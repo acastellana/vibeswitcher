@@ -349,3 +349,4 @@
 - 2026-11-20 20:25 Planned a-branch-run-s: A branch run's settings never appear on the launcher's command line (review audit, for security)
 - 2026-11-20 20:25 Planned sandbox-env-hygiene-no: sandbox_env hygiene: no credentials in it, no refused value echoed, every path judged, more shell names refused (review audit, for security)
 - 2026-11-20 20:26 Planned the-config-card-says: The config card says what sandbox_nesting: on exposes
+- 2026-11-20 21:40 Handed the lead over to a fresh session: the last one had been idle 50 minutes with 212k tokens of context, past handover_idle_min 50 and handover_tokens 150k
