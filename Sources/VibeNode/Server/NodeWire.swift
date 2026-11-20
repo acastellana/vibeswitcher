@@ -282,7 +282,7 @@ public enum NodeWire {
         "draft": .webDraft, "draft.clear": .webDraft,
         "web.open": .user, "web.revoke": .user,
         "term.open": .webTerminal, "term.close": .webTerminal,
-        // Driving an ordinary session (the parity table's gaps 1, 3 and 6, 2026-11-20).
+        // Driving an ordinary session (the parity table's gaps 1, 3 and 6, 2026-11-20): the user's voice, and a page's draft.
         "send": .user, "session.new": .user, "session.end": .user, "session.reply": .user,
         "session.draft": .webDraft, "session.draft.clear": .webDraft,
     ]
@@ -306,8 +306,9 @@ public enum NodeWire {
     /// from the start plan's S6; `build.switch` from its S8b; the live protocol's `subscribe`, `unsubscribe`, `web.open`
     /// and `web.revoke` from the live plan's I1; `chat.page` from I2; `draft` and `draft.clear` from I3, a web page's
     /// only; `tell` from the node frictions of 2026-11-19; `board` from the board view's; `seen` from the parity gaps
-    /// of 2026-11-19; `send`, `session.new`, `session.end` and `session.reply` from driving sessions, 2026-11-20): every kind `kinds` names but the live protocol's later ones
-    /// (the terminal from I4).
+    /// of 2026-11-19; `send`, `session.new`, `session.end`, `session.reply`, `session.draft` and `session.draft.clear`
+    /// from driving sessions, 2026-11-20): every kind `kinds` names but the live protocol's later ones (the terminal from
+    /// I4).
     public static let taken = ["status", "start", "stop", "lead", "questions", "draft", "draft.clear", "answer", "hold", "config.held", "config.accept",
                                "base.show", "base.accept", "base.keep", "question.post", "question.revise", "question.withdraw",
                                "hooks.install", "hooks.remove", "build.switch", "subscribe", "unsubscribe", "web.open", "web.revoke",

@@ -18,16 +18,18 @@ small_task_min, the seen mark, the battery hold, the push request told).
 
 The gaps that matter most for daily use, worst first:
 
-1. **You can't type to a session.** The web page has no working composer (the node doesn't accept `send`), so you can't
-   message or steer a session. The only way to talk to an agent is `vibeswitcher tell FOLDER TEXT`, and only to a lead.
+1. ~~**You can't type to a session.**~~ Closed 2026-11-20: `vibeswitcher send SESSION [TEXT]` types into a session the
+   node's host started, as the composer does; the page's composer leaves the message as a draft beside the session and
+   shows the line that sends it. Still missing: queueing behind a question, `/` commands, `@` files and images.
 2. **No live terminal** on your node. The web terminal exists only on a scratch test server.
-3. **You can't start or end an ordinary session.** There's no new session, new shell or launch preset, and no
-   End Session. The node runs only leads and their teams. `stop` ends everything.
+3. ~~**You can't start or end an ordinary session.**~~ Closed 2026-11-20: `vibeswitcher new FOLDER [--agent claude|shell]
+   [--model M]` and `vibeswitcher end SESSION`; the page shows each as a line to run. Launch presets are still missing.
 4. **No board view.** A lead's tasks, decisions, scorecard and messages between leads aren't shown anywhere (no
    command and no web tab). You'd have to read `board.json` yourself.
 5. **No notifications.** No banner, sound or reminder when a session needs you or finishes.
-6. **You can't answer a session's own prompt.** Permission prompts and Claude's own questions can't be answered. Only
-   the lead's cards can.
+6. ~~**You can't answer a session's own prompt.**~~ Closed 2026-11-20: the node reads the question on a session's
+   screen into its `prompt`, `vibeswitcher reply SESSION CHOICE [TEXT]` answers it, and the page shows it as a card
+   with the line that answers it. A multi-select is still answered in the session's terminal.
 7. ~~**The lead ignores `lead_model` and `lead_advisor`**~~: closed 2026-11-19, the node starts its lead as the app does.
 8. **`push_remote` does nothing on a node.** The request is recorded, but no Push button or command acts on it. Since
    2026-11-19 the lead is told so and `status` lists the request.
@@ -47,9 +49,9 @@ Sizes to close: S is about a day, M a few days, L a week or more.
 | Feature | V1 (where) | V2 state | Where in V2 / what's missing | Size | Note |
 | --- | --- | --- | --- | --- | --- |
 | A session host that keeps sessions running, and hands them to a new build | `Sources/VibeHost`, `Sources/VibeSwitcher/HostClient.swift` | has it | `Sources/VibeNode/Host/HostLink.swift`; the host runs under the node (`vibeswitcher start`) | | V2 always hands over and never replaces the host |
-| Start a new Claude, Codex or shell session (⌘N, ⌥⌘N, `--new`) | `MainWindow/MainWindowController.swift`, `Launcher.swift` | missing | no request type, command or page starts a session that isn't a lead | L | the host can do it; needs a request, a voice rule and a client |
+| Start a new Claude, Codex or shell session (⌘N, ⌥⌘N, `--new`) | `MainWindow/MainWindowController.swift`, `Launcher.swift` | partly | `vibeswitcher new FOLDER [--agent claude\|shell] [--model M]` (`session.new`, the user's voice, `Server/SessionRequests.swift`), labelled as the app's built-in Claude and Shell presets; the start page shows the line. No Codex, no presets | | closed for Claude and a shell 2026-11-20 |
 | Launch presets (per folder, environment, keep a shell open) | `SettingsWindow.swift`, `Sources/VibeCore/LaunchPresets.swift` | missing | no caller on the node | M | the shared code builds on Linux |
-| End a session (End Session…, Close Finished Shells) | `MainWindow/SessionListView.swift` | missing | only `stop` (ends every session) and the role sweep (ends finished team members) | S | |
+| End a session (End Session…, Close Finished Shells) | `MainWindow/SessionListView.swift` | partly | `vibeswitcher end SESSION` (`session.end`), refused for a lead and its team; the page's End… shows the line. No Close Finished Shells | | closed 2026-11-20 but for Close Finished Shells |
 | Pause, rename, reset a session's name | `MainWindow/SessionListView.swift`, `Sources/VibeCore/Pausing.swift` | missing | names are automatic only (`SessionNaming` in `Stores/NodeSessions.swift`) | S | |
 | Live terminal: type, select, find, scrollback, text size | `MainWindow/TerminalPane.swift` | partly | `Sources/VibeNode/Live/TerminalRelay.swift` exists, but only a scratch server enables it (`--test-web-terminal`). Your node answers `term.open` with `unknown-kind`, and the page says "comes in a later build" | L | another lane is building it |
 | Terminal look: theme, font, cursor, ANSI colours, Option as Meta, bell | `SettingsWindow.swift` (Appearance), `Sources/VibeCore/TerminalAppearance.swift` | missing | needs the terminal first | M | the page follows the system's light or dark (`?theme=`) |
@@ -82,8 +84,8 @@ Sizes to close: S is about a day, M a few days, L a week or more.
 | Read a conversation: prompts, replies, folded tool calls, diffs, to-dos, paged history | `MainWindow/Chat/ChatView.swift`, `ToolViews.swift` | has it | `Sources/VibeNode/Live/ChatStore.swift`; `WebApp/js/views/chat.js`, live, with `chat.page` | | |
 | Team messages between the lead and its workers | `MainWindow/Chat/TeamMessageCard.swift` | has it | chat items of type `team` (`Live/ChatValue.swift`, `chat.js`) | | |
 | Images in the chat | `MainWindow/Chat/ToolViews.swift` (image viewer) | partly | only the type and size are shown, because the node serves no image bytes (`chat.js`) | S | |
-| Composer: send, steer while working, queue, `/` commands, `@` files, pasted images | `MainWindow/Chat/ComposerView.swift`, `ComposerOutbox.swift` | missing | the page's composer is built but hidden. The node doesn't accept `send` (`Server/NodeWire.swift`'s `taken`) | L | another lane is building it |
-| Answer a session's own permission prompt or question (⌘1–9 card) | `MainWindow/Chat/ChatView.swift` | missing | `ask.answer` isn't accepted. Only the lead's cards can be answered | M | |
+| Composer: send, steer while working, queue, `/` commands, `@` files, pasted images | `MainWindow/Chat/ComposerView.swift`, `ComposerOutbox.swift` | partly | `vibeswitcher send SESSION [TEXT]` (`send`, the user's voice) types as the composer does, a working agent taking it after its turn; refused while a question or menu is open. The page's composer leaves a `session.draft` and shows `vibeswitcher send SESSION`. No queue behind a question, `/` commands, `@` files or images | M | send and steer closed 2026-11-20 |
+| Answer a session's own permission prompt or question (⌘1–9 card) | `MainWindow/Chat/ChatView.swift` | has it | `NodeSessions.prompts` reads it off the screen (`SessionPrompt`); `vibeswitcher reply SESSION CHOICE [TEXT]` (`session.reply`) types the app's keys while the same question shows; the page's card shows the line. A multi-select is answered in its terminal | | closed 2026-11-20 |
 | Find in the chat, Export Chat, Copy as Markdown, Edit in Composer, Send Again | `MainWindow/Chat/ChatView.swift` | missing | not in `chat.js` | M | the browser's own find works on the rows drawn |
 | "New since you looked" marker and summary | `MainWindow/Chat/ChatView.swift` | missing | not in `chat.js` | S | |
 | Run a code block (type it into the session after you confirm) | `MainWindow/Chat/ChatRunner.swift` | missing | needs the composer | M | |
