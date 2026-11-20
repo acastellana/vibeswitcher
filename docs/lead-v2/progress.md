@@ -241,3 +241,8 @@
 - 2026-11-20 03:02 Automatically (auto_advance): Merged a-lead-asked-for (A lead asked for twice at once starts twice under load) into v2 at 90f80f53, review none: on its worker's done report on a9d3223d and the full test run.
 - 2026-11-20 03:02 Automatically (auto_advance): Cleaned up a-lead-asked-for; ended pid 172370 (Worker: A lead asked for twice at once starts twice under load) (freed 1.7 GB of build output and temporary folders). It stays done.
 - 2026-11-20 03:17 Merged hosthardeningtests-lock: HostHardeningTests' lock test fails when another test forks at the wrong moment (no audit: review none) (build 5b6eccd929ad)
+- 2026-11-20 03:17 Automatically (auto_advance): Merged hosthardeningtests-lock (HostHardeningTests' lock test fails when another test forks at the wrong moment) into v2 at 597571eb, review none: on its worker's done report on b51151ac and the full test run.
+- 2026-11-20 03:17 Automatically (auto_advance): Cleaned up hosthardeningtests-lock; ended pid 1394339 (Worker: HostHardeningTests' lock test fails when another test forks at the wrong moment) (freed 1.7 GB of build output and temporary folders). It stays done.
+- 2026-11-20 03:30 Planned mac-gitguardtests: Mac: GitGuardTests' baseline message compared against the resolved root
+- 2026-11-20 03:30 Planned toolserverswitchtests-2: ToolServerSwitchTests passes with hosted agents identified from the host's spawn record
+- 2026-11-20 03:31 Merged toolserverswitchtests: ToolServerSwitchTests says why a switch was refused, and expects what the product promises (no audit: review none) (build 5b6eccd929ad)
