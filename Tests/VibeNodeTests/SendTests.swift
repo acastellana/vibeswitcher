@@ -53,21 +53,70 @@ struct SendTests {
         #expect(prompts(harness) == ["Run the tests\nthen tell me", "And the next"], "\(prompts(harness))")
     }
 
-    /// A permission prompt on its screen takes keys: the words would go into it, so nothing is typed, and the user is
-    /// told to answer it first. The prompt is still there afterwards.
-    @Test func aQuestionOpenOnItsScreenRefusesIt() async throws {
+    /// A permission prompt on its screen takes keys: typed now, the words would go into it, so the message is held, as
+    /// the app's composer holds it, and so is one sent after it (behind it); both go in, in order, once it's answered.
+    @Test func aMessageSentWhileAQuestionIsOpenWaitsForItsAnswer() async throws {
         let world = try await CardWorld.make(scratch)
         defer { world.stop() }
         let harness = try await claude(world)
+        let id = NodeIds.session(host: harness.session.id)
         harness.tell(["op": "permission", "command": "rm -rf build"])
         try await harness.screenShows { $0.contains("Do you want to proceed?") }
         // It draws before it writes its state.
         try await harness.waitFor { harness.agent["mode"] as? String == "permission" }
-        let reply = try #require(await send(world, harness.session.id.uuidString, "2"))
-        #expect(reply.error?.code == NodeWire.Code.refused.rawValue, "\(reply)")
-        #expect(reply.error?.message.contains("a question is open") == true, "\(reply)")
+        let first = try #require(await send(world, harness.session.id.uuidString, "Then run the linter"))
+        #expect(first.ok && first.result?["queued"]?.bool == true, "\(first)")
+        #expect(first.result?["waits"]?.string?.contains("a question is open") == true, "\(first)")
+        let second = try #require(await send(world, harness.session.id.uuidString, "And the docs"))
+        #expect(second.ok && second.result?["queued"]?.bool == true && second.result?["waits"]?.string?.contains("sent before it") == true, "\(second)")
+        #expect(world.queue.sync { world.requests.heldSends.values[id]?.map(\.text) } == ["Then run the linter", "And the docs"])
         #expect(harness.agent["mode"] as? String == "permission", "\(harness.agent)")
         #expect(prompts(harness).isEmpty, "\(prompts(harness))")
+        // A session's value lists them (`HeldSend.value`): the words, how many images, the action.
+        let value = try #require(world.queue.sync { world.requests.heldSends.values[id]?.first?.value })
+        #expect(value["text"]?.string == "Then run the linter" && value["images"]?.int == 0, "\(value)")
+
+        let answered = try #require(await world.ask("session.reply", ["session": .string(harness.session.id.uuidString), "choice": .int(1)]))
+        #expect(answered.ok, "\(answered)")
+        // It works on after the answer, so it queues them, as Claude Code queues what's typed during a turn.
+        try await harness.waitFor { (harness.agent["queued"] as? [String] ?? []) + prompts(harness) == ["Then run the linter", "And the docs"] }
+        try #require(await eventually { world.queue.sync { world.requests.heldSends.values[id] == nil } })
+    }
+
+    /// An image goes as its quoted path on a line of its own after the words, as the app's composer sends it, and the
+    /// Enter waits until Claude Code's box shows it taken: the fake drops an Enter that comes while it reads one, as
+    /// Claude Code 2.1.310 does.
+    @Test func anImageGoesAsItsPathAndTheEnterWaitsForIt() async throws {
+        let world = try await CardWorld.make(scratch)
+        defer { world.stop() }
+        let harness = try await claude(world)
+        let shots = scratch.url("shots")
+        try FileManager.default.createDirectory(at: shots, withIntermediateDirectories: true)
+        let image = shots.appendingPathComponent("screen shot.png")
+        try Data([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]).write(to: image)
+        let reply = try #require(await world.ask("send", ["session": .string(harness.session.id.uuidString), "text": .string("What's wrong here?"),
+                                                          "images": .array([.string(image.path)])]))
+        #expect(reply.ok && reply.result?["queued"]?.bool == false, "\(reply)")
+        try await harness.waitFor { harness.transcript.contains { line in
+            guard line["type"] as? String == "user", let content = (line["message"] as? [String: Any])?["content"] as? [[String: Any]] else { return false }
+            return content.contains { $0["type"] as? String == "image" }
+        } }
+        #expect(harness.agent["droppedEnters"] as? Int == 0, "\(harness.agent)")
+
+        // Refused, nothing typed: not an image Claude Code reads, not a file, not absolute.
+        for (path, says) in [(shots.appendingPathComponent("notes.txt").path, "isn't an image"), (shots.appendingPathComponent("gone.png").path, "no image file"), ("shot.png", "absolute")] {
+            let refused = try #require(await world.ask("send", ["session": .string(harness.session.id.uuidString), "images": .array([.string(path)])]))
+            #expect(refused.error?.message.contains(says) == true, "\(path): \(refused)")
+        }
+    }
+
+    @Test func aMessageIsItsWordsThenEachImagesPathOnALineOfItsOwn() {
+        #expect(Requests.message(text: "Look", images: ["/a/b.png", "/c/it's.png"]) == "Look\n\n'/a/b.png'\n'/c/it'\\''s.png'")
+        #expect(Requests.message(text: "", images: ["/a/b.png"]) == "'/a/b.png'")
+        #expect(Requests.message(text: "Only words", images: []) == "Only words")
+        #expect(Requests.imageRefusal("/c/it's.png", onDisk: false)?.contains("quote") == true)
+        #expect(Requests.imageRefusal("/a/b.PNG", onDisk: false) == nil)
+        #expect(Requests.imageRefusal("/a/b.heic", onDisk: false)?.contains("isn't an image") == true)
     }
 
     @Test func aShellAnEndedSessionAndOneTheHostDoesntRunAreRefused() async throws {

@@ -92,27 +92,50 @@ enum SessionCommand {
     }
 }
 
-/// `vibeswitcher send SESSION [TEXT]`: the user's words typed into a session the node's host runs, as the app's
-/// composer types them (a working agent takes them after its turn). With no TEXT, the message a web page's composer
-/// left for the session (its `draft`), shown whole first; what is sent is what was shown. Refused for a session the
-/// host didn't start, a shell, and one with a question or picker open on its screen.
+/// `vibeswitcher send SESSION [TEXT] [--image PATH]...`: the user's words, and images by their paths, typed into a
+/// session the node's host runs, as the app's composer types them (a working agent takes them after its turn; with a
+/// question open on its screen the node holds them, as the app does, and types them once it closes). With no TEXT and
+/// no image, the message a web page's composer left for the session (its `draft`, its images too), shown whole first;
+/// what is sent is what was shown. Refused for a session the host didn't start and a shell.
 enum SendCommand {
-    static let usage = "usage: vibeswitcher send SESSION [TEXT]  (no TEXT: the message drafted on the session's web page)"
+    static let usage = "usage: vibeswitcher send SESSION [TEXT] [--image PATH]...  (neither: the message drafted on the session's web page)"
 
     static func run(_ arguments: [String]) -> Int32 {
-        guard (1...2).contains(arguments.count), !arguments[0].isEmpty, !arguments[0].hasPrefix("--") else { return Say.usage(usage) }
-        if arguments.count == 1 { return takeDraft(arguments[0]) }
-        let (session, text) = (arguments[0], arguments[1])
-        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return Say.usage(usage) }
-        return SessionCommand.act("send", args: { _ in ["session": .string(session), "text": .string(text)] }, what: { _ in
-            "This types into session \(ConfigSeal.inert(session, limit: 80)), as you: " + ConfigSeal.inert(text, limit: 400)
+        var words = arguments[...]
+        guard let session = words.popFirst(), !session.isEmpty, !session.hasPrefix("--") else { return Say.usage(usage) }
+        var text: String?
+        var images: [String] = []
+        while let word = words.popFirst() {
+            if word == "--image" {
+                guard let path = words.popFirst(), !path.isEmpty else { return Say.usage(usage) }
+                images.append(CardCommand.absolute(path))
+            } else {
+                guard text == nil, !word.hasPrefix("--") else { return Say.usage(usage) }
+                text = word
+            }
+        }
+        if text == nil && images.isEmpty { return takeDraft(session) }
+        let typed = text ?? ""
+        guard !typed.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !images.isEmpty else { return Say.usage(usage) }
+        var args: [String: NodeWire.Value] = ["session": .string(session), "text": .string(typed)]
+        if !images.isEmpty { args["images"] = .array(images.map(NodeWire.Value.string)) }
+        return SessionCommand.act("send", args: { _ in args }, what: { _ in
+            "This types into session \(ConfigSeal.inert(session, limit: 80)), as you: " + ConfigSeal.inert(typed, limit: 400) + attached(images)
         }, say: said)
     }
 
-    /// The session's draft, if it has one.
-    static func draft(of session: NodeWire.Value) -> String? {
-        guard let text = session["draft"]?["text"]?.string, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
-        return text
+    /// The images a message carries, as what is shown says them.
+    static func attached(_ images: [String]) -> String {
+        images.isEmpty ? "" : "\n  with \(images.count == 1 ? "the image" : "\(images.count) images"): "
+            + images.map { ConfigSeal.inert($0, limit: 200) }.joined(separator: ", ")
+    }
+
+    /// The session's draft (its words and images), if it has one.
+    static func draft(of session: NodeWire.Value) -> (text: String, images: [String])? {
+        let text = session["draft"]?["text"]?.string ?? ""
+        let images = session["draft"]?["images"]?.array?.compactMap(\.string) ?? []
+        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !images.isEmpty else { return nil }
+        return (text, images)
     }
 
     private static func takeDraft(_ wanted: String) -> Int32 {
@@ -120,17 +143,27 @@ enum SendCommand {
             guard draft(of: session) == nil else { return nil }
             return Say.usage("\(usage)\n\(SessionCommand.describe(session)) has no draft: write it on its web page, or give TEXT")
         }, args: { session in
-            ["session": session["id"] ?? .string(wanted), "text": .string(draft(of: session) ?? "")]
+            let drafted = draft(of: session)
+            var args: [String: NodeWire.Value] = ["session": session["id"] ?? .string(wanted), "text": .string(drafted?.text ?? "")]
+            if let images = drafted?.images, !images.isEmpty { args["images"] = .array(images.map(NodeWire.Value.string)) }
+            return args
         }, what: { session in
             // Whole: this is what the agent will take as the user's.
-            "This types into \(SessionCommand.describe(session)), as you, the message drafted on its web page: "
-                + ConfigSeal.inert(draft(of: session) ?? "", limit: .max)
+            let drafted = draft(of: session)
+            return "This types into \(SessionCommand.describe(session)), as you, the message drafted on its web page: "
+                + ConfigSeal.inert(drafted?.text ?? "", limit: .max) + attached(drafted?.images ?? [])
         }, say: said)
     }
 
     static func said(_ result: NodeWire.Value) {
         let short = SessionCommand.short(result["session"]?.string)
         let characters = result["characters"]?.int ?? 0
+        if result["queued"]?.bool == true {
+            Say.out("queued: \(ConfigSeal.inert(result["waits"]?.string ?? "a question is open on its screen", limit: 200)); the node types your "
+                + "message into session \(short) once that closes (`vibeswitcher reply \(short) CHOICE` answers a question). "
+                + "It waits in the node's memory: a restart of the node's server drops it")
+            return
+        }
         Say.out(result["working"]?.bool == true
             ? "sent: \(characters) characters typed into session \(short); it was working, so it takes them after its turn"
             : "sent: \(characters) characters typed into session \(short)")

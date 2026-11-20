@@ -20,7 +20,7 @@ let usage = """
            vibeswitcher board [FOLDER] [--json]
            vibeswitcher answer CARD [TEXT] | hold CARD
            vibeswitcher tell FOLDER TEXT
-           vibeswitcher send SESSION [TEXT] | reply SESSION CHOICE [TEXT]
+           vibeswitcher send SESSION [TEXT] [--image PATH]... | reply SESSION CHOICE [TEXT]
            vibeswitcher new FOLDER [--agent claude|shell | --preset NAME] [--model M] | end SESSION | presets [FOLDER]
            vibeswitcher config held [FOLDER] [--diff NAME] [--long] | config accept CARD | config startup
            vibeswitcher base show FOLDER [--from COMMIT] | base accept CARD | base keep CARD

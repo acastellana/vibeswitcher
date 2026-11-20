@@ -59,6 +59,11 @@ public final class Requests: @unchecked Sendable {
     /// The messages web pages left for sessions (`session.draft`), by the node's id for each: told to nobody until
     /// `vibeswitcher send SESSION` types one. On `queue`.
     public let sessionDrafts = Changes<SessionDraft>()
+    /// The messages `send` holds for sessions while a question is open on their screens (`HeldSend`), by the node's id
+    /// for each, oldest first. On `queue`.
+    public let heldSends = Changes<[HeldSend]>()
+    /// The sessions whose held messages are being typed in now (`pumpHeld`). On `queue`.
+    var pumping: Set<UUID> = []
     /// The reply each recorded action (and each page's draft) got, by action id, the newest `repliesKept` (a retry is
     /// answered so).
     var replies: [String: NodeWire.Reply] = [:]
@@ -327,7 +332,7 @@ public final class Requests: @unchecked Sendable {
                              "scopes": .array(rule.scopes.map { .string($0.pattern) })]),
             "sessions": .array(list.map { session in
                 let id = NodeSessions.id(of: session)
-                return session.liveValue(prompt: sessions?.prompts.values[id], draft: sessionDrafts.values[id])
+                return session.liveValue(prompt: sessions?.prompts.values[id], draft: sessionDrafts.values[id], queued: heldSends.values[id] ?? [])
             }),
             "leads": .array((engine?.leads.leads.values.sorted { $0.root < $1.root } ?? []).map(leadValue)),
             "cards": Self.counts(engine?.cards.counts() ?? [:]),

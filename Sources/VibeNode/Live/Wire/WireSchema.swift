@@ -190,12 +190,17 @@ public enum WireSchema {
             field("task", Kind.string.orNull), field("detail", Kind.string.orNull), field("activity", Kind.string.orNull),
             field("activitySince", Kind.date.orNull), field("startedAt", .date), field("hasHooks", .bool), field("leadAsks", .bool),
             field("startFolder", Kind.string.orNull), field("backgroundJobs", .int), field("hasTranscript", .bool),
-            field("prompt", Kind.shape("session.prompt").orNull), field("draft", Kind.shape("session.draft").orNull)]))
+            field("prompt", Kind.shape("session.prompt").orNull), field("draft", Kind.shape("session.draft").orNull),
+            field("queued", .list(.shape("session.queued")))]))
         // What the node keeps beside a session (driving sessions, 2026-11-20): the question on its screen, a page's draft.
         shapes.append(shape("session.prompt", from: "SessionPrompt.value", [
             field("question", .string), field("options", strings), field("descriptions", .list(Kind.string.orNull)), field("text", .list(.int)),
             field("multiSelect", .bool), field("at", .date)]))
-        shapes.append(shape("session.draft", from: "SessionDraft.value", [field("text", .string), field("at", .date), field("action", .string)]))
+        shapes.append(shape("session.draft", from: "SessionDraft.value", [field("text", .string), field("images", strings), field("at", .date),
+                                                                          field("action", .string)]))
+        // A message `send` holds until the question on the session's screen closes (the composer's lane, 2026-11-20).
+        shapes.append(shape("session.queued", from: "HeldSend.value", [field("text", .string), field("images", .int), field("at", .date),
+                                                                       field("action", .string)]))
 
         // A lead (the contract's §5): the store's value, with what `status` adds.
         let byStatus = "Requests.leadValue adds it"
