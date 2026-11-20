@@ -2,12 +2,13 @@ import Foundation
 import VibeCore
 import VibeNode
 
-/// `vibeswitcher questions [FOLDER] [--all] [--json]` (the engine plan's E6): the open cards the server holds (the
-/// lead's questions and approvals, held config, base moves), closed ones too with `--all`. A read: anyone of the uid,
+/// `vibeswitcher questions [FOLDER] [--all | --wait] [--json]` (the engine plan's E6): the open cards the server holds
+/// (the lead's questions and approvals, held config, base moves), closed ones too with `--all`. With `--wait`, it
+/// blocks until a card needs the user (at once when one does), prints the open ones and exits. A read: anyone of the uid,
 /// no code. Every field a worker or the lead wrote is printed inert (`CardText`); under `--json`, what `inert` would
 /// replace is escaped (`NodeWire.printable`).
 enum QuestionsCommand {
-    static let usage = "usage: vibeswitcher questions [FOLDER] [--all] [--json]"
+    static let usage = "usage: vibeswitcher questions [FOLDER] [--all | --wait] [--json]"
 
     /// What `--all` says of the closed cards it left out (the server lists the newest, `Requests.closedListed`).
     static func moreLine(_ more: Int) -> String {
@@ -16,11 +17,12 @@ enum QuestionsCommand {
 
     static func run(_ arguments: [String]) -> Int32 {
         var folder: String?
-        var all = false, json = false
+        var all = false, json = false, wait = false
         for word in arguments {
             switch word {
             case "--all": all = true
             case "--json": json = true
+            case "--wait": wait = true
             default:
                 guard folder == nil, !word.hasPrefix("--") else { return Say.usage(usage) }
                 folder = CardCommand.absolute(word)
@@ -33,9 +35,16 @@ enum QuestionsCommand {
         case .failure(let failure): return Say.failed(failure)
         case .success(let connected): client = connected
         }
+        guard !(all && wait) else { return Say.usage(usage) }
         var args: [String: NodeWire.Value] = ["all": .bool(all)]
         if let folder { args["folder"] = .string(folder) }
-        switch client.request("questions", args: args) {
+        if wait { args["wait"] = .bool(true) }
+        // A wait the server ends with no card (`Requests.cardWait`) is asked again: until a card needs the user.
+        var answer = client.request("questions", args: args, timeout: wait ? Requests.cardWait + 30 : 30)
+        while wait, case .success(let reply) = answer, reply.ok, reply.result?["waited"]?.bool == true {
+            answer = client.request("questions", args: args, timeout: Requests.cardWait + 30)
+        }
+        switch answer {
         case .failure(let failure): return Say.failed(failure)
         case .success(let reply):
             guard reply.ok, let cards = reply.result?["cards"]?.array else { return Say.replyError(reply) }

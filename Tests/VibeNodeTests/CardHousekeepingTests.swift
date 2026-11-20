@@ -121,6 +121,36 @@ struct CardHousekeepingTests {
         #expect(none.ok && ids(none).isEmpty)
     }
 
+    /// `questions --wait`: the open cards at once when there are; else no reply until a card opens (a closed card is
+    /// no answer), then that card; with nothing opening, none after `seconds`, `waited` saying so.
+    @Test(NodeTraits.linuxOnly) func questionsWaitAnswersWhenACardNeedsTheUser() async throws {
+        let world = try await CardWorld.make(scratch)
+        defer { world.stop() }
+        let ids = { (reply: NodeWire.Reply?) in reply?.result?["cards"]?.array?.compactMap { $0["id"]?.string } ?? [] }
+
+        let none = try #require(await world.ask("questions", ["wait": .bool(true), "seconds": .int(0)]))
+        #expect(none.ok && ids(none).isEmpty && none.result?["waited"]?.bool == true, "\(none)")
+
+        let reply = Locked<NodeWire.Reply?>(nil)
+        let request = NodeWire.Request(id: "wait-1", kind: "questions", args: ["wait": .bool(true), "seconds": .int(120)])
+        world.queue.async { world.requests.handle(request, from: CardWorld.user) { reply.value = $0 } }
+        world.queue.sync {
+            var closed = CardStore.Card(root: world.repo, kind: .question)
+            closed.closed = "answered"
+            world.engine.cards.put(closed)
+        }
+        await world.drained()
+        world.queue.sync {}
+        #expect(reply.value == nil, "a closed card isn't one that needs the user")
+        let card = CardStore.Card(root: world.repo, kind: .approval)
+        world.queue.async { world.engine.cards.put(card) }
+        #expect(await eventually(timeout: 60) { reply.value != nil })
+        #expect(ids(reply.value) == [card.id] && reply.value?.result?["waited"]?.bool == false, "\(String(describing: reply.value))")
+
+        let atOnce = try #require(await world.ask("questions", ["wait": .bool(true), "seconds": .int(120)], timeout: 60))
+        #expect(ids(atOnce) == [card.id], "an open card answers at once")
+    }
+
     /// A reply whose line would pass `maxLine` is an `internal` failure under the same `re` that says how large it was
     /// (a line the reader takes), never a line the reader drops; one within the limit goes as it is.
     @Test func aReplyPastTheLineLimitIsAClearErrorNotADroppedLine() throws {
