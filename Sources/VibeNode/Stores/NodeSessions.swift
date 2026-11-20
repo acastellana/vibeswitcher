@@ -332,7 +332,7 @@ public final class NodeSessions: @unchecked Sendable {
     /// their background work (an urgent read keeps none). On `queue`.
     private func askScreens(_ ttys: Set<String>, keep: Bool = true) {
         guard let link, !stopped else { return }
-        if keep { screens = screens.filter { ttys.contains($0.key) || asking.contains($0.key) } }
+        if keep { screens = screens.filter { ttys.contains($0.key) } }
         for (tty, session) in hosted where ttys.contains(tty) {
             link.screen(session.id) { [weak self] text in
                 self?.perform {

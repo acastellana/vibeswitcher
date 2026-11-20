@@ -165,7 +165,10 @@ export function newSessionForm(app, { folder }) {
   function draw() {
     kinds.forEach((button, index) => button.setAttribute('aria-pressed', String((index === 0) === (agent === 'claude'))));
     model.hidden = agent !== 'claude';
-    const where = path.value.trim();
+    // `~/` is the node's home, as a shell would read it (the command line takes the folder as given).
+    const home = app.store.state.node?.home;
+    const typed = path.value.trim();
+    const where = home && (typed === '~' || typed.startsWith('~/')) ? home + typed.slice(1) : typed;
     if (!where) {
       lineSlot.replaceChildren(h('p', { class: 'confirm-note' }, 'Give a folder: the line that starts it shows here.'));
       return;

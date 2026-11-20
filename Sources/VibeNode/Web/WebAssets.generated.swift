@@ -3510,7 +3510,7 @@ extension EmbeddedAssets {
             Ym94LCBmb3IgdGhlIGtleXMgdGhhdCBnbyB0byBpdC4KICAgIGZvY3VzKCkgeyBpbnB1dC5mb2N1
             cygpOyB9LAogIH07Cn0K
             """),
-        EmbeddedAssets.File(path: "js/views/drive.js", sha256: "c70a1aa835bfdf366597396a84d73aa5b26c865774532cdaf3b8a31c4b8df7d2", base64: """
+        EmbeddedAssets.File(path: "js/views/drive.js", sha256: "48e000ef08192ef5a0280c6c463c83872a688555b4b56933069ce0fb73933684", base64: """
             Ly8gRHJpdmluZyBhbiBvcmRpbmFyeSBzZXNzaW9uIGZyb20gdGhlIHBhZ2UgKHRoZSBwYXJpdHkg
             dGFibGUncyBnYXBzIDEsIDMgYW5kIDYpOiBhIG1lc3NhZ2UgZm9yIGl0LCBpdHMgb3duIHF1ZXN0
             aW9uLAovLyBzdGFydGluZyBvbmUgYW5kIGVuZGluZyBvbmUuIE5vIGNsaWNrIGlzIHRoZSB1c2Vy
@@ -3680,21 +3680,25 @@ extension EmbeddedAssets {
             ZXJlLicpKTsKICBsZXQgb2ZmZXJlZCA9IGZhbHNlOwoKICBmdW5jdGlvbiBkcmF3KCkgewogICAg
             a2luZHMuZm9yRWFjaCgoYnV0dG9uLCBpbmRleCkgPT4gYnV0dG9uLnNldEF0dHJpYnV0ZSgnYXJp
             YS1wcmVzc2VkJywgU3RyaW5nKChpbmRleCA9PT0gMCkgPT09IChhZ2VudCA9PT0gJ2NsYXVkZScp
-            KSkpOwogICAgbW9kZWwuaGlkZGVuID0gYWdlbnQgIT09ICdjbGF1ZGUnOwogICAgY29uc3Qgd2hl
-            cmUgPSBwYXRoLnZhbHVlLnRyaW0oKTsKICAgIGlmICghd2hlcmUpIHsKICAgICAgbGluZVNsb3Qu
-            cmVwbGFjZUNoaWxkcmVuKGgoJ3AnLCB7IGNsYXNzOiAnY29uZmlybS1ub3RlJyB9LCAnR2l2ZSBh
-            IGZvbGRlcjogdGhlIGxpbmUgdGhhdCBzdGFydHMgaXQgc2hvd3MgaGVyZS4nKSk7CiAgICAgIHJl
-            dHVybjsKICAgIH0KICAgIGNvbnN0IGNob3Nlbk1vZGVsID0gYWdlbnQgPT09ICdjbGF1ZGUnID8g
-            bW9kZWwudmFsdWUudHJpbSgpIDogJyc7CiAgICBjb25zdCBsaW5lID0gYHZpYmVzd2l0Y2hlciBu
-            ZXcgJHtzaGVsbFdvcmQod2hlcmUpfSR7YWdlbnQgPT09ICdzaGVsbCcgPyAnIC0tYWdlbnQgc2hl
-            bGwnIDogJyd9JHtjaG9zZW5Nb2RlbCA/IGAgLS1tb2RlbCAke3NoZWxsV29yZChjaG9zZW5Nb2Rl
-            bCl9YCA6ICcnfWA7CiAgICBsaW5lU2xvdC5yZXBsYWNlQ2hpbGRyZW4oY29weUxpbmUobGluZSwg
-            J3RoZSBjb21tYW5kIHRoYXQgc3RhcnRzIGl0JykpOwogIH0KICBwYXRoLmFkZEV2ZW50TGlzdGVu
-            ZXIoJ2lucHV0JywgZHJhdyk7CiAgbW9kZWwuYWRkRXZlbnRMaXN0ZW5lcignaW5wdXQnLCBkcmF3
-            KTsKCiAgcmV0dXJuIHsKICAgIGVsLAogICAgdXBkYXRlKCkgewogICAgICBpZiAoIW9mZmVyZWQg
-            JiYgIXBhdGgudmFsdWUpIHsKICAgICAgICBjb25zdCBnaXZlbiA9IGZvbGRlcigpOwogICAgICAg
-            IGlmIChnaXZlbikgeyBwYXRoLnZhbHVlID0gZ2l2ZW47IG9mZmVyZWQgPSB0cnVlOyB9CiAgICAg
-            IH0KICAgICAgZHJhdygpOwogICAgfSwKICB9Owp9Cg==
+            KSkpOwogICAgbW9kZWwuaGlkZGVuID0gYWdlbnQgIT09ICdjbGF1ZGUnOwogICAgLy8gYH4vYCBp
+            cyB0aGUgbm9kZSdzIGhvbWUsIGFzIGEgc2hlbGwgd291bGQgcmVhZCBpdCAodGhlIGNvbW1hbmQg
+            bGluZSB0YWtlcyB0aGUgZm9sZGVyIGFzIGdpdmVuKS4KICAgIGNvbnN0IGhvbWUgPSBhcHAuc3Rv
+            cmUuc3RhdGUubm9kZT8uaG9tZTsKICAgIGNvbnN0IHR5cGVkID0gcGF0aC52YWx1ZS50cmltKCk7
+            CiAgICBjb25zdCB3aGVyZSA9IGhvbWUgJiYgKHR5cGVkID09PSAnficgfHwgdHlwZWQuc3RhcnRz
+            V2l0aCgnfi8nKSkgPyBob21lICsgdHlwZWQuc2xpY2UoMSkgOiB0eXBlZDsKICAgIGlmICghd2hl
+            cmUpIHsKICAgICAgbGluZVNsb3QucmVwbGFjZUNoaWxkcmVuKGgoJ3AnLCB7IGNsYXNzOiAnY29u
+            ZmlybS1ub3RlJyB9LCAnR2l2ZSBhIGZvbGRlcjogdGhlIGxpbmUgdGhhdCBzdGFydHMgaXQgc2hv
+            d3MgaGVyZS4nKSk7CiAgICAgIHJldHVybjsKICAgIH0KICAgIGNvbnN0IGNob3Nlbk1vZGVsID0g
+            YWdlbnQgPT09ICdjbGF1ZGUnID8gbW9kZWwudmFsdWUudHJpbSgpIDogJyc7CiAgICBjb25zdCBs
+            aW5lID0gYHZpYmVzd2l0Y2hlciBuZXcgJHtzaGVsbFdvcmQod2hlcmUpfSR7YWdlbnQgPT09ICdz
+            aGVsbCcgPyAnIC0tYWdlbnQgc2hlbGwnIDogJyd9JHtjaG9zZW5Nb2RlbCA/IGAgLS1tb2RlbCAk
+            e3NoZWxsV29yZChjaG9zZW5Nb2RlbCl9YCA6ICcnfWA7CiAgICBsaW5lU2xvdC5yZXBsYWNlQ2hp
+            bGRyZW4oY29weUxpbmUobGluZSwgJ3RoZSBjb21tYW5kIHRoYXQgc3RhcnRzIGl0JykpOwogIH0K
+            ICBwYXRoLmFkZEV2ZW50TGlzdGVuZXIoJ2lucHV0JywgZHJhdyk7CiAgbW9kZWwuYWRkRXZlbnRM
+            aXN0ZW5lcignaW5wdXQnLCBkcmF3KTsKCiAgcmV0dXJuIHsKICAgIGVsLAogICAgdXBkYXRlKCkg
+            ewogICAgICBpZiAoIW9mZmVyZWQgJiYgIXBhdGgudmFsdWUpIHsKICAgICAgICBjb25zdCBnaXZl
+            biA9IGZvbGRlcigpOwogICAgICAgIGlmIChnaXZlbikgeyBwYXRoLnZhbHVlID0gZ2l2ZW47IG9m
+            ZmVyZWQgPSB0cnVlOyB9CiAgICAgIH0KICAgICAgZHJhdygpOwogICAgfSwKICB9Owp9Cg==
             """),
         EmbeddedAssets.File(path: "js/views/inspector.js", sha256: "9f7163480182617208092bb9f75e1f4e64abecd985f5023d3a7f7861e34fd7d4", base64: """
             Ly8gVGhlIGluc3BlY3RvciAodGhlIE1hYydzIEluc3BlY3RvclZpZXcpOiBiZXNpZGUgdGhlIHNl

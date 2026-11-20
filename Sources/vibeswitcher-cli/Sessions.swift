@@ -206,8 +206,10 @@ enum ReplyCommand {
             guard choice <= count else { return Say.refused("its question has \(count) options, not \(choice)") }
             return nil
         }, args: { session in
+            // Bound to what was shown: the server types nothing while another question, or other options, are open.
             var args: [String: NodeWire.Value] = ["session": session["id"] ?? .string(arguments[0]), "choice": .int(choice),
-                                                  "question": session["prompt"]?["question"] ?? .null]
+                                                  "question": session["prompt"]?["question"] ?? .null,
+                                                  "options": session["prompt"]?["options"] ?? .null]
             if let text { args["text"] = .string(text) }
             return args
         }, what: { session in

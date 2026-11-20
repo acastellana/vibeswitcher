@@ -119,7 +119,8 @@ struct SessionDriveTests {
         let question = try #require(SessionPrompt.menu(on: harness.screen)).question
         #expect(question.contains("rm -rf build") && question.contains("Do you want to proceed?"), "\(question)")
         for (args, says) in [(["choice": NodeWire.Value.int(4)], "3 options"), (["choice": .int(1), "question": .string("Delete it?")], "isn't the one"),
-                             (["choice": .int(2), "text": .string("sure")], "takes no words")] {
+                             (["choice": .int(2), "text": .string("sure")], "takes no words"),
+                             (["choice": .int(1), "options": .array([.string("Yes"), .string("No")])], "options aren't the ones")] {
             let reply = try #require(await world.ask("session.reply", args.merging(["session": .string(id)]) { $1 }))
             #expect(reply.error?.code == NodeWire.Code.refused.rawValue && reply.error?.message.contains(says) == true, "\(args): \(reply)")
         }

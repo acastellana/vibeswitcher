@@ -267,14 +267,15 @@ extension Requests {
 // MARK: session.reply
 
 extension Requests {
-    /// `session.reply` with `session`, `choice` (an option's number, from 1), `text` (for a free-text option only) and
-    /// `question` (the question as the user was shown it: `prompt.question` of the session's value, optional)
+    /// `session.reply` with `session`, `choice` (an option's number, from 1), `text` (for a free-text option only), and
+    /// `question` and `options` (the question and its options as the user was shown them: the session's `prompt`, each
+    /// optional)
     /// (2026-11-20, the parity table's gap 6): the session's own question answered as the app's answer card answers it
     /// (`ChatSync.keys`: arrows from its cursor to the option, then Enter; for free text, the words then Enter). The
     /// screen is read, the question found there (`SessionPrompt.menu(on:)`), and the keys typed as one unit of the host's whose
     /// gate reads the screen again right before the first key: unless the same question shows with its cursor where it
     /// was, nothing is typed. Refused, nothing typed: a session the host didn't start, a shell, no question on its
-    /// screen, a question other than the one shown (`question`), a choice it hasn't, a multi-select (its boxes are
+    /// screen, a question or options other than those shown, a choice it hasn't, a multi-select (its boxes are
     /// ticked one by one: answer it in its terminal), and words for an option that takes none (or none for one that
     /// does).
     func replySession(_ request: NodeWire.Request, reply: @escaping (NodeWire.Reply) -> Void) {
@@ -286,6 +287,7 @@ extension Requests {
             return reply(.init(re: request.id, error: .init(.badArgs, "too long to type as an answer")))
         }
         let shown = request.args?["question"]?.string
+        let shownOptions = request.args?["options"]?.array?.map { $0.string ?? "" }
         let session: HostSession
         switch hostedSession(request.args?["session"]?.string, for: "session.reply", id: request.id) {
         case .failure(let refusal): return reply(refusal)
@@ -302,6 +304,10 @@ extension Requests {
                 guard let screen, let menu = SessionPrompt.menu(on: screen) else { return refuse("no question is open on its screen") }
                 if let shown, shown != menu.question {
                     return refuse("the question on its screen isn't the one you were shown; it asks now: " + ConfigSeal.inert(menu.question, limit: 400))
+                }
+                if let shownOptions, shownOptions != menu.options {
+                    return refuse("its options aren't the ones you were shown; they are now: "
+                                  + ConfigSeal.inert(menu.options.enumerated().map { "\($0.offset + 1). \($0.element)" }.joined(separator: "; "), limit: 400))
                 }
                 guard !menu.multiSelect else { return refuse("its question takes several ticks: answer it in the session's terminal") }
                 let index = choice - 1

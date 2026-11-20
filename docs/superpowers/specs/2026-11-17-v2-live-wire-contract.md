@@ -529,7 +529,7 @@ is done once (rule 8). What the first write actions need:
 | `seen` **new** (2026-11-19) | `session` | anyone (it changes nothing but the session's seen mark: a finished turn reads `idle`, the app's rule) | a token with `read`; the page sends it after 1.5 s on a finished session (`views/session.js`) |
 | `session.draft` **new** (2026-11-20) | `session` (the whole id), `text` | refused, `voice` | a token with `draft`, `action`: the message kept beside the session (its `draft`), told to nobody; the reply's `applied` is the `sessions` stream's seq. `vibeswitcher send SESSION` types it |
 | `session.draft.clear` **new** (2026-11-20) | `session` | refused, `voice` | a token with `draft`, `action` |
-| `send`, `session.new`, `session.end`, `session.reply` **new** (2026-11-20) | `session` and `text`; `folder`, `agent`, `model`; `session`; `session`, `choice`, `text`, `question` | the user's voice, the typed code from the action id, `action`; recorded | refused, `voice`: the page shows the line that runs each |
+| `send`, `session.new`, `session.end`, `session.reply` **new** (2026-11-20) | `session` and `text`; `folder`, `agent`, `model`; `session`; `session`, `choice`, `text`, `question`, `options` | the user's voice, the typed code from the action id, `action`; recorded | refused, `voice`: the page shows the line that runs each |
 
 A session (§5) carries two more fields since 2026-11-20, each null when there's none: `prompt` {`question` †,
 `options` †, `descriptions` †, `text` (the options that take words, by index), `multiSelect`, `at`}, the question open
