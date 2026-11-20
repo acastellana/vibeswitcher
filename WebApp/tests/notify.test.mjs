@@ -3,7 +3,7 @@
 // stopped), the first line only and inert, and the title bar's count. Run: node --test WebApp/tests/
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { summarize, changes, firstLine, titled } from '../js/notify.js';
+import { summarize, changes, firstLine, titled, sounding, chime } from '../js/notify.js';
 
 const session = (id, fields = {}) => ({ id, terminal: 'pts/1', agent: 'claude', cwd: '/home/dev/projects/app', status: 'idle', since: '2026-11-20T09:00:00.000Z', role: null, ...fields });
 const card = (id, fields = {}) => ({ id, kind: 'question', project: 'p1', root: '/home/dev/projects/app', open: true, question: { text: 'Ship it?\nMore detail.' }, ...fields });
@@ -65,4 +65,24 @@ test('the title bar counts what needs you', () => {
   assert.equal(titled('VibeSwitcher', 2), '(2) VibeSwitcher');
   assert.equal(titled('(2) VibeSwitcher', 3), '(3) VibeSwitcher');
   assert.equal(titled('(3) Fix it · VibeSwitcher', 0), 'Fix it · VibeSwitcher');
+});
+
+test('the sound is for something new that needs you, not a lead that stopped', () => {
+  assert.equal(sounding([{ key: 'card:c1' }]), true);
+  assert.equal(sounding([{ key: 'prompt:s1:2026-11-20T09:00:00.000Z' }]), true);
+  assert.equal(sounding([{ key: 'stopped:lead-1' }]), false);
+  assert.equal(sounding([]), false);
+});
+
+test('the chime is two short soft notes made on the page, each stopped within half a second', () => {
+  const made = [];
+  const param = () => ({ value: 0, setValueAtTime() {}, exponentialRampToValueAtTime(value) { this.peak = Math.max(this.peak || 0, value); } });
+  const context = {
+    currentTime: 10, destination: {},
+    createOscillator() { const tone = { frequency: param(), connect() {}, start(at) { tone.started = at; }, stop(at) { tone.stopped = at; } }; made.push(tone); return tone; },
+    createGain() { return { gain: param(), connect() {} }; },
+  };
+  chime(context);
+  assert.deepEqual(made.map((tone) => tone.frequency.value), [660, 990]);
+  for (const tone of made) assert.ok(tone.started >= 10 && tone.stopped - tone.started < 0.5, JSON.stringify(tone));
 });

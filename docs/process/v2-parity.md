@@ -154,7 +154,7 @@ Sizes to close: S is about a day, M a few days, L a week or more.
 | Feature | V1 (where) | V2 state | Where in V2 / what's missing | Size | Note |
 | --- | --- | --- | --- | --- | --- |
 | Banners when a session needs input or finishes | `AppDelegate.swift`, Settings › Notifications | partial | `WebApp/js/notify.js` (2026-11-20): the browser's notification while the page is open, when a card opens, a session's prompt waits (not a worker's or verifier's) or a lead stops; first line only; asked once, a toggle on This node; the title counts what needs you. `vibeswitcher questions --wait` for a terminal. Missing: a finished worker's banner (the Mac's is off for workers too), per-kind choices | M | planned "through the browser" |
-| A sound when a session needs input | Settings › Notifications | missing | | S | |
+| A sound when a session needs input | Settings › Notifications | has it | `WebApp/js/notify.js` (2026-11-20): a short chime made on the page when a card opens or a session's prompt waits (not a lead stopping, nor the session you're looking at), its own toggle on This node, off until turned on; while the page is open | | |
 | Reminders about waiting or stuck sessions | Settings › Notifications, `Sources/VibeCore/AlertRules.swift` | has it | `NodeSessions.reminderNotices` (2026-11-20): the app's `Nudges` and `AlertRules.nudge` as `status` notices while each stands: waiting on you 10 min (a look from the page, `seen`, restarts it), working with no hook event for 15; a team's silent, a lead's only while it waits on you. A notice, not a banner: the page's notifications don't show them yet; no setting turns them off (the settings lane's) | | |
 | Phone push notifications | `Sources/VibeCore/WebPush.swift`, `Web/sw.js` | missing | stage 7 | M | |
 
