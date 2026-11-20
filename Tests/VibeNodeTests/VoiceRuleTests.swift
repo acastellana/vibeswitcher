@@ -55,7 +55,11 @@ struct VoiceRuleTests {
         // Another user's session scope isn't this user's.
         #expect(Self.refused(Self.judged(Self.peer(cgroup: ["0::/user.slice/user-1001.slice/session-3.scope"]))))
         // The scope list is data: each row says where it comes from.
-        #expect(VoiceRule.terminalScopes.map(\.pattern) == ["/init.scope", "/user.slice/user-{uid}.slice/session-*.scope"])
+        // After WSL's kernel update (6.18, 2026-11-20) a Windows Terminal tab's shell and what it starts are in
+        // /non-systemd, as `cat /proc/self/cgroup` gave it there (a unified hierarchy only).
+        #expect(Self.judged(Self.peer(cgroup: ["0::/non-systemd"])) == .user)
+        #expect(Self.refused(Self.judged(Self.peer(cgroup: ["0::/non-systemd/x.scope"]))))
+        #expect(VoiceRule.terminalScopes.map(\.pattern) == ["/init.scope", "/non-systemd", "/user.slice/user-{uid}.slice/session-*.scope"])
         #expect(VoiceRule.terminalScopes.allSatisfy { $0.basis.hasPrefix("measured") || $0.basis.hasPrefix("documented") })
     }
 
@@ -246,7 +250,7 @@ struct VoiceRuleTests {
         #expect(Self.refused(Self.judged(Self.peer(cgroup: PeerFacts.rerooted(Self.hybrid(root), at: root), marker: true), rule: test)))
         #expect(Self.refused(Self.judged(Self.peer(cgroup: PeerFacts.rerooted(Self.hybrid(root), at: root), uid: 1001), rule: test)))
         // And the root alone is no pass: by the node's own rule (no test scopes) `/` is no terminal's scope.
-        #expect(judged(Self.hybrid(root), rule: Self.systemd) == .notUser("its cgroup / is no terminal scope this node knows (/init.scope, /user.slice/user-{uid}.slice/session-*.scope)"))
+        #expect(judged(Self.hybrid(root), rule: Self.systemd) == .notUser("its cgroup / is no terminal scope this node knows (/init.scope, /non-systemd, /user.slice/user-{uid}.slice/session-*.scope)"))
     }
 
     /// A scratch node gives its server a root only where its test runs inside the user's manager or the node's unit;
