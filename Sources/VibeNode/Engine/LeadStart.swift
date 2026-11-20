@@ -102,10 +102,7 @@ extension LeadEngine {
     func begin(root: String, program: String, start: PendingStart, completion: @escaping (StartOutcome) -> Void) {
         guard !stopping else { return completion(.refused(Self.stoppingRefusal)) }
         if case .gone(let why) = link.state { return completion(.refused("the session host is gone (\(why))")) }
-        if start.resume {
-            if start.goal != nil { return completion(.refused("--resume takes no goal: give it once the lead is reopened")) }
-            if let refusal = reopenRefusal(root: root) { return completion(.refused(refusal)) }
-        }
+        if start.resume, start.goal != nil { return completion(.refused("--resume takes no goal: give it once the lead is reopened")) }
         // One start per root at a time: a second ask waits for the first, then goes on with what it asked (`finish`).
         if starting[root] != nil {
             starting[root]?.append(JoinedStart(start: start, program: program, completion: completion))
@@ -120,6 +117,9 @@ extension LeadEngine {
             note("lead: the start of \(LeadMail.project(of: root)) waits for the host's welcome")
             return completion(.waiting)
         }
+        // Only now: the welcome is what says the host restarted (`restartLook`), so a reopen asked before it is decided
+        // on the restart it brought.
+        if start.resume, let refusal = reopenRefusal(root: root) { return completion(.refused(refusal)) }
         starting[root] = [JoinedStart(start: start, program: program, completion: completion)]
         leads.lead(root: root) { $0.starting = true }
         // Which lead runs for the root, the board read on the reads queue (even its stat waited seconds on a busy disk).
@@ -148,9 +148,14 @@ extension LeadEngine {
             let first = PendingStart(goal: goals.first, takeHead: waited.starts.contains { $0.takeHead },
                                      replace: waited.starts.contains { $0.replace }, resume: waited.starts.contains { $0.resume })
             for start in [first] + goals.dropFirst().map({ PendingStart(goal: $0, takeHead: false, replace: false) }) {
-                begin(root: root, program: waited.program, start: start) { [weak self] outcome in
-                    self?.note("lead: the start of \(LeadMail.project(of: root)) that waited for the welcome: \(Self.word(outcome))")
+                let begun: @Sendable () -> Void = { [weak self] in
+                    self?.begin(root: root, program: waited.program, start: start) { [weak self] outcome in
+                        self?.note("lead: the start of \(LeadMail.project(of: root)) that waited for the welcome: \(Self.word(outcome))")
+                    }
                 }
+                // A reopen is decided on the restart this welcome brings (`welcomed` looks for it after this): next on
+                // the queue, after the welcome.
+                if start.resume { queue.async { begun() } } else { begun() }
             }
         }
     }
