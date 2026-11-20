@@ -79,13 +79,13 @@ enum ReopenCommand {
             }
             for started in result["reopened"]?.array ?? [] {
                 let id = SessionCommand.short(started["session"]?.string)
-                Say.out("reopened: \(ConfigSeal.inert(started["folder"]?.string ?? "?", limit: 200)) in session \(id) on "
+                Say.out("reopened: \(ConfigSeal.inert(started["folder"]?.string ?? "?", limit: .max)) in session \(id) on "
                     + "\(ConfigSeal.inert(started["terminal"]?.string ?? "?", limit: 20)), conversation "
                     + "\(ConfigSeal.inert(started["conversation"]?.string ?? "?", limit: 40)) (`vibeswitcher send \(id) TEXT` types into it)")
             }
             let refused = result["refused"]?.array ?? []
             for failed in refused {
-                Say.err("not reopened: \(ConfigSeal.inert(failed["why"]?.string ?? "?", limit: 400)) (still offered)")
+                Say.err("not reopened: \(ConfigSeal.inert(failed["why"]?.string ?? "?", limit: .max)) (still offered)")
             }
             return refused.isEmpty ? 0 : 77
         }
@@ -101,6 +101,6 @@ enum ReopenCommand {
         let conversation = value["conversation"]?.string.map { "conversation \(ConfigSeal.inert($0, limit: 40))" }
             ?? "its conversation id wasn't known: it can't be reopened"
         return "\(SessionCommand.short(value["session"]?.string))  \(ConfigSeal.inert(value["name"]?.string ?? "?", limit: 60)) in "
-            + "\(ConfigSeal.inert(value["folder"]?.string ?? "?", limit: 200))  (\(conversation))"
+            + "\(ConfigSeal.inert(value["folder"]?.string ?? "?", limit: .max))  (\(conversation))"
     }
 }

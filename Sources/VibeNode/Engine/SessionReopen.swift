@@ -17,11 +17,12 @@ import VibeCore
 /// ordinary Claude session. `vibeswitcher reopen --forget` puts the offer away.
 ///
 /// **What the record can't do.** A worker of the user's uid can write `engine.json`, so the record is only a hint of
-/// which conversation to resume where (`reopenable`): the folder must be one, the conversation an id whose transcript is
-/// a Claude transcript inside the agents' folders, in Claude's folder for that very folder (so `--resume` finds it
-/// there), and not a named agent's (a lead's or its team's: `vibeswitcher new` names none); a model only when it's a
-/// model's name. The program is the node's `claude` link and the label the app's "Claude", never the record's command
-/// or label.
+/// which conversation to resume where (`reopenable`): the folder must be one, spelled as itself (no `.`, `..` or empty
+/// part, no link on the way: that canonical path is the session's folder and what's shown, in full), the conversation an
+/// id whose transcript is a Claude transcript inside the agents' folders, in Claude's folder for that very folder (so
+/// `--resume` finds it there), recording that folder as its `cwd` (Claude's folder names are a lossy slug), and not a
+/// named agent's (a lead's or its team's: `vibeswitcher new` names none); a model only when it's a model's name. The
+/// program is the node's `claude` link and the label the app's "Claude", never the record's command or label.
 extension LeadEngine {
     /// The user's own sessions the host runs, recorded in `engine.json` when they changed (their window sizes aside),
     /// while the host that runs them is the one `lastHostStart` names (a new host's empty list before `restartLook`
@@ -76,7 +77,7 @@ extension LeadEngine {
     /// `status`'s notice of them, while there are any.
     func sessionsNotice(_ restart: EngineState.Restart, at: String) -> [String] {
         guard let sessions = restart.sessions, !sessions.isEmpty else { return [] }
-        let names = sessions.prefix(5).map { "\(ConfigSeal.inert($0.name, limit: 60)) in \(ConfigSeal.inert($0.folder, limit: 120))" }
+        let names = sessions.prefix(5).map { "\(ConfigSeal.inert($0.name, limit: 60)) in \(ConfigSeal.inert($0.folder, limit: .max))" }
             .joined(separator: ", ") + (sessions.count > 5 ? ", …" : "")
         return ["the session host restarted at \(at): \(sessions.count) of your own session\(sessions.count == 1 ? "" : "s") ended with it "
                 + "(\(names)). `vibeswitcher reopen` lists \(sessions.count == 1 ? "it" : "them") and reopens each in its same conversation; "
@@ -132,31 +133,45 @@ extension LeadEngine {
     }
 
     /// What `entry` reopens, or why it can't: the record is only a hint (`SessionReopen.swift`'s header). A user's Claude
-    /// session; its folder one (as the app's `RestartReopen.blocker` says); its conversation an id whose transcript,
-    /// `<id>.jsonl` in Claude's folder for that folder, is a regular Claude transcript inside the agents' folders in `home`
-    /// (`TranscriptReader.checkedURL`) and not a named agent's (`--name`: a lead, worker or verifier); its model, when the
-    /// command it ran named one, a model's name (`Requests.isModelName`). Off the engine's queue (the disk).
-    static func reopenable(_ entry: RestartReopen.Entry, home: String,
-                           folderExists: (String) -> Bool = RestartReopen.isFolder) -> Result<Reopening, Refused> {
-        let shown = ConfigSeal.inert(entry.folder, limit: 200)
+    /// session; its folder an absolute path that is already its own canonical spelling (no `.` or `..` component, no
+    /// empty one, no link on the way: `realpath` gives it back unchanged), which is then both the session's folder and
+    /// what is shown; its conversation an id whose transcript, `<id>.jsonl` in Claude's folder for that canonical folder,
+    /// is a regular Claude transcript inside the agents' folders in `home` (`TranscriptReader.checkedURL`), not a named
+    /// agent's (`--name`: a lead, worker or verifier), and records that very folder as its `cwd` (Claude's folder names
+    /// are a lossy slug: `/a/b-c` and `/a/b/c` share one, so the slug alone isn't the folder); its model, when the command
+    /// it ran named one, a model's name (`Requests.isModelName`). Off the engine's queue (the disk).
+    static func reopenable(_ entry: RestartReopen.Entry, home: String) -> Result<Reopening, Refused> {
+        let shown = ConfigSeal.inert(entry.folder, limit: .max)
         func refused(_ why: String) -> Result<Reopening, Refused> { .failure(Refused("\(ConfigSeal.inert(entry.name, limit: 60)) in \(shown): \(why)")) }
         guard entry.role == .user, entry.agent == .claude else { return refused("not one of your own Claude sessions") }
         guard entry.folder.hasPrefix("/") else { return refused("its folder isn't an absolute path") }
-        if let blocker = RestartReopen.blocker(entry, folderExists: folderExists) { return refused(blocker.text.replacingOccurrences(of: "Can't reopen: ", with: "")) }
-        guard let id = entry.agentSessionID, UUID(uuidString: id) != nil else { return refused("its conversation id isn't one") }
-        let projects = URL(fileURLWithPath: home).appendingPathComponent(".claude/projects").resolvingSymlinksInPath()
-        let spellings = [entry.folder, (entry.folder as NSString).standardizingPath, URL(fileURLWithPath: entry.folder).resolvingSymlinksInPath().path]
-        let folders = Set(spellings.map { projects.appendingPathComponent(RecentProjects.claudeSlug(for: $0)).path })
-        let candidates = folders.sorted().map { URL(fileURLWithPath: $0).appendingPathComponent("\(id).jsonl").path }
-        guard let path = candidates.first(where: { FileManager.default.fileExists(atPath: $0) }) else {
-            return refused("Claude keeps no conversation \(id) for that folder")
+        let parts = entry.folder.split(separator: "/", omittingEmptySubsequences: false).dropFirst()
+        guard entry.folder == "/" || !parts.contains(where: { $0.isEmpty || $0 == "." || $0 == ".." }) else {
+            return refused("its folder is spelled with an empty, . or .. part: only its own plain spelling is reopened")
         }
+        guard let resolved = realpath(entry.folder, nil) else { return refused("its folder is gone") }
+        let canonical = String(cString: resolved)
+        free(resolved)
+        guard RestartReopen.isFolder(canonical) else { return refused("its folder isn't a folder") }
+        guard canonical == entry.folder else {
+            return refused("its folder is reached through a link (it is \(ConfigSeal.inert(canonical, limit: .max))): only a folder's own spelling is reopened")
+        }
+        guard let id = entry.agentSessionID, !id.isEmpty else { return refused("its conversation id wasn't known") }
+        guard UUID(uuidString: id) != nil else { return refused("its conversation id isn't one") }
+        let projects = URL(fileURLWithPath: home).appendingPathComponent(".claude/projects").resolvingSymlinksInPath()
+        let folder = projects.appendingPathComponent(RecentProjects.claudeSlug(for: canonical)).path
+        let path = URL(fileURLWithPath: folder).appendingPathComponent("\(id).jsonl").path
+        guard FileManager.default.fileExists(atPath: path) else { return refused("Claude keeps no conversation \(id) for that folder") }
         guard let (url, format) = TranscriptReader.checkedURL(path, home: home), format == .claude,
-              folders.contains(url.deletingLastPathComponent().path) else {
+              url.deletingLastPathComponent().path == folder else {
             return refused("its transcript isn't a Claude transcript inside the agents' folders")
         }
         guard let ends = edges(of: url), ends.range(of: Data(#""agentName":""#.utf8)) == nil else {
             return refused("its conversation is a named agent's (a lead's or its team's), not one of yours")
+        }
+        guard let recorded = recordedFolder(in: ends) else { return refused("its transcript records no folder it ran in") }
+        guard recorded == canonical else {
+            return refused("its transcript ran in \(ConfigSeal.inert(recorded, limit: .max)), not in this folder")
         }
         var model: String?
         if let command = entry.command, let range = command.range(of: #"--model '?([^' ]*)'?"#, options: .regularExpression) {
@@ -164,7 +179,19 @@ extension LeadEngine {
             guard Requests.isModelName(said) else { return refused("its recorded model \(ConfigSeal.inert(said, limit: 64)) isn't a model's name") }
             model = said
         }
-        return .success(Reopening(folder: entry.folder, conversation: id.lowercased(), model: model,
+        return .success(Reopening(folder: canonical, conversation: id.lowercased(), model: model,
                                   cols: (20...500).contains(entry.cols) ? entry.cols : 120, rows: (5...200).contains(entry.rows) ? entry.rows : 36))
+    }
+
+    /// The folder a Claude transcript says it ran in: the first line of `data` (its first and last 64 KB, `edges`) that is
+    /// a JSON object with a `cwd` string. Nil: none says one.
+    static func recordedFolder(in data: Data) -> String? {
+        for line in data.split(separator: UInt8(ascii: "\n")) {
+            guard line.range(of: Data(#""cwd""#.utf8)) != nil,
+                  let object = try? JSONSerialization.jsonObject(with: Data(line)) as? [String: Any],
+                  let cwd = object["cwd"] as? String, !cwd.isEmpty else { continue }
+            return cwd
+        }
+        return nil
     }
 }
