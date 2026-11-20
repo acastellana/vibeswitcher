@@ -338,3 +338,4 @@
 - 2026-11-20 17:59 Started a worker on hookscommandtests-hooks
 - 2026-11-20 17:59 Automatically (auto_advance): Started a worker on hookscommandtests-hooks (HooksCommandTests: `hooks install` takes minutes in a full run and is killed at its 120 s limit).
 - 2026-11-20 17:59 Automatically (auto_advance): Overlap for hookscommandtests-hooks's start (a warning only: nothing was refused or reordered). Tests/VibeNodeTests/HooksCommandTests.swift: tests-that-write-a (running: its branch changes it); Tests/VibeNodeTests/ScratchNode.swift: tests-that-write-a (running: its branch changes it).
+- 2026-11-20 18:05 Automatically (auto_advance): Nudged tests-that-write-a's worker: its turn ended at 18:04 without a report reaching you, so VibeSwitcher sent it the standard prompt (report done or blocked now, and stay until the report answers). It's sent once: if it stops again without reporting, you're told.
