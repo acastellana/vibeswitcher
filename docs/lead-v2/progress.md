@@ -117,3 +117,75 @@
 - 2026-11-19 22:26 Flaky in weblistener-slow-client's merge: aCodexWorkersCheckRunsInsideCodexsSandbox(), (the test command, naming no test) failed the first test run and passed its rerun (the whole test command); merged on the rerun
 - 2026-11-19 22:48 Merged planner-a-worker-s: Planner: a worker's box can't write config.worktree or the agent's memory (build 5b6eccd929ad)
 - 2026-11-19 22:48 Flaky in planner-a-worker-s's merge: theAppsListingNeverRunsInTheWorktree(), (the test command, naming no test) failed the first test run and passed its rerun (the whole test command); merged on the rerun
+- 2026-11-19 22:52 Sent sb3-the-launcher-builds's worker contract v3 (it had v2)
+- 2026-11-19 22:54 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: ~/.vibeswitcher/lead/run
+- 2026-11-19 22:54 Audit of leadadvancetests-battery at a4c89015 by 2 finders (contract and acceptance; bugs, regressions and security); the shared run: test command failed
+- 2026-11-19 22:54 Released leadadvancetests-battery's worker (idle since its done report on a4c89015) while its audit runs
+- 2026-11-19 22:54 Automatically (auto_advance): Started the audit of leadadvancetests-battery at a4c89015 (It touches sensitive_paths (Sources/VibeCore/LeadAdvance.swift), so it's treated as audit whatever its review says). Released its worker, idle since its done report, while the audit runs: its Mac slot and memory are free, its worktree and branch stay.
+- 2026-11-19 22:54 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: ~/.claude/shell-snapshots and ~/.vibeswitcher/lead/run
+- 2026-11-19 22:54 Started a worker on the-vault-s-look
+- 2026-11-19 22:54 Automatically (auto_advance): Started a worker on the-vault-s-look (The vault's look never catches the tool server halfway through writing its git-hooks copy), its after tasks done (the-full-suite-passes, planner-a-worker-s).
+- 2026-11-19 22:54 Automatically (auto_advance): Overlap for the-vault-s-look's start (a warning only: nothing was refused or reordered). Package.swift: branch-runs-get-the (planned: its boundaries name it), sb5-the-host-confines (planned: its boundaries name it), sb6-1-2-branch (planned: its boundaries name it), sb6-2-2-a (planned: its boundaries name it); Sources/VibeCore/LeadToolset.swift: branch-runs-get-the (planned: its boundaries name it).
+- 2026-11-19 22:55 Workflow: security_audit_model = `fable`
+- 2026-11-19 22:55 Sent leadadvancetests-battery's audit contract v3 (it had v2)
+- 2026-11-19 22:55 Planned port-map-rows-from: Port map rows from two branches merge without a conflict
+- 2026-11-19 23:02 Started a worker on leadadvancetests-battery
+- 2026-11-19 23:02 Automatically (auto_advance): Started a worker on leadadvancetests-battery (LeadAdvanceTests: the settle() race and the earlier-verifier test).
+- 2026-11-19 23:02 Sent the-merge-s-test's worker contract v2 (it had v1)
+- 2026-11-19 23:06 Audit of sb3-the-launcher-builds at 548df9a1 by 2 finders (contract and acceptance; bugs, regressions and security); the shared run: the test command passed
+- 2026-11-19 23:07 Audit of sb3-the-launcher-builds: finder 2 of 2 submitted (complete, clean, 1 finding)
+- 2026-11-19 23:09 Audit of sb3-the-launcher-builds: complete, clean, round 2: 1 Nit open, 2 Pre-existing (1 open, 1 unconfirmed) (2 finders voted: 0 new findings confirmed, 0 unconfirmed)
+- 2026-11-19 23:14 Sent sb6-1-2-branch's worker contract v5 (it had v4)
+- 2026-11-19 23:16 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: ~/.vibeswitcher/lead/run
+- 2026-11-19 23:16 Audit of the-merge-s-test at b86c8e9c by 2 finders (contract and acceptance; bugs, regressions and security); the shared run: the test command passed
+- 2026-11-19 23:16 Sent the-merge-s-test's audit contract v2 (it had v1)
+- 2026-11-19 23:16 Automatically (auto_advance): Started the audit of the-merge-s-test at b86c8e9c (Its review is audit).
+- 2026-11-19 23:16 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: ~/.claude/shell-snapshots and ~/.vibeswitcher/lead/run
+- 2026-11-19 23:16 Started a worker on port-map-rows-from
+- 2026-11-19 23:16 Automatically (auto_advance): Started a worker on port-map-rows-from (Port map rows from two branches merge without a conflict).
+- 2026-11-19 23:16 Automatically (auto_advance): Didn't audit leadadvancetests-battery: An audit of leadadvancetests-battery is already making its build and test run; its verdict comes as a report.
+- 2026-11-19 23:26 Audit of the-merge-s-test: finder 2 of 2 submitted (incomplete, clean, 2 findings)
+- 2026-11-19 23:26 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: ~/.claude/shell-snapshots
+- 2026-11-19 23:29 Audit of the-merge-s-test: incomplete, clean, round 1: 2 Important unconfirmed, 1 Nit open (2 finders voted: 1 new finding confirmed, 2 unconfirmed)
+- 2026-11-19 23:29 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: ~/.claude/shell-snapshots
+- 2026-11-19 23:35 The worker on the-merge-s-test answered findings: the-merge-s-test:F2 fixed at 09ccd894: Fixed in 09ccd894. The suite now builds its own environment instead of inheriting the caller's. Taken out: CODEX_SANDBOX (which makes test.sh skip the security tests, so the old line-206 expectation saw 2 'web tests' lines, not 3) and the width's variables. Set to a value: all six team-session variables from test-environment.sh's team_session_variables. The fake swift now counts which of those it received, and the test expects 0 in both runs. Red on the old…
+- 2026-11-19 23:36 Sent the-vault-s-look's worker contract v2 (it had v1)
+- 2026-11-19 23:48 Automatically (auto_advance): Didn't audit the-merge-s-test: Not audited: finder 1 of 2 couldn't start (Problem(text: "the-merge-s-test\'s finder not started: ~/.local/bin and ~/.local/share/claude/versions changed while the team\'s sessions ran, since VibeSwitcher last sealed them. A worker\'s shell, a verifier\'s command or a branch\'s tests can write them (the deny rules hold only the file tools), and the next session would load what was written. New workers, verifiers and merges are held until the user accepts the change in VibeSwitcher (its notice na…
+- 2026-11-19 23:56 Automatically (auto_advance): Didn't audit sb6-1-2-branch: Not audited: finder 1 of 2 couldn't start (Problem(text: "sb6-1-2-branch\'s finder not started: ~/.local/bin and ~/.local/share/claude/versions changed while the team\'s sessions ran, since VibeSwitcher last sealed them. A worker\'s shell, a verifier\'s command or a branch\'s tests can write them (the deny rules hold only the file tools), and the next session would load what was written. New workers, verifiers and merges are held until the user accepts the change in VibeSwitcher (its notice name…
+- 2026-11-20 00:04 Automatically (auto_advance): Didn't audit the-vault-s-look: Not audited: finder 1 of 2 couldn't start (Problem(text: "the-vault-s-look\'s finder not started: ~/.local/bin and ~/.local/share/claude/versions changed while the team\'s sessions ran, since VibeSwitcher last sealed them. A worker\'s shell, a verifier\'s command or a branch\'s tests can write them (the deny rules hold only the file tools), and the next session would load what was written. New workers, verifiers and merges are held until the user accepts the change in VibeSwitcher (its notice na…
+- 2026-11-20 00:17 Automatically (auto_advance): Merge of port-map-rows-from failed: Tests fail rebased onto v2: aRunningToolServerKeepsItsBuildAcrossASwitch(), aLiveToolServerWhoseParentIsTheTestIsNotAnOrphan(), vsHeavyNeverStopsARunPrintingSlowly(); the run stopped partway: 914 tests printed their start and never finished, but Swift Testing prints that line before a test gets a slot to run in, so the output can't say which of them were running Sent its worker the output; it's back at work.
+- 2026-11-20 00:19 Update: Today: the node's merge gate works; 3 merges in; the sandbox's first slice half-way, waiting on two answers — **Landed on v2**
+- 2026-11-20 00:31 Audit of the-merge-s-test at 09ccd894 by 2 finders (contract and acceptance; bugs, regressions and security); the shared run: test command failed
+- 2026-11-20 00:31 Released the-merge-s-test's worker (idle since its done report on 09ccd894) while its audit runs
+- 2026-11-20 00:31 Automatically (auto_advance): Started the audit of the-merge-s-test at 09ccd894 (Its review is audit). Released its worker, idle since its done report, while the audit runs: its Mac slot and memory are free, its worktree and branch stay.
+- 2026-11-20 00:31 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: ~/.claude/shell-snapshots
+- 2026-11-20 00:31 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: ~/.claude/shell-snapshots
+- 2026-11-20 00:32 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: ~/.local/bin
+- 2026-11-20 00:32 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: ~/.vibeswitcher/lead/run
+- 2026-11-20 00:32 Audit of the-vault-s-look at f0a174ef by 2 finders (contract and acceptance; bugs, regressions and security); the shared run: test command failed
+- 2026-11-20 00:32 Automatically (auto_advance): Started the audit of the-vault-s-look at f0a174ef (Its review is audit).
+- 2026-11-20 00:32 Pipeline held: sb3-the-launcher-builds ready to merge with none landing; cause: a merge in progress
+- 2026-11-20 00:32 Audit of sb6-1-2-branch at 67368a09 by 2 finders (contract and acceptance; bugs, regressions and security); the shared run: test command failed
+- 2026-11-20 00:32 Released sb6-1-2-branch's worker (idle since its done report on 67368a09) while its audit runs
+- 2026-11-20 00:32 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: ~/.claude/shell-snapshots
+- 2026-11-20 00:32 Automatically (auto_advance): Didn't merge port-map-rows-from: Not merged: port-map-rows-from's tests passed, and after them: ~/.local/bin changed while the team's sessions ran, since VibeSwitcher last sealed it. A worker's shell, a verifier's command or a branch's tests can write it (the deny rules hold only the file tools), and the next session would load what was written. New workers, verifiers and merges are held until the user accepts the change in VibeSwitcher (its notice names the files); you can't. Tell the user which changed and ask them to look: if they made the change, they accept it there; if not, they set it back first.
+- 2026-11-20 00:34 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: ~/.claude/shell-snapshots
+- 2026-11-20 00:34 Audit of the-merge-s-test at 09ccd894 by 2 finders (contract and acceptance; bugs, regressions and security); the shared run: test command failed
+- 2026-11-20 00:34 Audit of leadadvancetests-battery at 816aa092 by 2 finders (contract and acceptance; bugs, regressions and security); the shared run: test command failed
+- 2026-11-20 00:34 Released leadadvancetests-battery's worker (idle since its done report on 816aa092) while its audit runs
+- 2026-11-20 00:34 Automatically (auto_advance): Started the audit of leadadvancetests-battery at 816aa092 (An audit was started on it: its verdict decides). Released its worker, idle since its done report, while the audit runs: its Mac slot and memory are free, its worktree and branch stay.
+- 2026-11-20 00:35 Incident: On the Linux node, every start of a Claude Code session re-creates the link ~/.local/bin/claude (same target), and the vault takes it as a config change made wh…; planned turn-this-incident-into to turn it into a check
+- 2026-11-20 00:35 Review of turn-this-incident-into: audit
+- 2026-11-20 00:36 Audit of sb6-1-2-branch: finder 1 of 2 submitted (complete, clean, 0 findings)
+- 2026-11-20 00:38 Audit of sb6-1-2-branch: complete, clean, round 3: 2 Important closed, 5 Nit unconfirmed, 1 Pre-existing unconfirmed (2 finders voted: 0 new findings confirmed, 0 unconfirmed)
+- 2026-11-20 00:38 Audit of the-merge-s-test: finder 2 of 2 submitted (complete, clean, 1 finding)
+- 2026-11-20 00:39 Audit of the-merge-s-test: complete, clean, round 2: 2 Important unconfirmed, 1 Nit closed (2 finders voted: 0 new findings confirmed, 0 unconfirmed)
+- 2026-11-20 00:39 Audit of the-vault-s-look: finder 1 of 2 submitted (incomplete, clean, 5 findings)
+- 2026-11-20 00:40 Audit of the-vault-s-look: incomplete, clean, round 1: 1 Important open, 2 Nit (1 open, 1 unconfirmed), 4 Pre-existing unconfirmed (2 finders voted: 2 new findings confirmed, 5 unconfirmed)
+- 2026-11-20 00:40 Automatically (auto_advance): Sent the-vault-s-look's worker the open Important findings the-vault-s-look:F1 from its audit at f0a174ef.
+- 2026-11-20 00:41 Audit of leadadvancetests-battery: finder 2 of 2 submitted (complete, clean, 1 finding)
+- 2026-11-20 00:42 Planned a-lead-asked-for: A lead asked for twice at once starts twice under load
+- 2026-11-20 00:42 Audit of leadadvancetests-battery: complete, clean, round 1: 1 Pre-existing open (2 finders voted: 1 new finding confirmed, 0 unconfirmed)
+- 2026-11-20 00:43 Planned tests-that-write-a: Tests that write a program and run it no longer fail with "Text file busy"
+- 2026-11-20 00:50 Merged port-map-rows-from: Port map rows from two branches merge without a conflict (no audit: review none) (build 5b6eccd929ad)
+- 2026-11-20 00:50 Flaky in port-map-rows-from's merge: aCarriedServerChildOfAHostStoppedBeforeItsRestoreIsEnded(switchCarriedACopy:), aCarriedServerChildOfAHostStoppedBeforeItsRestoreIsEnded(switchCarriedACopy:) with 2 test cases, (the test command, naming no test) failed the first test run and passed its rerun (the whole test command); merged on the rerun

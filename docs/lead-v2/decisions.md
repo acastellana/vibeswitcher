@@ -24,3 +24,7 @@ The user's message; the first merge of the-full-suite-passes failed on two flake
 
 The reason for keeping them (the merge's test run failing on this node's environment) no longer holds.
 
+## 2026-11-19 23:35:22 Accepted limit of `scripts/test.sh --retry-failed` (task the-merge-s-test, finding F3): a test process that ends by SIGKILL, SIGTERM, SIGINT or a non-zero exit without a signal, only after every test has ended and been recorded, in a run that also has 1 to 10 failed tests that pass alone, is retried into a pass, because SwiftPM gives the same console, stream and exit 1 as for the failing tests alone (measured by the worker and two finders on swift 6.4.2). Not closable from the script without running the test binary directly; stated in the script's comments and pinned for the signals that are seen. Also accepted: up to 4 tries of a flaky test through the engine's own whole-command rerun, and the flaky names reaching only the merge's output (the lead copies them into the record).
+
+The user asked for the retry so one flake doesn't block every merge; no test's own failure is hidden by this limit, only an abnormal end after all results are recorded.
+
