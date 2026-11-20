@@ -596,6 +596,7 @@ command line alone where it doesn't (a guard rail):
 | `lead FOLDER --goal …` | the user's | yes | opens an app session, whose git commands `isYours` treats as the user's; refused on a fresh vault until `config accept` and `base accept` are done (S7) |
 | `answer CARD [TEXT]`, `hold CARD` | the user's | yes (the card's) | the user's answer to the lead, an approval included, bound to the card's id; with no TEXT, the card's draft, printed whole and inert before the code is asked, and sent as the text shown (the live plan's F3) |
 | `tell FOLDER TEXT` | the user's | yes | the user's words to the project's running lead that answer no card: recorded in the vault and delivered as an answer's message is, held until the lead can take it; refused when no lead runs there |
+| `send SESSION TEXT` | the user's | yes | the user's words typed into an agent's session the node's host started, as the app's composer types them (a working agent takes them after its turn); refused for a session the host didn't start, a shell, a replaced lead, and one with a question or picker open on its screen |
 | `draft`, `draft.clear` | a web page whose token drafts; refused `voice` on the Unix socket | no | the user's words left on a card in the server's memory and told to nobody: no lead, no vault, nothing recorded, until `answer CARD` takes them as above (the live plan's B5, I3; LW-D6). A draft a thief plants is shown in full before the code is typed: a guard rail as strong as the typed word |
 | `web.open`, `web.revoke` | the user's | yes (from the action id) | mint a pairing code for a page, or drop every page's token (the live plan's I1) |
 | `config held`, `base show FOLDER [--from COMMIT]` | the user's | no | change nothing; each makes the card the next request takes |
@@ -606,6 +607,10 @@ command line alone where it doesn't (a guard rail):
 | any later request that changes state | the user's | yes | until signed approvals |
 
 **(2026-11-19)** `tell` added (the node's first day of use): the same voice, code and record as `answer`, no card.
+
+**(2026-11-20)** `send` added (driving an ordinary session, the parity table's gap 1): the same voice, code and record
+as `tell`; the words go only into a session the node's host started. A web page leaves a draft on its own page and shows
+the command to run.
 
 `status --ack` and `start`'s acknowledgment of S11 are not requests: the command line writes each to the journal
 itself, after its own typed code (the engine's EN-D15), so a seized server can't clear them.
