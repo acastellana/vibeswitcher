@@ -264,6 +264,13 @@ code, pre, kbd { font-family: var(--mono); }
 .chat-rows > .chat-row:first-child { margin-top: 0; }
 .chat-row.tools { margin-top: 8px; padding-left: 30px; }
 .chat-row.tools + .chat-row.reply { margin-top: 6px; }
+/* "New since you looked": a line across the chat before the first new row, with what came since under its words. */
+.new-mark { display: flex; align-items: center; gap: 10px; margin-top: 16px; color: var(--accent); }
+.new-mark::before, .new-mark::after { content: ''; flex: 1; height: 1px; background: var(--accent); opacity: 0.6; }
+.new-mark-text { display: flex; flex-direction: column; align-items: center; font-size: 11px; font-weight: 600; line-height: 1.35; }
+.new-mark-summary { color: var(--ink-3); font-size: 10.5px; font-weight: 400; }
+.new-mark-summary:empty { display: none; }
+.new-mark + .chat-row { margin-top: 8px; }
 
 .chat-row.prompt { display: flex; flex-direction: column; align-items: flex-end; padding-left: 60px; }
 .bubble { max-width: 100%; padding: 8px 13px; border-radius: 14px; background: var(--accent-fill); font-size: var(--large); line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; transition: opacity 0.16s; }

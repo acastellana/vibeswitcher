@@ -11,12 +11,15 @@
 // - A reply that grows is drawn again in its own row only, keeping the blocks that didn't change.
 // - It stays where you are: new rows keep the view at the end only if it was there, and otherwise a small "Latest"
 //   button counts them.
+// - "New since you looked" (the Mac's marker): a line before the first item that came after the last one you saw at the
+//   chat's end, with what came since; worked out when the chat opens, kept until another opens. What you saw is this
+//   browser's (`SEEN`), by session.
 
 import { h, keyed, setText, setClass, framed } from '../dom.js';
 import { agentMark, statusMark, setMark, icon } from '../marks.js';
 import { since, short, clock, plural, tilde, stateOf, AGENTS, STATES } from '../words.js';
 import { markdown, diffView, codeBlock } from '../text.js';
-import { summaryOf } from '../chatops.js';
+import { summaryOf, newSince, sinceSummary } from '../chatops.js';
 import { questionStack, askCard } from './cards.js';
 import { draftBox, promptCard, drivable } from './drive.js';
 
@@ -28,6 +31,23 @@ const OVERSCAN = 1.5;
 const FIRST_ROWS = 30;
 // A row's height until it is measured, by type.
 const ESTIMATE = { prompt: 62, reply: 96, tools: 30, team: 70, ask: 160 };
+
+// The last item seen at each chat's end, by session id, in this browser: the newest `SEEN_KEPT` sessions.
+const SEEN = 'vibeswitcher.seen';
+const SEEN_KEPT = 300;
+
+function seenRecord() {
+  try { return JSON.parse(globalThis.localStorage?.getItem(SEEN) || '{}') || {}; } catch { return {}; }
+}
+
+function noteSeen(session, id) {
+  const record = seenRecord();
+  if (record[session] === id) return;
+  delete record[session];
+  record[session] = id;
+  const kept = Object.entries(record).slice(-SEEN_KEPT);
+  try { globalThis.localStorage?.setItem(SEEN, JSON.stringify(Object.fromEntries(kept))); } catch { /* a private window: not kept */ }
+}
 
 // A row's key: its id, but a message sent from here keeps its row when the transcript's own item takes its place.
 const keyOf = (item) => (item.action ? 'pending:' + item.action : item.id);
@@ -229,6 +249,9 @@ export function chatView(app) {
   const asking = promptCard(app);
   const column = h('div', { class: 'chat-column' }, earlier, skeleton, empty, later, above, rowsEl, below, live, stackSlot, asking.el);
   const scroller = h('div', { class: 'chat-scroll' }, column);
+  // The "New since you looked" line, placed before its row while that row is drawn.
+  const markSummary = h('span', { class: 'new-mark-summary' });
+  const mark = h('div', { class: 'new-mark', role: 'separator' }, h('span', { class: 'new-mark-text' }, h('span', null, 'New since you looked'), markSummary));
   const latestCount = h('span', { class: 'latest-count' });
   const latest = h('button', { class: 'latest', type: 'button', hidden: true, onclick: () => toEnd(true) }, icon('down', 12), 'Latest', latestCount);
 
@@ -262,6 +285,9 @@ export function chatView(app) {
   let jump = true;
   let shownQuestions = 0;
   let structural = true;
+  // The marker's row (its key) once the chat's items came; `marking`: not worked out yet for this chat.
+  let markKey = null;
+  let marking = true;
   const touched = new Set();
 
   const chat = () => store.state.chats.get(view.session);
@@ -295,9 +321,32 @@ export function chatView(app) {
     start = Math.max(0, Math.min(from, list.length));
     end = Math.max(start, Math.min(to, list.length));
     keyed(rowsEl, rows, list.slice(start, end), keyOf, (item) => makeRow(view, item), { enter: !jump && structural && to === list.length });
+    placeMark();
     above.style.height = sum(list, 0, start) + 'px';
     below.style.height = sum(list, end, list.length) + 'px';
     earlier.hidden = !(start === 0 && chat()?.more);
+  }
+
+  // The marker before its row, while that row is drawn (`keyed` moves rows only: the marker is put back after it).
+  function placeMark() {
+    const row = markKey ? rows.get(markKey) : null;
+    if (row?.el.parentNode === rowsEl) {
+      if (mark.nextSibling !== row.el) rowsEl.insertBefore(mark, row.el);
+    } else {
+      mark.remove();
+    }
+  }
+
+  // At the chat's first items: where the marker goes (from what this browser saw last), then what's seen now.
+  function noteLooked(list) {
+    if (marking) {
+      marking = false;
+      const at = newSince(list, seenRecord()[view.session]);
+      markKey = at >= 0 ? keyOf(list[at]) : null;
+      setText(markSummary, at >= 0 ? sinceSummary(list.slice(at)) : '');
+    }
+    const last = [...list].reverse().find((item) => item.id && !item.pending);
+    if (last) noteSeen(view.session, last.id);
   }
 
   // Each drawn row's height, with the gap above the next: the spacers then stand in for them exactly.
@@ -362,6 +411,7 @@ export function chatView(app) {
     later.hidden = following;
     const list = items();
     empty.hidden = !following || !loaded || list.length > 0 || !!stack;
+    if (loaded && marking) noteLooked(list);
     if (loaded) {
       if (structural) {
         // At the end, `toEnd` below draws the last rows.
@@ -388,7 +438,10 @@ export function chatView(app) {
     const fresh = stack ? stack.update() : 0;
     renderLive(session);
     renderComposer(session);
-    if (loaded && pinned) toEnd(false);
+    if (loaded && pinned) {
+      toEnd(false);
+      noteLooked(list);
+    }
     else if (unseen > 0 || fresh > shownQuestions) {
       latest.hidden = false;
       setText(latestCount, unseen > 0 ? String(unseen) : '');
@@ -438,6 +491,7 @@ export function chatView(app) {
     if (atEnd()) {
       unseen = 0;
       latest.hidden = true;
+      if (chat()?.loaded) noteLooked(items());
     }
     follow();
   });
@@ -520,6 +574,9 @@ export function chatView(app) {
       structural = true;
       jump = true;
       shownQuestions = 0;
+      markKey = null;
+      marking = true;
+      mark.remove();
       stack = null;
       stackProject = null;
       // The last session's questions leave with it (placeStack only draws when the project changes).
