@@ -430,6 +430,35 @@ code, pre, kbd { font-family: var(--mono); }
 .copy-button:hover { background: var(--fill-2); color: var(--ink); }
 .copy-button.done { color: var(--done); }
 .confirm.sending .copy-line { opacity: 0.6; transition: opacity 0.16s; }
+/* Driving a session (views/drive.js): the message left for it over the box, its own question, End, and New session.
+   Each ends in the line that does it in a terminal, as a card's draft does. */
+.copy-line .copy-text { flex: 1; min-width: 0; padding: 0; overflow: hidden; background: none; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; user-select: all; }
+.composer-draft { flex: none; width: calc(100% - 48px); max-width: 752px; margin: 4px auto 0; }
+.composer-draft .confirm-text { display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; }
+.confirm-actions { display: inline-flex; gap: 12px; }
+.session-prompt { margin-top: 14px; }
+.session-prompt .option-note { margin-left: auto; color: var(--ink-3); font-size: var(--small); font-weight: 400; }
+.session-prompt .answer-input { width: 100%; }
+.prompt-line { min-height: 20px; }
+.end-button { flex: none; }
+.end-strip { flex: none; display: flex; align-items: center; gap: 12px; padding: 8px 20px; border-bottom: 1px solid var(--line); background: var(--fill); animation: enter 0.16s var(--ease); }
+.end-text { flex: none; color: var(--ink-2); font-size: var(--small); }
+.end-text strong { color: var(--ink); font-weight: 600; }
+.end-strip > div:nth-child(2) { flex: 1; min-width: 0; }
+.new-session { display: grid; gap: 9px; margin: 22px 0 26px; padding: 14px 16px 15px; border-radius: 12px; background: var(--fill); }
+.new-title { color: var(--ink-2); font-size: var(--small); font-weight: 600; }
+.new-fields { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.new-fields > .answer-input:first-child { flex: 2 1 220px; }
+.new-fields > .model-input { flex: 1 1 120px; }
+.sidebar-top { position: relative; }
+.sidebar-top .new-link { position: absolute; right: 10px; top: 10px; }
+@media (max-width: 760px) {
+  .end-strip { flex-wrap: wrap; }
+  .end-text { flex: 1 1 100%; }
+  .composer-draft { width: calc(100% - 32px); }
+  .composer-draft .confirm-text { -webkit-line-clamp: 2; }
+  .composer-draft .confirm-note { display: none; }
+}
 .card-hold { display: grid; gap: 4px; }
 .card-hold-label { color: var(--ink-3); font-size: var(--small); }
 

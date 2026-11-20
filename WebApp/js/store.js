@@ -14,6 +14,8 @@
 //   store.openChat(id), closeChat(id), pageChat(id)   what the chat view asks of the feed
 //   store.draft(card, text)      leaves an answer drafted on a card, shown at once (the contract's §8); null clears it
 //   store.draftOf(card)          the draft a card shows: this page's overlay over the node's, or null
+//   store.sessionDraft(id, text) leaves a message drafted for a session (`session.draft`), shown at once; null clears it
+//   store.sessionDraftOf(id)     the message a session shows drafted: this page's overlay over the node's, or null
 
 // The keyed collections, and the field each entry is keyed by (a lead and its board by their project's id).
 import { applyOps, reindex } from './chatops.js';
@@ -56,6 +58,10 @@ export function createStore() {
     drafts: new Map(),
     // Why the node refused a card's last draft, by card id, until the next one.
     draftRefused: new Map(),
+    // The same for a message drafted for a session (`session.draft`), by session id: the overlay, and why the node
+    // refused the last one.
+    sessionDrafts: new Map(),
+    sessionDraftRefused: new Map(),
   };
 
   const listeners = new Map();
@@ -339,6 +345,46 @@ export function createStore() {
     return card?.open && card.draft ? { text: card.draft.text, sending: false, mine: false } : null;
   }
 
+  // A message for a session, drafted on the node beside it (`session.draft`, or `session.draft.clear` for null): shown
+  // at once as an overlay keyed by its action id, and kept until the sessions stream reaches what the node acked
+  // (`applied`), as a card's draft. Nothing is typed: the user sends it with `vibeswitcher send` in a terminal.
+  const sessionTouched = (id) => emit(new Map([['sessions', [{ in: 'sessions', id, drafting: true }]]]));
+  function sessionDraft(id, text) {
+    if (!state.sessions.get(id)?.hosted) return Promise.resolve({ ok: false, error: { code: 'gone', message: 'This session can’t be typed into.' } });
+    const action = crypto.randomUUID();
+    const clearing = text === null;
+    state.sessionDrafts.set(id, { text: clearing ? null : text, action, sent: false });
+    state.sessionDraftRefused.delete(id);
+    sessionTouched(id);
+    const mine = () => state.sessionDrafts.get(id)?.action === action;
+    return request(clearing ? 'session.draft.clear' : 'session.draft', clearing ? { session: id } : { session: id, text }, action).then((reply) => {
+      if (!mine()) return reply;
+      if (!reply.ok) {
+        state.sessionDrafts.delete(id);
+        state.sessionDraftRefused.set(id, reply.error?.message || 'The node refused it.');
+        sessionTouched(id);
+        return reply;
+      }
+      state.sessionDrafts.get(id).sent = true;
+      sessionTouched(id);
+      const applied = reply.result?.applied?.sessions;
+      const reached = typeof applied === 'number' && feed?.reached ? feed.reached('sessions', applied) : Promise.resolve();
+      return reached.then(() => {
+        if (mine()) { state.sessionDrafts.delete(id); sessionTouched(id); }
+        return reply;
+      });
+    });
+  }
+
+  // The message session `id` shows drafted, `{ text, sending, mine }`, or null: this page's overlay while it has one,
+  // else the node's (left here, in another tab, on another device).
+  function sessionDraftOf(id) {
+    const overlay = state.sessionDrafts.get(id);
+    if (overlay) return overlay.text === null ? null : { text: overlay.text, sending: !overlay.sent, mine: true };
+    const draft = state.sessions.get(id)?.draft;
+    return draft?.text ? { text: draft.text, sending: false, mine: false } : null;
+  }
+
   // A message typed into a session, shown at once as a pending row; the transcript's own row replaces it.
   function send(session, text) {
     const message = { v: 1, id: String(nextRequest++), kind: 'send', args: { session, text }, action: crypto.randomUUID() };
@@ -361,6 +407,8 @@ export function createStore() {
     act,
     draft,
     draftOf,
+    sessionDraft,
+    sessionDraftOf,
     send,
     openChat,
     closeChat,
