@@ -68,3 +68,7 @@ The user's policy is to serialize expensive runs, and here parallel runs don't j
 
 A lead after the next restart or handover must find why nothing merges, why one task was split and runs outside auto_advance, and the order agreed with the user, here and not in a lost conversation.
 
+## 2026-11-20 17:14:06 The gate comes back by fixing forward (the user, 2026-11-20, answer 37A83097): no older build has today's voice fix without the branch-run box, so no swap. As soon as the-node-s-gate is ready the lead tells the user its exact commit and the workflow.md keys to accept; the user's supervisor installs a build from that branch; nothing merges or is audited until then. After the install the lead restarts the audit of team-sessions-start, audits the-node-s-gate through the working gate and merges in this order: the-node-s-gate, the-suite-passes-on (four tests red on v2 on kernel 6.18), then the rest.
+
+The user's answer; the next lead must know the install is the supervisor's, from the branch, and that the lead owes the commit and the keys the moment the worker reports.
+
