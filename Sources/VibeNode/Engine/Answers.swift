@@ -595,7 +595,12 @@ extension LeadEngine {
             // The last accept the snapshot knows (E8): each held thing said the same, changed or new since.
             let held = ConfigHoldStore.held(root: root, vault: vault, home: home, snapshot: AcceptedSnapshot.load(root: node).projects[root])
                 .map { SessionPresets.withPresetsToAccept($0, vault: vault, home: home, nodeRoot: node) }
-            let difference: [String]? = { if case .success(let shown) = held, let diff { return ConfigHoldStore.difference(shown, name: diff, home: home) } else { return nil } }()
+            let difference: [String]? = {
+                guard case .success(let shown) = held, let diff else { return nil }
+                // The presets file: what changed in presets since the user's accept, not its text (`SessionPresets.difference`).
+                if diff == SessionPresets.sealName, shown.items.contains(where: { $0.name == diff }) { return SessionPresets.difference(vault: vault, nodeRoot: node) }
+                return ConfigHoldStore.difference(shown, name: diff, home: home)
+            }()
             guard let self else { return }
             self.queue.async {
                 switch held {

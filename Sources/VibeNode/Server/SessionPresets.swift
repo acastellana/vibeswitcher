@@ -174,16 +174,26 @@ public enum SessionPresets {
     /// the user's explicit one. Unchanged when the file is held already (the accept takes it as any held thing), when
     /// it is accepted as it is, or when there is no regular presets file where the seal watches. Asks the vault and
     /// reads the file: never on the engine's queue.
+    /// Either way the item says what changed in presets since the user's last accept (`cardChange`: names, kinds,
+    /// commands and variables by name), not only that the file changed.
     public static func withPresetsToAccept(_ shown: ConfigHoldStore.Shown, vault: LeadVault, home: String, nodeRoot: URL) -> ConfigHoldStore.Shown {
-        guard !shown.items.contains(where: { $0.name == sealName }),
-              let watched = ConfigSeal.homeWatched(home: home).first(where: { $0.name == sealName }),
-              URL(fileURLWithPath: watched.path).standardizedFileURL.path == nodeRoot.appendingPathComponent("presets.json").standardizedFileURL.path,
-              read(root: nodeRoot).fingerprint != nil, let now = ConfigSeal.fingerprint(watched) else { return shown }
+        guard let watched = ConfigSeal.homeWatched(home: home).first(where: { $0.name == sealName }),
+              URL(fileURLWithPath: watched.path).standardizedFileURL.path == nodeRoot.appendingPathComponent("presets.json").standardizedFileURL.path
+        else { return shown }
+        let file = read(root: nodeRoot)
         let record = (try? vault.guardedRecord(root: acceptRoot(nodeRoot: nodeRoot))) ?? nil
+        let change = { cardChange(before: acceptedPresets(nodeRoot: nodeRoot, record: record), after: file.presets) }
+        if let index = shown.items.firstIndex(where: { $0.name == sealName }) {
+            guard file.fingerprint != nil else { return shown }
+            var asked = shown
+            asked.items[index].change = [asked.items[index].change, change()].compactMap { $0 }.joined(separator: "; ")
+            return asked
+        }
+        guard file.fingerprint != nil, let now = ConfigSeal.fingerprint(watched) else { return shown }
         guard record?[acceptedKey] != now else { return shown }
         var asked = shown
         asked.items.append(ConfigHoldStore.Item(name: sealName, hash: String(now.prefix(12)),
-                                                change: "never accepted by you: a preset of it starts only once you accept it as it is"))
+                                                change: "never accepted by you: a preset of it starts only once you accept it as it is; " + change()))
         asked.hashes[ConfigSeal.keyPrefix + sealName] = now
         return asked
     }
@@ -198,6 +208,8 @@ public enum SessionPresets {
         do {
             guard try vault.guardedRecord(root: root)?[key] == hash else { return nil }
             try vault.setGuardedSettings([acceptedKey: hash], root: root)
+            // Its bytes as accepted, for the next card's difference.
+            keepAcceptedCopy(hash: hash, nodeRoot: nodeRoot)
             return nil
         } catch {
             return error

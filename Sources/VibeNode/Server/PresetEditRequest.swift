@@ -208,6 +208,18 @@ enum PresetEdit {
         return .success(Done(data: data, result: result))
     }
 
+    /// Why an edit can't start from `data`, the presets file's bytes as read (nil: it can), failing closed (the
+    /// security review of 2026-11-20): an edit is written in the user's voice, so it starts only from the file as the
+    /// user accepted it (`Requests.presetsBaselineRefusal`: the seal's record and the user's own accept of exactly
+    /// these bytes), never carrying in what anyone else wrote there since. No file, or one with nothing in it, carries
+    /// nothing: the edit starts from the built-ins. Asks the vault: never on the engine's queue.
+    static func unacceptedRefusal(_ data: Data?, vault: LeadVault?, home: String, nodeRoot: URL) -> String? {
+        guard let data, !data.allSatisfy({ $0 == 0x20 || $0 == 0x0A || $0 == 0x0D || $0 == 0x09 }) else { return nil }
+        let file = SessionPresets.decode(data)
+        guard let why = Requests.presetsBaselineRefusal(vault: vault, home: home, nodeRoot: nodeRoot, file: file, folder: "FOLDER") else { return nil }
+        return "presets.json has changes you haven't accepted (\(why)): review them with `vibeswitcher config held` and accept them first; nothing changed"
+    }
+
     /// A Claude preset's command: `claude` and the words given.
     static func command(_ args: String) -> String {
         (["claude"] + args.split(whereSeparator: { $0 == " " || $0 == "\t" }).map(String.init)).joined(separator: " ")
@@ -282,14 +294,17 @@ extension Requests {
         case .success(let value): asked = value
         }
         let (queue, nodeRoot, note) = (self.queue, root, self.note)
+        // The vault that keeps the user's accept of the presets file, and the home the config seal reads.
+        let (vault, home) = (engine?.cardVault, engine?.home ?? self.home)
         let refuse = { (why: String) in queue.async { reply(.init(re: request.id, error: .init(.refused, why))) } }
-        // Off the queue: the file is read and written.
+        // Off the queue: the file is read and written, the vault asked.
         DispatchQueue.global(qos: .userInitiated).async {
             let was: Data?
             switch SessionPresets.bytes(root: nodeRoot) {
             case .failure(let refusal): return refuse(refusal.message + ": nothing changed")
             case .success(let data): was = data
             }
+            if let why = PresetEdit.unacceptedRefusal(was, vault: vault, home: home, nodeRoot: nodeRoot) { return refuse(why) }
             let done: PresetEdit.Done
             switch PresetEdit.apply(asked, to: was) {
             case .failure(let refusal): return refuse(refusal.message)

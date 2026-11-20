@@ -187,19 +187,67 @@ struct PresetEditTests {
         #expect(try #require(await world.ask("config.accept", ["card": NodeWire.Value.string(card), "code": NodeWire.Value.string(NodeIds.code(card: card))])).ok)
         #expect(try await start().ok)
 
-        // Edited as shown; the same edit again, from what was shown before it, is refused.
+        // Edited as shown (the file as accepted); the next edit waits for the accept of that one, and one from what was
+        // shown before it is refused.
         let digest = try await listed()["digest"] ?? .null
         let edit = Self.wire(["op": "edit", "name": "Tests shell", "folder": world.repo, "digest": digest, "keepShell": true])
         #expect(try #require(await world.ask("presets.edit", edit)).ok)
+        let unaccepted = try #require(await world.ask("presets.edit", Self.wire(["op": "add", "name": "Another", "kind": "shell"])))
+        #expect(unaccepted.error?.message.contains("changes you haven't accepted") == true, "\(unaccepted)")
+        #expect(try await start().error?.message.contains("accept the presets first") == true, "changed again: held until accepted again")
+        try await acceptConfig(world)
         let stale = try #require(await world.ask("presets.edit", edit))
         #expect(stale.error?.code == NodeWire.Code.refused.rawValue && stale.error?.message.contains("changed since it was shown") == true, "\(stale)")
-        // Changed again: held until accepted again.
-        #expect(try await start().error?.message.contains("accept the presets first") == true)
+        #expect(try await start().ok)
+    }
+
+    /// A worker's change to the presets file, not accepted, is never carried into an edit made in the user's voice: the
+    /// edit is refused until the user looked at it and accepted it. The accept card says what changed in presets
+    /// (names, commands, variables by name), and `config held --diff` the values too, a secret-looking one masked.
+    @Test func aChangeNotAcceptedIsntCarriedIntoAnEdit() async throws {
+        let world = try await CardWorld.make(scratch)
+        defer { world.stop() }
+        let file = world.host.root.appendingPathComponent("presets.json")
+        #expect(try #require(await world.ask("presets.edit", Self.wire(["op": "add", "name": "Mine", "kind": "shell", "folder": world.repo]))).ok)
+        try await acceptConfig(world)
+
+        // Someone else (a worker) changes the file: a preset of theirs, and a variable of the user's changed.
+        var presets = SessionPresets.load(root: world.host.root).presets
+        presets.byProject[world.repo]?.append(LaunchPreset(name: "Planted", kind: .claude, command: "claude --model haiku",
+                                                           env: ["ANTHROPIC_MODEL": "haiku", "CLAUDE_CODE_SUBAGENT_MODEL": "sk-" + "planted"]))
+        try presets.save(to: file)
+        let planted = try Data(contentsOf: file)
+        let refused = try #require(await world.ask("presets.edit", Self.wire(["op": "add", "name": "Next", "kind": "shell"])))
+        #expect(refused.error?.code == NodeWire.Code.refused.rawValue && refused.error?.message.contains("changes you haven't accepted") == true, "\(refused)")
+        #expect(try Data(contentsOf: file) == planted, "nothing written")
+
+        // The card says what changed in presets, names only; the difference shows the values, a secret-looking one masked.
+        let held = try #require(await world.ask("config.held", ["folder": .string(world.repo), "diff": .string(SessionPresets.sealName)]))
+        let items = held.result?["card"]?["config"]?["items"]?.array ?? held.result?["card"]?["items"]?.array ?? []
+        let card = String(decoding: NodeWire.line(try #require(held.result?["card"])), as: UTF8.self)
+        #expect(card.contains("presets changed since you accepted them") && card.contains("Planted") && card.contains("claude --model haiku")
+                && card.contains("CLAUDE_CODE_SUBAGENT_MODEL") && !card.contains("planted)") && !card.contains("sk-"), "\(card) \(items)")
+        let difference = held.result?["difference"]?.array?.compactMap(\.string) ?? []
+        #expect(difference.contains { $0.contains("+ Planted (Claude: `claude --model haiku`; sets ANTHROPIC_MODEL=haiku, CLAUDE_CODE_SUBAGENT_MODEL=<set>)") },
+                "\(difference)")
+        #expect(!difference.joined().contains("sk-"))
+
+        // Accepted, the edit goes ahead, from the file as accepted.
+        try await acceptConfig(world)
+        #expect(try #require(await world.ask("presets.edit", Self.wire(["op": "add", "name": "Next", "kind": "shell"]))).ok)
+        #expect(SessionPresets.load(root: world.host.root).presets.byProject[world.repo]?.map(\.name) == ["Mine", "Planted"])
+    }
+
+    private func acceptConfig(_ world: CardWorld) async throws {
+        let held = try #require(await world.ask("config.held", ["folder": .string(world.repo)]))
+        let card = try #require(held.result?["card"]?["id"]?.string, "\(held)")
+        let accepted = try #require(await world.ask("config.accept", ["card": .string(card), "code": .string(NodeIds.code(card: card))]))
+        #expect(accepted.ok, "\(accepted)")
     }
 
     /// Through the command line on a scratch node: `preset add` shows the change (a secret-looking value masked) before
-    /// the code; a variable outside the reviewed few is refused before any code; `edit` and `remove` act on what
-    /// `presets` lists.
+    /// the code; a variable outside the reviewed few is refused before any code; an edit of a file no accept covers is
+    /// refused.
     @Test func theCommandLineAddsEditsAndRemovesAPreset() async throws {
         let node = try await ScratchNode(scratch)
         defer { node.stop() }
@@ -217,14 +265,14 @@ struct PresetEditTests {
         let refused = try await node.runOnTerminal(["preset", "add", "Evil", "--env", "LD_PRELOAD=/x.so"])
         #expect(refused.status == 77 && (refused.output + refused.errors).contains("LD_PRELOAD") && !refused.output.contains("Type "), "\(refused.output)\(refused.errors)")
 
+        // A scratch node's presets file isn't the one its home's seal watches, so no accept covers it: an edit of it is
+        // refused, failing closed; the built-ins are never edited.
         let edited = try await node.runOnTerminal(["preset", "edit", "fast", "--folder", folder, "--rename", "Faster", "--keep-shell"])
-        #expect(edited.status == 0 && edited.output.contains("changed: preset Faster"), "\(edited.output)\(edited.errors)")
-        #expect(SessionPresets.load(root: node.root).presets.byProject[folder]?.first.map { $0.name == "Faster" && $0.keepShell } == true)
+        #expect(edited.status == 77 && (edited.output + edited.errors).contains("changes you haven't accepted"), "\(edited.output)\(edited.errors)")
+        #expect(edited.output.contains("This changes preset Fast"), "shown before the code: \(edited.output)")
+        #expect(SessionPresets.load(root: node.root).presets.byProject[folder]?.first?.name == "Fast")
         let builtIn = try await node.runOnTerminal(["preset", "edit", "Shell", "--keep-shell"])
         #expect(builtIn.status == 77 && (builtIn.output + builtIn.errors).contains("built-in"), "\(builtIn.output)\(builtIn.errors)")
-        let removed = try await node.runOnTerminal(["preset", "remove", "Faster", "--folder", folder])
-        #expect(removed.status == 0 && removed.output.contains("removed: preset Faster"), "\(removed.output)\(removed.errors)")
-        #expect(SessionPresets.load(root: node.root).presets.byProject[folder] == [])
         #expect(try String(contentsOf: file, encoding: .utf8).contains("\"Claude\""), "the built-ins kept in the file")
 
         for words in [["preset"], ["preset", "add"], ["preset", "add", "--x"], ["preset", "edit", "A"], ["preset", "remove", "A", "--shell"],

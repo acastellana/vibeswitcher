@@ -366,7 +366,7 @@ export function presetEditor({ folder }) {
   const formSlot = h('div', { class: 'preset-form-slot' });
   const el = h('div', { class: 'preset-editor', hidden: true },
     h('p', { class: 'new-title' }, 'Your presets'), list, formSlot,
-    h('p', { class: 'confirm-note' }, 'A changed presets file waits for your accept (`vibeswitcher config held`, then `config accept`) before any preset of it starts.'));
+    h('p', { class: 'confirm-note' }, 'A changed presets file waits for your accept (`vibeswitcher config held`, then `config accept`): none of its presets starts, and no next change is taken, before that.'));
   let drawn = '';
   // What the form edits: null (closed), { op: 'add' }, { op: 'edit', original } or { op: 'remove', original }.
   let open = null;
