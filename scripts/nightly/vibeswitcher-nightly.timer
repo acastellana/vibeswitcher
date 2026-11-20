@@ -1,0 +1,12 @@
+# Starts vibeswitcher-nightly.service each night at 03:00 (a run missed while the machine was off starts at the next
+# boot: Persistent). NOT installed: vibeswitcher-nightly.service's header says how.
+[Unit]
+Description=VibeSwitcher nightly full test suite, each night
+
+[Timer]
+OnCalendar=*-*-* 03:00:00
+RandomizedDelaySec=15min
+Persistent=true
+
+[Install]
+WantedBy=timers.target
