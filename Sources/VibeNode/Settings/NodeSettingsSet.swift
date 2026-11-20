@@ -183,7 +183,7 @@ extension NodeSettings {
         let folder = (BoardStore(root: root).folder as NSString).appendingPathComponent("run")
         try? VibePaths.ensurePrivate(URL(fileURLWithPath: folder, isDirectory: true))
         let path = (folder as NSString).appendingPathComponent("configure.lock")
-        let fd = open(path, O_CREAT | O_RDWR, 0o600)
+        let fd = open(path, O_CREAT | O_RDWR | O_CLOEXEC, 0o600)
         guard fd >= 0 else { throw Refusal("couldn't open \(path) to take its lock: \(String(cString: strerror(errno)))") }
         defer { close(fd) }
         while flock(fd, LOCK_EX) != 0 {
