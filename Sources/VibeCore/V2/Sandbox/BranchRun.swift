@@ -218,17 +218,31 @@ public enum BranchRun {
     /// that has the account's own (a verifier's), `verifierHome` in its TMPDIR; with neither, none, which the launcher
     /// refuses. `facts`: nil for this machine's, asked only once a launcher is known.
     ///
-    /// The scope's settings: refused (`Scope.refusal`), a run that would be boxed starts nothing and says which key on
+    /// The scope's settings: refused (`Scope.refusal`), the run starts nothing, boxed or not, and says which key on
     /// stderr, exiting `refused`; `sandbox: off`, the wrapper runs plain, saying so first (`command`).
     static func launching(_ wrapped: [String], in directory: String, environment: [String: String],
                           facts: Platform.Sandbox.Facts? = nil, onTheMac: Bool = Platform.CodeIdentity.isAvailable) -> [String] {
         let scope = self.scope
+        if let refusal = scope?.refusal, !wrapped.isEmpty { return refusing(refusal) }
         guard !onTheMac, let launcher = scope?.launcher ?? own.launcher else { return wrapped }
         let account = scope?.accountHome ?? VibePaths.home
         let facts = facts ?? Platform.Sandbox.probe()
-        if let refusal = scope?.refusal, facts.why == nil, !wrapped.isEmpty { return refusing(refusal) }
         return command(wrapped, cwd: directory, home: home(environment, account: account), policy: scope?.policy ?? .standard,
                        server: launcher, facts: facts, accountHome: account, onTheMac: onTheMac).arguments
+    }
+
+    /// `environment`, for a run this thread starts, with what the project's settings tell its tools (`sandbox_env`):
+    /// its variables, and its folders first on the PATH (the PATH given, else this process's). Boxed or not: a run's
+    /// home is a scratch one (`Worktrees.runChecks`), where a tool installed in the account finds nothing of itself
+    /// even with no box. A box passes them on by its own plan (`plan`), its allow-list dropping what a launcher was
+    /// given. As given when this thread has no such settings.
+    static func tools(_ environment: [String: String], inherited: [String: String] = ProcessInfo.processInfo.environment) -> [String: String] {
+        guard let policy = scope?.policy, scope?.refusal == nil, !(policy.environment.isEmpty && policy.path.isEmpty) else { return environment }
+        var given = environment.merging(policy.environment) { $1 }
+        if !policy.path.isEmpty {
+            given["PATH"] = (policy.path + [environment["PATH"] ?? inherited["PATH"] ?? ""]).filter { !$0.isEmpty }.joined(separator: ":")
+        }
+        return given
     }
 
     /// What starts in place of a run whose project's settings were refused: a shell that says so and exits `refused`.
@@ -327,7 +341,9 @@ public enum BranchRun {
     ///   so a process started with another HOME still shows nothing the real account hides. A PATH folder either
     ///   refuses is left out, as the planner leaves one out; any other source refuses the plan.
     /// - Its environment is the plan's (an allow-list), with `passed`, `CFFIXED_USER_HOME` (the home, as `runChecks`
-    ///   gives it today) and swiftly's folders where the box shows them (`toolchain`).
+    ///   gives it today) and the variables the project's `sandbox_env` names (`SandboxPolicy.environment`).
+    /// - Its PATH: the folders the project's `sandbox_env` puts first (`SandboxPolicy.path`), then the launcher's own,
+    ///   each shown read-only as the planner shows a PATH folder.
     static func plan(_ request: Request, environment: [String: String], image: String?, realHome: String = VibePaths.accountHome,
                      run: String = "\(getpid())-\(UUID().uuidString.prefix(8))") -> Result<Planned, SandboxRefusal> {
         func refuse(_ value: String, _ reason: String) -> Result<Planned, SandboxRefusal> {
@@ -377,7 +393,7 @@ public enum BranchRun {
                                  temporary: temporary(in: home), build: build(image), pathFolders: path, agentProgram: nil, box: box,
                                  policy: request.policy, network: .none, slots: nil, environment: variables)
         }
-        var path = (environment["PATH"] ?? "").split(separator: ":").map(String.init).filter { $0.hasPrefix("/") }
+        var path = request.policy.path + (environment["PATH"] ?? "").split(separator: ":").map(String.init).filter { $0.hasPrefix("/") }
         if real != account {
             let judge = inputs(real, path: [])
             // Each by the spelling the planner would show it by.
@@ -412,41 +428,9 @@ public enum BranchRun {
             }
         }
         plan.environment += passed.compactMap { name in environment[name].map { "\(name)=\($0)" } } + ["CFFIXED_USER_HOME=\(home)"]
-        let shown = plan
-        plan.environment += toolchain(environment, accountHome: account) { shows(shown, $0) }
+        // The tools the project names (`sandbox_env`): told where they are, as the account's home has them.
+        plan.environment += request.policy.environment.sorted { $0.key < $1.key }.map { "\($0.key)=\($0.value)" }
         return .success(Planned(plan: plan, folders: folders, layers: layers))
-    }
-
-    /// The variables of a toolchain that finds itself by them, the only ones a run is given for a toolchain: swiftly's.
-    /// Outside, swiftly takes its folders from them or else from the account's home (`~/.local/share/swiftly`); in a
-    /// box the home is the run's scratch one, where swiftly finds no configuration ("Could not load swiftly's
-    /// configuration file at <scratch home>/.local/share/swiftly/config.json"), so a run that is shown swiftly's
-    /// folders is told where they are.
-    static let toolchainVariables = ["SWIFTLY_HOME_DIR", "SWIFTLY_BIN_DIR", "SWIFTLY_TOOLCHAINS_DIR"]
-
-    /// `toolchainVariables` for a run, "NAME=value" each, each the folder swiftly would use outside: the launcher's
-    /// `environment`'s value (an absolute path), else swiftly's own default, `$XDG_DATA_HOME/swiftly` or
-    /// `<accountHome>/.local/share/swiftly` for its home and `bin` and `toolchains` in that. Each only where the box
-    /// `shown` it (read-only, by the project's `sandbox_read` or as a PATH folder), by the spelling it has there; the
-    /// others aren't passed, as nothing else outside the box's allow-list is.
-    static func toolchain(_ environment: [String: String], accountHome: String, shown: (String) -> Bool) -> [String] {
-        func given(_ name: String) -> String? { environment[name].flatMap { $0.hasPrefix("/") ? $0 : nil } }
-        let data = given("XDG_DATA_HOME") ?? accountHome + "/.local/share"
-        let home = given("SWIFTLY_HOME_DIR") ?? data + "/swiftly"
-        let folders = ["SWIFTLY_HOME_DIR": home, "SWIFTLY_BIN_DIR": given("SWIFTLY_BIN_DIR") ?? home + "/bin",
-                       "SWIFTLY_TOOLCHAINS_DIR": given("SWIFTLY_TOOLCHAINS_DIR") ?? home + "/toolchains"]
-        return toolchainVariables.compactMap { name in
-            let folder = settled(folders[name] ?? "")
-            return folder.hasPrefix("/") && shown(folder) ? "\(name)=\(folder)" : nil
-        }
-    }
-
-    /// Whether `plan` shows `path` read-only at its own spelling: a read-only mount of the same path, at or above it.
-    static func shows(_ plan: Platform.Sandbox.Plan, _ path: String) -> Bool {
-        plan.mounts.contains { entry in
-            guard case .readOnly(let source) = entry.kind, source == entry.target else { return false }
-            return path == source || SandboxPolicy.isBelow(path, source)
-        }
     }
 
     /// The real folders and files `plan` shows.

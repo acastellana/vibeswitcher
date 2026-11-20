@@ -123,47 +123,77 @@ struct BranchRunPolicyTests: LeadTeamFixture {
         #expect(notice.upperBound <= (ran.text.range(of: "shared secret")?.lowerBound ?? ran.text.startIndex), "\(ran.text)")
     }
 
-    @Test func aRunSeesSwiftlysFoldersAndNoOtherVariableFromOutsideTheAllowList() throws {
-        // Short, so it all fits in the output's end the refusal shows: swiftly's lines, then every name on one line.
-        let team = try team { _ in "env | grep ^SWIFTLY_; printf names:; env | cut -d= -f1 | paste -sd, -; exit 1" }
-        let swiftly = team.account + "/.local/share/swiftly"
-        for folder in ["bin", "toolchains"] { try FileManager.default.createDirectory(atPath: swiftly + "/" + folder, withIntermediateDirectories: true) }
-        try "{}\n".write(toFile: swiftly + "/config.json", atomically: true, encoding: .utf8)
-        try write([("sandbox_read", "~/.local/share/swiftly")], in: team, accept: true)
+    /// A made-up tool installed in the account (a folder of its own, its data and a program in its `bin`), and another
+    /// the settings don't name.
+    func install(in team: Team) throws -> (tool: String, other: String) {
+        let tool = team.account + "/tools/made-up", other = team.account + "/tools/other"
+        for (folder, program, says) in [(tool, "made-up", "made-up ran"), (other, "other-tool", "other ran")] {
+            try FileManager.default.createDirectory(atPath: folder + "/bin", withIntermediateDirectories: true)
+            try FileManager.default.createDirectory(atPath: folder + "/share", withIntermediateDirectories: true)
+            try "#!/bin/sh\necho '\(says)'\n".write(toFile: folder + "/bin/" + program, atomically: true, encoding: .utf8)
+            chmod(folder + "/bin/" + program, 0o755)
+        }
+        try "the tool's data\n".write(toFile: tool + "/share/data.txt", atomically: true, encoding: .utf8)
+        return (tool, other)
+    }
+
+    /// What the check of `aMadeUpTool…` runs: through the variable and the PATH only, saying what it finds.
+    static let toolCheck = "cat \"$MADE_UP_HOME/share/data.txt\"; made-up; command -v other-tool || echo 'no other-tool'; exit 1"
+
+    /// The general case: any tool the user installed in the account, shown read-only by `sandbox_read` and told where it
+    /// is by `sandbox_env` (`~` the account's home), its `bin` first on the PATH; one the settings don't name isn't
+    /// found. Boxed, and with no box (a run on a scratch home already hides the account's installs).
+    @Test func aMadeUpToolIsFoundThroughTheVariableAndPathTheAcceptedSettingsName() throws {
+        let team = try team { _ in BranchRunPolicyTests.toolCheck }
+        _ = try install(in: team)
+        try write([("sandbox_read", "~/tools/made-up"), ("sandbox_env", "MADE_UP_HOME=~/tools/made-up, PATH=~/tools/made-up/bin")], in: team, accept: true)
+        // Boxed.
+        let boxed = report(team)
+        // Unboxed: no launcher, the scratch account's home for `~`.
+        let plain = BranchRun.with(BranchRun.Scope(accountHome: team.account)) { team.worker.call("report", doneReport("added b.txt")) }
+        for ran in [boxed, plain] {
+            #expect(ran.isError && ran.text.contains("the tool's data") && ran.text.contains("made-up ran") && ran.text.contains("no other-tool")
+                        && !ran.text.contains("other ran"), "\(ran.text)")
+        }
+    }
+
+    @Test func aValueUnderAHiddenFolderFailsTheRunClosedNamingTheKey() throws {
+        let team = try team { _ in "touch ran.txt" }
+        try write([("sandbox_env", "KEY=~/.ssh/id_ed25519")], in: team, accept: true)
+        for ran in [report(team), BranchRun.with(BranchRun.Scope(accountHome: team.account)) { team.worker.call("report", doneReport("added b.txt")) }] {
+            #expect(ran.isError && ran.text.contains("wasn't started") && ran.text.contains("sandbox_env") && ran.text.contains(".ssh"), "\(ran.text)")
+            #expect(!FileManager.default.fileExists(atPath: Worktrees.path(root: team.root, slug: "add-b") + "/ran.txt"))
+        }
+    }
+
+    @Test func anUnacceptedSandboxEnvChangesNothing() throws {
+        let team = try team { _ in "echo \"home=[$MADE_UP_HOME]\"; exit 1" }
+        _ = try install(in: team)
+        try write([("sandbox_env", "MADE_UP_HOME=~/tools/made-up")], in: team, accept: false)
+        for ran in [report(team), BranchRun.with(BranchRun.Scope(accountHome: team.account)) { team.worker.call("report", doneReport("added b.txt")) }] {
+            #expect(ran.isError && ran.text.contains("home=[]"), "\(ran.text)")
+        }
+    }
+
+    /// A run sees the variables its settings name and none other from outside beyond the box's allow-list.
+    @Test func aRunSeesTheVariablesItsSettingsNameAndNoOtherFromOutside() throws {
+        // Short, so it all fits in the output's end the refusal shows: every name on one line.
+        let team = try team { _ in "echo \"made=$MADE_UP_HOME\"; printf names:; env | cut -d= -f1 | paste -sd, -; exit 1" }
+        let (tool, _) = try install(in: team)
+        try write([("sandbox_read", "~/tools/made-up"), ("sandbox_env", "MADE_UP_HOME=~/tools/made-up")], in: team, accept: true)
         let ran = report(team)
-        #expect(ran.isError)
-        var seen: [String: String] = [:]
+        #expect(ran.isError && ran.text.contains("made=" + SandboxPolicy.resolved(tool) + "\n"), "\(ran.text)")
         let lines = ran.text.split(separator: "\n")
-        for line in lines where line.hasPrefix("SWIFTLY_") {
-            guard let equals = line.firstIndex(of: "=") else { continue }
-            seen[String(line[..<equals])] = String(line[line.index(after: equals)...])
-        }
-        let names = try #require(lines.last { $0.hasPrefix("names:") }, "\(ran.text)").dropFirst("names:".count).split(separator: ",").map(String.init)
-        #expect(names.contains("PATH") && names.contains("HOME"), "\(ran.text)")
-        for name in names where seen[name] == nil { seen[name] = "" }
-        let real = SandboxPolicy.resolved(swiftly)
-        // Each the folder swiftly would use outside: the tool server's own value where it has one (one this test's
-        // runner may have names the account's real swiftly, which this scratch box doesn't show, so the run is told
-        // nothing of it), else swiftly's default under the (scratch) account's home, which the box shows.
-        let given = ProcessInfo.processInfo.environment.filter { $0.value.hasPrefix("/") }
-        let home = given["SWIFTLY_HOME_DIR"] ?? (given["XDG_DATA_HOME"] ?? team.account + "/.local/share") + "/swiftly"
-        let folders = ["SWIFTLY_HOME_DIR": home, "SWIFTLY_BIN_DIR": given["SWIFTLY_BIN_DIR"] ?? home + "/bin",
-                       "SWIFTLY_TOOLCHAINS_DIR": given["SWIFTLY_TOOLCHAINS_DIR"] ?? home + "/toolchains"]
-        for (name, spelled) in folders {
-            let folder = SandboxPolicy.resolved(spelled)
-            #expect(seen[name] == (folder == real || folder.hasPrefix(real + "/") ? folder : nil), "\(name): \(ran.text)")
-        }
-        if given["SWIFTLY_HOME_DIR"] == nil && given["XDG_DATA_HOME"] == nil {
-            #expect(seen["SWIFTLY_HOME_DIR"] == real, "\(ran.text)")
-        }
+        let names = Set(try #require(lines.last { $0.hasPrefix("names:") }, "\(ran.text)").dropFirst("names:".count).split(separator: ",").map(String.init))
+        #expect(names.contains("PATH") && names.contains("HOME") && names.contains("MADE_UP_HOME"), "\(ran.text)")
         // What the tool server's own environment has outside the allow-list doesn't reach the run. (XDG_DATA_DIRS is
         // the login shell's own: /etc/profile sets it, inside as outside.)
         let allowed = SandboxPlanner.allowed.union(["HOME", "PATH", "SHELL", "TMPDIR", "VIBESWITCHER_ROLE", "CFFIXED_USER_HOME", "PWD", "SHLVL", "_",
                                                     "OLDPWD", "XDG_DATA_DIRS", TestLock.heldVariable, TestLock.coresVariable, TestLock.directoryVariable])
         let outside = ProcessInfo.processInfo.environment.keys.filter { name in
-            !allowed.contains(name) && !["LC_", "VIBESWITCHER_HEAVY_", "SWIFTLY_"].contains { name.hasPrefix($0) }
+            !allowed.contains(name) && !["LC_", "VIBESWITCHER_HEAVY_"].contains { name.hasPrefix($0) }
         }
         #expect(!outside.isEmpty)
-        for name in outside { #expect(seen[name] == nil, "\(name) reached a branch run") }
+        for name in outside { #expect(!names.contains(name), "\(name) reached a branch run") }
     }
 }

@@ -9,6 +9,14 @@ import Foundation
 /// - `sandbox_private`: folders a worker and a branch run read through a layer of their own (a package cache).
 /// - `sandbox_hosts`, `sandbox_run_hosts`: the hosts a worker's proxy, and a branch run's, let through (slice 2).
 /// - `sandbox_nesting`: whether a box may make user namespaces and mounts of its own (SB-D10).
+/// - `sandbox_env`: `NAME=value` pairs a branch run is given, boxed or not, for the tools the project uses from the
+///   user's account (`SWIFTLY_HOME_DIR=~/.local/share/swiftly`, `PYTHONUSERBASE=~/.local`, `NVM_DIR=~/.nvm`): a run's
+///   home is a scratch one, where a tool that finds itself under the home finds nothing. `~` in a value is the
+///   account's home, never the run's. `PATH=` names folders put first on the run's PATH (each `~/…` or absolute), which
+///   a box shows read-only as it shows the toolchain's. No tool's name is known here: what a tool needs to *see* is
+///   `sandbox_read`'s, what it needs to be *told* is this key's. A value (each `:`-separated part that is a path)
+///   at or under a hidden place is refused; a name the run's own machinery reads before the command does
+///   (`refusedNames`, `refusedPrefixes`) is refused too.
 ///
 /// Lists are comma-separated. A path is absolute or under the home (`~/…`) and is judged after its links are followed;
 /// one under a hidden folder (`hidden`), the node's own folder, `/run`, `/mnt`, `/init`, `/proc`, `/sys` or `/dev`, or one
@@ -21,22 +29,51 @@ public struct SandboxPolicy: Codable, Equatable, Sendable {
     public var hosts: [String]
     public var runHosts: [String]
     public var nesting: Bool
+    /// `sandbox_env`'s variables but `PATH`, by name, each value with `~` made the account's home.
+    public var environment: [String: String]
+    /// `sandbox_env`'s `PATH`: the folders put first on a run's PATH, their links followed.
+    public var path: [String]
 
     public init(enabled: Bool = true, read: [String] = [], privateFolders: [String] = [], hosts: [String] = [],
-                runHosts: [String] = [], nesting: Bool = false) {
+                runHosts: [String] = [], nesting: Bool = false, environment: [String: String] = [:], path: [String] = []) {
         self.enabled = enabled
         self.read = read
         self.privateFolders = privateFolders
         self.hosts = hosts
         self.runHosts = runHosts
         self.nesting = nesting
+        self.environment = environment
+        self.path = path
+    }
+
+    private enum CodingKeys: String, CodingKey { case enabled, read, privateFolders, hosts, runHosts, nesting, environment, path }
+
+    /// What a launcher's request carries; the two `sandbox_env` fields may be left out.
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(enabled: try container.decode(Bool.self, forKey: .enabled), read: try container.decode([String].self, forKey: .read),
+                  privateFolders: try container.decode([String].self, forKey: .privateFolders), hosts: try container.decode([String].self, forKey: .hosts),
+                  runHosts: try container.decode([String].self, forKey: .runHosts), nesting: try container.decode(Bool.self, forKey: .nesting),
+                  environment: try container.decodeIfPresent([String: String].self, forKey: .environment) ?? [:],
+                  path: try container.decodeIfPresent([String].self, forKey: .path) ?? [])
     }
 
     /// No setting: a box on, nothing added.
     public static let standard = SandboxPolicy()
 
     /// The keys, as `workflow.md` writes them; each is guarded (`LeadVault.guardedKeys`).
-    public static let keys = ["sandbox", "sandbox_read", "sandbox_private", "sandbox_hosts", "sandbox_run_hosts", "sandbox_nesting"]
+    public static let keys = ["sandbox", "sandbox_read", "sandbox_private", "sandbox_hosts", "sandbox_run_hosts", "sandbox_nesting", "sandbox_env"]
+
+    /// The names `sandbox_env` refuses: what the run's own machinery reads before or around the command (the tool
+    /// server's image as the launcher, the wrapper's shell, the box's home and TMPDIR, the slot's width), not the
+    /// tools the command runs. The command itself, as guarded as this key, may export anything inside its run; a name
+    /// here would act outside it.
+    public static let refusedNames: Set<String> = ["HOME", "SHELL", "TMPDIR", "CFFIXED_USER_HOME", "USER", "LOGNAME", "BASH_ENV", "ENV",
+                                                   "ZDOTDIR", "SHELLOPTS", "BASHOPTS", "PS4", "BASH_XTRACEFD", "IFS", "PROMPT_COMMAND",
+                                                   TestLock.coresVariable]
+    /// The prefixes of the names `sandbox_env` refuses: the node's own, the loader's, a shell's exported functions,
+    /// git's (it points git at another repository or config).
+    public static let refusedPrefixes = ["VIBESWITCHER_", "LD_", "DYLD_", "BASH_FUNC_", "GIT_"]
 
     /// The home's folders and files no key may name (they hold keys, logins, what runs later as the user, the node).
     public static let hidden = [".ssh", ".gnupg", ".config", ".vibeswitcher", ".aws", ".azure", ".gcloud", ".kube", ".docker",
@@ -74,6 +111,17 @@ public struct SandboxPolicy: Codable, Equatable, Sendable {
                                                                                resolve: resolve, isRepository: isRepository).get() }
             policy.hosts = try list("sandbox_hosts").map { try host($0, key: "sandbox_hosts").get() }
             policy.runHosts = try list("sandbox_run_hosts").map { try host($0, key: "sandbox_run_hosts").get() }
+            for pair in list("sandbox_env") {
+                switch variable(pair, home: home, resolve: resolve) {
+                case .failure(let refusal): throw refusal
+                case .success(let read) where read.name == "PATH": policy.path += read.value.split(separator: ":").map(String.init)
+                case .success(let read):
+                    guard policy.environment[read.name] == nil else {
+                        throw SandboxRefusal(key: "sandbox_env", value: pair, reason: "names \(read.name) twice")
+                    }
+                    policy.environment[read.name] = read.value
+                }
+            }
         } catch let refusal as SandboxRefusal {
             return .failure(refusal)
         } catch {
@@ -131,6 +179,55 @@ public struct SandboxPolicy: Codable, Equatable, Sendable {
         case .tooBig: return refuse("holds more than \(scanLimit) folders, too many to look through for another repository")
         }
         return .success(resolvedPath)
+    }
+
+    /// One `NAME=value` of `sandbox_env`: a name of letters, digits and `_` not starting with a digit, none of
+    /// `refusedNames` or `refusedPrefixes`; a value whose `:`-separated parts that start with `~` are made the
+    /// account's (`~` and `~/…`; `~user` is refused), and whose parts that are paths then (each starting with `/`) are
+    /// tidied, their links followed, and refused at or under a hidden place (`hidden`, `hiddenRoots`). A path may hold
+    /// one (`PYTHONUSERBASE=~/.local` holds `.local/share/keyrings`): a variable shows nothing, `sandbox_read` does,
+    /// and that is judged whole. `PATH`'s parts must all be paths.
+    public static func variable(_ text: String, home: String, resolve: (String) -> String = SandboxPolicy.resolved)
+        -> Result<(name: String, value: String), SandboxRefusal> {
+        func refuse(_ reason: String) -> Result<(name: String, value: String), SandboxRefusal> {
+            .failure(SandboxRefusal(key: "sandbox_env", value: text, reason: reason))
+        }
+        guard let equals = text.firstIndex(of: "=") else { return refuse("not NAME=value") }
+        let name = String(text[..<equals]).trimmingCharacters(in: .whitespaces)
+        let given = String(text[text.index(after: equals)...]).trimmingCharacters(in: .whitespaces)
+        guard let first = name.unicodeScalars.first, !CharacterSet.decimalDigits.contains(first),
+              name.unicodeScalars.allSatisfy({ ($0.isASCII && CharacterSet.alphanumerics.contains($0)) || $0 == "_" }) else {
+            return refuse("not a variable's name")
+        }
+        if refusedNames.contains(name) || refusedPrefixes.contains(where: { name.hasPrefix($0) }) {
+            return refuse("\(name) is the run's own (what starts and boxes it reads it), not a tool's")
+        }
+        let realHome = resolve(home)
+        var parts: [String] = []
+        for part in given.split(separator: ":", omittingEmptySubsequences: false).map(String.init) {
+            var spelled = part
+            if part == "~" { spelled = home } else if part.hasPrefix("~/") { spelled = home + "/" + part.dropFirst(2) } else if part.hasPrefix("~") {
+                return refuse("names a home that isn't this user's")
+            }
+            guard spelled.hasPrefix("/") else {
+                if name == "PATH" { return refuse("PATH's folders are written from / or from ~/") }
+                parts.append(part)
+                continue
+            }
+            let normalized = lexical(spelled), resolvedPath = resolve(normalized)
+            for candidate in Set([normalized, resolvedPath]) {
+                for hiddenRoot in hiddenRoots where candidate == hiddenRoot || isBelow(candidate, hiddenRoot) {
+                    return refuse("is or is under \(hiddenRoot), which no box shows")
+                }
+                for hidden in self.hidden {
+                    for base in Set([home, realHome]) where candidate == base + "/" + hidden || isBelow(candidate, base + "/" + hidden) {
+                        return refuse("is or is under ~/\(hidden), which no box shows")
+                    }
+                }
+            }
+            parts.append(resolvedPath)
+        }
+        return .success((name, parts.joined(separator: ":")))
     }
 
     /// One host of a key: a name of letters, digits and hyphens in two labels or more, optionally `*.` before it and

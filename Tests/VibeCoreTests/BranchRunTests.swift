@@ -298,39 +298,35 @@ struct BranchRunTests {
         }
     }
 
-    /// swiftly finds its folders by three variables, else under the home, which is the run's scratch one: a run whose
-    /// box shows swiftly's folder (the project's `sandbox_read`) is told where it is, by those three names and no other.
-    @Test func aRunIsToldSwiftlysFoldersWhereItsBoxShowsThemAndNothingWider() throws {
+    /// The project's `sandbox_env` (`SandboxPolicy.environment`, `path`): a run is told its variables and has its
+    /// folders first on its PATH, shown read-only; nothing else the launcher has passes.
+    @Test func aRunIsGivenTheVariablesAndPathItsSettingsNameAndNothingWider() throws {
         let layout = try Layout(scratch)
-        let swiftly = layout.account + "/.local/share/swiftly"
-        for folder in ["bin", "toolchains"] { try FileManager.default.createDirectory(atPath: swiftly + "/" + folder, withIntermediateDirectories: true) }
-        let outside = ["PATH": "/usr/bin:/bin", "LANG": "C.UTF-8", "SWIFTLY_EXTRA": "x", "TOOLCHAIN_TOKEN": "y", "XDG_CONFIG_HOME": layout.account + "/.config"]
-        func environment(_ policy: SandboxPolicy, _ given: [String: String] = [:]) throws -> [String: String] {
-            let plan = try layout.plan(layout.request(policy: policy), environment: outside.merging(given) { $1 }).get().plan
-            return Dictionary(uniqueKeysWithValues: plan.environment.compactMap { entry -> (String, String)? in
+        let tool = layout.account + "/tools/made-up"
+        for folder in ["bin", "share"] { try FileManager.default.createDirectory(atPath: tool + "/" + folder, withIntermediateDirectories: true) }
+        let outside = ["PATH": "/usr/bin:/bin", "LANG": "C.UTF-8", "MADE_UP_TOKEN": "x", "XDG_CONFIG_HOME": layout.account + "/.config"]
+        func planned(_ policy: SandboxPolicy) throws -> (environment: [String: String], plan: Platform.Sandbox.Plan) {
+            let plan = try layout.plan(layout.request(policy: policy), environment: outside).get().plan
+            return (Dictionary(uniqueKeysWithValues: plan.environment.compactMap { entry -> (String, String)? in
                 guard let equals = entry.firstIndex(of: "=") else { return nil }
                 return (String(entry[..<equals]), String(entry[entry.index(after: equals)...]))
-            })
+            }), plan)
         }
-        let names = ["SWIFTLY_HOME_DIR", "SWIFTLY_BIN_DIR", "SWIFTLY_TOOLCHAINS_DIR"]
-        let shown = try environment(SandboxPolicy(read: [swiftly]))
-        #expect(names.map { shown[$0] } == [swiftly, swiftly + "/bin", swiftly + "/toolchains"], "\(shown)")
-        // Nothing wider: no other name the launcher has beyond the box's own and its allow-list.
-        let standard = try environment(.standard)
-        #expect(Set(shown.keys).subtracting(standard.keys) == Set(names), "\(shown)")
-        for name in ["SWIFTLY_EXTRA", "TOOLCHAIN_TOKEN", "XDG_CONFIG_HOME"] { #expect(shown[name] == nil, "\(name) reached a branch run") }
-        // A folder the box doesn't show is named to nothing: the standard box, or a value given for a folder not shown.
-        #expect(names.allSatisfy { standard[$0] == nil }, "\(standard)")
-        let elsewhere = layout.account + "/elsewhere"
-        try FileManager.default.createDirectory(atPath: elsewhere, withIntermediateDirectories: true)
-        let given = try environment(SandboxPolicy(read: [swiftly]), ["SWIFTLY_HOME_DIR": elsewhere, "SWIFTLY_BIN_DIR": swiftly + "/bin"])
-        #expect(given["SWIFTLY_HOME_DIR"] == nil && given["SWIFTLY_BIN_DIR"] == swiftly + "/bin", "\(given)")
-        // swiftly's own default for its home follows XDG_DATA_HOME, as outside.
-        let data = layout.account + "/data"
-        try FileManager.default.createDirectory(atPath: data + "/swiftly/bin", withIntermediateDirectories: true)
-        let moved = try environment(SandboxPolicy(read: [data + "/swiftly"]), ["XDG_DATA_HOME": data])
-        #expect(moved["SWIFTLY_HOME_DIR"] == data + "/swiftly" && moved["SWIFTLY_BIN_DIR"] == data + "/swiftly/bin", "\(moved)")
-        #expect(moved["XDG_DATA_HOME"] == nil)
+        let given = try planned(SandboxPolicy(read: [tool], environment: ["MADE_UP_HOME": tool], path: [tool + "/bin"]))
+        let standard = try planned(.standard)
+        #expect(given.environment["MADE_UP_HOME"] == tool, "\(given.environment)")
+        #expect(given.environment["PATH"]?.hasPrefix(tool + "/bin:") == true, "\(given.environment)")
+        #expect(given.plan.mounts.contains(.init(tool + "/bin", .readOnly(source: tool + "/bin"))))
+        // Nothing wider: only the name it gives is new, and the launcher's own others don't pass.
+        #expect(Set(given.environment.keys).subtracting(standard.environment.keys) == ["MADE_UP_HOME"], "\(given.environment)")
+        for name in ["MADE_UP_TOKEN", "XDG_CONFIG_HOME"] { #expect(given.environment[name] == nil, "\(name) reached a branch run") }
+        #expect(standard.environment["PATH"]?.contains(tool) == false)
+
+        // Unboxed, the same for a run this thread starts: its variables, and its folders first on the PATH given.
+        let scope = BranchRun.Scope(policy: SandboxPolicy(environment: ["MADE_UP_HOME": tool], path: [tool + "/bin"]))
+        let told = BranchRun.with(scope) { BranchRun.tools(["TMPDIR": "/t/"], inherited: ["PATH": "/usr/bin"]) }
+        #expect(told == ["TMPDIR": "/t/", "MADE_UP_HOME": tool, "PATH": tool + "/bin:/usr/bin"])
+        #expect(BranchRun.tools(["TMPDIR": "/t/"]) == ["TMPDIR": "/t/"])
     }
 
     /// What an ended run's layers left (a layer's work folder is the kernel's, mode 000) goes at the next run beside

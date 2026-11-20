@@ -66,6 +66,10 @@ extension LeadVault {
     /// otherwise, and one when the vault can't be asked. Only read: nothing is recorded (`changedSettings` records what
     /// it has nothing for, which would take a worker's `sandbox: off` on first sight).
     public func sandboxPolicy(_ workflow: LeadWorkflow, root: String, home: String = VibePaths.accountHome) -> Result<SandboxPolicy, SandboxRefusal> {
+        // None set: the standard settings, whatever is recorded, and the vault isn't asked (a run is as it always was).
+        if SandboxPolicy.keys.allSatisfy({ Self.guardedValue($0, in: workflow).trimmingCharacters(in: .whitespaces).isEmpty }) {
+            return .success(.standard)
+        }
         let recorded: [String: String]?
         do { recorded = try guardedSettings(root: root) } catch {
             return .failure(SandboxRefusal(value: "the sandbox* keys", reason: "the session host couldn't say what the user accepted of them (\(error))"))

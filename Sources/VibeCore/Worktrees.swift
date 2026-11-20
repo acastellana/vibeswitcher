@@ -1425,7 +1425,8 @@ public enum Worktrees {
                 return (cancel?.isCancelled == true, run)
             }
             Git.run(["clean", "-q", "-f", "-d"], in: path)
-            var env = ["CFFIXED_USER_HOME": home, "TMPDIR": tmp + "/"]
+            // With what the project's settings tell its tools (`sandbox_env`), boxed or not (V2/Sandbox/BranchRun.swift).
+            var env = BranchRun.tools(["CFFIXED_USER_HOME": home, "TMPDIR": tmp + "/"])
             if let held, let lock {
                 env[TestLock.heldVariable] = held.path
                 env[TestLock.coresVariable] = String(TestLock.coreBudget(slots: lock.slots))
@@ -1446,7 +1447,8 @@ public enum Worktrees {
             // command and all it starts have the scratch one.
             let script = "export HOME=\(RecentProjects.shellQuote(home))\n" + command
             // All of it, in order: what failed may be anywhere in it, and its tail is often a build's warnings.
-            var env = ["CFFIXED_USER_HOME": home, "TMPDIR": tmp + "/"]
+            // With what the project's settings tell its tools (`sandbox_env`), boxed or not (V2/Sandbox/BranchRun.swift).
+            var env = BranchRun.tools(["CFFIXED_USER_HOME": home, "TMPDIR": tmp + "/"])
             if let held, let lock {
                 env[TestLock.heldVariable] = held.path
                 env[TestLock.coresVariable] = String(TestLock.coreBudget(slots: lock.slots))
