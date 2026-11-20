@@ -94,7 +94,7 @@ public enum Tailnet {
 
     /// A MagicDNS name as the page's origin takes it: lowercase, its final dot dropped, ending `.ts.net`, labels of
     /// letters, digits and `-` only. Nil for anything else.
-    static func name(_ given: String?) -> String? {
+    public static func name(_ given: String?) -> String? {
         guard var name = given?.lowercased() else { return nil }
         if name.hasSuffix(".") { name.removeLast() }
         guard name.utf8.count <= longestName, name.hasSuffix(".ts.net") else { return nil }
