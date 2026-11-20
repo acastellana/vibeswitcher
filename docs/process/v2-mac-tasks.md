@@ -88,6 +88,25 @@ that two pushes haven't explained comes here too, with the experiment that will 
   `vibeswitcher-host --node --node-root X --server X/bin/vibeswitcher-server` exits 1 with the refusal, and the app's
   host and its `~/.vibeswitcher/host.*` files are as they were. The design's measurements (the environment line under
   SIP, the voice candidates, LocalAuthentication from a LaunchAgent) are its steps 4 to 9.
+- **`ea63e9eb`** (the node on the Mac's step 2, the root): the user's node's root is a `Platform.Service` fact,
+  `Platform.Service.nodeRoot(accountHome:)`: `~/.vibeswitcher` on Linux (unchanged), `~/.vibeswitcher/v2/node` on the
+  Mac, beside the app's folder. `NodeFolders.nodeRoot` reads it, so the command line's socket, record and log for the
+  user's node are there; the `--node` host's environment (`HostImages.nodeEnvironment`) and the user's server
+  (`ServerStart.nodeRootVariable`) set `VIBESWITCHER_HOME` to it on the Mac (unset on Linux, as before), so the host's
+  lock, socket, launcher copy, log and vault would be there, never at the app's `~/.vibeswitcher/host.*`;
+  `NodeFolders.isUsersRoot` takes both the node's root and the account's folder as the user's node (a
+  `VIBESWITCHER_HOME=~/.vibeswitcher` on the Mac is the user's node, refused, never a scratch node on the app's files).
+  `--node` is still refused on the Mac (its text now names the root). The hosted Mac checks
+  `NodeRootHostTests.aHostInTheNodesEnvironmentKeepsItsFilesInTheNodesRoot` (a scratch host in that environment: its
+  socket at `<home>/.vibeswitcher/v2/node/host.sock`, the app's folder holding only `v2/node`), `ServiceTests`,
+  `ServerCheckTests.theNodesRootAndTheAccountsFolderAreBothTheUsersNode`,
+  `HostHardeningTests.theNodesRootIsNeverFromTheEnvironment` and `StartCommandTests.aMachineWithoutSystemdStartsTheNodeDetached`
+  (its Mac arms). **Needs a real Mac run**, with the app running: the app's launch repair (`PrivateRepair.atLaunch`)
+  leaves a `~/.vibeswitcher/v2/node` made after its marker alone, and a node made before it (0600/0700, programs kept
+  runnable); the server socket's path for the real home is under 104 bytes. **Left for step 5** (inert on the Mac
+  today, each a Linux-only arm): the host's `mayStart` is given `<home>/.vibeswitcher` as the account's root
+  (`vibeswitcher-host/main.swift`, shared with main), and `ProjectAllowList.place` and `HandoverTarget.installRoot`
+  return nil on the Mac; each is decided against the node's root when `--node` runs there.
 
 ## What `v2` found on the Mac and doesn't change
 
