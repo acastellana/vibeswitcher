@@ -9,11 +9,13 @@ import Foundation
 ///
 /// `HostConnection` takes a path for which a connector is registered here (`HostConnection.register(connector:for:)`)
 /// only through that connector, and never by its path, also when the connector fails. The registry is empty by
-/// default, as it stays on the Mac, where the app connects by path and proves itself by its code (`AppProof`): the Mac
-/// has no connector, and `connect(over:timeout:)` fails there at once.
+/// default, as it stays in the Mac app, which connects by path and proves itself by its code (`AppProof`). On the Mac
+/// the node's server child has a connector too (the node on the Mac's step 3), a stream pair
+/// (`Platform.Sockets.connectorType`) whose requests the host takes only from the child it started, running the code
+/// whose cdhash it read at its start (`AppConnector`).
 public enum HostConnector {
     public enum Failure: Error, Equatable, CustomStringConvertible {
-        /// This system has no connector (the Mac).
+        /// No connector to ask over (none is said so today: the Mac's server child has one too).
         case unavailable
         /// The call named failed, with its errno: the host has closed its end (EPIPE), or the reply carried no
         /// descriptor (EBADMSG).
@@ -39,9 +41,8 @@ public enum HostConnector {
     /// taken, made nonblocking, close-on-exec and free of SIGPIPE as `UnixSocket.connect`'s are. One request at a time
     /// on each connector in this process (a lock), so each reply goes to its asker; one that came after its asker
     /// gave up goes to the next, which is harmless: every connection the host makes this way is alike. Throws when no
-    /// connection came: the host's end closed, a reply without exactly one descriptor, `timeout` passed, or the Mac.
+    /// connection came: the host's end closed, a reply without exactly one descriptor, or `timeout` passed.
     public static func connect(over connector: Int32, timeout: TimeInterval) throws -> Int32 {
-        guard !Platform.CodeIdentity.isAvailable else { throw Failure.unavailable }
         let lock = locks.lock(for: connector)
         lock.lock()
         defer { lock.unlock() }
@@ -129,6 +130,6 @@ extension HostConnection {
     /// A connection to the host at `path` is made by the path again, as before `register(connector:for:)`.
     public static func unregister(path: String) { HostConnector.registry.set(nil, for: path) }
 
-    /// The connector registered for `path`; nil for none (the default, and always on the Mac).
+    /// The connector registered for `path`; nil for none (the default, and always in the Mac app).
     public static func connector(for path: String) -> Int32? { HostConnector.registry.connector(for: path) }
 }

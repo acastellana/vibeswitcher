@@ -141,6 +141,27 @@ extension Platform.Sockets {
         return ready < 0 || (ready > 0 && waiting.revents & Int16(POLLHUP | POLLERR | POLLNVAL) != 0)
     }
 
+    /// Waits until `socket`'s peer can send nothing more (it closed its end, or shut it for writing), reading nothing:
+    /// true then, and when it can't be watched; false when `socket` isn't open. The server child's watch on its
+    /// connector (`ServerStart.watchConnector`). A kqueue's read filter, edge-triggered (`EV_CLEAR`), so a byte that
+    /// arrives for another thread to read (the host's reply to `HostConnector.connect`) wakes it once and it waits on,
+    /// and its end of file (`EV_EOF`) ends the wait. (The Mac's `poll` asked for no event registers no filter, so it
+    /// never wakes, as Linux's does for a hang-up.)
+    public static func waitUntilPeerHasGone(_ socket: Int32) -> Bool {
+        let queue = kqueue()
+        guard queue >= 0 else { return true }
+        defer { close(queue) }
+        var change = kevent(ident: UInt(socket), filter: Int16(EVFILT_READ), flags: UInt16(EV_ADD | EV_CLEAR), fflags: 0, data: 0, udata: nil)
+        guard kevent(queue, &change, 1, nil, 0, nil) == 0 else { return errno != EBADF }
+        while true {
+            var event = kevent()
+            let count = kevent(queue, nil, 0, &event, 1, nil)
+            if count < 0, errno == EINTR { continue }
+            if count < 0 { return true }
+            if count > 0, event.flags & UInt16(EV_EOF | EV_ERROR) != 0 { return true }
+        }
+    }
+
     /// Nothing is sent, and -1 with ENOTSUP: the Mac has no session sandbox and so no door.
     public static func send(_ bytes: [UInt8], with fds: [Int32], over socket: Int32) -> Int {
         errno = ENOTSUP

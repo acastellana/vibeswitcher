@@ -144,20 +144,14 @@ public enum ServerStart {
     }
 
     /// The host's end of the connector closed (the host gone): the server exits, saying so. Watched on a thread of its
-    /// own with `poll` asking for no event, so a hang-up or an error is all that wakes it and nothing on the connector
-    /// is read here (`HostConnector.connect` reads its replies).
+    /// own (`Platform.Sockets.waitUntilPeerHasGone`: on Linux a poll asking for no event, on the Mac a kqueue's end of
+    /// file), so a hang-up or an error is all that ends the wait and nothing on the connector is read here
+    /// (`HostConnector.connect` reads its replies). A connector that isn't open is watched no more.
     static func watchConnector(_ connector: Int32) {
         let thread = Thread {
-            while true {
-                var watched = pollfd(fd: connector, events: 0, revents: 0)
-                let ready = poll(&watched, 1, -1)
-                if ready < 0, errno == EINTR { continue }
-                if ready > 0, watched.revents & Int16(POLLNVAL) != 0 { return }
-                if ready > 0 || ready < 0 {
-                    say("the session host is gone (its connector closed): exiting")
-                    exit(0)
-                }
-            }
+            guard Platform.Sockets.waitUntilPeerHasGone(connector) else { return }
+            say("the session host is gone (its connector closed): exiting")
+            exit(0)
         }
         thread.name = "connector-watch"
         thread.start()

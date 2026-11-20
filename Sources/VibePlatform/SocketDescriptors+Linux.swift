@@ -45,6 +45,19 @@ extension Platform.Sockets {
         vibe_peer_has_gone(socket) != 0
     }
 
+    /// Waits until `socket` reports a hang-up or an error, reading nothing: true then, and when the poll fails; false
+    /// when `socket` isn't open (`POLLNVAL`). The server child's watch on its connector (`ServerStart.watchConnector`):
+    /// a poll asking for no event, so a hang-up or an error is all that wakes it.
+    public static func waitUntilPeerHasGone(_ socket: Int32) -> Bool {
+        while true {
+            var watched = pollfd(fd: socket, events: 0, revents: 0)
+            let ready = poll(&watched, 1, -1)
+            if ready < 0, errno == EINTR { continue }
+            if ready > 0, watched.revents & Int16(POLLNVAL) != 0 { return false }
+            if ready > 0 || ready < 0 { return true }
+        }
+    }
+
     /// Sends `bytes` over the Unix socket `socket` with the descriptors `fds` (at most 8; `SCM_RIGHTS`) riding on the
     /// first byte, with no SIGPIPE when the peer has gone: the session sandbox's door, where a relay sends its one line
     /// with its stdin, stdout and stderr. What sendmsg returns: the bytes that went (a stream may take fewer: the
