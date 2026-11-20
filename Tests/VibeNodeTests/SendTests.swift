@@ -182,7 +182,15 @@ struct SendTests {
         #expect(sent.status == 0, "\(sent.output)\(sent.errors)\n\(node.said)")
         #expect(sent.output.contains("sent: 19 characters typed into session"), "\(sent.output)")
         _ = try await EngineEndToEndTests.prompt(files) { $0 == "Hello from the node" }
-        for words in [["send"], ["send", session.id.uuidString, "one", "two"], ["send", session.id.uuidString, " "]] {
+        // An image by its path (relative to where the command runs: made absolute), shown before the code.
+        let shots = scratch.url("cli-shots")
+        try FileManager.default.createDirectory(at: shots, withIntermediateDirectories: true)
+        let image = shots.appendingPathComponent("bug.png")
+        try Data([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]).write(to: image)
+        let pictured = try await node.runOnTerminal(["send", String(session.id.uuidString.lowercased().prefix(8)), "See this", "--image", image.path])
+        #expect(pictured.status == 0 && pictured.output.contains("with the image: \(image.path)") && pictured.output.contains("sent:"),
+                "\(pictured.output)\(pictured.errors)")
+        for words in [["send"], ["send", session.id.uuidString, "one", "two"], ["send", session.id.uuidString, " "], ["send", session.id.uuidString, "x", "--image"]] {
             let usage = try await node.run(words)
             #expect(usage.status == 64 && usage.errors.contains("usage: vibeswitcher send SESSION [TEXT]"), "\(words): \(usage.output)\(usage.errors)")
         }
