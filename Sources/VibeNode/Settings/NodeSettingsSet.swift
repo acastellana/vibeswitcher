@@ -130,9 +130,13 @@ extension NodeSettings {
             // set had "changed since your last accept"): the last accept's snapshot takes this key's new value, sealed
             // again, so the card says it is the same. Only this key, and only a snapshot the vault vouched for before:
             // one a worker rewrote isn't sealed anew over its rewrite. A diff aid only: the vault's record is what holds.
-            if vouched, snapshot?.configAt != nil {
+            // The entry is read again under the snapshot's lock and changed only while it is exactly the one vouched for:
+            // one rewritten between the vouch and here is left as it is (`config held` shows it unvouched), never sealed.
+            if vouched, let snapshot, snapshot.configAt != nil {
                 let now = LeadVault.guardedValue(key, in: after)
+                beforeReseal.get()[root]?()
                 try? AcceptedSnapshot.update(root: files.root, project: root) { project in
+                    guard project == snapshot else { return }
                     if now.isEmpty { project.guarded[key] = nil } else { project.guarded[key] = now }
                     project.seal = try? vault.seal(AcceptedSnapshot.sealMessage(project, root: root))
                 }
@@ -190,6 +194,10 @@ extension NodeSettings {
             + "above the floor, never lower one below it; status shows what's in force."
         return Applied(key: setting.key, value: now, was: shown(recorded), told: told)
     }
+
+    /// A test's hook, by project root: run after the snapshot was vouched for and before its update (a worker's rewrite
+    /// landing in between).
+    static let beforeReseal = Locked<[String: () -> Void]>([:])
 
     /// Runs `body` holding the lead's configure lock (`LeadToolset.exclusively("configure")`: `.vibeswitcher/run/configure.lock`),
     /// so a configure and a `set` don't each write over the other's line.

