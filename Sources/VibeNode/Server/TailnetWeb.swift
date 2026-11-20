@@ -208,6 +208,22 @@ public final class TailnetWeb: @unchecked Sendable {
         var port: UInt16 { web?.port ?? 0 }
     }
 
+    /// `status`'s `webTailnet`: `{"state": "off" | "looking" | "listening" | "refused: <why>", "name", "address", "port",
+    /// "tokens", "connections"}`, the place's fields null while it isn't bound.
+    public func value() -> NodeWire.Value {
+        var fields: [String: NodeWire.Value] = ["name": .null, "address": .null, "port": .null,
+                                                "tokens": .int(access.tokens.live(now: Date())), "connections": .int(connectionCount)]
+        switch state {
+        case .off: fields["state"] = .string("off")
+        case .looking: fields["state"] = .string("looking")
+        case .refused(let why): fields["state"] = .string("refused: " + why)
+        case .on(let place, let port):
+            fields["state"] = .string("listening")
+            (fields["name"], fields["address"], fields["port"]) = (.string(place.name), .string(place.address), .int(Int(port)))
+        }
+        return .object(fields)
+    }
+
     /// `status`'s words for it: `off`, `looking`, `listening on http://<name>:<port>`, `refused: <why>`.
     public var words: String {
         switch state {

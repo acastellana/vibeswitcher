@@ -354,7 +354,7 @@ public final class Requests: @unchecked Sendable {
     /// (`restart`, E8: the command line shows it with how the host ended). On `queue`.
     public func statusValue() -> NodeWire.Value {
         let list = sessions?.sessions ?? []
-        return .object([
+        var fields: [String: NodeWire.Value] = [
             "node": .string(NodeIds.node),
             "epoch": .string(epoch),
             "root": .string(root.path),
@@ -379,7 +379,10 @@ public final class Requests: @unchecked Sendable {
             "ended": engine?.endedValue ?? .array([]),
             "builds": installRoot.map { SwitchRequest.buildsValue(installRoot: $0, running: notes?.notes.build) } ?? .null,
             "web": webValue?() ?? NodeStatusStore.webOff,
-        ])
+        ]
+        // The user's node's tailnet page, for the command line (not in the `node` stream: `NodeStatusStore.value`).
+        if let tailnet { fields["webTailnet"] = tailnet.value() }
+        return .object(fields)
     }
 
     /// A lead as `status` lists it: the store's, with its open and blocking questions and its open cards (E6), and how

@@ -34,11 +34,13 @@ public final class NodeStatusStore: @unchecked Sendable {
         self.init(queue: requests.queue, status: { [weak requests] in requests?.statusValue() ?? .null }, web: web)
     }
 
-    /// The node's value now: `status` without `sessions` and `leads`, with `web`.
+    /// The node's value now: `status` without `sessions` and `leads`, with `web`. Without `webTailnet` too (the user's
+    /// node's tailnet page, `status`'s for the command line): the wire's `node` shape doesn't name it yet.
     public static func value(status: NodeWire.Value, web: NodeWire.Value) -> NodeWire.Value {
         guard case .object(var fields) = status else { return status }
         fields["sessions"] = nil
         fields["leads"] = nil
+        fields["webTailnet"] = nil
         fields["web"] = web
         return .object(fields)
     }

@@ -337,6 +337,11 @@ struct TailnetWebTests {
         let url = try #require(opened.value?.result?["url"]?.string, "\(String(describing: opened.value))")
         #expect(url.hasPrefix("http://\(Self.name):") && url.contains("/#pair="), "\(url)")
         #expect(opened.value?.result?["tailnet"]?.bool == true && opened.value?.result?["expiresIn"]?.int == 120)
+        // `status` says where it listens, for the command line; the `node` stream, whose shape doesn't name it, doesn't.
+        let status = requests.queue.sync { requests.statusValue() }
+        #expect(status["webTailnet"]?["state"]?.string == "listening" && status["webTailnet"]?["name"]?.string == Self.name, "\(String(describing: status["webTailnet"]))")
+        let node = NodeStatusStore.value(status: status, web: NodeStatusStore.webOff)
+        #expect(node["webTailnet"] == nil && WireSchema.check(node, as: "node", strict: true) == nil, "\(String(describing: WireSchema.check(node, as: "node", strict: true)))")
         _ = try rig.web.access.tokens.issue(now: Date())
         let revoked = Locked<NodeWire.Reply?>(nil), access = try #require(requests.web)
         requests.queue.sync { requests.webRevoke(NodeWire.Request(id: "r", kind: "web.revoke"), web: access) { revoked.value = $0 } }

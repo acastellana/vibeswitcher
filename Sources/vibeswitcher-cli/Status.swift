@@ -89,6 +89,7 @@ enum StatusCommand {
         out += facts.lines + modeLines
         out.append("voice rule: \(inert(result["rule"]?["says"]?.string))")
         if let line = webLine(result["web"]) { out.append(line) }
+        if let line = tailnetLine(result["webTailnet"]) { out.append(line) }
         let sessions = result["sessions"]?.array ?? []
         out.append(sessions.isEmpty ? "No agent sessions." : "sessions:")
         for session in sessions {
@@ -191,6 +192,19 @@ enum StatusCommand {
         case "listening":
             return "web: http://127.0.0.1:\(web["port"]?.int.map(String.init) ?? "?")/, \(tokens) tokens alive, \(connections) pages open"
         default: return "web: \(inert(state))"
+        }
+    }
+
+    /// The user's node's page on the tailnet (`web --tailnet`), when the server has one.
+    static func tailnetLine(_ web: NodeWire.Value?) -> String? {
+        guard let web, let state = web["state"]?.string else { return nil }
+        let tokens = web["tokens"]?.int ?? 0, connections = web["connections"]?.int ?? 0
+        switch state {
+        case "off": return "web on the tailnet: off (`vibeswitcher web --tailnet` opens it)" + (tokens > 0 ? "; \(tokens) tokens alive" : "")
+        case "listening":
+            let place = "http://\(inert(web["name"]?.string)):\(web["port"]?.int.map(String.init) ?? "?")/ (\(inert(web["address"]?.string)))"
+            return "web on the tailnet: \(place), \(tokens) tokens alive, \(connections) pages open"
+        default: return "web on the tailnet: \(inert(state))"
         }
     }
 
