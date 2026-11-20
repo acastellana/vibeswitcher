@@ -139,8 +139,9 @@ extension Requests {
                     return refuse("no preset \(shown) for \(ConfigSeal.inert(standard, limit: 200)) (`vibeswitcher presets \(ConfigSeal.inert(standard, limit: 200))` lists them)")
                 }
                 if let why = found.refusal { return refuse("preset \(shown) can't start here: \(why)") }
-                guard SessionPresets.digest(found.preset) == shownDigest else {
-                    return refuse("preset \(shown) changed since it was shown: nothing started; run the command again to see it as it is now")
+                guard SessionPresets.matches(found.preset, digest: shownDigest) else {
+                    return refuse("preset \(shown) changed since it was shown (or the node's server restarted since): nothing started; "
+                                  + "run the command again to see it as it is now")
                 }
                 guard model == nil || found.preset.kind == .claude else { return refuse("preset \(shown) starts a shell, which takes no model") }
                 preset = found.preset
@@ -191,7 +192,7 @@ extension Requests {
             let listed = SessionPresets.list(loaded.presets, folder: folder)
             queue.async {
                 reply(.init(re: request.id, result: .object([
-                    "presets": .array(listed.map(SessionPresets.value)),
+                    "presets": .array(listed.map { SessionPresets.value($0) }),
                     "problems": .array(loaded.problems.map(NodeWire.Value.string)),
                 ])))
             }

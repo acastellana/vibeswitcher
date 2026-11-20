@@ -11,7 +11,9 @@ import VibeCore
 /// shell looks up, so a Claude preset's command must be `claude` and then plain words (its arguments), each passed
 /// quoted; Codex isn't on the node yet; a shell is the host's own. Its environment may not name what the host refuses
 /// a spawn (`Platform.Tools.spawnEnvironmentRefused`) nor VibeSwitcher's own `VIBESWITCHER_*`. What the user is shown
-/// is bound to what starts by the preset's `digest`: a preset changed in between is refused, nothing started.
+/// is bound to what starts by the preset's `digest`, an HMAC under a key only this server run holds: a preset changed in
+/// between is refused, nothing started. A variable's value never leaves the node: the wire, the command line's listing
+/// and the log name variables only.
 public enum SessionPresets {
     /// A preset as the node lists it.
     public struct Listed: Equatable, Sendable {
@@ -109,24 +111,53 @@ public enum SessionPresets {
         return ([program] + rest).map(RecentProjects.shellQuote).joined(separator: " ")
     }
 
-    /// What binds the preset the user was shown to the one started: its name, kind, command, environment (names and
-    /// values) and whether a shell stays.
-    public static func digest(_ preset: LaunchPreset) -> String {
+    /// The key presets' digests are made under: random, made at this server's start and kept in its memory only (never
+    /// sent, never written). A restart makes a new one, so a digest from before it no longer matches: the user lists the
+    /// presets again.
+    static let key = SymmetricKey(size: .bits256)
+
+    /// What binds the preset the user was shown to the one started: an HMAC under `key` of its name, kind, command,
+    /// environment (names and values) and whether a shell stays, hex. Keyed (the security review of 2026-11-20): a
+    /// plain hash of a variable's value, sent to a page that may only read, would let the page test guesses of that
+    /// value (an API key) offline; without the key, two presets that differ in a value alone can't be told apart.
+    static func digest(_ preset: LaunchPreset, key: SymmetricKey = SessionPresets.key) -> String {
+        Data(HMAC<SHA256>.authenticationCode(for: bound(preset), using: key)).map { String(format: "%02x", $0) }.joined()
+    }
+
+    /// Whether `digest` is `preset`'s under `key`, compared in constant time.
+    static func matches(_ preset: LaunchPreset, digest: String?, key: SymmetricKey = SessionPresets.key) -> Bool {
+        guard let digest, digest.count == 64, let code = hexData(digest) else { return false }
+        return HMAC<SHA256>.isValidAuthenticationCode(code, authenticating: bound(preset), using: key)
+    }
+
+    private static func bound(_ preset: LaunchPreset) -> Data {
         let env = preset.env.sorted { $0.key < $1.key }.map { "\($0.key)=\($0.value)" }
-        let parts = [preset.name, preset.kind.rawValue, preset.command, preset.keepShell ? "keep" : "-"] + env
-        return LeadVaultV2.digest(parts.joined(separator: "\u{0}"))
+        let parts = ["vibeswitcher-preset", preset.name, preset.kind.rawValue, preset.command, preset.keepShell ? "keep" : "-"] + env
+        return Data(parts.joined(separator: "\u{0}").utf8)
+    }
+
+    private static func hexData(_ text: String) -> Data? {
+        var data = Data()
+        var index = text.startIndex
+        while index < text.endIndex {
+            let next = text.index(index, offsetBy: 2)
+            guard let byte = UInt8(text[index..<next], radix: 16) else { return nil }
+            data.append(byte)
+            index = next
+        }
+        return data
     }
 
     /// A preset as the wire carries it (`session.presets`): its name, kind, command and the names of its environment's
     /// variables (never their values: a key may be among them), whether a shell stays, where it is from, and why the
     /// node can't start it.
-    public static func value(_ listed: Listed) -> NodeWire.Value {
+    static func value(_ listed: Listed, key: SymmetricKey = SessionPresets.key) -> NodeWire.Value {
         let preset = listed.preset
         return .object([
             "name": .string(preset.name), "kind": .string(preset.kind.rawValue), "command": .string(preset.command),
             "env": .array(preset.env.keys.sorted().map(NodeWire.Value.string)), "keepShell": .bool(preset.keepShell),
             "project": .bool(listed.project), "default": .bool(listed.isDefault),
-            "digest": .string(digest(preset)), "refused": listed.refusal.map(NodeWire.Value.string) ?? .null,
+            "digest": .string(digest(preset, key: key)), "refused": listed.refusal.map(NodeWire.Value.string) ?? .null,
         ])
     }
 }

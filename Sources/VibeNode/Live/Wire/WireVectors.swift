@@ -385,6 +385,9 @@ public enum WireVectors {
 
     /// The launch presets of the vectors' example: the project's own Opus (its default, with a variable set) and the
     /// built-ins, Codex among them (the node can't start it).
+    /// A fixed key for the example's digests, so the generated files are the same each time (a node's is random).
+    static let presetsKey = SymmetricKey(data: Data(repeating: 0x5a, count: 32))
+
     static var presetsExample: LaunchPresets {
         var presets = LaunchPresets.builtIns()
         let opus = LaunchPreset(id: UUID(uuidString: "6f1d2c3b-4a5e-4f60-8a71-92b3c4d5e6f7")!, name: "Opus", kind: .claude,
@@ -638,7 +641,7 @@ public enum WireVectors {
             // --preset NAME` starts one, the user's voice.
             ("session.presets", [request(.init(id: "18", kind: "session.presets", args: ["folder": .string(root)])),
                                  reply("reply.session.presets", .init(re: "18", result: .object([
-                                     "presets": .array(SessionPresets.list(presetsExample, folder: root).map(SessionPresets.value)),
+                                     "presets": .array(SessionPresets.list(presetsExample, folder: root).map { SessionPresets.value($0, key: presetsKey) }),
                                      "problems": .array([])])))]),
             ("send.from-a-page", [reply(.init(re: "17", error: .init(.voice,
                                                                     "send is the user's voice: a web page is never that; run it with `vibeswitcher` in a terminal")))]),

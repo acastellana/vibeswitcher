@@ -533,7 +533,7 @@ is done once (rule 8). What the first write actions need:
 
 | `session.attach` **new** (2026-11-20, the composer) | `session`, `upload` (a UUID), `type` (png, jpeg, gif, webp), `part`, `parts`, `data` (base64) | refused, `voice` | a token with `draft`, `action`: an image in parts (a page's message is at most 64 KiB); the last part's reply carries the `path` it was written to, which `session.draft`'s `images` name |
 | `session.complete` **new** (2026-11-20, the composer) | `session`, `kind` (`slash`, `mention`), `query` | anyone | a token with `read`: `items` [{`insert`, `title`, `subtitle`}], what the app's composer offers |
-| `session.presets` **new** (2026-11-20, the composer) | `folder` (optional) | anyone | a token with `read`: `presets` [{`name`, `kind`, `command`, `env` (names), `keepShell`, `project`, `default`, `digest`, `refused`}], `problems`; `session.new` takes `preset` and its `digest` |
+| `session.presets` **new** (2026-11-20, the composer) | `folder` (optional) | anyone | a token with `read`: `presets` [{`name`, `kind`, `command`, `env` (names), `keepShell`, `project`, `default`, `digest` (an HMAC under a key only the server run holds: no variable's value can be guessed from it, and a restart makes the user list them again), `refused`}], `problems`; `session.new` takes `preset` and its `digest` |
 
 A session (§5) carries three more fields since 2026-11-20: `prompt` {`question` †, `options` †, `descriptions` †,
 `text` (the options that take words, by index), `multiSelect`, `at`}, the question open on its screen as the node read

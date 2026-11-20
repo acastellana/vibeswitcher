@@ -84,6 +84,33 @@ struct SessionPresetsTests {
         #expect(!String(decoding: NodeWire.line(value), as: UTF8.self).contains("\"1\""))
     }
 
+    /// The digest is keyed by a secret only the server run holds (the security review of 2026-11-20): a page that may
+    /// only read can't test guesses of a variable's value (an API key) by hashing them itself.
+    @Test func aVariablesValueCantBeGuessedFromTheDigest() {
+        let secret = "value-to-guess-41"
+        let real = LaunchPreset(name: "Keyed", kind: .claude, command: "claude", env: ["SOME_TOKEN": secret])
+        var guess = real
+        guess.env["SOME_TOKEN"] = "value-to-guess-42"
+        let shown = SessionPresets.digest(real)
+        // Recomputed without the key, by any unkeyed hash of what it covers, the guess and the real value read alike:
+        // neither gives the digest shown.
+        for unkeyed in [real, guess].flatMap({ preset -> [String] in
+            let parts = [preset.name, preset.kind.rawValue, preset.command, "-"] + preset.env.map { "\($0.key)=\($0.value)" }
+            return [LeadVaultV2.digest(parts.joined(separator: "\u{0}")), LeadVaultV2.digest((["vibeswitcher-preset"] + parts).joined(separator: "\u{0}"))]
+        }) { #expect(unkeyed != shown) }
+        // Under another key (another server run, or a page's guess at one) neither matches either.
+        let other = SymmetricKey(size: .bits256)
+        #expect(SessionPresets.digest(real, key: other) != shown)
+        #expect(!SessionPresets.matches(real, digest: SessionPresets.digest(real, key: other)))
+        // Under the server's own key it binds: the preset shown matches, one with another value doesn't.
+        #expect(SessionPresets.matches(real, digest: shown))
+        #expect(!SessionPresets.matches(guess, digest: shown))
+        #expect(!SessionPresets.matches(real, digest: "not hex") && !SessionPresets.matches(real, digest: nil))
+        // The value reaches neither the wire nor what the command line lists.
+        let wire = String(decoding: NodeWire.line(SessionPresets.value(.init(preset: real, project: true, isDefault: true, refusal: nil))), as: UTF8.self)
+        #expect(!wire.contains(secret) && wire.contains("SOME_TOKEN"), "\(wire)")
+    }
+
     @Test func theFileIsReadAsTheAppWritesItAndNeverWritten() throws {
         let root = scratch.url("root")
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
@@ -196,7 +223,9 @@ struct SessionPresetsTests {
         let started = try await node.runOnTerminal(["new", folder, "--preset", "tests shell"])
         #expect(started.status == 0, "\(started.output)\(started.errors)\n\(node.said)")
         #expect(started.output.contains("This starts preset Tests shell (a shell; this project's; sets RUN_SLOW"), "\(started.output)")
-        #expect(!started.output.contains("yes-slow"), "\(started.output)")
+        #expect(!started.output.contains("yes-slow") && !listed.output.contains("yes-slow"), "\(started.output)")
+        // Nor the server's log.
+        #expect(!node.said.contains("yes-slow"))
         #expect(started.output.contains("started: session "), "\(started.output)")
 
         for words in [["new", folder, "--preset", "Nope"]] {
