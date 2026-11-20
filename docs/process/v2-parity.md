@@ -92,7 +92,7 @@ Sizes to close: S is about a day, M a few days, L a week or more.
 | Find in the chat, Export Chat, Copy as Markdown, Edit in Composer, Send Again | `MainWindow/Chat/ChatView.swift` | missing | not in `chat.js` | M | the browser's own find works on the rows drawn |
 | "New since you looked" marker and summary | `MainWindow/Chat/ChatView.swift` | has it | `WebApp/js/views/chat.js`, `chatops.js` `newSince`/`sinceSummary` (2026-11-20): a line before the first item after the last one this browser saw at the chat's end, with what came since ("Ran 1 command · 1 reply"); worked out when the chat opens. What was seen is per browser (the Mac's per app) | | the chat opens at the end, not at the marker |
 | Run a code block (type it into the session after you confirm) | `MainWindow/Chat/ChatRunner.swift` | missing | needs the composer | M | |
-| The all-done card (a batch's summary and receipts) | `MainWindow/Lead/AllDoneWatch.swift`, `Chat/AllDoneCard.swift` | missing | owed in the port map | S | |
+| The all-done card (a batch's summary and receipts) | `MainWindow/Lead/AllDoneWatch.swift`, `Chat/AllDoneCard.swift` | partly | `Engine/AllDoneLook.swift` (2026-11-20): a board that clears is marked under its lock with the written summary (`BatchSummary`, no model asked), and `status` says it for a day. No card in the page's lead chat yet, no receipts shown, no seen mark | S | |
 | Push-to-talk dictation | `Dictation/` | missing | "later" in the design | L | |
 | Chat text size (⌘+ ⌘− ⌘0) | `MainWindow/Chat/MarkdownView.swift` | not needed | the browser zooms | | |
 

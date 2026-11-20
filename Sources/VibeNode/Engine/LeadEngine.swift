@@ -132,6 +132,10 @@ public final class LeadEngine: @unchecked Sendable {
     /// The engine's refresh every 3 s on its clock (`refresh`, E7).
     private var refreshTimer: Subscription?
 
+    // The all-done mark (`AllDoneLook.swift`), on `queue`: the marks whose summary is being written, and the clock.
+    var allDoneSummarizing: Set<String> = []
+    var allDoneNow: () -> Date = Date.init
+
     // The prompt-audit reminder (`PromptAuditWatch.swift`), on `queue`.
     /// The projects due a prompt audit, and why, as the last look found them.
     public internal(set) var promptAuditsDue: [String: PromptAudit.Due] = [:]
