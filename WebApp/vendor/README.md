@@ -28,11 +28,13 @@ The licences (MIT) aren't served: `scripts/webapp-embed.sh` leaves `LICENSE*` ou
 ## The page's policy
 
 Unchanged. xterm.js's DOM renderer is used (no canvas or WebGL add-on). It writes part of its CSS (a cell's size, the
-theme) into `<style>` elements it makes, which `style-src 'self'` refuses; `js/views/terminal.js` gives the same text
-to stylesheets made by script (`adoptedStyleSheets`), which the policy doesn't govern, and takes the elements out of
-the page. The browser logs a few refusals (each element's first texts, before it is taken out) as a terminal first
-opens; nothing is applied from them. xterm.js builds the text from the page's own options and from colours its parser
-has already normalized: nothing a program prints becomes CSS. No `innerHTML` or other string-to-markup call is in either file (`WebAppLintTests` reads them as it reads the page's own).
+theme) into `<style>` elements it makes, and a truecolor cell's colour into the cell's style attribute, both of which
+`style-src 'self'` refuses. `js/xtermstyle.js` (loaded with xterm.js, by `js/views/terminal.js`) hands both to script-made CSS,
+which the policy doesn't govern: a `<style>` element is never put in the page, its text goes to a stylesheet made by
+script (`adoptedStyleSheets`); a cell's style attribute that is only colours and a letter spacing is set property by
+property. So a terminal logs no refusal (checked in headless Chrome, 2026-11-20) and Claude Code's colours show.
+xterm.js builds the text from the page's own options and from colours its parser has already normalized: nothing a
+program prints becomes CSS. No `innerHTML` or other string-to-markup call is in either file (`WebAppLintTests` reads them as it reads the page's own).
 
 ## Updating
 
