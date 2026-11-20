@@ -232,3 +232,28 @@
 - 2026-11-20 02:37 Automatically (auto_advance): Merged leadadvancetests-battery (LeadAdvanceTests: the settle() race and the earlier-verifier test) into v2 at dbbce574, on its passing audit and the full test run.
 - 2026-11-20 02:37 Automatically (auto_advance): Cleaned up leadadvancetests-battery (freed 1.7 GB of build output and temporary folders). It stays done.
 - 2026-11-20 02:47 Merged the-vault-s-look: The vault's look never catches the tool server halfway through writing its git-hooks copy (build 5b6eccd929ad)
+- 2026-11-20 02:47 Automatically (auto_advance): Merged the-vault-s-look (The vault's look never catches the tool server halfway through writing its git-hooks copy) into v2 at 82f7b862, on its passing audit and the full test run.
+- 2026-11-20 02:47 Automatically (auto_advance): Cleaned up the-vault-s-look (freed 1.7 GB of build output and temporary folders). It stays done.
+- 2026-11-20 02:55 Started a worker on turn-this-incident-into
+- 2026-11-20 02:55 Automatically (auto_advance): Started a worker on turn-this-incident-into (A link re-created with the same target is no config change for the seal), its after tasks done (the-vault-s-look).
+- 2026-11-20 02:57 Sent sb5-the-host-confines's worker contract v6 (it had v5)
+- 2026-11-20 03:02 Merged a-lead-asked-for: A lead asked for twice at once starts twice under load (no audit: review none) (build 5b6eccd929ad)
+- 2026-11-20 03:02 Automatically (auto_advance): Merged a-lead-asked-for (A lead asked for twice at once starts twice under load) into v2 at 90f80f53, review none: on its worker's done report on a9d3223d and the full test run.
+- 2026-11-20 03:02 Automatically (auto_advance): Cleaned up a-lead-asked-for; ended pid 172370 (Worker: A lead asked for twice at once starts twice under load) (freed 1.7 GB of build output and temporary folders). It stays done.
+- 2026-11-20 03:17 Merged hosthardeningtests-lock: HostHardeningTests' lock test fails when another test forks at the wrong moment (no audit: review none) (build 5b6eccd929ad)
+- 2026-11-20 03:17 Automatically (auto_advance): Merged hosthardeningtests-lock (HostHardeningTests' lock test fails when another test forks at the wrong moment) into v2 at 597571eb, review none: on its worker's done report on b51151ac and the full test run.
+- 2026-11-20 03:17 Automatically (auto_advance): Cleaned up hosthardeningtests-lock; ended pid 1394339 (Worker: HostHardeningTests' lock test fails when another test forks at the wrong moment) (freed 1.7 GB of build output and temporary folders). It stays done.
+- 2026-11-20 03:30 Planned mac-gitguardtests: Mac: GitGuardTests' baseline message compared against the resolved root
+- 2026-11-20 03:30 Planned toolserverswitchtests-2: ToolServerSwitchTests passes with hosted agents identified from the host's spawn record
+- 2026-11-20 03:31 Merged toolserverswitchtests: ToolServerSwitchTests says why a switch was refused, and expects what the product promises (no audit: review none) (build 5b6eccd929ad)
+- 2026-11-20 03:31 Automatically (auto_advance): Merged toolserverswitchtests (ToolServerSwitchTests says why a switch was refused, and expects what the product promises) into v2 at 6727d6de, review none: on its worker's done report on fda84c5f and the full test run.
+- 2026-11-20 03:31 Automatically (auto_advance): Cleaned up toolserverswitchtests; ended pid 4018520 (Worker: ToolServerSwitchTests says why a switch was refused, and expects what the product promises) (freed 1.7 GB of build output and temporary folders). It stays done.
+- 2026-11-20 03:33 Started a worker on tests-that-write-a
+- 2026-11-20 03:33 Automatically (auto_advance): Started a worker on tests-that-write-a (Tests that write a program and run it no longer fail with "Text file busy"), its after tasks done (the-vault-s-look).
+- 2026-11-20 03:34 Kept turn-this-incident-into unmerged: The user (2026-11-20, answer 06BB12B6): keep the guard as strict as today; fix the relink at its source (updater off for team sessions, measured first). The vault change at 93afb7c6 stays unmerged and unaudited; its branch is kept in case the source fix doesn't hold.
+- 2026-11-20 03:35 Planned measure-does-claude-code: Measure: does Claude Code stop re-creating its link when its updater is off?
+- 2026-11-20 03:46 Automatically (auto_advance): Didn't audit turn-this-incident-into: Not audited, no finder started: the lead held turn-this-incident-into's audit (update_task hold_audit). It starts once an exception is recorded (update_task(turn-this-incident-into, exception: {scope, reason, evidence})), or with hold_audit: false.
+- 2026-11-20 03:57 Started a worker on mac-gitguardtests
+- 2026-11-20 03:57 Automatically (auto_advance): Started a worker on mac-gitguardtests (Mac: GitGuardTests' baseline message compared against the resolved root).
+- 2026-11-20 03:57 Sent sb5-the-host-confines's worker contract v7 (it had v6)
+- 2026-11-20 03:58 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: ~/.vibeswitcher/lead/run

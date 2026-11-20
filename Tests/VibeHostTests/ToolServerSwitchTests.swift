@@ -86,8 +86,32 @@ import Testing
         return found
     }
 
-    @Test(arguments: [false, true])
-    func theLeadsAndAWorkersServersKeepTheirRolesAndSealsThroughASwitch(keeper: Bool) async throws {
+    /// A copy of `source` at `target` (a new file), written on a descriptor closed on exec. `FileManager.copyItem`'s
+    /// isn't on Linux (its descriptor's flags read 0100001 in /proc: no O_CLOEXEC), so a child another test starts while
+    /// it copies holds the copy open for writing, and exec'ing the copy fails "Text file busy" while that child runs: a
+    /// switch's probe then can't start, and the server tries again a minute later. VibeNodeTests' `copyClosedOnExec` is
+    /// the same.
+    static func copyClosedOnExec(_ source: String, to target: String) throws {
+        let data = try Data(contentsOf: URL(fileURLWithPath: source))
+        let fd = open(target, O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, 0o755)
+        guard fd >= 0 else { throw CocoaError(.fileWriteUnknown, userInfo: [NSFilePathErrorKey: target, "errno": errno]) }
+        let handle = FileHandle(fileDescriptor: fd, closeOnDealloc: true)
+        try handle.write(contentsOf: data)
+        try handle.close()
+    }
+
+    /// The cases: under the keeper or not, and whether the first build installed is refused before another one is
+    /// switched to (`refusedOnce`: Linux's "Text file busy", which the Mac's exec doesn't have).
+    static let cases: [(keeper: Bool, refusedOnce: Bool)] = {
+        #if os(Linux)
+        [(false, false), (true, false), (false, true)]
+        #else
+        [(false, false), (true, false)]
+        #endif
+    }()
+
+    @Test(arguments: cases)
+    func theLeadsAndAWorkersServersKeepTheirRolesAndSealsThroughASwitch(keeper: Bool, refusedOnce: Bool) async throws {
         let built = URL(fileURLWithPath: hostLauncher).deletingLastPathComponent().appendingPathComponent("vibeswitcher-mcp").path
         try #require(FileManager.default.isExecutableFile(atPath: built), "vibeswitcher-mcp isn't built beside the host: run swift build first")
         let files = FileManager.default
@@ -103,7 +127,7 @@ import Testing
         try files.createSymbolicLink(atPath: vibe + "/host.sock", withDestinationPath: host.socket)
         // The installed build, as the app's is: the servers run this file and watch it.
         let installed = dir + "/app/vibeswitcher-mcp"
-        try files.copyItem(atPath: built, toPath: installed)
+        try Self.copyClosedOnExec(built, to: installed)
 
         // The project: a commit, and a repository config key the tool server's git doesn't run (so each loop's first
         // pass has something to tell the lead: what its git leaves out). One task, which nothing moves by itself.
@@ -153,6 +177,19 @@ import Testing
         for name in ["lead", "worker"] { files.createFile(atPath: "\(folder)/go-\(name)", contents: nil) }
 
         let lead = Server(folder: folder, name: "lead"), worker = Server(folder: folder, name: "worker")
+        // What the servers said of their switches, for a failure's message: their stderr ("couldn't switch to the new
+        // build at …: <why>", "switched in place to the new build") and the lead's server's log lines of its switches
+        // (`MCPLog`: "switching to the build at …", "didn't switch: <why>", "started: … switched in place from …"),
+        // under the keeper its child's log too.
+        let switches = { () -> String in
+            let debug = vibe + "/debug"
+            let logs = ((try? files.contentsOfDirectory(atPath: debug)) ?? []).filter { $0.hasPrefix("mcp-lead-") }.sorted()
+            let lines = logs.map { name in
+                let text = (try? String(contentsOfFile: "\(debug)/\(name)", encoding: .utf8)) ?? ""
+                return "\(name):\n" + text.split(separator: "\n").filter { $0.contains("switch") }.joined(separator: "\n")
+            }
+            return "lead: \(lead.errors)\nworker: \(worker.errors)\nlead's log: \(lines.isEmpty ? "none in \(debug)" : lines.joined(separator: "\n"))"
+        }
         await #expect(try lead.initialize(), "lead's stderr: \(lead.errors)")
         await #expect(try worker.initialize(), "worker's stderr: \(worker.errors)")
         var leadID = 2, workerID = 2
@@ -183,13 +220,36 @@ import Testing
         // Under the keeper, its child is the server that switches (on its own pid, the keeper's staying as it is).
         let kept = keeper ? (try #require(await child(of: leadPid)), try #require(await child(of: workerPid))) : nil
 
+        if refusedOnce {
+            // A build installed while something still holds it open for writing (as a child forked during a copy that
+            // isn't closed on exec does): its probe can't start ("Text file busy"), so neither server switches to it,
+            // and each says why and serves on.
+            let held = dir + "/app/held"
+            try Self.copyClosedOnExec(built, to: held)
+            let writer = open(held, O_WRONLY | O_CLOEXEC)
+            try #require(writer >= 0)
+            #expect(rename(held, installed) == 0)
+            let refused = { (server: Server) in
+                server.errors.split(separator: "\n").contains { $0.contains("couldn't switch to the new build") && $0.contains(": it couldn't start: Text file busy;") }
+            }
+            #expect(await eventually { refused(lead) && refused(worker) }, "\(switches())")
+            close(writer)
+            #expect(!lead.errors.contains("switched in place") && !worker.errors.contains("switched in place"), "\(switches())")
+            #expect(kill(leadPid, 0) == 0 && kill(workerPid, 0) == 0 && lead.pid == leadPid && worker.pid == workerPid)
+        }
         // The install: another build (another file) in its place, written beside it and renamed over it.
-        try files.copyItem(atPath: built, toPath: dir + "/app/next")
+        try Self.copyClosedOnExec(built, to: dir + "/app/next")
         #expect(rename(dir + "/app/next", installed) == 0)
-        // Each server switches between requests, an idle one within a second.
+        // Each server switches between requests, an idle one within a second, or after a refused try (its probe didn't
+        // answer in 20 s, it couldn't start) when it tries again: a minute later (`BinaryWatch.retry`, "a busy Mac can
+        // make its probe time out"), or at once for another build.
         #expect(await eventually { lead.errors.contains("switched in place to the new build") && worker.errors.contains("switched in place to the new build") },
-                "lead: \(lead.errors)\nworker: \(worker.errors)")
-        #expect(!lead.errors.contains("couldn't switch") && !worker.errors.contains("couldn't switch"))
+                "\(switches())")
+        // A refused try before the switch is the product's design, not a fault (a build that can't take over would never
+        // switch, and the wait above fails): its reason goes in the run's output.
+        if lead.errors.contains("couldn't switch") || worker.errors.contains("couldn't switch") {
+            print("ToolServerSwitchTests (keeper: \(keeper), refusedOnce: \(refusedOnce)): a server refused a try before it switched; why:\n\(switches())")
+        }
         // The same processes, on the same pipes, now the new build.
         #expect(kill(leadPid, 0) == 0 && kill(workerPid, 0) == 0)
         #expect(lead.pid == leadPid && worker.pid == workerPid)

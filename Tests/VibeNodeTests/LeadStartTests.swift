@@ -63,6 +63,11 @@ struct LeadStartTests {
             ((try? host.sessions()) ?? []).filter { $0.isLive && $0.label == "Lead · \(name)" }
         }
 
+        /// Each of the host's lead sessions for the repository, live or how it ended (a failure's message).
+        func leadEnds() -> [String] {
+            ((try? host.sessions()) ?? []).filter { $0.label == "Lead · \(name)" }.map { "\($0.id.uuidString.prefix(8)): \($0.exit.map { "\($0.cause) at \($0.at)" } ?? "live")" }
+        }
+
         /// The project's lead as the engine's store has it now.
         var stored: LeadStore.Lead? { queue.sync { engine.leads.leads[project] } }
 
@@ -432,16 +437,81 @@ struct LeadStartTests {
         #expect(world.leads().isEmpty)
     }
 
+    /// Two requests at once: the second joins the start under way and is shown the lead it started. The first is held
+    /// between its look for a running lead and its spawn until the second has joined it: on a loaded machine each
+    /// request's look for its repository (git, off the engine's queue, side by side) can end long after the other's, and
+    /// the second, not yet joined, then looks for itself once the first's start is over (the next two tests).
     @Test func aLeadAskedForTwiceAtOnceStartsOnce() async throws {
         let world = try await world()
         defer { world.stop() }
+        let gate = Gate()
+        world.holdTheFirstLook(at: gate)
         async let first = world.start()
         async let second = world.start()
+        try #require(await eventually(timeout: 120) { gate.reached && world.waitingOnTheStart == 2 }, "\(world.waitingOnTheStart) waiting")
+        #expect(world.spawns.value.isEmpty)
+        gate.open()
         let outcomes = await [first, second]
-        #expect(outcomes.filter { if case .started = $0 { return true } else { return false } }.count == 1, "\(outcomes)")
-        #expect(Set(outcomes.compactMap(session)).count == 1, "\(outcomes)")
-        #expect(world.leads().count == 1)
+        // A lead that ended between the first's spawn and the second's look is started again, rightly (the last test
+        // here): how each ended is said, should that ever be why this fails.
+        let said = "\(outcomes); the host's leads: \(world.leadEnds())"
+        #expect(outcomes.filter { if case .started = $0 { return true } else { return false } }.count == 1, "\(said)")
+        #expect(Set(outcomes.compactMap(session)).count == 1, "\(said)")
+        #expect(world.leads().count == 1, "\(said)")
+        #expect(world.spawns.value.count == 1, "\(said)")
+    }
+
+    /// Two requests whose second looks only once the first's start is over (its repository's look held until then, as
+    /// load made it in the audit's run of 2026-11-20): the lead the first started still runs, so the second is shown it.
+    @Test func aRequestAfterTheLeadStartedIsShownIt() async throws {
+        let world = try await world()
+        defer { world.stop() }
+        let (release, answers) = holdTheSecondRequest(world)
+        try #require(await eventually(timeout: 120) { answers.value.count == 1 })
+        let lead = try started(answers.value[0])
+        release.signal()
+        try #require(await eventually(timeout: 120) { answers.value.count == 2 })
+        #expect(answers.value[1] == .shown(session: lead, notes: []), "\(answers.value)")
+        #expect(world.leads().map(\.id) == [lead])
         #expect(world.spawns.value.count == 1)
+    }
+
+    /// As above, but the lead the first started ended before the second looked: no lead runs, so the second starts one,
+    /// and still one lead runs. The failure of `aLeadAskedForTwiceAtOnceStartsOnce` in that run (two `.started`, two
+    /// spawns, one live lead) is this order, which the test now holds off.
+    @Test func aRequestAfterTheLeadEndedStartsANewOne() async throws {
+        let world = try await world()
+        defer { world.stop() }
+        let (release, answers) = holdTheSecondRequest(world)
+        try #require(await eventually(timeout: 120) { answers.value.count == 1 })
+        let ended = try started(answers.value[0])
+        world.link.kill(ended)
+        // The engine looks at the link's sessions: the end is waited for there.
+        try #require(await eventually(timeout: 60) { world.queue.sync { world.link.sessions.first { $0.id == ended }?.isLive == false } })
+        release.signal()
+        try #require(await eventually(timeout: 120) { answers.value.count == 2 })
+        let lead = try started(answers.value[1])
+        #expect(lead != ended)
+        #expect(world.leads().map(\.id) == [lead])
+        #expect(world.spawns.value.count == 2)
+    }
+
+    /// Asks for the lead twice; the second request's look for its repository waits until `release` is signalled.
+    private func holdTheSecondRequest(_ world: World) -> (release: DispatchSemaphore, answers: Locked<[LeadEngine.StartOutcome]>) {
+        let looks = Locked(0)
+        let release = DispatchSemaphore(value: 0)
+        world.queue.sync {
+            world.engine.preflightLooked = {
+                var look = 0
+                looks.mutate { $0 += 1; look = $0 }
+                if look == 2 { _ = release.wait(timeout: .now() + 120) }
+            }
+        }
+        let answers = Locked<[LeadEngine.StartOutcome]>([])
+        for _ in 0..<2 {
+            world.engine.startLead(folder: world.repo, goal: nil, takeHead: false, replace: false) { outcome in answers.mutate { $0.append(outcome) } }
+        }
+        return (release, answers)
     }
 
     // MARK: Refusals
