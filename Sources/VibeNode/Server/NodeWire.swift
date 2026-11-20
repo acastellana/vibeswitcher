@@ -288,6 +288,8 @@ public enum NodeWire {
         // Between leads (the stability lane, 2026-11-20): a read, but the projects' private record of their leads'
         // messages, so only the user's (no session's, no page's), with no typed word (`changesNothing`).
         "mail": .user,
+        // The prompt-audit reminder's snooze, off and on (the stability lane, 2026-11-20).
+        "prompt-audit": .user,
         "session.draft": .webDraft, "session.draft.clear": .webDraft,
     ]
 
@@ -321,7 +323,7 @@ public enum NodeWire {
                                "tell",
                                "board", "seen",
                                "send", "session.new", "session.end", "session.reply", "session.draft", "session.draft.clear",
-                               "session.reopen", "mail"]
+                               "session.reopen", "mail", "prompt-audit"]
 
     // MARK: Lines
 

@@ -132,6 +132,18 @@ public final class LeadEngine: @unchecked Sendable {
     /// The engine's refresh every 3 s on its clock (`refresh`, E7).
     private var refreshTimer: Subscription?
 
+    // The prompt-audit reminder (`PromptAuditWatch.swift`), on `queue`.
+    /// The projects due a prompt audit, and why, as the last look found them.
+    public internal(set) var promptAuditsDue: [String: PromptAudit.Due] = [:]
+    /// Whether a look is under way, and whether one ran yet (the first runs at the first refresh).
+    var promptAuditLooking = false
+    var promptAuditLooked = false
+    /// The look every 30 minutes on the engine's clock, and the clock a reminder is judged by (a test's later).
+    var promptAuditTimer: Subscription?
+    var promptAuditNow: () -> Date = Date.init
+    /// The record's reads and writes, one at a time, off the engine's queue.
+    let promptAuditBook = DispatchQueue(label: "vibenode.lead-engine.prompt-audit", qos: .utility)
+
     // Cards, answers and holds (E6), on `queue`.
     /// Every card the user answers: the lead's questions and approvals, held config, base moves.
     public let cards = CardStore()
@@ -285,6 +297,7 @@ public final class LeadEngine: @unchecked Sendable {
         watch = link.changes.subscribe(on: link.queue) { [weak self] _ in self?.sessionsChanged() }
         if options.sweepsRoles { roleSweep = makeRoleSweep() }
         refreshTimer = clock?.every(3) { [weak self] in self?.refresh() }
+        promptAuditTimer = clock?.every(Int(Self.promptAuditEvery)) { [weak self] in self?.queue.async { self?.lookAtPromptAudits() } }
     }
 
     /// The vault the cards are built from and the user's answers recorded in: the link's, or a test's.

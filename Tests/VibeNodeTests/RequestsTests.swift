@@ -206,7 +206,9 @@ struct RequestsTests {
                                     // Driving an ordinary session (2026-11-20).
                                     "send", "session.new", "session.end", "session.reply", "session.draft", "session.draft.clear",
                                     // Reopening the user's sessions after a host restart (2026-11-20).
-                                    "session.reopen"]
+                                    "session.reopen",
+                                    // The prompt-audit reminder (2026-11-20).
+                                    "prompt-audit"]
         #expect(Set(NodeWire.kinds.keys) == reads.union(changes), "a kind added to NodeWire.kinds is classified here")
         for kind in reads { #expect(!NodeWire.changesState(kind), "\(kind)") }
         for kind in changes { #expect(NodeWire.changesState(kind), "\(kind)") }
