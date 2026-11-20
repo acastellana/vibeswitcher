@@ -116,7 +116,7 @@ struct SendTests {
         #expect(sent.output.contains("sent: 19 characters typed into session"), "\(sent.output)")
         _ = try await EngineEndToEndTests.prompt(files) { $0 == "Hello from the node" }
         let usage = try await node.run(["send", session.id.uuidString])
-        #expect(usage.status == 64 && usage.errors.contains("usage: vibeswitcher send SESSION TEXT"), "\(usage.output)\(usage.errors)")
+        #expect(usage.status == 64 && usage.errors.contains("usage: vibeswitcher send SESSION [TEXT]"), "\(usage.output)\(usage.errors)")
     }
 
     /// A web page is never the user's voice, whatever its token's rights.

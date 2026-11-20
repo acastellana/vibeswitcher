@@ -35,6 +35,9 @@ public final class NodeSessions: @unchecked Sendable {
         public var watchCoalesce: TimeInterval = 0.4
         /// The quiet Claude sessions' screens are asked at most this often (by the store's `now`).
         public var screenEvery: TimeInterval = 6
+        /// The screens of hosted sessions that need you are asked at most this often, for the question open there
+        /// (`prompts`).
+        public var promptEvery: TimeInterval = 2
         /// A state folder that couldn't be watched is tried again this long after (by the store's `now`), at a scan.
         public var watchRetry: TimeInterval = 60
 
@@ -52,6 +55,12 @@ public final class NodeSessions: @unchecked Sendable {
     /// Every change to `sessions`, by the node's id for each (`NodeSessions.id(of:)`): its new value, or nil once it's
     /// gone.
     public let changes = Changes<Session>()
+    /// The question open on each hosted agent session's screen (`SessionPrompt`), by the node's id for the session: set
+    /// while its screen shows one, nil once it doesn't, or the session is working or gone (2026-11-20, the parity
+    /// table's gap 6). Read off the screens of those that need you every `promptEvery` s, and of the quiet ones
+    /// (done, idle, unknown) with their background work, every `screenEvery` s: Claude's trust question at a start
+    /// comes before any hook says it needs you.
+    public let prompts = Changes<SessionPrompt>()
     /// The process table `sessions` come from: when it was read and the terminals it couldn't tell an agent on or not.
     /// Set after `sessions`, so a reader never pairs a newer table with older sessions (an agent the newer table finds
     /// would read as quit). On `queue`.
@@ -119,6 +128,10 @@ public final class NodeSessions: @unchecked Sendable {
     /// The quiet hosted sessions' screens, by terminal, as last read.
     private var screens: [String: String] = [:]
     private var lastScreenAsk = Date.distantPast
+    /// Hosted sessions whose screen may show a question (`prompts`): those that need you (`asking`), and the quiet ones.
+    private var asking: Set<String> = []
+    private var promptable: Set<String> = []
+    private var lastPromptAsk = Date.distantPast
 
     /// `root`: the node's root (the hooks' state folder is in it). `home`: the node's home, where the agents' own config
     /// (their hooks) and transcripts are. `queue`: the engine's; with a `link`, the link's. `clock`: the engine's, whose
@@ -277,10 +290,15 @@ public final class NodeSessions: @unchecked Sendable {
             watchStateFolder()
         }
         let hosted = self.hosted
-        let quiet = quietClaude.intersection(hosted.keys)
+        let quiet = quietClaude.union(promptable.subtracting(asking)).intersection(hosted.keys)
         if !quiet.isEmpty, now().timeIntervalSince(lastScreenAsk) >= timing.screenEvery {
             lastScreenAsk = now()
             askScreens(quiet)
+        }
+        let urgent = asking.intersection(hosted.keys)
+        if !urgent.isEmpty, now().timeIntervalSince(lastPromptAsk) >= timing.promptEvery {
+            lastPromptAsk = now()
+            askScreens(urgent, keep: false)
         }
         let screens = self.screens
         let (scanner, now, home, scanHosted) = (self.scanner, self.now, self.home, self.scanHosted)
@@ -310,19 +328,36 @@ public final class NodeSessions: @unchecked Sendable {
 
     /// Reads these hosted sessions' screens (by terminal) into `screens` (the app's `HostClient.refreshScreens`); a
     /// screen whose footer says something new scans again. On `queue`.
-    private func askScreens(_ ttys: Set<String>) {
+    /// The question on each screen read goes to `prompts`. `keep`: the quiet ones' read, whose screens are kept for
+    /// their background work (an urgent read keeps none). On `queue`.
+    private func askScreens(_ ttys: Set<String>, keep: Bool = true) {
         guard let link, !stopped else { return }
-        screens = screens.filter { ttys.contains($0.key) }
+        if keep { screens = screens.filter { ttys.contains($0.key) || asking.contains($0.key) } }
         for (tty, session) in hosted where ttys.contains(tty) {
             link.screen(session.id) { [weak self] text in
                 self?.perform {
-                    guard let self, !self.stopped else { return }
+                    guard let self, !self.stopped, self.hosted[tty]?.id == session.id else { return }
+                    if self.promptable.contains(tty) { self.prompt(text.flatMap(SessionPrompt.menu(on:)), id: NodeIds.session(host: session.id)) }
+                    guard keep else { return }
                     let before = self.screens[tty].flatMap { BackgroundWork.summary(fromScreen: $0) }
                     self.screens[tty] = text
                     if text.flatMap({ BackgroundWork.summary(fromScreen: $0) }) != before { self.scan() }
                 }
             }
         }
+    }
+
+    /// `menu` is the question on the screen of the session `id` now: kept with when it was first seen while the same
+    /// question shows (its cursor may move), sent as new when another one does, removed when none does. On `queue`.
+    private func prompt(_ menu: ScreenMenu?, id: String) {
+        let before = prompts.values[id]
+        guard let menu else {
+            if before != nil { prompts.send(id, nil) }
+            return
+        }
+        let at = before.flatMap { $0.menu.sameQuestion(as: menu) ? $0.at : nil } ?? now()
+        let fresh = SessionPrompt(menu: menu, at: at)
+        if fresh != before { prompts.send(id, fresh) }
     }
 
     /// Off `queue`: each session's transcript, if its hook named one inside the agents' folders in `home`.
@@ -342,6 +377,8 @@ public final class NodeSessions: @unchecked Sendable {
     private func apply(raw: [RawSession], hosted: [String: HostSession], background: [String: String], transcripts: [String: String],
                        now: Date) {
         var quiet: Set<String> = []
+        var needsYou: Set<String> = []
+        var mayAsk: Set<String> = []
         var result: [Session] = []
         for item in raw {
             let window = hosted[item.tty]
@@ -369,6 +406,10 @@ public final class NodeSessions: @unchecked Sendable {
             // at the session, reads idle.
             if status == .done, since <= (acknowledged[item.tty] ?? launchedAt) { status = .idle }
 
+            if window != nil, status != .working, status != .background {
+                mayAsk.insert(item.tty)
+                if status == .needsInput { needsYou.insert(item.tty) }
+            }
             var waitingOn: String?
             if item.agent == .claude, status == .done || status == .idle {
                 quiet.insert(item.tty)
@@ -407,6 +448,18 @@ public final class NodeSessions: @unchecked Sendable {
         acknowledged = acknowledged.filter { live.contains($0.key) }
         turns.prune(liveTTYs: live)
         quietClaude = quiet
+        // A session that started working, or went, has no question open: its prompt goes (a quiet one's stays until
+        // its screen is read again).
+        let askingFirst = needsYou.subtracting(asking)
+        asking = needsYou
+        promptable = mayAsk
+        let promptIDs = Set(mayAsk.compactMap { hosted[$0].map { NodeIds.session(host: $0.id) } })
+        for id in prompts.values.keys where !promptIDs.contains(id) { prompts.send(id, nil) }
+        // One that has just come to need you is read at the next turn, not up to `promptEvery` later.
+        if !askingFirst.isEmpty, link != nil {
+            lastPromptAsk = now
+            queue.async { [weak self] in self?.askScreens(askingFirst, keep: false) }
+        }
         let ordered = result.sorted { ($0.tty, $0.pid) < ($1.tty, $1.pid) }
         if ordered != sessions { publish(ordered) }
     }

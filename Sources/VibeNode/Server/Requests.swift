@@ -56,6 +56,9 @@ public final class Requests: @unchecked Sendable {
     var shutdown: () -> HostEvent? = { nil }
     /// The lead engine `lead` starts leads through, and whose leads `status` lists (E4); none: `lead` is refused.
     public var engine: LeadEngine?
+    /// The messages web pages left for sessions (`session.draft`), by the node's id for each: told to nobody until
+    /// `vibeswitcher send SESSION` types one. On `queue`.
+    public let sessionDrafts = Changes<SessionDraft>()
     /// The reply each recorded action (and each page's draft) got, by action id, the newest `repliesKept` (a retry is
     /// answered so).
     var replies: [String: NodeWire.Reply] = [:]
@@ -146,7 +149,7 @@ public final class Requests: @unchecked Sendable {
     /// The kinds recorded in the vault before they are acted on (EN-D11): every state-changing user's-voice request.
     public static let recorded: Set<String> = ["start", "stop", "lead", "answer", "hold", "config.accept", "base.accept", "base.keep",
                                                "hooks.install", "hooks.remove", "build.switch", "web.open", "web.revoke", "tell",
-                                               "send"]
+                                               "send", "session.new", "session.end", "session.reply"]
     /// The kinds on a card: the card's code (EN-D5), typed by the user, is checked here.
     public static let carded: Set<String> = ["answer", "hold", "config.accept", "base.accept", "base.keep"]
     /// How many replies to recorded actions are kept, so a repeated action (a retry) gets the reply it got.
@@ -229,6 +232,9 @@ public final class Requests: @unchecked Sendable {
         case "hold": hold(request, reply: reply)
         case "tell": tell(request, reply: reply)
         case "send": send(request, reply: reply)
+        case "session.new": newSession(request, reply: reply)
+        case "session.end": endSession(request, reply: reply)
+        case "session.reply": replySession(request, reply: reply)
         case "seen": seen(request, reply: reply)
         case "config.held": configHeld(request, reply: reply)
         case "config.accept": configAccept(request, reply: reply)
@@ -318,7 +324,10 @@ public final class Requests: @unchecked Sendable {
                              "notes": notes.map { Self.value($0.notes, at: $0.at) } ?? .null]),
             "rule": .object(["mode": .string(rule.mode.rawValue), "says": .string(rule.says),
                              "scopes": .array(rule.scopes.map { .string($0.pattern) })]),
-            "sessions": .array(list.map(\.liveValue)),
+            "sessions": .array(list.map { session in
+                let id = NodeSessions.id(of: session)
+                return session.liveValue(prompt: sessions?.prompts.values[id], draft: sessionDrafts.values[id])
+            }),
             "leads": .array((engine?.leads.leads.values.sorted { $0.root < $1.root } ?? []).map(leadValue)),
             "cards": Self.counts(engine?.cards.counts() ?? [:]),
             "accepted": .array(accepted.map(\.value)),
@@ -572,7 +581,7 @@ public final class Requests: @unchecked Sendable {
 
     /// One wait of `stop`'s, on `queue`: whether it was answered, its watch of the link's changes, and the sessions
     /// it asked to end.
-    private final class Waiting: @unchecked Sendable {
+    final class Waiting: @unchecked Sendable {
         var answered = false
         var watch: Subscription?
         var ended: Set<UUID> = []

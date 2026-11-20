@@ -152,6 +152,7 @@ extension Requests {
             reply(answer)
         }
         guard !stopping else { return reply(.init(re: request.id, error: .init(.stopping, "the node is stopping"))) }
+        if request.kind.hasPrefix("session.") { return sessionDraft(request, action: action, done: done) }
         guard let engine else { return done(.init(re: request.id, error: .init(.refused, "this server keeps no cards"))) }
         guard let id = request.args?["card"]?.string else { return done(.init(re: request.id, error: .init(.badArgs, "\(request.kind) needs card"))) }
         guard let card = engine.cards.cards[id] else {

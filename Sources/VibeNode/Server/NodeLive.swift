@@ -35,6 +35,8 @@ public final class NodeLive: @unchecked Sendable {
     public private(set) var chats: ChatStore?
     /// The leads' boards (the `boards` stream, `vibeswitcher board`); none for a server with no engine.
     public private(set) var boards: LiveBoards?
+    /// The `sessions` stream's values: each session with its prompt and draft.
+    private var sessionValues: SessionLiveValues?
 
     private let requests: Requests
     private let sessions: NodeSessions?
@@ -130,7 +132,10 @@ public final class NodeLive: @unchecked Sendable {
         let nodeStream = LiveStream(collection: "node")
         for stream in [sessionsStream, leadsStream, cardsStream, nodeStream] { hub.add(collection: stream.collection, stream) }
         if let sessions {
-            hub.follow(sessions.changes, into: sessionsStream) { $0.liveValue }
+            let values = SessionLiveValues(queue: queue, sessions: sessions, drafts: requests.sessionDrafts)
+            values.start()
+            hub.follow(values.changes, into: sessionsStream) { $0 }
+            sessionValues = values
             status.watch(sessions.changes)
             let chats = ChatStore(queue: queue, home: requests.home, sessions: sessions.changes, note: note)
             chats.start(clock: clock)
