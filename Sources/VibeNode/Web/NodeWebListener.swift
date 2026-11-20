@@ -5,10 +5,11 @@ import VibeCore
 /// behind the seams (WebSeams.swift, LiveSeams.swift), so the integrator joins the lanes by handing this the files
 /// (`WebAssetSource`), who may connect (`WebGate`) and the hub (`WebSocketHandler`).
 ///
-/// - **One name.** Every request whose Host isn't exactly `127.0.0.1:<port>` is 421 with no body, an upgrade too:
-///   no other name is this listener's, not `localhost`. (No Host, an empty one, or two, are 421 alike.)
+/// - **One name.** Every request whose Host isn't exactly `<name>:<port>` is 421 with no body, an upgrade too: no other
+///   name is this listener's, not `localhost`. (No Host, an empty one, or two, are 421 alike.) The name is `127.0.0.1`
+///   on loopback, the MagicDNS name on the tailnet (`TailnetWeb`, which binds the tailnet's address).
 /// - **Files.** A GET is answered with the source's file for its path, with the file's own headers, or 404.
-/// - **One upgrade.** `/ws`, and only for a request whose Origin is exactly `http://127.0.0.1:<port>` and whose
+/// - **One upgrade.** `/ws`, and only for a request whose Origin is exactly `http://<name>:<port>` and whose
 ///   `Sec-Fetch-Site`, when it sends one, is `same-origin`: else 403. Another path is 404. No subprotocol.
 /// - **`auth` first.** The server says nothing on a WebSocket until its first text message is an `auth` request the
 ///   gate admits, within `authSeconds`. Anything else first, a refusal, or no message in time is `bye` (`auth`) and

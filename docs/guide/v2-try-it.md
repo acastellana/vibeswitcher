@@ -38,6 +38,18 @@ Open the address it prints within two minutes, in a browser on this machine. You
 
 The page never acts for you: it drafts, and shows the one line to run.
 
+### On your phone, over Tailscale
+
+```sh
+vs web --tailnet
+```
+
+With Tailscale running on this machine and the phone, on the same tailnet, and MagicDNS on: it prints
+`http://<this machine>.<tailnet>.ts.net:47830/#pair=…`. Open it on the phone within two minutes. The phone's access
+lasts 8 hours; `vs web --revoke` ends every page, here and on the phone. No terminal there, and no notifications (the
+page is plain HTTP inside Tailscale's encryption, which browsers don't count as secure). If Tailscale isn't installed,
+isn't running, or MagicDNS is off, it says so: nothing is installed or changed. `vs status` shows where it listens.
+
 ## 3. A session of your own
 
 ```sh

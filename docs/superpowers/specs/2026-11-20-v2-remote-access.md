@@ -121,8 +121,10 @@ session** (the supervisor's decision of 2026-11-20) and before signed approvals,
 
 - `vibeswitcher web --tailnet`: the user's voice; the tailnet's own gate, listener and token file; the root-only
   `tailscale` lookup; MagicDNS name only; Host, Origin and CSP for that name; the peer check; 8 h and 4 tokens;
-  `web --revoke` over both; no terminal; refused on a scratch server's open form. Tests with a fake lookup and a
-  scratch root; nothing runs the real `tailscale`.
+  `web --revoke` over both; no terminal; refused on a scratch server's open form; `status` says where it listens (for
+  the command line: the wire's `node` stream leaves it out, since its shape doesn't name it; adding it there is the
+  integrator's regeneration of the page's vectors). Tests with a fake lookup and a scratch root; nothing runs the real
+  `tailscale`. Code: `Sources/VibeNode/Web/Tailnet.swift`, `Sources/VibeNode/Server/TailnetWeb.swift`.
 
 ## Decisions for the user
 
@@ -139,5 +141,5 @@ session** (the supervisor's decision of 2026-11-20) and before signed approvals,
    it. The code lasts 120 s either way.
 6. **A watched terminal on the remote page**: none in this slice. The loopback page may watch (LW-D12's amendment);
    whether a phone may too.
-7. **`status` showing the tailnet listener**: it needs a field in the wire's `node.web` shape, so the integrator's
-   regeneration of the page's vectors and embedded files. Until then `web --tailnet` prints its state when run.
+7. **The port.** The tailnet's page uses 47830 too (the loopback page's), on the other address. Another port is one
+   constant.
