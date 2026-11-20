@@ -107,6 +107,39 @@ that two pushes haven't explained comes here too, with the experiment that will 
   today, each a Linux-only arm): the host's `mayStart` is given `<home>/.vibeswitcher` as the account's root
   (`vibeswitcher-host/main.swift`, shared with main), and `ProjectAllowList.place` and `HandoverTarget.installRoot`
   return nil on the Mac; each is decided against the node's root when `--node` runs there.
+- **`87de7244`, `e98a89d6`, `0546967b`** (the node on the Mac's step 3, the server beside the host): new Darwin
+  code, written on Linux and never run on a Mac. `Platform.Sockets.connectorType` is a stream on the Mac (no
+  `SOCK_SEQPACKET` in its Unix domain); `sendDescriptor`/`receiveDescriptor` pass one descriptor by `SCM_RIGHTS`, the
+  control message laid out in Swift (12-byte `cmsghdr`, 4-byte alignment; the Mac's package has no C shim), close-on-exec
+  right after `recvmsg` (no `MSG_CMSG_CLOEXEC` there). `Platform.CodeIdentity.runs(_:cdhash:)` and `isHardened(_:)` (the
+  dynamic status word: valid, `CS_RUNTIME`, no `CS_GET_TASK_ALLOW`, not `CS_DEBUGGED`). The host's `ServerChild` on the
+  Mac reads the `--server` file's cdhash at its start and starts the child from the file only while its cdhash is still
+  that; its connector (`HostServer.openServerChildConnector`; `openAppConnector` stays nil on the Mac, so the app's tests
+  and the app are as before) answers only the child's pid running that code, under the Hardened Runtime; the server's
+  connector watch is `Platform.Sockets.waitUntilPeerHasGone` (a kqueue's `EV_EOF` on the Mac, whose `poll` asked for
+  no event registers nothing). The hosted Mac checks `SocketsTests.aDescriptorPassesOverAConnectorPair`,
+  `theConnectorsPairIsEachSystemsOwn`, `CodeIdentityTests`, `HostConnectorTests` (now on both systems) and
+  `MacServerChildTests` (a copy of the built server signed `codesign -s - -o runtime` is the app; the build's own
+  linker-signed one is refused and ended; a file replaced after the start starts nothing). **Needs a real Mac run**:
+  the three `MacServerChildTests` with SIP on (the runner's is off); that a hardened server can't be reached by
+  `task_for_pid` or `DYLD_INSERT_LIBRARIES` from a process of the user's (by reading the status word, not by trying a
+  debugger: the hard rules); that Security's dynamic check refuses a token after the child execs another program; that
+  a universal server's running slice is the one whose cdhash the host read (the host reads this machine's default
+  slice: a single-arch build is safe); and what happens to the old child across a handover (no record is carried on
+  the Mac: the exec closes its connector, it exits, and the new image starts another; check it is reaped, not left a
+  zombie).
+- **`8f8b7e20`** (the user's voice on the Mac, decided 2026-11-20: Touch ID or the login password for each state change,
+  with the caller check): `Platform.Approval` (LocalAuthentication's `deviceOwnerAuthentication` on the Mac, with a
+  timeout; Linux: unavailable) and `ApprovalVoice` in VibeNode (the uid, the installed command line's cdhash, the guard
+  rails without the environment line, then the card's text as the dialog's reason for a state change). **Not wired**:
+  the user's server on the Mac stays on the closed rule and the user's node refused, until the design's step 4.
+  `ApprovalVoiceTests` (a fake authenticator, both systems) and `ApprovalLintTests` (no test asks). **Needs a real
+  Mac** (step 4): the dialog from `vibeswitcher-server` as a LaunchAgent in `gui/<uid>`, its title (the program's
+  name, which the reason follows), with the lid closed, over ssh, with no Touch ID enrolled (the password then), and
+  `.notInteractive`/`.passcodeNotSet` read as unavailable; what a second dialog does while one is open; whether a
+  process of the user's can answer it (Accessibility consent); then the rule wired: `VoiceRule.Mode` gains the Mac's
+  mode, `Requests` judging each request by `ApprovalVoice` with the card each kind acts on, and the server's start
+  reading the installed `bin/vibeswitcher`'s cdhash.
 
 ## What `v2` found on the Mac and doesn't change
 
