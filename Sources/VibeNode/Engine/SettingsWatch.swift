@@ -96,6 +96,7 @@ extension LeadEngine {
         queue.async { [self] in
             switch key {
             case "policy":
+                leads.update(sessions: link.sessions, holders: holders)
                 lookAtPolicy()
                 return then(!leads.leads.values.allSatisfy { $0.session == nil })
             case _ where key.hasPrefix("boost") || NodeSettings.setting(key)?.home == .limits:

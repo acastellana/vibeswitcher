@@ -166,10 +166,11 @@ extension NodeSettings {
         floor = LeadReviewFloor(sensitivePaths: floor.sensitivePaths, strictPaths: floor.strictPaths, auditFinders: floor.auditFinders,
                                 mergePolicy: floor.mergePolicy, riskLines: floor.riskLines, riskModel: floor.riskModel,
                                 verifierDifferent: floor.verifierDifferent, auditSamplePercent: floor.auditSamplePercent)
-        let saved: LeadReviewFloor
-        do { saved = try vault.setReviewFloor(floor, root: root) ?? floor } catch {
+        let recordedNow: LeadReviewFloor?
+        do { recordedNow = try vault.setReviewFloor(floor, root: root) } catch {
             throw Refusal("the session host didn't record the floor (\(error)): nothing was changed")
         }
+        guard let saved = recordedNow else { throw Refusal("the session host recorded no floor: nothing was changed. Try again") }
         let now = shown(saved)
         let rule = setting.key.dropFirst("floor_".count)
         let told = "The user set this project's review rules' floor with `vibeswitcher set`: \(rule) is now \(now). configure may raise a rule "
