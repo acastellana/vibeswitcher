@@ -377,10 +377,13 @@ public enum GitGuard {
     /// baseline, before git runs, so the user's own hooks keep running in the lead's git. Told to the lead once (`notice`).
     /// One that fails (a hook changing as it's copied) is tried again at the next call, git meanwhile running no hooks.
     /// Taken in the main checkout, wherever the guard first sees the repository (`baselineFolder`).
-    static func baseline(in directory: String, commonDir: String) {
-        guard !FileManager.default.fileExists(atPath: store(commonDir: commonDir).appendingPathComponent("accepted.json").path),
-              let folder = baselineFolder(for: directory) else { return }
-        _ = try? accept(root: folder, baseline: true)
+    /// Why the baseline wasn't taken, when one was asked for and failed; `store`: a test's (`accept`'s).
+    @discardableResult
+    static func baseline(in directory: String, commonDir: String, store given: URL? = nil) -> String? {
+        guard !FileManager.default.fileExists(atPath: (given ?? store(commonDir: commonDir)).appendingPathComponent("accepted.json").path),
+              let folder = baselineFolder(for: directory) else { return nil }
+        do { _ = try accept(root: folder, only: nil, baseline: true, store: given, step: nil) } catch { return "\(error)" }
+        return nil
     }
 
     /// Where the baseline of the repository `directory` is in is taken: `directory` itself in the checkout that holds
@@ -442,26 +445,36 @@ public enum GitGuard {
         return found.sorted { $0.name < $1.name }
     }
 
-    static func accepted(commonDir: String) -> Accepted? {
-        let file = store(commonDir: commonDir).appendingPathComponent("accepted.json")
+    static func accepted(commonDir: String) -> Accepted? { accepted(in: store(commonDir: commonDir)) }
+
+    /// The record in a repository's `store`, as the guard reads it.
+    static func accepted(in store: URL) -> Accepted? {
+        let file = store.appendingPathComponent("accepted.json")
         return (try? Data(contentsOf: file)).flatMap { try? JSONDecoder().decode(Accepted.self, from: $0) }
     }
 
     /// What the lead is told while the repository's hooks or its own executable config aren't what it accepted: what
     /// the tool server's git doesn't run, and how to accept it; or, in a repository whose config includes another file,
     /// that it runs no git there at all (`refusal`). Nil when there's nothing to tell.
-    public static func notice(root: String) -> String? {
+    public static func notice(root: String) -> String? { notice(root: root, store: nil) }
+
+    /// `notice`, with the repository's store at `given` (a test's; `store(commonDir:)` otherwise).
+    static func notice(root: String, store given: URL?) -> String? {
         let place = place(of: root)
         if case let .unsure(folder) = place { return "Git: " + unsure(folder) }
         guard let dirs = place.dirs else { return nil }
         let config = repositoryConfig(common: dirs.common)
         if let refused = refusal(config.includes) { return "Git config: " + refused }
+        let store = given ?? store(commonDir: dirs.common)
         // Asked before any git ran here: the hooks it has now are the baseline, not news.
-        baseline(in: root, commonDir: dirs.common)
+        let failed = baseline(in: root, commonDir: dirs.common, store: given)
         var parts: [String] = []
         if let folder = hooksFolder(root: root) {
+            if let failed {
+                parts.append("Git hooks: VibeSwitcher's guarded git couldn't take the baseline of \(folder) (\(failed)), so it runs no hooks in this repository until it can (it tries again before each step) or you accept some (accept_git_hooks). Its private folder (~/.vibeswitcher/lead) may have been changed, and a worker's shell can write there: tell the user.")
+            }
             let now = files(in: folder)
-            let before = accepted(commonDir: dirs.common)
+            let before = accepted(in: store)
             let was = before?.files ?? []
             var changes: [String] = []
             for file in now {
@@ -475,9 +488,7 @@ public enum GitGuard {
                 changes.append("\(old.name) (removed\(before?.run.contains(old.name) == true ? "; its accepted copy still runs" : ""))")
             }
             if let before, before.baseline == true, before.told != true {
-                var told = before
-                told.told = true
-                try? VibePaths.writePrivate(try JSONEncoder().encode(told), to: store(commonDir: dirs.common).appendingPathComponent("accepted.json"))
+                markTold(before, store: store)
                 if !before.run.isEmpty {
                     let ran = before.files.filter { before.run.contains($0.name) }.map { "\($0.name) (\($0.short))" }
                     let inside = real(before.folder).hasPrefix(real(root) + "/") && !real(before.folder).hasPrefix(real(dirs.common) + "/")
@@ -503,9 +514,64 @@ public enum GitGuard {
         public var description: String
     }
 
+    /// `before`'s record in `store` with its `told` flag set: the lead heard of the baseline. Written outside the store
+    /// and renamed into it, so no temporary file of it is ever in the folder the vault looks at (`staging`). `step`: a
+    /// test's, called after each change on disk (`accept`'s).
+    static func markTold(_ before: Accepted, store: URL, step: ((String) -> Void)? = nil) {
+        var told = before
+        told.told = true
+        let staging = staging(of: store)
+        let file = staging.appendingPathComponent("accepted.\(UUID().uuidString).json")
+        guard (try? prepare(staging: staging)) != nil,
+              (try? VibePaths.writePrivate(try JSONEncoder().encode(told), to: file)) != nil else { return }
+        step?("told: written, not renamed")
+        if rename(file.path, store.appendingPathComponent("accepted.json").path) != 0 { unlink(file.path) }
+        step?("told: renamed")
+    }
+
+    /// Where the guard builds what it then renames into a repository's `store`: `lead/git-hooks-staging`, beside the
+    /// stores' folder (`lead/git-hooks`), so on its filesystem and outside what the vault's look reads, and as private
+    /// (no role's tools read or edit `~/.vibeswitcher/lead`).
+    static func staging(of store: URL) -> URL {
+        store.deletingLastPathComponent().deletingLastPathComponent().appendingPathComponent("git-hooks-staging", isDirectory: true)
+    }
+
+    /// The staging folder, made ready: what a shell of the user's own put in its place (a file, a link) removed, never
+    /// followed, and the folder made 0700 (its mode taken away, too), so that trick can't make the baseline fail. What
+    /// a killed accept left there (`store.`, `old.`, `accepted.….json`) goes once it's `stagingLeftoverAge` old: a
+    /// younger one may be another accept's at work.
+    static func prepare(staging: URL) throws {
+        var info = stat()
+        if lstat(staging.path, &info) == 0 {
+            if (info.st_mode & S_IFMT) != S_IFDIR {
+                guard unlink(staging.path) == 0 else { throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO) }
+            } else {
+                _ = chmod(staging.path, 0o700)
+            }
+        }
+        try VibePaths.ensurePrivate(staging)
+        let fileManager = FileManager.default
+        for name in (try? fileManager.contentsOfDirectory(atPath: staging.path)) ?? []
+        where name.hasPrefix("store.") || name.hasPrefix("old.") || (name.hasPrefix("accepted.") && name.hasSuffix(".json")) {
+            let path = staging.appendingPathComponent(name).path
+            guard let changed = (try? fileManager.attributesOfItem(atPath: path))?[.modificationDate] as? Date,
+                  Date().timeIntervalSince(changed) > stagingLeftoverAge else { continue }
+            try? fileManager.removeItem(atPath: path)
+        }
+    }
+
+    /// How old a leftover in the staging folder is before an accept sweeps it (an accept takes well under a second).
+    static let stagingLeftoverAge: TimeInterval = 3600
+
     /// Takes a copy of the repository's hooks, as they are now, for the tool server's git to run (all of them, or
     /// only those named in `only`); the folder as it is now is what `notice` compares with afterwards. What was accepted.
     public static func accept(root: String, only: [String]? = nil, baseline: Bool = false) throws -> String {
+        try accept(root: root, only: only, baseline: baseline, store: nil, step: nil)
+    }
+
+    /// `accept`, writing the repository's store at `given` (a test's; `store(commonDir:)` otherwise), with `step`
+    /// (a test's) called after each change on disk, named.
+    static func accept(root: String, only: [String]?, baseline: Bool, store given: URL?, step: ((String) -> Void)?) throws -> String {
         guard let dirs = gitDirs(of: root), let folder = hooksFolder(root: root) else {
             throw Refused(description: "\(root) isn't a git repository.")
         }
@@ -514,17 +580,21 @@ public enum GitGuard {
             throw Refused(description: "There's no \(unknown) in \(folder) (it has \(now.isEmpty ? "nothing" : now.map(\.name).joined(separator: ", "))).")
         }
         let run = now.filter { only?.contains($0.name) ?? true }
-        let store = store(commonDir: dirs.common)
-        let fresh = store.appendingPathComponent("copy.\(UUID().uuidString)", isDirectory: true)
-        let old = store.appendingPathComponent("old.\(UUID().uuidString)", isDirectory: true)
+        let store = given ?? store(commonDir: dirs.common)
+        // Built whole outside the watched folder, then put in place by one rename: the vault's look (`LinuxSealList`'s
+        // `hookEntryMayCome`) never sees it half written, as it did between the copy, its rename and the record.
+        let staging = staging(of: store)
+        let fresh = staging.appendingPathComponent("store.\(UUID().uuidString)", isDirectory: true)
+        let old = staging.appendingPathComponent("old.\(UUID().uuidString)", isDirectory: true)
         let fileManager = FileManager.default
         defer {
             try? fileManager.removeItem(at: fresh)
             try? fileManager.removeItem(at: old)
         }
         do {
-            let shims = fresh.appendingPathComponent("hooks", isDirectory: true)
-            let copies = fresh.appendingPathComponent("run", isDirectory: true)
+            try prepare(staging: staging)
+            let shims = fresh.appendingPathComponent("copy/hooks", isDirectory: true)
+            let copies = fresh.appendingPathComponent("copy/run", isDirectory: true)
             try VibePaths.ensurePrivate(shims)
             try VibePaths.ensurePrivate(copies)
             for file in run {
@@ -539,16 +609,46 @@ public enum GitGuard {
                 try fileManager.setAttributes([.posixPermissions: file.executable ? 0o700 : 0o600], ofItemAtPath: copy.path)
                 // What git runs: the copy, as branch code. What it reads sits around it in run, as in the folder.
                 guard file.executable, !file.name.contains("/") else { continue }
-                let runs = runCopy(commonDir: dirs.common).appendingPathComponent(file.name).path
+                // The copy where it will be once the store is in place.
+                let runs = store.appendingPathComponent("copy/run", isDirectory: true).appendingPathComponent(file.name).path
                 let shim = shims.appendingPathComponent(file.name)
                 try VibePaths.writePrivate(Data(Self.shim(running: runs).utf8), to: shim)
                 try fileManager.setAttributes([.posixPermissions: 0o700], ofItemAtPath: shim.path)
             }
-            let current = copy(commonDir: dirs.common)
-            if fileManager.fileExists(atPath: current.path) { try fileManager.moveItem(at: current, to: old) }
-            try fileManager.moveItem(at: fresh, to: current)
             let record = Accepted(folder: folder, files: now, run: run.map(\.name), baseline: baseline ? true : nil)
-            try VibePaths.writePrivate(try JSONEncoder().encode(record), to: store.appendingPathComponent("accepted.json"))
+            try VibePaths.writePrivate(try JSONEncoder().encode(record), to: fresh.appendingPathComponent("accepted.json"))
+            step?("built")
+            let failed = { POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO) }
+            // The stores' folder, when it isn't there yet, made 0700 in one step (a umask only takes bits away): the
+            // look records its mode, and one made 0755 then changed to 0700 (`ensurePrivate`) is a change in place.
+            let stores = store.deletingLastPathComponent()
+            try VibePaths.ensurePrivate(stores.deletingLastPathComponent())
+            guard mkdir(stores.path, 0o700) == 0 || errno == EEXIST else { throw failed() }
+            if fileManager.fileExists(atPath: store.path) {
+                // A store there already (an accept after the baseline) keeps its folder and its record, never absent
+                // once written: `baseline`, before every guarded step, takes a store with no record as never seen.
+                // Its copy goes aside and the new one takes its place (between the two git finds no hooks folder, so
+                // it runs none); then the new record replaces the old by a rename. All inside a store the seal has
+                // seen, where what changes waits for the user as before.
+                let current = store.appendingPathComponent("copy", isDirectory: true)
+                let aside = fileManager.fileExists(atPath: current.path)
+                if aside {
+                    guard rename(current.path, old.path) == 0 else { throw failed() }
+                    step?("old copy moved aside")
+                }
+                guard rename(fresh.appendingPathComponent("copy").path, current.path) == 0 else {
+                    let failure = failed()
+                    if aside { _ = rename(old.path, current.path) }
+                    throw failure
+                }
+                step?("copy renamed")
+                guard rename(fresh.appendingPathComponent("accepted.json").path, store.appendingPathComponent("accepted.json").path) == 0 else { throw failed() }
+                step?("record renamed")
+            } else {
+                // A new one: one rename, never over a store another step put there meanwhile (that one stays).
+                guard rename(fresh.path, store.path) == 0 else { throw failed() }
+                step?("store renamed")
+            }
         } catch let refused as Refused {
             throw refused
         } catch {
