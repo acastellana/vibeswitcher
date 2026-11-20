@@ -10,9 +10,10 @@ import Testing
 /// to (`EngineEndToEndTests.tell`) or calls its tool server as the agent would (`FakeClaude.Files.call`); what Claude
 /// Code's hooks would write the case writes (`hook`). A row that truly needs a real Claude is skipped saying why.
 ///
-/// `scripts/e2e/node-acceptance.sh` runs this suite alone; it is gated (`NodeAcceptance.enabled`) behind
-/// `VIBESWITCHER_ACCEPTANCE=1`, set by that script and by `scripts/nightly.sh`.
-@Suite(NodeTraits.linuxOnly, .enabled(if: NodeAcceptance.enabled, "set VIBESWITCHER_ACCEPTANCE=1 (scripts/e2e/node-acceptance.sh)"),
+/// Its cases run in parallel, about a minute in all on a 24-core machine (2026-11-20), so the suite runs wherever
+/// VibeNodeTests does: the Linux CI's core job, the full suite and `scripts/nightly.sh`. `scripts/e2e/node-acceptance.sh`
+/// runs it alone (or one row); `VIBESWITCHER_ACCEPTANCE=0` leaves it out of a run (`NodeAcceptance.enabled`).
+@Suite(NodeTraits.linuxOnly, .enabled(if: NodeAcceptance.enabled, "VIBESWITCHER_ACCEPTANCE=0 leaves the acceptance rows out"),
        .timeLimit(.minutes(10)))
 struct NodeAcceptanceTests {
     private let scratch = Scratch()
@@ -543,8 +544,8 @@ struct NodeAcceptanceTests {
 
 /// The suite's gate and helpers.
 enum NodeAcceptance {
-    /// Whether the acceptance suite runs: `VIBESWITCHER_ACCEPTANCE=1` (its script, the nightly run).
-    static let enabled = ProcessInfo.processInfo.environment["VIBESWITCHER_ACCEPTANCE"] == "1"
+    /// Whether the acceptance suite runs: unless `VIBESWITCHER_ACCEPTANCE=0`.
+    static let enabled = ProcessInfo.processInfo.environment["VIBESWITCHER_ACCEPTANCE"] != "0"
 }
 
 extension NodeAcceptanceTests {
