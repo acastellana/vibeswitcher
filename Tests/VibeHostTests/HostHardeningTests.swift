@@ -418,13 +418,14 @@ private let serveAsAHardenedProcess: @convention(c) () -> Void = { HardenedHelpe
     /// After a refused `start()`: the host let go of `lock` at once, nothing listening at `socket`, and `lock` free for
     /// another to take.
     ///
-    /// Letting go at once is the host's part, checked first: no descriptor of this process open on the lock's file. The flock itself belongs to the open file description, which a child
-    /// spawned by any thread of this process while the host held it shares from its fork until its exec closes it (the
-    /// host's lock is close-on-exec: `isCloseOnExec`). Every test runs in this one process, and many spawn, so a full
-    /// run 18 wide once found the lock still held just after the host had closed it. So a lock still held is waited
-    /// for, bounded (`eventuallyBlocking`): such a child's copy goes at its exec, while a descriptor the host kept or
-    /// let a long-lived child inherit would hold it for good, and fail here. `seenHeld` runs when the first look finds
-    /// it held, before the wait (a test holding such a child lets it go there).
+    /// Letting go at once is the host's part, checked first: no descriptor of this process open on the lock's file. The
+    /// flock itself belongs to the open file description, which a child spawned by any thread of this process while
+    /// the host held it shares from its fork until its exec closes it (the host's lock is close-on-exec:
+    /// `isCloseOnExec`). Every test runs in this one process, and many spawn, so a full run 18 wide once found the lock
+    /// still held just after the host had closed it. So a lock still held is waited for, bounded
+    /// (`eventuallyBlocking`): such a child's copy goes at its exec, while a descriptor the host kept or let a
+    /// long-lived child inherit would hold it for good, and fail here. `seenHeld` runs when the first look finds it
+    /// held, before the wait (a test holding such a child lets it go there).
     static func expectNotHeld(_ lock: String, socket: String, server: HostServer, seenHeld: () -> Void = {},
                               sourceLocation: SourceLocation = #_sourceLocation) {
         #expect(openDescriptors(on: lock).isEmpty, "this process still has the lock open", sourceLocation: sourceLocation)
@@ -1215,7 +1216,7 @@ final class SpawnHeldBeforeExec: @unchecked Sendable {
     let ready: String, go: String
     private(set) var pid: pid_t = -1
     private let spawned = DispatchSemaphore(value: 0)
-    private var started = false, released = false, failed = false
+    private var started = false, released = false, failed = false, failedWriter: Int32 = -1
     /// Whether the child was spawned and is held (between `start` and `release`).
     var holds: Bool { started && !failed && !released }
 
@@ -1237,9 +1238,9 @@ final class SpawnHeldBeforeExec: @unchecked Sendable {
             case .success(let started): pid = started
             case .failure:
                 failed = true
-                // No child to open `ready`: this opens it instead, so `start`'s open below returns.
-                let fd = open(ready, O_WRONLY | O_CLOEXEC)
-                if fd >= 0 { Sys.close(fd) }
+                // No child to open `ready` (or it ended): this opens it instead, kept open until `release`, so that
+                // `start`'s open below returns whether it began before this or after. Read and write: no waiting.
+                failedWriter = open(ready, O_RDWR | O_CLOEXEC)
             }
             spawned.signal()
         }
@@ -1257,5 +1258,6 @@ final class SpawnHeldBeforeExec: @unchecked Sendable {
         #expect(spawned.wait(timeout: .now() + hangGuard) == .success, "the held spawn didn't return")
         var status: Int32 = 0
         if pid > 0 { _ = waitpid(pid, &status, 0) }
+        if failedWriter >= 0 { Sys.close(failedWriter) }
     }
 }
