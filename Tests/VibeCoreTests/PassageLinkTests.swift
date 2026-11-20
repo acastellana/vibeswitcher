@@ -12,7 +12,7 @@ struct PassageLinkTests {
     static let otherPeer = "0d0d0d0d"
 
     /// A folder holding the fake `passage`, its inbox, and what each call left: `calls` (one line of arguments per
-    /// run), `sent-<name>` (the file `send` was given), `listen.pid` and `listen.stopped`. `send-exit` sets send's exit
+    /// run), `sent-<name>` (the file `send` was given), `listen.pid`, `listen.child` and `listen.stopped`. `send-exit` sets send's exit
     /// code, `send-signal` a signal it ends by instead; with `send-hold`, send makes `send-started` and waits for
     /// `send-go` (`inbox-hold`, `inbox-started` and `inbox-go` the same for inbox). `inbox.jsonl` is what `inbox` prints.
     struct FakePassage {
@@ -61,7 +61,10 @@ struct PassageLinkTests {
                     exit 0 ;;
                 listen)
                     trap 'echo TERM > "$here/listen.stopped"; kill $! 2>/dev/null; exit 0' TERM
-                    /bin/sleep 3600 &
+                    # What it waits on ends with it however it ends: a SIGKILL runs no trap, and a /bin/sleep 3600
+                    # here outlived it (the Mac CI's leftover).
+                    /usr/bin/perl -e 'select(undef, undef, undef, 0.1) while getppid() == $ARGV[0]' $$ &
+                    echo $! > "$here/listen.child"
                     echo $$ > "$here/listen.pid"
                     if [ -e "$here/listen-line" ]; then cat "$here/listen-line"; fi
                     wait $!
@@ -466,6 +469,25 @@ struct PassageLinkTests {
         defer { listener.stop() }
         #expect(await offPool { heard.wait(timeout: .now() + hangGuard) } == .success)
         #expect(listener.isRunning)
+    }
+
+    /// The fake's `passage listen` leaves nothing running however it ends. A SIGKILL runs no trap (a stop past its grace
+    /// on a loaded runner, a test's defer, the launch's `endOrphan` after its grace): the process it waits on goes with
+    /// it. A `/bin/sleep 3600` it left was the Mac CI's leftover (run 44737799857).
+    @Test func theFakesListenLeavesNothingWhenKilled() async throws {
+        let fake = try FakePassage(scratch)
+        let listen = Process()
+        listen.executableURL = URL(fileURLWithPath: fake.executable)
+        listen.arguments = ["listen"]
+        try listen.run()
+        defer { if listen.isRunning { kill(listen.processIdentifier, SIGKILL); waitForEnd(listen) } }
+        #expect(await eventually { fake.text("listen.pid") != nil })
+        let child = try #require(fake.text("listen.child").flatMap { Int32($0.trimmingCharacters(in: .whitespacesAndNewlines)) })
+        let waited = try #require(SessionStrays.descendants(of: getpid()).first { $0.pid == child })
+        defer { if SessionStrays.isRunning(waited) { kill(child, SIGKILL) } }
+        kill(listen.processIdentifier, SIGKILL)
+        #expect(await exited(listen), "pid \(listen.processIdentifier) still running")
+        #expect(await eventually(timeout: 30) { !SessionStrays.isRunning(waited) }, "pid \(child) outlived the passage listen it was under")
     }
 
     @Test func passageListenRunsOnlyWhileARequestIsOutstanding() async throws {
