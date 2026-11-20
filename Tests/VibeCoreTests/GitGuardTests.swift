@@ -519,4 +519,106 @@ struct GitGuardTests: LeadTeamFixture {
         #expect(Git.run(["log", "-1", "--format=%B"], in: root).output == "second")
         #expect(marked(marks) == ["user-commit-msg"])
     }
+
+    /// An accept over a repository's store already there (the lead's accept_git_hooks after the baseline) never leaves
+    /// it without its record: a guarded git step at any moment of it (each takes the baseline first, `command`) sees
+    /// the repository as seen, so it never takes what the hooks folder holds now (a worker's hook) as a new baseline,
+    /// and the lead's accept is what's in place after (F1 of the audit at f0a174ef).
+    @Test func aBaselineAskedForWhileAnAcceptReplacesTheStoreIsNotTaken() throws {
+        let root = try repo()
+        let marks = try marks()
+        let common = try #require(GitGuard.gitDirs(of: root)?.common)
+        try hook("pre-commit", in: root + "/.git/hooks", marks: marks)
+        let store = temp.url("home").appendingPathComponent(".vibeswitcher/lead/git-hooks/0123456789abcdef")
+        _ = try GitGuard.accept(root: root, only: nil, baseline: true, store: store, step: nil)
+        try hook("post-merge", in: root + "/.git/hooks", marks: marks)
+        var steps: [String] = []
+        var unrecorded: [String] = []
+        var taken: [String: String] = [:]
+        let step = { (name: String) in
+            steps.append(name)
+            if GitGuard.accepted(in: store) == nil { unrecorded.append(name) }
+            if let failed = GitGuard.baseline(in: root, commonDir: common, store: store) { taken[name] = "failed: \(failed)" }
+            if GitGuard.accepted(in: store)?.baseline == true, GitGuard.accepted(in: store)?.run.contains("post-merge") == true { taken[name] = "taken" }
+        }
+        let accepted = Result { try GitGuard.accept(root: root, only: ["pre-commit"], baseline: false, store: store, step: step) }
+        #expect((try? accepted.get()) != nil, "\(accepted)")
+        #expect(steps.count >= 2, "\(steps)")
+        #expect(unrecorded.isEmpty, "the record missing at: \(unrecorded)")
+        #expect(taken.isEmpty, "a baseline in the replace: \(taken)")
+        let record = try #require(GitGuard.accepted(in: store))
+        #expect(record.baseline == nil && record.run == ["pre-commit"], "\(record)")
+        let shims = (try? FileManager.default.contentsOfDirectory(atPath: store.appendingPathComponent("copy/hooks").path)) ?? []
+        #expect(shims == ["pre-commit"], "\(shims)")
+    }
+
+    /// What a shell of the user's own can do to the folder the guard builds a store in (`GitGuard.staging`): put a
+    /// file or a link in its place, or take its mode away. The guard puts it right and takes the baseline; before, the
+    /// baseline failed with nothing held or told (the audit at f0a174ef).
+    @Test func aStagingFolderMadeUnusableIsPutRightAndTheBaselineTaken() throws {
+        let root = try repo()
+        let marks = try marks()
+        let common = try #require(GitGuard.gitDirs(of: root)?.common)
+        try hook("pre-commit", in: root + "/.git/hooks", marks: marks)
+        let lead = temp.url("home").appendingPathComponent(".vibeswitcher/lead")
+        let staging = lead.appendingPathComponent("git-hooks-staging")
+        try FileManager.default.createDirectory(at: lead, withIntermediateDirectories: true)
+        defer { chmod(staging.path, 0o700) }
+        for (index, spoil) in ["a file", "a link", "its mode taken away"].enumerated() {
+            let store = lead.appendingPathComponent("git-hooks/\(index)123456789abcdef")
+            try? FileManager.default.removeItem(at: staging)
+            switch index {
+            case 0: try "x\n".write(to: staging, atomically: false, encoding: .utf8)
+            case 1: try FileManager.default.createSymbolicLink(at: staging, withDestinationURL: temp.url("nowhere"))
+            default:
+                try FileManager.default.createDirectory(at: staging, withIntermediateDirectories: true)
+                try #require(chmod(staging.path, 0) == 0)
+            }
+            let failed = GitGuard.baseline(in: root, commonDir: common, store: store)
+            #expect(failed == nil, "\(spoil): \(failed ?? "")")
+            #expect(GitGuard.accepted(in: store)?.run == ["pre-commit"], "\(spoil)")
+            var info = stat()
+            #expect(lstat(staging.path, &info) == 0 && (info.st_mode & S_IFMT) == S_IFDIR && (info.st_mode & 0o777) == 0o700, "\(spoil)")
+        }
+    }
+
+    /// A baseline that can't be taken (here the lead's private folder made unwritable) is told to the lead with why:
+    /// the guard's git runs no hooks there until one is taken or the lead accepts some.
+    @Test func aBaselineThatCantBeTakenIsTold() throws {
+        let root = try repo()
+        let marks = try marks()
+        try hook("pre-commit", in: root + "/.git/hooks", marks: marks)
+        let lead = temp.url("home").appendingPathComponent(".vibeswitcher/lead")
+        try FileManager.default.createDirectory(at: lead.appendingPathComponent("git-hooks"), withIntermediateDirectories: true)
+        let store = lead.appendingPathComponent("git-hooks/0123456789abcdef")
+        try #require(chmod(lead.path, 0o500) == 0)
+        defer { chmod(lead.path, 0o700) }
+        let told = GitGuard.notice(root: root, store: store) ?? ""
+        #expect(told.contains("couldn't take the baseline of \(root)/.git/hooks"), "\(told)")
+        #expect(GitGuard.accepted(in: store) == nil)
+    }
+
+    /// What an accept killed halfway left in the staging folder (a store it built, a copy set aside, a told record) is
+    /// swept at the next accept once it's an hour old; one younger may be another accept's at work, and stays.
+    @Test func whatAKilledAcceptLeftInStagingIsSweptAtTheNext() throws {
+        let root = try repo()
+        let lead = temp.url("home").appendingPathComponent(".vibeswitcher/lead")
+        let staging = lead.appendingPathComponent("git-hooks-staging")
+        let stale = ["store.\(UUID().uuidString)", "old.\(UUID().uuidString)", "accepted.\(UUID().uuidString).json"]
+        let young = "store.\(UUID().uuidString)"
+        for name in stale + [young] {
+            let url = staging.appendingPathComponent(name)
+            if name.hasSuffix(".json") {
+                try FileManager.default.createDirectory(at: staging, withIntermediateDirectories: true)
+                try "{}\n".write(to: url, atomically: false, encoding: .utf8)
+            } else {
+                try FileManager.default.createDirectory(at: url.appendingPathComponent("copy/hooks"), withIntermediateDirectories: true)
+            }
+            if name != young { try FileManager.default.setAttributes([.modificationDate: Date(timeIntervalSinceNow: -2 * 3600)], ofItemAtPath: url.path) }
+        }
+        let store = lead.appendingPathComponent("git-hooks/0123456789abcdef")
+        _ = try GitGuard.accept(root: root, only: nil, baseline: true, store: store, step: nil)
+        let left = try FileManager.default.contentsOfDirectory(atPath: staging.path)
+        #expect(left == [young], "\(left)")
+    }
 }

@@ -365,7 +365,7 @@ public enum LinuxSealList {
         }
         if name == hooksName {
             for (path, entry) in new where old[path] == nil {
-                guard hookEntryMayCome(path, entry: entry, old: old) else { return nil }
+                guard hookEntryMayCome(path, entry: entry, old: old, new: new) else { return nil }
             }
         }
         if name == runName {
@@ -509,14 +509,18 @@ public enum LinuxSealList {
     /// Whether `path`, an entry of the accepted hooks that wasn't there (`old`, as sealed), comes as no change. Git takes
     /// the lead's hooks from `<key>/copy/hooks` (`GitGuard.command`'s core.hooksPath): a file there that isn't a shim
     /// would run as the lead's tool server. So only GitGuard's baseline of a repository the seal hasn't seen comes (its
-    /// folders, its copies in `run`, which a shim runs as branch code, its shims, and its record); and the record of
-    /// one already there (written after its copy). Anything else added under a repository's folder waits for the user.
-    static func hookEntryMayCome(_ path: String, entry: String, old: [String: String]) -> Bool {
+    /// folders, its copies in `run`, which a shim runs as branch code, its shims, and its record), and only whole: with
+    /// its record in the same look (`new`), as GitGuard puts a store in place by one rename (`GitGuard.staging`); and
+    /// the record of one already there (a store sealed without one, whose copy a baseline then swaps, as it was, and
+    /// whose record it adds). Anything else added under a repository's folder waits for the user.
+    static func hookEntryMayCome(_ path: String, entry: String, old: [String: String], new: [String: String]) -> Bool {
         let parts = path.split(separator: "/", omittingEmptySubsequences: false).map(String.init)
         let kind = ConfigSeal.entryKind(entry)
+        if path == ownEntry { return kind == "d" }  // The folder itself, made.
         guard let store = parts.first, !store.isEmpty, !parts.contains("") else { return false }
         if parts.count == 2, parts[1] == acceptedRecord { return kind == "f" }
         guard !old.keys.contains(where: { $0 == store || $0.hasPrefix(store + "/") }) else { return false }
+        guard ConfigSeal.entryKind(new[store + "/" + acceptedRecord]) == "f" else { return false }
         let rest = Array(parts.dropFirst())
         switch rest.count {
         case 0: return kind == "d"

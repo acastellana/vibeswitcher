@@ -624,6 +624,54 @@ struct LinuxSealListTests {
         #expect(held(baseline), "a new repository's folder with anything else")
     }
 
+    /// GitGuard puts a repository's store in place whole (`GitGuard.staging`, one rename), so the look takes a new one
+    /// only finished: what isn't (a store with its copy and no record, a writer's temporary copy or record left in
+    /// one, a foreign file) is held, as a changed record is; and the staging folder is outside every watched path.
+    @Test(Self.linux) func aPlantedEntryThatIsntTheWritersFinishedStoreIsHeld() throws {
+        let home = try home()
+        let hooks = home + "/.vibeswitcher/lead/git-hooks"
+        let item = try #require(LinuxSealList.watched(home: home, uid: getuid()).first { $0.name == "~/.vibeswitcher/lead/git-hooks" })
+        let key = ConfigSeal.keyPrefix + item.name
+        let held = { (recorded: [String: String]) -> Bool in
+            let now = ConfigSeal.hashes(of: [item])
+            return now[key] != recorded[key] && LinuxSealList.cameOrWent(key: key, recorded: recorded, now: now) == nil
+        }
+        try Self.baseline(in: hooks, store: "0123456789abcdef", hooks: ["pre-commit"])
+        let sealed = ConfigSeal.hashes(of: [item])
+        let fresh = hooks + "/fedcba9876543210"
+        try Self.baseline(in: hooks, store: "fedcba9876543210", hooks: ["pre-commit", "post-merge"])
+        #expect(!held(sealed), "a new repository's finished store")
+        try FileManager.default.removeItem(atPath: fresh + "/accepted.json")
+        #expect(held(sealed), "a new repository's copy with no record")
+        try FileManager.default.removeItem(atPath: fresh)
+        try FileManager.default.createDirectory(atPath: fresh, withIntermediateDirectories: true)
+        #expect(held(sealed), "a new repository's folder alone")
+        try FileManager.default.removeItem(atPath: fresh)
+        let uuid = "6F1C2B9E-0D7A-4C1E-9B3F-2A5D8E7C4B10"
+        for (planted, what) in [("fedcba9876543210/copy.\(uuid)/hooks/pre-commit", "a writer's temporary copy in a new store"),
+                                ("0123456789abcdef/copy.\(uuid)/hooks/pre-commit", "a writer's temporary copy in a store sealed"),
+                                ("0123456789abcdef/.accepted.json.\(uuid)", "a record's temporary file in a store sealed"),
+                                ("0123456789abcdef/notes", "a foreign file in a store sealed"),
+                                ("notes", "a foreign file beside the stores")] {
+            if planted.hasPrefix("fedcba9876543210/") { try Self.baseline(in: hooks, store: "fedcba9876543210", hooks: ["pre-commit"]) }
+            try FileManager.default.createDirectory(atPath: ((hooks + "/" + planted) as NSString).deletingLastPathComponent, withIntermediateDirectories: true)
+            try installScript("#!/bin/sh\necho planted\n", atPath: hooks + "/" + planted, mode: 0o700)
+            #expect(held(sealed), "\(what)")
+            try FileManager.default.removeItem(atPath: hooks + "/" + planted)
+            try? FileManager.default.removeItem(atPath: fresh)
+            try? FileManager.default.removeItem(atPath: hooks + "/0123456789abcdef/copy.\(uuid)")
+            #expect(!held(sealed), "\(what): taken out")
+        }
+        try Self.record(in: hooks + "/0123456789abcdef", told: nil, run: [])
+        #expect(held(sealed), "the record changed")
+        // Where GitGuard builds a store, or its told record, before the rename: watched by nothing.
+        let staging = GitGuard.staging(of: URL(fileURLWithPath: hooks + "/0123456789abcdef")).path
+        #expect(staging == home + "/.vibeswitcher/lead/git-hooks-staging")
+        for watched in ConfigSeal.homeWatched(home: home) {
+            #expect(!(staging == watched.path || staging.hasPrefix(watched.path + "/")), "\(watched.name) covers the staging folder")
+        }
+    }
+
     /// A repository's accepted hooks as `GitGuard.accept` writes its baseline under `hooks/store`: for each hook, its copy
     /// in `run` and its shim in `hooks` (running that copy under `VibePaths.root`, as GitGuard names it), then the record.
     static func baseline(in hooks: String, store: String, hooks names: [String]) throws {
@@ -748,6 +796,41 @@ struct LinuxSealVaultTests: LeadTeamFixture {
         try FileManager.default.createDirectory(atPath: hooks + "/fedcba9876543210/copy/hooks", withIntermediateDirectories: true)
         try installScript("#!/bin/sh\necho planted\n", atPath: hooks + "/fedcba9876543210/copy/hooks/post-merge", mode: 0o700)
         #expect(try lead.checkConfig(root: root).held == ["~/.vibeswitcher/lead/git-hooks"], "a planted repository")
+    }
+
+    /// GitGuard's own write of a repository's accepted hooks (its baseline, then the record's told flag), looked at by
+    /// the lead's vault after each of its changes on disk (`step`): no look holds the folder, and the next worker
+    /// starts (2026-11-19: a look between the writer's steps held `~/.vibeswitcher/lead/git-hooks`, and with it the
+    /// gate's `SwitchTests.aWorkerStartedByAPreSwitchLeadKeepsTheOldBuild`). The store is this home's, so the hooks
+    /// folder holds a file that isn't executable (copied into `run`, no shim: a shim names `VibePaths.root`'s store).
+    @Test(LinuxSealListTests.linux) func aLookBetweenTheHooksWritersStepsHoldsNothing() throws {
+        let root = try repo()
+        let runtime = FakeRuntime()
+        try write("helper\n", root + "/.git/hooks/_/husky.sh")
+        let tools = try lead(root, runtime)
+        _ = try vault.checkConfig(root: root)
+        let look = vault(for: runtime)
+        #expect(try look.checkConfig(root: root) == LeadVault.ConfigCheck())
+        let store = URL(fileURLWithPath: home + "/.vibeswitcher/lead/git-hooks/0123456789abcdef", isDirectory: true)
+        var steps: [String] = []
+        var held: [String: [String]] = [:]
+        let step = { (name: String) in
+            steps.append(name)
+            let found = (try? look.checkConfig(root: root).held) ?? ["the look failed"]
+            if !found.isEmpty { held[name] = found }
+        }
+        _ = try GitGuard.accept(root: root, only: nil, baseline: true, store: store, step: step)
+        let record = try #require(GitGuard.accepted(in: store))
+        #expect(record.run == ["_/husky.sh"] && record.baseline == true)
+        GitGuard.markTold(record, store: store, step: step)
+        #expect(GitGuard.accepted(in: store)?.told == true)
+        #expect(steps.count >= 3, "\(steps)")
+        #expect(held.isEmpty, "held at: \(held)")
+        let added = tools.call("add_task", ["title": "First", "goal": "b.txt exists", "acceptance": ["test -f b.txt"], "boundaries": ["only b.txt"]])
+        #expect(!added.isError, "\(added.text)")
+        let task = try #require(BoardStore(root: root).load().tasks.last?.slug)
+        let started = tools.call("start_worker", ["task": task])
+        #expect(!started.isError, "\(started.text)")
     }
 
     /// The roles' launch folders (`~/.vibeswitcher/lead/run`, `.entries`): a launch the vault recorded (the lead's, a
