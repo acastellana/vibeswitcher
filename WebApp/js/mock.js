@@ -68,7 +68,7 @@ export function createMock(store, options = {}) {
     add(W_CLEAN, { agent: 'codex', status: 'idle', since: ago(130), startedAt: ago(1300), role: 'worker', lead: SITE_PROJECT, task: 'cleanup-ended-folders', branch: 'agent/cleanup-ended-folders', title: 'Clean up ended sessions’ folders' });
     add(V_CLEAN, { status: 'working', since: ago(118), role: 'verifier', lead: SITE_PROJECT, task: 'cleanup-ended-folders', branch: 'agent/cleanup-ended-folders', title: 'Clean up ended sessions’ folders', detail: 'Checking the work', activity: 'Read tools/cleanup.py', activitySince: ago(60) });
     // Its own question, as the node reads it off the session's screen (`prompt`, SessionPrompt.value), and a message
-    // drafted for it on a page (`draft`).
+    // drafted for it on a page (`draft`, session.draft).
     add(ASKING, { cwd: API, status: 'needs-you', since: ago(20), startedAt: ago(140), title: 'Why does the payout job run twice?', detail: 'Bash: pytest tests/test_payouts.py',
       prompt: { question: 'Bash command\n  pytest tests/test_payouts.py\nDo you want to proceed?', options: ['Yes', 'Yes, and don’t ask again for this command', 'No, and tell Claude what to do differently (esc)'],
         descriptions: [null, null, null], text: [], multiSelect: false, at: ago(20) },

@@ -431,7 +431,7 @@ code, pre, kbd { font-family: var(--mono); }
 .copy-button.done { color: var(--done); }
 .confirm.sending .copy-line { opacity: 0.6; transition: opacity 0.16s; }
 /* Driving a session (views/drive.js): the message left for it over the box, its own question, End, and New session.
-   Each ends in the line that does it in a terminal, as a card's draft does. */
+   Each ends in the line that does it in a terminal, as a card's draft does there. */
 .copy-line .copy-text { flex: 1; min-width: 0; padding: 0; overflow: hidden; background: none; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; user-select: all; }
 .composer-draft { flex: none; width: calc(100% - 48px); max-width: 752px; margin: 4px auto 0; }
 .composer-draft .confirm-text { display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; }
