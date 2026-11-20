@@ -68,6 +68,49 @@ public struct EngineState: Codable, Equatable, Sendable {
         }
     }
 
+    /// What reopens a project's lead after a host restart (`vibeswitcher lead FOLDER --resume`, the app's restart card
+    /// and `RestartReopen.Entry`): the conversation it carried, kept while it runs. Only a hint: a worker of the user's uid
+    /// can write this file, so the reopen takes nothing from it but which conversation to look at, and that only once
+    /// the user asked for it on the command line, the vault's accepts were made and the transcript checks out
+    /// (`LeadEngine.resumable`: inside the agents' folders, in Claude's folder for the project's own repository, named by
+    /// its conversation id and carrying the lead's name). The model, the advisor and the grant are the start's own, as
+    /// for any lead; the workers listed are for `status` to show (the reopened lead is told from its board).
+    public struct Reopen: Codable, Equatable, Sendable {
+        /// A worker running when this was last written: its task, its session and its branch.
+        public struct Worker: Codable, Equatable, Sendable {
+            public var task: String
+            public var session: String
+            public var branch: String
+
+            public init(task: String, session: String, branch: String) {
+                self.task = task
+                self.session = session
+                self.branch = branch
+            }
+        }
+
+        /// The host session the lead ran in.
+        public var session: String
+        /// Claude's own session id for it (its hook's, else its transcript's name): what `--resume` takes.
+        public var conversation: String?
+        /// Its transcript, as `NodeSessions` checked it.
+        public var transcript: String?
+        /// What it was started on.
+        public var model: String?
+        public var advisor: String?
+        public var workers: [Worker]
+
+        public init(session: String, conversation: String? = nil, transcript: String? = nil, model: String? = nil, advisor: String? = nil,
+                    workers: [Worker] = []) {
+            self.session = session
+            self.conversation = conversation
+            self.transcript = transcript
+            self.model = model
+            self.advisor = advisor
+            self.workers = workers
+        }
+    }
+
     public var format: Int
     /// In the order sent.
     public var held: [Held]
@@ -84,9 +127,11 @@ public struct EngineState: Codable, Equatable, Sendable {
     public var leads: [String]?
     /// The last host restart the engine saw, while `status` says so.
     public var restart: Restart?
+    /// What reopens each project's lead after a host restart, by root (`Reopen`). Absent from a file written before it.
+    public var reopen: [String: Reopen]?
 
     public init(held: [Held] = [], told: [String]? = nil, firstSightings: [String: Double]? = nil, hostStartedAt: Double? = nil,
-                leads: [String]? = nil, restart: Restart? = nil) {
+                leads: [String]? = nil, restart: Restart? = nil, reopen: [String: Reopen]? = nil) {
         format = Self.currentFormat
         self.held = held
         self.told = told
@@ -94,6 +139,7 @@ public struct EngineState: Codable, Equatable, Sendable {
         self.hostStartedAt = hostStartedAt
         self.leads = leads
         self.restart = restart
+        self.reopen = reopen
     }
 
     /// `<root>/v2/engine.json`.

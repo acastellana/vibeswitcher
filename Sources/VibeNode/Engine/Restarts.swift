@@ -35,12 +35,14 @@ extension LeadEngine {
         lastHostStart = state.hostStartedAt
         knownLeads = Set(state.leads ?? [])
         hostRestart = state.restart
+        reopen = state.reopen ?? [:]
     }
 
     /// Everything `engine.json` keeps, as it is now. On `queue`.
     func stateAtRest() -> EngineState {
         EngineState(held: heldAtRest(), told: told.sorted(), firstSightings: advanceSeen.mapValues(\.timeIntervalSince1970),
-                    hostStartedAt: lastHostStart, leads: knownLeads.sorted(), restart: hostRestart)
+                    hostStartedAt: lastHostStart, leads: knownLeads.sorted(), restart: hostRestart,
+                    reopen: reopen.isEmpty ? nil : reopen)
     }
 
     /// `engine.json` written on `reads` (in order with every other write there). On `queue`.
@@ -53,6 +55,7 @@ extension LeadEngine {
 
     /// The roots with a lead running now join those `engine.json` keeps (a host restart ends them). On `queue`.
     func noteKnownLeads() {
+        noteReopen()
         let running = Set(leads.leads.values.filter { $0.session != nil }.map(\.root))
         guard !running.isSubset(of: knownLeads) else { return }
         knownLeads.formUnion(running)
@@ -117,7 +120,7 @@ extension LeadEngine {
         return restart.gone.map { root in
             "the session host restarted at \(at): the lead and team of \(LeadMail.project(of: root)) (\(root)) ended with the host before it, "
                 + "and its vault started over (" + Self.resetByRestart + "). Run `vibeswitcher config held \(root)`, `config accept CARD`, "
-                + "`base show \(root)` and `base accept CARD`, reading the values, then `vibeswitcher lead \(root)`"
+                + "`base show \(root)` and `base accept CARD`, reading the values, then " + reopenStep(root: root)
         }
     }
 

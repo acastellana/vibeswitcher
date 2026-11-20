@@ -123,7 +123,7 @@ import tty
 import uuid
 
 # Claude's own flags that take a value (each skipped with it); any other flag is skipped alone.
-CLAUDE_VALUES = ("--settings", "--mcp-config", "--model", "--permission-mode", "--append-system-prompt")
+CLAUDE_VALUES = ("--settings", "--mcp-config", "--model", "--permission-mode", "--append-system-prompt", "--resume")
 
 
 def terminal_name():
@@ -167,6 +167,19 @@ def parse(argv):
 
 
 TRANSCRIPT, CONTROL, STATE, MCP_CONFIG, PROMPT, TERMINAL = parse(sys.argv[1:])
+
+
+def resumed(argv):
+    """The conversation --resume names (None: none), as Claude Code takes it."""
+    for index, arg in enumerate(argv):
+        name, _, inline = arg.partition("=")
+        if name == "--resume":
+            return inline if inline else (argv[index + 1] if index + 1 < len(argv) else None)
+        if arg == "--":
+            break
+    return None
+
+
 for path in (TRANSCRIPT, CONTROL):
     if not os.path.exists(path):
         open(path, "a").close()
@@ -225,6 +238,7 @@ state = {
     "wrap": 0,               # the box's width for a long draft, word-wrapped onto rows (0: one line, as the pty wraps it)
     "terminal": TERMINAL,    # its terminal's name (None: started with the app harness's three files)
     "prompt": PROMPT,        # the prompt it was started with (None: none)
+    "resume": resumed(sys.argv[1:]),  # the conversation --resume carried on (None: a fresh one)
     "mcp": [],               # the "mcp" op's calls: {"tool", "reply"} or {"tool", "error"}
 }
 MCP_DONE = threading.Event()  # an "mcp" call has finished: STATE to be written
