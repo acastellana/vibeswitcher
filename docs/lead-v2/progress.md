@@ -297,3 +297,25 @@
 - 2026-11-20 11:36 Abandoned toolserverswitchtests-2: The user fixed it in 5c31a74d (in v2 since 1f6fd5f0): the cause was the fixture, as this contract's first branch: the switch test's stand-ins were started with no agent in their SpawnRequest, so HostedAgents decided "no agent"; they are now started with agent: "claude" as the engine starts a lead and a worker. ToolServerSwitchTests passes its 3 cases (3 runs under load 24, the user's commit message). The task never ran.
 - 2026-11-20 11:36 You accepted 34 commits on v2 from the command line: 1f6fd5f Merge the main checkout's v2 (hosted agents from the host's record, web board, seen, Mac node seams, CLI card lookup); 5c31a74 v2 tests: the switch test's stand-ins are started as Claude, as the engine starts a lead and a worker; d5b0b04 v2: merge the lead's v2 (switch test, lock test, double-start fix); …
 - 2026-11-20 11:39 Pipeline held: mac-gitguardtests ready to merge with none landing; cause: a merge in progress
+- 2026-11-20 11:42 Incident: On the WSL node the wall clock ran about 60 s behind process start times during a loaded test run, so everything that compares a process's start (btime + ticks)… (in mac-gitguardtests); planned turn-this-incident-into-2 to turn it into a check
+- 2026-11-20 11:45 Review of turn-this-incident-into-2: audit
+- 2026-11-20 12:08 Automatically (auto_advance): Didn't audit team-sessions-start: Not audited: finder 1 of 2 couldn't start (Problem(text: "team-sessions-start\'s finder not started: ~/.claude/settings.json changed while the team\'s sessions ran, since VibeSwitcher last sealed it. A worker\'s shell, a verifier\'s command or a branch\'s tests can write it (the deny rules hold only the file tools), and the next session would load what was written. New workers, verifiers and merges are held until the user accepts the change in VibeSwitcher (its notice names the files); you can\'…
+- 2026-11-20 12:17 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: ~/.vibeswitcher/lead/run
+- 2026-11-20 12:17 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: ~/.vibeswitcher/lead/run
+- 2026-11-20 12:17 Audit of team-sessions-start at d9650237 by 2 finders (contract and acceptance; bugs, regressions and security); the shared run: test command failed
+- 2026-11-20 12:17 Released team-sessions-start's worker (idle since its done report on d9650237) while its audit runs
+- 2026-11-20 12:17 Automatically (auto_advance): Started the audit of team-sessions-start at d9650237 (Its review is audit). Released its worker, idle since its done report, while the audit runs: its Mac slot and memory are free, its worktree and branch stay.
+- 2026-11-20 12:17 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: ~/.claude/shell-snapshots
+- 2026-11-20 12:17 Audit of team-sessions-start at d9650237 by 2 finders (contract and acceptance; bugs, regressions and security); the shared run: test command failed
+- 2026-11-20 12:17 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: ~/.claude/shell-snapshots
+- 2026-11-20 12:18 Audit of team-sessions-start at d9650237 by 2 finders (contract and acceptance; bugs, regressions and security); the shared run: test command failed
+- 2026-11-20 12:18 Automatically (auto_advance): The verifier on team-sessions-start ended without a verdict (exited 129 after pid 5634 (vibeswitcher-mc) closed it): closed its session and started the audit again on the same commit, d9650237. If this one ends without a verdict too, it's left to you.
+- 2026-11-20 12:19 Workflow: heavy_slots = `1`
+- 2026-11-20 16:41 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: ~/.claude/shell-snapshots
+- 2026-11-20 16:42 Audit of team-sessions-start at d9650237 by 2 finders (contract and acceptance; bugs, regressions and security); the shared run of its merged result 10b4d91b: test command failed
+- 2026-11-20 16:42 Automatically (auto_advance): Started the audit of team-sessions-start at d9650237 (Its review is audit). Released its worker, idle since its done report, while the audit runs: its Mac slot and memory are free, its worktree and branch stay.
+- 2026-11-20 16:43 Abandoned mac-gitguardtests: Fixed on v2 by the user's supervisor (in v2 at ddb2f9a2): Tests/VibeCoreTests/GitGuardTests.swift:599-600 now accepts the root as given, /private + root, and the resolved root. The branch's one-line change (409f487e, SandboxPolicy.resolved in the same expectation) is superseded; its two merge runs failed only on the clock-lag cluster (task turn-this-incident-into-2), not on this change.
+- 2026-11-20 16:44 Started a worker on tests-that-write-a
+- 2026-11-20 16:44 Automatically (auto_advance): Started a worker on tests-that-write-a (Tests that write a program and run it no longer fail with "Text file busy"), its after tasks done (the-vault-s-look).
+- 2026-11-20 16:44 Started a worker on sb5-the-host-confines
+- 2026-11-20 16:46 Audit of team-sessions-start: finder 2 of 2 submitted (blocked, clean, 0 findings)

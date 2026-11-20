@@ -60,3 +60,7 @@ The user's policy: serialize expensive builds and tests so workers don't compete
 
 A later lead must know why a task with an open finding sits blocked with no worker, and that the v2 sync it was told to wait for has happened.
 
+## 2026-11-20 12:20:11 heavy_slots is 1 (2026-11-20 12:20): one full test run at a time on this node, merges', audits' and workers' alike, until task turn-this-incident-into-2 has merged. Measured: while the node is loaded its wall clock is set back about 5 s a minute against the boot clock (btime 1795165528 at 11:42, 1795165342 at 12:19; 141 "Time jumped backwards" lines from journald since boot), so a test process that keeps btime from its start is a minute off after 12 minutes and the same cluster fails every loaded full run (TestLockTests :465 :539 :542 :573-577 :609 :1181, StallWatchTests :306 :311, ProcessesTests :642) and leaves processes behind, which stops --retry-failed: three runs so far (the audit of tests-that-write-a, both runs of mac-gitguardtests' merge, the audit's run of team-sessions-start). Last night's calm merges passed these suites. A run that fails only on that cluster is rerun on a calm node, not sent back to its worker; turn-this-incident-into-2 goes ahead of SB6 (2/2) and branch-runs-get-the once SB5 has merged (it edits SB5's files), because every merge depends on it.
+
+The user's policy is to serialize expensive runs, and here parallel runs don't just slow each other: the load itself makes the clock drift that fails them, so three half-hour runs were lost this morning.
+
