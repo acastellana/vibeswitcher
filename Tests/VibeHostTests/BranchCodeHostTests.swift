@@ -115,7 +115,17 @@ import Testing
         return (text, result["isError"] as? Bool ?? true)
     }
 
-    @Test func aMergesTestCommandIsntTheLeadAndTheMergeStillLands() async throws {
+    /// Whether the built tool server runs branch code in a box of its own here (the session sandbox plan's SB6: where a
+    /// box can be built, never on the Mac). There the branch's code can't reach the host at all: its box has no host
+    /// socket and none of this test's folders (`BranchRunHostTests`, VibeNodeTests), so a probe that asks the host from
+    /// a merge's test command, or from a verifier's Bash command, never gets to ask. What the host answers code under
+    /// the wrapper alone is still asked there by an accepted git hook, which the lead's git runs outside any box
+    /// (`anAcceptedHookIsntTheLeadAndTheMergeStillLands`, whose merge's test command runs in a box and lands).
+    static let branchCodeIsBoxed = !Platform.CodeIdentity.isAvailable && Platform.Sandbox.probe().why == nil
+    static let boxedNote: Comment = "a merge's test command, and a verifier's, run in a box with no host socket here: BranchRunHostTests has them"
+
+    @Test(.enabled(if: !BranchCodeHostTests.branchCodeIsBoxed, BranchCodeHostTests.boxedNote))
+    func aMergesTestCommandIsntTheLeadAndTheMergeStillLands() async throws {
         let mcp = URL(fileURLWithPath: hostLauncher).deletingLastPathComponent().appendingPathComponent("vibeswitcher-mcp").path
         try #require(FileManager.default.isExecutableFile(atPath: mcp), "vibeswitcher-mcp isn't built beside the host: run swift build first")
         let team = try Team(temp)
