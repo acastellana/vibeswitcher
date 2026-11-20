@@ -99,7 +99,7 @@ that two pushes haven't explained comes here too, with the experiment that will 
   `--node` is still refused on the Mac (its text now names the root). The hosted Mac checks
   `NodeRootHostTests.aHostInTheNodesEnvironmentKeepsItsFilesInTheNodesRoot` (a scratch host in that environment: its
   socket at `<home>/.vibeswitcher/v2/node/host.sock`, the app's folder holding only `v2/node`), `ServiceTests`,
-  `ServerCheckTests.theNodesRootAndTheAccountsFolderAreBothTheUsersNode`,
+  `NodeSystemTests.theNodesRootAndTheAccountsFolderAreBothTheUsersNode`,
   `HostHardeningTests.theNodesRootIsNeverFromTheEnvironment` and `StartCommandTests.aMachineWithoutSystemdStartsTheNodeDetached`
   (its Mac arms). **Needs a real Mac run**, with the app running: the app's launch repair (`PrivateRepair.atLaunch`)
   leaves a `~/.vibeswitcher/v2/node` made after its marker alone, and a node made before it (0600/0700, programs kept
