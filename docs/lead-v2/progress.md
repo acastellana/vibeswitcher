@@ -238,3 +238,6 @@
 - 2026-11-20 02:55 Automatically (auto_advance): Started a worker on turn-this-incident-into (A link re-created with the same target is no config change for the seal), its after tasks done (the-vault-s-look).
 - 2026-11-20 02:57 Sent sb5-the-host-confines's worker contract v6 (it had v5)
 - 2026-11-20 03:02 Merged a-lead-asked-for: A lead asked for twice at once starts twice under load (no audit: review none) (build 5b6eccd929ad)
+- 2026-11-20 03:02 Automatically (auto_advance): Merged a-lead-asked-for (A lead asked for twice at once starts twice under load) into v2 at 90f80f53, review none: on its worker's done report on a9d3223d and the full test run.
+- 2026-11-20 03:02 Automatically (auto_advance): Cleaned up a-lead-asked-for; ended pid 172370 (Worker: A lead asked for twice at once starts twice under load) (freed 1.7 GB of build output and temporary folders). It stays done.
+- 2026-11-20 03:17 Merged hosthardeningtests-lock: HostHardeningTests' lock test fails when another test forks at the wrong moment (no audit: review none) (build 5b6eccd929ad)
