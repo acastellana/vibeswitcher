@@ -466,6 +466,62 @@ export function createMock(store, options = {}) {
 
   const refused = (message) => ({ ok: false, error: { code: 'refused', message } });
 
+  // The node's settings (`settings`' result, as `NodeSettings` makes it), the project's for the site's folder.
+  const POLICY = '- One agent owns each change through completion. Separate reviewers only for security, irreversible operations, or complex changes.\n'
+    + '- Run affected tests while editing, then the full suite once before merging. Repeat only when new changes justify it.\n'
+    + '- Parallelize independent implementation work. Serialize expensive builds and tests so workers don\'t compete for CPU.\n'
+    + '- Fix material bugs. Cosmetic observations don\'t automatically become tasks or block delivery.\n'
+    + '- Stop when the requested behavior works and relevant checks pass. No recursive audit loop without a concrete unresolved concern.';
+  function settingsResult(folder) {
+    const at = (file) => `${HOME}/.vibeswitcher/${file}`;
+    const workflow = `${SITE}/.vibeswitcher/workflow.md`;
+    const row = (key, title, about, section, scope, form, home, value, fallback, where, extra = {}) => ({
+      key, title, about, section, scope, form, home, choices: extra.choices || [], limits: extra.limits ?? null, value, default: fallback,
+      isDefault: value === fallback, where, guardRail: !!extra.rail, note: extra.note ?? null,
+    });
+    const limits = (key, title, about, form, value, fallback, extra) => row(key, title, about, extra?.section || 'Machine-wide limits', 'node', form, 'limits', value, fallback, at('mac-limits.json'), extra);
+    const boost = (key, title, about, form, value, fallback, extra) => row(key, title, about, 'Boost', 'node', form, 'preferences', value, fallback, at('settings.plist'), extra);
+    const models = (key, title, about, form, value, fallback, extra) => row(key, title, about, extra?.section || 'Models', 'project', form, 'workflow', value, fallback, workflow, extra);
+    const floor = (key, title, about, form, value, fallback, extra) => row(key, title, about, 'Review rules floor', 'project', form, 'floor', value, fallback, 'the session host\'s vault', extra);
+    const node = [
+      limits('mac_max_sessions', 'Team sessions on this node, at most', 'How many workers and verifiers, across every project, may run at once.', 'count', '10', '10', { limits: '1 to 99' }),
+      limits('load_threshold', 'Start nothing above a load of', 'Leads start nothing while the load is above this; default means twice the cores (24).', 'number', 'default', 'default', { limits: 'above 0' }),
+      limits('mac_heavy_slots', 'Test and build slots at once', 'How many builds and full test runs may run at once on this node.', 'count', '3', '2', { limits: '1 to 12' }),
+      limits('ignore_usage_limits', 'Ignore usage limits', 'Leads keep starting work at any share of a Claude limit, instead of stopping at 80 %.', 'flag', 'off', 'off', { section: 'Usage limits', limits: 'on or off' }),
+      boost('boost', 'Boost', 'Raises the machine-wide limits for more throughput. On a node Automatic acts as Off: it can\'t tell whether you\'re away.', 'choice', 'off', 'off', { choices: ['off', 'on', 'automatic'], limits: 'off, on, automatic' }),
+      boost('boost_load_threshold', 'Start nothing above a load of, while boosted', 'While boosted, leads start nothing once the load is above this.', 'number', '36', '36', { limits: 'above 0, at most 48' }),
+      boost('boost_max_sessions', 'Team sessions while boosted, at most', 'How many workers and verifiers may run at once across every project while boosted.', 'count', '18', '18', { limits: '1 to 48' }),
+      boost('boost_max_workers', 'Workers per project while boosted, at most', 'The most workers any one project may run at once while boosted.', 'count', '7', '7', { limits: '1 to 48' }),
+      boost('boost_heavy_slots', 'Test and build slots while boosted', 'How many builds and full test runs may run at once while boosted.', 'count', '3', '3', { limits: '1 to 12' }),
+      row('lead_mail', 'Let project leads message each other', 'Lets one project\'s lead send messages to another\'s (tell_lead).', 'Leads', 'node', 'flag', 'preferences', 'on', 'on', at('settings.plist'), { limits: 'on or off' }),
+      row('policy', 'Working policy', 'The rules every project\'s lead, workers and verifiers get in their prompts; running leads are told when it changes.', 'Working policy', 'node', 'text', 'policy', POLICY, POLICY, at('policy.md'), { limits: 'at most 32000 characters' }),
+    ];
+    const project = folder === SITE ? [
+      models('lead_model', 'The lead\'s model', 'The model the project\'s lead runs on (Opus in Fable\'s place while Fable is held back); from its next start.', 'model', 'fable', 'fable', { limits: 'a model\'s name as claude --model takes it' }),
+      models('lead_advisor', 'The lead\'s advisor', 'The lead\'s advisor while it runs on Opus: fable, opus or none; from its next start.', 'choice', 'fable', 'fable', { choices: ['fable', 'opus', 'none'], limits: 'fable, opus, none' }),
+      models('worker_advisor', 'Workers\' advisor', 'Every worker\'s advisor when its task sets none: none, fable or opus.', 'choice', 'none', 'none', { choices: ['none', 'fable', 'opus'], limits: 'none, fable, opus' }),
+      models('verifier_model', 'Verifier\'s model', 'The model audits run on; default means another model than the workers\', at least as capable.', 'model', 'default', 'default', { limits: 'a model\'s name as claude --model takes it' }),
+      models('security_audit_model', 'Security audits\' model', 'The model a sensitive or security audit runs on, whatever the verifier\'s model is.', 'model', 'mythos', 'mythos', { rail: true, limits: 'a model\'s name as claude --model takes it' }),
+      models('max_workers', 'Workers at once, at most', 'How many workers the project\'s lead may run at once.', 'count', '4', '3', { section: 'Team', rail: true, limits: '1 to 99' }),
+      floor('floor_sensitive_paths', 'Sensitive paths', 'Paths whose changes always count as sensitive; a lead can add to these, never remove them.', 'paths', '.claude/, .mcp.json, CLAUDE.md, AGENTS.md, .github/', 'none', { limits: 'globs, comma-separated; none for no paths' }),
+      floor('floor_strict_paths', 'Strict paths', 'Paths whose changes get the strictest review; a lead can add to these, never remove them.', 'paths', 'none', 'none', { limits: 'globs, comma-separated; none for no paths' }),
+      floor('floor_audit_finders', 'Audit finders, at least', 'The fewest independent checkers an audit may use in this project.', 'count', '1', '1', { limits: '1 to 3' }),
+      floor('floor_merge_policy', 'Merge policy, at least', 'How much approval a merge needs at minimum, from automatic to asking you every time.', 'choice', 'ask_sensitive', 'auto', { choices: ['auto', 'ask_sensitive', 'ask_all'], limits: 'auto, ask_sensitive, ask_all' }),
+      floor('floor_risk_lines', 'Risk lines, at most', 'A change bigger than this many lines counts as risky; 0 sets no floor, and the project\'s own limit applies.', 'count', '0', '0', { limits: '0 to 1000000' }),
+      floor('floor_risk_model', 'Risk check\'s model pass', 'Keeps the model\'s second look at a change\'s risk switched on.', 'flag', 'off', 'off', { limits: 'on or off' }),
+      floor('floor_audit_sample_percent', 'Audit sample, at least', 'The smallest share of finished work, in percent, that gets audited.', 'count', '10', '0', { limits: '0 to 100' }),
+      floor('floor_verifier_different', 'Verifier never on the workers\' model', 'Keeps audits on a different model from the one the workers use.', 'flag', 'on', 'on', { limits: 'on or off' }),
+    ] : null;
+    return {
+      node: { root: at('').replace(/\/$/, ''), settings: node },
+      project: project ? { project: SITE_PROJECT, root: SITE, settings: project } : null,
+      leftOut: [
+        { title: 'Also on battery (Boost)', why: 'a node runs on mains: it reads no battery' },
+        { title: 'Notifications (banners, sound, reminders)', why: 'the page\'s own: This node\'s toggle, in each browser' },
+      ],
+    };
+  }
+
   function handle(message) {
     const args = message.args || {};
     if (message.kind === 'answer') {
@@ -526,6 +582,10 @@ export function createMock(store, options = {}) {
       const drafted = message.kind === 'session.draft' ? { text: args.text, at: new Date().toISOString(), action: message.action } : null;
       emit(setSession(args.session, { draft: drafted }));
       return { ok: true, result: { session: args.session } };
+    }
+    if (message.kind === 'settings') {
+      if (args.folder && args.folder !== SITE) return { ok: false, error: { code: 'gone', message: `no lead has worked in ${args.folder} yet: \`vibeswitcher lead ${args.folder}\` starts one` } };
+      return { ok: true, result: settingsResult(args.folder) };
     }
     if (message.kind === 'seen') {
       const target = sessions.get(args.session);
