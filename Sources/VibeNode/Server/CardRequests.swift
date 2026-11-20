@@ -82,8 +82,18 @@ extension Requests {
 
     // MARK: questions
 
-    /// `questions [FOLDER] [--all]`: the open cards (closed ones too with `all`), each as `CardStore.Card.value`.
+    /// The closed cards `questions --all` lists at most when it isn't given `limit`.
+    static let closedListed = 50
+
+    /// `questions [FOLDER] [--all]`: the open cards (closed ones too with `all`: the newest `limit` of them, at most
+    /// `closedListed` unless given, `more` saying how many closed were left out), each as `CardStore.Card.value`.
+    /// With `card` (a whole id or a prefix only one card has, `CardStore.resolve`), that card alone, open or closed,
+    /// or none: what `answer`, `hold` and the accepts find a card by, however many the server holds.
     func questions(_ request: NodeWire.Request, reply: @escaping (NodeWire.Reply) -> Void) {
+        if let wanted = request.args?["card"]?.string {
+            let card = engine?.cards.resolve(wanted)
+            return reply(.init(re: request.id, result: .object(["cards": .array(card.map { [$0.value] } ?? []), "more": .int(0)])))
+        }
         namedRoot(request, required: false) { [weak self] named in
             guard let self else { return }
             let project: String?
@@ -91,8 +101,12 @@ extension Requests {
             case .failure(let refusal): return reply(refusal)
             case .root(let root): project = root.map { NodeIds.project(root: $0) }
             }
-            let cards = self.engine?.cards.list(project: project, all: request.args?["all"]?.bool == true) ?? []
-            reply(.init(re: request.id, result: .object(["cards": .array(cards.map(\.value))])))
+            let listed = self.engine?.cards.list(project: project, all: request.args?["all"]?.bool == true) ?? []
+            let limit = max(0, request.args?["limit"]?.int ?? Self.closedListed)
+            let closed = listed.filter { !$0.isOpen }
+            let left = Set(closed.dropLast(limit).map(\.id))
+            let cards = listed.filter { !left.contains($0.id) }
+            reply(.init(re: request.id, result: .object(["cards": .array(cards.map(\.value)), "more": .int(left.count)])))
         }
     }
 

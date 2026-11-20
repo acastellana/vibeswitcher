@@ -88,6 +88,8 @@ public final class CardStore: @unchecked Sendable {
         /// Closed: answered, withdrawn, decided by its timer, accepted, kept refused, or gone.
         public var closed: String?
         public var at: Date
+        /// When it closed, as the store saw it close (`put`); nil while open. What `prune` keeps the closed by.
+        public var closedAt: Date?
         /// The answer a web page drafted (`Draft`), until the card closes or the lead revises the wording it was for.
         public var draft: Draft?
 
@@ -114,16 +116,52 @@ public final class CardStore: @unchecked Sendable {
     public let changes = Changes<Card>()
     /// By id. On the engine's queue.
     public private(set) var cards: [String: Card] = [:]
+    /// The clock a card's close is stamped by (a test's own).
+    var now: @Sendable () -> Date = { Date() }
+
+    /// How many closed cards are kept, all kinds together (`prune`).
+    public static let keptClosed = 200
+    /// How many closed held-config cards are kept: each `config held` after a change, and each look that finds
+    /// something new held, draws one, so they are the most and the least read once closed.
+    public static let keptClosedConfig = 10
+    /// How long a closed card is kept at most.
+    public static let closedLife: TimeInterval = 24 * 60 * 60
 
     public init() {}
 
     /// `card` kept and sent. A draft doesn't outlive the card's question as it was drafted for: a card that closed (an
-    /// answer, a withdrawal, its timer) or whose question the lead revised since loses it.
+    /// answer, a withdrawal, its timer) or whose question the lead revised since loses it. A card that closes here is
+    /// stamped (`closedAt`) and the closed are pruned (`prune`).
     func put(_ card: Card) {
         var card = card
         if let draft = card.draft, !card.isOpen || card.question?.version != draft.version { card.draft = nil }
+        let closing = !card.isOpen && card.closedAt == nil
+        if card.isOpen { card.closedAt = nil } else if closing { card.closedAt = now() }
         cards[card.id] = card
         changes.send(card.id, card)
+        if closing { prune() }
+    }
+
+    /// The closed cards kept bounded (2026-11-20: a node kept every card it ever drew, 329 after a day, 1.4 MB, past a
+    /// line's limit, and `answer` broke): the held-config ones past the newest `keptClosedConfig` go first, then any
+    /// closed longer than `closedLife` ago, then the oldest closed past `keptClosed`. An open card is never pruned. A
+    /// pruned card is told to the stream as gone; asked for later it is `gone`, as after a restart (S3: cards are memory
+    /// only). On the engine's queue.
+    func prune() {
+        let closed = cards.values.filter { !$0.isOpen }.sorted { ($0.closedAt ?? $0.at, $0.id) > ($1.closedAt ?? $1.at, $1.id) }
+        guard !closed.isEmpty else { return }
+        let oldest = now().addingTimeInterval(-Self.closedLife)
+        var kept = 0, keptConfig = 0
+        for card in closed {
+            let at = card.closedAt ?? card.at
+            let config = card.kind == .configHeld
+            if (config && keptConfig >= Self.keptClosedConfig) || at < oldest || kept >= Self.keptClosed {
+                remove(card.id)
+                continue
+            }
+            kept += 1
+            if config { keptConfig += 1 }
+        }
     }
 
     func change(_ id: String, _ body: (inout Card) -> Void) {

@@ -322,6 +322,16 @@ public enum NodeWire {
         return data
     }
 
+    /// `reply` as one line, or, when that line would pass `maxLine` (the reader would drop it and close: 2026-11-19, a
+    /// node's every card past it broke `answer`), an `internal` failure under the same `re` saying how large it was and
+    /// to ask for less. Never a line the other side can't take, unless `re` itself is that long (the caller checks).
+    public static func replyLine(_ reply: Reply) -> Data {
+        let data = line(reply)
+        guard data.count - 1 > maxLine else { return data }
+        return line(Reply(re: reply.re, error: Failure(.internal, "the reply was \(data.count - 1) bytes, past the line's limit of \(maxLine): "
+            + "nothing was dropped, but nothing was sent; ask for less (a folder, a card, without --all)")))
+    }
+
     /// JSON text (`line`'s, or JSONSerialization's) for a terminal: every scalar `ConfigSeal.inert` would replace (C1
     /// controls, DEL, bidirectional and other format characters, separators, private-use and unassigned scalars)
     /// written as a `\uXXXX` escape (a surrogate pair past U+FFFF). The JSON means the same, so nothing is lost to a

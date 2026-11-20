@@ -205,7 +205,10 @@ public final class NodeServer: @unchecked Sendable {
         // `Requests` answers on `queue`.
         requests.handle(request, from: facts) { [weak self, weak connection] reply in
             guard let self, let connection else { return }
-            self.send(NodeWire.line(reply), on: connection)
+            // Never a line over the limit: the reader would drop it and close (`replyLine`).
+            let line = NodeWire.replyLine(reply)
+            guard line.count - 1 <= NodeWire.maxLine else { return self.bye("a reply over \(NodeWire.maxLine) bytes", connection) }
+            self.send(line, on: connection)
         }
     }
 
@@ -277,6 +280,8 @@ public final class NodeServer: @unchecked Sendable {
 
     /// The hub's events and replies on `connection`'s lines, and how many bytes wait there. On `queue`.
     fileprivate func sendMessage(_ message: Data, on connection: Connection) {
+        // A live message past the line's limit would be dropped by the reader: a bye saying so instead.
+        guard message.count <= NodeWire.maxLine else { return bye("a live message of \(message.count) bytes, past the line's limit of \(NodeWire.maxLine)", connection) }
         send(message + Data([UInt8(ascii: "\n")]), on: connection)
     }
 
