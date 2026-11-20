@@ -37,13 +37,15 @@ extension LeadEngine {
         hostRestart = state.restart
         reopen = state.reopen ?? [:]
         openSessions = state.open
+        endedSessions = state.ended ?? []
     }
 
     /// Everything `engine.json` keeps, as it is now. On `queue`.
     func stateAtRest() -> EngineState {
         EngineState(held: heldAtRest(), told: told.sorted(), firstSightings: advanceSeen.mapValues(\.timeIntervalSince1970),
                     hostStartedAt: lastHostStart, leads: knownLeads.sorted(), restart: hostRestart,
-                    reopen: reopen.isEmpty ? nil : reopen, open: openSessions)
+                    reopen: reopen.isEmpty ? nil : reopen, open: openSessions,
+                    ended: endedSessions.isEmpty ? nil : endedSessions)
     }
 
     /// `engine.json` written on `reads` (in order with every other write there). On `queue`.

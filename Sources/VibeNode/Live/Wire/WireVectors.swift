@@ -376,7 +376,7 @@ public enum WireVectors {
                              "liveSessions": .int(3), "notes": Requests.value(notes, at: date("2026-11-17T09:13:59.020Z"))]),
             "rule": .object(["mode": .string("systemd"), "says": .string("the user's voice is a terminal's process outside the node's unit"),
                              "scopes": .array([.string("/init.scope")])]),
-            "cards": Requests.counts([.question: 1]), "accepted": .array([]), "notices": .array([]), "restart": .null, "reopen": .array([]), "builds": .null,
+            "cards": Requests.counts([.question: 1]), "accepted": .array([]), "notices": .array([]), "restart": .null, "reopen": .array([]), "ended": .array([]), "builds": .null,
             "web": .object(["state": .string("listening"), "port": .int(Int(NodeWeb.port)), "tokens": .int(1), "connections": .int(1)]),
         ])
     }

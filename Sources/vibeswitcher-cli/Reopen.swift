@@ -104,3 +104,69 @@ enum ReopenCommand {
             + "\(ConfigSeal.inert(value["folder"]?.string ?? "?", limit: .max))  (\(conversation))"
     }
 }
+
+/// `vibeswitcher resume [SESSION]` (the stability lane, 2026-11-20; the app's ended sessions, Resume, Copy Resume Command
+/// and Copy Session ID): with no SESSION, the user's own sessions that ended lately, each with its conversation id and
+/// the command that resumes it by hand in a terminal; with one, that session started again in its same conversation on
+/// the node (`session.resume`, the user's voice: shown, the typed code, then the request).
+enum ResumeCommand {
+    static let usage = "usage: vibeswitcher resume [SESSION]  (no SESSION: lists your sessions that ended lately)"
+
+    static func run(_ arguments: [String]) -> Int32 {
+        guard arguments.count <= 1, arguments.allSatisfy({ !$0.isEmpty && !$0.hasPrefix("--") }) else { return Say.usage(usage) }
+        let context = NodeContext.current()
+        context.sayScratch()
+        let client: NodeClient
+        switch NodeClient.connect(context) {
+        case .failure(let failure): return Say.failed(failure)
+        case .success(let connected): client = connected
+        }
+        let ended: [NodeWire.Value]
+        switch client.request("status") {
+        case .failure(let failure): return Say.failed(failure)
+        case .success(let reply):
+            guard reply.ok, let result = reply.result else { return Say.replyError(reply) }
+            ended = result["ended"]?.array ?? []
+        }
+        guard let wanted = arguments.first else {
+            guard !ended.isEmpty else {
+                Say.out("no session of yours ended lately")
+                return 0
+            }
+            Say.out("ended lately, newest first:")
+            for session in ended {
+                Say.out("  " + ReopenCommand.line(session) + "  ended \(ConfigSeal.inert(session["at"]?.string ?? "?", limit: 40))")
+                if let conversation = session["conversation"]?.string {
+                    Say.out("      by hand: cd \(RecentProjects.shellQuote(ConfigSeal.inert(session["folder"]?.string ?? "", limit: .max))) && claude --resume "
+                        + RecentProjects.shellQuote(ConfigSeal.inert(conversation, limit: 40)))
+                }
+            }
+            Say.out("`vibeswitcher resume SESSION` starts one again on the node, in its same conversation")
+            return 0
+        }
+        let bare = wanted.lowercased().replacingOccurrences(of: NodeIds.node + ":", with: "")
+        let matching = bare.count >= 4 ? ended.filter { ($0["session"]?.string ?? "").lowercased().replacingOccurrences(of: NodeIds.node + ":", with: "").hasPrefix(bare) } : []
+        guard matching.count == 1, let session = matching.first else {
+            return Say.refused(matching.isEmpty ? "no ended session \(ConfigSeal.inert(wanted, limit: 80)) of yours (`vibeswitcher resume` lists them)"
+                                                : "\(ConfigSeal.inert(wanted, limit: 80)) begins \(matching.count) ended sessions' ids: give more of it")
+        }
+        let action = UUID().uuidString.lowercased()
+        let outcome = TypedWord.ask(code: NodeIds.code(action: action),
+                                    what: "This starts again, as you, in its same conversation (Claude with --resume, in its folder):\n  " + ReopenCommand.line(session))
+        guard outcome == .typed else { return Say.refused(TypedWord.refusal(outcome)) }
+        switch client.request("session.resume", args: ["session": session["session"] ?? .string(wanted)], action: action, timeout: 180) {
+        case .failure(let failure): return Say.failed(failure)
+        case .success(let reply):
+            if reply.ok || reply.error?.code == NodeWire.Code.refused.rawValue {
+                context.writeJournal(NodeJournal.entry(event: "request", action: action, kind: "session.resume", epoch: client.hello.epoch))
+            }
+            guard reply.ok, let result = reply.result else { return Say.replyError(reply) }
+            for started in result["reopened"]?.array ?? [] {
+                let id = SessionCommand.short(started["session"]?.string)
+                Say.out("resumed: \(ConfigSeal.inert(started["folder"]?.string ?? "?", limit: .max)) in session \(id) on "
+                    + "\(ConfigSeal.inert(started["terminal"]?.string ?? "?", limit: 20)) (`vibeswitcher send \(id) TEXT` types into it)")
+            }
+            return 0
+        }
+    }
+}

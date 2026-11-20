@@ -22,7 +22,7 @@ let usage = """
            vibeswitcher tell FOLDER TEXT
            vibeswitcher send SESSION [TEXT] | reply SESSION CHOICE [TEXT]
            vibeswitcher new FOLDER [--agent claude|shell] [--model M] | end SESSION
-           vibeswitcher reopen [all | SESSION... | --forget]
+           vibeswitcher reopen [all | SESSION... | --forget] | resume [SESSION]
            vibeswitcher rename SESSION [NAME] | pause SESSION [--hours N | --tomorrow | --off]
            vibeswitcher new-project NAME [--in LOCATION] [--folder NAME] [--goal TEXT] [--no-lead]
            vibeswitcher mail [FOLDER] [--all] [--json] | prompt-audit FOLDER snooze|off|on
@@ -69,6 +69,8 @@ case "rename":
     exit(RenameCommand.run(Array(words.dropFirst())))
 case "pause":
     exit(PauseCommand.run(Array(words.dropFirst())))
+case "resume":
+    exit(ResumeCommand.run(Array(words.dropFirst())))
 case "reopen":
     exit(ReopenCommand.run(Array(words.dropFirst())))
 case "new-project":

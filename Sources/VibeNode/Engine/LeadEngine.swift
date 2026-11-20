@@ -268,6 +268,8 @@ public final class LeadEngine: @unchecked Sendable {
     public internal(set) var reopen: [String: EngineState.Reopen] = [:]
     /// The user's own sessions live in the host, as last recorded (`EngineState.OpenSessions`, `SessionReopen.swift`).
     public internal(set) var openSessions: EngineState.OpenSessions?
+    /// The user's own sessions that ended lately, newest first (`EngineState.Ended`, `vibeswitcher resume`).
+    public internal(set) var endedSessions: [EngineState.Ended] = []
     /// When each recorded session was first seen ended (or gone from the host's list): kept in the record for
     /// `openGrace`, since a host going down (a reboot) ends its sessions and may say so before it goes.
     var openEnded: [UUID: Date] = [:]

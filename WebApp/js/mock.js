@@ -118,6 +118,12 @@ export function createMock(store, options = {}) {
     accepted: [{ kind: 'lead', action: 'b7e0c2d4-5a61-4f38-9c0b-1e2d3f4a5b6c', at: ago(5400), pid: 51022, cgroup: '/init.scope', commandLine: ['vibeswitcher', 'lead', SITE] }],
     notices: options.empty ? [] : ['example-site: landing-base moved outside the lead’s merges; its next merge is refused until you accept the move'],
     restart: null,
+    reopen: [],
+    // Your sessions that ended lately (`vibeswitcher resume`).
+    ended: [
+      { session: id('5c1e7a92'), folder: `${HOME}/projects/example-api`, name: 'example-api', conversation: '7a3f0c21-9b4d-4e8a-a1f2-3c5d7e9b0a14', at: ago(1500) },
+      { session: id('9d2b4f60'), folder: `${HOME}/projects/notes`, name: 'Tidy the notes', conversation: null, at: ago(7200) },
+    ],
     builds: { installRoot: `${HOME}/.local/share/vibeswitcher`, installed: ['f62aef61', '200e2c32', '5e563cf5'], rollback: { commit: '200e2c32', line: '200e2c32 v2 journal: an entry with no cgroup softens no mark' } },
     facts: [
       'plain mode: no sandbox before stage 6; what that doesn’t promise is S11’s list (`vibeswitcher start` prints it once)',

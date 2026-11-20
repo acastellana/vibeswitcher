@@ -152,9 +152,25 @@ public struct EngineState: Codable, Equatable, Sendable {
     public var reopen: [String: Reopen]?
     /// The user's own sessions live in the host (`OpenSessions`). Absent from a file written before it.
     public var open: OpenSessions?
+    /// The user's own sessions that ended lately, newest first (`Ended`). Absent from a file written before it.
+    public var ended: [Ended]?
+
+    /// One of the user's own sessions that ended (not with a host restart: those are `Restart.sessions`), when, and its
+    /// record: offered to `vibeswitcher resume` (the app's ended sessions and their Resume). Only a hint, as `OpenSessions`.
+    public struct Ended: Codable, Equatable, Sendable {
+        public var entry: RestartReopen.Entry
+        /// When it was seen gone (seconds since 1970).
+        public var at: Double
+
+        public init(entry: RestartReopen.Entry, at: Double) {
+            self.entry = entry
+            self.at = at
+        }
+    }
 
     public init(held: [Held] = [], told: [String]? = nil, firstSightings: [String: Double]? = nil, hostStartedAt: Double? = nil,
-                leads: [String]? = nil, restart: Restart? = nil, reopen: [String: Reopen]? = nil, open: OpenSessions? = nil) {
+                leads: [String]? = nil, restart: Restart? = nil, reopen: [String: Reopen]? = nil, open: OpenSessions? = nil,
+                ended: [Ended]? = nil) {
         format = Self.currentFormat
         self.held = held
         self.told = told
@@ -164,6 +180,7 @@ public struct EngineState: Codable, Equatable, Sendable {
         self.restart = restart
         self.reopen = reopen
         self.open = open
+        self.ended = ended
     }
 
     /// `<root>/v2/engine.json`.

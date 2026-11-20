@@ -152,7 +152,7 @@ public enum WireSchema {
                 field("node", .string), field("epoch", .string), field("root", .string), field("server", .shape("node.server")),
                 field("host", .shape("node.host")), field("rule", .shape("node.rule")), field("cards", .shape("node.cards")),
                 field("accepted", .list(.shape("node.accepted"))), field("notices", strings),
-                field("restart", Kind.shape("node.restart").orNull), field("reopen", .list(.shape("node.reopen"))),
+                field("restart", Kind.shape("node.restart").orNull), field("reopen", .list(.shape("node.reopen"))), field("ended", .list(.shape("node.ended"))),
                 field("builds", Kind.any.orNull), field("web", .shape("node.web"))]),
             shape("node.server", from: "Requests.statusValue", [field("pid", .int), field("startedAt", .date), field("commit", .string)]),
             shape("node.host", from: "Requests.statusValue", [
@@ -173,6 +173,9 @@ public enum WireSchema {
                                                                    field("reset", .string), field("sessions", .int)]),
             shape("node.reopen", from: "LeadEngine.offeredValue (the stability lane, 2026-11-20)", [
                 field("session", .string), field("folder", .string), field("name", .string), field("conversation", Kind.string.orNull)]),
+            shape("node.ended", from: "LeadEngine.endedValue (the stability lane, 2026-11-20)", [
+                field("session", .string), field("folder", .string), field("name", .string), field("conversation", Kind.string.orNull),
+                field("at", .date)]),
             shape("node.web", from: contractNode, [field("state", .string), field("port", Kind.int.orNull), field("tokens", .int),
                                                   field("connections", .int)]),
         ]

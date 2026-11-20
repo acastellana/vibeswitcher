@@ -51,6 +51,16 @@ extension Requests {
             ids = chosen
         }
         let taken = engine.takeOffered(ids)
+        resume(taken, engine: engine, request: request, giveBack: { engine.offerAgain($0) }, reply: reply)
+    }
+
+    /// Each of `taken` (out of their list already, so a second ask can't start one twice) checked off the queue
+    /// (`LeadEngine.reopenable`) and, when it checks out, started as an ordinary Claude session on the node's `claude`,
+    /// `--resume <its conversation>` in its folder at its window's size, one after the other; those that didn't start go
+    /// to `giveBack`. The reply lists what started (`reopened`) and what didn't (`refused`); none started is a refusal
+    /// naming each reason. On `queue`.
+    func resume(_ taken: [RestartReopen.Entry], engine: LeadEngine, request: NodeWire.Request,
+                giveBack: @escaping ([RestartReopen.Entry]) -> Void, reply: @escaping (NodeWire.Reply) -> Void) {
         let (home, claudeLink) = (engine.home, engine.preflight.claudeLink)
         let environment = VibePaths.isAccountRoot(root, accountHome: VibePaths.accountHome) ? [:] : ["VIBESWITCHER_HOME": root.path]
         let (link, queue, note) = (self.link, self.queue, self.note)
@@ -64,7 +74,7 @@ extension Requests {
             queue.async {
                 let run = ReopenRun()
                 func finish() {
-                    engine.offerAgain(run.back)
+                    giveBack(run.back)
                     note("session.reopen: \(run.reopened.count) reopened, \(run.refused.count) not")
                     guard !run.reopened.isEmpty else {
                         let why = run.refused.compactMap { $0["why"]?.string }.joined(separator: "; ")
@@ -118,3 +128,30 @@ extension Requests {
         var back: [RestartReopen.Entry] = []
     }
 }
+
+// MARK: session.resume
+
+extension Requests {
+    /// `session.resume` with `session` (an ended session's id as `status`'s `ended` lists it, its host id, or a prefix
+    /// of 4 or more of that id that only one ended session has) (the stability lane, 2026-11-20; the app's ended
+    /// sessions' Resume): the user's own session that ended lately, started again in its same conversation as `reopen`
+    /// starts one (`resume`: checked as a hint, the node's `claude` with `--resume`). The user's voice, recorded. One that
+    /// doesn't start goes back on the list.
+    func resumeSession(_ request: NodeWire.Request, reply: @escaping (NodeWire.Reply) -> Void) {
+        guard let engine else { return reply(.init(re: request.id, error: .init(.refused, "this server keeps no record of your sessions"))) }
+        guard let given = request.args?["session"]?.string?.trimmingCharacters(in: .whitespaces).lowercased(), !given.isEmpty else {
+            return reply(.init(re: request.id, error: .init(.badArgs, "session.resume needs session")))
+        }
+        let bare = given.hasPrefix(NodeIds.node + ":") ? String(given.dropFirst(NodeIds.node.count + 1)) : given
+        let matching = bare.count >= 4 && bare.allSatisfy({ $0.isHexDigit || $0 == "-" })
+            ? engine.endedSessions.filter { $0.entry.id.uuidString.lowercased().hasPrefix(bare) } : []
+        guard matching.count == 1, let entry = matching.first.flatMap({ engine.takeEnded($0.entry.id) }) else {
+            let shown = ConfigSeal.inert(given, limit: 80)
+            return reply(.init(re: request.id, error: .init(matching.isEmpty ? .gone : .badArgs, matching.isEmpty
+                ? "no ended session \(shown) of yours to resume (`vibeswitcher resume` lists them)"
+                : "\(matching.count) ended sessions start with \(shown): give more of its id")))
+        }
+        resume([entry], engine: engine, request: request, giveBack: { engine.endedAgain($0) }, reply: reply)
+    }
+}
+

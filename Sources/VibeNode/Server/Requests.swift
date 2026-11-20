@@ -150,7 +150,8 @@ public final class Requests: @unchecked Sendable {
     public static let recorded: Set<String> = ["start", "stop", "lead", "answer", "hold", "config.accept", "base.accept", "base.keep",
                                                "hooks.install", "hooks.remove", "build.switch", "web.open", "web.revoke", "tell",
                                                "send", "session.new", "session.end", "session.reply", "session.reopen",
-                                               "prompt-audit", "set", "session.rename", "session.pause"]
+                                               "prompt-audit", "set", "session.rename", "session.pause",
+                                               "session.resume"]
     /// The kinds on a card: the card's code (EN-D5), typed by the user, is checked here.
     public static let carded: Set<String> = ["answer", "hold", "config.accept", "base.accept", "base.keep"]
     /// How many replies to recorded actions are kept, so a repeated action (a retry) gets the reply it got.
@@ -243,6 +244,7 @@ public final class Requests: @unchecked Sendable {
         case "prompt-audit": promptAudit(request, reply: reply)
         case "session.rename": renameSession(request, reply: reply)
         case "session.pause": pauseSession(request, reply: reply)
+        case "session.resume": resumeSession(request, reply: reply)
         case "seen": seen(request, reply: reply)
         case "config.held": configHeld(request, reply: reply)
         case "config.accept": configAccept(request, reply: reply)
@@ -356,6 +358,7 @@ public final class Requests: @unchecked Sendable {
             "notices": .array(statusNotices().map(NodeWire.Value.string)),
             "restart": engine?.restartValue ?? .null,
             "reopen": engine?.offeredValue ?? .array([]),
+            "ended": engine?.endedValue ?? .array([]),
             "builds": installRoot.map { SwitchRequest.buildsValue(installRoot: $0, running: notes?.notes.build) } ?? .null,
             "web": webValue?() ?? NodeStatusStore.webOff,
         ])

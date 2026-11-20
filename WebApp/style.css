@@ -461,6 +461,12 @@ code, pre, kbd { font-family: var(--mono); }
 .end-strip > div:nth-child(2) { flex: 1; min-width: 0; }
 .new-session { display: grid; gap: 9px; margin: 22px 0 26px; padding: 14px 16px 15px; border-radius: 12px; background: var(--fill); }
 .new-title { color: var(--ink-2); font-size: var(--small); font-weight: 600; }
+/* Your sessions that ended lately, on the start page: a name and folder, the line that resumes it, its id. */
+.ended { display: grid; gap: 9px; margin: 0 0 26px; }
+.ended-list { display: grid; gap: 14px; }
+.ended-row { display: grid; gap: 6px; }
+.ended-name { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+.ended-folder { min-width: 0; overflow: hidden; color: var(--ink-3); font-size: var(--small); text-overflow: ellipsis; white-space: nowrap; }
 .new-fields { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .new-fields > .answer-input:first-child { flex: 2 1 220px; }
 .new-fields > .model-input { flex: 1 1 120px; }

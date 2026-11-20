@@ -291,7 +291,7 @@ public enum NodeWire {
         // The prompt-audit reminder's snooze, off and on (the stability lane, 2026-11-20).
         "prompt-audit": .user,
         // A session renamed or paused (the stability lane, 2026-11-20).
-        "session.rename": .user, "session.pause": .user,
+        "session.rename": .user, "session.pause": .user, "session.resume": .user,
         "session.draft": .webDraft, "session.draft.clear": .webDraft,
         // The node's settings (the parity table's gap 9, 2026-11-20): read by anyone of the uid (a page too), set in the
         // user's voice.
@@ -329,7 +329,7 @@ public enum NodeWire {
                                "board", "seen",
                                "send", "session.new", "session.end", "session.reply", "session.draft", "session.draft.clear",
                                "session.reopen", "mail", "prompt-audit", "session.rename", "session.pause",
-                               "settings", "set"]
+                               "session.resume", "settings", "set"]
 
     // MARK: Lines
 
