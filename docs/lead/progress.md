@@ -4239,3 +4239,4 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-20 22:13 Released agents-md-the-wallet's worker (idle since its done report on 2ab4df78) while its audit runs
 - 2026-11-20 22:13 Automatically (auto_advance): Released agents-md-the-wallet's worker, idle since its done report on 2ab4df78, while its audit runs (ended pid 59606 (Worker: AGENTS.md: the wallet e2e line stops naming a case count)): its Mac slot and memory are free. Its worktree and branch stay; findings the verdict sends back go to a fresh worker there, and a clean verdict merges with none.
 - 2026-11-20 22:14 Audit of agents-md-the-wallet: complete, clean
+- 2026-11-20 22:27 Merged agents-md-the-wallet: AGENTS.md: the wallet e2e line stops naming a case count (build 314c245bb76b)
