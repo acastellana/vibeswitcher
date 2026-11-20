@@ -242,6 +242,13 @@ code, pre, kbd { font-family: var(--mono); }
 .terminal-pane.is-stale .terminal-screen { opacity: 0.55; }
 .terminal-note { position: absolute; top: 10px; right: 18px; z-index: 5; margin: 0; padding: 2px 8px; border-radius: 6px; background: var(--fill-2); color: var(--ink-2); font-size: var(--small); }
 .terminal-pane.is-waiting .terminal-note { position: static; align-self: center; margin-top: 14vh; background: none; font-size: var(--text); }
+/* Watched (the user's own node): the session's own size, scrolled when wider than the pane; no cursor, a calm line. */
+.terminal-pane.is-watching .terminal-screen { overflow: auto; }
+.terminal-pane.is-watching .terminal-screen .xterm { height: auto; width: max-content; }
+.terminal-pane.is-watching .xterm-cursor-layer, .terminal-pane.is-watching .xterm-cursor { visibility: hidden; }
+.terminal-watching { display: flex; align-items: center; gap: 6px; flex: none; margin: 6px 0 2px; color: var(--ink-3); font-size: var(--small); }
+.terminal-watching[hidden] { display: none; }
+.terminal-watching code { color: var(--ink-2); user-select: all; }
 
 /* ---- Chat ---- */
 

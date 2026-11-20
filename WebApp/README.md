@@ -125,8 +125,7 @@ it has run every frame through `wire/validators.js` and judged each subscription
 the connection may do: the node's page reads and drafts (`draft`, not `answer`), so a card's options leave a draft
 (`store.draft`, an overlay kept until the cards stream reaches the ack's `applied`: `feed.reached`) and the card shows
 the line that confirms it; a page that only reads shows `vibeswitcher answer …` with the options as text; the
-terminal says it comes in a later build where `term.open` isn't among the kinds (the user's node: LW-D12), as a lead's
-board does, and the chat says so where `chat.page` isn't among the kinds. `mock.js` keeps the older whole-state messages below for the keyed collections, which the store still takes:
+terminal says it comes in a later build where `term.open` isn't among the kinds, as a lead's board does, and the chat says so where `chat.page` isn't among the kinds. `mock.js` keeps the older whole-state messages below for the keyed collections, which the store still takes:
 
 ```js
 feed.start()                    // sends store.apply(snapshot), then deltas
@@ -144,7 +143,10 @@ feed.onLink(fn)                 // 'up' after each hello, 'down' when the connec
 The terminal (`js/terminal.js`, `js/views/terminal.js`; the contract's §9) opens `term.open {session, cols, rows}` where
 `hello.kinds` has it, holds the replay until its type 2 and draws it whole over a reset emulator (a resync or a
 reconnect leaves the old screen up, dimmed, until the new one is whole), writes live bytes as they come, sends keys as
-type 1 and the pane's fitted size as type 3, and closes with `term.close` when the pane is left. In the terminal the
+type 1 and the pane's fitted size as type 3, and closes with `term.close` when the pane is left. On the user's own node the reply says `readOnly`
+(with the session's `cols` and `rows`, and each replay's type 5 says them again): the pane watches, drawn at the
+session's size (scrolled when wider than the pane), with no cursor and no keyboard, nothing sent up, and a line saying
+to type with `vibeswitcher send` in a terminal (the live plan's LW-D12, 2026-11-20). In a typed terminal the
 keyboard is the program's (Ctrl+K, Ctrl+J and the rest), but for a Mac's ⌘ keys. The program can't reach past the
 pane: OSC 52 (clipboard), OSC 8 (links) and the titles are swallowed, no link add-on is loaded, and the bell is
 silent.
