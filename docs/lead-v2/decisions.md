@@ -76,3 +76,7 @@ The user's answer; the next lead must know the install is the supervisor's, from
 
 The user's instruction; a later lead or the worker of branch-runs-get-the must reuse this one key and reader rather than add a per-tool rule.
 
+## 2026-11-20 17:55:06 Standing goal from the user (2026-11-20), for after the sandbox's first slice and between tasks: keep VibeSwitcher 2 improving itself until it's solid. The lead's queue, in order: (1) failures in docs/process/v2-acceptance.md (the supervisor's real-node acceptance run; the user brings it into this clone: not here yet at 17:45): each failing row becomes a task, and the row is rerun after its merge; (2) the nightly full suite's results (scripts/nightly.sh, in this clone, writes .build/nightly/last.md: no run yet): each flaky or failing test becomes a fix task; (3) the remaining 'partly' and 'missing' rows of docs/process/v2-parity.md that don't need the user (the table counts 16 partly, 20 missing); (4) anything seen breaking while working. Each is recorded as a decision, tasks stay small, and the user is asked only what is genuinely theirs to call. It doesn't displace what is in flight: the gate fix (the-node-s-gate), the four kernel-6.18 failures, SB5, SB6 2/2, branch-runs-get-the and Windows access finish first; the flake tasks already planned (tests-that-write-a, hookscommandtests-hooks, the-merge-s-test-2, turn-this-incident-into-2) are part of (2) and (4).
+
+The user's standing instruction; a lead after a handover or restart takes its next tasks from this queue without asking, in this order.
+
