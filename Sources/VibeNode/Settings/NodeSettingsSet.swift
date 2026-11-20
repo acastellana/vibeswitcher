@@ -104,7 +104,6 @@ extension NodeSettings {
         let wasShown = project(root: root, workflow: LeadWorkflow.load(from: path), floor: nil, files: files).first { $0.setting.key == key }?.value ?? ""
         try exclusively(root: root) {
             let current = FileManager.default.contents(atPath: path) ?? Data(LeadWorkflow.template.utf8)
-            let before = LeadWorkflow.load(from: path)
             try LeadWorkflow.write(LeadWorkflow.updating(current, with: [(key, value ?? "")]), to: path)
             let after = LeadWorkflow.load(from: path)
             let read = project(root: root, workflow: after, floor: nil, files: files).first { $0.setting.key == key }
@@ -112,14 +111,13 @@ extension NodeSettings {
             guard let read, read.value == expected else {
                 throw Refusal("wrote workflow.md, but \(key) reads back as \"\(read?.value ?? "")\", not \"\(expected ?? "")\": check the file")
             }
-            // The guard rail set here is the user's; the others stay as recorded (any not recorded yet, as they were),
-            // as configure records the lead's.
+            // Only the guard rail set here becomes the user's. A rail the vault has no record of yet is left as it is:
+            // a worker may have written it (`sandbox: off`), and recording it here would take that as the user's. The
+            // lead's checks (`LeadVault.changedSettings`, a sandbox key at its default) and `config accept`, where the
+            // user sees it, decide it. (configure, main's, records the unrecorded ones as they are: the same pattern.)
             guard setting.guardRail else { return }
             do {
-                let recorded = try vault.guardedSettings(root: root) ?? [:]
-                let given = LeadVault.guardedHashes(after).filter { $0.key == key }
-                let hashes = LeadVault.guardedHashes(before).filter { recorded[$0.key] == nil }.merging(given) { $1 }
-                try vault.setGuardedSettings(hashes, root: root)
+                try vault.setGuardedSettings(LeadVault.guardedHashes(after).filter { $0.key == key }, root: root)
             } catch {
                 throw Refusal("wrote workflow.md, but the session host didn't record \(key) as yours (\(error)): merge and start_worker "
                               + "refuse it until it does. Run the same `vibeswitcher set` again")

@@ -169,11 +169,26 @@ struct NodeSettingsTests {
         let applied = try NodeSettings.setProject(setting, to: "5", root: root, vault: vault, workerModel: nil, files: files)
         let workflow = LeadWorkflow.load(from: NodeSettings.workflowPath(project: root))
         #expect(workflow.maxWorkers == 5 && applied.value == "5" && applied.was == "3")
-        // Its hash is the user's now, and every rail not recorded before is recorded as it was.
-        #expect(fake.guarded?["max_workers"] == LeadVault.guardedHashes(workflow)["max_workers"])
-        #expect(Set(fake.guarded?.keys.map { $0 } ?? []) == Set(LeadVault.guardedKeys))
+        // Its hash is the user's now, and only its: the rails not recorded before are left to the lead's checks.
+        #expect(fake.sets == [["max_workers": LeadVault.guardedHashes(workflow)["max_workers"]!]])
         #expect(try vault.changedSettings(workflow, root: root).isEmpty)
         #expect(applied.told?.contains("max_workers to 5") == true && applied.told?.contains("recorded in the vault") == true)
+    }
+
+    /// A rail a worker wrote that the vault has no record of (`sandbox: off`) isn't made the user's by a `set` of
+    /// another key: the lead's checks still hold it.
+    @Test func aWorkerWrittenUnrecordedRailStaysHeldAfterTheUserSetsAnother() throws {
+        let (files, root, fake) = (try files(), try project(), FakeVault())
+        let path = NodeSettings.workflowPath(project: root)
+        // The vault records every rail as the template has them but the sandbox's keys; then a worker writes one.
+        fake.guarded = LeadVault.guardedHashes(LeadWorkflow.load(from: path)).filter { !SandboxPolicy.keys.contains($0.key) }
+        try LeadWorkflow.write(LeadWorkflow.updating(try Data(contentsOf: URL(fileURLWithPath: path)), with: [("sandbox", "off")]), to: path)
+        let vault = fake.vault(folder: scratch.url("vault"))
+        _ = try NodeSettings.setProject(NodeSettings.setting("max_workers")!, to: "5", root: root, vault: vault, workerModel: nil, files: files)
+        #expect(fake.sets.flatMap(\.keys) == ["max_workers"])
+        let workflow = LeadWorkflow.load(from: path)
+        #expect(workflow.maxWorkers == 5)
+        #expect(try vault.changedSettings(workflow, root: root).map(\.key) == ["sandbox"])
     }
 
     @Test func aModelThatIsNoGuardRailIsWrittenAloneWithNoRecord() throws {
