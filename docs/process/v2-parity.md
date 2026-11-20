@@ -35,8 +35,10 @@ The gaps that matter most for daily use, worst first:
 7. ~~**The lead ignores `lead_model` and `lead_advisor`**~~: closed 2026-11-19, the node starts its lead as the app does.
 8. **`push_remote` does nothing on a node.** The request is recorded, but no Push button or command acts on it. Since
    2026-11-19 the lead is told so and `status` lists the request.
-9. **No settings.** Limits, Ignore usage limits, the working policy, Boost and leads messaging each other can only be
-   changed by editing files by hand. Running leads aren't told when the policy changes.
+9. ~~**No settings.**~~ Closed 2026-11-20: `vibeswitcher settings [FOLDER]` shows the node's settings and a project's,
+   each with its value, default, where it lives and whether it is a guard rail; `vibeswitcher set [FOLDER] KEY VALUE`
+   changes one in the user's voice (typed code, recorded in the vault); the page's Settings drafts the line. Running
+   leads are told when the policy changes, and a project's lead when its settings do.
 10. **Restarts lose work.** Nothing records the open sessions or reopens a lead with `--resume` after the machine
     restarts. Rotation is only the cold idle handover.
 11. **No phone or remote access** (planned for stage 7). The web page is reachable on `127.0.0.1` only.
@@ -116,14 +118,14 @@ Sizes to close: S is about a day, M a few days, L a week or more.
 | Base moves (a base moved outside the lead) | `MainWindow/Lead/BaseMoves.swift` | has it | `vibeswitcher base show/accept/keep`; `Stores/BaseMoveStore.swift` | | V1's typed `!` lines wait for a composer |
 | Push to the remote (`push_remote`, then your Push click) | `MainWindow/Lead/PushRequests.swift` | partly | the tool records the request; `Engine/PushAsks.swift` tells the lead once that nothing on the node pushes it and no outcome will come, and `status` lists it while open (2026-11-19). Nothing offers or does the push | M | owed: a user's-voice `vibeswitcher push PROJECT` / `decline-push PROJECT` (typed code, recorded in the vault and journal like `answer`), settling through the vault (`settlePush`, which must take the node's server as the app) and running `LeadPush.settle` off the engine's queue, the outcome told to the lead as the app's `onSettled`; the web page shows the request and drafts the command, never pushes. The tool's own reply still says "click Push … in VibeSwitcher" (`LeadPush.swift`, shared with main): the engine's message corrects it right after |
 | Fetch from and merge the remote (`fetch_remote`, `merge_remote`) | `LeadToolset.swift` (shared) | unverified | shared tool, so it should work, but no node run has used it | | |
-| Leads messaging each other (`tell_lead`), and the "Between leads" view | `LeadToolset.swift`, `MainWindow/Lead/LeadMailViews.swift` | partly | the messages work (shared tool, delivered by `Engine/Delivery.swift`). There's no view, and no control to turn it off | S | |
+| Leads messaging each other (`tell_lead`), and the "Between leads" view | `LeadToolset.swift`, `MainWindow/Lead/LeadMailViews.swift` | partly | the messages work (shared tool, delivered by `Engine/Delivery.swift`); `vibeswitcher set lead_mail off` turns them off (2026-11-20). There's no view | S | |
 | The prompt-audit reminder | `MainWindow/Lead/PromptAuditDesk.swift` | missing | owed in the port map | S | |
 | `small_task_min` drops a review for tiny work | `LeadController.swift` `noteWorking` | has it | `Engine/Witness.swift` `witnessed`: the vault is told the sessions seen at work (`LeadVault.noteWorking`), on change or every 30 s, as the app's | | closed 2026-11-19 |
 | Fable held back: halted workers restarted on Opus | `LeadController.swift` `WitnessWork` | has it | `Engine/WitnessWork.swift` | | |
 | AI summaries of what each agent is doing | `MainWindow/Lead/TeamSummaryModel.swift`, `Sources/VibeCore/TeamSummaries.swift` | missing | no caller | M | |
 | Records: progress, decisions, incidents, redaction, the board's archive | `LeadToolset.swift` (shared) | has it | the lead's tool server | | |
-| Your working policy, and leads told when it changes | `WorkingPolicySettings.swift`, `Sources/VibeCore/WorkingPolicy.swift` | partly | read from `~/.vibeswitcher/policy.md` when a lead starts (`Engine/LeadStart.swift`). No editor, and running leads aren't told of a change (the policy watch is owed) | S | |
-| The review rules floor | `ReviewFloorSettings.swift`, `Sources/VibeCore/LeadReviewFloor.swift` | partly | the floor that workflow.md proposes is recorded by `config accept` (`Stores/ConfigHoldStore.swift`). There's no per-project floor editor | M | on purpose in part: the floor is accepted with a typed code |
+| Your working policy, and leads told when it changes | `WorkingPolicySettings.swift`, `Sources/VibeCore/WorkingPolicy.swift` | has it | `vibeswitcher set policy TEXT` (`- ` reads it from standard input, `default` puts the five rules back; `Settings/NodeSettings.swift`), the page drafts it; the running leads told once when it changes, again after a compaction (`Engine/SettingsWatch.swift`, `LeadWitness.PolicyWatch`) | | closed 2026-11-20 |
+| The review rules floor | `ReviewFloorSettings.swift`, `Sources/VibeCore/LeadReviewFloor.swift` | has it | recorded at `config accept` as workflow.md proposes it (`Stores/ConfigHoldStore.swift`); each rule set with `vibeswitcher set FOLDER floor_… VALUE` into the host's vault (`Settings/NodeSettingsSet.swift`), the project's lead told; the floor holds `set verifier_model` too | | closed 2026-11-20; the floor is the user's voice with a typed code |
 
 ### Accounts, usage limits and performance
 
@@ -132,9 +134,9 @@ Sizes to close: S is about a day, M a few days, L a week or more.
 | The account's usage, read from the roles' status line | `Sources/VibeCore/AccountUsage.swift` | has it | the status line reaches the roles through the door (`Sources/VibeCore/V2/Door/Porter.swift`) | | |
 | Workers and audits held back at 80 % of a limit | `LeadToolset.swift` (shared) | has it | the lead's tool server | | |
 | Usage shown to you (review rows waiting on a limit) | `MainWindow/Lead/TeamRows.swift` | missing | the engine reads no usage (the account watch is owed) | M | |
-| Ignore usage limits | `MacLimitsSettings.swift` | partly | honoured if `ignoreUsageLimits` is set in `~/.vibeswitcher/mac-limits.json` by hand | S | |
-| Machine-wide limits: team sessions, load, test and build slots, memory | `MacLimitsSettings.swift`, `Sources/VibeCore/MacLoad.swift` | partly | enforced (`Engine/RoomWatch.swift`, the tool server), on defaults unless the JSON is edited | S | memory pressure and swap are read on Linux (`VibePlatform/Host+Linux.swift`) |
-| Boost | `BoostWatch.swift`, `MainWindow/BoostMark.swift` | missing | nothing writes `boost.json` on a node | M | the design says Automatic acts as Off on WSL |
+| Ignore usage limits | `MacLimitsSettings.swift` | has it | `vibeswitcher set ignore_usage_limits on` (`mac-limits.json`, as the app writes it); the page drafts it | | closed 2026-11-20 |
+| Machine-wide limits: team sessions, load, test and build slots, memory | `MacLimitsSettings.swift`, `Sources/VibeCore/MacLoad.swift` | has it | enforced (`Engine/RoomWatch.swift`, the tool server); shown and set with `vibeswitcher settings` and `set mac_max_sessions`, `load_threshold`, `mac_heavy_slots` (2026-11-20), the room looked at again at once. The memory holds stay the file's, as in the app (no control) | | memory pressure and swap are read on Linux (`VibePlatform/Host+Linux.swift`) |
+| Boost | `BoostWatch.swift`, `MainWindow/BoostMark.swift` | partly | `vibeswitcher set boost on` and the boost limits (`settings.plist`); the engine writes `boost.json` (`Engine/SettingsWatch.swift` `lookAtBoost`): On unless the usage holds it off, Automatic as Off. No mark on the page, no Also on battery | S | the design says Automatic acts as Off on WSL |
 | Heavy-job slots (`vs-heavy`) | `Sources/VibeCore/TestLock.swift`, `HeavyJobs.swift` | has it | the command folder is on the sessions' PATH (`Sources/VibeHost/V2/HostImages.swift`) | | |
 | Battery hold, keep the machine awake, the sleep's cost | `KeepAwake.swift`, `PowerReading.swift`, `Sources/VibeCore/PowerSource.swift` | not needed | the battery hold: a node runs on a server or WSL on mains (no `/sys/class/power_supply` battery there), and has no battery limit setting; nothing writes `power.json` under its root, so the hold never applies, said in `Engine/Refresh.swift` (2026-11-19). Keep-awake is owed | M | WSL has nothing to keep awake; a Linux laptop node would need the reading, the limit and the watch's telling together (M) |
 | Memory benches, malloc relief, hang watchdog, UI benches | `MallocMode.swift`, `HangWatchdog.swift`, `UIBench.swift` | not needed | they measure the app's own process | | |
@@ -193,7 +195,7 @@ Sizes to close: S is about a day, M a few days, L a week or more.
 | Shell requests (an agent asks for a shell: Run or Decline) | `Shell/`, `Sources/VibeCore/ShellAsk.swift` | missing | no caller | M | |
 | Wallet requests (Wallet Manager, Passage, browser signing) | `Wallet/`, `Sources/VibeCore/Wallet*.swift` | missing | no caller | L | the design keeps only browser signing for Linux |
 | Brief Me (spoken briefing) | `Briefing/` | missing | "later" in the design | L | |
-| Settings (the window, its search, every tab) | `SettingsWindow.swift`, `SettingsCatalog.swift` | missing | no settings command or page. `VibePlatform/Settings+Linux.swift` keeps a settings file, but nothing lets you change it | L | |
+| Settings (the window, its search, every tab) | `SettingsWindow.swift`, `SettingsCatalog.swift` | partly | `vibeswitcher settings [FOLDER]` and `set [FOLDER] KEY VALUE` (2026-11-20): the limits, usage limits, Boost, leads messaging each other, the policy, and a project's models, max_workers and review floor; the page's Settings (`#/settings`) drafts each change as the line to run. No search; the window's and devices' tabs left out and said so (`NodeSettings.leftOut`) | M | |
 | Projects folder | Settings › General | missing | | S | |
 | Mac permissions (Automation, Accessibility) | Settings › Advanced | not needed | macOS only | | |
 | App Nap, focus log, presence | `TeamActivity.swift`, `FocusLog.swift`, `UserPresence.swift` | not needed | macOS only | | |
@@ -225,7 +227,8 @@ doesn't yet confine anything.
 - `lead` refuses a folder with no repository or no commit, and installs nothing. V1 offers to make one.
 - The web page listens on `127.0.0.1` only, with a pairing code good for 120 s. Phone access waits for stage 7.
 - The host always hands over to a new build. V1 can also replace an outdated host and end its sessions.
-- The review floor comes from workflow.md and is accepted with `config accept`, not set in a settings window.
+- The review floor comes from workflow.md and is accepted with `config accept`; each rule is changed with
+  `vibeswitcher set FOLDER floor_… VALUE`, not in a settings window.
 
 **By accident** (candidates for bugs or owed work):
 
@@ -233,11 +236,12 @@ doesn't yet confine anything.
 - ~~A finished session stays `done` forever, because nothing marks it seen.~~ Closed 2026-11-19: the app's seen rule,
   and the page's `seen`.
 - ~~`small_task_min` never drops a review.~~ Closed 2026-11-19: the witness tells the vault what it sees at work.
-- The limits run on defaults (10 team sessions, test and build slots at a sixth of the cores) with no way to change
-  them except by hand, and the defaults aren't shown.
+- ~~The limits run on defaults (10 team sessions, test and build slots at a sixth of the cores) with no way to change
+  them except by hand, and the defaults aren't shown.~~ Closed 2026-11-20: `vibeswitcher settings` shows them,
+  `vibeswitcher set` changes them.
 - ~~The battery hold never applies on the node, because no one writes the power state.~~ Now on purpose (2026-11-19):
   not needed on a server or WSL on mains; recorded in the table and in `Engine/Refresh.swift`.
-- Running leads aren't told when `policy.md` changes.
+- ~~Running leads aren't told when `policy.md` changes.~~ Closed 2026-11-20: the policy watch.
 - `push_remote` tells the lead it recorded a request that only you can push, but no client offers the push. Since
   2026-11-19 the node tells the lead so and lists the request in `status`; the push itself is owed.
 - The node's restart ends every session, and nothing records or reopens them.

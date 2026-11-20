@@ -600,6 +600,8 @@ command line alone where it doesn't (a guard rail):
 | `reply SESSION CHOICE [TEXT]` | the user's | yes | the question open on a session's screen answered with the app's keys, typed only while the question shown is still there (read again in the unit's gate) |
 | `new FOLDER [--agent claude\|shell] [--model M]` | the user's | yes | starts an ordinary session in the node's host: Claude by the node's `claude` link (never a PATH), or the host's plain shell |
 | `end SESSION` | the user's | yes | ends an ordinary session the node's host started; refused for a lead and its team |
+| `settings [FOLDER]` | anyone of the uid (a page's token reads it) | no | reads the node's settings and a project's, with where each lives; no secret in them |
+| `set [FOLDER] KEY VALUE` | the user's | yes | changes a setting where the app keeps it: the limits, Boost, leads messaging each other and the working policy under the node's root, a project's models and max_workers in its workflow.md (a guard rail's hash recorded in the vault as the user's, as the app's `setGuardedSettings`, so merge and start_worker take it), its review rules' floor in the vault; the value checked and shown inert before the code. A web page only drafts the line |
 | `draft`, `draft.clear` | a web page whose token drafts; refused `voice` on the Unix socket | no | the user's words left on a card in the server's memory and told to nobody: no lead, no vault, nothing recorded, until `answer CARD` takes them as above (the live plan's B5, I3; LW-D6). A draft a thief plants is shown in full before the code is typed: a guard rail as strong as the typed word |
 | `web.open`, `web.revoke` | the user's | yes (from the action id) | mint a pairing code for a page, or drop every page's token (the live plan's I1) |
 | `config held`, `base show FOLDER [--from COMMIT]` | the user's | no | change nothing; each makes the card the next request takes |
@@ -615,6 +617,11 @@ command line alone where it doesn't (a guard rail):
 and 6): the same voice, code and record as `tell`; each acts only on a session the node's host started. A web page
 leaves a message as a draft beside the session (`session.draft`, a token's `draft` right, recorded nowhere, told to
 nobody) and shows the command that sends it, and shows the others as commands to run.
+
+**(2026-11-20)** `settings` and `set` added (the parity table's gap 9): `settings` a read; `set` the same voice, code
+and record as `tell`. A guard rail or a floor rule set this way is the user's in the vault, never a session's: a
+session's `vibeswitcher set` is refused for its voice like any other. A web page reads the settings and drafts the
+`vibeswitcher set` line on its own page; nothing is left on the node.
 
 `status --ack` and `start`'s acknowledgment of S11 are not requests: the command line writes each to the journal
 itself, after its own typed code (the engine's EN-D15), so a seized server can't clear them.
