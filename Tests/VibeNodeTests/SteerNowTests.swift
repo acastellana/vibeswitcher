@@ -113,6 +113,34 @@ struct SteerNowTests {
         #expect(world.world.prompts(harness).isEmpty)
     }
 
+    /// Through the command line on a scratch node, its code typed on its terminal: what is shown says it steers; the
+    /// server process posts it sealed by the node's host as the user's (its vault verifies it), and the agent's hook
+    /// hands it over as the user's at its next step; nothing typed. A wrong form is the usage.
+    @Test func theCommandLineSteersAWorkingSession() async throws {
+        let node = try await ScratchNode(scratch)
+        defer { node.stop() }
+        let session = try await node.spawn("exec " + FakeClaude.quoted(node.fake.launcher.path), label: "Claude", agent: "claude")
+        let files = node.fake.files(terminal: session.tty)
+        try #require(await eventually(timeout: 60) { EngineEndToEndTests.state(files)["pid"] != nil }, "\(node.said)")
+        let pid = try #require((EngineEndToEndTests.state(files)["pid"] as? Int).map(Int32.init))
+        try hook(node, ["hook_event_name": "UserPromptSubmit", "prompt": "Fix the parser"], tty: session.tty, pid: pid)
+        let short = String(session.id.uuidString.lowercased().prefix(8))
+        let sent = try await node.runOnTerminal(["send", short, "Use the new tokenizer", "--now"])
+        #expect(sent.status == 0, "\(sent.output)\(sent.errors)\n\(node.said)")
+        #expect(sent.output.contains("This steers session \(short) now, as you"), "\(sent.output)")
+        #expect(sent.output.contains("steered: 21 characters into session \(short)'s steer inbox"), "\(sent.output)")
+        let waiting = node.inbox(session.tty).filter { $0.agentPid == pid }
+        #expect(waiting.count == 1 && waiting.first?.from == .user && waiting.first?.text == "Use the new tokenizer", "\(waiting)")
+        #expect(waiting.first.flatMap(node.verifies) == true)
+        let taken = leadsHookTakes(node, event: "PostToolUse", tty: session.tty, pid: pid)
+        #expect(taken.messages.map(\.from) == [.user] && taken.context.contains("The user sent this"), "\(taken.context)")
+        #expect(EngineEndToEndTests.prompts(files).isEmpty, "\(EngineEndToEndTests.prompts(files))")
+        for words in [["send", short, "x", "--now", "--now"], ["send", short, "--now", "x", "y"]] {
+            let usage = try await node.run(words)
+            #expect(usage.status == 64 && usage.errors.contains("[--now]"), "\(words): \(usage.output)\(usage.errors)")
+        }
+    }
+
     /// A page leaves a draft to go now (its "send now"): the session's value carries it, in the wire's shape.
     @Test func aDraftLeftToGoNowSaysSo() throws {
         let draft = SessionDraft(text: "Stop and look at the logs", at: Date(), action: "a", now: true)
