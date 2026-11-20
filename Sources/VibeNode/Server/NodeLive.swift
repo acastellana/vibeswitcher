@@ -29,6 +29,8 @@ public final class NodeLive: @unchecked Sendable {
     public let status: NodeStatusStore
     public let access: WebAccess
     public let web: NodeWebListener
+    /// The page on the user's tailnet (`vibeswitcher web --tailnet`); none on a scratch server.
+    public let tailnet: TailnetWeb?
     /// The page's files: the embedded ones, or a scratch server's folder.
     public let assets: LiveAssets
     /// The sessions' chats; none for a server with no sessions store.
@@ -56,9 +58,11 @@ public final class NodeLive: @unchecked Sendable {
     /// pick). `webRoot`: a scratch server's `--test-web-root=`. `terminals`: what a page may do with a session's
     /// terminal (`term.open` through a `TerminalRelay`, the live plan's I4; `ServerArguments.webTerminal`: the user's
     /// node watches, a scratch server's `--test-web-terminal` types); nil, `term.open` is `unknown-kind`. `clock`: the
-    /// engine's.
+    /// engine's. `tailnet`: the user's node's page on the tailnet (`TailnetWeb`, on the same port at the tailnet's
+    /// address); nil, `web --tailnet` is refused.
     public init(requests: Requests, sessions: NodeSessions?, engine: LeadEngine?, clock: NodeClock, port: UInt16 = NodeWeb.port,
-                webRoot: URL? = nil, terminals mode: TerminalRelay.Mode? = nil, note: @escaping @Sendable (String) -> Void = { _ in }) {
+                webRoot: URL? = nil, terminals mode: TerminalRelay.Mode? = nil, tailnet: TailnetWeb.Options? = nil,
+                note: @escaping @Sendable (String) -> Void = { _ in }) {
         queue = requests.queue
         self.requests = requests
         self.sessions = sessions
@@ -80,6 +84,16 @@ public final class NodeLive: @unchecked Sendable {
                                   return NodeWire.message(hello)
                               }, note: { note($0) })
         bound.web = web
+        // The tailnet's page: the same hub behind its own screen, which lets no terminal kind through.
+        let liveQueue = requests.queue, liveHub = hub
+        self.tailnet = tailnet.map { options in
+            TailnetWeb(root: requests.root, queue: liveQueue, clock: clock, port: port, find: options.find, admitPeer: options.admitPeer,
+                       folder: webRoot, handler: WebRequestScreen(liveHub, terminals: false, note: note),
+                       hello: { [weak requests] admission in
+                           guard let requests else { return nil }
+                           return NodeWire.message(requests.webHello(admission, assets: assets.build))
+                       }, note: note)
+        }
         let said = SaidWeb()
         status = NodeStatusStore(requests: requests, web: { said.live?.webValue() ?? NodeStatusStore.webOff })
         let web = web
@@ -113,6 +127,7 @@ public final class NodeLive: @unchecked Sendable {
         let hub = hub
         requests.liveSeq = { [weak hub] in hub?.seq(of: $0) ?? 0 }
         requests.web = access
+        requests.tailnet = self.tailnet
         requests.webValue = { said.live?.webValue() ?? NodeStatusStore.webOff }
         said.live = self
     }
@@ -162,6 +177,7 @@ public final class NodeLive: @unchecked Sendable {
         // After a restart, the web is bound again only when a token is alive (LW-D3).
         web.follow()
         if case .refused(let why) = web.state { note("the web isn't up: \(why)") }
+        tailnet?.follow()
     }
 
     /// The `boards` stream (the parity table's gap 4): each lead's board, read by `LiveBoards`, and `board`'s answer.
@@ -180,6 +196,7 @@ public final class NodeLive: @unchecked Sendable {
         access.sweep()
         web.closeUnheld()
         web.follow()
+        tailnet?.sweep()
         status.look()
     }
 

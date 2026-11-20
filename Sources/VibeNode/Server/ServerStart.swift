@@ -114,7 +114,8 @@ public enum ServerStart {
         // the loopback listener, off until `vibeswitcher web` (or a live token at rest) wants it.
         let live = NodeLive(requests: requests, sessions: sessions, engine: engine, clock: clock, port: parsed.testWebPort ?? NodeWeb.port,
                             webRoot: parsed.testWebRoot.map { URL(fileURLWithPath: $0, isDirectory: true) }, terminals: parsed.webTerminal,
-                            note: say)
+                            // The tailnet's page (`web --tailnet`) on the user's node only: a scratch server never binds it.
+                            tailnet: parsed.node ? TailnetWeb.Options() : nil, note: say)
         requests.openWebForAnyone = parsed.testWebPair
         server.hub = live.hub
         link.onWelcome = { _, _ in

@@ -89,6 +89,9 @@ public final class Requests: @unchecked Sendable {
     /// The web's gate and tokens (the live plan's I1, `NodeLive`): what `web.open` and `web.revoke` act on; none:
     /// both are refused.
     public var web: WebAccess?
+    /// The page on the user's tailnet (`NodeLive`'s, the user's node only): what `web.open` with `tailnet` acts on, and
+    /// `web.revoke` too; none: `web.open` with `tailnet` is refused.
+    public var tailnet: TailnetWeb?
     /// `status`'s `web`: the listener's state (`NodeLive.webValue`); none: off.
     public var webValue: (() -> NodeWire.Value)?
     /// The `seq` a live stream is at, by collection (`LiveHub.seq(of:)`, set by `NodeLive`): a draft's `applied`. On
@@ -181,7 +184,7 @@ public final class Requests: @unchecked Sendable {
             note("refused \(request.kind) from pid \(facts.pid): a draft comes from a web page")
             return reply(.init(re: request.id, error: .init(.voice, "a draft comes from a web page; in a terminal, `vibeswitcher answer CARD TEXT` answers and `vibeswitcher send SESSION TEXT` sends")))
         }
-        if request.kind == "web.open", openWebForAnyone {
+        if request.kind == "web.open", openWebForAnyone, request.args?["tailnet"] == nil {
             note("web.open from pid \(facts.pid), in a scratch server's form (--test-web-pair): no voice asked")
             return act(request, from: facts, reply: reply)
         }
@@ -267,6 +270,7 @@ public final class Requests: @unchecked Sendable {
         case "hooks.install", "hooks.remove": hooks(request, reply: reply)
         case "build.switch": buildSwitch(request, reply: reply)
         case "web.open", "web.revoke":
+            if request.kind == "web.open", request.args?["tailnet"]?.bool == true { return webOpenTailnet(request, reply: reply) }
             guard let web else { return reply(.init(re: request.id, error: .init(.refused, "this server has no web listener"))) }
             if request.kind == "web.open" { webOpen(request, web: web, reply: reply) } else { webRevoke(request, web: web, reply: reply) }
         default: reply(.init(re: request.id, error: .init(.unknownKind, "this server doesn't take \(request.kind)")))

@@ -18,13 +18,41 @@ extension Requests {
         }
     }
 
-    /// Every token and code dropped, each page's connection closed (`revoked`, 4403): `{"revoked": <tokens alive>}`.
+    /// `web.open` with `"tailnet": true` (`vibeswitcher web --tailnet`): the tailnet's listener bound on this machine's
+    /// Tailscale address if it wasn't, a code of the tailnet's gate made: `{"url": "http://<name>:<port>/#pair=<code>",
+    /// "expiresIn": 120, "tailnet": true}`. Refused, with nothing made, on a server with no tailnet (a scratch one), or
+    /// when Tailscale isn't there, isn't running, has MagicDNS off, or the port can't be had: saying which.
+    public func webOpenTailnet(_ request: NodeWire.Request, reply: @escaping (NodeWire.Reply) -> Void) {
+        guard let tailnet else {
+            return reply(.init(re: request.id, error: .init(.refused, "this server doesn't open the tailnet: only the user's node does")))
+        }
+        tailnet.open { opened in
+            switch opened {
+            case .failure(let refusal):
+                reply(.init(re: request.id, error: .init(.refused, "the tailnet page isn't open: \(refusal.description)")))
+            case .success(let opened):
+                reply(.init(re: request.id, result: .object(["url": .string(opened.url), "expiresIn": .int(opened.expiresIn), "tailnet": .bool(true)])))
+            }
+        }
+    }
+
+    /// Every token and code dropped, the tailnet's too, each page's connection closed (`revoked`, 4403):
+    /// `{"revoked": <loopback tokens alive>, "tailnetRevoked": <tailnet tokens alive>}`.
     public func webRevoke(_ request: NodeWire.Request, web: WebAccess, reply: @escaping (NodeWire.Reply) -> Void) {
+        // The tailnet's first: a refusal of the loopback's then still leaves no remote page.
+        var remote = 0
+        if let tailnet {
+            switch tailnet.revoke() {
+            case .failure(let refusal):
+                return reply(.init(re: request.id, error: .init(.refused, "the tailnet's web tokens weren't dropped: \(refusal.description)")))
+            case .success(let dropped): remote = dropped
+            }
+        }
         switch web.revoke() {
         case .failure(let refusal):
             reply(.init(re: request.id, error: .init(.refused, "the web tokens weren't dropped: \(refusal.description)")))
         case .success(let dropped):
-            reply(.init(re: request.id, result: .object(["revoked": .int(dropped)])))
+            reply(.init(re: request.id, result: .object(["revoked": .int(dropped), "tailnetRevoked": .int(remote)])))
         }
     }
 }
