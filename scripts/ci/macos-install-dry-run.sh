@@ -1,5 +1,5 @@
 #!/bin/bash
-# scripts/ci/macos-install-dry-run.sh: scripts/install-node-mac.sh's dry run, on the hosted Mac (the v2 macos workflow's
+# scripts/ci/macos-install-dry-run.sh: scripts/install-node-mac.sh's dry run, on the hosted Mac (the `v2 macos install` workflow's
 # `install` job) or any Mac: this checkout's HEAD, pushed as v2 to a scratch origin, installed into a scratch prefix with
 # the test flags (a file:// origin, an injected "green" CI answer, the runner's Xcode unchecked: it isn't root's there),
 # built for real (a release build, signed). Then what the install made is checked, and the refusals a dry run can reach:

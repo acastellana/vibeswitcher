@@ -231,8 +231,8 @@ or decided. Done on Linux, tested on both systems (`ApprovalJudgmentTests`, `App
      `/usr/lib/…` and `/System/Library/Frameworks/…`, no run path but `/usr/lib/swift`, no `LC_DYLD_ENVIRONMENT`; signed
      (`mac_sign_hardened`) before its first hash; `lib/mac-sign.sh` checked and sourced from the commit's blob; then
      `vibeswitcher agent-plist` (`NodeAgent.installed`) writes `<prefix>/dev.vibeswitcher.node.plist` and the
-     launchctl lines are printed, never run. Its dry run (`scripts/ci/macos-install-dry-run.sh`, the v2 macos
-     workflow's `install` job) builds HEAD for real from a scratch origin into a scratch prefix with an injected green
+     launchctl lines are printed, never run. Its dry run (`scripts/ci/macos-install-dry-run.sh`, its own workflow
+     `v2 macos install`, which install-node.sh's CI check doesn't ask until it has been green a while) builds HEAD for real from a scratch origin into a scratch prefix with an injected green
      answer, and checks the refusals it can reach. **Needs an independent review** (it is the Mac's S9). **Only a real
      Mac**: gh's token in the login keychain (`security find-generic-password -s gh:github.com`, its
      `go-keyring-base64:` form), GitHub's answers through curl, an App Store Xcode passing the toolchain check (and how
