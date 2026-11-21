@@ -444,8 +444,7 @@ extension StartCommandTests {
 
     /// An executable file at `url` holding `text`.
     static func makeProgram(_ url: URL, _ text: String = "#!/bin/sh\nexit 0\n") throws {
-        try text.write(to: url, atomically: true, encoding: .utf8)
-        chmod(url.path, 0o755)
+        try writeClosedOnExec(text, to: url)
     }
 
     /// A scratch home with swiftly's folder holding `swift` and nvm's `versions` holding `node` for each of `versions`.

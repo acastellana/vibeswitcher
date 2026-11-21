@@ -391,10 +391,23 @@ func collected(_ pid: pid_t, by deadline: TimeInterval) -> Int32? {
 /// makes a fake agent from `/bin/sleep` (`FakeAgent`, `ServerTests`), never `FileManager.copyItem`, whose descriptor a
 /// child forked during the copy inherits.
 func copyClosedOnExec(_ source: String, to target: String) throws {
-    let bytes = [UInt8](try Data(contentsOf: URL(fileURLWithPath: source)))
-    let fd = open(target, O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, 0o755)
+    try writeClosedOnExec([UInt8](try Data(contentsOf: URL(fileURLWithPath: source))), to: target)
+}
+
+/// A program's `text` (a script) written to `url` (made, `mode`), as `copyClosedOnExec` writes: never Foundation's
+/// `write(to:)`, whose descriptor a child forked during the write inherits ("Text file busy" at its exec;
+/// `ShebangWriteLintTests`). An existing file is replaced (removed first).
+func writeClosedOnExec(_ text: String, to url: URL, mode: mode_t = 0o755) throws {
+    try? FileManager.default.removeItem(at: url)
+    try writeClosedOnExec(Array(text.utf8), to: url.path, mode: mode)
+}
+
+/// `bytes` written to a new file at `target`, `mode`, through a close-on-exec descriptor.
+func writeClosedOnExec(_ bytes: [UInt8], to target: String, mode: mode_t = 0o755) throws {
+    let fd = open(target, O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, mode)
     guard fd >= 0 else { throw Platform.Errno(code: errno) }
     defer { Sys.close(fd) }
+    _ = fchmod(fd, mode)
     var done = 0
     while done < bytes.count {
         let wrote = bytes.withUnsafeBytes { Sys.write(fd, $0.baseAddress! + done, bytes.count - done) }

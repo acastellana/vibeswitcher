@@ -131,8 +131,7 @@ struct BranchRunPolicyTests: LeadTeamFixture {
         for (folder, program, says) in [(tool, "made-up", "made-up ran"), (other, "other-tool", "other ran")] {
             try FileManager.default.createDirectory(atPath: folder + "/bin", withIntermediateDirectories: true)
             try FileManager.default.createDirectory(atPath: folder + "/share", withIntermediateDirectories: true)
-            try "#!/bin/sh\necho '\(says)'\n".write(toFile: folder + "/bin/" + program, atomically: true, encoding: .utf8)
-            chmod(folder + "/bin/" + program, 0o755)
+            try installScript("#!/bin/sh\necho '\(says)'\n", atPath: folder + "/bin/" + program)
         }
         try "the tool's data\n".write(toFile: tool + "/share/data.txt", atomically: true, encoding: .utf8)
         return (tool, other)

@@ -50,7 +50,7 @@ struct InstallRelaunchTests {
             verifier = root.appendingPathComponent("verify.sh")
             try FileManager.default.createDirectory(at: ready, withIntermediateDirectories: true)
             try FileManager.default.createDirectory(at: shims, withIntermediateDirectories: true)
-            try """
+            try installScript("""
                 #!/bin/bash
                 # verify.sh APP: APP's files are the ones its seal lists, as `codesign -v` checks a signature's sealed
                 # resources. verify.sh seal APP: writes the seal.
@@ -58,13 +58,12 @@ struct InstallRelaunchTests {
                 if [[ $1 == seal ]]; then mkdir -p "$2/Contents/_CodeSignature" && listing "$2" >"$2/Contents/_CodeSignature/seal"; exit; fi
                 listing "$1" | diff "$1/Contents/_CodeSignature/seal" - >&2 || { echo "$1: a sealed resource is missing or invalid" >&2; exit 1; }
 
-                """.write(to: verifier, atomically: true, encoding: .utf8)
-            try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: verifier.path)
+                """, at: verifier)
             try Self.makeBundle(installed, name: name, mode: mode, version: "old")
             try Self.makeBundle(built, name: name, mode: "quits-when-asked", version: "new")
             #expect(try Self.runVerifier(verifier, ["seal", installed.path]) == 0)
             #expect(try Self.runVerifier(verifier, ["seal", built.path]) == 0)
-            try """
+            try installScript("""
                 #!/bin/bash
                 # Stands in for `open APP`: starts APP's process when none of its name is running; when one is, only
                 # activates it, which is to say does nothing.
@@ -72,8 +71,7 @@ struct InstallRelaunchTests {
                 "$1/Contents/MacOS/$VS_INSTALL_PROCESS" "$1/Contents/Resources/main.sh" "$VS_STANDIN_READY" </dev/null >/dev/null 2>&1 &
                 exit 0
 
-                """.write(to: launcher, atomically: true, encoding: .utf8)
-            try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: launcher.path)
+                """, at: launcher)
             old = Process()
             old.executableURL = installed.appendingPathComponent("Contents/MacOS/\(name)")
             old.arguments = [installed.appendingPathComponent("Contents/Resources/main.sh").path, ready.path]
@@ -172,8 +170,8 @@ struct InstallRelaunchTests {
 
         private func shim(_ command: String, _ body: String) throws {
             let file = shims.appendingPathComponent(command)
-            try body.write(to: file, atomically: true, encoding: .utf8)
-            try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: file.path)
+            try? FileManager.default.removeItem(at: file)
+            try installScript(body, at: file)
         }
 
         /// The pids pgrep -x finds under the stand-in's name (/usr/bin/pgrep, not a shim).
@@ -364,8 +362,8 @@ struct InstallRelaunchTests {
     @Test func aLaunchThatStartsNothingIsReportedAndFails() async throws {
         let stand = try await StandIn(temp, mode: "quits-when-asked")
         defer { stand.cleanUp() }
-        try "#!/bin/bash\nexit 0\n".write(to: stand.launcher, atomically: true, encoding: .utf8)
-        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: stand.launcher.path)
+        try? FileManager.default.removeItem(at: stand.launcher)
+        try installScript("#!/bin/bash\nexit 0\n", at: stand.launcher)
         let run = try await offPool { try stand.install(wait: 2) }
         #expect(run.status == 1, Comment(rawValue: run.output))
         #expect(run.output.contains("Installed \(stand.installed.path), but no new \(stand.name) process is up 2s after the launch"), Comment(rawValue: run.output))

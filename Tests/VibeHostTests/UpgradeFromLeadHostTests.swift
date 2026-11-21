@@ -301,8 +301,7 @@ import Testing
                     chmod +x "$scratch/debug/vibeswitcher-host" ;;
                 esac
                 """
-            try script.write(to: folder.appendingPathComponent("xcrun"), atomically: true, encoding: .utf8)
-            try UpgradeFromLeadHostTests.run("/bin/chmod", ["+x", folder.appendingPathComponent("xcrun").path])
+            try installScript(script, atPath: folder.appendingPathComponent("xcrun").path)
         }
 
         /// Each command it was given, in order.
