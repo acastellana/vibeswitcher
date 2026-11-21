@@ -190,6 +190,8 @@ function commands() {
     { title: 'This Node', about: 'Host, server, build and notices', icon: 'node', run: () => ui.go('#/node') },
     // The node's settings, and each lead's project's (views/settings.js).
     { title: 'Settings', about: 'Limits, Boost, the working policy', icon: 'settings', run: () => ui.go(settingsHref(null)) },
+    // This browser's terminal look (Settings › Terminal, views/termlook.js): the Mac's Appearance.
+    { title: 'Terminal Look', about: 'Theme, font, size, cursor and colours, in this browser', icon: 'terminal', run: () => ui.go(settingsHref(null)) },
     // The Mac's Statistics window (views/stats.js).
     ...(store.can('stats') ? [{ title: 'Statistics', about: 'Load, usage, merges, quality and cost, by project', icon: 'node', run: () => ui.go(statsHref('week')) }] : []),
     ...[...store.state.leads.values()].filter((lead) => lead.root).map((lead) => ({ title: `Settings: ${lastPart(lead.root)}`, about: 'Its models, max_workers and review floor', icon: 'settings', run: () => ui.go(settingsHref(lead.project)) })),

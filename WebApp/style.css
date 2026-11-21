@@ -900,3 +900,24 @@ kbd { padding: 1px 6px; border-radius: 5px; box-shadow: inset 0 0 0 1px var(--li
 .swatch { display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-left: 6px; }
 .stat-badge { margin-left: 8px; padding: 0 5px; border-radius: 4px; background: var(--fill-2); color: var(--ink-2); font-size: 10px; letter-spacing: 0.04em; }
 .stat-compared + .stat-compared { margin-top: 10px; }
+
+/* ---- Settings › Terminal, this browser's (views/termlook.js) ---- */
+
+.look-body { display: grid; gap: 2px; }
+.look-row { display: grid; grid-template-columns: 130px minmax(0, 1fr); align-items: center; gap: 4px 12px; padding: 6px 0; border-top: 1px solid var(--line); }
+.look-label { color: var(--ink-2); }
+.look-note { grid-column: 2; color: var(--ink-3); font-size: var(--small); }
+.look-input { width: 100%; max-width: 280px; padding: 3px 8px; border-radius: 6px; background: var(--fill-2); color: var(--ink); font: inherit; border: 0; }
+.look-input.narrow { max-width: 110px; }
+.look-pair { display: flex; align-items: center; gap: 14px; }
+.look-check { display: inline-flex; align-items: center; gap: 6px; }
+.look-colours { display: grid; gap: 8px; }
+.look-named { display: flex; flex-wrap: wrap; gap: 6px 14px; }
+.look-swatch { display: inline-flex; align-items: center; gap: 6px; font-size: var(--small); color: var(--ink-2); }
+.look-ansi { display: grid; grid-template-columns: repeat(8, 28px); gap: 4px; }
+.look-colour { width: 28px; height: 22px; padding: 0; border: 1px solid var(--line); border-radius: 5px; background: none; cursor: pointer; }
+.look-colour:disabled { cursor: default; opacity: 0.9; }
+.terminal-pane.is-bell .terminal-screen { animation: bell-flash 0.18s ease-out; }
+@keyframes bell-flash { from { filter: brightness(1.6); } to { filter: none; } }
+@media (prefers-reduced-motion: reduce) { .terminal-pane.is-bell .terminal-screen { animation: none; outline: 2px solid var(--accent); } }
+@media (max-width: 600px) { .look-row { grid-template-columns: minmax(0, 1fr); } .look-note { grid-column: 1; } }
