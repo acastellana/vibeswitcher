@@ -163,7 +163,9 @@ public final class HostServer {
 
     /// A node's host on the Mac: it runs a server child and keeps a vault. It answers `vaultV2` there (the record of the
     /// user's actions, `VaultV2Handler`) and lists it in its welcome; the Mac app's host has no server child and doesn't.
-    var isMacNodeHost: Bool { Platform.CodeIdentity.isAvailable && serverChild != nil && config.vault != nil }
+    /// Only from a checked node start (`HostImages.isCheckedMacNode`, never yet), never from "has a server child": any
+    /// host can be given `--server` (the review of 2026-11-21).
+    var isMacNodeHost: Bool { Platform.CodeIdentity.isAvailable && HostImages.isCheckedMacNode && serverChild != nil && config.vault != nil }
 
     /// What the welcome lists: the configured capabilities, and on a Mac node's host `vaultV2` too.
     var welcomeCapabilities: [String] {

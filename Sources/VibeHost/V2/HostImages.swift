@@ -231,6 +231,37 @@ public enum HostImages {
         }
     }
 
+    /// Whether this host is the Mac's node host from a checked `--node` start. Never yet: the Mac reads no `--node`
+    /// (above), and every anchor such a check could compare against (the builds folder, its `build-info`, the job's
+    /// program) is the user's to write, so a session could make one (docs/process/v2-mac-tasks.md, "Before
+    /// approvalMeasured flips", the review of 2026-11-21: an anchor a session can't write). Until it is built, no Mac
+    /// host is a node host (`HostServer.isMacNodeHost`) and none but a scratch host runs a server child.
+    public static let isCheckedMacNode = false
+
+    /// The Mac: why this host may not run a `--server` child, or nil. Its child's connections through the connector
+    /// are the app's (`.app`), so a host given `--server PATH` by anyone would make PATH the app: refused for the user's
+    /// host (`ownsLaunchers`) and for any host on the account's own locks (the app's `~/.vibeswitcher/host.lock` and the
+    /// node's root's, by the user database's home, compared by path and by file), unless it is a checked node start
+    /// (`isCheckedMacNode`, never yet). A scratch host (its own lock, its vault in memory) may: what it lets through is
+    /// no more than a session could start itself. Linux: nil (its server child is checked as `HostImages.load` says).
+    public static func macServerRefusal(lockPath: String, ownsLaunchers: Bool, accountHome: String? = accountHome) -> String? {
+        guard Platform.CodeIdentity.isAvailable, !isCheckedMacNode else { return nil }
+        if ownsLaunchers { return "the user's host on the Mac runs no server child until its node start is checked" }
+        guard let accountHome else { return "the account's home can't be read, so this host's lock can't be told from the account's" }
+        let locks = [(accountHome as NSString).appendingPathComponent(".vibeswitcher/host.lock"),
+                     (Platform.Service.nodeRoot(accountHome: accountHome) as NSString).appendingPathComponent("host.lock")]
+        var held = stat()
+        let heldRead = stat(lockPath, &held) == 0
+        for lock in locks {
+            var other = stat()
+            if (lockPath as NSString).standardizingPath == (lock as NSString).standardizingPath
+                || (heldRead && stat(lock, &other) == 0 && other.st_dev == held.st_dev && other.st_ino == held.st_ino) {
+                return "the lock \(lockPath) is the account's own (\(lock)): only a checked node start runs a server child on it"
+            }
+        }
+        return nil
+    }
+
     /// `main`'s start check (Linux; the Mac: nil): `mayStart` for the lock it takes (`lockPath`) and, for the user's host
     /// (`ownsLaunchers`, by its probe or by the state a handover carried), for the user's lock (`usersLock`, its
     /// `VibePaths.hostLock`) too, so that whatever made it the user's host it passes the user's host's checks: on the
