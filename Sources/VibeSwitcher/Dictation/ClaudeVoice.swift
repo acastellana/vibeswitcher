@@ -938,16 +938,20 @@ final class ClaudeVoiceRun {
             if text == plainShown, !plainKept.contains(text), plainKept.count < 2 { plainKept.append(text) }
         }
         plainShown = plain
-        if let dim = LeadDelivery.dimText(in: screen), !dim.isEmpty { live = dim }
+        // Words, not a grey level cursor (drawn dim too) left alone in the box.
+        if let dim = LeadDelivery.dimText(in: screen), dim.contains(where: { $0.isLetter || $0.isNumber }) { live = dim }
         let prompt = ClaudeVoiceScreen.prompt(screen)
         if prompt.dim != dimBefore, prompt.dim.contains(where: { $0.isLetter || $0.isNumber }) { wordsShown = true }
     }
 
     /// Whether text other than `text` (the box's draft now, Claude's) showed not dim while it recorded: at two reads in
-    /// a row, or at the last read that watched it.
+    /// a row, or at the last read that watched it. With no words heard shown, nothing not dim can be Claude's: the box
+    /// may hold only what was typed.
     private func typedOver(_ text: String) -> (kept: Bool, last: Bool) {
         let squeezed = { (text: String) in text.filter { !$0.isWhitespace } }
-        return (plainKept.contains { squeezed($0) != squeezed(text) }, plainShown.map { squeezed($0) != squeezed(text) } ?? false)
+        let heard = live.contains { $0.isLetter || $0.isNumber }
+        let other = { (shown: String) in !heard || squeezed(shown) != squeezed(text) }
+        return (plainKept.contains(where: other), plainShown.map(other) ?? false)
     }
 
     /// The same text a few reads in a row: Claude is done writing it. Out of its box with ⌃U, if it's Claude's: it starts

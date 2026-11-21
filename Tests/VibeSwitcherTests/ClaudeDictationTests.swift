@@ -1623,6 +1623,28 @@ struct ClaudeDictationTests {
         #expect(input(h) == "")
     }
 
+    /// A key typed in the terminal while Claude records and hears nothing, and writes nothing after: the box then holds
+    /// only what was typed, the same text as the box shows at the end, and nothing heard to say it's Claude's. It's left
+    /// alone, not taken as the dictation.
+    @Test func aKeyTypedWhileClaudeHearsNothingIsLeftAlone() async throws {
+        let h = try await Harness.start(temp)
+        defer { h.stop() }
+        h.tell(["op": "voice", "mode": "hold", "gap": 1.5, "transcript": "", "interim": ""])
+        try await h.waitFor { h.agent["voice"] as? String == "hold" && h.agent["transcript"] as? String == "" }
+        let controller = dictation(h)
+        controller.press(h.key, agent: .claude) { "" }
+        try await h.waitFor { controller.listening }
+        h.keys("x")
+        try await h.waitFor { self.input(h) == "x" }
+        controller.release()
+        try await h.waitFor { controller.phase == .idle }
+        #expect(controller.notice?.text == ClaudeVoiceRun.typedMeanwhile, "\(String(describing: controller.notice)) \(String(describing: ended))")
+        #expect(controller.deliveries[h.key] == nil)
+        #expect(input(h) == "x")
+        #expect(h.agent["killed"] as? Int == 0)
+        #expect(h.agent["enters"] as? Int == 0)
+    }
+
     /// A Claude screen whose box holds `parts` in order, each drawn plain, dim (`faint`), or as its level cursor (a
     /// coloured bar); `footer` under it.
     enum Part { case plain(String), dim(String), meter }
