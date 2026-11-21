@@ -81,6 +81,10 @@ struct CommandMaskTests {
             ("curl -HAuthorization:Bearer-abc123 x", "curl -HAuthorization:••• x"),
             ("curl -H'X-Api-Key: abc123' https://example.com/v1", "curl -H'X-Api-Key: •••' https://example.com/v1"),
             ("curl -H'Accept: text/plain' x", "curl -H'Accept: text/plain' x"),
+            // A credential header attached with nothing after its colon, or no colon: the next word is its value.
+            ("curl -HAuthorization: Bearer-abc123 x", "curl -HAuthorization: ••• x"),
+            ("curl -HX-Api-Key abc123 x", "curl -HX-Api-Key ••• x"),
+            ("curl '-HAuthorization:' 'Bearer abc123' x", "curl '-HAuthorization:' '•••' x"),
             ("curl -uuser:hunter2 x", "curl -u••• x"),
             ("DATABASE=bob:hunter2 tool", "DATABASE=bob:••• tool"),
             ("DATABASE_URL=bob:hunter2@db:5432 tool", "DATABASE_URL=bob:•••@db:5432 tool"),
