@@ -1584,9 +1584,9 @@ struct ClaudeDictationTests {
 
     /// app.log, the 09:49:46 run (one of five "typed in the terminal meanwhile" in the week to 2026-11-20): Claude
     /// stopped recording by itself while the key was held, its transcript went in, and the hold's own Spaces, still
-    /// going while the reads lagged, started a second recording over it. The reads then showed Claude's own transcript, not dim, beside its level cursor: taken for
-    /// something typed in the terminal, the run left it in the box ("typed in the terminal meanwhile"), though nobody
-    /// typed. It's Claude's: it lands in the composer.
+    /// going while the reads lagged, started a second recording over it. The reads then showed Claude's own
+    /// transcript, not dim, beside its level cursor: taken for something typed in the terminal, the run left it in the
+    /// box ("typed in the terminal meanwhile"), though nobody typed. It's Claude's: it lands in the composer.
     @Test func claudesOwnTextUnderASecondRecordingStartedByTheHoldLands() async throws {
         let h = try await Harness.start(temp)
         defer { h.stop() }
