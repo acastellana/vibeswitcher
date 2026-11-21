@@ -129,15 +129,13 @@ struct TeamPluginsTests: LeadTeamFixture {
         // A program that isn't Claude Code lists nothing.
         let folder = temp.url("vibe").appendingPathComponent("tmp/plugins", isDirectory: true)
         let fake = temp.url("not-claude").path
-        try "#!/bin/sh\necho not json\n".write(toFile: fake, atomically: true, encoding: .utf8)
-        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: fake)
+        try installScript("#!/bin/sh\necho not json\n", atPath: fake, mode: 0o700)
         #expect(LeadLaunch.listedPlugins(command: "FOO=1 '\(fake)' --model opus", folder: folder) == nil)
         // Claude Code's lists, run in the neutral folder: the folder it ran in is recorded outside it.
         let lister = temp.url("lists").path
         let ranIn = temp.url("ran-in").path
-        try "#!/bin/sh\npwd -P > '\(ranIn)'\n[ \"$1 $2 $3\" = 'plugin list --json' ] && echo '[{\"id\": \"x@y\"}]'\n"
-            .write(toFile: lister, atomically: true, encoding: .utf8)
-        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: lister)
+        try installScript("#!/bin/sh\npwd -P > '\(ranIn)'\n[ \"$1 $2 $3\" = 'plugin list --json' ] && echo '[{\"id\": \"x@y\"}]'\n",
+                          atPath: lister, mode: 0o700)
         #expect(LeadLaunch.listedPlugins(command: "'\(lister)' --model opus", folder: folder) == ["x@y"])
         #expect(try String(contentsOfFile: ranIn, encoding: .utf8) == Self.real(folder.path) + "\n")
         // The folder is made private, and stays empty.
@@ -158,8 +156,7 @@ struct TeamPluginsTests: LeadTeamFixture {
         try FileManager.default.createDirectory(atPath: worktree, withIntermediateDirectories: true)
         let lister = temp.url("lists").path
         let ranIn = temp.url("ran-in").path
-        try "#!/bin/sh\npwd -P > '\(ranIn)'\necho '[]'\n".write(toFile: lister, atomically: true, encoding: .utf8)
-        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: lister)
+        try installScript("#!/bin/sh\npwd -P > '\(ranIn)'\necho '[]'\n", atPath: lister, mode: 0o700)
         // The runtime's call (`HostRuntime.pluginIDs`) takes no folder: the listing runs in its own, VibeSwitcher's
         // (`pluginListFolder`, under the sessions' temporary root; a scratch one of the same shape here, so the test
         // leaves nothing in that root).

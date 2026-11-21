@@ -193,8 +193,7 @@ struct LeadDoneCheckTests: LeadTeamFixture {
         let path = folder + "/codex"
         let script = "#!/bin/bash\nprintf '%s\\n' \"$@\" > \(RecentProjects.shellQuote(log))\n"
             + "while (( $# > 0 )) && [[ $1 != -- ]]; do shift; done; shift\nCODEX_SANDBOX=seatbelt exec \"$@\"\n"
-        try script.write(toFile: path, atomically: true, encoding: .utf8)
-        chmod(path, 0o755)
+        try installScript(script, atPath: path)
         return path
     }
 

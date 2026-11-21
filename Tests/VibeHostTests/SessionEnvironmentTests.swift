@@ -159,12 +159,11 @@ struct SessionEnvironmentTests {
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         let launcher = folder.appendingPathComponent("launcher").path
         let written = folder.appendingPathComponent("parser-environment").path
-        FileManager.default.createFile(atPath: launcher, contents: Data("#!/bin/sh\nenv > '\(written).partial' && mv '\(written).partial' '\(written)'\n".utf8),
-                                       attributes: [.posixPermissions: 0o755])
+        try installScript("#!/bin/sh\nenv > '\(written).partial' && mv '\(written).partial' '\(written)'\n", atPath: launcher)
         let queue = DispatchQueue(label: "parser-env")
-        var link: ParserLink?
-        // A file just written can be busy to exec (ETXTBSY) while another test's child, forked meanwhile, holds it.
-        #expect(await eventually { link = ParserLink.start(launcher: launcher, cols: 80, rows: 24, options: ParserOptions(), queue: queue); return link != nil })
+        // Installed by a child (`installScript`): no other test's child holds it open, so it runs at once.
+        let link = ParserLink.start(launcher: launcher, cols: 80, rows: 24, options: ParserOptions(), queue: queue)
+        #expect(link != nil)
         defer { queue.sync { _ = link?.stop() } }
         #expect(await eventually { FileManager.default.fileExists(atPath: written) })
         let lines = ((try? String(contentsOfFile: written, encoding: .utf8)) ?? "").split(separator: "\n").map(String.init)
