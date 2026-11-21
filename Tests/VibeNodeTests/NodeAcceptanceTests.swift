@@ -761,6 +761,7 @@ struct NodeAcceptanceTests {
         let buildA = try ScratchBuilds.install(commit: a, into: installs)
         _ = try ScratchBuilds.install(commit: b, into: installs)
         let node = try await ScratchNode(scratch, holdFirstLook: true, build: buildA, installRoot: installs)
+        try node.noLoadHold()  // a worker starts: the runner's own load isn't the case's
         defer { node.stop() }
         let repo = try await Self.repository(node)
         let lead = try await Self.startLead(node, repo, goal: "write the parser")
