@@ -4250,3 +4250,5 @@ Proposed task 1: Find why dictations end with no text
   Counts by day, 2026-11-14 to 2026-11-20: 11-14 ×0, 11-15 ×0, 11-16 ×0, 11-17 ×1, 11-18 ×0, 11-19 ×1, 11-20 ×3.
   Lines: first at 2026-11-09 17:16:39, last at 2026-11-20 13:09:28 in ~/.vibeswitcher/debug/app.log (app.log.1 once it rotated).
   Line, masked: dictation: Claude's ended, session <id>, no text: …
+- 2026-11-21 12:30 Automatically (auto_advance): Held: on battery under your 10 % limit, so nothing starts, audits or merges by itself until AC power returns: no task paused yet, since 12:30.
+- 2026-11-21 12:30 Planned claude-dictation-text: Claude dictation: text that was dictated is dropped as "typed in the terminal meanwhile" (review audit)
