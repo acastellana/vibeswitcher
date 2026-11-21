@@ -66,7 +66,7 @@ public enum WireSchema {
                                   "chat.image.args", "chat.image.result", "stats.args", "stats.result", "session.ports.args", "session.ports.result",
                                   "board.task.args", "board.task.result", "board.image.args", "board.image.result",
 
-                                  "settings.args", "settings.result", "set.args", "set.result", "mail.args", "mail.result", "recent.args", "recent.result"]
+                                  "settings.args", "settings.result", "set.args", "set.result", "mail.args", "mail.result", "recent.args", "recent.result", "brief.args", "brief.result"]
     /// A keyed collection's entity.
     public static let collections = ["node": "node", "sessions": "session", "leads": "lead", "cards": "card", "boards": "board"]
 
@@ -452,6 +452,11 @@ public enum WireSchema {
                                                                   field("project", Kind.shape("settings.project").orNull),
                                                                   field("leftOut", .list(.shape("settings.left"))),
                                                                   field("usage", .shape("node.usage"))]),
+            // Brief me (`brief`, 2026-11-21).
+            shape("brief.args", from: "Requests.brief", [optional("folder", .string)]),
+            shape("brief.result", from: "Requests.briefValue", [field("text", .string), field("byModel", .bool), field("language", .string),
+                                                               field("at", .date), field("notice", Kind.string.orNull), field("asks", .int),
+                                                               field("kept", .bool)]),
             // The start page's recent projects (`recent`, 2026-11-21).
             shape("recent.args", from: "Requests.recent", []),
             shape("recent.result", from: "Requests.recent", [field("projects", .list(.shape("recent.project")))]),

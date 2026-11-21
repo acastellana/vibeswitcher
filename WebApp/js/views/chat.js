@@ -32,6 +32,7 @@ import { copyLine } from './cards.js';
 import { imageSendLine } from '../actions.js';
 import { tokenAt, accept, IMAGE_TYPES, MAX_IMAGE } from '../composing.js';
 import { allDoneView } from './alldone.js';
+import { talkButton } from '../dictate.js';
 
 // How close to the end counts as being at the end.
 const NEAR = 48;
@@ -367,7 +368,9 @@ export function chatView(app) {
       h('button', { class: 'icon-button', type: 'button', title: 'Close', 'aria-label': 'Close', onclick: () => { nodeImage.hidden = true; input.focus(); } }, icon('close', 12))),
     nodeLine,
     h('p', { class: 'confirm-note' }, 'Run it in a terminal on the node: it shows the message with the image and asks for a code. The page can’t read a file on the node itself.'));
-  const form = h('form', { class: 'composer' }, attachButton, input, sendButton, pick);
+  // Push-to-talk dictation into the box (js/dictate.js): only where the browser recognises speech and you turned it on.
+  const talk = talkButton(input);
+  const form = h('form', { class: 'composer' }, attachButton, input, talk, sendButton, pick);
   const hint = h('p', { class: 'composer-hint', hidden: true });
   // The message this page left for the session, over the box, with the line that sends it; Edit puts it and its images
   // back in the box.

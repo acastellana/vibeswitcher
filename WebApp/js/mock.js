@@ -749,6 +749,11 @@ export function createMock(store, options = {}) {
       ];
       return { ok: true, result: { presets: args.folder ? presets : presets.slice(1), problems: [] } };
     }
+    if (message.kind === 'brief') {
+      return { ok: true, result: { text: options.empty ? 'No project lead is running and no session needs you.'
+        : 'In example-site, the sync with main is running and the cleanup of ended folders is being checked. One question waits on you: whether to ship the new hero. One session needs you.',
+        byModel: false, language: 'en', at: ago(0), notice: null, asks: options.empty ? 0 : 2, kept: false } };
+    }
     if (message.kind === 'recent') {
       return { ok: true, result: { projects: options.empty ? [] : [
         { folder: SITE, lastUsed: ago(300), lead: SITE_PROJECT },

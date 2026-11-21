@@ -773,6 +773,11 @@ public enum WireVectors {
             // The node's settings (2026-11-20): read by a page, which drafts the line that sets one; `set` is never a page's.
             ("settings", [request(.init(id: "18", kind: "settings", args: ["folder": .string(root)])),
                           reply("reply.settings", .init(re: "18", result: settingsValue))]),
+            // Brief me (2026-11-21): what happened and what's asked of you, written by the template here.
+            ("brief", [request(.init(id: "41", kind: "brief")),
+                       reply("reply.brief", .init(re: "41", result: Requests.briefValue(
+                           text: "In acme-site, 2 updates; 1 landed, 1 running, 1 question for the user. Latest: Landed: the pricing page's copy. 1 session needs you: notes.",
+                           byModel: false, language: "en", at: boardNow.timeIntervalSince1970, notice: nil, asks: 2, kept: false)))]),
             // The start page's recent projects (2026-11-21): the folders Claude Code and Codex know, a lead's project where one runs.
             ("recent", [request(.init(id: "40", kind: "recent")),
                         reply("reply.recent", .init(re: "40", result: .object(["projects": .array([

@@ -321,6 +321,8 @@ public enum NodeWire {
         // The start page's recent projects (2026-11-21): a read of the folders Claude Code and Codex know, the user's
         // other projects among them, so never a session's: the user's or a page's that reads (`webRead`, as `mail`).
         "recent": .webRead,
+        // Brief me (2026-11-21): a read of the user's own, which may ask the summaries' model, so never a session's.
+        "brief": .webRead,
         // Settling the lead's push request (the parity table's push row, 2026-11-20): the user's voice.
         "push": .user, "push.decline": .user,
     ]
@@ -362,7 +364,7 @@ public enum NodeWire {
                                "push", "push.decline",
                                "session.reopen", "mail", "prompt-audit", "session.rename", "session.pause",
                                "session.resume", "shells", "session.close-shells", "presets.edit",
-                               "recent"]
+                               "recent", "brief"]
 
     // MARK: Lines
 

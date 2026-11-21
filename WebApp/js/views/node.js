@@ -5,6 +5,7 @@ import { h, framed } from '../dom.js';
 import { icon } from '../marks.js';
 import { since, plural, tilde } from '../words.js';
 import { usageFacts } from '../settings.js';
+import { dictationGroup } from '../dictate.js';
 import { healthFacts } from '../health.js';
 
 const row = (name, ...value) => h('div', { class: 'fact' }, h('dt', null, name), h('dd', null, value));
@@ -44,6 +45,7 @@ export function nodeView(app) {
       h('div', { class: 'head-text' }, h('div', { class: 'head-line' }, h('h1', { class: 'head-title' }, 'This node')))),
     h('div', { class: 'pane node-pane' }, body));
   let drawn = '';
+  const dictation = dictationGroup();
 
   function render() {
     if (app.ui.state.route.name !== 'node') return;
@@ -119,6 +121,8 @@ export function nodeView(app) {
         h('a', { class: 'link', href: '#/stats' }, 'Open Statistics')) : null,
       // This page's own: the browser's notifications (js/notify.js).
       app.notifications?.el,
+      // This page's own: dictation into a draft (js/dictate.js).
+      dictation,
     ].filter(Boolean));
   }
 

@@ -13,6 +13,7 @@ import { h, setText, setClass } from '../dom.js';
 import { icon } from '../marks.js';
 import { since, until, clock, plural } from '../words.js';
 import { pushLines } from '../push.js';
+import { talkButton } from '../dictate.js';
 
 const PRIORITY = { blocking: 'Blocking', important: 'Important', whenever: 'Whenever' };
 
@@ -204,7 +205,7 @@ export function questionCard(app, first) {
     input.value = draft;
     const send = h('button', { class: 'button', type: 'submit', disabled: !draft.trim() }, 'Answer');
     input.addEventListener('input', () => { send.disabled = !input.value.trim(); });
-    el.append(h('form', { class: 'answer', onsubmit: (event) => { event.preventDefault(); choose(input.value); } }, input, send));
+    el.append(h('form', { class: 'answer', onsubmit: (event) => { event.preventDefault(); choose(input.value); } }, input, talkButton(input), send));
 
     if (acting.refused) el.append(h('p', { class: 'card-notice', role: 'alert' }, acting.refused));
     else if (card.notice) el.append(h('p', { class: 'card-notice' }, card.notice));
@@ -240,7 +241,7 @@ export function questionCard(app, first) {
     input.value = typed || own;
     const send = h('button', { class: 'button quiet', type: 'submit', disabled: !input.value.trim() || input.value.trim() === drafted?.text }, 'Draft');
     input.addEventListener('input', () => { send.disabled = !input.value.trim() || input.value.trim() === app.store.draftOf(card.id)?.text; });
-    el.append(h('form', { class: 'answer', onsubmit: (event) => { event.preventDefault(); pick(input.value); } }, input, send));
+    el.append(h('form', { class: 'answer', onsubmit: (event) => { event.preventDefault(); pick(input.value); } }, input, talkButton(input), send));
 
     const refused = app.store.state.draftRefused.get(card.id);
     if (refused) el.append(h('p', { class: 'card-notice', role: 'alert' }, refused));
