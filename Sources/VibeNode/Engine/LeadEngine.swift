@@ -245,6 +245,17 @@ public final class LeadEngine: @unchecked Sendable {
     /// The working policy's watch (`SettingsWatch.swift`): each running lead told it once when it changes. None until
     /// `watchRoom`, so a test's engine tells nothing it didn't ask for.
     var policyWatch: LeadWitness.PolicyWatch?
+    // Shell requests (`ShellCards.swift`), on `queue`: the stamps the host vouched for (asked once each), each request's
+    // card, the messages under way, a look under way, the 15 s look and the clock. The folder and the host's seal are
+    // read on `shellWork`, one step at a time.
+    var shellTrusted: [String: WalletStamp] = [:]
+    var shellCards: [String: String] = [:]
+    var shellTelling: Set<String> = []
+    var shellTellingEnd: Set<String> = []
+    var shellLooking = false
+    var shellTimer: Subscription?
+    var shellNow: () -> Date = Date.init
+    let shellWork = DispatchQueue(label: "vibenode.lead-engine.shell-requests", qos: .userInitiated)
     // The developer tools notice (`ToolchainLook.swift`), on `queue`: the notices the last look found, when it ran,
     // whether one is under way; how a tool is asked its version (a test's stand-in) and the clock.
     public internal(set) var toolchainNotices: [String] = []

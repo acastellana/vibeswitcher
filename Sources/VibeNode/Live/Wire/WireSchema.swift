@@ -246,8 +246,13 @@ public enum WireSchema {
                 field("root", .string), field("open", .bool), field("closed", Kind.string.orNull), field("notice", Kind.string.orNull),
                 field("at", .date), field("blocking", .bool), optional("question", .shape("card.question")),
                 optional("approval", .shape("card.approval")), optional("config", .shape("card.config")),
-                optional("base", .shape("card.base")),
+                optional("base", .shape("card.base")), optional("shell", .shape("card.shell")),
                 field("draft", Kind.shape("card.draft").orNull)]),
+            shape("card.shell", from: "CardStore.Card.value (ShellCards.swift, 2026-11-21)", [
+                field("request", .string), field("session", .string), field("asker", .string), field("cwd", .string), field("command", .string),
+                field("label", .string), field("filedAt", .date), field("expiresAt", .date),
+                field("state", .words(["waiting", "starting", "started", "declined", "expired", "failed"])),
+                field("shell", Kind.string.orNull), field("name", Kind.string.orNull), field("why", Kind.string.orNull)]),
             shape("card.question", from: "CardStore.Card.value", [
                 field("id", .string), field("short", .string), field("text", .string), field("options", strings),
                 field("priority", .words(["blocking", "important", "whenever"])), field("whyNow", Kind.string.orNull),

@@ -26,6 +26,8 @@ extension LeadEngine {
                     engine.lookAtToolchainIfDue()
                 }
             }
+            // Shell requests (`ShellCards.swift`): the folder looked at every 15 s.
+            shellTimer = clock?.every(Self.shellLookEvery) { [weak self] in self?.queue.async { self?.lookAtShellRequests() } }
         }
     }
 
