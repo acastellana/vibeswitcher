@@ -29,10 +29,27 @@ struct SessionResumeTests {
         // It ends; past the grace it's on the ended list.
         world.queue.sync { world.world.link.kill(id) }
         try #require(await eventually(timeout: 60) { !live() })
+        // Within the grace: not listed yet, but `status`'s `ending` says it ended and when it will be listed, and
+        // `resume`'s words say so rather than "none ended" (the acceptance run's A8).
+        let endedAt = Date()
         world.queue.sync {
+            world.engine.openNow = { endedAt }
+            world.engine.noteOpenSessions()
+        }
+        #expect(world.queue.sync { world.engine.endedSessions.isEmpty })
+        let ending = try #require(world.queue.sync { world.engine.endingValue.array })
+        #expect(ending.count == 1 && ending[0]["session"]?.string == NodeIds.session(host: id), "\(ending)")
+        #expect(WireSchema.check(ending[0], as: "node.ending") == nil)
+        let said = ResumeText.endingLines(ending, now: endedAt.addingTimeInterval(4))
+        #expect(said == ["a session ended 4 s ago (\(ConfigSeal.inert(ending[0]["name"]?.string ?? "", limit: 80)) in \(repo)); it is listed in 26 s: run `vibeswitcher resume` again then"],
+                "\(said)")
+        #expect(world.requests.queue.sync { world.requests.statusValue()["ending"]?.array?.count } == 1)
+        world.queue.sync {
+            world.engine.openNow = Date.init
             world.engine.openGrace = 0
             world.engine.noteOpenSessions()
         }
+        #expect(world.queue.sync { world.engine.endingValue.array?.isEmpty } == true, "listed now, no longer ending")
         #expect(world.queue.sync { world.engine.endedSessions.map(\.entry.id) } == [id])
         let listed = world.queue.sync { world.engine.endedValue.array?.first }
         #expect(listed?["session"]?.string == NodeIds.session(host: id) && listed?["conversation"] == .null, "\(String(describing: listed))")
