@@ -215,7 +215,9 @@ struct RequestsTests {
                                   // The start page's recent projects (2026-11-21), the user's or a page's.
                                   "recent",
                                   // A session's dev servers (2026-11-21).
-                                  "session.ports"]
+                                  "session.ports",
+                                  // A board task's details, a result's screenshot (2026-11-21).
+                                  "board.task", "board.image"]
         let changes: Set<String> = ["stop", "lead", "answer", "hold", "tell", "config.accept", "base.accept", "base.keep", "hooks.install", "hooks.remove", "build.switch",
                                     "draft", "draft.clear", "web.open", "web.revoke", "term.open", "term.close",
                                     // Driving an ordinary session (2026-11-20).

@@ -135,6 +135,11 @@ enum ChatImageBytes {
 
     /// The part of `image` from `offset`, or why none is served.
     static func part(of image: ChatImage?, offset: Int) -> ChatStore.Read {
+        part(bytes: image.map { ($0.data, $0.mediaType) }, offset: offset)
+    }
+
+    /// The part of an image's bytes (`data`, said to be `mediaType`) from `offset`, or why none is served.
+    static func part(bytes image: (data: Data, mediaType: String)?, offset: Int) -> ChatStore.Read {
         guard let image else { return .refused(.init(.gone, "no such image in that session's chat")) }
         guard image.data.count <= most else { return .refused(.init(.refused, "that image is over \(most >> 20) MB")) }
         guard let type = sniff(image.data), type == image.mediaType.lowercased() else {

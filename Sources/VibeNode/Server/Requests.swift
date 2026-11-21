@@ -93,6 +93,13 @@ public final class Requests: @unchecked Sendable {
     /// S8b): the account's `NodeFolders.defaultPrefix` on the node, `--test-install-root` on a scratch node; none:
     /// `build.switch` is refused and `status` gives no `builds`.
     public var installRoot: String?
+    /// The Mac's voice (`VoiceRule.Mode.approval`): the caller checks and Touch ID per state change. Nil elsewhere.
+    public var approval: ApprovalVoice?
+    /// The Touch ID approvals waiting or asked: one at a time, on a queue of their own (`approvalVoice`). On `queue`.
+    var approvalsPending = 0
+    /// Whether the link to the host is welcomed, as the Mac's rule asks before a dialog (nil: `link.state`'s; a test's own).
+    var approvalLinkWelcomed: (() -> Bool)?
+    let approvals = DispatchQueue(label: "vibenode.requests.approvals", qos: .userInitiated)
     /// The health digest (`NodeHealth`): the server's own watchdog, slow refreshes and last errors.
     public var health: NodeHealth?
     /// Check for Updates (`UpdateWatch`): the user's node's only. Its notice is `status`'s, its last answer `update`.
@@ -136,8 +143,14 @@ public final class Requests: @unchecked Sendable {
     public var live: LiveSessions { LiveSessions(link.sessions, host: hostPID, server: serverPID) }
 
     /// The hello a new connection from `peer` gets. On `queue`.
-    public func hello(peer: PeerFacts?) -> NodeWire.Hello {
-        let voice = peer.map { Voice.judge($0, live: live, rule: rule) } ?? .notUser("its process can't be read")
+    public func hello(peer: PeerFacts?, token: Platform.PeerToken? = nil) -> NodeWire.Hello {
+        // Under the Mac's rule a read's voice (no dialog: `status` changes nothing) says whether the peer passes the
+        // caller checks.
+        let voice = peer.map { facts in
+            rule.mode == .approval
+                ? (approval?.judge(kind: "status", card: nil, peer: token, facts: facts, live: live, uid: rule.uid) ?? .notUser(Self.approvalUnset))
+                : Voice.judge(facts, live: live, rule: rule)
+        } ?? .notUser("its process can't be read")
         let why: String? = { if case .notUser(let why) = voice { return why } else { return nil } }()
         return NodeWire.Hello(node: NodeIds.node, epoch: epoch,
                               server: .init(commit: commit, startedAt: NodeWire.dateText(startedAt), pid: serverPID),
@@ -189,7 +202,8 @@ public final class Requests: @unchecked Sendable {
     /// recorded in the host's vault with its action id and digest (`LeadVaultV2Client.recordUserAction`) before it is
     /// acted on: one the vault doesn't take is refused, and an action the vault holds already (a retry) is answered as
     /// it was, not done again.
-    public func handle(_ request: NodeWire.Request, from facts: PeerFacts, reply: @escaping (NodeWire.Reply) -> Void) {
+    public func handle(_ request: NodeWire.Request, from facts: PeerFacts, token: Platform.PeerToken? = nil,
+                       reply: @escaping (NodeWire.Reply) -> Void) {
         let needs = NodeWire.kinds[request.kind] ?? .user
         if needs == .leadToolServer { return questionPost(request, from: facts, reply: reply) }
         // A draft comes from a web page (`NodeLive` hands those to `draft` itself): from here it is no one's to leave.
@@ -204,6 +218,8 @@ public final class Requests: @unchecked Sendable {
         // A private record's read (`webRead`) on the socket is the user's alone, as a user's-voice read (no typed word);
         // a page's comes through `webRead(_:reply:)`.
         if needs == .user || needs == .webRead {
+            // The Mac's rule: the caller checks, then Touch ID for a state change, off `queue` (`approvalVoice`).
+            if rule.mode == .approval { return approvalVoice(request, from: facts, token: token, reply: reply) }
             if case .notUser(let why) = Voice.judge(facts, live: live, rule: rule) {
                 note("refused \(request.kind) from pid \(facts.pid): not the user's voice: \(why)")
                 return reply(.init(re: request.id, error: .init(.voice, "not the user's voice: \(why)")))
@@ -212,34 +228,41 @@ public final class Requests: @unchecked Sendable {
                 note("refused \(request.kind) from pid \(facts.pid): \(why)")
                 return reply(.init(re: request.id, error: .init(.voice, why)))
             }
-            let records = Self.recorded.contains(request.kind)
-            guard !records || request.action.map({ UUID(uuidString: $0) != nil }) == true else {
-                return reply(.init(re: request.id, error: .init(.badArgs, "\(request.kind) needs an action id (a UUID)")))
-            }
-            guard !stopping else { return reply(.init(re: request.id, error: .init(.stopping, "the node is stopping"))) }
-            // Before the host's welcome (and while the link reconnects) its session list isn't known: a state change
-            // judged on it could be wrong (a `stop` would find nothing live). The command line asks again.
-            guard link.state == .connected else {
-                return reply(.init(re: request.id, error: .init(.notYet, "the server's link to its host isn't welcomed yet: retry")))
-            }
-            if Self.carded.contains(request.kind), let refusal = cardRefusal(request) { return reply(refusal) }
-            if records, let action = request.action?.lowercased() {
-                return record(request, action: action, from: facts) { [weak self] recorded in
-                    guard let self else { return }
-                    switch recorded {
-                    case .failure(let why):
-                        self.note("refused \(request.kind) (action \(action)): not recorded in the vault: \(why)")
-                        reply(.init(re: request.id, error: .init(.internal, "not recorded in the host's vault, so not done: \(ConfigSeal.inert(why.description, limit: .max))")))
-                    case .success(false):
-                        self.note("\(request.kind) (action \(action)) was recorded already: answered as before, not done again")
-                        var again = self.replies[action] ?? .init(re: request.id, result: .object(["again": .bool(true), "said": .string("this action was done already")]))
-                        again.re = request.id
-                        reply(again)
-                    case .success(true):
-                        self.act(request, from: facts) { [weak self] answer in
-                            self?.keep(answer, for: action)
-                            reply(answer)
-                        }
+            return voiced(request, from: facts, reply: reply)
+        }
+        act(request, from: facts, reply: reply)
+    }
+
+    /// A user's-voice request whose voice passed: its action id, the card's code, the vault's record, then the act. On
+    /// `queue`.
+    func voiced(_ request: NodeWire.Request, from facts: PeerFacts, reply: @escaping (NodeWire.Reply) -> Void) {
+        let records = Self.recorded.contains(request.kind)
+        guard !records || request.action.map({ UUID(uuidString: $0) != nil }) == true else {
+            return reply(.init(re: request.id, error: .init(.badArgs, "\(request.kind) needs an action id (a UUID)")))
+        }
+        guard !stopping else { return reply(.init(re: request.id, error: .init(.stopping, "the node is stopping"))) }
+        // Before the host's welcome (and while the link reconnects) its session list isn't known: a state change
+        // judged on it could be wrong (a `stop` would find nothing live). The command line asks again.
+        guard link.state == .connected else {
+            return reply(.init(re: request.id, error: .init(.notYet, "the server's link to its host isn't welcomed yet: retry")))
+        }
+        if Self.carded.contains(request.kind), let refusal = cardRefusal(request) { return reply(refusal) }
+        if records, let action = request.action?.lowercased() {
+            return record(request, action: action, from: facts) { [weak self] recorded in
+                guard let self else { return }
+                switch recorded {
+                case .failure(let why):
+                    self.note("refused \(request.kind) (action \(action)): not recorded in the vault: \(why)")
+                    reply(.init(re: request.id, error: .init(.internal, "not recorded in the host's vault, so not done: \(ConfigSeal.inert(why.description, limit: .max))")))
+                case .success(false):
+                    self.note("\(request.kind) (action \(action)) was recorded already: answered as before, not done again")
+                    var again = self.replies[action] ?? .init(re: request.id, result: .object(["again": .bool(true), "said": .string("this action was done already")]))
+                    again.re = request.id
+                    reply(again)
+                case .success(true):
+                    self.act(request, from: facts) { [weak self] answer in
+                        self?.keep(answer, for: action)
+                        reply(answer)
                     }
                 }
             }
@@ -272,6 +295,8 @@ public final class Requests: @unchecked Sendable {
         case "session.presets": presets(request, terminal: facts.pid != NodeLive.webPeer.pid && facts.uid != nil, reply: reply)
         case "session.complete": complete(request, reply: reply)
         case "stats": stats(request, reply: reply)
+        case "board.task": boardTask(request, reply: reply)
+        case "board.image": boardImage(request, reply: reply)
         case "session.reopen": reopenSessions(request, reply: reply)
         case "mail": mail(request, reply: reply)
         case "prompt-audit": promptAudit(request, reply: reply)

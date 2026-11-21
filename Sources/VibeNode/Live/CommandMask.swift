@@ -63,8 +63,13 @@ enum CommandMask {
                     let short = dashes == 1 && name.count > 1 ? name.first : nil
                     if short == "H", headerish(String(name.dropFirst())) {
                         // A credential header attached: what follows its colon; with nothing there (`-HAuthorization:`
-                        // `Bearer …`, `-HX-Api-Key`), the next word, whatever it is.
-                        if let range = attachedAfterColon(word) { cuts.append(range) } else { next = .always }
+                        // `Bearer …`, `-HX-Api-Key=abc`, `-HTokenabc`), all of it and the next word too (over-masking).
+                        if let range = attachedAfterColon(word) {
+                            cuts.append(range)
+                        } else {
+                            cuts.append(attached(word))
+                            next = .always
+                        }
                     } else {
                         if let short, short != "H", shortSecret.contains(short) { cuts.append(attached(word)) }
                         // A word that (also) reads as a secret-ish long flag (`-password`): the word after it too

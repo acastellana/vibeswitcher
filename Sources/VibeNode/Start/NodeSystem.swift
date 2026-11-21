@@ -27,6 +27,12 @@ public enum NodeSystem {
         + "and no rule tells your voice from a session's there. The Mac app is unchanged; only a scratch node (VIBESWITCHER_HOME) runs here. "
         + "See docs/superpowers/specs/2026-11-19-v2-node-on-macos.md"
 
+    /// Whether the Mac's rule (`VoiceRule.Mode.approval`, Touch ID per state change) is measured on a real Mac: the
+    /// design's step 4 (LocalAuthentication from a LaunchAgent in `gui/<uid>`, the lid closed, over ssh, no Touch ID; the
+    /// `open -a Terminal` and AppleScript escapes' process facts). False until then: the user's server there stays on
+    /// the closed rule. Turning it on is this one line, after that measurement and an independent review.
+    public static let approvalMeasured = false
+
     /// Why the user's server on a system with no cgroups is on the closed rule (`VoiceRule.at`, `usersNode`): no rule
     /// that tells the user's voice is built there, so no peer is the user's.
     public static let voiceUnbuilt = "closed: no rule tells the user's voice on this system yet (no cgroups; the Mac's rule isn't built), so no request is taken as the user's voice"

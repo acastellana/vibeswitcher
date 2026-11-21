@@ -64,6 +64,7 @@ public enum WireSchema {
                                   "session.presets.args", "session.presets.result", "session.complete.args", "session.complete.result",
                                   "session.attach.args", "session.attach.result", "session.usage.args", "session.usage.result",
                                   "chat.image.args", "chat.image.result", "stats.args", "stats.result", "session.ports.args", "session.ports.result",
+                                  "board.task.args", "board.task.result", "board.image.args", "board.image.result",
 
                                   "settings.args", "settings.result", "set.args", "set.result", "mail.args", "mail.result", "recent.args", "recent.result"]
     /// A keyed collection's entity.
@@ -98,7 +99,7 @@ public enum WireSchema {
             shape("hello", from: "NodeWire.Hello", [
                 field("v", .int), field("kind", .words(["hello"])), field("node", .string), field("epoch", .string),
                 field("server", .shape("hello.server")), field("host", .shape("hello.host")), field("kinds", strings),
-                field("peer", .shape("hello.peer")), field("rule", .words(["systemd", "weaker", "closed"])),
+                field("peer", .shape("hello.peer")), field("rule", .words(["systemd", "weaker", "closed", "approval"])),
                 optional("auth", .shape("hello.auth")), optional("assets", .string)]),
             shape("hello.server", from: "NodeWire.Hello.Server", [field("commit", .string), field("startedAt", .date), field("pid", .int)]),
             shape("hello.host", from: "NodeWire.Hello.Host", [optional("startedAt", .date), optional("notes", .shape("host.notes")),
@@ -247,7 +248,7 @@ public enum WireSchema {
                 field("startedAt", .date), field("serverRestarts", .int), field("replacedPaths", strings),
                 field("refusedAppConnections", .int), field("lockHeldElsewhere", Kind.string.orNull),
                 field("build", Kind.string.orNull), field("at", .date)]),
-            shape("node.rule", from: "Requests.statusValue", [field("mode", .words(["systemd", "weaker", "closed"])), field("says", .string),
+            shape("node.rule", from: "Requests.statusValue", [field("mode", .words(["systemd", "weaker", "closed", "approval"])), field("says", .string),
                                                              field("scopes", strings)]),
             shape("node.cards", from: "Requests.counts", [field("questions", .int), field("approvals", .int), field("config", .int),
                                                          field("base", .int)]),
@@ -377,6 +378,24 @@ public enum WireSchema {
                 field("results", .list(.shape("board.update")))]),
             shape("board.update", from: "BoardRecords.result", [field("id", .string), field("title", .string), field("body", .string),
                                                                field("at", .date), field("images", .int)]),
+            // A task's details (`board.task`), a result's screenshot (`board.image`).
+            shape("board.task.args", from: "Requests.boardTask (2026-11-21)", [field("project", .string), field("task", .string)]),
+            shape("board.task.result", from: "BoardDetails.task", [
+                field("slug", .string), field("title", .string), field("failure", Kind.string.orNull), field("checkpoints", .list(.shape("board.checkpoint"))),
+                field("report", Kind.string.orNull), field("audit", Kind.shape("board.task.audit").orNull), field("round", Kind.int.orNull),
+                field("findings", .list(.shape("board.task.finding"))), field("merged", Kind.string.orNull), field("score", Kind.string.orNull),
+                field("reverted", .bool), field("worker", Kind.string.orNull), field("verifier", Kind.string.orNull)]),
+            shape("board.task.audit", from: "BoardDetails.task", [
+                field("last", .bool), field("passes", Kind.bool.orNull), field("completion", Kind.string.orNull), field("integrity", Kind.string.orNull),
+                field("summary", Kind.string.orNull), field("vote", Kind.string.orNull), field("panel", Kind.string.orNull)]),
+            shape("board.task.finding", from: "BoardDetails.task", [
+                field("id", .string), field("severity", .string), field("status", .words(["open", "fixed", "dismissed", "unconfirmed"])),
+                field("blocks", .bool), field("text", .string)]),
+            shape("board.image.args", from: "Requests.boardImage (2026-11-21)", [field("project", .string), field("update", .string), field("index", .int),
+                                                                                 optional("offset", .int)]),
+            shape("board.image.result", from: "ChatImageBytes.part", [
+                field("mediaType", .words(["image/png", "image/jpeg", "image/gif", "image/webp"])), field("bytes", .int), field("offset", .int),
+                field("data", .string)]),
             shape("board.allDone", from: "BoardValue.allDone", [
                 field("id", .string), field("at", .date), field("summary", Kind.shape("board.allDone.summary").orNull),
                 field("tasks", .list(.shape("board.allDone.task"))), field("merged", .int), field("receipts", Kind.string.orNull),

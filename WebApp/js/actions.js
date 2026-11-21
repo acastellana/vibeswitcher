@@ -202,3 +202,18 @@ export function recentProjects(known, sessions, ended, leads, limit = 8) {
 export function projectLines(row) {
   return { session: `vibeswitcher new ${shellWord(row.folder)}`, lead: row.lead ? null : leadLine(row.folder) };
 }
+
+// `vibeswitcher send SESSION [TEXT] --image PATH… [--now]`: a message with images that are files on the node (the
+// page can't read them, so it drafts the line, typed in a terminal in the user's voice). A path as typed: `~/…` keeps
+// its tilde for the shell, anything else is one quoted word (relative: from where the line is run). Text that would
+// read as a flag (`--…`) goes with a space before it. Null with no path.
+export function imageSendLine(session, text, paths, now = false) {
+  const images = (paths || []).map((path) => String(path).trim()).filter(Boolean);
+  if (!images.length) return null;
+  const words = ['vibeswitcher', 'send', sessionWord(session)];
+  const typed = String(text || '').trim();
+  if (typed) words.push(shellWord(typed.startsWith('-') ? ' ' + typed : typed));
+  for (const path of images) words.push('--image', path.startsWith('~/') ? '~/' + shellWord(path.slice(2)) : shellWord(path));
+  if (now) words.push('--now');
+  return words.join(' ');
+}

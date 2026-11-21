@@ -124,6 +124,11 @@ export function createMock(store, options = {}) {
       { name: 'progress.md', path: 'docs/lead/progress.md', present: true }, { name: 'incidents.md', path: 'docs/lead/incidents.md', present: false },
     ],
     recordsDir: 'docs/lead',
+    // The lead's Results (the node's `BoardDetails.results`), newest first.
+    results: [
+      { id: 'mock-result-2', title: 'Static assets cached', body: 'Every asset now has a **hashed name** and a year of cache.\n\n- `index.html` stays uncached\n- old names keep working for a day', at: ago(2300), images: 1 },
+      { id: 'mock-result-1', title: 'Footer links fixed', body: 'All five links point at the new pages.', at: ago(3800), images: 0 },
+    ],
   }]]);
 
   const cards = new Map(options.empty ? [] : [[CARD_LAUNCH, {
@@ -710,6 +715,26 @@ export function createMock(store, options = {}) {
     // A session's dev servers (2026-11-21).
     if (message.kind === 'session.ports') {
       return { ok: true, result: { ports: [{ port: 5173, address: '127.0.0.1', pid: 48311, program: 'node', url: 'http://localhost:5173/' }] } };
+    }
+    // A board task's details (`board.task`) and a result's screenshot (`board.image`).
+    if (message.kind === 'board.task') {
+      const board = boards.get(args.project);
+      const found = board?.tasks.find((one) => one.slug === args.task);
+      if (!found) return { ok: false, error: { code: 'gone', message: 'no such task on that board' } };
+      return { ok: true, result: {
+        slug: found.slug, title: found.title, failure: found.status === 'blocked' ? 'Waits on Sync landing-base with main' : null,
+        checkpoints: (found.checkpoints || []).map((checkpoint) => ({ text: checkpoint.text, at: checkpoint.at })),
+        report: found.status === 'review' ? 'Removes folders of sessions ended over 7 days ago; skips any a live session points at. Six tests.' : null,
+        audit: found.status === 'review' ? { last: false, passes: false, completion: 'partial', integrity: 'clean', summary: 'One important finding: a folder a live session points at could be removed if its session ends mid-sweep.', vote: '2 of 3 finders agreed', panel: null } : null,
+        round: found.status === 'review' ? 1 : null,
+        findings: found.status === 'review' ? [{ id: 'F1', severity: 'Important', status: 'open', blocks: true, text: 'F1 tools/cleanup.py:42 — the live check runs before the sweep, not per folder' }] : [],
+        merged: found.merged ? `Merged ${found.merged.commit} at 12:25, tests passed` : null, score: null, reverted: false,
+        worker: found.worker || null, verifier: found.verifier || null,
+      } };
+    }
+    if (message.kind === 'board.image') {
+      if (args.update !== 'mock-result-2' || args.index !== 0) return { ok: false, error: { code: 'gone', message: 'no such image in that result' } };
+      return { ok: true, result: { mediaType: SHOT.mediaType, bytes: SHOT.bytes, offset: 0, data: SHOT_DATA } };
     }
     if (message.kind === 'chat.image') {
       if (args.id !== SHOT.id) return { ok: false, error: { code: 'gone', message: 'no such image in that session’s chat' } };

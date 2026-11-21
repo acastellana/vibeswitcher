@@ -191,3 +191,16 @@ test('a Codex of your own starts with --agent codex, a model too; a shell never 
   assert.equal(newLine('/home/me/site', { name: 'Claude', kind: 'claude', builtIn: true }), 'vibeswitcher new /home/me/site');
   assert.equal(newLine('/home/me/site', { name: 'Shell', kind: 'shell', builtIn: true }, 'opus'), 'vibeswitcher new /home/me/site --agent shell');
 });
+
+test('a message with images on the node is drafted as the send line, each path one word', async () => {
+  const { imageSendLine } = await import('../js/actions.js');
+  const session = { id: 'local:3f6c2c1e-8a5b-4c1d-9e0f-2b7a6d5c4e3f', hosted: true };
+  assert.equal(imageSendLine(session, '', []), null);
+  assert.equal(imageSendLine(session, '  ', ['  ']), null);
+  assert.equal(imageSendLine(session, 'What is wrong here?', ['/home/u/shots/a b.png']),
+    "vibeswitcher send 3f6c2c1e 'What is wrong here?' --image '/home/u/shots/a b.png'");
+  assert.equal(imageSendLine(session, '', ['~/shots/it\'s.png', 'rel/b.png'], true),
+    "vibeswitcher send 3f6c2c1e --image ~/'shots/it'\\''s.png' --image rel/b.png --now");
+  assert.equal(imageSendLine(session, '--help me', ['/x.png']), "vibeswitcher send 3f6c2c1e ' --help me' --image /x.png");
+  assert.equal(imageSendLine(session, '$(rm -rf ~)', ['/x.png']), "vibeswitcher send 3f6c2c1e '$(rm -rf ~)' --image /x.png");
+});

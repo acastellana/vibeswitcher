@@ -28,6 +28,8 @@ import { summaryOf, newSince, sinceSummary, chatMarkdown, exportName, findIn, fo
 import { imageLoader } from '../images.js';
 import { questionStack, askCard } from './cards.js';
 import { draftBox, promptCard, queuedStrip, drivable } from './drive.js';
+import { copyLine } from './cards.js';
+import { imageSendLine } from '../actions.js';
 import { tokenAt, accept, IMAGE_TYPES, MAX_IMAGE } from '../composing.js';
 import { allDoneView } from './alldone.js';
 
@@ -349,7 +351,23 @@ export function chatView(app) {
 
   const input = h('textarea', { class: 'composer-input', rows: 1, 'aria-label': 'Message' });
   const sendButton = h('button', { class: 'send', type: 'submit', title: 'Send (↩)', 'aria-label': 'Send', disabled: true }, icon('send', 15));
-  const form = h('form', { class: 'composer' }, input, sendButton);
+  // Images into the message: one from this device (as a paste, `session.attach`), or one that is a file on the node,
+  // which the page can't read: for that, the line that sends the message with it (`send … --image PATH`).
+  const pick = h('input', { type: 'file', accept: 'image/*', multiple: true, hidden: true, 'aria-hidden': 'true' });
+  const attachButton = h('button', { class: 'icon-button composer-attach', type: 'button', title: 'Add an image', 'aria-label': 'Add an image',
+    'aria-expanded': 'false', 'aria-controls': 'attach-menu' }, icon('plus', 15));
+  const fromDevice = h('button', { class: 'attach-choice', type: 'button' }, 'An image from this device…');
+  const fromNode = h('button', { class: 'attach-choice', type: 'button' }, 'An image on the node, by its path…');
+  const attachMenu = h('div', { class: 'attach-menu', id: 'attach-menu', role: 'group', 'aria-label': 'Add an image', hidden: true }, fromDevice, fromNode);
+  const nodePath = h('input', { class: 'find-input node-image-path', type: 'text', placeholder: '/path/on/the/node/screenshot.png', 'aria-label': 'Image path on the node',
+    autocomplete: 'off', spellcheck: 'false' });
+  const nodeLine = h('div', { class: 'node-image-line' });
+  const nodeImage = h('div', { class: 'node-image', hidden: true },
+    h('div', { class: 'node-image-head' }, nodePath,
+      h('button', { class: 'icon-button', type: 'button', title: 'Close', 'aria-label': 'Close', onclick: () => { nodeImage.hidden = true; input.focus(); } }, icon('close', 12))),
+    nodeLine,
+    h('p', { class: 'confirm-note' }, 'Run it in a terminal on the node: it shows the message with the image and asks for a code. The page can’t read a file on the node itself.'));
+  const form = h('form', { class: 'composer' }, attachButton, input, sendButton, pick);
   const hint = h('p', { class: 'composer-hint', hidden: true });
   // The message this page left for the session, over the box, with the line that sends it; Edit puts it and its images
   // back in the box.
@@ -375,7 +393,7 @@ export function chatView(app) {
     h('button', { class: 'icon-button', type: 'button', title: 'Previous (⇧↩)', 'aria-label': 'Previous match', onclick: () => step(-1) }, icon('send', 12)),
     h('button', { class: 'icon-button', type: 'button', title: 'Next (↩)', 'aria-label': 'Next match', onclick: () => step(1) }, icon('down', 12)),
     h('button', { class: 'icon-button', type: 'button', title: 'Close (Esc)', 'aria-label': 'Close find', onclick: () => closeFind() }, icon('close', 12)));
-  const el = h('div', { class: 'chat' }, findBar, scroller, latest, queuedMessages.el, drafted.el, suggestions, attachedEl, notice, form, hint);
+  const el = h('div', { class: 'chat' }, findBar, scroller, latest, queuedMessages.el, drafted.el, suggestions, attachedEl, notice, attachMenu, nodeImage, form, hint);
 
   const loader = imageLoader((kind, args) => store.read(kind, args));
   const view = {
@@ -607,6 +625,7 @@ export function chatView(app) {
   function renderComposer(session) {
     const typed = drivable(session) && (drafting() || store.can('send'));
     form.hidden = !typed;
+    if (!typed) { closeAttach(); nodeImage.hidden = true; }
     hint.hidden = typed;
     asking.update(session);
     drafted.update(session);
@@ -866,6 +885,46 @@ export function chatView(app) {
 
   for (const topic of ['sessions', 'cards', 'leads', 'connection']) store.subscribe(topic, () => { if (view.session && el.isConnected) schedule(); });
 
+  // ---- Images from the + button: this device's (as a paste), the node's (the line that sends them) ----
+
+  function closeAttach() {
+    attachMenu.hidden = true;
+    attachButton.setAttribute('aria-expanded', 'false');
+  }
+  attachButton.addEventListener('click', () => {
+    const opening = attachMenu.hidden;
+    attachMenu.hidden = !opening;
+    attachButton.setAttribute('aria-expanded', String(opening));
+    fromDevice.disabled = !canAttach();
+    fromDevice.title = canAttach() ? '' : 'This page can’t attach images to this session.';
+    if (opening) (canAttach() ? fromDevice : fromNode).focus();
+  });
+  attachMenu.addEventListener('keydown', (event) => { if (event.key === 'Escape') { closeAttach(); attachButton.focus(); } });
+  fromDevice.addEventListener('click', () => { closeAttach(); pick.click(); });
+  pick.addEventListener('change', () => {
+    const files = images(pick.files);
+    pick.value = '';
+    if (!canAttach()) return say('This page can’t attach images to this session.');
+    files.forEach(addImage);
+  });
+  fromNode.addEventListener('click', () => {
+    closeAttach();
+    nodeImage.hidden = false;
+    drawNodeLine();
+    nodePath.focus();
+  });
+  // The line for the path typed, with what the box holds as its text (several paths: separated by commas).
+  function drawNodeLine() {
+    if (nodeImage.hidden) return;
+    const session = store.state.sessions.get(view.session);
+    const paths = nodePath.value.split(',').map((path) => path.trim()).filter(Boolean);
+    const now = stateOf(session) === 'working' && session?.agent === 'claude';
+    const line = session ? imageSendLine(session, input.value, paths, now) : null;
+    nodeLine.replaceChildren(line ? copyLine(line, 'the command that sends the message with the image') : h('p', { class: 'confirm-note' }, 'Type the image’s path on the node.'));
+  }
+  nodePath.addEventListener('input', drawNodeLine);
+  input.addEventListener('input', drawNodeLine);
+
   // ---- Copy, export, find ----
 
   async function copyText(text, button) {
@@ -1003,6 +1062,9 @@ export function chatView(app) {
       attached = [];
       drawAttached();
       closeSuggestions();
+      closeAttach();
+      nodeImage.hidden = true;
+      nodePath.value = '';
       rows.clear();
       heights.clear();
       rowsEl.replaceChildren();

@@ -311,6 +311,8 @@ public enum NodeWire {
         "chat.image": .anyone,
         // The Statistics window's figures (2026-11-21): a read.
         "stats": .anyone,
+        // A board task's details as its row opens, a result's screenshot (the Team tab, 2026-11-21): reads.
+        "board.task": .anyone, "board.image": .anyone,
         // A session's dev servers, the ports its processes listen on (the dev pages row, 2026-11-21): a read.
         "session.ports": .anyone,
         // The node's settings (the parity table's gap 9, 2026-11-20): read by anyone of the uid (a page too), set in the
@@ -354,7 +356,7 @@ public enum NodeWire {
                                "tell",
                                "board", "seen",
                                "send", "session.new", "session.end", "session.reply", "session.draft", "session.draft.clear",
-                               "session.presets", "session.complete", "session.attach", "session.usage", "chat.image", "stats", "session.ports",
+                               "session.presets", "session.complete", "session.attach", "session.usage", "chat.image", "stats", "session.ports", "board.task", "board.image",
 
                                "settings", "set",
                                "push", "push.decline",
