@@ -4270,3 +4270,8 @@ Proposed task 1: Find why dictations end with no text
 - 2026-11-21 13:34 Planned auto-advance-s-send: auto_advance's send-back gives the worker each open finding in full
 - 2026-11-21 13:34 Started a worker on auto-advance-s-send (auto → Claude: Claude weekly 69%, 29 points ahead of pace (limits ignored), not tight; Codex 30%)
 - 2026-11-21 13:34 Automatically (auto_advance): Started a worker on auto-advance-s-send (auto_advance's send-back gives the worker each open finding in full); its agent is auto, so it went to Claude: Claude weekly 69%, 29 points ahead of pace (limits ignored), not tight; Codex 30%.
+- 2026-11-21 13:45 Automatically (auto_advance): Started the audit of one-sidebar-button at a9794bad (Its review is audit).
+- 2026-11-21 13:45 Exception on one-sidebar-button by lead of vibeswitcher: edits to scripts/product-inventory.sh, Sources/VibeSwitcher/MainWindow/WindowActions*.swift accepted. Reason: The lead accepts these edits outside the listed files: one line in the inventory generator's curated list (the button's title isn't a string literal, so the generator can't see it; the acceptance requ…
+- 2026-11-21 13:45 Released one-sidebar-button's worker (idle since its done report on a9794bad) while its audit runs
+- 2026-11-21 13:45 Automatically (auto_advance): Released one-sidebar-button's worker, idle since its done report on a9794bad, while its audit runs (ended pid 98046 (Worker: One sidebar button closes all finished shells and replaced leads)): its Mac slot and memory are free. Its worktree and branch stay; findings the verdict sends back go to a fresh worker there, and a clean verdict merges with none.
+- 2026-11-21 13:48 Audit of one-sidebar-button: complete, clean, round 1: 2 Nit open
