@@ -70,6 +70,9 @@ struct ShellCardsTests {
         let shell = try #require(answer.shell.flatMap(UUID.init(uuidString:)))
         let started = try #require(try world.host.sessions().first { $0.id == shell })
         #expect(started.label == "Shell: probe" && started.cwd == world.repo, "\(started)")
+        // Its shell got the command at launch and ran it.
+        let host = world.host
+        #expect(await eventually(timeout: 60) { host.screen(shell)?.contains("shell-card-ran") == true }, "\(host.screen(shell) ?? "no screen")")
         // The card closed, saying so; a second answer is refused and starts nothing.
         let closed = try #require(shellCard(world, request))
         #expect(!closed.isOpen && closed.closed?.contains("started in a new shell session") == true, "\(String(describing: closed.closed))")
