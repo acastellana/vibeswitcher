@@ -57,7 +57,7 @@ export function createMock(store, options = {}) {
       title: null, detail: null, paused: false, lead: null, task: null, prompt: null, draft: null, queued: [],
       startedAt: fields.since || ago(60), activity: null, activitySince: null, branch: 'main',
       agentSession: `${hex.split('').reverse().join('')}-0c2e-4a71-b3d5-9f6e8a1c2b40`, pid: 51022 + 37 * sessions.size,
-      command: hosted ? agent : null, size: hosted ? { cols: 132, rows: 38 } : null, ...fields,
+      command: hosted ? agent : null, size: hosted ? { cols: 132, rows: 38 } : null, hasTranscript: true, ...fields,
       // A worker's or verifier's task by its slug on the board (the node's `boardTask`; its `task` is words).
       boardTask: fields.boardTask ?? (fields.role && fields.role !== 'lead' ? fields.task : null),
     };

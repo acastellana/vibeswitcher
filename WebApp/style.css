@@ -347,7 +347,7 @@ code, pre, kbd { font-family: var(--mono); }
 /* A row's own actions (Copy, Edit in Composer, Send Again; a reply's Copy as Markdown): over its corner, on hover or focus. */
 .chat-row.prompt, .chat-row.reply { position: relative; }
 .row-actions { position: absolute; top: -10px; z-index: 1; display: flex; gap: 2px; padding: 2px; border-radius: 8px; background: var(--raised); box-shadow: 0 0 0 1px var(--line), 0 2px 8px var(--shadow); }
-.chat-row.prompt > .row-actions { left: 60px; }
+.chat-row.prompt > .row-actions { top: auto; bottom: -7px; right: 48px; }
 .chat-row.reply > .row-actions { right: 0; }
 .row-action { width: 24px; height: 24px; }
 .row-action.copied { color: var(--accent); }
