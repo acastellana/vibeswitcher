@@ -157,11 +157,9 @@ public struct SwitchRequest {
             case .notInstalled:
                 reply(.refused(.refused, "\(commit) isn't installed in \(installRoot): install it with install-node.sh, then switch"))
             case .refusedWhileTeamsWork:
-                let working = live.filter { session in LeadTeams.role(label: session.label).map { $0 != .lead } ?? false }
-                    .map { "\($0.tty) (\(ConfigSeal.inert($0.label, limit: 80)))" }
+                let working = Self.blockers(live)
                 note("build.switch \(commit) refused: \(working.count) workers or verifiers live")
-                reply(.refused(.refused, "no switch of builds while a worker or verifier runs (decision 6, the rule on switches): "
-                               + working.joined(separator: ", ") + " live; switch once they have ended (a lead may stay)"))
+                reply(.refused(.refused, Self.blockedText(working)))
             case .handOver(let target):
                 guard let held else { return handOver(to: target, before: (link.hostPID, running), reply: reply) }
                 let queue = link.queue
@@ -177,6 +175,20 @@ public struct SwitchRequest {
                 }
             }
         }
+    }
+
+    /// The live sessions that refuse a switch by the rule on switches (decision 6): each worker's and verifier's, by
+    /// its terminal and label ("ttypts4 (Worker · fix-login)"). `status` lists them (`switchBlockers`), so `vibeswitcher
+    /// switch` says before its code is asked whether the switch can run now.
+    public static func blockers(_ live: [HostSession]) -> [String] {
+        live.filter { session in session.isLive && (LeadTeams.role(label: session.label).map { $0 != .lead } ?? false) }
+            .map { "\($0.tty) (\(ConfigSeal.inert($0.label, limit: 80)))" }
+    }
+
+    /// The rule's words for `blockers`, as the server's refusal and the command line say them.
+    public static func blockedText(_ blockers: [String]) -> String {
+        "no switch of builds while a worker or verifier runs (decision 6, the rule on switches): "
+            + blockers.joined(separator: ", ") + " live; switch once they have ended (a lead may stay)"
     }
 
     // MARK: The handover

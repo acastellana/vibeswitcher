@@ -434,6 +434,8 @@ public final class Requests: @unchecked Sendable {
             "web": webValue?() ?? NodeStatusStore.webOff,
             "usage": engine?.usage.map(NodeUsage.value) ?? .null,
             "boost": engine?.boostValue ?? .null,
+            // What refuses a build switch now (the rule on switches), for `vibeswitcher switch` before its code.
+            "switchBlockers": .array(SwitchRequest.blockers(link.sessions).map(NodeWire.Value.string)),
         ]
         // The user's node's tailnet page, for the command line (not in the `node` stream: `NodeStatusStore.value`).
         if let tailnet { fields["webTailnet"] = tailnet.value() }

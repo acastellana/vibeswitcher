@@ -42,6 +42,7 @@ public final class NodeStatusStore: @unchecked Sendable {
         fields["sessions"] = nil
         fields["leads"] = nil
         fields["webTailnet"] = nil
+        fields["switchBlockers"] = nil
         fields["update"] = nil
         fields["web"] = web
         return .object(fields)
