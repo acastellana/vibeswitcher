@@ -12,11 +12,11 @@ that works through shared code counts only if the node actually calls it. Anythi
 
 ## Summary
 
-Of 101 features: **61 has it**, **12 partly**, **12 missing** (two of them on purpose: Codex workers, and Codex's trust of the hooks), **9 not needed on
+Of 101 features: **62 has it**, **15 partly**, **8 missing** (two of them on purpose: Codex workers, and Codex's trust of the hooks), **9 not needed on
 Linux**, **6 Linux-only new**, **1 unverified** (counted again from the table on 2026-11-20, `v2-stability`, after the
 settings, composer, push and rotation lanes' merges and that lane's rows: reopening your own sessions after a restart, the prompt-audit reminder,
 reminders about waiting or stuck sessions, New Project…, the sound, the "New since you looked" line, Between leads, the
-all-done mark, rename and pause, ended sessions resumed, and Close Finished Shells; launch presets edited on the node since the page-actions lane; and on 2026-11-21, `v2-small-rows`: Check for Updates, the developer tools notice, the projects folder, and shell requests; Codex's trust of the hooks left out on purpose; the inspector, chat images and the chat's copy, export and find since `v2-web-detail`; usage shown and AI summaries since `v2-usage-summaries`).
+all-done mark, rename and pause, ended sessions resumed, and Close Finished Shells; launch presets edited on the node since the page-actions lane; and on 2026-11-21, `v2-small-rows`: Check for Updates, the developer tools notice, the projects folder, and shell requests; Codex's trust of the hooks left out on purpose; the inspector, chat images and the chat's copy, export and find since `v2-web-detail`; usage shown and AI summaries since `v2-usage-summaries`; and the small rows' second round: a code block's Run, the health digest, phone access rechecked, and dev servers).
 
 The gaps that matter most for daily use, worst first:
 
@@ -183,7 +183,7 @@ Sizes to close: S is about a day, M a few days, L a week or more.
 | Feature | V1 (where) | V2 state | Where in V2 / what's missing | Size | Note |
 | --- | --- | --- | --- | --- | --- |
 | Phone access over Tailscale: pairing, replies, key presses, answers, Chrome access | `PhoneAccess.swift`, `RemoteServer.swift`, `Tailscale.swift`, `Web/` | partly | `vibeswitcher web --tailnet` (2026-11-20, `Server/TailnetWeb.swift`; the remote access note): the node's own page (not `Web/`) on this machine's Tailscale address under its MagicDNS name, off until the user runs it; pairing by a one-time code printed in the terminal, 8 h tokens, `web --revoke`; the phone layout (one column, the list then a session); reading every session, chat, card and the board; replies, answers and a code block's Run as drafts the user sends from a terminal; notifications while the page is open; `status` says where it listens. Missing, and why (rechecked 2026-11-21): replies and key presses from the phone itself, which need H1 (the host owning the listener) before any page input reaches a session; the terminal (refused on the tailnet); Chrome access and previews (the dev pages row); push (its own row); the Mac's credential masking for remote pages and a second lock on who asks (`tailscale whois`), both the user's decisions in the remote access note; a QR code for the address (also a decision) | L | input waits for H1 |
-| Dev pages, previews | `DevPreviews.swift`, `Sources/VibeCore/DevPages.swift` | missing | "later" in the design | M | |
+| Dev pages, previews | `DevPreviews.swift`, `Sources/VibeCore/DevPages.swift` | partly | `Facts/DevPorts.swift`, `session.ports` (2026-11-21): the inspector's Dev servers lists the ports a session's processes listen on (loopback or every address, 1024 and up, not the node's own), each with its program; on the loopback page each opens `http://localhost:PORT/` in a new tab. Missing on purpose: the app's previews for the phone (Chrome's localhost tabs proxied over `tailscale serve`): a node has no Chrome, and a proxy that serves an agent's pages on the tailnet waits for the remote decisions (the remote access note) | | the tailnet page lists the ports, links none |
 | A web page for the desktop, paired with a one-time code | — | Linux-only | `vibeswitcher web [--revoke]`; `Sources/VibeNode/Web/`, `WebApp/` on `127.0.0.1` | | the page reads and drafts, never answers |
 
 ### Diagnostics and health

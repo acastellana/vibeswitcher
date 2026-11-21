@@ -638,6 +638,10 @@ export function createMock(store, options = {}) {
       return { ok: true, result: { turns: [turn('t1', 182_400, 171_000, 3_900, 0.41), turn('t2', 96_200, 90_100, 1_250, 0.18)], count: 2, partial: false,
         tokens: { input: 278_600, cached: 261_100, output: 5_150 }, cost: 0.59, costPartial: false } };
     }
+    // A session's dev servers (2026-11-21).
+    if (message.kind === 'session.ports') {
+      return { ok: true, result: { ports: [{ port: 5173, address: '127.0.0.1', pid: 48311, program: 'node', url: 'http://localhost:5173/' }] } };
+    }
     if (message.kind === 'chat.image') {
       if (args.id !== SHOT.id) return { ok: false, error: { code: 'gone', message: 'no such image in that session’s chat' } };
       return { ok: true, result: { mediaType: SHOT.mediaType, bytes: SHOT.bytes, offset: 0, data: SHOT_DATA } };

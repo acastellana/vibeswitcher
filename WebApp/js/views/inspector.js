@@ -12,6 +12,7 @@ import { STATES, AGENTS, ROLES, stateOf, since, short, moment, tilde, plural } f
 import { sessionHref, inspectorTab, teamOf, projectOf } from '../ui.js';
 import { ledger, fileWords, usageWords, costWords } from '../activity.js';
 import { teamTasks } from './lead.js';
+import { portRow } from '../devports.js';
 
 const TABS = [{ id: 'team', label: 'Team' }, { id: 'overview', label: 'Overview' }, { id: 'activity', label: 'Activity' }];
 // How close to the end of the Activity counts as being at its end.
@@ -108,7 +109,44 @@ function overview(app) {
   const task = fact('Task');
   const team = group('Team', role, lead, task);
 
-  const el = h('div', { class: 'inspect-pane' }, status, place.el, times.el, agents.el, usage.el, team.el);
+  // Dev servers (the app's dev pages): the ports the session's processes listen on (`session.ports`), asked as the tab
+  // shows and again at most every `USAGE_EVERY` ms; each opens in a new tab on the node's own machine.
+  const portList = h('ul', { class: 'inspect-ports' });
+  const ports = { el: h('section', { class: 'inspect-group', hidden: true }, h('h2', { class: 'group-head' }, 'Dev servers'), portList) };
+  let portsFor = null;
+  let portsAt = 0;
+  let portsAsking = false;
+
+  const el = h('div', { class: 'inspect-pane' }, status, place.el, times.el, agents.el, usage.el, ports.el, team.el);
+
+  function drawPorts(result) {
+    const rows = (result?.ports || []).map((entry) => portRow(entry, globalThis.location?.hostname)).filter(Boolean);
+    ports.el.hidden = !rows.length;
+    portList.replaceChildren(...rows.map((row) => h('li', null,
+      row.url ? h('a', { class: 'inspect-link', href: row.url, target: '_blank', rel: 'noopener noreferrer', title: `Opens ${row.url} in a new tab` }, row.label)
+        : h('span', { title: 'On the node’s machine: this page can’t open it from here' }, row.label),
+      h('span', { class: 'inspect-port-about' }, ' · ' + row.about))));
+  }
+  function askPorts(session) {
+    if (!store.can('session.ports') || session.ended) {
+      portsFor = session.id;
+      drawPorts(null);
+      return;
+    }
+    if (portsFor !== session.id) {
+      portsFor = session.id;
+      portsAt = 0;
+      drawPorts(null);
+    }
+    if (portsAsking || Date.now() - portsAt < USAGE_EVERY) return;
+    portsAsking = true;
+    portsAt = Date.now();
+    const id = session.id;
+    store.read('session.ports', { session: id }).then((reply) => {
+      portsAsking = false;
+      if (portsFor === id) drawPorts(reply?.ok ? reply.result : null);
+    });
+  }
 
   function drawUsage(result) {
     tokens.say(usageWords(result));
@@ -176,6 +214,7 @@ function overview(app) {
       size.say(session.size ? `${session.size.cols} × ${session.size.rows}` : null);
       agents.settle();
       askUsage(session);
+      askPorts(session);
 
       role.say(ROLES[session.role]);
       const leader = session.role && session.role !== 'lead' && session.lead ? leadOf(store, session.lead) : null;

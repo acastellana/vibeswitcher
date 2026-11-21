@@ -605,6 +605,8 @@ code, pre, kbd { font-family: var(--mono); }
 .inspect-says { height: calc(1.4em + 1px); padding: 1px 18px 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-2); font-size: var(--small); }
 .inspect-link { color: var(--accent); }
 .inspect-link:hover { text-decoration: underline; }
+.inspect-ports { margin: 0; padding: 0; list-style: none; display: grid; gap: 4px; font-size: var(--small); }
+.inspect-port-about { color: var(--ink-3); }
 .inspect-note { padding: 12px 18px 0; color: var(--ink-2); }
 .inspect-notice { display: flex; align-items: flex-start; gap: 8px; padding: 12px 18px 0; color: var(--ink-2); font-size: var(--small); }
 .inspect-notice .icon { margin-top: 2px; color: var(--working); }

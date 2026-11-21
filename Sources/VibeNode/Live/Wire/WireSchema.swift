@@ -63,7 +63,7 @@ public enum WireSchema {
                                   "session.draft.args", "session.draft.result", "session.draft.clear.args",
                                   "session.presets.args", "session.presets.result", "session.complete.args", "session.complete.result",
                                   "session.attach.args", "session.attach.result", "session.usage.args", "session.usage.result",
-                                  "chat.image.args", "chat.image.result",
+                                  "chat.image.args", "chat.image.result", "session.ports.args", "session.ports.result",
 
                                   "settings.args", "settings.result", "set.args", "set.result"]
     /// A keyed collection's entity.
@@ -164,6 +164,10 @@ public enum WireSchema {
             shape("session.completion", from: "SessionCompletions.value", [field("insert", .string), field("title", .string), field("subtitle", .string)]),
             // A session's tokens and cost (the inspector, 2026-11-21): a read of its transcript's tail. `cost` is in US
             // dollars, a number (an int when whole).
+            shape("session.ports.args", from: "Requests.sessionPorts (the dev pages row, 2026-11-21)", [field("session", .string)]),
+            shape("session.ports.result", from: "DevPorts.value", [field("ports", .list(.shape("session.port")))]),
+            shape("session.port", from: "DevPorts.value", [field("port", .int), field("address", .string), field("pid", .int),
+                                                           field("program", Kind.string.orNull), field("url", .string)]),
             shape("session.usage.args", from: "ChatStore.usage (the inspector, 2026-11-21)", [field("session", .string)]),
             shape("session.usage.result", from: "ChatStore.usageValue", [
                 field("turns", .list(.shape("session.usage.turn"))), field("count", .int), field("partial", .bool),

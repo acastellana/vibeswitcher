@@ -304,6 +304,8 @@ public enum NodeWire {
         "session.usage": .anyone,
         // An image a session's chat shows, its bytes in parts (the chat's images, 2026-11-21): a read.
         "chat.image": .anyone,
+        // A session's dev servers, the ports its processes listen on (the dev pages row, 2026-11-21): a read.
+        "session.ports": .anyone,
         // The node's settings (the parity table's gap 9, 2026-11-20): read by anyone of the uid (a page too), set in the
         // user's voice.
         "settings": .anyone, "set": .user,
@@ -342,7 +344,7 @@ public enum NodeWire {
                                "tell",
                                "board", "seen",
                                "send", "session.new", "session.end", "session.reply", "session.draft", "session.draft.clear",
-                               "session.presets", "session.complete", "session.attach", "session.usage", "chat.image",
+                               "session.presets", "session.complete", "session.attach", "session.usage", "chat.image", "session.ports",
 
                                "settings", "set",
                                "push", "push.decline",

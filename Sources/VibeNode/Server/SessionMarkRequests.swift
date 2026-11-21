@@ -10,6 +10,25 @@ extension Requests {
         return sessions.sessions.first { NodeSessions.id(of: $0) == id }.map { ($0, marks) }
     }
 
+    /// `session.ports` with `session` (the dev pages row, 2026-11-21): the TCP ports the session's processes listen on
+    /// (`DevPorts`: its program and what it started, loopback or every address, 1024 and up, never the node's own),
+    /// each with its address, the process and the page's address on this machine. A read (anyone, a page's token too):
+    /// the kernel's tables and the uid's own processes' descriptors, read off `queue`; nothing is connected to.
+    func sessionPorts(_ request: NodeWire.Request, reply: @escaping (NodeWire.Reply) -> Void) {
+        guard let sessions, let id = request.args?["session"]?.string, let session = sessions.sessions.first(where: { NodeSessions.id(of: $0) == id }) else {
+            let id = request.args?["session"]?.string ?? ""
+            return reply(.init(re: request.id, error: .init(id.isEmpty ? .badArgs : .gone,
+                                                            id.isEmpty ? "session.ports needs session" : "no session \(ConfigSeal.inert(id, limit: 80)) on this node")))
+        }
+        let hosted = session.hostID.flatMap { host in link.sessions.first { $0.id == host } }
+        let root = hosted.map(\.childPID) ?? Int32(session.pid)
+        let queue = self.queue
+        DispatchQueue.global(qos: .userInitiated).async {
+            let value = root > 0 ? DevPorts.value(DevPorts.listening(pids: DevPorts.processes(of: root))) : DevPorts.value([])
+            queue.async { reply(.init(re: request.id, result: value)) }
+        }
+    }
+
     private func markRefusal(_ request: NodeWire.Request) -> NodeWire.Reply {
         guard sessions?.marks != nil else { return .init(re: request.id, error: .init(.refused, "this server keeps no names or pauses")) }
         guard let id = request.args?["session"]?.string, !id.isEmpty else { return .init(re: request.id, error: .init(.badArgs, "\(request.kind) needs session")) }
