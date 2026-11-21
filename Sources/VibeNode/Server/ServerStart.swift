@@ -106,6 +106,13 @@ public enum ServerStart {
         } ?? "unknown"
         let requests = Requests(link: link, sessions: sessions, rule: rule, root: root, hostSocket: parsed.hostSocket,
                                 commit: commit, note: say)
+        // The Mac's rule (`NodeSystem.approvalMeasured`): Touch ID asked by this server, the caller's code the installed
+        // command line's, read once from the build it runs (`<node root>/bin/vibeswitcher`); unreadable, no peer is the user's.
+        if rule.mode == .approval {
+            let commandLine = parsed.nodeRoot.flatMap { Platform.CodeIdentity.cdhash(atPath: NodeFolders.join($0, "bin/\(NodeFolders.installedCLI)")) }
+            requests.approval = ApprovalVoice(authenticator: ApprovalVoice.System(timeout: 60), commandLine: commandLine)
+            say("the Mac's rule: Touch ID per state change; the command line's code \(commandLine == nil ? "couldn't be read: no peer is the user's" : "read")")
+        }
         var options = LeadEngine.Options()
         options.firstLook = parsed.node || parsed.testFirstLook
         // A held `.user` message is the user's after a restart only when the vault's record holds its action (EN-D9, E6).

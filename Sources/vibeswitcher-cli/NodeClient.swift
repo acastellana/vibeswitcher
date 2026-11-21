@@ -231,8 +231,18 @@ final class NodeClient {
             Sys.close(fd)
             return .failure(.broken("the node's server sent no hello"))
         }
+        // The Mac's rule (`VoiceRule.Mode.approval`): the server asks Touch ID for each state change, in place of the
+        // typed code (`TypedWord.ask`).
+        approvalRule = hello.rule == "approval"
         return .success(NodeClient(fd: fd, hello: hello, lines: lines, ready: ready))
     }
+
+    /// Whether the server last connected to is on the Mac's rule: it asks the person at the Mac itself, so the command
+    /// line shows what the request does and asks no code. One process, one server: set at each connect.
+    nonisolated(unsafe) static var approvalRule = false
+
+    /// How long a state change waits under the Mac's rule at least: the server's dialog (60 s) and its record.
+    static let approvalPatience: TimeInterval = 120
 
     /// How long a request answered `not-yet` (the server's link to its host isn't welcomed yet) is asked again for.
     static let notYetPatience: TimeInterval = 15
@@ -242,6 +252,7 @@ final class NodeClient {
     func request(_ kind: String, args: [String: NodeWire.Value]? = nil, action: String? = nil,
                  timeout: TimeInterval = 30) -> Result<NodeWire.Reply, Failure> {
         let patience = Date().addingTimeInterval(Self.notYetPatience)
+        let timeout = Self.approvalRule && NodeWire.changesState(kind) ? max(timeout, Self.approvalPatience) : timeout
         while true {
             let answer = ask(kind, args: args, action: action, timeout: timeout)
             guard case .success(let reply) = answer, reply.error?.code == NodeWire.Code.notYet.rawValue, Date() < patience else { return answer }

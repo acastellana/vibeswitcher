@@ -155,7 +155,7 @@ public final class NodeServer: @unchecked Sendable {
             connection.reading = read
             read.resume()
             let facts = PeerFacts.read(pid: token.pid, token: token, cgroupRoot: cgroupRoot, runnersAbove: runnersAbove)
-            send(NodeWire.line(requests.hello(peer: facts)), on: connection)
+            send(NodeWire.line(requests.hello(peer: facts, token: token)), on: connection)
         }
     }
 
@@ -203,7 +203,7 @@ public final class NodeServer: @unchecked Sendable {
         }
         let facts = PeerFacts.read(pid: sender.pid, token: sender, cgroupRoot: cgroupRoot, runnersAbove: runnersAbove)
         // `Requests` answers on `queue`.
-        requests.handle(request, from: facts) { [weak self, weak connection] reply in
+        requests.handle(request, from: facts, token: sender) { [weak self, weak connection] reply in
             guard let self, let connection else { return }
             // Never a line over the limit: the reader would drop it and close (`replyLine`).
             let line = NodeWire.replyLine(reply)

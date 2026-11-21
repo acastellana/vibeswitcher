@@ -140,6 +140,25 @@ that two pushes haven't explained comes here too, with the experiment that will 
   process of the user's can answer it (Accessibility consent); then the rule wired: `VoiceRule.Mode` gains the Mac's
   mode, `Requests` judging each request by `ApprovalVoice` with the card each kind acts on, and the server's start
   reading the installed `bin/vibeswitcher`'s cdhash.
+- **`1a6c4688`, `9130a33a`** (the Mac's rule wired, 2026-11-21, `v2-small-rows`; still off): `VoiceRule.Mode.approval`
+  (`VoiceRule.at` gives it to the user's server on a system with no cgroups only when `NodeSystem.approvalMeasured` is
+  true; it is false, so that server stays on the closed rule and the user's node refused); `Requests.approvalJudgment`
+  (the action id, a card's code, stopping and the host's welcome answered before any dialog; a read judged at once; a
+  state change put to `ApprovalVoice` on a queue of its own, one at a time, a second refused while one waits; its reason
+  the server's own words for the request, `Requests.approvalCard`: a card's first lines, else the request's own
+  arguments, inert and short); `NodeServer` passing each peer's audit token; the server's start reading the installed
+  `bin/vibeswitcher`'s cdhash; the command line showing what a request does and asking no code when the hello's rule is
+  `approval`, waiting 120 s for a state change. Tests: `ApprovalJudgmentTests` (both systems, the hosted Mac's core job:
+  a read unasked, a state change only once approved, declined, unavailable, a stranger, a session's descendant, no
+  action id, a held card refused unasked, not-yet before a dialog, one at a time) and `ApprovalRequestsTests` (Linux, a
+  scratch host: the whole request, the vault's record and the act). **Needs a real Mac** before `approvalMeasured` is
+  turned on, besides step 4's measurements above: one `vibeswitcher set` and one `answer` end to end from Terminal (the
+  dialog appears once, names the setting or the card, Cancel refuses with nothing recorded, Touch ID does it); the same
+  from a Claude Code session's Bash tool (refused before any dialog: its ancestry); from `open -a Terminal x.command`
+  and `osascript … do script` started by a session (the escape the design names: the dialog then appears, and the
+  person must decline it; record what the dialog shows); a second request while a dialog is open (refused, saying so);
+  and the CLI's 120 s wait against the dialog's 60 s. An independent review of `ApprovalRequests.swift`,
+  `ApprovalCard.swift` and the `Requests.handle` split before it is turned on.
 
 ## What `v2` found on the Mac and doesn't change
 
