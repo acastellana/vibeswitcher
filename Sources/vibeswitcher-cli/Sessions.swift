@@ -216,11 +216,11 @@ enum SendCommand {
     }
 }
 
-/// `vibeswitcher new FOLDER [--agent claude|shell | --preset NAME] [--model M]`: an ordinary session started in the
+/// `vibeswitcher new FOLDER [--agent claude|codex|shell | --preset NAME] [--model M]`: an ordinary session started in the
 /// node's host, as the app's New Session starts its Claude or Shell preset, or the launch preset named (`vibeswitcher
 /// presets FOLDER` lists them): what it runs and the names of the variables it sets are shown before the code.
 enum NewCommand {
-    static let usage = "usage: vibeswitcher new FOLDER [--agent claude|shell | --preset NAME] [--model M]"
+    static let usage = "usage: vibeswitcher new FOLDER [--agent claude|codex|shell | --preset NAME] [--model M]"
 
     static func run(_ arguments: [String]) -> Int32 {
         var folder: String?
@@ -231,7 +231,7 @@ enum NewCommand {
         while let word = words.popFirst() {
             switch word {
             case "--agent":
-                guard agent == nil, let value = words.popFirst(), ["claude", "shell"].contains(value) else { return Say.usage(usage) }
+                guard agent == nil, let value = words.popFirst(), ["claude", "codex", "shell"].contains(value) else { return Say.usage(usage) }
                 agent = value
             case "--preset":
                 guard preset == nil, let value = words.popFirst(), !value.isEmpty, !value.hasPrefix("--") else { return Say.usage(usage) }
@@ -251,7 +251,7 @@ enum NewCommand {
         let chosen = agent ?? "claude"
         var args: [String: NodeWire.Value] = ["folder": .string(path), "agent": .string(chosen)]
         if let model { args["model"] = .string(model) }
-        let what = chosen == "shell" ? "a shell" : "Claude" + withModel
+        let what = chosen == "shell" ? "a shell" : (chosen == "codex" ? "Codex" : "Claude") + withModel
         return SessionCommand.act("session.new", args: { _ in args }, what: { _ in
             "This starts \(what) in a new session in \(ConfigSeal.inert(path, limit: 200)), as you."
         }, say: started)
@@ -274,7 +274,7 @@ enum NewCommand {
             }
         }, refuse: { preset in
             if let why = preset["refused"]?.string { return Say.refused("preset \(ConfigSeal.inert(name, limit: 80)) can't start here: \(ConfigSeal.inert(why, limit: 400))") }
-            if model != nil, preset["kind"]?.string != "claude" { return Say.usage(usage + "\n(preset \(ConfigSeal.inert(name, limit: 80)) starts a shell: no model)") }
+            if model != nil, preset["kind"]?.string == "shell" { return Say.usage(usage + "\n(preset \(ConfigSeal.inert(name, limit: 80)) starts a shell: no model)") }
             return nil
         }, args: { preset in
             var args: [String: NodeWire.Value] = ["folder": .string(path), "preset": preset["name"] ?? .string(name), "digest": preset["digest"] ?? .null]

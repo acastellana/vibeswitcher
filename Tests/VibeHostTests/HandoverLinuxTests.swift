@@ -348,12 +348,34 @@ extension HandoverLinuxTests {
         // The control: the same probe, the same way, of a state of this build's format, answers that it can take over;
         // so the refusal below is the probe's read of the format (it exits 1 having said so), not a probe that couldn't
         // be started or read its state at all.
-        let current = try stored(format: HostHandover.format)
-        defer { current.remove() }
-        try HostHandover.probe(target, statePath: current.path, timeout: hangGuard)
+        // Each format this build reads (H1: 2 carries the web's sockets, 1 doesn't), the probe naming the one it read; a
+        // probe asked for format 1 (a build before H1 handing over) refuses an answer for 2.
+        for format in HostHandover.reads {
+            let current = try stored(format: format)
+            defer { current.remove() }
+            try HostHandover.probe(target, statePath: current.path, format: format, timeout: hangGuard)
+            if format != 1 {
+                #expect(throws: HostHandover.Failure.probe("it said \(HostHandover.probeAnswer(format))")) {
+                    try HostHandover.probe(target, statePath: current.path, format: 1, timeout: hangGuard)
+                }
+            }
+        }
         #expect(throws: HostHandover.Failure.probe("it exited with status \(1 << 8)")) {
             try HostHandover.probe(target, statePath: newer.path, timeout: hangGuard)
         }
+    }
+
+    /// H1: a state carrying the web's sockets is format 2, so a build before H1 (which reads 1 alone) refuses it at its
+    /// probe and never takes them into its sessions; one carrying none stays format 1, so switches to and from such a
+    /// build keep working while the web is off.
+    @Test func aStateCarryingTheWebsSocketsIsFormatTwo() {
+        var state = HostHandover.State(fromBuild: 7, startedAt: Date(), lockFD: 3, listenFD: 4, secretFD: nil, sessions: [])
+        #expect(state.format == 1)
+        HandoverMemory.carryWebListeners([.init(place: "loopback", address: "127.0.0.1", port: 47830, fd: 9)], in: &state)
+        #expect(state.format == 2 && state.webListeners?.count == 1 && state.descriptors.contains(9))
+        HandoverMemory.carryWebListeners([], in: &state)
+        #expect(state.format == 1 && state.webListeners == nil && !state.descriptors.contains(9))
+        #expect(HostHandover.reads == 1...2 && HostHandover.format == 2 && HostHandover.probeAnswer == "vibeswitcher-host handover 1 ok")
     }
 
     /// A fresh host that holds the lock removes a state file and its `.partial` left beside the lock (the Mac's format,
@@ -505,9 +527,15 @@ extension HandoverLinuxTests {
         #expect(host.process.isRunning)
     }
 
-    /// The old build's file rewritten in place after the exec (it runs no longer, so no `ETXTBSY`) and before the new
-    /// build's failed restore (its modification time put back, so its build id is the same): what serves again is the
-    /// old build, from its sealed copy, not what the file now holds.
+    /// The old build's file rewritten in place after the exec and before the new build's failed restore (its
+    /// modification time put back, so its build id is the same): what serves again is the old build, from its sealed
+    /// copy, not what the file now holds.
+    ///
+    /// The scratch host runs from that file until its exec, so Linux refuses to open it for writing (`ETXTBSY`) until
+    /// the old image is let go. The kernel finishes that after the exec, while the new image already runs: measured on
+    /// WSL's 6.18, the file was still refused 1 to 9 ms after the stand-in build had touched its `.waiting` file, with
+    /// no process left executing it (the host's /proc exe already the shell). So the rewrite waits for the file to be
+    /// writable, the event it needs, not for the stand-in's file alone.
     @Test(.enabled(if: !Platform.CodeIdentity.isAvailable, "Linux's fallback through the old image's sealed copy"))
     func aFallbackImageRewrittenInPlaceIsNotWhatRuns() async throws {
         let host = try await ScratchHostProcess()
@@ -519,8 +547,14 @@ extension HandoverLinuxTests {
         let modified = try FileManager.default.attributesOfItem(atPath: host.oldBinary)[.modificationDate] as? Date
         #expect(await host.handOver(to: host.failingBuild(hold: hold), through: client) == .ok, "\(host.log)")
         #expect(await eventually { FileManager.default.fileExists(atPath: hold + ".waiting") }, "\(host.log)")
-        let file = open(host.oldBinary, O_WRONLY | O_TRUNC | O_CLOEXEC)
-        try #require(file >= 0, "errno \(errno)")
+        var file: Int32 = -1
+        var refused: Int32 = 0
+        let writable = await eventually {
+            file = open(host.oldBinary, O_WRONLY | O_TRUNC | O_CLOEXEC)
+            refused = file < 0 ? errno : 0
+            return file >= 0 || refused != ETXTBSY
+        }
+        try #require(writable && file >= 0, "errno \(refused)")
         let other = Array("#!/bin/sh\necho replaced-build >&2\nexit 9\n".utf8)
         #expect(write(file, other, other.count) == other.count)
         Sys.close(file)

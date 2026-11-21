@@ -46,9 +46,11 @@ extension Requests {
 
     func set(_ request: NodeWire.Request, reply: @escaping (NodeWire.Reply) -> Void) {
         let refuse = { (code: NodeWire.Code, why: String) in reply(.init(re: request.id, error: .init(code, why))) }
-        guard let key = request.args?["key"]?.string, let setting = NodeSettings.setting(key) else {
+        guard let asked = request.args?["key"]?.string, let setting = NodeSettings.setting(asked) else {
             return refuse(.badArgs, "set needs key, one of `vibeswitcher settings`'s")
         }
+        // An alias (`NodeSettings.aliases`: the app's mac_… names) is the setting's own key from here on.
+        let key = setting.key
         guard let given = request.args?["value"]?.string else { return refuse(.badArgs, "set needs value (default puts it back)") }
         let folder = request.args?["folder"]?.string
         switch (setting.scope, folder) {

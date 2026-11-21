@@ -10,6 +10,7 @@ import { newSessionForm, newLeadForm } from './drive.js';
 import { resumeLine, recentProjects, projectLines } from '../actions.js';
 import { boardHref } from '../ui.js';
 import { copyLine } from './cards.js';
+import { briefFoot, speech, speak } from '../brief.js';
 
 // How many ended sessions the page lists (the node keeps 20).
 const ENDED_SHOWN = 5;
@@ -85,8 +86,44 @@ export function startView(app) {
           : h('a', { class: 'link', href: boardHref(row.lead) }, 'Its lead runs: open its board'));
     }));
   }
+  // Brief me (the Mac's Briefing): what happened and what's asked of you, asked when you want it; read aloud by the
+  // browser's own speech where it has one.
+  const voice = speech();
+  const briefText = h('p', { class: 'brief-text', hidden: true });
+  const briefFootLine = h('p', { class: 'confirm-note', hidden: true });
+  const briefButton = h('button', { class: 'confirm-clear', type: 'button', onclick: () => askBrief() }, 'Brief me');
+  const speakButton = h('button', { class: 'confirm-clear', type: 'button', hidden: true, onclick: () => toggleSpeech() }, 'Speak');
+  const brief = h('section', { class: 'brief', 'aria-label': 'Brief me', hidden: true },
+    h('div', { class: 'brief-head' }, h('h2', { class: 'new-title' }, 'What happened, and what’s asked of you'), briefButton, speakButton),
+    briefText, briefFootLine);
+  let briefResult = null;
+  let speaking = false;
+  function askBrief() {
+    briefButton.disabled = true;
+    briefButton.textContent = 'Briefing…';
+    store.request('brief', {}).then((reply) => {
+      briefButton.disabled = false;
+      briefButton.textContent = 'Brief me again';
+      briefResult = reply.ok ? reply.result : null;
+      briefText.hidden = false;
+      briefText.textContent = reply.ok ? reply.result.text : (reply.error?.message || 'The node couldn’t write a briefing.');
+      briefFootLine.hidden = !reply.ok;
+      briefFootLine.textContent = reply.ok ? [briefFoot(reply.result), reply.result.notice || ''].filter(Boolean).join(' ') : '';
+      speakButton.hidden = !voice || !reply.ok;
+    });
+  }
+  function toggleSpeech() {
+    if (!voice || !briefResult) return;
+    if (speaking) {
+      voice.synth.cancel();
+      return;
+    }
+    speaking = true;
+    speakButton.textContent = 'Stop';
+    speak(voice, briefResult.text, briefResult.language || 'en', () => { speaking = false; speakButton.textContent = 'Speak'; });
+  }
   const el = h('section', { class: 'start', 'aria-label': 'Start page' },
-    h('div', { class: 'start-column' }, title, sub, starting.el, leading.el, recent, ended,
+    h('div', { class: 'start-column' }, title, sub, brief, starting.el, leading.el, recent, ended,
       h('dl', { class: 'keys' }, keys.map(([key, what]) => h('div', null, h('dt', null, h('kbd', null, key)), h('dd', null, what))))));
 
   function render() {
@@ -108,6 +145,7 @@ export function startView(app) {
     starting.el.hidden = state.connection === 'unpaired' || state.connection === 'revoked';
     leading.el.hidden = starting.el.hidden;
     starting.update();
+    brief.hidden = !store.can?.('brief');
     drawEnded();
     if (state.connection === 'live') askRecent();
     drawRecent();

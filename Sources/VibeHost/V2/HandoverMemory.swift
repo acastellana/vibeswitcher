@@ -107,6 +107,12 @@ public enum HandoverMemory {
     }
 
     /// `state` as `HostHandover.write` encodes it (a binary property list), which `HostHandover.read(from:)` reads.
+    /// The web's sockets the host holds (H1) put in `state`: format 2 with them, 1 without (`HostHandover.format`).
+    static func carryWebListeners(_ records: [HostHandover.WebListenerRecord], in state: inout HostHandover.State) {
+        state.webListeners = records.isEmpty ? nil : records
+        state.format = records.isEmpty ? 1 : 2
+    }
+
     static func encoded(_ state: HostHandover.State) throws -> Data {
         let encoder = PropertyListEncoder()
         encoder.outputFormat = .binary
@@ -525,11 +531,15 @@ extension HostServer {
             reply(.error("Couldn't hand over: \(error)."))
         }
         let probeState: Int32
+        let probeFormat: Int
         do {
-            let state = handoverState(secretFD: nil)
+            var state = handoverState(secretFD: nil)
             if let working = teamsWorking(state) { throw working }
+            // The web's sockets in the probe's state too: a build that can't carry them refuses it (format 2).
+            HandoverMemory.carryWebListeners(serverChild?.webListeners.records ?? [], in: &state)
             if let why = carriedLockRefusal(state.lockFD) { throw refusedForItsLock(why, executable) }
             probeState = try HandoverMemory.seal(HandoverMemory.encoded(state), name: "vibeswitcher-handover-probe")
+            probeFormat = state.format
         } catch {
             return fail(error)
         }
@@ -538,7 +548,7 @@ extension HostServer {
             do {
                 defer { Sys.close(probeState) }
                 HandoverMemory.holdIfAsked()
-                try HostHandover.probe(target.path, statePath: HandoverMemory.path(of: probeState))
+                try HostHandover.probe(target.path, statePath: HandoverMemory.path(of: probeState), format: probeFormat)
             } catch {
                 self?.queue.async { fail(error) }
                 return
@@ -561,6 +571,12 @@ extension HostServer {
                     if let working = self.teamsWorking(state) { throw working }
                     state.images = HandoverImages(own: target.fd, fallback: fallback?.fd, server: serverCopy?.fd)
                     state.ownsLaunchers = HandoverMemory.ownsLaunchers
+                    // The web's listening sockets (H1): held on by the new image, never free between the two.
+                    HandoverMemory.carryWebListeners(self.serverChild?.webListeners.records ?? [], in: &state)
+                    // The probe said yes to its format: the web went on or off since, and this state is another.
+                    if state.format != probeFormat {
+                        throw HostHandover.Failure.probe("the web's sockets changed during the probe; try again")
+                    }
                     if let bad = state.descriptors.first(where: { !HostHandover.isOpen($0) }) { throw HostHandover.Failure.badDescriptor(bad) }
                     if let why = self.carriedLockRefusal(state.lockFD) { throw self.refusedForItsLock(why, executable) }
                     let bytes = try HandoverMemory.encoded(state)

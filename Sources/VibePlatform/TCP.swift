@@ -150,6 +150,16 @@ extension Platform {
             port(of: fd) { getsockname($0, $1, $2) }
         }
 
+        /// Whether `fd` is a TCP socket that listens (`SO_ACCEPTCONN`): what the host hands its server for the web (H1).
+        public static func isListening(_ fd: Int32) -> Bool {
+            var on: Int32 = 0
+            var length = socklen_t(MemoryLayout<Int32>.size)
+            var type: Int32 = 0
+            var typeLength = socklen_t(MemoryLayout<Int32>.size)
+            return localPort(fd) != nil && getsockopt(fd, SOL_SOCKET, SO_ACCEPTCONN, &on, &length) == 0 && on != 0
+                && getsockopt(fd, SOL_SOCKET, SO_TYPE, &type, &typeLength) == 0 && type == Platform.Sockets.stream
+        }
+
         /// The address `fd` is bound to on this machine, written as numbers ("127.0.0.1", "::1"). Nil when `fd` isn't a
         /// TCP socket.
         public static func localAddress(_ fd: Int32) -> String? {

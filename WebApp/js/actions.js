@@ -109,8 +109,8 @@ export function newEntries(folders, presetsOf) {
 
 // `vibeswitcher new FOLDER` for `preset` (a built-in by its agent, any other by its name) and an optional model.
 export function newLine(folder, preset, model = '') {
-  const how = preset.builtIn ? (preset.kind === 'shell' ? ' --agent shell' : '') : ` --preset ${shellWord(preset.name)}`;
-  const chosen = preset.kind === 'claude' ? String(model || '').trim() : '';
+  const how = preset.builtIn ? (preset.kind === 'shell' ? ' --agent shell' : preset.kind === 'codex' ? ' --agent codex' : '') : ` --preset ${shellWord(preset.name)}`;
+  const chosen = preset.kind !== 'shell' ? String(model || '').trim() : '';
   return `vibeswitcher new ${shellWord(folder)}${how}${chosen ? ` --model ${shellWord(chosen)}` : ''}`;
 }
 

@@ -229,6 +229,18 @@ extension LeadEngine {
         })
     }
 
+    /// The user's own sessions that ended within `openGrace`, not listed for `resume` yet (`status`'s `ending`): each
+    /// with its session, folder and name, when it ended, and when it will be listed (`vibeswitcher resume` says so
+    /// rather than "none ended"). On `queue`.
+    var endingValue: NodeWire.Value {
+        let entries = openSessions?.entries ?? []
+        return .array(openEnded.sorted { $0.value > $1.value }.compactMap { id, since in
+            guard let entry = entries.first(where: { $0.id == id }) else { return nil }
+            return .object(["session": .string(NodeIds.session(host: id)), "folder": .string(entry.folder), "name": .string(entry.name),
+                            "at": .date(since), "listedAt": .date(since.addingTimeInterval(openGrace))])
+        })
+    }
+
     /// The ended session `id` names (its host id), out of the list for a resume. On `queue`.
     func takeEnded(_ id: UUID) -> RestartReopen.Entry? {
         guard let found = endedSessions.first(where: { $0.entry.id == id }) else { return nil }
@@ -242,5 +254,20 @@ extension LeadEngine {
         guard !entries.isEmpty else { return }
         noteEnded(entries, at: openNow())
         saveState()
+    }
+}
+
+/// `vibeswitcher resume`'s words for the sessions that ended within the grace (`status`'s `ending`): "a session ended
+/// 4 s ago (notes in /home/u/notes); it is listed in 26 s: run `vibeswitcher resume` again then".
+public enum ResumeText {
+    public static func endingLines(_ ending: [NodeWire.Value], now: Date) -> [String] {
+        ending.map { session in
+            let at = session["at"]?.string.flatMap(NodeWire.date) ?? now
+            let listed = session["listedAt"]?.string.flatMap(NodeWire.date) ?? now
+            let ago = max(0, Int(now.timeIntervalSince(at).rounded())), wait = max(1, Int(listed.timeIntervalSince(now).rounded(.up)))
+            let name = ConfigSeal.inert(session["name"]?.string ?? "a session", limit: 80)
+            let folder = ConfigSeal.inert(session["folder"]?.string ?? "?", limit: 300)
+            return "a session ended \(ago) s ago (\(name) in \(folder)); it is listed in \(wait) s: run `vibeswitcher resume` again then"
+        }
     }
 }

@@ -32,6 +32,9 @@ import { copyLine } from './cards.js';
 import { imageSendLine } from '../actions.js';
 import { tokenAt, accept, IMAGE_TYPES, MAX_IMAGE } from '../composing.js';
 import { allDoneView } from './alldone.js';
+import { talkButton } from '../dictate.js';
+import { shellCardsOf } from '../shellcard.js';
+import { shellCard } from './cards.js';
 
 // How close to the end counts as being at the end.
 const NEAR = 48;
@@ -339,9 +342,12 @@ export function chatView(app) {
   // in the conversation's place. A lead's questions still follow below it.
   const later = h('p', { class: 'pane-empty', hidden: true }, 'This node doesn’t send this session’s conversation to the page.');
   const stackSlot = h('div');
+  // This session's shell requests (js/shellcard.js).
+  const shellSlot = h('div', { class: 'stack-cards shell-cards' });
+  let shellDrawn = '';
   // The question open on the session's own screen, under its conversation, where the Mac's answer card sits.
   const asking = promptCard(app);
-  const column = h('div', { class: 'chat-column' }, earlier, skeleton, empty, later, above, rowsEl, below, live, stackSlot, asking.el);
+  const column = h('div', { class: 'chat-column' }, earlier, skeleton, empty, later, above, rowsEl, below, live, stackSlot, shellSlot, asking.el);
   const scroller = h('div', { class: 'chat-scroll' }, column);
   // The "New since you looked" line, placed before its row while that row is drawn.
   const markSummary = h('span', { class: 'new-mark-summary' });
@@ -367,7 +373,9 @@ export function chatView(app) {
       h('button', { class: 'icon-button', type: 'button', title: 'Close', 'aria-label': 'Close', onclick: () => { nodeImage.hidden = true; input.focus(); } }, icon('close', 12))),
     nodeLine,
     h('p', { class: 'confirm-note' }, 'Run it in a terminal on the node: it shows the message with the image and asks for a code. The page can’t read a file on the node itself.'));
-  const form = h('form', { class: 'composer' }, attachButton, input, sendButton, pick);
+  // Push-to-talk dictation into the box (js/dictate.js): only where the browser recognises speech and you turned it on.
+  const talk = talkButton(input);
+  const form = h('form', { class: 'composer' }, attachButton, input, talk, sendButton, pick);
   const hint = h('p', { class: 'composer-hint', hidden: true });
   // The message this page left for the session, over the box, with the line that sends it; Edit puts it and its images
   // back in the box.
@@ -562,6 +570,7 @@ export function chatView(app) {
   function render() {
     const session = store.state.sessions.get(view.session);
     placeStack(session);
+    drawShells();
     const held = chat();
     const pinned = jump || atEnd();
     const following = store.can('chat.page');
@@ -664,6 +673,14 @@ export function chatView(app) {
 
   // A lead's questions, under its chat. Its project can arrive after the session does (the node sends the leads in
   // their own collection), so the stack follows it.
+  function drawShells() {
+    const open = shellCardsOf(store.state.cards.values(), view.session);
+    const key = JSON.stringify(open.map((card) => [card.id, card.shell?.state, card.notice]));
+    if (key === shellDrawn) return;
+    shellDrawn = key;
+    shellSlot.replaceChildren(...open.map(shellCard));
+  }
+
   function placeStack(session) {
     const project = session?.role === 'lead' ? session.lead || null : null;
     if (project === stackProject) return;
@@ -1082,7 +1099,9 @@ export function chatView(app) {
       stackProject = null;
       // The last session's questions leave with it (placeStack only draws when the project changes).
       stackSlot.replaceChildren();
+      shellDrawn = '';
       placeStack(store.state.sessions.get(id));
+      drawShells();
       unsubscribe = store.subscribe('chat:' + id, onChat);
       store.openChat(id);
       render();

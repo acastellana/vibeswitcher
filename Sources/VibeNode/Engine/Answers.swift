@@ -716,7 +716,12 @@ extension LeadEngine {
         moves.log = { [note] in note($0) }
         moves.onAsk = { [weak self] root, move in
             guard let self else { return }
-            for old in self.cards.list(project: NodeIds.project(root: root)) where old.kind == .baseMove {
+            let open = self.cards.list(project: NodeIds.project(root: root)).filter { $0.kind == .baseMove }
+            // A card open already for this very move (the user's `base show` of a moment ago, the acceptance run's A16
+            // flake: the look found the commit just shown and closed the card the user was accepting) is the move's
+            // card: kept, and no second drawn. Accepting it records the head where the move went.
+            if open.contains(where: { $0.base?.branch == move.branch && $0.base?.to == move.to }) { return }
+            for old in open {
                 self.cards.change(old.id) { $0.closed = "superseded by a newer move" }
             }
             var card = CardStore.Card(root: root, kind: .baseMove)
@@ -792,6 +797,11 @@ extension LeadEngine {
                 self.queue.async {
                     if case .failure(let error) = set { return then(.failure(.refused("the vault didn't take it: \(error)"))) }
                     self.cards.change(id) { $0.closed = "accepted" }
+                    // The look's own card for this very move, if it drew one, is settled with it.
+                    for other in self.cards.list(project: NodeIds.project(root: root))
+                    where other.kind == .baseMove && other.base?.branch == shown.branch && other.base?.to == shown.to {
+                        self.cards.change(other.id) { $0.closed = "accepted" }
+                    }
                     self.note("lead: the user recorded \(shown.branch) of \(LeadMail.project(of: root)) at \(shown.to.prefix(8))")
                     then(.success(.object(["head": .string(shown.to), "branch": .string(shown.branch), "card": self.cards.cards[id]?.value ?? .null])))
                 }

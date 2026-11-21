@@ -390,8 +390,13 @@ public enum WireVectors {
             "rule": .object(["mode": .string("systemd"), "says": .string("the user's voice is a terminal's process outside the node's unit"),
                              "scopes": .array([.string("/init.scope")])]),
             "cards": Requests.counts([.question: 1]), "accepted": .array([]), "notices": .array([]), "restart": .null, "reopen": .array([]), "ended": .array([]), "builds": .null,
+            "ending": .array([.object(["session": .string(NodeIds.session(host: UUID(uuidString: "5c1e7a92-0000-4000-8000-000000000001")!)),
+                                       "folder": .string("/home/u/notes"), "name": .string("notes"), "at": .string("2026-11-17T09:13:40.000Z"),
+                                       "listedAt": .string("2026-11-17T09:14:10.000Z")])]),
             "web": .object(["state": .string("listening"), "port": .int(Int(NodeWeb.port)), "tokens": .int(1), "connections": .int(1)]),
             "usage": usage,
+            "boost": .object(["mode": .string("on"), "on": .bool(true), "why": .string("on in Settings"),
+                              "limits": .object(["loadThreshold": .string("48"), "maxSessions": .int(16), "maxWorkers": .int(6), "heavySlots": .int(4)])]),
         ])
     }
 
@@ -410,7 +415,7 @@ public enum WireVectors {
     }
 
     /// The launch presets of the vectors' example: the project's own Opus (its default, with a variable set) and the
-    /// built-ins, Codex among them (the node can't start it).
+    /// built-ins, Codex among them (the user's own, by its link).
     /// A fixed key for the example's digests, so the generated files are the same each time (a node's is random).
     static let presetsKey = SymmetricKey(data: Data(repeating: 0x5a, count: 32))
 
@@ -637,7 +642,7 @@ public enum WireVectors {
         let workflow = root + "/.vibeswitcher/workflow.md"
         return .object([
             "node": .object(["root": .string(node), "settings": .array([
-                shown("mac_max_sessions", "8", String(MacLimits.defaultMaxSessions), place: node + "/mac-limits.json"),
+                shown("node_max_sessions", "8", String(MacLimits.defaultMaxSessions), place: node + "/mac-limits.json"),
                 shown("ignore_usage_limits", "off", "off", place: node + "/mac-limits.json"),
                 shown("boost", "on", "off", place: node + "/settings.plist"),
                 shown("lead_mail", "on", "on", place: node + "/settings.plist"),
@@ -771,6 +776,11 @@ public enum WireVectors {
             // The node's settings (2026-11-20): read by a page, which drafts the line that sets one; `set` is never a page's.
             ("settings", [request(.init(id: "18", kind: "settings", args: ["folder": .string(root)])),
                           reply("reply.settings", .init(re: "18", result: settingsValue))]),
+            // Brief me (2026-11-21): what happened and what's asked of you, written by the template here.
+            ("brief", [request(.init(id: "41", kind: "brief")),
+                       reply("reply.brief", .init(re: "41", result: Requests.briefValue(
+                           text: "In acme-site, 2 updates; 1 landed, 1 running, 1 question for the user. Latest: Landed: the pricing page's copy. 1 session needs you: notes.",
+                           byModel: false, language: "en", at: boardNow.timeIntervalSince1970, notice: nil, asks: 2, kept: false)))]),
             // The start page's recent projects (2026-11-21): the folders Claude Code and Codex know, a lead's project where one runs.
             ("recent", [request(.init(id: "40", kind: "recent")),
                         reply("reply.recent", .init(re: "40", result: .object(["projects": .array([

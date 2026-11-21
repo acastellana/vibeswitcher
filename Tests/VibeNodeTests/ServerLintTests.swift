@@ -96,6 +96,30 @@ struct ServerLintTests {
         #expect(found.isEmpty, "\(found.joined(separator: "\n"))")
     }
 
+    /// H1 (docs/process/v2-h1-plan.md): the server binds no web socket of its own; it takes the session host's
+    /// (`WebBind.host`, over its connector). A listening socket is made in only two places, each for a process with no
+    /// host (an in-process test, the Mac's server until its H1 step): `WebBind.direct` and `WebListener.start` without a
+    /// `bindWith`; and the server's start hands its web `WebBind.forServer`, the host's form on Linux.
+    @Test func theServerBindsNoWebSocketOfItsOwn() throws {
+        var found: [String] = []
+        let allowed: Set<String> = ["Sources/VibeNode/Web/WebBind.swift", "Sources/VibeNode/Web/WebListener.swift"]
+        for folder in Self.covered {
+            let root = Self.repo.appendingPathComponent(folder)
+            guard let walker = FileManager.default.enumerator(at: root, includingPropertiesForKeys: nil) else { continue }
+            for case let file as URL in walker where file.pathExtension == "swift" {
+                let path = "\(folder)/\(file.path.dropFirst(root.path.count + 1))"
+                let code = Self.code(try String(contentsOf: file, encoding: .utf8))
+                for pattern in [#"\bPlatform\s*\.\s*TCP\s*\.\s*listen(OnLoopback)?\s*\("#, #"(?<![.\w])bind\s*\([^()]*,[^()]*,"#]
+                where code.range(of: pattern, options: .regularExpression) != nil && !allowed.contains(path) {
+                    found.append("\(path): \(pattern)")
+                }
+            }
+        }
+        #expect(found.isEmpty, "\(found.joined(separator: "\n"))")
+        let start = Self.code(try String(contentsOf: Self.repo.appendingPathComponent("Sources/VibeNode/Server/ServerStart.swift"), encoding: .utf8))
+        #expect(start.range(of: #"bind:\s*\.forServer\(connector:\s*parsed\.connector"#, options: .regularExpression) != nil)
+    }
+
     /// The rule on a fixture: each refused form found, on its line; a name in a comment or a string isn't.
     @Test func theRuleFindsEachForm() {
         let fixture = """

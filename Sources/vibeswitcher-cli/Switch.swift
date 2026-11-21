@@ -86,9 +86,16 @@ enum SwitchCommand {
         if let root = buildsRoot(context, prefix: prefix, status: status), let refused = SwitchFollowUp.targetRefusal(prefix: root, commit: target) {
             return Say.refused("\(command): \(ConfigSeal.inert(refused.text, limit: .max))")
         }
-        let what = rollback
+        // Whether it can run now, before any code is asked: the rule on switches refuses it while a worker or verifier
+        // runs (the server and the host both hold it), so a confirmation that reads as if it would go ahead is never shown.
+        let blockers = (status["switchBlockers"]?.array ?? []).compactMap(\.string).map { ConfigSeal.inert($0, limit: 120) }
+        if !blockers.isEmpty {
+            return Say.refused("\(command) can't run now: " + SwitchRequest.blockedText(blockers) + ". Nothing was asked or switched.")
+        }
+        let what = (rollback
             ? NodeTexts.rollback(from: from, to: target, line: status["builds"]?["rollback"]?["line"]?.string ?? "", rewrites: rewrites(context))
-            : NodeTexts.switch(from: from, to: target, rewrites: rewrites(context))
+            : NodeTexts.switch(from: from, to: target, rewrites: rewrites(context)))
+            + "\n  it can run now: no worker or verifier runs (a change the seal holds under the builds or the unit's folder would still stop it: `vs config held`)"
 
         let action = UUID().uuidString.lowercased()
         let outcome = TypedWord.ask(approval: client.approvalRule, code: NodeIds.code(action: action), what: what)

@@ -1,4 +1,5 @@
 import Foundation
+import VibeCore
 
 // The web listener's seams (the live plan's "The seams", W0): what lane A's listener consumes from lane C (the files),
 // lane F (who may connect) and lane B (the hub), wired together by the integrator (I1). The integrator's file: a lane
@@ -8,7 +9,7 @@ import Foundation
 /// stage 5's Settings store makes it a node's setting. No test binds it: a scratch server takes `--test-web-port=`.
 public enum NodeWeb {
     /// The Mac's phone server is 47823.
-    public static let port: UInt16 = 47830
+    public static let port: UInt16 = HostWebListen.port
 }
 
 /// One file the listener may serve, with its headers ready (lane C makes them; lane A writes them).

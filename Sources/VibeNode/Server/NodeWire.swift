@@ -321,14 +321,19 @@ public enum NodeWire {
         // The start page's recent projects (2026-11-21): a read of the folders Claude Code and Codex know, the user's
         // other projects among them, so never a session's: the user's or a page's that reads (`webRead`, as `mail`).
         "recent": .webRead,
+        // Brief me (2026-11-21): a read of the user's own, which may ask the summaries' model, so never a session's.
+        "brief": .webRead,
         // Settling the lead's push request (the parity table's push row, 2026-11-20): the user's voice.
         "push": .user, "push.decline": .user,
+        // Check for Updates now (`status --check-updates`, 2026-11-21): it asks GitHub and keeps the answer in the update
+        // watch's own record, changing nothing else; the user's, with no typed word, never a session's or a page's.
+        "update.check": .user,
     ]
 
     /// The user's-voice kinds that change nothing (EN-D5: no typed word): `start` to a running node says when it
     /// started; `config.held` and `base.show` make the card the next request takes; `shells` lists the node's shells for
-    /// Close Finished Shells. (`mail`, a read of the user's or a page's, is `webRead`: it changes nothing either.)
-    public static let changesNothing: Set<String> = ["start", "config.held", "base.show", "shells"]
+    /// Close Finished Shells; `update.check` asks GitHub now and keeps only its answer. (`mail`, a read of the user's or a page's, is `webRead`: it changes nothing either.)
+    public static let changesNothing: Set<String> = ["start", "config.held", "base.show", "shells", "update.check"]
 
     /// Whether `kind` changes state: every user's-voice kind but `changesNothing`'s, a kind added later included, and
     /// every web client's kind (a draft, a terminal). A kind missing from `kinds` needs the user's voice, as
@@ -362,7 +367,7 @@ public enum NodeWire {
                                "push", "push.decline",
                                "session.reopen", "mail", "prompt-audit", "session.rename", "session.pause",
                                "session.resume", "shells", "session.close-shells", "presets.edit",
-                               "recent"]
+                               "recent", "brief", "update.check"]
 
     // MARK: Lines
 

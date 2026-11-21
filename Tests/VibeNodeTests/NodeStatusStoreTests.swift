@@ -135,6 +135,9 @@ struct NodeStatusStoreTests {
         #expect(expected["sessions"] != nil && expected["leads"] != nil)
         expected["sessions"] = nil
         expected["leads"] = nil
+        // The command line's own: what blocks a build switch now (`switch` reads it before its code).
+        #expect(expected["switchBlockers"] == .array([]))
+        expected["switchBlockers"] = nil
         expected["web"] = web
         #expect(store.changes.values == [NodeIds.node: .object(expected)])
         #expect(NodeStatusStore.webOff == .object(["state": .string("off"), "port": .null, "tokens": .int(0), "connections": .int(0)]))

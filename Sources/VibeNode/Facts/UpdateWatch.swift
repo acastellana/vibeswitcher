@@ -172,6 +172,8 @@ public final class UpdateWatch: @unchecked Sendable {
     /// On `queue`.
     public private(set) var record: Record
     private var looking = false
+    /// Who asked while a look was under way (`look(done:)`): told when it lands.
+    private var waiting: [() -> Void] = []
     private var failing = false
     private var ticks: Subscription?
 
@@ -227,9 +229,11 @@ public final class UpdateWatch: @unchecked Sendable {
         }
     }
 
-    /// Asks GitHub now (off `queue`), keeps the answer and calls `done` on `queue`. A look under way: `done` at once.
+    /// Asks GitHub now (off `queue`), keeps the answer and calls `done` on `queue`, once it is kept. A look under way:
+    /// `done` when that one lands (`vibeswitcher status --check-updates` asking during the watch's own look).
     public func look(done: (() -> Void)? = nil) {
-        guard !looking else { done?(); return }
+        if let done { waiting.append(done) }
+        guard !looking else { return }
         looking = true
         let (running, looker, at) = (self.running, self.looker, now())
         work.async { [weak self] in
@@ -238,9 +242,35 @@ public final class UpdateWatch: @unchecked Sendable {
                 guard let self else { return }
                 self.looking = false
                 self.keep(decided, at: at)
-                done?()
+                let told = self.waiting
+                self.waiting = []
+                for done in told { done() }
             }
         }
+    }
+
+    /// `update.check`'s answer (`vibeswitcher status --check-updates`): `value`, with the running build and the notice
+    /// `status` now carries. On `queue`.
+    public var checked: NodeWire.Value {
+        var fields = value.object ?? [:]
+        fields["running"] = .string(running)
+        fields["notice"] = notice.map(NodeWire.Value.string) ?? .null
+        return .object(fields)
+    }
+
+    /// What `status --check-updates` says of `checked`: why it couldn't look, the newer build and its install line, or
+    /// that there is none.
+    public static func lines(_ checked: NodeWire.Value) -> [String] {
+        var lines: [String] = []
+        if let problem = checked["problem"]?.string {
+            lines.append("updates: couldn't check \(branch) for a newer build (\(ConfigSeal.inert(problem, limit: 300)))")
+        }
+        if let notice = checked["notice"]?.string {
+            lines.append("updates: " + ConfigSeal.inert(notice, limit: 600) + (checked["problem"]?.string == nil ? "" : " (the last check's answer)"))
+        } else if checked["problem"]?.string == nil, let at = checked["checkedAt"]?.string {
+            lines.append("updates: no newer build on \(branch) that both CI runs (\(workflows.joined(separator: ", "))) passed (checked \(ConfigSeal.inert(at, limit: 40)))")
+        }
+        return lines
     }
 
     private func keep(_ decided: Result<Offer?, Refusal>, at: Date) {
@@ -275,7 +305,57 @@ public final class UpdateWatch: @unchecked Sendable {
     }
 }
 
+extension UpdateWatch {
+    /// A scratch server's GitHub (`--test-update-answers=FILE`): the runs, the compares and a refusal written in a file,
+    /// read at each call, so a test changes what the next check finds. The user's node never reads one.
+    public struct Answers: Codable, Equatable, Sendable {
+        public struct Compare: Codable, Equatable, Sendable {
+            public var status: String
+            public var aheadBy: Int?
+            public init(status: String, aheadBy: Int? = nil) {
+                self.status = status
+                self.aheadBy = aheadBy
+            }
+        }
+        /// The running build's commit to compare with (a scratch build's is often unknown).
+        public var running: String?
+        public var runs: [Run]
+        /// Keyed `BASE...HEAD`.
+        public var compare: [String: Compare]
+        /// Each call refused, saying this (offline, no gh).
+        public var problem: String?
+        public init(running: String? = nil, runs: [Run] = [], compare: [String: Compare] = [:], problem: String? = nil) {
+            self.running = running
+            self.runs = runs
+            self.compare = compare
+            self.problem = problem
+        }
+
+        public static func read(_ file: URL) -> Answers? {
+            guard let data = try? Data(contentsOf: file), data.count < 1024 * 1024 else { return nil }
+            return try? JSONDecoder().decode(Answers.self, from: data)
+        }
+    }
+}
+
 extension UpdateWatch.Looker {
+    /// `UpdateWatch.Answers` from `file`, read at each call.
+    public static func answers(_ file: URL) -> UpdateWatch.Looker {
+        let read: @Sendable () -> Result<UpdateWatch.Answers, UpdateWatch.Refusal> = {
+            guard let answers = UpdateWatch.Answers.read(file) else { return .failure(.init("the test's answers (\(file.lastPathComponent)) can't be read")) }
+            if let problem = answers.problem { return .failure(.init(problem)) }
+            return .success(answers)
+        }
+        return UpdateWatch.Looker(
+            runs: { read().map(\.runs) },
+            compare: { base, head in
+                read().flatMap { answers in
+                    guard let said = answers.compare["\(base)...\(head)"] else { return .failure(.init("no compare of \(base) with \(head)")) }
+                    return .success(UpdateWatch.Compared(status: said.status, aheadBy: said.aheadBy))
+                }
+            })
+    }
+
     /// GitHub through `gh` (`gh`'s path: the install script's, `/usr/bin/gh`): the token read from gh's own store under
     /// `home` (a local read), then each call with that token and no configuration folder of the user's, so a
     /// `config.yml` can't route the answer elsewhere. Each call has 60 s.

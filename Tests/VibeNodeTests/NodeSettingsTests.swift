@@ -109,10 +109,13 @@ struct NodeSettingsTests {
         func parse(_ key: String, _ text: String) -> Result<String?, NodeSettings.Refusal> {
             NodeSettings.parse(NodeSettings.setting(key)!, text)
         }
-        #expect(try parse("mac_max_sessions", "7").get() == "7")
-        #expect((try? parse("mac_max_sessions", "0").get()) == nil)
-        #expect((try? parse("mac_max_sessions", "lots").get()) == nil)
-        #expect(try parse("mac_max_sessions", "default").get() == nil)
+        #expect(try parse("node_max_sessions", "7").get() == "7")
+        // The app's names stand for the node's.
+        #expect(NodeSettings.setting("mac_max_sessions")?.key == "node_max_sessions" && NodeSettings.setting("mac_heavy_slots")?.key == "node_heavy_slots")
+        #expect(!NodeSettings.all.contains { $0.key.hasPrefix("mac_") })
+        #expect((try? parse("node_max_sessions", "0").get()) == nil)
+        #expect((try? parse("node_max_sessions", "lots").get()) == nil)
+        #expect(try parse("node_max_sessions", "default").get() == nil)
         #expect(try parse("load_threshold", "30.5").get() == "30.5")
         #expect((try? parse("load_threshold", "-1").get()) == nil)
         #expect((try? parse("boost_load_threshold", String(BoostLimits.loadCeiling + 1)).get()) == nil)
@@ -156,7 +159,7 @@ struct NodeSettingsTests {
 
     @Test func theLimitsAreWrittenWhereTheLeadsReadThem() throws {
         let files = try files()
-        let applied = try set("mac_max_sessions", "7", files: files)
+        let applied = try set("node_max_sessions", "7", files: files)
         #expect(applied.value == "7" && applied.was == String(MacLimits.defaultMaxSessions) && applied.told == nil)
         _ = try set("load_threshold", "30", files: files)
         _ = try set("ignore_usage_limits", "on", files: files)
@@ -172,7 +175,7 @@ struct NodeSettingsTests {
     @Test func aLimitsChangeKeepsWhatItDoesntSet() throws {
         let files = try files()
         try MacLimits(memoryPressure: "critical", swapOutRate: 80).save(to: files.limits)
-        _ = try set("mac_heavy_slots", "1", files: files)
+        _ = try set("node_heavy_slots", "1", files: files)
         let limits = MacLimits.load(from: files.limits)
         #expect(limits.memoryPressure == "critical" && limits.swapOutRate == 80 && limits.heavySlots == 1)
     }

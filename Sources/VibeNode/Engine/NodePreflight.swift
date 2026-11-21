@@ -53,17 +53,34 @@ public struct NodePreflight: Sendable {
     }
 
     /// `link` resolved with `realpath` (no shell, no PATH), when it names an executable regular file; else why not.
-    static func resolve(_ link: String) -> (path: String?, why: String?) {
-        guard link.hasPrefix("/") else { return (nil, "claude: the link \(link) isn't an absolute path") }
+    static func resolve(_ link: String, name: String = "claude", what: String = "Claude Code's") -> (path: String?, why: String?) {
+        guard link.hasPrefix("/") else { return (nil, "\(name): the link \(link) isn't an absolute path") }
         guard let resolved = realpath(link, nil) else {
-            return (nil, "claude: \(link) names nothing (\(String(cString: strerror(errno)))); Claude Code's link is read there, never looked up on PATH")
+            return (nil, "\(name): \(link) names nothing (\(String(cString: strerror(errno)))); \(what) link is read there, never looked up on PATH")
         }
         let path = String(cString: resolved)
         free(resolved)
         guard isExecutableFile(path) else {
-            return (nil, "claude: \(link) resolves to \(path), which isn't an executable regular file")
+            return (nil, "\(name): \(link) resolves to \(path), which isn't an executable regular file")
         }
         return (path, nil)
+    }
+
+    /// The link the user's own Codex sessions run (`vibeswitcher new FOLDER --agent codex`), as Claude's
+    /// (`claudeLink`): `~/.local/bin/codex` on the user's node (a link the user makes to their Codex: `ln -s
+    /// ~/.bun/bin/codex ~/.local/bin/codex`), `<root>/v2/test/codex` on a scratch node; read there, never looked up on
+    /// PATH. Never a worker's: Codex workers stay off (decision 15).
+    public static func codexLink(root: URL, accountHome: String = VibePaths.accountHome) -> String {
+        guard NodeFolders.isUsersRoot(root, accountHome: accountHome) else { return root.appendingPathComponent("v2/test/codex").path }
+        return URL(fileURLWithPath: accountHome, isDirectory: true).appendingPathComponent(".local/bin/codex").path
+    }
+
+    /// The Codex the user's own sessions run, or why there is none.
+    public static func codex(root: URL) -> (path: String?, why: String?) {
+        let link = codexLink(root: root)
+        let found = resolve(link, name: "codex", what: "Codex's")
+        guard found.path == nil else { return found }
+        return (nil, (found.why ?? "codex: none") + " (make the link to your Codex: `ln -s \"$(command -v codex)\" \(link)`)")
     }
 
     /// A regular file this process may run.

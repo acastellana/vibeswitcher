@@ -55,6 +55,9 @@ public final class LeadEngine: @unchecked Sendable {
         /// Writes an all-done batch's summary (headline and bullets) for its prompt, blocking (`AllDoneLook`): the user's
         /// node's server gives headless Claude with `BatchSummaryPrompts.system`; none by default (the written fallback).
         public var summarizeBatch: Summarizer.Generate?
+        /// Writes a briefing for its prompt, blocking (`Requests.brief`): the user's node's server gives headless Claude
+        /// with `BriefingPrompts.system`; none by default (the written template).
+        public var summarizeBrief: Summarizer.Generate?
 
         public init() {}
     }
@@ -237,6 +240,12 @@ public final class LeadEngine: @unchecked Sendable {
     var summaryKeys: [String: [String: String]] = [:]
     /// The all-done summaries' model (`Options.summarizeBatch`; a test's fake). On `queue`.
     var batchModel: Summarizer.Generate?
+    /// Brief me (`Requests.brief`): the briefing's model (`Options.summarizeBrief`; a test's fake), when each scope
+    /// (a project's root, "" for every project) was last briefed, its last briefing kept, and the clock. On `queue`.
+    var briefModel: Summarizer.Generate?
+    var briefed: [String: Double] = [:]
+    var briefs: [String: (text: BriefingText, asks: Int, at: Double)] = [:]
+    var briefNow: () -> Date = { Date() }
     /// The summaries may be asked for now (a model given, Settings' AI summaries on, Haiku not held back), as the last
     /// refresh found; each lead's latest decisions (newest first) by root, and the boards' copy of them with their lines;
     /// the long messages' keys asked for, by "session|entry", and their lines.
@@ -304,6 +313,8 @@ public final class LeadEngine: @unchecked Sendable {
     var toolchainNow: () -> Date = Date.init
     /// Boost as last written to `boost.json` (`lookAtBoost`), and when; the clock it's judged on.
     var boostWritten: (state: BoostState, at: Date)?
+    /// Boost as the last look decided it (whether or not a file was written), with its mode: `status`'s `boost`.
+    public internal(set) var boostDecided: (mode: BoostMode, state: BoostState)?
     var boostNow: () -> Date = Date.init
     /// The machine's load as the room watch reads it, as the leads' tools judge it (`MacLoad.steady`); faked in tests.
     var macLoad: () -> Double? = MacLoad.steady
@@ -392,6 +403,7 @@ public final class LeadEngine: @unchecked Sendable {
         // Each screen the session scan reads: a popup on a team session declined, a dialog nothing reads noted.
         sessions?.sawScreen = { [weak self] session, text in self?.lookAt(screen: text, of: session) }
         batchModel = options.summarizeBatch
+        briefModel = options.summarizeBrief
         if let generate = options.summarize {
             let (runs, queue) = (summaryRuns, link.queue)
             let summarizer = Summarizer(generate: generate, run: { runs.async(execute: $0) }, deliver: { queue.async(execute: $0) })

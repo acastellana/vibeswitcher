@@ -151,6 +151,7 @@ export function createMock(store, options = {}) {
 
   const node = {
     usage,
+    boost: { mode: 'on', on: true, why: 'on in Settings', limits: { loadThreshold: '48', maxSessions: 16, maxWorkers: 6, heavySlots: 4 } },
     health: {
       since: ago(3 * 3600 + 720), stalled: null, freezes: [{ at: ago(5400), seconds: 14 }], slowRefreshes: 2, slowestRefresh: 7,
       lastSlowRefresh: ago(1800), serverRestarts: 0, refusedConnections: null, hostRestartAt: null, waiting: [],
@@ -543,9 +544,9 @@ export function createMock(store, options = {}) {
     const models = (key, title, about, form, value, fallback, extra) => row(key, title, about, extra?.section || 'Models', 'project', form, 'workflow', value, fallback, workflow, extra);
     const floor = (key, title, about, form, value, fallback, extra) => row(key, title, about, 'Review rules floor', 'project', form, 'floor', value, fallback, 'the session host\'s vault', extra);
     const node = [
-      limits('mac_max_sessions', 'Team sessions on this node, at most', 'How many workers and verifiers, across every project, may run at once.', 'count', '10', '10', { limits: '1 to 99' }),
+      limits('node_max_sessions', 'Team sessions on this node, at most', 'How many workers and verifiers, across every project, may run at once.', 'count', '10', '10', { limits: '1 to 99' }),
       limits('load_threshold', 'Start nothing above a load of', 'Leads start nothing while the load is above this; default means twice the cores (24).', 'number', 'default', 'default', { limits: 'above 0' }),
-      limits('mac_heavy_slots', 'Test and build slots at once', 'How many builds and full test runs may run at once on this node.', 'count', '3', '2', { limits: '1 to 12' }),
+      limits('node_heavy_slots', 'Test and build slots at once', 'How many builds and full test runs may run at once on this node.', 'count', '3', '2', { limits: '1 to 12' }),
       limits('ignore_usage_limits', 'Ignore usage limits', 'Leads keep starting work at any share of a Claude limit, instead of stopping at 80 %.', 'flag', 'off', 'off', { section: 'Usage limits', limits: 'on or off' }),
       boost('boost', 'Boost', 'Raises the machine-wide limits for more throughput. On a node Automatic acts as Off: it can\'t tell whether you\'re away.', 'choice', 'off', 'off', { choices: ['off', 'on', 'automatic'], limits: 'off, on, automatic' }),
       boost('boost_load_threshold', 'Start nothing above a load of, while boosted', 'While boosted, leads start nothing once the load is above this.', 'number', '36', '36', { limits: 'above 0, at most 48' }),
@@ -747,6 +748,11 @@ export function createMock(store, options = {}) {
         { name: 'Shell', kind: 'shell', command: '', env: [], keepShell: false, project: false, default: false, builtIn: true, digest: 'mock-shell', refused: null },
       ];
       return { ok: true, result: { presets: args.folder ? presets : presets.slice(1), problems: [] } };
+    }
+    if (message.kind === 'brief') {
+      return { ok: true, result: { text: options.empty ? 'No project lead is running and no session needs you.'
+        : 'In example-site, the sync with main is running and the cleanup of ended folders is being checked. One question waits on you: whether to ship the new hero. One session needs you.',
+        byModel: false, language: 'en', at: ago(0), notice: null, asks: options.empty ? 0 : 2, kept: false } };
     }
     if (message.kind === 'recent') {
       return { ok: true, result: { projects: options.empty ? [] : [

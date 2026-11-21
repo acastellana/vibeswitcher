@@ -189,3 +189,14 @@ export function allDoneCard(mark) {
     tasks: mark.tasks.map((task) => ({ title: task.title, word: OUTCOME_WORDS[task.outcome] || task.outcome, merged: task.outcome === 'merged' })),
   };
 }
+
+// Boost's mark (the node's `boost`, the app's `BoostMark`): its label and its hover's words while on; null while off.
+export function boostMarkText(boost) {
+  if (!boost?.on) return null;
+  const limits = boost.limits || {};
+  return {
+    label: `Boost on: ${boost.why}`,
+    help: `Boost on (${boost.why})\nRaised limits: a load of ${limits.loadThreshold}, ${limits.maxSessions} team sessions on this node, `
+      + `${limits.maxWorkers} workers per project, ${limits.heavySlots} test and build slots\nClick for Settings`,
+  };
+}

@@ -64,6 +64,9 @@ public struct ServerArguments: Equatable, Sendable {
     /// A scratch server opens a session's terminal to watch, as the user's node does (`webTerminal`): the end-to-end
     /// tests' stand-in for the user's node, whose root a scratch server can't take.
     public var testWebTerminalWatch = false
+    /// A scratch server checks for updates against these answers (`UpdateWatch.Answers`), on `update.check` only, never
+    /// on a timer: the user's node asks GitHub, never this.
+    public var testUpdateAnswers: String?
     /// The test flags a server with `--node` left out, each as given.
     public var refused: [String] = []
 
@@ -79,6 +82,7 @@ public struct ServerArguments: Equatable, Sendable {
     public static let testWebPairFlag = "--test-web-pair"
     public static let testWebTerminalFlag = "--test-web-terminal"
     public static let testWebTerminalWatchFlag = "--test-web-terminal-watch"
+    public static let testUpdateAnswersFlag = "--test-update-answers="
 
     /// What a page may do with a session's terminal (`TerminalRelay.Mode`; nil: no terminal, `term.open` is
     /// `unknown-kind`): on the user's node, watch it; on a scratch server, what its test flag says, read-write first.
@@ -110,6 +114,7 @@ public struct ServerArguments: Equatable, Sendable {
         var webPair = false
         var webTerminal = false
         var webTerminalWatch = false
+        var updateAnswers: String?
         var tests: [String] = []
         var index = 1
         func value() -> String? {
@@ -188,6 +193,11 @@ public struct ServerArguments: Equatable, Sendable {
             case testWebTerminalWatchFlag:
                 tests.append(word)
                 webTerminalWatch = true
+            case _ where word.hasPrefix(testUpdateAnswersFlag):
+                tests.append(word)
+                let path = String(word.dropFirst(testUpdateAnswersFlag.count))
+                guard path.hasPrefix("/") else { return .failure(Usage("\(testUpdateAnswersFlag) needs an absolute path")) }
+                updateAnswers = path
             default:
                 return .failure(Usage("unknown argument \(word)"))
             }
@@ -201,6 +211,7 @@ public struct ServerArguments: Equatable, Sendable {
                                      testInstallRoot: installRoot, testWebPort: webPort, testWebRoot: webRoot, testWebPair: webPair)
         parsed.testWebTerminal = webTerminal
         parsed.testWebTerminalWatch = webTerminalWatch
+        parsed.testUpdateAnswers = updateAnswers
         parsed.testCgroupRoot = cgroupRoot
         parsed.testRunnerAbove = runnerAbove
         if node {
@@ -217,6 +228,7 @@ public struct ServerArguments: Equatable, Sendable {
             parsed.testWebPair = false
             parsed.testWebTerminal = false
             parsed.testWebTerminalWatch = false
+            parsed.testUpdateAnswers = nil
         }
         return .success(parsed)
     }

@@ -245,8 +245,11 @@ extension HostServer {
     /// `queue`.
     private func answer(_ connector: AppConnector, _ number: Int32) {
         guard !connector.closed else { return }
-        var byte: UInt8 = 0
-        let (count, from) = withUnsafeMutableBytes(of: &byte) { Platform.Sockets.receive(connector.fd, into: $0) }
+        // A connection's request is one byte; a web request (H1, `HostWebListen`) a few words, one message on Linux's
+        // `SOCK_SEQPACKET` connector. The Mac's is a stream, where messages have no edges: one byte a request there, as
+        // before, and no web request (the Mac node's H1 is its own step).
+        var message = [UInt8](repeating: 0, count: Platform.Sockets.connectorType == Platform.Sockets.seqpacket ? 256 : 1)
+        let (count, from) = message.withUnsafeMutableBytes { Platform.Sockets.receive(connector.fd, into: $0) }
         if count < 0 {
             guard errno != EAGAIN, errno != EINTR else { return }
             return closeConnector(connector, number, why: "its read failed (errno \(errno))")
@@ -278,6 +281,8 @@ extension HostServer {
             connector.onDumpable?(from.pid)
             return
         }
+        let request = Array(message.prefix(count))
+        if HostWebListen.isWeb(request) { return answerWeb(request, connector, number, from: expected) }
         guard let (mine, theirs) = Platform.Sockets.pair(type: Platform.Sockets.stream) else {
             return refuse(connector, number, "no socket pair (errno \(errno))")
         }
@@ -296,6 +301,37 @@ extension HostServer {
         }
         connector.made(client)
         note("host: app connection made through connector \(number) for pid \(expected.pid)")
+    }
+
+    /// A web request from the server child (H1, `HostWebListen`), its sender checked as a connection's is: the web's
+    /// listening socket bound or held for it (`ServerChild.webListeners`) and a duplicate sent with `web ok`, or the
+    /// socket let go, or `web no: WHY`. Only the server child's connector holds web listeners: a test's stand-in for the
+    /// app, or any connector with no server child, is refused.
+    private func answerWeb(_ request: [UInt8], _ connector: AppConnector, _ number: Int32, from: Platform.PeerToken) {
+        let send = { (bytes: [UInt8], fd: Int32?) in
+            if Platform.Sockets.send(bytes, with: fd.map { [$0] } ?? [], over: connector.fd) != bytes.count {
+                self.note("host: a web answer through connector \(number) couldn't be sent (errno \(errno))")
+            }
+        }
+        guard let parsed = HostWebListen.parse(request) else { return send(HostWebListen.unasked("not a web request"), nil) }
+        // Each answer repeats its request's words: its asker takes no other.
+        let reply = { (refusal: String?, fd: Int32?) in send(HostWebListen.answer(parsed, refusal: refusal), fd) }
+        guard let child = serverChild, child.token.map({ from.sameImage(as: $0) }) == true else {
+            note("host: refused a web request through connector \(number): not the server child's")
+            return reply("only the server child holds the web's listeners", nil)
+        }
+        switch parsed {
+        case .listen(let place, let address, let port):
+            switch child.webListeners.listen(place, address: address, port: port) {
+            case .success(let fd): reply(nil, fd)
+            case .failure(let refusal):
+                note("host: refused the web listener \(place.rawValue) \(address):\(port): \(refusal.why)")
+                reply(refusal.why, nil)
+            }
+        case .release(let place):
+            child.webListeners.release(place)
+            reply(nil, nil)
+        }
     }
 
     /// Whether the process `token` names is out of reach of the user's other processes: on Linux non-dumpable

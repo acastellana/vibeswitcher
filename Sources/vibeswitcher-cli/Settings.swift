@@ -87,7 +87,8 @@ enum SettingsCommand {
                 if about.hasSuffix(".") { about.removeLast() }
                 if let limits = setting["limits"]?.string { about += " (\(ConfigSeal.inert(limits, limit: 120)))" }
                 out.append("        \(about).")
-                var place = "In " + shown(setting["where"]?.string ?? "?")
+                // The machine-wide limits' file keeps the Mac's name (mac-limits.json, which the leads' tools read): this node's.
+                var place = (setting["home"]?.string == "limits" ? "In this node's limits, " : "In ") + shown(setting["where"]?.string ?? "?")
                 if setting["guardRail"]?.bool == true { place += "; a guard rail: a change here is recorded in the vault as yours" }
                 out.append("        \(place).")
                 if let note = setting["note"]?.string { out.append("        \(ConfigSeal.inert(note, limit: 300)).") }

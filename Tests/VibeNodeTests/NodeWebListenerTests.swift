@@ -440,5 +440,81 @@ extension WebListenerTests {
             #expect(taken.port == nil && taken.connectionCount == 0)
             #expect(throws: WebListener.Failure.system(.system("bind", EADDRINUSE))) { try taken.start() }
         }
+
+        /// H1: a listener whose socket comes from the session host (`WebBind.host`) and is refused says why, as its
+        /// state, and binds nothing of its own. The web going off (nothing alive) never has the host let its socket go:
+        /// only the user's revoke does (`revoked`), once.
+        @Test func aSocketTheHostRefusesIsTheStateAndNothingIsBoundHere() throws {
+            let asked = Locked<[String]>([])
+            let refusing = WebBind(listen: { place, address, port, _ in
+                asked.value.append("\(place.rawValue) \(address):\(port)")
+                return .failure(.host("the user's node listens on port 47830 only, not 0"))
+            }, release: { asked.value.append("release \($0.rawValue)") })
+            let gate = StubGate()
+            let queue = DispatchQueue(label: "node-web-listener-host-refused")
+            let web = NodeWebListener(port: 0, assets: StubAssets(files: [:]), gate: gate, handler: StubHub(), queue: queue,
+                                      clock: WebTestTime().clock(), bind: refusing)
+            guard case .refused(let why) = web.follow() else {
+                Issue.record("\(web.state)")
+                return
+            }
+            #expect(why.contains("the session host gave no web socket: the user's node listens on port 47830 only"), "\(why)")
+            #expect(web.port == nil && web.connectionCount == 0)
+            gate.wanted = false
+            #expect(web.follow() == .off)
+            #expect(web.follow() == .off)
+            #expect(asked.value == ["loopback 127.0.0.1:0"], "nothing alive is no release: \(asked.value)")
+            web.revoked()
+            #expect(asked.value == ["loopback 127.0.0.1:0", "release loopback"], "\(asked.value)")
+            #expect(web.follow() == .off)
+            #expect(asked.value.count == 2)
+        }
+
+        /// H1 and the Mac: the server takes the host's socket where its connector carries web requests (a
+        /// `SOCK_SEQPACKET` one), and binds its own on a stream connector (the Mac's, until its own H1 step), so the Mac
+        /// node's web comes up.
+        @Test func theServersBindIsTheHostsOnlyOverASeqpacketConnector() throws {
+            let mac = WebBind.forServer(connector: -1, connectorType: Platform.Sockets.stream, note: { _ in })
+            let fd = try mac.listen(.loopback, "127.0.0.1", 0, 4).get()
+            #expect(Platform.TCP.isListening(fd))
+            Sys.close(fd)
+            let linux = WebBind.forServer(connector: -1, connectorType: Platform.Sockets.seqpacket, note: { _ in })
+            guard case .failure(.host) = linux.listen(.loopback, "127.0.0.1", 0, 4) else {
+                Issue.record("bound without a host")
+                return
+            }
+        }
+
+        /// H1: a listener the host's socket was up for, stopped because nothing is alive any more (codes and tokens ran
+        /// out), keeps the host's socket held; stopped after the user's revoke, it has the host let it go once its own
+        /// descriptor is closed.
+        @Test func onlyARevokeHasTheHostLetItsSocketGo() throws {
+            let asked = Locked<[String]>([])
+            let direct = WebBind.direct
+            let counting = WebBind(listen: { place, address, port, backlog in
+                asked.value.append("listen \(place.rawValue)")
+                return direct.listen(place, address, port, backlog)
+            }, release: { asked.value.append("release \($0.rawValue)") })
+            let gate = StubGate()
+            let queue = DispatchQueue(label: "node-web-listener-revoke")
+            let web = NodeWebListener(port: 0, assets: StubAssets(files: [:]), gate: gate, handler: StubHub(), queue: queue,
+                                      clock: WebTestTime().clock(), bind: counting)
+            guard case .on = web.follow() else { Issue.record("\(web.state)"); return }
+            gate.wanted = false
+            let stopped = DispatchSemaphore(value: 0)
+            #expect(web.follow() == .off)
+            web.stop { stopped.signal() }
+            #expect(stopped.wait(timeout: .now() + hangGuard) == .success)
+            #expect(asked.value == ["listen loopback"], "\(asked.value)")
+            gate.wanted = true
+            guard case .on = web.follow() else { Issue.record("\(web.state)"); return }
+            web.revoked()
+            gate.wanted = false
+            let released = DispatchSemaphore(value: 0)
+            web.stop { released.signal() }
+            #expect(released.wait(timeout: .now() + hangGuard) == .success)
+            #expect(asked.value == ["listen loopback", "listen loopback", "release loopback"], "\(asked.value)")
+        }
+
     }
 }

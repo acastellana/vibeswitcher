@@ -11,7 +11,7 @@ import VibeNode
 signal(SIGPIPE, SIG_IGN)
 
 let usage = """
-    usage: vibeswitcher status [--json] | status --health [--json] | status --probe [--json] | status --ack
+    usage: vibeswitcher status [--json] | status --health [--json] | status --probe [--json] | status --check-updates [--json] | status --ack
            vibeswitcher doctor
            vibeswitcher start [--interop-is-on] [--at-login] [--node-version vX.Y.Z]
            vibeswitcher stop
@@ -24,13 +24,13 @@ let usage = """
            vibeswitcher tell FOLDER TEXT
            vibeswitcher push FOLDER | decline-push FOLDER
            vibeswitcher send SESSION [TEXT] [--image PATH]... [--now] | reply SESSION CHOICE [TEXT]
-           vibeswitcher new FOLDER [--agent claude|shell | --preset NAME] [--model M] | end SESSION | presets [FOLDER]
+           vibeswitcher new FOLDER [--agent claude|codex|shell | --preset NAME] [--model M] | end SESSION | presets [FOLDER]
            vibeswitcher preset add|edit|remove NAME [--folder FOLDER] ...  (`vibeswitcher preset` says more)
            vibeswitcher close-shells [FOLDER]
            vibeswitcher reopen [all | SESSION... | --forget] | resume [SESSION]
            vibeswitcher rename SESSION [NAME] | pause SESSION [--hours N | --tomorrow | --off]
            vibeswitcher new-project NAME [--in LOCATION] [--folder NAME] [--goal TEXT] [--no-lead]
-           vibeswitcher mail [FOLDER] [--all] [--json] | prompt-audit FOLDER snooze|off|on
+           vibeswitcher mail [FOLDER] [--all] [--json] | brief [FOLDER] [--json] | prompt-audit FOLDER snooze|off|on
            vibeswitcher config held [FOLDER] [--diff NAME] [--long] | config accept CARD | config startup
            vibeswitcher base show FOLDER [--from COMMIT] | base accept CARD | base keep CARD
            vibeswitcher settings [FOLDER] [--find WORDS] [--json] | set [FOLDER] KEY VALUE
@@ -96,6 +96,8 @@ case "new-project":
     exit(NewProjectCommand.run(Array(words.dropFirst())))
 case "mail":
     exit(MailCommand.run(Array(words.dropFirst())))
+case "brief":
+    exit(BriefCommand.run(Array(words.dropFirst())))
 case "prompt-audit":
     exit(PromptAuditCommand.run(Array(words.dropFirst())))
 case "config":
@@ -112,6 +114,8 @@ case "web":
     exit(WebCommand.run(Array(words.dropFirst())))
 case "wire-vectors":
     // Not in the usage text: the web client's validators and vectors are written with it (the live plan's LW-D10).
+    // The vectors name times (a usage limit's reset): written in UTC, so they read the same on every machine and CI.
+    NSTimeZone.default = TimeZone(identifier: "UTC")!
     exit(WireCommand.run(Array(words.dropFirst())))
 case "install-record":
     // Not in the usage text: `scripts/install-node.sh` runs it from the build it has just made (the start plan's ST-D13).

@@ -122,11 +122,12 @@ function askRow(app) {
   return {
     el,
     update({ card, lead }) {
-      const words = card.question?.text || (card.kind === 'approval' ? `Approve the merge of ${card.approval?.commit?.slice(0, 8) || 'a commit'}` : card.kind === 'config' ? 'Held config waits for you' : card.kind === 'base' ? 'A base move waits for you' : 'The lead asks you something');
+      const words = card.question?.text || (card.kind === 'approval' ? `Approve the merge of ${card.approval?.commit?.slice(0, 8) || 'a commit'}` : card.kind === 'config' ? 'Held config waits for you' : card.kind === 'base' ? 'A base move waits for you' : card.kind === 'shell' ? `${card.shell?.asker} asks for a shell` : 'The lead asks you something');
       setText(text, words);
       setClass(el, 'blocking', !!card.blocking);
-      const session = lead?.session && app.store.state.sessions.has(lead.session) ? lead.session : null;
-      setText(where, (card.blocking ? 'Blocking · ' : '') + (session ? 'answer it in the lead’s chat' : 'answer it with vibeswitcher answer'));
+      const asker = card.kind === 'shell' ? card.shell?.session : lead?.session;
+      const session = asker && app.store.state.sessions.has(asker) ? asker : null;
+      setText(where, (card.blocking ? 'Blocking · ' : '') + (session ? `answer it in ${asker === lead?.session ? 'the lead’s' : 'its'} chat` : 'answer it with vibeswitcher answer'));
       if (session) link.setAttribute('href', sessionHref(session)); else link.removeAttribute('href');
     },
   };

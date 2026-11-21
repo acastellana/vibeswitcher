@@ -91,7 +91,7 @@ extension Requests {
     }
 
     /// The labels the app gives an ordinary session (its built-in presets' names): never a role's (`LeadTeams.role`).
-    static let sessionLabels = ["claude": "Claude", "shell": "Shell"]
+    static let sessionLabels = ["claude": "Claude", "codex": "Codex", "shell": "Shell"]
 
     /// `session.new` with `folder` (absolute), `agent` (`claude`, the default, or `shell`) or `preset` (a launch
     /// preset's name, with the `digest` `session.presets` gave for it), and `model` (Claude's, optional)
@@ -117,11 +117,11 @@ extension Requests {
         }
         let agent = request.args?["agent"]?.string ?? "claude"
         guard Self.sessionLabels[agent] != nil else {
-            return reply(.init(re: request.id, error: .init(.badArgs, "session.new's agent is claude or shell, not \(ConfigSeal.inert(agent, limit: 40))")))
+            return reply(.init(re: request.id, error: .init(.badArgs, "session.new's agent is claude, codex or shell, not \(ConfigSeal.inert(agent, limit: 40))")))
         }
         let model = request.args?["model"]?.string.flatMap { $0.isEmpty ? nil : $0 }
         if let model {
-            guard agent == "claude" else { return reply(.init(re: request.id, error: .init(.badArgs, "a shell takes no model"))) }
+            guard agent != "shell" else { return reply(.init(re: request.id, error: .init(.badArgs, "a shell takes no model"))) }
             guard Self.isModelName(model) else {
                 return reply(.init(re: request.id, error: .init(.badArgs, "\(ConfigSeal.inert(model, limit: 64)) isn't a model name (letters, digits, . _ : - [ ])")))
             }
@@ -141,7 +141,8 @@ extension Requests {
                 return refuse("\(ConfigSeal.inert(folder, limit: 200)) isn't a folder")
             }
             // The built-in Claude or Shell, else the preset named.
-            var preset = agent == "shell" ? LaunchPreset(name: "Shell", kind: .shell, command: "") : LaunchPreset(name: "Claude", kind: .claude, command: "")
+            var preset = agent == "shell" ? LaunchPreset(name: "Shell", kind: .shell, command: "")
+                : agent == "codex" ? LaunchPreset(name: "Codex", kind: .codex, command: "") : LaunchPreset(name: "Claude", kind: .claude, command: "")
             if let presetName {
                 // One read of the file: what is checked against the seal below is what starts (`PresetsFile`).
                 let file = SessionPresets.read(root: nodeRoot)
@@ -155,7 +156,7 @@ extension Requests {
                     return refuse("preset \(shown) changed since it was shown (or the node's server restarted since): nothing started; "
                                   + "run the command again to see it as it is now")
                 }
-                guard model == nil || found.preset.kind == .claude else { return refuse("preset \(shown) starts a shell, which takes no model") }
+                guard model == nil || found.preset.kind != .shell else { return refuse("preset \(shown) starts a shell, which takes no model") }
                 // Fail closed: a preset of the file (not a built-in) only from a file the user's accept sealed.
                 if !found.builtIn, let why = Self.presetsBaselineRefusal(vault: vault, home: home, nodeRoot: nodeRoot, file: file, folder: standard) {
                     return refuse("preset \(shown) can't start: " + why)
@@ -167,13 +168,20 @@ extension Requests {
                 let found = NodePreflight.resolve(claudeLink)
                 guard let program = found.path else { return refuse(found.why ?? "no claude for this node") }
                 command = SessionPresets.command(preset, program: program).map { $0 + (model.map { " --model " + RecentProjects.shellQuote($0) } ?? "") }
+            } else if preset.kind == .codex {
+                // The user's own Codex session, as typing `codex` in their terminal (decision 15 keeps Codex workers off,
+                // not this): the Codex its link names, never one a shell finds.
+                let found = NodePreflight.codex(root: nodeRoot)
+                guard let program = found.path else { return refuse(found.why ?? "no codex for this node") }
+                command = SessionPresets.command(preset, program: program).map { $0 + (model.map { " --model " + RecentProjects.shellQuote($0) } ?? "") }
             }
             // A scratch node's hooks and tools keep to its root, as its leads' do.
             var environment = preset.env
             if scratch { environment["VIBESWITCHER_HOME"] = nodeRoot.path }
-            let (kind, label) = (preset.kind == .claude ? "claude" : "shell", preset.name)
+            let kind = preset.kind == .claude ? "claude" : preset.kind == .codex ? "codex" : "shell"
+            let label = preset.name
             let spawn = SpawnRequest(cwd: standard, command: command, env: environment, cols: 120, rows: 36, keepShell: preset.keepShell,
-                                     label: preset.name, agent: preset.kind == .claude ? "claude" : nil)
+                                     label: preset.name, agent: kind == "shell" ? nil : kind)
             queue.async {
                 link.spawn(spawn) { result in
                     queue.async {

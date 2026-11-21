@@ -66,7 +66,7 @@ public enum WireSchema {
                                   "chat.image.args", "chat.image.result", "stats.args", "stats.result", "session.ports.args", "session.ports.result",
                                   "board.task.args", "board.task.result", "board.image.args", "board.image.result",
 
-                                  "settings.args", "settings.result", "set.args", "set.result", "mail.args", "mail.result", "recent.args", "recent.result"]
+                                  "settings.args", "settings.result", "set.args", "set.result", "mail.args", "mail.result", "recent.args", "recent.result", "brief.args", "brief.result"]
     /// A keyed collection's entity.
     public static let collections = ["node": "node", "sessions": "session", "leads": "lead", "cards": "card", "boards": "board"]
 
@@ -224,9 +224,14 @@ public enum WireSchema {
                 field("node", .string), field("epoch", .string), field("root", .string), field("server", .shape("node.server")),
                 field("host", .shape("node.host")), field("rule", .shape("node.rule")), field("cards", .shape("node.cards")),
                 field("accepted", .list(.shape("node.accepted"))), field("notices", strings),
-                field("restart", Kind.shape("node.restart").orNull), field("reopen", .list(.shape("node.reopen"))), field("ended", .list(.shape("node.ended"))),
+                field("restart", Kind.shape("node.restart").orNull), field("reopen", .list(.shape("node.reopen"))), field("ended", .list(.shape("node.ended"))), field("ending", .list(.shape("node.ending"))),
                 field("builds", Kind.any.orNull), field("web", .shape("node.web")), field("usage", Kind.shape("node.usage").orNull),
-                optional("health", .shape("node.health"))]),
+                optional("health", .shape("node.health")), field("boost", Kind.shape("node.boost").orNull)]),
+            // Boost (the app's `BoostMark`, 2026-11-21): null before the engine's first look.
+            shape("node.boost", from: "LeadEngine.boostValue", [field("mode", .words(BoostMode.allCases.map(\.rawValue))), field("on", .bool),
+                                                               field("why", .string), field("limits", .shape("node.boost.limits"))]),
+            shape("node.boost.limits", from: "LeadEngine.boostValue", [field("loadThreshold", .string), field("maxSessions", .int),
+                                                                      field("maxWorkers", .int), field("heavySlots", .int)]),
             shape("node.health", from: "NodeHealth.value (2026-11-21)", [
                 field("since", .date), field("stalled", Kind.int.orNull), field("freezes", .list(.shape("node.health.freeze"))),
                 field("slowRefreshes", .int), field("slowestRefresh", Kind.int.orNull), field("lastSlowRefresh", Kind.date.orNull),
@@ -254,6 +259,9 @@ public enum WireSchema {
                                                                    field("reset", .string), field("sessions", .int)]),
             shape("node.reopen", from: "LeadEngine.offeredValue (the stability lane, 2026-11-20)", [
                 field("session", .string), field("folder", .string), field("name", .string), field("conversation", Kind.string.orNull)]),
+            // Ended within the grace, listed for `resume` at `listedAt` (2026-11-21).
+            shape("node.ending", from: "LeadEngine.endingValue", [field("session", .string), field("folder", .string), field("name", .string),
+                                                                 field("at", .date), field("listedAt", .date)]),
             shape("node.ended", from: "LeadEngine.endedValue (the stability lane, 2026-11-20)", [
                 field("session", .string), field("folder", .string), field("name", .string), field("conversation", Kind.string.orNull),
                 field("at", .date), field("exit", Kind.shape("node.ended.exit").orNull)]),
@@ -447,6 +455,11 @@ public enum WireSchema {
                                                                   field("project", Kind.shape("settings.project").orNull),
                                                                   field("leftOut", .list(.shape("settings.left"))),
                                                                   field("usage", .shape("node.usage"))]),
+            // Brief me (`brief`, 2026-11-21).
+            shape("brief.args", from: "Requests.brief", [optional("folder", .string)]),
+            shape("brief.result", from: "Requests.briefValue", [field("text", .string), field("byModel", .bool), field("language", .string),
+                                                               field("at", .date), field("notice", Kind.string.orNull), field("asks", .int),
+                                                               field("kept", .bool)]),
             // The start page's recent projects (`recent`, 2026-11-21).
             shape("recent.args", from: "Requests.recent", []),
             shape("recent.result", from: "Requests.recent", [field("projects", .list(.shape("recent.project")))]),

@@ -49,14 +49,17 @@ struct SettingsRequestTests {
         let world = try await CardWorld.make(scratch)
         defer { world.stop() }
         let action = UUID().uuidString.lowercased()
-        let reply = try #require(await set(world, "mac_max_sessions", "7", action: action))
+        let reply = try #require(await set(world, "node_max_sessions", "7", action: action))
         #expect(reply.ok && reply.result?["value"]?.string == "7" && reply.result?["was"]?.string == String(MacLimits.defaultMaxSessions), "\(reply)")
         #expect(WireSchema.check(reply.result ?? .null, as: "set.result", strict: true) == nil)
         #expect(MacLimits.load(from: files(world).limits).maxSessions == 7)
         #expect(await world.actions().filter { $0.action == action }.map(\.kind) == ["set"])
         // The same action again is answered as before.
-        let again = try #require(await set(world, "mac_max_sessions", "9", action: action))
+        let again = try #require(await set(world, "node_max_sessions", "9", action: action))
         #expect(again.ok && MacLimits.load(from: files(world).limits).maxSessions == 7, "\(again)")
+        // The app's name for it (mac_max_sessions) is taken as the node's, and answered under the node's name.
+        let byAlias = try #require(await set(world, "mac_max_sessions", "8"))
+        #expect(byAlias.ok && byAlias.result?["key"] == .string("node_max_sessions") && MacLimits.load(from: files(world).limits).maxSessions == 8, "\(byAlias)")
     }
 
     @Test func boostOnIsDecidedForTheLeadsAtOnce() async throws {
@@ -70,10 +73,19 @@ struct SettingsRequestTests {
         #expect(await eventually(timeout: 60) { BoostState.active(from: file) != nil })
         #expect(BoostState.active(from: file)?.limits.maxSessions == sessions)
         #expect(MacLimits.current(file: files(world).limits, boostFile: file).maxSessions >= sessions)
+        // Status says it (the app's mark): on, why, the raised limits; and the command line's line.
+        #expect(await eventually(timeout: 60) { world.queue.sync { world.engine.boostValue["on"] } == .bool(true) })
+        let boost = world.queue.sync { world.engine.boostValue }
+        #expect(boost["mode"] == .string("on") && boost["limits"]?["maxSessions"] == .int(sessions), "\(boost)")
+        #expect(WireSchema.check(boost, as: "node.boost") == nil)
+        #expect(world.requests.queue.sync { world.requests.statusValue()["boost"] } == boost)
+        #expect(LeadEngine.boostLine(boost)?.hasPrefix("boost: on (on in Settings): start nothing above a load of") == true)
         // Automatic acts as off on a node: the boost is taken back.
         #expect(try #require(await set(world, "boost", "automatic")).ok)
         #expect(await eventually(timeout: 60) { BoostState.load(from: file)?.on == false })
         #expect(BoostState.load(from: file)?.why.contains("acts as off") == true)
+        #expect(await eventually(timeout: 60) { world.queue.sync { world.engine.boostValue["mode"] } == .string("automatic") })
+        #expect(LeadEngine.boostLine(world.queue.sync { world.engine.boostValue }) == nil, "off: no line, no mark")
     }
 
     @Test func aProjectsGuardRailIsTheUsersAndItsRunningLeadIsTold() async throws {
@@ -203,8 +215,8 @@ struct SettingsRequestTests {
     @Test func aValueOutOfItsFormOrScopeIsRefused() async throws {
         let world = try await CardWorld.make(scratch)
         defer { world.stop() }
-        for (key, value, folder, says) in [("mac_max_sessions", "0", nil, "1 to 99"), ("boost", "turbo", nil, "one of"),
-                                           ("max_workers", "4", nil, "a project's"), ("mac_max_sessions", "4", world.repo, "the node's"),
+        for (key, value, folder, says) in [("node_max_sessions", "0", nil, "1 to 99"), ("boost", "turbo", nil, "one of"),
+                                           ("max_workers", "4", nil, "a project's"), ("node_max_sessions", "4", world.repo, "the node's"),
                                            ("nonsense", "1", nil, "one of `vibeswitcher settings`'s")] as [(String, String, String?, String)] {
             let reply = try #require(await set(world, key, value, folder: folder))
             #expect(reply.error?.code == NodeWire.Code.badArgs.rawValue && reply.error?.message.contains(says) == true, "\(key): \(reply)")
@@ -240,21 +252,23 @@ struct SettingsRequestTests {
     @Test func theCommandLineSetsAndReadsASetting() async throws {
         let node = try await ScratchNode(scratch)
         defer { node.stop() }
-        let set = try await node.runOnTerminal(["set", "mac_max_sessions", "7"])
+        let set = try await node.runOnTerminal(["set", "node_max_sessions", "7"])
         #expect(set.status == 0, "\(set.output)\(set.errors)\n\(node.said)")
-        #expect(set.output.contains("set mac_max_sessions: \(MacLimits.defaultMaxSessions) → 7"), "\(set.output)")
+        #expect(set.output.contains("set node_max_sessions: \(MacLimits.defaultMaxSessions) → 7"), "\(set.output)")
         let read = try await node.run(["settings"])
-        #expect(read.status == 0 && read.output.contains("mac_max_sessions = 7"), "\(read.output)\(read.errors)")
+        #expect(read.status == 0 && read.output.contains("node_max_sessions = 7"), "\(read.output)\(read.errors)")
+        #expect(read.output.contains("In this node's limits, ") && read.output.contains("mac-limits.json") && !read.output.contains("mac_max_sessions"),
+                "\(read.output)")
         #expect(read.output.contains("Not on a node"), "\(read.output)")
         // The app's search: only the settings holding every word, no left-out list, and a word nothing holds said so.
         let found = try await node.run(["settings", "--find", "team sessions"])
-        #expect(found.status == 0 && found.output.contains("mac_max_sessions = 7") && found.output.contains("boost_max_sessions"), "\(found.output)")
+        #expect(found.status == 0 && found.output.contains("node_max_sessions = 7") && found.output.contains("boost_max_sessions"), "\(found.output)")
         #expect(!found.output.contains("lead_mail") && !found.output.contains("Not on a node"), "\(found.output)")
         let none = try await node.run(["settings", "--find", "nothing-like-this"])
         #expect(none.status == 0 && none.output.contains("No setting matches"), "\(none.output)")
-        let refused = try await node.run(["set", "mac_max_sessions", "0"])
+        let refused = try await node.run(["set", "node_max_sessions", "0"])
         #expect(refused.status == 77 && refused.errors.contains("1 to 99"), "\(refused.output)\(refused.errors)")
-        let usage = try await node.run(["set", "mac_max_sessions"])
+        let usage = try await node.run(["set", "node_max_sessions"])
         #expect(usage.status == 64 && usage.errors.contains("usage: vibeswitcher set"), "\(usage.output)\(usage.errors)")
     }
 }

@@ -1,7 +1,8 @@
 // Notifications (parity gap 5): while this page is open, the browser's own notification when something needs you: a
 // card opens (a lead's question or approval, held config, a moved base), a session's prompt waits (its status turns
 // needs you; never a worker's or a verifier's, as on the Mac, nor a lead's whose question is a card already), or a lead
-// stops (its session finishes its turn or ends), or the node's engine froze (a freeze its health digest keeps, told once,
+// stops (its session finishes its turn or ends), one of your own sessions finishes its work (never a worker's or a
+// verifier's: the Mac's "when a session finishes"), or the node's engine froze (a freeze its health digest keeps, told once,
 // never one kept before the page looked). Asked once, by a quiet offer the first time something needs you; then a
 // toggle on This node. A notification is the first line only, as text: the browser shows it as text, and controls,
 // bidirectional and other format characters are taken out first. The title bar counts what needs you: open cards and
@@ -12,13 +13,18 @@
 // clicked on it), a short soft chime made on the page (`chime`: no file fetched), not played for the session you're
 // looking at.
 //
-// What it decides (`summarize`, `changes`, `firstLine`, `titled`, `sounding`) knows nothing of the page and is tested on
+// Which kinds are told is a choice on This node, kept in this browser: something needs me, a session finishes (both on
+// by default, the Mac's Settings › Notifications).
+//
+// What it decides (`summarize`, `changes`, `wanted`, `firstLine`, `titled`, `sounding`) knows nothing of the page and is tested on
 // its own; `notifications(app)` puts it on the page.
 
 import { h } from './dom.js';
 
 const PREF = 'vibeswitcher.notifications';
 const SOUND = 'vibeswitcher.sound';
+// Each kind's choice (`kindOf`): 'off' turns it off; on otherwise, as the Mac's defaults.
+const KINDS = { needs: 'vibeswitcher.notify.needs', done: 'vibeswitcher.notify.done' };
 const href = (id) => '#/s/' + encodeURIComponent(id);
 const lastPart = (path) => String(path || '').split('/').filter(Boolean).pop() || '';
 
@@ -31,12 +37,13 @@ export function firstLine(text, limit = 120) {
   return chars.length > limit ? chars.slice(0, limit - 1).join('') + '…' : clean;
 }
 
-const CARD_TITLES = { question: 'A question for you', approval: 'An approval for you', config: 'Agents’ config held', base: 'The base moved' };
+const CARD_TITLES = { question: 'A question for you', approval: 'An approval for you', config: 'Agents’ config held', base: 'The base moved', shell: 'A shell asked for' };
 
 function cardBody(card) {
   if (card.question) return firstLine(card.question.text || card.question.short);
   if (card.approval) return firstLine(card.approval.subject || `Merge ${String(card.approval.commit || '').slice(0, 8)}`);
   if (card.config) return firstLine((card.config.items || []).map((item) => item.name).join(', '));
+  if (card.shell) return firstLine(`${card.shell.asker}: ${card.shell.command}`);
   return '';
 }
 
@@ -45,9 +52,11 @@ const working = (session) => session.status === 'working' || session.status === 
 // What needs you now, and each lead session's state, from the store's state:
 //   asks:  key → { title, body, href }   (counted in the title bar)
 //   leads: session id → { title, working, ended }
+//   own:   session id → { title, working, ended }   (your own sessions: no lead's, worker's or verifier's)
 export function summarize(state) {
   const asks = new Map();
   const leads = new Map();
+  const own = new Map();
   const leadSession = (project) => state.leads.get(project)?.session || null;
   for (const card of state.cards.values()) {
     if (!card.open) continue;
@@ -59,6 +68,7 @@ export function summarize(state) {
   for (const session of state.sessions.values()) {
     const name = session.title || lastPart(session.cwd) || 'A session';
     if (session.role === 'lead') leads.set(session.id, { title: name, working: working(session), ended: Boolean(session.ended) });
+    else if (!session.role) own.set(session.id, { title: name, working: working(session), ended: Boolean(session.ended), paused: Boolean(session.paused) });
     if (session.status !== 'needs-you' || session.paused || session.ended) continue;
     if (session.role === 'worker' || session.role === 'verifier') continue;
     if (session.role === 'lead' && session.leadAsks) continue;
@@ -67,7 +77,7 @@ export function summarize(state) {
   // The engine's newest freeze (the node's health digest): '' for none yet, null while the node keeps no digest.
   const health = state.node?.health;
   const freeze = health ? (health.freezes?.[0]?.at || '') : null;
-  return { asks, leads, freeze, freezeSeconds: health?.freezes?.[0]?.seconds || 0 };
+  return { asks, leads, own, freeze, freezeSeconds: health?.freezes?.[0]?.seconds || 0 };
 }
 
 // What to tell between two summaries: each ask that wasn't there, and each lead that was working and now isn't (done,
@@ -84,7 +94,23 @@ export function changes(before, after) {
     if (!lead.working || (now && now.working && !now.ended)) continue;
     told.push({ key: `stopped:${id}`, title: `${(now || lead).title} stopped`, body: now && !now.ended ? 'The lead finished its turn.' : 'The lead’s session ended.', href: now ? href(id) : '#/' });
   }
+  // One of your own sessions finished its work (the Mac's "Notify when a session finishes": never a worker's or a
+  // verifier's, nor one you paused): it was working and now isn't, or it ended.
+  for (const [id, session] of before.own || []) {
+    const now = (after.own || new Map()).get(id);
+    if (!session.working || session.paused || (now && now.working && !now.ended)) continue;
+    told.push({ key: `finished:${id}`, title: `${(now || session).title} finished`, body: now && !now.ended ? 'It finished its work.' : 'Its session ended.', href: now ? href(id) : '#/' });
+  }
   return told;
+}
+
+// The kind a note is of, for Settings › Notifications' choices: `needs` (a card, a prompt waiting, the node frozen) or
+// `done` (a lead stopped, a session of yours finished).
+export const kindOf = (note) => (/^(stopped|finished):/.test(note.key) ? 'done' : 'needs');
+
+// The kinds told by the choices kept: each on unless turned off.
+export function wanted(told, choices) {
+  return told.filter((note) => choices[kindOf(note)] !== false);
 }
 
 // `title` with the count in front ("(2) VibeSwitcher"), or without one when nothing needs you.
@@ -149,9 +175,22 @@ export function notifications(app, env = {}) {
   const said = h('span', { class: 'notify-said' });
   // The sound's toggle beside it.
   const ring = h('input', { type: 'checkbox', class: 'sound-toggle', onchange: () => sound(ring.checked) });
+  // Each kind's choice (the Mac's Settings › Notifications): something needs me; a session finishes.
+  const kindBoxes = {
+    needs: h('input', { type: 'checkbox', class: 'notify-kind', onchange: () => choose('needs', kindBoxes.needs.checked) }),
+    done: h('input', { type: 'checkbox', class: 'notify-kind', onchange: () => choose('done', kindBoxes.done.checked) }),
+  };
   const el = h('section', { class: 'node-group notify' }, h('h2', { class: 'section-title' }, 'Notifications'),
-    h('label', { class: 'notify-line' }, box, ' Tell me when something needs me, while this page is open'), said,
+    h('label', { class: 'notify-line' }, box, ' Tell me when something happens, while this page is open'), said,
+    h('label', { class: 'notify-line notify-sub' }, kindBoxes.needs, ' When a session or a lead needs me (a question, an approval, a prompt waiting)'),
+    h('label', { class: 'notify-line notify-sub' }, kindBoxes.done, ' When a lead stops or a session of mine finishes'),
     h('label', { class: 'notify-line' }, ring, ' Play a sound when something needs me'));
+
+  const choices = () => ({ needs: stored(storage, KINDS.needs) !== 'off', done: stored(storage, KINDS.done) !== 'off' });
+  function choose(kind, on) {
+    store(storage, on ? 'on' : 'off', KINDS[kind]);
+    draw();
+  }
 
   const soundOn = () => typeof Audio === 'function' && stored(storage, SOUND) === 'on';
 
@@ -160,6 +199,11 @@ export function notifications(app, env = {}) {
     box.disabled = !supported || Note.permission === 'denied';
     said.textContent = !supported ? 'This browser has no notifications.'
       : Note.permission === 'denied' ? 'Blocked in this browser’s settings for this page.' : '';
+    const chosen = choices();
+    for (const kind of Object.keys(kindBoxes)) {
+      kindBoxes[kind].checked = chosen[kind];
+      kindBoxes[kind].disabled = !enabled();
+    }
     ring.checked = soundOn();
     ring.disabled = typeof Audio !== 'function';
   }
@@ -214,8 +258,9 @@ export function notifications(app, env = {}) {
     if (last !== null) {
       const told = changes(last, now);
       if (told.length && supported && Note.permission === 'default' && stored(storage) === null) offer.hidden = false;
-      if (enabled()) told.forEach(show);
-      if (soundOn() && sounding(told.filter((note) => !lookingAt(note)))) play();
+      const chosen = wanted(told, choices());
+      if (enabled()) chosen.forEach(show);
+      if (soundOn() && sounding(chosen.filter((note) => !lookingAt(note)))) play();
     }
     last = now;
   }

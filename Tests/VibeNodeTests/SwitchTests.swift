@@ -781,10 +781,18 @@ struct SwitchTests {
         #expect(!message.contains(lead.tty), "\(message)")
         let unchanged = Self.host(client)
         #expect(unchanged.pid == Int(node.hostPID) && unchanged.build == Self.a, "\(unchanged)")
+        // `status` names what blocks it, so the command line says so before its code, by name, and asks nothing.
+        let blockers = (Self.status(client)?["switchBlockers"]?.array ?? []).compactMap(\.string)
+        #expect(blockers.count == 1 && blockers[0].contains(worker.tty) && blockers[0].contains("Worker: task-1"), "\(blockers)")
+        let said = try await node.runOnTerminal(["switch", Self.b])
+        #expect(said.status == 77 && said.output.contains("switch can't run now: no switch of builds while a worker or verifier runs")
+                && said.output.contains(worker.tty) && said.output.contains("Nothing was asked or switched."), "\(said.output)")
+        #expect(!said.output.contains("This switches the node") && !said.output.contains("code"), "no confirmation, no code: \(said.output)")
 
         // The worker ends: with only the lead live, the host hands over to B.
         _ = try HostCall.request(.kill(id: worker.id), socket: node.socket, appKey: nil, timeout: 15)
         #expect(await eventually { Self.host(client).live == 1 })
+        #expect(Self.status(client)?["switchBlockers"]?.array == [], "only the lead: nothing blocks it")
         let handed = try #require(WireClient.reply(client.request("build.switch", args: ["commit": .string(Self.b)], timeout: SwitchRequest.longestWait)),
                                   "\(node.said)")
         #expect(handed.ok && handed.result?["outcome"]?.string == "handed-over" && handed.result?["commit"]?.string == Self.b,

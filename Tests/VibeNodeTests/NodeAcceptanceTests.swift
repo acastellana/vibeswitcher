@@ -10,7 +10,7 @@ import Testing
 /// to (`EngineEndToEndTests.tell`) or calls its tool server as the agent would (`FakeClaude.Files.call`); what Claude
 /// Code's hooks would write the case writes (`hook`). A row that truly needs a real Claude is skipped saying why.
 ///
-/// Its cases run in parallel, about a minute in all on a 24-core machine (2026-11-20), so the suite runs wherever
+/// Its cases run in parallel, about a minute in all on a 24-core machine (36 cases, 49 s, 2026-11-21), so the suite runs wherever
 /// VibeNodeTests does: the Linux CI's core job, the full suite and `scripts/nightly.sh`. `scripts/e2e/node-acceptance.sh`
 /// runs it alone (or one row); `VIBESWITCHER_ACCEPTANCE=0` leaves it out of a run (`NodeAcceptance.enabled`).
 @Suite(NodeTraits.linuxOnly, .enabled(if: NodeAcceptance.enabled, "VIBESWITCHER_ACCEPTANCE=0 leaves the acceptance rows out"),
@@ -45,6 +45,15 @@ struct NodeAcceptanceTests {
         let card = try #require(ScratchNode.card(held.output, "config accept"), "\(held.output)")
         let accepted = try await node.runOnTerminal(["config", "accept", card])
         #expect(accepted.status == 0 && accepted.output.contains("accepted"), "\(accepted.output)\(accepted.errors)")
+        // One line per path sealed, under a count (the follow-up of 2026-11-21: no comma-joined line).
+        let said = accepted.output.split(whereSeparator: \.isNewline).map { $0.trimmingCharacters(in: .whitespaces.union(.controlCharacters)) == "" ? "" : String($0).replacingOccurrences(of: "\r", with: "") }
+        if let head = said.firstIndex(where: { $0.hasPrefix("accepted ") && $0.hasSuffix(":") }) {
+            let count = Int(said[head].split(separator: " ")[1]) ?? -1
+            #expect(said.count > head + count && said[(head + 1)...(head + count)].allSatisfy { $0.hasPrefix("  ") && !$0.contains(", ~") && !$0.contains(", .") },
+                    "\(accepted.output)")
+        } else {
+            #expect(said.contains("accepted: nothing held"), "\(accepted.output)")
+        }
         let after = try await node.run(["config", "held", repo.path])
         #expect(after.status == 0 && after.output.contains("nothing held"), "\(after.output)\(after.errors)")
     }
@@ -126,6 +135,14 @@ struct NodeAcceptanceTests {
 
         try EngineEndToEndTests.tell(files, ["op": "permission", "command": "make clean"])
         try #require(await node.eventuallyStatus { Self.prompt($0, id)?.contains("Do you want to proceed?") == true }, "\(node.said)")
+        // The prompt's options, each as the screen says it, in `status --json` (the acceptance run's A6 gap): what
+        // `reply SESSION N` picks from.
+        var options: [String]?
+        _ = await node.eventuallyStatus { status in
+            options = (Self.listed(status, id)?["prompt"] as? [String: Any])?["options"] as? [String]
+            return options?.count == 3
+        }
+        #expect(options == ["Yes", "Yes, and don't ask again for this command", "No, and tell Claude what to do differently (esc)"], "\(String(describing: options))")
         let allowed = try await node.runOnTerminal(["reply", Self.short(session), "1"])
         #expect(allowed.status == 0 && allowed.output.contains("answered: option 1"), "\(allowed.output)\(allowed.errors)")
         #expect(await eventually(timeout: 60) { EngineEndToEndTests.state(files)["reply"] as? String == "Allowed." })
@@ -537,6 +554,202 @@ struct NodeAcceptanceTests {
         let drafted = try #require(try page.until { $0.json?["re"]?.string == id }?.last?.json, "no reply to session.draft")
         #expect(drafted["ok"]?.bool == true, "\(drafted)")
         #expect(EngineEndToEndTests.prompts(files).isEmpty, "\(EngineEndToEndTests.prompts(files))")
+    }
+
+    // MARK: A26-A36, what landed on 2026-11-21
+
+    @Test("A26: doctor lists what the node needs, each missing piece with the command to run")
+    func a26Doctor() async throws {
+        let node = try await ScratchNode(scratch)
+        defer { node.stop() }
+        let ran = try await node.run(["doctor"])
+        #expect([0, 1].contains(ran.status) && !ran.output.isEmpty && !ran.errors.lowercased().contains("error"), "\(ran.output)\(ran.errors)")
+        #expect(ran.output.contains("claude"), "it looks at Claude Code's link: \(ran.output)")
+    }
+
+    @Test("A27: brief says what happened and what is asked of you, written from the boards when no model is asked")
+    func a27Brief() async throws {
+        let node = try await ScratchNode(scratch)
+        defer { node.stop() }
+        let ran = try await node.run(["brief"])
+        #expect(ran.status == 0, "\(ran.output)\(ran.errors)")
+        #expect(ran.output.contains("No project lead is running and no session needs you.") && ran.output.contains("Nothing waits on you.")
+                && ran.output.contains("(written from the boards and logs, no model asked)"), "\(ran.output)")
+        let json = try await node.run(["brief", "--json"])
+        let value = try #require(NodeWire.decode(NodeWire.Value.self, Data(json.output.utf8)), "\(json.output)")
+        #expect(WireSchema.check(value, as: "brief.result") == nil, "\(json.output)")
+    }
+
+    @Test("A28: stats gives the week's figures with no error")
+    func a28Stats() async throws {
+        let node = try await ScratchNode(scratch)
+        defer { node.stop() }
+        let ran = try await node.run(["stats", "week"])
+        #expect(ran.status == 0 && !ran.output.isEmpty && !ran.output.lowercased().contains("error"), "\(ran.output)\(ran.errors)")
+    }
+
+    @Test("A29: mail shows a project's messages between leads, which way each went and what became of it")
+    func a29Mail() async throws {
+        let node = try await ScratchNode(scratch)
+        defer { node.stop() }
+        let repo = try await Self.repository(node)
+        let project = LeadMail.project(of: repo.path)
+        try LeadMail.append(.init(at: Date().timeIntervalSince1970 - 60, from: "acme", to: project, kind: .question, text: "Which port?",
+                                  outcome: .delivered, detail: "Delivered."), root: repo.path)
+        let ran = try await node.run(["mail", repo.path])
+        #expect(ran.status == 0 && ran.output.contains("Between leads · \(project) (1 message)") && ran.output.contains("from the lead of acme")
+                && ran.output.contains("Which port?"), "\(ran.output)\(ran.errors)")
+    }
+
+    @Test("A30: settings --find keeps the settings holding every word, under the node's names")
+    func a30SettingsFind() async throws {
+        let node = try await ScratchNode(scratch)
+        defer { node.stop() }
+        let ran = try await node.run(["settings", "--find", "team sessions"])
+        #expect(ran.status == 0 && ran.output.contains("node_max_sessions") && ran.output.contains("boost_max_sessions")
+                && !ran.output.contains("lead_mail") && !ran.output.contains("mac_max_sessions"), "\(ran.output)\(ran.errors)")
+        let none = try await node.run(["settings", "--find", "nothing-like-this"])
+        #expect(none.status == 0 && none.output.contains("No setting matches"), "status \(none.status): \(none.output)\(none.errors)\n\(node.said)")
+    }
+
+    @Test("A31: new --agent codex starts the user's own Codex by its link (a stand-in here), labelled Codex")
+    func a31Codex() async throws {
+        let node = try await ScratchNode(scratch)
+        defer { node.stop() }
+        let folder = node.root.appendingPathComponent("work")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let missing = try await node.runOnTerminal(["new", folder.path, "--agent", "codex"])
+        #expect(missing.status != 0 && missing.output.contains("v2/test/codex") && missing.output.contains("ln -s"), "\(missing.output)\(missing.errors)")
+        let standIn = node.root.appendingPathComponent("stand-in-codex")
+        try Data("#!/bin/sh\necho \"stand-in codex $*\"\nexec sleep 600\n".utf8).write(to: standIn)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: standIn.path)
+        let link = node.root.appendingPathComponent("v2/test/codex")
+        try FileManager.default.createDirectory(at: link.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try FileManager.default.createSymbolicLink(atPath: link.path, withDestinationPath: standIn.path)
+        let started = try await node.runOnTerminal(["new", folder.path, "--agent", "codex"])
+        #expect(started.status == 0 && started.output.contains("started: session"), "\(started.output)\(started.errors)\n\(node.said)")
+        let session = try #require(await Self.liveSession(node) { $0.label == "Codex" }, "\(node.said)")
+        #expect(session.agent == "codex", "\(session)")
+        #expect(await eventually(timeout: 60) { node.screen(session.id)?.contains("stand-in codex") == true }, "\(node.screen(session.id) ?? "")")
+    }
+
+    @Test("A32: a session is found by the terminal status prints and by the name you gave it")
+    func a32SessionByTerminalOrName() async throws {
+        let node = try await ScratchNode(scratch)
+        defer { node.stop() }
+        let (session, _) = try await Self.newClaude(node)
+        let id = NodeIds.session(host: session.id)
+        let renamed = try await node.runOnTerminal(["rename", session.tty, "Release notes"])
+        #expect(renamed.status == 0, "by its terminal: \(renamed.output)\(renamed.errors)")
+        #expect(await node.eventuallyStatus { Self.listed($0, id)?["name"] as? String == "Release notes" })
+        let paused = try await node.runOnTerminal(["pause", "release NOTES", "--hours", "1"])
+        #expect(paused.status == 0 && paused.output.contains("paused: session \(Self.short(session))"), "by its name: \(paused.output)\(paused.errors)")
+        #expect(await node.eventuallyStatus { Self.listed($0, id)?["pausedUntil"] is String })
+    }
+
+    @Test("A33: resume right after end says the session ended N s ago and when it is listed")
+    func a33ResumeGrace() async throws {
+        let node = try await ScratchNode(scratch)
+        defer { node.stop() }
+        let (session, _) = try await Self.newClaude(node)
+        let ended = try await node.runOnTerminal(["end", Self.short(session)])
+        #expect(ended.status == 0, "\(ended.output)\(ended.errors)")
+        #expect(await node.eventuallyStatus { (($0["ending"] as? [[String: Any]]) ?? []).isEmpty == false }, "\(node.said)")
+        let resume = try await node.run(["resume"])
+        #expect(resume.status == 0 && resume.output.contains("a session ended ") && resume.output.contains("it is listed in ")
+                && !resume.output.contains("no session of yours ended lately"), "\(resume.output)\(resume.errors)")
+    }
+
+    @Test("A34: switch says at once that it can't run while a worker runs, naming it, with no code asked")
+    func a34SwitchBlocked() async throws {
+        let node = try await ScratchNode(scratch)
+        defer { node.stop() }
+        let worker = try await node.spawn("sleep 600", label: "Worker: task-1")
+        #expect(await node.eventuallyStatus { (($0["switchBlockers"] as? [String]) ?? []).count == 1 }, "\(node.said)")
+        let refused = try await node.runOnTerminal(["switch", String(repeating: "a", count: 40)])
+        #expect(refused.status == 77 && refused.output.contains("switch can't run now") && refused.output.contains(worker.tty)
+                && refused.output.contains("Nothing was asked or switched."), "\(refused.output)\(refused.errors)")
+        #expect(!refused.output.contains("Type "), "no code asked: \(refused.output)")
+    }
+
+    @Test("A35: a page reads recent, brief, board.task, board.image, session.usage and chat.image; a session's process can't ask the user's reads")
+    func a35PageReads() async throws {
+        let node = try await ScratchNode(scratch, hostArguments: LiveScratch.webArguments)
+        defer { node.stop() }
+        let (session, _) = try await Self.newClaude(node)
+        let page = try TermPage.paired(node)
+        let kinds = Set(page.hello?["kinds"]?.array?.compactMap(\.string) ?? [])
+        for kind in ["recent", "brief", "mail", "board.task", "board.image", "session.usage", "chat.image"] { #expect(kinds.contains(kind), "\(kind): \(kinds.sorted())") }
+        let sessionID = NodeIds.session(host: session.id)
+        func ask(_ kind: String, _ args: [String: NodeWire.Value]) throws -> NodeWire.Value? {
+            let id = try page.send(kind, args)
+            return try page.until { $0.json?["re"]?.string == id }?.last?.json
+        }
+        for kind in ["recent", "brief"] {
+            let reply = try #require(try ask(kind, [:]), "no reply to \(kind)")
+            #expect(reply["ok"]?.bool == true && WireSchema.check(reply["result"] ?? .null, as: "\(kind).result") == nil, "\(kind): \(reply)")
+        }
+        // Each read is answered as a read: what it names isn't there (no lead, no image), never a voice refusal.
+        for (kind, args) in [("board.task", ["project": NodeWire.Value.string("local:project:none"), "task": .string("x")]),
+                             ("board.image", ["project": .string("local:project:none"), "update": .string("u"), "index": .int(0)]),
+                             ("session.usage", ["session": .string(sessionID)]),
+                             ("chat.image", ["session": .string(sessionID), "id": .string("img")])] {
+            let reply = try #require(try ask(kind, args), "no reply to \(kind)")
+            #expect(reply["error"]?["code"]?.string != "voice", "\(kind): \(reply)")
+        }
+        // From a session's process (an agent), the user's own reads are refused.
+        let environment = ["HOME": node.home.path, "VIBESWITCHER_HOME": node.root.path].map { "\($0.key)='\($0.value)'" }.joined(separator: " ")
+        for kind in ["brief", "mail"] {
+            let out = node.root.appendingPathComponent("\(kind).out")
+            _ = try await node.spawn("env \(environment) '\(commandLine.path)' \(kind) > '\(out.path).part' 2>&1; echo \"status $?\" >> '\(out.path).part'; "
+                                     + "mv '\(out.path).part' '\(out.path)'; exec sleep 600", label: "Claude")
+            try #require(await eventually(timeout: 60) { FileManager.default.fileExists(atPath: out.path) }, "\(kind) never finished")
+            let said = try String(contentsOf: out, encoding: .utf8)
+            #expect(said.contains("not the user's voice") && said.contains("status 77"), "\(kind): \(said)")
+        }
+    }
+
+    @Test("A36: status --health gives the server's health digest")
+    func a36Health() async throws {
+        let node = try await ScratchNode(scratch)
+        defer { node.stop() }
+        let ran = try await node.run(["status", "--health"])
+        // What it says depends on the machine (a loaded one has slow refreshes, a long TMPDIR an unwatched state folder):
+        // each of its lines is there.
+        #expect(ran.status == 0 && ran.output.contains("health since the server started") && ran.output.contains("freezes:")
+                && ran.output.contains("slow refreshes:") && ran.output.contains("the server's last errors"), "\(ran.output)\(ran.errors)")
+        let json = try await node.run(["status", "--health", "--json"])
+        let value = try #require(NodeWire.decode(NodeWire.Value.self, Data(json.output.utf8)), "\(json.output)")
+        #expect(value["since"]?.string != nil, "\(json.output)")
+    }
+
+    @Test("A37: vs status --check-updates asks now: the newer green build and its install line, then none, then why it couldn't")
+    func a37CheckUpdates() async throws {
+        let sha = { (c: Character) in String(repeating: c, count: 40) }
+        let (running, newer) = (sha("a"), sha("b"))
+        let answers = scratch.url("update-answers.json")
+        func answer(_ given: UpdateWatch.Answers) throws { try JSONEncoder().encode(given).write(to: answers) }
+        let runs = [UpdateWatch.Run(databaseId: 1, workflowName: "v2 linux", headSha: newer, status: "completed", conclusion: "success"),
+                    UpdateWatch.Run(databaseId: 2, workflowName: "v2 macos", headSha: newer, status: "completed", conclusion: "success")]
+        try answer(.init(running: running, runs: runs, compare: ["\(running)...\(newer)": .init(status: "ahead", aheadBy: 2),
+                                                                 "\(newer)...v2": .init(status: "identical")]))
+        let node = try await ScratchNode(scratch, hostArguments: ["--server-arg", ServerArguments.testUpdateAnswersFlag + answers.path])
+        defer { node.stop() }
+        let found = try await node.run(["status", "--check-updates"])
+        #expect(found.status == 0 && found.output.contains("a newer build is on v2: \(newer) (2 commits ahead)")
+                && found.output.contains(UpdateWatch.installLine(newer)), "\(found.output)\(found.errors)")
+        // The answer is kept: `status` says it too.
+        let status = try await node.run(["status"])
+        #expect(status.output.contains("notice: a newer build is on v2: \(newer)"), "\(status.output)")
+        // The running build is the newest: none.
+        try answer(.init(running: running, runs: runs.map { var run = $0; run.headSha = running; return run }))
+        let none = try await node.run(["status", "--check-updates", "--json"])
+        let value = try #require(NodeWire.decode(NodeWire.Value.self, Data(none.output.utf8)), "\(none.output)\(none.errors)")
+        #expect(none.status == 0 && value["commit"] == .null && value["checkedAt"]?.string != nil && value["running"]?.string == running, "\(none.output)")
+        // GitHub can't be asked: why, and exit 1.
+        try answer(.init(problem: "gh isn't installed (/usr/bin/gh)"))
+        let failed = try await node.run(["status", "--check-updates"])
+        #expect(failed.status == 1 && failed.output.contains("couldn't check v2 for a newer build (gh isn't installed (/usr/bin/gh))"), "\(failed.output)\(failed.errors)")
     }
 
     // MARK: The rows a scratch node can't run

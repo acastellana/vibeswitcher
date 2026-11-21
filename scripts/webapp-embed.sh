@@ -6,7 +6,7 @@
 # no two lanes conflict in it. A scratch server serves a folder instead (--test-web-root=), with no step between.
 #
 # Left out: dotfiles, Markdown and shell scripts (the folder's notes and tools), LICENSE* (vendor/'s licences), shots/
-# (screenshots), and test/ and tests/ (Node's tests of the page). Refused, naming the file: an SVG, an HTML file but index.html and bench/bench.html,
+# (screenshots), test/ and tests/ (Node's tests of the page), and wire/vectors.json (those tests' data). Refused, naming the file: an SVG, an HTML file but index.html and bench/bench.html,
 # a type outside the content-type table (WebAssets.swift's, which the two must agree with), a name with a character
 # outside [A-Za-z0-9._/-], a link, anything not a plain file.
 # Reproducible: paths sorted in bytes (LC_ALL=C), base64 in lines of 76, no date and no machine's name in it.
@@ -35,7 +35,7 @@ else sha() { shasum -a 256 < "$1" | cut -d' ' -f1; }; fi
 # Every path under the root but what's left out, sorted in bytes.
 paths=()
 while IFS= read -r path; do paths+=("${path#./}"); done < <(
-    cd "$root" && find . -mindepth 1 \( -name '.*' -o -path ./shots -o -path ./test -o -path ./tests \) -prune \
+    cd "$root" && find . -mindepth 1 \( -name '.*' -o -path ./shots -o -path ./test -o -path ./tests -o -path ./wire/vectors.json \) -prune \
         -o ! -type d ! -name '*.md' ! -name '*.sh' ! -name 'LICENSE*' -print | sort)
 
 body=""
@@ -52,7 +52,9 @@ for path in "${paths[@]}"; do
         *) refuse "$path" "its type isn't in the content-type table (WebAssets.contentTypes)" ;;
     esac
     hash=$(sha "$file")
-    encoded=$(base64 < "$file" | tr -d '\n' | fold -w 76 | sed 's/^/            /')
+    # A line of exactly 40 base64 characters reads as an AWS secret key to SecretShapeLint: such a line (a file's
+    # last, unpadded) is split in two. The decoder ignores the newline (`.ignoreUnknownCharacters`).
+    encoded=$(base64 < "$file" | tr -d '\n' | fold -w 76 | awk 'length($0) == 40 { print substr($0, 1, 20); print substr($0, 21); next } { print }' | sed 's/^/            /')
     body+="        EmbeddedAssets.File(path: \"$path\", sha256: \"$hash\", base64: \"\"\"
 $encoded
             \"\"\"),

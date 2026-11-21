@@ -124,6 +124,7 @@ public enum ServerStart {
         // The AI summaries' model (Haiku, headless) on the user's node only: a scratch node's engine asks none.
         options.summarize = parsed.node ? NodeSummaries.headless(root: root) : nil
         options.summarizeBatch = parsed.node ? NodeSummaries.headless(root: root, system: BatchSummaryPrompts.system, timeout: ClaudeHeadless.briefingTimeout) : nil
+        options.summarizeBrief = parsed.node ? NodeSummaries.headless(root: root, system: BriefingPrompts.system, timeout: ClaudeHeadless.briefingTimeout) : nil
         let engine = LeadEngine(root: root, nodeRoot: parsed.nodeRoot.map { URL(fileURLWithPath: $0, isDirectory: true) }, link: link,
                                 clock: clock, sessions: sessions, options: options, note: say)
         requests.engine = engine
@@ -143,6 +144,12 @@ public enum ServerStart {
                                       looker: .github(home: accountHome), queue: queue, note: say)
             requests.updates = updates
             updates.start(clock: clock)
+        } else if let answers = parsed.testUpdateAnswers {
+            // A scratch server's check against a test's answers: on `update.check` only, never on a timer.
+            let file = URL(fileURLWithPath: answers)
+            requests.updates = UpdateWatch(file: root.appendingPathComponent("update-check.json"),
+                                           running: UpdateWatch.Answers.read(file)?.running ?? commit,
+                                           looker: .answers(file), queue: queue, note: say)
         }
         engine.watchRoom()
         let server = NodeServer(root: root, requests: requests, housekeeping: parsed.testHousekeeping ?? ServerArguments.housekeeping,
@@ -152,7 +159,11 @@ public enum ServerStart {
         let live = NodeLive(requests: requests, sessions: sessions, engine: engine, clock: clock, port: parsed.testWebPort ?? NodeWeb.port,
                             webRoot: parsed.testWebRoot.map { URL(fileURLWithPath: $0, isDirectory: true) }, terminals: parsed.webTerminal,
                             // The tailnet's page (`web --tailnet`) on the user's node only: a scratch server never binds it.
-                            tailnet: parsed.node ? TailnetWeb.Options() : nil, note: say)
+                            tailnet: parsed.node ? TailnetWeb.Options() : nil,
+                            // H1: the web's sockets are the session host's, asked for over the connector and held by it
+                            // across this server's restarts and its handovers; this server never binds one itself (the
+                            // Mac's, until its own H1 step, does: `WebBind.forServer`).
+                            bind: .forServer(connector: parsed.connector, note: say), note: say)
         requests.openWebForAnyone = parsed.testWebPair
         server.hub = live.hub
         link.onWelcome = { _, _ in

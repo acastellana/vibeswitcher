@@ -8,6 +8,11 @@ import Testing
 /// (a stand-in here), never in a project's folder; a missing or other-than-named tool a standing notice, a change told
 /// to the lead once and noted for a day.
 struct NodeToolchainTests {
+    /// A FIFO pin is never waited on: the look returns well inside this (it opens with O_NONBLOCK).
+    static let fifoLimit: TimeInterval = 5
+    /// A program that never ends is stopped at its 1 s timeout; this bounds the stop and its reaping.
+    static let stoppedLimit: TimeInterval = 10
+
     private let scratch = Scratch()
 
     private func project(_ name: String, files: [String: String]) throws -> String {
@@ -48,7 +53,7 @@ struct NodeToolchainTests {
         try #require(mkfifo(fifo + "/.nvmrc", 0o600) == 0)
         let start = Date()
         #expect(NodeToolchain.needs(root: fifo) == [.init(tool: "node", because: "package.json")])
-        #expect(Date().timeIntervalSince(start) < 5)
+        #expect(Date().timeIntervalSince(start) < Self.fifoLimit)
 
         for (index, weird) in ["lts/*", "6.4\u{1B}[31m", "latest; rm -rf ~", "1.2.3.4.5", String(repeating: "9", count: 300)].enumerated() {
             let root = try project("weird-\(index)", files: ["Package.swift": "", ".swift-version": weird + "\n"])
@@ -76,13 +81,19 @@ struct NodeToolchainTests {
         let program = bin.appendingPathComponent("swift")
         try "#!/bin/sh\npwd > '\(marker.path)'\necho 'Swift version 6.4.2 (swift-6.4.2-RELEASE)'\n".write(to: program, atomically: true, encoding: .utf8)
         try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: program.path)
-        let output = NodeToolchain.run([program.path, "--version"], environment: ["PATH=/usr/bin:/bin"], timeout: 15)
+        // A program just written can be busy to exec for a moment while another test's fork still holds a descriptor
+        // to it (ETXTBSY under a parallel run; docs/process/v2-flaky-tests.md): asked again, a few times.
+        var output: String?
+        for _ in 0..<10 where output == nil {
+            output = NodeToolchain.run([program.path, "--version"], environment: ["PATH=/usr/bin:/bin"], timeout: 15)
+            if output == nil { Thread.sleep(forTimeInterval: 0.2) }
+        }
         #expect(output.flatMap { NodeToolchain.version(tool: "swift", output: $0) } == "6.4.2")
         #expect(try String(contentsOf: marker, encoding: .utf8).trimmingCharacters(in: .whitespacesAndNewlines) == "/")
         #expect(NodeToolchain.absolutePath("bin:.::/usr/bin") == "/usr/bin")
         let start = Date()
         #expect(NodeToolchain.run(["/bin/sleep", "30"], environment: [], timeout: 1) == nil)
-        #expect(Date().timeIntervalSince(start) < 10)
+        #expect(Date().timeIntervalSince(start) < Self.stoppedLimit)
     }
 
     /// The first look keeps what it found and tells nothing; a change is told to that project's lead once and noted for a

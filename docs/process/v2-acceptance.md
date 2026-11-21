@@ -12,6 +12,11 @@ The run on the real node with a real Claude (this document's own) stays: it find
 `vs` is `~/.vibeswitcher/v2/builds/current/bin/vibeswitcher`. Sessions use the cheapest model (haiku) where a model
 can be chosen.
 
+What landed on 2026-11-21 after these rows (Brief me, your own Codex sessions, sessions named by terminal or name,
+resume's grace message, the page's Between leads, Statistics, health, dev servers, dictation, the Boost mark, the lead's
+results and all-done card, `settings --find`, switch's up-front refusal) has no row yet: `docs/guide/v2-try-it.md`
+walks through all of it for the user's first try, and its findings become rows here.
+
 | # | Area | Run | Must happen | Automated (`NodeAcceptanceTests`) | Last run |
 |---|---|---|---|---|---|
 | A1 | Node | `vs status` | build, host, server, sessions, leads, cards; no error | `a1Status` | pass (2026-11-20) |
@@ -19,7 +24,7 @@ can be chosen.
 | A3 | Web | `vs web`, open the address | sessions, chat, board, settings render; no console error | `a3Web` (the wire; the console in a browser by hand) | pass: page pairs and renders; console errors while a terminal shows (fix in progress) |
 | A4 | Session | `vs new ~/projects/vs-acceptance --model haiku` | a Claude session starts, listed in status and on the page | `a4New` | pass after adding the folder to the project allow-list (by design; the refusal says how) |
 | A5 | Session | `vs send S "say hello in three words"` | the agent answers; the chat shows it on the page | `a5Send` (the page's chat: `ScratchNodeTests.aPageFollowsASessionsChat`) | pass (2026-11-21, build 2ceb69f7): haiku answered "Hello there, friend." |
-| A6 | Session | a permission prompt, `vs reply S 1` | the prompt shows as a card/field; reply answers it | `a6Reply` (trust dialog, then a permission prompt) | pass (2026-11-21): a real permission prompt (a verifier's read) showed in `status` with its options; `vs reply SESSION 4` answered it as the user. (The user's auto mode prompts for no scratch command, so the scratch session couldn't raise one.) |
+| A6 | Session | a permission prompt, `vs reply S 1` | the prompt shows as a card/field; reply answers it | `a6Reply` (trust dialog, then a permission prompt, its three options checked in `status --json` before `reply` picks one) | pass (2026-11-21): a real permission prompt (a verifier's read) showed in `status` with its options; `vs reply SESSION 4` answered it as the user. (The user's auto mode prompts for no scratch command, so the scratch session couldn't raise one.) |
 | A7 | Session | `vs send S "…" --now` while it works | steered mid-turn, nothing lost | `a7SendNow` | pass (2026-11-21): mid-count, `send --now` steered it; it stopped and answered "STEERED" |
 | A8 | Session | `vs rename`, `vs pause`, `vs end` | name and pause shown; end removes it; resume lists it | `a8RenamePauseEnd` | pass (2026-11-21): name and pause shown in status; end removed it; `resume` lists it after the 30 s grace (says "none" before it: UX follow-up) |
 | A9 | Session | `vs resume S` | the ended session comes back in its conversation | `a9Resume` | pass (2026-11-21): resumed in its same conversation; it recalled its earlier answer |
@@ -39,3 +44,15 @@ can be chosen.
 | A23 | Security | a page token tries `answer`/`send` | refused; only drafts | `a23PageTokenRefused` | |
 | A24 | Tests | `scripts/nightly.sh` on the merged v2 | full suite passes (retry-failed); flaky list filed | 2026-11-21, 10 min, commit `370be064`: pass except the known interop test (`SandboxFactsTests.aWindowsStubDoesntStartWithoutInit`, kept failing on purpose until the sandbox's Windows-stub task); nothing flaky. The first run's real failures fixed (`83ce1ade`, `cf4cb1b2`, `a635e70f`, `03f406c9`); its one flake filed in [the flaky list](v2-flaky-tests.md) | |
 | A25 | Self-improvement | VS's own lead on its clone | merges its tasks through the gate; keeps a goal list | skipped: needs a real Claude lead | |
+| A26 | Node | `vs doctor` | what the node needs, each missing piece with its command | `a26Doctor` | |
+| A27 | Node | `vs brief` (and `--json`) | what happened and what's asked of you; from the boards when no model is asked | `a27Brief` | |
+| A28 | Node | `vs stats week` | the week's figures, no error | `a28Stats` | |
+| A29 | Lead | `vs mail FOLDER` | a project's messages between leads, which way, what became of each | `a29Mail` | |
+| A30 | Settings | `vs settings --find "team sessions"` | only the settings holding every word, under the node's names; none says so | `a30SettingsFind` | |
+| A31 | Session | `vs new FOLDER --agent codex` | without the link: refused, naming it and the `ln -s`; with it: Codex starts, labelled Codex | `a31Codex` (a stand-in codex on the scratch node) | |
+| A32 | Session | `vs rename TTY NAME`, `vs pause NAME …` | a session is found by the terminal `status` prints and by its given name | `a32SessionByTerminalOrName` | |
+| A33 | Session | `vs end S`, then `vs resume` | "a session ended N s ago … it is listed in M s", not "none ended" | `a33ResumeGrace` | |
+| A34 | Switch | `vs switch COMMIT` while a worker runs | refused at once, naming the worker, no code asked | `a34SwitchBlocked` | |
+| A35 | Web | a page asks recent, brief, board.task, board.image, session.usage, chat.image; a session runs `vibeswitcher brief` and `mail` | the page's reads answered (never a voice refusal); the session's refused: not the user's voice | `a35PageReads` | |
+| A36 | Node | `vs status --health` (and `--json`) | the health digest: freezes, slow refreshes, restarts, the last errors | `a36Health` | |
+| A37 | Node | `vs status --check-updates` (and `--json`) | asks now: the newer build on v2 both CI runs passed and its install line, or none, or why it couldn't (exit 1); `status` keeps the answer | `a37CheckUpdates` (GitHub's answers a test file's) | |

@@ -285,6 +285,8 @@ public final class Requests: @unchecked Sendable {
         case "board": board(request, reply: reply)
         case "settings": settings(request, reply: reply)
         case "recent": recent(request, reply: reply)
+        case "brief": brief(request, reply: reply)
+        case "update.check": updateCheck(request, reply: reply)
         case "session.ports": sessionPorts(request, reply: reply)
         case "set": set(request, reply: reply)
         case "answer": answer(request, reply: reply)
@@ -428,9 +430,13 @@ public final class Requests: @unchecked Sendable {
             "restart": engine?.restartValue ?? .null,
             "reopen": engine?.offeredValue ?? .array([]),
             "ended": engine?.endedValue ?? .array([]),
+            "ending": engine?.endingValue ?? .array([]),
             "builds": installRoot.map { SwitchRequest.buildsValue(installRoot: $0, running: notes?.notes.build) } ?? .null,
             "web": webValue?() ?? NodeStatusStore.webOff,
             "usage": engine?.usage.map(NodeUsage.value) ?? .null,
+            "boost": engine?.boostValue ?? .null,
+            // What refuses a build switch now (the rule on switches), for `vibeswitcher switch` before its code.
+            "switchBlockers": .array(SwitchRequest.blockers(link.sessions).map(NodeWire.Value.string)),
         ]
         // The user's node's tailnet page, for the command line (not in the `node` stream: `NodeStatusStore.value`).
         if let tailnet { fields["webTailnet"] = tailnet.value() }
