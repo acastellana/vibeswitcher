@@ -506,8 +506,14 @@ final class ClaudeVoiceRun {
     private var stopReads: (() -> Void)?
     private var lastDraft: String?
     private var steady = 0
-    /// Something not dim showed in the box while Claude recorded: typed in the terminal, not dictated.
-    private var typed = false
+    /// What showed not dim in the box (less its level cursor) while Claude recorded or processed: at the last read that
+    /// watched it, and the texts that stayed two such reads in a row (two at most: a final draft can be only one of
+    /// them). Typed in the terminal, unless it's Claude's own transcript under a second recording its hold's Spaces
+    /// started, which is the text it leaves in the box (`take`). One read's, gone at the next, was a redraw's.
+    private var plainShown: String?
+    private var plainKept: [String] = []
+    /// When text not dim first showed while it recorded, for app.log: the stage and the seconds into the run.
+    private var plainFirst: String?
     /// Its level cursor as seen: grey (low) at some read, and coloured (a level heard) at some read.
     private var meterQuiet = false
     private var meterHeard = false
@@ -920,21 +926,43 @@ final class ClaudeVoiceRun {
         return .notice(recorded >= Self.longHold ? Self.onlySilence : Self.didntCatch, offer: false)
     }
 
-    /// While Claude records: the words it shows dim, and whether anything not dim (typed in the terminal) showed too.
+    /// While Claude records: the words it shows dim, and what shows not dim (typed in the terminal, or its own text).
     private func watch(_ screen: LeadDelivery.Screen) {
         guard screen.runs != nil else { return }
         // Claude's recording-level cursor (a coloured bar glyph) isn't typed.
-        if case .draft(let draft) = LeadDelivery.box(in: screen), !ClaudeVoiceScreen.meterOnly(draft) { typed = true }
+        var plain: String?
+        if case .draft(let draft) = LeadDelivery.box(in: screen), !ClaudeVoiceScreen.meterOnly(draft) {
+            let text = ClaudeVoiceScreen.line(draft)
+            plain = text
+            if plainFirst == nil { plainFirst = String(format: "\(stage) %.1f s in", now().timeIntervalSince(started)) }
+            if text == plainShown, !plainKept.contains(text), plainKept.count < 2 { plainKept.append(text) }
+        }
+        plainShown = plain
         if let dim = LeadDelivery.dimText(in: screen), !dim.isEmpty { live = dim }
         let prompt = ClaudeVoiceScreen.prompt(screen)
         if prompt.dim != dimBefore, prompt.dim.contains(where: { $0.isLetter || $0.isNumber }) { wordsShown = true }
     }
 
-    /// The same text a few reads in a row: Claude is done writing it. Out of its box with ⌃U, if it's Claude's: nothing
-    /// was typed while it recorded, and it starts as what it heard (what's typed after the release isn't).
+    /// Whether text other than `text` (the box's draft now, Claude's) showed not dim while it recorded: at two reads in
+    /// a row, or at the last read that watched it.
+    private func typedOver(_ text: String) -> (kept: Bool, last: Bool) {
+        let squeezed = { (text: String) in text.filter { !$0.isWhitespace } }
+        return (plainKept.contains { squeezed($0) != squeezed(text) }, plainShown.map { squeezed($0) != squeezed(text) } ?? false)
+    }
+
+    /// The same text a few reads in a row: Claude is done writing it. Out of its box with ⌃U, if it's Claude's: it starts
+    /// as what it heard (what's typed after the release isn't), and nothing else showed not dim while it recorded, at
+    /// two reads in a row or at the last: the only text not dim then may be this one, Claude's own, under a second
+    /// recording.
     private func take(_ draft: String) {
-        guard !typed, ClaudeVoiceScreen.grew(ClaudeVoiceScreen.line(draft), from: live) else {
-            return end(cancelled ? .cancelled : .notice(Self.typedMeanwhile, offer: false))
+        let text = ClaudeVoiceScreen.line(draft)
+        let (kept, last) = typedOver(text)
+        let grew = ClaudeVoiceScreen.grew(text, from: live)
+        guard !kept, !last, grew else {
+            // Which check refused, by name and time only (never the text).
+            let why = !grew ? "not grown from the words heard"
+                : "text not Claude's showed while it recorded (first \(plainFirst ?? "?"), \(kept ? "stayed two reads in a row" : "at the last read"))"
+            return end(cancelled ? .cancelled : .notice(Self.typedMeanwhile, offer: false), why: "\(Self.typedMeanwhile) (\(why))")
         }
         taken = (draft, ClaudeVoiceScreen.line(draft))
         stage = .clearing
@@ -1031,8 +1059,10 @@ final class ClaudeVoiceRun {
                 case .empty, .dialog:
                     return endStopped()
                 case .draft(let draft):
-                    // Claude's transcript, in before the Esc: the dictation's when nothing was typed and it grew from
-                    // what was heard. Anything else is left alone.
+                    // Claude's transcript, in before the Esc: the dictation's when nothing else showed not dim while it
+                    // recorded (asked at the first sight of it: the ⌃U then take it out a row at a time) and it grew
+                    // from what was heard. Anything else is left alone.
+                    let typed = !stopLanded && typedOver(ClaudeVoiceScreen.line(draft)) != (false, false)
                     guard !typed, ClaudeVoiceScreen.grew(ClaudeVoiceScreen.line(draft), from: live) else { return endStopped() }
                     if !stopLanded { stopKillLimit = Self.clearBudget(draft).keys }
                     guard stopKills < stopKillLimit else { return end(.notice(Self.keptText, offer: false), why: "the dictated text stayed in the box") }
