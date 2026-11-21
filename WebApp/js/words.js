@@ -163,3 +163,12 @@ export function taskLine(task) {
   const first = text.split('\n').find((line) => line.trim()) || '';
   return task.line && !(text && task.line.trim() === first.trim()) ? task.line : '';
 }
+
+// A lead's decision as the board lists it: "Decided: run the two small tasks side by side", a long one by its AI
+// summary when the node has one (the app's `DecisionFeed.line`); its full text and why for the row's title.
+export function decisionLine(decision) {
+  const text = decision.summary || decision.text || '';
+  const first = text.split(' ')[0] || '';
+  const keep = !text || text[0] !== text[0].toUpperCase() || /[A-Z]/.test(first.slice(1));
+  return 'Decided: ' + (keep ? text : text[0].toLowerCase() + text.slice(1));
+}

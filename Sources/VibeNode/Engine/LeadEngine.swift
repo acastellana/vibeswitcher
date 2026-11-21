@@ -232,6 +232,14 @@ public final class LeadEngine: @unchecked Sendable {
     var summarizer: Summarizer?
     public let teamSummaries = Changes<[String: String]>()
     var summaryKeys: [String: [String: String]] = [:]
+    /// The summaries may be asked for now (a model given, Settings' AI summaries on, Haiku not held back), as the last
+    /// refresh found; each lead's latest decisions (newest first) by root, and the boards' copy of them with their lines;
+    /// the long messages' keys asked for, by "session|entry", and their lines.
+    var summariesAllowed = false
+    var recentDecisions: [String: [LeadDecision]] = [:]
+    public let boardDecisions = Changes<[BoardDecision]>()
+    var messageKeys: [String: String] = [:]
+    public let messageSummaries = Changes<String>()
     /// Where the summaries' transcripts are looked at, and where their model runs: one at a time.
     let summaryReads = DispatchQueue(label: "vibenode.lead-engine.summary-reads", qos: .utility)
     let summaryRuns = DispatchQueue(label: "vibenode.lead-engine.summaries", qos: .utility)

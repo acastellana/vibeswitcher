@@ -556,7 +556,17 @@ public enum WireVectors {
     /// With the AI summary of the running task's worker (`TeamSummaryWatch`).
     static var boardValue: NodeWire.Value {
         BoardValue.value(project: NodeIds.project(root: root), root: root, board: sampleBoard(now: boardNow.timeIntervalSince1970), now: boardNow,
-                         summaries: ["t-onboarding-steps": "Making the sign-up form check each field as you leave it"])
+                         summaries: ["t-onboarding-steps": "Making the sign-up form check each field as you leave it"],
+                         decisions: sampleDecisions(now: boardNow.timeIntervalSince1970))
+    }
+
+    /// The lead's latest decisions of the vectors' example, newest first: a long one with its AI summary, a short one.
+    static func sampleDecisions(now: Double) -> [BoardDecision] {
+        let long = LeadDecision(at: now - 300, text: "Run the onboarding steps and the upload retry in parallel, since they touch different files and neither waits on the other's review",
+                                why: "Both are small and independent; serial would idle a worker for an hour")
+        let short = LeadDecision(at: now - 1800, text: "Keep the sidebar pass for after onboarding", why: "")
+        return [BoardDecision(id: long.id, at: long.at, text: long.text, why: long.why, summary: "Run the two small tasks side by side"),
+                BoardDecision(id: short.id, at: short.at, text: short.text, why: short.why)]
     }
 
     /// The board a minute on: the review passed and the blocked task's question was answered.

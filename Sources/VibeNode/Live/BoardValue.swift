@@ -1,6 +1,24 @@
 import Foundation
 import VibeCore
 
+/// One of the lead's decisions as a board shows it (decisions.md's, `LeadDecision`), with its AI summary when it is
+/// long and one came (`TeamSummaryWatch`).
+public struct BoardDecision: Equatable, Sendable {
+    public var id: String
+    public var at: Double
+    public var text: String
+    public var why: String
+    public var summary: String?
+
+    public init(id: String, at: Double, text: String, why: String, summary: String? = nil) {
+        self.id = id
+        self.at = at
+        self.text = text
+        self.why = why
+        self.summary = summary
+    }
+}
+
 /// A lead's board as the `boards` stream and `vibeswitcher board` carry it (the parity table's gap 4): one value per
 /// project, its tasks as a person reads them at a glance. What each task is (its status as the board has it), the group
 /// it is shown in, its state in the Mac's Team words ("Working", "Rework 1", "Ready to merge", "Blocked"…), the one dim
@@ -43,8 +61,10 @@ public enum BoardValue {
     /// large, or isn't a board this build knows): the value then says so and has no tasks.
     /// `usageWaits`: the review rows waiting on the account's usage, by task id (`UsageWaits`): their state says so.
     /// `summaries`: the AI summaries' lines, by task id (`TeamSummaryWatch`): a task at work carries its own.
+    /// `decisions`: the lead's latest decisions, newest first, with their lines (`LeadEngine.boardDecisions`).
     public static func value(project: String, root: String, board: LeadBoard?, refusal: String? = nil, now: Date,
-                             usageWaits: [String: ReviewUsageWait] = [:], summaries: [String: String] = [:]) -> NodeWire.Value {
+                             usageWaits: [String: ReviewUsageWait] = [:], summaries: [String: String] = [:],
+                             decisions: [BoardDecision] = []) -> NodeWire.Value {
         var shown: [(group: Int, position: Int, value: NodeWire.Value)] = []
         var slugs: Set<String> = []
         if let board {
@@ -57,7 +77,7 @@ public enum BoardValue {
         shown.sort { ($0.group, $0.position) < ($1.group, $1.position) }
         var kept = Array(shown.prefix(mostTasks))
         // The byte budget: the tasks' encoded sizes and the rest of the value's, the last tasks dropped till it fits.
-        var size = 2_048 + root.utf8.count + project.utf8.count + kept.reduce(0) { $0 + NodeWire.message($1.value).count + 1 }
+        var size = 2_048 + NodeWire.message(Self.decisions(decisions)).count + root.utf8.count + project.utf8.count + kept.reduce(0) { $0 + NodeWire.message($1.value).count + 1 }
         while size > mostBytes, let last = kept.popLast() { size -= NodeWire.message(last.value).count + 1 }
         let more = shown.count - kept.count
         var counts: [String: NodeWire.Value] = [:]
@@ -67,6 +87,7 @@ public enum BoardValue {
             "baseBranch": board?.baseBranch.map { .string(text($0, limit: 200)) } ?? .null,
             "tasks": .array(kept.map(\.value)), "counts": .object(counts), "more": .int(more),
             "unreadable": refusal.map { .string(text($0, limit: 300)) } ?? .null,
+            "decisions": Self.decisions(decisions),
         ])
     }
 
@@ -98,6 +119,19 @@ public enum BoardValue {
         } ?? .null
         return (groups.firstIndex(of: shown.group) ?? groups.count, .object(fields))
     }
+
+    /// The decisions as a board carries them: at most `LeadEngine.decisionsShown`, each its text and why (inert,
+    /// capped: the lead wrote them), when it was taken, and its AI summary when a long one has one (null otherwise).
+    static func decisions(_ list: [BoardDecision]) -> NodeWire.Value {
+        .array(list.prefix(LeadEngine.decisionsShown).map { decision in
+            .object(["id": .string(text(decision.id, limit: 300)), "at": date(decision.at), "text": .string(text(decision.text, limit: decisionBytes)),
+                     "why": decision.why.isEmpty ? .null : .string(text(decision.why, limit: decisionBytes)),
+                     "summary": decision.summary.map { .string(line($0)) } ?? .null])
+        })
+    }
+
+    /// The most bytes of UTF-8 a decision's text, and its why, carry.
+    public static let decisionBytes = 1_200
 
     /// Its audit as the board shows it: the last verdict (`passed`, `failed`; null while none came), its open and all
     /// findings, and its rounds. Null for a task never audited.

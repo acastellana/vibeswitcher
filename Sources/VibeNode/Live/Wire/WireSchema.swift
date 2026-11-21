@@ -294,7 +294,9 @@ public enum WireSchema {
             shape("board", from: "BoardValue.value", [
                 field("project", .string), field("root", .string), field("baseBranch", Kind.string.orNull),
                 field("tasks", .list(.shape("board.task"))), field("counts", .shape("board.counts")), field("more", .int),
-                field("unreadable", Kind.string.orNull)]),
+                field("unreadable", Kind.string.orNull), field("decisions", .list(.shape("board.decision")))]),
+            shape("board.decision", from: "BoardValue.decisions", [field("id", .string), field("at", Kind.date.orNull), field("text", .string),
+                                                                 field("why", Kind.string.orNull), field("summary", Kind.string.orNull)]),
             shape("board.counts", from: "BoardValue.value", BoardValue.groups.map { field($0, .int) }),
             shape("board.task", from: "BoardValue.task", [
                 field("id", .string), field("slug", .string), field("title", .string), field("status", taskStatus),
@@ -353,7 +355,9 @@ public enum WireSchema {
             item("tools", [field("summary", .string), field("tools", .list(.shape("chat.tool")))]),
             item("team", [field("text", .string), field("title", .string), field("sender", .shape("chat.sender")),
                           field("message", .words(["report", "audit", "witness", "userAnswer", "leadMessage", "notice", "teammatePost"])),
-                          field("task", Kind.string.orNull), field("part", Kind.shape("chat.part").orNull)]),
+                          field("task", Kind.string.orNull), field("part", Kind.shape("chat.part").orNull),
+                          // A long message's TL;DR (`TeamSummaryWatch.summarizeMessage`), once one came.
+                          Field(name: "summary", type: .string, optional: true, pending: "ChatStore (a TL;DR the engine wrote, added to the item)")]),
             shape("chat.sender", from: contractChat, [field("kind", .words(["user", "lead", "vibeSwitcher", "teammate"])),
                                                       field("name", Kind.string.orNull), field("task", Kind.string.orNull)]),
             shape("chat.part", from: contractChat, [field("index", .int), field("count", .int)]),

@@ -41,8 +41,28 @@ public enum BoardText {
         if tasks.isEmpty { lines.append("  nothing on the board yet") }
         let more = board["more"]?.int ?? 0
         lines.append((counts.isEmpty ? "no tasks" : counts.joined(separator: " · ")) + (more > 0 ? " · \(more) more not shown" : ""))
+        // The lead's latest decisions: a long one by its AI summary when one came (the app's `DecisionFeed.line`).
+        let decisions = board["decisions"]?.array ?? []
+        if !decisions.isEmpty {
+            lines.append("Decisions")
+            lines += decisions.prefix(decisionsShown).map { decision in
+                let text = decision["summary"]?.string ?? decision["text"]?.string
+                let when = decision["at"]?.string.flatMap(NodeWire.date).map { " (" + Durations.short(now.timeIntervalSince($0)) + " ago)" } ?? ""
+                return "  Decided: " + lowercasedFirst(inert(text, limit: dimLimit)) + when
+            }
+        }
         return lines
     }
+
+    /// "Run them" → "run them"; "API keys…" and "VibeSwitcher…" stay (the app's `DecisionFeed.lowercasedFirst`).
+    static func lowercasedFirst(_ text: String) -> String {
+        guard let first = text.first, first.isUppercase else { return text }
+        if text.prefix { $0 != " " }.dropFirst().contains(where: \.isUppercase) { return text }
+        return first.lowercased() + text.dropFirst()
+    }
+
+    /// The decisions `vibeswitcher board` lists, newest first.
+    static let decisionsShown = 5
 
     /// "  Blocked 18m  Fix the flaky upload test — Waits on Sync landing-base with main".
     static func line(_ task: NodeWire.Value, now: Date) -> String {

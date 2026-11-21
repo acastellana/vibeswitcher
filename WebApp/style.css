@@ -792,3 +792,6 @@ kbd { padding: 1px 6px; border-radius: 5px; box-shadow: inset 0 0 0 1px var(--li
   .board-blocker { margin-left: 28px; }
 }
 .board-task-dim.summary { font-style: italic; }
+.board-decisions { list-style: none; margin: 0; padding: 0; }
+.board-decision { display: flex; gap: 8px; justify-content: space-between; padding: 4px 0; }
+.note-gist { font-weight: 600; margin-bottom: 2px; }

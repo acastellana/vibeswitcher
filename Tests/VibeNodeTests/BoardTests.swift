@@ -69,7 +69,8 @@ struct BoardTests {
         old.tasks[4].merged?.at = WireVectors.boardNow.timeIntervalSince1970
         old.tasks[3].status = .kept  // kept after a merge undone by hand: its record says no time
         old.tasks[3].merged = LeadMergeRecord(commit: "c0ffee", tested: false, at: 0)
-        let older = BoardValue.value(project: "p", root: "/r", board: old, now: WireVectors.boardNow)
+        let older = BoardValue.value(project: "p", root: "/r", board: old, now: WireVectors.boardNow,
+                                     decisions: [BoardDecision(id: "0|An old decision", at: 0, text: "An old decision", why: "")])
         for value in [WireVectors.boardValue, WireVectors.boardMoved, unreadable, older] {
             #expect(WireSchema.check(value, as: "board", strict: true) { field, state in seen.insert("\(field) \(state)") } == nil)
         }
@@ -349,6 +350,10 @@ struct BoardTests {
             "Done today",
             "  Merged  Cache the static assets — merged 8a3f1e2c, tests passed",
             "1 needs attention · 2 running · 1 waiting · 1 done today",
+            // The lead's latest decisions: the long one by its AI summary.
+            "Decisions",
+            "  Decided: run the two small tasks side by side (5m ago)",
+            "  Decided: keep the sidebar pass for after onboarding (30m ago)",
         ], "\(lines.joined(separator: "\n"))")
         let unreadable = BoardValue.value(project: "p", root: "/r", board: nil, refusal: "the board isn't one this build reads", now: WireVectors.boardNow)
         #expect(BoardText.lines(unreadable).last == "  the board can't be shown: the board isn't one this build reads")

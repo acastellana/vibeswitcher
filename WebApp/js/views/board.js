@@ -6,7 +6,7 @@
 
 import { h, keyed, setText, setClass, framed } from '../dom.js';
 import { icon } from '../marks.js';
-import { boardGroups, boardSummary, taskState, taskTone, taskGroup, taskLine, since, moment, plural, tilde, lastPart } from '../words.js';
+import { boardGroups, boardSummary, taskState, taskTone, taskGroup, taskLine, decisionLine, since, moment, plural, tilde, lastPart } from '../words.js';
 import { sessionHref } from '../ui.js';
 
 // A blocker longer than this many lines (or characters) is folded to its first lines until asked.
@@ -144,12 +144,16 @@ export function boardView(app) {
   const sections = [0, 1, 2, 3].map(() => groupSection(app));
   groupsEl.append(...sections.map((section) => section.el));
   const more = h('p', { class: 'board-more-note', hidden: true });
+  // The lead's latest decisions, newest first (the board's `decisions`).
+  const decisionsList = h('ul', { class: 'board-decisions' });
+  const decisions = h('section', { class: 'board-group decisions', hidden: true },
+    h('h2', { class: 'section-title board-group-head' }, h('span', null, 'Decisions')), decisionsList);
   const el = h('section', { class: 'board', 'aria-label': 'Board' },
     h('header', { class: 'head' },
       h('a', { class: 'back icon-button', href: '#/', 'aria-label': 'Sessions' }, icon('back', 16)),
       h('div', { class: 'head-text' }, h('div', { class: 'head-line' }, title, summary), place),
       leadLink),
-    h('div', { class: 'pane board-pane' }, h('div', { class: 'board-column' }, asks, note, groupsEl, more)));
+    h('div', { class: 'pane board-pane' }, h('div', { class: 'board-column' }, asks, note, groupsEl, more, decisions)));
   const askRows = new Map();
   let shown = null;
 
@@ -195,6 +199,11 @@ export function boardView(app) {
     note.hidden = !words;
     setText(more, board?.more ? `The board is long: ${plural(board.more, 'more task')} past these aren’t shown.` : '');
     more.hidden = !board?.more;
+    const decided = board?.decisions || [];
+    decisions.hidden = decided.length === 0;
+    decisionsList.replaceChildren(...decided.map((decision) => h('li', { class: 'board-decision', title: [decision.text, decision.why].filter(Boolean).join('\n\nWhy: ') },
+      h('span', { class: 'board-decision-text' }, decisionLine(decision)),
+      decision.at ? h('time', { class: 'board-task-when', data: { since: decision.at } }, since(decision.at)) : null)));
   }
 
   const schedule = framed(render);

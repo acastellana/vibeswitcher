@@ -154,7 +154,9 @@ public final class NodeLive: @unchecked Sendable {
             hub.follow(values.changes, into: sessionsStream) { $0 }
             sessionValues = values
             status.watch(sessions.changes)
-            let chats = ChatStore(queue: queue, home: requests.home, sessions: sessions.changes, note: note)
+            // Long messages' TL;DRs from the engine's AI summaries (`TeamSummaryWatch`), when there is an engine.
+            let chats = ChatStore(queue: queue, home: requests.home, sessions: sessions.changes, note: note, summaries: engine?.messageSummaries,
+                                  ask: engine.map { engine in { session, entry, message in engine.summarizeMessage(session: session, entry: entry, message: message) } })
             chats.start(clock: clock)
             hub.chats = chats
             self.chats = chats
@@ -182,7 +184,8 @@ public final class NodeLive: @unchecked Sendable {
 
     /// The `boards` stream (the parity table's gap 4): each lead's board, read by `LiveBoards`, and `board`'s answer.
     private func startBoards(_ engine: LeadEngine) {
-        let boards = LiveBoards(queue: queue, leads: engine.leads.changes, usageWaits: engine.usageWaits, summaries: engine.teamSummaries, note: note)
+        let boards = LiveBoards(queue: queue, leads: engine.leads.changes, usageWaits: engine.usageWaits, summaries: engine.teamSummaries,
+                                decisions: engine.boardDecisions, note: note)
         let stream = LiveStream(collection: "boards", order: .field("project"))
         hub.add(collection: stream.collection, stream)
         boards.start(clock: clock)
