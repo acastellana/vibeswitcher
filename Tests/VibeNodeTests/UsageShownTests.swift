@@ -7,6 +7,8 @@ import Testing
 /// usage the roles' tool servers keep under the node's root at each refresh (`NodeUsage`), `status`, `settings` and the
 /// page carry it, and a review row waiting on a limit says so on the board (`UsageWaits`, the app's
 /// `TeamRows.usageWaits`). No credential is read; every reading here is a scratch root's. Nothing is slept on.
+// A scratch host starts the sessions these use: on Linux only, as BoardNodeTests (the Mac's host refuses a scratch spawn).
+@Suite(NodeTraits.linuxOnly)
 struct UsageShownTests {
     private let scratch = Scratch()
 

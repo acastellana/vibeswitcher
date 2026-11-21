@@ -8,6 +8,8 @@ import Testing
 /// is ever run by a test), rate-limited per agent, off with Settings' AI summaries and while the usage holds Haiku back;
 /// the lines reach the boards (`teamSummaries`, `BoardValue`'s `summary`). Each test has a scratch root and host;
 /// nothing is slept on.
+// A scratch host starts the sessions these use: on Linux only, as BoardNodeTests (the Mac's host refuses a scratch spawn).
+@Suite(NodeTraits.linuxOnly)
 struct TeamSummaryWatchTests {
     private let scratch = Scratch()
 

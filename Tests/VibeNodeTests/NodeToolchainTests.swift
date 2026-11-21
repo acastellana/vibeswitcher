@@ -8,6 +8,11 @@ import Testing
 /// (a stand-in here), never in a project's folder; a missing or other-than-named tool a standing notice, a change told
 /// to the lead once and noted for a day.
 struct NodeToolchainTests {
+    /// A FIFO pin is never waited on: the look returns well inside this (it opens with O_NONBLOCK).
+    static let fifoLimit: TimeInterval = 5
+    /// A program that never ends is stopped at its 1 s timeout; this bounds the stop and its reaping.
+    static let stoppedLimit: TimeInterval = 10
+
     private let scratch = Scratch()
 
     private func project(_ name: String, files: [String: String]) throws -> String {
@@ -48,7 +53,7 @@ struct NodeToolchainTests {
         try #require(mkfifo(fifo + "/.nvmrc", 0o600) == 0)
         let start = Date()
         #expect(NodeToolchain.needs(root: fifo) == [.init(tool: "node", because: "package.json")])
-        #expect(Date().timeIntervalSince(start) < 5)
+        #expect(Date().timeIntervalSince(start) < Self.fifoLimit)
 
         for (index, weird) in ["lts/*", "6.4\u{1B}[31m", "latest; rm -rf ~", "1.2.3.4.5", String(repeating: "9", count: 300)].enumerated() {
             let root = try project("weird-\(index)", files: ["Package.swift": "", ".swift-version": weird + "\n"])
@@ -88,7 +93,7 @@ struct NodeToolchainTests {
         #expect(NodeToolchain.absolutePath("bin:.::/usr/bin") == "/usr/bin")
         let start = Date()
         #expect(NodeToolchain.run(["/bin/sleep", "30"], environment: [], timeout: 1) == nil)
-        #expect(Date().timeIntervalSince(start) < 10)
+        #expect(Date().timeIntervalSince(start) < Self.stoppedLimit)
     }
 
     /// The first look keeps what it found and tells nothing; a change is told to that project's lead once and noted for a
