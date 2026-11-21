@@ -66,6 +66,8 @@ enum ServerCheck {
               let prefix = resolved(NodeFolders.defaultPrefix(accountHome: VibePaths.accountHome)),
               let host = resolved(program) else { return nil }
         guard let server = NodeCheck.installedServer(host: host, prefix: prefix) else { return false }
+        // The server file itself, not a link elsewhere (the review of 2026-11-21).
+        guard resolved(server) == server else { return false }
         guard Platform.CodeIdentity.runs(token, executable: server) else { return false }
         return Platform.CodeIdentity.isHardened(token) == true
     }

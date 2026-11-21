@@ -257,8 +257,7 @@ or decided. Done on Linux, tested on both systems (`ApprovalJudgmentTests`, `App
    label and plist (`launchctl bootout`, then `bootstrap` a plist from any path with the same label and a program of
    one's choosing), the builds folder (`~/.vibeswitcher/v2/builds/<commit>/bin/…` can be made by any session with a
    genuine host and an evil server, so `NodeCheck.installedServer` and the cdhash read from that file vouch for
-   nothing), and any reference file beside them. The server's path isn't resolved (`realpath`) before its cdhash is
-   read either. Needs an anchor a session can't write. Options:
+   nothing), and any reference file beside them. (The server's path is now resolved and must be the file itself.) Needs an anchor a session can't write. Options:
    - **cdhashes pinned at install in a root-owned place** (`/Library/Application Support/VibeSwitcher/<uid>/pins`,
      written by a one-time `sudo` step or a privileged helper): the command line checks the server's running cdhash
      against the pin, not against a file. Costs a password at each install; the pin moves only with root.
