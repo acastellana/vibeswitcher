@@ -4256,3 +4256,7 @@ Proposed task 1: Find why dictations end with no text
 - 2026-11-21 12:36 Claude Code's skill sync finished a round (1795218410.862467) in ~/.claude/skills/synced, accepted by itself (nothing held): 1 changed
 - 2026-11-21 12:36 Started a worker on claude-dictation-text
 - 2026-11-21 12:36 Automatically (auto_advance): Started a worker on claude-dictation-text (Claude dictation: text that was dictated is dropped as "typed in the terminal meanwhile").
+- 2026-11-21 13:11 Planned one-sidebar-button: One sidebar button closes all finished shells and replaced leads (review audit)
+- 2026-11-21 13:11 Started a worker on one-sidebar-button
+- 2026-11-21 13:11 Automatically (auto_advance): Started a worker on one-sidebar-button (One sidebar button closes all finished shells and replaced leads).
+- 2026-11-21 13:11 Automatically (auto_advance): Overlap for one-sidebar-button's start (a warning only: nothing was refused or reordered). Sandbox.swift: claude-dictation-text (running: its boundaries name it); scripts/sandbox-app.sh: claude-dictation-text (running: its boundaries name it).
