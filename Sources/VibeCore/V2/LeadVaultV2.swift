@@ -119,8 +119,16 @@ public enum LeadVaultV2 {
         set { lifeLock.withLock { life = max(1, newValue) } }
     }
 
-    /// Whether the record is kept: on Linux only.
-    public static var isOn: Bool { !Platform.CodeIdentity.isAvailable }
+    /// Whether this host keeps the record: on Linux, every host; on the Mac, a node host only, which says so
+    /// (`recordsOnThisHost`, set by `HostServer` once it is one: the review of 2026-11-21), never the Mac app's.
+    public static var isOn: Bool { !Platform.CodeIdentity.isAvailable || recordsOnThisHost }
+
+    /// Set by a Mac node host (one host to a process): its vault keeps the record, the hooks included.
+    public static var recordsOnThisHost: Bool {
+        get { lifeLock.withLock { nodeHost } }
+        set { lifeLock.withLock { nodeHost = newValue } }
+    }
+    nonisolated(unsafe) private static var nodeHost = false
 
     /// The digest the record keeps of `text`: SHA-256, lower-case hex.
     public static func digest(_ text: String) -> String { BuildInfo.sha256(of: Data(text.utf8)) }
@@ -128,9 +136,10 @@ public enum LeadVaultV2 {
     // MARK: The book's side
 
     /// `request` from `caller` on `book` (made when there's none): the app's alone, on Linux alone.
+    /// `on`: whether this host keeps the record (`isOn`; the host's handler passes its own answer).
     public static func answer(_ request: Request, from caller: LeadVault.Caller, book: inout Book?,
-                              now: Double = Date().timeIntervalSince1970) -> Reply {
-        guard isOn else { return .refused("This session host keeps no record of the user's actions (the Mac's).") }
+                              now: Double = Date().timeIntervalSince1970, on: Bool = isOn) -> Reply {
+        guard on else { return .refused("This session host keeps no record of the user's actions (the Mac's).") }
         guard caller == .app else { return .refused("Only VibeSwitcher records and reads the user's actions.") }
         var record = book ?? Book()
         defer { book = record }
@@ -185,8 +194,8 @@ public enum LeadVaultV2 {
     /// neither lead's check takes it; nor after any later seal under it while one lives (a recipient differs from none).
     /// Its renewal goes on until `renewedLifeCap`, and the app's check (a handover) still takes it.
     public static func sealed(_ message: SteerMessage, target: String? = nil, book: inout Book?, changed: inout Bool,
-                              now: Double = Date().timeIntervalSince1970) {
-        guard isOn, message.from == .user else { return }
+                              now: Double = Date().timeIntervalSince1970, on: Bool = isOn) {
+        guard on, message.from == .user else { return }
         var record = book ?? Book()
         let contested = record.seals[message.id].map { now - $0 <= sealLife } == true && record.targets[message.id] != target
         record.seals[message.id] = now
@@ -204,15 +213,15 @@ public enum LeadVaultV2 {
     /// check is a taking, the app's (a handover) or a lead's own hook taking its inbox; anyone else's check (a worker's,
     /// a process outside the sessions) reads and changes nothing, so it can't stop a waiting answer's renewal.
     public static func verified(_ messages: [SteerMessage], _ valid: [Bool], book: inout Book?, changed: inout Bool,
-                                takes: Bool = true, now: Double = Date().timeIntervalSince1970) -> [Bool] {
-        verified(messages, valid, book: &book, changed: &changed, taking: { _ in takes }, now: now)
+                                takes: Bool = true, now: Double = Date().timeIntervalSince1970, on: Bool = isOn) -> [Bool] {
+        verified(messages, valid, book: &book, changed: &changed, taking: { _ in takes }, now: now, on: on)
     }
 
     /// As above, deciding for each message whether the check takes it: `taking` gets the session its seal was recorded
     /// for (`Book.targets`; nil: none recorded).
     static func verified(_ messages: [SteerMessage], _ valid: [Bool], book: inout Book?, changed: inout Bool,
-                         taking: (_ target: String?) -> Bool, now: Double) -> [Bool] {
-        guard isOn else { return valid }
+                         taking: (_ target: String?) -> Bool, now: Double, on: Bool = isOn) -> [Bool] {
+        guard on else { return valid }
         let life = sealLife
         var record = book
         let result = zip(messages, valid).map { message, valid -> Bool in
@@ -238,15 +247,15 @@ public enum LeadVaultV2 {
     /// book's handler (the close-out review: the port map's kinds keep that hook to a line).
     public static func verified(_ messages: [SteerMessage], _ valid: [Bool], book: inout Book?, changed: inout Bool,
                                 caller: LeadVault.Caller, members: [LeadVault.Member],
-                                now: Double = Date().timeIntervalSince1970) -> [Bool] {
-        guard isOn else { return valid }
-        if caller == .app { return verified(messages, valid, book: &book, changed: &changed, taking: { _ in true }, now: now) }
+                                now: Double = Date().timeIntervalSince1970, on: Bool = isOn) -> [Bool] {
+        guard on else { return valid }
+        if caller == .app { return verified(messages, valid, book: &book, changed: &changed, taking: { _ in true }, now: now, on: on) }
         guard case .session(let session) = caller, members.contains(where: { $0.role == .lead && $0.session == session }) else {
-            return verified(messages, valid, book: &book, changed: &changed, taking: { _ in false }, now: now)
+            return verified(messages, valid, book: &book, changed: &changed, taking: { _ in false }, now: now, on: on)
         }
         return verified(messages, valid, book: &book, changed: &changed, taking: { target in
             target.map { $0.lowercased() == session.lowercased() } ?? false
-        }, now: now)
+        }, now: now, on: on)
     }
 
     /// Seals, retirements and checks older than a seal's life verify false by their age alone: they're dropped.

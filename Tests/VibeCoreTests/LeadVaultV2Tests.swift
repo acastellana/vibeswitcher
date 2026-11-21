@@ -6,6 +6,27 @@ import Testing
 /// a `.user` seal verifies false once retired or past its life (T41 narrowed); a vault saved before the field reads as
 /// before; and the Mac's vault hooks do nothing.
 struct LeadVaultV2Tests {
+    /// The record per host (the review of 2026-11-21): `on` decides, on both systems, for the answer and both hooks; the
+    /// default is Linux's every host and, on the Mac, only a host that said it's a node host (`recordsOnThisHost`).
+    @Test func theRecordIsKeptWhereTheHostSaysSo() {
+        #expect(LeadVaultV2.isOn == (!Platform.CodeIdentity.isAvailable || LeadVaultV2.recordsOnThisHost))
+        let request = LeadVaultV2.Request.recordUserAction(action: "a", kind: "set", subject: nil, digest: "d")
+        var book: LeadVaultV2.Book?
+        #expect(LeadVaultV2.answer(request, from: .app, book: &book, on: true) == .recorded(first: true))
+        if case .refused = LeadVaultV2.answer(request, from: .app, book: &book, on: false) {} else { Issue.record("recorded while off") }
+        let message = SteerMessage(text: "yes", from: .user, agentPid: 42)
+        var changed = false
+        var off: LeadVaultV2.Book?
+        LeadVaultV2.sealed(message, book: &off, changed: &changed, on: false)
+        #expect(off == nil && !changed)
+        LeadVaultV2.sealed(message, book: &off, changed: &changed, on: true)
+        #expect(off?.seals[message.id] != nil && changed)
+        // Retired, it verifies false where the record is kept, and as the key says where it isn't.
+        _ = LeadVaultV2.answer(.retireUserSeals([message.id]), from: .app, book: &off, on: true)
+        #expect(LeadVaultV2.verified([message], [true], book: &off, changed: &changed, on: true) == [false])
+        #expect(LeadVaultV2.verified([message], [true], book: &off, changed: &changed, on: false) == [true])
+    }
+
     private let scratch = Scratch()
     private static let linux = !Platform.CodeIdentity.isAvailable
 
