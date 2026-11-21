@@ -116,9 +116,6 @@ public enum ServerStart {
         requests.nodeRoot = parsed.nodeRoot
         // Where `build.switch` finds the builds: the account's own install folder on the node, a test's on a scratch node.
         requests.installRoot = accountHome.map { NodeFolders.defaultPrefix(accountHome: $0) } ?? parsed.testInstallRoot
-        // Codex trusts the hooks `hooks install` puts in on the user's node (`CodexHookTrust`); a scratch server starts no
-        // Codex of the user's for a scratch home.
-        if parsed.node { requests.trustCodex = { $0.trustCodex() } }
         // Check for Updates on the user's node (`UpdateWatch`): a scratch server asks GitHub nothing.
         if parsed.node, let accountHome {
             let updates = UpdateWatch(file: root.appendingPathComponent("update-check.json"), running: commit,

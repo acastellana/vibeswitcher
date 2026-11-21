@@ -90,11 +90,6 @@ public final class Requests: @unchecked Sendable {
     /// S8b): the account's `NodeFolders.defaultPrefix` on the node, `--test-install-root` on a scratch node; none:
     /// `build.switch` is refused and `status` gives no `builds`.
     public var installRoot: String?
-    /// Codex's trust of the hooks an install put in (`HooksRequest.trustCodex`): the user's node's only (`ServerStart`
-    /// sets it), so a scratch node or a test starts no Codex of the user's. Blocks: off `queue`.
-    public var trustCodex: @Sendable (HooksRequest) -> Result<Int, StartRefusal> = { _ in
-        .failure(StartRefusal("a scratch node asks no Codex to trust its hooks", exitCode: 1))
-    }
     /// Check for Updates (`UpdateWatch`): the user's node's only. Its notice is `status`'s, its last answer `update`.
     public var updates: UpdateWatch?
     /// The waits a `build.switch` runs on (a test's shorter ones).
@@ -485,7 +480,7 @@ public final class Requests: @unchecked Sendable {
         guard !install || nodeRoot != nil else {
             return reply(.init(re: request.id, error: .init(.refused, "this server has no build folder to install the hooks' programs from")))
         }
-        let (nodeRoot, home, vault, commit, trustCodex) = (self.nodeRoot ?? "", self.home, link.vault, self.commit, self.trustCodex)
+        let (nodeRoot, home, vault, commit) = (self.nodeRoot ?? "", self.home, link.vault, self.commit)
         let work = { (binaries: [String: String]?, hostBuild: String?) -> NodeWire.Reply in
             var hooks = HooksRequest(nodeRoot: nodeRoot, home: home, binaries: binaries, vault: vault)
             // While the host runs another build than this server, a program that isn't its `binaries` entry is the
@@ -496,16 +491,8 @@ public final class Requests: @unchecked Sendable {
                 switch hooks.install(agents: agents) {
                 case .failure(let refusal): return .init(re: request.id, error: .init(.refused, refusal.text))
                 case .success(let installed):
-                    var result: [String: NodeWire.Value] = ["programs": .array(installed.programs.map(NodeWire.Value.string)),
-                                                            "configs": .array(installed.configs.map(NodeWire.Value.string))]
-                    // Codex skips a hook until it's trusted: trusted here as the app does (`CodexHookTrust`), or why not.
-                    if agents.contains(.codex) {
-                        switch trustCodex(hooks) {
-                        case .success(let count): result["codexTrusted"] = .int(count)
-                        case .failure(let refusal): result["codexTrust"] = .string(refusal.text)
-                        }
-                    }
-                    return .init(re: request.id, result: .object(result))
+                    return .init(re: request.id, result: .object(["programs": .array(installed.programs.map(NodeWire.Value.string)),
+                                                                 "configs": .array(installed.configs.map(NodeWire.Value.string))]))
                 }
             }
             switch hooks.remove(agents: agents) {

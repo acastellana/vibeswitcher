@@ -12,11 +12,11 @@ that works through shared code counts only if the node actually calls it. Anythi
 
 ## Summary
 
-Of 101 features: **57 has it**, **13 partly**, **15 missing** (one of them, Codex workers, on purpose), **9 not needed on
+Of 101 features: **56 has it**, **13 partly**, **16 missing** (two of them on purpose: Codex workers, and Codex's trust of the hooks), **9 not needed on
 Linux**, **6 Linux-only new**, **1 unverified** (counted again from the table on 2026-11-20, `v2-stability`, after the
 settings, composer, push and rotation lanes' merges and that lane's rows: reopening your own sessions after a restart, the prompt-audit reminder,
 reminders about waiting or stuck sessions, New Project…, the sound, the "New since you looked" line, Between leads, the
-all-done mark, rename and pause, ended sessions resumed, and Close Finished Shells; launch presets edited on the node since the page-actions lane; and on 2026-11-21, `v2-small-rows`: Check for Updates, the developer tools notice, the projects folder, shell requests and Codex's trust of the hooks).
+all-done mark, rename and pause, ended sessions resumed, and Close Finished Shells; launch presets edited on the node since the page-actions lane; and on 2026-11-21, `v2-small-rows`: Check for Updates, the developer tools notice, the projects folder, and shell requests; Codex's trust of the hooks left out on purpose).
 
 The gaps that matter most for daily use, worst first:
 
@@ -153,7 +153,7 @@ Sizes to close: S is about a day, M a few days, L a week or more.
 | Feature | V1 (where) | V2 state | Where in V2 / what's missing | Size | Note |
 | --- | --- | --- | --- | --- | --- |
 | Install and remove the hooks for Claude and Codex | `AppDelegate.swift` `HookSetup`, Settings › Agents | has it | `vibeswitcher hooks install|remove [--agent]`; `Server/HooksRequest.swift`, sealed after a typed code | | each config is checked first (`Sources/VibeCore/V2/HookInstallCheck.swift`) |
-| Trust VibeSwitcher's hooks in Codex automatically | `CodexTrust.swift` | has it | `Server/CodexHookTrust.swift` (2026-11-21): `vibeswitcher hooks install` (with Codex) asks `codex app-server` (your login shell's `codex`, the node's home) for the hooks and records only VibeSwitcher's exact ones as trusted in `~/.codex/config.toml`, written as the app and sealed (`HooksRequest.trustCodex`); when Codex can't be asked the command line says why and to trust them in `/hooks`. The user's node only: a scratch node starts no Codex | | Codex's trust works the same on Linux |
+| Trust VibeSwitcher's hooks in Codex automatically | `CodexTrust.swift` | missing | on purpose (2026-11-21): you trust them in Codex's `/hooks`, as `vibeswitcher hooks install` says. The app's way runs `codex app-server` inside the vault's sealed write of `~/.codex/config.toml`, so whatever that process (or a planted `codex`, or a login shell's startup files) writes there would be sealed as VibeSwitcher's: a seal bypass on a node, where every file of the user is a worker's to change | S | on purpose |
 | The status line for the lead, workers and verifiers | `Sources/VibeCore/LeadLaunch.swift`, `vibeswitcher-mcp --status-line` | has it | through the door (`Porter.swift`) | | |
 | Git guards: refused git options, deny rules, the read-only command hook | `Sources/VibeCore/RefusedGit.swift`, `ReadOnlyCommand.swift`, `LeadLaunch.swift` | has it | the node launches through the shared `LeadLaunch.prepare` | | |
 

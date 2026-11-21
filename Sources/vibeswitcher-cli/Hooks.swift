@@ -9,9 +9,8 @@ import VibeNode
 /// The server writes in its own home (`getpwuid`'s on the node, the scratch home on a scratch node) as the app, so the
 /// change is sealed as the user's (`LeadVault.appWrite`): install copies `vibeswitcher-hook` and `vibeswitcher-mcp`
 /// from the node's build into `~/.vibeswitcher/bin`, only when their bytes are the ones the host's `build-info` names,
-/// then adds the hooks to `~/.claude/settings.json` and `~/.codex/hooks.json`, and has Codex trust them (its app-server
-/// records them in `~/.codex/config.toml`, sealed too: `CodexHookTrust`); remove takes only VibeSwitcher's hooks out
-/// (the user's own handlers stay). Nothing is written here, and `CLAUDE_CONFIG_DIR` and `CODEX_HOME` play no part.
+/// then adds the hooks to `~/.claude/settings.json` and `~/.codex/hooks.json`; remove takes only VibeSwitcher's hooks
+/// out (the user's own handlers stay). Nothing is written here, and `CLAUDE_CONFIG_DIR` and `CODEX_HOME` play no part.
 /// The accepted request is written to the journal (ids only).
 enum HooksCommand {
     static let usage = "usage: vibeswitcher hooks install|remove [--agent claude|codex]"
@@ -60,13 +59,7 @@ enum HooksCommand {
             for (agent, config) in zip(agents, configs) {
                 Say.out(kind == "hooks.install" ? "\(agent.displayName): hooks installed in \(config)" : "\(agent.displayName): hooks removed from \(config)")
                 if kind == "hooks.install", agent == .codex {
-                    if let count = result["codexTrusted"]?.int {
-                        Say.out(count == 0 ? "  Codex trusts them already."
-                                : "  Codex trusts them: \(count) recorded in ~/.codex/config.toml, sealed as VibeSwitcher's.")
-                    } else {
-                        let why = result["codexTrust"]?.string.map { " (\(ConfigSeal.inert($0, limit: 400)))" } ?? ""
-                        Say.out("  Codex wasn't asked to trust them\(why): run /hooks in Codex and trust the vibeswitcher-hook entries.")
-                    }
+                    Say.out("  Codex asks to trust new hooks: run /hooks in Codex and trust the vibeswitcher-hook entries.")
                 }
             }
             return 0
