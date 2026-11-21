@@ -153,7 +153,7 @@ Sizes to close: S is about a day, M a few days, L a week or more.
 | Feature | V1 (where) | V2 state | Where in V2 / what's missing | Size | Note |
 | --- | --- | --- | --- | --- | --- |
 | Install and remove the hooks for Claude and Codex | `AppDelegate.swift` `HookSetup`, Settings › Agents | has it | `vibeswitcher hooks install|remove [--agent]`; `Server/HooksRequest.swift`, sealed after a typed code | | each config is checked first (`Sources/VibeCore/V2/HookInstallCheck.swift`) |
-| Trust VibeSwitcher's hooks in Codex automatically | `CodexTrust.swift` | missing | the command line tells you to trust them in Codex's `/hooks` | S | |
+| Trust VibeSwitcher's hooks in Codex automatically | `CodexTrust.swift` | has it | `Server/CodexHookTrust.swift` (2026-11-21): `vibeswitcher hooks install` (with Codex) asks `codex app-server` (your login shell's `codex`, the node's home) for the hooks and records only VibeSwitcher's exact ones as trusted in `~/.codex/config.toml`, written as the app and sealed (`HooksRequest.trustCodex`); when Codex can't be asked the command line says why and to trust them in `/hooks`. The user's node only: a scratch node starts no Codex | | Codex's trust works the same on Linux |
 | The status line for the lead, workers and verifiers | `Sources/VibeCore/LeadLaunch.swift`, `vibeswitcher-mcp --status-line` | has it | through the door (`Porter.swift`) | | |
 | Git guards: refused git options, deny rules, the read-only command hook | `Sources/VibeCore/RefusedGit.swift`, `ReadOnlyCommand.swift`, `LeadLaunch.swift` | has it | the node launches through the shared `LeadLaunch.prepare` | | |
 

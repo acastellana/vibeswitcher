@@ -150,6 +150,25 @@ public struct HooksRequest {
         return .success(Installed(programs: targets, configs: configs))
     }
 
+    /// Codex's trust of the hooks just installed (`CodexHookTrust`, the app's `CodexTrust`): what Codex's app-server
+    /// records in `<home>/.codex/config.toml` written as the app and sealed, as the app's Settings does. How many were
+    /// newly trusted, or why not (the hooks stay installed: `/hooks` in Codex trusts them by hand). `command`: tests'.
+    public func trustCodex(command: [String] = CodexHookTrust.loginCommand(), timeout: TimeInterval = 30) -> Result<Int, StartRefusal> {
+        let config = (home as NSString).appendingPathComponent(".codex/config.toml")
+        let hook = (binFolder as NSString).appendingPathComponent("vibeswitcher-hook")
+        var trusted = 0
+        do {
+            try vault.appWrite([config], home: home) {
+                trusted = try CodexHookTrust.trustOurHooks(home: home, hookBinary: hook, command: command, timeout: timeout)
+            }
+        } catch {
+            vault.sealAppWrites()
+            return .failure(StartRefusal("Codex wasn't asked to trust the hooks: \(ConfigSeal.inert("\(error)", limit: 400))", exitCode: 1))
+        }
+        vault.sealAppWrites()
+        return .success(trusted)
+    }
+
     public func remove(agents: [Agent]) -> Result<Void, StartRefusal> {
         guard !agents.isEmpty else { return .failure(StartRefusal("no agent named")) }
         do {
