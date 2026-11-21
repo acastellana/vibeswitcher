@@ -411,6 +411,13 @@ enum Samples {
             let message = TeamMessage(sender: sender, body: "Body \(index)", part: index == 2 ? .init(index: 1, count: 2) : nil)
             items.append(.team(ChatEntry(id: "m\(index)", at: index == 0 ? nil : at, kind: .steered(text: message.text, fromLead: message.fromLead), team: message), message))
         }
+        // The all-done card in the lead's chat: one with its summary, receipts and seen mark, one from before those.
+        var full = LeadAllDone(id: "done-1", at: at.timeIntervalSince1970, since: 0, tasks: [LeadAllDone.Task(slug: "a", title: "A", outcome: .merged),
+                                                                                             LeadAllDone.Task(slug: "b", title: "B", outcome: .reverted)])
+        full.summary = LeadAllDone.Summary(headline: "A is in", bullets: ["B was put back"], byModel: true)
+        full.receipts = try? JSONDecoder().decode(LeadReceiptTotals.self, from: Data(#"{"tasks":1,"worked":60,"tokens":10,"cost":0.1,"unpriced":0,"pricesAsOf":"2026-11-01"}"#.utf8))
+        full.seenAt = at.timeIntervalSince1970
+        items += [.allDone(full), .allDone(LeadAllDone(id: "done-0", at: at.timeIntervalSince1970, since: 0, tasks: []))]
         return items
     }
 

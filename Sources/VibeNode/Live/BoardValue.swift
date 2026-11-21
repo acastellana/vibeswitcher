@@ -137,8 +137,14 @@ public enum BoardValue {
     /// whether the user has seen it (`seen`). Null for none.
     static func allDone(_ board: LeadBoard, now: Date) -> NodeWire.Value? {
         guard let mark = board.allDone?.last, now.timeIntervalSince1970 - mark.at <= doneFor else { return nil }
-        return .object([
-            "id": .string(text(mark.id, limit: 80)), "at": .date(Date(timeIntervalSince1970: mark.at)),
+        return .object(allDoneFields(mark).merging(["id": .string(text(mark.id, limit: 80)), "at": .date(Date(timeIntervalSince1970: mark.at))]) { $1 })
+    }
+
+    /// An all-done mark's card as the board and the lead's chat carry it (`allDone`, `ChatValue`'s `allDone` item):
+    /// its summary, tasks and how each ended, how many merged, its receipts in words and their prices' date, and
+    /// whether it was seen; every string the batch's (the sessions') writing, inert and capped.
+    static func allDoneFields(_ mark: LeadAllDone) -> [String: NodeWire.Value] {
+        [
             "summary": mark.summary.map { summary in
                 .object(["headline": .string(text(summary.headline, limit: lineBytes)),
                          "bullets": .array(summary.bullets.prefix(8).map { .string(text($0, limit: lineBytes)) }), "byModel": .bool(summary.byModel)])
@@ -148,7 +154,7 @@ public enum BoardValue {
             "receipts": mark.receipts.map { .string(text($0.text, limit: lineBytes)) } ?? .null,
             "pricesAsOf": mark.receipts.map { .string(text($0.pricesAsOf, limit: 40)) } ?? .null,
             "seen": .bool(mark.seenAt != nil),
-        ])
+        ]
     }
 
     /// The most bytes of UTF-8 a decision's text, and its why, carry.

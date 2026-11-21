@@ -160,3 +160,10 @@ test('the batch that cleared the board: its summary, what it cost, and each task
   assert.equal(allDoneCard({ ...mark, summary: null, receipts: null, pricesAsOf: null }).cost, null);
   assert.equal(validate('seen.args', { project: 'local:project:x' }), null);
 });
+
+test('the all-done card is also an item of the lead’s chat, in the node’s shape', () => {
+  const { id, at, ...fields } = vector('board')[1].result.boards[0].allDone;
+  const item = { id: `all-done:${id}`, type: 'allDone', at, ...fields };
+  assert.equal(validate('chat.item', item), null);
+  assert.notEqual(validate('chat.item', { ...item, merged: 'two' }), null);
+});

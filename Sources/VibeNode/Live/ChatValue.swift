@@ -3,7 +3,8 @@ import VibeCore
 
 /// A chat's items as the live wire carries them (the live plan's B4, the live wire contract's §6): `ChatTimeline.items`
 /// of a transcript, each `ChatItem` of the cases `prompt`, `reply`, `tools` and `team` one wire item. `newMarker` is the
-/// client's view state; `allDone`, `question` and `updates` are placed by stage 5's Team slice: none of them is written.
+/// client's view state; `question` and `updates` are placed by stage 5's Team slice: neither is written. `allDone` is
+/// the lead's board's all-done card, which `ChatStore` places in the lead's chat (2026-11-21).
 ///
 /// Every text an agent, a tool or a lead wrote (marked † in the contract) is data: the page shows it as text nodes, and
 /// renders a reply's markdown to nodes itself. An image is its type and its size, never its bytes (LW-D11: what an agent
@@ -37,7 +38,11 @@ public enum ChatValue {
                 "summary": .string(ChatTimeline.summary(tools)), "tools": .array(tools.map(tool)),
             ]) { $1 })
         case .team(let entry, let message): return team(entry, message)
-        case .newMarker, .allDone, .question, .updates: return nil
+        // Where the lead's board cleared (the app's `AllDoneCard`): placed in the lead's chat by `ChatStore`, from the
+        // engine's marks (`LeadEngine.chatExtras`), never read from a transcript.
+        case .allDone(let mark):
+            return .object(head(item.id, "allDone", Date(timeIntervalSince1970: mark.at)).merging(BoardValue.allDoneFields(mark)) { $1 })
+        case .newMarker, .question, .updates: return nil
         }
     }
 
