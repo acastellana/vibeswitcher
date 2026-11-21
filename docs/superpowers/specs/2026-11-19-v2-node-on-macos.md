@@ -222,7 +222,8 @@ with the Hardened Runtime as non-dumpable; Hardened Runtime and `task_for_pid` w
 voice (2026-11-20: Touch ID or the login password for each state change, with the caller check); its code is built
 behind a seam (`Platform.Approval`, `ApprovalVoice`) and not wired: step 4 measures it first. Since 2026-11-21 it is wired
 (`VoiceRule.Mode.approval`, `Requests.approvalJudgment`, the command line asking no code under it) and still off: the
-user's server takes it only once `NodeSystem.approvalMeasured` is turned on, after step 4 and a review.
+user's server takes it only once `NodeSystem.approvalMeasured` is turned on, after step 4 and a review. Step 5's agent is built as data (`NodeAgent`: the
+property list, its check, the `launchctl` lines and `print`'s pid), not wired: `start` on the Mac is still refused.
 
 ## Decisions
 

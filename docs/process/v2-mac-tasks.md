@@ -159,6 +159,19 @@ that two pushes haven't explained comes here too, with the experiment that will 
   person must decline it; record what the dialog shows); a second request while a dialog is open (refused, saying so);
   and the CLI's 120 s wait against the dialog's 60 s. An independent review of `ApprovalRequests.swift`,
   `ApprovalCard.swift` and the `Requests.handle` split before it is turned on.
+- **The LaunchAgent as data** (2026-11-21, `v2-small-rows`; the design's step 5, not wired): `NodeAgent` makes
+  `~/Library/LaunchAgents/dev.vibeswitcher.node.plist` from the unit's inputs (the commit's own host with `--node`,
+  `--node-root` and its server; `HOME`, `PATH`, `SWIFT_BACKTRACE`; `KeepAlive` false; `RunAtLoad` only at login;
+  `ProcessType` Interactive; `LimitLoadToSessionType` Aqua; stderr to `<node root>/node.log`), checks a file read back
+  is exactly that (a key added or changed is found), gives the `launchctl` lines (`bootstrap gui/<uid>`, `kickstart`,
+  `bootout`, `print`, `getenv`) and reads `launchctl print`'s job `pid` and `program`. `NodeAgentTests`, both systems.
+  `start` on the Mac is still refused. **Needs a real Mac** before `start` uses it: `launchctl bootstrap gui/<uid>` of
+  the written file loads it and `kickstart` starts the host (and with `RunAtLoad`, at the next login); whether
+  `LimitLoadToSessionType` Aqua keeps it out of an ssh login's background session; `launchctl print`'s real output (the
+  job's own lines one tab in, `pid = ` and `program = ` as parsed; a nested block's deeper); `bootout` ends the host's
+  process group and what it leaves (sessions in sessions of their own stay, as the design says); `launchctl getenv` for
+  each of `NodeAgent.refusedManagerNames` after a `launchctl setenv`; the stderr file's mode and growth; and
+  LocalAuthentication's dialog from this agent (the voice's step 4 above).
 
 ## What `v2` found on the Mac and doesn't change
 
