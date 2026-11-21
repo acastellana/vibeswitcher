@@ -150,3 +150,26 @@ jobs:
             test.log
             .build/crash-reports/
           retention-days: 14
+  install:
+    # scripts/install-node-mac.sh's dry run (scripts/ci/macos-install-dry-run.sh): HEAD from a scratch origin into a
+    # scratch prefix, a release build signed with the Hardened Runtime, the injected CI answer; no LaunchAgent.
+    runs-on: xcode-27
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Select Xcode
+        # The Mac that builds main uses Xcode 27.2.
+        run: echo "DEVELOPER_DIR=/Applications/Xcode_27.2.app/Contents/Developer" >> "$GITHUB_ENV"
+      - name: Versions
+        run: |
+          swift --version
+          sw_vers
+          command -v shlock jq
+      - name: Install dry run
+        run: bash scripts/ci/macos-install-dry-run.sh

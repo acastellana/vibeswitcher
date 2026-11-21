@@ -82,4 +82,20 @@ struct NodeAgentTests {
         #expect(NodeAgent.printed(output) == .init(pid: 4242, program: "/Users/u/.vibeswitcher/v2/node/builds/\(Self.commit)/bin/vibeswitcher-host"))
         #expect(NodeAgent.printed("gui/501/dev.vibeswitcher.node = {\n\tstate = not running\n}").pid == nil)
     }
+
+    /// What `vibeswitcher agent-plist` prints for the Mac's install: the build's agent with the account's folders, its
+    /// root the node's, no start at login; refused when the folders aren't there, or for a commit the unit can't hold.
+    @Test func theInstallsAgentIsTheInstalledBuildsWithTheAccountsFolders() throws {
+        let tools: (String) -> Result<(swiftBin: String, nodeBin: String), StartRefusal> = { _ in .success((Self.inputs.swiftBin, Self.inputs.nodeBin)) }
+        let data = try NodeAgent.installed(prefix: Self.inputs.prefix, commit: Self.commit, home: "/Users/u", folders: tools).get()
+        let root = NodeFolders.nodeRoot(accountHome: "/Users/u")
+        #expect(NodeAgent.check(data, inputs: Self.inputs, nodeRoot: root, atLogin: false) == nil)
+        let none: (String) -> Result<(swiftBin: String, nodeBin: String), StartRefusal> = { _ in .failure(StartRefusal("no swift folder")) }
+        if case .failure(let refusal) = NodeAgent.installed(prefix: Self.inputs.prefix, commit: Self.commit, home: "/Users/u", folders: none) {
+            #expect(refusal.text == "no swift folder")
+        } else { Issue.record("made with no folders") }
+        if case .success = NodeAgent.installed(prefix: Self.inputs.prefix, commit: "current", home: "/Users/u", folders: tools) {
+            Issue.record("made for a commit that isn't one")
+        }
+    }
 }

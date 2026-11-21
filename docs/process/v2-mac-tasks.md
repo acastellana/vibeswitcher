@@ -222,7 +222,23 @@ or decided. Done on Linux, tested on both systems (`ApprovalJudgmentTests`, `App
      `scripts/install-node.sh` has no Mac arm yet (its checks are Linux's throughout: `getent`, the ELF interpreter,
      `readelf`, `sha256sum`, the root-owned toolchain), so nothing calls the signing; the Mac arm calls
      `mac_sign_hardened` on each staged copy before its first hash, and adds `lib/mac-sign.sh` to the libraries it
-     checks against the commit's blobs.
+     checks against the commit's blobs. Done as its own script (below).
+   - The Mac's install, `scripts/install-node-mac.sh` (2026-11-21, `v2-small-rows`; install-node.sh untouched): the
+     same steps and exit codes with the Mac's tools (`id -P` for the home, `shlock`, BSD `stat`/`realpath`/`mv -h`,
+     `shasum`, `/usr/bin/jq`); GitHub's compare and runs through `/usr/bin/curl` with gh's keychain token (no gh binary:
+     Homebrew's is the user's); the developer folder's toolchain and SDK root's; a release build without
+     `--static-swift-stdlib`; each product Mach-O, arm64/x86_64 slices with this Mac's, an executable, loading only
+     `/usr/lib/…` and `/System/Library/Frameworks/…`, no run path but `/usr/lib/swift`, no `LC_DYLD_ENVIRONMENT`; signed
+     (`mac_sign_hardened`) before its first hash; `lib/mac-sign.sh` checked and sourced from the commit's blob; then
+     `vibeswitcher agent-plist` (`NodeAgent.installed`) writes `<prefix>/dev.vibeswitcher.node.plist` and the
+     launchctl lines are printed, never run. Its dry run (`scripts/ci/macos-install-dry-run.sh`, the v2 macos
+     workflow's `install` job) builds HEAD for real from a scratch origin into a scratch prefix with an injected green
+     answer, and checks the refusals it can reach. **Needs an independent review** (it is the Mac's S9). **Only a real
+     Mac**: gh's token in the login keychain (`security find-generic-password -s gh:github.com`, its
+     `go-keyring-base64:` form), GitHub's answers through curl, an App Store Xcode passing the toolchain check (and how
+     long its `find` takes), launchd taking the written agent and the host starting from it, and whether the host
+     needs entitlements build-app.sh gives the app's (`VibeSwitcherHost.entitlements`). Known gap: BSD `mv` has no
+     `-T`, so the build's rename checks its target absent under the lock, then checks the result.
    - A card for a kind with no arguments (`stop`, `start`, `web.revoke`): done, `approvalCard` names what each does
      (`stop` the live sessions it ends).
 8. **(LOW, done in `6f367200`, `03f406c9`)** A replayed action id answered before any dialog; the command line's

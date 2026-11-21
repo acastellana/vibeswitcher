@@ -117,6 +117,10 @@ case "wire-vectors":
     // The vectors name times (a usage limit's reset): written in UTC, so they read the same on every machine and CI.
     NSTimeZone.default = TimeZone(identifier: "UTC")!
     exit(WireCommand.run(Array(words.dropFirst())))
+case "agent-plist":
+    // Not in the usage text: `scripts/install-node-mac.sh` runs it from the build it has just installed, and writes what
+    // it prints for the user to load (the Mac's LaunchAgent, `NodeAgent`); `start` on the Mac stays refused.
+    exit(AgentPlistCommand.run(Array(words.dropFirst())))
 case "install-record":
     // Not in the usage text: `scripts/install-node.sh` runs it from the build it has just made (the start plan's ST-D13).
     guard let arguments = BuildRecord.Arguments(Array(words.dropFirst())) else {
