@@ -48,10 +48,20 @@ struct ApprovalVoiceTests {
     static let live = LiveSessions(programs: [700], terminals: ["/dev/ttys009"], host: 600, server: 650)
 
     /// The voice with `person`, the peers running the command line's code being `commandLinePeers`.
-    static func voice(_ person: Person, commandLinePeers: Set<pid_t> = [900], commandLine: Data? = commandLine) -> ApprovalVoice {
-        ApprovalVoice(authenticator: person, commandLine: commandLine) { token, code in
+    static func voice(_ person: Person, commandLinePeers: Set<pid_t> = [900], commandLine: Data? = commandLine, hardened: Bool = true) -> ApprovalVoice {
+        ApprovalVoice(authenticator: person, commandLine: commandLine, runs: { token, code in
             code == Self.commandLine && commandLinePeers.contains(token.pid)
-        }
+        }, hardened: { _ in hardened })
+    }
+
+    /// A command line without the Hardened Runtime could be steered (an injected library, its task port): never the
+    /// user's, never asked (the review of 2026-11-21).
+    @Test func aCommandLineWithoutTheHardenedRuntimeIsNeverTheUsers() {
+        let person = Person(.approved)
+        let voice = Self.voice(person, hardened: false)
+        #expect(voice.judge(kind: "set", card: Self.card, peer: Self.token(900), facts: Self.facts(), live: Self.live, uid: Self.uid)
+                == .notUser("the command line doesn't run with the Hardened Runtime, so another process could steer it"))
+        #expect(person.asked.isEmpty)
     }
 
     @Test func aStateChangeIsTheUsersOnlyOnceThePersonAgreesToItsCard() {

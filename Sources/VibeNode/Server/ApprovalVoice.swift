@@ -12,8 +12,8 @@ import VibeCore
 /// puts a dialog on the screen):
 /// 1. its peer is the server's uid;
 /// 2. its peer runs the installed command line's code (`commandLine`, its cdhash read at the server's start; the peer's
-///    audit token checked by Security, `Platform.CodeIdentity.runs`): the request came through the command line, so
-///    its typed word and confirmation ran;
+///    audit token checked by Security, `Platform.CodeIdentity.runs`) with the Hardened Runtime (`hardened`: no injected
+///    library, no task port for another process): the request came through the command line;
 /// 3. the guard rails: its ancestry holds no live session's program, the host or the server; its controlling terminal
 ///    is no live session's; no branch code runner is above it. (Linux's environment line is left out: with SIP on, the
 ///    Mac doesn't show another process's environment, and it would fail every peer.)
@@ -46,36 +46,23 @@ public struct ApprovalVoice: Sendable {
     public var commandLine: Data?
     /// Whether a peer's token runs code of a cdhash (`Platform.CodeIdentity.runs(_:cdhash:)`; a test's table).
     public var runs: @Sendable (Platform.PeerToken, Data) -> Bool
+    /// Whether a peer runs with the Hardened Runtime (`Platform.CodeIdentity.isHardened`; unreadable is no; a test's own).
+    public var hardened: @Sendable (Platform.PeerToken) -> Bool
 
     public init(authenticator: any Authenticator, commandLine: Data?,
-                runs: @escaping @Sendable (Platform.PeerToken, Data) -> Bool = { Platform.CodeIdentity.runs($0, cdhash: $1) }) {
+                runs: @escaping @Sendable (Platform.PeerToken, Data) -> Bool = { Platform.CodeIdentity.runs($0, cdhash: $1) },
+                hardened: @escaping @Sendable (Platform.PeerToken) -> Bool = { Platform.CodeIdentity.isHardened($0) == true }) {
         self.authenticator = authenticator
         self.commandLine = commandLine
         self.runs = runs
+        self.hardened = hardened
     }
 
     /// Whose voice the request of `kind` from `peer` (its token, read from the socket: `Platform.Sockets.peerToken`) is,
     /// `facts` read of it, `live` the live sessions, `uid` the server's, `card` the text of the card it acts on as the
     /// engine built it (nil for none). Asks the person only at step 5 above.
     public func judge(kind: String, card: String?, peer: Platform.PeerToken?, facts: PeerFacts, live: LiveSessions, uid: uid_t) -> Voice {
-        guard let peerUID = facts.uid else { return .notUser("its user can't be read") }
-        guard peerUID == uid else { return .notUser("it is another user's (uid \(peerUID))") }
-        guard let commandLine else { return .notUser("the installed command line's code couldn't be read at the server's start") }
-        guard let peer else { return .notUser("its process can't be named (no audit token)") }
-        guard runs(peer, commandLine) else { return .notUser("it isn't the installed command line (its code isn't the build's)") }
-        guard let ancestry = facts.ancestry else { return .notUser("its ancestry can't be read") }
-        for ancestor in ancestry {
-            if ancestor.pid == live.host { return .notUser("it runs under the session host (pid \(ancestor.pid))") }
-            if ancestor.pid == live.server { return .notUser("it runs under the server (pid \(ancestor.pid))") }
-            if live.programs.contains(ancestor.pid) { return .notUser("it runs under a live session's program (pid \(ancestor.pid))") }
-        }
-        switch facts.terminal {
-        case .unreadable: return .notUser("its controlling terminal can't be read")
-        case .named(let name) where live.terminals.contains(name): return .notUser("its terminal \(name) is a live session's")
-        case .named, .none: break
-        }
-        guard let runner = facts.underRunner else { return .notUser("whether it runs under branch code can't be read") }
-        guard !runner else { return .notUser("it runs under a branch code runner") }
+        if let why = callerRefusal(peer: peer, facts: facts, live: live, uid: uid) { return .notUser(why) }
         guard NodeWire.changesState(kind) else { return .user }
         guard let card, !card.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             return .notUser("\(kind) changes state and has no card to ask the person at the Mac about")
@@ -85,6 +72,33 @@ public struct ApprovalVoice: Sendable {
         case .declined(let why): return .notUser("declined at the Mac (\(why))")
         case .unavailable(let why): return .notUser("Touch ID or the login password can't be asked here (\(why))")
         }
+    }
+
+    /// Why the caller fails steps 1 to 3 (its uid, the installed command line's code, a hardened process, the guard
+    /// rails), or nil when it passes: silent, never asks. The server runs it before it takes the one dialog's place.
+    public func callerRefusal(peer: Platform.PeerToken?, facts: PeerFacts, live: LiveSessions, uid: uid_t) -> String? {
+        guard let peerUID = facts.uid else { return "its user can't be read" }
+        guard peerUID == uid else { return "it is another user's (uid \(peerUID))" }
+        guard let commandLine else { return "the installed command line's code couldn't be read at the server's start" }
+        guard let peer else { return "its process can't be named (no audit token)" }
+        guard runs(peer, commandLine) else { return "it isn't the installed command line (its code isn't the build's)" }
+        // The Hardened Runtime refuses an injected library (DYLD_INSERT_LIBRARIES) and another process's task port: a
+        // command line without it could be made to send anything under its own code.
+        guard hardened(peer) else { return "the command line doesn't run with the Hardened Runtime, so another process could steer it" }
+        guard let ancestry = facts.ancestry else { return "its ancestry can't be read" }
+        for ancestor in ancestry {
+            if ancestor.pid == live.host { return "it runs under the session host (pid \(ancestor.pid))" }
+            if ancestor.pid == live.server { return "it runs under the server (pid \(ancestor.pid))" }
+            if live.programs.contains(ancestor.pid) { return "it runs under a live session's program (pid \(ancestor.pid))" }
+        }
+        switch facts.terminal {
+        case .unreadable: return "its controlling terminal can't be read"
+        case .named(let name) where live.terminals.contains(name): return "its terminal \(name) is a live session's"
+        case .named, .none: break
+        }
+        guard let runner = facts.underRunner else { return "whether it runs under branch code can't be read" }
+        guard !runner else { return "it runs under a branch code runner" }
+        return nil
     }
 
     /// The longest card text a reason carries: the dialog is small, and the rest is on the command line's screen.
