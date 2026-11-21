@@ -621,8 +621,10 @@ struct NodeAcceptanceTests {
         let missing = try await node.runOnTerminal(["new", folder.path, "--agent", "codex"])
         #expect(missing.status != 0 && missing.output.contains("v2/test/codex") && missing.output.contains("ln -s"), "\(missing.output)\(missing.errors)")
         let standIn = node.root.appendingPathComponent("stand-in-codex")
-        try Data("#!/bin/sh\necho \"stand-in codex $*\"\nexec sleep 600\n".utf8).write(to: standIn)
-        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: standIn.path)
+        // Copied through a close-on-exec descriptor, so no child another test forks holds it open ("Text file busy").
+        let text = node.root.appendingPathComponent("stand-in-codex.txt")
+        try Data("#!/bin/sh\necho \"stand-in codex $*\"\nexec sleep 600\n".utf8).write(to: text)
+        try copyClosedOnExec(text.path, to: standIn.path)
         let link = node.root.appendingPathComponent("v2/test/codex")
         try FileManager.default.createDirectory(at: link.deletingLastPathComponent(), withIntermediateDirectories: true)
         try FileManager.default.createSymbolicLink(atPath: link.path, withDestinationPath: standIn.path)
