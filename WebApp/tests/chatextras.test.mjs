@@ -5,7 +5,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { chatMarkdown, exportName, findIn, searchText } from '../js/chatops.js';
 import { usageWords, costWords, tokenCount } from '../js/activity.js';
-import { imageLoader, MOST } from '../js/images.js';
+import { imageLoader, MOST, KEPT } from '../js/images.js';
 
 const prompt = (id, text, more = {}) => ({ id, type: 'prompt', at: null, text, steered: false, fromLead: false, images: [], ...more });
 const reply = (id, text) => ({ id, type: 'reply', at: null, text });
@@ -130,11 +130,35 @@ test('at most two images are asked at once, and one pushed out of the kept ones 
   };
   const urls = fakeURLs();
   const loader = imageLoader(read, urls);
-  const all = await Promise.all(Array.from({ length: 70 }, (_, i) => loader.url('s1', { id: `i${i}`, mediaType: 'image/png', bytes: 1 })));
+  const all = await Promise.all(Array.from({ length: KEPT + 10 }, (_, i) => loader.url('s1', { id: `i${i}`, mediaType: 'image/png', bytes: 1 })));
   assert.ok(all.every(Boolean));
   assert.equal(most, 2);
   await new Promise((resolve) => setImmediate(resolve));
   assert.equal(urls.revoked.length, 10);
   assert.equal(loader.known('s1', { id: 'i0' }), null);
-  assert.equal(loader.known('s1', { id: 'i69' }), 'blob:test/70');
+  assert.equal(loader.known('s1', { id: `i${KEPT + 9}` }), `blob:test/${KEPT + 10}`);
+});
+
+test('a chat of more than 60 pictures drawn again asks for none again, and the kept ones stay under their bytes', async () => {
+  let asked = 0;
+  const read = async () => { asked += 1; return { ok: true, result: { mediaType: 'image/png', bytes: 1, offset: 0, data: 'iQ==' } }; };
+  const loader = imageLoader(read, fakeURLs());
+  const images = Array.from({ length: 80 }, (_, i) => ({ id: `p${i}`, mediaType: 'image/png', bytes: 1 }));
+  await Promise.all(images.map((image) => loader.url('s1', image)));
+  assert.equal(asked, 80);
+  // Drawn again, twice: each known at once.
+  for (let round = 0; round < 2; round++) {
+    for (const image of images) assert.ok(loader.known('s1', image));
+  }
+  assert.equal(asked, 80);
+  // Large ones: the oldest go once their bytes pass the budget, and one seen again is kept over an older one.
+  const big = imageLoader(async () => ({ ok: true, result: { mediaType: 'image/png', bytes: 1, offset: 0, data: 'iQ==' } }), fakeURLs());
+  const huge = (id) => ({ id, mediaType: 'image/png', bytes: 7 << 20 });
+  for (let i = 0; i < 13; i++) await big.url('s1', huge(`h${i}`));
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.ok(big.known('s1', huge('h0')), '91 MB kept');
+  await big.url('s1', huge('h13'));
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(big.known('s1', huge('h1')), null, 'past 96 MB the least lately used went');
+  assert.ok(big.known('s1', huge('h0')) && big.known('s1', huge('h13')));
 });
