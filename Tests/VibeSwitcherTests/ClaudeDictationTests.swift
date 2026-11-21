@@ -1557,12 +1557,14 @@ struct ClaudeDictationTests {
         controller.release()
     }
 
-    /// Reads of the screen held while `held`: each is asked of the session once it's let go (`open`), as when the
-    /// host's answers fall behind on a loaded Mac. `waiting` reads are held now.
+    /// Reads of the screen held while `held`: each is asked of the session once it's let go (`open`, or `pass` for one
+    /// at a time), as when the host's answers fall behind on a loaded Mac. `waiting` reads are held now; `answered`: the
+    /// screens the run was given, in order.
     @MainActor final class ReadGate {
         var held = false
         private var queued: [() -> Void] = []
         var waiting: Int { queued.count }
+        var answered: [String] = []
         func hold(_ read: @escaping () -> Void) { if held { queued.append(read) } else { read() } }
         func open() {
             held = false
@@ -1570,23 +1572,67 @@ struct ClaudeDictationTests {
             queued = []
             reads.forEach { $0() }
         }
+        /// The first read held goes; the gate stays held for the next.
+        func pass() {
+            guard !queued.isEmpty else { return }
+            queued.removeFirst()()
+        }
     }
 
-    /// The harness's session, its screen reads going through `gate`; the runs on `now`.
-    func dictation(_ h: Harness, gate: ReadGate, now: @escaping () -> Date) -> DictationController {
+    /// The keys the run sends, held while `held` (a held Space's repeats from their own queue, the rest from the main
+    /// thread), then sent in order once let go (`open`): as when they're on their way while Claude writes its
+    /// transcript. `queued`: the keys held now.
+    final class KeyGate: @unchecked Sendable {
+        private let lock = NSLock()
+        private var isHeld = false
+        private var keys: [(send: ([UInt8]) -> Bool, key: [UInt8])] = []
+        var held: Bool {
+            get { lock.withLock { isHeld } }
+            set { lock.withLock { isHeld = newValue } }
+        }
+        var queued: Int { lock.withLock { keys.count } }
+        func send(_ key: [UInt8], by send: @escaping ([UInt8]) -> Bool) -> Bool {
+            lock.lock()
+            defer { lock.unlock() }
+            guard isHeld else { return send(key) }
+            keys.append((send, key))
+            return true
+        }
+        func open() {
+            lock.lock()
+            defer { lock.unlock() }
+            isHeld = false
+            keys.forEach { _ = $0.send($0.key) }
+            keys = []
+        }
+    }
+
+    /// The harness's session, its screen reads going through `gate` (and its keys through `keys`); the runs on `now`.
+    func dictation(_ h: Harness, gate: ReadGate, keys: KeyGate = KeyGate(), now: @escaping () -> Date) -> DictationController {
         controller(session: { [weak h] key in
             guard var session = h?.sync.claudeVoice(key: key) else { return nil }
             let read = session.screen
-            session.screen = { done in gate.hold { read(done) } }
+            session.screen = { done in gate.hold { read { screen in
+                gate.answered.append(screen?.text ?? "")
+                done(screen)
+            } } }
+            let send = session.keys
+            session.keys = { keys.send($0, by: send) }
+            let offMain = session.offMainKeys
+            session.offMainKeys = {
+                guard let sendOff = offMain() else { return nil }
+                return { keys.send($0, by: sendOff) }
+            }
             return session
         }, now: now).0
     }
 
-    /// app.log, the 09:49:46 run (one of five "typed in the terminal meanwhile" in the week to 2026-11-20): Claude
-    /// stopped recording by itself while the key was held, its transcript went in, and the hold's own Spaces, still
-    /// going while the reads lagged, started a second recording over it. The reads then showed Claude's own
-    /// transcript, not dim, beside its level cursor: taken for something typed in the terminal, the run left it in the
-    /// box ("typed in the terminal meanwhile"), though nobody typed. It's Claude's: it lands in the composer.
+    /// app.log, the 09:49:46 run (one of five "typed in the terminal meanwhile" in the week to 2026-11-20, its trail
+    /// "recording → nothing → text written → recording → text written"): Claude stopped recording by itself while the
+    /// key was held, and its transcript went in. A read showed it landed alone, with no recording running, and the hold
+    /// stopped, but the Spaces already on their way started a second recording over it. The reads then showed Claude's
+    /// own transcript, not dim, beside its level cursor: taken for something typed in the terminal, the run left it in
+    /// the box, though nobody typed. It's Claude's (the text that landed alone first): it lands in the composer.
     @Test func claudesOwnTextUnderASecondRecordingStartedByTheHoldLands() async throws {
         let h = try await Harness.start(temp)
         defer { h.stop() }
@@ -1596,24 +1642,36 @@ struct ClaudeDictationTests {
         try await h.waitFor { h.agent["voice"] as? String == "hold" && h.agent["gap"] as? Double == 1.5 }
         let prompts = h.agentPrompts
         let gate = ReadGate()
+        let keys = KeyGate()
         // Held: no repeat is ever late on the runs' clock (a late one would pause the Spaces until a read), and its
         // waits run out only on the events.
-        let controller = dictation(h, gate: gate, now: Clock(held: true).now)
+        let controller = dictation(h, gate: gate, keys: keys, now: Clock(held: true).now)
         controller.press(h.key, agent: .claude) { "" }
         try await h.waitFor { controller.listening }
-        // No read in flight from here: the next one waits at the gate.
+        // No read in flight from here: the next one waits at the gate. The Spaces wait too, on their way.
         gate.held = true
         try await h.waitFor { gate.waiting > 0 }
+        keys.held = true
         h.tell(["op": "voiceStop"])
         try await h.waitFor { h.agent["voiceInserts"] as? Int == 1 }
-        // The second recording hears nothing.
-        h.tell(["op": "voice", "transcript": "", "interim": ""])
-        try await h.waitFor { h.agent["transcript"] as? String == "" && h.agent["voiceStarts"] as? Int == 2 }
+        // The second recording hears nothing, and goes on until it's stopped (a wide gap: no repeat comes once the hold
+        // is over).
+        h.tell(["op": "voice", "transcript": "", "interim": "", "gap": 60.0])
+        try await h.waitFor { h.agent["transcript"] as? String == "" && h.agent["gap"] as? Double == 60 }
+        // Enough Spaces on their way to start it (its warmup, and the double push they call off).
+        try await h.waitFor { keys.queued >= 12 }
         #expect(input(h) == "open the composer view on main")
+        // A read shows the transcript alone, no recording: the hold stops (its End waits behind the Spaces).
+        let read = gate.answered.count
+        gate.pass()
+        try await h.waitFor { gate.answered.count > read && gate.waiting > 0 }
+        #expect(gate.answered.last.map { $0.contains("❯ open the composer view on main") && !$0.contains("listening…") } == true)
+        keys.open()
+        try await h.waitFor { h.agent["voiceStarts"] as? Int == 2 }
         gate.open()
-        // The reads show it recording again, over Claude's own text.
-        try await h.waitFor { ClaudeDictationTests.recordingOverText(h.screen) }
-        controller.release()
+        // The reads show it recording again, over Claude's own text; then it stops by itself.
+        try await h.waitFor { gate.answered.filter(ClaudeDictationTests.recordingOverText).count >= 2 }
+        h.tell(["op": "voiceStop"])
         try await h.waitFor { controller.phase == .idle }
         #expect(controller.deliveries[h.key]?.text == "open the composer view on main", "\(String(describing: controller.notice)) \(String(describing: ended))")
         #expect(controller.notice?.text != ClaudeVoiceRun.typedMeanwhile)
@@ -1621,6 +1679,38 @@ struct ClaudeDictationTests {
         #expect(h.agent["enters"] as? Int == 0 && h.agent["doubleSubmits"] as? Int == 0)
         #expect(h.agentPrompts == prompts)
         #expect(input(h) == "")
+        controller.release()
+    }
+
+    /// The same second recording over Claude's transcript, the reads lagging so that none shows the transcript alone,
+    /// and a key typed in the terminal meanwhile: every read shows the transcript and the key, not dim, beside the level
+    /// cursor, and the box settles on that. It never landed alone, so it isn't Claude's: the box is left alone.
+    @Test func aKeyTypedUnderASecondRecordingIsLeftAloneThoughTheBoxEndsTheSame() async throws {
+        let h = try await Harness.start(temp)
+        defer { h.stop() }
+        h.tell(["op": "voice", "mode": "hold", "gap": 1.5])
+        try await h.waitFor { h.agent["voice"] as? String == "hold" && h.agent["gap"] as? Double == 1.5 }
+        let gate = ReadGate()
+        let controller = dictation(h, gate: gate, now: Clock(held: true).now)
+        controller.press(h.key, agent: .claude) { "" }
+        try await h.waitFor { controller.listening }
+        gate.held = true
+        try await h.waitFor { gate.waiting > 0 }
+        h.tell(["op": "voiceStop"])
+        try await h.waitFor { h.agent["voiceInserts"] as? Int == 1 }
+        h.tell(["op": "voice", "transcript": "", "interim": ""])
+        try await h.waitFor { h.agent["transcript"] as? String == "" && h.agent["voiceStarts"] as? Int == 2 }
+        h.keys("x")
+        try await h.waitFor { self.input(h) == "open the composer view on mainx" }
+        gate.open()
+        try await h.waitFor { gate.answered.filter(ClaudeDictationTests.recordingOverText).count >= 2 }
+        controller.release()
+        try await h.waitFor { controller.phase == .idle }
+        #expect(controller.notice?.text == ClaudeVoiceRun.typedMeanwhile, "\(String(describing: controller.notice)) \(String(describing: ended))")
+        #expect(controller.deliveries[h.key] == nil)
+        #expect(input(h) == "open the composer view on mainx")
+        #expect(h.agent["killed"] as? Int == 0)
+        #expect(h.agent["enters"] as? Int == 0)
     }
 
     /// A key typed in the terminal while Claude records and hears nothing, and writes nothing after: the box then holds
@@ -1707,6 +1797,29 @@ struct ClaudeDictationTests {
         #expect(!script.keys.contains([ClaudeVoiceRun.killLine]))
         #expect(ended?.contains("text not Claude's showed while it recorded") == true && ended?.contains("at the last read") == true,
                 "\(String(describing: ended))")
+        controller.release()
+    }
+
+    /// Cancelled while Claude records beside text not dim that no read saw land alone first (a key typed in the terminal
+    /// with Claude's transcript), the box then holding that text with no recording: it isn't Claude's alone, so no ⌃U
+    /// takes it out.
+    @Test func cancelledOverTextThatNeverLandedAloneLeavesTheBoxAlone() async {
+        let script = ReadScript()
+        let (controller, _) = controller(session: { _ in script.session })
+        controller.press("row", agent: .claude) { "" }
+        #expect(await until { controller.listening })
+        script.next = {
+            script.keys.contains([ClaudeVoiceRun.escape])
+                ? ClaudeDictationTests.box([.plain("open the composer x")], footer: "? for shortcuts")
+                : ClaudeDictationTests.box([.plain("open the composer x"), .meter])
+        }
+        let reads = script.reads
+        #expect(await until { script.reads >= reads + 3 })
+        controller.cancel()
+        #expect(await until { controller.phase == .idle })
+        #expect(controller.deliveries["row"] == nil)
+        #expect(script.keys.contains([ClaudeVoiceRun.escape]))
+        #expect(!script.keys.contains([ClaudeVoiceRun.killLine]), "\(String(describing: ended))")
         controller.release()
     }
 

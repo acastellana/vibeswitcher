@@ -508,10 +508,14 @@ final class ClaudeVoiceRun {
     private var steady = 0
     /// What showed not dim in the box (less its level cursor) while Claude recorded or processed: at the last read that
     /// watched it, and the texts that stayed two such reads in a row (two at most: a final draft can be only one of
-    /// them). Typed in the terminal, unless it's Claude's own transcript under a second recording its hold's Spaces
-    /// started, which is the text it leaves in the box (`take`). One read's, gone at the next, was a redraw's.
-    private var plainShown: String?
-    private var plainKept: [String] = []
+    /// them), each with whether a read had seen it landed before (`landed`). Typed in the terminal, unless it's Claude's
+    /// own transcript under a second recording its hold's Spaces started: seen landed first, and the text it leaves in
+    /// the box (`take`). One read's, gone at the next, was a redraw's.
+    private var plainShown: (text: String, landed: Bool)?
+    private var plainKept: [(text: String, landed: Bool)] = []
+    /// The texts (less their spaces) a read showed not dim in the box with no recording running, after Claude listened:
+    /// its transcript landed, or what was typed.
+    private var landed: Set<String> = []
     /// When text not dim first showed while it recorded, for app.log: the stage and the seconds into the run.
     private var plainFirst: String?
     /// Its level cursor as seen: grey (low) at some read, and coloured (a level heard) at some read.
@@ -762,6 +766,7 @@ final class ClaudeVoiceRun {
                 // land mid-redraw), it's over; the Spaces pause at the first (each would start that second warmup)
                 // and go on if the next shows it recording. Either way its transcript is waited for.
                 if doubting || ClaudeVoiceScreen.landed(screen) {
+                    if shown == .nothing || shown == .typed, case .draft(let draft) = LeadDelivery.box(in: screen) { sawLanded(draft) }
                     cutShort()
                     return finishing()
                 }
@@ -888,6 +893,7 @@ final class ClaudeVoiceRun {
                     lastDraft = nil
                 case .draft(let draft):
                     trail("text written")
+                    sawLanded(draft)
                     stirred = true
                     emptySince = nil
                     steady = draft == lastDraft ? steady + 1 : 1
@@ -930,12 +936,14 @@ final class ClaudeVoiceRun {
     private func watch(_ screen: LeadDelivery.Screen) {
         guard screen.runs != nil else { return }
         // Claude's recording-level cursor (a coloured bar glyph) isn't typed.
-        var plain: String?
+        var plain: (text: String, landed: Bool)?
         if case .draft(let draft) = LeadDelivery.box(in: screen), !ClaudeVoiceScreen.meterOnly(draft) {
             let text = ClaudeVoiceScreen.line(draft)
-            plain = text
+            // Seen landed before it showed under a recording: it may be Claude's. Else it was typed (or a redraw's).
+            let shown = (text: text, landed: landed.contains(Self.squeezed(text)))
             if plainFirst == nil { plainFirst = String(format: "\(stage) %.1f s in", now().timeIntervalSince(started)) }
-            if text == plainShown, !plainKept.contains(text), plainKept.count < 2 { plainKept.append(text) }
+            if shown == plainShown ?? ("", false), !plainKept.contains(where: { $0 == shown }), plainKept.count < 2 { plainKept.append(shown) }
+            plain = shown
         }
         plainShown = plain
         // Words, not a grey level cursor (drawn dim too) left alone in the box.
@@ -945,14 +953,23 @@ final class ClaudeVoiceRun {
     }
 
     /// Whether text other than `text` (the box's draft now, Claude's) showed not dim while it recorded: at two reads in
-    /// a row, or at the last read that watched it. With no words heard shown, nothing not dim can be Claude's: the box
-    /// may hold only what was typed.
+    /// a row, or at the last read that watched it. Only `text` itself, seen landed with no recording running before it
+    /// showed under one, can be Claude's: what's typed under a recording never landed alone first. With no words heard
+    /// shown, nothing not dim can be Claude's: the box may hold only what was typed.
     private func typedOver(_ text: String) -> (kept: Bool, last: Bool) {
-        let squeezed = { (text: String) in text.filter { !$0.isWhitespace } }
         let heard = live.contains { $0.isLetter || $0.isNumber }
-        let other = { (shown: String) in !heard || squeezed(shown) != squeezed(text) }
+        let other = { (shown: (text: String, landed: Bool)) in !heard || !shown.landed || Self.squeezed(shown.text) != Self.squeezed(text) }
         return (plainKept.contains(where: other), plainShown.map(other) ?? false)
     }
+
+    /// A read with no recording running shows `draft` in the box, after Claude listened: a text that may show under a
+    /// second recording next, Claude's own if it's this one.
+    private func sawLanded(_ draft: String) {
+        guard listening, !ClaudeVoiceScreen.meterOnly(draft) else { return }
+        landed.insert(Self.squeezed(ClaudeVoiceScreen.line(draft)))
+    }
+
+    private static func squeezed(_ text: String) -> String { text.filter { !$0.isWhitespace } }
 
     /// The same text a few reads in a row: Claude is done writing it. Out of its box with ⌃U, if it's Claude's: it starts
     /// as what it heard (what's typed after the release isn't), and nothing else showed not dim while it recorded, at
