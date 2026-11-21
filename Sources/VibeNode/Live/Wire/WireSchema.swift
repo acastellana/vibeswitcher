@@ -404,7 +404,9 @@ public enum WireSchema {
             item("prompt", [field("text", .string), field("steered", .bool), field("fromLead", .bool), field("images", .list(.shape("chat.image")))]),
             item("reply", [field("text", .string)]),
             // The lead's board cleared (the app's `AllDoneCard`, 2026-11-21): placed by `ChatStore` in the lead's chat.
-            item("allDone", [field("summary", Kind.shape("board.allDone.summary").orNull), field("tasks", .list(.shape("board.allDone.task"))),
+            // Its time is always the mark's (never null, as a transcript's item's may be).
+            shape("chat.allDone", from: contractChat, [field("id", .string), field("type", .words(["allDone"])), field("at", .date),
+                             field("summary", Kind.shape("board.allDone.summary").orNull), field("tasks", .list(.shape("board.allDone.task"))),
                              field("merged", .int), field("receipts", Kind.string.orNull), field("pricesAsOf", Kind.string.orNull),
                              field("seen", .bool)]),
             item("tools", [field("summary", .string), field("tools", .list(.shape("chat.tool")))]),
