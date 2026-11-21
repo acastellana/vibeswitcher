@@ -336,6 +336,36 @@ code, pre, kbd { font-family: var(--mono); }
 .row-images { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; margin-top: 4px; }
 .image-note { display: inline-flex; align-items: center; gap: 5px; padding: 3px 8px; border-radius: 6px; background: var(--fill); color: var(--ink-3); font-size: var(--small); }
 .image-note .icon { color: var(--ink-3); }
+/* A chat's pictures (`chat.image`'s bytes, as object URLs): small in the row, wide when tapped. */
+.image-holder { display: inline-flex; }
+.chat-image-button { display: block; padding: 0; border-radius: 8px; overflow: hidden; box-shadow: 0 0 0 1px var(--line); cursor: zoom-in; }
+.chat-image { display: block; max-width: min(320px, 100%); max-height: 240px; object-fit: contain; background: var(--fill); }
+.chat-image-button.wide { cursor: zoom-out; }
+.chat-image-button.wide .chat-image { max-width: 100%; max-height: 80vh; }
+.tool .image-holder { margin-top: 6px; }
+
+/* A row's own actions (Copy, Edit in Composer, Send Again; a reply's Copy as Markdown): over its corner, on hover or focus. */
+.chat-row.prompt, .chat-row.reply { position: relative; }
+.row-actions { position: absolute; top: -10px; z-index: 1; display: flex; gap: 2px; padding: 2px; border-radius: 8px; background: var(--raised); box-shadow: 0 0 0 1px var(--line), 0 2px 8px var(--shadow); }
+.chat-row.prompt > .row-actions { top: auto; bottom: -7px; right: 48px; }
+.chat-row.reply > .row-actions { right: 0; }
+.row-action { width: 24px; height: 24px; }
+.row-action.copied { color: var(--accent); }
+@media (hover: hover) {
+  .row-actions { opacity: 0; pointer-events: none; transition: opacity 0.12s; }
+  .chat-row:hover > .row-actions, .row-actions:focus-within { opacity: 1; pointer-events: auto; }
+}
+@media (hover: none) {
+  .row-actions { position: static; justify-self: end; align-self: flex-end; margin-bottom: 4px; box-shadow: none; background: none; }
+  .chat-row.reply > .row-actions { grid-column: 2; }
+}
+
+/* Find in the chat: a bar over it; the row found marked, its words highlighted where the browser can. */
+.chat-find { flex: none; display: flex; align-items: center; gap: 6px; padding: 6px 12px; border-bottom: 1px solid var(--line); background: var(--raised); color: var(--ink-3); }
+.find-input { flex: 1; min-width: 0; padding: 4px 8px; border-radius: 6px; background: var(--fill); color: var(--ink); font: inherit; font-size: var(--small); border: 0; }
+.find-count { flex: none; font-size: var(--small); font-variant-numeric: tabular-nums; }
+.chat-row.found { border-radius: 10px; box-shadow: 0 0 0 2px var(--accent-fill), 0 0 0 4px var(--accent-fill); }
+::highlight(chat-find) { background: light-dark(rgb(255 214 0 / 0.55), rgb(255 200 0 / 0.4)); color: inherit; }
 .prose.quiet { color: var(--ink-2); font-size: 12.5px; }
 .todos { display: grid; gap: 3px; font-size: 12.5px; }
 .todo { position: relative; padding-left: 16px; color: var(--ink-2); }

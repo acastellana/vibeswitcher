@@ -35,7 +35,8 @@ struct NodeStatusStoreTests {
         for (name, value) in status { #expect(live[name] == value, "\(name)") }
         #expect(Set(live.keys).subtracting(status.keys) == ["shownStatus", "project", "task", "detail", "activity", "activitySince",
                                                             "startedAt", "hasHooks", "leadAsks", "startFolder", "backgroundJobs",
-                                                            "hasTranscript", "name", "pausedUntil", "agentSession"])
+                                                            "hasTranscript", "name", "pausedUntil", "agentSession", "pid", "lead",
+                                                            "boardTask"])
         #expect(live["id"] == .string("local:3f6c2c1e-8a5b-4c1d-9e0f-2b7a6d5c4e3f"))
         #expect(live["project"] == .string("acme-site") && live["task"] == .string("Login fix") && live["detail"] == .string("Thinking"))
         #expect(live["activity"] == .string("Run unit tests"))
@@ -45,6 +46,42 @@ struct NodeStatusStoreTests {
         #expect(live["startFolder"] == .string("/home/u/acme-site"))
         #expect(live["backgroundJobs"] == .int(2) && live["hasTranscript"] == .bool(true))
         #expect(live["shownStatus"] == .string("working"))
+    }
+
+    // MARK: the inspector's facts (2026-11-21)
+
+    @Test func aTeamsSessionNamesItsBoardByTheFolderTheHostStartedItIn() {
+        let lead = Self.session()
+        #expect(lead.liveValue["pid"] == .int(4242))
+        #expect(lead.liveValue["lead"] == .string(NodeIds.project(root: "/home/u/acme-site")) && lead.liveValue["boardTask"] == .null)
+        var worker = Self.session()
+        worker.teamRole = .worker
+        worker.startFolder = "/home/u/acme-site/.vibeswitcher/worktrees/login-fix/"
+        #expect(worker.liveValue["lead"] == .string(NodeIds.project(root: "/home/u/acme-site")))
+        #expect(worker.liveValue["boardTask"] == .string("login-fix"))
+        // A worker whose folder isn't a lead's worktree, and a session with no role, are on no board.
+        worker.startFolder = "/home/u/elsewhere"
+        #expect(worker.liveValue["lead"] == .null && worker.liveValue["boardTask"] == .null)
+        var plain = Self.session()
+        plain.teamRole = nil
+        #expect(plain.liveValue["lead"] == .null && plain.liveValue["boardTask"] == .null)
+    }
+
+    @Test func theHostsRecordGivesTheCommandMaskedAndTheSize() throws {
+        let session = Self.session()
+        var host = HostSession(id: try #require(session.hostID), tty: "pts/4", childPID: 4000, cwd: "/home/u/acme-site",
+                               command: "ANTHROPIC_API_KEY=sk-ant-api03-abcdefghijklmnopqrstuvwxyz0123456789 claude --model opus",
+                               label: "Claude", agent: "claude", title: "", startedAt: Date(timeIntervalSince1970: 1_800_000_000), cols: 132, rows: 40, exit: nil)
+        let live = session.liveValue(prompt: nil, draft: nil, host: host, branch: "agent/login-fix")
+        #expect(live["branch"] == .string("agent/login-fix"))
+        #expect(live["size"] == .object(["cols": .int(132), "rows": .int(40)]))
+        let command = try #require(live["command"]?.string)
+        #expect(!command.contains("sk-ant-api03") && command.hasSuffix("claude --model opus"), "\(command)")
+        host.command = nil
+        #expect(session.liveValue(prompt: nil, draft: nil, host: host)["command"] == .null)
+        // A session the host doesn't run: no command, no size, and no branch unless one was read.
+        let alone = session.liveValue(prompt: nil, draft: nil)
+        for name in ["command", "size", "branch"] { #expect(alone[name] == .null, "\(name)") }
     }
 
     @Test func shownStatusIsTheLeadsAsk() {

@@ -138,3 +138,62 @@ export function sinceSummary(items) {
   const text = parts.join(' · ');
   return text.charAt(0).toUpperCase() + text.slice(1);
 }
+
+// ---- Copy as Markdown, Export Chat, find in the chat (the Mac's ChatExport and its chat's menus) ----
+
+// The conversation as Markdown, as the Mac's Export Chat writes it (`ChatExport.markdown`): each prompt under **You**
+// (and how many images it had), a prompt sent while the agent worked under "(while it worked)", each reply under the
+// agent's name, a run of tool calls as one quoted summary line, and a message VibeSwitcher handed over under its title.
+// Pending rows (sent from here, not in the transcript yet) are left out.
+export function chatMarkdown(items, agent = 'Claude') {
+  const parts = [];
+  for (const item of items || []) {
+    if (item.pending) continue;
+    if (item.type === 'prompt') {
+      const count = (item.images || []).length;
+      const who = item.steered ? `${item.fromLead ? 'Project lead' : 'You'} (while it worked)` : 'You';
+      parts.push(`**${who}**\n\n${item.text || ''}` + (count ? `\n\n_(${count} image${count === 1 ? '' : 's'})_` : ''));
+    } else if (item.type === 'reply') {
+      parts.push(`**${agent}**\n\n${item.text || ''}`);
+    } else if (item.type === 'tools') {
+      const summary = item.summary || summaryOf(item.tools || []);
+      if (summary) parts.push(`> ${summary}`);
+    } else if (item.type === 'team') {
+      parts.push(`**${item.title || 'VibeSwitcher'}**\n\n${item.text || ''}`);
+    }
+  }
+  return parts.join('\n\n') + '\n';
+}
+
+// The file Export Chat saves: the session's title with no character a file name can't hold, and `.md`.
+export function exportName(title) {
+  const name = String(title || '').replace(/[\\/:*?"<>|\u0000-\u001f]+/g, '-').replace(/\s+/g, ' ').trim().slice(0, 120);
+  return (name || 'Chat') + '.md';
+}
+
+// What find looks through in an item: a prompt's and a reply's text, a message's title and text, a run's summary and
+// each of its tools' titles, commands and paths.
+export function searchText(item) {
+  if (item.type === 'tools') {
+    const tools = item.tools || [];
+    return [item.summary || summaryOf(tools), ...tools.flatMap((tool) => [tool.title, tool.detail?.command, tool.detail?.path])]
+      .filter(Boolean).join('\n');
+  }
+  if (item.type === 'team') return `${item.title || ''}\n${item.text || ''}`;
+  return item.text || '';
+}
+
+// The positions of the items that hold `query` (case and accents aside), oldest first; none for an empty query.
+export function findIn(items, query) {
+  const wanted = fold(query.trim());
+  if (!wanted) return [];
+  const found = [];
+  (items || []).forEach((item, index) => { if (!item.pending && fold(searchText(item)).includes(wanted)) found.push(index); });
+  return found;
+}
+
+// Lower case without accents, each character still one character (so a match's place in the folded text is its place
+// in the text, for drawing it).
+export function fold(text) {
+  return String(text).toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+}

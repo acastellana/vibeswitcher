@@ -56,6 +56,7 @@ Screenshots of each screen, light and dark, desktop and phone, are in `shots/`.
 | `js/terminal.js` | A session's terminal over the socket (the contract's §9): the binary frames, and the stream's life (open, the replay drawn whole, live, resync, reconnect, close). |
 | `vendor/` | xterm.js and its fit add-on, at the versions and hashes `vendor/README.md` records; nothing else is vendored. |
 | `js/notify.js` | The browser's notifications while the page is open (a card opens, a session's prompt waits, a lead stops), asked once and toggled on This node; the title bar's count of what needs you. |
+| `js/images.js` | A chat's pictures: their bytes asked of the node (`chat.image`) a part at a time, shown as object URLs, the newest 60 kept. |
 | `js/composing.js` | The composer's word at the caret (`/` and `@`, as the app's composer finds it) and an image's parts for `session.attach`. In the box, `/` and `@` complete from the node (`session.complete`); a pasted or dropped image goes to the node and the draft names it; the messages the node holds behind a question show over the box. |
 | `js/settings.js` | The settings' parts with no page in them: grouped by section, a change's `vibeswitcher set` line quoted as the shell needs, what a draft is checked against. |
 | `js/push.js` | The push a lead asks for (the lead's `push`), in words: what goes where, its commits, and the two lines that settle it in a terminal; the card heads the lead's question stack. Nothing on the page pushes. |
@@ -101,23 +102,37 @@ end and ⌥⌘0 open and close it.
 | Overview › Status: State, Since, Running, and what it says | `shownStatus`, `since`, `activity`, `detail` |
 | Overview › Place: Folder, Runs in | `cwd` (as `~/…` with the node's `home`), `hosted` |
 | Overview › Time: Started, Running for | `startedAt` |
-| Overview › Agent: Agent, Terminal | `agent`, `terminal` |
-| Overview › Team: Role | `role` |
-| Team › Lead: Questions, Held, Reports, its notice | the lead's `questions`, `held`, `reportsWaiting`, `notice` |
+| Overview › Place: Branch | `branch` (the node reads `GitBranch.current` at the session's changes) |
+| Overview › Agent: Agent, Session, Process, Command, Size | `agent`, `agentSession`, `pid` and `terminal`, the host's `command` (credentials masked) and `size: { cols, rows }` |
+| Overview › Usage: Tokens, Cost, Turns | `session.usage`, asked as the tab shows and every 15 s while it does: the transcript's last 2 MB read by the Mac's `ActivityFeed` (`partial` when the conversation began before them; `costPartial` when some turns carried no cost) |
+| Overview › Team: Role, Lead, Task | `role`; `lead` (the project's id) and `boardTask` (a worker's or verifier's task slug on the board; the wire's `task` is what it works on, in words) |
+| Team: the board's tasks; Lead: Questions, Held, Reports, its notice | the `boards` stream's board for the session's `lead`; the lead's `questions`, `held`, `reportsWaiting`, `notice` |
 | Activity: files changed, commands run | the session's chat (the contract's §6): a tool's `detail` of type `edit`, `write` or `command`, and its `result` |
-
-**Asked of the node** for the rest (the mock sends all of it, so `?mock` shows the finished look):
-
-| Shows | Needs |
-| --- | --- |
-| Overview › Place: Branch | a session's `branch` (the Mac reads `GitBranch.current(in: cwd)`) |
-| Overview › Agent: Session, Process, Command, Size | a session's `agentSession` (the agent's own session id), `pid`, `command`, `size: { cols, rows }` |
-| Overview › Team: Lead, Task; the Team tab for a worker or a verifier | a worker's or verifier's `lead` (the project's id) and its task's slug (the wire's `task` is what it works on, in words) |
 | Folders as `~/…` | the node's `home` |
 
-The Mac's inspector also shows what no client field carries yet: a session's exit status and time, a command's exit
-code, a file created or deleted (as against written), a turn's tokens and cost (`ActivityFeed`), and the Team tab's
-decisions, scorecard, answered questions and files.
+How a session ended (the Mac's Exit) is on the ended session's own view: `status`'s `ended` entry's `exit`, its
+status, the host's words for it (`exited 0`, `killed by SIGTERM`) and when; the node lists no ended session, so there
+is no inspector for one.
+
+The Mac's inspector also shows what no client field carries yet: a command's exit code, a file created or deleted (as
+against written), and the Team tab's decisions, scorecard, answered questions and files.
+
+## The chat's extras
+
+- **Images.** A prompt's or a tool result's image is drawn from its bytes: `chat.image { session, id, offset }`, a read,
+  answers a part (`{ mediaType, bytes, offset, data }`, base64, 192 KB of bytes at most) of an image the session's own
+  chat holds, found by its id; never a path, only a PNG, JPEG, GIF or WebP its bytes agree with, at most 8 MB.
+  `js/images.js` asks two images at a time, joins the parts into a `Blob` and shows its object URL (the CSP's
+  `img-src 'self' blob:`, nothing else), and keeps the newest 60. Tapped, a picture opens wide. Where the node takes no
+  `chat.image`, the row says the image's type and size.
+- **A row's actions** (over it on hover, beside it on a touch screen): a prompt's Copy, Edit in Composer (the box holds
+  the text; nothing is sent) and Send Again (a `session.draft`, as every message this page leaves); a reply's Copy as
+  Markdown.
+- **The whole chat**, from the palette: Copy Chat as Markdown and Export Chat… (a `.md` download), in the Mac's
+  Export Chat words (`chatMarkdown`); Find in Chat (⌘F / Ctrl+F while the chat shows; ↩ next, ⇧↩ previous, Esc
+  closes), over every item the page holds, the rows not drawn too (the browser's own find sees only those), the found
+  row marked and its words highlighted (CSS Custom Highlights, where the browser has them). Each is of what the page
+  has paged in, and says so while older items exist.
 
 ## The feed
 
@@ -283,7 +298,7 @@ sent for a day after it finished; the page shows those of today.
 ### Chat item (in the node: `ChatValue`, the contract §6)
 
 ```js
-{ id, type: 'prompt', at, text, steered, fromLead, images: [{ id, mediaType, bytes }] }   // an image: no bytes
+{ id, type: 'prompt', at, text, steered, fromLead, images: [{ id, mediaType, bytes }] }   // an image: no bytes (`chat.image` asks them)
 { id, type: 'reply', at, text }                    // markdown, drawn to nodes by text.js
 { id: 'tools:<first tool id>', type: 'tools', at, summary: 'Ran 3 commands · edited 2 files',
   tools: [{ id, name, title, at, detail: { type: 'command', command } /* read, edit, write, thought, todos, … */,

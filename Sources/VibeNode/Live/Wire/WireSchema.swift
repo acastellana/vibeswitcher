@@ -62,7 +62,8 @@ public enum WireSchema {
                                   "board.args", "board.result", "seen.args",
                                   "session.draft.args", "session.draft.result", "session.draft.clear.args",
                                   "session.presets.args", "session.presets.result", "session.complete.args", "session.complete.result",
-                                  "session.attach.args", "session.attach.result",
+                                  "session.attach.args", "session.attach.result", "session.usage.args", "session.usage.result",
+                                  "chat.image.args", "chat.image.result",
 
                                   "settings.args", "settings.result", "set.args", "set.result"]
     /// A keyed collection's entity.
@@ -161,6 +162,22 @@ public enum WireSchema {
                 field("session", .string), field("kind", .words(["slash", "mention"])), field("query", .string)]),
             shape("session.complete.result", from: "Requests.complete", [field("items", .list(.shape("session.completion")))]),
             shape("session.completion", from: "SessionCompletions.value", [field("insert", .string), field("title", .string), field("subtitle", .string)]),
+            // A session's tokens and cost (the inspector, 2026-11-21): a read of its transcript's tail. `cost` is in US
+            // dollars, a number (an int when whole).
+            shape("session.usage.args", from: "ChatStore.usage (the inspector, 2026-11-21)", [field("session", .string)]),
+            shape("session.usage.result", from: "ChatStore.usageValue", [
+                field("turns", .list(.shape("session.usage.turn"))), field("count", .int), field("partial", .bool),
+                field("tokens", Kind.shape("session.usage.tokens").orNull), field("cost", Kind.any.orNull), field("costPartial", .bool)]),
+            shape("session.usage.turn", from: "ChatStore.usageValue", [
+                field("id", .string), field("at", Kind.date.orNull), field("partial", .bool), field("tokens", Kind.shape("session.usage.tokens").orNull),
+                field("cost", Kind.any.orNull)]),
+            shape("session.usage.tokens", from: "ChatStore.usageValue", [field("input", .int), field("cached", .int), field("output", .int)]),
+            // An image of a session's chat, a part of its bytes at a time (the chat's images, 2026-11-21): a read.
+            shape("chat.image.args", from: "ChatStore.image (the chat's images, 2026-11-21)", [
+                field("session", .string), field("id", .string), optional("offset", .int)]),
+            shape("chat.image.result", from: "ChatImageBytes.part", [
+                field("mediaType", .words(["image/png", "image/jpeg", "image/gif", "image/webp"])), field("bytes", .int), field("offset", .int),
+                field("data", .string)]),
             shape("session.preset", from: "SessionPresets.value", [
                 field("name", .string), field("kind", .words(["claude", "codex", "shell"])), field("command", .string), field("env", strings),
                 field("keepShell", .bool), field("project", .bool), field("default", .bool), field("builtIn", .bool), field("digest", .string),
@@ -196,7 +213,9 @@ public enum WireSchema {
                 field("session", .string), field("folder", .string), field("name", .string), field("conversation", Kind.string.orNull)]),
             shape("node.ended", from: "LeadEngine.endedValue (the stability lane, 2026-11-20)", [
                 field("session", .string), field("folder", .string), field("name", .string), field("conversation", Kind.string.orNull),
-                field("at", .date)]),
+                field("at", .date), field("exit", Kind.shape("node.ended.exit").orNull)]),
+            // How it ended (the inspector's Exit, 2026-11-21): `HostSession.Exit`'s status, its `cause` and when.
+            shape("node.ended.exit", from: "LeadEngine.endedValue", [field("status", .int), field("cause", .string), field("at", .date)]),
             shape("node.web", from: contractNode, [field("state", .string), field("port", Kind.int.orNull), field("tokens", .int),
                                                   field("connections", .int)]),
             // The account's usage (the parity table's "Usage shown to you", 2026-11-21): null until the engine's first refresh.
@@ -219,7 +238,11 @@ public enum WireSchema {
             field("startFolder", Kind.string.orNull), field("backgroundJobs", .int), field("hasTranscript", .bool),
             field("prompt", Kind.shape("session.prompt").orNull), field("draft", Kind.shape("session.draft").orNull),
             field("name", Kind.string.orNull), field("pausedUntil", Kind.date.orNull), field("agentSession", Kind.string.orNull),
-            field("queued", .list(.shape("session.queued")))]))
+            field("queued", .list(.shape("session.queued"))),
+            // The inspector's (2026-11-21): the agent's pid, its folder's branch, the host's command and size, its board.
+            field("pid", .int), field("branch", Kind.string.orNull), field("command", Kind.string.orNull),
+            field("size", Kind.shape("session.size").orNull), field("lead", Kind.string.orNull), field("boardTask", Kind.string.orNull)]))
+        shapes.append(shape("session.size", from: "Session.liveValue(prompt:draft:queued:host:branch:)", [field("cols", .int), field("rows", .int)]))
         // What the node keeps beside a session (driving sessions, 2026-11-20): the question on its screen, a page's draft.
         shapes.append(shape("session.prompt", from: "SessionPrompt.value", [
             field("question", .string), field("options", strings), field("descriptions", .list(Kind.string.orNull)), field("text", .list(.int)),

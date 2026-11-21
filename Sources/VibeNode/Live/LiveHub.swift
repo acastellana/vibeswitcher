@@ -131,6 +131,8 @@ public final class LiveHub: WebSocketHandler, @unchecked Sendable {
         case "term.open" where terminals != nil: terminals?.open(request, on: transport, rights: rights)
         case "term.close" where terminals != nil: terminals?.close(request, on: transport)
         case "chat.page": page(request, on: transport, rights: rights)
+        case "chat.image": chatRead(request, on: transport, rights: rights)
+        case "session.usage": chatRead(request, on: transport, rights: rights)
         default: return false
         }
         return true
@@ -234,6 +236,29 @@ public final class LiveHub: WebSocketHandler, @unchecked Sendable {
             guard let self, let stream else { return }
             self.changed(stream)
         }
+    }
+
+    /// `chat.image` and `session.usage` (`ChatReads.swift`): reads of a session's own transcript beside its chat, with
+    /// no place in any stream's sequence.
+    private func chatRead(_ request: NodeWire.Request, on transport: LiveTransport, rights: LiveRights) {
+        guard rights.contains(.read) else {
+            return reply(.init(re: request.id, error: .init(.voice, "this connection may not read")), on: transport)
+        }
+        guard let chats else { return reply(.init(re: request.id, error: .init(.unknownKind, "this server has no chats")), on: transport) }
+        guard let session = request.args?["session"]?.string, !session.isEmpty else {
+            return reply(.init(re: request.id, error: .init(.badArgs, "\(request.kind) needs a session")), on: transport)
+        }
+        let answer: (ChatStore.Read) -> Void = { [weak self] read in
+            switch read {
+            case .refused(let failure): self?.reply(.init(re: request.id, error: failure), on: transport)
+            case .value(let value): transport.send(NodeWire.message(NodeWire.Reply(re: request.id, result: value)))
+            }
+        }
+        if request.kind == "session.usage" { return chats.usage(session, reply: answer) }
+        guard let id = request.args?["id"]?.string, !id.isEmpty, id.utf8.count <= 200 else {
+            return reply(.init(re: request.id, error: .init(.badArgs, "chat.image needs an image's id")), on: transport)
+        }
+        chats.image(session, id: id, offset: request.args?["offset"]?.int ?? 0, reply: answer)
     }
 
     /// `chat.page` (the contract's §6): the items just before `before`, oldest first, and whether more exist before them;

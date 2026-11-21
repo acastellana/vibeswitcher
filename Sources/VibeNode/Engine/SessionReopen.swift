@@ -55,7 +55,10 @@ extension LeadEngine {
         openEnded = openEnded.filter { recorded.contains($0.key) }
         // Ended for good (past the grace): offered to `vibeswitcher resume` from now on.
         let gone = previous.filter { !liveIDs.contains($0.id) && !recorded.contains($0.id) }
-        if !gone.isEmpty { noteEnded(gone, at: now) }
+        if !gone.isEmpty {
+            let exits = Dictionary(link.sessions.compactMap { session in session.exit.map { (session.id, $0) } }, uniquingKeysWith: { $1 })
+            noteEnded(gone, at: now, exits: exits)
+        }
         let entries = previous.compactMap { entry in live.first { $0.id == entry.id } ?? (recorded.contains(entry.id) ? entry : nil) }
             + live.filter { entry in !previous.contains { $0.id == entry.id } }
         if let open = openSessions, abs(open.hostStartedAt - started) <= 0.001,
@@ -204,21 +207,25 @@ extension LeadEngine {
     static let endedKept = 20
 
     /// `entries` ended at `at`: first in the ended list, an entry once (by its host id, and by its conversation), the
-    /// newest `endedKept` kept. The caller saves. On `queue`.
-    func noteEnded(_ entries: [RestartReopen.Entry], at: Date) {
-        let fresh = entries.map { EngineState.Ended(entry: $0, at: at.timeIntervalSince1970) }
+    /// newest `endedKept` kept, each with how it ended where the host still says (`exits`, by host id). The caller
+    /// saves. On `queue`.
+    func noteEnded(_ entries: [RestartReopen.Entry], at: Date, exits: [UUID: HostSession.Exit] = [:]) {
+        let fresh = entries.map { EngineState.Ended(entry: $0, at: at.timeIntervalSince1970, exit: exits[$0.id]) }
         let ids = Set(entries.map(\.id)), conversations = Set(entries.compactMap(\.agentSessionID))
         let kept = endedSessions.filter { !ids.contains($0.entry.id) && !($0.entry.agentSessionID.map(conversations.contains) ?? false) }
         endedSessions = Array((fresh + kept).prefix(Self.endedKept))
     }
 
-    /// `status`'s `ended`: each ended session, its id, folder, name, conversation (null: unknown, so it can't be resumed)
-    /// and when it ended.
+    /// `status`'s `ended`: each ended session, its id, folder, name, conversation (null: unknown, so it can't be resumed),
+    /// when it ended, and how (`exit`: its status, the host's words for it and when; null where the host didn't say).
     var endedValue: NodeWire.Value {
         .array(endedSessions.map { ended in
             .object(["session": .string(NodeIds.session(host: ended.entry.id)), "folder": .string(ended.entry.folder),
                      "name": .string(ended.entry.name), "conversation": ended.entry.agentSessionID.map(NodeWire.Value.string) ?? .null,
-                     "at": .date(Date(timeIntervalSince1970: ended.at))])
+                     "at": .date(Date(timeIntervalSince1970: ended.at)),
+                     "exit": ended.exit.map { exit in
+                         .object(["status": .int(Int(exit.status)), "cause": .string(exit.cause), "at": .date(exit.at)])
+                     } ?? .null])
         })
     }
 

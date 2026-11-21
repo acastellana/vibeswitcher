@@ -36,6 +36,9 @@ struct SessionResumeTests {
         #expect(world.queue.sync { world.engine.endedSessions.map(\.entry.id) } == [id])
         let listed = world.queue.sync { world.engine.endedValue.array?.first }
         #expect(listed?["session"]?.string == NodeIds.session(host: id) && listed?["conversation"] == .null, "\(String(describing: listed))")
+        // How it ended, as the host recorded it (the inspector's Exit).
+        let exit = try #require(listed?["exit"]?.object, "\(String(describing: listed))")
+        #expect(exit["status"]?.int != nil && exit["cause"]?.string?.isEmpty == false && exit["at"] != nil, "\(exit)")
 
         // No conversation known: refused, and still listed.
         let short = String(id.uuidString.lowercased().prefix(8))

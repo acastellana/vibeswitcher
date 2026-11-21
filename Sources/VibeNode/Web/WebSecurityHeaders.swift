@@ -15,9 +15,11 @@ public enum WebSecurityHeaders {
     /// The page runs its own scripts and styles and nothing else, talks to its own socket only, is framed by nobody,
     /// and makes no element from a string (Trusted Types with no policy: `innerHTML` and its relatives throw). The port
     /// is in `connect-src` since a browser may not count `ws:` under `'self'`; so is the listener's name (`host`: the
-    /// loopback's address, or the tailnet's MagicDNS name).
+    /// loopback's address, or the tailnet's MagicDNS name). `img-src` takes `blob:` too, and nothing else: a chat's
+    /// images, whose bytes the page asks of the node (`chat.image`, read by a session's own image id) and shows as
+    /// object URLs it made; no image of another origin, no `data:`.
     public static func policy(port: UInt16, host: String = "127.0.0.1") -> String {
-        "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; font-src 'self'; "
+        "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' blob:; font-src 'self'; "
             + "connect-src 'self' ws://\(host):\(port); manifest-src 'self'; worker-src 'self'; base-uri 'none'; "
             + "form-action 'none'; frame-ancestors 'none'; require-trusted-types-for 'script'; trusted-types 'none'"
     }

@@ -161,10 +161,14 @@ public struct EngineState: Codable, Equatable, Sendable {
         public var entry: RestartReopen.Entry
         /// When it was seen gone (seconds since 1970).
         public var at: Double
+        /// How it ended, as the host recorded it (the inspector's Exit, 2026-11-21); nil when the host had forgotten it,
+        /// and in a file written before it.
+        public var exit: HostSession.Exit?
 
-        public init(entry: RestartReopen.Entry, at: Double) {
+        public init(entry: RestartReopen.Entry, at: Double, exit: HostSession.Exit? = nil) {
             self.entry = entry
             self.at = at
+            self.exit = exit
         }
     }
 

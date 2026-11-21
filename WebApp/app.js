@@ -177,6 +177,12 @@ function commands() {
     // Each lead's board: its team's tasks, grouped (views/board.js).
     ...[...store.state.boards.values()].map((board) => ({ title: `Board: ${lastPart(board.root) || 'a project'}`, about: 'Its lead’s tasks, as they move', icon: 'team', run: () => ui.go(boardHref(board.project)) })),
     ...sessionCommands(selected),
+    // The chat's own (the Mac's Find, Copy as Markdown and Export Chat): of what the page holds of it.
+    ...(selected && store.can('chat.page') ? [
+      { title: 'Find in Chat', about: 'Every message of it this page holds', keys: `${KEY.mod}F`, icon: 'search', run: () => session.chat('find') },
+      { title: 'Copy Chat as Markdown', about: 'The conversation, to the clipboard', icon: 'copy', run: () => session.chat('copyMarkdown') },
+      { title: 'Export Chat…', about: 'The conversation as a Markdown file', icon: 'file', run: () => session.chat('exportChat') },
+    ] : []),
     { title: 'Start Page', icon: 'home', run: () => ui.go('#/') },
     { title: 'This Node', about: 'Host, server, build and notices', icon: 'node', run: () => ui.go('#/node') },
     // The node's settings, and each lead's project's (views/settings.js).

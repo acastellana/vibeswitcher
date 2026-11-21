@@ -112,3 +112,25 @@ export function ledger(items, { cwd = null, home = null, counts = new Map() } = 
 export function fileWords(row) {
   return row.verb + (row.edits > 1 ? `, ${row.edits} times` : '');
 }
+
+// ---- The Overview's tokens and cost (`session.usage`, the Mac's ActivityFeed turns) ----
+
+// "1.2M in (1.1M cached) · 34K out" (the Mac's ledger, `TokenCount.short`); null when the transcript has none.
+export function usageWords(result) {
+  const tokens = result?.tokens;
+  if (!tokens) return null;
+  const cached = tokens.cached > 0 ? ` (${tokenCount(tokens.cached)} cached)` : '';
+  return `${tokenCount(tokens.input)} in${cached} · ${tokenCount(tokens.output)} out`;
+}
+// "$1.23", "at least $1.23" where some turns carried no cost; null when none did.
+export function costWords(result) {
+  if (typeof result?.cost !== 'number') return null;
+  return `${result.costPartial ? 'at least ' : ''}$${result.cost.toFixed(2)}`;
+}
+// 950, 1.2K, 12K, 1.2M.
+export function tokenCount(n) {
+  const cut = (value, unit) => `${value.toFixed(value >= 10 ? 0 : 1).replace(/\.0$/, '')}${unit}`;
+  if (n >= 999_500) return cut(n / 1_000_000, 'M');
+  if (n >= 1_000) return cut(n / 1_000, 'K');
+  return String(n);
+}
