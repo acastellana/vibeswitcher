@@ -48,7 +48,8 @@ The gaps that matter most for daily use, worst first:
 10. ~~**Restarts lose work.**~~ Closed 2026-11-20: after a host restart `vibeswitcher lead FOLDER --resume` reopens a
     project's lead in its conversation, and `vibeswitcher reopen` the user's own Claude sessions in theirs. A lead's
     workers are its to start again (told which). Rotation is on the node since 2026-11-20 (workflow.md's `lead_rotation:`).
-11. **No phone or remote access** (planned for stage 7). The web page is reachable on `127.0.0.1` only.
+11. **Remote access reads and drafts only.** `vibeswitcher web --tailnet` (2026-11-20) opens the page on the tailnet for
+    a phone, read and draft as on loopback; replies and key presses from the phone wait for H1.
 
 ## The table
 
@@ -181,7 +182,7 @@ Sizes to close: S is about a day, M a few days, L a week or more.
 
 | Feature | V1 (where) | V2 state | Where in V2 / what's missing | Size | Note |
 | --- | --- | --- | --- | --- | --- |
-| Phone access over Tailscale: pairing, replies, key presses, answers, Chrome access | `PhoneAccess.swift`, `RemoteServer.swift`, `Tailscale.swift`, `Web/` | missing | stage 7. `Web/` isn't ported | L | |
+| Phone access over Tailscale: pairing, replies, key presses, answers, Chrome access | `PhoneAccess.swift`, `RemoteServer.swift`, `Tailscale.swift`, `Web/` | partly | `vibeswitcher web --tailnet` (2026-11-20, `Server/TailnetWeb.swift`; the remote access note): the node's own page (not `Web/`) on this machine's Tailscale address under its MagicDNS name, off until the user runs it; pairing by a one-time code printed in the terminal, 8 h tokens, `web --revoke`; the phone layout (one column, the list then a session); reading every session, chat, card and the board; replies, answers and a code block's Run as drafts the user sends from a terminal; notifications while the page is open; `status` says where it listens. Missing, and why (rechecked 2026-11-21): replies and key presses from the phone itself, which need H1 (the host owning the listener) before any page input reaches a session; the terminal (refused on the tailnet); Chrome access and previews (the dev pages row); push (its own row); the Mac's credential masking for remote pages and a second lock on who asks (`tailscale whois`), both the user's decisions in the remote access note; a QR code for the address (also a decision) | L | input waits for H1 |
 | Dev pages, previews | `DevPreviews.swift`, `Sources/VibeCore/DevPages.swift` | missing | "later" in the design | M | |
 | A web page for the desktop, paired with a one-time code | — | Linux-only | `vibeswitcher web [--revoke]`; `Sources/VibeNode/Web/`, `WebApp/` on `127.0.0.1` | | the page reads and drafts, never answers |
 
@@ -232,7 +233,8 @@ doesn't yet confine anything.
 - The node delivers to the board's lead only when the vault binds that session to the role and the host lists it live.
   V1 trusts whatever the board names: a Mac fix owed in `docs/process/v2-mac-tasks.md`.
 - `lead` refuses a folder with no repository or no commit, and installs nothing. V1 offers to make one.
-- The web page listens on `127.0.0.1` only, with a pairing code good for 120 s. Phone access waits for stage 7.
+- The web page listens on `127.0.0.1`, and on the tailnet only after `vibeswitcher web --tailnet`, each with a pairing code good
+  for 120 s. A phone reads and drafts; its own input waits for H1.
 - The host always hands over to a new build. V1 can also replace an outdated host and end its sessions.
 - The review floor comes from workflow.md and is accepted with `config accept`; each rule is changed with
   `vibeswitcher set FOLDER floor_… VALUE`, not in a settings window.
