@@ -411,3 +411,7 @@ Without it, an unauditable obligation would block cleanup forever. The change it
 
 (1) merge-reruns-only-what's Codex round failed 3 Important findings on root cause, and the Claude round fixed them. (2) Deleting 16 GB of build output made 8 reviews rebuild from scratch at load 60–110. (3) The first install card ran `zsh -c security` with no arguments and failed.
 
+## 2026-11-21 15:56:14 Memory growth (2026-11-21): no fix task. The lead read the footprint-relief lines in app.log for Nov 19–21: it isn't a leak. Malloc in use stays level at about 120–170 MB with 27 sessions, and the footprint moves between about 250 and 420 MB with activity and comes back down; what stays is 150–200 MB of freed malloc-small memory that macOS keeps for reuse after busy peaks. File a root-cause task (agent claude, advisor fable) only if malloc in use keeps climbing across a day, or the footprint settles above about 500 MB, or the Mac's memory pressure leaves normal with the app among the top users.
+
+Two leads promised the user to read the memory log and file "the real fix". The log shows the "+5 MB an hour" trend is the allocator holding freed pages after peaks, not memory in use growing: in use was 120 MB at 27 h and 120–125 MB a day later. Nine memory tasks have already been spent, memory pressure is normal, and the working policy rules out another round without a concrete concern.
+

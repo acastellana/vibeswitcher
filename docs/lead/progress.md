@@ -4304,3 +4304,5 @@ Proposed task 1: Find why dictations end with no text
 - 2026-11-21 15:04 Merged claude-dictation: Claude dictation: recognise Claude Code's "Transcribing…" footer as processing (build 314c245bb76b)
 - 2026-11-21 15:04 Automatically (auto_advance): Merged claude-dictation (Claude dictation: recognise Claude Code's "Transcribing…" footer as processing) into main at d51a9299, on its passing audit and the full test run.
 - 2026-11-21 15:04 Automatically (auto_advance): Cleaned up claude-dictation (freed 1.8 GB of build output and temporary folders). It stays done.
+- 2026-11-21 15:55 Handed the lead over to a fresh session: the last one had been idle 50 minutes with 186k tokens of context, past handover_idle_min 50 and handover_tokens 150k
+- 2026-11-21 15:56 Update: Today: Nov 21 — the sidebar's Close Finished button, two dictation fixes, findings sent in full — **Landed (4 merges, all on the first test run; none pushed to GitHub):**
