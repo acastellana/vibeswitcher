@@ -225,6 +225,16 @@ behind a seam (`Platform.Approval`, `ApprovalVoice`) and not wired: step 4 measu
 user's server takes it only once `NodeSystem.approvalMeasured` is turned on, after step 4 and a review. Step 5's agent is built as data (`NodeAgent`: the
 property list, its check, the `launchctl` lines and `print`'s pid), not wired: `start` on the Mac is still refused.
 
+## Open for the user: the Mac's reads
+
+Under the Mac's rule a read asks no dialog: the caller check (uid, the installed command line's code, the Hardened
+Runtime, the guard rails) is its only gate. Most reads are what any process of the user's already reads on disk. Five
+are the user's alone on Linux, where the cgroup tells a detached session apart: `mail` (the projects' private record of
+their leads' messages), `recent`, `shells`, `config.held` and `base.show`. On the Mac a session that detached itself
+(`open -a Terminal`, AppleScript) passes the caller check with no dialog. **Open (the review of 2026-11-21):** take a
+dialog for those five too, keep them as reads (they show what the files show), or refuse them on the Mac until the
+app's window carries the voice.
+
 ## Decisions
 
 - **(call)** On the Mac, in this step, the user's node is refused by every command before anything is read or run
