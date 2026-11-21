@@ -10,12 +10,15 @@ import { h, keyed, setText, setClass, framed } from '../dom.js';
 import { statusMark, setMark, icon } from '../marks.js';
 import { STATES, AGENTS, ROLES, stateOf, since, short, moment, tilde, plural } from '../words.js';
 import { sessionHref, inspectorTab, teamOf, projectOf } from '../ui.js';
-import { ledger, fileWords } from '../activity.js';
+import { ledger, fileWords, usageWords, costWords } from '../activity.js';
 import { teamTasks } from './lead.js';
 
 const TABS = [{ id: 'team', label: 'Team' }, { id: 'overview', label: 'Overview' }, { id: 'activity', label: 'Activity' }];
 // How close to the end of the Activity counts as being at its end.
 const NEAR = 48;
+// How often the Overview asks for a session's tokens and cost again while it shows.
+const USAGE_EVERY = 15_000;
+
 
 // A fact: its name, dim, and its value, plain.
 function fact(name, ...content) {
@@ -88,13 +91,51 @@ function overview(app) {
   const size = fact('Size');
   const agents = group('Agent', agent, agentSession, process, command, size);
 
+  // Tokens and cost (the Mac's ActivityFeed): asked of the node (`session.usage`) as the tab shows, and again while it
+  // shows, at most every `USAGE_EVERY` ms.
+  const tokens = fact('Tokens');
+  tokens.el.classList.add('wraps');
+  const cost = fact('Cost');
+  const turns = fact('Turns');
+  const usage = group('Usage', tokens, cost, turns);
+  let usageFor = null;
+  let usageAt = 0;
+  let usageAsking = false;
+
   const role = fact('Role');
   const leadLink = h('a', { class: 'inspect-link' });
   const lead = fact('Lead', leadLink);
   const task = fact('Task');
   const team = group('Team', role, lead, task);
 
-  const el = h('div', { class: 'inspect-pane' }, status, place.el, times.el, agents.el, team.el);
+  const el = h('div', { class: 'inspect-pane' }, status, place.el, times.el, agents.el, usage.el, team.el);
+
+  function drawUsage(result) {
+    tokens.say(usageWords(result));
+    cost.say(costWords(result));
+    turns.say(result && result.count ? `${plural(result.count, 'turn')}${result.partial ? ', the transcript’s last part' : ''}` : null);
+    usage.settle();
+  }
+  function askUsage(session) {
+    if (!store.can('session.usage') || !session.hasTranscript) {
+      usageFor = session.id;
+      drawUsage(null);
+      return;
+    }
+    if (usageFor !== session.id) {
+      usageFor = session.id;
+      usageAt = 0;
+      drawUsage(null);
+    }
+    if (usageAsking || Date.now() - usageAt < USAGE_EVERY) return;
+    usageAsking = true;
+    usageAt = Date.now();
+    const id = session.id;
+    store.read('session.usage', { session: id }).then((reply) => {
+      usageAsking = false;
+      if (usageFor === id) drawUsage(reply?.ok ? reply.result : null);
+    });
+  }
 
   return {
     el,
@@ -134,14 +175,15 @@ function overview(app) {
       command.say(session.command);
       size.say(session.size ? `${session.size.cols} × ${session.size.rows}` : null);
       agents.settle();
+      askUsage(session);
 
       role.say(ROLES[session.role]);
       const leader = session.role && session.role !== 'lead' && session.lead ? leadOf(store, session.lead) : null;
       lead.el.hidden = !leader;
       pointAt(leadLink, leader);
       // The task by its title on the board; a session's own `task` may be other words, so nothing without the board.
-      const onBoard = session.role && session.role !== 'lead' && session.task
-        ? store.state.boards.get(session.lead)?.tasks.find((entry) => entry.slug === session.task) : null;
+      const onBoard = session.role && session.role !== 'lead' && session.boardTask
+        ? store.state.boards.get(session.lead)?.tasks.find((entry) => entry.slug === session.boardTask) : null;
       task.say(onBoard ? onBoard.title : null);
       team.settle();
     },

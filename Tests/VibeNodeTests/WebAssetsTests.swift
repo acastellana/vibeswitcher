@@ -10,7 +10,7 @@ struct WebAssetsTests {
     let scratch = Scratch()
     static let port: UInt16 = 47999
 
-    static let policy = "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; font-src 'self'; "
+    static let policy = "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' blob:; font-src 'self'; "
         + "connect-src 'self' ws://127.0.0.1:47999; manifest-src 'self'; worker-src 'self'; base-uri 'none'; "
         + "form-action 'none'; frame-ancestors 'none'; require-trusted-types-for 'script'; trusted-types 'none'"
 

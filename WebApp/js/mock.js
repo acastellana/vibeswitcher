@@ -58,6 +58,8 @@ export function createMock(store, options = {}) {
       startedAt: fields.since || ago(60), activity: null, activitySince: null, branch: 'main',
       agentSession: `${hex.split('').reverse().join('')}-0c2e-4a71-b3d5-9f6e8a1c2b40`, pid: 51022 + 37 * sessions.size,
       command: hosted ? agent : null, size: hosted ? { cols: 132, rows: 38 } : null, ...fields,
+      // A worker's or verifier's task by its slug on the board (the node's `boardTask`; its `task` is words).
+      boardTask: fields.boardTask ?? (fields.role && fields.role !== 'lead' ? fields.task : null),
     };
   };
   const sessions = new Map();
@@ -126,8 +128,8 @@ export function createMock(store, options = {}) {
     reopen: [],
     // Your sessions that ended lately (`vibeswitcher resume`).
     ended: [
-      { session: id('5c1e7a92'), folder: `${HOME}/projects/example-api`, name: 'example-api', conversation: '7a3f0c21-9b4d-4e8a-a1f2-3c5d7e9b0a14', at: ago(1500) },
-      { session: id('9d2b4f60'), folder: `${HOME}/projects/notes`, name: 'Tidy the notes', conversation: null, at: ago(7200) },
+      { session: id('5c1e7a92'), folder: `${HOME}/projects/example-api`, name: 'example-api', conversation: '7a3f0c21-9b4d-4e8a-a1f2-3c5d7e9b0a14', at: ago(1500), exit: { status: 0, cause: 'exited 0', at: ago(1510) } },
+      { session: id('9d2b4f60'), folder: `${HOME}/projects/notes`, name: 'Tidy the notes', conversation: null, at: ago(7200), exit: null },
     ],
     builds: { installRoot: `${HOME}/.local/share/vibeswitcher`, installed: ['f62aef61', '200e2c32', '5e563cf5'], rollback: { commit: '200e2c32', line: '200e2c32 v2 journal: an entry with no cgroup softens no mark' } },
     facts: [
@@ -143,7 +145,10 @@ export function createMock(store, options = {}) {
   // ---- Chats ----
 
   const chats = new Map();
-  const prompt = (text, at) => ({ id: next('m'), kind: 'prompt', text, at: ago(at) });
+  const prompt = (text, at, images = []) => ({ id: next('m'), kind: 'prompt', text, at: ago(at), images });
+  // A screenshot pasted into a prompt (`chat.image` serves its bytes, a 48 × 32 checker drawn for the mock).
+  const SHOT = { id: 'mock-shot-1', mediaType: 'image/png', bytes: 1268 };
+  const SHOT_DATA = 'iVBORw0KGgoAAAANSUhEUgAAADAAAAAgCAYAAABU1PscAAAEu0lEQVR42q3XsQsaeRrH4fw5Ka6wsLCwsLC44goLCwsLC4sr5DAwEAkGhJXlAgORYGBgJRgYiAQDA5FgYCASDAyshYWFhYWFXHXt1XvPX7B5iy2e7vsyfKof8+Tpv6o//kaNOg2atGjzn//+70/902bEmIQJU2bMA/cbmy0FO/aUHDgG7p88fSaAGnUaNGnRfhYIsBkxJmHClBnzwP3GZkvBjj0lB47PIgGJAGrUadCkRTsJBNiMGJMwYcqMeeB+Y7OlYMeekgPHJBLwXAA16jRo0qL9PBBgM2JMwoQpM+aB+43NloIde0oOHJ9HAl4IoEadBk1atF8EAmxGjEmYMGXGPHC/sdlSsGNPyYHji0jASwHUqNOgSYv2y0CAzYgxCROmzJgH7jc2Wwp27Ck5cHwZCZgJoEadBk1atGeBAJsRYxImTJkxD9xvbLYU7NhTcuA4iwT8IoAadRo0adH+JRBgM2JMwoQpM+aB+43NloIde0oOHAP3T342+Puv1R//oEOXHn0GDH/9+Qf+bZOyYEnGijV54L6yOXHmwpUbdx78POCVADp06dFnwPBVIMAmZcGSjBVr8sB9ZXPizIUrN+48XkUCUgF06NKjz4BhGgiwSVmwJGPFmjxwX9mcOHPhyo07jzQS8FoAHbr06DNg+DoQYJOyYEnGijV54L6yOXHmwpUbdx6vIwFvBNChS48+A4ZvAgE2KQuWZKxYkwfuK5sTZy5cuXHn8SYS8FYAHbr06DNg+DYQYJOyYEnGijV54L6yOXHmwpUbdx5vIwGZADp06dFnwDALBNikLFiSsWJNHrivbE6cuXDlxp1HFgn4TQAduvToM2D4WyDAJmXBkowVa/LAfWVz4syFKzfuPHjy9J2HjBp1GjRp0X4XeMhsRoxJmDBlxjxwv7HZUrBjT8mB47vIS/xeADXqNGjSov0+EGAzYkzChCkz5oH7jc2Wgh17Sg4c30cCcgHUqNOgSYt2HgiwGTEmYcKUGfPA/cZmS8GOPSUHjnkk4IMAatRp0KRF+0MgwGbEmIQJU2bMA/cbmy0FO/aUHDh+iAR8FECNOg2atGh/DATYjBiTMGHKjHngfmOzpWDHnpIDx4+RgE8CqFGnQZMW7U+BAJsRYxImTJkxD9xvbLYU7NhTcuD4KRJQCKBGnQZNWrSLQIDNiDEJE6bMmAfuNzZbCnbsKTlwLCIBnwVQo06DJi3anwMBNiPGJEyYMmMeuN/YbCnYsafkwPHzX/E/8MVDRocuPfoMGH4JPGQ2KQuWZKxYkwfuK5sTZy5cuXHn8SXyEn8VQIcuPfoMGH4NBNikLFiSsWJNHrivbE6cuXDlxp3H10hAKYAOXXr0GTAsAwE2KQuWZKxYkwfuK5sTZy5cuXHnUUYCvgmgQ5cefQYMvwUCbFIWLMlYsSYP3Fc2J85cuHLjzuNbJOC7ADp06dFnwPB7IMAmZcGSjBVr8sB9ZXPizIUrN+48vkcCfgigQ5cefQYMfwQCbFIWLMlYsSYP3Fc2J85cuHLjzuNHJKASQIcuPfoMGFaBAJuUBUsyVqzJA/eVzYkzF67cuPOoIgG/C6BDlx59Bgx/DwTYpCxYkrFiTR64r2xOnLlw5cadB/8HtiAPrSfGKF8AAAAASUVORK5CYII=';
   const reply = (text, at) => ({ id: next('m'), kind: 'reply', text, at: ago(at) });
   const tool = (name, title, detail, at, result = { output: '', failed: false, at: ago(at - 1) }) => ({ id: next('t'), kind: 'tool', name, title, detail, at: ago(at), result });
   const command = (line, output, at, result) => tool('Bash', line, { type: 'command', command: line }, at, result === undefined ? { output, failed: false, at: ago(at - 2) } : result);
@@ -155,7 +160,7 @@ export function createMock(store, options = {}) {
 
   if (!options.empty) {
     chats.set(ASKING, [
-      prompt('Why does the payout job run twice?', 140),
+      prompt('Why does the payout job run twice? Here is the dashboard.', 140, [SHOT]),
       command('git log --oneline -5 -- jobs/payouts.py', '9c2e1d4 payouts: one worker per region\n51b0a77 payouts: read the schedule from the store\n0e8f3c2 payouts: nightly run', 132),
       read(`${API}/jobs/payouts.py`, 128),
       read(`${API}/jobs/scheduler.py`, 126),
@@ -280,7 +285,7 @@ export function createMock(store, options = {}) {
       }
       run = null;
       if (item.kind === 'prompt') {
-        out.push({ id: item.id, type: 'prompt', at: item.at, text: item.text, steered: false, fromLead: false, images: [], ...(item.action ? { action: item.action } : {}) });
+        out.push({ id: item.id, type: 'prompt', at: item.at, text: item.text, steered: false, fromLead: false, images: item.images || [], ...(item.action ? { action: item.action } : {}) });
       } else if (item.kind === 'reply') {
         out.push({ id: item.id, type: 'reply', at: item.at, text: item.text, ...(item.streaming ? { streaming: true } : {}) });
       } else if (item.kind === 'team') {
@@ -609,6 +614,16 @@ export function createMock(store, options = {}) {
       if (args.part + 1 < args.parts) return { ok: true, result: { session: args.session, received: args.part + 1 } };
       const ext = { 'image/jpeg': 'jpg', 'image/gif': 'gif', 'image/webp': 'webp' }[args.type] || 'png';
       return { ok: true, result: { session: args.session, received: args.parts, path: `/home/you/.vibeswitcher/attachments/pasted-mock-${next('i')}.${ext}` } };
+    }
+    // The inspector's tokens and cost, and a chat's image bytes (2026-11-21).
+    if (message.kind === 'session.usage') {
+      const turn = (id, input, cached, output, cost) => ({ id, at: ago(140), partial: false, tokens: { input, cached, output }, cost });
+      return { ok: true, result: { turns: [turn('t1', 182_400, 171_000, 3_900, 0.41), turn('t2', 96_200, 90_100, 1_250, 0.18)], count: 2, partial: false,
+        tokens: { input: 278_600, cached: 261_100, output: 5_150 }, cost: 0.59, costPartial: false } };
+    }
+    if (message.kind === 'chat.image') {
+      if (args.id !== SHOT.id) return { ok: false, error: { code: 'gone', message: 'no such image in that session’s chat' } };
+      return { ok: true, result: { mediaType: SHOT.mediaType, bytes: SHOT.bytes, offset: 0, data: SHOT_DATA } };
     }
     if (message.kind === 'session.presets') {
       const presets = [
