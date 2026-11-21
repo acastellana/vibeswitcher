@@ -550,6 +550,20 @@ public enum WireVectors {
                 $0.merged = LeadMergeRecord(commit: "8a3f1e2c", tested: true, at: now - 3600)
             },
         ]
+        // The batch that cleared the board earlier today, before these came in (`LeadAllDone`, the app's card): its
+        // summary, its tasks, and its receipts summed.
+        var cleared = LeadAllDone(id: "a1d0e5c2", at: now - 5400, since: now - 9000, tasks: [
+            LeadAllDone.Task(slug: "hero-image", title: "Swap the hero image", outcome: .merged),
+            LeadAllDone.Task(slug: "footer-links", title: "Fix the footer links", outcome: .merged),
+            LeadAllDone.Task(slug: "old-banner", title: "Remove the old banner", outcome: .abandoned),
+        ])
+        cleared.summary = LeadAllDone.Summary(headline: "The landing page has its new hero and working footer links",
+                                              bullets: ["The hero image is the new photo, sized for phones", "Every footer link opens its page"], byModel: false)
+        cleared.receipts = try? JSONDecoder().decode(LeadReceiptTotals.self, from: Data(#"""
+            {"tasks":2,"worked":5400,"tokens":12400000,"cost":6.4,"unpriced":0,"top":"hero-image","topTitle":"Swap the hero image","topCost":4.1,
+            "topTokens":8000000,"pricesAsOf":"2026-11-01"}
+            """#.utf8))
+        board.allDone = [cleared]
         return board
     }
 

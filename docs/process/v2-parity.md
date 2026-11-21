@@ -12,7 +12,7 @@ that works through shared code counts only if the node actually calls it. Anythi
 
 ## Summary
 
-Of 101 features: **55 has it**, **12 partly**, **18 missing** (one of them, Codex workers, on purpose), **9 not needed on
+Of 101 features: **56 has it**, **11 partly**, **18 missing** (one of them, Codex workers, on purpose), **9 not needed on
 Linux**, **6 Linux-only new**, **1 unverified** (counted again from the table on 2026-11-20, `v2-stability`, after the
 settings, composer, push and rotation lanes' merges and that lane's rows: reopening your own sessions after a restart, the prompt-audit reminder,
 reminders about waiting or stuck sessions, New Project…, the sound, the "New since you looked" line, Between leads, the
@@ -100,7 +100,7 @@ Sizes to close: S is about a day, M a few days, L a week or more.
 | Find in the chat, Export Chat, Copy as Markdown, Edit in Composer, Send Again | `MainWindow/Chat/ChatView.swift` | missing | not in `chat.js` | M | the browser's own find works on the rows drawn |
 | "New since you looked" marker and summary | `MainWindow/Chat/ChatView.swift` | has it | `WebApp/js/views/chat.js`, `chatops.js` `newSince`/`sinceSummary` (2026-11-20): a line before the first item after the last one this browser saw at the chat's end, with what came since ("Ran 1 command · 1 reply"); worked out when the chat opens. What was seen is per browser (the Mac's per app) | | the chat opens at the end, not at the marker |
 | Run a code block (type it into the session after you confirm) | `MainWindow/Chat/ChatRunner.swift` | missing | needs the composer | M | |
-| The all-done card (a batch's summary and receipts) | `MainWindow/Lead/AllDoneWatch.swift`, `Chat/AllDoneCard.swift` | partly | `Engine/AllDoneLook.swift` (2026-11-20): a board that clears is marked under its lock with the written summary (`BatchSummary`, no model asked), and `status` says it for a day. No card in the page's lead chat yet, no receipts shown, no seen mark | S | |
+| The all-done card (a batch's summary and receipts) | `MainWindow/Lead/AllDoneWatch.swift`, `Chat/AllDoneCard.swift` | has it | `Engine/AllDoneLook.swift` (2026-11-20): a board that clears is marked under its lock with its summary (`BatchSummary`), and `status` says it for a day. Since 2026-11-21: the summary by the model on the user's node while the AI summaries may run (`Options.summarizeBatch`, the app's `ClaudeHeadless.allDone`), else the written one; its receipts summed in `status`; the board's `allDone` (summary, tasks and how each ended, cost, seen) in `vibeswitcher board` and as a card on the page's board; a page that shows it marks it seen (`seen` with the project, the app's `AllDoneWatch.see`) | | closed 2026-11-21; the card sits on the board, not in the lead's chat |
 | Push-to-talk dictation | `Dictation/` | missing | "later" in the design | L | |
 | Chat text size (⌘+ ⌘− ⌘0) | `MainWindow/Chat/MarkdownView.swift` | not needed | the browser zooms | | |
 

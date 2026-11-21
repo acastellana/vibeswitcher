@@ -24,6 +24,7 @@ public enum BoardText {
             lines.append("  the board can't be shown: \(inert(unreadable))")
             return lines
         }
+        lines += allDoneLines(board["allDone"], now: now)
         let today = calendar.startOfDay(for: now)
         let tasks = (board["tasks"]?.array ?? []).filter { task in
             guard task["group"]?.string == "done" else { return true }
@@ -59,6 +60,23 @@ public enum BoardText {
         guard let first = text.first, first.isUppercase else { return text }
         if text.prefix { $0 != " " }.dropFirst().contains(where: \.isUppercase) { return text }
         return first.lowercased() + text.dropFirst()
+    }
+
+    /// The board's all-done card (`BoardValue.allDone`, the app's): "All tasks finished 12m ago · 5 tasks · 4 merged",
+    /// its summary's headline and bullets, and what it cost; nothing when none.
+    static func allDoneLines(_ mark: NodeWire.Value?, now: Date) -> [String] {
+        guard let mark, mark.object != nil else { return [] }
+        let tasks = mark["tasks"]?.array?.count ?? 0
+        let when = mark["at"]?.string.flatMap(NodeWire.date).map { " " + Durations.short(now.timeIntervalSince($0)) + " ago" } ?? ""
+        var lines = ["All tasks finished\(when) · \(tasks) task\(tasks == 1 ? "" : "s") · \(mark["merged"]?.int ?? 0) merged"]
+        if let summary = mark["summary"], summary.object != nil {
+            lines.append("  " + inert(summary["headline"]?.string, limit: 200))
+            lines += (summary["bullets"]?.array ?? []).map { "  - " + inert($0.string, limit: 200) }
+        }
+        if let cost = mark["receipts"]?.string {
+            lines.append("  Cost: " + inert(cost, limit: 300) + (mark["pricesAsOf"]?.string.map { " (estimates at the API prices of \(inert($0, limit: 40)))" } ?? ""))
+        }
+        return lines
     }
 
     /// The decisions `vibeswitcher board` lists, newest first.

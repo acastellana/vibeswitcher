@@ -172,3 +172,20 @@ export function decisionLine(decision) {
   const keep = !text || text[0] !== text[0].toUpperCase() || /[A-Z]/.test(first.slice(1));
   return 'Decided: ' + (keep ? text : text[0].toLowerCase() + text.slice(1));
 }
+
+const OUTCOME_WORDS = { merged: 'merged', folded: 'folded into another task', abandoned: 'set aside', reverted: 'reverted' };
+
+// A board's all-done card (the board's `allDone`, the app's `AllDoneCard`): its summary, what it cost, "5 tasks · 4
+// merged", and each task with how it ended. Null for none.
+export function allDoneCard(mark) {
+  if (!mark) return null;
+  const count = mark.tasks.length;
+  return {
+    headline: mark.summary?.headline || null,
+    bullets: mark.summary?.bullets || [],
+    cost: mark.receipts ? `Cost: ${mark.receipts}.` : null,
+    costNote: mark.pricesAsOf ? `Each task's working time and tokens, read from its sessions' transcripts; costs are estimates at the API prices of ${mark.pricesAsOf}.` : null,
+    count: `${count} task${count === 1 ? '' : 's'} · ${mark.merged} merged`,
+    tasks: mark.tasks.map((task) => ({ title: task.title, word: OUTCOME_WORDS[task.outcome] || task.outcome, merged: task.outcome === 'merged' })),
+  };
+}

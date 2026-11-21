@@ -88,6 +88,7 @@ public enum BoardValue {
             "tasks": .array(kept.map(\.value)), "counts": .object(counts), "more": .int(more),
             "unreadable": refusal.map { .string(text($0, limit: 300)) } ?? .null,
             "decisions": Self.decisions(decisions),
+            "allDone": board.flatMap { Self.allDone($0, now: now) } ?? .null,
         ])
     }
 
@@ -128,6 +129,26 @@ public enum BoardValue {
                      "why": decision.why.isEmpty ? .null : .string(text(decision.why, limit: decisionBytes)),
                      "summary": decision.summary.map { .string(line($0)) } ?? .null])
         })
+    }
+
+    /// The board's newest all-done mark (`LeadAllDone`, the app's card) while it is a day old at most (`doneFor`): when
+    /// it cleared, its summary (a headline and bullets, by the model or written), its tasks and how each ended, how
+    /// many merged, its receipts summed in words (`LeadReceiptTotals.text`) and the prices they're estimated at, and
+    /// whether the user has seen it (`seen`). Null for none.
+    static func allDone(_ board: LeadBoard, now: Date) -> NodeWire.Value? {
+        guard let mark = board.allDone?.last, now.timeIntervalSince1970 - mark.at <= doneFor else { return nil }
+        return .object([
+            "id": .string(text(mark.id, limit: 80)), "at": .date(Date(timeIntervalSince1970: mark.at)),
+            "summary": mark.summary.map { summary in
+                .object(["headline": .string(text(summary.headline, limit: lineBytes)),
+                         "bullets": .array(summary.bullets.prefix(8).map { .string(text($0, limit: lineBytes)) }), "byModel": .bool(summary.byModel)])
+            } ?? .null,
+            "tasks": .array(mark.tasks.prefix(50).map { .object(["title": .string(text($0.title, limit: titleBytes)), "outcome": .string($0.outcome.rawValue)]) }),
+            "merged": .int(mark.merged),
+            "receipts": mark.receipts.map { .string(text($0.text, limit: lineBytes)) } ?? .null,
+            "pricesAsOf": mark.receipts.map { .string(text($0.pricesAsOf, limit: 40)) } ?? .null,
+            "seen": .bool(mark.seenAt != nil),
+        ])
     }
 
     /// The most bytes of UTF-8 a decision's text, and its why, carry.

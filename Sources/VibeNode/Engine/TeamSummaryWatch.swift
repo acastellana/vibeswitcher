@@ -139,11 +139,12 @@ public enum NodeSummaries {
     /// session), through the login shell, in `<root>/headless` (made empty each time, so Claude Code's start-up scan
     /// finds nothing): the line, or nil when Claude isn't there, fails or takes longer than `ClaudeHeadless.timeout`.
     /// Blocks. Only the user's node's server gives it (`ServerStart`); a scratch node's engine asks no model.
-    public static func headless(root: URL) -> Summarizer.Generate {
+    /// `system`, `timeout`: the all-done summary's (`BatchSummaryPrompts.system`, `ClaudeHeadless.briefingTimeout`).
+    public static func headless(root: URL, system: String = SummaryPrompts.system, timeout: TimeInterval = ClaudeHeadless.timeout) -> Summarizer.Generate {
         { prompt in
             guard let folder = folder(root: root) else { return nil }
-            let command = ClaudeHeadless.command(prompt: prompt)
-            let result = Shell.run(executable: command.executable, args: command.args, in: folder, timeout: ClaudeHeadless.timeout, grace: 1)
+            let command = ClaudeHeadless.command(prompt: prompt, system: system)
+            let result = Shell.run(executable: command.executable, args: command.args, in: folder, timeout: timeout, grace: 1)
             return result.ok && !result.output.isEmpty ? result.output : nil
         }
     }

@@ -69,6 +69,10 @@ struct BoardTests {
         old.tasks[4].merged?.at = WireVectors.boardNow.timeIntervalSince1970
         old.tasks[3].status = .kept  // kept after a merge undone by hand: its record says no time
         old.tasks[3].merged = LeadMergeRecord(commit: "c0ffee", tested: false, at: 0)
+        // An all-done mark from before summaries and receipts, cleared at a time a board can't say.
+        old.allDone = [LeadAllDone(id: "m0", at: WireVectors.boardNow.timeIntervalSince1970 - 60, since: 0,
+                                   tasks: [LeadAllDone.Task(slug: "a", title: "A", outcome: .merged)])]
+        old.allDone?[0].seenAt = WireVectors.boardNow.timeIntervalSince1970
         let older = BoardValue.value(project: "p", root: "/r", board: old, now: WireVectors.boardNow,
                                      decisions: [BoardDecision(id: "0|An old decision", at: 0, text: "An old decision", why: "")])
         for value in [WireVectors.boardValue, WireVectors.boardMoved, unreadable, older] {
@@ -339,6 +343,12 @@ struct BoardTests {
         let lines = BoardText.lines(WireVectors.boardValue, now: WireVectors.boardNow, calendar: utc, home: "/home/u")
         #expect(lines == [
             "~/acme-site · base main",
+            // The batch that cleared the board earlier: the app's all-done card, its summary and what it cost.
+            "All tasks finished 1h 30m ago · 3 tasks · 2 merged",
+            "  The landing page has its new hero and working footer links",
+            "  - The hero image is the new photo, sized for phones",
+            "  - Every footer link opens its page",
+            "  Cost: 2 tasks, 1.5 h of worker time, 12M tokens, est. $6.40; most expensive: Swap the hero image (est. $4.10) (estimates at the API prices of 2026-11-01)",
             "Needs attention",
             "  Blocked 18m  Rewrite the pricing page's copy — Which plan names do we launch with?",
             "Running",
