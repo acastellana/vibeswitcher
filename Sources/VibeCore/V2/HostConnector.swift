@@ -48,7 +48,8 @@ public enum HostConnector {
         defer { lock.unlock() }
         let deadline = Date().addingTimeInterval(timeout)
         // A host gone is EPIPE, not SIGPIPE: on the Mac the socket's own switch (`SO_NOSIGPIPE`, which `send`'s write
-        // relies on there; a connector's pair doesn't come with it); nothing on Linux, whose `send` says so itself.
+        // relies on there), set by `Platform.Sockets.pair` as it makes the connector's pair: here only for a connector
+        // made elsewhere, as the Mac takes it only while the host's end is open; nothing on Linux, whose `send` says so.
         Platform.Sockets.noSigPipe(socket: connector)
         var byte = UInt8(ascii: "c")
         while true {

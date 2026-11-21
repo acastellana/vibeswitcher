@@ -22,14 +22,17 @@ extension Platform.Sockets {
         _ = fcntl(fd, F_SETNOSIGPIPE, 1)
     }
 
-    /// The same for a socket, by the socket's own option (`SO_NOSIGPIPE`).
+    /// The same for a socket, by the socket's own option (`SO_NOSIGPIPE`). Only while the socket is whole: the Mac
+    /// refuses it (EINVAL) once the socket is shut both ways, as a stream's end is when its peer has closed, so the
+    /// sockets made here (SocketMaking+Darwin.swift) get it as they are made.
     public static func noSigPipe(socket fd: Int32) {
         var on: Int32 = 1
         setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &on, socklen_t(MemoryLayout<Int32>.size))
     }
 
     /// Writes `count` bytes from `bytes` to the socket `fd`: write(2), as the Mac's code always wrote to its sockets.
-    /// They carry `SO_NOSIGPIPE` (`noSigPipe(socket:)`, which UnixSocket gives each), so a peer gone is EPIPE.
+    /// They carry `SO_NOSIGPIPE` (`noSigPipe(socket:)`, which `makeSocket`, `accept` and `pair` give each as they make
+    /// it), so a peer gone is EPIPE.
     public static func send(_ fd: Int32, _ bytes: UnsafeRawPointer?, _ count: Int) -> Int {
         Sys.write(fd, bytes, count)
     }

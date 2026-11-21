@@ -491,6 +491,25 @@ struct SocketsTests {
         #expect(Sys.read(other, &byte, 1) == 1 && byte == UInt8(ascii: "x"))
     }
 
+    /// A pair's end whose peer closed before anyone asked anything of it fails a write with EPIPE, not SIGPIPE: the
+    /// Mac's switch is set as the pair is made, since the Mac refuses it (EINVAL) on an end whose peer has closed (the
+    /// connector of a host gone, `HostConnector.connect`, run 44801844163). A socket on its own has it from its making.
+    @Test(arguments: SocketsTests.socketTypes)
+    func aPairsEndIsFreeOfSIGPIPEFromItsMaking(type: Int32) throws {
+        let (one, other) = try #require(Platform.Sockets.pair(type: type))
+        defer { Sys.close(one) }
+        let alone = Platform.Sockets.makeSocket(type: type)
+        try #require(alone >= 0, "errno \(errno)")
+        defer { Sys.close(alone) }
+        #if canImport(Darwin)
+        #expect(fcntl(one, F_GETNOSIGPIPE) == 1 && fcntl(other, F_GETNOSIGPIPE) == 1)
+        #expect(fcntl(alone, F_GETNOSIGPIPE) == 1)
+        #endif
+        Sys.close(other)
+        let written = Self.refusedWrite(to: one)
+        #expect(written.count == -1 && written.code == EPIPE, "\(written)")
+    }
+
     #if os(Linux)
     /// What the server child's connector (Linux's) relies on: each send is one message, read whole and alone.
     @Test func aSeqpacketPairKeepsMessageBoundaries() throws {
