@@ -4,7 +4,9 @@ import Testing
 
 /// The test binary's helper mode, for a socket whose peer is another process: started again with
 /// `SocketsTests.connectVariable` naming a socket's path, this binary connects to it before any test of its own,
-/// writes one byte, stays until the other end closes, and ends. It exits 3 when it couldn't connect.
+/// writes one byte, stays until the other end closes, and ends. It exits 3 when it couldn't connect. With
+/// `SocketsTests.execVariable` set too, a byte from the other end makes it exec `/bin/sleep 30` in place (the same pid,
+/// another image: `ProcessesTests`' check that a token from before an exec names no link after it).
 private func connectIfAsked() {
     guard let path = getenv(SocketsTests.connectVariable).map({ String(cString: $0) }) else { return }
     let fd = socket(AF_UNIX, Platform.Sockets.stream, 0)
@@ -16,6 +18,11 @@ private func connectIfAsked() {
     var byte: UInt8 = 0
     while true {
         let count = read(fd, &byte, 1)
+        if count == 1, getenv(SocketsTests.execVariable) != nil {
+            let arguments: [UnsafeMutablePointer<CChar>?] = [strdup("sleep"), strdup("30"), nil]
+            execv("/bin/sleep", arguments)
+            _exit(4)
+        }
         if count == 0 || (count < 0 && errno != EINTR) { break }
     }
     _exit(0)
@@ -123,6 +130,7 @@ private let claimInAPidNamespaceWhenAsked: @convention(c) () -> Void = { claimIn
 struct SocketsTests {
     static let connectVariable = "VIBE_SOCKETS_TEST_CONNECT"
     static let gonePeerVariable = "VIBE_SOCKETS_TEST_GONE_PEER"
+    static let execVariable = "VIBE_SOCKETS_TEST_EXEC"
 
     struct Failure: Error { var what: String }
 
@@ -339,12 +347,13 @@ struct SocketsTests {
     }
 
     /// Starts this binary again in its helper mode (`connectIfAsked`), connecting to the listener at `path`.
-    static func connector(to path: String) throws -> pid_t {
+    static func connector(to path: String, execs: Bool = false) throws -> pid_t {
         // The helper never gets as far as a test; one that did would not start another.
         try #require(getenv(connectVariable) == nil)
         let binary = try #require(Bundle.main.executablePath)
         var spawn = Platform.Spawn(executable: binary, arguments: ProcessInfo.processInfo.arguments)
         spawn.environment = ProcessInfo.processInfo.environment.map { "\($0.key)=\($0.value)" } + ["\(connectVariable)=\(path)"]
+            + (execs ? ["\(execVariable)=1"] : [])
         spawn.stdin = .path("/dev/null", flags: O_RDONLY)
         spawn.stdout = .path("/dev/null", flags: O_WRONLY)
         return try spawn.start().get()

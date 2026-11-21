@@ -994,6 +994,46 @@ struct ProcessesTests {
         #expect(Processes.isDumpable(getpid()) == nil)
     }
 
+    /// A token is bound to its process's image (the review of 2026-11-21): a child's, taken from its connection, names
+    /// its link while it runs; once it has exec'd (the same pid, another image) a link read since isn't the token's;
+    /// once it has ended and been reaped there's no link, and the one read before isn't the token's either.
+    @Test(.enabled(if: !onLinux, "the Mac's binding by Security's guest check"))
+    func aTokenFromBeforeAnExecOrAnEndNamesNoLink() throws {
+        for execs in [true, false] {
+            let pair = try SocketsTests.Pair()
+            defer { pair.close() }
+            let child = try SocketsTests.connector(to: pair.path, execs: execs)
+            var reaped = false
+            defer { if !reaped { kill(child, SIGKILL); _ = SpawnTests.ended(child) } }
+            let served = try SocketsTests.accepted(from: pair.listener)
+            defer { Sys.close(served) }
+            var byte: UInt8 = 0
+            #expect(Sys.read(served, &byte, 1) == 1)
+            let token = try #require(Platform.Sockets.peerToken(served))
+            #expect(token.pid == child)
+            let before = try #require(Processes.link(child))
+            #expect(before.isProcess(of: token), "execs \(execs): a live child's token names its link")
+            if execs {
+                // The byte makes it exec /bin/sleep; its record names sleep once it has.
+                var go: UInt8 = UInt8(ascii: "x")
+                #expect(Sys.write(served, &go, 1) == 1)
+                let deadline = Date().addingTimeInterval(TestScriptLinuxTests.hangGuard)
+                while Processes.kernelRecord(child)?.name != "sleep", Date() < deadline { usleep(10_000) }
+                #expect(Processes.kernelRecord(child)?.name == "sleep")
+                let after = try #require(Processes.link(child))
+                #expect(after.pid == child)
+                #expect(!after.isProcess(of: token), "a link read after the exec isn't the token's")
+                #expect(!before.isProcess(of: token))
+            } else {
+                kill(child, SIGTERM)
+                _ = SpawnTests.ended(child)
+                reaped = true
+                #expect(Processes.link(child) == nil)
+                #expect(!before.isProcess(of: token), "the link read before the end isn't the token's")
+            }
+        }
+    }
+
     /// The Mac's link (`proc_pidinfo`'s BSD info, the review of 2026-11-21: the voice's ancestry there): this process's
     /// names its parent; a child's names this process and started no earlier; a token from a socket names the link of
     /// its own pid, never another pid's; a child ended and reaped has none.
