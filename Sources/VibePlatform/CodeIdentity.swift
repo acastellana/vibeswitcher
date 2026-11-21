@@ -39,6 +39,12 @@ extension Platform {
         /// the Mac's step 3). nil when it can't be told, and on Linux.
         public static func isHardened(_ token: Platform.PeerToken) -> Bool? { System.isHardened(token) }
 
+        /// Whether the code on disk at `path` is signed, validly as it is now, with the Hardened Runtime
+        /// (`codesign --options runtime`: every slice's signature valid, the runtime flag set) and without
+        /// `get-task-allow`: what the install's Mac signing gives the node's binaries (scripts/lib/mac-sign.sh), so the
+        /// processes they start pass `isHardened`. nil when it can't be read, and on Linux.
+        public static func isSignedHardened(atPath path: String) -> Bool? { System.isSignedHardened(atPath: path) }
+
         /// The architecture the process `pid` runs (the slice of a universal binary it was started from); nil when it
         /// can't be read. Linux: nil.
         public static func architecture(of pid: pid_t) -> Architecture? { System.architecture(of: pid) }

@@ -80,6 +80,22 @@ extension Platform.CodeIdentity {
             return architecture
         }
 
+        /// `kSecCodeSignatureRuntime` in a signature's flags (xnu's `CS_RUNTIME`, as `codesign --options runtime` sets).
+        static let signatureRuntimeFlag: UInt32 = 0x0001_0000
+
+        static func isSignedHardened(atPath path: String) -> Bool? {
+            var code: SecStaticCode?
+            guard SecStaticCodeCreateWithPath(URL(fileURLWithPath: path) as CFURL, [], &code) == errSecSuccess, let code else { return nil }
+            // Every slice's signature valid, as it is now on disk.
+            guard SecStaticCodeCheckValidity(code, SecCSFlags(rawValue: numericCast(kSecCSCheckAllArchitectures)), nil) == errSecSuccess else { return false }
+            var information: CFDictionary?
+            guard SecCodeCopySigningInformation(code, SecCSFlags(rawValue: numericCast(kSecCSSigningInformation)), &information) == errSecSuccess,
+                  let information = information as? [String: Any],
+                  let flags = (information[kSecCodeInfoFlags as String] as? NSNumber)?.uint32Value else { return nil }
+            let entitlements = information[kSecCodeInfoEntitlementsDict as String] as? [String: Any] ?? [:]
+            return flags & signatureRuntimeFlag != 0 && (entitlements["com.apple.security.get-task-allow"] as? Bool) != true
+        }
+
         static func cdhash(atPath path: String, architecture: Architecture? = nil) -> Data? {
             var code: SecStaticCode?
             let attributes: [CFString: Any] = architecture.map {

@@ -28,6 +28,9 @@ extension Platform.CodeIdentity {
         /// nil: Linux has no Hardened Runtime (its form is non-dumpable, `Platform.Processes.isDumpable`).
         static func isHardened(_ token: Platform.PeerToken) -> Bool? { nil }
 
+        /// nil: Linux's programs carry no signature.
+        static func isSignedHardened(atPath path: String) -> Bool? { nil }
+
         /// nil: nothing to read it from.
         static func architecture(of pid: pid_t) -> Architecture? { nil }
 
