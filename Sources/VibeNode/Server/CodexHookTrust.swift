@@ -37,8 +37,8 @@ public enum CodexHookTrust {
                                      timeout: TimeInterval = 30) throws -> Int {
         guard let executable = command.first else { throw Failure.launch("no program") }
         var toChild: [Int32] = [-1, -1], fromChild: [Int32] = [-1, -1]
-        guard Sys.pipe(&toChild) == 0 else { throw Failure.launch(String(cString: strerror(errno))) }
-        guard Sys.pipe(&fromChild) == 0 else {
+        guard Sys.pipeClosedOnExec(&toChild) == 0 else { throw Failure.launch(String(cString: strerror(errno))) }
+        guard Sys.pipeClosedOnExec(&fromChild) == 0 else {
             let code = errno
             Sys.close(toChild[0]); Sys.close(toChild[1])
             throw Failure.launch(String(cString: strerror(code)))
@@ -48,6 +48,8 @@ public enum CodexHookTrust {
         spawn.stdout = .descriptor(fromChild[1])
         spawn.stderr = .path("/dev/null", flags: O_WRONLY)
         spawn.group = .ownGroup
+        // Nothing of this process's but its three: the pipes' ends are close-on-exec from their making.
+        spawn.keep = []
         spawn.directory = home
         var environment = ProcessInfo.processInfo.environment
         environment["HOME"] = home
