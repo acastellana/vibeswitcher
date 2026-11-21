@@ -84,7 +84,8 @@ asked for at the step that needs each.
        the bootstrap. *Costs:* you switch between tasks, not during them. *2026-11-17, the step 8 sweep:* stage 2's
        Task 3b measurement passed here (2026-11-13), and the rule stays all the same: stage 2's 9d review kept the
        server's 30 s idle bound on the grounds that no switch happens while a worker or verifier runs (the start
-       plan's ST-D15).
+       plan's ST-D15). *2026-11-21:* a worker idle between turns with nothing waiting is parked by the switch (ended, its worktree
+       kept, its lead told), not carried across: the rule's reason holds for it (`SwitchPark`).
     3. [D4] No subreaper before the bootstrap; an escaped process is refused by the cgroup rule instead. *Otherwise:*
        every `waitpid` in the host must first tolerate adopted children (stage 2's 4b1).
     4. [D7] Sessions identified by an inherited socket come with the sandbox. *Costs:* until then a session can be

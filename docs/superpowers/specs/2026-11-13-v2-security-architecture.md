@@ -1310,7 +1310,15 @@ memory and writes no file.
   switched server on the grounds that no switch happens while a worker or verifier runs, and counting the requests in
   flight in `HostServer.handle` is left to after the bootstrap. The rule is lifted then, with that count. The server
   refuses `build.switch` while a worker or verifier session is live, naming decision 6 and each live one, with nothing
-  asked of the host; the lead may stay (the start plan's S8b, `SwitchRequest`). The server reads roles from labels,
+  asked of the host; the lead may stay (the start plan's S8b, `SwitchRequest`). *Idle workers (2026-11-21, after a real
+  switch waited about 1.5 h on finished workers their lead kept open):* not carried across, since the rule's reason holds
+  for them too (an idle worker keeps its tool server and box, and one message from its lead wakes it mid-switch). They
+  are parked instead: within the user's `build.switch`, after the checks that would refuse it anyway, each task's own
+  worker that is idle between turns with nothing waiting (no prompt, no background command, no message held or
+  delivered since its last report), looked at again and ended under its task's delivery lock, its worktree, branch and
+  commits kept and its end marked as no news, its lead told that `start_worker` continues there (`SwitchPark`,
+  `SwitchParkTests`, acceptance A38). A worker mid-turn, a verifier or any other team member still refuses the switch;
+  `status` says which workers it would park (`switchParks`) and the command line names them before the code. The server reads roles from labels,
   which their spawner picks, and only when the switch is planned, while a lead can start a worker through the host
   during the probe (up to 180 s). So the node's host (one with an install root) holds the rule too, on the sessions its
   handover would save, before the probe and again in the turn that executes (`HostServer.teamsWorking`): a live

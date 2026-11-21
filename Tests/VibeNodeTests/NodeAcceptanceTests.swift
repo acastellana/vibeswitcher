@@ -621,8 +621,10 @@ struct NodeAcceptanceTests {
         let missing = try await node.runOnTerminal(["new", folder.path, "--agent", "codex"])
         #expect(missing.status != 0 && missing.output.contains("v2/test/codex") && missing.output.contains("ln -s"), "\(missing.output)\(missing.errors)")
         let standIn = node.root.appendingPathComponent("stand-in-codex")
-        try Data("#!/bin/sh\necho \"stand-in codex $*\"\nexec sleep 600\n".utf8).write(to: standIn)
-        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: standIn.path)
+        // Copied through a close-on-exec descriptor, so no child another test forks holds it open ("Text file busy").
+        let text = node.root.appendingPathComponent("stand-in-codex.txt")
+        try Data("#!/bin/sh\necho \"stand-in codex $*\"\nexec sleep 600\n".utf8).write(to: text)
+        try copyClosedOnExec(text.path, to: standIn.path)
         let link = node.root.appendingPathComponent("v2/test/codex")
         try FileManager.default.createDirectory(at: link.deletingLastPathComponent(), withIntermediateDirectories: true)
         try FileManager.default.createSymbolicLink(atPath: link.path, withDestinationPath: standIn.path)
@@ -750,6 +752,32 @@ struct NodeAcceptanceTests {
         try answer(.init(problem: "gh isn't installed (/usr/bin/gh)"))
         let failed = try await node.run(["status", "--check-updates"])
         #expect(failed.status == 1 && failed.output.contains("couldn't check v2 for a newer build (gh isn't installed (/usr/bin/gh))"), "\(failed.output)\(failed.errors)")
+    }
+
+    @Test("A38: vs switch with an idle worker parks it (said before the code), hands over, keeps the lead, and tells it")
+    func a38SwitchParksIdleWorkers() async throws {
+        let (a, b) = (String(repeating: "a", count: 40), String(repeating: "b", count: 40))
+        let installs = scratch.url("builds")
+        let buildA = try ScratchBuilds.install(commit: a, into: installs)
+        _ = try ScratchBuilds.install(commit: b, into: installs)
+        let node = try await ScratchNode(scratch, holdFirstLook: true, build: buildA, installRoot: installs)
+        defer { node.stop() }
+        let repo = try await Self.repository(node)
+        let lead = try await Self.startLead(node, repo, goal: "write the parser")
+        let worker = try await Self.planAndStart(node, lead, title: "Write the parser")
+        let files = node.fake.files(terminal: worker.tty)
+        let pid = try #require((EngineEndToEndTests.state(files)["pid"] as? Int).map(Int32.init))
+        try files.call("report", ["task": "write-the-parser", "status": "blocked", "summary": "it needs the grammar"])
+        try #require(await eventually(timeout: 120) { files.calls().count == 2 }, "\(node.said)")
+        try hook(node, ["hook_event_name": "Stop"], tty: worker.tty, pid: pid)
+        try #require(await node.eventuallyStatus { (($0["switchParks"] as? [String]) ?? []).contains { $0.contains(worker.tty) } }, "\(node.said)")
+        let switched = try await node.runOnTerminal(["switch", b])
+        #expect(switched.status == 0 && switched.output.contains("it parks first the workers that only wait on their lead")
+                && switched.output.contains("parked first") && switched.output.contains(worker.tty) && switched.output.contains("handed over"),
+                "\(switched.output)\(switched.errors)\n\(node.said)")
+        #expect(try node.sessions().contains { $0.id == lead.session.id && $0.isLive })
+        #expect(try !node.sessions().contains { $0.id == worker.id && $0.isLive })
+        #expect(await eventually(timeout: 120) { node.inbox(lead.session.tty).contains { $0.text.contains("start_worker continues there") } }, "\(node.said)")
     }
 
     // MARK: The rows a scratch node can't run

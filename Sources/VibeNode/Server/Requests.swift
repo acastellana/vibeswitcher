@@ -436,7 +436,9 @@ public final class Requests: @unchecked Sendable {
             "usage": engine?.usage.map(NodeUsage.value) ?? .null,
             "boost": engine?.boostValue ?? .null,
             // What refuses a build switch now (the rule on switches), for `vibeswitcher switch` before its code.
-            "switchBlockers": .array(SwitchRequest.blockers(link.sessions).map(NodeWire.Value.string)),
+            // What refuses a switch now (decision 6), less the workers it would park (`SwitchPark`, by the last look).
+            "switchBlockers": .array(switchBlockersNow().blockers.map(NodeWire.Value.string)),
+            "switchParks": .array(switchBlockersNow().parks.map(NodeWire.Value.string)),
         ]
         // The user's node's tailnet page, for the command line (not in the `node` stream: `NodeStatusStore.value`).
         if let tailnet { fields["webTailnet"] = tailnet.value() }
@@ -587,6 +589,14 @@ public final class Requests: @unchecked Sendable {
     /// install root's builds, a handover refused while the seal holds a change under the builds folder or the unit's
     /// folder in this server's home (`HeldChange`). The host's notes are asked again after it, so `status` names the
     /// build that runs.
+    /// The sessions that refuse a switch now (`SwitchRequest.blockers`), less the workers the engine's last look saw only
+    /// waiting on their lead, which the switch parks (`parks`). On `queue`.
+    func switchBlockersNow() -> (blockers: [String], parks: [String]) {
+        let all = SwitchRequest.blockers(link.sessions)
+        let parks = engine?.switchParkHint(link.sessions).map(\.named) ?? []
+        return (all.filter { !parks.contains($0) }, parks)
+    }
+
     private func buildSwitch(_ request: NodeWire.Request, reply: @escaping (NodeWire.Reply) -> Void) {
         guard let commit = request.args?["commit"]?.string else {
             return reply(.init(re: request.id, error: .init(.badArgs, "build.switch needs commit, 40 lowercase hex digits")))
@@ -599,7 +609,13 @@ public final class Requests: @unchecked Sendable {
         let held: @Sendable () -> String? = {
             HeldChange.refusal(SwitchRequest.heldNames, home: home, vault: vault, accept: SwitchRequest.acceptFirst)?.text
         }
-        SwitchRequest(link: link, installRoot: installRoot, timing: switchTiming, held: held, note: note).run(commit: commit) { [weak self] answer in
+        // The workers that only wait on their lead are parked for it (`SwitchPark`): the engine's, on its queue.
+        let park: SwitchRequest.Park? = engine.map { engine in { live, commit, done in
+            engine.queue.async {
+                engine.parkForSwitch(live, commit: commit) { parked in done(parked.map(\.named)) }
+            }
+        } }
+        SwitchRequest(link: link, installRoot: installRoot, timing: switchTiming, held: held, park: park, note: note).run(commit: commit) { [weak self] answer in
             switch answer {
             case .done(let value): reply(.init(re: request.id, result: value))
             case .refused(let code, let why): reply(.init(re: request.id, error: .init(code, why)))

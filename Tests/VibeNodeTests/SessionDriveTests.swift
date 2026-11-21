@@ -62,8 +62,11 @@ struct SessionDriveTests {
         let world = try await CardWorld.make(scratch)
         defer { world.stop() }
         let fake = scratch.url("fake-codex")
-        try Data("#!/bin/sh\necho \"stand-in codex $*\"\nexec sleep 600\n".utf8).write(to: fake)
-        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: fake.path)
+        // Written beside it and copied through a close-on-exec descriptor: a child another test forks meanwhile can't
+        // hold the stand-in open for writing, which would refuse its exec ("Text file busy", CI 2026-11-21).
+        let text = scratch.url("fake-codex.txt")
+        try Data("#!/bin/sh\necho \"stand-in codex $*\"\nexec sleep 600\n".utf8).write(to: text)
+        try copyClosedOnExec(text.path, to: fake.path)
         let link = world.host.root.appendingPathComponent("v2/test/codex")
         try FileManager.default.createDirectory(at: link.deletingLastPathComponent(), withIntermediateDirectories: true)
         try FileManager.default.createSymbolicLink(atPath: link.path, withDestinationPath: fake.path)
