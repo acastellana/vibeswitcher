@@ -8,7 +8,7 @@ import { readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { validate } from '../wire/validators.js';
-import { settingSections, setLine, draftProblem, shownValue, usageFacts } from '../js/settings.js';
+import { settingSections, setLine, draftProblem, shownValue, usageFacts, settingMatches } from '../js/settings.js';
 import { parseRoute } from '../js/ui.js';
 import { settingsHref } from '../js/views/settings.js';
 import { createMock } from '../js/mock.js';
@@ -98,4 +98,13 @@ test('the account’s usage is shown from the node’s value: each limit, the on
   const ignored = usageFacts({ ...usage, ignored: true, fableHeldBack: null, limits: [] });
   assert.deepEqual(ignored.limits, []);
   assert.deepEqual(ignored.notes, ['Ignore usage limits is on: only a limit Claude refused a request at holds work back.']);
+});
+
+test('the settings search keeps those holding every word, in their key, title, description or section', () => {
+  const all = [...answered.result.node.settings, ...answered.result.project.settings];
+  assert.ok(all.every((setting) => settingMatches(setting, '')), 'no query keeps every one');
+  const usage = all.filter((setting) => settingMatches(setting, 'usage LIMITS'));
+  assert.ok(usage.length > 0 && usage.every((setting) => /usage/i.test(setting.title + setting.about + setting.section)), JSON.stringify(usage.map((s) => s.key)));
+  assert.deepEqual(all.filter((setting) => settingMatches(setting, 'max_workers')).map((setting) => setting.key), ['max_workers']);
+  assert.equal(all.filter((setting) => settingMatches(setting, 'nothing-like-this')).length, 0);
 });

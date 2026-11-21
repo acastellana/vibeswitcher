@@ -354,6 +354,25 @@ struct BoardTests {
         try #require(await eventually { world.queue.sync { world.stream.entries[world.project] } == nil }, "the board stayed")
     }
 
+    /// The lead's results (post_update) ride on the board: the newest `resultsKept`, newest first, each body inert and
+    /// capped, its screenshots counted (their paths, the node's files, never sent).
+    @Test func theLeadsResultsAreSentNewestFirstAndCapped() throws {
+        var board = LeadBoard()
+        board.updates = (0..<(BoardRecords.resultsKept + 2)).map { index in
+            var update = LeadUpdate(id: "u\(index)", title: "Result \(index)", body: String(repeating: "x", count: BoardRecords.resultBytes + 10) + "\u{1B}[2J",
+                                    images: ["/home/u/secret/shot.png"])
+            update.at = 1_763_000_000 + Double(index)
+            return update
+        }
+        let value = BoardValue.value(project: "p", root: "/r", board: board, now: WireVectors.boardNow)
+        let results = try #require(value["results"]?.array)
+        #expect(results.count == BoardRecords.resultsKept && results.first?["id"] == .string("u\(BoardRecords.resultsKept + 1)"))
+        let body = try #require(results.first?["body"]?.string)
+        #expect(body.utf8.count <= BoardRecords.resultBytes + 3 && !body.contains("\u{1B}"))
+        #expect(results.first?["images"] == .int(1) && !String(decoding: NodeWire.message(value), as: UTF8.self).contains("secret/shot.png"))
+        #expect(WireSchema.check(value, as: "board") == nil)
+    }
+
     // MARK: The command line's text
 
     @Test func theCommandLinePrintsOneShortLineATask() {

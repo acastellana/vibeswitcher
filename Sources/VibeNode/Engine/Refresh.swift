@@ -84,6 +84,7 @@ extension LeadEngine {
             self.usageRead(read.usage, teams: read.teams)
             self.refreshed(roots: roots, loaded: read.loaded, teams: read.teams, refusals: read.refusals, finished: read.finished)
             self.lookAtSummaries(loaded: read.loaded, teams: read.teams, decisions: read.decisions, on: read.summariesOn)
+            self.publishChatCards()
             self.refreshing = false
             if self.refreshAgain {
                 self.refreshAgain = false

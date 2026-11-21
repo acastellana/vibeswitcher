@@ -2,18 +2,25 @@ import Foundation
 import VibeCore
 import VibeNode
 
-/// `vibeswitcher settings [FOLDER] [--json]` (the parity table's gap 9): the node's settings and, with a folder, its
-/// project's, each with its value, its default, where it lives and whether it is a guard rail; then what the app has
-/// that a node leaves out. A read: anyone of the uid, no code. Every value from a file is shown inert, line by line.
+/// `vibeswitcher settings [FOLDER] [--find WORDS] [--json]` (the parity table's gap 9): the node's settings and, with a
+/// folder, its project's, each with its value, its default, where it lives and whether it is a guard rail; then what the
+/// app has that a node leaves out. `--find` keeps the settings whose key, title, description or section holds every
+/// word (the app's Settings search). A read: anyone of the uid, no code. Every value from a file is shown inert, line
+/// by line.
 enum SettingsCommand {
-    static let usage = "usage: vibeswitcher settings [FOLDER] [--json]"
+    static let usage = "usage: vibeswitcher settings [FOLDER] [--find WORDS] [--json]"
 
     static func run(_ arguments: [String]) -> Int32 {
         var folder: String?
         var json = false
-        for word in arguments {
+        var find: String?
+        var words = arguments[...]
+        while let word = words.popFirst() {
             switch word {
             case "--json": json = true
+            case "--find":
+                guard let given = words.popFirst(), !given.trimmingCharacters(in: .whitespaces).isEmpty else { return Say.usage(usage) }
+                find = given
             default:
                 guard folder == nil, !word.hasPrefix("--") else { return Say.usage(usage) }
                 folder = CardCommand.absolute(word)
@@ -34,19 +41,27 @@ enum SettingsCommand {
                 Say.out(String(decoding: NodeWire.printable(NodeWire.line(result)).dropLast(), as: UTF8.self))
                 return 0
             }
-            lines(result, home: ProcessInfo.processInfo.environment["HOME"]).forEach(Say.out)
+            lines(result, home: ProcessInfo.processInfo.environment["HOME"], find: find).forEach(Say.out)
             return 0
         }
     }
 
     /// The reply as a person reads it.
-    static func lines(_ result: NodeWire.Value, home: String?) -> [String] {
+    static func lines(_ result: NodeWire.Value, home: String?, find: String? = nil) -> [String] {
         var out: [String] = []
+        let words = (find ?? "").lowercased().split(whereSeparator: \.isWhitespace).map(String.init)
+        // The app's search: every word in the setting's key, title, description or section.
+        let found = { (setting: NodeWire.Value) -> Bool in
+            let text = ["key", "title", "about", "section"].compactMap { setting[$0]?.string }.joined(separator: " ").lowercased()
+            return words.allSatisfy { text.contains($0) }
+        }
         let shown = { (path: String) -> String in
             guard let home, !home.isEmpty, path.hasPrefix(home + "/") else { return ConfigSeal.inert(path, limit: 300) }
             return "~" + ConfigSeal.inert(String(path.dropFirst(home.count)), limit: 300)
         }
-        func section(_ heading: String, _ settings: [NodeWire.Value], folder: String?) {
+        func section(_ heading: String, _ all: [NodeWire.Value], folder: String?) {
+            let settings = all.filter(found)
+            if !words.isEmpty, settings.isEmpty { return }
             out.append(heading)
             var last: String?
             for setting in settings {
@@ -89,10 +104,14 @@ enum SettingsCommand {
             section("Project \(ConfigSeal.inert((root as NSString).lastPathComponent, limit: 80)) (\(shown(root))):",
                     project["settings"]?.array ?? [], folder: root)
         }
-        let usage = NodeUsage.lines(result["usage"])
+        let usage = words.isEmpty ? NodeUsage.lines(result["usage"]) : []
         if !usage.isEmpty {
             out.append("")
             out += usage
+        }
+        if !words.isEmpty {
+            if out.isEmpty { out.append("No setting matches \u{201C}\(ConfigSeal.inert(find ?? "", limit: 80))\u{201D}.") }
+            return out
         }
         if let left = result["leftOut"]?.array, !left.isEmpty {
             out.append("")

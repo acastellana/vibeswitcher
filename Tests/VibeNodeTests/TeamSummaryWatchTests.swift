@@ -244,8 +244,9 @@ struct TeamSummaryWatchTests {
         let sessions = Changes<Session>()
         let summaries = Changes<String>()
         let asked = Locked<[(String, String)]>([])
+        let extras = Changes<[NodeWire.Value]>()
         let chats = ChatStore(queue: queue, home: home.path, sessions: sessions, summaries: summaries,
-                              ask: { session, entry, _ in asked.mutate { $0.append((session, entry)) } })
+                              ask: { session, entry, _ in asked.mutate { $0.append((session, entry)) } }, extras: extras)
         var made = LiveWorld.session("pts/3")
         made.transcriptPath = transcript.path
         sessions.send("local:pts/3", made)
@@ -261,6 +262,13 @@ struct TeamSummaryWatchTests {
         #expect(await eventually { item()?["summary"] == .string("The login fix is done") }, "\(String(describing: item()))")
         #expect(item()?["text"]?.string?.contains("Line 8 of the report.") == true)
         #expect(WireSchema.check(try #require(item()), as: "chat.item") == nil)
+
+        // The lead's all-done card (`LeadEngine.chatExtras`) comes into the chat between the two messages, by its time.
+        let mark = LeadAllDone(id: "m1", at: try #require(NodeWire.date("2026-11-17T09:16:10.000Z")).timeIntervalSince1970, since: 0, tasks: [])
+        extras.send("local:pts/3", [try #require(ChatValue.value(.allDone(mark)))])
+        func ids() -> [String] { queue.sync { stream.items.map(\.id) } }
+        #expect(await eventually { ids().contains("all-done:m1") }, "\(ids())")
+        #expect(ids() == ["m_08", "all-done:m1", "m_09"], "\(ids())")
         chats.stop()
     }
 }

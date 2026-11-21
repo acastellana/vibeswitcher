@@ -245,6 +245,9 @@ public final class LeadEngine: @unchecked Sendable {
     public let boardDecisions = Changes<[BoardDecision]>()
     var messageKeys: [String: String] = [:]
     public let messageSummaries = Changes<String>()
+    /// What the lead's chat shows beside its transcript, by the lead's chat session id (`NodeIds.session`): its board's
+    /// all-done cards (`ChatValue`'s `allDone` items), oldest first (`AllDoneLook.publishChatCards`). `ChatStore` places them.
+    public let chatExtras = Changes<[NodeWire.Value]>()
     /// Where the summaries' transcripts are looked at, and where their model runs: one at a time.
     let summaryReads = DispatchQueue(label: "vibenode.lead-engine.summary-reads", qos: .utility)
     let summaryRuns = DispatchQueue(label: "vibenode.lead-engine.summaries", qos: .utility)

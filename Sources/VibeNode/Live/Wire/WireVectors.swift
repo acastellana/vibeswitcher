@@ -570,6 +570,11 @@ public enum WireVectors {
             "topTokens":8000000,"pricesAsOf":"2026-11-01"}
             """#.utf8))
         board.allDone = [cleared]
+        // The lead's results (post_update): one with a screenshot it kept.
+        var result = LeadUpdate(id: "u-hero", title: "The new hero, on a phone", body: "The hero image is **sized for phones** now:\n\n- 390 px wide\n- loads in 0.4 s",
+                                images: ["/home/u/acme-site/.vibeswitcher/updates/u-hero/hero.png"])
+        result.at = now - 5600
+        board.updates = [result]
         return board
     }
 

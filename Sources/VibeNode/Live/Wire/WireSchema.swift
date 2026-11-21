@@ -368,7 +368,10 @@ public enum WireSchema {
                 field("allDone", Kind.shape("board.allDone").orNull),
                 // The Team tab's records (2026-11-21, `BoardRecords`).
                 field("scorecard", Kind.shape("board.scorecard").orNull), field("answered", .list(.shape("board.question"))),
-                field("files", .list(.shape("board.file"))), field("recordsDir", Kind.string.orNull)]),
+                field("files", .list(.shape("board.file"))), field("recordsDir", Kind.string.orNull),
+                field("results", .list(.shape("board.update")))]),
+            shape("board.update", from: "BoardRecords.result", [field("id", .string), field("title", .string), field("body", .string),
+                                                               field("at", .date), field("images", .int)]),
             shape("board.allDone", from: "BoardValue.allDone", [
                 field("id", .string), field("at", .date), field("summary", Kind.shape("board.allDone.summary").orNull),
                 field("tasks", .list(.shape("board.allDone.task"))), field("merged", .int), field("receipts", Kind.string.orNull),
@@ -455,9 +458,16 @@ public enum WireSchema {
         let details = ["thought", "todos", "plan", "command", "edit", "write", "read", "patch", "questions", "agent", "fields"]
         shapes += [
             union("chat.item", from: contractChat, tag: "type",
-                  ["prompt": "chat.prompt", "reply": "chat.reply", "tools": "chat.tools", "team": "chat.team"]),
+                  ["prompt": "chat.prompt", "reply": "chat.reply", "tools": "chat.tools", "team": "chat.team",
+                   "allDone": "chat.allDone"]),
             item("prompt", [field("text", .string), field("steered", .bool), field("fromLead", .bool), field("images", .list(.shape("chat.image")))]),
             item("reply", [field("text", .string)]),
+            // The lead's board cleared (the app's `AllDoneCard`, 2026-11-21): placed by `ChatStore` in the lead's chat.
+            // Its time is always the mark's (never null, as a transcript's item's may be).
+            shape("chat.allDone", from: contractChat, [field("id", .string), field("type", .words(["allDone"])), field("at", .date),
+                             field("summary", Kind.shape("board.allDone.summary").orNull), field("tasks", .list(.shape("board.allDone.task"))),
+                             field("merged", .int), field("receipts", Kind.string.orNull), field("pricesAsOf", Kind.string.orNull),
+                             field("seen", .bool)]),
             item("tools", [field("summary", .string), field("tools", .list(.shape("chat.tool")))]),
             item("team", [field("text", .string), field("title", .string), field("sender", .shape("chat.sender")),
                           field("message", .words(["report", "audit", "witness", "userAnswer", "leadMessage", "notice", "teammatePost"])),

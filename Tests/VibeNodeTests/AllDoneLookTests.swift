@@ -94,4 +94,42 @@ struct AllDoneLookTests {
         let gone = try #require(await world.ask("seen", ["project": .string("local:project:nowhere")], action: nil))
         #expect(gone.error?.code == NodeWire.Code.gone.rawValue, "\(gone)")
     }
+
+    // MARK: The card in the lead's chat (2026-11-21)
+
+    /// The running lead's board's marks go to its chat (`chatExtras`, under the lead's chat session id), oldest first,
+    /// as `allDone` items; none once the board has none.
+    @Test func aRunningLeadsMarksGoToItsChat() async throws {
+        let world = try await CardWorld.make(scratch)
+        defer { world.stop() }
+        let lead = try await world.world.lead()
+        let store = BoardStore(root: world.repo)
+        try store.update { board in
+            board.allDone = [LeadAllDone(id: "m1", at: 1_763_000_000, since: 0, tasks: [LeadAllDone.Task(slug: "a", title: "A", outcome: .merged)]),
+                             LeadAllDone(id: "m2", at: 1_763_000_600, since: 1_763_000_000, tasks: [])]
+        }
+        let id = NodeIds.session(host: lead.session.id)
+        world.engine.refresh()
+        #expect(await eventually(timeout: 60) { world.queue.sync { world.engine.chatExtras.values[id]?.count } == 2 })
+        let cards = try #require(world.queue.sync { world.engine.chatExtras.values[id] })
+        #expect(cards.map { $0["id"]?.string } == ["all-done:m1", "all-done:m2"] && cards[0]["type"] == .string("allDone"), "\(cards)")
+        #expect(cards.allSatisfy { WireSchema.check($0, as: "chat.item") == nil })
+        try store.update { $0.allDone = nil }
+        world.engine.refresh()
+        #expect(await eventually(timeout: 60) { world.queue.sync { world.engine.chatExtras.values[id] } == nil })
+    }
+
+    /// A chat places each card by its time among the transcript's items (before the first later one; one with no time
+    /// stays after the item before it), the rest at the end, never twice.
+    @Test func aChatPlacesTheCardsByTheirTime() {
+        func item(_ id: String, _ at: String?) -> (id: String, value: NodeWire.Value) {
+            (id, .object(["id": .string(id), "at": at.map(NodeWire.Value.string) ?? .null]))
+        }
+        func card(_ id: String, _ at: String) -> NodeWire.Value { .object(["id": .string(id), "at": .string(at), "type": .string("allDone")]) }
+        let items = [item("p1", "2026-11-17T09:00:00.000Z"), item("r1", nil), item("p2", "2026-11-17T10:00:00.000Z")]
+        let placed = ChatStore.placed(items, extras: [card("late", "2026-11-17T11:00:00.000Z"), card("mid", "2026-11-17T09:30:00.000Z"),
+                                                      card("p1", "2026-11-17T08:00:00.000Z")])
+        #expect(placed.map(\.id) == ["p1", "r1", "mid", "p2", "late"])
+        #expect(ChatStore.placed(items, extras: []).map(\.id) == ["p1", "r1", "p2"])
+    }
 }

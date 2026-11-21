@@ -68,6 +68,12 @@ struct NodeSettingsTests {
         let keys = NodeSettings.all.map(\.key)
         #expect(Set(keys).count == keys.count)
         for setting in NodeSettings.all where setting.home == .workflow {
+            // lead_rotation is the node's stand-in for the app's Settings (`IdleHandover`): the user's to set, never a
+            // lead's through configure.
+            if setting.key == "lead_rotation" {
+                #expect(!LeadWorkflow.configurable.contains(setting.key))
+                continue
+            }
             #expect(LeadWorkflow.configurable.contains(setting.key), "\(setting.key)")
         }
         #expect(Set(NodeSettings.all.filter(\.guardRail).map(\.key)) == ["security_audit_model", "max_workers"])
@@ -287,5 +293,43 @@ struct NodeSettingsTests {
             try NodeSettings.setProject(NodeSettings.setting("max_workers")!, to: "4", root: root, vault: vault, workerModel: nil, files: files)
         }
         #expect(!FileManager.default.fileExists(atPath: root + "/.vibeswitcher"))
+    }
+
+    // MARK: The rotation and the prompt-audit reminder (2026-11-21)
+
+    /// The prompt-audit reminder's on and days are the app's keys in settings.plist; the rotation is workflow.md's
+    /// lead_rotation, which the engine's rotation reads.
+    @Test func theReminderAndTheRotationAreSetAndRead() async throws {
+        let files = NodeSettings.Files(root: scratch.url("node-root"))
+        try FileManager.default.createDirectory(at: files.root, withIntermediateDirectories: true)
+        func shown(_ key: String) -> String? { NodeSettings.node(files: files).first { $0.setting.key == key }?.value }
+        #expect(shown("prompt_audit") == "on" && shown("prompt_audit_days") == "14")
+        #expect(try set("prompt_audit", "off", files: files).value == "off")
+        #expect(try set("prompt_audit_days", "30", files: files).value == "30")
+        let store = try #require(files.preferences)
+        #expect(!PromptAudit.isOn(store) && PromptAudit.intervalDays(store) == 30)
+        guard case .failure = NodeSettings.parse(try #require(NodeSettings.setting("prompt_audit_days")), "91") else {
+            Issue.record("91 days is past the app's range")
+            return
+        }
+        let setting = try #require(NodeSettings.setting("lead_rotation"))
+        #expect(setting.scope == .project && setting.choices == ["daily", "context", "never"] && !setting.guardRail)
+        let workflow = LeadWorkflow.load(from: "/nowhere")
+        #expect(NodeSettings.project(root: "/r", workflow: workflow, floor: nil, files: files).first { $0.setting.key == "lead_rotation" }?.value == "context")
+        #expect(!NodeSettings.leftOut.contains { $0.title.contains("fresh lead") || $0.title.contains("prompt-audit") })
+    }
+
+    /// lead_rotation set in a project's workflow.md, as the rotation reads it, with no vault record; never back.
+    @Test func theRotationIsWrittenInWorkflowAndReadByTheEngine() throws {
+        let (files, root, fake) = (try files(), try project(), FakeVault())
+        let vault = fake.vault(folder: scratch.url("vault"))
+        let applied = try NodeSettings.setProject(NodeSettings.setting("lead_rotation")!, to: "never", root: root, vault: vault, workerModel: nil, files: files)
+        #expect(applied.value == "never" && applied.was == "context")
+        #expect(LeadEngine.rotationMode(LeadWorkflow.load(from: NodeSettings.workflowPath(project: root))) == .never)
+        #expect(fake.sets.isEmpty && applied.told?.contains("fresh lead session") == true)
+        guard case .failure = NodeSettings.parse(NodeSettings.setting("lead_rotation")!, "hourly") else {
+            Issue.record("hourly isn't a mode")
+            return
+        }
     }
 }

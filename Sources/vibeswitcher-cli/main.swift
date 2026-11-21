@@ -32,7 +32,7 @@ let usage = """
            vibeswitcher mail [FOLDER] [--all] [--json] | prompt-audit FOLDER snooze|off|on
            vibeswitcher config held [FOLDER] [--diff NAME] [--long] | config accept CARD | config startup
            vibeswitcher base show FOLDER [--from COMMIT] | base accept CARD | base keep CARD
-           vibeswitcher settings [FOLDER] [--json] | set [FOLDER] KEY VALUE
+           vibeswitcher settings [FOLDER] [--find WORDS] [--json] | set [FOLDER] KEY VALUE
            vibeswitcher hooks install|remove [--agent claude|codex]
            vibeswitcher web [--tailnet | --revoke]
     """

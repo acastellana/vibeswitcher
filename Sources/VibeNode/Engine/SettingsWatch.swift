@@ -99,6 +99,10 @@ extension LeadEngine {
                 leads.update(sessions: link.sessions, holders: holders)
                 lookAtPolicy()
                 return then(!leads.leads.values.allSatisfy { $0.session == nil })
+            case "prompt_audit", "prompt_audit_days":
+                // Status's reminders read again at once, by the new setting.
+                lookAtPromptAudits()
+                return then(false)
             case _ where key.hasPrefix("boost") || NodeSettings.setting(key)?.home == .limits:
                 lookAtBoost { [weak self] _ in self?.lookAtRoom() }
                 return then(false)

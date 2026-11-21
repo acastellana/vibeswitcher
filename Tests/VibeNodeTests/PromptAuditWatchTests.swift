@@ -91,4 +91,23 @@ struct PromptAuditWatchTests {
         let word = try #require(await world.ask("prompt-audit", ["folder": .string(world.repo), "do": .string("never")]))
         #expect(word.error?.code == NodeWire.Code.badArgs.rawValue && word.error?.message.contains("snooze, off or on") == true, "\(word)")
     }
+
+    /// Settings' reminder (`prompt_audit`, `prompt_audit_days`, the app's keys): its days say when a project is due, and
+    /// off it says none, whatever the project's record.
+    @Test func settingsDaysAndOffDecideTheReminder() async throws {
+        let world = try await CardWorld.make(scratch)
+        defer { world.stop() }
+        _ = try await world.sleepingLead()
+        let start = Date()
+        try transcript(world, [(start, "claude-opus-5-5")])
+        try #require(await eventually(timeout: 60) { world.queue.sync { world.engine.leadRoots.isEmpty == false } })
+        let files = NodeSettings.Files(root: world.host.root)
+        _ = try NodeSettings.setNode(try #require(NodeSettings.setting("prompt_audit_days")), to: "3", files: files)
+        await look(world, at: start)
+        await look(world, at: start + 4 * 86_400)
+        #expect(notices(world).count == 1, "3 days, not 14: \(notices(world))")
+        _ = try NodeSettings.setNode(try #require(NodeSettings.setting("prompt_audit")), to: "off", files: files)
+        await look(world, at: start + 5 * 86_400)
+        #expect(notices(world).isEmpty)
+    }
 }

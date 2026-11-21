@@ -251,6 +251,10 @@ public final class ChatStore: @unchecked Sendable {
     private let summaries: Changes<String>?
     private let ask: (@Sendable (String, String, TeamMessage) -> Void)?
     private var summariesWatch: Subscription?
+    /// What a chat shows beside its transcript, by session (`LeadEngine.chatExtras`: a lead's all-done cards), each
+    /// placed by its time among the transcript's items.
+    private let extras: Changes<[NodeWire.Value]>?
+    private var extrasWatch: Subscription?
 
     /// One session's chat: its stream, the file it is read from, and who follows it.
     private final class Feed {
@@ -280,7 +284,8 @@ public final class ChatStore: @unchecked Sendable {
     public init(queue: DispatchQueue, home: String, sessions: Changes<Session>,
                 now: @escaping @Sendable () -> TimeInterval = { Date().timeIntervalSince1970 },
                 date: @escaping @Sendable () -> Date = { Date() }, note: @escaping @Sendable (String) -> Void = { _ in },
-                summaries: Changes<String>? = nil, ask: (@Sendable (String, String, TeamMessage) -> Void)? = nil) {
+                summaries: Changes<String>? = nil, ask: (@Sendable (String, String, TeamMessage) -> Void)? = nil,
+                extras: Changes<[NodeWire.Value]>? = nil) {
         self.queue = queue
         self.home = home
         self.sessions = sessions
@@ -289,6 +294,7 @@ public final class ChatStore: @unchecked Sendable {
         self.note = note
         self.summaries = summaries
         self.ask = ask
+        self.extras = extras
         watching = sessions.subscribe(on: queue) { [weak self] batch in
             guard let self else { return }
             for change in batch { if let feed = self.feeds[change.id] { self.look(feed) } }
@@ -298,12 +304,36 @@ public final class ChatStore: @unchecked Sendable {
             let sessions = Set(batch.compactMap { $0.id.split(separator: "|", maxSplits: 1).first.map(String.init) })
             for session in sessions { if let feed = self.feeds[session], feed.stream.loaded { feed.stream.take(self.decorated(feed)) } }
         }
+        extrasWatch = extras?.subscribe(on: queue) { [weak self] batch in
+            guard let self else { return }
+            for change in batch { if let feed = self.feeds[change.id], feed.stream.loaded { feed.stream.take(self.decorated(feed)) } }
+        }
+    }
+
+    /// `items` with `extras` placed among them by time: each extra before the first item later than it (an item with
+    /// no time stays after the one before it), the rest at the end; an extra whose id an item has already is left out.
+    static func placed(_ items: [(id: String, value: NodeWire.Value)], extras: [NodeWire.Value]) -> [(id: String, value: NodeWire.Value)] {
+        let known = Set(items.map(\.id))
+        var waiting = extras.compactMap { value -> (id: String, at: String, value: NodeWire.Value)? in
+            guard let id = value["id"]?.string, !known.contains(id), let at = value["at"]?.string else { return nil }
+            return (id, at, value)
+        }.sorted { $0.at < $1.at }
+        guard !waiting.isEmpty else { return items }
+        var out: [(id: String, value: NodeWire.Value)] = []
+        for item in items {
+            if let at = item.value["at"]?.string {
+                while let next = waiting.first, next.at < at { out.append((next.id, next.value)); waiting.removeFirst() }
+            }
+            out.append(item)
+        }
+        return out + waiting.map { ($0.id, $0.value) }
     }
 
     /// The feed's items, each long message's `team` item with its TL;DR as `summary` once one came.
     private func decorated(_ feed: Feed) -> [(id: String, value: NodeWire.Value)] {
-        guard let lines = summaries?.values, !lines.isEmpty else { return feed.raw }
-        return feed.raw.map { item in
+        let raw = Self.placed(feed.raw, extras: extras?.values[feed.session] ?? [])
+        guard let lines = summaries?.values, !lines.isEmpty else { return raw }
+        return raw.map { item in
             guard case .object(var fields) = item.value, fields["type"] == .string("team"),
                   let line = lines["\(feed.session)|\(item.id)"] else { return item }
             fields["summary"] = .string(BoardValue.line(line))
@@ -330,6 +360,8 @@ public final class ChatStore: @unchecked Sendable {
     public func stop() {
         ticks = []
         watching = nil
+        summariesWatch = nil
+        extrasWatch = nil
         queue.async { [self] in
             for feed in feeds.values { feed.watch?.stop() }
             feeds = [:]
