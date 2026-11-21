@@ -367,7 +367,10 @@ public enum WireSchema {
                 field("allDone", Kind.shape("board.allDone").orNull),
                 // The Team tab's records (2026-11-21, `BoardRecords`).
                 field("scorecard", Kind.shape("board.scorecard").orNull), field("answered", .list(.shape("board.question"))),
-                field("files", .list(.shape("board.file"))), field("recordsDir", Kind.string.orNull)]),
+                field("files", .list(.shape("board.file"))), field("recordsDir", Kind.string.orNull),
+                field("results", .list(.shape("board.update")))]),
+            shape("board.update", from: "BoardRecords.result", [field("id", .string), field("title", .string), field("body", .string),
+                                                               field("at", .date), field("images", .int)]),
             shape("board.allDone", from: "BoardValue.allDone", [
                 field("id", .string), field("at", .date), field("summary", Kind.shape("board.allDone.summary").orNull),
                 field("tasks", .list(.shape("board.allDone.task"))), field("merged", .int), field("receipts", Kind.string.orNull),

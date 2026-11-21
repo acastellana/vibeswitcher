@@ -1,5 +1,7 @@
 // What the Mac's Team tab shows under a lead's tasks (its `TeamRecords`, `DecisionFeedView`): the scorecard, the lead's
-// decisions, the answered and withdrawn questions, and where the lead's files are. The node sends them in the board's
+// decisions, the answered and withdrawn questions, its results (`ResultsList`: each post_update's title and markdown),
+// the messages between this project's lead and others' (`LeadMailList`, asked of the node: `mail`, a page's read), and
+// where the lead's files are. The node sends them in the board's
 // value (`BoardRecords`); the Team tab and the board page both show them. Read-only.
 //
 // - The newest few of each list are in view, the rest folded under "Earlier (n)", as the Mac's; one opens to say the
@@ -7,10 +9,14 @@
 // - Every string is the sessions' writing: drawn as text, never markup.
 
 import { h, setText } from '../dom.js';
-import { clock, moment, decisionLine } from '../words.js';
+import { clock, moment, decisionLine, plural } from '../words.js';
+import { markdown } from '../text.js';
+import { mailLine } from '../mail.js';
 
 // How many of each list show before "Earlier".
 export const SHOWN = 3;
+// How often the open Team tab asks for the record between leads again (it changes only as leads message each other).
+const MAIL_EVERY = 30000;
 
 // A question's line, as the Mac's `ClosedQuestionList` says it: its first line and what it closed with.
 export function questionLine(question) {
@@ -52,10 +58,19 @@ export function boardRecords(app, { decisions: showDecisions = true } = {}) {
   const decisions = section('Decisions', decisionsList);
   const answeredList = h('div', { class: 'records-list' });
   const answered = section('Answered and withdrawn', answeredList);
+  const resultsList = h('div', { class: 'records-list' });
+  const results = section('Results', resultsList);
+  const mailList = h('div', { class: 'records-list' });
+  const mail = section('Between leads', mailList);
   const filesList = h('ul', { class: 'records-files' });
   const filesNote = h('p', { class: 'records-note' });
   const files = section('Files', filesList, filesNote);
-  const el = h('div', { class: 'records' }, score.el, decisions.el, answered.el, files.el);
+  const el = h('div', { class: 'records' }, score.el, decisions.el, answered.el, results.el, mail.el, files.el);
+  // The project's record between leads, as the node last said it (asked when the board's root changes, and again after
+  // `MAIL_EVERY`), and for which root.
+  let mailFor = null;
+  let mailAt = 0;
+  let mailMessages = [];
   // What is open, by key: kept across the board's changes.
   const open = new Set();
   let drawn = '';
@@ -82,14 +97,56 @@ export function boardRecords(app, { decisions: showDecisions = true } = {}) {
     return [...rows.slice(0, SHOWN), earlier];
   }
 
-  return {
+  // The record between leads for `root`, asked of the node (a page's read, `mail`) when the root changes and each
+  // `MAIL_EVERY` after; a node that doesn't serve it to pages leaves the section out.
+  function askMail(root) {
+    const store = app.store;
+    if (!root || !store.can?.('mail')) return;
+    if (root === mailFor && Date.now() - mailAt < MAIL_EVERY) return;
+    if (root !== mailFor) mailMessages = [];
+    mailFor = root;
+    mailAt = Date.now();
+    store.request('mail', { folder: root }).then((reply) => {
+      if (mailFor !== root || !reply?.ok) return;
+      mailMessages = reply.result.projects?.[0]?.messages || [];
+      drawn = '';
+      if (shownBoard) self.update(shownBoard);
+    });
+  }
+  let shownBoard = null;
+
+  const self = {
     el,
     update(board) {
+      shownBoard = board;
       el.hidden = !board || !!board.unreadable;
       if (el.hidden) return;
-      const now = JSON.stringify([board.scorecard, board.decisions, board.answered, board.files, board.recordsDir, board.root, (board.tasks || []).length]);
+      askMail(board.root);
+      const now = JSON.stringify([board.scorecard, board.decisions, board.answered, board.files, board.recordsDir, board.root, (board.tasks || []).length,
+        board.results, mailMessages]);
       if (now === drawn) return;
       drawn = now;
+
+      // The lead's results, newest first: a body is the lead's markdown, drawn to nodes as a reply's; a screenshot is a file
+      // on the node, said to be there.
+      const posted = board.results || [];
+      results.el.hidden = !posted.length;
+      resultsList.replaceChildren(...folded(posted.map((result) => h('article', { class: 'records-result' },
+        h('div', { class: 'records-result-head' }, h('span', { class: 'records-text' }, result.title),
+          h('time', { class: 'records-time', title: moment(result.at) }, clock(result.at))),
+        h('div', { class: 'prose' }, markdown(result.body || '')),
+        result.images ? h('p', { class: 'records-note' }, `${plural(result.images, 'screenshot')} kept on the node`) : null)), 'r:earlier', 'Earlier results'));
+
+      // Between leads: this project's messages with other projects' leads (shown when there are any).
+      mail.el.hidden = !mailMessages.length;
+      mailList.replaceChildren(...folded(mailMessages.map((message, index) => {
+        const line = mailLine(message);
+        return opener('m:' + message.at + index, [
+          h('span', { class: 'records-text' + (line.sent ? '' : ' quiet') }, `${line.way} · ${line.kind}`),
+          h('span', { class: 'records-outcome' }, line.outcome),
+          h('time', { class: 'records-time', title: moment(message.at) }, clock(message.at)),
+        ], [h('p', { class: 'records-question' }, line.text), line.why ? h('p', { class: 'records-note' }, `Why: ${line.why}`) : null]);
+      }), 'm:earlier', 'Earlier messages'));
 
       const card = board.scorecard;
       score.el.hidden = !card || !(board.tasks || []).length;
@@ -133,4 +190,5 @@ export function boardRecords(app, { decisions: showDecisions = true } = {}) {
       setText(filesNote, filesLine(board, app.store.state.node?.home));
     },
   };
+  return self;
 }

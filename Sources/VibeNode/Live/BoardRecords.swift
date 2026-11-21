@@ -3,7 +3,7 @@ import VibeCore
 
 /// What the Mac's Team tab shows under a lead's tasks (the parity table's board row, 2026-11-21), carried in the board's
 /// value beside its tasks: the lead's decisions, the scorecard and the batch's receipts, the answered and withdrawn
-/// questions, and where the lead's files are. Read-only, as the board.
+/// questions, the lead's results (`post_update`, the newest `resultsKept`), and where the lead's files are. Read-only, as the board.
 ///
 /// - **Decisions** come from the lead's `decisions.md`: in its records folder (`records_dir` in the project's
 ///   workflow.md, a folder of the repository: no `..`, nothing absolute, never `.git` or `.vibeswitcher`), and the one
@@ -21,6 +21,10 @@ import VibeCore
 public enum BoardRecords {
     static let decisionsKept = 50
     static let answeredKept = 30
+    /// The lead's newest results a board carries, and the most bytes and lines of each one's body.
+    static let resultsKept = 15
+    static let resultBytes = 6_000
+    static let resultLines = 120
     /// The largest record file read.
     static let recordBytes = 4 << 20
     /// The four files the Mac's Team tab opens.
@@ -95,7 +99,17 @@ public enum BoardRecords {
                      "present": .bool(read.present[name] ?? false)])
         })
         fields["recordsDir"] = read.recordsDir.map { .string(text($0, 200, 1)) } ?? .null
+        fields["results"] = .array((board?.updates ?? []).suffix(resultsKept).reversed().map(result))
         return fields
+    }
+
+    /// One of the lead's results (`post_update`, the Mac's `ResultsList`): its title, its markdown body (the page draws
+    /// it as a reply's: to nodes, never markup), when, and how many screenshots it kept (files on the node: a page can't
+    /// show them, it says they're there).
+    static func result(_ update: LeadUpdate) -> NodeWire.Value {
+        .object(["id": .string(text(update.id, 80, 1)), "title": .string(text(update.title, 400, 1)),
+                 "body": .string(text(update.body, resultBytes, resultLines)), "at": .date(Date(timeIntervalSince1970: update.at)),
+                 "images": .int(update.images.count)])
     }
 
     /// The scorecard as the Mac's `ScorecardView` shows it: its four tiles, the footnote under them, and the batch's
