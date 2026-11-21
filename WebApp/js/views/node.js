@@ -5,6 +5,7 @@ import { h, framed } from '../dom.js';
 import { icon } from '../marks.js';
 import { since, plural, tilde } from '../words.js';
 import { usageFacts } from '../settings.js';
+import { healthFacts } from '../health.js';
 
 const row = (name, ...value) => h('div', { class: 'fact' }, h('dt', null, name), h('dd', null, value));
 const ago = (iso) => (iso ? h('time', { data: { since: iso }, title: new Date(iso).toLocaleString() }, since(iso)) : 'unknown');
@@ -21,6 +22,17 @@ export function usageGroup(usage) {
       h('span', { class: limit.holds ? 'dot tone-needs-you' : 'dot tone-done', 'aria-hidden': 'true' }), limit.value, limit.holds ? ' · holds work back' : ''))
       : row('Limits', 'Nothing known yet')),
     h('ul', { class: 'lines' }, facts.notes.map((note) => h('li', null, note))));
+}
+
+// The health digest (`vibeswitcher status --health`): rows, then each freeze, waiting session and error line.
+export function healthGroup(health) {
+  const facts = healthFacts(health);
+  if (!facts) return null;
+  return group('Health',
+    h('dl', { class: 'facts-list' }, facts.rows.map(([name, value], index) => index === 0
+      ? row(name, h('span', { class: facts.tone === 'done' ? 'dot tone-done' : 'dot tone-needs-you', 'aria-hidden': 'true' }), value)
+      : row(name, value))),
+    facts.lines.length ? h('ul', { class: 'lines' }, facts.lines.map((line) => h('li', null, line.at ? [ago(line.at), ' · '] : null, line.text))) : null);
 }
 
 export function nodeView(app) {
@@ -64,6 +76,7 @@ export function nodeView(app) {
           notes?.refusedAppConnections ? row('Refused connections', String(notes.refusedAppConnections)) : null,
           (notes?.replacedPaths || []).map((path) => row('Took back its path', tilde(path, home))))),
       usageGroup(node.usage),
+      healthGroup(node.health),
       group('Server',
         h('dl', { class: 'facts-list' },
           row('Running for', ago(server.startedAt)),

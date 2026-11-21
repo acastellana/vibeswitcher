@@ -125,6 +125,11 @@ export function createMock(store, options = {}) {
 
   const node = {
     usage,
+    health: {
+      since: ago(3 * 3600 + 720), stalled: null, freezes: [{ at: ago(5400), seconds: 14 }], slowRefreshes: 2, slowestRefresh: 7,
+      lastSlowRefresh: ago(1800), serverRestarts: 0, refusedConnections: null, hostRestartAt: null, waiting: [],
+      errors: [{ at: ago(900), line: 'prompt audit: /home/u/.vibeswitcher/prompt-audit.json not written: disk full' }],
+    },
     node: 'local', epoch, root: `${HOME}/.vibeswitcher`, home: HOME,
     server: { pid: 48213, startedAt: ago(3 * 3600 + 720), commit: 'f62aef61' },
     host: {
@@ -632,6 +637,10 @@ export function createMock(store, options = {}) {
       const turn = (id, input, cached, output, cost) => ({ id, at: ago(140), partial: false, tokens: { input, cached, output }, cost });
       return { ok: true, result: { turns: [turn('t1', 182_400, 171_000, 3_900, 0.41), turn('t2', 96_200, 90_100, 1_250, 0.18)], count: 2, partial: false,
         tokens: { input: 278_600, cached: 261_100, output: 5_150 }, cost: 0.59, costPartial: false } };
+    }
+    // A session's dev servers (2026-11-21).
+    if (message.kind === 'session.ports') {
+      return { ok: true, result: { ports: [{ port: 5173, address: '127.0.0.1', pid: 48311, program: 'node', url: 'http://localhost:5173/' }] } };
     }
     if (message.kind === 'chat.image') {
       if (args.id !== SHOT.id) return { ok: false, error: { code: 'gone', message: 'no such image in that session’s chat' } };

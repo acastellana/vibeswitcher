@@ -63,7 +63,7 @@ public enum WireSchema {
                                   "session.draft.args", "session.draft.result", "session.draft.clear.args",
                                   "session.presets.args", "session.presets.result", "session.complete.args", "session.complete.result",
                                   "session.attach.args", "session.attach.result", "session.usage.args", "session.usage.result",
-                                  "chat.image.args", "chat.image.result",
+                                  "chat.image.args", "chat.image.result", "session.ports.args", "session.ports.result",
 
                                   "settings.args", "settings.result", "set.args", "set.result", "mail.args", "mail.result", "recent.args", "recent.result"]
     /// A keyed collection's entity.
@@ -164,6 +164,10 @@ public enum WireSchema {
             shape("session.completion", from: "SessionCompletions.value", [field("insert", .string), field("title", .string), field("subtitle", .string)]),
             // A session's tokens and cost (the inspector, 2026-11-21): a read of its transcript's tail. `cost` is in US
             // dollars, a number (an int when whole).
+            shape("session.ports.args", from: "Requests.sessionPorts (the dev pages row, 2026-11-21)", [field("session", .string)]),
+            shape("session.ports.result", from: "DevPorts.value", [field("ports", .list(.shape("session.port")))]),
+            shape("session.port", from: "DevPorts.value", [field("port", .int), field("address", .string), field("pid", .int),
+                                                           field("program", Kind.string.orNull), field("url", .string)]),
             shape("session.usage.args", from: "ChatStore.usage (the inspector, 2026-11-21)", [field("session", .string)]),
             shape("session.usage.result", from: "ChatStore.usageValue", [
                 field("turns", .list(.shape("session.usage.turn"))), field("count", .int), field("partial", .bool),
@@ -191,7 +195,15 @@ public enum WireSchema {
                 field("host", .shape("node.host")), field("rule", .shape("node.rule")), field("cards", .shape("node.cards")),
                 field("accepted", .list(.shape("node.accepted"))), field("notices", strings),
                 field("restart", Kind.shape("node.restart").orNull), field("reopen", .list(.shape("node.reopen"))), field("ended", .list(.shape("node.ended"))),
-                field("builds", Kind.any.orNull), field("web", .shape("node.web")), field("usage", Kind.shape("node.usage").orNull)]),
+                field("builds", Kind.any.orNull), field("web", .shape("node.web")), field("usage", Kind.shape("node.usage").orNull),
+                optional("health", .shape("node.health"))]),
+            shape("node.health", from: "NodeHealth.value (2026-11-21)", [
+                field("since", .date), field("stalled", Kind.int.orNull), field("freezes", .list(.shape("node.health.freeze"))),
+                field("slowRefreshes", .int), field("slowestRefresh", Kind.int.orNull), field("lastSlowRefresh", Kind.date.orNull),
+                field("serverRestarts", Kind.int.orNull), field("refusedConnections", Kind.int.orNull), field("hostRestartAt", Kind.date.orNull),
+                field("waiting", strings), field("errors", .list(.shape("node.health.error")))]),
+            shape("node.health.freeze", from: "NodeHealth.value", [field("at", .date), field("seconds", .int)]),
+            shape("node.health.error", from: "NodeHealth.value", [field("at", .date), field("line", .string)]),
             shape("node.server", from: "Requests.statusValue", [field("pid", .int), field("startedAt", .date), field("commit", .string)]),
             shape("node.host", from: "Requests.statusValue", [
                 field("startedAt", Kind.date.orNull), field("pid", Kind.int.orNull), field("state", .string),

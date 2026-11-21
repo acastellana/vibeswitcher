@@ -293,7 +293,9 @@ code, pre, kbd { font-family: var(--mono); }
 .prose h3, .prose h4, .prose h5 { font-size: var(--large); font-weight: 600; }
 .prose code, .card code, .node code { padding: 1px 4px; border-radius: 4px; background: var(--fill-2); font-size: 0.92em; }
 .code { border-radius: 8px; background: var(--fill); overflow: hidden; }
-.code figcaption { padding: 5px 12px 0; color: var(--ink-3); font-size: var(--small); }
+.code figcaption { padding: 5px 12px 0; color: var(--ink-3); font-size: var(--small); display: flex; align-items: center; gap: 8px; }
+.code-run { margin-left: auto; display: inline-flex; align-items: center; gap: 4px; padding: 1px 8px; border: 1px solid var(--line); border-radius: 6px; background: transparent; color: var(--ink-2); font: inherit; cursor: pointer; }
+.code-run:hover, .code-run:focus-visible { color: var(--ink); border-color: var(--ink-3); }
 .code pre { padding: 8px 12px 10px; overflow-x: auto; font-size: 12px; line-height: 1.5; }
 .code pre code { padding: 0; background: none; font-size: inherit; }
 
@@ -603,6 +605,8 @@ code, pre, kbd { font-family: var(--mono); }
 .inspect-says { height: calc(1.4em + 1px); padding: 1px 18px 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-2); font-size: var(--small); }
 .inspect-link { color: var(--accent); }
 .inspect-link:hover { text-decoration: underline; }
+.inspect-ports { margin: 0; padding: 0; list-style: none; display: grid; gap: 4px; font-size: var(--small); }
+.inspect-port-about { color: var(--ink-3); }
 .inspect-note { padding: 12px 18px 0; color: var(--ink-2); }
 .inspect-notice { display: flex; align-items: flex-start; gap: 8px; padding: 12px 18px 0; color: var(--ink-2); font-size: var(--small); }
 .inspect-notice .icon { margin-top: 2px; color: var(--working); }

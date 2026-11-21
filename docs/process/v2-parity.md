@@ -12,11 +12,11 @@ that works through shared code counts only if the node actually calls it. Anythi
 
 ## Summary
 
-Of 101 features: **64 has it**, **9 partly**, **12 missing** (two of them on purpose: Codex workers, and Codex's trust of the hooks), **9 not needed on
+Of 101 features: **65 has it**, **12 partly**, **8 missing** (two of them on purpose: Codex workers, and Codex's trust of the hooks), **9 not needed on
 Linux**, **6 Linux-only new**, **1 unverified** (counted again from the table on 2026-11-20, `v2-stability`, after the
 settings, composer, push and rotation lanes' merges and that lane's rows: reopening your own sessions after a restart, the prompt-audit reminder,
 reminders about waiting or stuck sessions, New Project…, the sound, the "New since you looked" line, Between leads, the
-all-done mark, rename and pause, ended sessions resumed, and Close Finished Shells; launch presets edited on the node since the page-actions lane; and on 2026-11-21, `v2-small-rows`: Check for Updates, the developer tools notice, the projects folder, and shell requests; Codex's trust of the hooks left out on purpose; the inspector, chat images and the chat's copy, export and find since `v2-web-detail`; usage shown and AI summaries since `v2-usage-summaries`).
+all-done mark, rename and pause, ended sessions resumed, and Close Finished Shells; launch presets edited on the node since the page-actions lane; and on 2026-11-21, `v2-small-rows`: Check for Updates, the developer tools notice, the projects folder, and shell requests; Codex's trust of the hooks left out on purpose; the inspector, chat images and the chat's copy, export and find since `v2-web-detail`; usage shown and AI summaries since `v2-usage-summaries`; and the small rows' second round: a code block's Run, the health digest, phone access rechecked, and dev servers).
 
 The gaps that matter most for daily use, worst first:
 
@@ -48,7 +48,8 @@ The gaps that matter most for daily use, worst first:
 10. ~~**Restarts lose work.**~~ Closed 2026-11-20: after a host restart `vibeswitcher lead FOLDER --resume` reopens a
     project's lead in its conversation, and `vibeswitcher reopen` the user's own Claude sessions in theirs. A lead's
     workers are its to start again (told which). Rotation is on the node since 2026-11-20 (workflow.md's `lead_rotation:`).
-11. **No phone or remote access** (planned for stage 7). The web page is reachable on `127.0.0.1` only.
+11. **Remote access reads and drafts only.** `vibeswitcher web --tailnet` (2026-11-20) opens the page on the tailnet for
+    a phone, read and draft as on loopback; replies and key presses from the phone wait for H1.
 
 ## The table
 
@@ -99,7 +100,7 @@ Sizes to close: S is about a day, M a few days, L a week or more.
 | Answer a session's own permission prompt or question (⌘1–9 card) | `MainWindow/Chat/ChatView.swift` | has it | `NodeSessions.prompts` reads it off the screen (`SessionPrompt`); `vibeswitcher reply SESSION CHOICE [TEXT]` (`session.reply`) types the app's keys while the same question shows; the page's card shows the line. A multi-select is answered in its terminal | | closed 2026-11-20 |
 | Find in the chat, Export Chat, Copy as Markdown, Edit in Composer, Send Again | `MainWindow/Chat/ChatView.swift` | has it | `WebApp/js/views/chat.js`, `chatops.js` (2026-11-21): a prompt's Copy, Edit in Composer (the box holds it, nothing sent) and Send Again (a `session.draft`, as every message a page leaves: `vibeswitcher send` types it), a reply's Copy as Markdown; Copy Chat as Markdown and Export Chat (a `.md` download, the Mac's `ChatExport` words) from the palette; Find in Chat (⌘F / Ctrl+F while the chat shows, ↩ and ⇧↩, its words highlighted) over every item the page holds, the rows not drawn included | | closed 2026-11-21; of what the page has paged in (older items are fetched as you scroll up), which find and export say |
 | "New since you looked" marker and summary | `MainWindow/Chat/ChatView.swift` | has it | `WebApp/js/views/chat.js`, `chatops.js` `newSince`/`sinceSummary` (2026-11-20): a line before the first item after the last one this browser saw at the chat's end, with what came since ("Ran 1 command · 1 reply"); worked out when the chat opens. What was seen is per browser (the Mac's per app) | | the chat opens at the end, not at the marker |
-| Run a code block (type it into the session after you confirm) | `MainWindow/Chat/ChatRunner.swift` | missing | needs the composer | M | |
+| Run a code block (type it into the session after you confirm) | `MainWindow/Chat/ChatRunner.swift` | has it | `WebApp/js/runnable.js` (2026-11-21): a reply's shell code block gets Run on the page (the app's `RunnableCommand` rules: shell languages or a `$ `/`!` first line; no hidden or blank-looking characters, heredocs, open quotes, long blank runs; standalone lines joined with `&&`), which leaves `! command` as the session's draft over the box; `vibeswitcher send SESSION` shows it whole and types it after the code (the user's voice). A Claude or Codex session only | | a block whose lines mean something only together (the app runs it from a script file) gets no Run on the page |
 | The all-done card (a batch's summary and receipts) | `MainWindow/Lead/AllDoneWatch.swift`, `Chat/AllDoneCard.swift` | has it | `Engine/AllDoneLook.swift` (2026-11-20): a board that clears is marked under its lock with its summary (`BatchSummary`), and `status` says it for a day. Since 2026-11-21: the summary by the model on the user's node while the AI summaries may run (`Options.summarizeBatch`, the app's `ClaudeHeadless.allDone`), else the written one; its receipts summed in `status`; the board's `allDone` (summary, tasks and how each ended, cost, seen) in `vibeswitcher board` and as a card on the page's board; a page that shows it marks it seen (`seen` with the project, the app's `AllDoneWatch.see`) | | closed 2026-11-21; the card sits on the board, not in the lead's chat |
 | Push-to-talk dictation | `Dictation/` | missing | "later" in the design | L | |
 | Chat text size (⌘+ ⌘− ⌘0) | `MainWindow/Chat/MarkdownView.swift` | not needed | the browser zooms | | |
@@ -181,8 +182,8 @@ Sizes to close: S is about a day, M a few days, L a week or more.
 
 | Feature | V1 (where) | V2 state | Where in V2 / what's missing | Size | Note |
 | --- | --- | --- | --- | --- | --- |
-| Phone access over Tailscale: pairing, replies, key presses, answers, Chrome access | `PhoneAccess.swift`, `RemoteServer.swift`, `Tailscale.swift`, `Web/` | missing | stage 7. `Web/` isn't ported | L | |
-| Dev pages, previews | `DevPreviews.swift`, `Sources/VibeCore/DevPages.swift` | missing | "later" in the design | M | |
+| Phone access over Tailscale: pairing, replies, key presses, answers, Chrome access | `PhoneAccess.swift`, `RemoteServer.swift`, `Tailscale.swift`, `Web/` | partly | `vibeswitcher web --tailnet` (2026-11-20, `Server/TailnetWeb.swift`; the remote access note): the node's own page (not `Web/`) on this machine's Tailscale address under its MagicDNS name, off until the user runs it; pairing by a one-time code printed in the terminal, 8 h tokens, `web --revoke`; the phone layout (one column, the list then a session); reading every session, chat, card and the board; replies, answers and a code block's Run as drafts the user sends from a terminal; notifications while the page is open; `status` says where it listens. Missing, and why (rechecked 2026-11-21): replies and key presses from the phone itself, which need H1 (the host owning the listener) before any page input reaches a session; the terminal (refused on the tailnet); Chrome access and previews (the dev pages row); push (its own row); the Mac's credential masking for remote pages and a second lock on who asks (`tailscale whois`), both the user's decisions in the remote access note; a QR code for the address (also a decision) | L | input waits for H1 |
+| Dev pages, previews | `DevPreviews.swift`, `Sources/VibeCore/DevPages.swift` | partly | `Facts/DevPorts.swift`, `session.ports` (2026-11-21): the inspector's Dev servers lists the ports a session's processes listen on (loopback or every address, 1024 and up, not the node's own), each with its program; on the loopback page each opens `http://localhost:PORT/` in a new tab. Missing on purpose: the app's previews for the phone (Chrome's localhost tabs proxied over `tailscale serve`): a node has no Chrome, and a proxy that serves an agent's pages on the tailnet waits for the remote decisions (the remote access note) | | the tailnet page lists the ports, links none |
 | A web page for the desktop, paired with a one-time code | — | Linux-only | `vibeswitcher web [--revoke]`; `Sources/VibeNode/Web/`, `WebApp/` on `127.0.0.1` | | the page reads and drafts, never answers |
 
 ### Diagnostics and health
@@ -191,7 +192,7 @@ Sizes to close: S is about a day, M a few days, L a week or more.
 | --- | --- | --- | --- | --- | --- |
 | Sessions and the raw hook state (`--dump`) | `AppDelegate.swift` | has it | `vibeswitcher status [--json]`, `status --probe` | | |
 | Logs | `app.log`, `Sources/VibeCore/DebugLog.swift` | has it | the node's journal (`Facts/NodeJournal.swift`) and the server log (the host's stderr, the unit's journal) | | |
-| The app health digest, freeze reports | `AppHealthWatcher.swift`, `Sources/VibeCore/AppHealth.swift` | missing | "later" in the design | M | |
+| The app health digest, freeze reports | `AppHealthWatcher.swift`, `Sources/VibeCore/AppHealth.swift` | partly | `Facts/NodeHealth.swift` (2026-11-21): `vibeswitcher status --health` and the page's This node (Health): freezes of the engine's queue (a watchdog thread pings it every 5 s; 10 s unanswered is a stall, kept with how long in `health.json`), slow refreshes (over 5 s), the host's server restarts and refused connections, its last restart, sessions left waiting or stuck, and the server's last failing log lines. Missing: the app's freeze sample (a stack: no debugger on a node), its causes' digest and notifications | | |
 | The developer tools notice | `Sources/VibeCore/ToolchainWatch.swift` | has it | `Facts/NodeToolchain.swift`, `Engine/ToolchainLook.swift` (2026-11-21): every 10 minutes each running lead's project's tools, as its files name them (`Package.swift` and `.swift-version`: swift; `package.json` and `.nvmrc` or `.node-version`: node), are read (never through a link, a pin kept only when it reads as a version) and the node's tools asked once a look, never in a project's folder: by absolute path from PATH's absolute folders, from `/`, with a bare environment; a pinned Swift swiftly has installed counts. One missing or not the named version is a `status` notice (and the page's) while it stands, a change is told to its lead once as the witness and noted for a day. Kept in `toolchain.json`. Queries only | | the app's watches Xcode and the Command Line Tools, which Linux hasn't |
 | What plain mode doesn't promise, said once | — | Linux-only | `Facts/NotPromised.swift`, shown by `start` and `status` | | |
 
@@ -232,7 +233,8 @@ doesn't yet confine anything.
 - The node delivers to the board's lead only when the vault binds that session to the role and the host lists it live.
   V1 trusts whatever the board names: a Mac fix owed in `docs/process/v2-mac-tasks.md`.
 - `lead` refuses a folder with no repository or no commit, and installs nothing. V1 offers to make one.
-- The web page listens on `127.0.0.1` only, with a pairing code good for 120 s. Phone access waits for stage 7.
+- The web page listens on `127.0.0.1`, and on the tailnet only after `vibeswitcher web --tailnet`, each with a pairing code good
+  for 120 s. A phone reads and drafts; its own input waits for H1.
 - The host always hands over to a new build. V1 can also replace an outdated host and end its sessions.
 - The review floor comes from workflow.md and is accepted with `config accept`; each rule is changed with
   `vibeswitcher set FOLDER floor_… VALUE`, not in a settings window.
