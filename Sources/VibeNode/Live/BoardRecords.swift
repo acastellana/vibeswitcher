@@ -95,6 +95,8 @@ public enum BoardRecords {
                      "present": .bool(read.present[name] ?? false)])
         })
         fields["recordsDir"] = read.recordsDir.map { .string(text($0, 200, 1)) } ?? .null
+        // The lead's Results, newest first (`BoardDetails`).
+        fields["results"] = BoardDetails.results(board)
         return fields
     }
 
