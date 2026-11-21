@@ -214,8 +214,15 @@ or decided. Done on Linux, tested on both systems (`ApprovalJudgmentTests`, `App
    - The command line's server check by code identity (this commit): on the Mac, the listener's audit token must run
      the `vibeswitcher-server` beside the LaunchAgent job's program (an installed build, `NodeCheck.installedServer`)
      by cdhash with the Hardened Runtime, be the job's child and in its session; a scratch or detached node is
-     refused there. Owed: the install signing the server `--options runtime` (else every check refuses), and a run
-     against a real job.
+     refused there. Owed: a run against a real job.
+   - The install's Mac signing (2026-11-21, `v2-small-rows`): `scripts/lib/mac-sign.sh`'s `mac_sign_hardened` signs a
+     product ad hoc with `--options runtime` and checks it back (valid for every slice, the runtime flag);
+     `Platform.CodeIdentity.isSignedHardened(atPath:)` reads the same from disk; `MacSigningTests` (the Mac runner) signs
+     copies of the built server and command line and checks them, and a copy signed without the runtime fails. **Owed**:
+     `scripts/install-node.sh` has no Mac arm yet (its checks are Linux's throughout: `getent`, the ELF interpreter,
+     `readelf`, `sha256sum`, the root-owned toolchain), so nothing calls the signing; the Mac arm calls
+     `mac_sign_hardened` on each staged copy before its first hash, and adds `lib/mac-sign.sh` to the libraries it
+     checks against the commit's blobs.
    - A card for a kind with no arguments (`stop`, `start`, `web.revoke`): done, `approvalCard` names what each does
      (`stop` the live sessions it ends).
 8. **(LOW, done in `6f367200`, `03f406c9`)** A replayed action id answered before any dialog; the command line's
