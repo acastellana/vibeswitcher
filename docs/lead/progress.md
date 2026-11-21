@@ -4264,3 +4264,6 @@ Proposed task 1: Find why dictations end with no text
 - 2026-11-21 13:27 Planned claude-dictation: Claude dictation: recognise Claude Code's "Transcribing…" footer as processing
 - 2026-11-21 13:27 Released claude-dictation-text's worker (idle since its done report on 1678dd04) while its audit runs
 - 2026-11-21 13:27 Automatically (auto_advance): Released claude-dictation-text's worker, idle since its done report on 1678dd04, while its audit runs (ended pid 26386 (Worker: Claude dictation: text that was dictated is dropped as "typed in the terminal meanwhile")): its Mac slot and memory are free. Its worktree and branch stay; findings the verdict sends back go to a fresh worker there, and a clean verdict merges with none.
+- 2026-11-21 13:32 Audit of claude-dictation-text: incomplete, clean, round 1: 1 Important open, 1 Nit open
+- 2026-11-21 13:33 Started a worker on claude-dictation-text
+- 2026-11-21 13:33 Automatically (auto_advance): Sent claude-dictation-text's worker the open Important findings claude-dictation-text:F1 from its audit at 1678dd04 (in a new worker: its last one was released during the audit).
