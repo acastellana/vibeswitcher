@@ -507,6 +507,8 @@ struct ClaudeDictationTests {
                     read { screen in
                         done(screen)
                         shown.spaces = screen.flatMap { ClaudeVoiceScreen.prompt($0).spaces } ?? 0
+                        shown.reads += 1
+                        shown.text = screen?.text ?? ""
                     }
                 }
             }
@@ -520,6 +522,9 @@ struct ClaudeDictationTests {
     /// (the state file can be ahead of the read in flight).
     final class Shown: @unchecked Sendable {
         var spaces = 0
+        /// Reads taken in so far, and the last one's text.
+        var reads = 0
+        var text = ""
     }
 
     /// The real time, moved on by the test; `held`, it stands still there (but for `ahead`): a run's waits (its 3 s for
@@ -774,6 +779,53 @@ struct ClaudeDictationTests {
         try await h.waitFor { controller.phase == .idle }
         #expect(controller.deliveries[h.key]?.text == "fix the build", "\(String(describing: controller.notice)) \(String(describing: ended))")
         #expect(input(h) == "" && h.agent["voiceCancels"] as? Int == 0)
+    }
+
+    /// Claude Code 2.1.330's footer while it processes says `Transcribing…`, not `Voice: processing…`: read as processing
+    /// all the same. With no words shown and its level cursor flat, it's what says Claude is still at it: 3 s after the
+    /// release the run still waits (read as nothing, it stopped there, its Esc cancelling the transcript on its way), and
+    /// the transcript lands. With no transcript, the empty box after it ends the run 2 s on ("no text after processing"),
+    /// not at the 20 s limit.
+    @Test func claudesTranscribingFooterIsReadAsProcessing() async throws {
+        #expect(ClaudeVoiceScreen.footer(Self.screen(footer: "Transcribing…").text) == .processing)
+        #expect(ClaudeVoiceScreen.seen(Self.screen(footer: "Transcribing…"), sent: 6) == .processing)
+        let h = try await Harness.start(temp)
+        defer { h.stop() }
+        h.tell(["op": "voice", "mode": "hold", "interim": "", "processing": 30.0, "processingFooter": "Transcribing…"])
+        try await h.waitFor { h.agent["processingFooter"] as? String == "Transcribing…" && h.agent["processing"] as? Double == 30 }
+        let clock = Clock()
+        let shown = Shown()
+        let controller = dictation(h, now: clock.now, shown: shown)
+        for transcript in ["fix the build", ""] {
+            h.tell(["op": "voice", "transcript": transcript])
+            try await h.waitFor { h.agent["transcript"] as? String == transcript }
+            let (inserts, start) = (h.agent["voiceInserts"] as? Int ?? 0, clock.ahead)
+            controller.press(h.key, agent: .claude) { "" }
+            try await h.waitFor { controller.listening }
+            controller.release()
+            // A read showing it transcribing taken in, then 3 s on, and a read taken in after that.
+            try await h.waitFor { shown.text.contains("Transcribing…") }
+            clock.ahead += ClaudeVoiceRun.quietAfterRelease + 0.1
+            let reads = shown.reads
+            try await h.waitFor { shown.reads > reads }
+            #expect(controller.isTranscribing(h.key), "\(transcript): ended while Claude transcribed: \(String(describing: ended))")
+            h.tell(["op": "processed"])
+            if transcript.isEmpty {
+                // Its empty box after the footer went, taken in, then 2 s on: no text.
+                try await h.waitFor { h.agent["voiceInserts"] as? Int == inserts + 1 && h.agent["recording"] as? String == "" }
+                let after = shown.reads
+                try await h.waitFor { shown.reads > after && !shown.text.contains("Transcribing…") }
+                clock.ahead += ClaudeVoiceRun.emptyAfterProcessing + 0.1
+            }
+            try await h.waitFor { controller.phase == .idle }
+            if transcript.isEmpty {
+                #expect(ended?.contains("no text after processing") == true, "\(String(describing: ended))")
+                #expect(clock.ahead - start < ClaudeVoiceRun.finishWithin)
+            } else {
+                #expect(controller.deliveries[h.key]?.text == transcript, "\(String(describing: controller.notice)) \(String(describing: ended))")
+            }
+            #expect(h.agent["voiceCancels"] as? Int == 0 && input(h) == "")
+        }
     }
 
     /// No text and a flat level cursor after an earlier run in this launch heard fine: the microphone works, so the
