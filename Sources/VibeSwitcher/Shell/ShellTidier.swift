@@ -11,7 +11,8 @@ import VibeCore
 /// kept in `file`, so a shell the user took over stays theirs across a restart of the app.
 ///
 /// The sidebar's Close Finished Shells… (`close`): after one confirmation that lists them, ends every Run-card shell
-/// of a project that is back at its prompt, a failed or typed-into one too.
+/// of a project that is back at its prompt, a failed or typed-into one too. The sidebar's Close Finished (N)…
+/// (`closeFinished`): the same, in every project, and the replaced leads between turns too (`CloseFinished`).
 final class ShellTidier {
     /// What Close Finished Shells… asks before it ends anything, or says when there's nothing to end (`button` nil).
     struct Question: Equatable {
@@ -30,6 +31,9 @@ final class ShellTidier {
     var leftRunning: (HostSession, ShellTidy.Ending) -> Bool = ShellTidy.leftRunning
     /// Ends the session, as End Session does (main thread).
     var end: (UUID) -> Void = { _ in }
+    /// The session's board names it as its project's lead (main thread): never ended as a replaced lead.
+    var holdsRole: (UUID) -> Bool = { _ in false }
+
     /// Asks the question (main thread): whether to go on. One without a button only says something.
     var ask: (Question) -> Bool = ShellTidier.alert
 
@@ -153,6 +157,72 @@ final class ShellTidier {
         return ending.map(\.id)
     }
 
+    /// What the sidebar's Close Finished (N)… would end now (`CloseFinished.items`): in every project, the finished
+    /// Run-card shells and the replaced leads (`replaced`, by window session) between turns, among `rows`.
+    func closable(rows: [WindowRow], replaced: Set<UUID>) -> [CloseFinished.Item] {
+        CloseFinished.items(rows: rows, sessions: sessions(), replaced: replaced, holdsRole: holdsRole, idle: idle)
+    }
+
+    /// The sidebar's Close Finished (N)… (main thread): asks once, listing what it found in `rows()` (every project's
+    /// rows) with `replaced()` the replaced leads, then ends, as End Session does, each that is still to close when
+    /// the question is answered (both read again then): what changed since is skipped. The sessions it ended.
+    @discardableResult
+    func closeFinished(rows: () -> [WindowRow], replaced: () -> Set<UUID>) -> [UUID] {
+        let found = closable(rows: rows(), replaced: replaced())
+        let question = Self.question(closing: found, sessions: sessions(), now: now())
+        guard ask(question), question.button != nil else { return [] }
+        // Asked a while ago, perhaps: only what's still finished, and still a replaced lead between turns.
+        let ending = CloseFinished.still(found, now: closable(rows: rows(), replaced: replaced()))
+        for item in found where !ending.contains(item) {
+            log("\(item.id.uuidString.prefix(8)) (\(item.name)) not closed by Close Finished: it changed since the question")
+        }
+        for item in ending {
+            log("\(item.id.uuidString.prefix(8)) (\(item.name)) ended by Close Finished (\(item.kind == .shell ? "a finished shell" : "a replaced lead"))")
+            end(item.id)
+        }
+        return ending.map(\.id)
+    }
+
+    /// What Close Finished (N)… asks before `items` are ended: grouped by project, its finished shells (each with how
+    /// its command ended) and its replaced leads apart; with none, what's said instead.
+    static func question(closing items: [CloseFinished.Item], sessions: [HostSession], now: Date) -> Question {
+        guard !items.isEmpty else {
+            return Question(message: "Nothing finished to close",
+                            detail: "No shell an agent opened is back at its prompt, and no replaced lead is between turns. "
+                                + "Shells you opened yourself, the leads holding their role, workers and verifiers are never closed by this.",
+                            button: nil)
+        }
+        let hosted = Dictionary(sessions.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        var projects: [String] = []
+        for item in items where !projects.contains(item.project) { projects.append(item.project) }
+        let groups = projects.map { project -> String in
+            let mine = items.filter { $0.project == project }
+            var lines = [project]
+            let shells = mine.filter { $0.kind == .shell }, leads = mine.filter { $0.kind == .replacedLead }
+            if !shells.isEmpty {
+                lines.append(shells.count == 1 ? "  Finished shell:" : "  Finished shells:")
+                lines += shells.map { item in
+                    guard let ending = hosted[item.id].flatMap(ShellTidy.ending(of:)) else { return "    \(item.name): at its prompt" }
+                    return "    \(item.name): command \(ending.ok ? "finished" : "failed") \(Durations.short(now.timeIntervalSince(ending.at))) ago"
+                }
+            }
+            if !leads.isEmpty {
+                lines.append(leads.count == 1 ? "  Replaced lead:" : "  Replaced leads:")
+                lines += leads.map { "    \($0.name): between turns" }
+            }
+            return lines.joined(separator: "\n")
+        }
+        let shells = items.filter { $0.kind == .shell }.count, leads = items.count - shells
+        let what = [shells == 0 ? nil : shells == 1 ? "1 finished shell" : "\(shells) finished shells",
+                    leads == 0 ? nil : leads == 1 ? "1 replaced lead" : "\(leads) replaced leads"].compactMap { $0 }.joined(separator: " and ")
+        var why: [String] = []
+        if shells > 0 { why.append("Each shell was opened by an agent and is back at its prompt; closing it ends anything it left running too.") }
+        if leads > 0 { why.append("Each replaced lead's role went to a newer lead, and its agent isn't in a turn.") }
+        why.append("Anything that changed by the time you confirm stays. Ended sessions show under Ended, where their output can still be read.")
+        return Question(message: "Close \(what)?", detail: groups.joined(separator: "\n\n") + "\n\n" + why.joined(separator: " "),
+                        button: items.count == 1 ? "Close 1 Session" : "Close \(items.count) Sessions")
+    }
+
     static func names(_ rows: [WindowRow]) -> [UUID: String] {
         Dictionary(rows.compactMap { row in row.hostID.map { ($0, row.title) } }, uniquingKeysWith: { first, _ in first })
     }
@@ -179,6 +249,13 @@ final class ShellTidier {
 
     /// The question as an alert; true when its button was pressed.
     static func alert(_ question: Question) -> Bool {
+        let alert = makeAlert(question)
+        NSApp.activate()
+        return alert.runModal() == .alertFirstButtonReturn && question.button != nil
+    }
+
+    /// The question's alert, not shown yet (the sandbox draws it).
+    static func makeAlert(_ question: Question) -> NSAlert {
         let alert = NSAlert()
         alert.messageText = question.message
         alert.informativeText = question.detail
@@ -188,8 +265,7 @@ final class ShellTidier {
         } else {
             alert.addButton(withTitle: "OK")
         }
-        NSApp.activate()
-        return alert.runModal() == .alertFirstButtonReturn && question.button != nil
+        return alert
     }
 
     private func save() {

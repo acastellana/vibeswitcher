@@ -276,6 +276,12 @@ struct WindowActions {
     /// Close Finished Shells…: ends, after one confirmation listing them, every shell of the project named `project`
     /// that an agent's Run card opened and that is back at its prompt (`ShellTidier.close`).
     var closeFinishedShells: (_ project: String) -> Void = { _ in }
+    /// What the sidebar's Close Finished (N)… would close now, in every project: the finished Run-card shells and the
+    /// replaced leads between turns (`ShellTidier.closable`). The button shows only when there's one.
+    var closable: () -> [CloseFinished.Item] = { [] }
+    /// Close Finished (N)…: ends, after one confirmation listing them, what `closable` lists that is still to close
+    /// then (`ShellTidier.closeFinished`).
+    var closeFinished: () -> Void = {}
 
     /// You pick a project's folder and its lead starts there (`ProjectFolderStart`): Home's Choose Folder…, the empty
     /// sidebar's Project Lead….

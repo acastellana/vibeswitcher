@@ -125,3 +125,75 @@ public enum ShellTidy {
         }
     }
 }
+
+/// The sidebar's Close Finished (N)…: in every project, the Run-card shells Close Finished Shells… ends
+/// (`ShellTidy.finished`, the rule unchanged) and the replaced leads whose agent is between turns, ended after one
+/// confirmation that lists them. Never the lead holding the role, a replaced lead mid-turn (working, on a prompt,
+/// waiting on background work, or not known), a shell the user opened, a worker or verifier, or the user's own
+/// sessions: none is a finished Run-card shell or a replaced lead.
+///
+/// Fail closed: what's confirmed is what may end, and each is looked at again just before (`still`): one that changed
+/// since (a shell running a command again, a lead that took a turn or holds the role again) is skipped.
+public enum CloseFinished {
+    public enum Kind: String, Equatable, Sendable {
+        /// A Run-card shell back at its prompt.
+        case shell
+        /// A lead its board no longer names (`ReplacedLead`), its agent between turns.
+        case replacedLead
+    }
+
+    public struct Item: Equatable, Sendable, Identifiable {
+        /// The window session.
+        public var id: UUID
+        public var kind: Kind
+        public var project: String
+        /// The row's title.
+        public var name: String
+
+        public init(id: UUID, kind: Kind, project: String, name: String) {
+            self.id = id
+            self.kind = kind
+            self.project = project
+            self.name = name
+        }
+    }
+
+    /// The replaced lead's agent isn't mid-turn: its scan says its turn is over (idle, or done and not looked at yet),
+    /// or its agent quit and only its shell lives. Working, on a prompt, waiting on background work, or not known
+    /// (no scan of it yet, no hooks): false.
+    public static func betweenTurns(_ row: WindowRow) -> Bool {
+        switch row.content {
+        case .agent(let session): return session.status == .idle || session.status == .done
+        case .hosted(let info): return info.isLive && info.agent != nil && info.liveProgramStatus == nil && row.agentQuit
+        }
+    }
+
+    /// What Close Finished (N)… ends now, in the rows' order: of `rows`' live window sessions (as the host lists them,
+    /// `sessions`), the finished Run-card shells and the replaced leads (`replaced`, by window session) between turns
+    /// that still don't hold their project's lead role (`holdsRole`: the board names them again).
+    public static func items(rows: [WindowRow], sessions: [HostSession], replaced: Set<UUID>,
+                             holdsRole: (UUID) -> Bool = { _ in false },
+                             idle: (HostSession) -> Bool = ShellTidy.idle) -> [Item] {
+        let live = Dictionary(sessions.filter(\.isLive).map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        var seen: Set<UUID> = []
+        return rows.compactMap { row -> Item? in
+            guard let id = row.hostID, let host = live[id], seen.insert(id).inserted else { return nil }
+            if replaced.contains(id) {
+                guard LeadTeams.role(label: host.label) == .lead, betweenTurns(row), !holdsRole(id) else { return nil }
+                return Item(id: id, kind: .replacedLead, project: row.project, name: row.title)
+            }
+            guard !ShellTidy.finished([host], idle: idle).isEmpty else { return nil }
+            return Item(id: id, kind: .shell, project: row.project, name: row.title)
+        }
+    }
+
+    /// Of what was confirmed, what may end now: each that is still to close as it was (`now`, looked at again), the
+    /// same session as the same kind. Anything else changed since, and is skipped.
+    public static func still(_ confirmed: [Item], now: [Item]) -> [Item] {
+        let current = Set(now.map { "\($0.kind.rawValue)|\($0.id)" })
+        return confirmed.filter { current.contains("\($0.kind.rawValue)|\($0.id)") }
+    }
+
+    /// The button's words: "Close Finished (3)…".
+    public static func title(_ count: Int) -> String { "Close Finished (\(count))…" }
+}
