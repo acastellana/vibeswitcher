@@ -290,7 +290,9 @@ public enum WireVectors {
     static func session(id: String, terminal: String, agent: String, cwd: String?, status: String, since: String, hosted: Bool,
                         role: String?, shown: String, project: String, task: String?, startedAt: String, hasHooks: Bool,
                         leadAsks: Bool, startFolder: String?, hasTranscript: Bool, prompt: NodeWire.Value = .null,
-                        draft: NodeWire.Value = .null, queued: NodeWire.Value = .array([])) -> NodeWire.Value {
+                        draft: NodeWire.Value = .null, queued: NodeWire.Value = .array([]), pid: Int = 4242,
+                        branch: String? = nil, command: String? = nil, size: (cols: Int, rows: Int)? = nil,
+                        lead: String? = nil, boardTask: String? = nil) -> NodeWire.Value {
         func text(_ value: String?) -> NodeWire.Value { value.map(NodeWire.Value.string) ?? .null }
         return .object(["id": .string(id), "terminal": .string(terminal), "agent": .string(agent), "cwd": text(cwd),
                         "status": .string(status), "since": .string(since), "hosted": .bool(hosted), "role": text(role),
@@ -298,7 +300,10 @@ public enum WireVectors {
                         "activity": .null, "activitySince": .null, "startedAt": .string(startedAt), "hasHooks": .bool(hasHooks),
                         "leadAsks": .bool(leadAsks), "startFolder": text(startFolder), "backgroundJobs": .int(0),
                         "hasTranscript": .bool(hasTranscript), "prompt": prompt, "draft": draft, "queued": queued,
-                        "name": .null, "pausedUntil": .null, "agentSession": .null])
+                        "name": .null, "pausedUntil": .null, "agentSession": .null,
+                        "pid": .int(pid), "branch": text(branch), "command": text(command),
+                        "size": size.map { .object(["cols": .int($0.cols), "rows": .int($0.rows)]) } ?? .null,
+                        "lead": text(lead), "boardTask": text(boardTask)])
     }
 
     /// An ordinary Claude session asking its own question, a message drafted for it on a page (driving sessions,
@@ -321,7 +326,8 @@ public enum WireVectors {
     static func lead(status: String, since: String) -> NodeWire.Value {
         session(id: leadSession, terminal: "pts/4", agent: "claude", cwd: root, status: status, since: since, hosted: true, role: "lead",
                 shown: "needs-you", project: "acme-site", task: "Login fix", startedAt: "2026-11-17T08:40:02.000Z", hasHooks: true,
-                leadAsks: true, startFolder: root, hasTranscript: true)
+                leadAsks: true, startFolder: root, hasTranscript: true, pid: 51022, branch: "main", command: "claude --model opus",
+                size: (132, 40), lead: NodeIds.project(root: root))
     }
 
     static var notes: NodeWire.Value {

@@ -212,7 +212,11 @@ public enum WireSchema {
             field("startFolder", Kind.string.orNull), field("backgroundJobs", .int), field("hasTranscript", .bool),
             field("prompt", Kind.shape("session.prompt").orNull), field("draft", Kind.shape("session.draft").orNull),
             field("name", Kind.string.orNull), field("pausedUntil", Kind.date.orNull), field("agentSession", Kind.string.orNull),
-            field("queued", .list(.shape("session.queued")))]))
+            field("queued", .list(.shape("session.queued"))),
+            // The inspector's (2026-11-21): the agent's pid, its folder's branch, the host's command and size, its board.
+            field("pid", .int), field("branch", Kind.string.orNull), field("command", Kind.string.orNull),
+            field("size", Kind.shape("session.size").orNull), field("lead", Kind.string.orNull), field("boardTask", Kind.string.orNull)]))
+        shapes.append(shape("session.size", from: "Session.liveValue(prompt:draft:queued:host:branch:)", [field("cols", .int), field("rows", .int)]))
         // What the node keeps beside a session (driving sessions, 2026-11-20): the question on its screen, a page's draft.
         shapes.append(shape("session.prompt", from: "SessionPrompt.value", [
             field("question", .string), field("options", strings), field("descriptions", .list(Kind.string.orNull)), field("text", .list(.int)),
