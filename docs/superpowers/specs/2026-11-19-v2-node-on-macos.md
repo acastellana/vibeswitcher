@@ -220,7 +220,9 @@ in [the Mac's tasks](../../process/v2-mac-tasks.md)): step 2 is built (`Platform
 refused on the Mac). Step 3's code is built: the server child from a cdhash-checked file, its connector a stream pair
 with the Hardened Runtime as non-dumpable; Hardened Runtime and `task_for_pid` wait for a real Mac. The user decided the
 voice (2026-11-20: Touch ID or the login password for each state change, with the caller check); its code is built
-behind a seam (`Platform.Approval`, `ApprovalVoice`) and not wired: step 4 measures it first.
+behind a seam (`Platform.Approval`, `ApprovalVoice`) and not wired: step 4 measures it first. Since 2026-11-21 it is wired
+(`VoiceRule.Mode.approval`, `Requests.approvalJudgment`, the command line asking no code under it) and still off: the
+user's server takes it only once `NodeSystem.approvalMeasured` is turned on, after step 4 and a review.
 
 ## Decisions
 
