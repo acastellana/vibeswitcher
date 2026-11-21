@@ -4296,3 +4296,4 @@ Proposed task 1: Find why dictations end with no text
 - 2026-11-21 14:20 Automatically (auto_advance): Cleaned up claude-dictation-text (freed 1.8 GB of build output and temporary folders). It stays done.
 - 2026-11-21 14:20 Automatically (auto_advance): Cleaned up auto-advance-s-send (freed 1.8 GB of build output and temporary folders). It stays done.
 - 2026-11-21 14:21 Update: Merged: Claude dictation no longer drops your text as "typed in the terminal meanwhile" — **What was wrong:** five dictations in the last week ended with "Something was typed in the terminal meanwhile" and no text, though you'd typed nothing. The app's own logs showed it; you hadn't report…
+- 2026-11-21 14:42 Raised claude-dictation to audit (the risk check, at 1db5bc98): it changes test or build infrastructure the suite relies on (Tests/VibeSwitcherTests/FakeClaude.swift)
