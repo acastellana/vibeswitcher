@@ -45,6 +45,15 @@ struct NodeAcceptanceTests {
         let card = try #require(ScratchNode.card(held.output, "config accept"), "\(held.output)")
         let accepted = try await node.runOnTerminal(["config", "accept", card])
         #expect(accepted.status == 0 && accepted.output.contains("accepted"), "\(accepted.output)\(accepted.errors)")
+        // One line per path sealed, under a count (the follow-up of 2026-11-21: no comma-joined line).
+        let said = accepted.output.split(whereSeparator: \.isNewline).map { $0.trimmingCharacters(in: .whitespaces.union(.controlCharacters)) == "" ? "" : String($0).replacingOccurrences(of: "\r", with: "") }
+        if let head = said.firstIndex(where: { $0.hasPrefix("accepted ") && $0.hasSuffix(":") }) {
+            let count = Int(said[head].split(separator: " ")[1]) ?? -1
+            #expect(said.count > head + count && said[(head + 1)...(head + count)].allSatisfy { $0.hasPrefix("  ") && !$0.contains(", ~") && !$0.contains(", .") },
+                    "\(accepted.output)")
+        } else {
+            #expect(said.contains("accepted: nothing held"), "\(accepted.output)")
+        }
         let after = try await node.run(["config", "held", repo.path])
         #expect(after.status == 0 && after.output.contains("nothing held"), "\(after.output)\(after.errors)")
     }

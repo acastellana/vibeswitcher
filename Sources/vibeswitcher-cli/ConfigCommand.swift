@@ -25,8 +25,10 @@ enum ConfigCommand {
                 "This accepts the agents' config card \(ConfigSeal.inert(card["id"]?.string ?? "", limit: 80)) showed, sealing exactly that, "
                     + "then records the floor and guard rails workflow.md proposes."
             }) { result in
+                // One line per path sealed, so a long accept reads as a list.
                 let sealed = result["sealed"]?.array?.compactMap(\.string) ?? []
-                Say.out("accepted" + (sealed.isEmpty ? "" : ": " + sealed.map { ConfigSeal.inert($0, limit: 200) }.joined(separator: ", ")))
+                Say.out(sealed.isEmpty ? "accepted: nothing held" : "accepted \(sealed.count) held change\(sealed.count == 1 ? "" : "s"):")
+                sealed.forEach { Say.out("  " + ConfigSeal.inert($0, limit: 200)) }
                 Say.out(result["floorRecorded"]?.bool == true ? "  the review floor is recorded" : "  no review floor recorded")
             }
         default: return Say.usage(usage)
