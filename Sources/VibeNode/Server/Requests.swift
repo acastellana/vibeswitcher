@@ -194,7 +194,9 @@ public final class Requests: @unchecked Sendable {
             note("web.open from pid \(facts.pid), in a scratch server's form (--test-web-pair): no voice asked")
             return act(request, from: facts, reply: reply)
         }
-        if needs == .user {
+        // A private record's read (`webRead`) on the socket is the user's alone, as a user's-voice read (no typed word);
+        // a page's comes through `webRead(_:reply:)`.
+        if needs == .user || needs == .webRead {
             if case .notUser(let why) = Voice.judge(facts, live: live, rule: rule) {
                 note("refused \(request.kind) from pid \(facts.pid): not the user's voice: \(why)")
                 return reply(.init(re: request.id, error: .init(.voice, "not the user's voice: \(why)")))

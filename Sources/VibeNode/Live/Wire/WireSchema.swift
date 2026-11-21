@@ -64,7 +64,7 @@ public enum WireSchema {
                                   "session.presets.args", "session.presets.result", "session.complete.args", "session.complete.result",
                                   "session.attach.args", "session.attach.result",
 
-                                  "settings.args", "settings.result", "set.args", "set.result"]
+                                  "settings.args", "settings.result", "set.args", "set.result", "mail.args", "mail.result"]
     /// A keyed collection's entity.
     public static let collections = ["node": "node", "sessions": "session", "leads": "lead", "cards": "card", "boards": "board"]
 
@@ -333,6 +333,15 @@ public enum WireSchema {
                                                                   field("project", Kind.shape("settings.project").orNull),
                                                                   field("leftOut", .list(.shape("settings.left"))),
                                                                   field("usage", .shape("node.usage"))]),
+            // Between leads (`mail`, a page's read since 2026-11-21: `NodeWire.Voice.webRead`).
+            shape("mail.args", from: "Requests.mail", [optional("folder", .string), optional("all", .bool)]),
+            shape("mail.result", from: "Requests.mail", [field("projects", .list(.shape("mail.project")))]),
+            shape("mail.project", from: "Requests.mail", [field("root", .string), field("project", .string), field("total", .int),
+                                                          field("messages", .list(.shape("mail.message")))]),
+            shape("mail.message", from: "Requests.mailValue", [
+                field("at", .date), field("from", .string), field("to", .string), field("received", .bool),
+                field("kind", Kind.words(LeadMail.Kind.allCases.map(\.rawValue)).orNull), field("text", .string),
+                field("outcome", .words(["delivered", "waiting", "refused", "no_lead", "off", "failed"])), field("sent", .bool), field("detail", .string)]),
             shape("set.args", from: "Requests.set", [optional("folder", .string), field("key", .string), field("value", .string)]),
             shape("set.result", from: "Requests.set", [field("key", .string), field("value", .string), field("was", .string),
                                                         field("scope", .words(["node", "project"])), field("project", Kind.string.orNull),

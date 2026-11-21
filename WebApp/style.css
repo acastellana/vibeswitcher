@@ -795,3 +795,8 @@ kbd { padding: 1px 6px; border-radius: 5px; box-shadow: inset 0 0 0 1px var(--li
 .board-decisions { list-style: none; margin: 0; padding: 0; }
 .board-decision { display: flex; gap: 8px; justify-content: space-between; padding: 4px 0; }
 .note-gist { font-weight: 600; margin-bottom: 2px; }
+.mail-list { list-style: none; margin: 0; padding: 0; }
+.mail-message { padding: 8px 0; border-bottom: 1px solid var(--line, rgba(127,127,127,.2)); }
+.mail-head { font-size: 12px; opacity: .8; }
+.mail-way { font-weight: 600; }
+.mail-text { margin: 4px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; }

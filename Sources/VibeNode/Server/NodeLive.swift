@@ -122,6 +122,12 @@ public final class NodeLive: @unchecked Sendable {
                 guard rights.contains(.draft) else { return answer(.init(re: request.id, error: .init(.voice, "this page's token doesn't draft"))) }
                 return requests.draft(request, reply: answer)
             }
+            // A private record's read (Between leads): the screen judged its token's `read` right; never `handle`'s
+            // user's-voice path, which a page never passes.
+            if NodeWire.kinds[request.kind] == .webRead {
+                guard rights.contains(.read) else { return answer(.init(re: request.id, error: .init(.voice, "this page's token doesn't read"))) }
+                return requests.webRead(request, reply: answer)
+            }
             requests.handle(request, from: NodeLive.webPeer, reply: answer)
         }
         let hub = hub

@@ -560,6 +560,23 @@ public enum WireVectors {
                          decisions: sampleDecisions(now: boardNow.timeIntervalSince1970))
     }
 
+    /// `mail`'s answer for the vectors' project: a question it asked another project's lead, the answer that came
+    /// back, and one refused for its kind.
+    static var mailValue: NodeWire.Value {
+        let project = LeadMail.project(of: root)
+        let at = boardNow.timeIntervalSince1970
+        let records = [
+            LeadMail.Record(at: at - 900, from: project, to: "acme-api", kind: .question, text: "Which port does the API listen on in staging?",
+                            outcome: .delivered, detail: "Delivered: steered in while it works."),
+            LeadMail.Record(at: at - 600, from: "acme-api", to: project, kind: .answer, text: "8080, behind the staging proxy.", outcome: .waiting,
+                            detail: "Waiting in its inbox: VibeSwitcher wakes the lead for it."),
+            LeadMail.Record(at: at - 300, from: project, to: "acme-api", kind: nil, text: "ok", outcome: .refused,
+                            detail: "Refused, not sent: the kind is question, report or answer"),
+        ]
+        return .object(["projects": .array([.object(["root": .string(root), "project": .string(project), "total": .int(records.count),
+                                                     "messages": .array(records.reversed().map { Requests.mailValue($0, project: project) })])])])
+    }
+
     /// The lead's latest decisions of the vectors' example, newest first: a long one with its AI summary, a short one.
     static func sampleDecisions(now: Double) -> [BoardDecision] {
         let long = LeadDecision(at: now - 300, text: "Run the onboarding steps and the upload retry in parallel, since they touch different files and neither waits on the other's review",
@@ -706,6 +723,9 @@ public enum WireVectors {
             // The node's settings (2026-11-20): read by a page, which drafts the line that sets one; `set` is never a page's.
             ("settings", [request(.init(id: "18", kind: "settings", args: ["folder": .string(root)])),
                           reply("reply.settings", .init(re: "18", result: settingsValue))]),
+            // Between leads (2026-11-21): a page reads the projects' record of their leads' messages (`webRead`).
+            ("mail", [request(.init(id: "39", kind: "mail", args: ["folder": .string(root)])),
+                      reply("reply.mail", .init(re: "39", result: mailValue))]),
             ("set.from-a-page", [reply(.init(re: "19", error: .init(.voice,
                                                                    "set is the user's voice: a web page is never that; run it with `vibeswitcher` in a terminal")))]),
             ("send.from-a-page", [reply(.init(re: "17", error: .init(.voice,

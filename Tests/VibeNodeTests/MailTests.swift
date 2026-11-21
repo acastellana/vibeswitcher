@@ -5,7 +5,7 @@ import VibeCore
 
 /// "Between leads" (`MailRequest.swift`, the app's `LeadMailViews.swift`): `mail` gives a project's record of its lead's
 /// tell_lead messages, newest first, which way each went and what became of it; only to the user's voice (it's a private
-/// record), with no code; `MailText` prints it with every lead's word inert.
+/// record), with no code, or a page's token that reads (never a session's process); `MailText` prints it with every lead's word inert.
 @Suite(NodeTraits.linuxOnly, .timeLimit(.minutes(5)))
 struct MailTests {
     private let scratch = Scratch()
@@ -65,5 +65,33 @@ struct MailTests {
         #expect(MailText.lines(some).first?.contains("the newest \(Requests.mailShown) shown: --all for every one") == true)
         let every = try #require(await world.ask("mail", ["folder": .string(world.repo), "all": .bool(true)], action: nil)?.result?["projects"]?.array?.first)
         #expect(every["messages"]?.array?.count == Requests.mailShown + 3)
+    }
+
+    /// A page reads the record with its token's `read` right (the page's Between leads view, `webRead`), never without
+    /// it; `webRead` gives `mail` and nothing else; a page's `mail` asked through `handle`, as a peer with no terminal,
+    /// is still refused: only the screen's path reads it for a page. A session's process stays refused (above).
+    @Test func aPageReadsTheRecordWithItsReadRightOnly() async throws {
+        #expect(NodeWire.kinds["mail"] == .webRead && !NodeWire.changesState("mail"))
+        #expect(WebAccess.refusal(for: NodeWire.Request(id: "1", kind: "mail"), rights: [.read]) == nil)
+        #expect(WebAccess.refusal(for: NodeWire.Request(id: "2", kind: "mail"), rights: [])?.error?.code == NodeWire.Code.voice.rawValue)
+        #expect(WebAccess.kinds(for: [.read]).contains("mail"))
+
+        let world = try await CardWorld.make(scratch)
+        defer { world.stop() }
+        try LeadMail.append(.init(at: 1_763_600_000, from: "acme", to: LeadMail.project(of: world.repo), kind: .report, text: "done",
+                                  outcome: .delivered, detail: "Delivered."), root: world.repo)
+        func ask(_ kind: String, through handle: Bool = false) async -> NodeWire.Reply? {
+            await withCheckedContinuation { done in
+                world.requests.queue.async {
+                    let request = NodeWire.Request(id: "w", kind: kind, args: ["folder": .string(world.repo)])
+                    if handle { world.requests.handle(request, from: NodeLive.webPeer) { done.resume(returning: $0) } }
+                    else { world.requests.webRead(request) { done.resume(returning: $0) } }
+                }
+            }
+        }
+        let read = try #require(await ask("mail"))
+        #expect(read.result?["projects"]?.array?.first?["messages"]?.array?.first?["text"] == .string("done"), "\(read)")
+        #expect(await ask("status")?.error?.code == NodeWire.Code.voice.rawValue)
+        #expect(await ask("mail", through: true)?.error?.code == NodeWire.Code.voice.rawValue)
     }
 }

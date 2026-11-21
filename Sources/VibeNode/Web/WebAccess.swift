@@ -245,7 +245,7 @@ public final class WebAccess: WebGate, @unchecked Sendable {
         switch NodeWire.kinds[request.kind] {
         case nil:
             return .init(re: request.id, error: .init(.unknownKind, "this server doesn't take \(kind)"))
-        case .anyone?:
+        case .anyone?, .webRead?:
             return rights.contains(.read) ? nil : .init(re: request.id, error: .init(.voice, "this page's token doesn't read"))
         case .webDraft?:
             return rights.contains(.draft) ? nil : .init(re: request.id, error: .init(.voice, "this page's token doesn't draft"))

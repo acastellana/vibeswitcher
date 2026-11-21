@@ -3,9 +3,19 @@ import VibeCore
 
 /// "Between leads" (the parity table's row; the app's Team tab, `LeadMailViews.swift`): the messages projects' leads
 /// sent each other with `tell_lead`, refused ones too, as each project's private record keeps them (`LeadMail`,
-/// `.vibeswitcher/lead-mail.jsonl`). `mail [FOLDER] [all]` is a read, of a private record: the user's voice (no session's process, no page), no typed
-/// code; nothing changes.
+/// `.vibeswitcher/lead-mail.jsonl`). `mail [FOLDER] [all]` is a read, of a private record: the user's voice (no session's
+/// process), no typed code, or since 2026-11-21 a page's token that reads (`webRead`, the page's Between leads view);
+/// nothing changes.
 extension Requests {
+    /// A page's read of a private record (`NodeWire.Voice.webRead`), its token's `read` right judged by the screen and
+    /// `NodeLive`: only `mail`, never anything that changes state. On `queue`.
+    func webRead(_ request: NodeWire.Request, reply: @escaping (NodeWire.Reply) -> Void) {
+        switch request.kind {
+        case "mail": mail(request, reply: reply)
+        default: reply(.init(re: request.id, error: .init(.voice, "\(ConfigSeal.inert(request.kind, limit: 80)) isn't a page's read")))
+        }
+    }
+
     /// How many of a project's messages `mail` gives without `all`: the newest.
     static let mailShown = 20
 
