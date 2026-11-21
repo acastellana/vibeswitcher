@@ -80,12 +80,14 @@ public enum BoardRecords {
     static func text(_ value: String, _ limit: Int, _ lines: Int) -> String { BoardValue.text(value, limit: limit, lines: lines) }
 
     /// The fields the board's value gains.
-    static func fields(board: LeadBoard?, read: Read, now: Date) -> [String: NodeWire.Value] {
+    /// `summaries`: the engine's decisions with their AI lines (`LeadEngine.boardDecisions`): a line is taken for a
+    /// decision read here (by its id), never a decision of the engine's own read.
+    static func fields(board: LeadBoard?, read: Read, now: Date, summaries: [BoardDecision] = []) -> [String: NodeWire.Value] {
         var fields: [String: NodeWire.Value] = [:]
-        fields["decisions"] = .array(read.decisions.suffix(decisionsKept).reversed().map { decision in
-            .object(["at": .date(Date(timeIntervalSince1970: decision.at)), "text": .string(text(decision.text, 600, 4)),
-                     "why": .string(text(decision.why, 2_000, 20))])
-        })
+        let lines = Dictionary(summaries.compactMap { decision in decision.summary.map { (decision.id, $0) } }, uniquingKeysWith: { first, _ in first })
+        fields["decisions"] = BoardValue.decisions(read.decisions.suffix(decisionsKept).reversed().map { decision in
+            BoardDecision(id: decision.id, at: decision.at, text: decision.text, why: decision.why, summary: lines[decision.id])
+        }, limit: decisionsKept)
         fields["scorecard"] = board.map { scorecard($0, now: now) } ?? .null
         fields["answered"] = .array(Array(closed(board?.questions ?? []).prefix(answeredKept)).map(question))
         fields["files"] = .array(files.map { name in

@@ -11,21 +11,24 @@ import VibeNode
 /// `vibeswitcher status --probe [--json]`: stage 1's local read, without the server: the agent sessions on this machine
 /// (`LocalSessions`), one line each: terminal, agent, folder, status, since when.
 ///
+/// `vibeswitcher status --health [--json]`: the server's health digest only (`NodeHealth`: freezes of the engine's queue,
+/// slow refreshes, the host's restarts and refused connections, sessions left waiting or stuck, the server's last errors).
+///
 /// `vibeswitcher status --ack`: acknowledges what the journal shows (a journal entry the command line writes after the
 /// typed code), never a server request.
 enum StatusCommand {
-    static let usage = "usage: vibeswitcher status [--json] | status --probe [--json] | status --ack"
+    static let usage = "usage: vibeswitcher status [--json] | status --health [--json] | status --probe [--json] | status --ack"
 
     /// The JSON form's version.
     static let format = 1
 
     static func run(_ arguments: [String]) -> Int32 {
         let words = Set(arguments)
-        guard words.count == arguments.count, words.isSubset(of: ["--json", "--probe", "--ack"]),
-              !(words.contains("--ack") && words.count > 1) else { return Say.usage(usage) }
+        guard words.count == arguments.count, words.isSubset(of: ["--json", "--probe", "--ack", "--health"]),
+              !(words.contains("--ack") && words.count > 1), !(words.contains("--health") && words.contains("--probe")) else { return Say.usage(usage) }
         if words.contains("--probe") { return probe(json: words.contains("--json")) }
         if words.contains("--ack") { return acknowledge() }
-        return throughServer(json: words.contains("--json"))
+        return throughServer(json: words.contains("--json"), health: words.contains("--health"))
     }
 
     /// Stage 1's read, as it was.
@@ -43,7 +46,8 @@ enum StatusCommand {
         return 0
     }
 
-    static func throughServer(json asJSON: Bool) -> Int32 {
+    /// `health`: only the health digest (`NodeHealth.lines`; with `json`, its object).
+    static func throughServer(json asJSON: Bool, health: Bool = false) -> Int32 {
         let context = NodeContext.current()
         context.sayScratch()
         let client: NodeClient
@@ -62,6 +66,15 @@ enum StatusCommand {
         case .success(let reply):
             guard reply.ok, let given = reply.result else { return Say.replyError(reply) }
             result = given
+        }
+        if health {
+            guard let digest = result["health"], digest != .null else { return Say.refused("this node's server keeps no health digest (an older build)") }
+            if asJSON {
+                try? FileHandle.standardOutput.write(contentsOf: NodeWire.printable(NodeWire.line(digest)))
+            } else {
+                Say.out(NodeHealth.lines(digest).joined(separator: "\n"))
+            }
+            return 0
         }
         let facts = context.facts()
         // A node started detached: the weaker rule, and its pid file any worker can write (the start plan's S3).
@@ -103,9 +116,19 @@ enum StatusCommand {
             out.append("accepted: \(inert(accepted["kind"]?.string)) at \(inert(accepted["at"]?.string)) from pid \(accepted["pid"]?.int.map(String.init) ?? "?") in \(inert(accepted["cgroup"]?.string)): \(inert(accepted["commandLine"]?.array?.compactMap(\.string).joined(separator: " ")))")
         }
         for notice in result["notices"]?.array ?? [] { out.append("notice: \(inert(notice.string))") }
+        if let line = updateLine(result["update"]) { out.append(line) }
         out += journal
         Say.out(out.joined(separator: "\n"))
         return 0
+    }
+
+    /// The last update check's answer when it has nothing to offer (a newer build is a notice): up to date, or why it
+    /// couldn't look. Nil before a look, and on a server that doesn't check (a scratch node).
+    static func updateLine(_ update: NodeWire.Value?) -> String? {
+        guard let update, update != .null, update["commit"]?.string == nil else { return nil }
+        if let problem = update["problem"]?.string { return "updates: couldn't check v2 for a newer build (\(inert(problem)))" }
+        guard let at = update["checkedAt"]?.string else { return nil }
+        return "updates: no newer build on v2 that both CI runs passed (checked \(inert(at)))"
     }
 
     /// What the journal says that the user should see (EN-D15): a host restart the server saw (`restart`, E8) with how

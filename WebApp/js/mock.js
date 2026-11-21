@@ -110,10 +110,10 @@ export function createMock(store, options = {}) {
         { value: '3 min', label: 'of yours per merged task', note: null, help: 'The minutes a merged task waited on you.' },
         { value: '0', label: 'reverts', note: null, help: 'Merges undone since.' }] },
     decisions: [
-      { at: ago(600), text: 'Keep the new hero and drop the old one', why: 'Both were half done; the new one passes the page tests and marketing asked for it.' },
-      { at: ago(2000), text: 'Cache the assets for a year with hashed names', why: 'A new build changes every name, so nothing stale is ever served.' },
-      { at: ago(5000), text: 'Sync landing-base before the sidebar pass', why: 'The pass touches the same files; syncing first saves a second merge.' },
-      { at: ago(9000), text: 'Run the page tests on every merge', why: 'Two merges broke the hero last week.' },
+      { id: 'mock-decision-1', summary: 'Keep the new hero', at: ago(600), text: 'Keep the new hero and drop the old one', why: 'Both were half done; the new one passes the page tests and marketing asked for it.' },
+      { id: 'mock-decision-2', summary: null, at: ago(2000), text: 'Cache the assets for a year with hashed names', why: 'A new build changes every name, so nothing stale is ever served.' },
+      { id: 'mock-decision-3', summary: null, at: ago(5000), text: 'Sync landing-base before the sidebar pass', why: 'The pass touches the same files; syncing first saves a second merge.' },
+      { id: 'mock-decision-4', summary: null, at: ago(9000), text: 'Run the page tests on every merge', why: 'Two merges broke the hero last week.' },
     ],
     answered: [
       { id: 'q-cache', state: 'answered', text: 'Cache for a day or a year?', answer: 'A year, with hashed names', proposal: null, why: null, reworded: false, task: 'cache-static-assets', at: ago(2100) },
@@ -146,6 +146,11 @@ export function createMock(store, options = {}) {
 
   const node = {
     usage,
+    health: {
+      since: ago(3 * 3600 + 720), stalled: null, freezes: [{ at: ago(5400), seconds: 14 }], slowRefreshes: 2, slowestRefresh: 7,
+      lastSlowRefresh: ago(1800), serverRestarts: 0, refusedConnections: null, hostRestartAt: null, waiting: [],
+      errors: [{ at: ago(900), line: 'prompt audit: /home/u/.vibeswitcher/prompt-audit.json not written: disk full' }],
+    },
     node: 'local', epoch, root: `${HOME}/.vibeswitcher`, home: HOME,
     server: { pid: 48213, startedAt: ago(3 * 3600 + 720), commit: 'f62aef61' },
     host: {
@@ -700,6 +705,10 @@ export function createMock(store, options = {}) {
         },
       } };
     }
+    // A session's dev servers (2026-11-21).
+    if (message.kind === 'session.ports') {
+      return { ok: true, result: { ports: [{ port: 5173, address: '127.0.0.1', pid: 48311, program: 'node', url: 'http://localhost:5173/' }] } };
+    }
     if (message.kind === 'chat.image') {
       if (args.id !== SHOT.id) return { ok: false, error: { code: 'gone', message: 'no such image in that session’s chat' } };
       return { ok: true, result: { mediaType: SHOT.mediaType, bytes: SHOT.bytes, offset: 0, data: SHOT_DATA } };
@@ -712,6 +721,19 @@ export function createMock(store, options = {}) {
         { name: 'Shell', kind: 'shell', command: '', env: [], keepShell: false, project: false, default: false, builtIn: true, digest: 'mock-shell', refused: null },
       ];
       return { ok: true, result: { presets: args.folder ? presets : presets.slice(1), problems: [] } };
+    }
+    if (message.kind === 'recent') {
+      return { ok: true, result: { projects: options.empty ? [] : [
+        { folder: SITE, lastUsed: ago(300), lead: SITE_PROJECT },
+        { folder: `${HOME}/projects/notes`, lastUsed: ago(86400), lead: null },
+      ] } };
+    }
+    if (message.kind === 'mail') {
+      const messages = [
+        { at: ago(600), from: 'example-api', to: 'example-site', received: true, kind: 'answer', text: '8080, behind the staging proxy.', outcome: 'waiting', sent: true, detail: 'Waiting in its inbox.' },
+        { at: ago(900), from: 'example-site', to: 'example-api', received: false, kind: 'question', text: 'Which port does the API listen on in staging?', outcome: 'delivered', sent: true, detail: 'Delivered.' },
+      ];
+      return { ok: true, result: { projects: options.empty ? [] : [{ root: SITE, project: 'example-site', total: messages.length, messages }] } };
     }
     if (message.kind === 'settings') {
       if (args.folder && args.folder !== SITE) return { ok: false, error: { code: 'gone', message: `no lead has worked in ${args.folder} yet: \`vibeswitcher lead ${args.folder}\` starts one` } };

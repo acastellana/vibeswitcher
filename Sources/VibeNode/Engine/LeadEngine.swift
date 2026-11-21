@@ -52,6 +52,9 @@ public final class LeadEngine: @unchecked Sendable {
         /// headless Claude on Haiku (`NodeSummaries.headless`); none by default, so a test's engine asks no model but the
         /// fake it gives.
         public var summarize: Summarizer.Generate?
+        /// Writes an all-done batch's summary (headline and bullets) for its prompt, blocking (`AllDoneLook`): the user's
+        /// node's server gives headless Claude with `BatchSummaryPrompts.system`; none by default (the written fallback).
+        public var summarizeBatch: Summarizer.Generate?
 
         public init() {}
     }
@@ -232,6 +235,16 @@ public final class LeadEngine: @unchecked Sendable {
     var summarizer: Summarizer?
     public let teamSummaries = Changes<[String: String]>()
     var summaryKeys: [String: [String: String]] = [:]
+    /// The all-done summaries' model (`Options.summarizeBatch`; a test's fake). On `queue`.
+    var batchModel: Summarizer.Generate?
+    /// The summaries may be asked for now (a model given, Settings' AI summaries on, Haiku not held back), as the last
+    /// refresh found; each lead's latest decisions (newest first) by root, and the boards' copy of them with their lines;
+    /// the long messages' keys asked for, by "session|entry", and their lines.
+    var summariesAllowed = false
+    var recentDecisions: [String: [LeadDecision]] = [:]
+    public let boardDecisions = Changes<[BoardDecision]>()
+    var messageKeys: [String: String] = [:]
+    public let messageSummaries = Changes<String>()
     /// Where the summaries' transcripts are looked at, and where their model runs: one at a time.
     let summaryReads = DispatchQueue(label: "vibenode.lead-engine.summary-reads", qos: .utility)
     let summaryRuns = DispatchQueue(label: "vibenode.lead-engine.summaries", qos: .utility)
@@ -263,6 +276,29 @@ public final class LeadEngine: @unchecked Sendable {
     /// The working policy's watch (`SettingsWatch.swift`): each running lead told it once when it changes. None until
     /// `watchRoom`, so a test's engine tells nothing it didn't ask for.
     var policyWatch: LeadWitness.PolicyWatch?
+    /// The health digest (`NodeHealth`): each refresh's time told to it. None in a test's engine unless given.
+    public var health: NodeHealth?
+    // Shell requests (`ShellCards.swift`), on `queue`: the stamps the host vouched for (asked once each), each request's
+    // card, the messages under way, a look under way, the 15 s look and the clock. The folder and the host's seal are
+    // read on `shellWork`, one step at a time.
+    var shellTrusted: [String: WalletStamp] = [:]
+    /// What became of each request, the engine's own (never read from the folder's answer files).
+    var shellAnswers: [String: ShellAsk.Answer] = [:]
+    var shellCards: [String: String] = [:]
+    var shellTelling: Set<String> = []
+    var shellTellingEnd: Set<String> = []
+    var shellLooking = false
+    var shellTimer: Subscription?
+    var shellNow: () -> Date = Date.init
+    let shellWork = DispatchQueue(label: "vibenode.lead-engine.shell-requests", qos: .userInitiated)
+    // The developer tools notice (`ToolchainLook.swift`), on `queue`: the notices the last look found, when it ran,
+    // whether one is under way; how the node's tools are asked (a test's stand-in) and the clock.
+    public internal(set) var toolchainNotices: [String] = []
+    var toolchainLookedAt: Date?
+    var toolchainLooking = false
+    /// The node's tools as a look asks them (nil: `NodeToolchain.node(home:)` in the engine's home).
+    var toolchainTools: (@Sendable () -> NodeToolchain.Tools)?
+    var toolchainNow: () -> Date = Date.init
     /// Boost as last written to `boost.json` (`lookAtBoost`), and when; the clock it's judged on.
     var boostWritten: (state: BoostState, at: Date)?
     var boostNow: () -> Date = Date.init
@@ -352,6 +388,7 @@ public final class LeadEngine: @unchecked Sendable {
         promptAuditTimer = clock?.every(Int(Self.promptAuditEvery)) { [weak self] in self?.queue.async { self?.lookAtPromptAudits() } }
         // Each screen the session scan reads: a popup on a team session declined, a dialog nothing reads noted.
         sessions?.sawScreen = { [weak self] session, text in self?.lookAt(screen: text, of: session) }
+        batchModel = options.summarizeBatch
         if let generate = options.summarize {
             let (runs, queue) = (summaryRuns, link.queue)
             let summarizer = Summarizer(generate: generate, run: { runs.async(execute: $0) }, deliver: { queue.async(execute: $0) })

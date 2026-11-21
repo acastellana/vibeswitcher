@@ -93,6 +93,10 @@ public final class Requests: @unchecked Sendable {
     /// S8b): the account's `NodeFolders.defaultPrefix` on the node, `--test-install-root` on a scratch node; none:
     /// `build.switch` is refused and `status` gives no `builds`.
     public var installRoot: String?
+    /// The health digest (`NodeHealth`): the server's own watchdog, slow refreshes and last errors.
+    public var health: NodeHealth?
+    /// Check for Updates (`UpdateWatch`): the user's node's only. Its notice is `status`'s, its last answer `update`.
+    public var updates: UpdateWatch?
     /// The waits a `build.switch` runs on (a test's shorter ones).
     public var switchTiming = SwitchRequest.Timing()
     /// The web's gate and tokens (the live plan's I1, `NodeLive`): what `web.open` and `web.revoke` act on; none:
@@ -197,7 +201,9 @@ public final class Requests: @unchecked Sendable {
             note("web.open from pid \(facts.pid), in a scratch server's form (--test-web-pair): no voice asked")
             return act(request, from: facts, reply: reply)
         }
-        if needs == .user {
+        // A private record's read (`webRead`) on the socket is the user's alone, as a user's-voice read (no typed word);
+        // a page's comes through `webRead(_:reply:)`.
+        if needs == .user || needs == .webRead {
             if case .notUser(let why) = Voice.judge(facts, live: live, rule: rule) {
                 note("refused \(request.kind) from pid \(facts.pid): not the user's voice: \(why)")
                 return reply(.init(re: request.id, error: .init(.voice, "not the user's voice: \(why)")))
@@ -252,6 +258,8 @@ public final class Requests: @unchecked Sendable {
         case "questions": questions(request, reply: reply)
         case "board": board(request, reply: reply)
         case "settings": settings(request, reply: reply)
+        case "recent": recent(request, reply: reply)
+        case "session.ports": sessionPorts(request, reply: reply)
         case "set": set(request, reply: reply)
         case "answer": answer(request, reply: reply)
         case "hold": hold(request, reply: reply)
@@ -354,7 +362,10 @@ public final class Requests: @unchecked Sendable {
         notices += engine?.promptAuditNotices ?? []
         notices += engine?.unknownDialogNotices ?? []
         notices += engine?.allDoneNotices ?? []
+        notices += engine?.toolchainNotices ?? []
+        notices += engine?.shellNotices ?? []
         notices += sessions?.reminderNotices() ?? []
+        if let notice = updates?.notice { notices.append(notice) }
         return notices
     }
 
@@ -395,6 +406,14 @@ public final class Requests: @unchecked Sendable {
         ]
         // The user's node's tailnet page, for the command line (not in the `node` stream: `NodeStatusStore.value`).
         if let tailnet { fields["webTailnet"] = tailnet.value() }
+        // The last update check's answer, for the command line (the page has its notice).
+        if let updates { fields["update"] = updates.value }
+        // The health digest (`status --health`, the page's This node).
+        if let health {
+            fields["health"] = health.value(serverRestarts: notes?.notes.serverRestarts, refusedConnections: notes?.notes.refusedAppConnections,
+                                            hostRestartAt: engine?.restartValue["at"]?.string.flatMap(NodeWire.date),
+                                            waiting: sessions?.reminderNotices() ?? [])
+        }
         return .object(fields)
     }
 
@@ -452,8 +471,15 @@ public final class Requests: @unchecked Sendable {
     /// the app's looking at its tab), so its finished turn reads `idle`. A web page sends it while it has the session
     /// open. It changes nothing but the seen mark, so it needs no voice: anyone that reads (a page's `read` right).
     private func seen(_ request: NodeWire.Request, reply: @escaping (NodeWire.Reply) -> Void) {
+        // A project's all-done cards seen (the board's `allDone`, the app's `AllDoneWatch.see`): only that mark changes.
+        if let project = request.args?["project"]?.string, !project.isEmpty {
+            guard let engine, let root = engine.leads.leads[project]?.root else {
+                return reply(.init(re: request.id, error: .init(.gone, "no lead's project \(ConfigSeal.inert(project, limit: 80)) on this node")))
+            }
+            return engine.seeAllDone(root: root) { reply(.init(re: request.id, result: .object(["changed": .bool($0)]))) }
+        }
         guard let id = request.args?["session"]?.string, !id.isEmpty else {
-            return reply(.init(re: request.id, error: .init(.badArgs, "seen needs a session")))
+            return reply(.init(re: request.id, error: .init(.badArgs, "seen needs a session or a project")))
         }
         guard let sessions else { return reply(.init(re: request.id, error: .init(.notYet, "this server keeps no session list"))) }
         sessions.acknowledge(id) { found in

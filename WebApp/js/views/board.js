@@ -6,7 +6,7 @@
 
 import { h, keyed, setText, setClass, framed } from '../dom.js';
 import { icon } from '../marks.js';
-import { boardGroups, boardSummary, taskState, taskTone, taskGroup, taskLine, since, moment, plural, tilde, lastPart } from '../words.js';
+import { boardGroups, boardSummary, taskState, taskTone, taskGroup, taskLine, decisionLine, allDoneCard, since, moment, plural, tilde, lastPart } from '../words.js';
 import { sessionHref } from '../ui.js';
 import { boardRecords } from './records.js';
 
@@ -141,17 +141,25 @@ export function boardView(app) {
   const asksCount = h('span', { class: 'count' });
   const asks = h('section', { class: 'board-group asks' }, h('h2', { class: 'section-title board-group-head' }, h('span', null, 'Asked of you'), asksCount), asksList);
   const note = h('p', { class: 'board-note', hidden: true });
+  // The batch that cleared the board (the board's `allDone`, the app's card), for a day.
+  const doneCard = h('section', { class: 'board-group all-done', hidden: true, 'aria-label': 'All tasks finished' });
+  let seenAsked = null;
   const groupsEl = h('div', { class: 'board-groups' });
   const sections = [0, 1, 2, 3].map(() => groupSection(app));
   groupsEl.append(...sections.map((section) => section.el));
   const more = h('p', { class: 'board-more-note', hidden: true });
-  const records = boardRecords(app);
+  // The lead's latest decisions, newest first (the board's `decisions`).
+  const decisionsList = h('ul', { class: 'board-decisions' });
+  const decisions = h('section', { class: 'board-group decisions', hidden: true },
+    h('h2', { class: 'section-title board-group-head' }, h('span', null, 'Decisions')), decisionsList);
+  // The Team tab's other records under them (views/records.js): its decisions are the list above.
+  const records = boardRecords(app, { decisions: false });
   const el = h('section', { class: 'board', 'aria-label': 'Board' },
     h('header', { class: 'head' },
       h('a', { class: 'back icon-button', href: '#/', 'aria-label': 'Sessions' }, icon('back', 16)),
       h('div', { class: 'head-text' }, h('div', { class: 'head-line' }, title, summary), place),
       leadLink),
-    h('div', { class: 'pane board-pane' }, h('div', { class: 'board-column' }, asks, note, groupsEl, more, records.el)));
+    h('div', { class: 'pane board-pane' }, h('div', { class: 'board-column' }, asks, doneCard, note, groupsEl, more, decisions, records.el)));
   const askRows = new Map();
   let shown = null;
 
@@ -198,6 +206,32 @@ export function boardView(app) {
     setText(more, board?.more ? `The board is long: ${plural(board.more, 'more task')} past these aren’t shown.` : '');
     more.hidden = !board?.more;
     records.update(board);
+    const card = allDoneCard(board?.allDone);
+    doneCard.hidden = !card;
+    if (card) {
+      const drawn = JSON.stringify(board.allDone);
+      if (doneCard.dataset.drawn !== drawn) {
+        doneCard.dataset.drawn = drawn;
+        doneCard.replaceChildren(
+          h('h2', { class: 'section-title board-group-head' }, h('span', null, 'All tasks finished'),
+            h('time', { class: 'board-task-when', data: { since: board.allDone.at } }, since(board.allDone.at))),
+          card.headline ? h('p', { class: 'all-done-headline' }, card.headline) : h('p', { class: 'node-says' }, 'Writing a short summary of what was done…'),
+          card.bullets.length ? h('ul', { class: 'all-done-bullets' }, card.bullets.map((bullet) => h('li', null, bullet))) : null,
+          card.cost ? h('p', { class: 'all-done-cost', title: card.costNote || '' }, card.cost) : null,
+          h('details', { class: 'all-done-tasks' }, h('summary', null, card.count),
+            h('ul', null, card.tasks.map((task) => h('li', { class: task.merged ? 'merged' : '' }, `${task.title} (${task.word})`)))));
+      }
+      // Seen once the page has shown it a moment (the app's: the user opened the lead).
+      if (!board.allDone.seen && seenAsked !== board.allDone.id && store.can?.('seen') && document.visibilityState === 'visible') {
+        seenAsked = board.allDone.id;
+        setTimeout(() => { if (app.ui.state.route.name === 'board' && app.ui.state.route.id === project) store.request('seen', { project }); }, 1500);
+      }
+    }
+    const decided = board?.decisions || [];
+    decisions.hidden = decided.length === 0;
+    decisionsList.replaceChildren(...decided.map((decision) => h('li', { class: 'board-decision', title: [decision.text, decision.why].filter(Boolean).join('\n\nWhy: ') },
+      h('span', { class: 'board-decision-text' }, decisionLine(decision)),
+      decision.at ? h('time', { class: 'board-task-when', data: { since: decision.at } }, since(decision.at)) : null)));
   }
 
   const schedule = framed(render);

@@ -7,7 +7,7 @@
 // - Every string is the sessions' writing: drawn as text, never markup.
 
 import { h, setText } from '../dom.js';
-import { clock, moment } from '../words.js';
+import { clock, moment, decisionLine } from '../words.js';
 
 // How many of each list show before "Earlier".
 export const SHOWN = 3;
@@ -42,7 +42,8 @@ export function filesLine(board, home) {
     : `Kept in ${root}/.vibeswitcher (not committed).`;
 }
 
-export function boardRecords(app) {
+// `decisions: false`: without the decisions (the board page lists them itself).
+export function boardRecords(app, { decisions: showDecisions = true } = {}) {
   const scoreTiles = h('div', { class: 'score-tiles' });
   const scoreFoot = h('p', { class: 'records-note' });
   const scoreReceipts = h('p', { class: 'records-note' });
@@ -107,10 +108,12 @@ export function boardRecords(app) {
       }
 
       const said = board.decisions || [];
-      decisions.el.hidden = !said.length;
+      decisions.el.hidden = !showDecisions || !said.length;
       decisionsList.replaceChildren(...folded(said.map((decision) => opener('d:' + decision.at + decision.text,
-        [h('span', { class: 'records-text' }, decision.text), h('time', { class: 'records-time', title: moment(decision.at) }, clock(decision.at))],
-        decision.why ? [h('p', null, decision.why)] : [h('p', { class: 'records-note' }, 'No why was written.')])), 'd:earlier', 'Earlier decisions'));
+        // Its line: a long one by its AI summary when one came (the app's `DecisionFeed.line`); opened, all of it and why.
+        [h('span', { class: 'records-text' }, decisionLine(decision)), decision.at ? h('time', { class: 'records-time', title: moment(decision.at) }, clock(decision.at)) : null],
+        [decision.summary ? h('p', { class: 'records-question' }, decision.text) : null,
+          decision.why ? h('p', null, decision.why) : h('p', { class: 'records-note' }, 'No why was written.')])), 'd:earlier', 'Earlier decisions'));
 
       const closed = board.answered || [];
       answered.el.hidden = !closed.length;

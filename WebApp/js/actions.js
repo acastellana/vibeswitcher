@@ -178,3 +178,27 @@ export function presetLine(op, form, { folder = null, original = null } = {}) {
   if (form.isDefault && folder) words.push('--default');
   return words.join(' ');
 }
+
+// The start page's recent projects (the Mac's StartPage): the folders of the sessions the node's host runs and of your
+// sessions that ended lately (`recentFolders`), then those the node says Claude Code and Codex know (`recent`'s
+// `projects`, newest first), each once, at most `limit`; each with the project of the lead that runs there, from the
+// node's answer or the leads it lists.
+export function recentProjects(known, sessions, ended, leads, limit = 8) {
+  const leadOf = new Map([...leads].filter((lead) => lead.root).map((lead) => [lead.root, lead.project]));
+  const rows = [];
+  const seen = new Set();
+  const add = (folder, lead) => {
+    if (!folder || seen.has(folder) || rows.length >= limit) return;
+    seen.add(folder);
+    rows.push({ folder, lead: lead || leadOf.get(folder) || null });
+  };
+  for (const folder of recentFolders(sessions, ended, limit)) add(folder, null);
+  for (const project of known || []) add(project.folder, project.lead);
+  return rows;
+}
+
+// The lines that start work in a recent project: a Claude session there, and its project lead (none while one runs:
+// its board is a click away instead).
+export function projectLines(row) {
+  return { session: `vibeswitcher new ${shellWord(row.folder)}`, lead: row.lead ? null : leadLine(row.folder) };
+}

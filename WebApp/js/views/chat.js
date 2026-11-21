@@ -23,6 +23,7 @@ import { h, keyed, setText, setClass, framed } from '../dom.js';
 import { agentMark, statusMark, setMark, icon } from '../marks.js';
 import { since, short, clock, plural, tilde, stateOf, AGENTS, STATES, KEY } from '../words.js';
 import { markdown, diffView, codeBlock } from '../text.js';
+import { runnable } from '../runnable.js';
 import { summaryOf, newSince, sinceSummary, chatMarkdown, exportName, findIn, fold } from '../chatops.js';
 import { imageLoader } from '../images.js';
 import { questionStack, askCard } from './cards.js';
@@ -113,6 +114,17 @@ function rowActions(...buttons) {
 }
 function rowButton(label, glyph, onclick) {
   return h('button', { class: 'icon-button row-action', type: 'button', title: label, 'aria-label': label, onclick }, icon(glyph, 12));
+}
+
+// A shell code block's Run (the app's `RunButton`): the command as the message that runs it in the agent's shell
+// (`! command`, js/runnable.js), left as the session's draft over the box, where `vibeswitcher send SESSION` in a
+// terminal shows it whole and asks for the code. Nothing runs from the page. None for a block that isn't plainly one
+// command line, or where the page can't draft.
+function runButton(view, code, language) {
+  const run = runnable(code, language);
+  if (!run || !view.canRun()) return null;
+  return h('button', { class: 'code-run', type: 'button', title: `Leaves “${run.prompt}” as a draft for this session: vibeswitcher send runs it after you type its code`,
+    onclick: () => view.runCode(run.prompt) }, icon('terminal', 11), 'Run');
 }
 
 function toolView(tool, home, view) {
@@ -213,7 +225,7 @@ function makeRow(view, first) {
         if (item.text === shown) return;
         const grew = shown !== null && item.text.startsWith(shown);
         shown = item.text;
-        const next = h('div', null, markdown(item.text));
+        const next = h('div', null, markdown(item.text, { codeAction: (code, language) => runButton(view, code, language) }));
         if (grew) patchChildren(body, next); else body.replaceChildren(...next.childNodes);
       },
     };
@@ -259,12 +271,16 @@ function makeRow(view, first) {
   if (first.type === 'team') {
     const title = h('div', { class: 'note-title' });
     const text = h('div', { class: 'note-text' });
+    // A long message's TL;DR, once the node wrote one (its AI summaries).
+    const gist = h('div', { class: 'note-gist', hidden: true });
     const time = h('time', { class: 'note-time' });
-    const el = h('div', { class: 'chat-row team' }, icon('note', 14), h('div', { class: 'note-body' }, title, text), time);
+    const el = h('div', { class: 'chat-row team' }, icon('note', 14), h('div', { class: 'note-body' }, title, gist, text), time);
     return {
       el,
       update(item) {
         setText(title, item.title || 'VibeSwitcher');
+        setText(gist, item.summary ? `TL;DR: ${item.summary}` : '');
+        gist.hidden = !item.summary;
         setText(text, item.text);
         setText(time, clock(item.at));
       },
@@ -374,6 +390,13 @@ export function chatView(app) {
       if (form.hidden || !drafting() || !text) return;
       store.sessionDraft(view.session, text, [], false);
       say('Left as a draft, over the box.');
+    },
+    // A code block's Run: only in an agent's session the page drafts for (a shell takes no `send`).
+    canRun: () => view.canDraft() && ['claude', 'codex'].includes(store.state.sessions.get(view.session)?.agent),
+    runCode: (prompt) => {
+      if (!view.canRun()) return;
+      store.sessionDraft(view.session, prompt, [], false);
+      say('Left as a draft, over the box: `vibeswitcher send` runs it in the agent’s shell after you type its code.');
     },
     // A change inside a row that moves what follows it (a fold opened): the row under your eyes stays put.
     held: (work) => { anchored(work); measure(); },

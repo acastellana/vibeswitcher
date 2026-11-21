@@ -556,6 +556,20 @@ public enum WireVectors {
                 $0.merged = LeadMergeRecord(commit: "8a3f1e2c", tested: true, at: now - 3600)
             },
         ]
+        // The batch that cleared the board earlier today, before these came in (`LeadAllDone`, the app's card): its
+        // summary, its tasks, and its receipts summed.
+        var cleared = LeadAllDone(id: "a1d0e5c2", at: now - 5400, since: now - 9000, tasks: [
+            LeadAllDone.Task(slug: "hero-image", title: "Swap the hero image", outcome: .merged),
+            LeadAllDone.Task(slug: "footer-links", title: "Fix the footer links", outcome: .merged),
+            LeadAllDone.Task(slug: "old-banner", title: "Remove the old banner", outcome: .abandoned),
+        ])
+        cleared.summary = LeadAllDone.Summary(headline: "The landing page has its new hero and working footer links",
+                                              bullets: ["The hero image is the new photo, sized for phones", "Every footer link opens its page"], byModel: false)
+        cleared.receipts = try? JSONDecoder().decode(LeadReceiptTotals.self, from: Data(#"""
+            {"tasks":2,"worked":5400,"tokens":12400000,"cost":6.4,"unpriced":0,"top":"hero-image","topTitle":"Swap the hero image","topCost":4.1,
+            "topTokens":8000000,"pricesAsOf":"2026-11-01"}
+            """#.utf8))
+        board.allDone = [cleared]
         return board
     }
 
@@ -563,10 +577,38 @@ public enum WireVectors {
     static var boardValue: NodeWire.Value {
         BoardValue.value(project: NodeIds.project(root: root), root: root, board: sampleBoard(now: boardNow.timeIntervalSince1970), now: boardNow,
                          summaries: ["t-onboarding-steps": "Making the sign-up form check each field as you leave it"],
-                         records: BoardRecords.Read(decisions: [
-                             LeadDecision(at: boardNow.timeIntervalSince1970 - 900, text: "Retry only idempotent requests",
-                                          why: "A POST may have landed; a PUT can be sent twice safely."),
-                         ], recordsDir: "docs/lead", present: ["workflow.md": true, "decisions.md": true, "progress.md": true, "incidents.md": false]))
+                         decisions: sampleDecisions(now: boardNow.timeIntervalSince1970),
+                         // The same decisions as the records folder holds them (oldest first): the board carries each with its line.
+                         records: BoardRecords.Read(decisions: sampleDecisions(now: boardNow.timeIntervalSince1970).reversed().map {
+                             LeadDecision(at: $0.at, text: $0.text, why: $0.why)
+                         }, recordsDir: "docs/lead", present: ["workflow.md": true, "decisions.md": true, "progress.md": true, "incidents.md": false]))
+    }
+
+    /// `mail`'s answer for the vectors' project: a question it asked another project's lead, the answer that came
+    /// back, and one refused for its kind.
+    static var mailValue: NodeWire.Value {
+        let project = LeadMail.project(of: root)
+        let at = boardNow.timeIntervalSince1970
+        let records = [
+            LeadMail.Record(at: at - 900, from: project, to: "acme-api", kind: .question, text: "Which port does the API listen on in staging?",
+                            outcome: .delivered, detail: "Delivered: steered in while it works."),
+            LeadMail.Record(at: at - 600, from: "acme-api", to: project, kind: .answer, text: "8080, behind the staging proxy.", outcome: .waiting,
+                            detail: "Waiting in its inbox: VibeSwitcher wakes the lead for it."),
+            LeadMail.Record(at: at - 300, from: project, to: "acme-api", kind: nil, text: "ok", outcome: .refused,
+                            detail: "Refused, not sent: the kind is question, report or answer"),
+        ]
+        return .object(["projects": .array([.object(["root": .string(root), "project": .string(project), "total": .int(records.count),
+                                                     "messages": .array(records.reversed().map { Requests.mailValue($0, project: project) })])])])
+    }
+
+    /// The lead's latest decisions of the vectors' example, newest first: a long one with its AI summary, a short one.
+    static func sampleDecisions(now: Double) -> [BoardDecision] {
+        let long = LeadDecision(at: now - 300, text: "Run the onboarding steps and the upload retry in parallel, since they touch different files and neither waits on the other's review",
+                                why: "Both are small and independent; serial would idle a worker for an hour")
+        let short = LeadDecision(at: now - 1800, text: "Keep the sidebar pass for after onboarding", why: "")
+        return [BoardDecision(id: long.id, at: long.at, text: long.text, why: long.why, summary: "Run the two small tasks side by side"),
+                BoardDecision(id: short.id, at: short.at, text: short.text, why: short.why)]
+
     }
 
     /// The board a minute on: the review passed and the blocked task's question was answered.
@@ -724,6 +766,17 @@ public enum WireVectors {
             // The node's settings (2026-11-20): read by a page, which drafts the line that sets one; `set` is never a page's.
             ("settings", [request(.init(id: "18", kind: "settings", args: ["folder": .string(root)])),
                           reply("reply.settings", .init(re: "18", result: settingsValue))]),
+            // The start page's recent projects (2026-11-21): the folders Claude Code and Codex know, a lead's project where one runs.
+            ("recent", [request(.init(id: "40", kind: "recent")),
+                        reply("reply.recent", .init(re: "40", result: .object(["projects": .array([
+                            .object(["folder": .string(root), "lastUsed": .date(date("2026-11-17T09:28:50.000Z")),
+                                     "lead": .string(NodeIds.project(root: root))]),
+                            .object(["folder": .string("/home/u/notes"), "lastUsed": .date(date("2026-11-16T18:02:11.000Z")), "lead": .null]),
+                            .object(["folder": .string("/home/u/old-tool"), "lastUsed": .null, "lead": .null]),
+                        ])])))]),
+            // Between leads (2026-11-21): a page reads the projects' record of their leads' messages (`webRead`).
+            ("mail", [request(.init(id: "39", kind: "mail", args: ["folder": .string(root)])),
+                      reply("reply.mail", .init(re: "39", result: mailValue))]),
             ("set.from-a-page", [reply(.init(re: "19", error: .init(.voice,
                                                                    "set is the user's voice: a web page is never that; run it with `vibeswitcher` in a terminal")))]),
             ("send.from-a-page", [reply(.init(re: "17", error: .init(.voice,

@@ -33,7 +33,11 @@ public enum ServerStart {
     /// A line on the server's stderr, which the host's stderr is (the unit sends it to the journal).
     public static func say(_ line: String) {
         FileHandle.standardError.write(Data("vibeswitcher-server: \(line)\n".utf8))
+        heard.get()?(line)
     }
+
+    /// Who else hears each line: the health digest's last errors (`NodeHealth.heard`), once it is made.
+    static let heard = Locked<((String) -> Void)?>(nil)
 
     /// The rest of the start; never returns.
     public static func run(_ arguments: [String]) -> Never {
@@ -112,12 +116,27 @@ public enum ServerStart {
         options.lock = parsed.node ? TestLock.standard() : nil
         // The AI summaries' model (Haiku, headless) on the user's node only: a scratch node's engine asks none.
         options.summarize = parsed.node ? NodeSummaries.headless(root: root) : nil
+        options.summarizeBatch = parsed.node ? NodeSummaries.headless(root: root, system: BatchSummaryPrompts.system, timeout: ClaudeHeadless.briefingTimeout) : nil
         let engine = LeadEngine(root: root, nodeRoot: parsed.nodeRoot.map { URL(fileURLWithPath: $0, isDirectory: true) }, link: link,
                                 clock: clock, sessions: sessions, options: options, note: say)
         requests.engine = engine
+        // The health digest (`NodeHealth`): the engine's queue watched from a thread of its own, its refreshes timed,
+        // the server's failing lines kept.
+        let health = NodeHealth(file: root.appendingPathComponent("health.json"))
+        requests.health = health
+        engine.health = health
+        heard.set { health.heard($0) }
+        health.watch(queue)
         requests.nodeRoot = parsed.nodeRoot
         // Where `build.switch` finds the builds: the account's own install folder on the node, a test's on a scratch node.
         requests.installRoot = accountHome.map { NodeFolders.defaultPrefix(accountHome: $0) } ?? parsed.testInstallRoot
+        // Check for Updates on the user's node (`UpdateWatch`): a scratch server asks GitHub nothing.
+        if parsed.node, let accountHome {
+            let updates = UpdateWatch(file: root.appendingPathComponent("update-check.json"), running: commit,
+                                      looker: .github(home: accountHome), queue: queue, note: say)
+            requests.updates = updates
+            updates.start(clock: clock)
+        }
         engine.watchRoom()
         let server = NodeServer(root: root, requests: requests, housekeeping: parsed.testHousekeeping ?? ServerArguments.housekeeping,
                                 clock: clock, cgroupRoot: parsed.testCgroupRoot, runnersAbove: runnersAbove, note: say)

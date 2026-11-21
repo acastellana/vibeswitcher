@@ -260,6 +260,10 @@ public enum NodeWire {
         case user
         /// The lead's tool server, its post sealed by the host as the lead's (EN-D10).
         case leadToolServer
+        /// A read of a private record (Between leads' `mail`): the user's voice on the socket, with no typed word, or a
+        /// web client's token with the `read` right (the page's Between leads view, 2026-11-21); never a session's
+        /// process, which `anyone` would let read every project's leads' messages.
+        case webRead
         /// A web client's token with the `draft` right (the live plan's LW-D6): never the user's voice, and refused on
         /// the Unix socket. It changes state (a draft on a card), so the integration task that takes such a kind checks
         /// the right before `Requests.handle`'s user's-voice path is reached.
@@ -286,8 +290,9 @@ public enum NodeWire {
         // Driving an ordinary session (the parity table's gaps 1, 3 and 6, 2026-11-20): the user's voice, and a page's draft.
         "send": .user, "session.new": .user, "session.end": .user, "session.reply": .user, "session.reopen": .user,
         // Between leads (the stability lane, 2026-11-20): a read, but the projects' private record of their leads'
-        // messages, so only the user's (no session's, no page's), with no typed word (`changesNothing`).
-        "mail": .user,
+        // messages, so never a session's: the user's, with no typed word, and since 2026-11-21 a page's token that reads
+        // (the page's Between leads view, read-only: the leads' messages reach the page's chats already).
+        "mail": .webRead,
         // The prompt-audit reminder's snooze, off and on (the stability lane, 2026-11-20).
         "prompt-audit": .user,
         // A session renamed or paused (the stability lane, 2026-11-20).
@@ -306,17 +311,22 @@ public enum NodeWire {
         "chat.image": .anyone,
         // The Statistics window's figures (2026-11-21): a read.
         "stats": .anyone,
+        // A session's dev servers, the ports its processes listen on (the dev pages row, 2026-11-21): a read.
+        "session.ports": .anyone,
         // The node's settings (the parity table's gap 9, 2026-11-20): read by anyone of the uid (a page too), set in the
         // user's voice.
         "settings": .anyone, "set": .user,
+        // The start page's recent projects (2026-11-21): a read of the folders Claude Code and Codex know, the user's
+        // other projects among them, so never a session's: the user's or a page's that reads (`webRead`, as `mail`).
+        "recent": .webRead,
         // Settling the lead's push request (the parity table's push row, 2026-11-20): the user's voice.
         "push": .user, "push.decline": .user,
     ]
 
     /// The user's-voice kinds that change nothing (EN-D5: no typed word): `start` to a running node says when it
-    /// started; `config.held` and `base.show` make the card the next request takes; `mail` reads the projects' private
-    /// record of their leads' messages; `shells` lists the node's shells for Close Finished Shells.
-    public static let changesNothing: Set<String> = ["start", "config.held", "base.show", "mail", "shells"]
+    /// started; `config.held` and `base.show` make the card the next request takes; `shells` lists the node's shells for
+    /// Close Finished Shells. (`mail`, a read of the user's or a page's, is `webRead`: it changes nothing either.)
+    public static let changesNothing: Set<String> = ["start", "config.held", "base.show", "shells"]
 
     /// Whether `kind` changes state: every user's-voice kind but `changesNothing`'s, a kind added later included, and
     /// every web client's kind (a draft, a terminal). A kind missing from `kinds` needs the user's voice, as
@@ -325,7 +335,7 @@ public enum NodeWire {
         switch kinds[kind] ?? .user {
         case .user: return !changesNothing.contains(kind)
         case .webDraft, .webTerminal: return true
-        case .anyone, .leadToolServer: return false
+        case .anyone, .leadToolServer, .webRead: return false
         }
     }
 
@@ -344,12 +354,13 @@ public enum NodeWire {
                                "tell",
                                "board", "seen",
                                "send", "session.new", "session.end", "session.reply", "session.draft", "session.draft.clear",
-                               "session.presets", "session.complete", "session.attach", "session.usage", "chat.image", "stats",
+                               "session.presets", "session.complete", "session.attach", "session.usage", "chat.image", "stats", "session.ports",
 
                                "settings", "set",
                                "push", "push.decline",
                                "session.reopen", "mail", "prompt-audit", "session.rename", "session.pause",
-                               "session.resume", "shells", "session.close-shells", "presets.edit"]
+                               "session.resume", "shells", "session.close-shells", "presets.edit",
+                               "recent"]
 
     // MARK: Lines
 

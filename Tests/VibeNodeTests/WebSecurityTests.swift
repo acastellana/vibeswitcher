@@ -167,7 +167,9 @@ struct WebSecurityTests {
         let hello = try #require(try client.nextFrame()?.json)
         #expect(hello["auth"]?["rights"] == .array([.string("read"), .string("draft")]), "\(hello)")
         #expect(hello["peer"]?["voice"]?.string == "other", "\(hello)")
-        let closed = NodeWire.kinds.filter { $0.value != .anyone && $0.value != .webDraft }.map(\.key).sorted()
+        // `webRead` kinds (mail, recent) are reads a page with `read` is served: they change nothing.
+        let closed = NodeWire.kinds.filter { $0.value != .anyone && $0.value != .webDraft && $0.value != .webRead }.map(\.key).sorted()
+        #expect(!closed.contains("mail") && !closed.contains("recent"))
         for name in ["answer", "hold", "tell", "stop", "lead", "start", "web.open", "web.revoke", "hooks.install", "build.switch",
                      "config.accept", "question.post", "term.open", "send", "set"] {
             #expect(closed.contains(name), "\(name)")

@@ -3,10 +3,11 @@ import VibeCore
 
 /// The all-done mark (the app's `AllDoneWatch` and its card, for a node; the rule and the mark are `BatchSummary`'s,
 /// shared): at each refresh, a lead's board that went from open work to none since the last read, with a task merged
-/// since the last mark, gets its mark (under the board's lock, as the app writes it) and the written summary (the
-/// fallback: the node asks no model, as the app's AI summaries setting off does). `status` then says it for a day: the
-/// project, when, the summary and how many merged. The app's card in the lead's chat, its receipts and its seen mark are
-/// the app's (a client's): the mark on the board is what a client shows later.
+/// since the last mark, gets its mark (under the board's lock, as the app writes it) and its summary: by the model on
+/// the user's node while the AI summaries may run (`Options.summarizeBatch`, the app's `ClaudeHeadless.allDone`), else
+/// the written fallback. `status` then says it for a day: the project, when, the summary, how many merged and its
+/// receipts summed; the board carries the mark (`BoardValue.allDone`: `vibeswitcher board` and the page's card), and a
+/// page that shows the board marks it seen (`seeAllDone`).
 extension LeadEngine {
     /// How long `status` says a board cleared.
     static let allDoneShown: TimeInterval = 24 * 60 * 60
@@ -22,20 +23,48 @@ extension LeadEngine {
             let unsummarized = (board.allDone ?? []).filter { $0.summary == nil && !allDoneSummarizing.contains($0.id) }
             guard cleared || !unsummarized.isEmpty else { continue }
             unsummarized.forEach { allDoneSummarizing.insert($0.id) }
-            let (project, note) = ((root as NSString).lastPathComponent, self.note)
+            let (project, note, runs, reads) = ((root as NSString).lastPathComponent, self.note, summaryRuns, self.reads)
+            // The model writes the summary when one is given and the AI summaries may run (the app's, with its setting
+            // on); else the written fallback, as before.
+            let model = summariesAllowed ? batchModel : nil
             reads.async({ _ in
-                (try? BoardStore(root: root).update { board -> LeadAllDone? in
+                (try? BoardStore(root: root).update { board -> (mark: LeadAllDone?, asks: [(id: String, tasks: [LeadAllDone.Task], input: BatchSummary.Input)]) in
                     let mark = cleared ? BatchSummary.mark(&board, previous: before, now: now) : nil
+                    var asks: [(id: String, tasks: [LeadAllDone.Task], input: BatchSummary.Input)] = []
                     for unwritten in board.allDone ?? [] where unwritten.summary == nil {
                         let input = BatchSummary.input(unwritten, board: board, project: project)
-                        board.setAllDoneSummary(BatchSummary.write(input, tasks: unwritten.tasks, enabled: false, generate: { _ in nil }), for: unwritten.id)
+                        if model != nil {
+                            asks.append((unwritten.id, unwritten.tasks, input))
+                        } else {
+                            board.setAllDoneSummary(BatchSummary.write(input, tasks: unwritten.tasks, enabled: false, generate: { _ in nil }), for: unwritten.id)
+                        }
                     }
-                    return mark
-                }) ?? nil
-            }) { mark in
-                if let mark { note("all done: the lead of \(project) cleared its board, \(mark.merged) of \(mark.tasks.count) task(s) merged") }
+                    return (mark, asks)
+                }) ?? (nil, [])
+            }) { read in
+                if let mark = read.mark { note("all done: the lead of \(project) cleared its board, \(mark.merged) of \(mark.tasks.count) task(s) merged") }
+                guard let model else { return }
+                for ask in read.asks {
+                    // One prompt at a time with the other summaries; its answer, or the written fallback, kept under the lock.
+                    runs.async {
+                        let summary = BatchSummary.write(ask.input, tasks: ask.tasks, enabled: true, generate: model)
+                        reads.async({ _ in (try? BoardStore(root: root).update { $0.setAllDoneSummary(summary, for: ask.id) }) ?? false })
+                    }
+                }
             }
         }
+    }
+
+    /// The user saw `root`'s all-done cards (a page showed its board: `seen` with a project, the app's
+    /// `AllDoneWatch.see`): each unseen mark gets its seen time, under the board's lock, on `reads`; nothing written
+    /// when none is unseen. `done` hears whether the board changed, on `queue`.
+    func seeAllDone(root: String, done: @escaping (Bool) -> Void = { _ in }) {
+        let now = allDoneNow().timeIntervalSince1970
+        reads.async({ _ in
+            let store = BoardStore(root: root)
+            guard (try? store.read())?.hasUnseenAllDone == true else { return false }
+            return (try? store.update { $0.seeAllDone(at: now) }) ?? false
+        }, then: done)
     }
 
     /// What `status` says of each board that cleared in the last day: its newest mark.
@@ -47,7 +76,9 @@ extension LeadEngine {
             let summary = mark.summary.map { summary in
                 ConfigSeal.inert(summary.headline, limit: 240) + (summary.bullets.isEmpty ? "" : " " + summary.bullets.map { ConfigSeal.inert($0, limit: 240) }.joined(separator: " "))
             } ?? "\(mark.tasks.count) task\(mark.tasks.count == 1 ? "" : "s") finished, \(mark.merged) merged."
-            return "all done: the lead of \(project) cleared its board at \(NodeWire.dateText(Date(timeIntervalSince1970: mark.at))): \(summary)"
+            // Its receipts summed, as the app's card says them.
+            let cost = mark.receipts.map { " Cost: " + ConfigSeal.inert($0.text, limit: 300) + " (estimates at the API prices of \($0.pricesAsOf))." } ?? ""
+            return "all done: the lead of \(project) cleared its board at \(NodeWire.dateText(Date(timeIntervalSince1970: mark.at))): \(summary)\(cost)"
         }
     }
 }

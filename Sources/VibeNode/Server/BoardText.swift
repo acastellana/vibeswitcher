@@ -24,6 +24,7 @@ public enum BoardText {
             lines.append("  the board can't be shown: \(inert(unreadable))")
             return lines
         }
+        lines += allDoneLines(board["allDone"], now: now)
         let today = calendar.startOfDay(for: now)
         let tasks = (board["tasks"]?.array ?? []).filter { task in
             guard task["group"]?.string == "done" else { return true }
@@ -41,15 +42,50 @@ public enum BoardText {
         if tasks.isEmpty { lines.append("  nothing on the board yet") }
         let more = board["more"]?.int ?? 0
         lines.append((counts.isEmpty ? "no tasks" : counts.joined(separator: " · ")) + (more > 0 ? " · \(more) more not shown" : ""))
+        // The lead's latest decisions: a long one by its AI summary when one came (the app's `DecisionFeed.line`).
+        let decisions = board["decisions"]?.array ?? []
+        if !decisions.isEmpty {
+            lines.append("Decisions")
+            lines += decisions.prefix(decisionsShown).map { decision in
+                let text = decision["summary"]?.string ?? decision["text"]?.string
+                let when = decision["at"]?.string.flatMap(NodeWire.date).map { " (" + Durations.short(now.timeIntervalSince($0)) + " ago)" } ?? ""
+                return "  Decided: " + lowercasedFirst(inert(text, limit: dimLimit)) + when
+            }
+            if decisions.count > decisionsShown { lines.append("  \(decisions.count - decisionsShown) earlier (--json shows them, each with why)") }
+        }
         lines += records(board, now: now, calendar: calendar)
         return lines
     }
 
-    /// How many decisions and closed questions are printed (the rest: `--json`).
+    /// "Run them" → "run them"; "API keys…" and "VibeSwitcher…" stay (the app's `DecisionFeed.lowercasedFirst`).
+    static func lowercasedFirst(_ text: String) -> String {
+        guard let first = text.first, first.isUppercase else { return text }
+        if text.prefix { $0 != " " }.dropFirst().contains(where: \.isUppercase) { return text }
+        return first.lowercased() + text.dropFirst()
+    }
+
+    /// The board's all-done card (`BoardValue.allDone`, the app's): "All tasks finished 12m ago · 5 tasks · 4 merged",
+    /// its summary's headline and bullets, and what it cost; nothing when none.
+    static func allDoneLines(_ mark: NodeWire.Value?, now: Date) -> [String] {
+        guard let mark, mark.object != nil else { return [] }
+        let tasks = mark["tasks"]?.array?.count ?? 0
+        let when = mark["at"]?.string.flatMap(NodeWire.date).map { " " + Durations.short(now.timeIntervalSince($0)) + " ago" } ?? ""
+        var lines = ["All tasks finished\(when) · \(tasks) task\(tasks == 1 ? "" : "s") · \(mark["merged"]?.int ?? 0) merged"]
+        if let summary = mark["summary"], summary.object != nil {
+            lines.append("  " + inert(summary["headline"]?.string, limit: 200))
+            lines += (summary["bullets"]?.array ?? []).map { "  - " + inert($0.string, limit: 200) }
+        }
+        if let cost = mark["receipts"]?.string {
+            lines.append("  Cost: " + inert(cost, limit: 300) + (mark["pricesAsOf"]?.string.map { " (estimates at the API prices of \(inert($0, limit: 40)))" } ?? ""))
+        }
+        return lines
+    }
+
+    /// How many closed questions are printed (the rest: `--json`).
     static let recordsShown = 5
 
-    /// The Team tab's records under the tasks (2026-11-21, `BoardRecords`): the scorecard, the lead's newest decisions,
-    /// the newest answered and withdrawn questions, and where the lead's files are.
+    /// The Team tab's other records under the tasks and decisions (2026-11-21, `BoardRecords`): the scorecard, the
+    /// newest answered and withdrawn questions, and where the lead's files are.
     static func records(_ board: NodeWire.Value, now: Date, calendar: Calendar) -> [String] {
         var lines: [String] = []
         if let card = board["scorecard"], card != .null, !(board["tasks"]?.array ?? []).isEmpty {
@@ -62,14 +98,6 @@ public enum BoardText {
                 if let footnote = card["footnote"]?.string { lines.append("  " + inert(footnote, limit: 300)) }
             }
             if let receipts = card["receipts"]?.string { lines.append("  " + inert(receipts, limit: 600)) }
-        }
-        let decisions = board["decisions"]?.array ?? []
-        if !decisions.isEmpty {
-            lines.append("Decisions")
-            lines += decisions.prefix(recordsShown).map { decision in
-                "  \(when(decision["at"], now: now, calendar: calendar))  \(inert(decision["text"]?.string, limit: 140))"
-            }
-            if decisions.count > recordsShown { lines.append("  \(decisions.count - recordsShown) earlier (--json shows them, each with why)") }
         }
         let answered = board["answered"]?.array ?? []
         if !answered.isEmpty {
@@ -109,6 +137,8 @@ public enum BoardText {
         formatter.dateFormat = calendar.isDate(date, inSameDayAs: now) ? "HH:mm" : "MMM d"
         return formatter.string(from: date)
     }
+    /// The decisions `vibeswitcher board` lists, newest first.
+    static let decisionsShown = 5
 
     /// "  Blocked 18m  Fix the flaky upload test — Waits on Sync landing-base with main".
     static func line(_ task: NodeWire.Value, now: Date) -> String {

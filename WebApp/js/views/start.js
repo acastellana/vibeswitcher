@@ -1,12 +1,14 @@
 // The start page (the Mac's StartPage): what needs you, in one line, starting a session (the line that starts it in a
-// terminal, views/drive.js), your sessions that ended lately (each with the line that resumes it and its conversation's
-// id to copy), and the keys worth knowing.
+// terminal, views/drive.js), your recent projects (each with the lines that start a session or its lead there), your
+// sessions that ended lately (each with the line that resumes it and its conversation's id to copy), and the keys
+// worth knowing. Nothing here starts anything: each line is copied and run in a terminal.
 
 import { h, setText, framed } from '../dom.js';
-import { KEY, tilde } from '../words.js';
+import { KEY, tilde, lastPart } from '../words.js';
 import { summary } from '../ui.js';
 import { newSessionForm, newLeadForm } from './drive.js';
-import { resumeLine } from '../actions.js';
+import { resumeLine, recentProjects, projectLines } from '../actions.js';
+import { boardHref } from '../ui.js';
 import { copyLine } from './cards.js';
 
 // How many ended sessions the page lists (the node keeps 20).
@@ -51,8 +53,40 @@ export function startView(app) {
         : h('p', { class: 'confirm-note' }, 'Its conversation id wasn’t known: it can’t be resumed.'),
       entry.conversation ? copyLine(entry.conversation, 'its conversation id') : null)));
   }
+  // Recent projects (the Mac's StartPage): each folder with the lines that start a session or its lead there, to copy.
+  const recentList = h('div', { class: 'ended-list' });
+  const recent = h('section', { class: 'ended recent', 'aria-label': 'Recent projects', hidden: true },
+    h('h2', { class: 'new-title' }, 'Recent projects'), recentList,
+    h('p', { class: 'confirm-note' }, 'Run a line in a terminal on this node: it asks for a code, then starts it.'));
+  let known = null;
+  let recentDrawn = '';
+  let recentAsked = false;
+  function askRecent() {
+    if (recentAsked || !store.can?.('recent')) return;
+    recentAsked = true;
+    store.request('recent', {}).then((reply) => {
+      if (reply.ok) { known = reply.result.projects; drawRecent(); } else recentAsked = false;
+    });
+  }
+  function drawRecent() {
+    const state = store.state;
+    const rows = recentProjects(known, state.sessions.values(), state.node?.ended || [], state.leads.values());
+    const key = JSON.stringify([rows, state.node?.home]);
+    if (key === recentDrawn) return;
+    recentDrawn = key;
+    recent.hidden = rows.length === 0;
+    const home = state.node?.home;
+    recentList.replaceChildren(...rows.map((row) => {
+      const lines = projectLines(row);
+      return h('div', { class: 'ended-row' },
+        h('div', { class: 'ended-name' }, h('span', null, lastPart(row.folder) || row.folder), h('span', { class: 'ended-folder' }, tilde(row.folder, home))),
+        copyLine(lines.session, `the command that starts a session in ${lastPart(row.folder)}`),
+        lines.lead ? copyLine(lines.lead, `the command that starts its project lead`)
+          : h('a', { class: 'link', href: boardHref(row.lead) }, 'Its lead runs: open its board'));
+    }));
+  }
   const el = h('section', { class: 'start', 'aria-label': 'Start page' },
-    h('div', { class: 'start-column' }, title, sub, starting.el, leading.el, ended,
+    h('div', { class: 'start-column' }, title, sub, starting.el, leading.el, recent, ended,
       h('dl', { class: 'keys' }, keys.map(([key, what]) => h('div', null, h('dt', null, h('kbd', null, key)), h('dd', null, what))))));
 
   function render() {
@@ -75,6 +109,8 @@ export function startView(app) {
     leading.el.hidden = starting.el.hidden;
     starting.update();
     drawEnded();
+    if (state.connection === 'live') askRecent();
+    drawRecent();
     const said = summary(state);
     const needs = [...state.sessions.values()].some((session) => session.status === 'needs-you');
     setText(title, state.sessions.size === 0 ? 'No sessions' : said ? said.charAt(0).toUpperCase() + said.slice(1) : 'Nothing needs you');
@@ -86,6 +122,7 @@ export function startView(app) {
   store.subscribe('sessions', schedule);
   store.subscribe('connection', schedule);
   store.subscribe('node', schedule);
+  store.subscribe('leads', schedule);
   render();
   // The palette's "New … in …": the start page with that folder and preset in its form.
   // The palette's "Start Project Lead in …": the start page with that folder in the lead's form.

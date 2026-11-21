@@ -54,6 +54,7 @@ extension LeadEngine {
         let (usageFiles, home, now, summaries) = (settingsFiles, self.home, usageNow(), summarizer != nil)
         // The posted questions' timers, from their cards (never the boards': S3).
         fireTimers(now: timersNow())
+        let began = MacTime.real.awake()
         reads.async({ files -> Refreshed in
             var read = Refreshed()
             for root in roots { read.loaded[root] = files.board(root) }
@@ -64,6 +65,12 @@ extension LeadEngine {
             // The account watch: the usage the roles' tool servers keep under the node's root, once for every team.
             read.usage = NodeUsage.read(files: usageFiles, home: home, now: now)
             read.summariesOn = summaries && NodeSummaries.isOn(usageFiles.preferences)
+            // Each lead's latest decisions, for the boards (and their lines).
+            // Newest first; two of one second (decisions.md's stamps) in the file's order, the later first.
+            for root in roots {
+                let newest = files.decisions(root).enumerated().sorted { ($0.element.at, $0.offset) > ($1.element.at, $1.offset) }.map(\.element)
+                read.decisions[root] = Array(newest.prefix(LeadEngine.decisionsShown))
+            }
             let account = read.usage
             read.teams = Dictionary(uniqueKeysWithValues: read.loaded.map { root, board in
                 (root, TeamReading.read(root: root, board: board, hosted: hosted, sessions: scanned, observer: observer, inbox: inbox, lock: lock, account: account))
@@ -72,10 +79,11 @@ extension LeadEngine {
             return read
         }) { [weak self] read in
             guard let self else { return }
+            self.health?.refreshed(in: MacTime.real.awake() - began)
             self.markReplaced(read.named, roots: roots)
             self.usageRead(read.usage, teams: read.teams)
             self.refreshed(roots: roots, loaded: read.loaded, teams: read.teams, refusals: read.refusals, finished: read.finished)
-            self.lookAtSummaries(loaded: read.loaded, teams: read.teams, on: read.summariesOn)
+            self.lookAtSummaries(loaded: read.loaded, teams: read.teams, decisions: read.decisions, on: read.summariesOn)
             self.refreshing = false
             if self.refreshAgain {
                 self.refreshAgain = false
@@ -93,6 +101,7 @@ extension LeadEngine {
         var finished: Set<UUID> = []
         var usage = NodeUsage.Reading()
         var summariesOn = false
+        var decisions: [String: [LeadDecision]] = [:]
     }
 
     /// What the account watch read, kept for `status` (`usage`), and each lead's review rows waiting on a limit sent to
