@@ -4288,3 +4288,5 @@ Proposed task 1: Find why dictations end with no text
 - 2026-11-21 14:07 Automatically (auto_advance): Merged one-sidebar-button (One sidebar button closes all finished shells and replaced leads) into main at b2f0d6a4, on its passing audit and the full test run.
 - 2026-11-21 14:07 Automatically (auto_advance): Cleaned up one-sidebar-button (freed 2.6 GB of build output and temporary folders). It stays done.
 - 2026-11-21 14:08 Update: Merged: one sidebar button closes all finished shells and replaced leads — **What you asked for** ("a button to close all finished shells as well as replaced leads"):
+- 2026-11-21 14:20 Merged claude-dictation-text: Claude dictation: text that was dictated is dropped as "typed in the terminal meanwhile" (in a batch: claude-dictation-text, auto-advance-s-send landed on one test run) (build 314c245bb76b)
+- 2026-11-21 14:20 Merged auto-advance-s-send: auto_advance's send-back gives the worker each open finding in full (in a batch: claude-dictation-text, auto-advance-s-send landed on one test run) (build 314c245bb76b)
