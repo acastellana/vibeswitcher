@@ -245,6 +245,13 @@ public final class LeadEngine: @unchecked Sendable {
     /// The working policy's watch (`SettingsWatch.swift`): each running lead told it once when it changes. None until
     /// `watchRoom`, so a test's engine tells nothing it didn't ask for.
     var policyWatch: LeadWitness.PolicyWatch?
+    // The developer tools notice (`ToolchainLook.swift`), on `queue`: the notices the last look found, when it ran,
+    // whether one is under way; how a tool is asked its version (a test's stand-in) and the clock.
+    public internal(set) var toolchainNotices: [String] = []
+    var toolchainLookedAt: Date?
+    var toolchainLooking = false
+    var toolchainRun: @Sendable (String, [String], String) -> String? = { NodeToolchain.command($0, $1, $2) }
+    var toolchainNow: () -> Date = Date.init
     /// Boost as last written to `boost.json` (`lookAtBoost`), and when; the clock it's judged on.
     var boostWritten: (state: BoostState, at: Date)?
     var boostNow: () -> Date = Date.init

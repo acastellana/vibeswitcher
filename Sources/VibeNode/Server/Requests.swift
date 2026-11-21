@@ -352,6 +352,7 @@ public final class Requests: @unchecked Sendable {
         notices += engine?.promptAuditNotices ?? []
         notices += engine?.unknownDialogNotices ?? []
         notices += engine?.allDoneNotices ?? []
+        notices += engine?.toolchainNotices ?? []
         notices += sessions?.reminderNotices() ?? []
         if let notice = updates?.notice { notices.append(notice) }
         return notices

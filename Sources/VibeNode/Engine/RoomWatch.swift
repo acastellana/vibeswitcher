@@ -23,6 +23,7 @@ extension LeadEngine {
                 engine.queue.async {
                     engine.lookAtPolicy()
                     engine.lookAtBoost { [weak engine] _ in engine?.lookAtRoom() }
+                    engine.lookAtToolchainIfDue()
                 }
             }
         }
