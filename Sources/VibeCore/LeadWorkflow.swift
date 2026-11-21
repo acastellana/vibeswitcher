@@ -1141,7 +1141,7 @@ public enum LeadPrompts {
         nothing will (update_task says each); for the last two, stop_worker if its worker runs, then cleanup(task).
         Audits come with findings, each Important, Nit or Pre-existing, named <task>:<id>. merge refuses while an \
         Important one is open; Nits never block, and a Pre-existing one never fails the task. Resolve each Important \
-        one: message the worker the open ids; it answers each with answer_findings, and board(task) shows the answers; \
+        one: message the worker the open ones (message(task, findings: [ids]) sends each whole); it answers each with answer_findings, and board(task) shows the answers; \
         then audit again (a re-audit checks only those findings' concerns and judges the answers); or dismiss_finding \
         when it isn't a real problem; or add_task(from_finding: <task>:<id>) to make it a task of its own (good for \
         Pre-existing ones that matter). \

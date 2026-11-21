@@ -1136,10 +1136,11 @@ public final class LeadAdvance: @unchecked Sendable {
         let open = hold.findings
         let ids = open.map { "\(slug):\($0.id)" }.joined(separator: ", ")
         let why: String = hold.why.isEmpty ? "" : "\n(\(hold.why).)"
-        let listed: String = open.map { "- \($0.id): " + LeadToolset.clip($0.line1, 400) }.joined(separator: "\n") + why
-        let text = "Your branch's audit (at \(head.prefix(8))) left \(open.count) Important finding\(open.count == 1 ? "" : "s") open, which hold its merge back:\n"
+        // Each whole: a worker can't read its audit, so what it's sent is all it has (2026-11-21, claude-dictation-text).
+        let listed: String = LeadToolset.findingsForWorker(open) + why
+        let text = "Your branch's audit (at \(head.prefix(8))) left \(open.count) Important finding\(open.count == 1 ? "" : "s") open, which hold its merge back:\n\n"
             + listed
-            + "\nFix \(open.count == 1 ? "it" : "each") on your branch and commit, or disagree with a reason; answer each by id with answer_findings "
+            + "\n\nFix \(open.count == 1 ? "it" : "each") on your branch and commit, or disagree with a reason; answer each by id with answer_findings "
             + "(fixed or disagree), run the affected tests, then report done again: it's audited again then (a re-audit checks these findings' concerns and judges your answers)."
         let live = workerRuns(task)
         // Its worker ended (released during the audit, say): a new one in its worktree gets them, not on a battery

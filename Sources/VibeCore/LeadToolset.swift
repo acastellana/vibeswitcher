@@ -762,7 +762,8 @@ public final class LeadToolset: MCPToolset {
                 MCPToolInfo(name: "message", description: "Tell a task's worker something: while it works (or waits on a prompt) it gets it at its next step without stopping; between turns it's typed in as its next prompt.",
                             properties: ["task": task, "text": P(type: "string", description: "The message"),
                                          "member": P(type: "string", description: "A team task: the member it's for, by name (else its integrator); it gets it as yours"),
-                                         "clear_draft": P(type: "boolean", description: "If its input box holds a leftover draft, clear it first (the draft is lost)")],
+                                         "clear_draft": P(type: "boolean", description: "If its input box holds a leftover draft, clear it first (the draft is lost)"),
+                                         "findings": P(type: "array", description: "Its audit's findings to send with the text, by id (F1, or <task>:F1): each goes whole, its evidence and failure scenario, never the board's one-line cut", items: "string")],
                             required: ["task", "text"]),
                 MCPToolInfo(name: "tell_lead", description: "Tell another project's lead on this Mac something: a question, a report, or an answer to one it asked. It reaches that lead at once (at its next step while it works, else VibeSwitcher wakes it), marked as from you, this project's lead; the user sees every message in VibeSwitcher. Use it, not SendMessage, for other projects' leads. No credentials, at most \(LeadMail.maxCharacters) characters, \(LeadMail.perHour) an hour to one lead; it can't approve or grant anything.",
                             properties: ["project": P(type: "string", description: "The project whose lead it's for, as VibeSwitcher names it (its folder's name), or its path"),
@@ -2734,6 +2735,10 @@ public final class LeadToolset: MCPToolset {
     }
 
     private func message(_ slug: String, _ arguments: [String: Any]) throws -> MCPToolResult {
+        var arguments = arguments
+        if let named = arguments["findings"], !(named is NSNull) {
+            arguments["text"] = try text(arguments, "text", missing: "Nothing to send.") + "\n\n" + (try namedFindings(slug, named))
+        }
         if let toMember = try messageMember(slug, arguments, note: { leadNote(.message, $0, on: slug) }) { return toMember }
         return try sent(slug, arguments).result
     }
@@ -6693,11 +6698,11 @@ public final class LeadToolset: MCPToolset {
             text += Self.reconsiderText(ledger, of: slug)
         } else if !blocking.isEmpty {
             text += (hold.held.isEmpty ? "" : "Held by strict_paths: \(hold.held.map { "\(slug):\($0.id)" }.joined(separator: ", ")). ")
-                + "merge refuses while an Important finding is open: send the worker the open ones (message, with their ids; it answers each with answer_findings, fixed or disagree with a reason, and the re-audit judges the answers), or dismiss_finding one with a reason, or add_task(from_finding: …) to move it to a task of its own."
+                + "merge refuses while an Important finding is open: send the worker the open ones (message(\(slug), findings: [\(blocking.map { "\"\($0.id)\"" }.joined(separator: ", "))]) sends each whole; it answers each with answer_findings, fixed or disagree with a reason, and the re-audit judges the answers), or dismiss_finding one with a reason, or add_task(from_finding: …) to move it to a task of its own."
         } else if !evidence.passes, let concern = boundaryConcern(slug, verdict) {
             text += Self.settleText(concern, of: slug)
         } else if !evidence.passes {
-            text += "Send the worker the findings with message, or re-plan the task."
+            text += "Send the worker the findings with message (its findings: [ids] sends each whole), or re-plan the task."
         } else if ledger?.open.isEmpty == false, stale == nil {
             text += "merge(\(slug)) when you're ready: Nits and Pre-existing findings don't hold it back, and a Nit never becomes a task by itself (add_task(from_finding: …) makes a Pre-existing one that matters a task).\(moved)"
         }
@@ -6992,6 +6997,44 @@ public final class LeadToolset: MCPToolset {
             }
         }
         return lines.joined(separator: "\n")
+    }
+
+    /// The most of a finding's evidence, or of its failure scenario, a worker is sent: far past any audit's so far.
+    static let workerFindingField = 20_000
+
+    /// Findings as their worker is sent them (auto_advance's send-back, message(findings:)): each whole, its evidence
+    /// and failure scenario with their lines kept, never the one-line cut status and board use (2026-11-21,
+    /// claude-dictation-text: a fresh worker got F1 cut at "clearing()…" and had to ask for its failure scenario).
+    static func findingsForWorker(_ findings: [LeadFinding]) -> String {
+        findings.map { finding in
+            "\(finding.id): \(finding.severity.rawValue), at \(finding.place)\nEvidence: " + workerField(finding.evidence, "evidence", of: finding.id)
+                + (finding.failureScenario.map { "\nFails: " + workerField($0, "failure scenario", of: finding.id) } ?? "")
+        }.joined(separator: "\n\n")
+    }
+
+    /// A finding's field whole, or, past `workerFindingField`, its start and where the rest is.
+    static func workerField(_ text: String, _ field: String, of id: String) -> String {
+        let kept = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard kept.count > workerFindingField else { return kept }
+        return String(kept.prefix(workerFindingField)) + "… [\(id)'s \(field) is cut here, at \(workerFindingField) of its \(kept.count) characters: ask_lead for the rest]"
+    }
+
+    /// message's `findings`: the task's findings named, each whole for its worker. An id it doesn't have sends nothing.
+    private func namedFindings(_ slug: String, _ value: Any) throws -> String {
+        let ids = strings(value).flatMap { $0.split(separator: ",") }.map { name -> String in
+            let id = name.trimmingCharacters(in: .whitespaces)
+            return id.lowercased().hasPrefix(slug.lowercased() + ":") ? String(id.dropFirst(slug.count + 1)) : id
+        }.filter { !$0.isEmpty }
+        let all = vault.audits(root: root, task: slug)?.findings ?? []
+        guard !ids.isEmpty else { throw Problem(text: "findings names its audit's findings by id (F1). Nothing was sent.") }
+        var found: [LeadFinding] = []
+        for id in ids {
+            guard let finding = all.first(where: { $0.named(id) }) else {
+                throw Problem(text: "\(slug) has no finding \(id) (" + (all.isEmpty ? "it has none" : "its findings: " + all.map(\.id).joined(separator: ", ")) + "). Nothing was sent.")
+            }
+            if !found.contains(where: { $0.id == finding.id }) { found.append(finding) }
+        }
+        return Self.findingsForWorker(found)
     }
 
     /// What the lead is told once the rounds reached the cap.
