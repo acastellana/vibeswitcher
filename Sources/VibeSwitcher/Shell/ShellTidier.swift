@@ -184,7 +184,8 @@ final class ShellTidier {
     }
 
     /// What Close Finished (N)… asks before `items` are ended: grouped by project, its finished shells (each with how
-    /// its command ended) and its replaced leads apart; with none, what's said instead.
+    /// its command ended) and its replaced leads apart, each a bullet (an alert drops a line's leading spaces); with
+    /// none, what's said instead.
     static func question(closing items: [CloseFinished.Item], sessions: [HostSession], now: Date) -> Question {
         guard !items.isEmpty else {
             return Question(message: "Nothing finished to close",
@@ -200,15 +201,15 @@ final class ShellTidier {
             var lines = [project]
             let shells = mine.filter { $0.kind == .shell }, leads = mine.filter { $0.kind == .replacedLead }
             if !shells.isEmpty {
-                lines.append(shells.count == 1 ? "  Finished shell:" : "  Finished shells:")
+                lines.append(shells.count == 1 ? "Finished shell:" : "Finished shells:")
                 lines += shells.map { item in
-                    guard let ending = hosted[item.id].flatMap(ShellTidy.ending(of:)) else { return "    \(item.name): at its prompt" }
-                    return "    \(item.name): command \(ending.ok ? "finished" : "failed") \(Durations.short(now.timeIntervalSince(ending.at))) ago"
+                    guard let ending = hosted[item.id].flatMap(ShellTidy.ending(of:)) else { return "• \(item.name): at its prompt" }
+                    return "• \(item.name): command \(ending.ok ? "finished" : "failed") \(Durations.short(now.timeIntervalSince(ending.at))) ago"
                 }
             }
             if !leads.isEmpty {
-                lines.append(leads.count == 1 ? "  Replaced lead:" : "  Replaced leads:")
-                lines += leads.map { "    \($0.name): between turns" }
+                lines.append(leads.count == 1 ? "Replaced lead:" : "Replaced leads:")
+                lines += leads.map { "• \($0.name): between turns" }
             }
             return lines.joined(separator: "\n")
         }

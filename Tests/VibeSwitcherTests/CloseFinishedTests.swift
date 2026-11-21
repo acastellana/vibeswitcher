@@ -149,8 +149,8 @@ struct CloseFinishedTests {
         let groups = question.detail.components(separatedBy: "\n\n")
         let alpha = try #require(groups.first { $0.hasPrefix("alpha\n") }, "\(question.detail)")
         let bravo = try #require(groups.first { $0.hasPrefix("bravo\n") }, "\(question.detail)")
-        #expect(alpha == "alpha\n  Finished shell:\n    Install: command finished 0s ago\n  Replaced lead:\n    Lead before: between turns", "\(alpha)")
-        #expect(bravo == "bravo\n  Finished shell:\n    Backup: command failed 0s ago", "\(bravo)")
+        #expect(alpha == "alpha\nFinished shell:\n• Install: command finished 0s ago\nReplaced lead:\n• Lead before: between turns", "\(alpha)")
+        #expect(bravo == "bravo\nFinished shell:\n• Backup: command failed 0s ago", "\(bravo)")
         for session in never {
             let name = session.title.isEmpty ? (fixture.scanned.first { $0.hostID == session.id }?.customName ?? session.label) : session.title
             #expect(!question.detail.contains(name), "\(name) was listed")
