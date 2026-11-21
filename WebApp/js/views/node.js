@@ -76,6 +76,13 @@ export function nodeView(app) {
           notes?.refusedAppConnections ? row('Refused connections', String(notes.refusedAppConnections)) : null,
           (notes?.replacedPaths || []).map((path) => row('Took back its path', tilde(path, home))))),
       usageGroup(node.usage),
+      // Boost (the node's `boost`): on or off, why, and the limits it raises to.
+      node.boost ? group('Boost',
+        h('dl', { class: 'facts-list' },
+          row('State', h('span', { class: node.boost.on ? 'dot tone-working' : 'dot', 'aria-hidden': 'true' }), node.boost.on ? `On: ${node.boost.why}` : `Off: ${node.boost.why}`),
+          row('Mode', node.boost.mode),
+          node.boost.on ? row('Raised limits', `a load of ${node.boost.limits.loadThreshold}, ${node.boost.limits.maxSessions} team sessions, ${node.boost.limits.maxWorkers} workers per project, ${node.boost.limits.heavySlots} test and build slots`) : null),
+        h('a', { class: 'link', href: '#/settings' }, 'Change it in Settings')) : null,
       healthGroup(node.health),
       group('Server',
         h('dl', { class: 'facts-list' },

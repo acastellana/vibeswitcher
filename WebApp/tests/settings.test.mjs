@@ -108,3 +108,15 @@ test('the settings search keeps those holding every word, in their key, title, d
   assert.deepEqual(all.filter((setting) => settingMatches(setting, 'max_workers')).map((setting) => setting.key), ['max_workers']);
   assert.equal(all.filter((setting) => settingMatches(setting, 'nothing-like-this')).length, 0);
 });
+
+test('Boost’s mark: shown while on, why and the raised limits on hover; nothing while off', async () => {
+  const { boostMarkText } = await import('../js/words.js');
+  const node = vectors['snapshot.node']?.entries?.[0]?.value ?? null;
+  const boost = node?.boost ?? { mode: 'on', on: true, why: 'on in Settings', limits: { loadThreshold: '48', maxSessions: 16, maxWorkers: 6, heavySlots: 4 } };
+  assert.equal(validate('node.boost', boost), null);
+  const mark = boostMarkText(boost);
+  assert.equal(mark.label, `Boost on: ${boost.why}`);
+  assert.ok(mark.help.includes(`a load of ${boost.limits.loadThreshold}`) && mark.help.includes(`${boost.limits.heavySlots} test and build slots`));
+  assert.equal(boostMarkText({ ...boost, on: false }), null);
+  assert.equal(boostMarkText(null), null);
+});

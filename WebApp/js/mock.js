@@ -146,6 +146,7 @@ export function createMock(store, options = {}) {
 
   const node = {
     usage,
+    boost: { mode: 'on', on: true, why: 'on in Settings', limits: { loadThreshold: '48', maxSessions: 16, maxWorkers: 6, heavySlots: 4 } },
     health: {
       since: ago(3 * 3600 + 720), stalled: null, freezes: [{ at: ago(5400), seconds: 14 }], slowRefreshes: 2, slowestRefresh: 7,
       lastSlowRefresh: ago(1800), serverRestarts: 0, refusedConnections: null, hostRestartAt: null, waiting: [],

@@ -63,7 +63,7 @@ extension LeadEngine {
     /// `then` hears on `queue` what was decided. On `queue`.
     func lookAtBoost(then: @escaping (BoostState?) -> Void = { _ in }) {
         let (files, home, now, written) = (settingsFiles, self.home, boostNow(), boostWritten)
-        reads.async({ _ -> (state: BoostState?, wrote: Bool, problem: String?) in
+        reads.async({ _ -> (state: BoostState?, wrote: Bool, problem: String?, mode: BoostMode) in
             let store = files.preferences
             let mode = NodeSettings.boostMode(store)
             let ignoring = MacLimits.load(from: files.limits).ignoreUsageLimits
@@ -71,16 +71,17 @@ extension LeadEngine {
             let decided = Self.boostDecision(mode: mode, veto: veto)
             let state = BoostState(on: decided.on, why: decided.why, limits: NodeSettings.boostLimits(store), at: now.timeIntervalSince1970)
             // Off, and nothing on to undo: no file to write (none reads as off).
-            if !state.on, written?.state.on != true, BoostState.active(from: files.boost, now: now) == nil { return (state, false, nil) }
-            if state.sameAs(written?.state), let at = written?.at, now.timeIntervalSince(at) < BoostState.refresh { return (state, false, nil) }
+            if !state.on, written?.state.on != true, BoostState.active(from: files.boost, now: now) == nil { return (state, false, nil, mode) }
+            if state.sameAs(written?.state), let at = written?.at, now.timeIntervalSince(at) < BoostState.refresh { return (state, false, nil, mode) }
             do {
                 try state.save(to: files.boost)
-                return (state, true, nil)
+                return (state, true, nil, mode)
             } catch {
-                return (state, false, "\(error)")
+                return (state, false, "\(error)", mode)
             }
         }) { [weak self] result in
             guard let self else { return }
+            if let state = result.state { self.boostDecided = (result.mode, state) }
             if result.wrote, let state = result.state {
                 if self.boostWritten?.state.on != state.on { self.note("boost: \(state.text)") }
                 self.boostWritten = (state, now)
@@ -88,6 +89,26 @@ extension LeadEngine {
             if let problem = result.problem { self.note("boost: \(files.boost.path) couldn't be written (\(problem)): the leads read the normal limits") }
             then(result.state)
         }
+    }
+
+    /// Boost as `status` and the `node` stream carry it (the app's `BoostMark`): its mode as set, whether it's on and why,
+    /// and the limits it raises to; null before the engine's first look.
+    var boostValue: NodeWire.Value {
+        guard let (mode, state) = boostDecided else { return .null }
+        let limits = state.limits
+        return .object(["mode": .string(mode.rawValue), "on": .bool(state.on), "why": .string(state.why),
+                        "limits": .object(["loadThreshold": .string(MacLoad.number(limits.loadThreshold)), "maxSessions": .int(limits.maxSessions),
+                                           "maxWorkers": .int(limits.maxWorkers), "heavySlots": .int(limits.heavySlots)])])
+    }
+
+    /// `vibeswitcher status`'s line for `status`'s `boost` (nil while off or not looked at yet).
+    public static func boostLine(_ value: NodeWire.Value?) -> String? {
+        guard let value, value["on"]?.bool == true else { return nil }
+        let limits = value["limits"]
+        let why = ConfigSeal.inert(value["why"]?.string ?? "", limit: 200)
+        return "boost: on (\(why)): start nothing above a load of \(ConfigSeal.inert(limits?["loadThreshold"]?.string ?? "?", limit: 20)), "
+            + "\(limits?["maxSessions"]?.int ?? 0) team sessions, \(limits?["maxWorkers"]?.int ?? 0) workers per project, "
+            + "\(limits?["heavySlots"]?.int ?? 0) test and build slots"
     }
 
     /// After a `set` of `key`: the policy told at once, boost decided again and the room looked at with the new limits,
