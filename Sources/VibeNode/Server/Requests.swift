@@ -286,6 +286,7 @@ public final class Requests: @unchecked Sendable {
         case "settings": settings(request, reply: reply)
         case "recent": recent(request, reply: reply)
         case "brief": brief(request, reply: reply)
+        case "update.check": updateCheck(request, reply: reply)
         case "session.ports": sessionPorts(request, reply: reply)
         case "set": set(request, reply: reply)
         case "answer": answer(request, reply: reply)

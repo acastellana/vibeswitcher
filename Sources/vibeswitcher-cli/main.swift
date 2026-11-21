@@ -11,7 +11,7 @@ import VibeNode
 signal(SIGPIPE, SIG_IGN)
 
 let usage = """
-    usage: vibeswitcher status [--json] | status --health [--json] | status --probe [--json] | status --ack
+    usage: vibeswitcher status [--json] | status --health [--json] | status --probe [--json] | status --check-updates [--json] | status --ack
            vibeswitcher doctor
            vibeswitcher start [--interop-is-on] [--at-login] [--node-version vX.Y.Z]
            vibeswitcher stop

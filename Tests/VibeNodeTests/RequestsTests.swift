@@ -216,6 +216,8 @@ struct RequestsTests {
                                   "recent",
                                   // Brief me (2026-11-21), the user's or a page's.
                                   "brief",
+                                  // Check for Updates now (2026-11-21): the user's; it keeps only the watch's answer.
+                                  "update.check",
                                   // A session's dev servers (2026-11-21).
                                   "session.ports",
                                   // A board task's details, a result's screenshot (2026-11-21).

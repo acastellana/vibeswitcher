@@ -144,6 +144,12 @@ public enum ServerStart {
                                       looker: .github(home: accountHome), queue: queue, note: say)
             requests.updates = updates
             updates.start(clock: clock)
+        } else if let answers = parsed.testUpdateAnswers {
+            // A scratch server's check against a test's answers: on `update.check` only, never on a timer.
+            let file = URL(fileURLWithPath: answers)
+            requests.updates = UpdateWatch(file: root.appendingPathComponent("update-check.json"),
+                                           running: UpdateWatch.Answers.read(file)?.running ?? commit,
+                                           looker: .answers(file), queue: queue, note: say)
         }
         engine.watchRoom()
         let server = NodeServer(root: root, requests: requests, housekeeping: parsed.testHousekeeping ?? ServerArguments.housekeeping,

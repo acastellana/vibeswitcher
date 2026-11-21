@@ -14,7 +14,7 @@ filter=NodeAcceptanceTests
 if (($#)); then
     rows=()
     for row in "$@"; do
-        [[ $row =~ ^[Aa][0-9]{1,2}$ ]] || { echo "node-acceptance.sh: $row isn't a row (A1 … A36)" >&2; exit 64; }
+        [[ $row =~ ^[Aa][0-9]{1,2}$ ]] || { echo "node-acceptance.sh: $row isn't a row (A1 … A37)" >&2; exit 64; }
         rows+=("a${row:1}[A-Z]")
     done
     filter="NodeAcceptanceTests/($(IFS='|'; echo "${rows[*]}"))"

@@ -14,21 +14,50 @@ import VibeNode
 /// `vibeswitcher status --health [--json]`: the server's health digest only (`NodeHealth`: freezes of the engine's queue,
 /// slow refreshes, the host's restarts and refused connections, sessions left waiting or stuck, the server's last errors).
 ///
+/// `vibeswitcher status --check-updates [--json]`: Check for Updates now (`UpdateWatch`, as the 6 h watch looks and into
+/// its record): the newer build on v2 both CI runs passed and its install line, or that there is none, or why it
+/// couldn't look (exit 1). Read-only: it installs nothing.
+///
 /// `vibeswitcher status --ack`: acknowledges what the journal shows (a journal entry the command line writes after the
 /// typed code), never a server request.
 enum StatusCommand {
-    static let usage = "usage: vibeswitcher status [--json] | status --health [--json] | status --probe [--json] | status --ack"
+    static let usage = "usage: vibeswitcher status [--json] | status --health [--json] | status --probe [--json] | status --check-updates [--json] | status --ack"
 
     /// The JSON form's version.
     static let format = 1
 
     static func run(_ arguments: [String]) -> Int32 {
         let words = Set(arguments)
-        guard words.count == arguments.count, words.isSubset(of: ["--json", "--probe", "--ack", "--health"]),
-              !(words.contains("--ack") && words.count > 1), !(words.contains("--health") && words.contains("--probe")) else { return Say.usage(usage) }
+        guard words.count == arguments.count, words.isSubset(of: ["--json", "--probe", "--ack", "--health", "--check-updates"]),
+              !(words.contains("--ack") && words.count > 1), words.intersection(["--health", "--probe", "--check-updates"]).count < 2 else { return Say.usage(usage) }
+        if words.contains("--check-updates") { return checkUpdates(json: words.contains("--json")) }
         if words.contains("--probe") { return probe(json: words.contains("--json")) }
         if words.contains("--ack") { return acknowledge() }
         return throughServer(json: words.contains("--json"), health: words.contains("--health"))
+    }
+
+    /// `--check-updates`: the server's `update.check`, said as `UpdateWatch.lines` (with `json`, its object).
+    static func checkUpdates(json asJSON: Bool) -> Int32 {
+        let context = NodeContext.current()
+        context.sayScratch()
+        let client: NodeClient
+        switch NodeClient.connect(context) {
+        case .failure(let failure): return Say.failed(failure)
+        case .success(let connected): client = connected
+        }
+        let checked: NodeWire.Value
+        switch client.request("update.check", timeout: Requests.updateCheckPatience) {
+        case .failure(let failure): return Say.failed(failure)
+        case .success(let reply):
+            guard reply.ok, let given = reply.result else { return Say.replyError(reply) }
+            checked = given
+        }
+        if asJSON {
+            try? FileHandle.standardOutput.write(contentsOf: NodeWire.printable(NodeWire.line(checked)))
+        } else {
+            Say.out(UpdateWatch.lines(checked).joined(separator: "\n"))
+        }
+        return checked["problem"]?.string == nil ? 0 : 1
     }
 
     /// Stage 1's read, as it was.

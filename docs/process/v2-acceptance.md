@@ -55,3 +55,4 @@ walks through all of it for the user's first try, and its findings become rows h
 | A34 | Switch | `vs switch COMMIT` while a worker runs | refused at once, naming the worker, no code asked | `a34SwitchBlocked` | |
 | A35 | Web | a page asks recent, brief, board.task, board.image, session.usage, chat.image; a session runs `vibeswitcher brief` and `mail` | the page's reads answered (never a voice refusal); the session's refused: not the user's voice | `a35PageReads` | |
 | A36 | Node | `vs status --health` (and `--json`) | the health digest: freezes, slow refreshes, restarts, the last errors | `a36Health` | |
+| A37 | Node | `vs status --check-updates` (and `--json`) | asks now: the newer build on v2 both CI runs passed and its install line, or none, or why it couldn't (exit 1); `status` keeps the answer | `a37CheckUpdates` (GitHub's answers a test file's) | |

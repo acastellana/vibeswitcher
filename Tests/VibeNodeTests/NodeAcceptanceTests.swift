@@ -723,6 +723,35 @@ struct NodeAcceptanceTests {
         #expect(value["since"]?.string != nil, "\(json.output)")
     }
 
+    @Test("A37: vs status --check-updates asks now: the newer green build and its install line, then none, then why it couldn't")
+    func a37CheckUpdates() async throws {
+        let sha = { (c: Character) in String(repeating: c, count: 40) }
+        let (running, newer) = (sha("a"), sha("b"))
+        let answers = scratch.url("update-answers.json")
+        func answer(_ given: UpdateWatch.Answers) throws { try JSONEncoder().encode(given).write(to: answers) }
+        let runs = [UpdateWatch.Run(databaseId: 1, workflowName: "v2 linux", headSha: newer, status: "completed", conclusion: "success"),
+                    UpdateWatch.Run(databaseId: 2, workflowName: "v2 macos", headSha: newer, status: "completed", conclusion: "success")]
+        try answer(.init(running: running, runs: runs, compare: ["\(running)...\(newer)": .init(status: "ahead", aheadBy: 2),
+                                                                 "\(newer)...v2": .init(status: "identical")]))
+        let node = try await ScratchNode(scratch, hostArguments: ["--server-arg", ServerArguments.testUpdateAnswersFlag + answers.path])
+        defer { node.stop() }
+        let found = try await node.run(["status", "--check-updates"])
+        #expect(found.status == 0 && found.output.contains("a newer build is on v2: \(newer) (2 commits ahead)")
+                && found.output.contains(UpdateWatch.installLine(newer)), "\(found.output)\(found.errors)")
+        // The answer is kept: `status` says it too.
+        let status = try await node.run(["status"])
+        #expect(status.output.contains("notice: a newer build is on v2: \(newer)"), "\(status.output)")
+        // The running build is the newest: none.
+        try answer(.init(running: running, runs: runs.map { var run = $0; run.headSha = running; return run }))
+        let none = try await node.run(["status", "--check-updates", "--json"])
+        let value = try #require(NodeWire.decode(NodeWire.Value.self, Data(none.output.utf8)), "\(none.output)\(none.errors)")
+        #expect(none.status == 0 && value["commit"] == .null && value["checkedAt"]?.string != nil && value["running"]?.string == running, "\(none.output)")
+        // GitHub can't be asked: why, and exit 1.
+        try answer(.init(problem: "gh isn't installed (/usr/bin/gh)"))
+        let failed = try await node.run(["status", "--check-updates"])
+        #expect(failed.status == 1 && failed.output.contains("couldn't check v2 for a newer build (gh isn't installed (/usr/bin/gh))"), "\(failed.output)\(failed.errors)")
+    }
+
     // MARK: The rows a scratch node can't run
 
     @Test("A19: the page notifies of a question or prompt, and its title counts them",
