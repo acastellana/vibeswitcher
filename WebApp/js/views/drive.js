@@ -314,7 +314,7 @@ export function newLeadForm(app) {
 }
 
 export function newSessionForm(app, { folder }) {
-  const BUILT_IN = [{ name: 'Claude', kind: 'claude', builtIn: true }, { name: 'Shell', kind: 'shell', builtIn: true }];
+  const BUILT_IN = [{ name: 'Claude', kind: 'claude', builtIn: true }, { name: 'Codex', kind: 'codex', builtIn: true }, { name: 'Shell', kind: 'shell', builtIn: true }];
   let presets = BUILT_IN;
   let chosen = 'Claude';
   // Whether you picked one: until then the folder's default (the first listed) is.
@@ -372,7 +372,7 @@ export function newSessionForm(app, { folder }) {
       type: 'button', 'aria-pressed': String(one === preset), disabled: !!one.refused, title: one.refused ? `Can’t start here: ${one.refused}` : presetNote(one),
       onclick: () => { chosen = one.name; picked = true; draw(); },
     }, one.name)));
-    model.hidden = preset.kind !== 'claude';
+    model.hidden = preset.kind === 'shell';
     about.hidden = preset.builtIn || !presetNote(preset);
     setText(about, preset.builtIn ? '' : presetNote(preset));
     const folder = where();

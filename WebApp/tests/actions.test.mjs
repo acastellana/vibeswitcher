@@ -185,3 +185,9 @@ test('the mock answers recent in the node’s shape', async () => {
   assert.equal(validate('recent.result', reply.result), null);
   mock.stop();
 });
+
+test('a Codex of your own starts with --agent codex, a model too; a shell never takes one', () => {
+  assert.equal(newLine('/home/me/site', { name: 'Codex', kind: 'codex', builtIn: true }, 'gpt-5'), 'vibeswitcher new /home/me/site --agent codex --model gpt-5');
+  assert.equal(newLine('/home/me/site', { name: 'Claude', kind: 'claude', builtIn: true }), 'vibeswitcher new /home/me/site');
+  assert.equal(newLine('/home/me/site', { name: 'Shell', kind: 'shell', builtIn: true }, 'opus'), 'vibeswitcher new /home/me/site --agent shell');
+});

@@ -29,8 +29,8 @@ struct SessionPresetsTests {
         #expect(listed.map(\.preset.name) == ["Opus", "Tests shell", "Claude", "Codex", "Shell"])
         #expect(listed.map(\.isDefault) == [true, false, false, false, false])
         #expect(listed.map(\.project) == [true, true, false, false, false])
-        // Codex isn't on the node; the rest can start.
-        #expect(listed.map { $0.refusal == nil } == [true, true, true, false, true])
+        // Each can start (Codex as the user's own session, by its link: decision 15 keeps Codex workers off, not this).
+        #expect(listed.map { $0.refusal == nil } == [true, true, true, true, true])
         // Another folder (one whose name only begins the same) has the global ones alone.
         #expect(SessionPresets.list(Self.presets, folder: Self.project + "-old").map(\.preset.name) == ["Claude", "Codex", "Shell"])
         #expect(SessionPresets.named("opus", in: listed)?.preset.name == "Opus")
@@ -424,7 +424,7 @@ struct SessionPresetsTests {
         // A variable outside the reviewed few: listed with its value masked, and refused.
         #expect(listed.output.contains("Keyed (a shell; this project's; sets SOME_TOKEN=<set>)\n    can't start here: its environment sets SOME_TOKEN"),
                 "\(listed.output)")
-        #expect(listed.output.contains("Codex (codex: `codex`)\n    can't start here: Codex doesn't run on this node yet"), "\(listed.output)")
+        #expect(listed.output.contains("Codex (codex: `codex`)") && !listed.output.contains("Codex doesn't run"), "\(listed.output)")
 
         // A scratch node's presets file isn't the one its home's seal watches, so no accept covers it: refused, failing
         // closed, after the confirmation showed it.
