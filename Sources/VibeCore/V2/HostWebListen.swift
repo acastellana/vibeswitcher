@@ -9,9 +9,16 @@ import Foundation
 ///
 /// The messages, each one `SOCK_SEQPACKET` message on the connector beside its one-byte connection requests:
 ///
-/// - `web listen PLACE ADDRESS PORT`: PLACE `loopback` or `tailnet`. Answered `web ok` with the listening socket riding
-///   on it, or `web no: WHY` with none.
-/// - `web release PLACE`: answered `web ok`. The host closes what it holds for PLACE (nothing when it holds none).
+/// - `web listen PLACE ADDRESS PORT`: PLACE `loopback` or `tailnet`. Answered `web ok listen PLACE ADDRESS PORT` with the
+///   listening socket riding on it, or `web no listen PLACE ADDRESS PORT: WHY` with none.
+/// - `web release PLACE`: answered `web ok release PLACE`. The host closes what it holds for PLACE (nothing when it holds
+///   none). The server sends it only when the user revoked the web (`web --revoke`): a server that starts and finds no
+///   code or token alive leaves the socket held, so no process that moved the token file aside and ended the server
+///   can have the host free the port.
+///
+/// Each answer repeats its request's words, and the asker takes only the answer to its own (`answers`), so an answer that
+/// came after its asker gave up never answers another request: a release never takes a listen's socket, nor a tailnet
+/// listen a loopback one. The asker also checks the socket listens where it asked (`HostConnector.web`).
 ///
 /// The host's own check (`refusal`): loopback is 127.0.0.1 only; the tailnet is an IPv4 address in 100.64.0.0/10
 /// (Tailscale's CGNAT range) only, which the bind itself then requires to be this machine's (the server keeps its own
@@ -91,8 +98,25 @@ public enum HostWebListen {
         return octets
     }
 
-    /// An answer as its message's bytes: `web ok`, or `web no: WHY`.
-    public static func answer(refusal: String?) -> [UInt8] {
-        Array((word + (refusal.map { "no: " + $0 } ?? "ok")).utf8)
+    /// `request`'s words after `web `.
+    static func words(_ request: Request) -> String { String(decoding: bytes(request).dropFirst(word.count), as: UTF8.self) }
+
+    /// The answer to `request` as its message's bytes: `web ok WORDS`, or `web no WORDS: WHY`.
+    public static func answer(_ request: Request, refusal: String?) -> [UInt8] {
+        Array((word + (refusal.map { "no \(words(request)): " + $0 } ?? "ok \(words(request))")).utf8)
+    }
+
+    /// The answer to a message that is no request at all: `web no: WHY` (no asker's words, so no asker takes it).
+    public static func unasked(_ why: String) -> [UInt8] { Array((word + "no: " + why).utf8) }
+
+    /// What `bytes` answers to `request`: nil when it is no answer to it (another request's, a connection's, garbled);
+    /// `.some(nil)` for ok, `.some(why)` for a refusal.
+    public static func answers(_ request: Request, _ bytes: [UInt8]) -> String?? {
+        guard let text = String(bytes: bytes, encoding: .utf8) else { return nil }
+        let words = words(request)
+        if text == word + "ok " + words { return .some(nil) }
+        let refused = word + "no " + words + ": "
+        if text.hasPrefix(refused) { return .some(String(text.dropFirst(refused.count))) }
+        return nil
     }
 }

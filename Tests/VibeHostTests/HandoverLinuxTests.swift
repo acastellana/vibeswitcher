@@ -348,12 +348,34 @@ extension HandoverLinuxTests {
         // The control: the same probe, the same way, of a state of this build's format, answers that it can take over;
         // so the refusal below is the probe's read of the format (it exits 1 having said so), not a probe that couldn't
         // be started or read its state at all.
-        let current = try stored(format: HostHandover.format)
-        defer { current.remove() }
-        try HostHandover.probe(target, statePath: current.path, timeout: hangGuard)
+        // Each format this build reads (H1: 2 carries the web's sockets, 1 doesn't), the probe naming the one it read; a
+        // probe asked for format 1 (a build before H1 handing over) refuses an answer for 2.
+        for format in HostHandover.reads {
+            let current = try stored(format: format)
+            defer { current.remove() }
+            try HostHandover.probe(target, statePath: current.path, format: format, timeout: hangGuard)
+            if format != 1 {
+                #expect(throws: HostHandover.Failure.probe("it said \(HostHandover.probeAnswer(format))")) {
+                    try HostHandover.probe(target, statePath: current.path, format: 1, timeout: hangGuard)
+                }
+            }
+        }
         #expect(throws: HostHandover.Failure.probe("it exited with status \(1 << 8)")) {
             try HostHandover.probe(target, statePath: newer.path, timeout: hangGuard)
         }
+    }
+
+    /// H1: a state carrying the web's sockets is format 2, so a build before H1 (which reads 1 alone) refuses it at its
+    /// probe and never takes them into its sessions; one carrying none stays format 1, so switches to and from such a
+    /// build keep working while the web is off.
+    @Test func aStateCarryingTheWebsSocketsIsFormatTwo() {
+        var state = HostHandover.State(fromBuild: 7, startedAt: Date(), lockFD: 3, listenFD: 4, secretFD: nil, sessions: [])
+        #expect(state.format == 1)
+        HandoverMemory.carryWebListeners([.init(place: "loopback", address: "127.0.0.1", port: 47830, fd: 9)], in: &state)
+        #expect(state.format == 2 && state.webListeners?.count == 1 && state.descriptors.contains(9))
+        HandoverMemory.carryWebListeners([], in: &state)
+        #expect(state.format == 1 && state.webListeners == nil && !state.descriptors.contains(9))
+        #expect(HostHandover.reads == 1...2 && HostHandover.format == 2 && HostHandover.probeAnswer == "vibeswitcher-host handover 1 ok")
     }
 
     /// A fresh host that holds the lock removes a state file and its `.partial` left beside the lock (the Mac's format,

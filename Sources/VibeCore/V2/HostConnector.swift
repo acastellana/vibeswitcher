@@ -95,19 +95,22 @@ public enum HostConnector {
         case refused(String)
     }
 
-    /// Sends `request` over `connector` and waits for the host's answer (`web ok`, a `listen`'s with its socket, or
-    /// `web no: WHY`), under the same lock as `connect`'s requests, so each answer goes to its asker; an answer that
-    /// isn't a web answer (a connection's, after its asker gave up) is closed and passed over. A `listen` answered ok
-    /// with no socket, or with one that isn't a listening one, is refused. Throws as `connect` does.
+    /// Sends `request` over `connector` and waits for the host's answer to it (`HostWebListen.answers`: `web ok WORDS`,
+    /// a `listen`'s with its socket, or `web no WORDS: WHY`), under the same lock as `connect`'s requests. Every other
+    /// message read meanwhile (a connection's, or a web answer to another request that came after its asker gave up) is
+    /// closed and passed over, so a release never takes a listen's socket, nor one place's listen another's. A `listen`
+    /// answered ok is refused unless its one socket listens on the address asked for, and on the port asked for (any,
+    /// for 0). `timeout` bounds the whole call, the wait for the lock included. Throws as `connect` does.
     public static func web(_ request: HostWebListen.Request, over connector: Int32, timeout: TimeInterval) throws -> WebAnswer {
         // Messages with edges: Linux's `SOCK_SEQPACKET` connector only (the Mac's is a stream; its node's H1 is its own step).
         guard Platform.Sockets.connectorType == Platform.Sockets.seqpacket else {
             return .refused("this system's connector carries no web request (a stream)")
         }
-        let lock = locks.lock(for: connector)
-        lock.lock()
-        defer { lock.unlock() }
         let deadline = Date().addingTimeInterval(timeout)
+        let lock = locks.lock(for: connector)
+        // A connection asked for meanwhile holds it up to its own patience: never longer than this call's.
+        guard lock.lock(before: deadline) else { throw Failure.timedOut }
+        defer { lock.unlock() }
         Platform.Sockets.noSigPipe(socket: connector)
         let bytes = HostWebListen.bytes(request)
         while true {
@@ -124,27 +127,23 @@ public enum HostConnector {
                 continue
             }
             if got.bytes.isEmpty, got.descriptors.isEmpty, Platform.Sockets.peerHasGone(connector) { throw Failure.system("receive", EPIPE) }
-            guard HostWebListen.isWeb(got.bytes), let text = String(bytes: got.bytes, encoding: .utf8) else {
+            guard let answer = HostWebListen.answers(request, got.bytes) else {
                 got.descriptors.forEach { Sys.close($0) }
                 continue
             }
-            let said = String(text.dropFirst(4))
-            if said.hasPrefix("no: ") {
+            if let why = answer {
                 got.descriptors.forEach { Sys.close($0) }
-                return .refused(String(said.dropFirst(4)))
-            }
-            guard said == "ok" else {
-                got.descriptors.forEach { Sys.close($0) }
-                return .refused("the host's answer wasn't one: \(said.prefix(80))")
+                return .refused(why)
             }
             switch request {
             case .release:
                 got.descriptors.forEach { Sys.close($0) }
                 return .ok(nil)
-            case .listen:
-                guard got.descriptors.count == 1, let fd = got.descriptors.first, Platform.TCP.isListening(fd) else {
+            case .listen(_, let address, let port):
+                guard got.descriptors.count == 1, let fd = got.descriptors.first, Platform.TCP.isListening(fd),
+                      Platform.TCP.localAddress(fd) == address, port == 0 || Platform.TCP.localPort(fd) == port else {
                     got.descriptors.forEach { Sys.close($0) }
-                    return .refused("the host's answer carried no listening socket")
+                    return .refused("the host's answer carried no socket listening on \(address):\(port)")
                 }
                 return .ok(fd)
             }

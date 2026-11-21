@@ -101,9 +101,8 @@ public final class NodeWebListener: @unchecked Sendable {
     private let lock = NSLock()
     private var listener: WebListener?
     private var current = State.off
-    /// Whether the host was told, once, that this server doesn't want the socket (a server started with the web off,
-    /// after one that had it on: the host still holds it).
-    private var letGo = false
+    /// The user revoked the web (`revoked`): the host is told to let its socket go once this listener's is closed.
+    private var releasing = false
 
     // On `queue`.
     private var transports: [ObjectIdentifier: NodeWebTransport] = [:]
@@ -162,12 +161,10 @@ public final class NodeWebListener: @unchecked Sendable {
             closeAll(code: "revoked", reason: "the web was closed: run `\(command)` again")
             stop()
         } else {
-            let tell = lock.withLock { () -> Bool in
-                current = .off
-                defer { letGo = true }
-                return !letGo
-            }
-            if tell { bind.release(place) }
+            // Off, and the host's socket (if it holds one) left held: only the user's revoke lets it go (`revoked`).
+            // A server started after a process moved the token file aside and ended the last one finds nothing alive:
+            // it accepts nothing, and no process can bind the port meanwhile.
+            lock.withLock { current = .off }
         }
         return state
     }
@@ -211,7 +208,7 @@ public final class NodeWebListener: @unchecked Sendable {
             lock.withLock {
                 listener = made
                 current = .on(port: port)
-                letGo = false
+                releasing = false
             }
             return port
         } catch {
@@ -237,17 +234,31 @@ public final class NodeWebListener: @unchecked Sendable {
             if let done { queue.async { done() } }
             return
         }
-        // Once this process's descriptor is closed, the host lets its own go (the port free), unless a listener was
-        // bound again meanwhile.
+        // After the user's revoke, once this process's descriptor is closed, the host lets its own go (the port free),
+        // unless a listener was bound again meanwhile.
         stopped.stop { [self] in
-            let tell = lock.withLock { () -> Bool in
-                guard listener == nil, !letGo else { return false }
-                letGo = true
-                return true
-            }
-            if tell { bind.release(place) }
+            releaseIfRevoked()
             done?()
         }
+    }
+
+    /// The user revoked every page's access (`web.revoke`, the user's voice): the host lets this place's socket go, at
+    /// once when no listener is up, else once it has stopped. The only way the server asks it to (H1).
+    public func revoked() {
+        let now = lock.withLock { () -> Bool in
+            releasing = true
+            return listener == nil
+        }
+        if now { releaseIfRevoked() }
+    }
+
+    private func releaseIfRevoked() {
+        let tell = lock.withLock { () -> Bool in
+            guard releasing, listener == nil else { return false }
+            releasing = false
+            return true
+        }
+        if tell { bind.release(place) }
     }
 
     /// `bye` with `code` and `reason`, then the close, to every connection (`revoked`: every token was dropped).

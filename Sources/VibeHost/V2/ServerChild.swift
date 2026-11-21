@@ -131,20 +131,27 @@ public final class ServerChild {
     public static func adopt(arguments: [String], ownsLaunchers: Bool, nodeRoot: String, config: HostServer.Config,
                              server: HostServer, restored: HostHandover.State? = nil,
                              copy: Platform.ProcessSelf.SealedCopy? = nil) -> ServerChild? {
-        let child = adoptChild(arguments: arguments, ownsLaunchers: ownsLaunchers, nodeRoot: nodeRoot, config: config, server: server,
-                               restored: restored, copy: copy)
-        var others = restored
-        others?.webListeners = nil
-        let otherDescriptors = Set(others?.descriptors ?? [])
-        let carried = restored?.webListeners ?? []
-        guard let child else {
-            HostWebListeners.drop(carried, others: otherDescriptors)
-            if !carried.isEmpty { say(server, "web listeners a handover carried closed: this image runs no server child") }
-            return nil
+        // On the host's queue, in one turn: the child's start or resume is queued behind it, so the carried sockets are
+        // held before the child can ask for one (or let one go).
+        var adopted: ServerChild?
+        let work = {
+            let child = adoptChild(arguments: arguments, ownsLaunchers: ownsLaunchers, nodeRoot: nodeRoot, config: config, server: server,
+                                   restored: restored, copy: copy)
+            var others = restored
+            others?.webListeners = nil
+            let otherDescriptors = Set(others?.descriptors ?? [])
+            let carried = restored?.webListeners ?? []
+            guard let child else {
+                HostWebListeners.drop(carried, others: otherDescriptors)
+                if !carried.isEmpty { say(server, "web listeners a handover carried closed: this image runs no server child") }
+                return
+            }
+            child.webListeners.configure(usersHost: ownsLaunchers, note: { [weak server] line in if let server { say(server, line) } })
+            child.webListeners.adopt(carried, others: otherDescriptors)
+            adopted = child
         }
-        child.webListeners.configure(usersHost: ownsLaunchers, note: { [weak server] line in if let server { say(server, line) } })
-        child.webListeners.adopt(carried, others: otherDescriptors)
-        return child
+        if DispatchQueue.getSpecific(key: HostServer.queueKey) != nil { work() } else { server.queue.sync(execute: work) }
+        return adopted
     }
 
     private static func adoptChild(arguments: [String], ownsLaunchers: Bool, nodeRoot: String, config: HostServer.Config,

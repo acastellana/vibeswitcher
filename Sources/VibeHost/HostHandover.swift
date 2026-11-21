@@ -14,10 +14,16 @@ import VibeCore
 /// the exec happens only when the probe says it can. If the new build then can't restore after all, it executes the
 /// old build's own copy again (`--handover-fallback`), which restores it.
 public enum HostHandover {
-    /// Bumped whenever `State` changes shape: a build reads only its own.
-    public static let format = 1
-    /// What the probe prints when it can take over.
-    static let probeAnswer = "vibeswitcher-host handover \(format) ok"
+    /// Bumped whenever `State` changes shape: the newest a build writes. A state carrying the web's sockets (H1,
+    /// `webListeners`) is format 2, any other 1, so a build before H1 takes over (or falls back) from one without them, and
+    /// refuses one with them at its probe rather than leave them open in its sessions (see V2/HostWebListeners.swift).
+    public static let format = 2
+    /// The formats this build reads.
+    static let reads: ClosedRange<Int> = 1...2
+    /// What the probe prints when it can take over from a state of `format`.
+    static func probeAnswer(_ format: Int) -> String { "vibeswitcher-host handover \(format) ok" }
+    /// The probe's answer for a format 1 state, as every build before H1 prints it.
+    static let probeAnswer = probeAnswer(1)
 
     public struct Session: Codable, Equatable {
         public var info: HostSession
@@ -53,7 +59,7 @@ public enum HostHandover {
     }
 
     public struct State: Codable, Equatable {
-        public var format = HostHandover.format
+        public var format = 1
         public var fromBuild: Int
         /// When the host (this process) first started.
         public var startedAt: Date
@@ -145,7 +151,7 @@ public enum HostHandover {
             case .notExecutable(let path): return "\(path) isn't an executable"
             case .write(let error): return "couldn't write the state file: \(String(cString: strerror(error)))"
             case .unreadable(let why): return "couldn't read the state file: \(why)"
-            case .wrongFormat(let format): return "the state file is format \(format); this build reads \(HostHandover.format)"
+            case .wrongFormat(let format): return "the state file is format \(format); this build reads \(HostHandover.reads.lowerBound) to \(HostHandover.reads.upperBound)"
             case .badDescriptor(let fd): return "descriptor \(fd) didn't survive"
             case .probe(let why): return "the new build can't take over: \(why)"
             case .secretTooLarge(let size): return "\(size) bytes of secrets don't fit the channel"
@@ -191,7 +197,7 @@ public enum HostHandover {
         // The format first: a state of another shape wouldn't decode, and that should say why.
         struct Header: Decodable { var format: Int }
         guard let header = try? PropertyListDecoder().decode(Header.self, from: data) else { throw Failure.unreadable("not a state file") }
-        guard header.format == format else { throw Failure.wrongFormat(header.format) }
+        guard reads.contains(header.format) else { throw Failure.wrongFormat(header.format) }
         do { return try PropertyListDecoder().decode(State.self, from: data) } catch { throw Failure.unreadable("\(error)") }
     }
 
@@ -201,8 +207,8 @@ public enum HostHandover {
         // On Linux: its sealed copy closed, then hardened (V2/HandoverMemory.swift); the Mac: nothing.
         HandoverMemory.startProbe()
         do {
-            _ = try read(from: arguments[index + 1])
-            print(probeAnswer)
+            let state = try read(from: arguments[index + 1])
+            print(probeAnswer(state.format))
             exit(0)
         } catch {
             FileHandle.standardError.write(Data("vibeswitcher-host: handover probe: \(error)\n".utf8))
@@ -219,7 +225,8 @@ public enum HostHandover {
 
     /// Runs `executable --handover-probe path` and waits (up to `timeout`) for it to say it can take over. Blocks: not on
     /// the server's queue.
-    static func probe(_ executable: String, statePath: String, timeout: TimeInterval = probeLimit, time: MacTime = .real) throws {
+    /// `format`: the state's, which the answer must name.
+    static func probe(_ executable: String, statePath: String, format: Int = 1, timeout: TimeInterval = probeLimit, time: MacTime = .real) throws {
         var pipe: [Int32] = [-1, -1]
         guard Sys.pipeClosedOnExec(&pipe) == 0 else { throw Failure.probe("no pipe") }
         defer { Sys.close(pipe[0]) }
@@ -254,7 +261,7 @@ public enum HostHandover {
         }
         output.append(drain(pipe[0]))
         let answer = String(decoding: output, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
-        guard status == 0, answer.hasSuffix(probeAnswer) else {
+        guard status == 0, answer.hasSuffix(probeAnswer(format)) else {
             throw Failure.probe(answer.isEmpty ? "it exited with status \(status)" : "it said \(answer.suffix(200))")
         }
     }

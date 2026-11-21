@@ -113,7 +113,11 @@ public final class NodeLive: @unchecked Sendable {
                 self.status.look()
             }
         }
-        access.onRevoke = { web.closeAll(code: "revoked", reason: "this page's access was revoked: run `vibeswitcher web` again") }
+        access.onRevoke = {
+            web.closeAll(code: "revoked", reason: "this page's access was revoked: run `vibeswitcher web` again")
+            // The user's revoke, and only it, has the host let the port go (H1).
+            web.revoked()
+        }
         hub.others = { [weak requests] request, transport, rights in
             guard let requests else { return }
             let answer = { (reply: NodeWire.Reply) in transport.send(NodeWire.message(reply)) }

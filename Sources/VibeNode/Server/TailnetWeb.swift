@@ -52,8 +52,6 @@ public final class TailnetWeb: @unchecked Sendable {
     private let note: @Sendable (String) -> Void
     /// Where the socket comes from (H1): the session host's on the server, which binds only a tailnet address.
     private let bind: WebBind
-    /// Whether the host was told, since the last listener, that this server doesn't want the socket. On `queue`.
-    private var letGo = false
 
     private let lock = NSLock()
     private var current = State.off
@@ -92,7 +90,16 @@ public final class TailnetWeb: @unchecked Sendable {
         }
         access.onChange = { [weak self] in self?.follow() }
         access.onRevoke = { [weak self] in
-            self?.queue.async { self?.listener?.closeAll(code: "revoked", reason: "this page's access was revoked: run `\(Self.command)` again") }
+            self?.queue.async {
+                guard let self else { return }
+                if let listener = self.listener {
+                    listener.closeAll(code: "revoked", reason: "this page's access was revoked: run `\(Self.command)` again")
+                    // The user's revoke, and only it, has the host let the port go (H1): once the listener has stopped.
+                    listener.revoked()
+                } else {
+                    self.bind.release(.tailnet)
+                }
+            }
         }
     }
 
@@ -148,11 +155,6 @@ public final class TailnetWeb: @unchecked Sendable {
                 note("tailnet: the listener was let go: no code or token is alive")
             } else if waiting.isEmpty, closing == 0 {
                 set(.off)
-                // A server started with the tailnet page off, after one that had it on: the host holds its socket still.
-                if !letGo {
-                    letGo = true
-                    bind.release(.tailnet)
-                }
             }
         }
     }
@@ -201,7 +203,6 @@ public final class TailnetWeb: @unchecked Sendable {
         do {
             let port = try made.start()
             listener = made
-            letGo = false
             access.host = place.name
             set(.on(place, port: port))
             note("tailnet: listening on \(place.address):\(port) as \(place.name)")

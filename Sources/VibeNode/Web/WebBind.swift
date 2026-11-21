@@ -27,6 +27,14 @@ public struct WebBind: Sendable {
     /// How long a question to the host waits: it answers on its one queue, and the server's queue waits meanwhile.
     public static let hostPatience: TimeInterval = 5
 
+    /// The server process's: the host's (`host`) where its connector carries web requests (Linux's `SOCK_SEQPACKET`);
+    /// on the Mac, whose connector is a stream, this process's (`direct`) until the Mac node's own H1 step, so its web
+    /// comes up as before. `connectorType`: `Platform.Sockets.connectorType` (a test's other).
+    public static func forServer(connector: Int32, connectorType: Int32 = Platform.Sockets.connectorType,
+                                 note: @escaping @Sendable (String) -> Void) -> WebBind {
+        connectorType == Platform.Sockets.seqpacket ? host(connector: connector, note: note) : direct
+    }
+
     /// From the session host, over the server's `connector` (`HostConnector.web`). `note`: the server's log.
     public static func host(connector: Int32, note: @escaping @Sendable (String) -> Void) -> WebBind {
         WebBind(listen: { place, address, port, _ in

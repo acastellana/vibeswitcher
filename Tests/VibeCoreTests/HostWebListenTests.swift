@@ -18,7 +18,30 @@ struct HostWebListenTests {
             #expect(HostWebListen.parse(Array(text.utf8)) == nil, "\(text)")
         }
         #expect(!HostWebListen.isWeb([UInt8(ascii: "c")]))
-        #expect(HostWebListen.answer(refusal: nil) == Array("web ok".utf8) && HostWebListen.answer(refusal: "why") == Array("web no: why".utf8))
+        let loopback = HostWebListen.Request.listen(.loopback, address: "127.0.0.1", port: 0)
+        #expect(String(decoding: HostWebListen.answer(loopback, refusal: nil), as: UTF8.self) == "web ok listen loopback 127.0.0.1 0")
+        #expect(String(decoding: HostWebListen.answer(loopback, refusal: "why"), as: UTF8.self) == "web no listen loopback 127.0.0.1 0: why")
+    }
+
+    /// An answer is its own request's only: a stale loopback answer isn't a tailnet listen's, nor a release's, nor
+    /// another port's; a message that is no answer (a connection's byte, an unasked refusal) is nobody's.
+    @Test func anAnswerIsItsOwnRequestsOnly() {
+        let loopback = HostWebListen.Request.listen(.loopback, address: "127.0.0.1", port: 0)
+        let tailnet = HostWebListen.Request.listen(.tailnet, address: "100.64.0.1", port: 0)
+        let otherPort = HostWebListen.Request.listen(.loopback, address: "127.0.0.1", port: 47830)
+        let release = HostWebListen.Request.release(.loopback)
+        let ok = HostWebListen.answer(loopback, refusal: nil), no = HostWebListen.answer(loopback, refusal: "taken")
+        #expect(HostWebListen.answers(loopback, ok) == .some(nil))
+        #expect(HostWebListen.answers(loopback, no) == .some("taken"))
+        for other in [tailnet, otherPort, release] {
+            #expect(HostWebListen.answers(other, ok) == nil, "\(other)")
+            #expect(HostWebListen.answers(other, no) == nil, "\(other)")
+        }
+        #expect(HostWebListen.answers(release, HostWebListen.answer(release, refusal: nil)) == .some(nil))
+        #expect(HostWebListen.answers(loopback, HostWebListen.answer(release, refusal: nil)) == nil)
+        #expect(HostWebListen.answers(loopback, [UInt8(ascii: "d")]) == nil)
+        #expect(HostWebListen.answers(loopback, HostWebListen.unasked("not a web request")) == nil)
+        #expect(HostWebListen.answers(loopback, Array("web ok listen loopback 127.0.0.1 0 ".utf8)) == nil)
     }
 
     @Test func theHostsCheck() {

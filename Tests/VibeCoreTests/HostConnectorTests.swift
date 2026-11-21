@@ -167,4 +167,65 @@ struct HostConnectorTests {
             return events.contains { $0.replyTo == seq }
         })
     }
+
+    /// H1's web ask (`HostConnector.web`) against a stand-in host on a `SOCK_SEQPACKET` pair: answers to other requests
+    /// that came late (a tailnet listen's with its socket, a release's, a connection's) are passed over and their
+    /// sockets closed, and its own is taken; an answer whose socket listens on another port than asked is refused.
+    @Test(.enabled(if: Platform.Sockets.connectorType == Platform.Sockets.seqpacket, "Linux's connector carries web requests"))
+    func aWebAskTakesOnlyItsOwnAnswer() async throws {
+        let (host, connector) = try #require(Platform.Sockets.pair(type: Platform.Sockets.seqpacket))
+        defer { Sys.close(host); Sys.close(connector) }
+        let listening = try Platform.TCP.listen(family: .ipv4, address: "127.0.0.1", port: 0, backlog: 1).get()
+        defer { Sys.close(listening) }
+        let port = try #require(Platform.TCP.localPort(listening))
+        let asked = HostWebListen.Request.listen(.loopback, address: "127.0.0.1", port: port)
+        let stale = HostWebListen.Request.listen(.tailnet, address: "100.64.0.1", port: port)
+        // The stand-in: reads the request, then sends the late answers and its own.
+        let served = Task.detached { () -> [UInt8] in
+            var request = [UInt8](repeating: 0, count: 256)
+            let (count, _) = request.withUnsafeMutableBytes { Platform.Sockets.receive(host, into: $0) }
+            _ = Platform.Sockets.send(HostWebListen.answer(stale, refusal: nil), with: [listening], over: host)
+            _ = Platform.Sockets.send(HostWebListen.answer(.release(.loopback), refusal: nil), with: [], over: host)
+            _ = Platform.Sockets.send([UInt8(ascii: "d")], with: [listening], over: host)
+            _ = Platform.Sockets.send(HostWebListen.answer(asked, refusal: nil), with: [listening], over: host)
+            return Array(request.prefix(max(count, 0)))
+        }
+        let answer = try await offPool { try HostConnector.web(asked, over: connector, timeout: 30) }
+        #expect(try await served.value == HostWebListen.bytes(asked))
+        guard case .ok(let fd?) = answer else { Issue.record("\(answer)"); return }
+        defer { Sys.close(fd) }
+        #expect(Platform.TCP.localPort(fd) == port)
+
+        // Its own words, a socket on another port: refused, the socket closed.
+        let elsewhere = HostWebListen.Request.listen(.loopback, address: "127.0.0.1", port: port == 65535 ? 1 : port + 1)
+        let wrong = Task.detached {
+            var request = [UInt8](repeating: 0, count: 256)
+            _ = request.withUnsafeMutableBytes { Platform.Sockets.receive(host, into: $0) }
+            _ = Platform.Sockets.send(HostWebListen.answer(elsewhere, refusal: nil), with: [listening], over: host)
+        }
+        let refused = try await offPool { try HostConnector.web(elsewhere, over: connector, timeout: 30) }
+        await wrong.value
+        guard case .refused(let why) = refused else { Issue.record("\(refused)"); return }
+        #expect(why.contains("no socket listening on 127.0.0.1:"), "\(why)")
+    }
+
+    /// The web ask's bound covers its wait for the connector's lock: a connection asked for meanwhile, which the host
+    /// never answers, holds it for its own 30 s, and the web ask gives up at its own.
+    @Test(.enabled(if: Platform.Sockets.connectorType == Platform.Sockets.seqpacket, "Linux's connector carries web requests"))
+    func aWebAsksBoundCoversTheLocksWait() async throws {
+        let (host, connector) = try #require(Platform.Sockets.pair(type: Platform.Sockets.seqpacket))
+        defer { Sys.close(host); Sys.close(connector) }
+        let asking = Task.detached { _ = try? HostConnector.connect(over: connector, timeout: 30) }
+        // The connection's byte reached the host: its asker holds the lock.
+        var byte: UInt8 = 0
+        let (count, _) = await offPool { withUnsafeMutableBytes(of: &byte) { Platform.Sockets.receive(host, into: $0) } }
+        #expect(count == 1)
+        let began = Date()
+        await #expect(throws: HostConnector.Failure.timedOut) {
+            try await offPool { try HostConnector.web(.release(.loopback), over: connector, timeout: 0.5) }
+        }
+        #expect(Date().timeIntervalSince(began) < 10, "it waited for the connection's 30 s")
+        _ = shutdown(host, Int32(SHUT_RDWR))
+        await asking.value
+    }
 }

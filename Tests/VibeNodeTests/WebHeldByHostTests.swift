@@ -72,8 +72,13 @@ struct WebHeldByHostTests {
         defer { node.stop() }
         let port = try paired(node)
         try await node.handOver()
-        // Said once the new image has taken its server child, which may be after its "took over".
-        #expect(await eventually(timeout: 60) { node.said.contains("web listener loopback 127.0.0.1:\(port) held on across the handover") }, "\(node.said)")
+        // Said once the new image has taken its server child, which may be after its "took over"; held before the
+        // carried child is taken again (on the host's queue, in the turn before its resume), so before it can ask.
+        let held = "web listener loopback 127.0.0.1:\(port) held on across the handover"
+        #expect(await eventually(timeout: 60) { node.said.contains(held) && node.said.contains("carried over from the build before") }, "\(node.said)")
+        if let heldAt = node.said.range(of: held), let resumedAt = node.said.range(of: "carried over from the build before", options: .backwards) {
+            #expect(heldAt.lowerBound < resumedAt.lowerBound, "\(node.said)")
+        }
         // The new image holds it: with the server gone, still nobody else's.
         let old = try #require(node.serverPID)
         kill(old, SIGKILL)
@@ -83,6 +88,30 @@ struct WebHeldByHostTests {
         try await node.restartServer(after: old)
         let head = try #require(waiting.response()?.head, "no answer: \(node.said)")
         #expect(head.hasPrefix("HTTP/1.1 "), "\(head)")
+    }
+
+    /// The review's attack: a process of the user moves the token file aside and ends the server. The server the host
+    /// starts finds nothing alive, and leaves the host's socket held: the port stays nobody else's, and only the user's
+    /// revoke frees it.
+    @Test func aServerThatFindsNothingAliveLeavesThePortHeld() async throws {
+        let node = try await ScratchNode(scratch, hostArguments: LiveScratch.webArguments)
+        defer { node.stop() }
+        let port = try paired(node)
+        let tokens = node.root.appendingPathComponent("v2/web-tokens.json")
+        try #require(FileManager.default.fileExists(atPath: tokens.path), "no token file at \(tokens.path)")
+        try FileManager.default.moveItem(at: tokens, to: node.root.appendingPathComponent("v2/web-tokens.json.aside"))
+        let old = try #require(node.serverPID)
+        kill(old, SIGKILL)
+        try await node.restartServer(after: old)
+        // The new server's web followed what it found (nothing alive) at its start, before its link was welcomed.
+        let status = try await node.statusJSON()
+        #expect((status["web"] as? [String: Any])?["state"] as? String != "listening", "\(status["web"] ?? "none")")
+        #expect(!squat("127.0.0.1", port) && !squat("0.0.0.0", port), "the host still holds it")
+        #expect(!node.said.contains("closed: the web went off"), "\(node.said)")
+        let revoked = try await node.runOnTerminal(["web", "--revoke"])
+        #expect(revoked.status == 0, "\(revoked.output)\n\(node.said)")
+        #expect(await eventually(timeout: 60) { node.said.contains("web listener loopback 127.0.0.1:\(port) closed: the web went off") }, "\(node.said)")
+        #expect(squat("127.0.0.1", port))
     }
 
     @Test func revokeFreesThePortAndTheNextWebBindsAgain() async throws {

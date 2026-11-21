@@ -308,13 +308,14 @@ extension HostServer {
     /// socket let go, or `web no: WHY`. Only the server child's connector holds web listeners: a test's stand-in for the
     /// app, or any connector with no server child, is refused.
     private func answerWeb(_ request: [UInt8], _ connector: AppConnector, _ number: Int32, from: Platform.PeerToken) {
-        let reply = { (refusal: String?, fd: Int32?) in
-            let bytes = HostWebListen.answer(refusal: refusal)
+        let send = { (bytes: [UInt8], fd: Int32?) in
             if Platform.Sockets.send(bytes, with: fd.map { [$0] } ?? [], over: connector.fd) != bytes.count {
                 self.note("host: a web answer through connector \(number) couldn't be sent (errno \(errno))")
             }
         }
-        guard let parsed = HostWebListen.parse(request) else { return reply("not a web request", nil) }
+        guard let parsed = HostWebListen.parse(request) else { return send(HostWebListen.unasked("not a web request"), nil) }
+        // Each answer repeats its request's words: its asker takes no other.
+        let reply = { (refusal: String?, fd: Int32?) in send(HostWebListen.answer(parsed, refusal: refusal), fd) }
         guard let child = serverChild, child.token.map({ from.sameImage(as: $0) }) == true else {
             note("host: refused a web request through connector \(number): not the server child's")
             return reply("only the server child holds the web's listeners", nil)
