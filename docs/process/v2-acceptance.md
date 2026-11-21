@@ -44,3 +44,14 @@ walks through all of it for the user's first try, and its findings become rows h
 | A23 | Security | a page token tries `answer`/`send` | refused; only drafts | `a23PageTokenRefused` | |
 | A24 | Tests | `scripts/nightly.sh` on the merged v2 | full suite passes (retry-failed); flaky list filed | skipped: the nightly run itself | |
 | A25 | Self-improvement | VS's own lead on its clone | merges its tasks through the gate; keeps a goal list | skipped: needs a real Claude lead | |
+| A26 | Node | `vs doctor` | what the node needs, each missing piece with its command | `a26Doctor` | |
+| A27 | Node | `vs brief` (and `--json`) | what happened and what's asked of you; from the boards when no model is asked | `a27Brief` | |
+| A28 | Node | `vs stats week` | the week's figures, no error | `a28Stats` | |
+| A29 | Lead | `vs mail FOLDER` | a project's messages between leads, which way, what became of each | `a29Mail` | |
+| A30 | Settings | `vs settings --find "team sessions"` | only the settings holding every word, under the node's names; none says so | `a30SettingsFind` | |
+| A31 | Session | `vs new FOLDER --agent codex` | without the link: refused, naming it and the `ln -s`; with it: Codex starts, labelled Codex | `a31Codex` (a stand-in codex on the scratch node) | |
+| A32 | Session | `vs rename TTY NAME`, `vs pause NAME …` | a session is found by the terminal `status` prints and by its given name | `a32SessionByTerminalOrName` | |
+| A33 | Session | `vs end S`, then `vs resume` | "a session ended N s ago … it is listed in M s", not "none ended" | `a33ResumeGrace` | |
+| A34 | Switch | `vs switch COMMIT` while a worker runs | refused at once, naming the worker, no code asked | `a34SwitchBlocked` | |
+| A35 | Web | a page asks recent, brief, board.task, board.image, session.usage, chat.image; a session runs `vibeswitcher brief` and `mail` | the page's reads answered (never a voice refusal); the session's refused: not the user's voice | `a35PageReads` | |
+| A36 | Node | `vs status --health` (and `--json`) | the health digest: freezes, slow refreshes, restarts, the last errors | `a36Health` | |
