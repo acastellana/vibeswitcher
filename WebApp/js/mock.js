@@ -631,6 +631,12 @@ export function createMock(store, options = {}) {
       ];
       return { ok: true, result: { presets: args.folder ? presets : presets.slice(1), problems: [] } };
     }
+    if (message.kind === 'recent') {
+      return { ok: true, result: { projects: options.empty ? [] : [
+        { folder: SITE, lastUsed: ago(300), lead: SITE_PROJECT },
+        { folder: `${HOME}/projects/notes`, lastUsed: ago(86400), lead: null },
+      ] } };
+    }
     if (message.kind === 'mail') {
       const messages = [
         { at: ago(600), from: 'example-api', to: 'example-site', received: true, kind: 'answer', text: '8080, behind the staging proxy.', outcome: 'waiting', sent: true, detail: 'Waiting in its inbox.' },

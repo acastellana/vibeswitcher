@@ -64,7 +64,7 @@ public enum WireSchema {
                                   "session.presets.args", "session.presets.result", "session.complete.args", "session.complete.result",
                                   "session.attach.args", "session.attach.result",
 
-                                  "settings.args", "settings.result", "set.args", "set.result", "mail.args", "mail.result"]
+                                  "settings.args", "settings.result", "set.args", "set.result", "mail.args", "mail.result", "recent.args", "recent.result"]
     /// A keyed collection's entity.
     public static let collections = ["node": "node", "sessions": "session", "leads": "lead", "cards": "card", "boards": "board"]
 
@@ -341,6 +341,11 @@ public enum WireSchema {
                                                                   field("project", Kind.shape("settings.project").orNull),
                                                                   field("leftOut", .list(.shape("settings.left"))),
                                                                   field("usage", .shape("node.usage"))]),
+            // The start page's recent projects (`recent`, 2026-11-21).
+            shape("recent.args", from: "Requests.recent", []),
+            shape("recent.result", from: "Requests.recent", [field("projects", .list(.shape("recent.project")))]),
+            shape("recent.project", from: "Requests.recent", [field("folder", .string), field("lastUsed", Kind.date.orNull),
+                                                              field("lead", Kind.string.orNull)]),
             // Between leads (`mail`, a page's read since 2026-11-21: `NodeWire.Voice.webRead`).
             shape("mail.args", from: "Requests.mail", [optional("folder", .string), optional("all", .bool)]),
             shape("mail.result", from: "Requests.mail", [field("projects", .list(.shape("mail.project")))]),

@@ -308,6 +308,8 @@ public enum NodeWire {
         // The node's settings (the parity table's gap 9, 2026-11-20): read by anyone of the uid (a page too), set in the
         // user's voice.
         "settings": .anyone, "set": .user,
+        // The start page's recent projects (2026-11-21): a read of the folders Claude Code and Codex know.
+        "recent": .anyone,
         // Settling the lead's push request (the parity table's push row, 2026-11-20): the user's voice.
         "push": .user, "push.decline": .user,
     ]
@@ -348,7 +350,8 @@ public enum NodeWire {
                                "settings", "set",
                                "push", "push.decline",
                                "session.reopen", "mail", "prompt-audit", "session.rename", "session.pause",
-                               "session.resume", "shells", "session.close-shells", "presets.edit"]
+                               "session.resume", "shells", "session.close-shells", "presets.edit",
+                               "recent"]
 
     // MARK: Lines
 

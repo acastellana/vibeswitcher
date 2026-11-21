@@ -251,6 +251,7 @@ public final class Requests: @unchecked Sendable {
         case "questions": questions(request, reply: reply)
         case "board": board(request, reply: reply)
         case "settings": settings(request, reply: reply)
+        case "recent": recent(request, reply: reply)
         case "set": set(request, reply: reply)
         case "answer": answer(request, reply: reply)
         case "hold": hold(request, reply: reply)

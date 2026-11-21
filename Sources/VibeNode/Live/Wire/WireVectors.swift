@@ -737,6 +737,14 @@ public enum WireVectors {
             // The node's settings (2026-11-20): read by a page, which drafts the line that sets one; `set` is never a page's.
             ("settings", [request(.init(id: "18", kind: "settings", args: ["folder": .string(root)])),
                           reply("reply.settings", .init(re: "18", result: settingsValue))]),
+            // The start page's recent projects (2026-11-21): the folders Claude Code and Codex know, a lead's project where one runs.
+            ("recent", [request(.init(id: "40", kind: "recent")),
+                        reply("reply.recent", .init(re: "40", result: .object(["projects": .array([
+                            .object(["folder": .string(root), "lastUsed": .date(date("2026-11-17T09:28:50.000Z")),
+                                     "lead": .string(NodeIds.project(root: root))]),
+                            .object(["folder": .string("/home/u/notes"), "lastUsed": .date(date("2026-11-16T18:02:11.000Z")), "lead": .null]),
+                            .object(["folder": .string("/home/u/old-tool"), "lastUsed": .null, "lead": .null]),
+                        ])])))]),
             // Between leads (2026-11-21): a page reads the projects' record of their leads' messages (`webRead`).
             ("mail", [request(.init(id: "39", kind: "mail", args: ["folder": .string(root)])),
                       reply("reply.mail", .init(re: "39", result: mailValue))]),
