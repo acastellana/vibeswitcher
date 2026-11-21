@@ -357,3 +357,4 @@
 - 2026-11-21 09:09 Review of turn-this-incident-into-4: audit
 - 2026-11-21 09:25 Audit of team-sessions-start: finder 1 of 2 submitted (blocked, clean, 3 findings)
 - 2026-11-21 09:59 Handed the lead over to a fresh session: the last one had been idle 50 minutes with 170k tokens of context, past handover_idle_min 50 and handover_tokens 150k
+- 2026-11-21 13:06 Automatically (auto_advance): Didn't audit team-sessions-start: Not audited, no verifier started: the lead held team-sessions-start's audit (update_task hold_audit). It starts once an exception is recorded (update_task(team-sessions-start, exception: {scope, reason, evidence})), or with hold_audit: false.
