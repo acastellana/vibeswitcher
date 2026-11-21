@@ -412,7 +412,7 @@ public enum WireVectors {
     }
 
     /// The launch presets of the vectors' example: the project's own Opus (its default, with a variable set) and the
-    /// built-ins, Codex among them (the node can't start it).
+    /// built-ins, Codex among them (the user's own, by its link).
     /// A fixed key for the example's digests, so the generated files are the same each time (a node's is random).
     static let presetsKey = SymmetricKey(data: Data(repeating: 0x5a, count: 32))
 
