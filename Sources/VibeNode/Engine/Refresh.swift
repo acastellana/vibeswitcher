@@ -51,6 +51,7 @@ extension LeadEngine {
         let scanned = Dictionary((sessions?.sessions ?? []).compactMap { session in session.hostID.map { ($0.uuidString, session) } },
                                  uniquingKeysWith: { first, _ in first })
         let (observer, inbox, lock) = (observer, root, options.lock)
+        let (usageFiles, home, now) = (settingsFiles, self.home, usageNow())
         // The posted questions' timers, from their cards (never the boards': S3).
         fireTimers(now: timersNow())
         reads.async({ files -> Refreshed in
@@ -60,14 +61,18 @@ extension LeadEngine {
             for root in roots { read.named[root] = files.names.board(root).leadSession.flatMap(UUID.init(uuidString:)) }
             read.refusals = Dictionary(uniqueKeysWithValues: roots.compactMap { root in LeadVault.BaseMoveRefusal.load(root: root).map { (root, $0) } })
             files.keep(roots.union(timerRoots))
+            // The account watch: the usage the roles' tool servers keep under the node's root, once for every team.
+            read.usage = NodeUsage.read(files: usageFiles, home: home, now: now)
+            let account = read.usage
             read.teams = Dictionary(uniqueKeysWithValues: read.loaded.map { root, board in
-                (root, TeamReading.read(root: root, board: board, hosted: hosted, sessions: scanned, observer: observer, inbox: inbox, lock: lock))
+                (root, TeamReading.read(root: root, board: board, hosted: hosted, sessions: scanned, observer: observer, inbox: inbox, lock: lock, account: account))
             })
             read.finished = Set(read.loaded.flatMap { root, board in LeadTeams.finished(Array(hosted.values), root: root, board: board) })
             return read
         }) { [weak self] read in
             guard let self else { return }
             self.markReplaced(read.named, roots: roots)
+            self.usageRead(read.usage, teams: read.teams)
             self.refreshed(roots: roots, loaded: read.loaded, teams: read.teams, refusals: read.refusals, finished: read.finished)
             self.refreshing = false
             if self.refreshAgain {
@@ -84,6 +89,15 @@ extension LeadEngine {
         var refusals: [String: LeadVault.BaseMoveRefusal] = [:]
         var teams: [String: TeamReading] = [:]
         var finished: Set<UUID> = []
+        var usage = NodeUsage.Reading()
+    }
+
+    /// What the account watch read, kept for `status` (`usage`), and each lead's review rows waiting on a limit sent to
+    /// the boards (`usageWaits`, by root; a root no lead runs at any more is dropped). On `queue`.
+    func usageRead(_ reading: NodeUsage.Reading, teams: [String: TeamReading]) {
+        usage = reading
+        for root in usageWaits.values.keys where teams[root] == nil { usageWaits.send(root, nil) }
+        for (root, team) in teams { usageWaits.send(root, team.reviewUsageWaits) }
     }
 
     /// The lead sessions marked replaced, from which session each root's board names (the app's `markReplaced`,

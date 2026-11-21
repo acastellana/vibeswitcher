@@ -41,12 +41,14 @@ public enum BoardValue {
 
     /// `board`'s value for `project` (at `root`) at `now`; `refusal` instead when the board couldn't be read (it is too
     /// large, or isn't a board this build knows): the value then says so and has no tasks.
-    public static func value(project: String, root: String, board: LeadBoard?, refusal: String? = nil, now: Date) -> NodeWire.Value {
+    /// `usageWaits`: the review rows waiting on the account's usage, by task id (`UsageWaits`): their state says so.
+    public static func value(project: String, root: String, board: LeadBoard?, refusal: String? = nil, now: Date,
+                             usageWaits: [String: ReviewUsageWait] = [:]) -> NodeWire.Value {
         var shown: [(group: Int, position: Int, value: NodeWire.Value)] = []
         var slugs: Set<String> = []
         if let board {
             for (position, task) in board.tasks.enumerated() where slugs.insert(task.slug).inserted {
-                guard let (group, value) = Self.task(task, position: position, board: board, now: now) else { continue }
+                guard let (group, value) = Self.task(task, position: position, board: board, now: now, usageWait: usageWaits[task.id]) else { continue }
                 shown.append((group, position, value))
             }
         }
@@ -67,8 +69,8 @@ public enum BoardValue {
     }
 
     /// One task's value and its group's place in `groups`; nil when it isn't shown (finished more than `doneFor` ago).
-    static func task(_ task: LeadTask, position: Int, board: LeadBoard, now: Date) -> (Int, NodeWire.Value)? {
-        let shown = Shown(task, board: board)
+    static func task(_ task: LeadTask, position: Int, board: LeadBoard, now: Date, usageWait: ReviewUsageWait? = nil) -> (Int, NodeWire.Value)? {
+        let shown = Shown(task, board: board, usageWait: usageWait)
         if shown.group == "done", now.timeIntervalSince1970 - finishedAt(task) > doneFor { return nil }
         var fields: [String: NodeWire.Value] = [
             "id": .string(text(task.id, limit: 80)), "slug": .string(text(task.slug, limit: 120)), "title": .string(text(task.title, limit: titleBytes)),
@@ -104,13 +106,14 @@ public enum BoardValue {
                         "rounds": .int(ledger?.rounds ?? 0)])
     }
 
-    /// What a task's row says, from the board alone (the Mac's `TeamRow.row`, less what its sessions are doing now).
+    /// What a task's row says, from the board alone (the Mac's `TeamRow.row`, less what its sessions are doing now),
+    /// and a review row's wait on the account's usage (`usageWait`, the engine's account watch).
     struct Shown {
         var group = "waiting"
         var state = "Queued"
         var line: String?
 
-        init(_ task: LeadTask, board: LeadBoard) {
+        init(_ task: LeadTask, board: LeadBoard, usageWait: ReviewUsageWait? = nil) {
             switch task.status {
             case .done:
                 (group, state) = ("done", "Merged")
@@ -141,6 +144,8 @@ public enum BoardValue {
                 group = "running"
                 if task.evidence?.passes == true {
                     state = "Ready to merge"
+                } else if task.evidence == nil, let usageWait {
+                    (state, line) = (usageWait.state, usageWait.line)
                 } else if task.verifier == nil, task.evidence == nil, let why = task.auditNeeded ?? task.riskRaised.map({ "Raised to audit: \($0.reason)" }) {
                     (state, line) = ("Needs audit", why)
                 } else if task.reviewLevel == .none, task.verifier == nil, task.evidence == nil {

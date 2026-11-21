@@ -8,7 +8,7 @@ import { readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { validate } from '../wire/validators.js';
-import { settingSections, setLine, draftProblem, shownValue } from '../js/settings.js';
+import { settingSections, setLine, draftProblem, shownValue, usageFacts } from '../js/settings.js';
 import { parseRoute } from '../js/ui.js';
 import { settingsHref } from '../js/views/settings.js';
 import { createMock } from '../js/mock.js';
@@ -79,4 +79,23 @@ test('the mock answers settings in the node’s shape, a folder with no lead gon
   const gone = await mock.request({ v: 1, id: '3', kind: 'settings', args: { folder: '/elsewhere' } });
   assert.equal(gone.error.code, 'gone');
   mock.stop();
+});
+
+test('the account’s usage is shown from the node’s value: each limit, the ones that hold work back, Fable held back', () => {
+  assert.equal(usageFacts(null), null, 'nothing before the node has read it');
+  const usage = answered.result.usage;
+  assert.equal(validate('node.usage', usage), null);
+  const facts = usageFacts(usage, (iso) => iso.slice(0, 10));
+  assert.equal(facts.account, usage.account);
+  assert.deepEqual(facts.limits.map((limit) => limit.title), usage.limits.map((limit) => limit.label.charAt(0).toUpperCase() + limit.label.slice(1) + (limit.model ? '' : ' (every model)')));
+  const weekly = facts.limits.find((limit) => limit.title.startsWith('The weekly limit'));
+  assert.equal(weekly.value, '84% used, resets 2026-11-19');
+  assert.equal(weekly.holds, true);
+  assert.equal(facts.limits.find((limit) => limit.title.startsWith('The 5-hour')).holds, false);
+  assert.equal(facts.limits.find((limit) => limit.title.startsWith('The fable')).value.startsWith('reached'), true);
+  assert.ok(facts.notes.some((note) => note.startsWith('Fable held back until 2026-11-18')));
+  assert.ok(facts.notes.some((note) => note.startsWith('At 80% of a limit')));
+  const ignored = usageFacts({ ...usage, ignored: true, fableHeldBack: null, limits: [] });
+  assert.deepEqual(ignored.limits, []);
+  assert.deepEqual(ignored.notes, ['Ignore usage limits is on: only a limit Claude refused a request at holds work back.']);
 });

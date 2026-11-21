@@ -20,6 +20,14 @@ struct TeamReading {
     /// The live workers with a run in line for the Mac-wide test and build lock (see `LeadWitness.Seen.lockWait`).
     var lockWaits: [String: TestLock.Wait] = [:]
     var workflow = LeadWorkflow()
+    /// The account's usage as the node keeps it (`AccountUsageStore` under its root), the model workers start on
+    /// (Claude's settings in the node's home), and Settings' Ignore usage limits: what `UsageWaits` decides with.
+    var usage = AccountUsage()
+    var workerModel: String?
+    var ignoreUsageLimits = false
+    /// The review rows waiting on a limit (`UsageWaits.reviews`), made here on the reads queue: choosing a held
+    /// audit model can need the branch's security check.
+    var reviewUsageWaits: [String: ReviewUsageWait] = [:]
     /// The lead's loop runs with workflow.md's auto_advance on: a verifier that ends without a verdict is its to
     /// audit again (see `LeadWitness.leftToAdvance`). Looked at only while a task is in review.
     var advancing = false
@@ -37,9 +45,13 @@ struct TeamReading {
     /// `LeadStall`), and a turn that ended on the account's usage limit reads as working (Claude Code fires no Stop hook
     /// on it): its transcript says so (see `UsageLimit`). `inbox`: the engine's root, whose steer inboxes hold what waits
     /// for each worker. `lock`: the Mac-wide test and build lock its workers queue on (none: no wait is read).
+    /// `account`: the account's usage, as the refresh read it once for every team (`NodeUsage.Reading`).
     static func read(root: String, board: LeadBoard, hosted: [String: HostSession], sessions: [String: Session],
-                     observer: LeadObserver, inbox: URL, lock: TestLock?) -> TeamReading {
+                     observer: LeadObserver, inbox: URL, lock: TestLock?, account: NodeUsage.Reading = NodeUsage.Reading()) -> TeamReading {
         var team = TeamReading(hosted: hosted, sessions: sessions)
+        team.usage = account.usage
+        team.workerModel = account.workerModel
+        team.ignoreUsageLimits = account.ignoring
         let workers = workerSessions(board)
         for id in board.tasks.flatMap(\.watched) where team.watched[id] == nil {
             guard let info = hosted[id], info.isLive, let session = sessions[id] else { continue }
@@ -61,6 +73,7 @@ struct TeamReading {
         if !unseen.isEmpty, let table = ProcessTable.trySnapshot() {
             team.agentGone = Set(unseen.filter { !$0.session.agentRuns(in: table) }.map(\.id))
         }
+        team.reviewUsageWaits = UsageWaits.reviews(board, team: team, now: account.now, root: root)
         return team
     }
 

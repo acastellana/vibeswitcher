@@ -4,10 +4,24 @@
 import { h, framed } from '../dom.js';
 import { icon } from '../marks.js';
 import { since, plural, tilde } from '../words.js';
+import { usageFacts } from '../settings.js';
 
 const row = (name, ...value) => h('div', { class: 'fact' }, h('dt', null, name), h('dd', null, value));
 const ago = (iso) => (iso ? h('time', { data: { since: iso }, title: new Date(iso).toLocaleString() }, since(iso)) : 'unknown');
 const group = (title, ...children) => h('section', { class: 'node-group' }, h('h2', { class: 'section-title' }, title), children);
+
+// The account's usage (the node's `usage`): each limit known, the ones holding work back marked; null before the
+// node's first read. Also on Settings.
+export function usageGroup(usage) {
+  const facts = usageFacts(usage);
+  if (!facts) return null;
+  return group('Account usage',
+    h('p', { class: 'node-says' }, 'Best effort: what the sessions’ status lines and Claude’s refusals said' + (facts.account ? ` (${facts.account})` : '') + '.'),
+    h('dl', { class: 'facts-list' }, facts.limits.length ? facts.limits.map((limit) => row(limit.title,
+      h('span', { class: limit.holds ? 'dot tone-needs-you' : 'dot tone-done', 'aria-hidden': 'true' }), limit.value, limit.holds ? ' · holds work back' : ''))
+      : row('Limits', 'Nothing known yet')),
+    h('ul', { class: 'lines' }, facts.notes.map((note) => h('li', null, note))));
+}
 
 export function nodeView(app) {
   const { store } = app;
@@ -49,6 +63,7 @@ export function nodeView(app) {
           notes ? row('Server restarts', String(notes.serverRestarts)) : null,
           notes?.refusedAppConnections ? row('Refused connections', String(notes.refusedAppConnections)) : null,
           (notes?.replacedPaths || []).map((path) => row('Took back its path', tilde(path, home))))),
+      usageGroup(node.usage),
       group('Server',
         h('dl', { class: 'facts-list' },
           row('Running for', ago(server.startedAt)),

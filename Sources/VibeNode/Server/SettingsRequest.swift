@@ -6,7 +6,7 @@ import VibeCore
 /// - `settings [folder]`: a read (anyone of the uid, no code; a web page's token reads it): the node's settings and,
 ///   with a folder, those of the project holding it (its repository's top), each with its value, its default, where it
 ///   lives and whether it is a guard rail; and what the app has that a node leaves out. A folder no lead has worked in
-///   is `gone`.
+///   is `gone`. And the account's usage as the node keeps it (`NodeUsage`), read-only.
 /// - `set [folder] key value`: the user's voice, recorded in the vault before it acts (`Requests.recorded`), its typed
 ///   code the command line's (as `tell`'s: no card). A page never sets: it drafts the `vibeswitcher set …` line for a
 ///   terminal. The change is written where the app writes it; a guard rail's hash recorded as the user's; then the
@@ -23,6 +23,8 @@ extension Requests {
                 "node": .object(["root": .string(files.root.path), "settings": .array(NodeSettings.node(files: files).map(\.wire))]),
                 "project": .null,
                 "leftOut": .array(NodeSettings.leftOut.map { .object(["title": .string($0.title), "why": .string($0.why)]) }),
+                // The account's usage, read here (off the engine's queue) as the account watch reads it.
+                "usage": NodeUsage.value(NodeUsage.read(files: files, home: home)),
             ]
             if let folder {
                 let root = find(folder)

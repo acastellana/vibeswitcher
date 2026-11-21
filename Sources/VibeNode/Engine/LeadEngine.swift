@@ -217,6 +217,12 @@ public final class LeadEngine: @unchecked Sendable {
     /// How many of the witness's looks were applied for each root since this engine started (`status` gives each lead's
     /// as `looks`: what a test waits on to know looks went by). On `queue`.
     public internal(set) var witnessLooks: [String: Int] = [:]
+    /// The account's usage as the last refresh read it (`NodeUsage`): `status`'s `usage`. On `queue`.
+    public internal(set) var usage: NodeUsage.Reading?
+    /// Each lead's review rows waiting on a limit (`UsageWaits`), by root: the boards show them (`LiveBoards`).
+    public let usageWaits = Changes<[String: ReviewUsageWait]>()
+    /// The clock the account's usage is read by (a limit holds until its reset by it). Faked in tests.
+    var usageNow: () -> Date = { Date() }
     /// Each project's free disk space, watched (`LeadWitness.Disk`), by root: on `reads` only.
     let disks = DiskWatches()
     /// The bytes free on the volume holding a path, as the disk watch reads them (`DiskSpace.free`). Faked in tests.

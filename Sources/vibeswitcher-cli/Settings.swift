@@ -89,6 +89,11 @@ enum SettingsCommand {
             section("Project \(ConfigSeal.inert((root as NSString).lastPathComponent, limit: 80)) (\(shown(root))):",
                     project["settings"]?.array ?? [], folder: root)
         }
+        let usage = NodeUsage.lines(result["usage"])
+        if !usage.isEmpty {
+            out.append("")
+            out += usage
+        }
         if let left = result["leftOut"]?.array, !left.isEmpty {
             out.append("")
             out.append("Not on a node (the app's Settings has them):")

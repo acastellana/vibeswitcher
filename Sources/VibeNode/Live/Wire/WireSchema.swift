@@ -174,7 +174,7 @@ public enum WireSchema {
                 field("host", .shape("node.host")), field("rule", .shape("node.rule")), field("cards", .shape("node.cards")),
                 field("accepted", .list(.shape("node.accepted"))), field("notices", strings),
                 field("restart", Kind.shape("node.restart").orNull), field("reopen", .list(.shape("node.reopen"))), field("ended", .list(.shape("node.ended"))),
-                field("builds", Kind.any.orNull), field("web", .shape("node.web"))]),
+                field("builds", Kind.any.orNull), field("web", .shape("node.web")), field("usage", Kind.shape("node.usage").orNull)]),
             shape("node.server", from: "Requests.statusValue", [field("pid", .int), field("startedAt", .date), field("commit", .string)]),
             shape("node.host", from: "Requests.statusValue", [
                 field("startedAt", Kind.date.orNull), field("pid", Kind.int.orNull), field("state", .string),
@@ -199,6 +199,13 @@ public enum WireSchema {
                 field("at", .date)]),
             shape("node.web", from: contractNode, [field("state", .string), field("port", Kind.int.orNull), field("tokens", .int),
                                                   field("connections", .int)]),
+            // The account's usage (the parity table's "Usage shown to you", 2026-11-21): null until the engine's first refresh.
+            shape("node.usage", from: "NodeUsage.value", [
+                field("account", Kind.string.orNull), field("limits", .list(.shape("node.usage.limit"))), field("ignored", .bool),
+                field("threshold", .int), field("fableHeldBack", Kind.date.orNull)]),
+            shape("node.usage.limit", from: "NodeUsage.value", [
+                field("name", .string), field("label", .string), field("model", Kind.string.orNull), field("usedPercent", .int),
+                field("reached", .bool), field("resetsAt", Kind.date.orNull), field("holds", .bool), field("text", .string)]),
         ]
 
         // A session (the contract's §5).
@@ -321,7 +328,8 @@ public enum WireSchema {
             shape("settings.args", from: "Requests.settings", [optional("folder", .string)]),
             shape("settings.result", from: "Requests.settings", [field("node", .shape("settings.node")),
                                                                   field("project", Kind.shape("settings.project").orNull),
-                                                                  field("leftOut", .list(.shape("settings.left")))]),
+                                                                  field("leftOut", .list(.shape("settings.left"))),
+                                                                  field("usage", .shape("node.usage"))]),
             shape("set.args", from: "Requests.set", [optional("folder", .string), field("key", .string), field("value", .string)]),
             shape("set.result", from: "Requests.set", [field("key", .string), field("value", .string), field("was", .string),
                                                         field("scope", .words(["node", "project"])), field("project", Kind.string.orNull),

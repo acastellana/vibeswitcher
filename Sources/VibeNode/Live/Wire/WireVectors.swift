@@ -385,7 +385,22 @@ public enum WireVectors {
                              "scopes": .array([.string("/init.scope")])]),
             "cards": Requests.counts([.question: 1]), "accepted": .array([]), "notices": .array([]), "restart": .null, "reopen": .array([]), "ended": .array([]), "builds": .null,
             "web": .object(["state": .string("listening"), "port": .int(Int(NodeWeb.port)), "tokens": .int(1), "connections": .int(1)]),
+            "usage": usage,
         ])
+    }
+
+    /// The account's usage of the vectors' example: the weekly limit at 84 % (over the threshold), the 5-hour at 31 %,
+    /// and a Fable refusal holding Fable back.
+    static var usage: NodeWire.Value {
+        let at = date("2026-11-17T09:00:00.000Z").timeIntervalSince1970
+        let account = "7a1c0e52-0000-4000-8000-000000000001"
+        let usage = AccountUsage(limits: [
+            AccountUsage.Limit(name: "seven_day", usedPercent: 84, resetsAt: at + 2 * 86_400, at: at, account: account),
+            AccountUsage.Limit(name: "five_hour", usedPercent: 31, resetsAt: at + 3 * 3600, at: at, account: account),
+            AccountUsage.Limit(name: "seven_day_overage_included", model: "fable", usedPercent: 100, resetsAt: at + 86_400, at: at, reached: true,
+                               account: account),
+        ], account: account, names: [account: "u…@example.invalid"])
+        return NodeUsage.value(NodeUsage.Reading(usage: usage, workerModel: "opus", now: date("2026-11-17T09:13:59.020Z")))
     }
 
     /// The launch presets of the vectors' example: the project's own Opus (its default, with a variable set) and the
@@ -576,6 +591,7 @@ public enum WireVectors {
                       note: "not recorded yet: the project's values, recorded when you set one or accept its config"),
             ])]),
             "leftOut": .array(NodeSettings.leftOut.prefix(2).map { .object(["title": .string($0.title), "why": .string($0.why)]) }),
+            "usage": usage,
         ])
     }
 

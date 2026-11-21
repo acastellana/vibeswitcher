@@ -8,6 +8,7 @@ import { h, setText, framed } from '../dom.js';
 import { icon } from '../marks.js';
 import { tilde, lastPart } from '../words.js';
 import { copyLine } from './cards.js';
+import { usageGroup } from './node.js';
 import { settingSections, setLine, draftProblem, shownValue } from '../settings.js';
 
 // How often the open page reads the settings again (a `set` from a terminal shows by then).
@@ -167,6 +168,7 @@ export function settingsView(app) {
       h('p', { class: 'settings-intro' }, 'What the leads and their teams work under. Change drafts the line that sets it; run it in a terminal.'),
       projectPart,
       group('This node · every project', result.node.settings, null, home),
+      usageGroup(result.usage),
       result.leftOut?.length ? h('section', { class: 'node-group' }, h('h2', { class: 'section-title' }, 'Not on a node'),
         h('ul', { class: 'lines' }, result.leftOut.map((item) => h('li', null, `${item.title}: ${item.why}`)))) : null,
     ].filter(Boolean));

@@ -182,7 +182,7 @@ public final class NodeLive: @unchecked Sendable {
 
     /// The `boards` stream (the parity table's gap 4): each lead's board, read by `LiveBoards`, and `board`'s answer.
     private func startBoards(_ engine: LeadEngine) {
-        let boards = LiveBoards(queue: queue, leads: engine.leads.changes, note: note)
+        let boards = LiveBoards(queue: queue, leads: engine.leads.changes, usageWaits: engine.usageWaits, note: note)
         let stream = LiveStream(collection: "boards", order: .field("project"))
         hub.add(collection: stream.collection, stream)
         boards.start(clock: clock)

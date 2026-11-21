@@ -387,6 +387,7 @@ public final class Requests: @unchecked Sendable {
             "ended": engine?.endedValue ?? .array([]),
             "builds": installRoot.map { SwitchRequest.buildsValue(installRoot: $0, running: notes?.notes.build) } ?? .null,
             "web": webValue?() ?? NodeStatusStore.webOff,
+            "usage": engine?.usage.map(NodeUsage.value) ?? .null,
         ]
         // The user's node's tailnet page, for the command line (not in the `node` stream: `NodeStatusStore.value`).
         if let tailnet { fields["webTailnet"] = tailnet.value() }

@@ -111,7 +111,17 @@ export function createMock(store, options = {}) {
     },
   }]]);
 
+  // The account's usage (`NodeUsage.value`): the weekly limit past the threshold, the 5-hour well under it.
+  const usage = {
+    account: 'u…@example.invalid', ignored: false, threshold: 80, fableHeldBack: null,
+    limits: [
+      { name: 'seven_day', label: 'the weekly limit', model: null, usedPercent: 84, reached: false, resetsAt: ago(-2 * 86400), holds: true, text: 'the weekly limit (every model): 84% used' },
+      { name: 'five_hour', label: 'the 5-hour limit', model: null, usedPercent: 31, reached: false, resetsAt: ago(-3 * 3600), holds: false, text: 'the 5-hour limit (every model): 31% used' },
+    ],
+  };
+
   const node = {
+    usage,
     node: 'local', epoch, root: `${HOME}/.vibeswitcher`, home: HOME,
     server: { pid: 48213, startedAt: ago(3 * 3600 + 720), commit: 'f62aef61' },
     host: {
@@ -530,6 +540,7 @@ export function createMock(store, options = {}) {
         { title: 'Also on battery (Boost)', why: 'a node runs on mains: it reads no battery' },
         { title: 'Notifications (banners, sound, reminders)', why: 'the page\'s own: This node\'s toggle, in each browser' },
       ],
+      usage,
     };
   }
 
