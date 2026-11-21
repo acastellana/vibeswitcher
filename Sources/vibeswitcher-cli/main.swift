@@ -24,7 +24,7 @@ let usage = """
            vibeswitcher tell FOLDER TEXT
            vibeswitcher push FOLDER | decline-push FOLDER
            vibeswitcher send SESSION [TEXT] [--image PATH]... [--now] | reply SESSION CHOICE [TEXT]
-           vibeswitcher new FOLDER [--agent claude|shell | --preset NAME] [--model M] | end SESSION | presets [FOLDER]
+           vibeswitcher new FOLDER [--agent claude|codex|shell | --preset NAME] [--model M] | end SESSION | presets [FOLDER]
            vibeswitcher preset add|edit|remove NAME [--folder FOLDER] ...  (`vibeswitcher preset` says more)
            vibeswitcher close-shells [FOLDER]
            vibeswitcher reopen [all | SESSION... | --forget] | resume [SESSION]

@@ -1,97 +1,143 @@
 # VibeSwitcher 2 on Linux: try it
 
-A short walk through the node as it is now, for a first real try. Each step says what you should see. Anything that
-surprises you is worth reporting: what you ran, what you expected, what happened.
+A walk through everything on v2 as it is today (2026-11-21), for a first real try. Each step says what to run and what
+you should see. If something surprises you, report what you ran, what you expected and what happened.
 
-In every command, `vs` is `~/.vibeswitcher/v2/builds/current/bin/vibeswitcher` (an alias you write yourself, never a
-`vibeswitcher` found on PATH). A command that acts in your name asks you to type a short code first: that is the point,
-nothing else on the machine can answer it for you.
+`vs` is `~/.vibeswitcher/v2/builds/current/bin/vibeswitcher`: an alias you write yourself, never a `vibeswitcher` found
+on PATH. Anything that acts in your name (starting, sending, answering, setting) shows what it will do and asks you to
+type a short code: nothing else on the machine can answer it for you. Reads ask nothing.
 
 ## 1. The node
 
 ```sh
-vs status
+vs status        # build, host, sessions, leads, open cards, account usage, boost, notices
+vs doctor        # what the node needs, each missing piece with the exact command for you to run
+vs brief         # what happened lately and what is asked of you, in a few sentences
 ```
 
-You see the node's build, its host, your sessions, the leads and the open cards. If the node isn't running:
-`vs start --interop-is-on` (two codes after a reboot: the first says you read what plain mode doesn't promise).
+`brief` is written by Claude Haiku while AI summaries are on, otherwise from the boards and logs. It says how many
+things wait on you. If the node isn't running: `vs start --interop-is-on`.
 
-After a reboot or a restart of the node, the seal shows you what it holds before any team works again:
+## 2. Your own sessions
 
 ```sh
-vs config held          # what changed since you last accepted, one line each
-vs config accept CARD   # the card's id from the line above
+vs new ~/projects/app                   # Claude there (--model haiku picks one)
+vs new ~/projects/app --agent codex     # your Codex (needs its link, below); --agent shell for a shell
+vs presets ~/projects/app               # the launch presets; vs new FOLDER --preset NAME starts one
+vs status                               # each session: its terminal (ttypts4), its id, your name for it
 ```
 
-## 2. The web page
+Name a session by its short id, by the terminal `status` prints (`ttypts4`), or by the name you gave it:
 
 ```sh
-vs web
+vs send ttypts4 "explain this repository in five lines"    # typed in as you
+vs send ttypts4 "use the new parser" --now                 # steers it mid-turn, at its next step
+vs send ttypts4 "what's wrong here?" --image ~/shot.png
+vs reply ttypts4 1                      # answers the question on its screen (a permission, a choice)
+vs rename ttypts4 "Release notes" ; vs pause "Release notes" --hours 2 ; vs end "Release notes"
+vs resume                               # sessions that ended lately; vs resume SESSION reopens one in its conversation
 ```
 
-Open the address it prints within two minutes, in a browser on this machine. You see:
+Right after `end`, `resume` says the session ended N s ago and is listed in M s (the node waits 30 s first).
 
-- the sessions on the left, by what needs you;
-- a session's live chat, its terminal (watching only), its overview;
-- a project's board (Projects → the project → Board): what's asked of you, what needs attention, what runs, what's done;
-- notifications, if you allow them (the page asks once).
+Codex runs through a link you make once: `ln -s ~/.bun/bin/codex ~/.local/bin/codex`. Without it, `new --agent codex`
+says so and names the link.
 
-The page never acts for you: it drafts, and shows the one line to run.
+## 3. The page
+
+```sh
+vs web                  # prints an address with #pair=…: open it within two minutes, in a browser here
+```
+
+What to look at:
+
+- **Start page**: what needs you; *Brief me* (with *Speak*, read aloud by the browser); recent projects and sessions
+  that ended, each with the line that starts or resumes it.
+- **A session**: its live chat (images, tool calls folded, a long message's TL;DR, the lead's all-done card), its
+  terminal (watching only), the composer and answer boxes. These leave a **draft** and show the one line to run in a
+  terminal: a page never acts for you.
+- **Inspector** (⌘⌥0): Overview (branch, pid, command, tokens and cost, the **dev servers** the session listens on),
+  Activity, and for a lead's team the **Team** tab: tasks and each task's details, decisions, scorecard, answered
+  questions, **results**, between leads, files.
+- **Board** (Projects → a project → Board): what's asked of you, what runs, a review waiting on a usage limit, the AI
+  summary of what each agent is doing, decisions, the batch that cleared the board and its cost.
+- **This node**: host, server, build, account usage, Boost (a bolt beside This node while it's on), **health**,
+  between leads, notifications (per kind: something needs me, a session finishes; a sound), **dictation**.
+- **Settings**: a search box; every setting with the line that sets it; *Terminal Look* (this browser's own).
+- **Statistics** and **Between leads**: ⌘K, then their names.
+- **Dictation**: turn it on in This node. Then hold the mic beside a box and speak; it fills the box only. Chrome sends
+  your voice to Google to recognise it. Firefox has no speech recognition, so the mic isn't there.
+
+`vs web --revoke` closes every page.
 
 ### On your phone, over Tailscale
 
 ```sh
-vs web --tailnet
+vs web --tailnet        # Tailscale up here and on the phone, same tailnet, MagicDNS on
 ```
 
-With Tailscale running on this machine and the phone, on the same tailnet, and MagicDNS on: it prints
-`http://<this machine>.<tailnet>.ts.net:47830/#pair=…`. Open it on the phone within two minutes. The phone's access
-lasts 8 hours; `vs web --revoke` ends every page, here and on the phone. No terminal there, and no notifications (the
-page is plain HTTP inside Tailscale's encryption, which browsers don't count as secure). If Tailscale isn't installed,
-isn't running, or MagicDNS is off, it says so: nothing is installed or changed. `vs status` shows where it listens.
-
-## 3. A session of your own
-
-```sh
-vs new ~/projects/some-project            # a Claude session there
-vs status                                 # its id
-vs send SESSION "explain this repository in five lines"
-```
-
-Watch it answer on the page. If it asks you something (a permission, a question), the page shows the question with
-the line that answers it:
-
-```sh
-vs reply SESSION 1
-vs end SESSION
-```
+It prints `http://<machine>.<tailnet>.ts.net:47830/#pair=…`: open it on the phone within two minutes. The phone reads
+and drafts for 8 hours. No terminal, notifications or dictation there: browsers don't count plain HTTP inside
+Tailscale's encryption as a secure page. If Tailscale isn't ready, it says what's missing and changes nothing.
 
 ## 4. A project lead
 
 ```sh
-vs lead ~/projects/some-project --goal "a small real task"
-vs board ~/projects/some-project
-vs questions --wait                        # blocks until something needs you
-vs answer CARD "your answer"               # or leave a draft on the page, then: vs answer CARD
-vs tell ~/projects/some-project "a note to the lead that answers no question"
+vs lead ~/projects/app --goal "a small real task"
+vs board ~/projects/app                  # tasks, waits, decisions, the last batch's summary and cost
+vs questions --wait                      # blocks until something needs you
+vs answer CARD "your answer"             # or draft it on the page, then: vs answer CARD
+vs hold CARD                             # stops a question's timer
+vs tell ~/projects/app "a note for the lead, not an answer"
+vs push ~/projects/app                   # when the lead asks to push (or: vs decline-push ~/projects/app)
+vs mail                                  # what the leads told each other
+vs stats week
 ```
 
-The lead plans tasks, starts workers, has their work audited by two reviewers and merges through the tests.
-Changes to sensitive files ask for your approval of the exact commit first.
+The lead plans tasks, starts workers, has their work audited, and merges through the tests. A change to sensitive
+files asks you to approve the exact commit first.
 
-## 5. After a reboot
+## 5. Settings
 
 ```sh
-vs start --interop-is-on
-vs config held ; vs config accept CARD     # for your home, then for the project (vs config held FOLDER)
-vs base show FOLDER ; vs base accept CARD
-vs lead FOLDER --resume                    # the lead comes back in its own conversation
+vs settings                              # this node's; vs settings ~/projects/app adds the project's
+vs settings --find "team sessions"
+vs set node_max_sessions 8               # mac_max_sessions works too
+vs set ai_summaries off
+vs set ~/projects/app lead_rotation never
 ```
 
-## Known limits today
+## 6. Switching builds
 
-- Approvals on a Mac aren't built yet (they will use Touch ID).
-- No settings screen yet (being built): some limits are still edited in `.vibeswitcher/workflow.md`.
-- `send` doesn't take `/` commands, `@` files or images yet; `new` has no launch presets yet (being built).
-- The sandbox's first slice is still being finished: sessions don't run boxed yet.
+```sh
+vs switch COMMIT        # says at once if it can't run now, naming the worker or verifier in the way
+vs rollback
+```
+
+## 7. After a reboot
+
+```sh
+vs start --interop-is-on                 # two codes the first time: what plain mode doesn't promise
+vs config held ; vs config accept CARD   # what changed in your home; vs config held FOLDER for a project
+vs base show FOLDER ; vs base accept CARD
+vs lead FOLDER --resume                  # the lead comes back in its own conversation
+vs reopen                                # your own sessions the restart ended
+```
+
+The seal holds every team until you accept what changed. When Claude Code has updated itself, the card says "this looks
+like Claude Code's own update to X". VibeSwitcher can't tell it from a file a session put there, so it asks you.
+`DISABLE_AUTOUPDATER=1` in Claude Code's settings stops those holds.
+
+## Known limits, honestly
+
+- **Sessions aren't sandboxed yet.** The sandbox is built, but nothing launches a session in a box (its last slice is
+  still to come). Workers run with your rights, under the seal and the voice rule.
+- **Approvals on a Mac with Touch ID** aren't on: the Mac node isn't built yet.
+- **A page can't act for you.** Typing into a terminal, one-click answers and replies from the phone wait on the web
+  listener moving into the host (H1). They also wait on two of your decisions: which sessions a page may type into,
+  and what right a page needs (`docs/process/v2-h1-plan.md`).
+- **Phone push** and **wallet requests** wait on your decisions (`docs/process/v2-push-decision.md`; the parity
+  table's wallet row).
+- **Codex** needs its link (above). Codex *workers* stay off until Codex's sandbox is measured.
+- **Briefings** are in English and spoken by the browser's own voice (no ElevenLabs on the node).
 - Windows interop is on, so the security document's S11 list applies (`vs start` prints it once).

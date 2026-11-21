@@ -12,6 +12,11 @@ The run on the real node with a real Claude (this document's own) stays: it find
 `vs` is `~/.vibeswitcher/v2/builds/current/bin/vibeswitcher`. Sessions use the cheapest model (haiku) where a model
 can be chosen.
 
+What landed on 2026-11-21 after these rows (Brief me, your own Codex sessions, sessions named by terminal or name,
+resume's grace message, the page's Between leads, Statistics, health, dev servers, dictation, the Boost mark, the lead's
+results and all-done card, `settings --find`, switch's up-front refusal) has no row yet: `docs/guide/v2-try-it.md`
+walks through all of it for the user's first try, and its findings become rows here.
+
 | # | Area | Run | Must happen | Automated (`NodeAcceptanceTests`) | Last run |
 |---|---|---|---|---|---|
 | A1 | Node | `vs status` | build, host, server, sessions, leads, cards; no error | `a1Status` | pass (2026-11-20) |
