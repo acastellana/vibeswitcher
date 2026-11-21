@@ -69,7 +69,7 @@ enum LeadCommand {
         if asked.replace { what += ", replacing a running lead that lost its role" }
         what += ".\nThe lead runs \(ConfigSeal.inert(program, limit: 400))."
         if let goal = asked.goal { what += "\nIts goal: \(ConfigSeal.inert(goal, limit: 400))" }
-        let outcome = TypedWord.ask(code: NodeIds.code(action: action), what: what)
+        let outcome = TypedWord.ask(approval: client.approvalRule, code: NodeIds.code(action: action), what: what)
         guard outcome == .typed else { return Say.refused(TypedWord.refusal(outcome)) }
         var args: [String: NodeWire.Value] = ["folder": .string(asked.folder), "takeHead": .bool(asked.takeHead), "replace": .bool(asked.replace)]
         if asked.resume { args["resume"] = .bool(true) }

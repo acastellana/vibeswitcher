@@ -91,7 +91,7 @@ enum SwitchCommand {
             : NodeTexts.switch(from: from, to: target, rewrites: rewrites(context))
 
         let action = UUID().uuidString.lowercased()
-        let outcome = TypedWord.ask(code: NodeIds.code(action: action), what: what)
+        let outcome = TypedWord.ask(approval: client.approvalRule, code: NodeIds.code(action: action), what: what)
         guard outcome == .typed else { return Say.refused(TypedWord.refusal(outcome)) }
         let kind = "build.switch"
         let journal = { _ = context.writeJournal(NodeJournal.entry(event: "request", action: action, kind: kind, epoch: client.hello.epoch)) }

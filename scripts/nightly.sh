@@ -41,7 +41,9 @@ report() {
     local flaky failed other
     flaky=$(grep -aoE 'flaky \(passed on retry\): .*' "$log" | sed 's/^flaky (passed on retry): //' | sort -u)
     # Each failed test once, with the file and line of its first issue when the console gave one.
-    failed=$(grep -aE '✘ Test .* (recorded an issue at|failed after|failed with)' "$log" | awk '
+    # Only a console line that starts with the mark (a test case's own arguments can quote one: NightlyScriptTests), and
+    # never the run's own summary ("✘ Test run with N tests … failed").
+    failed=$(grep -aE '^[[:space:]]*✘ Test .* (recorded an issue at|failed after|failed with)' "$log" | grep -avE '^[[:space:]]*✘ Test run with ' | awk '
         {
             line = $0
             sub(/.*✘ Test /, "", line)
@@ -57,6 +59,7 @@ report() {
         failed=""
     fi
     other=$(grep -aE '^(web tests: [0-9]+ of [0-9]+ passed.*|WEB TEST FAILED: .*|retry-failed: not retried: .*|RETRY FAILED: .*|error: .*|.*: error: .*|LEFTOVER PROCESSES: .*|PREFERENCE FILES LEFT: .*)$' "$log" \
+        | grep -avE '^[[:space:]]*◇ ' \
         | awk '!($1 == "web" && $2 == "tests:" && NF == 6 && $3 == $5 && $6 == "passed") && !seen[$0]++' | head -20)
     echo
     echo "## Failed"

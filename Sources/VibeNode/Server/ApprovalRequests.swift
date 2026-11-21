@@ -15,7 +15,12 @@ import VibeCore
 ///   stacking dialogs (a process that passes the caller checks could otherwise queue them faster than a person reads).
 extension Requests {
     static let approvalUnset = "the Mac's rule has no authenticator on this server"
-    static let approvalBusy = "another request is waiting for your approval at the Mac: answer or cancel that dialog first"
+    /// While another request's dialog is open at the Mac: this one isn't asked. Never "answer it": the open one may be
+    /// another process's, and its word tells.
+    static let approvalBusy = "another request's dialog is open at the Mac right now, so this one wasn't asked: run it again once that "
+        + "dialog is gone. That dialog starts with its own word: if your terminal didn't print it, it isn't yours, cancel it"
+    /// How long after a declined, cancelled, timed-out or unavailable dialog no other is shown.
+    static let approvalCooldown: TimeInterval = 10
 
     func approvalVoice(_ request: NodeWire.Request, from facts: PeerFacts, token: Platform.PeerToken?,
                        reply: @escaping (NodeWire.Reply) -> Void) {
@@ -26,7 +31,12 @@ extension Requests {
     }
 
     /// The Mac's voice on `request`: `done` on `queue` with nil when it is the user's (approved at the Mac for a state
-    /// change), else the reply that refuses it. On `queue`.
+    /// change), else the reply to give (a refusal, or a replayed action's first answer). Silent checks first, in this
+    /// order, none of them asking: the action id; a replayed action id (answered as it was, `replies`); a card's code;
+    /// the caller (`ApprovalVoice.callerRefusal`: uid, the command line's code, the Hardened Runtime, the guard rails);
+    /// a read then passes. A state change then: stopping and the host's welcome; the cooldown after a dialog that came
+    /// to nothing; one dialog at a time; its text (`approvalCard`: refused when the decisive part can't fit). Only then
+    /// is a dialog shown. On `queue`.
     func approvalJudgment(_ request: NodeWire.Request, from facts: PeerFacts, token: Platform.PeerToken?,
                           done: @escaping (NodeWire.Reply?) -> Void) {
         let refuse = { [note] (why: String) in
@@ -34,25 +44,35 @@ extension Requests {
             done(.init(re: request.id, error: .init(.voice, "not the user's voice: \(why)")))
         }
         guard let approval else { return refuse(Self.approvalUnset) }
-        if Self.recorded.contains(request.kind), request.action.map({ UUID(uuidString: $0) != nil }) != true {
+        let action = request.action?.lowercased()
+        if Self.recorded.contains(request.kind), action.map({ UUID(uuidString: $0) != nil }) != true {
             return done(.init(re: request.id, error: .init(.badArgs, "\(request.kind) needs an action id (a UUID)")))
         }
-        if Self.carded.contains(request.kind), let refusal = cardRefusal(request) { return done(refusal) }
-        // A read asks nothing: judged here, at once, not behind a dialog.
-        guard NodeWire.changesState(request.kind) else {
-            if case .notUser(let why) = approval.judge(kind: request.kind, card: nil, peer: token, facts: facts, live: live, uid: rule.uid) {
-                return refuse(why)
-            }
-            return done(nil)
+        // An action this server answered already: its answer again, no dialog (`voiced` would answer it so after one).
+        if let action, var again = replies[action] {
+            again.re = request.id
+            return done(again)
         }
+        if Self.carded.contains(request.kind), let refusal = cardRefusal(request) { return done(refusal) }
+        if let why = approval.callerRefusal(peer: token, facts: facts, live: live, uid: rule.uid) { return refuse(why) }
+        guard NodeWire.changesState(request.kind) else { return done(nil) }
         // What `voiced` would answer after the dialog, answered before it: no dialog for a request that can't go on (and
         // a `not-yet` the command line asks again would ask the person twice).
         guard !stopping else { return done(.init(re: request.id, error: .init(.stopping, "the node is stopping"))) }
         guard approvalLinkWelcomed?() ?? (link.state == .connected) else {
             return done(.init(re: request.id, error: .init(.notYet, "the server's link to its host isn't welcomed yet: retry")))
         }
+        if let until = approvalQuietUntil, approvalNow() < until {
+            return refuse("a dialog came to nothing a moment ago (declined, cancelled, timed out or not shown), so none is shown for \(Int(Self.approvalCooldown)) s: run it again then")
+        }
         if approvalsPending > 0 { return refuse(Self.approvalBusy) }
-        let card = approvalCard(request)
+        let card: String
+        switch approvalCard(request) {
+        case .failure(let refusal):
+            note("refused \(request.kind) from pid \(facts.pid): \(refusal.why)")
+            return done(.init(re: request.id, error: .init(.refused, refusal.why)))
+        case .success(let text): card = text
+        }
         let (live, uid, queue) = (self.live, rule.uid, self.queue)
         approvalsPending += 1
         approvals.async { [weak self] in
@@ -60,7 +80,10 @@ extension Requests {
             queue.async {
                 guard let self else { return }
                 self.approvalsPending -= 1
-                if case .notUser(let why) = voice { return refuse(why) }
+                if case .notUser(let why) = voice {
+                    self.approvalQuietUntil = self.approvalNow().addingTimeInterval(Self.approvalCooldown)
+                    return refuse(why)
+                }
                 self.note("\(request.kind) from pid \(facts.pid): approved at the Mac")
                 done(nil)
             }

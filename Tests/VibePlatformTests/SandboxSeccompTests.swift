@@ -134,7 +134,9 @@ import Testing
         for name in ["fd io_uring_setup", "io_uring_enter", "io_uring_register"] { #expect(box[name] == "EPERM", "\(name): \(box)") }
         // The kernel alone answers otherwise: a ring, where io_uring is on; else its own refusal, never the filter's.
         #expect(plain["fd io_uring_setup"] == "ok" || plain["fd io_uring_setup"] == "ENOSYS", "\(plain)")
-        #expect(plain["io_uring_enter"] == "EBADF" && plain["io_uring_register"] == "EBADF", "\(plain)")
+        // io_uring_register's own refusal of fd -1 and opcode 0 is EBADF, or EINVAL where the kernel checks the opcode
+        // first (Linux 6.18, WSL's of 2026-11-20): never EPERM.
+        #expect(plain["io_uring_enter"] == "EBADF" && ["EBADF", "EINVAL"].contains(plain["io_uring_register"] ?? ""), "\(plain)")
     }
 
     /// fanotify_init is refused (the lead's decision of 2026-11-18). The probe asks for what the kernel gives a process
@@ -176,7 +178,9 @@ import Testing
             """
         let (box, plain) = try Self.both(source, "seccomp-tiocsti")
         #expect(box["TIOCSTI"] == "EPERM" && box["TIOCLINUX"] == "EPERM", "\(box)")
-        #expect(plain["TIOCSTI"] == "ok", "\(plain)")
+        // The kernel alone types it, or refuses it itself where `dev.tty.legacy_tiocsti` is 0 (EIO, Linux 6.2 and later;
+        // WSL's 6.18 of 2026-11-20): never the filter's EPERM.
+        #expect(plain["TIOCSTI"] == "ok" || plain["TIOCSTI"] == "EIO", "\(plain)")
     }
 
     @Test(.enabled(if: can, "\(skip)"))

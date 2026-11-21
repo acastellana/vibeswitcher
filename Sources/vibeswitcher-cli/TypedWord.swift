@@ -9,8 +9,11 @@ import VibeNode
 /// would be typed for nothing. A guard rail against a request run without the user's hands (an agent's Bash tool has
 /// no terminal; `script` gives it one), not a lock.
 enum TypedWord {
-    /// What the command line says under the Mac's rule, in place of asking the code.
-    static let approvalNote = "Approve it at the Mac: Touch ID or your login password, in the dialog the node shows (it names what it will do). Cancel there to stop."
+    /// What the command line says under the Mac's rule, in place of asking the code: the word the dialog will start with.
+    static func approvalNote(_ word: String) -> String {
+        "The Mac now asks for Touch ID or your login password. Its dialog starts with \(word): approve only a dialog that does "
+            + "and names what is shown above. A dialog with another word isn't this request: cancel it."
+    }
 
     /// What `refused` says for each outcome but `typed` (`TypedOutcome.refusal`, in `VibeNode` since the start plan's
     /// S2, so `StartSequence` takes the asker's answer).
@@ -19,9 +22,12 @@ enum TypedWord {
     /// Shows `what` and `code` on the controlling terminal (`/dev/tty` alone) and reads one line there. Under the Mac's
     /// rule (`NodeClient.approvalRule`: the server asks Touch ID or the login password for each state change, its dialog
     /// naming what the server built of the request) it shows `what` and that the Mac will ask, and asks no code.
-    static func ask(code: String, what: String) -> TypedOutcome {
-        if NodeClient.approvalRule {
-            Say.err("\(what)\n\(approvalNote)")
+    /// `approval`: the request goes to a server on the Mac's rule (`NodeClient.approvalRule`), which asks the person at the
+    /// Mac: `what` is shown with the word the dialog will start with (`word`, else `code`: `NodeIds.code(action:)` of the
+    /// request's action id, which the server puts first in the dialog), and no code is asked.
+    static func ask(approval: Bool = false, code: String, what: String, word: String? = nil) -> TypedOutcome {
+        if approval {
+            Say.err("\(what)\n\(approvalNote(word ?? code))")
             return .typed
         }
         let fd = open("/dev/tty", O_RDWR | O_NOCTTY | O_CLOEXEC)

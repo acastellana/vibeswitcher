@@ -173,6 +173,43 @@ that two pushes haven't explained comes here too, with the experiment that will 
   each of `NodeAgent.refusedManagerNames` after a `launchctl setenv`; the stderr file's mode and growth; and
   LocalAuthentication's dialog from this agent (the voice's step 4 above).
 
+## Before approvalMeasured flips
+
+The independent review of the Touch ID voice (2026-11-21): no path reaches `voiced` without `.approved`, and today's
+path fails closed (`NodeSystem.approvalMeasured` is false). Before it is turned on, each of these is done, measured
+or decided. Done on Linux, tested on both systems (`ApprovalJudgmentTests`, `ApprovalVoiceTests`):
+
+1. **(HIGH, done in `6f367200`)** The dialog's text per kind from validated arguments (`Requests.approvalCard`): the
+   request's word first; the decisive part whole (an answer's words, an approval's commit and tasks, a shell card's
+   command and folder under "run an agent's command in your login shell", a config card's held-item count and changed
+   guard rails, a setting and its value) or nothing asked; the lead's and agents' words marked “…” and cut after it,
+   saying so; no argument key shown; a field a kind doesn't take refused before any dialog.
+2. **(HIGH, done in `6f367200`, `03f406c9`)** Attribution: the dialog starts with `NodeIds.code(action:)` of the
+   request's action id, which the command line prints before it sends; the busy refusal never tells the person to
+   answer the dialog on screen (it says that one is someone else's when its word isn't theirs). **Real Mac**: that the
+   word reads first in the dialog as drawn (the system's title precedes the reason).
+3. **(MEDIUM-HIGH)** The caller check: the Hardened Runtime is required of the peer (done, `6f367200`:
+   `ApprovalVoice.hardened`, `Platform.CodeIdentity.isHardened`). **Owed**: the node's command line signed with
+   `--options runtime` (the install's signing decision, step 7); its cdhash anchored where the host anchors the
+   server's (read at the host's start from the build it checked, handed over with its notes), not re-read from the
+   writable `<root>/bin` at each server start. **Real Mac**: `DYLD_INSERT_LIBRARIES` into the command line refused;
+   the connect-write-exec race (a process connects, the command line's code then execs in its place: Security's dynamic
+   check on a token after exec); Accessibility driving the password fallback (synthetic typing into the dialog).
+4. **(MEDIUM, done in `6f367200`)** Values per kind: send's words cut only saying how many there are, presets' env
+   values shown, sessions by terminal and folder, no forgeable "; key value" (no key is shown).
+5. **(MEDIUM, done in `6f367200`)** The uid, code, Hardened Runtime and guard-rail checks before the one dialog's place;
+   a 10 s cooldown after a declined, cancelled, timed-out or unavailable dialog; a truthful busy refusal.
+6. **(MEDIUM, for the user)** The reads with no gate a detached session can't pass on the Mac (`mail`, `recent`,
+   `shells`, `config.held`, `base.show`): written into the design note as open.
+7. **(BLOCKER, list)** Darwin ancestry: `Platform.Processes.link` is nil on the Mac, so the guard rails' ancestry is
+   unread there (and the peer refused: "its ancestry can't be read") until a Darwin `proc_pidinfo` arm is built and
+   measured; the Mac host's vault and its action-id record (`recordUserAction`) on the Mac's host; the command line's
+   server check by code identity (`ServerCheck` on the Mac: the server's audit token and cdhash); a card for a kind with
+   no arguments (`stop`, `start`, `web.revoke`): done, `approvalCard` names what each does (`stop` the live sessions it
+   ends).
+8. **(LOW, done in `6f367200`, `03f406c9`)** A replayed action id answered before any dialog; the command line's
+   approval rule per connection, so its own confirmations (`status --ack`) always ask the code.
+
 ## What `v2` found on the Mac and doesn't change
 
 Found by [the security architecture document](../superpowers/specs/2026-11-13-v2-security-architecture.md#the-mac-and-linux)

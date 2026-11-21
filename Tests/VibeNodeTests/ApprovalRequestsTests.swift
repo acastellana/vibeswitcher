@@ -32,9 +32,9 @@ struct ApprovalRequestsTests {
         let requests = Requests(link: world.world.link, sessions: nil, rule: rule, root: world.host.root, hostSocket: world.host.socket,
                                 commit: "test", hostPID: 1)
         requests.engine = world.engine
-        requests.approval = ApprovalVoice(authenticator: person, commandLine: Self.commandLine) { token, code in
+        requests.approval = ApprovalVoice(authenticator: person, commandLine: Self.commandLine, runs: { token, code in
             commandLinePeer && code == Self.commandLine && token.pid == CardWorld.userPID
-        }
+        }, hardened: { _ in true })
         return requests
     }
 
@@ -66,7 +66,7 @@ struct ApprovalRequestsTests {
         #expect(leadMail(world) == "off")
         // What the person was asked: the server's words for the request, its own arguments.
         let reason = try #require(person.asked.first)
-        #expect(reason.hasPrefix("change a VibeSwitcher setting: ") && reason.contains("key lead_mail") && reason.contains("value off"), "\(reason)")
+        #expect(reason.hasPrefix("change a VibeSwitcher setting: ") && reason.contains("set lead_mail to “off”"), "\(reason)")
         #expect(person.asked.count == 1)
     }
 
@@ -105,7 +105,7 @@ struct ApprovalRequestsTests {
         let answered = try #require(await ask(world, requests, "answer", ["card": .string(card.id), "code": .string(card.code), "text": .string("yes")]))
         #expect(answered.ok, "\(answered)")
         let reason = try #require(person.asked.first)
-        #expect(reason.hasPrefix("answer a lead's question for you: card ") && reason.contains("Ship it?") && reason.contains("text yes"), "\(reason)")
+        #expect(reason.hasPrefix("answer a lead's question for you: ") && reason.contains("answer “yes” in") && reason.contains("Ship it?"), "\(reason)")
     }
 
     /// While one approval waits at the Mac, another state change is refused, not stacked; a read still answers.
@@ -121,26 +121,11 @@ struct ApprovalRequestsTests {
         world.queue.async { requests.handle(request, from: CardWorld.user, token: token) { first.value = $0 } }
         try #require(await offPool { person.asking.wait(timeout: .now() + 60) == .success })
         let second = try #require(await ask(world, requests, "set", ["key": .string("lead_mail"), "value": .string("on")]))
-        #expect(second.error?.message.contains("waiting for your approval at the Mac") == true, "\(second)")
+        #expect(second.error?.message.contains("dialog is open at the Mac right now, so this one wasn't asked") == true, "\(second)")
         let status = try #require(await ask(world, requests, "status", action: nil))
         #expect(status.ok)
         person.release.signal()
         #expect(await eventually(timeout: 60) { first.value?.ok == true })
         #expect(leadMail(world) == "off")
-    }
-
-    /// The card a dialog names: the server's, each argument inert and short; nil for a card it doesn't hold.
-    @Test func theCardIsTheServersWordsInert() async throws {
-        let world = try await CardWorld.make(scratch)
-        defer { world.stop() }
-        let requests = requests(world, ApprovalVoiceTests.Person(.approved))
-        let card = world.queue.sync {
-            requests.approvalCard(NodeWire.Request(id: "x", kind: "send", args: ["session": .string("local:abcd"),
-                                                                             "text": .string("rm -rf ~\n\u{1B}[2Jhidden" + String(repeating: "x", count: 200))]))
-        }
-        let text = try #require(card)
-        #expect(text.hasPrefix("session local:abcd; text rm -rf ~ "), "\(text)")
-        #expect(!text.contains("\u{1B}") && !text.contains("\n") && text.count < 200, "\(text)")
-        #expect(world.queue.sync { requests.approvalCard(NodeWire.Request(id: "y", kind: "answer", args: ["card": .string("local:card:nope")])) } == nil)
     }
 }

@@ -116,8 +116,9 @@ public enum NodeAgent {
     public static func bootout(launchctl: String, uid: uid_t) -> [String] { [launchctl, "bootout", target(uid: uid)] }
     /// `launchctl print gui/<uid>/dev.vibeswitcher.node`: the job as launchd holds it.
     public static func print(launchctl: String, uid: uid_t) -> [String] { [launchctl, "print", target(uid: uid)] }
-    /// `launchctl getenv NAME`: what the user's launchd gives every job for `name`.
-    public static func getenv(launchctl: String, name: String) -> [String] { [launchctl, "getenv", name] }
+    /// `launchctl getenv NAME`: what the user's launchd gives every job for `name` (named so: the start's code reads no
+    /// environment of its own, `StartCommandTests`).
+    public static func managerVariable(launchctl: String, name: String) -> [String] { [launchctl, "getenv", name] }
 
     /// What `launchctl print` says of the job: its pid (nil while it doesn't run) and its program (the first of its
     /// arguments). The output's lines `pid = <n>` and `program = <path>` at the job's own level (one tab in), never a

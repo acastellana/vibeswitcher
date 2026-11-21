@@ -42,7 +42,7 @@ enum HooksCommand {
         let ignored = ["CLAUDE_CONFIG_DIR", "CODEX_HOME"].filter { environment[$0] != nil }
         if !ignored.isEmpty { what += "\n\(ignored.joined(separator: " and ")) \(ignored.count == 1 ? "plays" : "play") no part: the node's own home is written." }
         let id = UUID().uuidString.lowercased()
-        let outcome = TypedWord.ask(code: NodeIds.code(action: id), what: what)
+        let outcome = TypedWord.ask(approval: client.approvalRule, code: NodeIds.code(action: id), what: what)
         guard outcome == .typed else { return Say.refused(TypedWord.refusal(outcome)) }
         switch client.request(kind, args: ["agents": .array(agents.map { .string($0.rawValue) })], action: id, timeout: 120) {
         case .failure(let failure): return Say.failed(failure)

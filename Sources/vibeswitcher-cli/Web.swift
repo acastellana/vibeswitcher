@@ -40,7 +40,7 @@ enum WebCommand {
                 + "It never answers, holds, starts or stops anything. Under WSL's mirrored networking Windows' processes reach "
                 + "the port too: the token is what keeps them out. `vibeswitcher web --revoke` drops every token."
         let id = UUID().uuidString.lowercased()
-        let outcome = TypedWord.ask(code: NodeIds.code(action: id), what: what)
+        let outcome = TypedWord.ask(approval: client.approvalRule, code: NodeIds.code(action: id), what: what)
         guard outcome == .typed else { return Say.refused(TypedWord.refusal(outcome)) }
         let args: [String: NodeWire.Value] = tailnet ? ["tailnet": .bool(true)] : [:]
         switch client.request(kind, args: args, action: id, timeout: 30) {

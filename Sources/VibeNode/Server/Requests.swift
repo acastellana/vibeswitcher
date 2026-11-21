@@ -99,6 +99,9 @@ public final class Requests: @unchecked Sendable {
     var approvalsPending = 0
     /// Whether the link to the host is welcomed, as the Mac's rule asks before a dialog (nil: `link.state`'s; a test's own).
     var approvalLinkWelcomed: (() -> Bool)?
+    /// No dialog before this, after one that came to nothing (`approvalCooldown`), and the clock it's judged by.
+    var approvalQuietUntil: Date?
+    var approvalNow: () -> Date = Date.init
     let approvals = DispatchQueue(label: "vibenode.requests.approvals", qos: .userInitiated)
     /// The health digest (`NodeHealth`): the server's own watchdog, slow refreshes and last errors.
     public var health: NodeHealth?
