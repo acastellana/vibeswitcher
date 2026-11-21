@@ -285,3 +285,37 @@ struct ServerCheckTests {
         }
     }
 }
+
+/// The Mac's form of the command line's server check (`NodeCheck.refusal`'s `codeIdentity`, the review of 2026-11-21):
+/// the listener's code (the installed build's server, by its audit token, with the Hardened Runtime) in place of its
+/// dumpable state the Mac can't tell, no cgroup, and still the host's child in the host's session. Both systems: pure.
+struct MacServerCheckTests {
+    @Test func theMacsCheckAsksTheListenersCodeNotItsDumpableState() {
+        let good = NodeCheck.Listener(pid: 50, dumpable: nil, parent: 40, cgroup: nil, session: 40, code: true)
+        #expect(NodeCheck.refusal(good, mode: .node, expectedParent: 40, parentSession: 40, codeIdentity: true) == nil)
+        // The same facts under Linux's form: its dumpable state can't be told, so refused.
+        #expect(NodeCheck.refusal(good, mode: .node, expectedParent: 40, parentSession: 40) != nil)
+        var other = good
+        other.code = false
+        #expect(NodeCheck.refusal(other, mode: .node, expectedParent: 40, parentSession: 40, codeIdentity: true)?.contains("doesn't run the installed build's server code") == true)
+        other.code = nil
+        #expect(NodeCheck.refusal(other, mode: .node, expectedParent: 40, parentSession: 40, codeIdentity: true)?.contains("can't be told") == true)
+        // Not the job's child, or in another session, or no job to check against: refused, whatever its code.
+        #expect(NodeCheck.refusal(good, mode: .node, expectedParent: 41, parentSession: 41, codeIdentity: true) != nil)
+        var detached = good
+        detached.session = 50
+        #expect(NodeCheck.refusal(detached, mode: .node, expectedParent: 40, parentSession: 40, codeIdentity: true) != nil)
+        #expect(NodeCheck.refusal(good, mode: .node, expectedParent: nil, parentSession: nil, codeIdentity: true) != nil)
+    }
+
+    /// The server checked is the one beside the job's host, only for an installed build's host.
+    @Test func theServerCheckedIsTheInstalledBuildsBesideItsHost() {
+        let prefix = "/Users/u/.vibeswitcher/v2/builds"
+        #expect(NodeCheck.installedServer(host: "\(prefix)/abc123/bin/vibeswitcher-host", prefix: prefix) == "\(prefix)/abc123/bin/vibeswitcher-server")
+        for host in ["/Users/u/elsewhere/abc/bin/vibeswitcher-host", "\(prefix)/abc/bin/other", "\(prefix)/abc/x/bin/vibeswitcher-host",
+                     "\(prefix)/bin/vibeswitcher-host", "\(prefix)/../abc/bin/vibeswitcher-host", "\(prefix)/current/bin/vibeswitcher-host",
+                     "\(prefix)//bin/vibeswitcher-host", "\(prefix)x/abc/bin/vibeswitcher-host"] {
+            #expect(NodeCheck.installedServer(host: host, prefix: prefix) == nil, "\(host)")
+        }
+    }
+}

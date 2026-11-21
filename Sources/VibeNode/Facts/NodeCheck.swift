@@ -63,13 +63,18 @@ public enum NodeCheck {
         public var cgroup: [String]?
         /// Its POSIX session's id (`getsid`); nil when it can't be read.
         public var session: pid_t?
+        /// The Mac's check in place of `dumpable` (which the Mac can't tell): whether the process its audit token names
+        /// runs the installed build's server code (its cdhash, Security's dynamic check) with the Hardened Runtime; nil
+        /// when it can't be told.
+        public var code: Bool?
 
-        public init(pid: pid_t, dumpable: Bool?, parent: pid_t?, cgroup: [String]?, session: pid_t?) {
+        public init(pid: pid_t, dumpable: Bool?, parent: pid_t?, cgroup: [String]?, session: pid_t?, code: Bool? = nil) {
             self.pid = pid
             self.dumpable = dumpable
             self.parent = parent
             self.cgroup = cgroup
             self.session = session
+            self.code = code
         }
     }
 
@@ -80,13 +85,35 @@ public enum NodeCheck {
     /// (`Platform.Processes.lockHolder(path:exclusiveFlock:patience:)`: one look at /proc/locks can miss a held lock).
     public static let lockPatience: TimeInterval = 3
 
-    public static func refusal(_ listener: Listener, mode: Mode, expectedParent: pid_t?, parentSession: pid_t?) -> String? {
-        switch listener.dumpable {
-        case true?: return "the process listening on the server's socket (pid \(listener.pid)) is dumpable: not the node's server"
-        case nil: return "whether the process listening on the server's socket (pid \(listener.pid)) is dumpable can't be told"
-        case false?: break
+    /// The Mac's server check: the server beside an installed build's host, `<prefix>/<build>/bin/vibeswitcher-server`
+    /// for the host `<prefix>/<build>/bin/vibeswitcher-host` (both paths resolved); nil for a host anywhere else.
+    public static func installedServer(host: String, prefix: String) -> String? {
+        let parts = host.split(separator: "/", omittingEmptySubsequences: false).map(String.init)
+        let base = prefix.split(separator: "/", omittingEmptySubsequences: false).map(String.init)
+        guard parts.count == base.count + 3, Array(parts.prefix(base.count)) == base, prefix.hasPrefix("/"),
+              parts[base.count] != "", parts[base.count] != ".", parts[base.count] != "..", parts[base.count] != SwitchFollowUp.currentLink,
+              parts[base.count + 1] == "bin", parts[base.count + 2] == BuildInfo.host else { return nil }
+        return (parts.dropLast() + [BuildInfo.server]).joined(separator: "/")
+    }
+
+    /// `codeIdentity`: the Mac's form (`Platform.CodeIdentity.isAvailable`): the listener's code (`Listener.code`) in
+    /// place of its dumpable state, and no cgroup (the Mac has none: the parent and the session hold it to the host).
+    public static func refusal(_ listener: Listener, mode: Mode, expectedParent: pid_t?, parentSession: pid_t?,
+                               codeIdentity: Bool = false) -> String? {
+        if codeIdentity {
+            switch listener.code {
+            case true?: break
+            case false?: return "the process listening on the server's socket (pid \(listener.pid)) doesn't run the installed build's server code with the Hardened Runtime: not the node's server"
+            case nil: return "whether the process listening on the server's socket (pid \(listener.pid)) runs the installed build's server code can't be told"
+            }
+        } else {
+            switch listener.dumpable {
+            case true?: return "the process listening on the server's socket (pid \(listener.pid)) is dumpable: not the node's server"
+            case nil: return "whether the process listening on the server's socket (pid \(listener.pid)) is dumpable can't be told"
+            case false?: break
+            }
         }
-        if mode == .node {
+        if mode == .node, !codeIdentity {
             let path = listener.cgroup.flatMap { PeerFacts.unifiedPath($0) ?? PeerFacts.systemdPath($0) }
             guard let path, path.split(separator: "/").last.map(String.init) == VoiceRule.nodeUnit else {
                 // The cgroup's name is the listener's to choose (any process of the user's can make one under its
