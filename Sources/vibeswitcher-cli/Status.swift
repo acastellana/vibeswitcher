@@ -102,9 +102,19 @@ enum StatusCommand {
             out.append("accepted: \(inert(accepted["kind"]?.string)) at \(inert(accepted["at"]?.string)) from pid \(accepted["pid"]?.int.map(String.init) ?? "?") in \(inert(accepted["cgroup"]?.string)): \(inert(accepted["commandLine"]?.array?.compactMap(\.string).joined(separator: " ")))")
         }
         for notice in result["notices"]?.array ?? [] { out.append("notice: \(inert(notice.string))") }
+        if let line = updateLine(result["update"]) { out.append(line) }
         out += journal
         Say.out(out.joined(separator: "\n"))
         return 0
+    }
+
+    /// The last update check's answer when it has nothing to offer (a newer build is a notice): up to date, or why it
+    /// couldn't look. Nil before a look, and on a server that doesn't check (a scratch node).
+    static func updateLine(_ update: NodeWire.Value?) -> String? {
+        guard let update, update != .null, update["commit"]?.string == nil else { return nil }
+        if let problem = update["problem"]?.string { return "updates: couldn't check v2 for a newer build (\(inert(problem)))" }
+        guard let at = update["checkedAt"]?.string else { return nil }
+        return "updates: no newer build on v2 that both CI runs passed (checked \(inert(at)))"
     }
 
     /// What the journal says that the user should see (EN-D15): a host restart the server saw (`restart`, E8) with how

@@ -170,7 +170,7 @@ Sizes to close: S is about a day, M a few days, L a week or more.
 
 | Feature | V1 (where) | V2 state | Where in V2 / what's missing | Size | Note |
 | --- | --- | --- | --- | --- | --- |
-| Check for Updates, the update card | `UpdateChecks.swift`, `UpdateCard.swift`, `Sources/VibeCore/AppUpdateWatch.swift` | missing | you build and install by hand (`scripts/install-node.sh`), then `vibeswitcher switch` | S | releases are stage 8 |
+| Check for Updates, the update card | `UpdateChecks.swift`, `UpdateCard.swift`, `Sources/VibeCore/AppUpdateWatch.swift` | has it | `Facts/UpdateWatch.swift` (2026-11-21): the user's node asks GitHub (`gh`, the install script's repository and token handling) 2 minutes after its start and every 6 hours for v2's newest commit both CI workflows passed, compares it with the running build, and while one is newer `status` and the page's notices name it with its install line (`scripts/install-node.sh COMMIT`, then `vibeswitcher switch COMMIT`); `status` also says up to date or why it couldn't look. Read-only, kept in `update-check.json`. No Check now button, nothing installed for you | | releases are stage 8; the install script checks the commit again before it builds |
 | Install | `scripts/build-app.sh --install` | Linux-only | `scripts/install-node.sh`, `install-record`; `vibeswitcher start` (a systemd user unit, `Start/NodeUnit.swift`) | | |
 | Switch between builds and roll back, keeping the sessions | — | Linux-only | `vibeswitcher switch COMMIT`, `rollback`; `Server/SwitchRequest.swift`, `Start/SwitchPlan.swift` | | |
 | Open at login | Settings › General (ServiceManagement) | has it | `vibeswitcher start --at-login` | | |

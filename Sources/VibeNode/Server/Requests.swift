@@ -90,6 +90,8 @@ public final class Requests: @unchecked Sendable {
     /// S8b): the account's `NodeFolders.defaultPrefix` on the node, `--test-install-root` on a scratch node; none:
     /// `build.switch` is refused and `status` gives no `builds`.
     public var installRoot: String?
+    /// Check for Updates (`UpdateWatch`): the user's node's only. Its notice is `status`'s, its last answer `update`.
+    public var updates: UpdateWatch?
     /// The waits a `build.switch` runs on (a test's shorter ones).
     public var switchTiming = SwitchRequest.Timing()
     /// The web's gate and tokens (the live plan's I1, `NodeLive`): what `web.open` and `web.revoke` act on; none:
@@ -351,6 +353,7 @@ public final class Requests: @unchecked Sendable {
         notices += engine?.unknownDialogNotices ?? []
         notices += engine?.allDoneNotices ?? []
         notices += sessions?.reminderNotices() ?? []
+        if let notice = updates?.notice { notices.append(notice) }
         return notices
     }
 
@@ -390,6 +393,8 @@ public final class Requests: @unchecked Sendable {
         ]
         // The user's node's tailnet page, for the command line (not in the `node` stream: `NodeStatusStore.value`).
         if let tailnet { fields["webTailnet"] = tailnet.value() }
+        // The last update check's answer, for the command line (the page has its notice).
+        if let updates { fields["update"] = updates.value }
         return .object(fields)
     }
 
