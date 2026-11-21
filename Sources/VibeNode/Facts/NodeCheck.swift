@@ -76,6 +76,10 @@ public enum NodeCheck {
     /// Why the listener isn't the node's server, or nil when it passes. `expectedParent`: the unit's `MainPID` (the
     /// user's node) or the scratch lock's holder; nil when it couldn't be read, which fails. `parentSession`: that
     /// process's session (`getsid`); nil when it couldn't be read, which fails too.
+    /// How long the command line looks again for a lock's holder before it says none holds it
+    /// (`Platform.Processes.lockHolder(path:exclusiveFlock:patience:)`: one look at /proc/locks can miss a held lock).
+    public static let lockPatience: TimeInterval = 3
+
     public static func refusal(_ listener: Listener, mode: Mode, expectedParent: pid_t?, parentSession: pid_t?) -> String? {
         switch listener.dumpable {
         case true?: return "the process listening on the server's socket (pid \(listener.pid)) is dumpable: not the node's server"
@@ -145,7 +149,8 @@ public enum NodeCheck {
                                     startTicks: (pid_t) -> UInt64? = NodeRecord.liveTicks,
                                     arguments: (pid_t) -> [String] = Platform.Processes.arguments,
                                     dumpable: (pid_t) -> Bool? = Platform.Processes.isDumpable,
-                                    holder: (String) -> pid_t? = Platform.Processes.exclusiveFlockHolder) -> Recorded {
+                                    holder: (String) -> pid_t? = { Platform.Processes.lockHolder(path: $0, exclusiveFlock: true, patience: NodeCheck.lockPatience) })
+        -> Recorded {
         guard let record else { return .none("no host is recorded") }
         let pid = record.pid
         guard let ticks = startTicks(pid) else { return .none("the recorded host (pid \(pid)) has ended") }

@@ -17,7 +17,9 @@ enum ServerCheck {
         let expected: pid_t?
         switch context.mode {
         case .scratch(let root):
-            expected = Platform.Processes.lockHolder(path: (root as NSString).appendingPathComponent(NodeCheck.scratchLock))
+            // Looked at again for a moment when no holder shows: one look at /proc/locks can miss a held lock.
+            expected = Platform.Processes.lockHolder(path: (root as NSString).appendingPathComponent(NodeCheck.scratchLock),
+                                                     patience: NodeCheck.lockPatience)
         case .node:
             expected = context.systemctl.flatMap { context.runTool($0, ["--user", "show", "-p", "MainPID", "--value", VoiceRule.nodeUnit]) }
                 .flatMap { $0.status == 0 ? pid_t($0.output.trimmingCharacters(in: .whitespacesAndNewlines)) : nil }

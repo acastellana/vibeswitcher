@@ -274,6 +274,28 @@ extension Platform.Processes {
     /// process that holds the account's host lock.
     public static func exclusiveFlockHolder(path: String) -> pid_t? { System.lockHolder(path: path, exclusiveFlock: true) }
 
+    /// `lockHolder` (or with `exclusiveFlock`, `exclusiveFlockHolder`) looked at again while it finds no holder, for at
+    /// most `patience` seconds. `/proc/locks` comes in page-sized reads between which other processes' locks come and go,
+    /// and a line can be skipped by every read of one look (`lockListFirstReads`): on a machine where many processes
+    /// take and drop locks (a loaded test run), the first command after a scratch node's start said no process held its
+    /// lock while the host did. A held lock is found by a later look; one truly not held is said after `patience`, which
+    /// costs a wait only when the answer is "nobody" (a refusal anyway). Linux; the Mac: nil at once.
+    public static func lockHolder(path: String, exclusiveFlock: Bool = false, patience: Double) -> pid_t? {
+        patiently(patience: patience) { System.lockHolder(path: path, exclusiveFlock: exclusiveFlock) }
+    }
+
+    /// `read` until it gives a pid or `patience` seconds pass (by `now`, the awake clock), `pause` seconds between looks:
+    /// the first pid, or nil.
+    static func patiently(patience: Double, pause: Double = 0.02, now: () -> Double = Platform.Clock.awakeSeconds,
+                          wait: (Double) -> Void = { usleep(UInt32($0 * 1_000_000)) }, _ read: () -> pid_t?) -> pid_t? {
+        let deadline = now() + patience
+        while true {
+            if let pid = read() { return pid }
+            guard now() < deadline else { return nil }
+            wait(pause)
+        }
+    }
+
     /// `lockHolder`'s reading of a `/proc/locks` text: the pid of the first lock (not a waiter, `->`) on the file of
     /// device `major:minor` and inode `inode`, whose pid is a number above 0; with `exclusiveFlock`, of the first
     /// `FLOCK` `WRITE` one only. Each line is `N: KIND ADVISORY|MANDATORY READ|WRITE PID MAJOR:MINOR:INODE START END`,
