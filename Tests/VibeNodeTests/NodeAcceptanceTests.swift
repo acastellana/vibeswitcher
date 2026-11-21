@@ -752,6 +752,32 @@ struct NodeAcceptanceTests {
         #expect(failed.status == 1 && failed.output.contains("couldn't check v2 for a newer build (gh isn't installed (/usr/bin/gh))"), "\(failed.output)\(failed.errors)")
     }
 
+    @Test("A38: vs switch with an idle worker parks it (said before the code), hands over, keeps the lead, and tells it")
+    func a38SwitchParksIdleWorkers() async throws {
+        let (a, b) = (String(repeating: "a", count: 40), String(repeating: "b", count: 40))
+        let installs = scratch.url("builds")
+        let buildA = try ScratchBuilds.install(commit: a, into: installs)
+        _ = try ScratchBuilds.install(commit: b, into: installs)
+        let node = try await ScratchNode(scratch, holdFirstLook: true, build: buildA, installRoot: installs)
+        defer { node.stop() }
+        let repo = try await Self.repository(node)
+        let lead = try await Self.startLead(node, repo, goal: "write the parser")
+        let worker = try await Self.planAndStart(node, lead, title: "Write the parser")
+        let files = node.fake.files(terminal: worker.tty)
+        let pid = try #require((EngineEndToEndTests.state(files)["pid"] as? Int).map(Int32.init))
+        try files.call("report", ["task": "write-the-parser", "status": "blocked", "summary": "it needs the grammar"])
+        try #require(await eventually(timeout: 120) { files.calls().count == 2 }, "\(node.said)")
+        try hook(node, ["hook_event_name": "Stop"], tty: worker.tty, pid: pid)
+        try #require(await node.eventuallyStatus { (($0["switchParks"] as? [String]) ?? []).contains { $0.contains(worker.tty) } }, "\(node.said)")
+        let switched = try await node.runOnTerminal(["switch", b])
+        #expect(switched.status == 0 && switched.output.contains("it parks first the workers that only wait on their lead")
+                && switched.output.contains("parked first") && switched.output.contains(worker.tty) && switched.output.contains("handed over"),
+                "\(switched.output)\(switched.errors)\n\(node.said)")
+        #expect(try node.sessions().contains { $0.id == lead.session.id && $0.isLive })
+        #expect(try !node.sessions().contains { $0.id == worker.id && $0.isLive })
+        #expect(await eventually(timeout: 120) { node.inbox(lead.session.tty).contains { $0.text.contains("start_worker continues there") } }, "\(node.said)")
+    }
+
     // MARK: The rows a scratch node can't run
 
     @Test("A19: the page notifies of a question or prompt, and its title counts them",
