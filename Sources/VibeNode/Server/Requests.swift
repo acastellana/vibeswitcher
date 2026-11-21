@@ -97,6 +97,8 @@ public final class Requests: @unchecked Sendable {
     public var approval: ApprovalVoice?
     /// The Touch ID approvals waiting or asked: one at a time, on a queue of their own (`approvalVoice`). On `queue`.
     var approvalsPending = 0
+    /// Whether the link to the host is welcomed, as the Mac's rule asks before a dialog (nil: `link.state`'s; a test's own).
+    var approvalLinkWelcomed: (() -> Bool)?
     let approvals = DispatchQueue(label: "vibenode.requests.approvals", qos: .userInitiated)
     /// The health digest (`NodeHealth`): the server's own watchdog, slow refreshes and last errors.
     public var health: NodeHealth?

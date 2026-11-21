@@ -45,6 +45,12 @@ extension Requests {
             }
             return done(nil)
         }
+        // What `voiced` would answer after the dialog, answered before it: no dialog for a request that can't go on (and
+        // a `not-yet` the command line asks again would ask the person twice).
+        guard !stopping else { return done(.init(re: request.id, error: .init(.stopping, "the node is stopping"))) }
+        guard approvalLinkWelcomed?() ?? (link.state == .connected) else {
+            return done(.init(re: request.id, error: .init(.notYet, "the server's link to its host isn't welcomed yet: retry")))
+        }
         if approvalsPending > 0 { return refuse(Self.approvalBusy) }
         let card = approvalCard(request)
         let (live, uid, queue) = (self.live, rule.uid, self.queue)

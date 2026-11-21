@@ -18,7 +18,7 @@ struct ApprovalJudgmentTests {
     static let user = PeerFacts(pid: pid, uid: getuid(), cgroup: nil, ancestry: [.init(pid: pid, startTicks: 5)], terminal: .named("ttytest-mac"),
                                 sessionMarker: nil, underRunner: false)
 
-    private func requests(_ person: any ApprovalVoice.Authenticator, commandLinePeer: Bool = true) -> Requests {
+    private func requests(_ person: any ApprovalVoice.Authenticator, commandLinePeer: Bool = true, welcomed: Bool = true) -> Requests {
         let queue = DispatchQueue(label: "approval-judgment")
         let link = HostLink(dialer: NoHost(), root: scratch.url("link"), queue: queue)
         let requests = Requests(link: link, sessions: nil, rule: VoiceRule(mode: .approval, scopes: [], uid: getuid(), says: VoiceRule.approvalSays),
@@ -26,6 +26,7 @@ struct ApprovalJudgmentTests {
         requests.approval = ApprovalVoice(authenticator: person, commandLine: Self.commandLine) { token, code in
             commandLinePeer && code == Self.commandLine && token.pid == Self.pid
         }
+        requests.approvalLinkWelcomed = { welcomed }
         return requests
     }
 
@@ -65,6 +66,9 @@ struct ApprovalJudgmentTests {
         let noAction = await judge(requests(person), "session.end", ["session": .string("local:abcd")], action: nil).refused
         #expect(noAction?.error?.code == NodeWire.Code.badArgs.rawValue)
         // A card's request on a server that holds no cards: refused before asking.
+        // Before the host's welcome: `not-yet`, before any dialog (a retry would otherwise ask twice).
+        let early = await judge(requests(person, welcomed: false), "session.end", ["session": .string("local:abcd")]).refused
+        #expect(early?.error?.code == NodeWire.Code.notYet.rawValue, "\(String(describing: early))")
         let card = await judge(requests(person), "answer", ["card": .string("local:card:x"), "code": .string("ABCD"), "text": .string("yes")]).refused
         #expect(card != nil)
         #expect(person.asked.isEmpty)
