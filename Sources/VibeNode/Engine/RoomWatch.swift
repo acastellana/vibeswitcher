@@ -23,8 +23,11 @@ extension LeadEngine {
                 engine.queue.async {
                     engine.lookAtPolicy()
                     engine.lookAtBoost { [weak engine] _ in engine?.lookAtRoom() }
+                    engine.lookAtToolchainIfDue()
                 }
             }
+            // Shell requests (`ShellCards.swift`): the folder looked at every 15 s.
+            shellTimer = clock?.every(Self.shellLookEvery) { [weak self] in self?.queue.async { self?.lookAtShellRequests() } }
         }
     }
 

@@ -546,6 +546,8 @@ is done once (rule 8). What the first write actions need:
 
 | `session.attach` **new** (2026-11-20, the composer) | `session`, `upload` (a UUID), `type` (png, jpeg, gif, webp), `part`, `parts`, `data` (base64) | refused, `voice` | a token with `draft`, `action`: an image in parts (a page's message is at most 64 KiB); the last part's reply carries the `path` it was written to, which `session.draft`'s `images` name |
 | `session.complete` **new** (2026-11-20, the composer) | `session`, `kind` (`slash`, `mention`), `query` | anyone | a token with `read`: `items` [{`insert`, `title`, `subtitle`}], what the app's composer offers |
+| `session.usage` **new** (2026-11-21, the inspector) | `session` | anyone | a token with `read`: the session's tokens and cost from its own transcript's last 2 MB (`ActivityFeed`): `turns` [{`id`, `at`, `partial`, `tokens` {`input`, `cached`, `output`}?, `cost`?}] (the newest 40), `count`, `partial`, `tokens`?, `cost`? (US dollars, a number), `costPartial`; `gone` for a session with no transcript in the agents' folders |
+| `chat.image` **new** (2026-11-21, the chat's images) | `session`, `id` (an image's id in that session's chat items), `offset`? (a byte, 0 by default) | anyone | a token with `read`: `mediaType` (png, jpeg, gif, webp, as its bytes say), `bytes`, `offset`, `data` (base64 of at most 192 KiB from `offset`); only an image the session's own chat holds (an id it doesn't, a path, anything else: `gone`), only one whose bytes are the type it says (else `refused`), at most 8 MB. The page shows it as a `blob:` URL, the one image source its CSP adds |
 | `session.presets` **new** (2026-11-20, the composer) | `folder` (optional) | anyone | a token with `read`: `presets` [{`name`, `kind`, `command`, `env` (names), `keepShell`, `project`, `default`, `digest` (an HMAC under a key only the server run holds: no variable's value can be guessed from it, and a restart makes the user list them again), `refused`}], `problems`; `session.new` takes `preset` and its `digest` |
 
 A session (§5) carries three more fields since 2026-11-20: `prompt` {`question` †, `options` †, `descriptions` †,
@@ -556,6 +558,11 @@ question on its screen closes.
 Three more since 2026-11-20 (the stability lane), each null when there's none: `name` †, your name for it
 (`vibeswitcher rename`); `pausedUntil`, the end of your pause (`vibeswitcher pause`; far in the future: until you
 resume it); `agentSession`, the agent's own session id (what `--resume` takes).
+Six more since 2026-11-21 (the inspector): `pid`, the agent's process; `branch` †, its folder's git branch; `command` †,
+the host's preset command with credentials masked, and `size` {`cols`, `rows`}, both null where the host doesn't run
+it; `lead`, the project id of the board a lead, worker or verifier is on, and `boardTask`, a worker's or verifier's
+task slug there (from the folder the host started it in), null for the rest. `status`'s `ended` entries carry `exit`
+{`status`, `cause` †, `at`}, how the host recorded the session ended, or null.
 
 **The user's-voice rule is unchanged (S3).** A browser is not a terminal in the user's scope and types no code, and a
 token is a secret in a file the user's processes can read (the security document's S11, item 31). So in the first

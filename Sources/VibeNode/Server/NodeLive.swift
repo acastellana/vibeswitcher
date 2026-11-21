@@ -155,7 +155,8 @@ public final class NodeLive: @unchecked Sendable {
         let nodeStream = LiveStream(collection: "node")
         for stream in [sessionsStream, leadsStream, cardsStream, nodeStream] { hub.add(collection: stream.collection, stream) }
         if let sessions {
-            let values = SessionLiveValues(queue: queue, sessions: sessions, drafts: requests.sessionDrafts, held: requests.heldSends)
+            let values = SessionLiveValues(queue: queue, sessions: sessions, drafts: requests.sessionDrafts, held: requests.heldSends,
+                                           hosts: requests.link.changes)
             values.start()
             hub.follow(values.changes, into: sessionsStream) { $0 }
             sessionValues = values

@@ -290,7 +290,9 @@ public enum WireVectors {
     static func session(id: String, terminal: String, agent: String, cwd: String?, status: String, since: String, hosted: Bool,
                         role: String?, shown: String, project: String, task: String?, startedAt: String, hasHooks: Bool,
                         leadAsks: Bool, startFolder: String?, hasTranscript: Bool, prompt: NodeWire.Value = .null,
-                        draft: NodeWire.Value = .null, queued: NodeWire.Value = .array([])) -> NodeWire.Value {
+                        draft: NodeWire.Value = .null, queued: NodeWire.Value = .array([]), pid: Int = 4242,
+                        branch: String? = nil, command: String? = nil, size: (cols: Int, rows: Int)? = nil,
+                        lead: String? = nil, boardTask: String? = nil) -> NodeWire.Value {
         func text(_ value: String?) -> NodeWire.Value { value.map(NodeWire.Value.string) ?? .null }
         return .object(["id": .string(id), "terminal": .string(terminal), "agent": .string(agent), "cwd": text(cwd),
                         "status": .string(status), "since": .string(since), "hosted": .bool(hosted), "role": text(role),
@@ -298,7 +300,10 @@ public enum WireVectors {
                         "activity": .null, "activitySince": .null, "startedAt": .string(startedAt), "hasHooks": .bool(hasHooks),
                         "leadAsks": .bool(leadAsks), "startFolder": text(startFolder), "backgroundJobs": .int(0),
                         "hasTranscript": .bool(hasTranscript), "prompt": prompt, "draft": draft, "queued": queued,
-                        "name": .null, "pausedUntil": .null, "agentSession": .null])
+                        "name": .null, "pausedUntil": .null, "agentSession": .null,
+                        "pid": .int(pid), "branch": text(branch), "command": text(command),
+                        "size": size.map { .object(["cols": .int($0.cols), "rows": .int($0.rows)]) } ?? .null,
+                        "lead": text(lead), "boardTask": text(boardTask)])
     }
 
     /// An ordinary Claude session asking its own question, a message drafted for it on a page (driving sessions,
@@ -321,7 +326,8 @@ public enum WireVectors {
     static func lead(status: String, since: String) -> NodeWire.Value {
         session(id: leadSession, terminal: "pts/4", agent: "claude", cwd: root, status: status, since: since, hosted: true, role: "lead",
                 shown: "needs-you", project: "acme-site", task: "Login fix", startedAt: "2026-11-17T08:40:02.000Z", hasHooks: true,
-                leadAsks: true, startFolder: root, hasTranscript: true)
+                leadAsks: true, startFolder: root, hasTranscript: true, pid: 51022, branch: "main", command: "claude --model opus",
+                size: (132, 40), lead: NodeIds.project(root: root))
     }
 
     static var notes: NodeWire.Value {
@@ -423,7 +429,7 @@ public enum WireVectors {
                        host: .init(startedAt: "2026-11-17T08:01:10.555Z", notes: nil, pid: 41790),
                        kinds: ["status", "questions", "subscribe", "unsubscribe", "chat.page", "draft", "draft.clear", "board", "seen",
                                "session.draft", "session.draft.clear", "session.presets", "session.complete", "session.attach",
-                               "settings"],
+                               "session.usage", "chat.image", "settings"],
                        peer: .init(voice: "other", why: "a web client: it reads and drafts, and is never the user's voice"),
                        rule: "systemd",
                        auth: .object(["rights": .array([.string("read"), .string("draft")]), "token": .string(token),
@@ -728,6 +734,24 @@ public enum WireVectors {
                                   reply("reply.session.complete", .init(re: "39", result: .object(["items": .array([
                                       SessionCompletions.value(insert: "@src/login.ts ", title: "login.ts", subtitle: "src/login.ts"),
                                       SessionCompletions.value(insert: "@tests/login.test.ts ", title: "login.test.ts", subtitle: "tests/login.test.ts")])])))]),
+            // A session's tokens and cost, for the inspector (2026-11-21).
+            ("session.usage", [request(.init(id: "42", kind: "session.usage", args: ["session": .string(plainSession)])),
+                               reply("reply.session.usage", .init(re: "42", result: .object([
+                                   "turns": .array([
+                                       .object(["id": .string("u_01"), "at": .string("2026-11-17T09:20:05.000Z"), "partial": .bool(true),
+                                                "tokens": .object(["input": .int(42_000), "cached": .int(40_000), "output": .int(1_200)]),
+                                                "cost": .double(0.25)]),
+                                       .object(["id": .string("u_02"), "at": .string("2026-11-17T09:22:40.000Z"), "partial": .bool(false),
+                                                "tokens": .object(["input": .int(61_500), "cached": .int(58_000), "output": .int(2_400)]),
+                                                "cost": .null])]),
+                                   "count": .int(2), "partial": .bool(true),
+                                   "tokens": .object(["input": .int(103_500), "cached": .int(98_000), "output": .int(3_600)]),
+                                   "cost": .double(0.25), "costPartial": .bool(true)])))]),
+            // An image a prompt of the chat shows, its one part (the chat's images, 2026-11-21).
+            ("chat.image", [request(.init(id: "43", kind: "chat.image", args: ["session": .string(plainSession), "id": .string("u_07.img0"),
+                                                                                "offset": .int(0)])),
+                            reply("reply.chat.image", .init(re: "43", result: .object([
+                                "mediaType": .string("image/png"), "bytes": .int(8), "offset": .int(0), "data": .string("iVBORw0KGgo=")])))]),
             // The launch presets for a folder (2026-11-20): the page's New session form offers them; `vibeswitcher new FOLDER
             // --preset NAME` starts one, the user's voice.
             ("session.presets", [request(.init(id: "38", kind: "session.presets", args: ["folder": .string(root)])),

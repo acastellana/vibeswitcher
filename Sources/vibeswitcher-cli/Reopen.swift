@@ -46,13 +46,11 @@ enum ReopenCommand {
         } else {
             var picked: [NodeWire.Value] = []
             for given in arguments {
-                let bare = given.lowercased().replacingOccurrences(of: NodeIds.node + ":", with: "")
-                let matching = bare.count >= 4 ? offered.filter { short(full: $0).hasPrefix(bare) } : []
-                guard matching.count == 1 else {
-                    return Say.refused(matching.isEmpty ? "no session \(ConfigSeal.inert(given, limit: 80)) is offered to reopen (`vibeswitcher reopen` lists them)"
-                                                        : "\(ConfigSeal.inert(given, limit: 80)) begins \(matching.count) offered sessions' ids: give more of it")
+                switch SessionLookup.match(given, in: offered, idKey: "session", hostedOnly: false, noun: "session offered to reopen",
+                                           listed: "`vibeswitcher reopen` lists them") {
+                case .failure(let why): return Say.refused(why.description)
+                case .success(let found): picked.append(found)
                 }
-                picked += matching
             }
             chosen = picked
         }
@@ -89,11 +87,6 @@ enum ReopenCommand {
             }
             return refused.isEmpty ? 0 : 77
         }
-    }
-
-    /// An offered session's host id, lowercased, without the node's prefix.
-    private static func short(full value: NodeWire.Value) -> String {
-        (value["session"]?.string ?? "").lowercased().replacingOccurrences(of: NodeIds.node + ":", with: "")
     }
 
     /// An offered session in a line: its id, name, folder and conversation, all inert.
@@ -144,11 +137,11 @@ enum ResumeCommand {
             Say.out("`vibeswitcher resume SESSION` starts one again on the node, in its same conversation")
             return 0
         }
-        let bare = wanted.lowercased().replacingOccurrences(of: NodeIds.node + ":", with: "")
-        let matching = bare.count >= 4 ? ended.filter { ($0["session"]?.string ?? "").lowercased().replacingOccurrences(of: NodeIds.node + ":", with: "").hasPrefix(bare) } : []
-        guard matching.count == 1, let session = matching.first else {
-            return Say.refused(matching.isEmpty ? "no ended session \(ConfigSeal.inert(wanted, limit: 80)) of yours (`vibeswitcher resume` lists them)"
-                                                : "\(ConfigSeal.inert(wanted, limit: 80)) begins \(matching.count) ended sessions' ids: give more of it")
+        let session: NodeWire.Value
+        switch SessionLookup.match(wanted, in: ended, idKey: "session", hostedOnly: false, noun: "ended session",
+                                   listed: "`vibeswitcher resume` lists yours") {
+        case .failure(let why): return Say.refused(why.description)
+        case .success(let found): session = found
         }
         let action = UUID().uuidString.lowercased()
         let outcome = TypedWord.ask(code: NodeIds.code(action: action),

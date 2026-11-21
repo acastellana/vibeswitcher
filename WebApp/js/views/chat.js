@@ -11,15 +11,20 @@
 // - A reply that grows is drawn again in its own row only, keeping the blocks that didn't change.
 // - It stays where you are: new rows keep the view at the end only if it was there, and otherwise a small "Latest"
 //   button counts them.
+// - Its images drawn (images.js: their bytes asked of the node, `chat.image`), a picture that opens wide when tapped.
+// - A prompt's Copy, Edit in Composer and Send Again (a draft, as every message this page leaves), a reply's Copy as
+//   Markdown; the whole chat copied as Markdown or exported as a .md file (the Mac's Export Chat); and find in the
+//   chat (⌘F / Ctrl+F while it shows): the rows aren't all in the page, so the browser's own find can't see them all.
 // - "New since you looked" (the Mac's marker): a line before the first item that came after the last one you saw at the
 //   chat's end, with what came since; worked out when the chat opens, kept until another opens. What you saw is this
 //   browser's (`SEEN`), by session.
 
 import { h, keyed, setText, setClass, framed } from '../dom.js';
 import { agentMark, statusMark, setMark, icon } from '../marks.js';
-import { since, short, clock, plural, tilde, stateOf, AGENTS, STATES } from '../words.js';
+import { since, short, clock, plural, tilde, stateOf, AGENTS, STATES, KEY } from '../words.js';
 import { markdown, diffView, codeBlock } from '../text.js';
-import { summaryOf, newSince, sinceSummary } from '../chatops.js';
+import { summaryOf, newSince, sinceSummary, chatMarkdown, exportName, findIn, fold } from '../chatops.js';
+import { imageLoader } from '../images.js';
 import { questionStack, askCard } from './cards.js';
 import { draftBox, promptCard, queuedStrip, drivable } from './drive.js';
 import { tokenAt, accept, IMAGE_TYPES, MAX_IMAGE } from '../composing.js';
@@ -69,14 +74,48 @@ function outputView(output, failed, truncated) {
   return parts;
 }
 
-// An image the agent saw: its type and size only (the node serves no bytes yet).
-function imageNote(image) {
+// An image the agent saw, in words: its type and size.
+function imageWords(image) {
   const type = (image.mediaType || 'image').replace(/^image\//, '').toUpperCase();
   const size = image.bytes >= 1048576 ? `${(image.bytes / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(image.bytes / 1024))} KB`;
-  return h('span', { class: 'image-note' }, icon('file', 12), `Image · ${type} · ${size}`);
+  return `Image · ${type} · ${size}`;
 }
 
-function toolView(tool, home) {
+// An image the agent saw: its picture, where the node serves its bytes (`chat.image`), else its line of words. The
+// words stand in while the bytes come, and stay when they can't be had.
+function imageView(view, image) {
+  const words = imageWords(image);
+  const note = h('span', { class: 'image-note' }, icon('file', 12), words);
+  if (!view.images) return note;
+  const holder = h('span', { class: 'image-holder' }, note);
+  const show = (url) => {
+    if (!url) return;
+    const picture = h('img', { class: 'chat-image', src: url, alt: words, decoding: 'async' });
+    const button = h('button', { class: 'chat-image-button', type: 'button', title: `${words} · tap to see it wide`, 'aria-expanded': 'false',
+      onclick: () => {
+        const wide = !button.classList.contains('wide');
+        button.classList.toggle('wide', wide);
+        button.setAttribute('aria-expanded', String(wide));
+        view.redraw();
+      } }, picture);
+    picture.addEventListener('load', () => view.redraw(), { once: true });
+    holder.replaceChildren(button);
+  };
+  const known = view.images.known(view.session, image);
+  if (known) show(known);
+  else view.images.url(view.session, image).then((url) => { if (holder.isConnected || !holder.parentNode) show(url); });
+  return holder;
+}
+
+// A row's own actions (the Mac's row menu): small buttons over its corner, shown on hover and on focus.
+function rowActions(...buttons) {
+  return h('div', { class: 'row-actions' }, buttons);
+}
+function rowButton(label, glyph, onclick) {
+  return h('button', { class: 'icon-button row-action', type: 'button', title: label, 'aria-label': label, onclick }, icon(glyph, 12));
+}
+
+function toolView(tool, home, view) {
   const took = seconds(tool);
   const detail = tool.detail || {};
   const head = h('div', { class: 'tool-head' }, icon(TOOL_ICON[detail.type] || 'tool', 13), h('span', { class: 'tool-title' }, tool.title),
@@ -109,7 +148,7 @@ function toolView(tool, home) {
     body.push(h('dl', { class: 'fields' }, (detail.fields || []).map((field) => [h('dt', null, field.name), h('dd', null, field.value)])));
   }
   if (tool.result?.output) body.push(outputView(tool.result.output, tool.result.failed, tool.result.truncated));
-  for (const image of tool.result?.images || []) body.push(imageNote(image));
+  for (const image of tool.result?.images || []) body.push(imageView(view, image));
   return h('div', { class: tool.result?.failed ? 'tool failed' : 'tool' }, head, body);
 }
 
@@ -128,13 +167,33 @@ function makeRow(view, first) {
     const text = h('div', { class: 'bubble' });
     const images = h('div', { class: 'row-images' });
     const note = h('div', { class: 'row-note' });
-    const el = h('div', { class: 'chat-row prompt' }, text, images, note);
+    let row = first;
+    const again = rowButton('Send Again (leaves it as a draft)', 'send', () => view.again(row.text || ''));
+    const edit = rowButton('Edit in Composer', 'pencil', () => view.edit(row.text || ''));
+    const copy = rowButton('Copy Message', 'copy', (event) => view.copy(row.text || '', event.currentTarget));
+    const actions = rowActions(copy, edit, again);
+    const el = h('div', { class: 'chat-row prompt' }, actions, text, images, note);
+    // What it may do is asked as you reach it: the session's state moves without its row being drawn again.
+    const look = () => {
+      edit.hidden = !view.canEdit();
+      again.hidden = !view.canDraft();
+    };
+    el.addEventListener('pointerenter', look);
+    el.addEventListener('focusin', look);
+    let drawnImages = '';
     return {
       el,
       update(item) {
+        row = item;
         setText(text, item.text);
         text.hidden = !item.text;
-        images.replaceChildren(...(item.images || []).map(imageNote));
+        actions.hidden = !item.text || !!item.pending;
+        look();
+        const ids = (item.images || []).map((image) => image.id).join(' ');
+        if (ids !== drawnImages) {
+          drawnImages = ids;
+          images.replaceChildren(...(item.images || []).map((image) => imageView(view, image)));
+        }
         images.hidden = !(item.images || []).length;
         setClass(el, 'pending', !!item.pending);
         setClass(el, 'steered', !!item.steered);
@@ -144,8 +203,9 @@ function makeRow(view, first) {
   }
   if (first.type === 'reply') {
     const body = h('div', { class: 'prose' });
-    const el = h('div', { class: 'chat-row reply' }, agentMark(view.agent(), 18), body);
     let shown = null;
+    const actions = rowActions(rowButton('Copy as Markdown', 'copy', (event) => view.copy(shown || '', event.currentTarget)));
+    const el = h('div', { class: 'chat-row reply' }, actions, agentMark(view.agent(), 18), body);
     return {
       el,
       update(item) {
@@ -175,7 +235,7 @@ function makeRow(view, first) {
       const now = JSON.stringify(row.tools);
       if (now === drawn) return;
       drawn = now;
-      body.replaceChildren(...row.tools.map((tool) => toolView(tool, view.home())));
+      body.replaceChildren(...row.tools.map((tool) => toolView(tool, view.home(), view)));
     };
     toggle.addEventListener('click', () => {
       if (!view.open.delete(row.id)) view.open.add(row.id);
@@ -280,8 +340,17 @@ export function chatView(app) {
   // The images pasted or dropped into the box (`session.attach`), as small pictures over it.
   const attachedEl = h('div', { class: 'attached', hidden: true });
   const notice = h('p', { class: 'composer-notice', role: 'status', hidden: true });
-  const el = h('div', { class: 'chat' }, scroller, latest, queuedMessages.el, drafted.el, suggestions, attachedEl, notice, form, hint);
+  // Find in the chat: over it, opened by ⌘F / Ctrl+F (or the palette's Find in Chat) while the chat shows.
+  const findInput = h('input', { class: 'find-input', type: 'search', placeholder: 'Find in chat', 'aria-label': 'Find in chat',
+    autocomplete: 'off', spellcheck: 'false' });
+  const findCount = h('span', { class: 'find-count', role: 'status' });
+  const findBar = h('div', { class: 'chat-find', role: 'search', hidden: true }, icon('search', 13), findInput, findCount,
+    h('button', { class: 'icon-button', type: 'button', title: 'Previous (⇧↩)', 'aria-label': 'Previous match', onclick: () => step(-1) }, icon('send', 12)),
+    h('button', { class: 'icon-button', type: 'button', title: 'Next (↩)', 'aria-label': 'Next match', onclick: () => step(1) }, icon('down', 12)),
+    h('button', { class: 'icon-button', type: 'button', title: 'Close (Esc)', 'aria-label': 'Close find', onclick: () => closeFind() }, icon('close', 12)));
+  const el = h('div', { class: 'chat' }, findBar, scroller, latest, queuedMessages.el, drafted.el, suggestions, attachedEl, notice, form, hint);
 
+  const loader = imageLoader((kind, args) => store.read(kind, args));
   const view = {
     app,
     session: null,
@@ -290,7 +359,26 @@ export function chatView(app) {
     agent: () => store.state.sessions.get(view.session)?.agent || 'claude',
     home: () => store.state.node?.home,
     composer: input,
-    redraw: () => schedule(),
+    // Its pictures' bytes, asked of the node where it serves them (`chat.image`).
+    get images() { return store.can('chat.image') ? loader : null; },
+    redraw: () => { structural = true; schedule(); },
+    // A row's Copy: the text to the clipboard, and the button says so for a moment.
+    copy: (text, button) => copyText(text, button),
+    // Edit in Composer (the box holds the text, nothing is sent) and Send Again (a draft, as every message here).
+    canEdit: () => !form.hidden,
+    canDraft: () => !form.hidden && drafting(),
+    edit: (text) => {
+      if (form.hidden) return;
+      input.value = text;
+      grow();
+      input.focus();
+      input.setSelectionRange(text.length, text.length);
+    },
+    again: (text) => {
+      if (form.hidden || !drafting() || !text) return;
+      store.sessionDraft(view.session, text, [], false);
+      say('Left as a draft, over the box.');
+    },
     // A change inside a row that moves what follows it (a fold opened): the row under your eyes stays put.
     held: (work) => { anchored(work); measure(); },
   };
@@ -744,6 +832,125 @@ export function chatView(app) {
 
   for (const topic of ['sessions', 'cards', 'leads', 'connection']) store.subscribe(topic, () => { if (view.session && el.isConnected) schedule(); });
 
+  // ---- Copy, export, find ----
+
+  async function copyText(text, button) {
+    let done = false;
+    try {
+      await navigator.clipboard.writeText(text);
+      done = true;
+    } catch { /* no clipboard here (an insecure origin, a refusal) */ }
+    if (button) {
+      button.classList.toggle('copied', done);
+      button.title = done ? 'Copied' : 'This browser didn’t let the page copy';
+      setTimeout(() => { button.classList.remove('copied'); button.title = button.getAttribute('aria-label'); }, 1500);
+    } else {
+      say(done ? 'Copied.' : 'This browser didn’t let the page copy.');
+    }
+    return done;
+  }
+
+  // The whole chat as the Mac's Export Chat writes it, of what this page holds (older items it hasn't paged in aren't).
+  function markdownNow() {
+    const session = store.state.sessions.get(view.session);
+    return chatMarkdown(items(), AGENTS[session?.agent] || 'Agent');
+  }
+  function exportChat() {
+    if (!items().length) return say('Nothing in this chat to export yet.');
+    const session = store.state.sessions.get(view.session);
+    const url = URL.createObjectURL(new Blob([markdownNow()], { type: 'text/markdown' }));
+    const link = h('a', { href: url, download: exportName(session?.title || (session && session.project)) , hidden: true });
+    document.body.append(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 10_000);
+    if (chat()?.more) say('Exported what this page holds: scroll up for earlier messages first to take them too.');
+  }
+
+  let found = [];            // the positions of the items that match
+  let foundAt = -1;          // which of them is shown
+  let foundKey = null;       // its row's key
+  function openFind() {
+    findBar.hidden = false;
+    findInput.focus();
+    findInput.select();
+    search();
+  }
+  function closeFind() {
+    if (findBar.hidden) return;
+    findBar.hidden = true;
+    found = [];
+    foundAt = -1;
+    markFound(null);
+    input.focus({ preventScroll: true });
+  }
+  function search() {
+    const list = items();
+    found = findIn(list, findInput.value);
+    // From the newest match: what you look for is most often what just happened.
+    foundAt = found.length ? found.length - 1 : -1;
+    show();
+  }
+  function step(by) {
+    if (!found.length) return;
+    foundAt = (foundAt + by + found.length) % found.length;
+    show();
+  }
+  function show() {
+    const query = findInput.value.trim();
+    const more = chat()?.more ? ' · earlier messages not loaded' : '';
+    setText(findCount, !query ? '' : found.length ? `${foundAt + 1} of ${found.length}${more}` : `No matches${more}`);
+    if (foundAt < 0) return markFound(null);
+    const list = items();
+    const index = found[foundAt];
+    const item = list[index];
+    // A run of tools opens, so what matched in it shows.
+    if (item.type === 'tools') view.open.add(item.id);
+    draw(list, Math.max(0, index - 8), Math.min(list.length, index + 12));
+    measure();
+    const row = rows.get(keyOf(item));
+    row?.update(item);
+    markFound(keyOf(item), query);
+    row?.el.scrollIntoView({ block: 'center' });
+  }
+  // The found row marked, and the query in it highlighted where the browser can (CSS Custom Highlights).
+  function markFound(key, query = '') {
+    if (foundKey && rows.get(foundKey)) rows.get(foundKey).el.classList.remove('found');
+    foundKey = key;
+    const row = key ? rows.get(key) : null;
+    row?.el.classList.add('found');
+    if (!globalThis.CSS?.highlights || typeof Highlight === 'undefined') return;
+    CSS.highlights.delete('chat-find');
+    if (!row || !query) return;
+    const wanted = fold(query);
+    const ranges = [];
+    const walker = document.createTreeWalker(row.el, NodeFilter.SHOW_TEXT);
+    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+      const text = fold(node.nodeValue);
+      for (let at = text.indexOf(wanted); at >= 0; at = text.indexOf(wanted, at + wanted.length)) {
+        const range = new Range();
+        range.setStart(node, at);
+        range.setEnd(node, at + wanted.length);
+        ranges.push(range);
+      }
+    }
+    if (ranges.length) CSS.highlights.set('chat-find', new Highlight(...ranges));
+  }
+  findInput.addEventListener('input', search);
+  findInput.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') { event.preventDefault(); step(event.shiftKey ? -1 : 1); }
+    else if (event.key === 'Escape') { event.preventDefault(); closeFind(); }
+  });
+  // ⌘F / Ctrl+F while the chat shows: this find, since the browser's sees only the rows drawn. ⌘G / Ctrl+G: the next.
+  document.addEventListener('keydown', (event) => {
+    if (!view.session || el.hidden || !el.isConnected || el.closest('[hidden]')) return;
+    const mod = KEY.mod === '⌘' ? event.metaKey && !event.ctrlKey : event.ctrlKey && !event.metaKey;
+    if (!mod || event.altKey) return;
+    const key = event.key.toLowerCase();
+    if (key === 'f') { event.preventDefault(); openFind(); }
+    else if (key === 'g' && !findBar.hidden) { event.preventDefault(); step(event.shiftKey ? -1 : 1); }
+  });
+
   let unsubscribe = null;
   return {
     el,
@@ -754,6 +961,10 @@ export function chatView(app) {
       if (view.session) store.closeChat(view.session);
       view.session = id;
       view.open = new Set();
+      findBar.hidden = true;
+      found = [];
+      foundAt = -1;
+      foundKey = null;
       // What the box held for the last session stays with it: nothing typed here goes to another.
       attached = [];
       drawAttached();
@@ -792,5 +1003,9 @@ export function chatView(app) {
     },
     // The message box, for the keys that go to it.
     focus() { input.focus(); },
+    // The chat's own commands (the palette's): find in it, copy it as Markdown, export it as a .md file.
+    find: () => openFind(),
+    copyMarkdown: () => (items().length ? copyText(markdownNow()) : say('Nothing in this chat to copy yet.')),
+    exportChat: () => exportChat(),
   };
 }

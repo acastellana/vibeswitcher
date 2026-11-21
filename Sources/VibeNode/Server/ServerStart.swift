@@ -119,6 +119,13 @@ public enum ServerStart {
         requests.nodeRoot = parsed.nodeRoot
         // Where `build.switch` finds the builds: the account's own install folder on the node, a test's on a scratch node.
         requests.installRoot = accountHome.map { NodeFolders.defaultPrefix(accountHome: $0) } ?? parsed.testInstallRoot
+        // Check for Updates on the user's node (`UpdateWatch`): a scratch server asks GitHub nothing.
+        if parsed.node, let accountHome {
+            let updates = UpdateWatch(file: root.appendingPathComponent("update-check.json"), running: commit,
+                                      looker: .github(home: accountHome), queue: queue, note: say)
+            requests.updates = updates
+            updates.start(clock: clock)
+        }
         engine.watchRoom()
         let server = NodeServer(root: root, requests: requests, housekeeping: parsed.testHousekeeping ?? ServerArguments.housekeeping,
                                 clock: clock, cgroupRoot: parsed.testCgroupRoot, runnersAbove: runnersAbove, note: say)

@@ -41,6 +41,7 @@ extension NodeSettings {
             case "boost": store.set(value, forKey: "boostMode")
             case "lead_mail": store.set(value.map { $0 == "on" }, forKey: LeadMail.enabledKey)
             case "ai_summaries": store.set(value.map { $0 == "on" }, forKey: NodeSummaries.key)
+            case "projects_folder": store.set(value, forKey: projectsFolderKey)
             case "boost_load_threshold", "boost_max_sessions", "boost_max_workers", "boost_heavy_slots":
                 var limits = boostLimits(store)
                 let fallback = BoostLimits()

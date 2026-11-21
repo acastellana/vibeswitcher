@@ -208,6 +208,8 @@ struct RequestsTests {
                                   "settings",
                                   // The node's shells, listed (2026-11-20).
                                   "shells",
+                                  // A session's tokens and cost, an image of its chat (2026-11-21).
+                                  "session.usage", "chat.image",
                                   // The start page's recent projects (2026-11-21), the user's or a page's.
                                   "recent"]
         let changes: Set<String> = ["stop", "lead", "answer", "hold", "tell", "config.accept", "base.accept", "base.keep", "hooks.install", "hooks.remove", "build.switch",

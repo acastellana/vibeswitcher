@@ -39,7 +39,8 @@ test('the page allows only its own scripts and styles, with Trusted Types and no
   assert.equal(directives['default-src'], "'none'");
   assert.equal(directives['script-src'], "'self'");
   assert.equal(directives['style-src'], "'self'");
-  assert.equal(directives['img-src'], "'self'");
+  // `blob:`: a chat's images, their bytes asked of the node (`chat.image`) and shown as object URLs; nothing else.
+  assert.equal(directives['img-src'], "'self' blob:");
   assert.equal(directives['require-trusted-types-for'], "'script'");
   assert.equal(directives['trusted-types'], "'none'");
   assert.doesNotMatch(policy, /unsafe|https?:|data:|\*/);

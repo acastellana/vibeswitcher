@@ -4,7 +4,7 @@
 
 import { h, setText, setClass, framed, motionOK } from '../dom.js';
 import { agentMark, statusMark, setMark, icon } from '../marks.js';
-import { STATES, ROLES, stateOf, since, tilde, KEY, AGENTS } from '../words.js';
+import { STATES, ROLES, stateOf, since, tilde, KEY, AGENTS, clock } from '../words.js';
 import { projectOf } from '../ui.js';
 import { chatView } from './chat.js';
 import { teamStrip } from './lead.js';
@@ -56,8 +56,10 @@ export function sessionView(app) {
   // A session that ended lately (the node's `ended`) says so, with the line that resumes it where its conversation is known.
   const goneWhy = h('p', null, 'It ended, or its link is from another node.');
   const goneResume = h('div', { class: 'gone-resume', hidden: true });
+  // How it ended, as the host recorded it (the Mac's inspector's Exit): "exited 0 at 10:42", "killed by SIGTERM at 10:42".
+  const goneExit = h('p', { class: 'gone-exit', hidden: true });
   const gone = h('div', { class: 'pane', hidden: true },
-    h('div', { class: 'placeholder' }, h('h2', null, 'This session isn’t here any more'), goneWhy, goneResume, h('a', { class: 'button quiet', href: '#/' }, 'Start Page')));
+    h('div', { class: 'placeholder' }, h('h2', null, 'This session isn’t here any more'), goneWhy, goneExit, goneResume, h('a', { class: 'button quiet', href: '#/' }, 'Start Page')));
   let goneDrawn = '';
   function drawGone(id) {
     const entry = endedEntry(store.state.node, id);
@@ -67,6 +69,8 @@ export function sessionView(app) {
     const line = resumeLine(entry);
     setText(goneWhy, !entry ? 'It ended, or its link is from another node.'
       : line ? 'It ended. This starts it again in its same conversation, from a terminal on this node:' : 'It ended, and its conversation id wasn’t known: it can’t be resumed.');
+    goneExit.hidden = !entry?.exit;
+    setText(goneExit, entry?.exit ? `Exit: ${entry.exit.cause} at ${clock(entry.exit.at)}` : '');
     goneResume.hidden = !line;
     goneResume.replaceChildren(...(line ? [copyLine(line, 'the command that resumes it')] : []));
   }
@@ -175,5 +179,13 @@ export function sessionView(app) {
   document.addEventListener('visibilitychange', schedule);
   render();
 
-  return { el, focusComposer: () => chat.focus(), act: (tab) => acting.open(tab) };
+  return {
+    el, focusComposer: () => chat.focus(), act: (tab) => acting.open(tab),
+    // The chat's own commands, its pane shown first.
+    chat: (command) => {
+      const id = ui.state.route.id;
+      if (ui.pane(id) === 'terminal') ui.setPane(id, 'chat');
+      requestAnimationFrame(() => chat[command]());
+    },
+  };
 }

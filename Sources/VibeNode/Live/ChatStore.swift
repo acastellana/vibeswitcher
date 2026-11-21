@@ -342,6 +342,13 @@ public final class ChatStore: @unchecked Sendable {
         return feeds.count
     }
 
+    /// For the reads beside the chat (`ChatReads.swift`): the sessions as the store has them, the node's home, the
+    /// queue the files are read on, and the follow a held chat is read by. On `queue`.
+    var sessionsValues: [String: Session] { sessions.values }
+    var homeFolder: String { home }
+    var readsQueue: DispatchQueue { reads }
+    func follow(of session: String) -> TranscriptFollow? { feeds[session]?.follow }
+
     /// Whether `session`'s chat is held now. On `queue`.
     public func holds(_ session: String) -> Bool {
         dispatchPrecondition(condition: .onQueue(queue))
@@ -507,6 +514,9 @@ final class TranscriptFollow: @unchecked Sendable {
         self.url = url
         self.format = format
     }
+
+    /// The chat's items as last read (each a wire item's), in no order.
+    var items: [ChatItem] { made.values.map(\.item) }
 
     /// The chat's wire items after reading what was written since the last read; nil when nothing new was read (the
     /// first read always says its items, none when the file can't be read).

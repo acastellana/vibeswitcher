@@ -305,6 +305,10 @@ public enum NodeWire {
         "session.draft": .webDraft, "session.draft.clear": .webDraft,
         // The composer and launch presets (2026-11-20): what a session's `/` and `@` offer, and the presets, are reads.
         "session.presets": .anyone, "session.complete": .anyone, "session.attach": .webDraft,
+        // A session's tokens and cost, read from its transcript (the inspector, 2026-11-21).
+        "session.usage": .anyone,
+        // An image a session's chat shows, its bytes in parts (the chat's images, 2026-11-21): a read.
+        "chat.image": .anyone,
         // The node's settings (the parity table's gap 9, 2026-11-20): read by anyone of the uid (a page too), set in the
         // user's voice.
         "settings": .anyone, "set": .user,
@@ -346,7 +350,7 @@ public enum NodeWire {
                                "tell",
                                "board", "seen",
                                "send", "session.new", "session.end", "session.reply", "session.draft", "session.draft.clear",
-                               "session.presets", "session.complete", "session.attach",
+                               "session.presets", "session.complete", "session.attach", "session.usage", "chat.image",
 
                                "settings", "set",
                                "push", "push.decline",

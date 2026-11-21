@@ -38,6 +38,7 @@ export function draftProblem(setting, value) {
     case 'model': return /^[A-Za-z0-9.\-_[\]:]{1,100}$/.test(text.trim()) ? null : 'one word, a model’s name as claude --model takes it';
     case 'paths': return text.includes('\n') ? 'one line' : null;
     case 'text': return text.trim() ? null : 'some text (or default)';
+    case 'folder': return /^(\/|~$|~\/)/.test(text.trim()) && !text.includes('\n') ? null : 'a full path, or one under ~';
     default: return null;
   }
 }
