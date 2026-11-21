@@ -429,6 +429,8 @@ if [[ -n $preferences_only ]]; then
 fi
 
 export HOME=$tool_scratch/home CFFIXED_USER_HOME=$tool_scratch/home VIBESWITCHER_HOME=$tool_scratch/home/.vibeswitcher
+# The suites run in UTC, as on CI: a time a test checks (the wire vectors' usage resets) reads the same everywhere.
+export TZ=UTC
 # Only --perf runs the benches, whatever the caller's environment holds.
 unset VIBESWITCHER_PERF
 if [[ -n $web_only ]]; then

@@ -17406,7 +17406,7 @@ extension EmbeddedAssets {
             ICBpZiAoZmFpbHVyZSAhPT0gbnVsbCkgcmV0dXJuIGZhaWx1cmU7CiAgfQogIHJldHVybiBudWxs
             Owp9Cg==
             """),
-        EmbeddedAssets.File(path: "wire/vectors.json", sha256: "b4a905cac28d6d0d4dfb0c93bc5392c3f798d99afb574a50949120c9a49d78ae", base64: """
+        EmbeddedAssets.File(path: "wire/vectors.json", sha256: "1683bae72e834effbf619189a98e543d30af3558ba95e0417e2aae2724a68683", base64: """
             ewogICJhbnN3ZXIuZnJvbS1hLXBhZ2UiOiB7ImVycm9yIjp7ImNvZGUiOiJ2b2ljZSIsIm1lc3Nh
             Z2UiOiJub3QgdGhlIHVzZXIncyB2b2ljZTogYSB3ZWIgY2xpZW50IGRyYWZ0cywgYW5kIGB2aWJl
             c3dpdGNoZXIgYW5zd2VyYCBjb25maXJtcyJ9LCJvayI6ZmFsc2UsInJlIjoiMTQiLCJ2IjoxfSwK
@@ -18034,15 +18034,15 @@ extension EmbeddedAssets {
             Im1vZGVsIjoiZmFibGUiLCJuYW1lIjoic2V2ZW5fZGF5X292ZXJhZ2VfaW5jbHVkZWQiLCJyZWFj
             aGVkIjp0cnVlLCJyZXNldHNBdCI6IjIwMjYtMTEtMThUMDk6MDA6MDAuMDAwWiIsInRleHQiOiJ0
             aGUgZmFibGUgbGltaXQgKHNldmVuX2RheV9vdmVyYWdlX2luY2x1ZGVkKTogcmVhY2hlZCAoQ2xh
-            dWRlIHJlZnVzZWQgYSByZXF1ZXN0IGF0IGl0KSwgcmVzZXRzIE5vdiAxOCwgMTA6MDAiLCJ1c2Vk
+            dWRlIHJlZnVzZWQgYSByZXF1ZXN0IGF0IGl0KSwgcmVzZXRzIE5vdiAxOCwgMDk6MDAiLCJ1c2Vk
             UGVyY2VudCI6MTAwfSx7ImhvbGRzIjp0cnVlLCJsYWJlbCI6InRoZSB3ZWVrbHkgbGltaXQiLCJt
             b2RlbCI6bnVsbCwibmFtZSI6InNldmVuX2RheSIsInJlYWNoZWQiOmZhbHNlLCJyZXNldHNBdCI6
             IjIwMjYtMTEtMTlUMDk6MDA6MDAuMDAwWiIsInRleHQiOiJ0aGUgd2Vla2x5IGxpbWl0IChldmVy
-            eSBtb2RlbCk6IDg0JSB1c2VkLCByZXNldHMgTm92IDE5LCAxMDowMCIsInVzZWRQZXJjZW50Ijo4
+            eSBtb2RlbCk6IDg0JSB1c2VkLCByZXNldHMgTm92IDE5LCAwOTowMCIsInVzZWRQZXJjZW50Ijo4
             NH0seyJob2xkcyI6ZmFsc2UsImxhYmVsIjoidGhlIDUtaG91ciBsaW1pdCIsIm1vZGVsIjpudWxs
             LCJuYW1lIjoiZml2ZV9ob3VyIiwicmVhY2hlZCI6ZmFsc2UsInJlc2V0c0F0IjoiMjAyNi0xMS0x
             N1QxMjowMDowMC4wMDBaIiwidGV4dCI6InRoZSA1LWhvdXIgbGltaXQgKGV2ZXJ5IG1vZGVsKTog
-            MzElIHVzZWQsIHJlc2V0cyBOb3YgMTcsIDEzOjAwIiwidXNlZFBlcmNlbnQiOjMxfV0sInRocmVz
+            MzElIHVzZWQsIHJlc2V0cyBOb3YgMTcsIDEyOjAwIiwidXNlZFBlcmNlbnQiOjMxfV0sInRocmVz
             aG9sZCI6ODB9fSwidiI6MX1dLAogICJzbmFwc2hvdC5ib2FyZHMiOiB7ImNvbGxlY3Rpb24iOiJi
             b2FyZHMiLCJlbnRyaWVzIjpbeyJpZCI6ImxvY2FsOnByb2plY3Q6Tk5JUjBhOENncGhnIiwidmFs
             dWUiOnsiYWxsRG9uZSI6eyJhdCI6IjIwMjYtMTEtMTdUMDg6MDA6MDAuMDAwWiIsImlkIjoiYTFk
@@ -18216,15 +18216,15 @@ extension EmbeddedAssets {
             ZWQpIiwibW9kZWwiOiJmYWJsZSIsIm5hbWUiOiJzZXZlbl9kYXlfb3ZlcmFnZV9pbmNsdWRlZCIs
             InJlYWNoZWQiOnRydWUsInJlc2V0c0F0IjoiMjAyNi0xMS0xOFQwOTowMDowMC4wMDBaIiwidGV4
             dCI6InRoZSBmYWJsZSBsaW1pdCAoc2V2ZW5fZGF5X292ZXJhZ2VfaW5jbHVkZWQpOiByZWFjaGVk
-            IChDbGF1ZGUgcmVmdXNlZCBhIHJlcXVlc3QgYXQgaXQpLCByZXNldHMgTm92IDE4LCAxMDowMCIs
+            IChDbGF1ZGUgcmVmdXNlZCBhIHJlcXVlc3QgYXQgaXQpLCByZXNldHMgTm92IDE4LCAwOTowMCIs
             InVzZWRQZXJjZW50IjoxMDB9LHsiaG9sZHMiOnRydWUsImxhYmVsIjoidGhlIHdlZWtseSBsaW1p
             dCIsIm1vZGVsIjpudWxsLCJuYW1lIjoic2V2ZW5fZGF5IiwicmVhY2hlZCI6ZmFsc2UsInJlc2V0
             c0F0IjoiMjAyNi0xMS0xOVQwOTowMDowMC4wMDBaIiwidGV4dCI6InRoZSB3ZWVrbHkgbGltaXQg
-            KGV2ZXJ5IG1vZGVsKTogODQlIHVzZWQsIHJlc2V0cyBOb3YgMTksIDEwOjAwIiwidXNlZFBlcmNl
+            KGV2ZXJ5IG1vZGVsKTogODQlIHVzZWQsIHJlc2V0cyBOb3YgMTksIDA5OjAwIiwidXNlZFBlcmNl
             bnQiOjg0fSx7ImhvbGRzIjpmYWxzZSwibGFiZWwiOiJ0aGUgNS1ob3VyIGxpbWl0IiwibW9kZWwi
             Om51bGwsIm5hbWUiOiJmaXZlX2hvdXIiLCJyZWFjaGVkIjpmYWxzZSwicmVzZXRzQXQiOiIyMDI2
             LTExLTE3VDEyOjAwOjAwLjAwMFoiLCJ0ZXh0IjoidGhlIDUtaG91ciBsaW1pdCAoZXZlcnkgbW9k
-            ZWwpOiAzMSUgdXNlZCwgcmVzZXRzIE5vdiAxNywgMTM6MDAiLCJ1c2VkUGVyY2VudCI6MzF9XSwi
+            ZWwpOiAzMSUgdXNlZCwgcmVzZXRzIE5vdiAxNywgMTI6MDAiLCJ1c2VkUGVyY2VudCI6MzF9XSwi
             dGhyZXNob2xkIjo4MH0sIndlYiI6eyJjb25uZWN0aW9ucyI6MSwicG9ydCI6NDc4MzAsInN0YXRl
             IjoibGlzdGVuaW5nIiwidG9rZW5zIjoxfX19XSwiZXBvY2giOiIwYjZjMWE1Mi0zZjBlLTRjNTgt
             OWE1Ny0yZDFjOGU0ZjdhMTAiLCJraW5kIjoic25hcHNob3QiLCJzZXEiOjMsInN1YiI6InMwIiwi

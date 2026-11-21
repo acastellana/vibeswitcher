@@ -112,6 +112,8 @@ case "web":
     exit(WebCommand.run(Array(words.dropFirst())))
 case "wire-vectors":
     // Not in the usage text: the web client's validators and vectors are written with it (the live plan's LW-D10).
+    // The vectors name times (a usage limit's reset): written in UTC, so they read the same on every machine and CI.
+    NSTimeZone.default = TimeZone(identifier: "UTC")!
     exit(WireCommand.run(Array(words.dropFirst())))
 case "install-record":
     // Not in the usage text: `scripts/install-node.sh` runs it from the build it has just made (the start plan's ST-D13).
