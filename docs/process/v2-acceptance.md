@@ -37,5 +37,5 @@ can be chosen.
 | A21 | Switch | install a new build, `vs switch` | sessions survive the handover; hooks install after | `a21Switch` | |
 | A22 | Security | from a session: `vibeswitcher answer …` | refused: not the user's voice | `a22AnswerFromASession` | pass (2026-11-21): a session's Bash ran `vibeswitcher tell …`: refused (exit 77), nothing done |
 | A23 | Security | a page token tries `answer`/`send` | refused; only drafts | `a23PageTokenRefused` | |
-| A24 | Tests | `scripts/nightly.sh` on the merged v2 | full suite passes (retry-failed); flaky list filed | skipped: the nightly run itself | |
+| A24 | Tests | `scripts/nightly.sh` on the merged v2 | full suite passes (retry-failed); flaky list filed | 2026-11-21, 10 min, commit `370be064`: pass except the known interop test (`SandboxFactsTests.aWindowsStubDoesntStartWithoutInit`, kept failing on purpose until the sandbox's Windows-stub task); nothing flaky. The first run's real failures fixed (`83ce1ade`, `cf4cb1b2`, `a635e70f`, `03f406c9`); its one flake filed in [the flaky list](v2-flaky-tests.md) | |
 | A25 | Self-improvement | VS's own lead on its clone | merges its tasks through the gate; keeps a goal list | skipped: needs a real Claude lead | |
