@@ -157,8 +157,19 @@ public final class HostServer {
     /// The app's connectors, by the number of the end `openAppConnector` gave out (see V2/AppConnector.swift): none
     /// on the Mac.
     var appConnectors: [Int32: AppConnector] = [:]
-    /// The server child, the app on Linux (see V2/ServerChild.swift): none on the Mac, nor without `--server`.
+    /// The server child, the app on Linux (see V2/ServerChild.swift); on the Mac only a node's host's (`--server`, the
+    /// node on the Mac's step 3); none without `--server`.
     var serverChild: ServerChild?
+
+    /// A node's host on the Mac: it runs a server child and keeps a vault. It answers `vaultV2` there (the record of the
+    /// user's actions, `VaultV2Handler`) and lists it in its welcome; the Mac app's host has no server child and doesn't.
+    var isMacNodeHost: Bool { Platform.CodeIdentity.isAvailable && serverChild != nil && config.vault != nil }
+
+    /// What the welcome lists: the configured capabilities, and on a Mac node's host `vaultV2` too.
+    var welcomeCapabilities: [String] {
+        isMacNodeHost && !config.capabilities.contains(HostProtocol.Capability.vaultV2)
+            ? config.capabilities + [HostProtocol.Capability.vaultV2] : config.capabilities
+    }
     /// The watch on the host's own paths (see V2/HostPathWatch.swift): only with `Config.watchesItsPath`.
     var pathWatch: HostPathWatch?
     /// What `hostNotes` answers that no other part keeps (see V2/HostNotesAnswer.swift).
@@ -480,13 +491,13 @@ public final class HostServer {
         case .hello:
             let visible = allInfo.filter { mayKill($0.id, from: caller(of: client)) }
             reply(.welcome(protocolVersion: HostProtocol.version, hostBuild: config.hostBuild, sessions: visible,
-                           capabilities: config.capabilities, pid: getpid(), startedAt: startedAt))
+                           capabilities: welcomeCapabilities, pid: getpid(), startedAt: startedAt))
         case .census:
             reply(.census(HostCensus.count(allInfo.map { ($0.label, $0.cwd, $0.isLive) })))
         case .hostNotes:
             reply(.hostNotes(hostNotes(startedAt: startedAt)))
         case .vaultV2(let request):
-            reply(.vaultV2(VaultV2Handler.answer(request, from: caller(of: client), vault: config.vault)))
+            reply(.vaultV2(VaultV2Handler.answer(request, from: caller(of: client), vault: config.vault, nodeHost: isMacNodeHost)))
         case .watch(let id):
             watch(id, from: client, reply: reply)
         case .spawn(let request):
