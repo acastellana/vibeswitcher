@@ -32,9 +32,9 @@ extension Requests {
 
     /// The Mac's voice on `request`: `done` on `queue` with nil when it is the user's (approved at the Mac for a state
     /// change), else the reply to give (a refusal, or a replayed action's first answer). Silent checks first, in this
-    /// order, none of them asking: the action id; a replayed action id (answered as it was, `replies`); a card's code;
-    /// the caller (`ApprovalVoice.callerRefusal`: uid, the command line's code, the Hardened Runtime, the guard rails);
-    /// a read then passes. A state change then: stopping and the host's welcome; the cooldown after a dialog that came
+    /// order, none of them asking: the action id; a card's code; the caller (`ApprovalVoice.callerRefusal`: uid, the
+    /// command line's code, the Hardened Runtime, the guard rails); a replayed action id (answered as it was, `replies`,
+    /// only to a caller that passed); a read then passes. A state change then: stopping and the host's welcome; the cooldown after a dialog that came
     /// to nothing; one dialog at a time; its text (`approvalCard`: refused when the decisive part can't fit). Only then
     /// is a dialog shown. On `queue`.
     func approvalJudgment(_ request: NodeWire.Request, from facts: PeerFacts, token: Platform.PeerToken?,
@@ -48,13 +48,14 @@ extension Requests {
         if Self.recorded.contains(request.kind), action.map({ UUID(uuidString: $0) != nil }) != true {
             return done(.init(re: request.id, error: .init(.badArgs, "\(request.kind) needs an action id (a UUID)")))
         }
+        if Self.carded.contains(request.kind), let refusal = cardRefusal(request) { return done(refusal) }
+        if let why = approval.callerRefusal(peer: token, facts: facts, live: live, uid: rule.uid) { return refuse(why) }
         // An action this server answered already: its answer again, no dialog (`voiced` would answer it so after one).
+        // Only to a caller that passed the checks above: an action id alone gets nothing.
         if let action, var again = replies[action] {
             again.re = request.id
             return done(again)
         }
-        if Self.carded.contains(request.kind), let refusal = cardRefusal(request) { return done(refusal) }
-        if let why = approval.callerRefusal(peer: token, facts: facts, live: live, uid: rule.uid) { return refuse(why) }
         guard NodeWire.changesState(request.kind) else { return done(nil) }
         // What `voiced` would answer after the dialog, answered before it: no dialog for a request that can't go on (and
         // a `not-yet` the command line asks again would ask the person twice).

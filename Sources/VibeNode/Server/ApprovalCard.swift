@@ -72,7 +72,9 @@ extension Requests {
 
     private func approvalParts(_ kind: String, _ args: [String: NodeWire.Value]) -> Result<(decisive: String, context: String?), ApprovalTextRefusal> {
         let text = { (key: String) in args[key]?.string }
-        func quoted(_ value: String, limit: Int) -> String { Self.quoted(value, limit: limit) }
+        // A decisive value is shown whole (`whole`): one too long for the dialog makes the request's text too long, and
+        // nothing is asked (`approvalCard`'s budget). Only context is cut.
+        func whole(_ value: String) -> String { Self.whole(value) }
         switch kind {
         case "answer", "hold", "config.accept", "base.accept", "base.keep":
             guard let wanted = text("card"), let card = engine?.cards.resolve(wanted) else {
@@ -83,25 +85,24 @@ extension Requests {
             guard let key = text("key"), let setting = NodeSettings.setting(key), let value = text("value") else {
                 return .failure(.init(why: "set needs a known key and a value: nothing was asked"))
             }
-            let shown = value.contains("\n") ? "a text of \(value.split(separator: "\n", omittingEmptySubsequences: false).count) lines" : quoted(value, limit: 120)
-            return .success(("set \(setting.key) to \(shown)", text("folder").map { "in \(Self.place($0))" } ?? "for the whole node"))
+            return .success(("set \(setting.key) to \(whole(value))", text("folder").map { "in \(Self.place($0))" } ?? "for the whole node"))
         case "send":
             guard let session = text("session") else { return .failure(.init(why: "send needs a session: nothing was asked")) }
             let words = text("text") ?? ""
             let images = args["images"]?.array?.count ?? 0
-            let what = words.isEmpty ? "no words" : Self.cutSaying(words, limit: 100)
+            let what = words.isEmpty ? "no words" : whole(words)
             return .success(("type into \(sessionLabel(session)): \(what)" + (images > 0 ? " with \(images) image\(images == 1 ? "" : "s")" : ""),
                              args["now"]?.bool == true ? "now, at its agent's next step" : nil))
         case "session.new":
             guard let folder = text("folder") else { return .failure(.init(why: "session.new needs a folder: nothing was asked")) }
-            var what = "start \(text("preset").map { "the preset \(quoted($0, limit: 40))" } ?? ConfigSeal.inert(text("agent") ?? "claude", limit: 20)) in \(Self.place(folder))"
-            if let model = text("model") { what += " on \(quoted(model, limit: 40))" }
+            var what = "start \(text("preset").map { "the preset \(whole($0))" } ?? whole(text("agent") ?? "claude")) in \(Self.place(folder))"
+            if let model = text("model") { what += " on \(whole(model))" }
             return .success((what, nil))
         case "session.end": return session(args, "end")
         case "session.resume": return session(args, "resume")
         case "session.rename":
             guard let session = text("session") else { return .failure(.init(why: "session.rename needs a session: nothing was asked")) }
-            return .success(("rename \(sessionLabel(session)) to \(text("name").map { quoted($0, limit: 60) } ?? "its own name")", nil))
+            return .success(("rename \(sessionLabel(session)) to \(text("name").map(whole) ?? "its own name")", nil))
         case "session.pause":
             guard let session = text("session") else { return .failure(.init(why: "session.pause needs a session: nothing was asked")) }
             let how = args["hours"]?.int.map { "for \($0) hours" } ?? text("for").map { ConfigSeal.inert($0, limit: 30) } ?? ""
@@ -110,15 +111,16 @@ extension Requests {
             guard let session = text("session"), let choice = args["choice"]?.int else {
                 return .failure(.init(why: "session.reply needs a session and a choice: nothing was asked"))
             }
-            let typed = text("text").map { " with the words \(quoted($0, limit: 80))" } ?? ""
+            let typed = text("text").map { " with the words \(whole($0))" } ?? ""
             return .success(("answer \(sessionLabel(session))'s question with option \(choice)\(typed)", nil))
         case "tell":
             guard let folder = text("folder"), let words = text("text") else { return .failure(.init(why: "tell needs a folder and words: nothing was asked")) }
-            return .success(("tell the lead of \(Self.place(folder)): \(Self.cutSaying(words, limit: 80))", nil))
+            return .success(("tell the lead of \(Self.place(folder)): \(whole(words))", nil))
         case "lead":
             guard let folder = text("folder") else { return .failure(.init(why: "lead needs a folder: nothing was asked")) }
             let how = args["resume"]?.bool == true ? "reopen the lead of" : args["replace"]?.bool == true ? "replace the lead of" : "start a lead in"
-            return .success(("\(how) \(Self.place(folder))", text("goal").map { "goal \(Self.cutSaying($0, limit: 100))" }))
+            // The goal is told to the lead as the user's: decisive, whole.
+            return .success(("\(how) \(Self.place(folder))" + (text("goal").map { " with the goal \(whole($0))" } ?? ""), nil))
         case "stop":
             let live = link.sessions.filter(\.isLive).count
             return .success(("stop the node, ending \(live) live session\(live == 1 ? "" : "s")", nil))
@@ -152,10 +154,18 @@ extension Requests {
             return .success(("close \(count.map { "\($0) finished shell\($0 == 1 ? "" : "s")" } ?? "the finished shells")", text("folder").map { "in \(Self.place($0))" }))
         case "presets.edit":
             guard let op = text("op"), let name = text("name") else { return .failure(.init(why: "presets.edit needs an op and a name: nothing was asked")) }
-            var what = "\(ConfigSeal.inert(op, limit: 10)) the launch preset \(quoted(name, limit: 30))"
-            if let command = text("args") { what += ": runs \(quoted(command, limit: 80))" }
-            let env = (args["env"]?.object ?? [:]).sorted { $0.key < $1.key }.map { "\(ConfigSeal.inert($0.key, limit: 30))=\(quoted($0.value.string ?? "", limit: 30))" }
+            // Every field that changes the preset, whole: its kind, its command, each variable set or unset, a new name,
+            // whether it is the default and whether a shell stays.
+            var what = "\(whole(op)) the launch preset \(whole(name))"
+            if let kind = text("kind") { what += " (\(whole(kind)))" }
+            if let rename = text("rename") { what += " renamed \(whole(rename))" }
+            if let command = text("args") { what += ": runs \(whole(command))" }
+            let env = (args["env"]?.object ?? [:]).sorted { $0.key < $1.key }.map { "\(whole($0.key))=\(whole($0.value.string ?? ""))" }
             if !env.isEmpty { what += " with \(env.joined(separator: " "))" }
+            let unset = (args["unset"]?.array ?? []).compactMap(\.string)
+            if !unset.isEmpty { what += " unsetting \(unset.map(whole).joined(separator: " "))" }
+            if let isDefault = args["default"]?.bool { what += isDefault ? " as the folder's default" : " no longer the default" }
+            if let keep = args["keepShell"]?.bool { what += keep ? ", a shell kept after it" : ", no shell after it" }
             return .success((what, text("folder").map { "for \(Self.place($0))" }))
         default:
             return .failure(.init(why: "\(kind) has no dialog the Mac can show"))
@@ -175,28 +185,26 @@ extension Requests {
         switch kind {
         case "answer":
             if let shell = card.shell {
-                let word = (answer ?? "").trimmingCharacters(in: .whitespaces).lowercased()
-                guard word == "run" else { return .success(("decline an agent's shell request", "in \(Self.place(shell.request.cwd))")) }
-                // The command and the folder whole, or nothing asked.
-                guard shell.request.command.count <= 100, shell.request.cwd.count <= 80, !shell.request.command.contains("\n") else {
-                    return .failure(.init(why: "the shell request's command or folder is too long to show whole in the Mac's dialog: nothing was asked"))
+                // The same reading `answerShell` acts on (`ShellCards.answerWord`): run, decline, or nothing asked.
+                switch ShellCards.answerWord(answer ?? "") {
+                case nil: return .failure(.init(why: "a shell card is answered run or decline: nothing was asked"))
+                case "decline"?: return .success(("decline an agent's shell request", "in \(Self.place(shell.request.cwd))"))
+                default: break
                 }
-                return .success(("run an agent's command in your login shell: \(Self.quoted(shell.request.command, limit: 100)) in \(Self.place(shell.request.cwd))", nil))
+                // The command and the folder whole, or nothing asked.
+                guard !shell.request.command.contains("\n") else {
+                    return .failure(.init(why: "the shell request's command has more than one line, too much to show whole in the Mac's dialog: nothing was asked"))
+                }
+                return .success(("run an agent's command in your login shell: \(Self.whole(shell.request.command)) in \(Self.place(shell.request.cwd))", nil))
             }
             guard let words = answer, !words.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
                 return .failure(.init(why: "an answer needs words: nothing was asked"))
             }
             if let approval = card.approval {
-                guard words.count <= 60 else {
-                    return .failure(.init(why: "the answer is too long to show whole beside the commit in the Mac's dialog (at most 60 characters): nothing was asked"))
-                }
                 let tasks = approval.tasks.isEmpty ? "" : " (task\(approval.tasks.count == 1 ? "" : "s") \(ConfigSeal.inert(approval.tasks.joined(separator: ", "), limit: 60)))"
-                return .success(("answer \(Self.quoted(words, limit: 60)) to merging \(approval.commit.prefix(12))\(tasks) in \(project)", asks))
+                return .success(("answer \(Self.whole(words)) to merging \(approval.commit.prefix(12))\(tasks) in \(project)", asks))
             }
-            guard words.count <= 120 else {
-                return .failure(.init(why: "the answer is too long to show whole in the Mac's dialog (\(words.count) characters, at most 120): nothing was asked"))
-            }
-            return .success(("answer \(Self.quoted(words, limit: 120)) in \(project)", asks))
+            return .success(("answer \(Self.whole(words)) in \(project)", asks))
         case "hold":
             return .success(("hold the timer of a question in \(project)", asks))
         case "config.accept":
@@ -228,7 +236,13 @@ extension Requests {
     /// A folder as the dialog names it: its last part, then where it is.
     static func place(_ path: String) -> String {
         let name = (path as NSString).lastPathComponent
-        return "\(ConfigSeal.inert(name, limit: 40)) (\(ConfigSeal.inert(path, limit: 80)))"
+        return "\(ConfigSeal.inert(name, limit: .max)) (\(ConfigSeal.inert(path, limit: .max)))"
+    }
+
+    /// A decisive value, marked “…”, on one line (a line break shown as ⏎), inert, never cut: too long, and the request's
+    /// text doesn't fit the dialog, so nothing is asked.
+    static func whole(_ text: String) -> String {
+        "“" + ConfigSeal.inert(text.replacingOccurrences(of: "\n", with: " ⏎ "), limit: .max) + "”"
     }
 
     /// Words someone else wrote, marked as theirs: “…”, on one line, inert, cut at `limit` with an ellipsis.
@@ -238,8 +252,4 @@ extension Requests {
         return "“" + (inert.count <= limit ? inert : String(inert.prefix(limit - 1)) + "…") + "”"
     }
 
-    /// Words marked, and when cut, how many there are in all.
-    static func cutSaying(_ text: String, limit: Int) -> String {
-        text.count <= limit ? quoted(text, limit: limit) : quoted(text, limit: limit) + " (\(text.count) characters in all)"
-    }
 }

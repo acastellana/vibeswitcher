@@ -216,17 +216,63 @@ struct ApprovalJudgmentTests {
         #expect(text.count <= Requests.approvalBudget)
     }
 
-    /// No argument key is shown, a value can't pass itself off as a field, and words sent are marked and their cut said.
-    @Test func valuesAreMarkedAndNoKeyIsShown() throws {
+    /// No argument key is shown, a value can't pass itself off as a field, and words sent are marked, whole.
+    @Test func valuesAreMarkedWholeAndNoKeyIsShown() throws {
         let requests = requests(ApprovalVoiceTests.Person(.approved))
         let action = UUID().uuidString.lowercased()
         let send = try dialog(requests, "send", ["session": .string("local:3f6c2c1e-8a5b-4c1d-9e0f-2b7a6d5c4e3f"),
-                                                  "text": .string("fine; session other\n\u{1B}[2J" + String(repeating: "x", count: 200))], action: action).get()
+                                                  "text": .string("fine; session other\n\u{1B}[2Jok")], action: action).get()
         #expect(send.hasPrefix("\(NodeIds.code(action: action)) · type into session 3f6c2c1e: “fine; session other ⏎ "), "\(send)")
-        #expect(send.contains("characters in all)") && !send.contains("\u{1B}") && !send.contains("text "), "\(send)")
-        let preset = try dialog(requests, "presets.edit", ["op": .string("add"), "name": .string("dev"), "args": .string("npm run dev"),
-                                                            "env": .object(["PORT": .string("5173")])], action: action).get()
-        #expect(preset.contains("runs “npm run dev” with PORT=“5173”"), "\(preset)")
+        #expect(!send.contains("\u{1B}") && !send.contains("text "), "\(send)")
         #expect(try dialog(requests, "stop", [:], action: action).get() == "\(NodeIds.code(action: action)) · stop the node, ending 0 live sessions")
+    }
+
+    // MARK: The second review (2026-11-21)
+
+    /// The dialog reads a shell card's answer exactly as `answerShell` does: "run" with a line break around it is run,
+    /// and shown as run; anything but run or decline is refused, never shown as a decline.
+    @Test func aShellAnswerIsReadOnceForTheDialogAndTheRun() throws {
+        #expect(ShellCards.answerWord("run\n") == "run" && ShellCards.answerWord(" Run\t\n") == "run" && ShellCards.answerWord("DECLINE") == "decline")
+        #expect(ShellCards.answerWord("maybe") == nil && ShellCards.answerWord("ru n") == nil && ShellCards.answerWord("") == nil)
+        let requests = requests(ApprovalVoiceTests.Person(.approved))
+        var card = CardStore.Card(root: "/Users/u/shop", kind: .shell)
+        card.shell = .init(request: ShellRequest(session: "3f6c2c1e-8a5b-4c1d-9e0f-2b7a6d5c4e3f", cwd: "/Users/u/shop", command: "make install",
+                                                 label: "", createdAt: Date()), asker: "Claude")
+        put(card, requests)
+        let action = UUID().uuidString.lowercased()
+        func text(_ answer: String) -> String? {
+            try? dialog(requests, "answer", ["card": .string(card.id), "code": .string(card.code), "text": .string(answer)], action: action).get()
+        }
+        for answer in ["run\n", " Run\t\n", "RUN"] { #expect(text(answer)?.contains("run an agent's command in your login shell: “make install”") == true, "\(answer)") }
+        #expect(text("decline\n")?.contains("decline an agent's shell request") == true)
+        for answer in ["maybe", "yes", "run it"] { #expect(text(answer) == nil, "\(answer)") }
+    }
+
+    /// A decisive value is never cut: too long for the dialog, nothing is asked. Every field a preset edit changes is shown.
+    @Test func decisiveValuesAreWholeOrNothingIsAsked() throws {
+        let requests = requests(ApprovalVoiceTests.Person(.approved))
+        let action = UUID().uuidString.lowercased()
+        let long = String(repeating: "x", count: 180)
+        #expect((try? dialog(requests, "set", ["key": .string("policy"), "value": .string(long)], action: action).get()) == nil)
+        #expect((try? dialog(requests, "send", ["session": .string("local:abcd"), "text": .string(long)], action: action).get()) == nil)
+        #expect((try? dialog(requests, "presets.edit", ["op": .string("add"), "name": .string("dev"), "args": .string(long)], action: action).get()) == nil)
+        #expect((try? dialog(requests, "presets.edit", ["op": .string("add"), "name": .string("dev"), "env": .object(["TOKEN": .string(long)])], action: action).get()) == nil)
+        let preset = try dialog(requests, "presets.edit", ["op": .string("edit"), "name": .string("dev"), "kind": .string("shell"), "rename": .string("web"),
+                                                            "args": .string("npm run dev"), "env": .object(["PORT": .string("5173")]),
+                                                            "unset": .array([.string("DEBUG")]), "default": .bool(true), "keepShell": .bool(true)], action: action).get()
+        #expect(preset == "\(NodeIds.code(action: action)) · “edit” the launch preset “dev” (“shell”) renamed “web”: runs “npm run dev” with “PORT”=“5173” unsetting “DEBUG” as the folder's default, a shell kept after it", "\(preset)")
+        let set = try dialog(requests, "set", ["key": .string("lead_mail"), "value": .string("off")], action: action).get()
+        #expect(set.contains("set lead_mail to “off”"))
+    }
+
+    /// A replayed action id is answered only to a caller that passes the checks: an action id alone gets nothing.
+    @Test func aReplayIsAnsweredOnlyToACallerThatPasses() async {
+        let person = ApprovalVoiceTests.Person(.approved)
+        let requests = requests(person, commandLinePeer: false)
+        let action = UUID().uuidString.lowercased()
+        requests.queue.sync { requests.replies[action] = .init(re: "old", result: .object(["said": .string("done before")])) }
+        let replay = await judge(requests, "session.end", ["session": .string("local:abcd")], action: action)
+        #expect(replay.refused?.result == nil && replay.refused?.error?.message.contains("isn't the installed command line") == true, "\(String(describing: replay.refused))")
+        #expect(person.asked.isEmpty)
     }
 }

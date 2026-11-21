@@ -196,8 +196,7 @@ extension LeadEngine {
     /// On `queue`.
     func answerShell(_ card: CardStore.Card, text: String, then: @escaping (Result<NodeWire.Value, CardFailure>) -> Void) {
         guard var shown = card.shell else { return then(.failure(.gone("no shell request on card \(card.id)"))) }
-        let word = text.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        guard ["run", "decline"].contains(word) else {
+        guard let word = ShellCards.answerWord(text) else {
             return then(.failure(.badArgs("a shell card is answered run or decline (`vibeswitcher answer \(card.id) run`)")))
         }
         let request = shown.request
@@ -347,6 +346,13 @@ public enum ShellCards {
             }
         }
         return nil
+    }
+
+    /// How a shell card's answer is read, by `answerShell` and by the Mac's dialog alike (`Requests.approvalCard`): spaces
+    /// and line breaks at its ends dropped, any case; `run` or `decline`, else nil (refused).
+    public static func answerWord(_ text: String) -> String? {
+        let word = text.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return ["run", "decline"].contains(word) ? word : nil
     }
 
     /// The command's size as the card and the code prompt say it: its lines and bytes.
