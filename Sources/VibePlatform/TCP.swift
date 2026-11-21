@@ -180,8 +180,11 @@ extension Platform {
 
         /// Whether `address` is a numeric address in Tailscale's ranges: 100.64.0.0/10 (IPv4's shared address space,
         /// where Tailscale numbers a tailnet's devices) or fd7a:115c:a1e0::/48 (its IPv6 prefix). False for what isn't
-        /// an address, and for an IPv4 address written as IPv6.
+        /// an address, and for an IPv4 address written as IPv6. Only digits, a to f, `.` and `:` make an address: the
+        /// Mac's inet_pton takes an IPv6 address with a zone after it ("fd7a:115c:a1e0::1%eth0", read as the address
+        /// alone), which Linux's refuses; an address with a zone is no peer's on the tailnet, on either.
         public static func isTailscaleAddress(_ address: String) -> Bool {
+            guard address.utf8.allSatisfy({ numeric.contains($0) }) else { return false }
             var four = in_addr()
             if inet_pton(AF_INET, address, &four) == 1 {
                 return withUnsafeBytes(of: &four) { $0[0] == 100 && $0[1] & 0xc0 == 64 }
@@ -190,6 +193,9 @@ extension Platform {
             guard inet_pton(AF_INET6, address, &six) == 1 else { return false }
             return withUnsafeBytes(of: &six) { Array($0.prefix(6)) == [0xfd, 0x7a, 0x11, 0x5c, 0xa1, 0xe0] }
         }
+
+        /// The bytes a numeric IPv4 or IPv6 address is written with.
+        private static let numeric = Set("0123456789abcdefABCDEF.:".utf8)
 
         /// The address `ask` fills for `fd` (`getsockname`, `getpeername`), of either family, written as numbers.
         private static func address(of fd: Int32, _ ask: (Int32, UnsafeMutablePointer<sockaddr>, UnsafeMutablePointer<socklen_t>) -> Int32) -> String? {
