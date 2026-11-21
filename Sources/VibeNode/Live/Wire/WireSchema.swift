@@ -98,7 +98,7 @@ public enum WireSchema {
             shape("hello", from: "NodeWire.Hello", [
                 field("v", .int), field("kind", .words(["hello"])), field("node", .string), field("epoch", .string),
                 field("server", .shape("hello.server")), field("host", .shape("hello.host")), field("kinds", strings),
-                field("peer", .shape("hello.peer")), field("rule", .words(["systemd", "weaker", "closed"])),
+                field("peer", .shape("hello.peer")), field("rule", .words(["systemd", "weaker", "closed", "approval"])),
                 optional("auth", .shape("hello.auth")), optional("assets", .string)]),
             shape("hello.server", from: "NodeWire.Hello.Server", [field("commit", .string), field("startedAt", .date), field("pid", .int)]),
             shape("hello.host", from: "NodeWire.Hello.Host", [optional("startedAt", .date), optional("notes", .shape("host.notes")),
@@ -242,7 +242,7 @@ public enum WireSchema {
                 field("startedAt", .date), field("serverRestarts", .int), field("replacedPaths", strings),
                 field("refusedAppConnections", .int), field("lockHeldElsewhere", Kind.string.orNull),
                 field("build", Kind.string.orNull), field("at", .date)]),
-            shape("node.rule", from: "Requests.statusValue", [field("mode", .words(["systemd", "weaker", "closed"])), field("says", .string),
+            shape("node.rule", from: "Requests.statusValue", [field("mode", .words(["systemd", "weaker", "closed", "approval"])), field("says", .string),
                                                              field("scopes", strings)]),
             shape("node.cards", from: "Requests.counts", [field("questions", .int), field("approvals", .int), field("config", .int),
                                                          field("base", .int)]),

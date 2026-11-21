@@ -20,6 +20,8 @@ public enum Voice: Equatable, Sendable {
     /// A field that can't be read fails the rule. Under the closed rule (the server's own cgroup unread) no peer is.
     public static func judge(_ facts: PeerFacts, live: LiveSessions, rule: VoiceRule) -> Voice {
         guard rule.mode != .closed else { return .notUser(rule.refusal ?? VoiceRule.closedRefusal) }
+        // The Mac's rule is `ApprovalVoice`'s (it needs the peer's token and may ask the person): never this function's.
+        guard rule.mode != .approval else { return .notUser("the Mac's rule asks through ApprovalVoice, not here") }
         guard let uid = facts.uid else { return .notUser("its user can't be read") }
         guard uid == rule.uid else { return .notUser("it is another user's (uid \(uid))") }
         if rule.mode == .systemd {
@@ -100,6 +102,12 @@ public struct VoiceRule: Equatable, Sendable {
         /// server restarted into it): failing open there would hand it the weaker rule. Also the user's server on a
         /// system with no cgroups (the Mac), where no rule that tells the user's voice is built yet (`refusal` says so).
         case closed
+        /// The Mac's rule (the node on the Mac's design, "The user's voice"; the user's decision of 2026-11-20):
+        /// `ApprovalVoice`, the caller's code identity and the guard rails, then Touch ID or the login password for each
+        /// state change, its reason the card the server built (`Requests.approvalCard`). `Voice.judge` takes no peer
+        /// under it: `Requests.approvalVoice` judges, off the server's queue. Only the user's server on a system with
+        /// no cgroups once the rule is measured on a real Mac (`NodeSystem.approvalMeasured`), or a test's.
+        case approval
     }
 
     /// Why every peer is refused under the closed rule.
@@ -188,12 +196,15 @@ public struct VoiceRule: Equatable, Sendable {
     /// `NodeSystem.voiceUnbuilt`: the Mac's rule isn't built (the node on the Mac's design), and unbuilt is refused,
     /// never the weaker rule by default. A scratch server there keeps the weaker rule, for its tests.
     public static func at(start ownCgroup: [String]?, testScopes: [String]?, uid: uid_t = getuid(),
-                          cgroups: Bool = systemHasCgroups, usersNode: Bool = false) -> VoiceRule {
+                          cgroups: Bool = systemHasCgroups, usersNode: Bool = false,
+                          approvalMeasured: Bool = NodeSystem.approvalMeasured) -> VoiceRule {
         if let testScopes {
             return VoiceRule(mode: .systemd, scopes: testScopes.map { Scope($0, basis: "a scratch host's test") }, uid: uid,
                              says: "the cgroup rule, on a scratch node's test scopes (\(testScopes.joined(separator: ", ")))")
         }
         if usersNode, !cgroups {
+            // The Mac's rule once it is measured on a real Mac; until then unbuilt is refused, never the weaker rule.
+            if approvalMeasured { return VoiceRule(mode: .approval, scopes: [], uid: uid, says: approvalSays) }
             return VoiceRule(mode: .closed, scopes: [], uid: uid, says: NodeSystem.voiceUnbuilt, refusal: NodeSystem.voiceUnbuilt)
         }
         let ownCgroup = ownCgroup.flatMap { $0.isEmpty ? nil : $0 }
@@ -215,6 +226,10 @@ public struct VoiceRule: Equatable, Sendable {
         return VoiceRule(mode: .weaker, scopes: [], uid: uid,
                          says: "the weaker rule: no systemd unit to tell by (the server's cgroup is \(path.isEmpty ? "unknown" : path)), so a peer's cgroup isn't checked and a state change needs a controlling terminal")
     }
+
+    /// What `status` says of the Mac's rule.
+    public static let approvalSays = "the Mac's rule: a request from the installed command line, outside every session, and for each state change "
+        + "Touch ID or the login password at the Mac, its dialog naming what the server will do"
 
     /// Why the cgroup `lines` aren't a user's terminal's under this rule, or nil when they are: each of the unified
     /// and systemd paths that is there must be outside `user@<uid>.service` and the node's unit and match a scope;
