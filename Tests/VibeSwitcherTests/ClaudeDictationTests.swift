@@ -1581,20 +1581,25 @@ struct ClaudeDictationTests {
 
     /// The keys the run sends, held while `held` (a held Space's repeats from their own queue, the rest from the main
     /// thread), then sent in order once let go (`open`): as when they're on their way while Claude writes its
-    /// transcript. `queued`: the keys held now.
+    /// transcript. `queued`: the keys held now; `spacesSent`: the Spaces that went through.
     final class KeyGate: @unchecked Sendable {
         private let lock = NSLock()
         private var isHeld = false
         private var keys: [(send: ([UInt8]) -> Bool, key: [UInt8])] = []
+        private var spaces = 0
         var held: Bool {
             get { lock.withLock { isHeld } }
             set { lock.withLock { isHeld = newValue } }
         }
         var queued: Int { lock.withLock { keys.count } }
+        var spacesSent: Int { lock.withLock { spaces } }
         func send(_ key: [UInt8], by send: @escaping ([UInt8]) -> Bool) -> Bool {
             lock.lock()
             defer { lock.unlock() }
-            guard isHeld else { return send(key) }
+            guard isHeld else {
+                if key == [ClaudeVoiceRun.space] { spaces += 1 }
+                return send(key)
+            }
             keys.append((send, key))
             return true
         }
@@ -1652,6 +1657,10 @@ struct ClaudeDictationTests {
         gate.held = true
         try await h.waitFor { gate.waiting > 0 }
         keys.held = true
+        // Every Space already sent is taken before Claude stops (its warmup's, then held repeats): none comes after its
+        // transcript.
+        let warmup = (h.agent["warmup"] as? Int ?? 5) + 1
+        try await h.waitFor { (h.agent["heldRepeats"] as? Int ?? -1) + warmup == keys.spacesSent }
         h.tell(["op": "voiceStop"])
         try await h.waitFor { h.agent["voiceInserts"] as? Int == 1 }
         // The second recording hears nothing, and goes on until it's stopped (a wide gap: no repeat comes once the hold

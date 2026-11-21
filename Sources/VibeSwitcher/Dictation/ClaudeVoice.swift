@@ -507,10 +507,11 @@ final class ClaudeVoiceRun {
     private var lastDraft: String?
     private var steady = 0
     /// What showed not dim in the box (less its level cursor) while Claude recorded or processed: at the last read that
-    /// watched it, and the texts that stayed two such reads in a row (two at most: a final draft can be only one of
-    /// them), each with whether a read had seen it landed before (`landed`). Typed in the terminal, unless it's Claude's
-    /// own transcript under a second recording its hold's Spaces started: seen landed first, and the text it leaves in
-    /// the box (`take`). One read's, gone at the next, was a redraw's.
+    /// watched it, and the texts that stayed two watched reads in a row (reads between that don't watch the box don't
+    /// count; two at most: a final draft can be only one of them), each with whether a read had seen it landed before
+    /// (`landed`). Typed in the terminal, unless it's Claude's own transcript under a second recording its hold's Spaces
+    /// started: seen landed first, and the text it leaves in the box (`take`). One read's, gone at the next, was a
+    /// redraw's.
     private var plainShown: (text: String, landed: Bool)?
     private var plainKept: [(text: String, landed: Bool)] = []
     /// The texts (less their spaces) a read showed not dim in the box with no recording running, after Claude listened:
