@@ -491,6 +491,12 @@ private final class Driver: NSObject, NSApplicationDelegate {
         tidier.holdsRole = { [weak self] id in
             self?.leads.boards.values.contains { $0.leadSession.flatMap(UUID.init(uuidString:)) == id } ?? true
         }
+        tidier.scanned = { [weak self] in (self?.store.sessions ?? [], self?.store.tableRead ?? TableRead()) }
+        // The leads' own, and those `replaced` marks in the window (the sandbox's stand-in for a handover).
+        tidier.replaced = { [weak self] in
+            guard let self else { return [] }
+            return Set(leads.replacedLeads.keys).union(model.replacedLeads.keys)
+        }
         host.onInput = { [weak tidier] id in tidier?.typed(id) }
         return tidier
     }()
@@ -515,8 +521,7 @@ private final class Driver: NSObject, NSApplicationDelegate {
             return confirmed
         }
         defer { shellTidier.ask = ask }
-        let ended = shellTidier.closeFinished(rows: { [weak self] in self?.model.allRows ?? [] },
-                                              replaced: { [weak self] in self.map { Set($0.model.replacedLeads.keys) } ?? [] })
+        let ended = shellTidier.closeFinished()
         return (shellQuestion, ended)
     }
     /// The Wallet Manager peer the wallet desk sends to: the first made-up one, or none after `wallet-peer none`, or
@@ -1382,10 +1387,7 @@ private final class Driver: NSObject, NSApplicationDelegate {
             projectsFolder: { [weak self] in (self?.home ?? "") + "/projects" },
             projectCreated: { [weak self] folder, _ in self?.refuse("starting a lead in the new project \(folder)") },
             closeFinishedShells: { [weak self] project in self?.closeFinishedShells(project) },
-            closable: { [weak self] in
-                guard let self else { return [] }
-                return shellTidier.closable(rows: model.allRows, replaced: Set(model.replacedLeads.keys))
-            },
+            closable: { [weak self] in self?.shellTidier.closable() ?? [] },
             closeFinished: { [weak self] in self?.closeFinished() })
         windowActions = actions
         // The sandbox's finished Run-card shells leave as the app's do (and typing into one is recorded from now on).

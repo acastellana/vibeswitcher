@@ -91,6 +91,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
         tidier.holdsRole = { [weak self] id in
             self?.leadController.boards.values.contains { $0.leadSession.flatMap(UUID.init(uuidString:)) == id } ?? true
         }
+        // Read live, not from the window's copies: those wait while an alert runs modal (`ShellTidier.rows`).
+        tidier.scanned = { [weak self] in (self?.store.sessions ?? [], self?.store.tableRead ?? TableRead()) }
+        tidier.replaced = { [weak self] in self.map { Set($0.leadController.replacedLeads.keys) } ?? [] }
         hostClient.onInput = { [weak tidier] id in tidier?.typed(id) }
         return tidier
     }()
@@ -180,15 +183,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
             guard let self else { return }
             shellTidier.close(project: project, rows: windowModel.allRows.filter { $0.project == project })
         },
-        closable: { [weak self] in
-            guard let self else { return [] }
-            return shellTidier.closable(rows: windowModel.allRows, replaced: Set(windowModel.replacedLeads.keys))
-        },
-        closeFinished: { [weak self] in
-            guard let self else { return }
-            shellTidier.closeFinished(rows: { [weak self] in self?.windowModel.allRows ?? [] },
-                                      replaced: { [weak self] in self.map { Set($0.windowModel.replacedLeads.keys) } ?? [] })
-        })
+        closable: { [weak self] in self?.shellTidier.closable() ?? [] },
+        closeFinished: { [weak self] in self?.shellTidier.closeFinished() })
     private(set) lazy var leadController: LeadController = {
         let controller = LeadController(host: hostClient, store: store, sweepsRoles: true) { [weak self] root in
             let presets = self?.presets(for: root) ?? []

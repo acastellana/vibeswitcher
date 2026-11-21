@@ -33,6 +33,11 @@ final class ShellTidier {
     var end: (UUID) -> Void = { _ in }
     /// The session's board names it as its project's lead (main thread): never ended as a replaced lead.
     var holdsRole: (UUID) -> Bool = { _ in false }
+    /// The scan's agent sessions and the process table it read, as the store has them now (main thread): with
+    /// `sessions`, the rows Close Finished (N)… looks at (`rows`).
+    var scanned: () -> (sessions: [Session], table: TableRead) = { ([], TableRead()) }
+    /// The replaced leads, by window session, as the leads' controller has them now (main thread).
+    var replaced: () -> Set<UUID> = { [] }
 
     /// Asks the question (main thread): whether to go on. One without a button only says something.
     var ask: (Question) -> Bool = ShellTidier.alert
@@ -157,22 +162,31 @@ final class ShellTidier {
         return ending.map(\.id)
     }
 
-    /// What the sidebar's Close Finished (N)… would end now (`CloseFinished.items`): in every project, the finished
-    /// Run-card shells and the replaced leads (`replaced`, by window session) between turns, among `rows`.
-    func closable(rows: [WindowRow], replaced: Set<UUID>) -> [CloseFinished.Item] {
-        CloseFinished.items(rows: rows, sessions: sessions(), replaced: replaced, holdsRole: holdsRole, idle: idle)
+    /// Every project's rows, made from the sources as they are now (`sessions`, `scanned`), as the window makes its
+    /// own. Not the window's copy (`WindowModel`): that one is delivered in the run loop's default mode only
+    /// (`receiveLatest`), so while the question's alert runs modal it keeps what was true when it was asked.
+    func rows() -> [WindowRow] {
+        let scan = scanned()
+        return WindowRows.sections(sessions: scan.sessions, hosted: sessions(), table: scan.table) { SessionNaming.name(forProjectRoot: $0) }
+            .flatMap(\.rows)
     }
 
-    /// The sidebar's Close Finished (N)… (main thread): asks once, listing what it found in `rows()` (every project's
-    /// rows) with `replaced()` the replaced leads, then ends, as End Session does, each that is still to close when
-    /// the question is answered (both read again then): what changed since is skipped. The sessions it ended.
+    /// What the sidebar's Close Finished (N)… would end now (`CloseFinished.items`): in every project, the finished
+    /// Run-card shells and the replaced leads between turns.
+    func closable() -> [CloseFinished.Item] {
+        CloseFinished.items(rows: rows(), sessions: sessions(), replaced: replaced(), holdsRole: holdsRole, idle: idle)
+    }
+
+    /// The sidebar's Close Finished (N)… (main thread): asks once, listing what it finds (`closable`), then ends, as
+    /// End Session does, each that is still to close when the question is answered (looked at again then, from the
+    /// sources as they are by then): what changed since is skipped. The sessions it ended.
     @discardableResult
-    func closeFinished(rows: () -> [WindowRow], replaced: () -> Set<UUID>) -> [UUID] {
-        let found = closable(rows: rows(), replaced: replaced())
+    func closeFinished() -> [UUID] {
+        let found = closable()
         let question = Self.question(closing: found, sessions: sessions(), now: now())
         guard ask(question), question.button != nil else { return [] }
         // Asked a while ago, perhaps: only what's still finished, and still a replaced lead between turns.
-        let ending = CloseFinished.still(found, now: closable(rows: rows(), replaced: replaced()))
+        let ending = CloseFinished.still(found, now: closable())
         for item in found where !ending.contains(item) {
             log("\(item.id.uuidString.prefix(8)) (\(item.name)) not closed by Close Finished: it changed since the question")
         }

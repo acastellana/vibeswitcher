@@ -65,9 +65,9 @@ struct CloseFinishedTests {
             return host
         }
 
+        /// The scan sees the agent in `status` now; the window's copy (`model`) isn't told.
         func status(of id: UUID, _ status: SessionStatus) {
             if let index = scanned.firstIndex(where: { $0.hostID == id }) { scanned[index].status = status }
-            feed()
         }
 
         func feed() {
@@ -82,19 +82,19 @@ struct CloseFinishedTests {
             tidier.sessions = { [unowned self] in hosted }
             tidier.idle = { [unowned self] in !busy.contains($0.id) }
             tidier.holdsRole = { [unowned self] in holders.contains($0) }
+            // The sources as they are, never the window's copy: `meanwhile` changes them and not the model.
+            tidier.scanned = { [unowned self] in (scanned, TableRead(at: CloseFinishedTests.now)) }
+            tidier.replaced = { [unowned self] in replaced }
             tidier.end = { [unowned self] in ended.append($0) }
             tidier.ask = { [unowned self] question in
                 asked.append(question)
                 meanwhile()
-                feed()
                 return answer
             }
             return tidier
         }
 
-        func closeFinished(_ tidier: ShellTidier) -> [UUID] {
-            tidier.closeFinished(rows: { [unowned self] in model.allRows }, replaced: { [unowned self] in Set(model.replacedLeads.keys) })
-        }
+        func closeFinished(_ tidier: ShellTidier) -> [UUID] { tidier.closeFinished() }
     }
 
     /// Everything the button may never take, in both projects: the lead holding the role, a replaced lead mid-turn (and
@@ -130,7 +130,7 @@ struct CloseFinishedTests {
         fixture.feed()
         let tidier = fixture.tidier(file: temp.url("used").appendingPathComponent("used.json"))
 
-        let listed = tidier.closable(rows: fixture.model.allRows, replaced: fixture.replaced)
+        let listed = tidier.closable()
         #expect(Set(listed.map(\.id)) == [install.id, backup.id, old.id], "\(listed.map(\.name))")
         #expect(listed.first { $0.id == old.id }?.kind == .replacedLead)
         let shells = Set(listed.filter { $0.kind == .shell }.map(\.id))
@@ -163,7 +163,7 @@ struct CloseFinishedTests {
         Self.neverClosed(fixture)
         fixture.feed()
         let tidier = fixture.tidier(file: temp.url("used").appendingPathComponent("used.json"))
-        #expect(tidier.closable(rows: fixture.model.allRows, replaced: fixture.replaced).isEmpty)
+        #expect(tidier.closable().isEmpty)
         #expect(fixture.closeFinished(tidier).isEmpty && fixture.ended.isEmpty)
         #expect(fixture.asked.map(\.button) == [nil])
         #expect(fixture.asked.first?.message == "Nothing finished to close")
@@ -171,7 +171,8 @@ struct CloseFinishedTests {
 
     /// What changed between the question and its answer stays: a shell back to running a program, one whose command
     /// runs again (a new start report), a lead that took a turn, and one its board names as the lead again. What
-    /// didn't change ends.
+    /// didn't change ends. The window's list (`model`) isn't told of any of it, as while the alert runs modal it
+    /// isn't: the look again reads the sources.
     @Test func whatChangedSinceTheQuestionIsSkipped() {
         let fixture = Fixture()
         let busyAgain = fixture.shell("Install", project: "alpha")
@@ -261,7 +262,7 @@ struct CloseFinishedTests {
         fixture.feed()
         let tidier = fixture.tidier(file: temp.url("used").appendingPathComponent("used.json"))
         var actions = EndedSnapshots.actions
-        actions.closable = { tidier.closable(rows: fixture.model.allRows, replaced: Set(fixture.model.replacedLeads.keys)) }
+        actions.closable = { tidier.closable() }
         actions.closeFinished = { _ = fixture.closeFinished(tidier) }
 
         let folder = temp.url("sidebar")
