@@ -4260,3 +4260,7 @@ Proposed task 1: Find why dictations end with no text
 - 2026-11-21 13:11 Started a worker on one-sidebar-button
 - 2026-11-21 13:11 Automatically (auto_advance): Started a worker on one-sidebar-button (One sidebar button closes all finished shells and replaced leads).
 - 2026-11-21 13:11 Automatically (auto_advance): Overlap for one-sidebar-button's start (a warning only: nothing was refused or reordered). Sandbox.swift: claude-dictation-text (running: its boundaries name it); scripts/sandbox-app.sh: claude-dictation-text (running: its boundaries name it).
+- 2026-11-21 13:27 Automatically (auto_advance): Started the audit of claude-dictation-text at 1678dd04 (Its review is audit).
+- 2026-11-21 13:27 Planned claude-dictation: Claude dictation: recognise Claude Code's "Transcribing…" footer as processing
+- 2026-11-21 13:27 Released claude-dictation-text's worker (idle since its done report on 1678dd04) while its audit runs
+- 2026-11-21 13:27 Automatically (auto_advance): Released claude-dictation-text's worker, idle since its done report on 1678dd04, while its audit runs (ended pid 26386 (Worker: Claude dictation: text that was dictated is dropped as "typed in the terminal meanwhile")): its Mac slot and memory are free. Its worktree and branch stay; findings the verdict sends back go to a fresh worker there, and a clean verdict merges with none.
