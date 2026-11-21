@@ -77,3 +77,48 @@ struct StatsTests {
         func connect(queue: DispatchQueue, patience: TimeInterval) throws -> HostConnection { throw HostLink.Failure("no host in this test") }
     }
 }
+
+/// `vibeswitcher stats` as it prints (`StatisticsText`), and end to end on a scratch node.
+struct StatsTextTests {
+    private let scratch = Scratch()
+
+    @Test func theFixturesStatisticsPrintAsTheWindowWordsThem() async throws {
+        let home = scratch.url("empty-home")
+        try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
+        let stats = await SetupStatsCollector(home: home, codexHome: nil, calendar: StatsTests.utc)
+            .collect(projects: [], range: DateInterval(start: Date(timeIntervalSince1970: 1_800_000_000), duration: 86_400))
+        let page = StatisticsPage(stats, calendar: StatsTests.utc)
+        let empty = StatisticsText.lines(StatisticsWire.value(page, range: .today))
+        #expect(empty.first?.hasPrefix("Statistics · Today · ") == true, "\(empty)")
+        #expect(empty.contains("This node") && empty.contains("  Load: Not recorded") && empty.contains("  No project with a lead's board on this node yet."), "\(empty)")
+        // A usage limit with its bar, a table in columns.
+        let meter = StatisticsText.figure(.object(["label": .string("Claude weekly"), "value": .string("42%"), "detail": .string("on pace"),
+                                                   "meter": .object(["used": .int(420), "elapsed": .null, "reached": .bool(false)])]))
+        #expect(meter == ["  Claude weekly: 42% [########............] — on pace"])
+        #expect(StatisticsText.table(["Project", "Merged"], [["site", "21"], ["api-long-name", "7"]])
+                == ["  Project        Merged", "  site               21", "  api-long-name       7"])
+        // A name with a terminal's escape in it is inert.
+        let named = StatisticsText.lines(.object(["title": .string("7 days"), "span": .string("x"), "mac": .array([]), "columns": .array([]),
+                                                  "projects": .array([.object(["id": .string("a"), "name": .string("evil\u{1B}[2J"), "note": .null, "cells": .array([])])]),
+                                                  "total": .null, "quality": .null]))
+        #expect(!named.joined().contains("\u{1B}"), "\(named)")
+    }
+}
+
+@Suite(NodeTraits.linuxOnly)
+struct StatsNodeTests {
+    private let scratch = Scratch()
+
+    @Test func statsPrintsAndGivesItsJSONOnAScratchNode() async throws {
+        let node = try await ScratchNode(scratch)
+        defer { node.stop() }
+        let printed = try await node.run(["stats"])
+        #expect(printed.status == 0 && printed.output.hasPrefix("Statistics · 7 days · "), "\(printed.output)\(printed.errors)")
+        #expect(printed.output.contains("No project with a lead's board on this node yet."), "\(printed.output)")
+        let json = try await node.run(["stats", "today", "--json"])
+        let value = try #require(try JSONSerialization.jsonObject(with: Data(json.output.utf8)) as? [String: Any], "\(json.output)\(json.errors)")
+        #expect(value["range"] as? String == "today")
+        let refused = try await node.run(["stats", "year"])
+        #expect(refused.status != 0 && refused.errors.contains("usage: vibeswitcher stats"), "\(refused.errors)")
+    }
+}

@@ -18,6 +18,7 @@ let usage = """
            vibeswitcher lead FOLDER [--goal TEXT | --resume] [--take-head] [--replace]
            vibeswitcher questions [FOLDER] [--all] [--json]
            vibeswitcher board [FOLDER] [--json]
+           vibeswitcher stats [today|week|month] [--json]
            vibeswitcher answer CARD [TEXT] | hold CARD
            vibeswitcher tell FOLDER TEXT
            vibeswitcher push FOLDER | decline-push FOLDER
@@ -54,6 +55,8 @@ case "questions":
     exit(QuestionsCommand.run(Array(words.dropFirst())))
 case "board":
     exit(BoardCommand.run(Array(words.dropFirst())))
+case "stats":
+    exit(StatsCommand.run(Array(words.dropFirst())))
 case "answer":
     exit(AnswerCommand.run(Array(words.dropFirst())))
 case "hold":
