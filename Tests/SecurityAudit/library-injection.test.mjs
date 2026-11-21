@@ -6,6 +6,12 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 
 const binary = process.env.VIBESWITCHER_AUDIT_HOST || path.resolve('.build/debug/vibeswitcher-host');
+// What the Hardened Runtime's refusal rests on, said with every result: the Mac's version and whether System Integrity
+// Protection is on. With SIP off (GitHub's hosted runner: scripts/ci/macos-runner-skips.txt) AMFI lets DYLD_ variables
+// into a hardened binary, so an injected library loads: the machine's state, not the signature's.
+const said = (command, args) => spawnSync(command, args, { encoding: 'utf8' }).stdout?.trim() || 'unknown';
+const machine = `macOS ${said('/usr/bin/sw_vers', ['-productVersion'])} (${said('/usr/bin/sw_vers', ['-buildVersion'])}); ${said('/usr/bin/csrutil', ['status'])}`;
+console.log(`library injection audit on ${machine}`);
 const folder = await mkdtemp(path.join(tmpdir(), 'inject-'));
 const source = path.join(folder, 'probe.c');
 const library = path.join(folder, 'probe.dylib');
@@ -40,7 +46,9 @@ __attribute__((constructor)) static void probe(void) {
         DYLD_INSERT_LIBRARIES: library },
       encoding: 'utf8', timeout: 15000, killSignal: 'SIGKILL',
     });
-    assert.doesNotMatch(result.stdout || '', /AUDIT_INJECTED/);
+    assert.doesNotMatch(result.stdout || '', /AUDIT_INJECTED/,
+      `${name}: an injected library loaded into a hardened copy on ${machine}` +
+      (/disabled/i.test(machine) ? ': SIP is off here, which lets DYLD_ variables through; a Mac with SIP on refuses them' : ''));
     assert.equal(result.status, 1, JSON.stringify(result));
     assert.match(result.stderr, /handover probe/);
   }
