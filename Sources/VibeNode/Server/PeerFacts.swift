@@ -58,8 +58,9 @@ public struct PeerFacts: Equatable, Sendable {
     /// The longest ancestry read: past it, the chain counts as unreadable (a loop the reads made of reused pids).
     static let deepest = 256
 
-    /// The process `pid` as it reads now (Linux: `/proc`; the Mac reads no links, so every field there is unreadable
-    /// and no peer is the user, which only Linux's server asks). `token`: the sender as the socket named it; when its
+    /// The process `pid` as it reads now (Linux: `/proc`; the Mac: `proc_pidinfo`'s links, each bound to the peer's
+    /// audit token by Security's check after the read, `Platform.Processes.Link.isProcess(of:)`; its environment and
+    /// cgroup unread there). `token`: the sender as the socket named it; when its
     /// pid now names another process (it ended and its number was given again), nothing is readable. `cgroupRoot`: a
     /// scratch server's test's (`ServerArguments.testCgroupRoot`), from which its cgroup lines are read (`rerooted`);
     /// nil, as the user's node's server always has it: the lines as `/proc` gives them. `runnersAbove`: the runners a

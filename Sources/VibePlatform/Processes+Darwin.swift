@@ -296,11 +296,28 @@ extension Platform.Processes.System {
     /// nil: the Mac has no dumpable state another process can read.
     static func isDumpable(_ pid: pid_t) -> Bool? { nil }
 
-    /// nil: the Mac's records carry no start ticks (see `Platform.Processes.link`).
-    static func link(_ pid: pid_t) -> Platform.Processes.Link? { nil }
+    /// One read of `proc_pidinfo(PROC_PIDTBSDINFO)`: the process's parent, its start (microseconds since 1970, from
+    /// `pbi_start_tvsec` and `pbi_start_tvusec`: a process started later has no smaller one, and an exec keeps it) and
+    /// its controlling terminal (`e_tdev`, named as its record names it: `ttys004`). nil when it has gone, isn't the
+    /// user's to read, or the answer is short or names another pid.
+    static func link(_ pid: pid_t) -> Platform.Processes.Link? {
+        guard pid > 0 else { return nil }
+        var info = proc_bsdinfo()
+        let size = Int32(MemoryLayout<proc_bsdinfo>.size)
+        guard proc_pidinfo(pid, PROC_PIDTBSDINFO, 0, &info, size) == size, info.pbi_pid == UInt32(pid) else { return nil }
+        let start = UInt64(info.pbi_start_tvsec) &* 1_000_000 &+ UInt64(info.pbi_start_tvusec)
+        // Named as its record names it (`kernelRecord`): nil for none (NODEV).
+        let terminal = Platform.Terminals.name(device: dev_t(bitPattern: info.e_tdev))
+        return Platform.Processes.Link(pid: pid, parent: pid_t(bitPattern: info.pbi_ppid), startTicks: start, terminal: terminal)
+    }
 
-    /// false: an audit token carries no start ticks.
-    static func names(_ token: Platform.PeerToken, _ link: Platform.Processes.Link) -> Bool { false }
+    /// Whether `link` (read first) is the process `token` names: the same pid, and the token still valid once the link
+    /// was read: Security finds its guest only while the process with that pid and pidversion lives, not exec'd since
+    /// (`CodeIdentity.System.guest`). A pid reused before the read leaves the token's process gone, so its guest isn't
+    /// found; an exec after it changes the pidversion, so neither. Read the link before asking this (`PeerFacts.read`).
+    static func names(_ token: Platform.PeerToken, _ link: Platform.Processes.Link) -> Bool {
+        token.pid == link.pid && Platform.CodeIdentity.System.guest(token) != nil
+    }
 }
 #endif
 

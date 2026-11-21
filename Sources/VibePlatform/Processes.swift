@@ -246,14 +246,15 @@ extension Platform.Processes {
             self.terminal = terminal
         }
 
-        /// Whether `token` names this process: the same pid, started at the same tick, not the pid given again.
-        /// The Mac's tokens carry no start ticks: false (the Mac reads no links).
+        /// Whether `token` names this process: the same pid, not the pid given again. Linux: started at the same tick.
+        /// The Mac: the token's process still alive, unchanged by an exec, after the link was read (its tokens carry no
+        /// start, so the link is read first and the token's validity asked after).
         public func isProcess(of token: Platform.PeerToken) -> Bool { System.names(token, self) }
     }
 
     /// The process `pid` as one read gives it (`Link`). Linux: its line of /proc/<pid>/stat; nil when it has gone,
-    /// or the number is a thread's. The Mac: nil (its records carry no start ticks; the host there matches a process by
-    /// its pid, `ProcessTable.ancestry`).
+    /// or the number is a thread's. The Mac: `proc_pidinfo`'s BSD info (its start in microseconds since 1970, where
+    /// Linux gives clock ticks since boot: compared only with another of the same system); nil when it has gone.
     public static func link(_ pid: pid_t) -> Link? { System.link(pid) }
 }
 

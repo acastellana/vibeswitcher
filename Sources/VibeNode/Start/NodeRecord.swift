@@ -81,7 +81,7 @@ public struct NodeRecord: Codable, Equatable, Sendable {
     }
 
     /// When the process `pid` started (`Platform.Processes.link`), nil when it has gone or is a zombie (ended, its
-    /// parent not yet told). The Mac: nil (its records carry no start ticks; no node runs detached there).
+    /// parent not yet told). The Mac: its start in microseconds since 1970 (`proc_pidinfo`), compared only with its own.
     public static func liveTicks(_ pid: pid_t) -> UInt64? {
         guard pid > 0, let link = Platform.Processes.link(pid), Platform.Processes.kernelRecord(pid)?.state != .zombie else { return nil }
         return link.startTicks

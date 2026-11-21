@@ -201,12 +201,23 @@ or decided. Done on Linux, tested on both systems (`ApprovalJudgmentTests`, `App
    a 10 s cooldown after a declined, cancelled, timed-out or unavailable dialog; a truthful busy refusal.
 6. **(MEDIUM, for the user)** The reads with no gate a detached session can't pass on the Mac (`mail`, `recent`,
    `shells`, `config.held`, `base.show`): written into the design note as open.
-7. **(BLOCKER, list)** Darwin ancestry: `Platform.Processes.link` is nil on the Mac, so the guard rails' ancestry is
-   unread there (and the peer refused: "its ancestry can't be read") until a Darwin `proc_pidinfo` arm is built and
-   measured; the Mac host's vault and its action-id record (`recordUserAction`) on the Mac's host; the command line's
-   server check by code identity (`ServerCheck` on the Mac: the server's audit token and cdhash); a card for a kind with
-   no arguments (`stop`, `start`, `web.revoke`): done, `approvalCard` names what each does (`stop` the live sessions it
-   ends).
+7. **(BLOCKER, built 2026-11-21, `v2-small-rows`; each needs an independent review and a real-Mac run)**
+   - Darwin ancestry (`c1eeb472`): `Platform.Processes.link` reads `proc_pidinfo(PROC_PIDTBSDINFO)` (parent, start
+     in microseconds, controlling terminal by `devname`); `isProcess(of:)` is the same pid and the audit token still
+     found by Security (`SecCodeCopyGuestWithAttributes`) after the link was read, so a reused pid or an exec fails it.
+     Owed on a real Mac: a link read for a process of another user (refused, nil), a zombie, a process that execs
+     between the read and the check; `HostHardening.isOurs` stays Linux-only (`atStart`/`watch` never run there).
+   - The record of the user's actions on a Mac node's host (`03f4044a`): `vaultV2` answered, and listed in the
+     welcome, only by a host with a server child and a vault (`HostServer.isMacNodeHost`); the Mac app's host
+     unchanged. The record's rules are Linux's (`LeadVaultV2.answer`). Owed: the Mac node host's vault on disk
+     (its keychain-held key) measured, and the record surviving a handover there.
+   - The command line's server check by code identity (this commit): on the Mac, the listener's audit token must run
+     the `vibeswitcher-server` beside the LaunchAgent job's program (an installed build, `NodeCheck.installedServer`)
+     by cdhash with the Hardened Runtime, be the job's child and in its session; a scratch or detached node is
+     refused there. Owed: the install signing the server `--options runtime` (else every check refuses), and a run
+     against a real job.
+   - A card for a kind with no arguments (`stop`, `start`, `web.revoke`): done, `approvalCard` names what each does
+     (`stop` the live sessions it ends).
 8. **(LOW, done in `6f367200`, `03f406c9`)** A replayed action id answered before any dialog; the command line's
    approval rule per connection, so its own confirmations (`status --ack`) always ask the code.
 9. **(BEFORE THE MAC NODE STARTS) The Mac's own H1.** On Linux the host holds the web page's listening sockets (H1, merged
