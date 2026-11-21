@@ -55,7 +55,8 @@ public enum CardText {
     /// with its value or hash (all a card is bound to stays shown), what changed since the last accept on its line, and
     /// a word that only says it's as it was as a mark (`sameMark`), said once at the end for the lines marked; `long` puts
     /// that word on every line it applies to, as before (`config held --long`).
-    public static func lines(_ card: NodeWire.Value, long: Bool) -> [String] {
+    /// `home`: whose Claude Code link a held card's update hint reads (`ClaudeUpdateHint`; nil: this process's).
+    public static func lines(_ card: NodeWire.Value, long: Bool, home: String? = nil) -> [String] {
         let id = inert(card["id"]?.string)
         let kind = card["kind"]?.string ?? "?"
         let root = card["root"]?.string ?? ""
@@ -110,6 +111,10 @@ public enum CardText {
                 else { line += shortSince(item["sinceAccept"]?.string, legend: &legend) }
                 lines.append(line)
                 for file in item["files"]?.array?.compactMap(\.string) ?? [] { lines.append("      " + inert(file)) }
+            }
+            // What these likely are, when it's only Claude Code's versions and its link (a hint: the hold stays).
+            if let hint = ClaudeUpdateHint.hint(names: items.compactMap { $0["name"]?.string }, home: home ?? VibePaths.home) {
+                lines.append("  " + hint)
             }
             if let floor = config["floor"]?.object {
                 var said = "  the review floor workflow.md proposes: merge policy \(inert(floor["mergePolicy"]?.string)), "
