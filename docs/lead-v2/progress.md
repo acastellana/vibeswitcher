@@ -358,3 +358,7 @@
 - 2026-11-21 09:25 Audit of team-sessions-start: finder 1 of 2 submitted (blocked, clean, 3 findings)
 - 2026-11-21 09:59 Handed the lead over to a fresh session: the last one had been idle 50 minutes with 170k tokens of context, past handover_idle_min 50 and handover_tokens 150k
 - 2026-11-21 13:06 Automatically (auto_advance): Didn't audit team-sessions-start: Not audited, no verifier started: the lead held team-sessions-start's audit (update_task hold_audit). It starts once an exception is recorded (update_task(team-sessions-start, exception: {scope, reason, evidence})), or with hold_audit: false.
+- 2026-11-21 13:20 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: ~/.claude/shell-snapshots
+- 2026-11-21 13:20 Started a worker on turn-this-incident-into-4
+- 2026-11-21 13:20 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: ~/.claude/shell-snapshots and ~/.vibeswitcher/lead/run
+- 2026-11-21 13:20 Started a worker on the-node-s-gate
