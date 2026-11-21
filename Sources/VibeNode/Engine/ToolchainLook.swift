@@ -22,9 +22,10 @@ extension LeadEngine {
         guard !toolchainLooking, !roots.isEmpty else { done?(); return }
         toolchainLooking = true
         toolchainLookedAt = toolchainNow()
-        let (file, now, run, queue, note) = (toolchainFile, toolchainNow(), toolchainRun, self.queue, self.note)
+        let home = self.home
+        let (file, now, tools, queue, note) = (toolchainFile, toolchainNow(), toolchainTools ?? { NodeToolchain.node(home: home) }, self.queue, self.note)
         Self.toolchainReads.async { [weak self] in
-            let seen = NodeToolchain.observe(NodeToolchain.Book.load(from: file), roots: roots, now: now, run: run)
+            let seen = NodeToolchain.observe(NodeToolchain.Book.load(from: file), roots: roots, now: now, tools: tools())
             do { try seen.book.save(to: file) } catch { note("developer tools: \(file.path) not written: \(error)") }
             queue.async {
                 guard let self else { return }
