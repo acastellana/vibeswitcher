@@ -102,7 +102,7 @@ end and ⌥⌘0 open and close it.
 | Overview › Status: State, Since, Running, and what it says | `shownStatus`, `since`, `activity`, `detail` |
 | Overview › Place: Folder, Runs in | `cwd` (as `~/…` with the node's `home`), `hosted` |
 | Overview › Time: Started, Running for | `startedAt` |
-| Overview › Place: Branch | `branch` (the node reads `GitBranch.current` at the session's changes) |
+| Overview › Place: Branch | `branch` (the node reads it at the session's changes, off its queue: `NodeGitBranch`, no link followed, a ref-shaped value only) |
 | Overview › Agent: Agent, Session, Process, Command, Size | `agent`, `agentSession`, `pid` and `terminal`, the host's `command` (credentials masked) and `size: { cols, rows }` |
 | Overview › Usage: Tokens, Cost, Turns | `session.usage`, asked as the tab shows and every 15 s while it does: the transcript's last 2 MB read by the Mac's `ActivityFeed` (`partial` when the conversation began before them; `costPartial` when some turns carried no cost) |
 | Overview › Team: Role, Lead, Task | `role`; `lead` (the project's id) and `boardTask` (a worker's or verifier's task slug on the board; the wire's `task` is what it works on, in words) |
