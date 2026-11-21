@@ -553,8 +553,10 @@ public enum WireVectors {
         return board
     }
 
+    /// With the AI summary of the running task's worker (`TeamSummaryWatch`).
     static var boardValue: NodeWire.Value {
-        BoardValue.value(project: NodeIds.project(root: root), root: root, board: sampleBoard(now: boardNow.timeIntervalSince1970), now: boardNow)
+        BoardValue.value(project: NodeIds.project(root: root), root: root, board: sampleBoard(now: boardNow.timeIntervalSince1970), now: boardNow,
+                         summaries: ["t-onboarding-steps": "Making the sign-up form check each field as you leave it"])
     }
 
     /// The board a minute on: the review passed and the blocked task's question was answered.

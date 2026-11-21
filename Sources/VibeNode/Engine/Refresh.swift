@@ -51,7 +51,7 @@ extension LeadEngine {
         let scanned = Dictionary((sessions?.sessions ?? []).compactMap { session in session.hostID.map { ($0.uuidString, session) } },
                                  uniquingKeysWith: { first, _ in first })
         let (observer, inbox, lock) = (observer, root, options.lock)
-        let (usageFiles, home, now) = (settingsFiles, self.home, usageNow())
+        let (usageFiles, home, now, summaries) = (settingsFiles, self.home, usageNow(), summarizer != nil)
         // The posted questions' timers, from their cards (never the boards': S3).
         fireTimers(now: timersNow())
         reads.async({ files -> Refreshed in
@@ -63,6 +63,7 @@ extension LeadEngine {
             files.keep(roots.union(timerRoots))
             // The account watch: the usage the roles' tool servers keep under the node's root, once for every team.
             read.usage = NodeUsage.read(files: usageFiles, home: home, now: now)
+            read.summariesOn = summaries && NodeSummaries.isOn(usageFiles.preferences)
             let account = read.usage
             read.teams = Dictionary(uniqueKeysWithValues: read.loaded.map { root, board in
                 (root, TeamReading.read(root: root, board: board, hosted: hosted, sessions: scanned, observer: observer, inbox: inbox, lock: lock, account: account))
@@ -74,6 +75,7 @@ extension LeadEngine {
             self.markReplaced(read.named, roots: roots)
             self.usageRead(read.usage, teams: read.teams)
             self.refreshed(roots: roots, loaded: read.loaded, teams: read.teams, refusals: read.refusals, finished: read.finished)
+            self.lookAtSummaries(loaded: read.loaded, teams: read.teams, on: read.summariesOn)
             self.refreshing = false
             if self.refreshAgain {
                 self.refreshAgain = false
@@ -90,6 +92,7 @@ extension LeadEngine {
         var teams: [String: TeamReading] = [:]
         var finished: Set<UUID> = []
         var usage = NodeUsage.Reading()
+        var summariesOn = false
     }
 
     /// What the account watch read, kept for `status` (`usage`), and each lead's review rows waiting on a limit sent to

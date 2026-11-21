@@ -6,7 +6,7 @@
 
 import { h, keyed, setText, setClass, framed } from '../dom.js';
 import { icon } from '../marks.js';
-import { boardGroups, boardSummary, taskState, taskTone, taskGroup, since, moment, plural, tilde, lastPart } from '../words.js';
+import { boardGroups, boardSummary, taskState, taskTone, taskGroup, taskLine, since, moment, plural, tilde, lastPart } from '../words.js';
 import { sessionHref } from '../ui.js';
 
 // A blocker longer than this many lines (or characters) is folded to its first lines until asked.
@@ -64,11 +64,11 @@ function taskRow(app) {
       const at = done ? task.merged?.at || task.since : task.since;
       if (at && !done) time.dataset.since = at; else delete time.dataset.since;
       setText(time, at ? (done ? moment(at) : since(at)) : '');
-      // A blocked task's blocker is shown whole below; its first line isn't said twice.
+      // A blocked task's blocker is shown whole below; its first line isn't said twice. A task at work: its AI summary.
       const text = task.blocker || '';
-      const firstLine = text.split('\n').find((line) => line.trim()) || '';
-      const line = task.line && !(text && task.line.trim() === firstLine.trim()) ? task.line : '';
+      const line = taskLine(task);
       setText(dim, line);
+      setClass(dim, 'summary', !!task.summary);
       dim.hidden = !line;
       const said = facts(task);
       setText(small, said);

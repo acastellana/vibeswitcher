@@ -48,6 +48,10 @@ public final class LeadEngine: @unchecked Sendable {
         /// The Mac-wide test and build lock the witness reads its workers' waits from (`TestLock.standard()` for the
         /// user's node, which the server gives); none by default, so a test's engine reads no lock outside its root.
         public var lock: TestLock?
+        /// Writes an AI summary's line for a prompt, blocking (`TeamSummaryWatch`): the user's node's server gives
+        /// headless Claude on Haiku (`NodeSummaries.headless`); none by default, so a test's engine asks no model but the
+        /// fake it gives.
+        public var summarize: Summarizer.Generate?
 
         public init() {}
     }
@@ -223,6 +227,14 @@ public final class LeadEngine: @unchecked Sendable {
     public let usageWaits = Changes<[String: ReviewUsageWait]>()
     /// The clock the account's usage is read by (a limit holds until its reset by it). Faked in tests.
     var usageNow: () -> Date = { Date() }
+    /// The AI summaries (`TeamSummaryWatch`): their writer when `Options.summarize` gives a model, each team's lines by
+    /// root (task id to line: the boards show them), and the summary key of each task at work, by root. On `queue`.
+    var summarizer: Summarizer?
+    public let teamSummaries = Changes<[String: String]>()
+    var summaryKeys: [String: [String: String]] = [:]
+    /// Where the summaries' transcripts are looked at, and where their model runs: one at a time.
+    let summaryReads = DispatchQueue(label: "vibenode.lead-engine.summary-reads", qos: .utility)
+    let summaryRuns = DispatchQueue(label: "vibenode.lead-engine.summaries", qos: .utility)
     /// Each project's free disk space, watched (`LeadWitness.Disk`), by root: on `reads` only.
     let disks = DiskWatches()
     /// The bytes free on the volume holding a path, as the disk watch reads them (`DiskSpace.free`). Faked in tests.
@@ -340,6 +352,12 @@ public final class LeadEngine: @unchecked Sendable {
         promptAuditTimer = clock?.every(Int(Self.promptAuditEvery)) { [weak self] in self?.queue.async { self?.lookAtPromptAudits() } }
         // Each screen the session scan reads: a popup on a team session declined, a dialog nothing reads noted.
         sessions?.sawScreen = { [weak self] session, text in self?.lookAt(screen: text, of: session) }
+        if let generate = options.summarize {
+            let (runs, queue) = (summaryRuns, link.queue)
+            let summarizer = Summarizer(generate: generate, run: { runs.async(execute: $0) }, deliver: { queue.async(execute: $0) })
+            summarizer.changed = { [weak self] in self?.publishSummaries() }
+            self.summarizer = summarizer
+        }
     }
 
     /// The vault the cards are built from and the user's answers recorded in: the link's, or a test's.

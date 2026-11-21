@@ -93,7 +93,8 @@ export function createMock(store, options = {}) {
   const boards = new Map(options.empty ? [] : [[SITE_PROJECT, {
     project: SITE_PROJECT, root: SITE, baseBranch: 'landing-base',
     tasks: [
-      task('sync-landing-base', 'Sync landing-base with main', 'running', { since: ago(252), worker: W_SYNC, checkpoints: [{ text: 'Rebased onto main; resolving the hero’s conflicts', at: ago(70) }] }),
+      task('sync-landing-base', 'Sync landing-base with main', 'running', { since: ago(252), worker: W_SYNC, checkpoints: [{ text: 'Rebased onto main; resolving the hero’s conflicts', at: ago(70) }],
+        summary: 'Fixing the landing page’s clashes with the latest main' }),
       task('cleanup-ended-folders', 'Clean up ended sessions’ folders', 'review', { since: ago(118), worker: W_CLEAN, verifier: V_CLEAN, checkpoints: [{ text: 'Raised to audit: it has code that deletes files', at: ago(118) }] }),
       task('flaky-upload-test', 'Fix the flaky upload test', 'blocked', { since: ago(1080), after: ['sync-landing-base'] }),
       task('sidebar-consistency', 'UI consistency pass over the sidebar', 'planned', { since: ago(1500) }),

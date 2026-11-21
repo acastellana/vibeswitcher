@@ -55,7 +55,8 @@ public enum BoardText {
         if task["status"]?.string == "done", let merged = task["merged"], let commit = merged["commit"]?.string {
             dim = "merged \(inert(commit, limit: 12))" + (merged["tested"]?.bool == true ? ", tests passed" : "")
         } else {
-            dim = task["line"]?.string
+            // A task at work: the AI summary's line of what its agent is doing, when one came.
+            dim = task["summary"]?.string ?? task["line"]?.string
         }
         if let dim, !dim.isEmpty { text += " — " + inert(dim, limit: dimLimit) }
         return text

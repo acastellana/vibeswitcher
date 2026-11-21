@@ -341,7 +341,8 @@ struct BoardTests {
             "Needs attention",
             "  Blocked 18m  Rewrite the pricing page's copy — Which plan names do we launch with?",
             "Running",
-            "  Rework 1 4m  Onboarding: the three first-run steps — Step two's form validates on blur; writing its tests",
+            // The running task's AI summary, in its line's place (the vectors' board carries one).
+            "  Rework 1 4m  Onboarding: the three first-run steps — Making the sign-up form check each field as you leave it",
             "  In review 1m  Retry a failed upload once — Waiting for the audit",
             "Waiting",
             "  Queued 25m  UI consistency pass over the sidebar — Waits on Onboarding: the three first-run steps",

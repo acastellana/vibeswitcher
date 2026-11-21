@@ -107,6 +107,9 @@ public enum NodeSettings {
             Setting(key: "lead_mail", title: "Let project leads message each other",
                     about: "Lets one project's lead send messages to another's (tell_lead).",
                     section: "Leads", scope: .node, form: .flag, home: .preferences),
+            Setting(key: "ai_summaries", title: "AI summaries",
+                    about: "A small model (Haiku) writes one plain line of what each worker and verifier is doing, for the board; at most one an agent every 3 minutes.",
+                    section: "Leads", scope: .node, form: .flag, home: .preferences),
             Setting(key: "policy", title: "Working policy",
                     about: "The rules every project's lead, workers and verifiers get in their prompts; running leads are told when it changes.",
                     section: "Working policy", scope: .node, form: .text, home: .policy),
@@ -163,7 +166,7 @@ public enum NodeSettings {
         ("Also on battery (Boost)", "a node runs on mains: it reads no battery"),
         ("Battery hold, keep awake, memory benches", "the Mac's power and the app's own process"),
         ("Notifications (banners, sound, reminders)", "the page's own: This node's toggle, in each browser"),
-        ("AI summaries, a fresh lead session", "not on a node yet (the parity table)"),
+        ("A fresh lead session", "not on a node yet (the parity table)"),
         ("The prompt-audit reminder's on and days", "on, every 14 days; `vibeswitcher prompt-audit FOLDER off` stops it for a project"),
         ("Appearance, sidebar, launch presets, dictation, phone, wallet", "the Mac app's window and devices"),
         ("Hooks, open at login", "`vibeswitcher hooks install`, `vibeswitcher start --at-login`"),
@@ -241,6 +244,7 @@ public enum NodeSettings {
                 case "boost_max_workers": return (String(boost.maxWorkers), String(boostDefault.maxWorkers))
                 case "boost_heavy_slots": return (String(boost.heavySlots), String(boostDefault.heavySlots))
                 case "lead_mail": return (flag(LeadMail.isOn(store)), "on")
+                case "ai_summaries": return (flag(NodeSummaries.isOn(store)), "on")
                 case "policy": return (WorkingPolicy.load(from: files.policy), WorkingPolicy.defaultText)
                 default: return ("", "")
                 }

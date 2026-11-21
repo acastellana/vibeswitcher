@@ -791,3 +791,4 @@ kbd { padding: 1px 6px; border-radius: 5px; box-shadow: inset 0 0 0 1px var(--li
   .board-task-link { padding: 10px 12px; }
   .board-blocker { margin-left: 28px; }
 }
+.board-task-dim.summary { font-style: italic; }

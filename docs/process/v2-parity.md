@@ -12,11 +12,11 @@ that works through shared code counts only if the node actually calls it. Anythi
 
 ## Summary
 
-Of 101 features: **52 has it**, **13 partly**, **20 missing** (one of them, Codex workers, on purpose), **9 not needed on
+Of 101 features: **54 has it**, **13 partly**, **18 missing** (one of them, Codex workers, on purpose), **9 not needed on
 Linux**, **6 Linux-only new**, **1 unverified** (counted again from the table on 2026-11-20, `v2-stability`, after the
 settings, composer, push and rotation lanes' merges and that lane's rows: reopening your own sessions after a restart, the prompt-audit reminder,
 reminders about waiting or stuck sessions, New Project…, the sound, the "New since you looked" line, Between leads, the
-all-done mark, rename and pause, ended sessions resumed, and Close Finished Shells; launch presets edited on the node since the page-actions lane).
+all-done mark, rename and pause, ended sessions resumed, and Close Finished Shells; launch presets edited on the node since the page-actions lane; usage shown and AI summaries since the usage-summaries lane, 2026-11-21).
 
 The gaps that matter most for daily use, worst first:
 
@@ -129,7 +129,7 @@ Sizes to close: S is about a day, M a few days, L a week or more.
 | The prompt-audit reminder | `MainWindow/Lead/PromptAuditDesk.swift` | has it | `Engine/PromptAuditWatch.swift` (2026-11-20): each running lead's project's transcripts looked at every 30 min (`PromptAudit`, shared); a project due one gets a `status` notice saying why and to type `/doctor prompt-audit` in its lead's session; `vibeswitcher prompt-audit FOLDER snooze\|off\|on` (the user's voice) is the card's Remind me in a week and Not for this project. Nothing types the command (the app's Run now is a click; here the user types it); on, every 14 days (the app's settings aren't the node's) | | |
 | `small_task_min` drops a review for tiny work | `LeadController.swift` `noteWorking` | has it | `Engine/Witness.swift` `witnessed`: the vault is told the sessions seen at work (`LeadVault.noteWorking`), on change or every 30 s, as the app's | | closed 2026-11-19 |
 | Fable held back: halted workers restarted on Opus | `LeadController.swift` `WitnessWork` | has it | `Engine/WitnessWork.swift` | | |
-| AI summaries of what each agent is doing | `MainWindow/Lead/TeamSummaryModel.swift`, `Sources/VibeCore/TeamSummaries.swift` | missing | no caller | M | |
+| AI summaries of what each agent is doing | `MainWindow/Lead/TeamSummaryModel.swift`, `Sources/VibeCore/TeamSummaries.swift` | has it | `Engine/TeamSummaryWatch.swift` (2026-11-21): after each refresh, a line for each running task's worker and reviewed task's verifier whose session is live, from its title, checkpoints and transcript's last steps (masked, `SummaryPrompts`), by headless Claude on Haiku (the user's node only), at most one an agent every 3 minutes and only when its input changed, one prompt at a time; off with `vibeswitcher set ai_summaries off` (on by default, as the app's) and while the usage holds Haiku back; the board's `summary` (`vibeswitcher board`'s and the page's line for a task at work). No decision or message TL;DRs (the app's chat cards) | | closed 2026-11-21 |
 | Records: progress, decisions, incidents, redaction, the board's archive | `LeadToolset.swift` (shared) | has it | the lead's tool server | | |
 | Your working policy, and leads told when it changes | `WorkingPolicySettings.swift`, `Sources/VibeCore/WorkingPolicy.swift` | has it | `vibeswitcher set policy TEXT` (`- ` reads it from standard input, `default` puts the five rules back; `Settings/NodeSettings.swift`), the page drafts it; the running leads told once when it changes, again after a compaction (`Engine/SettingsWatch.swift`, `LeadWitness.PolicyWatch`) | | closed 2026-11-20 |
 | The review rules floor | `ReviewFloorSettings.swift`, `Sources/VibeCore/LeadReviewFloor.swift` | has it | recorded at `config accept` as workflow.md proposes it (`Stores/ConfigHoldStore.swift`); each rule set with `vibeswitcher set FOLDER floor_… VALUE` into the host's vault (`Settings/NodeSettingsSet.swift`), the project's lead told; the floor holds `set verifier_model` too | | closed 2026-11-20; the floor is the user's voice with a typed code |

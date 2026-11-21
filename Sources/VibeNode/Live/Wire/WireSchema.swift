@@ -299,6 +299,7 @@ public enum WireSchema {
             shape("board.task", from: "BoardValue.task", [
                 field("id", .string), field("slug", .string), field("title", .string), field("status", taskStatus),
                 field("group", .words(BoardValue.groups)), field("state", .string), field("line", Kind.string.orNull),
+                field("summary", Kind.string.orNull),
                 field("blocker", Kind.string.orNull), field("worker", Kind.string.orNull), field("verifier", Kind.string.orNull),
                 field("review", .words(LeadTask.Review.allCases.map(\.rawValue))), field("position", .int), field("createdAt", Kind.date.orNull),
                 field("since", Kind.date.orNull), field("startedAt", Kind.date.orNull), field("attempts", .int),

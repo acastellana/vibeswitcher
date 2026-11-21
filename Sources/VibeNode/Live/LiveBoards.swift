@@ -31,7 +31,10 @@ public final class LiveBoards: @unchecked Sendable {
     private let leads: Changes<LeadStore.Lead>
     /// Each lead's review rows waiting on a limit, by root (`LeadEngine.usageWaits`): a row's state says so.
     private let usageWaits: Changes<[String: ReviewUsageWait]>?
+    /// Each lead's AI summaries, by root (`LeadEngine.teamSummaries`): a task at work carries its line.
+    private let summaries: Changes<[String: String]>?
     private var waitsWatch: Subscription?
+    private var summariesWatch: Subscription?
     private let now: @Sendable () -> Date
     private let note: @Sendable (String) -> Void
     private var feeds: [String: Feed] = [:]
@@ -60,11 +63,14 @@ public final class LiveBoards: @unchecked Sendable {
 
     /// `leads`: the lead store's changes (each project's root). `now`: what a finished task's day is counted from.
     /// `usageWaits`: the engine's review rows waiting on a limit, by root; a change reads that board's value again.
+    /// `summaries`: the engine's AI summaries, by root; a change reads that board's value again.
     public init(queue: DispatchQueue, leads: Changes<LeadStore.Lead>, usageWaits: Changes<[String: ReviewUsageWait]>? = nil,
+                summaries: Changes<[String: String]>? = nil,
                 now: @escaping @Sendable () -> Date = { Date() }, note: @escaping @Sendable (String) -> Void = { _ in }) {
         self.queue = queue
         self.leads = leads
         self.usageWaits = usageWaits
+        self.summaries = summaries
         self.now = now
         self.note = note
     }
@@ -77,11 +83,8 @@ public final class LiveBoards: @unchecked Sendable {
             for change in batch { self.lead(change.id, root: change.value?.root) }
         }
         for (project, lead) in leads.values.sorted(by: { $0.key < $1.key }) { self.lead(project, root: lead.root) }
-        waitsWatch = usageWaits?.subscribe(on: queue) { [weak self] batch in
-            guard let self else { return }
-            let roots = Set(batch.map(\.id))
-            for feed in self.feeds.values where roots.contains(feed.root) { self.read(feed) }
-        }
+        waitsWatch = usageWaits?.subscribe(on: queue) { [weak self] batch in self?.readAgain(roots: Set(batch.map(\.id))) }
+        summariesWatch = summaries?.subscribe(on: queue) { [weak self] batch in self?.readAgain(roots: Set(batch.map(\.id))) }
         if let clock {
             ticks.append(clock.every(Self.lookEvery) { [weak self] in self?.lookAll() })
         }
@@ -91,6 +94,7 @@ public final class LiveBoards: @unchecked Sendable {
         ticks = []
         watching = nil
         waitsWatch = nil
+        summariesWatch = nil
         queue.async { [self] in
             for feed in feeds.values { feed.watch?.stop() }
             feeds = [:]
@@ -107,6 +111,11 @@ public final class LiveBoards: @unchecked Sendable {
             if feed.watch == nil { watch(feed) }
             read(feed)
         }
+    }
+
+    /// The boards at `roots` read again (what the engine adds to them changed). On `queue`.
+    private func readAgain(roots: Set<String>) {
+        for feed in feeds.values where roots.contains(feed.root) { read(feed) }
     }
 
     /// `project`'s lead is at `root` now (nil: it has none): its board followed, or no longer.
@@ -144,10 +153,11 @@ public final class LiveBoards: @unchecked Sendable {
         feed.reading = true
         let now = self.now
         let waits = usageWaits?.values[feed.root] ?? [:]
+        let lines = summaries?.values[feed.root] ?? [:]
         feed.reads.async { [weak self] in
             let loaded = feed.file.load()
             let value = BoardValue.value(project: feed.project, root: feed.root, board: loaded.board, refusal: loaded.refusal, now: now(),
-                                         usageWaits: waits)
+                                         usageWaits: waits, summaries: lines)
             self?.queue.async { [weak self] in
                 guard let self else { return }
                 feed.reading = false

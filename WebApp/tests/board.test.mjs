@@ -9,7 +9,7 @@ import { fileURLToPath } from 'node:url';
 import { createStore } from '../js/store.js';
 import { connectSocket } from '../js/socket.js';
 import { validate } from '../wire/validators.js';
-import { boardGroups, boardSummary, taskGroup, taskState, taskTone, doneToday } from '../js/words.js';
+import { boardGroups, boardSummary, taskGroup, taskState, taskTone, taskLine, doneToday } from '../js/words.js';
 import { parseRoute, boardHref } from '../js/ui.js';
 
 const vectors = JSON.parse(readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'wire', 'vectors.json'), 'utf8'));
@@ -117,6 +117,18 @@ test('a mock board (no group, state or line) is read from its statuses', () => {
   assert.equal(taskGroup({ status: 'folded' }), 'done');
   assert.equal(taskState({ status: 'review' }), 'In review');
   assert.equal(taskTone({ status: 'failed' }), 'needs-you');
+});
+
+test('a task at work shows its AI summary as its line; without one, its own line, a blocker’s first line not said twice', () => {
+  assert.equal(taskLine({ summary: 'Fixing the upload retry', line: 'Step two' }), 'Fixing the upload retry');
+  assert.equal(taskLine({ summary: null, line: 'Step two' }), 'Step two');
+  assert.equal(taskLine({ line: 'Waits on lead', blocker: 'Waits on lead\nmore' }), '');
+  assert.equal(taskLine({ line: null }), '');
+  const tasks = vector('board')[1].result.boards[0].tasks;
+  assert.ok(tasks.every((task) => 'summary' in task), 'the node sends every task’s summary, null or a line');
+  const working = tasks.find((task) => task.summary);
+  assert.equal(working.status, 'running');
+  assert.equal(taskLine(working), working.summary);
 });
 
 test('a board has an address of its own, and any project id survives it', () => {

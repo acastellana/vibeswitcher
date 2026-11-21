@@ -110,6 +110,8 @@ public enum ServerStart {
         // scratch one's none outside its root.
         options.sweepsRoles = true
         options.lock = parsed.node ? TestLock.standard() : nil
+        // The AI summaries' model (Haiku, headless) on the user's node only: a scratch node's engine asks none.
+        options.summarize = parsed.node ? NodeSummaries.headless(root: root) : nil
         let engine = LeadEngine(root: root, nodeRoot: parsed.nodeRoot.map { URL(fileURLWithPath: $0, isDirectory: true) }, link: link,
                                 clock: clock, sessions: sessions, options: options, note: say)
         requests.engine = engine

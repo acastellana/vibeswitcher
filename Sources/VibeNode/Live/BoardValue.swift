@@ -42,13 +42,15 @@ public enum BoardValue {
     /// `board`'s value for `project` (at `root`) at `now`; `refusal` instead when the board couldn't be read (it is too
     /// large, or isn't a board this build knows): the value then says so and has no tasks.
     /// `usageWaits`: the review rows waiting on the account's usage, by task id (`UsageWaits`): their state says so.
+    /// `summaries`: the AI summaries' lines, by task id (`TeamSummaryWatch`): a task at work carries its own.
     public static func value(project: String, root: String, board: LeadBoard?, refusal: String? = nil, now: Date,
-                             usageWaits: [String: ReviewUsageWait] = [:]) -> NodeWire.Value {
+                             usageWaits: [String: ReviewUsageWait] = [:], summaries: [String: String] = [:]) -> NodeWire.Value {
         var shown: [(group: Int, position: Int, value: NodeWire.Value)] = []
         var slugs: Set<String> = []
         if let board {
             for (position, task) in board.tasks.enumerated() where slugs.insert(task.slug).inserted {
-                guard let (group, value) = Self.task(task, position: position, board: board, now: now, usageWait: usageWaits[task.id]) else { continue }
+                guard let (group, value) = Self.task(task, position: position, board: board, now: now, usageWait: usageWaits[task.id],
+                                                              summary: summaries[task.id]) else { continue }
                 shown.append((group, position, value))
             }
         }
@@ -69,13 +71,17 @@ public enum BoardValue {
     }
 
     /// One task's value and its group's place in `groups`; nil when it isn't shown (finished more than `doneFor` ago).
-    static func task(_ task: LeadTask, position: Int, board: LeadBoard, now: Date, usageWait: ReviewUsageWait? = nil) -> (Int, NodeWire.Value)? {
+    /// `summary`: the AI summary's line of what its agent is doing, sent only while the task is at work (running, not
+    /// waiting on a limit): what someone has to look at keeps its own line.
+    static func task(_ task: LeadTask, position: Int, board: LeadBoard, now: Date, usageWait: ReviewUsageWait? = nil,
+                     summary: String? = nil) -> (Int, NodeWire.Value)? {
         let shown = Shown(task, board: board, usageWait: usageWait)
         if shown.group == "done", now.timeIntervalSince1970 - finishedAt(task) > doneFor { return nil }
         var fields: [String: NodeWire.Value] = [
             "id": .string(text(task.id, limit: 80)), "slug": .string(text(task.slug, limit: 120)), "title": .string(text(task.title, limit: titleBytes)),
             "status": .string(task.status.rawValue), "group": .string(shown.group), "state": .string(shown.state),
             "line": shown.line.map { .string(line($0)) } ?? .null,
+            "summary": summary.flatMap { shown.group == "running" && usageWait == nil ? .string(line($0)) : nil } ?? .null,
             "blocker": task.status == .blocked ? task.blocker.map { .string(text($0, limit: blockerLimit, lines: blockerLines)) } ?? .null : .null,
             "worker": session(task.worker), "verifier": session(task.verifier),
             "review": .string(task.reviewLevel.rawValue), "position": .int(position),

@@ -154,3 +154,12 @@ export const ROLES = { lead: 'Lead', worker: 'Worker', verifier: 'Verifier' };
 // ⌘ on a Mac, Ctrl elsewhere; ⌥ on a Mac, Alt elsewhere.
 export const MAC = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform || '');
 export const KEY = { mod: MAC ? '⌘' : 'Ctrl+', alt: MAC ? '⌥' : 'Alt+' };
+
+// The dim line under a task's row: while it works, the AI summary of what its agent is doing when the node has one
+// (`summary`), else the node's line; a blocked task's line is left out when its blocker's first line says the same.
+export function taskLine(task) {
+  if (task.summary) return task.summary;
+  const text = task.blocker || '';
+  const first = text.split('\n').find((line) => line.trim()) || '';
+  return task.line && !(text && task.line.trim() === first.trim()) ? task.line : '';
+}
