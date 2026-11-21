@@ -4285,3 +4285,6 @@ Proposed task 1: Find why dictations end with no text
 - 2026-11-21 14:05 Automatically (auto_advance): Released claude-dictation-text's worker, idle since its done report on 98fb32cf, while its audit runs (ended pid 69609 (Worker: Claude dictation: text that was dictated is dropped as "typed in the terminal meanwhile")): its Mac slot and memory are free. Its worktree and branch stay; findings the verdict sends back go to a fresh worker there, and a clean verdict merges with none.
 - 2026-11-21 14:06 Audit of claude-dictation-text: complete, clean, round 2: 1 Important closed, 1 Nit closed
 - 2026-11-21 14:07 Merged one-sidebar-button: One sidebar button closes all finished shells and replaced leads (build 314c245bb76b)
+- 2026-11-21 14:07 Automatically (auto_advance): Merged one-sidebar-button (One sidebar button closes all finished shells and replaced leads) into main at b2f0d6a4, on its passing audit and the full test run.
+- 2026-11-21 14:07 Automatically (auto_advance): Cleaned up one-sidebar-button (freed 2.6 GB of build output and temporary folders). It stays done.
+- 2026-11-21 14:08 Update: Merged: one sidebar button closes all finished shells and replaced leads — **What you asked for** ("a button to close all finished shells as well as replaced leads"):
