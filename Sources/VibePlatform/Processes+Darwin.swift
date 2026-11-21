@@ -298,7 +298,7 @@ extension Platform.Processes.System {
 
     /// One read of `proc_pidinfo(PROC_PIDTBSDINFO)`: the process's parent, its start (microseconds since 1970, from
     /// `pbi_start_tvsec` and `pbi_start_tvusec`: a process started later has no smaller one, and an exec keeps it) and
-    /// its controlling terminal (`e_tdev`, named as `devname` names it: `ttys004`). nil when it has gone, isn't the
+    /// its controlling terminal (`e_tdev`, named as its record names it: `ttys004`). nil when it has gone, isn't the
     /// user's to read, or the answer is short or names another pid.
     static func link(_ pid: pid_t) -> Platform.Processes.Link? {
         guard pid > 0 else { return nil }
@@ -306,11 +306,8 @@ extension Platform.Processes.System {
         let size = Int32(MemoryLayout<proc_bsdinfo>.size)
         guard proc_pidinfo(pid, PROC_PIDTBSDINFO, 0, &info, size) == size, info.pbi_pid == UInt32(pid) else { return nil }
         let start = UInt64(info.pbi_start_tvsec) &* 1_000_000 &+ UInt64(info.pbi_start_tvusec)
-        // NODEV (all bits set) for no controlling terminal.
-        var terminal: String?
-        if info.e_tdev != UInt32.max, let name = devname(dev_t(bitPattern: info.e_tdev), S_IFCHR) {
-            terminal = Platform.Terminals.name(devicePath: String(cString: name))
-        }
+        // Named as its record names it (`kernelRecord`): nil for none (NODEV).
+        let terminal = Platform.Terminals.name(device: dev_t(bitPattern: info.e_tdev))
         return Platform.Processes.Link(pid: pid, parent: pid_t(bitPattern: info.pbi_ppid), startTicks: start, terminal: terminal)
     }
 

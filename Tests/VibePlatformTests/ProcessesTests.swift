@@ -1001,6 +1001,7 @@ struct ProcessesTests {
     func theMacsLinkIsItsProcessBoundToItsToken() throws {
         let link = try #require(Processes.link(getpid()))
         #expect(link.pid == getpid() && link.parent == getppid())
+        #expect(link.terminal == Processes.kernelRecord(getpid())?.terminal)
         #expect(Processes.link(0) == nil && Processes.link(-1) == nil)
         // The token of this process, as a socket names its peer (a pair's ends are both this process's).
         let (one, other) = try #require(Platform.Sockets.pair(type: Platform.Sockets.stream))
