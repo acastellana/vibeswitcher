@@ -12,7 +12,7 @@ that works through shared code counts only if the node actually calls it. Anythi
 
 ## Summary
 
-Of 101 features: **65 has it**, **12 partly**, **8 missing** (two of them on purpose: Codex workers, and Codex's trust of the hooks), **9 not needed on
+Of 101 features: **68 has it**, **11 partly**, **6 missing** (two of them on purpose: Codex workers, and Codex's trust of the hooks), **9 not needed on
 Linux**, **6 Linux-only new**, **1 unverified** (counted again from the table on 2026-11-20, `v2-stability`, after the
 settings, composer, push and rotation lanes' merges and that lane's rows: reopening your own sessions after a restart, the prompt-audit reminder,
 reminders about waiting or stuck sessions, New Project…, the sound, the "New since you looked" line, Between leads, the
