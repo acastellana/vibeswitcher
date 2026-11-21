@@ -224,7 +224,7 @@ public enum WireSchema {
                 field("node", .string), field("epoch", .string), field("root", .string), field("server", .shape("node.server")),
                 field("host", .shape("node.host")), field("rule", .shape("node.rule")), field("cards", .shape("node.cards")),
                 field("accepted", .list(.shape("node.accepted"))), field("notices", strings),
-                field("restart", Kind.shape("node.restart").orNull), field("reopen", .list(.shape("node.reopen"))), field("ended", .list(.shape("node.ended"))),
+                field("restart", Kind.shape("node.restart").orNull), field("reopen", .list(.shape("node.reopen"))), field("ended", .list(.shape("node.ended"))), field("ending", .list(.shape("node.ending"))),
                 field("builds", Kind.any.orNull), field("web", .shape("node.web")), field("usage", Kind.shape("node.usage").orNull),
                 optional("health", .shape("node.health")), field("boost", Kind.shape("node.boost").orNull)]),
             // Boost (the app's `BoostMark`, 2026-11-21): null before the engine's first look.
@@ -259,6 +259,9 @@ public enum WireSchema {
                                                                    field("reset", .string), field("sessions", .int)]),
             shape("node.reopen", from: "LeadEngine.offeredValue (the stability lane, 2026-11-20)", [
                 field("session", .string), field("folder", .string), field("name", .string), field("conversation", Kind.string.orNull)]),
+            // Ended within the grace, listed for `resume` at `listedAt` (2026-11-21).
+            shape("node.ending", from: "LeadEngine.endingValue", [field("session", .string), field("folder", .string), field("name", .string),
+                                                                 field("at", .date), field("listedAt", .date)]),
             shape("node.ended", from: "LeadEngine.endedValue (the stability lane, 2026-11-20)", [
                 field("session", .string), field("folder", .string), field("name", .string), field("conversation", Kind.string.orNull),
                 field("at", .date), field("exit", Kind.shape("node.ended.exit").orNull)]),

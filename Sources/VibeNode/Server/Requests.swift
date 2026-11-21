@@ -429,6 +429,7 @@ public final class Requests: @unchecked Sendable {
             "restart": engine?.restartValue ?? .null,
             "reopen": engine?.offeredValue ?? .array([]),
             "ended": engine?.endedValue ?? .array([]),
+            "ending": engine?.endingValue ?? .array([]),
             "builds": installRoot.map { SwitchRequest.buildsValue(installRoot: $0, running: notes?.notes.build) } ?? .null,
             "web": webValue?() ?? NodeStatusStore.webOff,
             "usage": engine?.usage.map(NodeUsage.value) ?? .null,

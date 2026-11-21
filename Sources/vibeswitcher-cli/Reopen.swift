@@ -114,16 +114,18 @@ enum ResumeCommand {
         case .failure(let failure): return Say.failed(failure)
         case .success(let connected): client = connected
         }
-        let ended: [NodeWire.Value]
+        let ended: [NodeWire.Value], ending: [NodeWire.Value]
         switch client.request("status") {
         case .failure(let failure): return Say.failed(failure)
         case .success(let reply):
             guard reply.ok, let result = reply.result else { return Say.replyError(reply) }
             ended = result["ended"]?.array ?? []
+            ending = result["ending"]?.array ?? []
         }
         guard let wanted = arguments.first else {
             guard !ended.isEmpty else {
-                Say.out("no session of yours ended lately")
+                // One that ended within the grace isn't listed yet: said, with when it will be.
+                if ending.isEmpty { Say.out("no session of yours ended lately") } else { ResumeText.endingLines(ending, now: Date()).forEach(Say.out) }
                 return 0
             }
             Say.out("ended lately, newest first:")
@@ -140,7 +142,11 @@ enum ResumeCommand {
         let session: NodeWire.Value
         switch SessionLookup.match(wanted, in: ended, idKey: "session", hostedOnly: false, noun: "ended session",
                                    listed: "`vibeswitcher resume` lists yours") {
-        case .failure(let why): return Say.refused(why.description)
+        case .failure(let why):
+            if case .success = SessionLookup.match(wanted, in: ending, idKey: "session", hostedOnly: false, noun: "ended session", listed: "") {
+                return Say.refused(ResumeText.endingLines(ending, now: Date()).joined(separator: "\n"))
+            }
+            return Say.refused(why.description)
         case .success(let found): session = found
         }
         let action = UUID().uuidString.lowercased()

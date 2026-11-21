@@ -82,13 +82,13 @@ public enum NodeSettings {
             Setting(key: "projects_folder", title: "Projects folder",
                     about: "Where `vibeswitcher new-project` makes a project when --in names no other place.",
                     section: "General", scope: .node, form: .folder, home: .preferences),
-            Setting(key: "mac_max_sessions", title: "Team sessions on this node, at most",
+            Setting(key: "node_max_sessions", title: "Team sessions on this node, at most",
                     about: "How many workers and verifiers, across every project, may run at once.",
                     section: "Machine-wide limits", scope: .node, form: .count, home: .limits, range: 1...99),
             Setting(key: "load_threshold", title: "Start nothing above a load of",
                     about: "Leads start nothing while the load is above this; default means twice the cores (\(2 * cores)).",
                     section: "Machine-wide limits", scope: .node, form: .number, home: .limits),
-            Setting(key: "mac_heavy_slots", title: "Test and build slots at once",
+            Setting(key: "node_heavy_slots", title: "Test and build slots at once",
                     about: "How many builds and full test runs may run at once on this node.",
                     section: "Machine-wide limits", scope: .node, form: .count, home: .limits, range: 1...MacLimits.heavySlotsCeiling),
             Setting(key: "ignore_usage_limits", title: "Ignore usage limits",
@@ -173,7 +173,15 @@ public enum NodeSettings {
         ]
     }
 
-    public static func setting(_ key: String) -> Setting? { all.first { $0.key == key } }
+    public static func setting(_ key: String) -> Setting? {
+        let key = aliases[key] ?? key
+        return all.first { $0.key == key }
+    }
+
+    /// The app's names for the machine-wide limits (`mac_max_sessions`, `mac_heavy_slots`, as workflow.md, the lead's
+    /// tools and the Mac's Settings say them), taken as the node's (`node_…`): `set` takes either. The file stays
+    /// `mac-limits.json`, which the leads' tool servers read (shared with the Mac); it is shown as this node's limits.
+    public static let aliases = ["mac_max_sessions": "node_max_sessions", "mac_heavy_slots": "node_heavy_slots"]
 
     /// The app's settings a node leaves out, and why.
     public static let leftOut: [(title: String, why: String)] = [
@@ -257,9 +265,9 @@ public enum NodeSettings {
         return all.filter { $0.scope == .node }.map { setting in
             let (value, fallback): (String, String) = {
                 switch setting.key {
-                case "mac_max_sessions": return (String(limits.maxSessions), String(MacLimits.defaultMaxSessions))
+                case "node_max_sessions": return (String(limits.maxSessions), String(MacLimits.defaultMaxSessions))
                 case "load_threshold": return (limits.loadThreshold.map(MacLoad.number) ?? "default", "default")
-                case "mac_heavy_slots": return (String(limits.heavySlots), String(MacLimits.defaultHeavySlots))
+                case "node_heavy_slots": return (String(limits.heavySlots), String(MacLimits.defaultHeavySlots))
                 case "ignore_usage_limits": return (flag(limits.ignoreUsageLimits), "off")
                 case "boost": return (boostMode(store).rawValue, BoostMode.off.rawValue)
                 case "boost_load_threshold": return (MacLoad.number(boost.loadThreshold), MacLoad.number(boostDefault.loadThreshold))

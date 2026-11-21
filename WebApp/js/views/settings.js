@@ -27,7 +27,8 @@ function settingRow(setting, { folder, home, editing, toggle }) {
   ];
   const change = h('button', { class: 'confirm-clear', type: 'button', 'aria-expanded': String(drafted != null), onclick: () => toggle(setting) },
     drafted != null ? 'Close' : 'Change');
-  const where = [setting.home === 'floor' ? setting.where : tilde(setting.where, home)];
+  // The machine-wide limits' file keeps the Mac's name (mac-limits.json, which the leads' tools read): this node's.
+  const where = [setting.home === 'floor' ? setting.where : (setting.home === 'limits' ? 'this node’s limits, ' : '') + tilde(setting.where, home)];
   if (!setting.isDefault) where.push(`default ${setting.form === 'text' ? 'the five rules' : setting.default}`);
   if (setting.limits) where.push(setting.limits);
   return h('div', { class: 'setting', data: { key: setting.key } },

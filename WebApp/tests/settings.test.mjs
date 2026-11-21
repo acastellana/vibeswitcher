@@ -37,7 +37,7 @@ test('a change is drafted as the line that sets it, every word quoted as the she
   const node = answered.result.node.settings;
   const project = answered.result.project.settings;
   const at = (list, key) => list.find((setting) => setting.key === key);
-  assert.equal(setLine(at(node, 'mac_max_sessions'), '8'), 'vibeswitcher set mac_max_sessions 8');
+  assert.equal(setLine(at(node, 'node_max_sessions'), '8'), 'vibeswitcher set node_max_sessions 8');
   // A node's setting names no folder, even if one is given.
   assert.equal(setLine(at(node, 'boost'), 'on', '/home/u/acme-site'), 'vibeswitcher set boost on');
   assert.equal(setLine(at(project, 'max_workers'), '5', '/home/u/acme site'), "vibeswitcher set '/home/u/acme site' max_workers 5");
@@ -50,9 +50,9 @@ test('a change is drafted as the line that sets it, every word quoted as the she
 test('a draft is checked against its form before a line is shown', () => {
   const node = answered.result.node.settings;
   const at = (key) => node.find((setting) => setting.key === key);
-  assert.equal(draftProblem(at('mac_max_sessions'), '8'), null);
-  assert.match(draftProblem(at('mac_max_sessions'), 'lots'), /whole number/);
-  assert.equal(draftProblem(at('mac_max_sessions'), 'default'), null);
+  assert.equal(draftProblem(at('node_max_sessions'), '8'), null);
+  assert.match(draftProblem(at('node_max_sessions'), 'lots'), /whole number/);
+  assert.equal(draftProblem(at('node_max_sessions'), 'default'), null);
   assert.equal(draftProblem(at('boost'), 'automatic'), null);
   assert.match(draftProblem(at('boost'), 'turbo'), /one of off, on, automatic/);
   assert.equal(draftProblem(at('lead_mail'), 'off'), null);

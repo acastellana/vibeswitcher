@@ -544,9 +544,9 @@ export function createMock(store, options = {}) {
     const models = (key, title, about, form, value, fallback, extra) => row(key, title, about, extra?.section || 'Models', 'project', form, 'workflow', value, fallback, workflow, extra);
     const floor = (key, title, about, form, value, fallback, extra) => row(key, title, about, 'Review rules floor', 'project', form, 'floor', value, fallback, 'the session host\'s vault', extra);
     const node = [
-      limits('mac_max_sessions', 'Team sessions on this node, at most', 'How many workers and verifiers, across every project, may run at once.', 'count', '10', '10', { limits: '1 to 99' }),
+      limits('node_max_sessions', 'Team sessions on this node, at most', 'How many workers and verifiers, across every project, may run at once.', 'count', '10', '10', { limits: '1 to 99' }),
       limits('load_threshold', 'Start nothing above a load of', 'Leads start nothing while the load is above this; default means twice the cores (24).', 'number', 'default', 'default', { limits: 'above 0' }),
-      limits('mac_heavy_slots', 'Test and build slots at once', 'How many builds and full test runs may run at once on this node.', 'count', '3', '2', { limits: '1 to 12' }),
+      limits('node_heavy_slots', 'Test and build slots at once', 'How many builds and full test runs may run at once on this node.', 'count', '3', '2', { limits: '1 to 12' }),
       limits('ignore_usage_limits', 'Ignore usage limits', 'Leads keep starting work at any share of a Claude limit, instead of stopping at 80 %.', 'flag', 'off', 'off', { section: 'Usage limits', limits: 'on or off' }),
       boost('boost', 'Boost', 'Raises the machine-wide limits for more throughput. On a node Automatic acts as Off: it can\'t tell whether you\'re away.', 'choice', 'off', 'off', { choices: ['off', 'on', 'automatic'], limits: 'off, on, automatic' }),
       boost('boost_load_threshold', 'Start nothing above a load of, while boosted', 'While boosted, leads start nothing once the load is above this.', 'number', '36', '36', { limits: 'above 0, at most 48' }),

@@ -126,6 +126,14 @@ struct NodeAcceptanceTests {
 
         try EngineEndToEndTests.tell(files, ["op": "permission", "command": "make clean"])
         try #require(await node.eventuallyStatus { Self.prompt($0, id)?.contains("Do you want to proceed?") == true }, "\(node.said)")
+        // The prompt's options, each as the screen says it, in `status --json` (the acceptance run's A6 gap): what
+        // `reply SESSION N` picks from.
+        var options: [String]?
+        _ = await node.eventuallyStatus { status in
+            options = (Self.listed(status, id)?["prompt"] as? [String: Any])?["options"] as? [String]
+            return options?.count == 3
+        }
+        #expect(options == ["Yes", "Yes, and don't ask again for this command", "No, and tell Claude what to do differently (esc)"], "\(String(describing: options))")
         let allowed = try await node.runOnTerminal(["reply", Self.short(session), "1"])
         #expect(allowed.status == 0 && allowed.output.contains("answered: option 1"), "\(allowed.output)\(allowed.errors)")
         #expect(await eventually(timeout: 60) { EngineEndToEndTests.state(files)["reply"] as? String == "Allowed." })

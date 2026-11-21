@@ -390,6 +390,9 @@ public enum WireVectors {
             "rule": .object(["mode": .string("systemd"), "says": .string("the user's voice is a terminal's process outside the node's unit"),
                              "scopes": .array([.string("/init.scope")])]),
             "cards": Requests.counts([.question: 1]), "accepted": .array([]), "notices": .array([]), "restart": .null, "reopen": .array([]), "ended": .array([]), "builds": .null,
+            "ending": .array([.object(["session": .string(NodeIds.session(host: UUID(uuidString: "5c1e7a92-0000-4000-8000-000000000001")!)),
+                                       "folder": .string("/home/u/notes"), "name": .string("notes"), "at": .string("2026-11-17T09:13:40.000Z"),
+                                       "listedAt": .string("2026-11-17T09:14:10.000Z")])]),
             "web": .object(["state": .string("listening"), "port": .int(Int(NodeWeb.port)), "tokens": .int(1), "connections": .int(1)]),
             "usage": usage,
             "boost": .object(["mode": .string("on"), "on": .bool(true), "why": .string("on in Settings"),
@@ -639,7 +642,7 @@ public enum WireVectors {
         let workflow = root + "/.vibeswitcher/workflow.md"
         return .object([
             "node": .object(["root": .string(node), "settings": .array([
-                shown("mac_max_sessions", "8", String(MacLimits.defaultMaxSessions), place: node + "/mac-limits.json"),
+                shown("node_max_sessions", "8", String(MacLimits.defaultMaxSessions), place: node + "/mac-limits.json"),
                 shown("ignore_usage_limits", "off", "off", place: node + "/mac-limits.json"),
                 shown("boost", "on", "off", place: node + "/settings.plist"),
                 shown("lead_mail", "on", "on", place: node + "/settings.plist"),
