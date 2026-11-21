@@ -4,7 +4,8 @@ import VibeNode
 
 /// `vibeswitcher new-project NAME [--in LOCATION] [--folder NAME] [--goal TEXT] [--no-lead]` (the parity table's New
 /// Project… row; the app's sheet, `ProjectCreation`, shared): a folder named for NAME ("My App": my-app) in LOCATION
-/// (default `~/dev`, the app's when Settings names none), with a git repository and a first commit of README.md and
+/// (default: the node's projects folder, `vibeswitcher set projects_folder PATH`, else `~/dev`, as the app's Settings ›
+/// General), with a git repository and a first commit of README.md and
 /// .gitignore, or nothing left behind; then its lead started (`vibeswitcher lead FOLDER [--goal TEXT]`, the user's voice
 /// with its own typed code), unless `--no-lead`. Making the folder is this process's own, as `git init` in a terminal
 /// is: nothing of the node's is asked for it. A project made whose lead didn't start says so and how to start it.
@@ -13,7 +14,8 @@ enum NewProjectCommand {
 
     struct Asked: Equatable {
         var name: String
-        var location = ProjectCreation.defaultLocation
+        /// nil: the node's projects folder.
+        var location: String?
         var folder: String?
         var goal: String?
         var lead = true
@@ -48,11 +50,15 @@ enum NewProjectCommand {
         return asked
     }
 
-    static func run(_ arguments: [String], home: String = ProcessInfo.processInfo.environment["HOME"] ?? NSHomeDirectory()) -> Int32 {
+    static func run(_ arguments: [String], home: String = ProcessInfo.processInfo.environment["HOME"] ?? NSHomeDirectory(),
+                    nodeRoot: @autoclosure () -> URL = NodeContext.current().root) -> Int32 {
         guard let asked = parse(arguments) else { return Say.usage(usage) }
+        // The node's projects folder is read from its settings file, as the command's own read: a node not running yet
+        // still has it, and nothing of the node's is asked.
+        let location = asked.location ?? NodeSettings.projectsFolder(files: NodeSettings.Files(root: nodeRoot()))
         let plan: ProjectCreation.Plan
         switch ProjectCreation.plan(name: asked.name, folderName: asked.folder ?? ProjectCreation.folderName(for: asked.name),
-                                    location: asked.location, home: home) {
+                                    location: location, home: home) {
         case .failure(let problem): return Say.refused(problem.message)
         case .success(let made): plan = made
         }

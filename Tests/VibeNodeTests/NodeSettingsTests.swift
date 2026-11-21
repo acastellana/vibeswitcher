@@ -126,6 +126,28 @@ struct NodeSettingsTests {
 
     // MARK: The node's own
 
+    /// The projects folder (Settings › General): kept in the node's settings.plist under the app's key, as given (a tilde
+    /// path or a full one), read back by `new-project`'s default; `default` puts back `~/dev`. Only a folder is taken.
+    @Test func theProjectsFolderIsKeptWhereNewProjectReadsIt() throws {
+        let files = try files()
+        #expect(NodeSettings.projectsFolder(files: files) == ProjectCreation.defaultLocation)
+        let applied = try set("projects_folder", "  ~/code/projects ", files: files)
+        #expect(applied.was == "~/dev" && applied.value == "~/code/projects")
+        #expect(NodeSettings.projectsFolder(files: files) == "~/code/projects")
+        #expect(files.preferences?.string(forKey: "projectsFolder") == "~/code/projects")
+        #expect(value("projects_folder", NodeSettings.node(files: files)) == "~/code/projects")
+        _ = try set("projects_folder", "/srv/work", files: files)
+        #expect(NodeSettings.projectsFolder(files: files) == "/srv/work")
+        _ = try set("projects_folder", "default", files: files)
+        #expect(NodeSettings.projectsFolder(files: files) == "~/dev")
+        #expect(files.preferences?.string(forKey: "projectsFolder") == nil)
+        let setting = try #require(NodeSettings.setting("projects_folder"))
+        for refused in ["dev", "~other/dev", "./dev", "/a\nb", String(repeating: "/a", count: 600)] {
+            #expect((try? NodeSettings.parse(setting, refused).get()) == nil, "\(refused)")
+        }
+        #expect(try NodeSettings.parse(setting, "~").get() == "~")
+    }
+
     @Test func theLimitsAreWrittenWhereTheLeadsReadThem() throws {
         let files = try files()
         let applied = try set("mac_max_sessions", "7", files: files)

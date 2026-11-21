@@ -442,7 +442,11 @@ struct SessionDriveTests {
         let noDraft = try await node.run(["send", short])
         #expect(noDraft.status == 64 && noDraft.errors.contains("has no draft"), "\(noDraft.output)\(noDraft.errors)")
 
-        let ended = try await node.runOnTerminal(["end", short])
+        // The terminal name `status` prints names it as well as its id (`SessionLookup`), also as pts/N.
+        let byTerminal = try await node.run(["send", session.tty])
+        #expect(byTerminal.status == 64 && byTerminal.errors.contains("session \(short)") && byTerminal.errors.contains("has no draft"),
+                "\(byTerminal.output)\(byTerminal.errors)")
+        let ended = try await node.runOnTerminal(["end", session.tty])
         #expect(ended.status == 0 && ended.output.contains("ended: session \(short)"), "\(ended.output)\(ended.errors)")
         for (words, usage) in [(["new"], "usage: vibeswitcher new"), (["new", repo.path, "--agent", "codex"], "usage: vibeswitcher new"),
                                (["end"], "usage: vibeswitcher end"), (["reply", short], "usage: vibeswitcher reply"),

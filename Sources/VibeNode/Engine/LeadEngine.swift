@@ -263,6 +263,27 @@ public final class LeadEngine: @unchecked Sendable {
     /// The working policy's watch (`SettingsWatch.swift`): each running lead told it once when it changes. None until
     /// `watchRoom`, so a test's engine tells nothing it didn't ask for.
     var policyWatch: LeadWitness.PolicyWatch?
+    // Shell requests (`ShellCards.swift`), on `queue`: the stamps the host vouched for (asked once each), each request's
+    // card, the messages under way, a look under way, the 15 s look and the clock. The folder and the host's seal are
+    // read on `shellWork`, one step at a time.
+    var shellTrusted: [String: WalletStamp] = [:]
+    /// What became of each request, the engine's own (never read from the folder's answer files).
+    var shellAnswers: [String: ShellAsk.Answer] = [:]
+    var shellCards: [String: String] = [:]
+    var shellTelling: Set<String> = []
+    var shellTellingEnd: Set<String> = []
+    var shellLooking = false
+    var shellTimer: Subscription?
+    var shellNow: () -> Date = Date.init
+    let shellWork = DispatchQueue(label: "vibenode.lead-engine.shell-requests", qos: .userInitiated)
+    // The developer tools notice (`ToolchainLook.swift`), on `queue`: the notices the last look found, when it ran,
+    // whether one is under way; how the node's tools are asked (a test's stand-in) and the clock.
+    public internal(set) var toolchainNotices: [String] = []
+    var toolchainLookedAt: Date?
+    var toolchainLooking = false
+    /// The node's tools as a look asks them (nil: `NodeToolchain.node(home:)` in the engine's home).
+    var toolchainTools: (@Sendable () -> NodeToolchain.Tools)?
+    var toolchainNow: () -> Date = Date.init
     /// Boost as last written to `boost.json` (`lookAtBoost`), and when; the clock it's judged on.
     var boostWritten: (state: BoostState, at: Date)?
     var boostNow: () -> Date = Date.init

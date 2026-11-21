@@ -6,4 +6,7 @@
 # Settings › Agents). It runs the app's tool server binary in its filing mode (`ShellAsk` in VibeCore): the session host
 # stamps the request for the session this process runs in, and the app shows only a request it stamped.
 here="$(cd "$(dirname "$0")" && pwd)"
-exec "$here/../../MacOS/vibeswitcher-mcp" --shell-request "$@"
+mcp="$here/../../MacOS/vibeswitcher-mcp"
+# A Linux node's install: <prefix>/<commit>/Resources/bin, beside the build's <prefix>/<commit>/bin.
+[[ -x $mcp ]] || mcp="$here/../../bin/vibeswitcher-mcp"
+exec "$mcp" --shell-request "$@"
