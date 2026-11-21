@@ -11,7 +11,8 @@ import VibeNode
 signal(SIGPIPE, SIG_IGN)
 
 let usage = """
-    usage: vibeswitcher status [--json] | status --probe [--json] | status --ack
+    usage: vibeswitcher status [--json] | status --health [--json] | status --probe [--json] | status --ack
+           vibeswitcher doctor
            vibeswitcher start [--interop-is-on] [--at-login] [--node-version vX.Y.Z]
            vibeswitcher stop
            vibeswitcher switch COMMIT | rollback
@@ -40,6 +41,8 @@ let words = Array(CommandLine.arguments.dropFirst())
 switch words.first {
 case "status":
     exit(StatusCommand.run(Array(words.dropFirst())))
+case "doctor":
+    exit(DoctorCommand.run(Array(words.dropFirst())))
 case "start":
     exit(StartCommand.run(Array(words.dropFirst())))
 case "stop":
