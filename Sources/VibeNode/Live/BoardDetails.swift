@@ -1,36 +1,20 @@
 import Foundation
 import VibeCore
 
-/// The rest of the Mac's Team tab (the parity table's board row, 2026-11-21): the lead's Results (`post_update`'s
-/// cards: a title, a Markdown body and its kept screenshots), carried in the board's value beside its records; and a
-/// task's details as its row opens (`TeamRowDetails`: why it last failed, its checkpoints, the worker's report, the
+/// The rest of the Mac's Team tab (the parity table's board row, 2026-11-21): a result's screenshots (the board's
+/// `results` are `BoardRecords.result`'s), and a task's details as its row opens (`TeamRowDetails`: why it last failed, its checkpoints, the worker's report, the
 /// audit and its findings, its merge and its score line), asked when a row opens (`board.task`, a read) so the board's
 /// stream stays small. A result's image is served by `board.image` (a read): only a file the board's own result names,
 /// in its kept-images folder `.vibeswitcher/updates/<id>/` under the lead's root, read with no link followed, as a PNG,
 /// JPEG, GIF or WebP its bytes agree with (`ChatImageBytes`), in parts. Every string is the sessions' writing: inert
 /// and capped (`BoardValue.text`).
 enum BoardDetails {
-    /// The newest results a board carries.
-    static let resultsKept = 20
-    /// The most bytes of a result's body, and its lines.
-    static let bodyBytes = 8_000
-    static let bodyLines = 200
-    /// The most images of a result sent, and checkpoints and findings of a task.
+    /// The most images of a result served, and checkpoints and findings of a task sent.
     static let imagesKept = 6
     static let checkpointsKept = 8
     static let findingsKept = 60
 
     static func text(_ value: String, _ limit: Int, _ lines: Int = 1) -> String { BoardValue.text(value, limit: limit, lines: lines) }
-
-    /// The results, newest first: each its id, title, body (Markdown, the page renders it as text nodes), when, and how
-    /// many images it names (`board.image` serves them by index).
-    static func results(_ board: LeadBoard?) -> NodeWire.Value {
-        .array((board?.updates ?? []).suffix(resultsKept).reversed().map { update in
-            .object(["id": .string(text(update.id, 80)), "title": .string(text(update.title, 300)),
-                     "body": .string(text(update.body, bodyBytes, bodyLines)), "at": BoardValue.date(update.at),
-                     "images": .int(min(update.images.count, imagesKept))])
-        })
-    }
 
     /// A task's details, as its row opens (`TeamRowDetails`).
     static func task(_ task: LeadTask) -> NodeWire.Value {

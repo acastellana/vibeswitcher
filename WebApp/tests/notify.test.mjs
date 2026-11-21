@@ -86,3 +86,19 @@ test('the chime is two short soft notes made on the page, each stopped within ha
   assert.deepEqual(made.map((tone) => tone.frequency.value), [660, 990]);
   for (const tone of made) assert.ok(tone.started >= 10 && tone.stopped - tone.started < 0.5, JSON.stringify(tone));
 });
+
+test('a freeze the node keeps after the page looked is told once; one from before, or none, is not', () => {
+  const withHealth = (freezes) => ({ ...state(), node: { health: { freezes } } });
+  const none = summarize(state());
+  const quiet = summarize(withHealth([]));
+  const frozen = summarize(withHealth([{ at: '2026-11-21T10:00:00.000Z', seconds: 14 }]));
+  // The first look at a node with a freeze already kept: nothing (the page had no digest before).
+  assert.deepEqual(changes(none, frozen), []);
+  const told = changes(quiet, frozen);
+  assert.equal(told.length, 1);
+  assert.equal(told[0].key, 'freeze:2026-11-21T10:00:00.000Z');
+  assert.match(told[0].body, /didn’t answer for 14 s/);
+  assert.equal(told[0].href, '#/node');
+  assert.equal(sounding(told), false);
+  assert.deepEqual(changes(frozen, frozen), []);
+});

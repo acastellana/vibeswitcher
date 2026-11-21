@@ -246,6 +246,12 @@ struct SettingsRequestTests {
         let read = try await node.run(["settings"])
         #expect(read.status == 0 && read.output.contains("mac_max_sessions = 7"), "\(read.output)\(read.errors)")
         #expect(read.output.contains("Not on a node"), "\(read.output)")
+        // The app's search: only the settings holding every word, no left-out list, and a word nothing holds said so.
+        let found = try await node.run(["settings", "--find", "team sessions"])
+        #expect(found.status == 0 && found.output.contains("mac_max_sessions = 7") && found.output.contains("boost_max_sessions"), "\(found.output)")
+        #expect(!found.output.contains("lead_mail") && !found.output.contains("Not on a node"), "\(found.output)")
+        let none = try await node.run(["settings", "--find", "nothing-like-this"])
+        #expect(none.status == 0 && none.output.contains("No setting matches"), "\(none.output)")
         let refused = try await node.run(["set", "mac_max_sessions", "0"])
         #expect(refused.status == 77 && refused.errors.contains("1 to 99"), "\(refused.output)\(refused.errors)")
         let usage = try await node.run(["set", "mac_max_sessions"])

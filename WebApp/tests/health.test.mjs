@@ -25,3 +25,8 @@ test('a stall, freezes, waiting sessions and errors need a look, each listed', (
   assert.equal(facts.lines.length, 4);
   assert.ok(facts.lines.some((line) => line.text === 'set boost: not changed: disk full'));
 });
+
+test('the causes show the most frequent first', () => {
+  const facts = healthFacts({ ...quiet, causes: [{ kind: 'set: not changed', count: 4, last: '2026-11-21T09:00:00.000Z' }, { kind: 'update check: couldn\'t', count: 1, last: '2026-11-21T08:00:00.000Z' }] });
+  assert.deepEqual(facts.rows.find(([name]) => name === 'Causes'), ['Causes', 'set: not changed ×4 · update check: couldn\'t ×1']);
+});

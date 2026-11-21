@@ -231,7 +231,8 @@ public enum WireSchema {
                 field("since", .date), field("stalled", Kind.int.orNull), field("freezes", .list(.shape("node.health.freeze"))),
                 field("slowRefreshes", .int), field("slowestRefresh", Kind.int.orNull), field("lastSlowRefresh", Kind.date.orNull),
                 field("serverRestarts", Kind.int.orNull), field("refusedConnections", Kind.int.orNull), field("hostRestartAt", Kind.date.orNull),
-                field("waiting", strings), field("errors", .list(.shape("node.health.error")))]),
+                field("waiting", strings), field("errors", .list(.shape("node.health.error"))), field("causes", .list(.shape("node.health.cause")))]),
+            shape("node.health.cause", from: "NodeHealth.value", [field("kind", .string), field("count", .int), field("last", .date)]),
             shape("node.health.freeze", from: "NodeHealth.value", [field("at", .date), field("seconds", .int)]),
             shape("node.health.error", from: "NodeHealth.value", [field("at", .date), field("line", .string)]),
             shape("node.server", from: "Requests.statusValue", [field("pid", .int), field("startedAt", .date), field("commit", .string)]),
@@ -369,10 +370,10 @@ public enum WireSchema {
                 // The Team tab's records (2026-11-21, `BoardRecords`).
                 field("scorecard", Kind.shape("board.scorecard").orNull), field("answered", .list(.shape("board.question"))),
                 field("files", .list(.shape("board.file"))), field("recordsDir", Kind.string.orNull),
-                field("results", .list(.shape("board.result.card")))]),
-            // The lead's Results (`BoardDetails.results`), a task's details (`board.task`), a result's image (`board.image`).
-            shape("board.result.card", from: "BoardDetails.results", [field("id", .string), field("title", .string), field("body", .string),
-                                                                      field("at", Kind.date.orNull), field("images", .int)]),
+                field("results", .list(.shape("board.update")))]),
+            shape("board.update", from: "BoardRecords.result", [field("id", .string), field("title", .string), field("body", .string),
+                                                               field("at", .date), field("images", .int)]),
+            // A task's details (`board.task`), a result's screenshot (`board.image`).
             shape("board.task.args", from: "Requests.boardTask (2026-11-21)", [field("project", .string), field("task", .string)]),
             shape("board.task.result", from: "BoardDetails.task", [
                 field("slug", .string), field("title", .string), field("failure", Kind.string.orNull), field("checkpoints", .list(.shape("board.checkpoint"))),
@@ -476,9 +477,16 @@ public enum WireSchema {
         let details = ["thought", "todos", "plan", "command", "edit", "write", "read", "patch", "questions", "agent", "fields"]
         shapes += [
             union("chat.item", from: contractChat, tag: "type",
-                  ["prompt": "chat.prompt", "reply": "chat.reply", "tools": "chat.tools", "team": "chat.team"]),
+                  ["prompt": "chat.prompt", "reply": "chat.reply", "tools": "chat.tools", "team": "chat.team",
+                   "allDone": "chat.allDone"]),
             item("prompt", [field("text", .string), field("steered", .bool), field("fromLead", .bool), field("images", .list(.shape("chat.image")))]),
             item("reply", [field("text", .string)]),
+            // The lead's board cleared (the app's `AllDoneCard`, 2026-11-21): placed by `ChatStore` in the lead's chat.
+            // Its time is always the mark's (never null, as a transcript's item's may be).
+            shape("chat.allDone", from: contractChat, [field("id", .string), field("type", .words(["allDone"])), field("at", .date),
+                             field("summary", Kind.shape("board.allDone.summary").orNull), field("tasks", .list(.shape("board.allDone.task"))),
+                             field("merged", .int), field("receipts", Kind.string.orNull), field("pricesAsOf", Kind.string.orNull),
+                             field("seen", .bool)]),
             item("tools", [field("summary", .string), field("tools", .list(.shape("chat.tool")))]),
             item("team", [field("text", .string), field("title", .string), field("sender", .shape("chat.sender")),
                           field("message", .words(["report", "audit", "witness", "userAnswer", "leadMessage", "notice", "teammatePost"])),

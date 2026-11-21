@@ -865,13 +865,8 @@ kbd { padding: 1px 6px; border-radius: 5px; box-shadow: inset 0 0 0 1px var(--li
 .board .records .score-tiles, .board .records .records-note, .board .records .records-files { padding-left: 10px; padding-right: 10px; }
 .board .records .records-list { padding: 0; }
 
-/* ---- The Team tab's Results and a task's details (views/results.js) ---- */
+/* ---- A result's screenshots and a task's details (views/results.js) ---- */
 
-.results-list { display: flex; flex-direction: column; gap: 8px; padding: 2px 18px 4px; }
-.result-card { padding: 8px 10px; border-radius: 8px; background: var(--fill); }
-.result-head { display: flex; align-items: baseline; gap: 8px; margin-bottom: 4px; }
-.result-title { flex: 1; min-width: 0; font-weight: 600; font-size: 12.5px; }
-.result-body { font-size: 12px; }
 .result-images { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
 .task-row { display: flex; align-items: flex-start; }
 .task-row .task-link { flex: 1; min-width: 0; }
@@ -973,3 +968,6 @@ kbd { padding: 1px 6px; border-radius: 5px; box-shadow: inset 0 0 0 1px var(--li
 .node-image-line { min-width: 0; overflow-x: auto; }
 .node-image-head { display: flex; align-items: center; gap: 6px; }
 .node-image-path { flex: 1; }
+.setting-search { width: 100%; box-sizing: border-box; margin: 0 0 12px; padding: 6px 10px; }
+.records-result { padding: 6px 0; }
+.records-result-head { display: flex; justify-content: space-between; gap: 8px; font-weight: 600; }

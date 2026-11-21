@@ -41,6 +41,8 @@ extension NodeSettings {
             case "boost": store.set(value, forKey: "boostMode")
             case "lead_mail": store.set(value.map { $0 == "on" }, forKey: LeadMail.enabledKey)
             case "ai_summaries": store.set(value.map { $0 == "on" }, forKey: NodeSummaries.key)
+            case "prompt_audit": store.set(value.map { $0 == "on" }, forKey: PromptAudit.enabledKey)
+            case "prompt_audit_days": store.set(value.flatMap(Int.init), forKey: PromptAudit.intervalKey)
             case "projects_folder": store.set(value, forKey: projectsFolderKey)
             case "boost_load_threshold", "boost_max_sessions", "boost_max_workers", "boost_heavy_slots":
                 var limits = boostLimits(store)
@@ -150,6 +152,7 @@ extension NodeSettings {
         case "lead_model", "lead_advisor": effect = "it takes effect when the project's lead next starts (this session keeps its own)"
         case "worker_advisor": effect = "workers started from now on get it"
         case "verifier_model", "security_audit_model": effect = "audits started from now on run on it"
+        case "lead_rotation": effect = "VibeSwitcher starts a fresh lead session by it from its next look"
         default: effect = "it holds from your next start_worker"
         }
         let told = "The user set \(key) to \(now) in this project's workflow.md with `vibeswitcher set`"

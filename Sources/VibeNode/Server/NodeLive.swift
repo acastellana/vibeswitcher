@@ -163,7 +163,8 @@ public final class NodeLive: @unchecked Sendable {
             status.watch(sessions.changes)
             // Long messages' TL;DRs from the engine's AI summaries (`TeamSummaryWatch`), when there is an engine.
             let chats = ChatStore(queue: queue, home: requests.home, sessions: sessions.changes, note: note, summaries: engine?.messageSummaries,
-                                  ask: engine.map { engine in { session, entry, message in engine.summarizeMessage(session: session, entry: entry, message: message) } })
+                                  ask: engine.map { engine in { session, entry, message in engine.summarizeMessage(session: session, entry: entry, message: message) } },
+                                  extras: engine?.chatExtras)
             chats.start(clock: clock)
             hub.chats = chats
             self.chats = chats

@@ -13,21 +13,17 @@ struct BoardDetailsTests {
         Data([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]) + Data((0..<count).map { UInt8($0 % 251) })
     }
 
-    @Test func theResultsAreNewestFirstAndTheBoardSaysThemAsTheSchemaDoes() throws {
+    /// The board's results (`BoardRecords.result`) as `vibeswitcher board` names them: newest first, with their screenshots.
+    @Test func theResultsPrintNewestFirstWithTheirScreenshots() throws {
         var board = WireVectors.sampleBoard(now: WireVectors.boardNow.timeIntervalSince1970)
         var first = LeadUpdate(id: "u1", title: "Onboarding shipped", body: "**Three steps**, each tested.")
         first.at = 1_000
-        var second = LeadUpdate(id: "u2", title: "Upload retry", body: String(repeating: "line\n", count: 400), images: ["/r/.vibeswitcher/updates/u2/a.png"])
+        var second = LeadUpdate(id: "u2", title: "Upload retry", body: "Done.", images: ["/r/.vibeswitcher/updates/u2/a.png"])
         second.at = 2_000
         board.updates = [first, second]
-        let results = try #require(BoardDetails.results(board).array)
-        #expect(results.map { $0["id"]?.string ?? "" } == ["u2", "u1"])
-        #expect(results[0]["images"] == .int(1) && results[1]["body"] == .string("**Three steps**, each tested."))
-        #expect((results[0]["body"]?.string?.split(separator: "\n").count ?? 0) <= BoardDetails.bodyLines)
         let value = BoardValue.value(project: "p", root: "/r", board: board, now: WireVectors.boardNow)
-        #expect(value["results"]?.array?.count == 2)
+        #expect(value["results"]?.array?.map { $0["id"]?.string ?? "" } == ["u2", "u1"])
         #expect(WireSchema.check(value, as: "board", strict: true) == nil, "\(WireSchema.check(value, as: "board", strict: true) ?? "")")
-        // `vibeswitcher board` names them under the scorecard, newest first.
         var utc = Calendar(identifier: .gregorian)
         utc.timeZone = TimeZone(identifier: "UTC")!
         let printed = BoardText.records(value, now: WireVectors.boardNow, calendar: utc)

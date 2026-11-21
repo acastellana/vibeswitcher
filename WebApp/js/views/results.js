@@ -1,14 +1,11 @@
-// The rest of the Mac's Team tab (its `ResultsList` and `TeamRowDetails`): the lead's Results (the board's `results`,
-// `post_update`'s cards: a title, a Markdown body drawn as text nodes, and its screenshots, `board.image`), and a task's
-// details as its row opens (`board.task`: why it last failed, its checkpoints, the worker's report, the audit and its
-// findings, its merge and its score line). Read-only; asked of the node only when shown.
+// The rest of the Mac's Team tab: a result's screenshots (records.js's Results, `board.image`), and a task's details as
+// its row opens (`TeamRowDetails`, `board.task`: why it last failed, its checkpoints, the worker's report, the audit and
+// its findings, its merge and its score line). Read-only; asked of the node only when shown.
 
 import { h, setText } from '../dom.js';
 import { icon } from '../marks.js';
 import { clock, moment } from '../words.js';
-import { markdown } from '../text.js';
 import { imageLoader } from '../images.js';
-import { SHOWN } from './records.js';
 
 // A result's screenshots, as the chat's: its bytes asked a part at a time (`board.image`), shown as an object URL.
 function resultImages(app) {
@@ -19,19 +16,18 @@ function resultImages(app) {
   });
 }
 
-export function resultsSection(app) {
+// A result's screenshots for records.js's Results: `(project, result)` → their element (each a picture once its bytes
+// came, `board.image`), or null where the node doesn't serve them. At most `SCREENSHOTS` a result, as the node serves.
+export const SCREENSHOTS = 6;
+export function resultScreenshots(app) {
   const loader = resultImages(app);
-  const list = h('div', { class: 'results-list' });
-  const el = h('section', { class: 'inspect-group records-section results', hidden: true }, h('h2', { class: 'group-head' }, 'Results'), list);
-  const open = new Set();
-  let drawn = '';
-
-  function card(project, result) {
+  return (project, result) => {
+    if (!app.store.can('board.image') || !project || !result.images) return null;
     const pictures = h('div', { class: 'result-images' });
-    for (let index = 0; index < (result.images || 0); index++) {
+    const count = Math.min(result.images, SCREENSHOTS);
+    for (let index = 0; index < count; index++) {
       const holder = h('span', { class: 'image-note' }, icon('file', 12), 'Screenshot');
       pictures.append(holder);
-      if (!app.store.can('board.image')) continue;
       loader.url(project, { id: `${result.id}\u0000${index}`, mediaType: 'image/png', bytes: 1 }).then((url) => {
         if (!url) return setText(holder, 'Screenshot no longer available');
         const picture = h('img', { class: 'chat-image', src: url, alt: `${result.title}: screenshot ${index + 1}`, decoding: 'async' });
@@ -43,30 +39,8 @@ export function resultsSection(app) {
         holder.replaceWith(button);
       });
     }
-    return h('article', { class: 'result-card' },
-      h('div', { class: 'result-head' }, h('span', { class: 'result-title' }, result.title),
-        result.at ? h('time', { class: 'records-time', title: moment(result.at) }, clock(result.at)) : null),
-      h('div', { class: 'prose result-body' }, markdown(result.body || '')),
-      result.images ? pictures : null);
-  }
-
-  return {
-    el,
-    update(board) {
-      const results = board && !board.unreadable ? board.results || [] : [];
-      el.hidden = results.length === 0;
-      const now = JSON.stringify([board?.project, results]);
-      if (now === drawn) return;
-      drawn = now;
-      const cards = results.map((result) => card(board.project, result));
-      const earlier = cards.slice(SHOWN);
-      const fold = earlier.length ? h('details', { class: 'records-earlier' }, h('summary', null, `Earlier results (${earlier.length})`), earlier) : null;
-      if (fold) {
-        fold.open = open.has('earlier');
-        fold.addEventListener('toggle', () => { if (fold.open) open.add('earlier'); else open.delete('earlier'); });
-      }
-      list.replaceChildren(...cards.slice(0, SHOWN), ...(fold ? [fold] : []));
-    },
+    if (result.images > count) pictures.append(h('span', { class: 'records-note' }, `and ${result.images - count} more kept on the node`));
+    return pictures;
   };
 }
 

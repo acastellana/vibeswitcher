@@ -160,3 +160,18 @@ test('the batch that cleared the board: its summary, what it cost, and each task
   assert.equal(allDoneCard({ ...mark, summary: null, receipts: null, pricesAsOf: null }).cost, null);
   assert.equal(validate('seen.args', { project: 'local:project:x' }), null);
 });
+
+test('the all-done card is also an item of the lead’s chat, in the node’s shape', () => {
+  const { id, at, ...fields } = vector('board')[1].result.boards[0].allDone;
+  const item = { id: `all-done:${id}`, type: 'allDone', at, ...fields };
+  assert.equal(validate('chat.item', item), null);
+  assert.notEqual(validate('chat.item', { ...item, merged: 'two' }), null);
+});
+
+test('the lead’s results come with the board, newest first, each its title, markdown body and screenshots counted', () => {
+  const [result] = vector('board')[1].result.boards[0].results;
+  assert.equal(validate('board.update', result), null);
+  assert.equal(result.title, 'The new hero, on a phone');
+  assert.ok(result.body.includes('**sized for phones**'), 'the markdown as the lead wrote it: the page draws it to nodes');
+  assert.equal(result.images, 1, 'a screenshot is a file on the node: counted, never its path');
+});

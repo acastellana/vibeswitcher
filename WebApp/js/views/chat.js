@@ -31,6 +31,7 @@ import { draftBox, promptCard, queuedStrip, drivable } from './drive.js';
 import { copyLine } from './cards.js';
 import { imageSendLine } from '../actions.js';
 import { tokenAt, accept, IMAGE_TYPES, MAX_IMAGE } from '../composing.js';
+import { allDoneView } from './alldone.js';
 
 // How close to the end counts as being at the end.
 const NEAR = 48;
@@ -39,7 +40,7 @@ const OVERSCAN = 1.5;
 // Rows drawn at least, from the end, when the chat opens.
 const FIRST_ROWS = 30;
 // A row's height until it is measured, by type.
-const ESTIMATE = { prompt: 62, reply: 96, tools: 30, team: 70, ask: 160 };
+const ESTIMATE = { prompt: 62, reply: 96, tools: 30, team: 70, ask: 160, allDone: 140 };
 
 // The last item seen at each chat's end, by session id, in this browser: the newest `SEEN_KEPT` sessions.
 const SEEN = 'vibeswitcher.seen';
@@ -285,6 +286,20 @@ function makeRow(view, first) {
         gist.hidden = !item.summary;
         setText(text, item.text);
         setText(time, clock(item.at));
+      },
+    };
+  }
+  // Where the lead's board cleared (the node places it in the lead's chat by its time).
+  if (first.type === 'allDone') {
+    const el = h('div', { class: 'chat-row all-done-row' });
+    let drawn = '';
+    return {
+      el,
+      update(item) {
+        const now = JSON.stringify(item);
+        if (now === drawn) return;
+        drawn = now;
+        el.replaceChildren(allDoneView(item, { className: 'all-done' }));
       },
     };
   }

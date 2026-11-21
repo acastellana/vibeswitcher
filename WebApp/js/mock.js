@@ -155,6 +155,7 @@ export function createMock(store, options = {}) {
       since: ago(3 * 3600 + 720), stalled: null, freezes: [{ at: ago(5400), seconds: 14 }], slowRefreshes: 2, slowestRefresh: 7,
       lastSlowRefresh: ago(1800), serverRestarts: 0, refusedConnections: null, hostRestartAt: null, waiting: [],
       errors: [{ at: ago(900), line: 'prompt audit: /home/u/.vibeswitcher/prompt-audit.json not written: disk full' }],
+      causes: [{ kind: 'prompt audit: not written', count: 1, last: ago(900) }],
     },
     node: 'local', epoch, root: `${HOME}/.vibeswitcher`, home: HOME,
     server: { pid: 48213, startedAt: ago(3 * 3600 + 720), commit: 'f62aef61' },

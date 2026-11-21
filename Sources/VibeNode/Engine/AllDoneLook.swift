@@ -55,6 +55,22 @@ extension LeadEngine {
         }
     }
 
+    /// The most all-done cards a lead's chat shows (the newest).
+    static let chatCardsShown = 20
+
+    /// Each running lead's all-done cards, for its chat (`chatExtras`, by the lead's chat session id): the newest
+    /// `chatCardsShown` of its board's marks, oldest first; a lead no longer running, or with none, has none. From the
+    /// boards as the refresh read them. On `queue`.
+    func publishChatCards() {
+        var cards: [String: [NodeWire.Value]] = [:]
+        for lead in leads.leads.values {
+            guard let session = lead.session, let marks = boards[lead.root]?.allDone, !marks.isEmpty else { continue }
+            cards[NodeIds.session(host: session)] = marks.suffix(Self.chatCardsShown).compactMap { ChatValue.value(.allDone($0)) }
+        }
+        for id in chatExtras.values.keys where cards[id] == nil { chatExtras.send(id, nil) }
+        for (id, values) in cards { chatExtras.send(id, values) }
+    }
+
     /// The user saw `root`'s all-done cards (a page showed its board: `seen` with a project, the app's
     /// `AllDoneWatch.see`): each unseen mark gets its seen time, under the board's lock, on `reads`; nothing written
     /// when none is unseen. `done` hears whether the board changed, on `queue`.

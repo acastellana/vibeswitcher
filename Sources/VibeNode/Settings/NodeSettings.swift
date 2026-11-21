@@ -112,6 +112,12 @@ public enum NodeSettings {
             Setting(key: "lead_mail", title: "Let project leads message each other",
                     about: "Lets one project's lead send messages to another's (tell_lead).",
                     section: "Leads", scope: .node, form: .flag, home: .preferences),
+            Setting(key: "prompt_audit", title: "Remind me to run a prompt audit",
+                    about: "Says in status when a project's lead should run /doctor prompt-audit: after the days below, or when its model changes.",
+                    section: "Leads", scope: .node, form: .flag, home: .preferences),
+            Setting(key: "prompt_audit_days", title: "Days between prompt audits",
+                    about: "How many days after a project's last prompt audit its reminder shows.",
+                    section: "Leads", scope: .node, form: .count, home: .preferences, range: PromptAudit.intervalRange),
             Setting(key: "ai_summaries", title: "AI summaries",
                     about: "A small model (Haiku) writes one plain line of what each worker and verifier is doing, for the board; at most one an agent every 3 minutes.",
                     section: "Leads", scope: .node, form: .flag, home: .preferences),
@@ -133,6 +139,9 @@ public enum NodeSettings {
             Setting(key: "security_audit_model", title: "Security audits' model",
                     about: "The model a sensitive or security audit runs on, whatever the verifier's model is.",
                     section: "Models", scope: .project, form: .model, home: .workflow),
+            Setting(key: "lead_rotation", title: "Start a fresh lead session",
+                    about: "When the lead's session is started anew, so it keeps working with a clear context: daily, when its context is large, or never.",
+                    section: "Models", scope: .project, form: .choice, home: .workflow, choices: LeadRotationMode.allCases.map(\.rawValue)),
             Setting(key: "max_workers", title: "Workers at once, at most",
                     about: "How many workers the project's lead may run at once.",
                     section: "Team", scope: .project, form: .count, home: .workflow, range: 1...99),
@@ -171,8 +180,7 @@ public enum NodeSettings {
         ("Also on battery (Boost)", "a node runs on mains: it reads no battery"),
         ("Battery hold, keep awake, memory benches", "the Mac's power and the app's own process"),
         ("Notifications (banners, sound, reminders)", "the page's own: This node's toggle, in each browser"),
-        ("A fresh lead session", "not on a node yet (the parity table)"),
-        ("The prompt-audit reminder's on and days", "on, every 14 days; `vibeswitcher prompt-audit FOLDER off` stops it for a project"),
+        ("Let agents open shells without asking", "a node has none: every agent's shell request is a card the user answers in a terminal (`ShellCards`)"),
         ("Appearance, sidebar, launch presets, dictation, phone, wallet", "the Mac app's window and devices"),
         ("Hooks, open at login", "`vibeswitcher hooks install`, `vibeswitcher start --at-login`"),
         ("Mac permissions, the session host", "macOS only; the node's host is `vibeswitcher start` and `stop`"),
@@ -260,6 +268,8 @@ public enum NodeSettings {
                 case "boost_heavy_slots": return (String(boost.heavySlots), String(boostDefault.heavySlots))
                 case "lead_mail": return (flag(LeadMail.isOn(store)), "on")
                 case "ai_summaries": return (flag(NodeSummaries.isOn(store)), "on")
+                case "prompt_audit": return (flag(store.map(PromptAudit.isOn) ?? true), "on")
+                case "prompt_audit_days": return (String(store.map(PromptAudit.intervalDays) ?? PromptAudit.defaultIntervalDays), String(PromptAudit.defaultIntervalDays))
                 case "policy": return (WorkingPolicy.load(from: files.policy), WorkingPolicy.defaultText)
                 case "projects_folder": return (projectsFolder(files: files), ProjectCreation.defaultLocation)
                 default: return ("", "")
@@ -287,6 +297,7 @@ public enum NodeSettings {
                 case "verifier_model": return ((workflow.verifierModel ?? "").isEmpty ? "default" : workflow.verifierModel ?? "", "default")
                 case "security_audit_model": return (workflow.securityAuditModel, LeadWorkflow.defaultSecurityAuditModel)
                 case "max_workers": return (String(workflow.maxWorkers), String(LeadWorkflow().maxWorkers))
+                case "lead_rotation": return (LeadEngine.rotationMode(workflow).rawValue, LeadRotationMode.context.rawValue)
                 default: return floorValue(setting.key, shownFloor, none)
                 }
             }()

@@ -68,3 +68,11 @@ export function usageFacts(usage, when = (iso) => new Date(iso).toLocaleString()
   if (usage.fableHeldBack) notes.push(`Fable held back until ${when(usage.fableHeldBack)}: workers on Opus, audits on another model under the review floor.`);
   return { account: usage.account || null, limits, notes };
 }
+
+// The app's Settings search: whether every word of `query` is in the setting's key, title, description or section
+// (case aside). An empty query keeps every setting.
+export function settingMatches(setting, query) {
+  const words = String(query || '').toLowerCase().split(/\s+/).filter(Boolean);
+  const text = [setting.key, setting.title, setting.about, setting.section].join(' ').toLowerCase();
+  return words.every((word) => text.includes(word));
+}
