@@ -42,10 +42,10 @@ struct NodeAgentTests {
             return NodeAgent.check(written, inputs: Self.inputs, nodeRoot: Self.root, atLogin: false)
         }
         #expect(try check { $0["KeepAlive"] = true }?.contains("KeepAlive") == true)
-        #expect(try check { $0["EnvironmentVariables"] = ["HOME": "/Users/u", "PATH": "/tmp/x:/usr/bin", "SWIFT_BACKTRACE": "enable=no"] } != nil)
-        #expect(try check { var env = $0["EnvironmentVariables"] as? [String: String] ?? [:]; env["DYLD_INSERT_LIBRARIES"] = "/tmp/x.dylib"; $0["EnvironmentVariables"] = env } != nil)
-        #expect(try check { $0["ProgramArguments"] = ["/tmp/evil"] }?.contains("ProgramArguments") == true)
-        #expect(try check { $0["WatchPaths"] = ["/tmp"] }?.contains("WatchPaths") == true)
+        #expect(try check { $0["EnvironmentVariables"] = ["HOME": "/Users/u", "PATH": "/Users/u/evil:/usr/bin", "SWIFT_BACKTRACE": "enable=no"] } != nil)
+        #expect(try check { var env = $0["EnvironmentVariables"] as? [String: String] ?? [:]; env["DYLD_INSERT_LIBRARIES"] = "/Users/u/evil.dylib"; $0["EnvironmentVariables"] = env } != nil)
+        #expect(try check { $0["ProgramArguments"] = ["/Users/u/evil"] }?.contains("ProgramArguments") == true)
+        #expect(try check { $0["WatchPaths"] = ["/Users/u"] }?.contains("WatchPaths") == true)
         #expect(try check { $0["Label"] = nil }?.contains("no Label") == true)
         #expect(NodeAgent.check(Data("not a plist".utf8), inputs: Self.inputs, nodeRoot: Self.root, atLogin: false) == "the agent's file isn't a property list")
     }
@@ -74,7 +74,7 @@ struct NodeAgentTests {
             \tprogram = /Users/u/.vibeswitcher/v2/node/builds/\(Self.commit)/bin/vibeswitcher-host
             \tenvironment = {
             \t\tpid = 1
-            \t\tprogram = /tmp/evil
+            \t\tprogram = /Users/u/evil
             \t}
             \tpid = 4242
             }
