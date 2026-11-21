@@ -356,3 +356,4 @@
 - 2026-11-21 09:08 Incident: An audit's finder stops on a permission prompt to Read the audit's own shared-run log (.vibeswitcher/audit/<task>/<run>/test.log), which nobody on the node can … (in team-sessions-start); planned turn-this-incident-into-4 to turn it into a check
 - 2026-11-21 09:09 Review of turn-this-incident-into-4: audit
 - 2026-11-21 09:25 Audit of team-sessions-start: finder 1 of 2 submitted (blocked, clean, 3 findings)
+- 2026-11-21 09:59 Handed the lead over to a fresh session: the last one had been idle 50 minutes with 170k tokens of context, past handover_idle_min 50 and handover_tokens 150k
