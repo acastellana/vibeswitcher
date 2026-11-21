@@ -616,17 +616,42 @@ public enum LinuxSealList {
     /// holds a recorded launch, a recorded launch's folder (`launches`), or a file a launcher writes in one (or
     /// `VibePaths.writePrivate`'s temporary file for it, there until its rename). Anything else (a launch no launch
     /// made, another file, a link, a folder deeper down) holds the team, as a `.folder`'s change would.
+    ///
+    /// The lead's own fresh session (the rotation, `LeadEngine.handOver` in `IdleHandover.swift`; the app's `launchRotation`
+    /// in `LeadController` the same) is launched from `<key>/scheduled-<UUID>`, a new folder each time, while the team
+    /// works: such a folder and the launcher's files in it come too, but only under a repository whose lead the vault
+    /// records (a `lead-…` launch of the same key). It is the same launch as the lead's `lead-…` (the same
+    /// `LeadLaunch.prepare`, the same files, written by VibeSwitcher's engine, never a session), under a name no
+    /// session's process reads: nothing launches from a folder it didn't just make itself, by a fresh UUID. A planted
+    /// `scheduled-…` folder under a key with no recorded lead, a non-UUID name, another file in one, a link or anything
+    /// deeper still holds, as does any entry changed in place (`cameOrWent`'s first rule).
     static func launchEntryMayCome(_ path: String, entry: String, launches: Set<String>) -> Bool {
         let parts = path.split(separator: "/", omittingEmptySubsequences: false).map(String.init)
         let kind = ConfigSeal.entryKind(entry)
         if path == ownEntry { return kind == "d" }  // The folder itself, made.
         guard !parts.contains(""), !parts.contains("."), !parts.contains("..") else { return false }
+        let recorded = { (launch: String) in launches.contains(launch) || (isRotationLaunch(launch) && hasLead(launches, key: parts[0])) }
         switch parts.count {
         case 1: return kind == "d" && launches.contains { $0.hasPrefix(parts[0] + "/") }
-        case 2: return kind == "d" && launches.contains(path)
-        case 3: return kind == "f" && launches.contains(parts[0] + "/" + parts[1]) && isLaunchFile(parts[2])
+        case 2: return kind == "d" && recorded(path)
+        case 3: return kind == "f" && recorded(parts[0] + "/" + parts[1]) && isLaunchFile(parts[2])
         default: return false
         }
+    }
+
+    /// The lead's rotation's launch folder name: `<key>/scheduled-<UUID>`.
+    static func isRotationLaunch(_ launch: String) -> Bool {
+        let parts = launch.split(separator: "/", omittingEmptySubsequences: false)
+        guard parts.count == 2, parts[1].hasPrefix(rotationPrefix) else { return false }
+        return UUID(uuidString: String(parts[1].dropFirst(rotationPrefix.count))) != nil
+    }
+
+    /// What the rotation names its launch folder with, before a fresh UUID (`IdleHandover`'s `vault.runFolder`).
+    static let rotationPrefix = "scheduled-"
+
+    /// Whether the vault records a lead for repository `key` (its `lead-…` launch).
+    static func hasLead(_ launches: Set<String>, key: String) -> Bool {
+        launches.contains { $0.hasPrefix(key + "/lead-") }
     }
 
     /// A file a launcher writes, or `VibePaths.writePrivate`'s temporary one for it (`.<name>.<UUID>`).

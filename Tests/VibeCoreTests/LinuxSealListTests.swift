@@ -536,6 +536,15 @@ struct LinuxSealListTests {
         #expect(!may(String(repeating: "b", count: 20), "d") && !may(String(repeating: "b", count: 20) + "/worker-fix", "d"), "another key")
         #expect(!may(key + "/worker-fix/.settings.json.x", "f") && !may(key + "/./worker-fix", "d"))
 
+        // The lead's rotation: `<key>/scheduled-<UUID>` and its launcher files, only under a key whose lead is recorded.
+        let rotation = key + "/scheduled-" + UUID().uuidString
+        #expect(may(rotation, "d") && may(rotation + "/settings.json", "f") && may(rotation + "/prompt.md", "f") && may(rotation + "/mcp.json", "f"))
+        #expect(!may(rotation + "/hooks.sh", "f") && !may(rotation, "f") && !may(rotation + "/settings.json", "l") && !may(rotation + "/x/settings.json", "f"))
+        #expect(!may(key + "/scheduled-later", "d") && !may(key + "/scheduled-", "d"), "not a fresh UUID")
+        let other = String(repeating: "c", count: 20)
+        #expect(!LinuxSealList.launchEntryMayCome(other + "/scheduled-" + UUID().uuidString, entry: "0123abcd d 0", launches: launches.union([other + "/worker-x"])),
+                "a key whose lead isn't recorded")
+
         let issued = 0.0, lead = LeadVault.Caller.app
         let member = { (role: LeadLaunch.Role, task: String?, finder: Int?) in
             LeadVault.Member(id: UUID().uuidString, role: role, task: task, session: nil, auditing: nil,
@@ -854,6 +863,29 @@ struct LinuxSealVaultTests: LeadTeamFixture {
             #expect(try lead.checkConfig(root: root).held == ["~/.vibeswitcher/lead/run"], "\(what)")
             #expect(try vault.checkConfig(root: root).resealed == ["~/.vibeswitcher/lead/run"], "the app's accept")
         }
+    }
+
+    /// The lead's rotation launches a fresh lead from `<key>/scheduled-<UUID>` while the team works (`IdleHandover`):
+    /// its folder and files coming hold nothing, so a rotation doesn't freeze the team until the user accepts; one
+    /// changed in place after, or another file planted in it, still holds.
+    @Test(LinuxSealListTests.linux) func theLeadsRotationLaunchHoldsNothing() throws {
+        let run = home + "/.vibeswitcher/lead/run"
+        let (root, lead) = try team()
+        let key = LeadVault.key(root)
+        let leadName = "lead-" + Slug.make(LeadMail.project(of: root), taken: [])
+        try write("the lead's prompt\n", "\(run)/\(key)/\(leadName)/prompt.md")
+        #expect(try lead.checkConfig(root: root).held.isEmpty, "the lead's own launch")
+        let rotation = "\(run)/\(key)/scheduled-\(UUID().uuidString)"
+        try write("the fresh lead's prompt\n", rotation + "/prompt.md")
+        try write("{}\n", rotation + "/mcp.json")
+        try write("{\"permissions\": {}}\n", rotation + "/settings.json")
+        #expect(try lead.checkConfig(root: root).held.isEmpty, "the rotation's launch holds nothing")
+        // Changed in place once sealed: held, as any launch file changed.
+        try write("{\"hooks\": {}}\n", rotation + "/settings.json")
+        #expect(try lead.checkConfig(root: root).held == ["~/.vibeswitcher/lead/run"], "changed in place")
+        _ = try vault.checkConfig(root: root)
+        try write("echo planted\n", rotation + "/hooks.sh")
+        #expect(try lead.checkConfig(root: root).held == ["~/.vibeswitcher/lead/run"], "a file the launcher doesn't write")
     }
 
     /// A watched folder made unreadable mid-walk (`chmod 000`) hides what's under it: held, as a cut read is, not
