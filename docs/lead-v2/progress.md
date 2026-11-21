@@ -396,3 +396,6 @@
 - 2026-11-21 17:31 Pipeline held: the-node-s-gate ready to merge with none landing; cause: every test slot held
 - 2026-11-21 17:31 Pipeline held: the-node-s-gate ready to merge with none landing; cause: every test slot held
 - 2026-11-21 17:31 Pipeline held: the-node-s-gate ready to merge with none landing; cause: every test slot held
+- 2026-11-21 18:01 Pipeline held: the-node-s-gate ready to merge with none landing; cause: nothing VibeSwitcher sees
+- 2026-11-21 18:01 Pipeline held: the-node-s-gate ready to merge with none landing; cause: the gate not installed
+- 2026-11-21 18:01 Pipeline held: the-node-s-gate ready to merge with none landing; cause: the gate not installed
