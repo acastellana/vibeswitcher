@@ -505,9 +505,15 @@ extension HandoverLinuxTests {
         #expect(host.process.isRunning)
     }
 
-    /// The old build's file rewritten in place after the exec (it runs no longer, so no `ETXTBSY`) and before the new
-    /// build's failed restore (its modification time put back, so its build id is the same): what serves again is the
-    /// old build, from its sealed copy, not what the file now holds.
+    /// The old build's file rewritten in place after the exec and before the new build's failed restore (its
+    /// modification time put back, so its build id is the same): what serves again is the old build, from its sealed
+    /// copy, not what the file now holds.
+    ///
+    /// The scratch host runs from that file until its exec, so Linux refuses to open it for writing (`ETXTBSY`) until
+    /// the old image is let go. The kernel finishes that after the exec, while the new image already runs: measured on
+    /// WSL's 6.18, the file was still refused 1 to 9 ms after the stand-in build had touched its `.waiting` file, with
+    /// no process left executing it (the host's /proc exe already the shell). So the rewrite waits for the file to be
+    /// writable, the event it needs, not for the stand-in's file alone.
     @Test(.enabled(if: !Platform.CodeIdentity.isAvailable, "Linux's fallback through the old image's sealed copy"))
     func aFallbackImageRewrittenInPlaceIsNotWhatRuns() async throws {
         let host = try await ScratchHostProcess()
@@ -519,8 +525,14 @@ extension HandoverLinuxTests {
         let modified = try FileManager.default.attributesOfItem(atPath: host.oldBinary)[.modificationDate] as? Date
         #expect(await host.handOver(to: host.failingBuild(hold: hold), through: client) == .ok, "\(host.log)")
         #expect(await eventually { FileManager.default.fileExists(atPath: hold + ".waiting") }, "\(host.log)")
-        let file = open(host.oldBinary, O_WRONLY | O_TRUNC | O_CLOEXEC)
-        try #require(file >= 0, "errno \(errno)")
+        var file: Int32 = -1
+        var refused: Int32 = 0
+        let writable = await eventually {
+            file = open(host.oldBinary, O_WRONLY | O_TRUNC | O_CLOEXEC)
+            refused = file < 0 ? errno : 0
+            return file >= 0 || refused != ETXTBSY
+        }
+        try #require(writable && file >= 0, "errno \(refused)")
         let other = Array("#!/bin/sh\necho replaced-build >&2\nexit 9\n".utf8)
         #expect(write(file, other, other.count) == other.count)
         Sys.close(file)
