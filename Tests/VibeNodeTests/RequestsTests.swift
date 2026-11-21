@@ -207,7 +207,9 @@ struct RequestsTests {
                                   // The node's settings, read (2026-11-20).
                                   "settings",
                                   // The node's shells, listed (2026-11-20).
-                                  "shells"]
+                                  "shells",
+                                  // The start page's recent projects (2026-11-21).
+                                  "recent"]
         let changes: Set<String> = ["stop", "lead", "answer", "hold", "tell", "config.accept", "base.accept", "base.keep", "hooks.install", "hooks.remove", "build.switch",
                                     "draft", "draft.clear", "web.open", "web.revoke", "term.open", "term.close",
                                     // Driving an ordinary session (2026-11-20).
