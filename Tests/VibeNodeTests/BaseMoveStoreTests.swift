@@ -281,4 +281,40 @@ extension BaseMoveStoreTests {
         #expect(none.result?["card"]?["base"]?["fromIs"]?.string == "none", "\(none)")
         #expect(none.result?["card"]?["base"]?["reason"]?.string?.contains("last 20 commits") == true, "\(none)")
     }
+
+    /// The user's `base show` card for a move, then the engine's own look finding that same move (A16's flake under
+    /// load: its card closed the one the user was accepting, "superseded by a newer move"): the user's card stays open
+    /// and is accepted; a move somewhere else still supersedes it.
+    @Test(NodeTraits.linuxOnly, .timeLimit(.minutes(5))) func theLooksAskForTheMoveShownKeepsTheShownCard() async throws {
+        let world = try await CardWorld.make(temp)
+        defer { world.stop() }
+        let first = Git.run(["rev-parse", "main"], in: world.repo).output
+        let commit = try await taskBranch(world.repo, task: "x")
+        #expect(Git.run(["merge", "-q", "--ff-only", "agent/x"], in: world.repo).ok)
+        let held = try #require(await world.ask("config.held", ["folder": .string(world.repo)]))
+        let configCard = try #require(held.result?["card"]?["id"]?.string, "\(held)")
+        #expect(try #require(await world.ask("config.accept", ["card": .string(configCard), "code": .string(NodeIds.code(card: configCard))])).ok)
+        let shown = try #require(await world.ask("base.show", ["folder": .string(world.repo), "from": .string(first)]))
+        let id = try #require(shown.result?["card"]?["id"]?.string, "\(shown)")
+
+        // The look finds that same move and asks (as `lookAtBases` does at a refresh): the shown card stays the move's.
+        let move = try JSONDecoder().decode(LeadVault.BaseMove.self, from: Data("""
+            {"branch":"main","from":"\(first)","to":"\(commit)","accepted":false,"commits":[],"sessions":[],"reason":"no session of yours made it"}
+            """.utf8))
+        world.queue.sync { world.engine.baseMoves.onAsk(world.repo, move) }
+        #expect(world.card(id)?.closed == nil, "\(String(describing: world.card(id)?.closed))")
+        #expect(world.queue.sync { world.engine.cards.list(project: world.project).filter { $0.kind == .baseMove }.count } == 1)
+        let accepted = try #require(await world.ask("base.accept", ["card": .string(id), "code": .string(NodeIds.code(card: id))]))
+        #expect(accepted.ok, "\(accepted)")
+        let vault = world.host.vault
+        #expect(try await offPool { try vault.head(root: world.repo, branch: "main") } == commit)
+
+        // A move to somewhere else still supersedes an open card.
+        let again = try #require(await world.ask("base.show", ["folder": .string(world.repo), "from": .string(first)]))
+        let second = try #require(again.result?["card"]?["id"]?.string, "\(again)")
+        var elsewhere = move
+        elsewhere.to = String(repeating: "e", count: 40)
+        world.queue.sync { world.engine.baseMoves.onAsk(world.repo, elsewhere) }
+        #expect(world.card(second)?.closed == "superseded by a newer move")
+    }
 }
