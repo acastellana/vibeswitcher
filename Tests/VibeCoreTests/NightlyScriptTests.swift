@@ -61,6 +61,22 @@ struct NightlyScriptTests {
                                              "- web tests: 3 of 4 passed; failed: x.test.mjs", "- WEB TEST FAILED: x.test.mjs (exit 1)"], "\(report)")
     }
 
+    /// A test case whose arguments quote a failure line (`theReasonNamesWhatFailedNotTheLastLine`'s), or an error line, is
+    /// no failure; nor is the run's own summary line (the nightly of 2026-11-21 listed `firstBad()` and "run with 5112
+    /// tests in 627 suites" as failed tests).
+    @Test func quotedFailureLinesAndTheRunsSummaryAreNoFailedTests() async throws {
+        let path = try log("""
+            ◇ Test case passing 2 arguments failure → "echo '✘ Test firstBad() recorded an issue at A.swift:3:5: nope'", expected → "firstBad()" to theReason(failure:expected:) started.
+            ◇ Test case passing 2 arguments failure → "echo 'src/main.c:3: error: boom happened'", expected → "x" to theReason(failure:expected:) started.
+            ✘ Test real() recorded an issue at RealTests.swift:7:3: Expectation failed: w
+            ✘ Test real() failed after 1.000 seconds with 1 issue.
+            ✘ Test run with 5112 tests in 627 suites failed after 600.000 seconds with 1 issue.
+            """)
+        let (_, report) = try await run(["--report", path, "1", "1763600000", "1763600100", "abc"])
+        #expect(section(report, "Failed") == ["- real() (RealTests.swift:7:3)"], "\(report)")
+        #expect(section(report, "Other") == ["nothing"], "\(report)")
+    }
+
     /// A pass whose first run failed a test that then passed alone: no failure, the test listed as flaky.
     @Test func aPassListsTheRetriedTestsAsFlakyNotFailed() async throws {
         let path = try log("""
