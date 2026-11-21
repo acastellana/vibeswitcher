@@ -60,7 +60,7 @@ struct DevPortsTests {
     /// The live read on this machine: a listener this test opens on loopback is this process's, found by its pid.
     @Test(.enabled(if: FileManager.default.fileExists(atPath: "/proc/net/tcp")))
     func thisProcesssOwnListenerIsFound() throws {
-        let fd = socket(AF_INET, Int32(SOCK_STREAM.rawValue), 0)
+        let fd = socket(AF_INET, Platform.Sockets.stream, 0)
         try #require(fd >= 0)
         defer { close(fd) }
         var address = sockaddr_in()
