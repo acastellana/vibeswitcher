@@ -34,9 +34,10 @@ struct ClaudeVoiceSession {
 /// What Claude Code's screen says about its dictation (code.claude.com/docs/en/voice-dictation).
 enum ClaudeVoiceScreen {
     /// Its footer, under the prompt box: `keep holding…` while a held key warms up, `listening…` while it records
-    /// (hold mode), `● REC · tap to send` (tap mode, which sends by itself), `Voice: processing…` once it stops. One
-    /// signal among several: where it shows depends on the layout (2.1.312 puts `listening…` in the notices at the
-    /// footer's right, or in its first row; a custom status line takes the footer's left), so it may not be on screen.
+    /// (hold mode), `● REC · tap to send` (tap mode, which sends by itself), `Voice: processing…` once it stops
+    /// (`Transcribing…` in 2.1.330). One signal among several: where it shows depends on the layout (2.1.312 puts
+    /// `listening…` in the notices at the footer's right, or in its first row; a custom status line takes the footer's
+    /// left), so it may not be on screen.
     enum Footer: Equatable { case none, warming, listening, tap, processing }
 
     static func footer(_ text: String) -> Footer {
@@ -46,7 +47,7 @@ enum ClaudeVoiceScreen {
         if below.contains("tap to send") { return .tap }
         if below.contains("listening…") || below.contains("listening...") { return .listening }
         if below.contains("keep holding") { return .warming }
-        if below.contains("processing…") { return .processing }
+        if below.contains("processing…") || below.contains("transcribing…") || below.contains("transcribing...") { return .processing }
         return .none
     }
 
