@@ -147,6 +147,28 @@ public enum NodeCheck {
                         cgroup: Platform.Processes.cgroup(pid), session: session > 0 ? session : nil)
     }
 
+    /// The Mac's listener (the review of 2026-11-21), every fact bound to the one audit token the socket gave
+    /// (`token`): its pid must be `pid` (the peer the socket named), its link read (`link`), then its session
+    /// (`session`) and its code (`code`, by the token), then its link read again, which must be the same process
+    /// (pid, parent, start) and still the token's (`bound`: `Link.isProcess(of:)`, Security's check that the token's
+    /// process lives unchanged, asked after every read). A pid given to another process between the reads fails it:
+    /// parent and session are then unreadable, and the check refuses.
+    public static func macListener(pid: pid_t, token: Platform.PeerToken?,
+                                   link: (pid_t) -> Platform.Processes.Link? = Platform.Processes.link,
+                                   session: (pid_t) -> pid_t? = { let s = getsid($0); return s > 0 ? s : nil },
+                                   code: (Platform.PeerToken) -> Bool?,
+                                   bound: (Platform.Processes.Link, Platform.PeerToken) -> Bool = { $0.isProcess(of: $1) }) -> Listener {
+        var listener = Listener(pid: pid, dumpable: nil, parent: nil, cgroup: nil, session: nil, code: nil)
+        guard let token, token.pid == pid, let first = link(pid) else { return listener }
+        let read = session(pid)
+        let runs = code(token)
+        guard let again = link(pid), again == first, bound(again, token) else { return listener }
+        listener.parent = first.parent
+        listener.session = read
+        listener.code = runs
+        return listener
+    }
+
     /// What a detached node's record names (S3).
     public enum Recorded: Equatable, Sendable {
         /// The node's host, by its pid.
