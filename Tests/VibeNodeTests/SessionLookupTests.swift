@@ -41,6 +41,23 @@ struct SessionLookupTests {
     }
 
     /// `resume` and `reopen` find an ended or offered session by its id the same way (they have no terminal).
+    /// Last, the name you gave a session (`rename`), whole and case aside; two of one name are refused, naming them;
+    /// an id, a terminal or a prefix wins over a name.
+    @Test func theNameYouGaveOneNamesIt() throws {
+        func named(_ uuid: String, _ name: String, terminal: String) -> NodeWire.Value {
+            guard case .object(var fields) = session(uuid, terminal: terminal) else { return .null }
+            fields["name"] = .string(name)
+            return .object(fields)
+        }
+        let list = [named(a, "Release notes", terminal: "ttypts4"), named(b, "Fix login", terminal: "ttypts7"), named(c, "fix login", terminal: "ttypts9")]
+        #expect(try SessionLookup.match("release NOTES", in: list).get()["id"]?.string == "\(NodeIds.node):\(a)")
+        guard case .failure(let two) = SessionLookup.match("Fix login", in: list) else { Issue.record("matched one"); return }
+        #expect(two.ambiguous && two.description.contains(b) && two.description.contains(c), "\(two)")
+        #expect((try? SessionLookup.match("Release", in: list).get()) == nil, "a part of a name isn't it")
+        let shadow = [named(a, "ttypts7", terminal: "ttypts4"), named(b, "x", terminal: "ttypts7")]
+        #expect(try SessionLookup.match("ttypts7", in: shadow).get()["id"]?.string == "\(NodeIds.node):\(b)", "a terminal wins over a name")
+    }
+
     @Test func endedSessionsAreFoundByTheirIds() throws {
         let ended: [NodeWire.Value] = [.object(["session": .string("\(NodeIds.node):\(a)")]), .object(["session": .string("\(NodeIds.node):\(c)")])]
         let match = SessionLookup.match("a1b2", in: ended, idKey: "session", hostedOnly: false, noun: "ended session")

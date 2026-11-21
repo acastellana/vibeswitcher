@@ -4,8 +4,9 @@ import VibeCore
 /// The session a command line's SESSION names among those `status` lists (`sessions`, each its live value): its node id
 /// (`local:<uuid>`, `local:pts/9`) or that id without `local:`; the terminal name `status` prints for it (`ttypts4`,
 /// also given as `pts/4` or `/dev/pts/4`); or a prefix of 4 or more of its host id that only one session has (as the
-/// page and `status` show it, 8). An exact id wins over a terminal name, and a terminal name over a prefix. A name two
-/// sessions answer to is refused, naming each with its id and terminal, never guessed.
+/// page and `status` show it, 8); or, last, the name you gave it (`rename`), whole. An exact id wins over a terminal
+/// name, a terminal name over a prefix, and a prefix over a name. A name two sessions answer to is refused, naming each
+/// with its id and terminal, never guessed.
 public enum SessionLookup {
     public struct Refusal: Error, Equatable, CustomStringConvertible, Sendable {
         public let description: String
@@ -34,7 +35,9 @@ public enum SessionLookup {
         }
         let byPrefix = bare.count >= 4 && bare.allSatisfy({ $0.isHexDigit || $0 == "-" })
             ? sessions.filter { (!hostedOnly || $0["hosted"]?.bool == true) && id($0).dropFirst(prefix.count).hasPrefix(bare) } : []
-        let matches = !exact.isEmpty ? exact : !byTerminal.isEmpty ? byTerminal : byPrefix
+        // Last, the name you gave it (`rename`, as `status` shows it in quotes), whole, case aside.
+        let byName = given.isEmpty ? [] : sessions.filter { ($0["name"]?.string ?? "").trimmingCharacters(in: .whitespaces).lowercased() == given }
+        let matches = !exact.isEmpty ? exact : !byTerminal.isEmpty ? byTerminal : !byPrefix.isEmpty ? byPrefix : byName
         let shown = ConfigSeal.inert(wanted, limit: 80)
         guard let session = matches.first else { return .failure(Refusal("no \(noun) \(shown) on this node (\(listed))")) }
         guard matches.count == 1 else {
