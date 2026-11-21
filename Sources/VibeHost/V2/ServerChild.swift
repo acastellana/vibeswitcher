@@ -97,6 +97,10 @@ public final class ServerChild {
     /// it is started again from `copy`.
     private var due: (pid: pid_t, sha256: String)?
     private var stopped = false
+    /// The web's listening sockets the host holds for its server (H1, `HostWebListeners`): asked for over the child's
+    /// connector, held across the child's restarts and the host's handovers. Strict (the user's host's port alone)
+    /// until `adopt` says the host is a scratch one.
+    public let webListeners = HostWebListeners(usersHost: true, note: { _ in })
     private var delay = ServerChild.firstDelay
     private var restartCount = 0
 
@@ -120,10 +124,31 @@ public final class ServerChild {
     /// `restored`: the state a handover carried, if this image took over: its server child is taken again when
     /// `restore` finds it sound, and started again otherwise. `copy`: PATH's sealed copy when the host loaded it already
     /// (`HostImages.load`, which checked it against `build-info`): the one every start is from; nil: loaded here.
+    ///
+    /// The web's listening sockets a handover carried (H1, `State.webListeners`) are held on by the child's
+    /// `webListeners`, checked first; with no child they are closed.
     @discardableResult
     public static func adopt(arguments: [String], ownsLaunchers: Bool, nodeRoot: String, config: HostServer.Config,
                              server: HostServer, restored: HostHandover.State? = nil,
                              copy: Platform.ProcessSelf.SealedCopy? = nil) -> ServerChild? {
+        let child = adoptChild(arguments: arguments, ownsLaunchers: ownsLaunchers, nodeRoot: nodeRoot, config: config, server: server,
+                               restored: restored, copy: copy)
+        var others = restored
+        others?.webListeners = nil
+        let otherDescriptors = Set(others?.descriptors ?? [])
+        let carried = restored?.webListeners ?? []
+        guard let child else {
+            HostWebListeners.drop(carried, others: otherDescriptors)
+            if !carried.isEmpty { say(server, "web listeners a handover carried closed: this image runs no server child") }
+            return nil
+        }
+        child.webListeners.configure(usersHost: ownsLaunchers, note: { [weak server] line in if let server { say(server, line) } })
+        child.webListeners.adopt(carried, others: otherDescriptors)
+        return child
+    }
+
+    private static func adoptChild(arguments: [String], ownsLaunchers: Bool, nodeRoot: String, config: HostServer.Config,
+                                   server: HostServer, restored: HostHandover.State?, copy: Platform.ProcessSelf.SealedCopy?) -> ServerChild? {
         // The new build's server a handover to an installed build carried (Task 9d): this image's when it is that build.
         let carried = carriedServer(restored)
         guard let (launch, refused) = Self.launch(arguments: arguments, ownsLaunchers: ownsLaunchers, socketPath: config.socketPath,
@@ -410,6 +435,7 @@ public final class ServerChild {
                 while waitpid(running.pid, &status, 0) < 0, errno == EINTR {}
             }
             if case .sealed(let copy) = self.image { Sys.close(copy.fd) }
+            self.webListeners.closeAll()
         }
         if DispatchQueue.getSpecific(key: HostServer.queueKey) != nil { work() } else { queue.sync(execute: work) }
     }

@@ -62,7 +62,7 @@ public final class NodeLive: @unchecked Sendable {
     /// address); nil, `web --tailnet` is refused.
     public init(requests: Requests, sessions: NodeSessions?, engine: LeadEngine?, clock: NodeClock, port: UInt16 = NodeWeb.port,
                 webRoot: URL? = nil, terminals mode: TerminalRelay.Mode? = nil, tailnet: TailnetWeb.Options? = nil,
-                note: @escaping @Sendable (String) -> Void = { _ in }) {
+                bind: WebBind = .direct, note: @escaping @Sendable (String) -> Void = { _ in }) {
         queue = requests.queue
         self.requests = requests
         self.sessions = sessions
@@ -82,12 +82,12 @@ public final class NodeLive: @unchecked Sendable {
                                   var hello = requests.webHello(admission, assets: assets.build)
                                   if terminals, admission.rights.contains(.read) { hello.kinds += Self.terminalKinds }
                                   return NodeWire.message(hello)
-                              }, note: { note($0) })
+                              }, bind: bind, place: .loopback, note: { note($0) })
         bound.web = web
         // The tailnet's page: the same hub behind its own screen, which lets no terminal kind through.
         let liveQueue = requests.queue, liveHub = hub
         self.tailnet = tailnet.map { options in
-            TailnetWeb(root: requests.root, queue: liveQueue, clock: clock, port: port, find: options.find, admitPeer: options.admitPeer,
+            TailnetWeb(root: requests.root, queue: liveQueue, clock: clock, port: port, find: options.find, admitPeer: options.admitPeer, bind: bind,
                        folder: webRoot, handler: WebRequestScreen(liveHub, terminals: false, note: note),
                        hello: { [weak requests] admission in
                            guard let requests else { return nil }

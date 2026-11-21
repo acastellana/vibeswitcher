@@ -50,6 +50,10 @@ public final class TailnetWeb: @unchecked Sendable {
     private let hello: (WebAdmission) -> Data?
     private let clock: NodeClock
     private let note: @Sendable (String) -> Void
+    /// Where the socket comes from (H1): the session host's on the server, which binds only a tailnet address.
+    private let bind: WebBind
+    /// Whether the host was told, since the last listener, that this server doesn't want the socket. On `queue`.
+    private var letGo = false
 
     private let lock = NSLock()
     private var current = State.off
@@ -68,11 +72,12 @@ public final class TailnetWeb: @unchecked Sendable {
     /// server's page files. `handler`: the screen around the hub, with no terminal. `hello`: the `hello` for an
     /// admitted connection.
     public init(root: URL, queue: DispatchQueue, clock: NodeClock, port: UInt16 = NodeWeb.port, find: @escaping Tailnet.Finder = Tailnet.find,
-                admitPeer: @escaping @Sendable (String) -> Bool = Platform.TCP.isTailscaleAddress, folder: URL? = nil,
+                admitPeer: @escaping @Sendable (String) -> Bool = Platform.TCP.isTailscaleAddress, bind: WebBind = .direct, folder: URL? = nil,
                 handler: WebSocketHandler, hello: @escaping (WebAdmission) -> Data?, now: @escaping @Sendable () -> Date = { Date() },
                 note: @escaping @Sendable (String) -> Void = { _ in }) {
         self.queue = queue
         self.port = port
+        self.bind = bind
         self.find = find
         self.admitPeer = admitPeer
         self.folder = folder
@@ -143,6 +148,11 @@ public final class TailnetWeb: @unchecked Sendable {
                 note("tailnet: the listener was let go: no code or token is alive")
             } else if waiting.isEmpty, closing == 0 {
                 set(.off)
+                // A server started with the tailnet page off, after one that had it on: the host holds its socket still.
+                if !letGo {
+                    letGo = true
+                    bind.release(.tailnet)
+                }
             }
         }
     }
@@ -185,11 +195,13 @@ public final class TailnetWeb: @unchecked Sendable {
         let bound = Bound()
         let assets = LiveAssets(folder: folder, port: { bound.port }, host: place.name)
         let made = NodeWebListener(port: port, address: place.address, name: place.name, admitPeer: admitPeer, command: Self.command,
-                                   assets: assets, gate: access, handler: handler, queue: queue, clock: clock, hello: hello, note: { [note] in note("tailnet: " + $0) })
+                                   assets: assets, gate: access, handler: handler, queue: queue, clock: clock, hello: hello, bind: bind, place: .tailnet,
+                                   note: { [note] in note("tailnet: " + $0) })
         bound.web = made
         do {
             let port = try made.start()
             listener = made
+            letGo = false
             access.host = place.name
             set(.on(place, port: port))
             note("tailnet: listening on \(place.address):\(port) as \(place.name)")

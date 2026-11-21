@@ -63,11 +63,91 @@ public enum HostConnector {
         while true {
             try wait(connector, for: Int16(POLLIN), until: deadline)
             if let fd = Platform.Sockets.receiveDescriptor(over: connector) {
+                // A web listener's answer (`web`, H1) that came after its asker gave up: not a connection.
+                guard isUnixSocket(fd) else {
+                    Sys.close(fd)
+                    continue
+                }
                 UnixSocket.configure(fd)
                 return fd
             }
-            // A nonblocking connector woken with nothing to read yet.
-            guard errno == EAGAIN || errno == EINTR else { throw Failure.system("receive", errno) }
+            // A nonblocking connector woken with nothing to read yet; a web answer carrying no descriptor (EBADMSG)
+            // that came after its asker gave up, which is not this one's.
+            guard errno == EAGAIN || errno == EINTR || errno == EBADMSG else { throw Failure.system("receive", errno) }
+        }
+    }
+
+    /// Whether `fd` is a Unix-domain socket, as every connection the host hands back is.
+    private static func isUnixSocket(_ fd: Int32) -> Bool {
+        var address = sockaddr_storage()
+        var length = socklen_t(MemoryLayout<sockaddr_storage>.size)
+        let named = withUnsafeMutablePointer(to: &address) {
+            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { getsockname(fd, $0, &length) }
+        }
+        return named == 0 && Int32(address.ss_family) == AF_UNIX
+    }
+
+    /// What the host answered a web request (`HostWebListen`, H1).
+    public enum WebAnswer: Equatable, Sendable {
+        /// `listen`: the listening socket, close-on-exec, the caller's to close; `release`: nil.
+        case ok(Int32?)
+        /// The host's refusal, as it said it.
+        case refused(String)
+    }
+
+    /// Sends `request` over `connector` and waits for the host's answer (`web ok`, a `listen`'s with its socket, or
+    /// `web no: WHY`), under the same lock as `connect`'s requests, so each answer goes to its asker; an answer that
+    /// isn't a web answer (a connection's, after its asker gave up) is closed and passed over. A `listen` answered ok
+    /// with no socket, or with one that isn't a listening one, is refused. Throws as `connect` does.
+    public static func web(_ request: HostWebListen.Request, over connector: Int32, timeout: TimeInterval) throws -> WebAnswer {
+        // Messages with edges: Linux's `SOCK_SEQPACKET` connector only (the Mac's is a stream; its node's H1 is its own step).
+        guard Platform.Sockets.connectorType == Platform.Sockets.seqpacket else {
+            return .refused("this system's connector carries no web request (a stream)")
+        }
+        let lock = locks.lock(for: connector)
+        lock.lock()
+        defer { lock.unlock() }
+        let deadline = Date().addingTimeInterval(timeout)
+        Platform.Sockets.noSigPipe(socket: connector)
+        let bytes = HostWebListen.bytes(request)
+        while true {
+            let sent = Platform.Sockets.send(bytes, with: [], over: connector)
+            if sent == bytes.count { break }
+            if sent < 0, errno == EINTR { continue }
+            guard sent < 0, errno == EAGAIN else { throw Failure.system("send", sent < 0 ? errno : EIO) }
+            try wait(connector, for: Int16(POLLOUT), until: deadline)
+        }
+        while true {
+            try wait(connector, for: Int16(POLLIN), until: deadline)
+            guard let got = Platform.Sockets.receive(over: connector, count: 512, room: 1) else {
+                guard errno == EAGAIN || errno == EINTR else { throw Failure.system("receive", errno) }
+                continue
+            }
+            if got.bytes.isEmpty, got.descriptors.isEmpty, Platform.Sockets.peerHasGone(connector) { throw Failure.system("receive", EPIPE) }
+            guard HostWebListen.isWeb(got.bytes), let text = String(bytes: got.bytes, encoding: .utf8) else {
+                got.descriptors.forEach { Sys.close($0) }
+                continue
+            }
+            let said = String(text.dropFirst(4))
+            if said.hasPrefix("no: ") {
+                got.descriptors.forEach { Sys.close($0) }
+                return .refused(String(said.dropFirst(4)))
+            }
+            guard said == "ok" else {
+                got.descriptors.forEach { Sys.close($0) }
+                return .refused("the host's answer wasn't one: \(said.prefix(80))")
+            }
+            switch request {
+            case .release:
+                got.descriptors.forEach { Sys.close($0) }
+                return .ok(nil)
+            case .listen:
+                guard got.descriptors.count == 1, let fd = got.descriptors.first, Platform.TCP.isListening(fd) else {
+                    got.descriptors.forEach { Sys.close($0) }
+                    return .refused("the host's answer carried no listening socket")
+                }
+                return .ok(fd)
+            }
         }
     }
 

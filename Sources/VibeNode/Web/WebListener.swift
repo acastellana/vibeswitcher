@@ -32,15 +32,23 @@ public final class WebListener: @unchecked Sendable {
         /// Started before (a listener starts once), or stopped.
         case alreadyStarted
         case system(Platform.TCP.Failure)
+        /// The session host, which holds the node's web sockets (H1, `WebBind.host`), didn't give one: why.
+        case host(String)
 
         public var description: String {
             switch self {
             case .notLoopback(let address): return "\(address) isn't a loopback address: the web listener binds to loopback only"
             case .alreadyStarted: return "the web listener was started before"
             case .system(let failure): return "the web listener's socket: \(failure)"
+            case .host(let why): return "the session host gave no web socket: \(why)"
             }
         }
     }
+
+    /// Where the listening socket comes from (H1): nil, made here (`Platform.TCP.listen`); else this, which on the
+    /// user's node asks the session host for the socket it holds (`WebBind.host`). Called on `queue` by `start`, with
+    /// the family, the address, the port and the backlog; the socket it gives is this listener's to close.
+    public var bindWith: ((Platform.TCP.Family, String, UInt16, Int32) -> Result<Int32, Failure>)?
 
     /// Whether a WebSocket may be opened for a request with this Host, this Origin (nil: it sent none), this path
     /// and these fields.
@@ -159,9 +167,16 @@ public final class WebListener: @unchecked Sendable {
         return try onQueue {
             guard listener < 0, !stopping else { throw Failure.alreadyStarted }
             let fd: Int32
-            switch Platform.TCP.listen(family: family, address: address, port: requestedPort, backlog: limits.backlog) {
-            case .success(let made): fd = made
-            case .failure(let failure): throw Failure.system(failure)
+            if let bindWith {
+                switch bindWith(family, address, requestedPort, limits.backlog) {
+                case .success(let given): fd = given
+                case .failure(let failure): throw failure
+                }
+            } else {
+                switch Platform.TCP.listen(family: family, address: address, port: requestedPort, backlog: limits.backlog) {
+                case .success(let made): fd = made
+                case .failure(let failure): throw Failure.system(failure)
+                }
             }
             guard let port = Platform.TCP.localPort(fd) else {
                 let code = errno

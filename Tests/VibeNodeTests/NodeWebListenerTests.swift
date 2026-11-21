@@ -440,5 +440,30 @@ extension WebListenerTests {
             #expect(taken.port == nil && taken.connectionCount == 0)
             #expect(throws: WebListener.Failure.system(.system("bind", EADDRINUSE))) { try taken.start() }
         }
+
+        /// H1: a listener whose socket comes from the session host (`WebBind.host`) and is refused says why, as its
+        /// state, and binds nothing of its own; and when the web goes off it tells the host to let its socket go, once.
+        @Test func aSocketTheHostRefusesIsTheStateAndNothingIsBoundHere() throws {
+            let asked = Locked<[String]>([])
+            let refusing = WebBind(listen: { place, address, port, _ in
+                asked.value.append("\(place.rawValue) \(address):\(port)")
+                return .failure(.host("the user's node listens on port 47830 only, not 0"))
+            }, release: { asked.value.append("release \($0.rawValue)") })
+            let gate = StubGate()
+            let queue = DispatchQueue(label: "node-web-listener-host-refused")
+            let web = NodeWebListener(port: 0, assets: StubAssets(files: [:]), gate: gate, handler: StubHub(), queue: queue,
+                                      clock: WebTestTime().clock(), bind: refusing)
+            guard case .refused(let why) = web.follow() else {
+                Issue.record("\(web.state)")
+                return
+            }
+            #expect(why.contains("the session host gave no web socket: the user's node listens on port 47830 only"), "\(why)")
+            #expect(web.port == nil && web.connectionCount == 0)
+            gate.wanted = false
+            #expect(web.follow() == .off)
+            #expect(web.follow() == .off)
+            #expect(asked.value == ["loopback 127.0.0.1:0", "release loopback"], "\(asked.value)")
+        }
+
     }
 }

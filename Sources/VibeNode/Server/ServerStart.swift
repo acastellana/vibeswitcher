@@ -159,7 +159,10 @@ public enum ServerStart {
         let live = NodeLive(requests: requests, sessions: sessions, engine: engine, clock: clock, port: parsed.testWebPort ?? NodeWeb.port,
                             webRoot: parsed.testWebRoot.map { URL(fileURLWithPath: $0, isDirectory: true) }, terminals: parsed.webTerminal,
                             // The tailnet's page (`web --tailnet`) on the user's node only: a scratch server never binds it.
-                            tailnet: parsed.node ? TailnetWeb.Options() : nil, note: say)
+                            tailnet: parsed.node ? TailnetWeb.Options() : nil,
+                            // H1: the web's sockets are the session host's, asked for over the connector and held by it
+                            // across this server's restarts and its handovers; this server never binds one itself.
+                            bind: .host(connector: parsed.connector, note: say), note: say)
         requests.openWebForAnyone = parsed.testWebPair
         server.hub = live.hub
         link.onWelcome = { _, _ in

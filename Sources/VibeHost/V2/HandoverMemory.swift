@@ -561,6 +561,9 @@ extension HostServer {
                     if let working = self.teamsWorking(state) { throw working }
                     state.images = HandoverImages(own: target.fd, fallback: fallback?.fd, server: serverCopy?.fd)
                     state.ownsLaunchers = HandoverMemory.ownsLaunchers
+                    // The web's listening sockets (H1): held on by the new image, never free between the two.
+                    let listeners = self.serverChild?.webListeners.records ?? []
+                    state.webListeners = listeners.isEmpty ? nil : listeners
                     if let bad = state.descriptors.first(where: { !HostHandover.isOpen($0) }) { throw HostHandover.Failure.badDescriptor(bad) }
                     if let why = self.carriedLockRefusal(state.lockFD) { throw self.refusedForItsLock(why, executable) }
                     let bytes = try HandoverMemory.encoded(state)

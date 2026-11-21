@@ -93,9 +93,17 @@ public final class NodeWebListener: @unchecked Sendable {
     private let hello: ((WebAdmission) -> Data?)?
     private let note: (String) -> Void
 
+    /// Where the socket comes from (H1): the session host's on the server (`WebBind.host`), this process's in tests.
+    private let bind: WebBind
+    /// Which of the host's sockets this listener's is.
+    private let place: HostWebListen.Place
+
     private let lock = NSLock()
     private var listener: WebListener?
     private var current = State.off
+    /// Whether the host was told, once, that this server doesn't want the socket (a server started with the web off,
+    /// after one that had it on: the host still holds it).
+    private var letGo = false
 
     // On `queue`.
     private var transports: [ObjectIdentifier: NodeWebTransport] = [:]
@@ -113,7 +121,9 @@ public final class NodeWebListener: @unchecked Sendable {
     public init(port: UInt16 = NodeWeb.port, address: String = "127.0.0.1", name: String? = nil, admitPeer: ((String) -> Bool)? = nil,
                 command: String = "vibeswitcher web", assets: WebAssetSource, gate: WebGate, handler: WebSocketHandler, queue: DispatchQueue,
                 clock: NodeClock, limits: WebLimits = NodeWebListener.limits, hello: ((WebAdmission) -> Data?)? = nil,
-                note: @escaping (String) -> Void = { _ in }) {
+                bind: WebBind = .direct, place: HostWebListen.Place = .loopback, note: @escaping (String) -> Void = { _ in }) {
+        self.bind = bind
+        self.place = place
         requestedPort = port
         self.address = address
         self.name = name ?? address
@@ -152,7 +162,12 @@ public final class NodeWebListener: @unchecked Sendable {
             closeAll(code: "revoked", reason: "the web was closed: run `\(command)` again")
             stop()
         } else {
-            lock.withLock { current = .off }
+            let tell = lock.withLock { () -> Bool in
+                current = .off
+                defer { letGo = true }
+                return !letGo
+            }
+            if tell { bind.release(place) }
         }
         return state
     }
@@ -171,6 +186,8 @@ public final class NodeWebListener: @unchecked Sendable {
             return path == "/ws" && host.utf8.elementsEqual(name.utf8) && origin.utf8.elementsEqual(("http://" + name).utf8)
                 && headers.all("sec-fetch-site").allSatisfy { $0 == "same-origin" }
         }, address: address, port: requestedPort, allowBeyondLoopback: beyond, note: note)
+        let (bind, place) = (bind, place)
+        made.bindWith = { _, address, port, backlog in bind.listen(place, address, port, backlog) }
         made.admitPeer = admitPeer
         made.refuse = { request in
             guard let name = own.name, let host = request.headers["host"], host.utf8.elementsEqual(name.utf8) else {
@@ -194,6 +211,7 @@ public final class NodeWebListener: @unchecked Sendable {
             lock.withLock {
                 listener = made
                 current = .on(port: port)
+                letGo = false
             }
             return port
         } catch {
@@ -219,7 +237,17 @@ public final class NodeWebListener: @unchecked Sendable {
             if let done { queue.async { done() } }
             return
         }
-        stopped.stop(done)
+        // Once this process's descriptor is closed, the host lets its own go (the port free), unless a listener was
+        // bound again meanwhile.
+        stopped.stop { [self] in
+            let tell = lock.withLock { () -> Bool in
+                guard listener == nil, !letGo else { return false }
+                letGo = true
+                return true
+            }
+            if tell { bind.release(place) }
+            done?()
+        }
     }
 
     /// `bye` with `code` and `reason`, then the close, to every connection (`revoked`: every token was dropped).
