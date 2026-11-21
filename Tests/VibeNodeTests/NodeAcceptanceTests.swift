@@ -609,7 +609,7 @@ struct NodeAcceptanceTests {
         #expect(ran.status == 0 && ran.output.contains("node_max_sessions") && ran.output.contains("boost_max_sessions")
                 && !ran.output.contains("lead_mail") && !ran.output.contains("mac_max_sessions"), "\(ran.output)\(ran.errors)")
         let none = try await node.run(["settings", "--find", "nothing-like-this"])
-        #expect(none.status == 0 && none.output.contains("No setting matches"), "\(none.output)")
+        #expect(none.status == 0 && none.output.contains("No setting matches"), "status \(none.status): \(none.output)\(none.errors)\n\(node.said)")
     }
 
     @Test("A31: new --agent codex starts the user's own Codex by its link (a stand-in here), labelled Codex")
