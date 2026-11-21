@@ -87,7 +87,10 @@ struct ChatReadsTests {
         let id = try #require(Self.imageIDs(client).first)
         for wanted in [beside.path, secret.path, "../../secret.png", "../shot.png", "shot.png", "/etc/passwd", id + "/../" + id, id + "x"] {
             let reply = try await world.request(client, "chat.image", ["session": .string(world.session), "id": .string(wanted)])
-            #expect(reply["error"]?["code"] == .string("gone"), "\(wanted): \(reply)")
+            // Not an id the chat holds (`gone`), or, past 200 bytes (a long scratch folder's path), no id at all.
+            let code = reply["error"]?["code"]?.string
+            #expect(code == "gone" || (code == "bad-args" && wanted.utf8.count > 200), "\(wanted): \(reply)")
+            #expect(reply["result"] == nil, "\(wanted): \(reply)")
         }
         let past = try await world.request(client, "chat.image", ["session": .string(world.session), "id": .string(id), "offset": .int(108)])
         #expect(past["error"]?["code"] == .string("bad-args"), "\(past)")
