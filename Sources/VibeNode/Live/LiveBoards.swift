@@ -47,6 +47,7 @@ public final class LiveBoards: @unchecked Sendable {
         let project: String
         let root: String
         let file: BoardFile
+        let records: BoardRecordsFile
         let reads = DispatchQueue(label: "vibenode.live.board", qos: .utility)
         var watch: Platform.FolderWatch?
         var reading = false
@@ -56,6 +57,7 @@ public final class LiveBoards: @unchecked Sendable {
             self.project = project
             self.root = root
             file = BoardFile(root: root)
+            records = BoardRecordsFile(root: root)
         }
 
         var folder: String { (file.path as NSString).deletingLastPathComponent }
@@ -157,7 +159,7 @@ public final class LiveBoards: @unchecked Sendable {
         feed.reads.async { [weak self] in
             let loaded = feed.file.load()
             let value = BoardValue.value(project: feed.project, root: feed.root, board: loaded.board, refusal: loaded.refusal, now: now(),
-                                         usageWaits: waits, summaries: lines)
+                                         usageWaits: waits, summaries: lines, records: feed.records.load())
             self?.queue.async { [weak self] in
                 guard let self else { return }
                 feed.reading = false

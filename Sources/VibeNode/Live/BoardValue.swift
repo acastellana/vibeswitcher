@@ -43,8 +43,11 @@ public enum BoardValue {
     /// large, or isn't a board this build knows): the value then says so and has no tasks.
     /// `usageWaits`: the review rows waiting on the account's usage, by task id (`UsageWaits`): their state says so.
     /// `summaries`: the AI summaries' lines, by task id (`TeamSummaryWatch`): a task at work carries its own.
+    /// `records`: the lead's decisions and files under its root (`BoardRecords`); the value's `decisions`, `scorecard`,
+    /// `answered`, `files` and `recordsDir` are made from them and the board (2026-11-21).
     public static func value(project: String, root: String, board: LeadBoard?, refusal: String? = nil, now: Date,
-                             usageWaits: [String: ReviewUsageWait] = [:], summaries: [String: String] = [:]) -> NodeWire.Value {
+                             usageWaits: [String: ReviewUsageWait] = [:], summaries: [String: String] = [:],
+                             records: BoardRecords.Read = BoardRecords.Read()) -> NodeWire.Value {
         var shown: [(group: Int, position: Int, value: NodeWire.Value)] = []
         var slugs: Set<String> = []
         if let board {
@@ -57,7 +60,9 @@ public enum BoardValue {
         shown.sort { ($0.group, $0.position) < ($1.group, $1.position) }
         var kept = Array(shown.prefix(mostTasks))
         // The byte budget: the tasks' encoded sizes and the rest of the value's, the last tasks dropped till it fits.
-        var size = 2_048 + root.utf8.count + project.utf8.count + kept.reduce(0) { $0 + NodeWire.message($1.value).count + 1 }
+        let extra = BoardRecords.fields(board: board, read: records, now: now)
+        var size = 2_048 + root.utf8.count + project.utf8.count + NodeWire.message(NodeWire.Value.object(extra)).count
+            + kept.reduce(0) { $0 + NodeWire.message($1.value).count + 1 }
         while size > mostBytes, let last = kept.popLast() { size -= NodeWire.message(last.value).count + 1 }
         let more = shown.count - kept.count
         var counts: [String: NodeWire.Value] = [:]
@@ -67,7 +72,7 @@ public enum BoardValue {
             "baseBranch": board?.baseBranch.map { .string(text($0, limit: 200)) } ?? .null,
             "tasks": .array(kept.map(\.value)), "counts": .object(counts), "more": .int(more),
             "unreadable": refusal.map { .string(text($0, limit: 300)) } ?? .null,
-        ])
+        ].merging(extra) { old, _ in old })
     }
 
     /// One task's value and its group's place in `groups`; nil when it isn't shown (finished more than `doneFor` ago).

@@ -103,6 +103,27 @@ export function createMock(store, options = {}) {
       task('cache-static-assets', 'Cache the static assets', 'done', { since: ago(2400), merged: { commit: '8a3f1e2', at: ago(2400), tested: true } }),
       task('footer-links', 'Fix the footer links', 'done', { since: ago(3900), merged: { commit: 'c41d7b9', at: ago(3900), tested: true } }),
     ],
+    // The Team tab's records (the node's `BoardRecords`).
+    scorecard: { merged: 2, reverts: 0, mergedWithoutTests: 0, footnote: 'Over 2 merged tasks.', receipts: 'This batch: 2 tasks, 1.4 h of worker time, 3.1M tokens, est. $4.80; most expensive: Cache the static assets (est. $3.10).',
+      tiles: [{ value: '1.5', label: 'audit rounds to pass', note: null, help: 'The mean audit rounds a merged task took to pass.' },
+        { value: '—', label: 'pass the first audit', note: 'too few audited tasks (2)', help: 'The share of merged tasks that passed their first audit.' },
+        { value: '3 min', label: 'of yours per merged task', note: null, help: 'The minutes a merged task waited on you.' },
+        { value: '0', label: 'reverts', note: null, help: 'Merges undone since.' }] },
+    decisions: [
+      { at: ago(600), text: 'Keep the new hero and drop the old one', why: 'Both were half done; the new one passes the page tests and marketing asked for it.' },
+      { at: ago(2000), text: 'Cache the assets for a year with hashed names', why: 'A new build changes every name, so nothing stale is ever served.' },
+      { at: ago(5000), text: 'Sync landing-base before the sidebar pass', why: 'The pass touches the same files; syncing first saves a second merge.' },
+      { at: ago(9000), text: 'Run the page tests on every merge', why: 'Two merges broke the hero last week.' },
+    ],
+    answered: [
+      { id: 'q-cache', state: 'answered', text: 'Cache for a day or a year?', answer: 'A year, with hashed names', proposal: null, why: null, reworded: false, task: 'cache-static-assets', at: ago(2100) },
+      { id: 'q-footer', state: 'withdrawn', text: 'Should the footer link to the old blog?', answer: null, proposal: null, why: 'The blog moved; the link goes to the new one.', reworded: false, task: null, at: ago(4000) },
+    ],
+    files: [
+      { name: 'workflow.md', path: '.vibeswitcher/workflow.md', present: true }, { name: 'decisions.md', path: 'docs/lead/decisions.md', present: true },
+      { name: 'progress.md', path: 'docs/lead/progress.md', present: true }, { name: 'incidents.md', path: 'docs/lead/incidents.md', present: false },
+    ],
+    recordsDir: 'docs/lead',
   }]]);
 
   const cards = new Map(options.empty ? [] : [[CARD_LAUNCH, {

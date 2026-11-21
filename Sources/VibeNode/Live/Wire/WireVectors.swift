@@ -562,7 +562,11 @@ public enum WireVectors {
     /// With the AI summary of the running task's worker (`TeamSummaryWatch`).
     static var boardValue: NodeWire.Value {
         BoardValue.value(project: NodeIds.project(root: root), root: root, board: sampleBoard(now: boardNow.timeIntervalSince1970), now: boardNow,
-                         summaries: ["t-onboarding-steps": "Making the sign-up form check each field as you leave it"])
+                         summaries: ["t-onboarding-steps": "Making the sign-up form check each field as you leave it"],
+                         records: BoardRecords.Read(decisions: [
+                             LeadDecision(at: boardNow.timeIntervalSince1970 - 900, text: "Retry only idempotent requests",
+                                          why: "A POST may have landed; a PUT can be sent twice safely."),
+                         ], recordsDir: "docs/lead", present: ["workflow.md": true, "decisions.md": true, "progress.md": true, "incidents.md": false]))
     }
 
     /// The board a minute on: the review passed and the blocked task's question was answered.

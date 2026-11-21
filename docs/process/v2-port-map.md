@@ -82,6 +82,7 @@ rows above are.
 | `LeadController.swift` `leadSessions(_:named:)` | 715-741 (with `readLeadSessions`) | `Sources/VibeNode/Stores/LeadStore.swift` (`LeadStore.leadSessions`) | E4 (made 2026-11-15) |
 | `LeadController.swift` `StartPlan`, `plan(hostState:running:holdsRole:fromUser:)` | 869-888 | `Sources/VibeNode/Engine/LeadStart.swift` (`LeadEngine.StartPlan`, `LeadEngine.plan`, on `HostLink.State`) | E4 (made 2026-11-15) |
 | `LeadController.swift` `SessionDelivery` | 2287-2295 | `Sources/VibeNode/Engine/Delivery.swift` (`SessionDelivery`) | E5 (made 2026-11-15) |
+| `TeamViews.swift` `ScorecardView.footnote`; `LeadViews.swift` `ClosedQuestionList.newestFirst`, `closedAt`, `TeamRecords`' files and their places | 493-499; 574-581, 973-996 | `Sources/VibeNode/Live/BoardRecords.swift` (`BoardRecords.footnote`, `closed`, `path(of:recordsDir:)`; the page's words in `WebApp/js/views/records.js`) | the board row (made 2026-11-21) |
 | `PushRequests.swift` `notice(_:_:)` | 92-104 | `Sources/VibeNode/Engine/PushAsks.swift` (`LeadEngine.pushOutcome`, what `vibeswitcher push` prints) | the push row (made 2026-11-20) |
 | `LeadController.swift` `answer`'s notices (`answerNotices`' texts) and `runTimers`' look at the board as last read | 1127-1162, 1187-1201 | `Sources/VibeNode/Engine/Answers.swift` (`LeadEngine.notice(_:)`, `runTimers(now:)`) | E6 (made 2026-11-15) |
 | `ConfigHolds.swift` `changedAt(_:root:home:)` | 152-166 | `Sources/VibeNode/Stores/ConfigHoldStore.swift` (`ConfigHoldStore.changedAt`; `sizes` beside it, new) | E6 (made 2026-11-15) |

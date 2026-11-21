@@ -317,8 +317,23 @@ public enum WireSchema {
             shape("board", from: "BoardValue.value", [
                 field("project", .string), field("root", .string), field("baseBranch", Kind.string.orNull),
                 field("tasks", .list(.shape("board.task"))), field("counts", .shape("board.counts")), field("more", .int),
-                field("unreadable", Kind.string.orNull)]),
+                field("unreadable", Kind.string.orNull),
+                // The Team tab's records (2026-11-21, `BoardRecords`).
+                field("decisions", .list(.shape("board.decision"))), field("scorecard", Kind.shape("board.scorecard").orNull),
+                field("answered", .list(.shape("board.question"))), field("files", .list(.shape("board.file"))),
+                field("recordsDir", Kind.string.orNull)]),
             shape("board.counts", from: "BoardValue.value", BoardValue.groups.map { field($0, .int) }),
+            shape("board.decision", from: "BoardRecords.fields", [field("at", .date), field("text", .string), field("why", .string)]),
+            shape("board.scorecard", from: "BoardRecords.scorecard", [
+                field("merged", .int), field("reverts", .int), field("mergedWithoutTests", .int), field("tiles", .list(.shape("board.tile"))),
+                field("footnote", Kind.string.orNull), field("receipts", Kind.string.orNull)]),
+            shape("board.tile", from: "BoardRecords.scorecard", [field("value", .string), field("label", .string), field("note", Kind.string.orNull),
+                                                                  field("help", .string)]),
+            shape("board.question", from: "BoardRecords.question", [
+                field("id", .string), field("state", .words(["answered", "withdrawn", "autoDecided"])), field("text", .string),
+                field("answer", Kind.string.orNull), field("proposal", Kind.string.orNull), field("why", Kind.string.orNull),
+                field("reworded", .bool), field("task", Kind.string.orNull), field("at", .date)]),
+            shape("board.file", from: "BoardRecords.fields", [field("name", .string), field("path", .string), field("present", .bool)]),
             shape("board.task", from: "BoardValue.task", [
                 field("id", .string), field("slug", .string), field("title", .string), field("status", taskStatus),
                 field("group", .words(BoardValue.groups)), field("state", .string), field("line", Kind.string.orNull),

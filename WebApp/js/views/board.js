@@ -8,6 +8,7 @@ import { h, keyed, setText, setClass, framed } from '../dom.js';
 import { icon } from '../marks.js';
 import { boardGroups, boardSummary, taskState, taskTone, taskGroup, taskLine, since, moment, plural, tilde, lastPart } from '../words.js';
 import { sessionHref } from '../ui.js';
+import { boardRecords } from './records.js';
 
 // A blocker longer than this many lines (or characters) is folded to its first lines until asked.
 const FOLD_LINES = 2;
@@ -144,12 +145,13 @@ export function boardView(app) {
   const sections = [0, 1, 2, 3].map(() => groupSection(app));
   groupsEl.append(...sections.map((section) => section.el));
   const more = h('p', { class: 'board-more-note', hidden: true });
+  const records = boardRecords(app);
   const el = h('section', { class: 'board', 'aria-label': 'Board' },
     h('header', { class: 'head' },
       h('a', { class: 'back icon-button', href: '#/', 'aria-label': 'Sessions' }, icon('back', 16)),
       h('div', { class: 'head-text' }, h('div', { class: 'head-line' }, title, summary), place),
       leadLink),
-    h('div', { class: 'pane board-pane' }, h('div', { class: 'board-column' }, asks, note, groupsEl, more)));
+    h('div', { class: 'pane board-pane' }, h('div', { class: 'board-column' }, asks, note, groupsEl, more, records.el)));
   const askRows = new Map();
   let shown = null;
 
@@ -195,6 +197,7 @@ export function boardView(app) {
     note.hidden = !words;
     setText(more, board?.more ? `The board is long: ${plural(board.more, 'more task')} past these aren’t shown.` : '');
     more.hidden = !board?.more;
+    records.update(board);
   }
 
   const schedule = framed(render);

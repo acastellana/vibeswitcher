@@ -12,6 +12,7 @@ import { STATES, AGENTS, ROLES, stateOf, since, short, moment, tilde, plural } f
 import { sessionHref, inspectorTab, teamOf, projectOf } from '../ui.js';
 import { ledger, fileWords, usageWords, costWords } from '../activity.js';
 import { teamTasks } from './lead.js';
+import { boardRecords } from './records.js';
 
 const TABS = [{ id: 'team', label: 'Team' }, { id: 'overview', label: 'Overview' }, { id: 'activity', label: 'Activity' }];
 // How close to the end of the Activity counts as being at its end.
@@ -194,6 +195,8 @@ function overview(app) {
 function teamPane(app) {
   const { store } = app;
   const tasks = teamTasks(app);
+  // Under the tasks, as the Mac's Team tab: the scorecard, decisions, answered questions, files.
+  const records = boardRecords(app);
   const later = h('p', { class: 'inspect-note' }, 'The board’s tasks come to this page in a later build.');
   const leadLink = h('a', { class: 'inspect-link' });
   const leader = fact('Session', leadLink);
@@ -203,7 +206,7 @@ function teamPane(app) {
   const about = group('Lead', leader, questions, held, reports);
   const noticeText = h('span');
   const notice = h('p', { class: 'inspect-notice', hidden: true }, icon('warning', 13), noticeText);
-  const el = h('div', { class: 'inspect-pane' }, tasks.el, about.el, notice, later);
+  const el = h('div', { class: 'inspect-pane' }, tasks.el, about.el, notice, records.el, later);
 
   return {
     el,
@@ -212,6 +215,7 @@ function teamPane(app) {
       const lead = store.state.leads.get(session.lead);
       tasks.el.hidden = !board;
       if (board) tasks.update(session);
+      records.update(board);
       // Said only where the node sends no board at all, not where a board is still on its way.
       later.hidden = !!board || store.follows('boards');
 

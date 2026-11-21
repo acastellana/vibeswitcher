@@ -563,6 +563,11 @@ the host's preset command with credentials masked, and `size` {`cols`, `rows`}, 
 it; `lead`, the project id of the board a lead, worker or verifier is on, and `boardTask`, a worker's or verifier's
 task slug there (from the folder the host started it in), null for the rest. `status`'s `ended` entries carry `exit`
 {`status`, `cause` †, `at`}, how the host recorded the session ended, or null.
+A board (`boards`, `board`) carries the Mac's Team tab's records since 2026-11-21 (`BoardRecords`): `decisions` [{`at`,
+`text` †, `why` †}] (newest first, 50 at most), `scorecard` {`merged`, `reverts`, `mergedWithoutTests`, `tiles`
+[{`value`, `label`, `note`?, `help`}], `footnote`?, `receipts`? †} (null for a board that can't be read), `answered`
+[{`id`, `state` (`answered`, `withdrawn`, `autoDecided`), `text` †, `answer`? †, `proposal`? †, `why`? †, `reworded`,
+`task`?, `at`}] (newest first, 30 at most), `files` [{`name`, `path` (under the root), `present`}] and `recordsDir`?.
 
 **The user's-voice rule is unchanged (S3).** A browser is not a terminal in the user's scope and types no code, and a
 token is a secret in a file the user's processes can read (the security document's S11, item 31). So in the first

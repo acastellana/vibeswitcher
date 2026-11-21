@@ -822,3 +822,41 @@ kbd { padding: 1px 6px; border-radius: 5px; box-shadow: inset 0 0 0 1px var(--li
   .board-blocker { margin-left: 28px; }
 }
 .board-task-dim.summary { font-style: italic; }
+
+/* The Team tab's records (views/records.js): the scorecard, decisions, answered questions, files. */
+.records-section { padding-bottom: 4px; }
+.score-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(84px, 1fr)); gap: 10px; padding: 4px 18px 2px; }
+.score-tile { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.score-value { font-size: 15px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.score-label { color: var(--ink-2); font-size: 10.5px; line-height: 1.3; }
+.score-note { color: var(--ink-3); font-size: 10px; line-height: 1.3; }
+.score-tile.quiet .score-value { color: var(--ink-3); }
+.score-tile.bad .score-value { color: var(--removed); }
+.records-note { padding: 2px 18px; color: var(--ink-3); font-size: 10.5px; line-height: 1.4; overflow-wrap: anywhere; }
+.records-note.warn { color: var(--blocked); }
+.records-list { display: flex; flex-direction: column; padding: 0 10px; }
+.records-row > summary, .records-earlier > summary { display: flex; align-items: baseline; gap: 6px; padding: 4px 8px; border-radius: 7px; cursor: pointer; list-style: none; font-size: 12px; }
+.records-row > summary::-webkit-details-marker, .records-earlier > summary::-webkit-details-marker { display: none; }
+.records-row[open] { background: var(--accent-fill); border-radius: 7px; }
+.records-row > summary:hover, .records-earlier > summary:hover { background: var(--fill); }
+.records-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.records-text.quiet { color: var(--ink-3); }
+.records-row[open] .records-text { white-space: normal; overflow-wrap: anywhere; }
+.records-time { flex: none; color: var(--ink-3); font-size: 10.5px; font-variant-numeric: tabular-nums; }
+.records-tag { flex: none; color: var(--ink-3); font-size: 10.5px; font-weight: 500; }
+.records-outcome { flex: none; max-width: 45%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--accent); font-weight: 500; }
+.records-detail { padding: 0 8px 6px 16px; font-size: 11.5px; line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--ink-2); }
+.records-detail .records-note { padding: 2px 0 0; }
+.records-question { color: var(--ink); }
+.records-earlier > summary { color: var(--ink-2); font-weight: 500; font-size: 11.5px; }
+.records-earlier > summary::before { content: '›'; display: inline-block; width: 8px; transition: transform 0.12s; }
+.records-earlier[open] > summary::before { transform: rotate(90deg); }
+.records-files { display: flex; flex-direction: column; gap: 2px; padding: 2px 18px; font-size: 11.5px; }
+.records-file { display: flex; gap: 8px; min-width: 0; }
+.records-file-name { flex: none; font-weight: 500; }
+.records-file-path { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-3); font-family: var(--mono); font-size: 10.5px; }
+.records-file.missing .records-file-name { color: var(--ink-3); }
+.board .records { margin-top: 24px; }
+.board .records .group-head { padding: 12px 10px 6px; letter-spacing: 0.04em; text-transform: uppercase; }
+.board .records .score-tiles, .board .records .records-note, .board .records .records-files { padding-left: 10px; padding-right: 10px; }
+.board .records .records-list { padding: 0; }

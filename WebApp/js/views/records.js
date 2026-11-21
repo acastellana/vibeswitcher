@@ -1,0 +1,133 @@
+// What the Mac's Team tab shows under a lead's tasks (its `TeamRecords`, `DecisionFeedView`): the scorecard, the lead's
+// decisions, the answered and withdrawn questions, and where the lead's files are. The node sends them in the board's
+// value (`BoardRecords`); the Team tab and the board page both show them. Read-only.
+//
+// - The newest few of each list are in view, the rest folded under "Earlier (n)", as the Mac's; one opens to say the
+//   whole of it (a decision's why, a question's answer). What is open stays open while the board changes.
+// - Every string is the sessions' writing: drawn as text, never markup.
+
+import { h, setText } from '../dom.js';
+import { clock, moment } from '../words.js';
+
+// How many of each list show before "Earlier".
+export const SHOWN = 3;
+
+// A question's line, as the Mac's `ClosedQuestionList` says it: its first line and what it closed with.
+export function questionLine(question) {
+  const gist = String(question.text || '').split('\n')[0].trim();
+  if (question.state === 'withdrawn') return { gist, outcome: null, withdrawn: true };
+  const with_ = question.state === 'autoDecided' ? question.proposal : question.answer;
+  return { gist, outcome: with_ ? '→ ' + clipped(with_) : null, withdrawn: false };
+}
+
+// A long answer's start, so the question's gist keeps room on its line.
+function clipped(answer) {
+  const line = String(answer).split('\n')[0].trim();
+  return line.length > 36 || line !== String(answer).trim() ? line.slice(0, 34) + '…' : line;
+}
+
+// What opens under a closed question: the wording answered, and how it closed.
+export function questionDetail(question) {
+  if (question.state === 'withdrawn') return [question.answer ? `Answered anyway → ${question.answer}` : 'Withdrawn by the lead.', question.why ? `Why: ${question.why}` : ''].filter(Boolean);
+  if (question.state === 'autoDecided') return [`No answer in time: the lead went ahead with ${question.proposal || 'its proposal'}` + (question.answer ? `; you answered later: ${question.answer}` : '') + '.'];
+  return [`Answered → ${question.answer || ''}`, question.reworded ? 'It was reworded after you answered.' : ''].filter(Boolean);
+}
+
+// "workflow.md is kept in ~/site/.vibeswitcher (not committed); decisions.md, progress.md and incidents.md in
+// ~/site/docs/lead, committed to the lead's branch." (the Mac's line under its Files buttons).
+export function filesLine(board, home) {
+  const root = board.root && home && (board.root === home || board.root.startsWith(home + '/')) ? '~' + board.root.slice(home.length) : board.root || '';
+  return board.recordsDir
+    ? `workflow.md is kept in ${root}/.vibeswitcher (not committed); decisions.md, progress.md and incidents.md in ${root}/${board.recordsDir}, committed to the lead’s branch.`
+    : `Kept in ${root}/.vibeswitcher (not committed).`;
+}
+
+export function boardRecords(app) {
+  const scoreTiles = h('div', { class: 'score-tiles' });
+  const scoreFoot = h('p', { class: 'records-note' });
+  const scoreReceipts = h('p', { class: 'records-note' });
+  const score = section('Scorecard', scoreTiles, scoreFoot, scoreReceipts);
+  const decisionsList = h('div', { class: 'records-list' });
+  const decisions = section('Decisions', decisionsList);
+  const answeredList = h('div', { class: 'records-list' });
+  const answered = section('Answered and withdrawn', answeredList);
+  const filesList = h('ul', { class: 'records-files' });
+  const filesNote = h('p', { class: 'records-note' });
+  const files = section('Files', filesList, filesNote);
+  const el = h('div', { class: 'records' }, score.el, decisions.el, answered.el, files.el);
+  // What is open, by key: kept across the board's changes.
+  const open = new Set();
+  let drawn = '';
+
+  function section(title, ...content) {
+    const el = h('section', { class: 'inspect-group records-section' }, h('h2', { class: 'group-head' }, title), content);
+    return { el };
+  }
+
+  // A row that opens: its line, and what it says in full under it.
+  function opener(key, line, detail) {
+    const details = h('details', { class: 'records-row' }, h('summary', null, line), h('div', { class: 'records-detail' }, detail));
+    details.open = open.has(key);
+    details.addEventListener('toggle', () => { if (details.open) open.add(key); else open.delete(key); });
+    return details;
+  }
+
+  // The newest `SHOWN` of `rows`, the rest under "Earlier (n)".
+  function folded(rows, key, label) {
+    if (rows.length <= SHOWN) return rows;
+    const earlier = h('details', { class: 'records-earlier' }, h('summary', null, `${label} (${rows.length - SHOWN})`), rows.slice(SHOWN));
+    earlier.open = open.has(key);
+    earlier.addEventListener('toggle', () => { if (earlier.open) open.add(key); else open.delete(key); });
+    return [...rows.slice(0, SHOWN), earlier];
+  }
+
+  return {
+    el,
+    update(board) {
+      el.hidden = !board || !!board.unreadable;
+      if (el.hidden) return;
+      const now = JSON.stringify([board.scorecard, board.decisions, board.answered, board.files, board.recordsDir, board.root, (board.tasks || []).length]);
+      if (now === drawn) return;
+      drawn = now;
+
+      const card = board.scorecard;
+      score.el.hidden = !card || !(board.tasks || []).length;
+      if (card) {
+        const tiles = card.tiles || [];
+        scoreTiles.replaceChildren(...(tiles.length ? tiles.map((tile, index) => h('div', {
+          class: 'score-tile' + (tile.note ? ' quiet' : '') + (index === 3 && card.reverts > 0 ? ' bad' : ''), title: tile.help || '',
+        }, h('span', { class: 'score-value' }, tile.value), h('span', { class: 'score-label' }, tile.label),
+        tile.note ? h('span', { class: 'score-note' }, tile.note) : null))
+          : [h('p', { class: 'records-note' }, 'Nothing merged yet: the numbers start with the first merge.')]));
+        setText(scoreFoot, card.footnote || '');
+        scoreFoot.hidden = !card.footnote;
+        scoreFoot.classList.toggle('warn', card.mergedWithoutTests > 0);
+        setText(scoreReceipts, card.receipts || '');
+        scoreReceipts.hidden = !card.receipts;
+      }
+
+      const said = board.decisions || [];
+      decisions.el.hidden = !said.length;
+      decisionsList.replaceChildren(...folded(said.map((decision) => opener('d:' + decision.at + decision.text,
+        [h('span', { class: 'records-text' }, decision.text), h('time', { class: 'records-time', title: moment(decision.at) }, clock(decision.at))],
+        decision.why ? [h('p', null, decision.why)] : [h('p', { class: 'records-note' }, 'No why was written.')])), 'd:earlier', 'Earlier decisions'));
+
+      const closed = board.answered || [];
+      answered.el.hidden = !closed.length;
+      answeredList.replaceChildren(...folded(closed.map((question) => {
+        const line = questionLine(question);
+        return opener('q:' + question.id, [
+          line.withdrawn ? h('span', { class: 'records-tag' }, 'Withdrawn') : null,
+          h('span', { class: 'records-text' + (line.withdrawn ? ' quiet' : '') }, line.gist),
+          line.outcome ? h('span', { class: 'records-outcome' }, line.outcome) : null,
+        ], [h('p', { class: 'records-question' }, question.text), ...questionDetail(question).map((text) => h('p', { class: 'records-note' }, text))]);
+      }), 'q:earlier', 'Earlier'));
+
+      const list = board.files || [];
+      files.el.hidden = !list.length;
+      filesList.replaceChildren(...list.map((file) => h('li', { class: 'records-file' + (file.present ? '' : ' missing'), title: file.path },
+        h('span', { class: 'records-file-name' }, file.name), h('span', { class: 'records-file-path' }, file.present ? file.path : `${file.path} · not there yet`))));
+      setText(filesNote, filesLine(board, app.store.state.node?.home));
+    },
+  };
+}
