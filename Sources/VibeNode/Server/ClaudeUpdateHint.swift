@@ -15,8 +15,8 @@ import VibeCore
 /// card says what it likely is and the user accepts it; turning the updater off (`DISABLE_AUTOUPDATER=1` in Claude
 /// Code's settings) removes the holds altogether.
 public enum ClaudeUpdateHint {
-    static let versionsName = "~/.local/share/claude/versions"
-    static let binName = "~/.local/bin"
+    static var versionsName: String { "~/.local/share/claude/versions" }
+    static var binName: String { "~/.local/bin" }
 
     /// The hint for a held card's item names, with `home`'s `claude` link read; nil when it isn't only those, or the link
     /// doesn't name a version's file there.
