@@ -30,8 +30,9 @@ enum AnswerCommand {
             let id = ConfigSeal.inert(card["id"]?.string ?? "", limit: 80)
             guard card["kind"]?.string == "shell" else { return "This answers card \(id) with: \(ConfigSeal.inert(text, limit: 400))" }
             let folder = ConfigSeal.inert(card["shell"]?["cwd"]?.string ?? "?", limit: .max)
+            let size = ShellCards.size(card["shell"]?["command"]?.string ?? "")
             return word == "run"
-                ? "This runs the command above, exactly as shown, in a new shell session in \(folder), as you: it runs with everything your account can do."
+                ? "This runs the command above (\(size)), exactly as shown, in a new shell session in \(folder), as you: it runs with everything your account can do."
                 : "This declines card \(id)'s shell request: nothing runs, and the asking session is told."
         }, say: said)
     }

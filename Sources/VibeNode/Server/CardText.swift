@@ -148,8 +148,10 @@ public enum CardText {
             // Exactly what runs, whole: every line of the command, the folder, the session that asks.
             lines.append("  \(inert(shell["asker"]?.string)) (session \(inert(shell["session"]?.string))) asks for a new shell session")
             lines.append("  in the folder: " + inert(shell["cwd"]?.string))
-            lines.append("  running exactly this command (an agent's words), by your login shell, which stays open after it:")
-            for line in (shell["command"]?.string ?? "").split(separator: "\n", omittingEmptySubsequences: false) {
+            let command = shell["command"]?.string ?? ""
+            lines.append("  running exactly this command (an agent's words; \(ShellCards.size(command)), every line shown), "
+                         + "by your login shell, which stays open after it:")
+            for line in command.split(separator: "\n", omittingEmptySubsequences: false) {
                 lines.append("    | " + inert(String(line)))
             }
             if let label = shell["label"]?.string, !label.isEmpty { lines.append("  named: Shell: " + inert(label)) }

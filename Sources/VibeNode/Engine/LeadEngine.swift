@@ -249,6 +249,8 @@ public final class LeadEngine: @unchecked Sendable {
     // card, the messages under way, a look under way, the 15 s look and the clock. The folder and the host's seal are
     // read on `shellWork`, one step at a time.
     var shellTrusted: [String: WalletStamp] = [:]
+    /// What became of each request, the engine's own (never read from the folder's answer files).
+    var shellAnswers: [String: ShellAsk.Answer] = [:]
     var shellCards: [String: String] = [:]
     var shellTelling: Set<String> = []
     var shellTellingEnd: Set<String> = []
