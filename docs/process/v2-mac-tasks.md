@@ -209,6 +209,14 @@ or decided. Done on Linux, tested on both systems (`ApprovalJudgmentTests`, `App
    ends).
 8. **(LOW, done in `6f367200`, `03f406c9`)** A replayed action id answered before any dialog; the command line's
    approval rule per connection, so its own confirmations (`status --ack`) always ask the code.
+9. **(BEFORE THE MAC NODE STARTS) The Mac's own H1.** On Linux the host holds the web page's listening sockets (H1, merged
+   2026-11-21); on the Mac, with its stream connector, the server binds them itself (`WebBind.forServer` gives
+   `.direct`, as before H1), so a process of the user's can take the port in the gap between one server and the next
+   and serve its own page to a reconnecting browser. Owed: the host holds the web socket there too, handed to its
+   server with `SCM_RIGHTS` over the stream connector (with framing for it), or by launchd socket activation in the
+   LaunchAgent (`NodeAgent`'s `Sockets` key). Until then the Mac node keeps `web` refused, or behind an explicit opt-in
+   that says the port can be squatted. **Real Mac**: whichever is built, that the server gets the descriptor and that a
+   second process can't bind the port while the host holds it.
 
 ## What `v2` found on the Mac and doesn't change
 
