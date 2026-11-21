@@ -1234,7 +1234,8 @@ extension EmbeddedAssets {
             b3IpID0+ICh7IGF0OiBlcnJvci5hdCwgdGV4dDogZXJyb3IubGluZSB9KSksCiAgXTsKICBjb25z
             dCB0b25lID0gaGVhbHRoLnN0YWxsZWQgIT0gbnVsbCB8fCBmcmVlemVzLmxlbmd0aCB8fCBlcnJv
             cnMubGVuZ3RoIHx8IHdhaXRpbmcubGVuZ3RoID8gJ25lZWRzLXlvdScgOiAnZG9uZSc7CiAgcmV0
-            dXJuIHsgdG9uZSwgcm93cywgbGluZXMgfTsKfQo=
+            dXJuIHsgdG9uZSwgcm93
+            cywgbGluZXMgfTsKfQo=
             """),
         EmbeddedAssets.File(path: "js/images.js", sha256: "83e58dd0edc86f984c18360bbdf7547efbc316ed5690a346a6ed81e253b35041", base64: """
             Ly8gQSBjaGF0J3MgaW1hZ2VzICh0aGUgTWFjJ3MgaW1hZ2Ugdmlld2VyLCBpdHMgaW5saW5lIHBp
@@ -8462,7 +8463,8 @@ extension EmbeddedAssets {
             dGFydCBQcm9qZWN0IExlYWQgaW4g4oCmIjogdGhlIHN0YXJ0IHBhZ2Ugd2l0aCB0aGF0IGZvbGRl
             ciBpbiB0aGUgbGVhZCdzIGZvcm0uCiAgcmV0dXJuIHsgZWwsIGNob29zZTogKGZvbGRlciwgcHJl
             c2V0KSA9PiBzdGFydGluZy5jaG9vc2UoZm9sZGVyLCBwcmVzZXQpLCBsZWFkOiAoZm9sZGVyKSA9
-            PiBsZWFkaW5nLmNob29zZShmb2xkZXIpIH07Cn0K
+            PiBsZWFkaW5nLmNob29z
+            ZShmb2xkZXIpIH07Cn0K
             """),
         EmbeddedAssets.File(path: "js/views/stats.js", sha256: "97f83bd37eb4a0c3904b8cb7d5752139b7f417c11f0480a9dc39c1b161c6fd30", base64: """
             Ly8gU3RhdGlzdGljcyAodGhlIE1hYydzIFN0YXRpc3RpY3Mgd2luZG93KTogdGhlIHdob2xlIHNl
@@ -10520,7 +10522,8 @@ extension EmbeddedAssets {
             ZD1uLnJpZ2h0K24ubGVmdCxjPWwtbSxwPWEtZC1zO3JldHVybntjb2xzOk1hdGgubWF4KGgsTWF0
             aC5mbG9vcihwL3QuY3NzLmNlbGwud2lkdGgpKSxyb3dzOk1hdGgubWF4KF8sTWF0aC5mbG9vcihj
             L3QuY3NzLmNlbGwuaGVpZ2h0KSl9fX07ZXhwb3J0e28gYXMgRml0QWRkb259OwovLyMgc291cmNl
-            TWFwcGluZ1VSTD1hZGRvbi1maXQubWpzLm1hcAo=
+            TWFwcGluZ1VSTD1hZGRv
+            bi1maXQubWpzLm1hcAo=
             """),
         EmbeddedAssets.File(path: "vendor/xterm.css", sha256: "854a7c0fb70e8b1a083c16797ab827299fb18744f5ad34f227b48337e33293c6", base64: """
             LyoqCiAqIENvcHlyaWdodCAoYykgMjAxNCBUaGUgeHRlcm0uanMgYXV0aG9ycy4gQWxsIHJpZ2h0

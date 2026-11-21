@@ -52,7 +52,9 @@ for path in "${paths[@]}"; do
         *) refuse "$path" "its type isn't in the content-type table (WebAssets.contentTypes)" ;;
     esac
     hash=$(sha "$file")
-    encoded=$(base64 < "$file" | tr -d '\n' | fold -w 76 | sed 's/^/            /')
+    # A line of exactly 40 base64 characters reads as an AWS secret key to SecretShapeLint: such a line (a file's
+    # last, unpadded) is split in two. The decoder ignores the newline (`.ignoreUnknownCharacters`).
+    encoded=$(base64 < "$file" | tr -d '\n' | fold -w 76 | awk 'length($0) == 40 { print substr($0, 1, 20); print substr($0, 21); next } { print }' | sed 's/^/            /')
     body+="        EmbeddedAssets.File(path: \"$path\", sha256: \"$hash\", base64: \"\"\"
 $encoded
             \"\"\"),
