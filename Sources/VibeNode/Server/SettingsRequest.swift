@@ -112,6 +112,7 @@ extension NodeSettings.Shown {
             case .model: return "a model's name as claude --model takes it"
             case .paths: return "globs, comma-separated; none for no paths"
             case .text: return "at most \(NodeSettings.policyLimit) characters"
+            case .folder: return "a full path, or one under ~"
             }
         }()
         return .object([

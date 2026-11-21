@@ -310,7 +310,7 @@ public enum WireSchema {
         shapes += [
             shape("setting", from: "NodeSettings.Shown.wire", [
                 field("key", .string), field("title", .string), field("about", .string), field("section", .string),
-                field("scope", .words(["node", "project"])), field("form", .words(["flag", "count", "number", "choice", "model", "paths", "text"])),
+                field("scope", .words(["node", "project"])), field("form", .words(["flag", "count", "number", "choice", "model", "paths", "text", "folder"])),
                 field("home", .words(["limits", "preferences", "policy", "workflow", "floor"])), field("choices", strings),
                 field("limits", Kind.string.orNull), field("value", .string), field("default", .string), field("isDefault", .bool),
                 field("where", .string), field("guardRail", .bool), field("note", Kind.string.orNull)]),

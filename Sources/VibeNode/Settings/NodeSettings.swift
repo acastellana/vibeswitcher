@@ -36,6 +36,8 @@ public enum NodeSettings {
         case paths
         /// Free text, lines and all.
         case text
+        /// A folder: a full path, or one under `~`.
+        case folder
     }
 
     /// Where a setting is kept.
@@ -77,6 +79,9 @@ public enum NodeSettings {
     public static var all: [Setting] {
         let cores = MacLoad.processors
         return [
+            Setting(key: "projects_folder", title: "Projects folder",
+                    about: "Where `vibeswitcher new-project` makes a project when --in names no other place.",
+                    section: "General", scope: .node, form: .folder, home: .preferences),
             Setting(key: "mac_max_sessions", title: "Team sessions on this node, at most",
                     about: "How many workers and verifiers, across every project, may run at once.",
                     section: "Machine-wide limits", scope: .node, form: .count, home: .limits, range: 1...99),
@@ -173,6 +178,16 @@ public enum NodeSettings {
     /// The words that put a setting back to its default.
     public static let resetWords: Set<String> = ["default", ""]
 
+    /// The app's defaults' key for the projects folder (Settings › General), kept as given: a tilde path or a full one.
+    public static let projectsFolderKey = "projectsFolder"
+
+    /// Where `new-project` makes a project when `--in` names no other place: the node's `projects_folder`, as kept (a
+    /// tilde path or a full one), else the app's default, `~/dev`. Reads the disk.
+    public static func projectsFolder(files: Files) -> String {
+        let kept = files.preferences?.string(forKey: projectsFolderKey)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return kept.isEmpty ? ProjectCreation.defaultLocation : kept
+    }
+
     /// The longest working policy taken, in characters.
     public static let policyLimit = 32_000
 
@@ -242,6 +257,7 @@ public enum NodeSettings {
                 case "boost_heavy_slots": return (String(boost.heavySlots), String(boostDefault.heavySlots))
                 case "lead_mail": return (flag(LeadMail.isOn(store)), "on")
                 case "policy": return (WorkingPolicy.load(from: files.policy), WorkingPolicy.defaultText)
+                case "projects_folder": return (projectsFolder(files: files), ProjectCreation.defaultLocation)
                 default: return ("", "")
                 }
             }()
@@ -352,6 +368,13 @@ public enum NodeSettings {
             if globs.map({ $0.lowercased() }) == ["none"] { return .success("") }
             guard !globs.contains(where: { $0.contains(where: \.isNewline) }) else { return .failure(Refusal("\(setting.key) is one line")) }
             return .success(globs.joined(separator: ", "))
+        case .folder:
+            // As the app's field takes it: a full path or a tilde one (`ProjectCreation.expand`), on one line; `~user` isn't.
+            guard text.count <= 1_000, !text.contains(where: { $0.isNewline || $0 == "\0" }),
+                  text.hasPrefix("/") || text == "~" || text.hasPrefix("~/") else {
+                return .failure(Refusal("\(setting.key) is a folder, a full path or one under ~ (~/dev)"))
+            }
+            return .success(text)
         case .text:
             let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
             guard trimmed.count <= policyLimit else { return .failure(Refusal("\(setting.key) is at most \(policyLimit) characters")) }
