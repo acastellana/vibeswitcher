@@ -399,3 +399,7 @@
 - 2026-11-21 18:01 Pipeline held: the-node-s-gate ready to merge with none landing; cause: nothing VibeSwitcher sees
 - 2026-11-21 18:01 Pipeline held: the-node-s-gate ready to merge with none landing; cause: the gate not installed
 - 2026-11-21 18:01 Pipeline held: the-node-s-gate ready to merge with none landing; cause: the gate not installed
+- 2026-11-21 18:31 Pipeline held: the-node-s-gate ready to merge with none landing; cause: nothing VibeSwitcher sees
+- 2026-11-21 18:31 Pipeline held: the-node-s-gate ready to merge with none landing; cause: the gate not installed
+- 2026-11-21 18:31 Pipeline held: the-node-s-gate ready to merge with none landing; cause: the gate not installed
+- 2026-11-21 18:31 Kept the-node-s-gate unmerged: Waits on the user: approval of fe043af2a944ffdf13b968eba8305390fe9c98fc (question BC07914D, sensitive paths) and a fix for v2's own failing test SteerNowTests.theCommandLineSteersAWorkingSession (question A5D36154), without which the merge's test run fails. The lead sets it back and merges (accept_stale_verdict: the context gained only a state note after the audit) once both are answered.
