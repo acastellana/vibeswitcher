@@ -14,6 +14,7 @@ import { icon } from '../marks.js';
 import { since, until, clock, plural } from '../words.js';
 import { pushLines } from '../push.js';
 import { talkButton } from '../dictate.js';
+import { shellFacts } from '../shellcard.js';
 
 const PRIORITY = { blocking: 'Blocking', important: 'Important', whenever: 'Whenever' };
 
@@ -304,6 +305,22 @@ function pushCard(lead) {
       copyLine(said.push, 'the command that pushes it'),
       copyLine(said.decline, 'the command that declines it')),
     h('p', { class: 'card-foot' }, 'Either shows the request and asks for its code. Push pushes that commit itself, as a fast-forward only; nothing is pushed before you type the code.'));
+}
+
+// A shell request's card (js/shellcard.js). Never acts.
+export function shellCard(card) {
+  const f = shellFacts(card), wait = f.state === 'waiting', fact = (n, ...v) => [h('dt', null, n), h('dd', null, v)];
+  return h('article', { class: 'card' + (wait ? '' : ' closed') },
+    h('header', { class: 'card-head' }, h('span', { class: 'priority important' }, 'A shell asked for'),
+      wait && f.expiresAt ? h('time', { class: 'asked', data: { until: f.expiresAt } }, `expires ${until(f.expiresAt)}`) : null),
+    h('div', { class: 'facts' }, h('div', { class: 'facts-head' }, 'Exactly what would run'), h('dl', null,
+      fact('Asked by', f.asker), fact('In the folder', h('code', null, f.folder)),
+      fact('Command', h('pre', { class: 'shell-command' }, f.lines.join('\n')), `${f.size}, by your login shell, which stays open`),
+      f.label ? fact('Named', `Shell: ${f.label}`) : null)),
+    wait ? h('div', { class: 'card-command' }, h('span', { class: 'card-command-label' }, 'Settle it in a terminal; nothing runs before its code'),
+      copyLine(f.run, 'the command that runs it'), copyLine(f.decline, 'the command that declines it'))
+      : h('p', { class: 'card-notice' }, f.outcome || f.state),
+    card.notice ? h('p', { class: 'card-notice' }, card.notice) : null);
 }
 
 export function questionStack(app, project) {

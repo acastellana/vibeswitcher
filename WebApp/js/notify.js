@@ -37,12 +37,13 @@ export function firstLine(text, limit = 120) {
   return chars.length > limit ? chars.slice(0, limit - 1).join('') + '…' : clean;
 }
 
-const CARD_TITLES = { question: 'A question for you', approval: 'An approval for you', config: 'Agents’ config held', base: 'The base moved' };
+const CARD_TITLES = { question: 'A question for you', approval: 'An approval for you', config: 'Agents’ config held', base: 'The base moved', shell: 'A shell asked for' };
 
 function cardBody(card) {
   if (card.question) return firstLine(card.question.text || card.question.short);
   if (card.approval) return firstLine(card.approval.subject || `Merge ${String(card.approval.commit || '').slice(0, 8)}`);
   if (card.config) return firstLine((card.config.items || []).map((item) => item.name).join(', '));
+  if (card.shell) return firstLine(`${card.shell.asker}: ${card.shell.command}`);
   return '';
 }
 
