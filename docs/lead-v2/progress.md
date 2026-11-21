@@ -362,3 +362,4 @@
 - 2026-11-21 13:20 Started a worker on turn-this-incident-into-4
 - 2026-11-21 13:20 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: ~/.claude/shell-snapshots and ~/.vibeswitcher/lead/run
 - 2026-11-21 13:20 Started a worker on the-node-s-gate
+- 2026-11-21 13:36 Workflow: handover_idle_min = `10`, handover_tokens = •••
