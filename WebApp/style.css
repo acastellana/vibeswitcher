@@ -942,3 +942,4 @@ kbd { padding: 1px 6px; border-radius: 5px; box-shadow: inset 0 0 0 1px var(--li
 .records-result { padding: 6px 0; }
 .records-result-head { display: flex; justify-content: space-between; gap: 8px; font-weight: 600; }
 .boost-mark { color: #e8890c; }
+.notify-sub { padding-left: 22px; }
