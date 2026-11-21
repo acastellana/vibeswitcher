@@ -84,8 +84,8 @@ public enum BoardText {
     /// How many closed questions are printed (the rest: `--json`).
     static let recordsShown = 5
 
-    /// The Team tab's other records under the tasks and decisions (2026-11-21, `BoardRecords`): the scorecard, the
-    /// newest answered and withdrawn questions, and where the lead's files are.
+    /// The Team tab's other records under the tasks and decisions (2026-11-21, `BoardRecords`, `BoardDetails`): the
+    /// scorecard, the lead's newest results, the newest answered and withdrawn questions, and where the lead's files are.
     static func records(_ board: NodeWire.Value, now: Date, calendar: Calendar) -> [String] {
         var lines: [String] = []
         if let card = board["scorecard"], card != .null, !(board["tasks"]?.array ?? []).isEmpty {
@@ -98,6 +98,15 @@ public enum BoardText {
                 if let footnote = card["footnote"]?.string { lines.append("  " + inert(footnote, limit: 300)) }
             }
             if let receipts = card["receipts"]?.string { lines.append("  " + inert(receipts, limit: 600)) }
+        }
+        let results = board["results"]?.array ?? []
+        if !results.isEmpty {
+            lines.append("Results")
+            lines += results.prefix(recordsShown).map { result in
+                "  \(when(result["at"], now: now, calendar: calendar))  \(inert(result["title"]?.string, limit: 140))"
+                    + ((result["images"]?.int ?? 0) > 0 ? " (\(result["images"]?.int ?? 0) screenshot\(result["images"]?.int == 1 ? "" : "s"))" : "")
+            }
+            if results.count > recordsShown { lines.append("  \(results.count - recordsShown) earlier (--json shows them, each with its text)") }
         }
         let answered = board["answered"]?.array ?? []
         if !answered.isEmpty {

@@ -88,6 +88,10 @@ struct BoardTests {
         var decided = LeadQuestion(text: "Name it Parser?", options: ["Parser", "Reader"], proposal: "Parser", decideIn: 10, at: 1_000)
         decided.autoDecidedAt = 1_600
         asked.questions = [answered, withdrawn, decided]
+        // The lead's Results (`BoardDetails`): one from before results had a time.
+        var untimed = LeadUpdate(id: "r1", title: "Old result", body: "Done.")
+        untimed.at = 0
+        asked.updates = [untimed, LeadUpdate(id: "r2", title: "Shipped", body: "**Yes**", images: ["/r/.vibeswitcher/updates/r2/a.png"])]
         // A merged task with its receipt: the batch's line under the scorecard.
         let at = WireVectors.boardNow.timeIntervalSince1970 - 60
         asked.tasks[4].receipt = LeadReceipt(ending: .merged, startedAt: at - 3600, endedAt: at, worked: 1800,

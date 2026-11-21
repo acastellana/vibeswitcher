@@ -295,6 +295,8 @@ public final class Requests: @unchecked Sendable {
         case "session.presets": presets(request, terminal: facts.pid != NodeLive.webPeer.pid && facts.uid != nil, reply: reply)
         case "session.complete": complete(request, reply: reply)
         case "stats": stats(request, reply: reply)
+        case "board.task": boardTask(request, reply: reply)
+        case "board.image": boardImage(request, reply: reply)
         case "session.reopen": reopenSessions(request, reply: reply)
         case "mail": mail(request, reply: reply)
         case "prompt-audit": promptAudit(request, reply: reply)

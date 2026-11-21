@@ -12,6 +12,7 @@ import { h, setText } from '../dom.js';
 import { clock, moment, decisionLine, plural } from '../words.js';
 import { markdown } from '../text.js';
 import { mailLine } from '../mail.js';
+import { resultScreenshots } from './results.js';
 
 // How many of each list show before "Earlier".
 export const SHOWN = 3;
@@ -59,6 +60,8 @@ export function boardRecords(app, { decisions: showDecisions = true } = {}) {
   const answeredList = h('div', { class: 'records-list' });
   const answered = section('Answered and withdrawn', answeredList);
   const resultsList = h('div', { class: 'records-list' });
+  // A result's screenshots, asked of the node (`board.image`) where it serves them (views/results.js).
+  const screenshots = resultScreenshots(app);
   const results = section('Results', resultsList);
   const mailList = h('div', { class: 'records-list' });
   const mail = section('Between leads', mailList);
@@ -135,7 +138,7 @@ export function boardRecords(app, { decisions: showDecisions = true } = {}) {
         h('div', { class: 'records-result-head' }, h('span', { class: 'records-text' }, result.title),
           h('time', { class: 'records-time', title: moment(result.at) }, clock(result.at))),
         h('div', { class: 'prose' }, markdown(result.body || '')),
-        result.images ? h('p', { class: 'records-note' }, `${plural(result.images, 'screenshot')} kept on the node`) : null)), 'r:earlier', 'Earlier results'));
+        result.images ? screenshots(board.project, result) ?? h('p', { class: 'records-note' }, `${plural(result.images, 'screenshot')} kept on the node`) : null)), 'r:earlier', 'Earlier results'));
 
       // Between leads: this project's messages with other projects' leads (shown when there are any).
       mail.el.hidden = !mailMessages.length;
