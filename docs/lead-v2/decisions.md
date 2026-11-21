@@ -100,3 +100,11 @@ The lead proposed it with a 240 min timer and the user didn't answer in time, so
 
 A reversible design choice proposed with a timer; a session with Windows access can act as the user on Windows, so the narrowest grant (one session, the user's own typed approval) is the default the lead goes ahead with.
 
+## 2026-11-21 09:06:31 After the session host's restart of 2026-11-21 (morning; every worker and verifier ended, the user accepted config and base again) the lead restarts nothing yet: the installed build is still e0984442 and this clone's v2 (a1dde20a) still lacks the supervisor's b1db3adb, so the-node-s-gate's worker would have nothing to do and team-sessions-start's audit would fail at the build as on 2026-11-20 16:42. the-node-s-gate keeps its branch at ebf14251 with no worker; its context carries a pick-up note (2026-11-21 09:10) with the two remaining steps. The lead starts its worker when v2 with b1db3adb is in this clone (step 1: merge v2, focused suites) and runs audit on team-sessions-start only once a build with the gate fix is installed and the keys are accepted. Question BA207A96 stays open and blocking.
+
+A worker or verifier started now only spends the weekly limit (68%, 41 points ahead of pace) waiting or failing; a later lead must know the two "ended" sessions are left stopped on purpose and what releases each.
+
+## 2026-11-21 09:07:16 team-sessions-start has hold_audit: true since 2026-11-21 09:15. auto_advance restarted its audit at 09:06 after the host's restart, before the lead could hold it; the shared run failed at the build again (test.log: "Could not load swiftly's configuration file", the installed e0984442), and its two finders run on to a verdict that can't be clean. No further audit of it starts until the lead sets hold_audit: false, which it does once a build with the gate fix is installed and this project's sandbox keys are accepted; then audit(team-sessions-start) (restart: true if a finder is stuck on a prompt).
+
+Each restarted audit on the broken gate spends two Fable finders on a run that fails in seconds; a later lead must know the hold is the lead's own and what lifts it.
+

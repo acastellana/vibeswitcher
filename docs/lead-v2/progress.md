@@ -350,3 +350,8 @@
 - 2026-11-20 20:25 Planned sandbox-env-hygiene-no: sandbox_env hygiene: no credentials in it, no refused value echoed, every path judged, more shell names refused (review audit, for security)
 - 2026-11-20 20:26 Planned the-config-card-says: The config card says what sandbox_nesting: on exposes
 - 2026-11-20 21:40 Handed the lead over to a fresh session: the last one had been idle 50 minutes with 212k tokens of context, past handover_idle_min 50 and handover_tokens 150k
+- 2026-11-21 09:06 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: ~/.claude/shell-snapshots
+- 2026-11-21 09:06 Audit of team-sessions-start at d9650237 by 2 finders (contract and acceptance; bugs, regressions and security); the shared run of its merged result edbcc169: test command failed
+- 2026-11-21 09:06 Automatically (auto_advance): Started the audit of team-sessions-start at d9650237 (Its review is audit). Released its worker, idle since its done report, while the audit runs: its Mac slot and memory are free, its worktree and branch stay.
+- 2026-11-21 09:08 Incident: An audit's finder stops on a permission prompt to Read the audit's own shared-run log (.vibeswitcher/audit/<task>/<run>/test.log), which nobody on the node can … (in team-sessions-start); planned turn-this-incident-into-4 to turn it into a check
+- 2026-11-21 09:09 Review of turn-this-incident-into-4: audit

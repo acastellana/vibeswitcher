@@ -20,3 +20,10 @@ Evidence: 2026-11-20 16:41: the audit's shared run of team-sessions-start (d9650
 Task: team-sessions-start
 Check: task turn-this-incident-into-3 turns it into a check that runs before merge.
 
+## 2026-11-21 09:08:50 An audit's finder stops on a permission prompt to Read the audit's own shared-run log (.vibeswitcher/audit/<task>/<run>/test.log), which nobody on the node can answer, so the audit never reaches a verdict (second time on team-sessions-start)
+
+Evidence: 2026-11-21 09:17, witness report: "The verifier on team-sessions-start has waited 2 min for input no one answers: 'Asks permission: approve Read: /home/albert/projects/vibeswitcher-v2-lead/.vibeswitcher/audit/team-sessions-start/edbcc169950c/test.log'. VibeSwitcher couldn't decline it (that prompt isn't on its screen, or it changed while the keys went in)." The audit (2 finders, started by auto_advance at 09:06 on d9650237, installed build e0984442) lists exactly that file under its panel's logs (board(team-sessions-start): panel.logs = init.log, test.log in that folder; the folder is 0700, the files 0600, owned by the user). On 2026-11-20 16:42 to 20:55 the same task's audit sat the same way: one finder submitted, the other "stuck on a Read prompt" (the handover note of 2026-11-20 20:55), and it was only ended by the host's restart. The shared run itself had failed at the build both times (the gate, incident of 2026-11-20 16:41), which is when a finder most needs the log. Known general gap: nobody can answer a team session's own permission prompt on this node (decisions.md 2026-11-19 18:59:55); this is narrower: the finder is told to read a file its own permissions then ask about.
+
+Task: team-sessions-start
+Check: task turn-this-incident-into-4 turns it into a check that runs before merge.
+
