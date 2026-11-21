@@ -23,16 +23,19 @@ extension LeadEngine {
         promptAuditLooking = true
         promptAuditLooked = true
         let roots = leadRoots.map { ($0 as NSString).standardizingPath }
-        let (file, home, now, queue, note) = (promptAuditFile, self.home, promptAuditNow(), self.queue, self.note)
+        let (file, home, now, queue, note, settings) = (promptAuditFile, self.home, promptAuditNow(), self.queue, self.note, settingsFiles)
         promptAuditBook.async { [weak self] in
             var book = PromptAudit.Book.load(from: file)
+            // Settings' reminder and its days (`prompt_audit`, `prompt_audit_days`, the app's keys in settings.plist).
+            let store = settings.preferences
+            let (on, days) = (store.map(PromptAudit.isOn) ?? true, store.map(PromptAudit.intervalDays) ?? PromptAudit.defaultIntervalDays)
             for root in roots {
                 let kept = book.projects[root]
                 let scan = PromptAudit.scan(PromptAudit.transcripts(root: root, home: home), read: kept?.read ?? [:])
                 book.projects[root] = PromptAudit.observe(kept, scan: scan, now: now)
             }
             do { try book.save(to: file) } catch { note("prompt audit: \(file.path) not written: \(error)") }
-            let due = Self.promptAuditsDue(book, roots: roots, now: now)
+            let due = on ? Self.promptAuditsDue(book, roots: roots, now: now, intervalDays: days) : [:]
             queue.async {
                 self?.promptAuditsDue = due
                 self?.promptAuditLooking = false
@@ -42,9 +45,12 @@ extension LeadEngine {
     }
 
     /// The projects of `roots` due an audit at `now` in `book`.
-    static func promptAuditsDue(_ book: PromptAudit.Book, roots: [String], now: Date) -> [String: PromptAudit.Due] {
+    static func promptAuditsDue(_ book: PromptAudit.Book, roots: [String], now: Date,
+                                intervalDays: Int = PromptAudit.defaultIntervalDays) -> [String: PromptAudit.Due] {
         var due: [String: PromptAudit.Due] = [:]
-        for root in roots { if let project = book.projects[root], let why = PromptAudit.due(project, now: now) { due[root] = why } }
+        for root in roots {
+            if let project = book.projects[root], let why = PromptAudit.due(project, now: now, intervalDays: intervalDays) { due[root] = why }
+        }
         return due
     }
 
@@ -67,9 +73,11 @@ extension LeadEngine {
     /// `change` made to `root`'s record (a project the record doesn't know yet starts from now), then which are due
     /// again; `done` with the project's record as it then is. On `queue`; `done` on it too.
     func changePromptAudit(root: String, _ change: PromptAuditChange, done: @escaping (PromptAudit.Project) -> Void) {
-        let (file, now, queue, note) = (promptAuditFile, promptAuditNow(), self.queue, self.note)
+        let (file, now, queue, note, settings) = (promptAuditFile, promptAuditNow(), self.queue, self.note, settingsFiles)
         let roots = leadRoots.map { ($0 as NSString).standardizingPath }
         promptAuditBook.async { [weak self] in
+            let store = settings.preferences
+            let (on, days) = (store.map(PromptAudit.isOn) ?? true, store.map(PromptAudit.intervalDays) ?? PromptAudit.defaultIntervalDays)
             var book = PromptAudit.Book.load(from: file)
             var project = book.projects[root] ?? PromptAudit.Project(firstSeen: now)
             switch change {
@@ -81,7 +89,7 @@ extension LeadEngine {
             }
             book.projects[root] = project
             do { try book.save(to: file) } catch { note("prompt audit: \(file.path) not written: \(error)") }
-            let due = Self.promptAuditsDue(book, roots: roots, now: now)
+            let due = on ? Self.promptAuditsDue(book, roots: roots, now: now, intervalDays: days) : [:]
             queue.async {
                 self?.promptAuditsDue = due
                 done(project)

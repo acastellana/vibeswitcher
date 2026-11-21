@@ -9,7 +9,7 @@ import { icon } from '../marks.js';
 import { tilde, lastPart } from '../words.js';
 import { copyLine } from './cards.js';
 import { usageGroup } from './node.js';
-import { settingSections, setLine, draftProblem, shownValue } from '../settings.js';
+import { settingSections, setLine, draftProblem, shownValue, settingMatches } from '../settings.js';
 
 // How often the open page reads the settings again (a `set` from a terminal shows by then).
 const REFRESH = 15000;
@@ -84,12 +84,16 @@ function editor(setting, folder, editing) {
 export function settingsView(app) {
   const { store, ui } = app;
   const picker = h('select', { class: 'setting-picker', 'aria-label': 'Whose settings', onchange: (event) => ui.go(settingsHref(event.target.value)) });
+  // The app's search: the settings whose words hold every word typed.
+  let query = '';
+  const search = h('input', { class: 'setting-search', type: 'search', placeholder: 'Search settings', 'aria-label': 'Search settings',
+    spellcheck: 'false', autocomplete: 'off', oninput: (event) => { query = event.target.value; drawn = ''; render(true); } });
   const body = h('div', { class: 'node-column settings-column' });
   const el = h('section', { class: 'node settings', 'aria-label': 'Settings' },
     h('header', { class: 'head' },
       h('a', { class: 'back icon-button', href: '#/node', 'aria-label': 'This node' }, icon('back', 16)),
       h('div', { class: 'head-text' }, h('div', { class: 'head-line' }, h('h1', { class: 'head-title' }, 'Settings'), picker))),
-    h('div', { class: 'pane node-pane' }, body));
+    h('div', { class: 'pane node-pane' }, search, body));
   // Per key: the value being drafted (its field open). Kept while the page reads the settings again.
   const editing = new Map();
   let result = null;
@@ -127,14 +131,16 @@ export function settingsView(app) {
     render();
   }
 
-  function group(title, settings, folder, home) {
+  function group(title, all, folder, home) {
+    const settings = all.filter((setting) => settingMatches(setting, query));
+    if (query && settings.length === 0) return null;
     return h('section', { class: 'node-group' }, h('h2', { class: 'section-title' }, title),
       settingSections(settings).map((section) => h('div', { class: 'setting-section' },
         h('h3', { class: 'setting-section-title' }, section.title),
         section.settings.map((setting) => settingRow(setting, { folder, home, editing, toggle })))));
   }
 
-  function render() {
+  function render(typing = false) {
     if (ui.state.route.name !== 'settings') return;
     const id = project();
     // The project's folder came with the leads after the page asked without it: asked again with it.
@@ -149,8 +155,8 @@ export function settingsView(app) {
       picker.hidden = choices.length === 0;
     }
     // Someone typing in a field keeps it: the page draws again once they leave it.
-    if (body.contains(document.activeElement) && document.activeElement.matches('input, textarea, select')) return;
-    const now = JSON.stringify([result, failed, [...editing.keys()]]);
+    if (!typing && body.contains(document.activeElement) && document.activeElement.matches('input, textarea, select')) return;
+    const now = JSON.stringify([result, failed, [...editing.keys()], query]);
     if (now === drawn) return;
     drawn = now;
     const home = store.state.node?.home;
@@ -168,8 +174,10 @@ export function settingsView(app) {
       h('p', { class: 'settings-intro' }, 'What the leads and their teams work under. Change drafts the line that sets it; run it in a terminal.'),
       projectPart,
       group('This node · every project', result.node.settings, null, home),
-      usageGroup(result.usage),
-      result.leftOut?.length ? h('section', { class: 'node-group' }, h('h2', { class: 'section-title' }, 'Not on a node'),
+      query && ![...(result.project?.settings || []), ...result.node.settings].some((setting) => settingMatches(setting, query))
+        ? h('p', { class: 'node-says' }, `No setting matches “${query}”.`) : null,
+      query ? null : usageGroup(result.usage),
+      !query && result.leftOut?.length ? h('section', { class: 'node-group' }, h('h2', { class: 'section-title' }, 'Not on a node'),
         h('ul', { class: 'lines' }, result.leftOut.map((item) => h('li', null, `${item.title}: ${item.why}`)))) : null,
     ].filter(Boolean));
   }
