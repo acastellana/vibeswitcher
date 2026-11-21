@@ -28,18 +28,35 @@ extension ChatStore {
         case refused(NodeWire.Failure)
     }
 
-    /// `session.usage`'s result for `session`. On `queue`; `reply` on `queue`.
+    /// How long a session's usage answers a later ask without a read, in seconds.
+    static let usageKeep: TimeInterval = 5
+
+    /// `session.usage`'s result for `session`. One read a session at a time (the security review of 2026-11-21): an ask
+    /// while one runs waits for it and shares its answer, and an answer `usageKeep` old or newer is given again with no
+    /// read. On `queue`; `reply` on `queue`.
     func usage(_ session: String, reply: @escaping (Read) -> Void) {
         dispatchPrecondition(condition: .onQueue(queue))
         guard let path = sessionsValues[session]?.transcriptPath, let (url, format) = TranscriptReader.checkedURL(path, home: homeFolder) else {
             return reply(.refused(.init(.gone, "no such session, or it has no transcript in the agents' own folders")))
         }
+        if let kept = usageKept[session], clock - kept.at < Self.usageKeep { return reply(kept.read) }
+        if usageWaiting[session] != nil { return usageWaiting[session]?.append(reply) ?? () }
+        usageWaiting[session] = [reply]
+        usageReadsRun += 1
         let queue = self.queue
-        DispatchQueue.global(qos: .userInitiated).async {
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             let value = Self.usageValue(url: url, format: format)
-            queue.async { reply(value.map(Read.value) ?? .refused(.init(.gone, "that session's transcript couldn't be read"))) }
+            queue.async { [weak self] in
+                guard let self else { return }
+                let read = value.map(Read.value) ?? .refused(.init(.gone, "that session's transcript couldn't be read"))
+                self.usageKept = self.usageKept.filter { self.clock - $0.value.at < Self.usageKeep }
+                self.usageKept[session] = (self.clock, read)
+                let waiting = self.usageWaiting.removeValue(forKey: session) ?? []
+                waiting.forEach { $0(read) }
+            }
         }
     }
+
 
     /// The usage of the transcript at `url`, from its last `tailBytes`; nil when it can't be read.
     static func usageValue(url: URL, format: TranscriptReader.Format, tailBytes: Int = usageTailBytes) -> NodeWire.Value? {
