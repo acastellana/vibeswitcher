@@ -791,9 +791,10 @@ struct ClaudeDictationTests {
         #expect(ClaudeVoiceScreen.seen(Self.screen(footer: "Transcribing…"), sent: 6) == .processing)
         let h = try await Harness.start(temp)
         defer { h.stop() }
-        h.tell(["op": "voice", "mode": "hold", "interim": "", "processing": 30.0, "processingFooter": "Transcribing…"])
-        try await h.waitFor { h.agent["processingFooter"] as? String == "Transcribing…" && h.agent["processing"] as? Double == 30 }
-        let clock = Clock()
+        // Processing until told it's done; the run's clock held, so only the test moves its waits on.
+        h.tell(["op": "voice", "mode": "hold", "interim": "", "processing": 600.0, "processingFooter": "Transcribing…"])
+        try await h.waitFor { h.agent["processingFooter"] as? String == "Transcribing…" && h.agent["processing"] as? Double == 600 }
+        let clock = Clock(held: true)
         let shown = Shown()
         let controller = dictation(h, now: clock.now, shown: shown)
         for transcript in ["fix the build", ""] {
