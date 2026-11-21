@@ -62,7 +62,8 @@ public enum WireSchema {
                                   "board.args", "board.result", "seen.args",
                                   "session.draft.args", "session.draft.result", "session.draft.clear.args",
                                   "session.presets.args", "session.presets.result", "session.complete.args", "session.complete.result",
-                                  "session.attach.args", "session.attach.result",
+                                  "session.attach.args", "session.attach.result", "session.usage.args", "session.usage.result",
+                                  "chat.image.args", "chat.image.result",
 
                                   "settings.args", "settings.result", "set.args", "set.result"]
     /// A keyed collection's entity.
@@ -161,6 +162,22 @@ public enum WireSchema {
                 field("session", .string), field("kind", .words(["slash", "mention"])), field("query", .string)]),
             shape("session.complete.result", from: "Requests.complete", [field("items", .list(.shape("session.completion")))]),
             shape("session.completion", from: "SessionCompletions.value", [field("insert", .string), field("title", .string), field("subtitle", .string)]),
+            // A session's tokens and cost (the inspector, 2026-11-21): a read of its transcript's tail. `cost` is in US
+            // dollars, a number (an int when whole).
+            shape("session.usage.args", from: "ChatStore.usage (the inspector, 2026-11-21)", [field("session", .string)]),
+            shape("session.usage.result", from: "ChatStore.usageValue", [
+                field("turns", .list(.shape("session.usage.turn"))), field("count", .int), field("partial", .bool),
+                field("tokens", Kind.shape("session.usage.tokens").orNull), field("cost", Kind.any.orNull), field("costPartial", .bool)]),
+            shape("session.usage.turn", from: "ChatStore.usageValue", [
+                field("id", .string), field("at", Kind.date.orNull), field("partial", .bool), field("tokens", Kind.shape("session.usage.tokens").orNull),
+                field("cost", Kind.any.orNull)]),
+            shape("session.usage.tokens", from: "ChatStore.usageValue", [field("input", .int), field("cached", .int), field("output", .int)]),
+            // An image of a session's chat, a part of its bytes at a time (the chat's images, 2026-11-21): a read.
+            shape("chat.image.args", from: "ChatStore.image (the chat's images, 2026-11-21)", [
+                field("session", .string), field("id", .string), optional("offset", .int)]),
+            shape("chat.image.result", from: "ChatImageBytes.part", [
+                field("mediaType", .words(["image/png", "image/jpeg", "image/gif", "image/webp"])), field("bytes", .int), field("offset", .int),
+                field("data", .string)]),
             shape("session.preset", from: "SessionPresets.value", [
                 field("name", .string), field("kind", .words(["claude", "codex", "shell"])), field("command", .string), field("env", strings),
                 field("keepShell", .bool), field("project", .bool), field("default", .bool), field("builtIn", .bool), field("digest", .string),

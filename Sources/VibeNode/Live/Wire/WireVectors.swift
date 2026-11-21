@@ -414,7 +414,7 @@ public enum WireVectors {
                        host: .init(startedAt: "2026-11-17T08:01:10.555Z", notes: nil, pid: 41790),
                        kinds: ["status", "questions", "subscribe", "unsubscribe", "chat.page", "draft", "draft.clear", "board", "seen",
                                "session.draft", "session.draft.clear", "session.presets", "session.complete", "session.attach",
-                               "settings"],
+                               "session.usage", "chat.image", "settings"],
                        peer: .init(voice: "other", why: "a web client: it reads and drafts, and is never the user's voice"),
                        rule: "systemd",
                        auth: .object(["rights": .array([.string("read"), .string("draft")]), "token": .string(token),
@@ -675,6 +675,24 @@ public enum WireVectors {
                                   reply("reply.session.complete", .init(re: "39", result: .object(["items": .array([
                                       SessionCompletions.value(insert: "@src/login.ts ", title: "login.ts", subtitle: "src/login.ts"),
                                       SessionCompletions.value(insert: "@tests/login.test.ts ", title: "login.test.ts", subtitle: "tests/login.test.ts")])])))]),
+            // A session's tokens and cost, for the inspector (2026-11-21).
+            ("session.usage", [request(.init(id: "42", kind: "session.usage", args: ["session": .string(plainSession)])),
+                               reply("reply.session.usage", .init(re: "42", result: .object([
+                                   "turns": .array([
+                                       .object(["id": .string("u_01"), "at": .string("2026-11-17T09:20:05.000Z"), "partial": .bool(true),
+                                                "tokens": .object(["input": .int(42_000), "cached": .int(40_000), "output": .int(1_200)]),
+                                                "cost": .double(0.25)]),
+                                       .object(["id": .string("u_02"), "at": .string("2026-11-17T09:22:40.000Z"), "partial": .bool(false),
+                                                "tokens": .object(["input": .int(61_500), "cached": .int(58_000), "output": .int(2_400)]),
+                                                "cost": .null])]),
+                                   "count": .int(2), "partial": .bool(true),
+                                   "tokens": .object(["input": .int(103_500), "cached": .int(98_000), "output": .int(3_600)]),
+                                   "cost": .double(0.25), "costPartial": .bool(true)])))]),
+            // An image a prompt of the chat shows, its one part (the chat's images, 2026-11-21).
+            ("chat.image", [request(.init(id: "43", kind: "chat.image", args: ["session": .string(plainSession), "id": .string("u_07.img0"),
+                                                                                "offset": .int(0)])),
+                            reply("reply.chat.image", .init(re: "43", result: .object([
+                                "mediaType": .string("image/png"), "bytes": .int(8), "offset": .int(0), "data": .string("iVBORw0KGgo=")])))]),
             // The launch presets for a folder (2026-11-20): the page's New session form offers them; `vibeswitcher new FOLDER
             // --preset NAME` starts one, the user's voice.
             ("session.presets", [request(.init(id: "38", kind: "session.presets", args: ["folder": .string(root)])),

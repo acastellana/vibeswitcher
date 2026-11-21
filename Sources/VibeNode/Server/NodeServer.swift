@@ -194,7 +194,7 @@ public final class NodeServer: @unchecked Sendable {
             if request.must == true { bye("a request this server must understand and doesn't (\(request.kind))", connection) }
             return
         }
-        if request.kind == "subscribe" || request.kind == "unsubscribe" || request.kind == "chat.page" {
+        if ["subscribe", "unsubscribe", "chat.page", "chat.image", "session.usage"].contains(request.kind) {
             guard let hub else {
                 return send(NodeWire.line(NodeWire.Reply(re: request.id, error: .init(.unknownKind, "this server has no live hub"))), on: connection)
             }
