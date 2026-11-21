@@ -72,8 +72,11 @@ extension Session {
 ///
 /// The host's record of a hosted session (`hosts`, the link's changes by the same ids) gives its command and size: a
 /// resize is sent, a title changing (many times a second while an agent works) reads the same value and isn't. Its git
-/// branch is read again (`branch`, `GitBranch.current` by default) each time the session itself changes, so a branch
-/// switched shows at the session's next change (its status moves as its agent works), with no read per title.
+/// branch is read again (`branch`, `NodeGitBranch.current` by default: no link followed, a few hundred bytes at most,
+/// only a ref-shaped value) each time the session itself changes, so a branch switched shows at the session's next
+/// change (its status moves as its agent works), with no read per title. The reads are off the engine's queue
+/// (`branchReads`), one at a time a session: a change while one runs reads again after it; until a read comes back
+/// the value says what the last read said for the same folder.
 /// On `queue` (the engine's, the stores').
 final class SessionLiveValues: @unchecked Sendable {
     let changes = Changes<NodeWire.Value>()
@@ -82,13 +85,18 @@ final class SessionLiveValues: @unchecked Sendable {
     private let drafts: Changes<SessionDraft>
     private let held: Changes<[HeldSend]>
     private let hosts: Changes<HostSession>
-    private let branch: (String) -> String?
+    private let branch: @Sendable (String) -> String?
     /// Each session's folder and its branch as last read.
     private var branches: [String: (cwd: String?, branch: String?)] = [:]
+    /// Where the branches are read: never the engine's queue.
+    private let branchReads = DispatchQueue(label: "vibenode.sessions.branches", qos: .utility)
+    /// The sessions whose branch is being read, and those to read again after.
+    private var reading: Set<String> = []
+    private var readAgain: Set<String> = []
     private var follows: [Subscription] = []
 
     init(queue: DispatchQueue, sessions: NodeSessions, drafts: Changes<SessionDraft>, held: Changes<[HeldSend]> = Changes(),
-         hosts: Changes<HostSession> = Changes(), branch: @escaping (String) -> String? = { GitBranch.current(in: $0) }) {
+         hosts: Changes<HostSession> = Changes(), branch: @escaping @Sendable (String) -> String? = { NodeGitBranch.current(in: $0) }) {
         self.queue = queue
         self.sessions = sessions
         self.drafts = drafts
@@ -114,16 +122,39 @@ final class SessionLiveValues: @unchecked Sendable {
         update(Array(sessions.changes.values.keys))
     }
 
-    /// The branch of each of `ids`' folders, read again; a session gone forgets its own.
+    /// The branch of each of `ids`' folders, read again off the queue; a session gone forgets its own. On `queue`.
     private func readBranches(_ ids: [String]) {
         for id in ids {
-            guard let session = sessions.changes.values[id] else {
-                branches[id] = nil
+            guard let cwd = sessions.changes.values[id]?.cwd else {
+                branches[id] = sessions.changes.values[id] == nil ? nil : (nil, nil)
                 continue
             }
-            branches[id] = (session.cwd, session.cwd.flatMap(branch))
+            guard !reading.contains(id) else {
+                readAgain.insert(id)
+                continue
+            }
+            reading.insert(id)
+            let branch = self.branch
+            branchReads.async { [weak self] in
+                let read = branch(cwd)
+                self?.queue.async { [weak self] in self?.branchRead(id, cwd: cwd, branch: read) }
+            }
         }
     }
+
+    /// A read came back: kept while the session is in that folder, its value sent again when it changed. On `queue`.
+    private func branchRead(_ id: String, cwd: String, branch: String?) {
+        reading.remove(id)
+        if sessions.changes.values[id]?.cwd == cwd {
+            let before = branches[id]
+            branches[id] = (cwd, branch)
+            if before?.cwd != cwd || before?.branch != branch { update([id]) }
+        }
+        if readAgain.remove(id) != nil { readBranches([id]) }
+    }
+
+    /// Every read asked so far done (tests). On `queue`.
+    var branchesSettled: Bool { reading.isEmpty }
 
     private func update(_ ids: [String]) {
         let (all, prompts, drafts, held, hosts) = (sessions.changes.values, sessions.prompts.values, self.drafts.values, self.held.values,
