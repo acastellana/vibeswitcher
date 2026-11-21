@@ -393,3 +393,6 @@
 - 2026-11-21 16:31 Pipeline held: the-node-s-gate ready to merge with none landing; cause: every test slot held
 - 2026-11-21 17:01 Pipeline held: the-node-s-gate ready to merge with none landing; cause: the gate not installed
 - 2026-11-21 17:01 Incident: After a lead handover the replaced lead's Claude session and its tool server stay alive: this project has three lead tool servers at once, two of them on the ol… (in the-node-s-gate); planned turn-this-incident-into-5 to turn it into a check
+- 2026-11-21 17:31 Pipeline held: the-node-s-gate ready to merge with none landing; cause: every test slot held
+- 2026-11-21 17:31 Pipeline held: the-node-s-gate ready to merge with none landing; cause: every test slot held
+- 2026-11-21 17:31 Pipeline held: the-node-s-gate ready to merge with none landing; cause: every test slot held
