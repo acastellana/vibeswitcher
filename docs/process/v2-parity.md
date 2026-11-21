@@ -175,7 +175,7 @@ Sizes to close: S is about a day, M a few days, L a week or more.
 | Install | `scripts/build-app.sh --install` | Linux-only | `scripts/install-node.sh`, `install-record`; `vibeswitcher start` (a systemd user unit, `Start/NodeUnit.swift`) | | |
 | Switch between builds and roll back, keeping the sessions | — | Linux-only | `vibeswitcher switch COMMIT`, `rollback`; `Server/SwitchRequest.swift`, `Start/SwitchPlan.swift` | | |
 | Open at login | Settings › General (ServiceManagement) | has it | `vibeswitcher start --at-login` | | |
-| First-run setup, installing Claude Code and tools | `Onboarding.swift`, `ToolInstaller.swift` | partly | `start` and `lead` refuse and name what's missing (`Start/StartPreflight.swift`, `Engine/NodePreflight.swift`). Nothing is installed | | agents install nothing |
+| First-run setup, installing Claude Code and tools | `Onboarding.swift`, `ToolInstaller.swift` | partly | `vibeswitcher doctor` (2026-11-21, `Start/NodeDoctor.swift`): what the node needs (claude, a root-owned git, swiftly's swift, nvm's node), the steps (a build installed, the node started, the hooks) and what's advised (WSL interop off, systemd, the install's root toolchain, gh signed in, Tailscale), each looked at in fixed places with nothing run, each missing one with the exact command for you to run. `start` and `lead` still refuse and name what's missing. Nothing is installed: the app's one-click installs have no form here | | agents install nothing |
 | Restart Session Host | `HostRestart.swift` | has it | `vibeswitcher stop`, `start`; `switch` hands over | | `stop` asks for a typed code and says how many sessions end |
 
 ### Remote and web
