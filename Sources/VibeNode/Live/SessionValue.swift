@@ -51,7 +51,7 @@ extension Session {
     ///
     /// And the inspector's facts from beside it (2026-11-21): `branch`, its folder's git branch (`GitBranch`, read by the
     /// caller); `command` and `size`, from the host's record of the session (`host`): the preset's command with any
-    /// credential in it masked (`Redaction`, `PushText.scrub`; null for a shell), and the terminal's columns and rows.
+    /// credential in it masked (`CommandMask`; null for a shell), and the terminal's columns and rows.
     /// Null where the host doesn't run it.
     public func liveValue(prompt: SessionPrompt?, draft: SessionDraft?, queued: [HeldSend] = [], host: HostSession? = nil,
                           branch: String? = nil) -> NodeWire.Value {
@@ -60,7 +60,7 @@ extension Session {
         fields["draft"] = draft?.value ?? .null
         fields["queued"] = .array(queued.map(\.value))
         fields["branch"] = branch.map(NodeWire.Value.string) ?? .null
-        fields["command"] = host?.command.map { .string(Redaction.secrets(in: PushText.scrub($0))) } ?? .null
+        fields["command"] = host?.command.map { .string(CommandMask.masked($0)) } ?? .null
         fields["size"] = host.map { .object(["cols": .int($0.cols), "rows": .int($0.rows)]) } ?? .null
         return .object(fields)
     }
