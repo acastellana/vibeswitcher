@@ -429,7 +429,7 @@ public enum WireVectors {
                        host: .init(startedAt: "2026-11-17T08:01:10.555Z", notes: nil, pid: 41790),
                        kinds: ["status", "questions", "subscribe", "unsubscribe", "chat.page", "draft", "draft.clear", "board", "seen",
                                "session.draft", "session.draft.clear", "session.presets", "session.complete", "session.attach",
-                               "session.usage", "chat.image", "settings"],
+                               "session.usage", "chat.image", "stats", "settings"],
                        peer: .init(voice: "other", why: "a web client: it reads and drafts, and is never the user's voice"),
                        rule: "systemd",
                        auth: .object(["rights": .array([.string("read"), .string("draft")]), "token": .string(token),

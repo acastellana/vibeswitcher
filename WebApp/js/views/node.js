@@ -91,6 +91,9 @@ export function nodeView(app) {
       group('Settings',
         h('p', { class: 'node-says' }, 'What every project’s leads work under, and each project’s models and review floor.'),
         h('a', { class: 'link', href: '#/settings' }, 'Open Settings')),
+      app.store.can('stats') ? group('Statistics',
+        h('p', { class: 'node-says' }, 'Load, usage, merges, quality and cost, by project, for today, 7 or 30 days.'),
+        h('a', { class: 'link', href: '#/stats' }, 'Open Statistics')) : null,
       // This page's own: the browser's notifications (js/notify.js).
       app.notifications?.el,
     ].filter(Boolean));

@@ -61,7 +61,7 @@ Screenshots of each screen, light and dark, desktop and phone, are in `shots/`.
 | `js/settings.js` | The settings' parts with no page in them: grouped by section, a change's `vibeswitcher set` line quoted as the shell needs, what a draft is checked against. |
 | `js/push.js` | The push a lead asks for (the lead's `push`), in words: what goes where, its commits, and the two lines that settle it in a terminal; the card heads the lead's question stack. Nothing on the page pushes. |
 | `js/activity.js` | The inspector's Activity, made from a chat's items: files changed with their line counts, commands run. |
-| `js/views/` | `sidebar`, `session` (header and panes), `terminal` (the session's screen in xterm.js, where the node opens one), `chat`, `cards`, `inspector` (Team, Overview, Activity), `lead` (strip and the Team tab's tasks), `records` (under the tasks, on the Team tab and the board page: the scorecard, decisions, answered and withdrawn questions, files), `board`, `node`, `settings`, `start`, `palette`. |
+| `js/views/` | `sidebar`, `session` (header and panes), `terminal` (the session's screen in xterm.js, where the node opens one), `chat`, `cards`, `inspector` (Team, Overview, Activity), `lead` (strip and the Team tab's tasks), `records` (under the tasks, on the Team tab and the board page: the scorecard, decisions, answered and withdrawn questions, files), `board`, `stats` (Statistics, `#/stats`: the node's `stats`, the Mac's window's words), `node`, `settings`, `start`, `palette`. |
 
 ## Keys
 

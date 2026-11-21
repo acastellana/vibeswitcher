@@ -112,7 +112,7 @@ struct ScratchNodeTests {
         let kinds = Set(hello["kinds"]?.array?.compactMap(\.string) ?? [])
         #expect(kinds == ["status", "questions", "subscribe", "unsubscribe", "chat.page", "draft", "draft.clear", "board", "seen",
                           "session.draft", "session.draft.clear", "session.presets", "session.complete", "session.attach",
-                          "session.usage", "chat.image", "settings"], "\(kinds)")
+                          "session.usage", "chat.image", "stats", "settings"], "\(kinds)")
         var seq: [String: Int] = [:]
         for (sub, collection) in [("s0", "node"), ("s1", "sessions"), ("s2", "leads"), ("s3", "cards")] {
             let id = try socket.send("subscribe", ["sub": .string(sub), "collection": .string(collection)])

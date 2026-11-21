@@ -86,6 +86,9 @@ public final class Requests: @unchecked Sendable {
     /// The home `hooks.install` and `hooks.remove` write in: the server's own (`getpwuid`'s on the node, the scratch home
     /// on a scratch node).
     public var home = VibePaths.home
+    /// `stats`' collector (`Stats/StatisticsWire.swift`): the node's root, the home's Codex folder; made at the first ask
+    /// and kept, so a file unchanged is parsed once.
+    lazy var statsCollector = SetupStatsCollector(home: root, codexHome: URL(fileURLWithPath: home).appendingPathComponent(".codex"))
     /// Where `build.switch` finds the builds it switches between, and `status` the install record (the start plan's
     /// S8b): the account's `NodeFolders.defaultPrefix` on the node, `--test-install-root` on a scratch node; none:
     /// `build.switch` is refused and `status` gives no `builds`.
@@ -260,6 +263,7 @@ public final class Requests: @unchecked Sendable {
         case "session.reply": replySession(request, reply: reply)
         case "session.presets": presets(request, terminal: facts.pid != NodeLive.webPeer.pid && facts.uid != nil, reply: reply)
         case "session.complete": complete(request, reply: reply)
+        case "stats": stats(request, reply: reply)
         case "session.reopen": reopenSessions(request, reply: reply)
         case "mail": mail(request, reply: reply)
         case "prompt-audit": promptAudit(request, reply: reply)

@@ -63,7 +63,7 @@ public enum WireSchema {
                                   "session.draft.args", "session.draft.result", "session.draft.clear.args",
                                   "session.presets.args", "session.presets.result", "session.complete.args", "session.complete.result",
                                   "session.attach.args", "session.attach.result", "session.usage.args", "session.usage.result",
-                                  "chat.image.args", "chat.image.result",
+                                  "chat.image.args", "chat.image.result", "stats.args", "stats.result",
 
                                   "settings.args", "settings.result", "set.args", "set.result"]
     /// A keyed collection's entity.
@@ -172,6 +172,35 @@ public enum WireSchema {
                 field("id", .string), field("at", Kind.date.orNull), field("partial", .bool), field("tokens", Kind.shape("session.usage.tokens").orNull),
                 field("cost", Kind.any.orNull)]),
             shape("session.usage.tokens", from: "ChatStore.usageValue", [field("input", .int), field("cached", .int), field("output", .int)]),
+            // The Statistics window from the node (2026-11-21): the Mac's words; bars per mille, a trend day's value in thousandths.
+            shape("stats.args", from: "Requests.stats (2026-11-21)", [optional("range", .words(["today", "week", "month"]))]),
+            shape("stats.result", from: "StatisticsWire.value", [
+                field("range", .words(["today", "week", "month"])), field("title", .string), field("span", .string),
+                field("mac", .list(.shape("stats.figure"))), field("columns", strings), field("projects", .list(.shape("stats.row"))),
+                field("total", Kind.shape("stats.row").orNull), field("quality", Kind.shape("stats.quality").orNull)]),
+            shape("stats.figure", from: "StatisticsWire.figure", [
+                field("label", .string), field("value", .string), field("detail", Kind.string.orNull), field("help", Kind.string.orNull),
+                field("meter", Kind.shape("stats.meter").orNull), field("trend", .list(.shape("stats.day")))]),
+            shape("stats.meter", from: "StatisticsWire.figure", [field("used", .int), field("elapsed", Kind.int.orNull), field("reached", .bool)]),
+            shape("stats.day", from: "StatisticsWire.figure", [field("label", .string), field("value", Kind.int.orNull), field("text", .string)]),
+            shape("stats.row", from: "StatisticsWire.row", [field("id", .string), field("name", .string), field("note", Kind.string.orNull),
+                                                             field("cells", strings)]),
+            shape("stats.quality", from: "StatisticsWire.quality", [
+                field("sections", .list(.shape("stats.section"))), field("columns", strings), field("columnHelp", strings),
+                field("breakdown", .list(.shape("stats.breakdown"))), field("modelsNote", Kind.string.orNull), field("trend", .list(.shape("stats.week"))),
+                field("compared", .shape("stats.compared"))]),
+            shape("stats.section", from: "StatisticsWire.quality", [field("title", .string), field("figures", .list(.shape("stats.figure")))]),
+            shape("stats.breakdown", from: "StatisticsWire.quality", [field("name", .string), field("model", .bool), field("cells", strings)]),
+            shape("stats.week", from: "StatisticsWire.quality", [
+                field("label", .string), field("merged", .int), field("passRate", .string), field("passBar", Kind.int.orNull), field("cost", .string),
+                field("costBar", Kind.int.orNull)]),
+            shape("stats.compared", from: "StatisticsWire.quality", [
+                field("title", .string), field("badge", .string), field("method", .string), field("columns", strings),
+                field("groups", .list(.shape("stats.group")))]),
+            shape("stats.group", from: "StatisticsWire.quality", [field("title", .string), field("rows", .list(.shape("stats.comparedRow")))]),
+            shape("stats.comparedRow", from: "StatisticsWire.quality", [field("label", .string), field("help", .string),
+                                                                         field("cells", .list(.shape("stats.cell")))]),
+            shape("stats.cell", from: "StatisticsWire.quality", [field("value", .string), field("detail", Kind.string.orNull)]),
             // An image of a session's chat, a part of its bytes at a time (the chat's images, 2026-11-21): a read.
             shape("chat.image.args", from: "ChatStore.image (the chat's images, 2026-11-21)", [
                 field("session", .string), field("id", .string), optional("offset", .int)]),
