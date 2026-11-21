@@ -1,7 +1,8 @@
 // Notifications (parity gap 5): while this page is open, the browser's own notification when something needs you: a
 // card opens (a lead's question or approval, held config, a moved base), a session's prompt waits (its status turns
 // needs you; never a worker's or a verifier's, as on the Mac, nor a lead's whose question is a card already), or a lead
-// stops (its session finishes its turn or ends). Asked once, by a quiet offer the first time something needs you; then a
+// stops (its session finishes its turn or ends), or the node's engine froze (a freeze its health digest keeps, told once,
+// never one kept before the page looked). Asked once, by a quiet offer the first time something needs you; then a
 // toggle on This node. A notification is the first line only, as text: the browser shows it as text, and controls,
 // bidirectional and other format characters are taken out first. The title bar counts what needs you: open cards and
 // prompts waiting.
@@ -63,7 +64,10 @@ export function summarize(state) {
     if (session.role === 'lead' && session.leadAsks) continue;
     asks.set(`prompt:${session.id}:${session.since || ''}`, { title: `${name} needs you`, body: firstLine(session.detail || session.activity || 'It’s waiting for you.'), href: href(session.id) });
   }
-  return { asks, leads };
+  // The engine's newest freeze (the node's health digest): '' for none yet, null while the node keeps no digest.
+  const health = state.node?.health;
+  const freeze = health ? (health.freezes?.[0]?.at || '') : null;
+  return { asks, leads, freeze, freezeSeconds: health?.freezes?.[0]?.seconds || 0 };
 }
 
 // What to tell between two summaries: each ask that wasn't there, and each lead that was working and now isn't (done,
@@ -71,6 +75,10 @@ export function summarize(state) {
 export function changes(before, after) {
   const told = [];
   for (const [key, ask] of after.asks) if (!before.asks.has(key)) told.push({ key, ...ask });
+  // A freeze kept since the last look (never one from before this page looked: `before.freeze` null).
+  if (before.freeze != null && after.freeze && after.freeze !== before.freeze) {
+    told.push({ key: `freeze:${after.freeze}`, title: 'The node froze', body: `Its engine didn’t answer for ${after.freezeSeconds} s. This node shows its health.`, href: '#/node' });
+  }
   for (const [id, lead] of before.leads) {
     const now = after.leads.get(id);
     if (!lead.working || (now && now.working && !now.ended)) continue;
@@ -212,7 +220,7 @@ export function notifications(app, env = {}) {
     last = now;
   }
 
-  for (const topic of ['cards', 'sessions', 'leads', 'connection']) data.subscribe(topic, look);
+  for (const topic of ['cards', 'sessions', 'leads', 'connection', 'node']) data.subscribe(topic, look);
   // The page's own title changes with the route (app.js, the board): the count goes back in front.
   if (doc?.querySelector && typeof MutationObserver === 'function') {
     const title = doc.querySelector('title');

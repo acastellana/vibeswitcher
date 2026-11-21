@@ -13,6 +13,9 @@ import VibeCore
 ///   transcripts), counted, with the slowest and the last.
 /// - The last errors: the server's own log lines that say something failed (`problem(_:)`), the newest `kept`, as the
 ///   journal has them (the server's stderr is the unit's journal).
+/// - Their causes (the app's digest of error kinds, `AppHealth.errorKind`): each failing line counted by its kind, the
+///   part of the server that wrote it (its words before the first colon) and the failure word, never what else it
+///   says; the most frequent first, so a cause that repeats stands out from one that happened once.
 ///
 /// Freezes are kept in `<node root>/health.json` across restarts (the newest `kept`), so one that ended in a restart
 /// still shows; the rest is this server's.
@@ -43,6 +46,7 @@ public final class NodeHealth: @unchecked Sendable {
     private var slow = 0
     private var slowest: Double = 0
     private var lastSlow: Date?
+    private var causes: [String: (count: Int, last: Date)] = [:]
     /// The ping waiting for the queue: when it was sent (the monotonic clock) and the date then.
     private var pending: (sent: TimeInterval, at: Date)?
     private var timer: DispatchSourceTimer?
@@ -133,13 +137,35 @@ public final class NodeHealth: @unchecked Sendable {
             .contains { lower.contains($0) }
     }
 
-    /// A server log line: kept when it says something failed.
+    /// The failure words, in the order a line is judged by.
+    static let failureWords = ["failed", "fail", "error", "couldn't", "can't", "not written", "not recorded", "not started", "refused",
+                               "didn't start", "timed out"]
+
+    /// A failing line's kind: the part of the server that wrote it (its words before the first colon, when they read as
+    /// a name: letters, spaces and dots, at most 40) and the failure word; nil for a line that says nothing failed.
+    public static func kind(_ line: String) -> String? {
+        let lower = line.lowercased()
+        guard let word = failureWords.first(where: { lower.contains($0) }) else { return nil }
+        var part = "server"
+        if let colon = lower.firstIndex(of: ":") {
+            let name = lower[..<colon].trimmingCharacters(in: .whitespaces)
+            if !name.isEmpty, name.count <= 40, name.allSatisfy({ $0.isLetter || $0 == " " || $0 == "." || $0 == "-" }) { part = name }
+        }
+        return "\(part): \(word)"
+    }
+
+    /// A server log line: kept when it says something failed, and counted by its kind.
     public func heard(_ line: String) {
         guard Self.problem(line) else { return }
         let at = date()
+        let kind = Self.kind(line) ?? "server: failed"
         lock.withLock {
             problems.append(Problem(at: at, line: String(line.prefix(300))))
             if problems.count > Self.kept { problems.removeFirst(problems.count - Self.kept) }
+            let was = causes[kind]?.count ?? 0
+            causes[kind] = (was + 1, at)
+            // A bounded table: past 50 kinds, the least frequent goes.
+            if causes.count > 50, let least = causes.min(by: { ($0.value.count, $0.value.last) < ($1.value.count, $1.value.last) }) { causes[least.key] = nil }
         }
     }
 
@@ -148,7 +174,10 @@ public final class NodeHealth: @unchecked Sendable {
     /// The digest as `status` carries it (`health`): `restarts` and `refused` the host's counts, `waiting` the
     /// sessions' reminders (left waiting or stuck).
     public func value(serverRestarts: Int?, refusedConnections: Int?, hostRestartAt: Date?, waiting: [String]) -> NodeWire.Value {
-        let (freezes, problems, slow, slowest, lastSlow) = lock.withLock { (self.freezes, self.problems, self.slow, self.slowest, self.lastSlow) }
+        let (freezes, problems, slow, slowest, lastSlow, causes) = lock.withLock {
+            (self.freezes, self.problems, self.slow, self.slowest, self.lastSlow, self.causes)
+        }
+        let ranked = causes.sorted { ($0.value.count, $0.value.last, $1.key) > ($1.value.count, $1.value.last, $0.key) }.prefix(Self.kept)
         return .object([
             "since": .date(started),
             "stalled": stalled.map { .int(Int($0.rounded())) } ?? .null,
@@ -161,6 +190,8 @@ public final class NodeHealth: @unchecked Sendable {
             "hostRestartAt": hostRestartAt.map(NodeWire.Value.date) ?? .null,
             "waiting": .array(waiting.map(NodeWire.Value.string)),
             "errors": .array(problems.reversed().map { .object(["at": .date($0.at), "line": .string(ConfigSeal.inert($0.line, limit: 300))]) }),
+            "causes": .array(ranked.map { .object(["kind": .string(ConfigSeal.inert($0.key, limit: 80)), "count": .int($0.value.count),
+                                                    "last": .date($0.value.last)]) }),
         ])
     }
 
@@ -181,6 +212,11 @@ public final class NodeHealth: @unchecked Sendable {
         let waiting = health["waiting"]?.array ?? []
         out.append(waiting.isEmpty ? "  sessions left waiting or stuck: none" : "  sessions left waiting or stuck:")
         for line in waiting { out.append("    " + inert(line.string)) }
+        let causes = health["causes"]?.array ?? []
+        if !causes.isEmpty {
+            out.append("  causes, the most frequent first:")
+            for cause in causes { out.append("    \(inert(cause["kind"]?.string)) ×\(cause["count"]?.int ?? 0), the last at \(inert(cause["last"]?.string))") }
+        }
         let errors = health["errors"]?.array ?? []
         out.append(errors.isEmpty ? "  the server's last errors: none" : "  the server's last errors, newest first:")
         for error in errors { out.append("    \(inert(error["at"]?.string)): \(inert(error["line"]?.string))") }

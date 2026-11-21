@@ -18,6 +18,9 @@ export function healthFacts(health) {
   if (health.serverRestarts != null) rows.push(['Server restarts', String(health.serverRestarts)]);
   if (health.refusedConnections) rows.push(['Refused connections', String(health.refusedConnections)]);
   rows.push(['Sessions waiting or stuck', waiting.length ? String(waiting.length) : 'None']);
+  // The causes (the Mac's digest of error kinds): the most frequent first, a repeat standing out from a one-off.
+  const causes = health.causes || [];
+  if (causes.length) rows.push(['Causes', causes.slice(0, 3).map((cause) => `${cause.kind} ×${cause.count}`).join(' · ')]);
   const lines = [
     ...freezes.map((freeze) => ({ at: freeze.at, text: `The engine didn’t answer for ${freeze.seconds} s` })),
     ...waiting.map((text) => ({ at: null, text })),
