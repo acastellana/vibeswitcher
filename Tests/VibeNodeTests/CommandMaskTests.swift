@@ -39,10 +39,39 @@ struct CommandMaskTests {
         }
     }
 
-    /// A flag word with no value after it masks nothing; another flag after one isn't taken for its value.
-    @Test func aFlagWithNoValueMasksNothing() {
+    /// A flag word with no value after it masks nothing; the word after one is masked whatever it starts with (a value
+    /// can start with a dash), and a flag of three dashes is a flag.
+    @Test func theWordAfterASecretFlagIsAlwaysMasked() {
         #expect(CommandMask.masked("claude --token") == "claude --token")
-        #expect(CommandMask.masked("'claude' '--api-key' '--model' 'opus'") == "'claude' '--api-key' '--model' 'opus'")
+        #expect(CommandMask.masked("'claude' '--api-key' '-dash-first-secret' 'opus'") == "'claude' '--api-key' '•••' 'opus'")
+        #expect(CommandMask.masked("tool ---password hunter2 --verbose") == "tool ---password ••• --verbose")
+        #expect(CommandMask.masked("tool ---token=hunter2") == "tool ---token=•••")
+    }
+
+    /// `user:pass` anywhere, `--user`/`-u`, a header holding a credential, and a short flag's attached value.
+    @Test func credentialsInTheirOtherShapesAreMasked() {
+        let cases: [(String, String)] = [
+            ("curl -u bob:hunter2 https://example.com", "curl -u ••• https://example.com"),
+            ("curl --user bob https://example.com", "curl --user ••• https://example.com"),
+            ("curl --user=bob:hunter2 x", "curl --user=••• x"),
+            ("curl -ubob:hunter2 x", "curl -u••• x"),
+            ("mysql -phunter2 -h db", "mysql -p••• -h db"),
+            ("tool -kSECRETKEY", "tool -k•••"),
+            ("tool bob:hunter2", "tool bob:•••"),
+            ("tool 'bob:hunter2'", "tool 'bob:•••'"),
+            ("curl -H 'Authorization: Bearer abc123' x", "curl -H 'Authorization: •••' x"),
+            ("curl --header 'X-Api-Key: abc123' x", "curl --header 'X-Api-Key: •••' x"),
+            ("curl -H 'Accept: text/plain' x", "curl -H 'Accept: text/plain' x"),
+            ("curl --header='Cookie: sid=abc123' x", "curl --header='•••' x"),
+            ("claude --model opus -c", "claude --model opus -c"),
+        ]
+        for (command, expected) in cases {
+            let masked = CommandMask.masked(command)
+            #expect(masked == expected, "\(command) → \(masked)")
+            for secret in ["hunter2", "abc123", "SECRETKEY"] where command.contains(secret) {
+                #expect(!masked.contains(secret), "\(command) → \(masked)")
+            }
+        }
     }
 
     @Test func aSessionsCommandAndAPresetsSentToAPageAreMasked() throws {

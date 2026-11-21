@@ -5,38 +5,65 @@ import VibeCore
 /// review of 2026-11-21): `Redaction.secrets` and `PushText.scrub` first, then, word by word as a shell splits them
 /// (single and double quotes, backslashes, the node's own `'claude' '--api-key' '…'` form included):
 ///
-/// - the value after a secret-ish flag (`--api-key VALUE`, `--token=VALUE`, `-p`… whose name holds key, token, secret,
-///   pass, auth, credential, cookie, bearer or session-id), quoted or not;
+/// - the word after a secret-ish flag written without `=` (`--api-key VALUE`, `-p VALUE`… whose name holds key, token,
+///   secret, pass, auth, credential, cookie, bearer or session-id; `--user` and `-u` too), always, whatever it starts
+///   with; the value after its `=` (`--token=VALUE`), quoted or not, however many dashes it has;
+/// - a short flag of a secret-ish letter (`p`, `k`, `t`, `u`) with its value attached: `-pSECRET`;
+/// - a header's value after `-H` or `--header` when the header holds key, token, auth, bearer or cookie;
 /// - an environment word's value (`NAME=VALUE`) whose name holds KEY, TOKEN, SECRET, PASS, AUTH or CREDENTIAL;
-/// - a URL's query value whose name is secret-ish (`?key=…`, `&access_token=…`), and a URL's `user:pass@`;
-/// - a `user:pass` value after such a flag, as any value is.
+/// - a `user:pass`-shaped word anywhere (what follows its first colon); a URL's query value whose name is secret-ish
+///   (`?key=…`, `&access_token=…`), and a URL's `user:pass@`.
 ///
 /// Each is replaced by `•••`, its quotes kept; nothing else is changed. Over-masking a harmless value whose flag merely
-/// sounds secret is the cost: a page never needs the value.
+/// sounds secret (or a `host:port`) is the cost: a page never needs the value.
 enum CommandMask {
     static let mask = "•••"
     /// What makes a flag's or a query's name secret-ish (lower case, dashes and underscores dropped).
     static let secretWords = ["key", "token", "secret", "pass", "auth", "credential", "cookie", "bearer", "sessionid", "signature", "sig"]
     /// What makes an environment word's name secret-ish (upper case, as written).
     static let envWords = ["KEY", "TOKEN", "SECRET", "PASS", "AUTH", "CREDENTIAL"]
+    /// The flags whose next word is a user's credentials (`curl -u user:pass`).
+    static let userFlags: Set<String> = ["user", "u"]
+    /// The flags whose next word is a header, masked when it holds one of `headerWords`.
+    static let headerFlags: Set<String> = ["H", "header"]
+    static let headerWords = ["key", "token", "auth", "bearer", "cookie", "secret", "pass"]
+    /// The short flags whose attached value is masked (`-pSECRET`).
+    static let shortSecret: Set<Character> = ["p", "k", "t", "u"]
+
+    private enum Next { case always, header }
 
     static func masked(_ command: String) -> String {
         let text = Redaction.secrets(in: PushText.scrub(command))
         let words = split(text)
         var cuts: [Range<String.Index>] = []
-        var maskNext = false
+        var next: Next?
         for word in words {
             let value = word.value
-            if maskNext {
-                maskNext = false
-                if !value.hasPrefix("-") || value == "-" { cuts.append(word.content); continue }
+            if let pending = next {
+                next = nil
+                switch pending {
+                case .always: cuts.append(word.content)
+                case .header: if headerish(value) { cuts.append(afterColon(word) ?? word.content) }
+                }
+                continue
             }
-            if value.hasPrefix("-"), !value.hasPrefix("---") {
+            if value.hasPrefix("-"), value.count > 1 {
                 let name = value.drop { $0 == "-" }
+                let dashes = value.count - name.count
                 if let equals = name.firstIndex(of: "=") {
-                    if secretish(String(name[..<equals])) { cuts.append(contentAfterEquals(word)) }
-                } else if secretish(String(name)) {
-                    maskNext = true
+                    let flag = String(name[..<equals])
+                    if secretish(flag) || userFlags.contains(flag) || (headerFlags.contains(flag) && headerish(String(name[name.index(after: equals)...]))) {
+                        cuts.append(contentAfterEquals(word))
+                    }
+                } else {
+                    // `-pSECRET`: its attached value; and, a word that also reads as a secret-ish long flag
+                    // (`-password`), the word after it too (over-masking, not under).
+                    if dashes == 1, name.count > 1, let letter = name.first, shortSecret.contains(letter) { cuts.append(attached(word)) }
+                    if secretish(String(name)) || userFlags.contains(String(name)) {
+                        next = .always
+                    } else if headerFlags.contains(String(name)) {
+                        next = .header
+                    }
                 }
                 continue
             }
@@ -44,13 +71,48 @@ enum CommandMask {
                value[..<equals].allSatisfy({ $0.isLetter || $0.isNumber || $0 == "_" }) {
                 let name = value[..<equals].uppercased()
                 if envWords.contains(where: name.contains) { cuts.append(contentAfterEquals(word)) }
+                continue
             }
+            if userPass(value), let range = afterColon(word) { cuts.append(range) }
         }
         var out = text
         // Query values and URL credentials, anywhere in the text not already cut.
         for range in queryValues(in: text) where !cuts.contains(where: { $0.overlaps(range) }) { cuts.append(range) }
         for range in cuts.sorted(by: { $0.lowerBound > $1.lowerBound }) where !range.isEmpty { out.replaceSubrange(range, with: mask) }
         return out
+    }
+
+    /// A header holding a secret-ish word.
+    static func headerish(_ value: String) -> Bool {
+        let folded = value.lowercased()
+        return headerWords.contains { folded.contains($0) }
+    }
+
+    /// `user:pass`-shaped: something, a colon, something, with no space, slash or `@`, and not a URL.
+    static func userPass(_ value: String) -> Bool {
+        guard let colon = value.firstIndex(of: ":"), colon > value.startIndex, value.index(after: colon) < value.endIndex else { return false }
+        return !value.contains("://") && !value.contains(where: { $0.isWhitespace || $0 == "/" || $0 == "@" })
+    }
+
+    /// What follows a word's first colon (and the spaces after it), as written in the line.
+    static func afterColon(_ word: Word) -> Range<String.Index>? {
+        let line = word.line
+        guard let colon = line[word.content].firstIndex(of: ":") else { return nil }
+        var start = line.index(after: colon)
+        while start < word.content.upperBound, line[start] == " " { start = line.index(after: start) }
+        return start < word.content.upperBound ? start..<word.content.upperBound : nil
+    }
+
+    /// A short flag's attached value: the word after its dash and letter, as written.
+    static func attached(_ word: Word) -> Range<String.Index> {
+        let line = word.line
+        var start = word.content.lowerBound
+        var skipped = 0
+        while start < word.content.upperBound, skipped < 2 {
+            if !["'", "\"", "\\"].contains(line[start]) { skipped += 1 }
+            start = line.index(after: start)
+        }
+        return start..<max(start, word.content.upperBound)
     }
 
     static func secretish(_ name: String) -> Bool {
