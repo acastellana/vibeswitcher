@@ -252,6 +252,40 @@ or decided. Done on Linux, tested on both systems (`ApprovalJudgmentTests`, `App
    that says the port can be squatted. **Real Mac**: whichever is built, that the server gets the descriptor and that a
    second process can't bind the port while the host holds it.
 
+10. **(BLOCKER before approvalMeasured, design; the review of 2026-11-21, its fifth finding)** A fake server passes the
+   command line's server check on the Mac with no race. Every anchor the check uses is the user's to write: the job's
+   label and plist (`launchctl bootout`, then `bootstrap` a plist from any path with the same label and a program of
+   one's choosing), the builds folder (`~/.vibeswitcher/v2/builds/<commit>/bin/…` can be made by any session with a
+   genuine host and an evil server, so `NodeCheck.installedServer` and the cdhash read from that file vouch for
+   nothing), and any reference file beside them. The server's path isn't resolved (`realpath`) before its cdhash is
+   read either. Needs an anchor a session can't write. Options:
+   - **cdhashes pinned at install in a root-owned place** (`/Library/Application Support/VibeSwitcher/<uid>/pins`,
+     written by a one-time `sudo` step or a privileged helper): the command line checks the server's running cdhash
+     against the pin, not against a file. Costs a password at each install; the pin moves only with root.
+   - **A Keychain item bound to the command line's code** (an access control list naming the CLI's designated
+     requirement, written by the install): holds the expected server cdhash; a session's process can't read or
+     rewrite it without the CLI's code. Ad-hoc signing changes the requirement at every build, so the install rewrites
+     the ACL, and the item needs the user's login keychain unlocked.
+   - **A Developer ID team identifier**: check the server against a requirement on a team the user can't sign as.
+     Needs a paid signing identity; then the requirement is fixed and no pin is needed.
+   Until one is built, the Mac's server check proves only "a hardened binary the user's account could have placed".
+11. **(BLOCKER before approvalMeasured; the review's sixth finding)** The Mac's ancestry is unreadable for a Terminal or
+   ssh user: `proc_pidinfo(PROC_PIDTBSDINFO)` is refused for root's processes (`login`, `sshd-session`), and so is
+   `KERN_PROCARGS2`, so a chain through them ends unread and the peer is refused. The fix reads the short record
+   (`PROC_PIDT_SHORTBSDINFO`, any user's: parent and start) and `sysctl KERN_PROC_PID` for the rest, each still bound
+   to the token as `Link.isProcess(of:)` binds it; never "unreadable is fine". **Real Mac**: a chain from Terminal and
+   one from ssh read whole.
+12. **(BEFORE the Mac node's switch; the review's eighth finding)** `launchctl print`'s `program` line is the job's
+   configured program, not the running image: after an in-place switch (the job's plist rewritten, the host handed
+   over to the next build) the check would compare the genuine server against the next build and refuse it. And
+   `launchctl print`'s output isn't an API (its format changes between releases). Options: the host reports its own
+   build to the command line over a channel the check already trusts, or the check reads the host's executable by
+   its pid and token (`proc_pidpath` bound to the token) instead of the job's line.
+13. **(Owed, the review of 2026-11-21)** The Mac's checked node start (`HostImages.isCheckedMacNode`, false): until it
+   exists no Mac host runs a `--server` child on the account's locks, none is a node host, and the record of the
+   user's actions, its hooks and the vaultV2 capability stay off on the Mac (fixes `6e0798d9`, `a0a596d8`,
+   `b45bb7b0`). It depends on item 10's anchor: a check against the user's own files proves nothing.
+
 ## What `v2` found on the Mac and doesn't change
 
 Found by [the security architecture document](../superpowers/specs/2026-11-13-v2-security-architecture.md#the-mac-and-linux)
