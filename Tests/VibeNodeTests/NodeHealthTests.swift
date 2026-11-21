@@ -63,10 +63,18 @@ struct NodeHealthTests {
         #expect(!errors.contains { $0.contains("started, pid") })
         #expect(WireSchema.check(digest, as: "node.health", strict: true) == nil, "\(digest)")
 
+        // The causes: by kind (the part that wrote it and the failure word), the most frequent first.
+        let causes = digest["causes"]?.array ?? []
+        #expect(causes.first?["kind"]?.string == "prompt audit: not written" && causes.first?["count"]?.int == NodeHealth.kept + 3, "\(causes)")
+        #expect(causes.contains { $0["kind"]?.string == "update check: couldn't" && $0["count"]?.int == 1 })
+        #expect(NodeHealth.kind("set boost: not changed: disk full") == nil)
+        #expect(NodeHealth.kind("lead: couldn't post to /a/b: x") == "lead: couldn't")
+        #expect(NodeHealth.kind("shell request 1234-abcd: not recorded") == "server: not recorded")
         let lines = NodeHealth.lines(digest)
         #expect(lines.contains { $0.contains("slow refreshes (over 5 s): 2") })
         #expect(lines.contains("    reminder: waiting on you, on ttypts4"))
         #expect(lines.contains("  server restarts by the host: 1"))
         #expect(!lines.joined().contains("\u{1B}"))
+        #expect(lines.contains { $0.hasPrefix("    prompt audit: not written ×\(NodeHealth.kept + 3)") })
     }
 }
