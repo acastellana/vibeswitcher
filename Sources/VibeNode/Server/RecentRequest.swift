@@ -5,8 +5,8 @@ import VibeCore
 /// `StartPage`): the folders Claude Code knows (`~/.claude.json`'s `projects`, its keys only, ranked by when each one's
 /// transcripts folder last changed) and Codex trusts (`~/.codex/config.toml`'s `[projects."…"]`), in the node's home,
 /// newest first, folders gone and the home itself left out (`RecentProjects.rank`), each with the project of the lead
-/// that runs there, if one does. `recent` is a read (anyone of the uid, a page too: the sessions' folders are on the wire
-/// already); the page drafts the line that starts each (`vibeswitcher new FOLDER`, `vibeswitcher lead FOLDER`), never
+/// that runs there, if one does. `recent` is a read of the user's own (`NodeWire.Voice.webRead`: the user's on the socket, or a page's token that
+/// reads; never a session's process, which would list the user's other projects); the page drafts the line that starts each (`vibeswitcher new FOLDER`, `vibeswitcher lead FOLDER`), never
 /// starts one. Nothing else of those files is read (no account, no history), and nothing is written.
 extension Requests {
     /// The most folders `recent` gives.

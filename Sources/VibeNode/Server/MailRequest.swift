@@ -8,10 +8,11 @@ import VibeCore
 /// nothing changes.
 extension Requests {
     /// A page's read of a private record (`NodeWire.Voice.webRead`), its token's `read` right judged by the screen and
-    /// `NodeLive`: only `mail`, never anything that changes state. On `queue`.
+    /// `NodeLive`: only `mail` and `recent`, never anything that changes state. On `queue`.
     func webRead(_ request: NodeWire.Request, reply: @escaping (NodeWire.Reply) -> Void) {
         switch request.kind {
         case "mail": mail(request, reply: reply)
+        case "recent": recent(request, reply: reply)
         default: reply(.init(re: request.id, error: .init(.voice, "\(ConfigSeal.inert(request.kind, limit: 80)) isn't a page's read")))
         }
     }
