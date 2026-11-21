@@ -10,7 +10,10 @@ import { fileURLToPath } from 'node:url';
 import {
   sessionShort, shellWord, sessionWord, renameLine, pauseLine, PAUSES, endable, endLine, closeShellsLine, resumeLine, endedEntry,
   recentFolders, newEntries, newLine, presetProblem, presetLine, presetArgs, PRESET_VARIABLES, leadFolders, leadLine,
+  recentProjects, projectLines,
 } from '../js/actions.js';
+import { validate } from '../wire/validators.js';
+import { createMock } from '../js/mock.js';
 
 const HOSTED = { id: 'local:3f2a9c41-7d1e-4b8a-9c0f-2e5d6a7b8c9d', hosted: true, cwd: '/home/me/site', name: null, role: null };
 const MINE = { id: 'local:pts/9', hosted: false, cwd: '/home/me/notes', name: null, role: null };
@@ -156,4 +159,29 @@ test('“Start Project Lead in …”: the shown session’s folder first, then 
   assert.equal(leadLine('/home/me/site', '  '), 'vibeswitcher lead /home/me/site');
   const line = leadLine('/home/me/my site', 'add a subtract function; with a test $(rm -rf ~)');
   assert.deepEqual(words(line), ['vibeswitcher', 'lead', '/home/me/my site', '--goal', 'add a subtract function; with a test $(rm -rf ~)']);
+});
+
+test('recent projects: the node’s hosted and ended folders first, then those Claude Code and Codex know, each once with its lead', () => {
+  const vectors = JSON.parse(readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'wire', 'vectors.json'), 'utf8'));
+  const [asked, answered] = vectors.recent;
+  assert.equal(validate('request', asked), null);
+  assert.equal(validate('reply.recent', answered), null);
+  const known = answered.result.projects;
+  const leads = [{ project: 'local:project:notes', root: '/home/u/notes' }];
+  const rows = recentProjects(known, [HOSTED], [{ folder: '/home/u/old-tool' }], leads);
+  assert.deepEqual(rows.map((row) => row.folder), ['/home/me/site', '/home/u/old-tool', known[0].folder, '/home/u/notes']);
+  assert.equal(rows[2].lead, known[0].lead, 'the node says whose lead runs there');
+  assert.equal(rows[3].lead, 'local:project:notes', 'or the leads the page holds do');
+  assert.equal(recentProjects(known, [], [], [], 2).length, 2);
+  assert.deepEqual(projectLines({ folder: "/home/u/it's mine", lead: null }), {
+    session: "vibeswitcher new '/home/u/it'\\''s mine'", lead: "vibeswitcher lead '/home/u/it'\\''s mine'" });
+  assert.deepEqual(words(projectLines({ folder: "/home/u/it's mine", lead: null }).session), ['vibeswitcher', 'new', "/home/u/it's mine"]);
+  assert.equal(projectLines(rows[2]).lead, null, 'a running lead: its board, no line');
+});
+
+test('the mock answers recent in the node’s shape', async () => {
+  const mock = createMock({ apply() {}, setConnection() {}, chatSnapshot() {} }, { still: true });
+  const reply = await mock.request({ v: 1, id: '1', kind: 'recent', args: {} });
+  assert.equal(validate('recent.result', reply.result), null);
+  mock.stop();
 });

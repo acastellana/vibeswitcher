@@ -646,6 +646,19 @@ export function createMock(store, options = {}) {
       ];
       return { ok: true, result: { presets: args.folder ? presets : presets.slice(1), problems: [] } };
     }
+    if (message.kind === 'recent') {
+      return { ok: true, result: { projects: options.empty ? [] : [
+        { folder: SITE, lastUsed: ago(300), lead: SITE_PROJECT },
+        { folder: `${HOME}/projects/notes`, lastUsed: ago(86400), lead: null },
+      ] } };
+    }
+    if (message.kind === 'mail') {
+      const messages = [
+        { at: ago(600), from: 'example-api', to: 'example-site', received: true, kind: 'answer', text: '8080, behind the staging proxy.', outcome: 'waiting', sent: true, detail: 'Waiting in its inbox.' },
+        { at: ago(900), from: 'example-site', to: 'example-api', received: false, kind: 'question', text: 'Which port does the API listen on in staging?', outcome: 'delivered', sent: true, detail: 'Delivered.' },
+      ];
+      return { ok: true, result: { projects: options.empty ? [] : [{ root: SITE, project: 'example-site', total: messages.length, messages }] } };
+    }
     if (message.kind === 'settings') {
       if (args.folder && args.folder !== SITE) return { ok: false, error: { code: 'gone', message: `no lead has worked in ${args.folder} yet: \`vibeswitcher lead ${args.folder}\` starts one` } };
       return { ok: true, result: settingsResult(args.folder) };

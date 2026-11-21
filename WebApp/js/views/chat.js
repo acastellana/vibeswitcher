@@ -259,12 +259,16 @@ function makeRow(view, first) {
   if (first.type === 'team') {
     const title = h('div', { class: 'note-title' });
     const text = h('div', { class: 'note-text' });
+    // A long message's TL;DR, once the node wrote one (its AI summaries).
+    const gist = h('div', { class: 'note-gist', hidden: true });
     const time = h('time', { class: 'note-time' });
-    const el = h('div', { class: 'chat-row team' }, icon('note', 14), h('div', { class: 'note-body' }, title, text), time);
+    const el = h('div', { class: 'chat-row team' }, icon('note', 14), h('div', { class: 'note-body' }, title, gist, text), time);
     return {
       el,
       update(item) {
         setText(title, item.title || 'VibeSwitcher');
+        setText(gist, item.summary ? `TL;DR: ${item.summary}` : '');
+        gist.hidden = !item.summary;
         setText(text, item.text);
         setText(time, clock(item.at));
       },

@@ -24,6 +24,7 @@ public enum BoardText {
             lines.append("  the board can't be shown: \(inert(unreadable))")
             return lines
         }
+        lines += allDoneLines(board["allDone"], now: now)
         let today = calendar.startOfDay(for: now)
         let tasks = (board["tasks"]?.array ?? []).filter { task in
             guard task["group"]?.string == "done" else { return true }
@@ -41,8 +42,45 @@ public enum BoardText {
         if tasks.isEmpty { lines.append("  nothing on the board yet") }
         let more = board["more"]?.int ?? 0
         lines.append((counts.isEmpty ? "no tasks" : counts.joined(separator: " · ")) + (more > 0 ? " · \(more) more not shown" : ""))
+        // The lead's latest decisions: a long one by its AI summary when one came (the app's `DecisionFeed.line`).
+        let decisions = board["decisions"]?.array ?? []
+        if !decisions.isEmpty {
+            lines.append("Decisions")
+            lines += decisions.prefix(decisionsShown).map { decision in
+                let text = decision["summary"]?.string ?? decision["text"]?.string
+                let when = decision["at"]?.string.flatMap(NodeWire.date).map { " (" + Durations.short(now.timeIntervalSince($0)) + " ago)" } ?? ""
+                return "  Decided: " + lowercasedFirst(inert(text, limit: dimLimit)) + when
+            }
+        }
         return lines
     }
+
+    /// "Run them" → "run them"; "API keys…" and "VibeSwitcher…" stay (the app's `DecisionFeed.lowercasedFirst`).
+    static func lowercasedFirst(_ text: String) -> String {
+        guard let first = text.first, first.isUppercase else { return text }
+        if text.prefix { $0 != " " }.dropFirst().contains(where: \.isUppercase) { return text }
+        return first.lowercased() + text.dropFirst()
+    }
+
+    /// The board's all-done card (`BoardValue.allDone`, the app's): "All tasks finished 12m ago · 5 tasks · 4 merged",
+    /// its summary's headline and bullets, and what it cost; nothing when none.
+    static func allDoneLines(_ mark: NodeWire.Value?, now: Date) -> [String] {
+        guard let mark, mark.object != nil else { return [] }
+        let tasks = mark["tasks"]?.array?.count ?? 0
+        let when = mark["at"]?.string.flatMap(NodeWire.date).map { " " + Durations.short(now.timeIntervalSince($0)) + " ago" } ?? ""
+        var lines = ["All tasks finished\(when) · \(tasks) task\(tasks == 1 ? "" : "s") · \(mark["merged"]?.int ?? 0) merged"]
+        if let summary = mark["summary"], summary.object != nil {
+            lines.append("  " + inert(summary["headline"]?.string, limit: 200))
+            lines += (summary["bullets"]?.array ?? []).map { "  - " + inert($0.string, limit: 200) }
+        }
+        if let cost = mark["receipts"]?.string {
+            lines.append("  Cost: " + inert(cost, limit: 300) + (mark["pricesAsOf"]?.string.map { " (estimates at the API prices of \(inert($0, limit: 40)))" } ?? ""))
+        }
+        return lines
+    }
+
+    /// The decisions `vibeswitcher board` lists, newest first.
+    static let decisionsShown = 5
 
     /// "  Blocked 18m  Fix the flaky upload test — Waits on Sync landing-base with main".
     static func line(_ task: NodeWire.Value, now: Date) -> String {

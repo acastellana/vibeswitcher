@@ -112,6 +112,7 @@ public enum ServerStart {
         options.lock = parsed.node ? TestLock.standard() : nil
         // The AI summaries' model (Haiku, headless) on the user's node only: a scratch node's engine asks none.
         options.summarize = parsed.node ? NodeSummaries.headless(root: root) : nil
+        options.summarizeBatch = parsed.node ? NodeSummaries.headless(root: root, system: BatchSummaryPrompts.system, timeout: ClaudeHeadless.briefingTimeout) : nil
         let engine = LeadEngine(root: root, nodeRoot: parsed.nodeRoot.map { URL(fileURLWithPath: $0, isDirectory: true) }, link: link,
                                 clock: clock, sessions: sessions, options: options, note: say)
         requests.engine = engine

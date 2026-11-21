@@ -160,4 +160,107 @@ struct TeamSummaryWatchTests {
         #expect(NodeSummaries.folder(root: other) == nil)
         #expect(FileManager.default.fileExists(atPath: target.appendingPathComponent("keep.txt").path))
     }
+
+    // MARK: Decisions and messages
+
+    /// The lead's decisions reach the board through a refresh (decisions.md read, newest first), whatever the
+    /// summaries do; a long one gets its line once, a short one never asks.
+    @Test func aLongDecisionGetsItsLineOnceAndEveryDecisionReachesTheBoard() async throws {
+        let world = try await DeliveryWorld.make(scratch)
+        defer { world.stop() }
+        let model = Model(answer: "Run the two small tasks side by side")
+        Self.give(world, model)
+        _ = try await world.lead()
+        let repo = world.repo
+        let long = "Run the onboarding steps and the upload retry in parallel, since they touch different files and neither waits on the other"
+        try await offPool {
+            try BoardStore(root: repo).appendDecision("Keep it short", why: "")
+            try BoardStore(root: repo).appendDecision(long, why: "Both are small")
+        }
+        func decisions() -> [BoardDecision]? { world.queue.sync { world.engine.boardDecisions.values[repo] } }
+
+        world.engine.refresh()
+        #expect(await eventually(timeout: 60) { decisions()?.first { $0.text == long }?.summary == model.answer }, "\(String(describing: decisions()))")
+        #expect(decisions()?.map(\.text) == [long, "Keep it short"], "newest first")
+        #expect(decisions()?.last?.summary == nil)
+        #expect(model.prompts.value.count == 1 && model.prompts.value[0].contains("Decision: Run the onboarding steps"))
+        world.engine.refresh()
+        await world.drained()
+        world.engine.summaryRuns.sync {}
+        #expect(model.prompts.value.count == 1, "a decision's line is asked once")
+
+        // A LiveBoards following the engine shows them.
+        let leads = Changes<LeadStore.Lead>()
+        let boards = LiveBoards(queue: world.queue, leads: leads, decisions: world.engine.boardDecisions)
+        leads.send(world.project, LeadStore.Lead(project: world.project, root: repo))
+        world.queue.sync { boards.start(clock: nil) }
+        defer { boards.stop() }
+        #expect(await eventually(timeout: 60) { boards.values[world.project]?["decisions"]?.array?.first?["summary"] == .string(model.answer) })
+
+        // Off: the lines go, the decisions stay.
+        _ = try NodeSettings.setNode(try #require(NodeSettings.setting("ai_summaries")), to: "off", files: NodeSettings.Files(root: world.host.root))
+        world.engine.refresh()
+        #expect(await eventually(timeout: 60) { decisions()?.count == 2 && decisions()?.allSatisfy { $0.summary == nil } == true })
+    }
+
+    /// A long message's TL;DR is asked once when its chat asks (`summarizeMessage`), and reaches `messageSummaries`; a
+    /// short one, or any while the summaries are off, asks nothing. A chat store following them puts it on the `team`
+    /// item as `summary`.
+    @Test func aLongMessagesTLDRIsAskedOnceAndShownOnItsItem() async throws {
+        let world = try await DeliveryWorld.make(scratch)
+        defer { world.stop() }
+        let model = Model(answer: "The upload retry is done and its tests pass")
+        Self.give(world, model)
+        _ = try await world.lead()
+        world.engine.refresh()
+        await world.drained()
+        #expect(world.queue.sync { world.engine.summariesAllowed })
+        let body = (1...8).map { "Line \($0) of the worker's report on the upload retry." }.joined(separator: "\n")
+        let long = TeamMessage(sender: .teammate(member: "worker", task: "retry"), body: body)
+        let short = TeamMessage(sender: .teammate(member: "worker", task: "retry"), body: "Done.")
+        #expect(long.needsSummary && !short.needsSummary)
+        world.engine.summarizeMessage(session: "s1", entry: "m_09", message: long)
+        world.engine.summarizeMessage(session: "s1", entry: "m_10", message: short)
+        #expect(await eventually(timeout: 60) { world.queue.sync { world.engine.messageSummaries.values["s1|m_09"] } == model.answer })
+        world.engine.summarizeMessage(session: "s1", entry: "m_09", message: long)
+        world.queue.sync {}
+        world.engine.summaryRuns.sync {}
+        #expect(model.prompts.value.count == 1 && model.prompts.value[0].contains("Line 8 of the worker's report"))
+        #expect(world.queue.sync { world.engine.messageSummaries.values["s1|m_10"] } == nil)
+    }
+
+    /// A chat store asks a TL;DR for a long message VibeSwitcher handed the lead as its chat is read (not for a short
+    /// one), and once a line comes the `team` item carries it as `summary` (a `set` op), its text untouched.
+    @Test func aChatsLongMessageAsksItsTLDRAndItsItemCarriesIt() async throws {
+        let home = scratch.url("chat-home")
+        let transcript = home.appendingPathComponent(".claude/projects/-work-p/0f6c2c1e-8a5b-4c1d-9e0f-2b7a6d5c4e3f.jsonl")
+        try FileManager.default.createDirectory(at: transcript.deletingLastPathComponent(), withIntermediateDirectories: true)
+        let long = "[VibeSwitcher · worker login-fix, not the user] " + (1...8).map { "Line \($0) of the report." }.joined(separator: "\n")
+        let lines = [["type": "user", "uuid": "m_08", "timestamp": "2026-11-17T09:16:00.000Z",
+                      "message": ["role": "user", "content": "[VibeSwitcher · worker login-fix, not the user] Done."]] as [String: Any],
+                     ["type": "user", "uuid": "m_09", "timestamp": "2026-11-17T09:16:30.000Z", "message": ["role": "user", "content": long]]]
+        try Data(lines.map { String(decoding: try JSONSerialization.data(withJSONObject: $0), as: UTF8.self) + "\n" }.joined().utf8).write(to: transcript)
+        let queue = DispatchQueue(label: "chat-engine")
+        let sessions = Changes<Session>()
+        let summaries = Changes<String>()
+        let asked = Locked<[(String, String)]>([])
+        let chats = ChatStore(queue: queue, home: home.path, sessions: sessions, summaries: summaries,
+                              ask: { session, entry, _ in asked.mutate { $0.append((session, entry)) } })
+        var made = LiveWorld.session("pts/3")
+        made.transcriptPath = transcript.path
+        sessions.send("local:pts/3", made)
+        let stream = try #require(queue.sync { () -> ChatStream? in
+            guard case .opened(let stream) = chats.open("local:pts/3") else { return nil }
+            return stream
+        })
+        #expect(await eventually { asked.value.count == 1 })
+        #expect(asked.value.first.map { [$0.0, $0.1] } == ["local:pts/3", "m_09"], "only the long one: \(asked.value)")
+        func item() -> NodeWire.Value? { queue.sync { stream.items.first { $0.id == "m_09" }?.value } }
+        #expect(item()?["summary"] == nil)
+        summaries.send("local:pts/3|m_09", "The login fix is done")
+        #expect(await eventually { item()?["summary"] == .string("The login fix is done") }, "\(String(describing: item()))")
+        #expect(item()?["text"]?.string?.contains("Line 8 of the report.") == true)
+        #expect(WireSchema.check(try #require(item()), as: "chat.item") == nil)
+        chats.stop()
+    }
 }

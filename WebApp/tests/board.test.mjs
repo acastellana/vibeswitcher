@@ -9,7 +9,7 @@ import { fileURLToPath } from 'node:url';
 import { createStore } from '../js/store.js';
 import { connectSocket } from '../js/socket.js';
 import { validate } from '../wire/validators.js';
-import { boardGroups, boardSummary, taskGroup, taskState, taskTone, taskLine, doneToday } from '../js/words.js';
+import { boardGroups, boardSummary, taskGroup, taskState, taskTone, taskLine, decisionLine, allDoneCard, doneToday } from '../js/words.js';
 import { parseRoute, boardHref } from '../js/ui.js';
 
 const vectors = JSON.parse(readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'wire', 'vectors.json'), 'utf8'));
@@ -135,4 +135,28 @@ test('a board has an address of its own, and any project id survives it', () => 
   const id = 'local:project:a/b c#d';
   assert.deepEqual(parseRoute(boardHref(id)), { name: 'board', id });
   assert.deepEqual(parseRoute('#/p/%E0%A4%A'), { name: 'home' }, 'a broken escape is the start page');
+});
+
+test('the lead’s decisions: a long one by its AI summary, each as "Decided: …", a name kept as it is', () => {
+  const [long, short] = vector('board')[1].result.boards[0].decisions;
+  assert.equal(validate('board.decision', long), null);
+  assert.equal(decisionLine(long), 'Decided: run the two small tasks side by side');
+  assert.equal(short.summary, null);
+  assert.equal(decisionLine(short), 'Decided: keep the sidebar pass for after onboarding');
+  assert.equal(decisionLine({ text: 'API keys stay in the vault', summary: null }), 'Decided: API keys stay in the vault');
+  assert.equal(decisionLine({ text: 'VibeSwitcher builds go first', summary: null }), 'Decided: VibeSwitcher builds go first');
+});
+
+test('the batch that cleared the board: its summary, what it cost, and each task with how it ended', () => {
+  const mark = vector('board')[1].result.boards[0].allDone;
+  assert.equal(validate('board.allDone', mark), null);
+  const card = allDoneCard(mark);
+  assert.equal(card.headline, mark.summary.headline);
+  assert.deepEqual(card.bullets, mark.summary.bullets);
+  assert.ok(card.cost.startsWith('Cost: 2 tasks, 1.5 h of worker time'), card.cost);
+  assert.equal(card.count, '3 tasks · 2 merged');
+  assert.deepEqual(card.tasks.map((task) => task.word), ['merged', 'merged', 'set aside']);
+  assert.equal(allDoneCard(null), null);
+  assert.equal(allDoneCard({ ...mark, summary: null, receipts: null, pricesAsOf: null }).cost, null);
+  assert.equal(validate('seen.args', { project: 'local:project:x' }), null);
 });

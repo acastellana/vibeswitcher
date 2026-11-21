@@ -65,7 +65,7 @@ public enum WireSchema {
                                   "session.attach.args", "session.attach.result", "session.usage.args", "session.usage.result",
                                   "chat.image.args", "chat.image.result",
 
-                                  "settings.args", "settings.result", "set.args", "set.result"]
+                                  "settings.args", "settings.result", "set.args", "set.result", "mail.args", "mail.result", "recent.args", "recent.result"]
     /// A keyed collection's entity.
     public static let collections = ["node": "node", "sessions": "session", "leads": "lead", "cards": "card", "boards": "board"]
 
@@ -144,7 +144,7 @@ public enum WireSchema {
             shape("draft.args", from: "the contract's §8", [field("card", .string), field("text", .string), field("version", .int)]),
             shape("draft.result", from: "Requests.draft", [field("applied", .map(.int)), field("card", .string)]),
             shape("draft.clear.args", from: "the contract's §8", [field("card", .string)]),
-            shape("seen.args", from: "Requests.seen (the parity gaps of 2026-11-19)", [field("session", .string)]),
+            shape("seen.args", from: "Requests.seen (the parity gaps of 2026-11-19)", [optional("session", .string), optional("project", .string)]),
             shape("session.draft.args", from: "Requests.sessionDraft (driving sessions, 2026-11-20)", [field("session", .string), field("text", .string),
                                                                                                     optional("images", strings), optional("now", .bool)]),
             shape("session.draft.result", from: "Requests.sessionDraft", [field("applied", .map(.int)), field("session", .string)]),
@@ -322,7 +322,17 @@ public enum WireSchema {
             shape("board", from: "BoardValue.value", [
                 field("project", .string), field("root", .string), field("baseBranch", Kind.string.orNull),
                 field("tasks", .list(.shape("board.task"))), field("counts", .shape("board.counts")), field("more", .int),
-                field("unreadable", Kind.string.orNull)]),
+                field("unreadable", Kind.string.orNull), field("decisions", .list(.shape("board.decision"))),
+                field("allDone", Kind.shape("board.allDone").orNull)]),
+            shape("board.allDone", from: "BoardValue.allDone", [
+                field("id", .string), field("at", .date), field("summary", Kind.shape("board.allDone.summary").orNull),
+                field("tasks", .list(.shape("board.allDone.task"))), field("merged", .int), field("receipts", Kind.string.orNull),
+                field("pricesAsOf", Kind.string.orNull), field("seen", .bool)]),
+            shape("board.allDone.summary", from: "BoardValue.allDone", [field("headline", .string), field("bullets", strings), field("byModel", .bool)]),
+            shape("board.allDone.task", from: "BoardValue.allDone", [field("title", .string),
+                                                                    field("outcome", .words(["merged", "folded", "abandoned", "reverted"]))]),
+            shape("board.decision", from: "BoardValue.decisions", [field("id", .string), field("at", Kind.date.orNull), field("text", .string),
+                                                                 field("why", Kind.string.orNull), field("summary", Kind.string.orNull)]),
             shape("board.counts", from: "BoardValue.value", BoardValue.groups.map { field($0, .int) }),
             shape("board.task", from: "BoardValue.task", [
                 field("id", .string), field("slug", .string), field("title", .string), field("status", taskStatus),
@@ -359,6 +369,20 @@ public enum WireSchema {
                                                                   field("project", Kind.shape("settings.project").orNull),
                                                                   field("leftOut", .list(.shape("settings.left"))),
                                                                   field("usage", .shape("node.usage"))]),
+            // The start page's recent projects (`recent`, 2026-11-21).
+            shape("recent.args", from: "Requests.recent", []),
+            shape("recent.result", from: "Requests.recent", [field("projects", .list(.shape("recent.project")))]),
+            shape("recent.project", from: "Requests.recent", [field("folder", .string), field("lastUsed", Kind.date.orNull),
+                                                              field("lead", Kind.string.orNull)]),
+            // Between leads (`mail`, a page's read since 2026-11-21: `NodeWire.Voice.webRead`).
+            shape("mail.args", from: "Requests.mail", [optional("folder", .string), optional("all", .bool)]),
+            shape("mail.result", from: "Requests.mail", [field("projects", .list(.shape("mail.project")))]),
+            shape("mail.project", from: "Requests.mail", [field("root", .string), field("project", .string), field("total", .int),
+                                                          field("messages", .list(.shape("mail.message")))]),
+            shape("mail.message", from: "Requests.mailValue", [
+                field("at", .date), field("from", .string), field("to", .string), field("received", .bool),
+                field("kind", Kind.words(LeadMail.Kind.allCases.map(\.rawValue)).orNull), field("text", .string),
+                field("outcome", .words(["delivered", "waiting", "refused", "no_lead", "off", "failed"])), field("sent", .bool), field("detail", .string)]),
             shape("set.args", from: "Requests.set", [optional("folder", .string), field("key", .string), field("value", .string)]),
             shape("set.result", from: "Requests.set", [field("key", .string), field("value", .string), field("was", .string),
                                                         field("scope", .words(["node", "project"])), field("project", Kind.string.orNull),
@@ -381,7 +405,9 @@ public enum WireSchema {
             item("tools", [field("summary", .string), field("tools", .list(.shape("chat.tool")))]),
             item("team", [field("text", .string), field("title", .string), field("sender", .shape("chat.sender")),
                           field("message", .words(["report", "audit", "witness", "userAnswer", "leadMessage", "notice", "teammatePost"])),
-                          field("task", Kind.string.orNull), field("part", Kind.shape("chat.part").orNull)]),
+                          field("task", Kind.string.orNull), field("part", Kind.shape("chat.part").orNull),
+                          // A long message's TL;DR (`TeamSummaryWatch.summarizeMessage`), once one came.
+                          Field(name: "summary", type: .string, optional: true, pending: "ChatStore (a TL;DR the engine wrote, added to the item)")]),
             shape("chat.sender", from: contractChat, [field("kind", .words(["user", "lead", "vibeSwitcher", "teammate"])),
                                                       field("name", Kind.string.orNull), field("task", Kind.string.orNull)]),
             shape("chat.part", from: contractChat, [field("index", .int), field("count", .int)]),

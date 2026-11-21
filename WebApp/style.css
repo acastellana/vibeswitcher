@@ -822,3 +822,16 @@ kbd { padding: 1px 6px; border-radius: 5px; box-shadow: inset 0 0 0 1px var(--li
   .board-blocker { margin-left: 28px; }
 }
 .board-task-dim.summary { font-style: italic; }
+.board-decisions { list-style: none; margin: 0; padding: 0; }
+.board-decision { display: flex; gap: 8px; justify-content: space-between; padding: 4px 0; }
+.note-gist { font-weight: 600; margin-bottom: 2px; }
+.mail-list { list-style: none; margin: 0; padding: 0; }
+.mail-message { padding: 8px 0; border-bottom: 1px solid var(--line, rgba(127,127,127,.2)); }
+.mail-head { font-size: 12px; opacity: .8; }
+.mail-way { font-weight: 600; }
+.mail-text { margin: 4px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.all-done { border: 1.5px solid var(--done, #2e9d5b); border-radius: 12px; padding: 10px 14px; }
+.all-done-headline { font-weight: 600; margin: 4px 0; }
+.all-done-bullets { margin: 0 0 4px 18px; padding: 0; }
+.all-done-cost { font-size: 12px; opacity: .8; margin: 4px 0; }
+.all-done-tasks li.merged { font-weight: 500; }

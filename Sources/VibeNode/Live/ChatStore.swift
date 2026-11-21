@@ -246,6 +246,11 @@ public final class ChatStore: @unchecked Sendable {
     private var reached: [String: Int] = [:]
     private var watching: Subscription?
     private var ticks: [Subscription] = []
+    /// The long messages' TL;DRs (`LeadEngine.messageSummaries`, by "session|item"), and what asks for one
+    /// (`LeadEngine.summarizeMessage`): a chat's `team` item carries its line as `summary` once one came.
+    private let summaries: Changes<String>?
+    private let ask: (@Sendable (String, String, TeamMessage) -> Void)?
+    private var summariesWatch: Subscription?
 
     /// One session's chat: its stream, the file it is read from, and who follows it.
     private final class Feed {
@@ -259,6 +264,9 @@ public final class ChatStore: @unchecked Sendable {
         var idleSince: TimeInterval?
         var reading = false
         var again = false
+        /// The items as last read, before any TL;DR is added (`decorated`), and the messages a TL;DR was asked for.
+        var raw: [(id: String, value: NodeWire.Value)] = []
+        var asked: Set<String> = []
 
         init(session: String, stream: ChatStream, follow: TranscriptFollow) {
             self.session = session
@@ -271,16 +279,43 @@ public final class ChatStore: @unchecked Sendable {
     /// session's `transcriptPath`). `now`: seconds, for the idle drop; `date`: an op's `at`.
     public init(queue: DispatchQueue, home: String, sessions: Changes<Session>,
                 now: @escaping @Sendable () -> TimeInterval = { Date().timeIntervalSince1970 },
-                date: @escaping @Sendable () -> Date = { Date() }, note: @escaping @Sendable (String) -> Void = { _ in }) {
+                date: @escaping @Sendable () -> Date = { Date() }, note: @escaping @Sendable (String) -> Void = { _ in },
+                summaries: Changes<String>? = nil, ask: (@Sendable (String, String, TeamMessage) -> Void)? = nil) {
         self.queue = queue
         self.home = home
         self.sessions = sessions
         self.now = now
         self.date = date
         self.note = note
+        self.summaries = summaries
+        self.ask = ask
         watching = sessions.subscribe(on: queue) { [weak self] batch in
             guard let self else { return }
             for change in batch { if let feed = self.feeds[change.id] { self.look(feed) } }
+        }
+        summariesWatch = summaries?.subscribe(on: queue) { [weak self] batch in
+            guard let self else { return }
+            let sessions = Set(batch.compactMap { $0.id.split(separator: "|", maxSplits: 1).first.map(String.init) })
+            for session in sessions { if let feed = self.feeds[session], feed.stream.loaded { feed.stream.take(self.decorated(feed)) } }
+        }
+    }
+
+    /// The feed's items, each long message's `team` item with its TL;DR as `summary` once one came.
+    private func decorated(_ feed: Feed) -> [(id: String, value: NodeWire.Value)] {
+        guard let lines = summaries?.values, !lines.isEmpty else { return feed.raw }
+        return feed.raw.map { item in
+            guard case .object(var fields) = item.value, fields["type"] == .string("team"),
+                  let line = lines["\(feed.session)|\(item.id)"] else { return item }
+            fields["summary"] = .string(BoardValue.line(line))
+            return (item.id, .object(fields))
+        }
+    }
+
+    /// A TL;DR asked for each of the latest `LeadEngine.messagesSummarized` long messages not asked for yet.
+    private func askSummaries(_ feed: Feed, _ long: [(id: String, message: TeamMessage)]) {
+        guard let ask else { return }
+        for (id, message) in long.suffix(LeadEngine.messagesSummarized) where feed.asked.insert(id).inserted {
+            ask(feed.session, id, message)
         }
     }
 
@@ -426,10 +461,15 @@ public final class ChatStore: @unchecked Sendable {
         let queue = self.queue
         reads.async { [weak self] in
             let items = follow.read()
+            let long = follow.long
             queue.async { [weak self] in
                 guard let self else { return }
                 feed.reading = false
-                if let items, self.feeds[feed.session] === feed, follow === feed.follow { feed.stream.take(items) }
+                if let items, self.feeds[feed.session] === feed, follow === feed.follow {
+                    feed.raw = items
+                    feed.stream.take(self.decorated(feed))
+                    self.askSummaries(feed, long)
+                }
                 if feed.again {
                     feed.again = false
                     if self.feeds[feed.session] === feed { self.read(feed) }
@@ -467,6 +507,8 @@ final class TranscriptFollow: @unchecked Sendable {
     private var made: [String: (item: ChatItem, value: NodeWire.Value)] = [:]
     private var values: [(id: String, value: NodeWire.Value)] = []
     private var readOnce = false
+    /// The messages VibeSwitcher handed over that are long enough for a TL;DR (`TeamMessage.needsSummary`), oldest first.
+    private(set) var long: [(id: String, message: TeamMessage)] = []
 
     init(url: URL, format: TranscriptReader.Format) {
         self.url = url
@@ -504,7 +546,9 @@ final class TranscriptFollow: @unchecked Sendable {
         log.append(events)
         var next: [String: (item: ChatItem, value: NodeWire.Value)] = [:]
         var list: [(id: String, value: NodeWire.Value)] = []
+        var long: [(id: String, message: TeamMessage)] = []
         for item in ChatTimeline.items(log.entries, newAfter: nil) {
+            if case .team(_, let message) = item, message.needsSummary { long.append((item.id, message)) }
             let value: NodeWire.Value
             if let known = made[item.id], known.item == item {
                 value = known.value
@@ -518,6 +562,7 @@ final class TranscriptFollow: @unchecked Sendable {
         }
         made = next
         values = list
+        self.long = long
         return list
     }
 }
