@@ -74,8 +74,27 @@ struct BoardTests {
                                    tasks: [LeadAllDone.Task(slug: "a", title: "A", outcome: .merged)])]
         old.allDone?[0].seenAt = WireVectors.boardNow.timeIntervalSince1970
         let older = BoardValue.value(project: "p", root: "/r", board: old, now: WireVectors.boardNow,
-                                     decisions: [BoardDecision(id: "0|An old decision", at: 0, text: "An old decision", why: "")])
-        for value in [WireVectors.boardValue, WireVectors.boardMoved, unreadable, older] {
+                                     decisions: [BoardDecision(id: "0.0|An old decision", at: 0, text: "An old decision", why: "")],
+                                     records: BoardRecords.Read(decisions: [LeadDecision(at: 0, text: "An old decision", why: "")]))
+        // The Team tab's records (`BoardRecords`): closed questions of each kind, and a board with nothing merged.
+        var asked = WireVectors.sampleBoard(now: WireVectors.boardNow.timeIntervalSince1970)
+        var answered = LeadQuestion(id: "q1", text: "Which colour?", options: ["red", "blue"])
+        answered.answer = "blue"
+        answered.answeredAt = 200
+        answered.task = "pricing-copy"
+        var withdrawn = LeadQuestion(id: "q2", text: "Rename it?", options: ["yes", "no"])
+        withdrawn.withdrawnAt = 300
+        withdrawn.withdrawReason = "Settled."
+        var decided = LeadQuestion(text: "Name it Parser?", options: ["Parser", "Reader"], proposal: "Parser", decideIn: 10, at: 1_000)
+        decided.autoDecidedAt = 1_600
+        asked.questions = [answered, withdrawn, decided]
+        // A merged task with its receipt: the batch's line under the scorecard.
+        let at = WireVectors.boardNow.timeIntervalSince1970 - 60
+        asked.tasks[4].receipt = LeadReceipt(ending: .merged, startedAt: at - 3600, endedAt: at, worked: 1800,
+                                             worker: LeadTokens(output: 10_000, sessions: 1, models: ["claude-opus-5-5"], cost: 0.25), verifier: nil)
+        let questioned = BoardValue.value(project: "p", root: "/r", board: asked, now: WireVectors.boardNow)
+        let nothingMerged = BoardValue.value(project: "p", root: "/r", board: LeadBoard(), now: WireVectors.boardNow)
+        for value in [WireVectors.boardValue, WireVectors.boardMoved, unreadable, older, questioned, nothingMerged] {
             #expect(WireSchema.check(value, as: "board", strict: true) { field, state in seen.insert("\(field) \(state)") } == nil)
         }
         let missed = WireSchema.coverage(of: ["board"]).subtracting(seen).sorted()
@@ -364,7 +383,15 @@ struct BoardTests {
             "Decisions",
             "  Decided: run the two small tasks side by side (5m ago)",
             "  Decided: keep the sidebar pass for after onboarding (30m ago)",
-        ], "\(lines.joined(separator: "\n"))")
+        ] + BoardText.records(WireVectors.boardValue, now: WireVectors.boardNow, calendar: utc), "\(lines.joined(separator: "\n"))")
+        // The Team tab's other records under them (2026-11-21).
+        let records = BoardText.records(WireVectors.boardValue, now: WireVectors.boardNow, calendar: utc)
+        #expect(records.first == "Scorecard", "\(records)")
+        #expect(records.last == "Files: .vibeswitcher/workflow.md, docs/lead/decisions.md, docs/lead/progress.md, docs/lead/incidents.md (not there yet)")
+        #expect(BoardText.question(.object(["state": .string("withdrawn"), "text": .string("Rename it?\nIt reads oddly."), "why": .string("Settled.")]))
+                == "  Withdrawn: Rename it? (Settled.)")
+        #expect(BoardText.question(.object(["state": .string("answered"), "text": .string("Which colour?"), "answer": .string("blue")]))
+                == "  Which colour? → blue")
         let unreadable = BoardValue.value(project: "p", root: "/r", board: nil, refusal: "the board isn't one this build reads", now: WireVectors.boardNow)
         #expect(BoardText.lines(unreadable).last == "  the board can't be shown: the board isn't one this build reads")
     }

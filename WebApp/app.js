@@ -14,6 +14,7 @@ import { sessionView } from './js/views/session.js';
 import { nodeView } from './js/views/node.js';
 import { boardView } from './js/views/board.js';
 import { settingsView, settingsHref } from './js/views/settings.js';
+import { statsView, statsHref } from './js/views/stats.js';
 import { mailView, mailHref } from './js/views/mail.js';
 import { startView } from './js/views/start.js';
 import { palette } from './js/views/palette.js';
@@ -56,13 +57,14 @@ const session = sessionView(app);
 const node = nodeView(app);
 const board = boardView(app);
 const settings = settingsView(app);
+const stats = statsView(app);
 const mail = mailView(app);
 const start = startView(app);
 const offline = h('div', { class: 'offline', role: 'status', hidden: true }, 'Reconnecting to the node…');
 // The node doesn't know this page, or dropped it: said once, quietly, with the one thing that fixes it. The rows it
 // had stay readable underneath.
 const unpaired = h('div', { class: 'offline signed-out', role: 'status', hidden: true });
-const main = h('main', { class: 'main' }, start.el, session.el, node.el, board.el, settings.el, mail.el);
+const main = h('main', { class: 'main' }, start.el, session.el, node.el, board.el, settings.el, stats.el, mail.el);
 const root = document.getElementById('app');
 const commandPalette = palette(app);
 root.replaceChildren(list.el, main, commandPalette.el, offline, unpaired, app.notifications.offer);
@@ -75,10 +77,11 @@ function route() {
   node.el.hidden = name !== 'node';
   board.el.hidden = name !== 'board';
   settings.el.hidden = name !== 'settings';
+  stats.el.hidden = name !== 'stats';
   mail.el.hidden = name !== 'mail';
   if (name === 'board') return; // the board names itself (views/board.js)
   const shown = store.state.sessions.get(ui.state.route.id);
-  document.title = name === 'session' && shown ? `${shown.title || 'Session'} · VibeSwitcher` : name === 'node' ? 'This node · VibeSwitcher' : name === 'settings' ? 'Settings · VibeSwitcher' : name === 'mail' ? 'Between leads · VibeSwitcher' : 'VibeSwitcher';
+  document.title = name === 'session' && shown ? `${shown.title || 'Session'} · VibeSwitcher` : name === 'node' ? 'This node · VibeSwitcher' : name === 'settings' ? 'Settings · VibeSwitcher' : name === 'stats' ? 'Statistics · VibeSwitcher' : name === 'mail' ? 'Between leads · VibeSwitcher' : 'VibeSwitcher';
 }
 ui.subscribe((what) => { if (what === 'route') route(); });
 store.subscribe('sessions', route);
@@ -190,6 +193,10 @@ function commands() {
     { title: 'This Node', about: 'Host, server, build and notices', icon: 'node', run: () => ui.go('#/node') },
     // The node's settings, and each lead's project's (views/settings.js).
     { title: 'Settings', about: 'Limits, Boost, the working policy', icon: 'settings', run: () => ui.go(settingsHref(null)) },
+    // This browser's terminal look (Settings › Terminal, views/termlook.js): the Mac's Appearance.
+    { title: 'Terminal Look', about: 'Theme, font, size, cursor and colours, in this browser', icon: 'terminal', run: () => ui.go(settingsHref(null)) },
+    // The Mac's Statistics window (views/stats.js).
+    ...(store.can('stats') ? [{ title: 'Statistics', about: 'Load, usage, merges, quality and cost, by project', icon: 'node', run: () => ui.go(statsHref('week')) }] : []),
     // What the projects' leads told each other (views/mail.js).
     { title: 'Between leads', about: 'The leads’ messages to each other', icon: 'chat', run: () => ui.go(mailHref) },
     ...[...store.state.leads.values()].filter((lead) => lead.root).map((lead) => ({ title: `Settings: ${lastPart(lead.root)}`, about: 'Its models, max_workers and review floor', icon: 'settings', run: () => ui.go(settingsHref(lead.project)) })),

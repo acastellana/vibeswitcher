@@ -33,7 +33,11 @@ public enum ServerStart {
     /// A line on the server's stderr, which the host's stderr is (the unit sends it to the journal).
     public static func say(_ line: String) {
         FileHandle.standardError.write(Data("vibeswitcher-server: \(line)\n".utf8))
+        heard.get()?(line)
     }
+
+    /// Who else hears each line: the health digest's last errors (`NodeHealth.heard`), once it is made.
+    static let heard = Locked<((String) -> Void)?>(nil)
 
     /// The rest of the start; never returns.
     public static func run(_ arguments: [String]) -> Never {
@@ -116,6 +120,13 @@ public enum ServerStart {
         let engine = LeadEngine(root: root, nodeRoot: parsed.nodeRoot.map { URL(fileURLWithPath: $0, isDirectory: true) }, link: link,
                                 clock: clock, sessions: sessions, options: options, note: say)
         requests.engine = engine
+        // The health digest (`NodeHealth`): the engine's queue watched from a thread of its own, its refreshes timed,
+        // the server's failing lines kept.
+        let health = NodeHealth(file: root.appendingPathComponent("health.json"))
+        requests.health = health
+        engine.health = health
+        heard.set { health.heard($0) }
+        health.watch(queue)
         requests.nodeRoot = parsed.nodeRoot
         // Where `build.switch` finds the builds: the account's own install folder on the node, a test's on a scratch node.
         requests.installRoot = accountHome.map { NodeFolders.defaultPrefix(accountHome: $0) } ?? parsed.testInstallRoot

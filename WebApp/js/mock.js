@@ -103,6 +103,27 @@ export function createMock(store, options = {}) {
       task('cache-static-assets', 'Cache the static assets', 'done', { since: ago(2400), merged: { commit: '8a3f1e2', at: ago(2400), tested: true } }),
       task('footer-links', 'Fix the footer links', 'done', { since: ago(3900), merged: { commit: 'c41d7b9', at: ago(3900), tested: true } }),
     ],
+    // The Team tab's records (the node's `BoardRecords`).
+    scorecard: { merged: 2, reverts: 0, mergedWithoutTests: 0, footnote: 'Over 2 merged tasks.', receipts: 'This batch: 2 tasks, 1.4 h of worker time, 3.1M tokens, est. $4.80; most expensive: Cache the static assets (est. $3.10).',
+      tiles: [{ value: '1.5', label: 'audit rounds to pass', note: null, help: 'The mean audit rounds a merged task took to pass.' },
+        { value: '—', label: 'pass the first audit', note: 'too few audited tasks (2)', help: 'The share of merged tasks that passed their first audit.' },
+        { value: '3 min', label: 'of yours per merged task', note: null, help: 'The minutes a merged task waited on you.' },
+        { value: '0', label: 'reverts', note: null, help: 'Merges undone since.' }] },
+    decisions: [
+      { id: 'mock-decision-1', summary: 'Keep the new hero', at: ago(600), text: 'Keep the new hero and drop the old one', why: 'Both were half done; the new one passes the page tests and marketing asked for it.' },
+      { id: 'mock-decision-2', summary: null, at: ago(2000), text: 'Cache the assets for a year with hashed names', why: 'A new build changes every name, so nothing stale is ever served.' },
+      { id: 'mock-decision-3', summary: null, at: ago(5000), text: 'Sync landing-base before the sidebar pass', why: 'The pass touches the same files; syncing first saves a second merge.' },
+      { id: 'mock-decision-4', summary: null, at: ago(9000), text: 'Run the page tests on every merge', why: 'Two merges broke the hero last week.' },
+    ],
+    answered: [
+      { id: 'q-cache', state: 'answered', text: 'Cache for a day or a year?', answer: 'A year, with hashed names', proposal: null, why: null, reworded: false, task: 'cache-static-assets', at: ago(2100) },
+      { id: 'q-footer', state: 'withdrawn', text: 'Should the footer link to the old blog?', answer: null, proposal: null, why: 'The blog moved; the link goes to the new one.', reworded: false, task: null, at: ago(4000) },
+    ],
+    files: [
+      { name: 'workflow.md', path: '.vibeswitcher/workflow.md', present: true }, { name: 'decisions.md', path: 'docs/lead/decisions.md', present: true },
+      { name: 'progress.md', path: 'docs/lead/progress.md', present: true }, { name: 'incidents.md', path: 'docs/lead/incidents.md', present: false },
+    ],
+    recordsDir: 'docs/lead',
   }]]);
 
   const cards = new Map(options.empty ? [] : [[CARD_LAUNCH, {
@@ -125,6 +146,11 @@ export function createMock(store, options = {}) {
 
   const node = {
     usage,
+    health: {
+      since: ago(3 * 3600 + 720), stalled: null, freezes: [{ at: ago(5400), seconds: 14 }], slowRefreshes: 2, slowestRefresh: 7,
+      lastSlowRefresh: ago(1800), serverRestarts: 0, refusedConnections: null, hostRestartAt: null, waiting: [],
+      errors: [{ at: ago(900), line: 'prompt audit: /home/u/.vibeswitcher/prompt-audit.json not written: disk full' }],
+    },
     node: 'local', epoch, root: `${HOME}/.vibeswitcher`, home: HOME,
     server: { pid: 48213, startedAt: ago(3 * 3600 + 720), commit: 'f62aef61' },
     host: {
@@ -632,6 +658,56 @@ export function createMock(store, options = {}) {
       const turn = (id, input, cached, output, cost) => ({ id, at: ago(140), partial: false, tokens: { input, cached, output }, cost });
       return { ok: true, result: { turns: [turn('t1', 182_400, 171_000, 3_900, 0.41), turn('t2', 96_200, 90_100, 1_250, 0.18)], count: 2, partial: false,
         tokens: { input: 278_600, cached: 261_100, output: 5_150 }, cost: 0.59, costPartial: false } };
+    }
+    // The Statistics window (`stats`): the Mac's words, made up.
+    if (message.kind === 'stats') {
+      const range = ['today', 'week', 'month'].includes(args.range) ? args.range : 'week';
+      const n = { today: 1, week: 7, month: 30 }[range];
+      const fig = (label, value, detail = null, more = {}) => ({ label, value, detail, help: null, meter: null, trend: [], ...more });
+      const days = Array.from({ length: n }, (_, i) => (i % 5 === 3
+        ? { label: `day ${i + 1}`, value: null, text: 'not counted' }
+        : { label: `day ${i + 1}`, value: 1200 + ((i * 937) % 2900), text: `${((1200 + ((i * 937) % 2900)) / 1000).toFixed(1)} an hour` }));
+      const figure = (label, value, detail, help) => fig(label, value, detail, { help });
+      return { ok: true, result: {
+        range, title: { today: 'Today', week: '7 days', month: '30 days' }[range], span: range === 'today' ? 'Today' : `The last ${n} days`,
+        mac: [
+          fig('Load', 'median 6.2 · p90 14 · max 31', '12 min at 24 or more, 0 min at 36 or more · 24 cores'),
+          fig('Freezes per hour', '0.4', `${3 * n} freezes in ${8 * n} h counted`, { help: 'Times the main thread stopped answering for 2 s or more, an hour', trend: days }),
+          fig('Boost hours', `${2 * n} h`, 'off now'),
+          fig('Merges per hour', '0.31', `${4 * n} landed of ${5 * n} merge runs`),
+          fig('Claude weekly', '42%', 'on pace · resets Monday at 9:00 AM', { meter: { used: 420, elapsed: 520, reached: false } }),
+          fig('Claude 5-hour', '81%', 'ahead of pace', { meter: { used: 810, elapsed: 600, reached: false } }),
+          fig('Codex usage', 'Not recorded'),
+        ],
+        columns: ['Merged', 'Abandoned', 'Audits · rounds', 'Flakes', 'Worker hours', 'Cost', 'Codex share', 'Median to merge'],
+        projects: [
+          { id: SITE, name: 'example-site', note: null, cells: [String(3 * n), '1', `${2 * n} · ${3 * n}`, '2', `${(4.5 * n).toFixed(1)} h`, `$${(11.2 * n).toFixed(2)}`, '12%', '2.4 h'] },
+          { id: API, name: 'example-api', note: 'no archive: archived tasks not counted', cells: [String(n), '0', `${n} · ${n}`, 'Not recorded', `${(1.5 * n).toFixed(1)} h`, `≥ $${(3.1 * n).toFixed(2)}`, '–', '1.1 h'] },
+        ],
+        total: { id: 'total', name: 'Total', note: null, cells: [String(4 * n), '1', `${3 * n} · ${4 * n}`, '2', `${6 * n} h`, `≥ $${(14.3 * n).toFixed(2)}`, '9%', '2 h'] },
+        quality: {
+          sections: [
+            { title: 'Quality', figures: [figure('First-audit pass rate', '67%', 'of 9 audited merges', 'The share of audited merges that passed their first audit.'), figure('Important findings per audited merge', '0.8', null, null)] },
+            { title: 'Autonomy', figures: [figure('Needed nobody', '58%', 'no question, no lead message after start, no re-roll', null), figure('Questions per merge', '0.42', null, null)] },
+            { title: 'Where time goes', figures: [figure('Median to merge', '2 h', null, null), figure('Waiting on you per merge', '3 min', null, null)] },
+            { title: 'Cost', figures: [figure('Cost per merged task', '$3.58', 'worker and verifier', null)] },
+          ],
+          columns: ['Merged', 'First audit', 'Rounds to pass', 'Important / audited', 'First-try merge', 'Questions / task', 'Needed nobody', 'Median to merge', 'Cost / task'],
+          columnHelp: [], modelsNote: null,
+          breakdown: [
+            { name: 'Claude', model: false, cells: ['24', '70%', '1.4', '0.7', '80%', '0.4', '60%', '2 h', '$3.80'] },
+            { name: 'claude-opus-5-5', model: true, cells: ['20', '72%', '1.3', '0.6', '82%', '0.4', '62%', '1.9 h', '$4.10'] },
+            { name: 'Codex', model: false, cells: ['4', '50%', '2', '1.2', '60%', '0.5', '50%', '2.6 h', '$1.90'] },
+          ],
+          trend: ['Sep 29', 'Oct 6', 'Oct 13', 'Oct 20', 'Oct 27', 'Nov 3', 'Nov 10', 'Nov 17'].map((label, i) => ({ label, merged: 3 + i * 2, passRate: `${50 + i * 4}%`, passBar: 500 + i * 40, cost: `$${(5 - i * 0.3).toFixed(2)}`, costBar: 1000 - i * 60 })),
+          compared: { title: 'Compared with working solo', badge: 'Estimate', method: 'Estimated, not measured: nothing was run solo.', columns: ['All', 'Claude', 'Codex'],
+            groups: [{ title: 'What it costs', rows: [{ label: 'Process cost', help: '', cells: [{ value: '+38%', detail: 'over 22 merges' }, { value: '+41%', detail: null }, { value: '+20%', detail: null }] }] }] },
+        },
+      } };
+    }
+    // A session's dev servers (2026-11-21).
+    if (message.kind === 'session.ports') {
+      return { ok: true, result: { ports: [{ port: 5173, address: '127.0.0.1', pid: 48311, program: 'node', url: 'http://localhost:5173/' }] } };
     }
     if (message.kind === 'chat.image') {
       if (args.id !== SHOT.id) return { ok: false, error: { code: 'gone', message: 'no such image in that session’s chat' } };

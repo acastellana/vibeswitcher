@@ -44,7 +44,9 @@ struct BoardNodeTests {
         let lines = try #require(printed?.output.split(separator: "\n").map(String.init))
         #expect(lines.contains("Needs attention") && lines.contains("Running") && lines.contains("Waiting") && lines.contains("Done today"), "\(lines)")
         #expect(lines.contains { $0.hasPrefix("  Blocked ") && $0.hasSuffix("— Which plan names do we launch with?") }, "\(lines)")
-        #expect(lines.last == "1 needs attention · 2 running · 1 waiting · 1 done today", "\(lines)")
+        // The count line ends the tasks; the Team tab's records follow it (2026-11-21).
+        #expect(lines.contains("1 needs attention · 2 running · 1 waiting · 1 done today"), "\(lines)")
+        #expect(lines.contains("Scorecard") && lines.last?.hasPrefix("Files: ") == true, "\(lines)")
 
         let json = try await node.run(["board", repo.path, "--json"])
         let result = try #require(try JSONSerialization.jsonObject(with: Data(json.output.utf8)) as? [String: Any], "\(json.output)\(json.errors)")

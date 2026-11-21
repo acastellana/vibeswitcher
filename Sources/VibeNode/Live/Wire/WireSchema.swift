@@ -63,7 +63,7 @@ public enum WireSchema {
                                   "session.draft.args", "session.draft.result", "session.draft.clear.args",
                                   "session.presets.args", "session.presets.result", "session.complete.args", "session.complete.result",
                                   "session.attach.args", "session.attach.result", "session.usage.args", "session.usage.result",
-                                  "chat.image.args", "chat.image.result",
+                                  "chat.image.args", "chat.image.result", "stats.args", "stats.result", "session.ports.args", "session.ports.result",
 
                                   "settings.args", "settings.result", "set.args", "set.result", "mail.args", "mail.result", "recent.args", "recent.result"]
     /// A keyed collection's entity.
@@ -164,6 +164,10 @@ public enum WireSchema {
             shape("session.completion", from: "SessionCompletions.value", [field("insert", .string), field("title", .string), field("subtitle", .string)]),
             // A session's tokens and cost (the inspector, 2026-11-21): a read of its transcript's tail. `cost` is in US
             // dollars, a number (an int when whole).
+            shape("session.ports.args", from: "Requests.sessionPorts (the dev pages row, 2026-11-21)", [field("session", .string)]),
+            shape("session.ports.result", from: "DevPorts.value", [field("ports", .list(.shape("session.port")))]),
+            shape("session.port", from: "DevPorts.value", [field("port", .int), field("address", .string), field("pid", .int),
+                                                           field("program", Kind.string.orNull), field("url", .string)]),
             shape("session.usage.args", from: "ChatStore.usage (the inspector, 2026-11-21)", [field("session", .string)]),
             shape("session.usage.result", from: "ChatStore.usageValue", [
                 field("turns", .list(.shape("session.usage.turn"))), field("count", .int), field("partial", .bool),
@@ -172,6 +176,35 @@ public enum WireSchema {
                 field("id", .string), field("at", Kind.date.orNull), field("partial", .bool), field("tokens", Kind.shape("session.usage.tokens").orNull),
                 field("cost", Kind.any.orNull)]),
             shape("session.usage.tokens", from: "ChatStore.usageValue", [field("input", .int), field("cached", .int), field("output", .int)]),
+            // The Statistics window from the node (2026-11-21): the Mac's words; bars per mille, a trend day's value in thousandths.
+            shape("stats.args", from: "Requests.stats (2026-11-21)", [optional("range", .words(["today", "week", "month"]))]),
+            shape("stats.result", from: "StatisticsWire.value", [
+                field("range", .words(["today", "week", "month"])), field("title", .string), field("span", .string),
+                field("mac", .list(.shape("stats.figure"))), field("columns", strings), field("projects", .list(.shape("stats.row"))),
+                field("total", Kind.shape("stats.row").orNull), field("quality", Kind.shape("stats.quality").orNull)]),
+            shape("stats.figure", from: "StatisticsWire.figure", [
+                field("label", .string), field("value", .string), field("detail", Kind.string.orNull), field("help", Kind.string.orNull),
+                field("meter", Kind.shape("stats.meter").orNull), field("trend", .list(.shape("stats.day")))]),
+            shape("stats.meter", from: "StatisticsWire.figure", [field("used", .int), field("elapsed", Kind.int.orNull), field("reached", .bool)]),
+            shape("stats.day", from: "StatisticsWire.figure", [field("label", .string), field("value", Kind.int.orNull), field("text", .string)]),
+            shape("stats.row", from: "StatisticsWire.row", [field("id", .string), field("name", .string), field("note", Kind.string.orNull),
+                                                             field("cells", strings)]),
+            shape("stats.quality", from: "StatisticsWire.quality", [
+                field("sections", .list(.shape("stats.section"))), field("columns", strings), field("columnHelp", strings),
+                field("breakdown", .list(.shape("stats.breakdown"))), field("modelsNote", Kind.string.orNull), field("trend", .list(.shape("stats.week"))),
+                field("compared", .shape("stats.compared"))]),
+            shape("stats.section", from: "StatisticsWire.quality", [field("title", .string), field("figures", .list(.shape("stats.figure")))]),
+            shape("stats.breakdown", from: "StatisticsWire.quality", [field("name", .string), field("model", .bool), field("cells", strings)]),
+            shape("stats.week", from: "StatisticsWire.quality", [
+                field("label", .string), field("merged", .int), field("passRate", .string), field("passBar", Kind.int.orNull), field("cost", .string),
+                field("costBar", Kind.int.orNull)]),
+            shape("stats.compared", from: "StatisticsWire.quality", [
+                field("title", .string), field("badge", .string), field("method", .string), field("columns", strings),
+                field("groups", .list(.shape("stats.group")))]),
+            shape("stats.group", from: "StatisticsWire.quality", [field("title", .string), field("rows", .list(.shape("stats.comparedRow")))]),
+            shape("stats.comparedRow", from: "StatisticsWire.quality", [field("label", .string), field("help", .string),
+                                                                         field("cells", .list(.shape("stats.cell")))]),
+            shape("stats.cell", from: "StatisticsWire.quality", [field("value", .string), field("detail", Kind.string.orNull)]),
             // An image of a session's chat, a part of its bytes at a time (the chat's images, 2026-11-21): a read.
             shape("chat.image.args", from: "ChatStore.image (the chat's images, 2026-11-21)", [
                 field("session", .string), field("id", .string), optional("offset", .int)]),
@@ -191,7 +224,15 @@ public enum WireSchema {
                 field("host", .shape("node.host")), field("rule", .shape("node.rule")), field("cards", .shape("node.cards")),
                 field("accepted", .list(.shape("node.accepted"))), field("notices", strings),
                 field("restart", Kind.shape("node.restart").orNull), field("reopen", .list(.shape("node.reopen"))), field("ended", .list(.shape("node.ended"))),
-                field("builds", Kind.any.orNull), field("web", .shape("node.web")), field("usage", Kind.shape("node.usage").orNull)]),
+                field("builds", Kind.any.orNull), field("web", .shape("node.web")), field("usage", Kind.shape("node.usage").orNull),
+                optional("health", .shape("node.health"))]),
+            shape("node.health", from: "NodeHealth.value (2026-11-21)", [
+                field("since", .date), field("stalled", Kind.int.orNull), field("freezes", .list(.shape("node.health.freeze"))),
+                field("slowRefreshes", .int), field("slowestRefresh", Kind.int.orNull), field("lastSlowRefresh", Kind.date.orNull),
+                field("serverRestarts", Kind.int.orNull), field("refusedConnections", Kind.int.orNull), field("hostRestartAt", Kind.date.orNull),
+                field("waiting", strings), field("errors", .list(.shape("node.health.error")))]),
+            shape("node.health.freeze", from: "NodeHealth.value", [field("at", .date), field("seconds", .int)]),
+            shape("node.health.error", from: "NodeHealth.value", [field("at", .date), field("line", .string)]),
             shape("node.server", from: "Requests.statusValue", [field("pid", .int), field("startedAt", .date), field("commit", .string)]),
             shape("node.host", from: "Requests.statusValue", [
                 field("startedAt", Kind.date.orNull), field("pid", Kind.int.orNull), field("state", .string),
@@ -323,7 +364,10 @@ public enum WireSchema {
                 field("project", .string), field("root", .string), field("baseBranch", Kind.string.orNull),
                 field("tasks", .list(.shape("board.task"))), field("counts", .shape("board.counts")), field("more", .int),
                 field("unreadable", Kind.string.orNull), field("decisions", .list(.shape("board.decision"))),
-                field("allDone", Kind.shape("board.allDone").orNull)]),
+                field("allDone", Kind.shape("board.allDone").orNull),
+                // The Team tab's records (2026-11-21, `BoardRecords`).
+                field("scorecard", Kind.shape("board.scorecard").orNull), field("answered", .list(.shape("board.question"))),
+                field("files", .list(.shape("board.file"))), field("recordsDir", Kind.string.orNull)]),
             shape("board.allDone", from: "BoardValue.allDone", [
                 field("id", .string), field("at", .date), field("summary", Kind.shape("board.allDone.summary").orNull),
                 field("tasks", .list(.shape("board.allDone.task"))), field("merged", .int), field("receipts", Kind.string.orNull),
@@ -331,9 +375,20 @@ public enum WireSchema {
             shape("board.allDone.summary", from: "BoardValue.allDone", [field("headline", .string), field("bullets", strings), field("byModel", .bool)]),
             shape("board.allDone.task", from: "BoardValue.allDone", [field("title", .string),
                                                                     field("outcome", .words(["merged", "folded", "abandoned", "reverted"]))]),
+            // The lead's decisions (`BoardRecords`, read with no link followed), each with its AI line when a long one has one.
             shape("board.decision", from: "BoardValue.decisions", [field("id", .string), field("at", Kind.date.orNull), field("text", .string),
                                                                  field("why", Kind.string.orNull), field("summary", Kind.string.orNull)]),
             shape("board.counts", from: "BoardValue.value", BoardValue.groups.map { field($0, .int) }),
+            shape("board.scorecard", from: "BoardRecords.scorecard", [
+                field("merged", .int), field("reverts", .int), field("mergedWithoutTests", .int), field("tiles", .list(.shape("board.tile"))),
+                field("footnote", Kind.string.orNull), field("receipts", Kind.string.orNull)]),
+            shape("board.tile", from: "BoardRecords.scorecard", [field("value", .string), field("label", .string), field("note", Kind.string.orNull),
+                                                                  field("help", .string)]),
+            shape("board.question", from: "BoardRecords.question", [
+                field("id", .string), field("state", .words(["answered", "withdrawn", "autoDecided"])), field("text", .string),
+                field("answer", Kind.string.orNull), field("proposal", Kind.string.orNull), field("why", Kind.string.orNull),
+                field("reworded", .bool), field("task", Kind.string.orNull), field("at", .date)]),
+            shape("board.file", from: "BoardRecords.fields", [field("name", .string), field("path", .string), field("present", .bool)]),
             shape("board.task", from: "BoardValue.task", [
                 field("id", .string), field("slug", .string), field("title", .string), field("status", taskStatus),
                 field("group", .words(BoardValue.groups)), field("state", .string), field("line", Kind.string.orNull),

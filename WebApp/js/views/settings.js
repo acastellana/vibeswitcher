@@ -9,6 +9,7 @@ import { icon } from '../marks.js';
 import { tilde, lastPart } from '../words.js';
 import { copyLine } from './cards.js';
 import { usageGroup } from './node.js';
+import { terminalLookSection } from './termlook.js';
 import { settingSections, setLine, draftProblem, shownValue, settingMatches } from '../settings.js';
 
 // How often the open page reads the settings again (a `set` from a terminal shows by then).
@@ -89,11 +90,13 @@ export function settingsView(app) {
   const search = h('input', { class: 'setting-search', type: 'search', placeholder: 'Search settings', 'aria-label': 'Search settings',
     spellcheck: 'false', autocomplete: 'off', oninput: (event) => { query = event.target.value; drawn = ''; render(true); } });
   const body = h('div', { class: 'node-column settings-column' });
+  // This browser's own: the terminal's look (views/termlook.js), drawn apart from the node's settings.
+  const terminalLook = terminalLookSection();
   const el = h('section', { class: 'node settings', 'aria-label': 'Settings' },
     h('header', { class: 'head' },
       h('a', { class: 'back icon-button', href: '#/node', 'aria-label': 'This node' }, icon('back', 16)),
       h('div', { class: 'head-text' }, h('div', { class: 'head-line' }, h('h1', { class: 'head-title' }, 'Settings'), picker))),
-    h('div', { class: 'pane node-pane' }, search, body));
+    h('div', { class: 'pane node-pane' }, search, body, h('div', { class: 'node-column settings-column' }, terminalLook.el)));
   // Per key: the value being drafted (its field open). Kept while the page reads the settings again.
   const editing = new Map();
   let result = null;
@@ -188,6 +191,7 @@ export function settingsView(app) {
   store.subscribe('connection', () => { if (ui.state.route.name === 'settings' && store.state.connection === 'live') load(); });
   function entered() {
     clearInterval(timer);
+    if (ui.state.route.name === 'settings') terminalLook.update();
     timer = null;
     if (ui.state.route.name !== 'settings') return;
     const id = project();

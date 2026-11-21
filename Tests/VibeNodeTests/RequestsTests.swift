@@ -210,8 +210,12 @@ struct RequestsTests {
                                   "shells",
                                   // A session's tokens and cost, an image of its chat (2026-11-21).
                                   "session.usage", "chat.image",
+                                  // The Statistics window's figures (2026-11-21).
+                                  "stats",
                                   // The start page's recent projects (2026-11-21), the user's or a page's.
-                                  "recent"]
+                                  "recent",
+                                  // A session's dev servers (2026-11-21).
+                                  "session.ports"]
         let changes: Set<String> = ["stop", "lead", "answer", "hold", "tell", "config.accept", "base.accept", "base.keep", "hooks.install", "hooks.remove", "build.switch",
                                     "draft", "draft.clear", "web.open", "web.revoke", "term.open", "term.close",
                                     // Driving an ordinary session (2026-11-20).

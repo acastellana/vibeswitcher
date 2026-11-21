@@ -347,7 +347,9 @@ public enum SessionPresets {
     static func value(_ listed: Listed, key: SymmetricKey = SessionPresets.key, values: Bool = false) -> NodeWire.Value {
         let preset = listed.preset
         var fields: [String: NodeWire.Value] = [
-            "name": .string(preset.name), "kind": .string(preset.kind.rawValue), "command": .string(preset.command),
+            "name": .string(preset.name), "kind": .string(preset.kind.rawValue),
+            // A page sees it masked (`CommandMask`, the security review of 2026-11-21); a terminal's confirmation, whole.
+            "command": .string(values ? preset.command : CommandMask.masked(preset.command)),
             "env": .array(preset.env.keys.sorted().map(NodeWire.Value.string)), "keepShell": .bool(preset.keepShell),
             "project": .bool(listed.project), "default": .bool(listed.isDefault), "builtIn": .bool(listed.builtIn),
             "digest": .string(digest(preset, key: key)), "refused": listed.refusal.map(NodeWire.Value.string) ?? .null,

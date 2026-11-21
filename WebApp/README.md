@@ -56,12 +56,12 @@ Screenshots of each screen, light and dark, desktop and phone, are in `shots/`.
 | `js/terminal.js` | A session's terminal over the socket (the contract's §9): the binary frames, and the stream's life (open, the replay drawn whole, live, resync, reconnect, close). |
 | `vendor/` | xterm.js and its fit add-on, at the versions and hashes `vendor/README.md` records; nothing else is vendored. |
 | `js/notify.js` | The browser's notifications while the page is open (a card opens, a session's prompt waits, a lead stops), asked once and toggled on This node; the title bar's count of what needs you. |
-| `js/images.js` | A chat's pictures: their bytes asked of the node (`chat.image`) a part at a time, shown as object URLs, the newest 60 kept. |
+| `js/images.js` | A chat's pictures: their bytes asked of the node (`chat.image`) a part at a time, shown as object URLs; the 400 lately used kept, 96 MB at most. |
 | `js/composing.js` | The composer's word at the caret (`/` and `@`, as the app's composer finds it) and an image's parts for `session.attach`. In the box, `/` and `@` complete from the node (`session.complete`); a pasted or dropped image goes to the node and the draft names it; the messages the node holds behind a question show over the box. |
 | `js/settings.js` | The settings' parts with no page in them: grouped by section, a change's `vibeswitcher set` line quoted as the shell needs, what a draft is checked against. |
 | `js/push.js` | The push a lead asks for (the lead's `push`), in words: what goes where, its commits, and the two lines that settle it in a terminal; the card heads the lead's question stack. Nothing on the page pushes. |
 | `js/activity.js` | The inspector's Activity, made from a chat's items: files changed with their line counts, commands run. |
-| `js/views/` | `sidebar`, `session` (header and panes), `terminal` (the session's screen in xterm.js, where the node opens one), `chat`, `cards`, `inspector` (Team, Overview, Activity), `lead` (strip and the Team tab's tasks), `node`, `settings`, `start`, `palette`. |
+| `js/views/` | `sidebar`, `session` (header and panes), `terminal` (the session's screen in xterm.js, where the node opens one), `chat`, `cards`, `inspector` (Team, Overview, Activity), `lead` (strip and the Team tab's tasks), `records` (under the tasks, on the Team tab and the board page: the scorecard, decisions, answered and withdrawn questions, files), `termlook` (Settings › Terminal, this browser's: the terminal's look, `js/termlook.js`), `board`, `stats` (Statistics, `#/stats`: the node's `stats`, the Mac's window's words), `node`, `settings`, `start`, `palette`. |
 
 ## Keys
 
@@ -102,7 +102,7 @@ end and ⌥⌘0 open and close it.
 | Overview › Status: State, Since, Running, and what it says | `shownStatus`, `since`, `activity`, `detail` |
 | Overview › Place: Folder, Runs in | `cwd` (as `~/…` with the node's `home`), `hosted` |
 | Overview › Time: Started, Running for | `startedAt` |
-| Overview › Place: Branch | `branch` (the node reads `GitBranch.current` at the session's changes) |
+| Overview › Place: Branch | `branch` (the node reads it at the session's changes, off its queue: `NodeGitBranch`, no link followed, a ref-shaped value only) |
 | Overview › Agent: Agent, Session, Process, Command, Size | `agent`, `agentSession`, `pid` and `terminal`, the host's `command` (credentials masked) and `size: { cols, rows }` |
 | Overview › Usage: Tokens, Cost, Turns | `session.usage`, asked as the tab shows and every 15 s while it does: the transcript's last 2 MB read by the Mac's `ActivityFeed` (`partial` when the conversation began before them; `costPartial` when some turns carried no cost) |
 | Overview › Team: Role, Lead, Task | `role`; `lead` (the project's id) and `boardTask` (a worker's or verifier's task slug on the board; the wire's `task` is what it works on, in words) |
@@ -123,7 +123,7 @@ against written), and the Team tab's decisions, scorecard, answered questions an
   answers a part (`{ mediaType, bytes, offset, data }`, base64, 192 KB of bytes at most) of an image the session's own
   chat holds, found by its id; never a path, only a PNG, JPEG, GIF or WebP its bytes agree with, at most 8 MB.
   `js/images.js` asks two images at a time, joins the parts into a `Blob` and shows its object URL (the CSP's
-  `img-src 'self' blob:`, nothing else), and keeps the newest 60. Tapped, a picture opens wide. Where the node takes no
+  `img-src 'self' blob:`, nothing else), and keeps the 400 lately used (96 MB at most). Tapped, a picture opens wide. Where the node takes no
   `chat.image`, the row says the image's type and size.
 - **A row's actions** (over it on hover, beside it on a touch screen): a prompt's Copy, Edit in Composer (the box holds
   the text; nothing is sent) and Send Again (a `session.draft`, as every message this page leaves); a reply's Copy as

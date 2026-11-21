@@ -6,8 +6,8 @@
 //
 // What the program in the session can't do from here (the live plan's Security): write the clipboard (OSC 52 is
 // swallowed; xterm.js has no handler for it, and none is added), open a link (OSC 8 hyperlinks are swallowed and no link
-// add-on is loaded: an address is text), set anything outside the pane (titles are swallowed; nothing listens to the
-// bell, and xterm.js plays no sound). What the emulator answers to a program's queries goes up as input and the node
+// add-on is loaded: an address is text), set anything outside the pane (titles are swallowed; the bell only flashes the pane or
+// plays a short tone, as this browser chose, throttled). What the emulator answers to a program's queries goes up as input and the node
 // cuts it out (TerminalReplies): only the host's parser answers.
 //
 // The renderer is xterm.js's DOM one. It writes some of its CSS into <style> elements and a truecolor cell's colour into
@@ -15,33 +15,23 @@
 // hands them to script-made CSS, which the policy doesn't govern, so the policy stays as it was and a terminal logs
 // nothing. The text is xterm.js's, built from this file's options and colours the parser has already turned into
 // numbers: nothing the program prints becomes CSS.
+//
+// Its look is this browser's (js/termlook.js, Settings › Terminal: the Mac's Appearance, its defaults): theme, font,
+// size, cursor, colours, scrollback, Option as Meta, the bell (a flash of the pane, or a short tone, at most one a
+// `BELL_GAP` ms). A change shows at once in an open terminal. Watching keeps its own cursor (an underline, still).
 
 import { h, setText } from '../dom.js';
 import { icon } from '../marks.js';
 import { createTerminal, clampSize } from '../terminal.js';
 import { takeXtermStyles } from '../xtermstyle.js';
-
-const FONT = 'ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace';
-
-// The page's own colours (style.css), and a calm ANSI palette in each look, each at least readable on its background.
-const THEMES = {
-  light: {
-    background: '#ffffff', foreground: '#1d1d1f', cursor: '#1d1d1f', cursorAccent: '#ffffff',
-    selectionBackground: 'rgba(10, 102, 214, 0.2)', selectionInactiveBackground: 'rgba(0, 0, 0, 0.08)',
-    scrollbarSliderBackground: 'rgba(0, 0, 0, 0.14)', scrollbarSliderHoverBackground: 'rgba(0, 0, 0, 0.24)', scrollbarSliderActiveBackground: 'rgba(0, 0, 0, 0.3)',
-    black: '#1d1d1f', red: '#c4001a', green: '#1a7330', yellow: '#8a5a00', blue: '#0a66d6', magenta: '#8e3bbf', cyan: '#0b6e6a', white: '#8e8e93',
-    brightBlack: '#5e5e62', brightRed: '#d9302c', brightGreen: '#248a3d', brightYellow: '#9c6b00', brightBlue: '#2f7fe0', brightMagenta: '#a550d6', brightCyan: '#148a85', brightWhite: '#636366',
-  },
-  dark: {
-    background: '#1c1c1e', foreground: '#f2f2f4', cursor: '#f2f2f4', cursorAccent: '#1c1c1e',
-    selectionBackground: 'rgba(74, 160, 255, 0.3)', selectionInactiveBackground: 'rgba(255, 255, 255, 0.1)',
-    scrollbarSliderBackground: 'rgba(255, 255, 255, 0.16)', scrollbarSliderHoverBackground: 'rgba(255, 255, 255, 0.26)', scrollbarSliderActiveBackground: 'rgba(255, 255, 255, 0.32)',
-    black: '#3a3a3c', red: '#ff7a72', green: '#30d158', yellow: '#ffd60a', blue: '#4aa0ff', magenta: '#c98bff', cyan: '#5ed3cc', white: '#d1d1d6',
-    brightBlack: '#8e8e93', brightRed: '#ff9f99', brightGreen: '#5ee07f', brightYellow: '#ffe55c', brightBlue: '#7bbeff', brightMagenta: '#dcb0ff', brightCyan: '#8ae6e0', brightWhite: '#ffffff',
-  },
-};
+import { look as terminalLook, onLook, xtermOptions } from '../termlook.js';
 
 const darkQuery = globalThis.matchMedia?.('(prefers-color-scheme: dark)');
+// How far apart two bells are at the most often (a program ringing in a loop rings this often).
+const BELL_GAP = 400;
+let lastBell = 0;
+let tones = null;
+
 function look() {
   const chosen = document.documentElement.dataset.theme;
   if (chosen === 'dark' || chosen === 'light') return chosen;
@@ -92,10 +82,11 @@ export function terminalView(app) {
     if (!making) {
       making = loadXterm().then(({ Terminal, FitAddon }) => {
         term = new Terminal({
-          fontFamily: FONT, fontSize: 12.5, lineHeight: 1.2, theme: THEMES[look()], cursorBlink: false, cursorStyle: 'block',
-          cursorInactiveStyle: 'outline', scrollback: 4000, allowProposedApi: false, minimumContrastRatio: 1, linkHandler: null,
+          ...xtermOptions(terminalLook(), look() === 'dark'), lineHeight: 1.2,
+          cursorInactiveStyle: 'outline', allowProposedApi: false, minimumContrastRatio: 1, linkHandler: null,
           drawBoldTextInBrightColors: false, rightClickSelectsWord: false,
         });
+        term.onBell(() => ring());
         // The program's reach ends at the pane: no clipboard (52), no link (8), no title (0, 1, 2).
         for (const code of [0, 1, 2, 8, 52]) term.parser.registerOscHandler(code, () => true);
         fit = new FitAddon();
@@ -131,9 +122,46 @@ export function terminalView(app) {
     });
   }
 
-  darkQuery?.addEventListener?.('change', () => { if (term) term.options.theme = THEMES[look()]; });
-  new MutationObserver(() => { if (term) term.options.theme = THEMES[look()]; })
-    .observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+  // The look, applied again: the page's light or dark changed, or this browser's preferences did.
+  function restyle() {
+    if (!term) return;
+    const options = xtermOptions(terminalLook(), look() === 'dark');
+    const watched = !!term.options.disableStdin;
+    for (const [name, value] of Object.entries(options)) {
+      if (watched && (name === 'cursorStyle' || name === 'cursorBlink')) continue;
+      term.options[name] = value;
+    }
+    refit();
+  }
+  darkQuery?.addEventListener?.('change', restyle);
+  new MutationObserver(restyle).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+  onLook(restyle);
+
+  // The bell, as this browser's look says: a flash of the pane, a short tone, or nothing; one a `BELL_GAP` at most.
+  function ring() {
+    const bell = terminalLook().bell;
+    const now = Date.now();
+    if (bell === 'none' || now - lastBell < BELL_GAP) return;
+    lastBell = now;
+    if (bell === 'visual') {
+      el.classList.remove('is-bell');
+      void el.offsetWidth;
+      el.classList.add('is-bell');
+      setTimeout(() => el.classList.remove('is-bell'), 300);
+      return;
+    }
+    try {
+      tones ??= new AudioContext();
+      const tone = tones.createOscillator();
+      const gain = tones.createGain();
+      gain.gain.setValueAtTime(0.08, tones.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.0001, tones.currentTime + 0.12);
+      tone.frequency.value = 880;
+      tone.connect(gain).connect(tones.destination);
+      tone.start();
+      tone.stop(tones.currentTime + 0.12);
+    } catch { /* no sound here */ }
+  }
 
   function draw() {
     const phase = control.state.phase;
@@ -174,7 +202,8 @@ export function terminalView(app) {
     watching.hidden = !(watched && drawn && !ended);
     if (term) {
       term.options.disableStdin = watched;
-      term.options.cursorStyle = watched ? 'underline' : 'block';
+      term.options.cursorStyle = watched ? 'underline' : terminalLook().cursorShape;
+      term.options.cursorBlink = watched ? false : terminalLook().cursorBlink;
       term.options.cursorInactiveStyle = watched ? 'none' : 'outline';
       if (watched && screen.contains(document.activeElement)) term.blur();
     }

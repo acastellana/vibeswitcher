@@ -202,3 +202,34 @@ struct ChatReadsTests {
         #expect(client.messages.count == 2 && client.messages.allSatisfy { $0["error"]?["code"] == .string("voice") }, "\(client.messages)")
     }
 }
+
+/// `session.usage` reads a session's transcript once at a time (the security review of 2026-11-21): asks while a read
+/// runs share its answer, and an answer a few seconds old is given again with no read.
+struct ChatUsageBoundTests {
+    @Test func asksInFlightShareOneReadAndAFreshAnswerIsKept() async throws {
+        let clock = Locked(1_000.0)
+        let world = try ChatWorld(now: { clock.get() })
+        try world.append(ChatReadsTests.turn("u1", prompt: "Go", reply: "Done", input: 10, cached: 0, output: 5, cost: 0.1))
+        let replies = Locked(0)
+        world.queue.sync {
+            for _ in 0..<20 { world.chats.usage(world.session) { _ in replies.set(replies.get() + 1) } }
+        }
+        try #require(await eventually { replies.get() == 20 })
+        #expect(world.queue.sync { world.chats.usageReadsRun } == 1, "twenty asks in flight, one read")
+        // Within the keep, answered with no read; past it, read again.
+        world.queue.sync { world.chats.usage(world.session) { _ in replies.set(replies.get() + 1) } }
+        #expect(replies.get() == 21 && world.queue.sync { world.chats.usageReadsRun } == 1)
+        clock.set(1_000 + ChatStore.usageKeep + 1)
+        world.queue.sync { world.chats.usage(world.session) { _ in replies.set(replies.get() + 1) } }
+        try #require(await eventually { replies.get() == 22 })
+        #expect(world.queue.sync { world.chats.usageReadsRun } == 2)
+    }
+
+    private final class Locked<Value>: @unchecked Sendable {
+        private let lock = NSLock()
+        private var value: Value
+        init(_ value: Value) { self.value = value }
+        func get() -> Value { lock.withLock { value } }
+        func set(_ next: Value) { lock.withLock { value = next } }
+    }
+}

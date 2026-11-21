@@ -86,10 +86,15 @@ public final class Requests: @unchecked Sendable {
     /// The home `hooks.install` and `hooks.remove` write in: the server's own (`getpwuid`'s on the node, the scratch home
     /// on a scratch node).
     public var home = VibePaths.home
+    /// `stats`' collector (`Stats/StatisticsWire.swift`): the node's root, the home's Codex folder; made at the first ask
+    /// and kept, so a file unchanged is parsed once.
+    lazy var statsCollector = SetupStatsCollector(home: root, codexHome: URL(fileURLWithPath: home).appendingPathComponent(".codex"))
     /// Where `build.switch` finds the builds it switches between, and `status` the install record (the start plan's
     /// S8b): the account's `NodeFolders.defaultPrefix` on the node, `--test-install-root` on a scratch node; none:
     /// `build.switch` is refused and `status` gives no `builds`.
     public var installRoot: String?
+    /// The health digest (`NodeHealth`): the server's own watchdog, slow refreshes and last errors.
+    public var health: NodeHealth?
     /// Check for Updates (`UpdateWatch`): the user's node's only. Its notice is `status`'s, its last answer `update`.
     public var updates: UpdateWatch?
     /// The waits a `build.switch` runs on (a test's shorter ones).
@@ -254,6 +259,7 @@ public final class Requests: @unchecked Sendable {
         case "board": board(request, reply: reply)
         case "settings": settings(request, reply: reply)
         case "recent": recent(request, reply: reply)
+        case "session.ports": sessionPorts(request, reply: reply)
         case "set": set(request, reply: reply)
         case "answer": answer(request, reply: reply)
         case "hold": hold(request, reply: reply)
@@ -265,6 +271,7 @@ public final class Requests: @unchecked Sendable {
         case "session.reply": replySession(request, reply: reply)
         case "session.presets": presets(request, terminal: facts.pid != NodeLive.webPeer.pid && facts.uid != nil, reply: reply)
         case "session.complete": complete(request, reply: reply)
+        case "stats": stats(request, reply: reply)
         case "session.reopen": reopenSessions(request, reply: reply)
         case "mail": mail(request, reply: reply)
         case "prompt-audit": promptAudit(request, reply: reply)
@@ -401,6 +408,12 @@ public final class Requests: @unchecked Sendable {
         if let tailnet { fields["webTailnet"] = tailnet.value() }
         // The last update check's answer, for the command line (the page has its notice).
         if let updates { fields["update"] = updates.value }
+        // The health digest (`status --health`, the page's This node).
+        if let health {
+            fields["health"] = health.value(serverRestarts: notes?.notes.serverRestarts, refusedConnections: notes?.notes.refusedAppConnections,
+                                            hostRestartAt: engine?.restartValue["at"]?.string.flatMap(NodeWire.date),
+                                            waiting: sessions?.reminderNotices() ?? [])
+        }
         return .object(fields)
     }
 

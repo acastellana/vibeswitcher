@@ -61,10 +61,13 @@ public enum BoardValue {
     /// large, or isn't a board this build knows): the value then says so and has no tasks.
     /// `usageWaits`: the review rows waiting on the account's usage, by task id (`UsageWaits`): their state says so.
     /// `summaries`: the AI summaries' lines, by task id (`TeamSummaryWatch`): a task at work carries its own.
-    /// `decisions`: the lead's latest decisions, newest first, with their lines (`LeadEngine.boardDecisions`).
+    /// `decisions`: the lead's latest decisions with their lines, as the engine read them (`LeadEngine.boardDecisions`):
+    /// only their AI summaries are taken, for the decisions `records` holds. `records`: the lead's decisions and files
+    /// under its root, read with no link followed (`BoardRecords`); the value's `decisions`, `scorecard`, `answered`,
+    /// `files` and `recordsDir` are made from them and the board (2026-11-21).
     public static func value(project: String, root: String, board: LeadBoard?, refusal: String? = nil, now: Date,
                              usageWaits: [String: ReviewUsageWait] = [:], summaries: [String: String] = [:],
-                             decisions: [BoardDecision] = []) -> NodeWire.Value {
+                             decisions: [BoardDecision] = [], records: BoardRecords.Read = BoardRecords.Read()) -> NodeWire.Value {
         var shown: [(group: Int, position: Int, value: NodeWire.Value)] = []
         var slugs: Set<String> = []
         if let board {
@@ -77,7 +80,9 @@ public enum BoardValue {
         shown.sort { ($0.group, $0.position) < ($1.group, $1.position) }
         var kept = Array(shown.prefix(mostTasks))
         // The byte budget: the tasks' encoded sizes and the rest of the value's, the last tasks dropped till it fits.
-        var size = 2_048 + NodeWire.message(Self.decisions(decisions)).count + root.utf8.count + project.utf8.count + kept.reduce(0) { $0 + NodeWire.message($1.value).count + 1 }
+        let extra = BoardRecords.fields(board: board, read: records, now: now, summaries: decisions)
+        var size = 2_048 + root.utf8.count + project.utf8.count + NodeWire.message(NodeWire.Value.object(extra)).count
+            + kept.reduce(0) { $0 + NodeWire.message($1.value).count + 1 }
         while size > mostBytes, let last = kept.popLast() { size -= NodeWire.message(last.value).count + 1 }
         let more = shown.count - kept.count
         var counts: [String: NodeWire.Value] = [:]
@@ -87,9 +92,8 @@ public enum BoardValue {
             "baseBranch": board?.baseBranch.map { .string(text($0, limit: 200)) } ?? .null,
             "tasks": .array(kept.map(\.value)), "counts": .object(counts), "more": .int(more),
             "unreadable": refusal.map { .string(text($0, limit: 300)) } ?? .null,
-            "decisions": Self.decisions(decisions),
             "allDone": board.flatMap { Self.allDone($0, now: now) } ?? .null,
-        ])
+        ].merging(extra) { old, _ in old })
     }
 
     /// One task's value and its group's place in `groups`; nil when it isn't shown (finished more than `doneFor` ago).
@@ -123,8 +127,8 @@ public enum BoardValue {
 
     /// The decisions as a board carries them: at most `LeadEngine.decisionsShown`, each its text and why (inert,
     /// capped: the lead wrote them), when it was taken, and its AI summary when a long one has one (null otherwise).
-    static func decisions(_ list: [BoardDecision]) -> NodeWire.Value {
-        .array(list.prefix(LeadEngine.decisionsShown).map { decision in
+    static func decisions(_ list: [BoardDecision], limit: Int = LeadEngine.decisionsShown) -> NodeWire.Value {
+        .array(list.prefix(limit).map { decision in
             .object(["id": .string(text(decision.id, limit: 300)), "at": date(decision.at), "text": .string(text(decision.text, limit: decisionBytes)),
                      "why": decision.why.isEmpty ? .null : .string(text(decision.why, limit: decisionBytes)),
                      "summary": decision.summary.map { .string(line($0)) } ?? .null])

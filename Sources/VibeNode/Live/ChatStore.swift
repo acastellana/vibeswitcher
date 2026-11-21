@@ -380,6 +380,13 @@ public final class ChatStore: @unchecked Sendable {
     var homeFolder: String { home }
     var readsQueue: DispatchQueue { reads }
     func follow(of session: String) -> TranscriptFollow? { feeds[session]?.follow }
+    /// `session.usage`'s: the asks waiting on a read under way, by session (one read a session at a time), and each
+    /// session's last answer with when it came (`ChatReads.usageKeep`). On `queue`.
+    var usageWaiting: [String: [(Read) -> Void]] = [:]
+    var usageKept: [String: (at: TimeInterval, read: Read)] = [:]
+    var clock: TimeInterval { now() }
+    /// How many usage reads ran (tests).
+    var usageReadsRun = 0
 
     /// Whether `session`'s chat is held now. On `queue`.
     public func holds(_ session: String) -> Bool {

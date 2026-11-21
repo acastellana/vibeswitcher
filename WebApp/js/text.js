@@ -20,14 +20,16 @@ function inline(text) {
   return nodes;
 }
 
-// A fenced block: its language, then its lines, which never wrap (a wide one scrolls).
-export function codeBlock(code, language = '') {
+// A fenced block: its language, then its lines, which never wrap (a wide one scrolls). `action`: an element beside the
+// language (a reply's Run, chat.js), or none.
+export function codeBlock(code, language = '', action = null) {
   return h('figure', { class: 'code' },
-    language ? h('figcaption', null, language.toLowerCase()) : null,
+    language || action ? h('figcaption', null, language ? language.toLowerCase() : '', action) : null,
     h('pre', { tabindex: 0 }, h('code', null, code)));
 }
 
-export function markdown(text) {
+// `options.codeAction(code, language)`: the element a fenced block gets beside its language, or null.
+export function markdown(text, options = {}) {
   const out = document.createDocumentFragment();
   const lines = text.split('\n');
   let paragraph = [];
@@ -45,7 +47,8 @@ export function markdown(text) {
       const body = [];
       // An open fence (a reply still streaming) runs to the end.
       for (i += 1; i < lines.length && !/^```\s*$/.test(lines[i]); i++) body.push(lines[i]);
-      out.append(codeBlock(body.join('\n'), fence[1]));
+      const code = body.join('\n');
+      out.append(codeBlock(code, fence[1], options.codeAction ? options.codeAction(code, fence[1]) : null));
       continue;
     }
     const item = line.match(/^\s*(?:[-*•]|(\d+)[.)])\s+(.*)$/);

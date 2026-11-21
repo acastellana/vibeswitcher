@@ -429,7 +429,7 @@ public enum WireVectors {
                        host: .init(startedAt: "2026-11-17T08:01:10.555Z", notes: nil, pid: 41790),
                        kinds: ["status", "questions", "subscribe", "unsubscribe", "chat.page", "draft", "draft.clear", "board", "seen",
                                "session.draft", "session.draft.clear", "session.presets", "session.complete", "session.attach",
-                               "session.usage", "chat.image", "settings"],
+                               "session.usage", "chat.image", "stats", "settings"],
                        peer: .init(voice: "other", why: "a web client: it reads and drafts, and is never the user's voice"),
                        rule: "systemd",
                        auth: .object(["rights": .array([.string("read"), .string("draft")]), "token": .string(token),
@@ -577,7 +577,11 @@ public enum WireVectors {
     static var boardValue: NodeWire.Value {
         BoardValue.value(project: NodeIds.project(root: root), root: root, board: sampleBoard(now: boardNow.timeIntervalSince1970), now: boardNow,
                          summaries: ["t-onboarding-steps": "Making the sign-up form check each field as you leave it"],
-                         decisions: sampleDecisions(now: boardNow.timeIntervalSince1970))
+                         decisions: sampleDecisions(now: boardNow.timeIntervalSince1970),
+                         // The same decisions as the records folder holds them (oldest first): the board carries each with its line.
+                         records: BoardRecords.Read(decisions: sampleDecisions(now: boardNow.timeIntervalSince1970).reversed().map {
+                             LeadDecision(at: $0.at, text: $0.text, why: $0.why)
+                         }, recordsDir: "docs/lead", present: ["workflow.md": true, "decisions.md": true, "progress.md": true, "incidents.md": false]))
     }
 
     /// `mail`'s answer for the vectors' project: a question it asked another project's lead, the answer that came
@@ -604,6 +608,7 @@ public enum WireVectors {
         let short = LeadDecision(at: now - 1800, text: "Keep the sidebar pass for after onboarding", why: "")
         return [BoardDecision(id: long.id, at: long.at, text: long.text, why: long.why, summary: "Run the two small tasks side by side"),
                 BoardDecision(id: short.id, at: short.at, text: short.text, why: short.why)]
+
     }
 
     /// The board a minute on: the review passed and the blocked task's question was answered.

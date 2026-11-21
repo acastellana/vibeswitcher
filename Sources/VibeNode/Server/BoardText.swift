@@ -51,7 +51,9 @@ public enum BoardText {
                 let when = decision["at"]?.string.flatMap(NodeWire.date).map { " (" + Durations.short(now.timeIntervalSince($0)) + " ago)" } ?? ""
                 return "  Decided: " + lowercasedFirst(inert(text, limit: dimLimit)) + when
             }
+            if decisions.count > decisionsShown { lines.append("  \(decisions.count - decisionsShown) earlier (--json shows them, each with why)") }
         }
+        lines += records(board, now: now, calendar: calendar)
         return lines
     }
 
@@ -79,6 +81,62 @@ public enum BoardText {
         return lines
     }
 
+    /// How many closed questions are printed (the rest: `--json`).
+    static let recordsShown = 5
+
+    /// The Team tab's other records under the tasks and decisions (2026-11-21, `BoardRecords`): the scorecard, the
+    /// newest answered and withdrawn questions, and where the lead's files are.
+    static func records(_ board: NodeWire.Value, now: Date, calendar: Calendar) -> [String] {
+        var lines: [String] = []
+        if let card = board["scorecard"], card != .null, !(board["tasks"]?.array ?? []).isEmpty {
+            lines.append("Scorecard")
+            let tiles = card["tiles"]?.array ?? []
+            if tiles.isEmpty {
+                lines.append("  Nothing merged yet: the numbers start with the first merge.")
+            } else {
+                lines.append("  " + tiles.map { "\(inert($0["value"]?.string, limit: 20)) \(inert($0["label"]?.string, limit: 80))" }.joined(separator: " · "))
+                if let footnote = card["footnote"]?.string { lines.append("  " + inert(footnote, limit: 300)) }
+            }
+            if let receipts = card["receipts"]?.string { lines.append("  " + inert(receipts, limit: 600)) }
+        }
+        let answered = board["answered"]?.array ?? []
+        if !answered.isEmpty {
+            lines.append("Answered and withdrawn")
+            lines += answered.prefix(recordsShown).map(question)
+            if answered.count > recordsShown { lines.append("  \(answered.count - recordsShown) earlier (--json)") }
+        }
+        let files = board["files"]?.array ?? []
+        if !files.isEmpty {
+            let said = files.map { file in
+                inert(file["path"]?.string, limit: 200) + (file["present"]?.bool == true ? "" : " (not there yet)")
+            }
+            lines.append("Files: " + said.joined(separator: ", "))
+        }
+        return lines
+    }
+
+    /// "  Which colour? → blue", "  Withdrawn: Rename it? (Settled by the spec.)", "  Name it? → Parser (no answer in time)".
+    static func question(_ question: NodeWire.Value) -> String {
+        let gist = inert(question["text"]?.string.flatMap { $0.split(whereSeparator: \.isNewline).first.map(String.init) }, limit: 100)
+        switch question["state"]?.string {
+        case "withdrawn":
+            return "  Withdrawn: \(gist)" + (question["why"]?.string.map { " (\(inert($0, limit: 100)))" } ?? "")
+        case "autoDecided":
+            return "  \(gist) → \(inert(question["proposal"]?.string, limit: 60)) (no answer in time: the lead went ahead)"
+        default:
+            return "  \(gist) → \(inert(question["answer"]?.string, limit: 60))"
+        }
+    }
+
+    /// "14:05" today, "Nov 19" before.
+    static func when(_ value: NodeWire.Value?, now: Date, calendar: Calendar) -> String {
+        guard let date = value?.string.flatMap(NodeWire.date) else { return "     " }
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = calendar.timeZone
+        formatter.dateFormat = calendar.isDate(date, inSameDayAs: now) ? "HH:mm" : "MMM d"
+        return formatter.string(from: date)
+    }
     /// The decisions `vibeswitcher board` lists, newest first.
     static let decisionsShown = 5
 
