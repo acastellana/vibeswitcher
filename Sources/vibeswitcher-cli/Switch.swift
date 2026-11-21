@@ -89,13 +89,19 @@ enum SwitchCommand {
         // Whether it can run now, before any code is asked: the rule on switches refuses it while a worker or verifier
         // runs (the server and the host both hold it), so a confirmation that reads as if it would go ahead is never shown.
         let blockers = (status["switchBlockers"]?.array ?? []).compactMap(\.string).map { ConfigSeal.inert($0, limit: 120) }
+        // The idle workers the switch parks first (`SwitchPark`): said in the confirmation, never a refusal.
+        let parks = (status["switchParks"]?.array ?? []).compactMap(\.string).map { ConfigSeal.inert($0, limit: 120) }
         if !blockers.isEmpty {
             return Say.refused("\(command) can't run now: " + SwitchRequest.blockedText(blockers) + ". Nothing was asked or switched.")
         }
         let what = (rollback
             ? NodeTexts.rollback(from: from, to: target, line: status["builds"]?["rollback"]?["line"]?.string ?? "", rewrites: rewrites(context))
             : NodeTexts.switch(from: from, to: target, rewrites: rewrites(context)))
-            + "\n  it can run now: no worker or verifier runs (a change the seal holds under the builds or the unit's folder would still stop it: `vs config held`)"
+            + (parks.isEmpty
+                ? "\n  it can run now: no worker or verifier runs (a change the seal holds under the builds or the unit's folder would still stop it: `vs config held`)"
+                : "\n  it parks first the workers that only wait on their lead (idle since their last report; their worktrees and commits stay, "
+                    + "start_worker continues there, and their leads are told): " + parks.joined(separator: ", ")
+                    + "\n  then it runs, unless one of them has begun a turn meanwhile (a change the seal holds under the builds or the unit's folder would still stop it: `vs config held`)")
 
         let action = UUID().uuidString.lowercased()
         let outcome = TypedWord.ask(approval: client.approvalRule, code: NodeIds.code(action: action), what: what)
@@ -120,6 +126,8 @@ enum SwitchCommand {
             // Accepted (the voice passed and the server recorded it): its own refusal (`refused`) comes after that.
             if reply.ok || reply.error?.code == NodeWire.Code.refused.rawValue { journal() }
             guard reply.ok, let result = reply.result else { return Say.replyError(reply) }
+            let parked = (result["parked"]?.array ?? []).compactMap(\.string).map { ConfigSeal.inert($0, limit: 120) }
+            if !parked.isEmpty { Say.out("parked first (idle since their last report; their leads were told): " + parked.joined(separator: ", ")) }
             Say.out(ConfigSeal.inert(result["said"]?.string ?? "switched", limit: 400))
             guard result["outcome"]?.string == "handed-over" || result["outcome"]?.string == "already" else {
                 Say.err("vibeswitcher: the server's reply names no outcome: \(ConfigSeal.inert(result["outcome"]?.string ?? "none", limit: 64))")

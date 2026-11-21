@@ -24,6 +24,7 @@ extension LeadEngine {
         // Each team member beside the task's worker, verifier and finders (`LeadTask.watched`): its stalls and stops are
         // told to the lead by name (`LeadWitness.memberNotices`).
         let roles = Set(board.tasks.flatMap(\.members))
+        var idle: Set<String> = []
         for id in board.tasks.flatMap(\.watched) {
             guard let info = hosted[id] else { continue }
             let session = team.sessions[id]
@@ -59,9 +60,14 @@ extension LeadEngine {
             // Called gone only once its job has stayed missing (`MissingJobs`): until then, not known either way.
             look.confirmMissingJob(id, in: &missingJobs, awake: awake)
             seen[id] = look
+            // A switch would park it (`SwitchPark`): a task's worker, idle between turns, nothing held for it.
+            if info.isLive, workers.contains(id), held == nil, board.tasks.contains(where: { task in
+                SwitchPark.parkable(task: task, worker: id, activity: watched?.activity, held: false)
+            }) { idle.insert(id.lowercased()) }
             // A member's own inbox isn't typed from here: only what it was before (the worker's, verifier's, finders').
             if info.isLive, let session, roles.contains(id) { flush(LeadAgent(pid: session.pid, tty: session.tty, session: id)) }
         }
+        idleWorkers[root] = idle
         // What to tell and do is worked out on `reads` (see `WitnessWork`), with what's told and seen so far; the reads
         // queue runs one thing at a time, so each look is applied before the next refresh's.
         let (toldNow, advanceSeenNow, step) = (told, advanceSeen, witnessStep)

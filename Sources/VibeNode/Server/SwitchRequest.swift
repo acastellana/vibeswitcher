@@ -127,22 +127,48 @@ public struct SwitchRequest {
     /// Why a handover is refused now for a change the seal holds (`HeldChange`), or nil; none: not asked. Blocking (the
     /// vault's calls go to the host): run off the link's queue.
     let held: (@Sendable () -> String?)?
+    /// Parks the workers of the live sessions given that only wait on their lead (`SwitchPark`, the engine's), for a
+    /// switch to the commit given: what it parked, by `SwitchPark.Worker.named`, on the link's queue. Nil: none parked
+    /// (a server with no engine).
+    public typealias Park = (_ live: [HostSession], _ commit: String, _ done: @escaping ([String]) -> Void) -> Void
+    let park: Park?
+    /// How long the sessions parked may take to end before the switch is planned again.
+    static let parkedEndLimit: TimeInterval = 15
 
     /// A switch on `link`'s host between the builds of `installRoot`, asked through the link's own dialer; `held` asked
-    /// before a handover.
+    /// before a handover; `park` asked when only workers and verifiers stand in the way.
     public init(link: HostLink, installRoot: String, timing: Timing = Timing(), held: (@Sendable () -> String?)? = nil,
-                note: @escaping (String) -> Void = { _ in }) {
+                park: Park? = nil, note: @escaping (String) -> Void = { _ in }) {
         self.link = link
         self.installRoot = installRoot
         self.timing = timing
         dialer = link.dialer
         self.held = held
+        self.park = park
         self.note = note
     }
 
     /// `build.switch` to `commit`: the plan, then the handover and its outcome; `reply` once, on the link's queue. Call
-    /// on the link's queue.
+    /// on the link's queue. While workers or verifiers live, the workers that only wait on their lead are parked first
+    /// (`SwitchPark`), once a held change wouldn't refuse the switch anyway, and the switch is planned again once their
+    /// sessions have ended: any worker mid-turn, verifier or other team member still refuses it (decision 6).
     public func run(commit: String, reply: @escaping (Answer) -> Void) {
+        run(commit: commit, parked: nil, reply: reply)
+    }
+
+    /// `parked`: the workers parked for this switch already (nil: not tried yet), said in its reply.
+    private func run(commit: String, parked: [String]?, reply plainReply: @escaping (Answer) -> Void) {
+        let reply = { (answer: Answer) in
+            guard let parked, !parked.isEmpty else { return plainReply(answer) }
+            switch answer {
+            case .done(let value):
+                var fields = value.object ?? [:]
+                fields["parked"] = .array(parked.map(NodeWire.Value.string))
+                plainReply(.done(.object(fields)))
+            case .refused(let code, let why):
+                plainReply(.refused(code, why + " (parked meanwhile, idle since their last report: \(parked.joined(separator: ", ")))"))
+            }
+        }
         guard NodeUnit.isCommit(commit) else { return reply(.refused(.badArgs, "build.switch needs commit, 40 lowercase hex digits")) }
         notes { notes in
             let running = notes?.build
@@ -157,9 +183,26 @@ public struct SwitchRequest {
             case .notInstalled:
                 reply(.refused(.refused, "\(commit) isn't installed in \(installRoot): install it with install-node.sh, then switch"))
             case .refusedWhileTeamsWork:
-                let working = Self.blockers(live)
-                note("build.switch \(commit) refused: \(working.count) workers or verifiers live")
-                reply(.refused(.refused, Self.blockedText(working)))
+                guard parked == nil, let park else {
+                    let working = Self.blockers(live)
+                    note("build.switch \(commit) refused: \(working.count) workers or verifiers live")
+                    return reply(.refused(.refused, Self.blockedText(working)))
+                }
+                // A held change refuses it whatever the team: no worker is parked for a switch that can't run.
+                let (queue, held) = (link.queue, self.held)
+                DispatchQueue.global(qos: .userInitiated).async {
+                    let refusal = held?()
+                    queue.async {
+                        if let refusal {
+                            note("build.switch \(commit) refused: \(refusal)")
+                            return reply(.refused(.refused, refusal))
+                        }
+                        park(live, commit) { names in
+                            guard !names.isEmpty else { return run(commit: commit, parked: [], reply: plainReply) }
+                            whenEnded(names: names, of: live) { run(commit: commit, parked: names, reply: plainReply) }
+                        }
+                    }
+                }
             case .handOver(let target):
                 guard let held else { return handOver(to: target, before: (link.hostPID, running), reply: reply) }
                 let queue = link.queue
@@ -175,6 +218,18 @@ public struct SwitchRequest {
                 }
             }
         }
+    }
+
+    /// `then` on the link's queue once the sessions of `live` named `names` (`SwitchPark.Worker.named`) are no longer
+    /// live in the link's list, or `parkedEndLimit` later.
+    private func whenEnded(names: [String], of live: [HostSession], then: @escaping () -> Void) {
+        let ids = Set(live.filter { session in names.contains("\(session.tty) (\(ConfigSeal.inert(session.label, limit: 80)))") }.map(\.id))
+        let (link, deadline) = (self.link, Date().addingTimeInterval(Self.parkedEndLimit))
+        func look() {
+            if Date() >= deadline || !link.sessions.contains(where: { ids.contains($0.id) && $0.isLive }) { return then() }
+            link.queue.asyncAfter(deadline: .now() + 0.1) { look() }
+        }
+        look()
     }
 
     /// The live sessions that refuse a switch by the rule on switches (decision 6): each worker's and verifier's, by

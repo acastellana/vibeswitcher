@@ -227,6 +227,9 @@ public final class LeadEngine: @unchecked Sendable {
     /// How many of the witness's looks were applied for each root since this engine started (`status` gives each lead's
     /// as `looks`: what a test waits on to know looks went by). On `queue`.
     public internal(set) var witnessLooks: [String: Int] = [:]
+    /// Each root's workers its witness's last look saw idle between turns with nothing waiting (lowercased session ids):
+    /// what `status` says a switch would park (`SwitchPark`). On `queue`.
+    var idleWorkers: [String: Set<String>] = [:]
     /// The account's usage as the last refresh read it (`NodeUsage`): `status`'s `usage`. On `queue`.
     public internal(set) var usage: NodeUsage.Reading?
     /// Each lead's review rows waiting on a limit (`UsageWaits`), by root: the boards show them (`LiveBoards`).

@@ -111,7 +111,7 @@ vs set ~/projects/app lead_rotation never
 
 ```sh
 vs status --check-updates   # asks now (else every 6 h): the newer green build on v2 and its install line
-vs switch COMMIT        # says at once if it can't run now, naming the worker or verifier in the way
+vs switch COMMIT        # parks workers idle since their report (named first); refuses at once while one is mid-turn
 vs rollback
 ```
 
