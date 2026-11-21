@@ -315,6 +315,7 @@ Settings (⌘,), category by category: each option, under its section, with the 
 - A lead's Team tab: tasks, decisions, scorecard, messages between leads — `Sources/VibeSwitcher/MainWindow/Lead/TeamViews.swift`
 - Brief Me (⇧⌘B): a spoken briefing across led projects, or one project's — `Sources/VibeSwitcher/Briefing/BriefingViews.swift`
 - Statistics window — `Sources/VibeSwitcher/Statistics/StatisticsView.swift`
+- Sidebar: Close Finished (N)… at its foot ends every project's finished agent-opened shells and replaced leads between turns, after one confirmation listing them — `Sources/VibeSwitcher/MainWindow/SessionListView.swift`
 - Menu bar popover: every session, switch, pause, rename — `Sources/VibeSwitcher/PopoverView.swift`
 - Global hot key — `Sources/VibeSwitcher/HotKey.swift`
 - Phone access: a web app for the phone over Tailscale — `Sources/VibeSwitcher/PhoneAccess.swift`
@@ -378,6 +379,7 @@ Settings (⌘,), category by category: each option, under its section, with the 
 - `shell-idle SECONDS` — how long after its command went well an untouched Run-card shell is ended by itself (600 by default), and… — `Sources/VibeSwitcher/Sandbox.swift`
 - `end row|key|window` — ends the selected session as the window does: row is its End Session… in the sidebar's menu, key is the File… — `Sources/VibeSwitcher/Sandbox.swift`
 - `shell-close [PROJECT]` — the sidebar's Close Finished Shells… for PROJECT (the selected session's unless given), its confirmation… — `Sources/VibeSwitcher/Sandbox.swift`
+- `close-finished [yes]` — the sidebar's Close Finished (N)…, in every project: prints the button's words and its confirmation, shown as… — `Sources/VibeSwitcher/Sandbox.swift`
 - `sidebar attention|projects [ended]` — groups the sidebar by attention or by project (a project's header has its menu), with the Ended fold open… — `Sources/VibeSwitcher/Sandbox.swift`
 - `shell-fail on|off` — on: the sandbox's own host refuses to start the shells a card's Run asks for, so the Run says why it didn't… — `Sources/VibeSwitcher/Sandbox.swift`
 - `wallet-card` — prints the newest wallet request card in the selected chat: its id, state, line, not-picked-up hint… — `Sources/VibeSwitcher/Sandbox.swift`
@@ -428,6 +430,7 @@ Settings (⌘,), category by category: each option, under its section, with the 
 - `empty-repository` — `Sources/VibeSwitcher/Sandbox.swift`
 - `missing-claude` — `Sources/VibeSwitcher/Sandbox.swift`
 - `missing-tools` — `Sources/VibeSwitcher/Sandbox.swift`
+- `close-finished` — `Sources/VibeSwitcher/Sandbox.swift`
 - `installing-tools` — `Sources/VibeSwitcher/Sandbox.swift`
 - `choose-folder` — `Sources/VibeSwitcher/Sandbox.swift`
 - `new-session-menu` — `Sources/VibeSwitcher/Sandbox.swift`
