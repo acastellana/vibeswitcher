@@ -4267,3 +4267,6 @@ Proposed task 1: Find why dictations end with no text
 - 2026-11-21 13:32 Audit of claude-dictation-text: incomplete, clean, round 1: 1 Important open, 1 Nit open
 - 2026-11-21 13:33 Started a worker on claude-dictation-text
 - 2026-11-21 13:33 Automatically (auto_advance): Sent claude-dictation-text's worker the open Important findings claude-dictation-text:F1 from its audit at 1678dd04 (in a new worker: its last one was released during the audit).
+- 2026-11-21 13:34 Planned auto-advance-s-send: auto_advance's send-back gives the worker each open finding in full
+- 2026-11-21 13:34 Started a worker on auto-advance-s-send (auto → Claude: Claude weekly 69%, 29 points ahead of pace (limits ignored), not tight; Codex 30%)
+- 2026-11-21 13:34 Automatically (auto_advance): Started a worker on auto-advance-s-send (auto_advance's send-back gives the worker each open finding in full); its agent is auto, so it went to Claude: Claude weekly 69%, 29 points ahead of pace (limits ignored), not tight; Codex 30%.
