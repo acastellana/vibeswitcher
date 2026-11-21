@@ -4290,3 +4290,9 @@ Proposed task 1: Find why dictations end with no text
 - 2026-11-21 14:08 Update: Merged: one sidebar button closes all finished shells and replaced leads — **What you asked for** ("a button to close all finished shells as well as replaced leads"):
 - 2026-11-21 14:20 Merged claude-dictation-text: Claude dictation: text that was dictated is dropped as "typed in the terminal meanwhile" (in a batch: claude-dictation-text, auto-advance-s-send landed on one test run) (build 314c245bb76b)
 - 2026-11-21 14:20 Merged auto-advance-s-send: auto_advance's send-back gives the worker each open finding in full (in a batch: claude-dictation-text, auto-advance-s-send landed on one test run) (build 314c245bb76b)
+- 2026-11-21 14:20 Automatically (auto_advance): Merged claude-dictation-text at 2fe917ee (its passing audit), auto-advance-s-send at 809c1719 (its passing audit) into main as one batch, on 1 test run for 2 tasks.
+- 2026-11-21 14:20 Started a worker on claude-dictation
+- 2026-11-21 14:20 Automatically (auto_advance): Started a worker on claude-dictation (Claude dictation: recognise Claude Code's "Transcribing…" footer as processing), its after tasks done (claude-dictation-text).
+- 2026-11-21 14:20 Automatically (auto_advance): Cleaned up claude-dictation-text (freed 1.8 GB of build output and temporary folders). It stays done.
+- 2026-11-21 14:20 Automatically (auto_advance): Cleaned up auto-advance-s-send (freed 1.8 GB of build output and temporary folders). It stays done.
+- 2026-11-21 14:21 Update: Merged: Claude dictation no longer drops your text as "typed in the terminal meanwhile" — **What was wrong:** five dictations in the last week ended with "Something was typed in the terminal meanwhile" and no text, though you'd typed nothing. The app's own logs showed it; you hadn't report…
