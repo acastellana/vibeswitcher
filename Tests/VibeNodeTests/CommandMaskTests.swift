@@ -74,6 +74,28 @@ struct CommandMaskTests {
         }
     }
 
+    /// Round 2 of the review: a short flag's attached header, a user:pass value in any env word, and a scheme-less
+    /// `user:pass@host`.
+    @Test func attachedHeadersEnvCredentialsAndSchemelessHostsAreMasked() {
+        let cases: [(String, String)] = [
+            ("curl -HAuthorization:Bearer-abc123 x", "curl -HAuthorization:••• x"),
+            ("curl -H'X-Api-Key: abc123' https://example.com/v1", "curl -H'X-Api-Key: •••' https://example.com/v1"),
+            ("curl -H'Accept: text/plain' x", "curl -H'Accept: text/plain' x"),
+            ("curl -uuser:hunter2 x", "curl -u••• x"),
+            ("DATABASE=bob:hunter2 tool", "DATABASE=bob:••• tool"),
+            ("DATABASE_URL=bob:hunter2@db:5432 tool", "DATABASE_URL=bob:•••@db:5432 tool"),
+            ("psql postgres:hunter2@db.internal/app", "psql postgres:•••@db.internal/app"),
+            ("tool --to bob:hunter2@host", "tool --to bob:•••@host"),
+            ("git clone git@github.com:org/repo", "git clone git@github.com:org/repo"),
+            ("LANG=en_US.UTF-8 tool", "LANG=en_US.UTF-8 tool"),
+        ]
+        for (command, expected) in cases {
+            let masked = CommandMask.masked(command)
+            #expect(masked == expected, "\(command) → \(masked)")
+            for secret in ["hunter2", "abc123"] where command.contains(secret) { #expect(!masked.contains(secret), "\(command) → \(masked)") }
+        }
+    }
+
     @Test func aSessionsCommandAndAPresetsSentToAPageAreMasked() throws {
         let session = Session(tty: "pts/4", agent: .claude, pid: 1, startedAt: Date(), cwd: nil, project: "p", task: nil, status: .idle,
                               statusSince: Date(), detail: nil, hasHooks: false, inTerminalApp: false)

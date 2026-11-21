@@ -8,11 +8,13 @@ import VibeCore
 /// - the word after a secret-ish flag written without `=` (`--api-key VALUE`, `-p VALUE`… whose name holds key, token,
 ///   secret, pass, auth, credential, cookie, bearer or session-id; `--user` and `-u` too), always, whatever it starts
 ///   with; the value after its `=` (`--token=VALUE`), quoted or not, however many dashes it has;
-/// - a short flag of a secret-ish letter (`p`, `k`, `t`, `u`) with its value attached: `-pSECRET`;
+/// - a short flag's attached value, looked at first: of a secret-ish letter (`p`, `k`, `t`, `u`): `-pSECRET`,
+///   `-uuser:pass`; a credential header (`-HAuthorization: …`, `-H'X-Api-Key: …'`): what follows its colon;
 /// - a header's value after `-H` or `--header` when the header holds key, token, auth, bearer or cookie;
-/// - an environment word's value (`NAME=VALUE`) whose name holds KEY, TOKEN, SECRET, PASS, AUTH or CREDENTIAL;
-/// - a `user:pass`-shaped word anywhere (what follows its first colon); a URL's query value whose name is secret-ish
-///   (`?key=…`, `&access_token=…`), and a URL's `user:pass@`.
+/// - an environment word's value (`NAME=VALUE`) whose name holds KEY, TOKEN, SECRET, PASS, AUTH or CREDENTIAL, and in
+///   any environment word a `user:pass` value or a `user:pass@host`'s password;
+/// - a `user:pass`-shaped word anywhere (what follows its first colon), a scheme-less `user:pass@host`'s password; a
+///   URL's query value whose name is secret-ish (`?key=…`, `&access_token=…`), and a URL's `user:pass@`.
 ///
 /// Each is replaced by `•••`, its quotes kept; nothing else is changed. Over-masking a harmless value whose flag merely
 /// sounds secret (or a `host:port`) is the cost: a page never needs the value.
@@ -56,13 +58,20 @@ enum CommandMask {
                         cuts.append(contentAfterEquals(word))
                     }
                 } else {
-                    // `-pSECRET`: its attached value; and, a word that also reads as a secret-ish long flag
-                    // (`-password`), the word after it too (over-masking, not under).
-                    if dashes == 1, name.count > 1, let letter = name.first, shortSecret.contains(letter) { cuts.append(attached(word)) }
-                    if secretish(String(name)) || userFlags.contains(String(name)) {
-                        next = .always
-                    } else if headerFlags.contains(String(name)) {
-                        next = .header
+                    // A short flag's attached value is looked at first: `-HAuthorization: …` (a credential header: what
+                    // follows its colon, or all of it), `-pSECRET`, `-uuser:pass`.
+                    let short = dashes == 1 && name.count > 1 ? name.first : nil
+                    if short == "H" {
+                        if headerish(String(name.dropFirst())) { cuts.append(attachedAfterColon(word) ?? attached(word)) }
+                    } else {
+                        if let short, shortSecret.contains(short) { cuts.append(attached(word)) }
+                        // A word that (also) reads as a secret-ish long flag (`-password`): the word after it too
+                        // (over-masking, not under).
+                        if secretish(String(name)) || userFlags.contains(String(name)) {
+                            next = .always
+                        } else if headerFlags.contains(String(name)) {
+                            next = .header
+                        }
                     }
                 }
                 continue
@@ -70,10 +79,21 @@ enum CommandMask {
             if let equals = value.firstIndex(of: "="), value.first?.isLetter == true || value.first == "_",
                value[..<equals].allSatisfy({ $0.isLetter || $0.isNumber || $0 == "_" }) {
                 let name = value[..<equals].uppercased()
-                if envWords.contains(where: name.contains) { cuts.append(contentAfterEquals(word)) }
+                let assigned = String(value[value.index(after: equals)...])
+                if envWords.contains(where: name.contains) {
+                    cuts.append(contentAfterEquals(word))
+                } else if let range = atCredentials(word, after: "=") {
+                    cuts.append(range)
+                } else if userPass(assigned), let range = afterColon(word, after: "=") {
+                    cuts.append(range)
+                }
                 continue
             }
-            if userPass(value), let range = afterColon(word) { cuts.append(range) }
+            if let range = atCredentials(word) {
+                cuts.append(range)
+            } else if userPass(value), let range = afterColon(word) {
+                cuts.append(range)
+            }
         }
         var out = text
         // Query values and URL credentials, anywhere in the text not already cut.
@@ -94,10 +114,43 @@ enum CommandMask {
         return !value.contains("://") && !value.contains(where: { $0.isWhitespace || $0 == "/" || $0 == "@" })
     }
 
-    /// What follows a word's first colon (and the spaces after it), as written in the line.
-    static func afterColon(_ word: Word) -> Range<String.Index>? {
+    /// `user:pass@host` with no scheme (`postgres:pw@db`, `DB=bob:pw@host:5432`): the range from just after its first
+    /// colon to its `@`, as written in the line (in an env word, the value after `after`). Nil for anything else (a URL
+    /// is the query rule's; `git@host:org/repo` has its colon after the `@`).
+    static func atCredentials(_ word: Word, after: Character? = nil) -> Range<String.Index>? {
         let line = word.line
-        guard let colon = line[word.content].firstIndex(of: ":") else { return nil }
+        var start = word.content.lowerBound
+        if let after {
+            guard let mark = line[word.content].firstIndex(of: after) else { return nil }
+            start = line.index(after: mark)
+        }
+        let part = line[start..<word.content.upperBound]
+        guard !part.contains("://"), let at = part.firstIndex(of: "@"), let colon = part[..<at].firstIndex(of: ":"),
+              colon > part.startIndex, line.index(after: colon) < at,
+              !part[..<at].contains(where: { $0.isWhitespace || $0 == "/" }) else { return nil }
+        return line.index(after: colon)..<at
+    }
+
+    /// A short flag's attached value after its colon (`-H'X-Api-Key: abc'` → `abc`), as written in the line.
+    static func attachedAfterColon(_ word: Word) -> Range<String.Index>? {
+        let rest = attached(word)
+        let line = word.line
+        guard let colon = line[rest].firstIndex(of: ":") else { return nil }
+        var start = line.index(after: colon)
+        while start < rest.upperBound, line[start] == " " { start = line.index(after: start) }
+        return start < rest.upperBound ? start..<rest.upperBound : nil
+    }
+
+    /// What follows a word's first colon (and the spaces after it), as written in the line; with `after`, the first
+    /// colon after that character (an env word's value).
+    static func afterColon(_ word: Word, after: Character? = nil) -> Range<String.Index>? {
+        let line = word.line
+        var from = word.content.lowerBound
+        if let after {
+            guard let mark = line[word.content].firstIndex(of: after) else { return nil }
+            from = line.index(after: mark)
+        }
+        guard let colon = line[from..<word.content.upperBound].firstIndex(of: ":") else { return nil }
         var start = line.index(after: colon)
         while start < word.content.upperBound, line[start] == " " { start = line.index(after: start) }
         return start < word.content.upperBound ? start..<word.content.upperBound : nil
