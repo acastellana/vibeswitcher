@@ -3,6 +3,7 @@
 
 import { h, keyed, setText, setClass } from '../dom.js';
 import { icon } from '../marks.js';
+import { taskDetails } from './results.js';
 import { TASKS, TASK_ORDER, TASK_GROUPS, taskCount, taskGroup, taskState, taskTone, since, clock } from '../words.js';
 import { sessionHref, boardHref } from '../ui.js';
 
@@ -78,10 +79,13 @@ export function teamTasks(app) {
     const time = h('time');
     const dim = h('span', { class: 'task-dim' });
     const link = h('a', { class: 'task-link' }, h('span', { class: 'task-line' }, mark, title, h('span', { class: 'task-when' }, state, ' ', time)), dim);
-    const el = h('li', { class: 'task' }, link);
+    // Its details as it opens (views/results.js: the Mac's `TeamRowDetails`).
+    const details = taskDetails(app);
+    const el = h('li', { class: 'task' }, h('div', { class: 'task-row' }, link, details.button), details.el);
     return {
       el,
       update(task) {
+        details.set(board?.project, task.slug);
         mark.className = `dot tone-${taskTone(task)}`;
         setText(title, task.title);
         setText(state, taskState(task));

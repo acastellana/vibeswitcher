@@ -27,6 +27,12 @@ struct BoardDetailsTests {
         let value = BoardValue.value(project: "p", root: "/r", board: board, now: WireVectors.boardNow)
         #expect(value["results"]?.array?.count == 2)
         #expect(WireSchema.check(value, as: "board", strict: true) == nil, "\(WireSchema.check(value, as: "board", strict: true) ?? "")")
+        // `vibeswitcher board` names them under the scorecard, newest first.
+        var utc = Calendar(identifier: .gregorian)
+        utc.timeZone = TimeZone(identifier: "UTC")!
+        let printed = BoardText.records(value, now: WireVectors.boardNow, calendar: utc)
+        let at = try #require(printed.firstIndex(of: "Results"))
+        #expect(printed[at + 1].hasSuffix("Upload retry (1 screenshot)") && printed[at + 2].hasSuffix("Onboarding shipped"), "\(printed)")
     }
 
     @Test func aTasksDetailsAreTheMacsRowDetails() throws {
