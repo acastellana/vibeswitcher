@@ -4300,3 +4300,4 @@ Proposed task 1: Find why dictations end with no text
 - 2026-11-21 14:42 Automatically (auto_advance): Started the audit of claude-dictation at 1db5bc98 (The risk check raised it to audit: it changes test or build infrastructure the suite relies on (Tests/VibeSwitcherTests/FakeClaude.swift)).
 - 2026-11-21 14:42 Released claude-dictation's worker (idle since its done report on 1db5bc98) while its audit runs
 - 2026-11-21 14:42 Automatically (auto_advance): Released claude-dictation's worker, idle since its done report on 1db5bc98, while its audit runs (ended pid 83773 (Worker: Claude dictation: recognise Claude Code's "Transcribing…" footer as processing)): its Mac slot and memory are free. Its worktree and branch stay; findings the verdict sends back go to a fresh worker there, and a clean verdict merges with none.
+- 2026-11-21 14:48 Audit of claude-dictation: complete, clean, round 1: 1 Nit open
