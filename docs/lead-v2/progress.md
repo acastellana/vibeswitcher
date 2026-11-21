@@ -389,3 +389,5 @@
 - 2026-11-21 16:07 Update: Interop measurement with a real Windows program: no box starts one, on the installed build or with the fix — The real-program half of the measurement your supervisor asked for. Measured by the worker of `measured-with-a-real`, not yet audited. `cmd.exe /c exit 7` and `whoami.exe` (the copies you placed) were…
 - 2026-11-21 16:11 Audit of the-node-s-gate: finder 1 of 2 submitted (complete, clean, 3 findings)
 - 2026-11-21 16:11 Audit of the-node-s-gate: complete, clean, round 2: 1 Important closed, 5 Nit (2 open, 2 unconfirmed), 2 Pre-existing unconfirmed (2 finders voted: 1 new finding confirmed, 0 unconfirmed)
+- 2026-11-21 16:31 Pipeline held: the-node-s-gate ready to merge with none landing; cause: every test slot held
+- 2026-11-21 16:31 Pipeline held: the-node-s-gate ready to merge with none landing; cause: every test slot held
