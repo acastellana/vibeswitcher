@@ -76,7 +76,13 @@ struct NodeToolchainTests {
         let program = bin.appendingPathComponent("swift")
         try "#!/bin/sh\npwd > '\(marker.path)'\necho 'Swift version 6.4.2 (swift-6.4.2-RELEASE)'\n".write(to: program, atomically: true, encoding: .utf8)
         try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: program.path)
-        let output = NodeToolchain.run([program.path, "--version"], environment: ["PATH=/usr/bin:/bin"], timeout: 15)
+        // A program just written can be busy to exec for a moment while another test's fork still holds a descriptor
+        // to it (ETXTBSY under a parallel run; docs/process/v2-flaky-tests.md): asked again, a few times.
+        var output: String?
+        for _ in 0..<10 where output == nil {
+            output = NodeToolchain.run([program.path, "--version"], environment: ["PATH=/usr/bin:/bin"], timeout: 15)
+            if output == nil { Thread.sleep(forTimeInterval: 0.2) }
+        }
         #expect(output.flatMap { NodeToolchain.version(tool: "swift", output: $0) } == "6.4.2")
         #expect(try String(contentsOf: marker, encoding: .utf8).trimmingCharacters(in: .whitespacesAndNewlines) == "/")
         #expect(NodeToolchain.absolutePath("bin:.::/usr/bin") == "/usr/bin")
