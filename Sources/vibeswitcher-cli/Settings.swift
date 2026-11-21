@@ -175,7 +175,7 @@ enum SetCommand {
         let place = folder.map { "the project in \(ConfigSeal.inert($0, limit: 300))" } ?? "this node, for every project"
         let what = "This sets \(key) (\(setting.title)) for \(place) to \(shownValue)"
             + (setting.guardRail ? "\nA guard rail: recorded in the host's vault as yours." : "")
-        let outcome = TypedWord.ask(code: NodeIds.code(action: action), what: what)
+        let outcome = TypedWord.ask(approval: client.approvalRule, code: NodeIds.code(action: action), what: what)
         guard outcome == .typed else { return Say.refused(TypedWord.refusal(outcome)) }
         var args: [String: NodeWire.Value] = ["key": .string(key), "value": .string(given)]
         if let folder { args["folder"] = .string(folder) }

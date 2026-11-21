@@ -60,7 +60,7 @@ enum ReopenCommand {
             : "This reopens, as you, each in its same conversation (Claude with --resume, in its folder):\n"
                 + chosen.map { "  " + line($0) }.joined(separator: "\n")
         let action = UUID().uuidString.lowercased()
-        let outcome = TypedWord.ask(code: NodeIds.code(action: action), what: what)
+        let outcome = TypedWord.ask(approval: client.approvalRule, code: NodeIds.code(action: action), what: what)
         guard outcome == .typed else { return Say.refused(TypedWord.refusal(outcome)) }
         let args: [String: NodeWire.Value] = forget ? ["forget": .bool(true)]
             : all ? ["all": .bool(true)] : ["sessions": .array(chosen.compactMap { $0["session"] })]
@@ -144,7 +144,7 @@ enum ResumeCommand {
         case .success(let found): session = found
         }
         let action = UUID().uuidString.lowercased()
-        let outcome = TypedWord.ask(code: NodeIds.code(action: action),
+        let outcome = TypedWord.ask(approval: client.approvalRule, code: NodeIds.code(action: action),
                                     what: "This starts again, as you, in its same conversation (Claude with --resume, in its folder):\n  " + ReopenCommand.line(session))
         guard outcome == .typed else { return Say.refused(TypedWord.refusal(outcome)) }
         switch client.request("session.resume", args: ["session": session["session"] ?? .string(wanted)], action: action, timeout: 180) {

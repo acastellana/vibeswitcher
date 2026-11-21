@@ -37,7 +37,7 @@ enum CloseShellsCommand {
                 + ConfigSeal.inert(shell["folder"]?.string ?? "?", limit: .max)
         }
         let action = UUID().uuidString.lowercased()
-        let outcome = TypedWord.ask(code: NodeIds.code(action: action), what: "This ends \(finished.count) shell\(finished.count == 1 ? "" : "s") "
+        let outcome = TypedWord.ask(approval: client.approvalRule, code: NodeIds.code(action: action), what: "This ends \(finished.count) shell\(finished.count == 1 ? "" : "s") "
             + "back at its prompt, with anything it left running:\n" + lines.joined(separator: "\n"))
         guard outcome == .typed else { return Say.refused(TypedWord.refusal(outcome)) }
         switch client.request("session.close-shells", args: ["sessions": .array(finished.compactMap { $0["session"] })], action: action) {

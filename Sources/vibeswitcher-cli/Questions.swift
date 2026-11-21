@@ -124,9 +124,10 @@ enum CardCommand {
         if let status = refuse(card) { return status }
         CardText.lines(card).forEach(Say.out)
         let code = NodeIds.code(card: id)
-        let outcome = TypedWord.ask(code: code, what: what(card))
-        guard outcome == .typed else { return Say.refused(TypedWord.refusal(outcome)) }
         let action = UUID().uuidString.lowercased()
+        // Under the Mac's rule the dialog carries this request's word (its action id's), not the card's code.
+        let outcome = TypedWord.ask(approval: client.approvalRule, code: code, what: what(card), word: NodeIds.code(action: action))
+        guard outcome == .typed else { return Say.refused(TypedWord.refusal(outcome)) }
         var args = extra(card)
         args["card"] = .string(id)
         args["code"] = .string(code)

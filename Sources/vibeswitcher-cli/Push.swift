@@ -37,7 +37,7 @@ enum PushCommand {
                                + (approve ? "push" : "decline"))
         }
         let action = UUID().uuidString.lowercased()
-        let outcome = TypedWord.ask(code: NodeIds.code(action: action), what: PushText.what(push, root: root, approve: approve))
+        let outcome = TypedWord.ask(approval: client.approvalRule, code: NodeIds.code(action: action), what: PushText.what(push, root: root, approve: approve))
         guard outcome == .typed else { return Say.refused(TypedWord.refusal(outcome)) }
         let kind = approve ? "push" : "push.decline"
         switch client.request(kind, args: ["folder": .string(root), "request": .string(id)], action: action, timeout: LeadPush.timeout + 60) {

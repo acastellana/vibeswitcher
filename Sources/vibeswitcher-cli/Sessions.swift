@@ -39,7 +39,7 @@ enum SessionCommand {
             if let status = refuse(session) { return status }
         }
         let action = UUID().uuidString.lowercased()
-        let outcome = TypedWord.ask(code: NodeIds.code(action: action), what: what(session))
+        let outcome = TypedWord.ask(approval: client.approvalRule, code: NodeIds.code(action: action), what: what(session))
         guard outcome == .typed else { return Say.refused(TypedWord.refusal(outcome)) }
         switch client.request(kind, args: args(session), action: action, timeout: timeout) {
         case .failure(let failure): return Say.failed(failure)
@@ -134,8 +134,10 @@ enum SendCommand {
             if now { args["now"] = .bool(true) }
             return args
         }, what: { found in
-            (now ? "This steers \(SessionCommand.describe(found)) now, as you (\(steerWhen)): "
-                 : "This types into \(SessionCommand.describe(found)), as you: ")
+            // "session <short>" first, as before the lookup (SteerNowTests), then what the node lists of it.
+            let named = "session \(SessionCommand.short(found["id"]?.string ?? session))"
+            let about = found["status"] == nil ? "" : " " + String(SessionCommand.describe(found).drop { $0 != "(" })
+            return (now ? "This steers \(named) now, as you (\(steerWhen))\(about): " : "This types into \(named)\(about), as you: ")
                 + ConfigSeal.inert(typed, limit: 400) + attached(images)
         }, say: said)
     }

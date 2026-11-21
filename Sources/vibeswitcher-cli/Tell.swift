@@ -25,7 +25,7 @@ enum TellCommand {
         let action = UUID().uuidString.lowercased()
         let what = "This tells the lead of \(ConfigSeal.inert(folder, limit: 400)), as you (not an answer to a card): "
             + ConfigSeal.inert(text, limit: 400)
-        let outcome = TypedWord.ask(code: NodeIds.code(action: action), what: what)
+        let outcome = TypedWord.ask(approval: client.approvalRule, code: NodeIds.code(action: action), what: what)
         guard outcome == .typed else { return Say.refused(TypedWord.refusal(outcome)) }
         switch client.request("tell", args: ["folder": .string(folder), "text": .string(text)], action: action, timeout: 120) {
         case .failure(let failure): return Say.failed(failure)
