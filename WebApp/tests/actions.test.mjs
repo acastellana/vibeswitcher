@@ -198,3 +198,9 @@ test('a message with images on the node is drafted as the send line, each path o
   assert.equal(imageSendLine(session, '--help me', ['/x.png']), "vibeswitcher send 3f6c2c1e ' --help me' --image /x.png");
   assert.equal(imageSendLine(session, '$(rm -rf ~)', ['/x.png']), "vibeswitcher send 3f6c2c1e '$(rm -rf ~)' --image /x.png");
 });
+
+test('a Codex of your own starts with --agent codex, a model too; a shell never takes one', () => {
+  assert.equal(newLine('/home/me/site', { name: 'Codex', kind: 'codex', builtIn: true }, 'gpt-5'), 'vibeswitcher new /home/me/site --agent codex --model gpt-5');
+  assert.equal(newLine('/home/me/site', { name: 'Claude', kind: 'claude', builtIn: true }), 'vibeswitcher new /home/me/site');
+  assert.equal(newLine('/home/me/site', { name: 'Shell', kind: 'shell', builtIn: true }, 'opus'), 'vibeswitcher new /home/me/site --agent shell');
+});

@@ -9,7 +9,7 @@ import VibeCore
 ///
 /// What a preset runs on the node keeps EN-D13: Claude is the program the node's `claude` link names, never a word a
 /// shell looks up, so a Claude preset's command must be `claude` and then plain words (its arguments), each passed
-/// quoted; Codex isn't on the node yet; a shell is the host's own. Its environment may not name what the host refuses
+/// quoted; Codex as Claude, `codex` and plain words (the user's own sessions: decision 15 keeps Codex *workers* off); a shell is the host's own. Its environment may not name what the host refuses
 /// a spawn (`Platform.Tools.spawnEnvironmentRefused`) nor VibeSwitcher's own `VIBESWITCHER_*`. What the user is shown
 /// is bound to what starts by the preset's `digest`, an HMAC under a key only this server run holds: a preset changed in
 /// between is refused, nothing started. A variable's value never leaves the node: the wire, the command line's listing
@@ -220,10 +220,9 @@ public enum SessionPresets {
     /// only VibeSwitcher records it. The home's sealed config comes with any root's record.
     public static func acceptRoot(nodeRoot: URL) -> String { nodeRoot.appendingPathComponent("v2/presets-accept").path }
 
-    /// Why the node can't start `preset` (nil: it can): Codex, a name that is a role's, a Claude command that isn't
-    /// `claude` and plain words, an environment variable the host refuses.
+    /// Why the node can't start `preset` (nil: it can): a name that is a role's, a Claude (Codex) command that isn't
+    /// `claude` (`codex`) and plain words, an environment variable the host refuses.
     public static func refusal(_ preset: LaunchPreset, builtIn: Bool = false) -> String? {
-        if preset.kind == .codex { return "Codex doesn't run on this node yet" }
         if LeadTeams.role(label: preset.name) != nil {
             return "its name is a lead's or a team member's label, which only a lead's start gives"
         }
@@ -231,7 +230,7 @@ public enum SessionPresets {
             return "it takes a built-in preset's name or id (\(ConfigSeal.inert(preset.name, limit: 40))), which it would stand in for: "
                 + "give it a name and id of its own (the built-ins come from VibeSwitcher itself)"
         }
-        if preset.kind == .claude, case .failure(let why) = arguments(preset) { return why.message }
+        if preset.kind != .shell, case .failure(let why) = arguments(preset) { return why.message }
         let names = preset.env.keys.sorted()
         if let bad = names.first(where: { !LaunchPlan.validEnvName($0) }) {
             return "its environment names \(ConfigSeal.inert(bad, limit: 64)), which isn't a variable's name"
@@ -285,21 +284,23 @@ public enum SessionPresets {
     static func arguments(_ preset: LaunchPreset) -> Result<[String], Refusal> {
         let words = preset.command.split(whereSeparator: { $0 == " " || $0 == "\t" }).map(String.init)
         guard let first = words.first else { return .success([]) }
-        guard first == "claude" else {
-            return .failure(Refusal(message: "its command starts \(ConfigSeal.inert(first, limit: 64)), and on this node a Claude preset's command is "
-                                    + "`claude` and its arguments (the node runs the claude its link names, never one a shell finds)"))
+        // A Claude preset runs `claude`, a Codex one `codex` (the user's own: never a worker's), each the program its link names.
+        let (program, name) = preset.kind == .codex ? ("codex", "Codex") : ("claude", "Claude")
+        guard first == program else {
+            return .failure(Refusal(message: "its command starts \(ConfigSeal.inert(first, limit: 64)), and on this node a \(name) preset's command is "
+                                    + "`\(program)` and its arguments (the node runs the \(program) its link names, never one a shell finds)"))
         }
         let rest = Array(words.dropFirst())
         if let odd = rest.first(where: { $0.range(of: #"^[A-Za-z0-9_./:=,+@%\[\]-]+$"#, options: .regularExpression) == nil }) {
-            return .failure(Refusal(message: "its command has \(ConfigSeal.inert(odd, limit: 64)), and on this node a Claude preset's arguments are "
+            return .failure(Refusal(message: "its command has \(ConfigSeal.inert(odd, limit: 64)), and on this node a \(name) preset's arguments are "
                                     + "plain words (letters, digits and _ . / : = , + @ % [ ] -): no quotes, variables or shell syntax"))
         }
         return .success(rest)
     }
 
-    /// The command line the host runs for `preset` (nil: the host's plain shell), Claude run as `program`.
+    /// The command line the host runs for `preset` (nil: the host's plain shell), Claude (or Codex) run as `program`.
     public static func command(_ preset: LaunchPreset, program: String) -> String? {
-        guard preset.kind == .claude, case .success(let rest) = arguments(preset) else { return nil }
+        guard preset.kind != .shell, case .success(let rest) = arguments(preset) else { return nil }
         return ([program] + rest).map(RecentProjects.shellQuote).joined(separator: " ")
     }
 

@@ -226,7 +226,12 @@ public enum WireSchema {
                 field("accepted", .list(.shape("node.accepted"))), field("notices", strings),
                 field("restart", Kind.shape("node.restart").orNull), field("reopen", .list(.shape("node.reopen"))), field("ended", .list(.shape("node.ended"))),
                 field("builds", Kind.any.orNull), field("web", .shape("node.web")), field("usage", Kind.shape("node.usage").orNull),
-                optional("health", .shape("node.health"))]),
+                optional("health", .shape("node.health")), field("boost", Kind.shape("node.boost").orNull)]),
+            // Boost (the app's `BoostMark`, 2026-11-21): null before the engine's first look.
+            shape("node.boost", from: "LeadEngine.boostValue", [field("mode", .words(BoostMode.allCases.map(\.rawValue))), field("on", .bool),
+                                                               field("why", .string), field("limits", .shape("node.boost.limits"))]),
+            shape("node.boost.limits", from: "LeadEngine.boostValue", [field("loadThreshold", .string), field("maxSessions", .int),
+                                                                      field("maxWorkers", .int), field("heavySlots", .int)]),
             shape("node.health", from: "NodeHealth.value (2026-11-21)", [
                 field("since", .date), field("stalled", Kind.int.orNull), field("freezes", .list(.shape("node.health.freeze"))),
                 field("slowRefreshes", .int), field("slowestRefresh", Kind.int.orNull), field("lastSlowRefresh", Kind.date.orNull),

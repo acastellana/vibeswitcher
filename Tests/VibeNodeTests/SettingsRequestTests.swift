@@ -70,10 +70,19 @@ struct SettingsRequestTests {
         #expect(await eventually(timeout: 60) { BoostState.active(from: file) != nil })
         #expect(BoostState.active(from: file)?.limits.maxSessions == sessions)
         #expect(MacLimits.current(file: files(world).limits, boostFile: file).maxSessions >= sessions)
+        // Status says it (the app's mark): on, why, the raised limits; and the command line's line.
+        #expect(await eventually(timeout: 60) { world.queue.sync { world.engine.boostValue["on"] } == .bool(true) })
+        let boost = world.queue.sync { world.engine.boostValue }
+        #expect(boost["mode"] == .string("on") && boost["limits"]?["maxSessions"] == .int(sessions), "\(boost)")
+        #expect(WireSchema.check(boost, as: "node.boost") == nil)
+        #expect(world.requests.queue.sync { world.requests.statusValue()["boost"] } == boost)
+        #expect(LeadEngine.boostLine(boost)?.hasPrefix("boost: on (on in Settings): start nothing above a load of") == true)
         // Automatic acts as off on a node: the boost is taken back.
         #expect(try #require(await set(world, "boost", "automatic")).ok)
         #expect(await eventually(timeout: 60) { BoostState.load(from: file)?.on == false })
         #expect(BoostState.load(from: file)?.why.contains("acts as off") == true)
+        #expect(await eventually(timeout: 60) { world.queue.sync { world.engine.boostValue["mode"] } == .string("automatic") })
+        #expect(LeadEngine.boostLine(world.queue.sync { world.engine.boostValue }) == nil, "off: no line, no mark")
     }
 
     @Test func aProjectsGuardRailIsTheUsersAndItsRunningLeadIsTold() async throws {

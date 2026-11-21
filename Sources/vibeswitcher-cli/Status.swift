@@ -104,6 +104,7 @@ enum StatusCommand {
         if let line = webLine(result["web"]) { out.append(line) }
         if let line = tailnetLine(result["webTailnet"]) { out.append(line) }
         out += NodeUsage.lines(result["usage"])
+        if let line = LeadEngine.boostLine(result["boost"]) { out.append(line) }
         let sessions = result["sessions"]?.array ?? []
         out.append(sessions.isEmpty ? "No agent sessions." : "sessions:")
         for session in sessions {

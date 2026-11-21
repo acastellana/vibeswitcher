@@ -304,6 +304,8 @@ public final class LeadEngine: @unchecked Sendable {
     var toolchainNow: () -> Date = Date.init
     /// Boost as last written to `boost.json` (`lookAtBoost`), and when; the clock it's judged on.
     var boostWritten: (state: BoostState, at: Date)?
+    /// Boost as the last look decided it (whether or not a file was written), with its mode: `status`'s `boost`.
+    public internal(set) var boostDecided: (mode: BoostMode, state: BoostState)?
     var boostNow: () -> Date = Date.init
     /// The machine's load as the room watch reads it, as the leads' tools judge it (`MacLoad.steady`); faked in tests.
     var macLoad: () -> Double? = MacLoad.steady

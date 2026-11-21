@@ -392,6 +392,8 @@ public enum WireVectors {
             "cards": Requests.counts([.question: 1]), "accepted": .array([]), "notices": .array([]), "restart": .null, "reopen": .array([]), "ended": .array([]), "builds": .null,
             "web": .object(["state": .string("listening"), "port": .int(Int(NodeWeb.port)), "tokens": .int(1), "connections": .int(1)]),
             "usage": usage,
+            "boost": .object(["mode": .string("on"), "on": .bool(true), "why": .string("on in Settings"),
+                              "limits": .object(["loadThreshold": .string("48"), "maxSessions": .int(16), "maxWorkers": .int(6), "heavySlots": .int(4)])]),
         ])
     }
 
@@ -410,7 +412,7 @@ public enum WireVectors {
     }
 
     /// The launch presets of the vectors' example: the project's own Opus (its default, with a variable set) and the
-    /// built-ins, Codex among them (the node can't start it).
+    /// built-ins, Codex among them (the user's own, by its link).
     /// A fixed key for the example's digests, so the generated files are the same each time (a node's is random).
     static let presetsKey = SymmetricKey(data: Data(repeating: 0x5a, count: 32))
 

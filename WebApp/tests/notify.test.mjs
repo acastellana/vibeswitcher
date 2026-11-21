@@ -3,7 +3,7 @@
 // stopped), the first line only and inert, and the title bar's count. Run: node --test WebApp/tests/
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { summarize, changes, firstLine, titled, sounding, chime } from '../js/notify.js';
+import { summarize, changes, firstLine, titled, sounding, chime, kindOf, wanted } from '../js/notify.js';
 
 const session = (id, fields = {}) => ({ id, terminal: 'pts/1', agent: 'claude', cwd: '/home/dev/projects/app', status: 'idle', since: '2026-11-20T09:00:00.000Z', role: null, ...fields });
 const card = (id, fields = {}) => ({ id, kind: 'question', project: 'p1', root: '/home/dev/projects/app', open: true, question: { text: 'Ship it?\nMore detail.' }, ...fields });
@@ -101,4 +101,27 @@ test('a freeze the node keeps after the page looked is told once; one from befor
   assert.equal(told[0].href, '#/node');
   assert.equal(sounding(told), false);
   assert.deepEqual(changes(frozen, frozen), []);
+});
+
+test('a session of yours that finishes its work is told; a worker’s, a verifier’s, a paused one or one not working is not', () => {
+  const mine = (status, fields = {}) => session('s-1', { status, title: 'Fix the login', ...fields });
+  const was = summarize(state({ sessions: [mine('working')] }));
+  assert.deepEqual(changes(was, summarize(state({ sessions: [mine('done')] }))).map((note) => [note.key, note.title, note.body, note.href]),
+    [['finished:s-1', 'Fix the login finished', 'It finished its work.', '#/s/s-1']]);
+  assert.deepEqual(changes(was, summarize(state())).map((note) => note.body), ['Its session ended.']);
+  assert.deepEqual(changes(was, summarize(state({ sessions: [mine('background')] }))), []);
+  for (const role of ['worker', 'verifier']) {
+    const team = (status) => session('w-1', { status, role });
+    assert.deepEqual(changes(summarize(state({ sessions: [team('working')] })), summarize(state({ sessions: [team('done')] }))), [], role);
+  }
+  assert.deepEqual(changes(summarize(state({ sessions: [mine('working', { paused: true })] })), summarize(state({ sessions: [mine('done')] }))), []);
+});
+
+test('each kind is told only while its choice is on: something needs me, a session finishes', () => {
+  const told = [{ key: 'card:c1' }, { key: 'prompt:s1:x' }, { key: 'freeze:t' }, { key: 'stopped:l1' }, { key: 'finished:s2' }];
+  assert.deepEqual(told.map(kindOf), ['needs', 'needs', 'needs', 'done', 'done']);
+  assert.deepEqual(wanted(told, { needs: true, done: true }), told);
+  assert.deepEqual(wanted(told, { needs: true, done: false }).map((note) => note.key), ['card:c1', 'prompt:s1:x', 'freeze:t']);
+  assert.deepEqual(wanted(told, { needs: false, done: true }).map((note) => note.key), ['stopped:l1', 'finished:s2']);
+  assert.equal(sounding(wanted(told, { needs: false, done: true })), false, 'no sound for what isn’t told');
 });

@@ -4,7 +4,7 @@
 
 import { h, keyed, setText, setClass, framed } from '../dom.js';
 import { sessionMark, icon } from '../marks.js';
-import { STATES, stateOf, since, plural } from '../words.js';
+import { STATES, stateOf, since, plural, boostMarkText } from '../words.js';
 import { arrange, summary, sessionHref, boardHref, projectOf, teamSummary } from '../ui.js';
 
 function sessionRow(app) {
@@ -122,6 +122,8 @@ export function sidebar(app) {
   const line = h('span', { class: 'foot-summary', role: 'status' });
   const nodeDot = h('span', { class: 'notice-dot', hidden: true });
   const nodeLink = h('a', { class: 'icon-button', href: '#/node', title: 'This node', 'aria-label': 'This node' }, icon('node', 15), nodeDot);
+  // Boost on (the app's `BoostMark`): a bolt beside This node, why on hover; Settings changes it.
+  const boostMark = h('a', { class: 'icon-button boost-mark', href: '#/settings', hidden: true }, icon('bolt', 14));
   const el = h('nav', { class: 'sidebar', 'aria-label': 'Sessions' },
     h('div', { class: 'sidebar-top' }, h('div', { class: 'segmented', role: 'group', 'aria-label': 'Group by' }, tabs),
       // Starting a session is the start page's (the line that starts it in a terminal).
@@ -129,7 +131,7 @@ export function sidebar(app) {
     h('div', { class: 'list' }, skeleton, groups, empty),
     h('div', { class: 'sidebar-foot' },
       h('label', { class: 'filter' }, icon('filter', 13), filter),
-      h('div', { class: 'foot-line' }, line, nodeLink)));
+      h('div', { class: 'foot-line' }, line, boostMark, nodeLink)));
 
   const sections = new Map();
   let arranged = { sections: [], order: [], total: 0 };
@@ -149,6 +151,9 @@ export function sidebar(app) {
     const notices = state.node?.notices?.length || 0;
     nodeDot.hidden = notices === 0;
     nodeLink.title = notices ? `This node · ${plural(notices, 'notice')}` : 'This node';
+    const boost = boostMarkText(state.node?.boost);
+    boostMark.hidden = !boost;
+    if (boost) { boostMark.title = boost.help; boostMark.setAttribute('aria-label', boost.label); }
     if (ui.state.route.name === 'node') nodeLink.setAttribute('aria-current', 'page'); else nodeLink.removeAttribute('aria-current');
   }
 
