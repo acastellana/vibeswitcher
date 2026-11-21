@@ -962,3 +962,14 @@ kbd { padding: 1px 6px; border-radius: 5px; box-shadow: inset 0 0 0 1px var(--li
 .all-done-bullets { margin: 0 0 4px 18px; padding: 0; }
 .all-done-cost { font-size: 12px; opacity: .8; margin: 4px 0; }
 .all-done-tasks li.merged { font-weight: 500; }
+
+/* The composer's + (views/chat.js): an image from this device, or the line that sends one on the node. */
+.composer-attach { flex: none; width: 34px; height: 34px; margin-bottom: 2px; border-radius: 50%; }
+.attach-menu { display: flex; flex-direction: column; align-self: flex-start; gap: 2px; width: min(320px, calc(100% - 48px)); margin: 0 0 4px max(24px, calc((100% - 800px) / 2 + 24px)); padding: 4px; border-radius: 10px; background: var(--raised); box-shadow: 0 0 0 1px var(--line), 0 6px 20px var(--shadow); }
+.attach-choice { padding: 7px 10px; border-radius: 7px; text-align: left; font-size: var(--small); }
+.attach-choice:hover:not(:disabled), .attach-choice:focus-visible { background: var(--fill); }
+.attach-choice:disabled { color: var(--ink-3); }
+.node-image { display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; box-sizing: border-box; width: 100%; max-width: 800px; margin: 0 auto; padding: 6px 24px 0; }
+.node-image-line { min-width: 0; overflow-x: auto; }
+.node-image-head { display: flex; align-items: center; gap: 6px; }
+.node-image-path { flex: 1; }
