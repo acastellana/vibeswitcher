@@ -25,9 +25,9 @@ extension NodeSettings {
         case .limits:
             var limits = MacLimits.load(from: files.limits)
             switch setting.key {
-            case "mac_max_sessions": limits.maxSessions = value.flatMap(Int.init) ?? MacLimits.defaultMaxSessions
+            case "node_max_sessions": limits.maxSessions = value.flatMap(Int.init) ?? MacLimits.defaultMaxSessions
             case "load_threshold": limits.loadThreshold = value.flatMap(Double.init)
-            case "mac_heavy_slots": limits.heavySlots = value.flatMap(Int.init) ?? MacLimits.defaultHeavySlots
+            case "node_heavy_slots": limits.heavySlots = value.flatMap(Int.init) ?? MacLimits.defaultHeavySlots
             case "ignore_usage_limits": limits.ignoreUsageLimits = value == "on"
             default: throw Refusal("\(setting.key) isn't kept in mac-limits.json")
             }

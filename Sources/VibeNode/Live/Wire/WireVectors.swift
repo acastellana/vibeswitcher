@@ -642,7 +642,7 @@ public enum WireVectors {
         let workflow = root + "/.vibeswitcher/workflow.md"
         return .object([
             "node": .object(["root": .string(node), "settings": .array([
-                shown("mac_max_sessions", "8", String(MacLimits.defaultMaxSessions), place: node + "/mac-limits.json"),
+                shown("node_max_sessions", "8", String(MacLimits.defaultMaxSessions), place: node + "/mac-limits.json"),
                 shown("ignore_usage_limits", "off", "off", place: node + "/mac-limits.json"),
                 shown("boost", "on", "off", place: node + "/settings.plist"),
                 shown("lead_mail", "on", "on", place: node + "/settings.plist"),
