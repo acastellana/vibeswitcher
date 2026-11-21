@@ -49,7 +49,8 @@ The gaps that matter most for daily use, worst first:
     project's lead in its conversation, and `vibeswitcher reopen` the user's own Claude sessions in theirs. A lead's
     workers are its to start again (told which). Rotation is on the node since 2026-11-20 (workflow.md's `lead_rotation:`).
 11. **Remote access reads and drafts only.** `vibeswitcher web --tailnet` (2026-11-20) opens the page on the tailnet for
-    a phone, read and draft as on loopback; replies and key presses from the phone wait for H1.
+    a phone, read and draft as on loopback; replies and key presses from the phone wait for H1 (what H1 needs and the
+    decisions page input waits on: `docs/process/v2-h1-plan.md`, 2026-11-21).
 
 ## The table
 
