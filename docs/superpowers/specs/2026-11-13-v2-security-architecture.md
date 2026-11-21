@@ -277,7 +277,7 @@ A page on `http://127.0.0.1:<port>` holding a token (the live wire contract's §
 the read and draft ones is refused `voice` before any handler (`WebSecurityTests.aWebConnectionChangesNothing`), and
 `web.open` and `web.revoke` are the user's voice behind the typed code. The token's SHA-256 is kept at rest in a file
 the user's processes can write, so a worker can mint itself one (S11, item 33): a token gains nothing a process of
-the uid lacks. The listener is the server's until H1 moves it to the host (S11, item 32).
+the uid lacks. The listening socket is the host's since H1, the server only accepting on it (S11, item 32).
 
 #### Root
 
@@ -2070,12 +2070,18 @@ against it. Each line says what reduces it now, if anything.
     profile's IndexedDB files on disk, which on WSL are under `/mnt/c` for any process of the user. Approvals that
     need the person's presence (a security key or the platform authenticator, WebAuthn) don't have this hole. Stage 4's
     design checks it before approvals rest on browser keys.
-32. **The web's port while the server is down** (the live plan's LW-D1). Until the host binds the loopback port and
-    hands it to each server it starts (Task H1), nothing holds `127.0.0.1:47830` between two servers: any local process
-    can bind it, and a page reconnecting sends its token there, and a bookmark opens that process's page. A squatter
-    gains a token that reads what its uid reads already and a display it can lie on; a draft it plants is shown whole
-    on the command line before the user's code confirms it. A server that finds the port taken refuses the web and
-    says so in `status`.
+32. **The web's port while the server is down** (the live plan's LW-D1). *Closed by H1 (2026-11-21,
+    docs/process/v2-h1-plan.md) while the web is on:* the session host binds `127.0.0.1:47830` (and the tailnet's
+    address, only in 100.64.0.0/10) when its server child asks over its connector, holds it across the server's restarts
+    and the host's handovers, and hands the server a duplicate to accept on (`HostWebListeners`, `WebBind.host`); the
+    server binds nothing itself (`ServerLintTests.theServerBindsNoWebSocketOfItsOwn`). Before H1 nothing held the port
+    between two servers: any local process could bind it, a page reconnecting sent its token there, and a bookmark
+    opened that process's page. What stays open: while the web is **off** (no code or token alive, LW-D3) the port is
+    free by design, so a page left open or a bookmark reaches whatever holds it then (a squatter gains a display it can
+    lie on, no token: none is alive); a host that ends rather than hands over (a crash, `vibeswitcher stop`) frees it
+    until the next host's server asks again; and `[::1]:47830` is not held (no page of the node uses it: its one name is
+    `127.0.0.1`, and any other Host is 421). A host that finds the port taken refuses the web and the server says so in
+    `status`.
 33. **The web tokens' hashes are in a file the user's processes can write** (`<root>/v2/web-tokens.json`, 0600): a
     worker can add a hash of its own and gain a token. That is why a token reads and drafts and never changes anything
     (the live plan's LW-D6).

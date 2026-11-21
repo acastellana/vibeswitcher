@@ -1,4 +1,14 @@
-# H1: the host owns the web listener (a plan, not built)
+# H1: the host owns the web listener
+
+**Built 2026-11-21 (`v2-usage-summaries`), shape (a), the tailnet as recommended.** The server asks over its connector
+(`web listen PLACE ADDRESS PORT`, `web release PLACE`: `HostWebListen` in VibeCore, `HostConnector.web`); the host
+checks the place and address itself (127.0.0.1; 100.64.0.0/10; the user's host only port 47830), binds, holds and
+sends a duplicate (`HostWebListeners`, `AppConnector.answerWeb`, only to the server child's connector); a handover
+carries the sockets (`State.webListeners`); the server binds nothing itself (`WebBind.host`, `ServerLintTests`). Rather
+than `--web-listener FD` at each spawn, a restarted server asks again at its start, as it bound again before, and the
+host hands it the socket it still holds. Tests: `WebHeldByHostTests` (a restart, a handover, a revoke, on a scratch
+node), `HostWebListenersTests`, `HostWebListenTests`, `NodeWebListenerTests`'s host refusal. Page input stays out:
+decisions 1, 2 and 4 below still wait on the user. The text below is the plan as written.
 
 2026-11-21, `v2-usage-summaries`. H1 is the gate before any input from a page reaches a real session: typing into a
 terminal, a one-click answer, a reply from a phone (the live plan's LW-D1 and LW-D12 as amended on 2026-11-20, the

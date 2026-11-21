@@ -312,9 +312,9 @@ change.
   socket under `~/.vibeswitcher/v2/` instead of the host owning it; the cost is that nothing listens at that path
   between the server's death and its restart, which a worker could take (the command line's check of the server
   refuses such a listener; the security document's T9). **The same for the web's port, recorded at stage 3's first
-  slice** (the live plan's LW-D1): the server binds the loopback listener (`127.0.0.1:47830`, off until `vibeswitcher
-  web`) until Task H1 moves it to the host; between two servers any local process can take the port (the security
-  document's S11, item 32). A web page's first frame authenticates with a pairing code or a token, not yet a device key.
+  slice** (the live plan's LW-D1): since Task H1 (2026-11-21) the host binds the loopback
+  listener (`127.0.0.1:47830`, off until `vibeswitcher web`) and holds it while the web is on, across the server's
+  restarts and its own handovers, the server only accepting on it (the security document's S11, item 32). A web page's first frame authenticates with a pairing code or a token, not yet a device key.
 - **`vibeswitcher-server`**: the stores, the lead engine, the live protocol to clients and, later, peers. It can
   crash and be restarted without a session ending or an approval being forgeable. It hardens itself in its first
   statements, in the order the engine plan's E1 gives: the image it was started from closed, then non-dumpable (it is
