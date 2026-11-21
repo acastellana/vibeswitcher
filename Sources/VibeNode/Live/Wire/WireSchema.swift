@@ -196,7 +196,9 @@ public enum WireSchema {
                 field("session", .string), field("folder", .string), field("name", .string), field("conversation", Kind.string.orNull)]),
             shape("node.ended", from: "LeadEngine.endedValue (the stability lane, 2026-11-20)", [
                 field("session", .string), field("folder", .string), field("name", .string), field("conversation", Kind.string.orNull),
-                field("at", .date)]),
+                field("at", .date), field("exit", Kind.shape("node.ended.exit").orNull)]),
+            // How it ended (the inspector's Exit, 2026-11-21): `HostSession.Exit`'s status, its `cause` and when.
+            shape("node.ended.exit", from: "LeadEngine.endedValue", [field("status", .int), field("cause", .string), field("at", .date)]),
             shape("node.web", from: contractNode, [field("state", .string), field("port", Kind.int.orNull), field("tokens", .int),
                                                   field("connections", .int)]),
         ]
