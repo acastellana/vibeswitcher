@@ -90,6 +90,8 @@ public final class Requests: @unchecked Sendable {
     /// S8b): the account's `NodeFolders.defaultPrefix` on the node, `--test-install-root` on a scratch node; none:
     /// `build.switch` is refused and `status` gives no `builds`.
     public var installRoot: String?
+    /// The health digest (`NodeHealth`): the server's own watchdog, slow refreshes and last errors.
+    public var health: NodeHealth?
     /// Check for Updates (`UpdateWatch`): the user's node's only. Its notice is `status`'s, its last answer `update`.
     public var updates: UpdateWatch?
     /// The waits a `build.switch` runs on (a test's shorter ones).
@@ -398,6 +400,12 @@ public final class Requests: @unchecked Sendable {
         if let tailnet { fields["webTailnet"] = tailnet.value() }
         // The last update check's answer, for the command line (the page has its notice).
         if let updates { fields["update"] = updates.value }
+        // The health digest (`status --health`, the page's This node).
+        if let health {
+            fields["health"] = health.value(serverRestarts: notes?.notes.serverRestarts, refusedConnections: notes?.notes.refusedAppConnections,
+                                            hostRestartAt: engine?.restartValue["at"]?.string.flatMap(NodeWire.date),
+                                            waiting: sessions?.reminderNotices() ?? [])
+        }
         return .object(fields)
     }
 

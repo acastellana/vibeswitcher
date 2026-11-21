@@ -54,6 +54,7 @@ extension LeadEngine {
         let (usageFiles, home, now, summaries) = (settingsFiles, self.home, usageNow(), summarizer != nil)
         // The posted questions' timers, from their cards (never the boards': S3).
         fireTimers(now: timersNow())
+        let began = MacTime.real.awake()
         reads.async({ files -> Refreshed in
             var read = Refreshed()
             for root in roots { read.loaded[root] = files.board(root) }
@@ -72,6 +73,7 @@ extension LeadEngine {
             return read
         }) { [weak self] read in
             guard let self else { return }
+            self.health?.refreshed(in: MacTime.real.awake() - began)
             self.markReplaced(read.named, roots: roots)
             self.usageRead(read.usage, teams: read.teams)
             self.refreshed(roots: roots, loaded: read.loaded, teams: read.teams, refusals: read.refusals, finished: read.finished)

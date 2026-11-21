@@ -11,21 +11,24 @@ import VibeNode
 /// `vibeswitcher status --probe [--json]`: stage 1's local read, without the server: the agent sessions on this machine
 /// (`LocalSessions`), one line each: terminal, agent, folder, status, since when.
 ///
+/// `vibeswitcher status --health [--json]`: the server's health digest only (`NodeHealth`: freezes of the engine's queue,
+/// slow refreshes, the host's restarts and refused connections, sessions left waiting or stuck, the server's last errors).
+///
 /// `vibeswitcher status --ack`: acknowledges what the journal shows (a journal entry the command line writes after the
 /// typed code), never a server request.
 enum StatusCommand {
-    static let usage = "usage: vibeswitcher status [--json] | status --probe [--json] | status --ack"
+    static let usage = "usage: vibeswitcher status [--json] | status --health [--json] | status --probe [--json] | status --ack"
 
     /// The JSON form's version.
     static let format = 1
 
     static func run(_ arguments: [String]) -> Int32 {
         let words = Set(arguments)
-        guard words.count == arguments.count, words.isSubset(of: ["--json", "--probe", "--ack"]),
-              !(words.contains("--ack") && words.count > 1) else { return Say.usage(usage) }
+        guard words.count == arguments.count, words.isSubset(of: ["--json", "--probe", "--ack", "--health"]),
+              !(words.contains("--ack") && words.count > 1), !(words.contains("--health") && words.contains("--probe")) else { return Say.usage(usage) }
         if words.contains("--probe") { return probe(json: words.contains("--json")) }
         if words.contains("--ack") { return acknowledge() }
-        return throughServer(json: words.contains("--json"))
+        return throughServer(json: words.contains("--json"), health: words.contains("--health"))
     }
 
     /// Stage 1's read, as it was.
@@ -43,7 +46,8 @@ enum StatusCommand {
         return 0
     }
 
-    static func throughServer(json asJSON: Bool) -> Int32 {
+    /// `health`: only the health digest (`NodeHealth.lines`; with `json`, its object).
+    static func throughServer(json asJSON: Bool, health: Bool = false) -> Int32 {
         let context = NodeContext.current()
         context.sayScratch()
         let client: NodeClient
@@ -62,6 +66,15 @@ enum StatusCommand {
         case .success(let reply):
             guard reply.ok, let given = reply.result else { return Say.replyError(reply) }
             result = given
+        }
+        if health {
+            guard let digest = result["health"], digest != .null else { return Say.refused("this node's server keeps no health digest (an older build)") }
+            if asJSON {
+                try? FileHandle.standardOutput.write(contentsOf: NodeWire.printable(NodeWire.line(digest)))
+            } else {
+                Say.out(NodeHealth.lines(digest).joined(separator: "\n"))
+            }
+            return 0
         }
         let facts = context.facts()
         // A node started detached: the weaker rule, and its pid file any worker can write (the start plan's S3).

@@ -191,7 +191,15 @@ public enum WireSchema {
                 field("host", .shape("node.host")), field("rule", .shape("node.rule")), field("cards", .shape("node.cards")),
                 field("accepted", .list(.shape("node.accepted"))), field("notices", strings),
                 field("restart", Kind.shape("node.restart").orNull), field("reopen", .list(.shape("node.reopen"))), field("ended", .list(.shape("node.ended"))),
-                field("builds", Kind.any.orNull), field("web", .shape("node.web")), field("usage", Kind.shape("node.usage").orNull)]),
+                field("builds", Kind.any.orNull), field("web", .shape("node.web")), field("usage", Kind.shape("node.usage").orNull),
+                optional("health", .shape("node.health"))]),
+            shape("node.health", from: "NodeHealth.value (2026-11-21)", [
+                field("since", .date), field("stalled", Kind.int.orNull), field("freezes", .list(.shape("node.health.freeze"))),
+                field("slowRefreshes", .int), field("slowestRefresh", Kind.int.orNull), field("lastSlowRefresh", Kind.date.orNull),
+                field("serverRestarts", Kind.int.orNull), field("refusedConnections", Kind.int.orNull), field("hostRestartAt", Kind.date.orNull),
+                field("waiting", strings), field("errors", .list(.shape("node.health.error")))]),
+            shape("node.health.freeze", from: "NodeHealth.value", [field("at", .date), field("seconds", .int)]),
+            shape("node.health.error", from: "NodeHealth.value", [field("at", .date), field("line", .string)]),
             shape("node.server", from: "Requests.statusValue", [field("pid", .int), field("startedAt", .date), field("commit", .string)]),
             shape("node.host", from: "Requests.statusValue", [
                 field("startedAt", Kind.date.orNull), field("pid", Kind.int.orNull), field("state", .string),
