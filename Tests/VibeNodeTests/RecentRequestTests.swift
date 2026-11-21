@@ -5,8 +5,8 @@ import VibeCore
 
 /// The start page's recent projects (`RecentRequest.swift`, the app's `Launcher.recentProjects`): the folders a scratch
 /// home's Claude Code (`.claude.json`'s `projects`) and Codex (`.codex/config.toml`) know, newest first by their
-/// transcripts folder, the home itself and folders gone left out, each with its lead's project; a read anyone of the uid
-/// and a page may ask. Every file is a scratch home's: never the real ~/.claude.json.
+/// transcripts folder, the home itself and folders gone left out, each with its lead's project; a read of the user's or a
+/// page's (never a session's process). Every file is a scratch home's: never the real ~/.claude.json.
 @Suite(NodeTraits.linuxOnly, .timeLimit(.minutes(5)))
 struct RecentRequestTests {
     private let scratch = Scratch()
@@ -48,7 +48,7 @@ struct RecentRequestTests {
         let (older, trusted) = (scratch.url("older").path, scratch.url("trusted").path)
         let home = try home(older: older, newer: world.repo, trusted: trusted)
         world.requests.home = home.path
-        #expect(NodeWire.kinds["recent"] == .anyone && !NodeWire.changesState("recent"))
+        #expect(NodeWire.kinds["recent"] == .webRead && !NodeWire.changesState("recent"))
         #expect(WebAccess.refusal(for: NodeWire.Request(id: "1", kind: "recent"), rights: [.read]) == nil)
         let reply = try #require(await world.ask("recent", action: nil))
         let projects = try #require(reply.result?["projects"]?.array, "\(reply)")
@@ -57,5 +57,17 @@ struct RecentRequestTests {
         #expect(projects[2]["lastUsed"] == .null, "Codex's trusted folders say no time")
         #expect(WireSchema.check(try #require(reply.result), as: "recent.result") == nil)
         #expect(!String(decoding: NodeWire.message(try #require(reply.result)), as: UTF8.self).contains("example.invalid"), "nothing else of .claude.json")
+
+        // A session's process (an agent) is refused: the user's other projects aren't its to list. A page's read goes
+        // through `webRead`, which gives it.
+        var session = CardWorld.user
+        session.sessionMarker = true
+        let refused = try #require(await world.ask("recent", action: nil, from: session))
+        #expect(refused.error?.code == NodeWire.Code.voice.rawValue, "\(refused)")
+        #expect(WebAccess.refusal(for: NodeWire.Request(id: "2", kind: "recent"), rights: [])?.error?.code == NodeWire.Code.voice.rawValue)
+        let paged = await withCheckedContinuation { done in
+            world.requests.queue.async { world.requests.webRead(NodeWire.Request(id: "p", kind: "recent")) { done.resume(returning: $0) } }
+        }
+        #expect(paged.result?["projects"]?.array?.count == 3, "\(paged)")
     }
 }
