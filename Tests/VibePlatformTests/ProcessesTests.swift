@@ -986,13 +986,41 @@ struct ProcessesTests {
         #expect(Processes.link(-1) == nil)
     }
 
-    /// The Mac has no token for a pid (an audit token can't be had for another process without privileges), reads
-    /// no other process's dumpable state, and no links.
+    /// The Mac has no token for a pid (an audit token can't be had for another process without privileges) and reads
+    /// no other process's dumpable state.
     @Test(.enabled(if: !onLinux, "the Mac's forms; Linux's are tested above"))
     func thereIsNoTokenForAPidOnTheMac() {
         #expect(Processes.token(getpid()) == nil)
         #expect(Processes.isDumpable(getpid()) == nil)
-        #expect(Processes.link(getpid()) == nil)
+    }
+
+    /// The Mac's link (`proc_pidinfo`'s BSD info, the review of 2026-11-21: the voice's ancestry there): this process's
+    /// names its parent; a child's names this process and started no earlier; a token from a socket names the link of
+    /// its own pid, never another pid's; a child ended and reaped has none.
+    @Test(.enabled(if: !onLinux, "the Mac's link; Linux's is tested above"))
+    func theMacsLinkIsItsProcessBoundToItsToken() throws {
+        let link = try #require(Processes.link(getpid()))
+        #expect(link.pid == getpid() && link.parent == getppid())
+        #expect(Processes.link(0) == nil && Processes.link(-1) == nil)
+        // The token of this process, as a socket names its peer (a pair's ends are both this process's).
+        let (one, other) = try #require(Platform.Sockets.pair(type: Platform.Sockets.stream))
+        defer { close(one); close(other) }
+        let token = try #require(Platform.Sockets.peerToken(one))
+        #expect(token.pid == getpid())
+        #expect(link.isProcess(of: token))
+        var someoneElse = link
+        someoneElse.pid = getppid()
+        #expect(!someoneElse.isProcess(of: token))
+        // A child: its parent this process, its start no earlier than this one's; gone once reaped.
+        var spawn = Platform.Spawn(executable: "/bin/sleep", arguments: ["sleep", "30"])
+        spawn.keep = []
+        let child = try spawn.start().get()
+        let childLink = try #require(Processes.link(child))
+        #expect(childLink.parent == getpid() && childLink.startTicks >= link.startTicks)
+        kill(child, SIGKILL)
+        var status: Int32 = 0
+        waitpid(child, &status, 0)
+        #expect(Processes.link(child) == nil)
     }
 }
 
