@@ -53,8 +53,8 @@ enum SessionCommand {
         }
     }
 
-    /// The session `wanted` names among those `status` lists: the node's id for it (`local:<uuid>`, `local:pts/9`), its
-    /// host id, or a prefix of 4 or more of that id that only one has (as the page and `status` show it, 8).
+    /// The session `wanted` names among those `status` lists (`SessionLookup.match`): its id, the terminal name
+    /// `status` prints (`ttypts4`), or a prefix of its host id only one has; a name two answer to is refused, naming them.
     static func find(_ wanted: String, client: NodeClient) -> Result<NodeWire.Value, NodeClient.Failure> {
         switch client.request("status") {
         case .failure(let failure): return .failure(failure)
@@ -62,18 +62,7 @@ enum SessionCommand {
             guard reply.ok, let sessions = reply.result?["sessions"]?.array else {
                 return .failure(.broken(reply.error.map { "\($0.code): \($0.message)" } ?? "the server listed no sessions"))
             }
-            let given = wanted.lowercased()
-            let prefix = NodeIds.node + ":"
-            let bare = given.hasPrefix(prefix) ? String(given.dropFirst(prefix.count)) : given
-            let exact = sessions.filter { $0["id"]?.string?.lowercased() == prefix + bare }
-            let byPrefix = bare.count >= 4 && bare.allSatisfy({ $0.isHexDigit || $0 == "-" })
-                ? sessions.filter { $0["hosted"]?.bool == true && ($0["id"]?.string ?? "").lowercased().dropFirst(prefix.count).hasPrefix(bare) } : []
-            let matches = exact.isEmpty ? byPrefix : exact
-            guard matches.count == 1, let session = matches.first else {
-                return .failure(.refused(matches.isEmpty ? "no session \(ConfigSeal.inert(wanted, limit: 80)) on this node (`vibeswitcher status` lists them)"
-                                                        : "\(ConfigSeal.inert(wanted, limit: 80)) begins \(matches.count) sessions' ids: give more of it"))
-            }
-            return .success(session)
+            return SessionLookup.match(wanted, in: sessions).mapError { .refused($0.description) }
         }
     }
 
@@ -123,12 +112,30 @@ enum SendCommand {
         if text == nil && images.isEmpty { return takeDraft(session, now: now) }
         let typed = text ?? ""
         guard !typed.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !images.isEmpty else { return Say.usage(usage) }
-        var args: [String: NodeWire.Value] = ["session": .string(session), "text": .string(typed)]
-        if !images.isEmpty { args["images"] = .array(images.map(NodeWire.Value.string)) }
-        if now { args["now"] = .bool(true) }
-        return SessionCommand.act("send", args: { _ in args }, what: { _ in
-            (now ? "This steers session \(ConfigSeal.inert(session, limit: 80)) now, as you (\(steerWhen)): "
-                 : "This types into session \(ConfigSeal.inert(session, limit: 80)), as you: ")
+        // The session found first (its id, its terminal name, or a prefix only one has), so what is shown names it. One
+        // `status` doesn't list yet (its scan runs every 2 s, a session just started) goes to the server as given, which
+        // finds it in its host's list, as before; a name two sessions answer to is refused.
+        return SessionCommand.act("send", fetch: { client in
+            switch client.request("status") {
+            case .failure(let failure): return .failure(failure)
+            case .success(let reply):
+                guard reply.ok, let sessions = reply.result?["sessions"]?.array else {
+                    return .failure(.broken(reply.error.map { "\($0.code): \($0.message)" } ?? "the server listed no sessions"))
+                }
+                switch SessionLookup.match(session, in: sessions) {
+                case .success(let found): return .success(found)
+                case .failure(let refusal) where refusal.ambiguous: return .failure(.refused(refusal.description))
+                case .failure: return .success(.object(["id": .string(session)]))
+                }
+            }
+        }, args: { found in
+            var args: [String: NodeWire.Value] = ["session": found["id"] ?? .string(session), "text": .string(typed)]
+            if !images.isEmpty { args["images"] = .array(images.map(NodeWire.Value.string)) }
+            if now { args["now"] = .bool(true) }
+            return args
+        }, what: { found in
+            (now ? "This steers \(SessionCommand.describe(found)) now, as you (\(steerWhen)): "
+                 : "This types into \(SessionCommand.describe(found)), as you: ")
                 + ConfigSeal.inert(typed, limit: 400) + attached(images)
         }, say: said)
     }
