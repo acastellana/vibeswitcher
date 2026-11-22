@@ -7,6 +7,9 @@ import Testing
 /// at the host's path never reaches the app. Without one (the default, and always on the Mac) a connection is made by
 /// the path as today. The host's half is `HostIdentitySeamTests`'.
 struct HostConnectorTests {
+    /// A web ask with a 0.5 s timeout ends well inside this even while a connection holds the lock for its 30 s.
+    static let lockWaitBound: TimeInterval = 10
+
     let temp = Scratch()
 
     /// A listener at a path of its own, short enough for a socket's (its folder goes with the test's `Scratch`).
@@ -224,7 +227,7 @@ struct HostConnectorTests {
         await #expect(throws: HostConnector.Failure.timedOut) {
             try await offPool { try HostConnector.web(.release(.loopback), over: connector, timeout: 0.5) }
         }
-        #expect(Date().timeIntervalSince(began) < 10, "it waited for the connection's 30 s")
+        #expect(Date().timeIntervalSince(began) < Self.lockWaitBound, "it waited for the connection's 30 s")
         _ = shutdown(host, Int32(SHUT_RDWR))
         await asking.value
     }
