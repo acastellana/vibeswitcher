@@ -121,6 +121,9 @@ taken on the Unix socket.
 | `hooks.remove` | the user's terminal | yes | yes |  | `Requests.act` | `agents` |
 | `lead` | the user's terminal | yes | yes |  | `Requests.act` | `folder`, `goal`, `replace`, `resume`, `takeHead` |
 | `mail` | the user's terminal, or a page that reads |  |  |  | `Requests.act` |  |
+| `plugin.list` | anyone of the uid |  |  |  | `Requests.act` |  |
+| `plugin.off` | the user's terminal | yes | yes |  | `Requests.act` | `plugin` |
+| `plugin.on` | the user's terminal | yes | yes |  | `Requests.act` | `plugin` |
 | `presets.edit` | the user's terminal | yes | yes |  | `Requests.act` | `args`, `default`, `digest`, `env`, `folder`, `keepShell`, `kind`, `name`, `op`, `rename`, `unset` |
 | `prompt-audit` | the user's terminal | yes | yes |  | `Requests.act` | `do`, `folder` |
 | `push` | the user's terminal | yes | yes |  | `Requests.act` | `folder`, `request` |

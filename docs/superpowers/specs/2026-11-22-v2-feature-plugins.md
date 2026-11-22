@@ -56,8 +56,11 @@ the Mac's approval dialog text, `approve`'s own-decision list, the brief):
 - `actions`: each a word, a label, whether it acts, and a one-line statement of what acting does;
 - `state` and `outcome` once settled.
 
-The wire carries it as `card.plugin` (a generic shape in `WireSchema`), replacing `card.shell`. A stored card of the
-old `shell` kind still loads, as the shell plugin's.
+The wire carries it as `card.plugin` (a generic shape in `WireSchema`), replacing `card.shell`. (No old `shell` card
+needs loading: cards live in the server's memory only (S3), and the page is served by its own server's build and
+reloads on a new one.) The renderers mark the agent's words as the agent's (the context, quoted, in `CardText`, the
+page and the notice), never among the facts; the Mac's dialog shows every fact the plugin marks decisive, or asks
+nothing.
 
 ## What stays the core's, whatever a plugin says
 
@@ -65,7 +68,11 @@ A plugin can't relax any of these, because it never holds them:
 
 1. **Requests are host-stamped.** A plugin reads only requests the session host stamped for a live session the user
    opened, through the one reader the registry gives it. Outcomes live in the engine's memory or the node's state,
-   never in a file an agent can write (the shell review's finding).
+   never in a file an agent can write (the shell review's finding). The desk holds this itself, before any plugin's
+   decoder runs: it reads each request's bytes and its stamp (no link followed, bounded), checks the stamp's digest is
+   of those bytes and its session the request's, asks the vault whether the stamp is the host's, and gives nothing from
+   a session that isn't live and the user's (a team's worker or verifier is the lead's tool server's). A request once
+   settled (answered, withdrawn, expired, gone) is never drawn again: the vault keeps the settled ids.
 2. **Acting is the user's voice.** Every acting answer goes through `Requests.voiced`: the terminal check, the
    card's typed code, the vault's record, replay by action id. A plugin's `perform` runs only after it. A page
    never acts; it shows the card and the line to run.
@@ -76,7 +83,10 @@ A plugin can't relax any of these, because it never holds them:
    an action runs once (the card is marked inside the same turn).
 5. **On and off are the user's, and an agent's write doesn't count.** `vibeswitcher plugin on|off NAME` is a voiced,
    recorded action. The state is kept where the vault vouches for it, so a session that rewrites a settings file
-   turns nothing on. Decisions are never part of `vibeswitcher approve`'s batch.
+   turns nothing on. Decisions are never part of `vibeswitcher approve`'s batch. The limit: on Linux the vault lives
+   in the host's memory, so a host restart starts it over, and each plugin is back at its default (the wallet, off by
+   default, comes back off). The restart's notice names the plugins among what it reset, and `plugin list` says
+   "at its default since the session host's restart" until the user sets it again.
 6. **A plugin's page content never shares the node page's origin when it can move money or run code.** A page a
    plugin serves for a person's browser to act in (the wallet's signing page) is on an origin of its own (its own
    loopback port, held by the host as the web's is), serves one request, and is gone.
