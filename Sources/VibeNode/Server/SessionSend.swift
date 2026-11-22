@@ -158,6 +158,7 @@ extension Requests {
                 engine.steerAsUser(message, session: session, agentPid: pid) { outcome in
                     switch outcome {
                     case .steered:
+                        engine.noteUserInput(session, typed: nil)
                         answer(nil, nil, true, nil)
                     case .idle:
                         // Its turn is over (or its hooks say nothing): a steer would wait for a step that never comes.
@@ -237,7 +238,9 @@ extension Requests {
             // Nothing of the text in the log: it is the user's words.
             let outcome: TypeOutcome = typed ? .typed : stopped.get() ?? .refused("the host didn't take all of it: it may not have gone in")
             switch outcome {
-            case .typed: note("send to session \(short): typed in, \(held.message.count) characters, \(images.count) image(s)")
+            case .typed:
+                note("send to session \(short): typed in, \(held.message.count) characters, \(images.count) image(s)")
+                queue.async { [weak self] in self?.engine?.noteUserInput(session, typed: images.isEmpty ? held.text : nil) }
             case .menuOpen(let open): note("send to session \(short): held, \(open)")
             case .refused(let why): note("send to session \(short): not typed: \(why)")
             }

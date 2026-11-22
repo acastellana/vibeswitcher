@@ -53,6 +53,23 @@ struct SendTests {
         #expect(prompts(harness) == ["Run the tests\nthen tell me", "And the next"], "\(prompts(harness))")
     }
 
+    /// What the user typed is the engine's to know: the session's input (a lead's rotation quiet), and a `!` git line
+    /// kept for the base move it may make (`BaseMoveStore.typed`); words to the agent aren't a command of the user's.
+    @Test func aTypedMessageIsTheSessionsInputAndABangGitLineIsKept() async throws {
+        let world = try await CardWorld.make(scratch)
+        defer { world.stop() }
+        let harness = try await claude(world)
+        let short = String(harness.session.id.uuidString.lowercased().prefix(8))
+        #expect(try #require(await send(world, short, "commit it for me")).ok)
+        try await harness.waitFor { prompts(harness).contains("commit it for me") }
+        #expect(await eventually(timeout: 30) { world.queue.sync { world.engine.userInput[harness.session.id] != nil } })
+        #expect(world.queue.sync { world.engine.baseMoves.sent.isEmpty })
+        #expect(try #require(await send(world, short, "! git commit -am mine")).ok)
+        let kept = await eventually(timeout: 30) { world.queue.sync { world.engine.baseMoves.sent.map(\.line) == ["git commit -am mine"] } }
+        #expect(kept, "\(world.queue.sync { world.engine.baseMoves.sent })")
+        #expect(world.queue.sync { world.engine.baseMoves.sent.first?.session } == harness.session.id.uuidString)
+    }
+
     /// A question open on its screen that takes typed words (its "Type something." row, the app's free-text row): the
     /// message goes in as that answer, as the app's composer sends it, not held; a `/` command isn't an answer (held), and
     /// a multi-select is ticked in its terminal (held).
