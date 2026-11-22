@@ -285,6 +285,22 @@ or decided. Done on Linux, tested on both systems (`ApprovalJudgmentTests`, `App
    user's actions, its hooks and the vaultV2 capability stay off on the Mac (fixes `6e0798d9`, `a0a596d8`,
    `b45bb7b0`). It depends on item 10's anchor: a check against the user's own files proves nothing.
 
+14. **(Answered, the re-review questions of 2026-11-22)**
+   - *Is `HostImages.macServerRefusal`'s set of the account's locks complete?* It names the app's
+     `~/.vibeswitcher/host.lock` and the node root's, from the user database's home, and refuses the user's host by
+     `ownsLaunchers`, which compares with `VibePaths.hostLock`: the environment's root. So a root moved by
+     `VIBESWITCHER_HOME` (a session's `launchctl setenv` before the app's next launch) is covered both ways: a host
+     started with it takes its lock for the user's (`ownsLaunchers`) and is refused; a host started without it on that
+     root's lock (`--lock /moved/host.lock`) is a scratch host, allowed, but it opens no vault from disk (only
+     `ownsLaunchers` hosts read `lead/vault.sealed` with the Keychain key: its vault is in memory, empty). What remains
+     is the app on the moved root connecting to that scratch host's socket and taking it for its own: the listed "The
+     app trusts any host at the socket's path" below, not a server child's `.app`. Nothing to add to the set.
+   - *Is the process-wide `LeadVaultV2.recordsOnThisHost` acceptable?* For `vibeswitcher-host` yes: one `HostServer` to a
+     process. But it is one-way (never cleared) and the test bundles run many hosts in one process, so a test that made
+     a Mac node host would leave it on for the rest. Nothing sets it today (`isCheckedMacNode` is false). When the
+     checked node start lands (item 13), move it into the vault (`LeadVault.Book`, set by the host that owns it) and
+     pass the book's own `on:` from the `.seal` and `.verify` hooks in `LeadVault.swift` (a one-line hook each).
+
 ## What `v2` found on the Mac and doesn't change
 
 Found by [the security architecture document](../superpowers/specs/2026-11-13-v2-security-architecture.md#the-mac-and-linux)
