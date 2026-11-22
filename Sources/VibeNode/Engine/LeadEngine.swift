@@ -319,6 +319,8 @@ public final class LeadEngine: @unchecked Sendable {
     /// for was filed): one more look, after it, and who waits for that one.
     var pluginLookAgain: [String: [() -> Void]] = [:]
     var pluginAsking = false
+    /// Who waits for the vault's answer under way.
+    var pluginAskWaiters: [() -> Void] = []
     var pluginTimer: Subscription?
     var pluginNow: () -> Date = Date.init
     /// The plugin requests settled (`PluginKey.name`), as the vault keeps them: never drawn again.

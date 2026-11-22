@@ -16,7 +16,9 @@ extension LeadEngine {
     /// Asks the vault which plugins the user set (at each welcome, and at a look while it hasn't said). `then` on `queue`
     /// once it answered or couldn't. On `queue`.
     func askPlugins(then: (() -> Void)? = nil) {
-        guard !pluginAsking else { then?(); return }
+        // An ask under way: this waits for its answer (a look asked meanwhile mustn't take "not known" for an answer).
+        if let then { pluginAskWaiters.append(then) }
+        guard !pluginAsking else { return }
         pluginAsking = true
         let client = link.vaultV2
         pluginWork.async { [weak self] in
@@ -30,7 +32,9 @@ extension LeadEngine {
                 case .success(let kept): self.keptPlugins(kept)
                 case .failure(let error): self.note("plugins: the vault didn't say which are on (\(error)); each stays as it was")
                 }
-                then?()
+                let waiters = self.pluginAskWaiters
+                self.pluginAskWaiters = []
+                waiters.forEach { $0() }
             }
         }
     }
