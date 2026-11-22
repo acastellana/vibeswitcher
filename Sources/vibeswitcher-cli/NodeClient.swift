@@ -234,7 +234,18 @@ final class NodeClient {
             Sys.close(fd)
             return .failure(.broken("the node's server sent no hello"))
         }
+        warnOfBuild(server: hello.server.commit)
         return .success(NodeClient(fd: fd, hello: hello, context: context, lines: lines, ready: ready))
+    }
+
+    /// Whether this process said already that the server runs another build (`BuildMismatch`): once is enough.
+    private static var warnedOfBuild = false
+
+    /// Says, once, on stderr, when the server runs another build than this command line's own.
+    private static func warnOfBuild(server: String) {
+        guard !warnedOfBuild, let warning = BuildMismatch.warning(own: BuildMismatch.own(executable: "/proc/self/exe"), server: server) else { return }
+        warnedOfBuild = true
+        Say.err("vibeswitcher: \(warning)")
     }
 
     /// Whether this connection's server is on the Mac's rule (`VoiceRule.Mode.approval`): it asks the person at the Mac

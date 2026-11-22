@@ -72,7 +72,8 @@ Not replaced (view or Mac-only): `LeadViews`, `TeamViews`, `TeamRows`, `TeamSumm
 ## Copied from the app
 
 Pure helpers and test helpers copied into `v2`-only files, each kept in step with its source at every merge as the
-rows above are.
+rows above are. CopiedFilesLint diffs the verbatim ones (the Statistics files, `UsageWaits`, `WitnessWork`,
+`TeamReading`) against their originals, each difference listed there with why.
 
 | From | Lines | To | Task |
 | --- | --- | --- | --- |
