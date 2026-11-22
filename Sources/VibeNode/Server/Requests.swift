@@ -80,6 +80,9 @@ public final class Requests: @unchecked Sendable {
     private var replyOrder: [String] = []
     /// The recorded actions being done now (recorded, their reply not yet given). On `queue`.
     private var doing: Set<String> = []
+    /// A scratch server's test (`--test-stall=`): true once for each `<root>/test-hold-act` made, and that recorded
+    /// action is held for good after its record, before its act, as a server that ends in between leaves it.
+    var testHoldsAct: (() -> Bool)?
     /// Each request as it is acted on, after the voice, the code and the vault's record (for tests). On `queue`.
     public var acting: (NodeWire.Request) -> Void = { _ in }
     /// The build's folder (`ServerArguments.nodeRoot`): where `hooks.install` reads the programs it installs; none:
@@ -375,15 +378,12 @@ public final class Requests: @unchecked Sendable {
                     self.note("refused \(request.kind) (action \(action)): not recorded in the vault: \(why)")
                     reply(.init(re: request.id, error: .init(.internal, "not recorded in the host's vault, so not done: \(ConfigSeal.inert(why.description, limit: .max))")))
                 case .success(false):
-                    self.note("\(request.kind) (action \(action)) was recorded already: answered as before, not done again")
-                    reply(self.again(request, action: action))
+                    self.retry(request, action: action, from: facts, reply: reply)
                 case .success(true):
-                    self.doing.insert(action)
-                    self.act(request, from: facts) { [weak self] answer in
-                        self?.doing.remove(action)
-                        self?.keep(answer, for: action)
-                        reply(answer)
+                    if self.testHoldsAct?() == true {
+                        return self.note("a scratch node's test: \(request.kind) (action \(action)) recorded, and held for good before its act")
                     }
+                    self.perform(request, action: action, from: facts, reply: reply)
                 }
             }
         }
@@ -447,11 +447,86 @@ public final class Requests: @unchecked Sendable {
         }
     }
 
-    /// The answer to a retry of `action`, recorded already: the reply it got, when kept; otherwise what is known, never
-    /// "done": while it is being done, that it is; else (recorded before this server restarted, or too long ago for its
-    /// reply to be kept) that whether it was carried out isn't known (the architecture review's row 10). Not done again
-    /// either way. On `queue`.
-    func again(_ request: NodeWire.Request, action: String) -> NodeWire.Reply {
+    /// The act of a recorded action (its record made first), then its outcome written on that record, through the host
+    /// as the record was (`finishUserAction`), before the answer goes: an answer someone saw is in the record. A host
+    /// that doesn't take the outcome (one before it) leaves the record begun, noted. On `queue`.
+    private func perform(_ request: NodeWire.Request, action: String, from facts: PeerFacts, reply: @escaping (NodeWire.Reply) -> Void) {
+        doing.insert(action)
+        act(request, from: facts) { [weak self] answer in
+            guard let self else { return reply(answer) }
+            self.queue.async {
+                self.keep(answer, for: action)
+                let (client, kind, outcome) = (self.link.vaultV2, request.kind, Self.outcome(of: answer))
+                DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+                    let written = Result { try client.finishUserAction(action, kind: kind, outcome: outcome) }
+                    self?.queue.async {
+                        if case .failure(let why) = written { self?.note("\(kind) (action \(action)): its outcome isn't in the vault's record: \(why)") }
+                        self?.doing.remove(action)
+                        reply(answer)
+                    }
+                }
+            }
+        }
+    }
+
+    /// What the record keeps of `answer`: done with its result (when it fits), or failed with why.
+    static func outcome(of answer: NodeWire.Reply) -> LeadVaultV2.UserAction.Outcome {
+        guard answer.ok else { return .init(done: false, note: answer.error?.message ?? "no reason given", code: answer.error?.code) }
+        return .init(done: true, note: answer.result.map { String(decoding: NodeWire.line($0).dropLast(), as: UTF8.self) })
+    }
+
+    /// The kinds that a second act leaves as one does (each sets a state, or ends or holds what it names), so a retry of
+    /// one whose server ended before its outcome was written does it again: its record's digest the same, and begun
+    /// `rerunWithin` ago at most. Every other recorded kind isn't (it types or sends text, starts a session or a lead,
+    /// answers or runs what a card asks, pushes, switches the build, opens a link): a retry of one is told it began and
+    /// its outcome isn't known (`unknownCheck`).
+    public static let rerunnable: Set<String> = ["start", "stop", "hold", "config.accept", "base.accept", "base.keep",
+                                                 "hooks.install", "hooks.remove", "web.revoke", "session.end", "set",
+                                                 "prompt-audit", "push.decline", "session.rename", "session.pause",
+                                                 "session.resume", "session.close-shells", "plugin.on", "plugin.off"]
+    /// How old a begun record may be for its retry to do it again: later, something else may have set it since.
+    static let rerunWithin: TimeInterval = 15 * 60
+
+    /// A retry of `action`, recorded already. Answered from what this server kept when it can (its reply; or that it is
+    /// being done now); else from the vault's record (the architecture review's row 10): done, its recorded result;
+    /// failed, why, and whether a new attempt can do it; begun with no outcome (the server ended in between), done again
+    /// when its kind is `rerunnable`, else that it began and its outcome isn't known, with what to look at. A record the
+    /// host can't give (one before outcomes) is told the outcome isn't known. Never "done" unless it was. On `queue`.
+    func retry(_ request: NodeWire.Request, action: String, from facts: PeerFacts, reply: @escaping (NodeWire.Reply) -> Void) {
+        if let known = kept(request, action: action) { return reply(known) }
+        let (client, kind) = (link.vaultV2, request.kind)
+        let digest = LeadVaultV2.digest(String(decoding: NodeWire.line(request.args ?? [:]), as: UTF8.self))
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            let record = Result { try client.userAction(action, kind: kind) }
+            guard let self else { return }
+            self.queue.async {
+                // Asked again meanwhile, and done, or under way, since.
+                if let known = self.kept(request, action: action) { return reply(known) }
+                switch record {
+                case .failure(let why):
+                    self.note("\(kind) (action \(action)) was recorded already; its record can't be read (\(why)): its outcome isn't known")
+                    reply(.init(re: request.id, error: .init(.refused, Self.outcomeUnknown(action: action))))
+                case .success(nil):
+                    reply(.init(re: request.id, error: .init(.refused, Self.outcomeUnknown(action: action))))
+                case .success(let recorded?):
+                    let began = Date(timeIntervalSince1970: recorded.at)
+                    if let outcome = recorded.outcome {
+                        self.note("\(kind) (action \(action)) was recorded already: answered from its record (\(outcome.done ? "done" : "failed")), not done again")
+                        return reply(Self.answer(request, action: action, outcome: outcome))
+                    }
+                    if Self.rerunnable.contains(kind), recorded.digest == digest, Date().timeIntervalSince(began) <= Self.rerunWithin {
+                        self.note("\(kind) (action \(action)) began at \(Self.shown(began)) with no outcome recorded: done again, as a second act leaves it as one does")
+                        return self.perform(request, action: action, from: facts, reply: reply)
+                    }
+                    self.note("\(kind) (action \(action)) began at \(Self.shown(began)) with no outcome recorded: not done again")
+                    reply(.init(re: request.id, error: .init(.refused, Self.begunUnknown(action: action, kind: kind, at: began))))
+                }
+            }
+        }
+    }
+
+    /// The answer a retry gets from this server's memory: the reply it kept, or that its first request is being done.
+    private func kept(_ request: NodeWire.Request, action: String) -> NodeWire.Reply? {
         if var kept = replies[action] {
             kept.re = request.id
             return kept
@@ -459,12 +534,56 @@ public final class Requests: @unchecked Sendable {
         if doing.contains(action) {
             return .init(re: request.id, error: .init(.refused, "action \(action) is being done now, from its first request: not done again; that request's answer says how it went"))
         }
-        return .init(re: request.id, error: .init(.refused, Self.outcomeUnknown(action: action)))
+        return nil
     }
 
-    /// What a retry of a recorded action whose reply isn't kept is told.
+    /// A retry's answer from a recorded outcome: done, the result recorded (or that it was done, when its answer was too
+    /// long to keep); failed, why, under the code it failed with, and whether running the command again can do it.
+    static func answer(_ request: NodeWire.Request, action: String, outcome: LeadVaultV2.UserAction.Outcome) -> NodeWire.Reply {
+        let when = shown(Date(timeIntervalSince1970: outcome.at))
+        if outcome.done {
+            if let note = outcome.note, let result = try? JSONDecoder().decode(NodeWire.Value.self, from: Data(note.utf8)) {
+                return .init(re: request.id, result: result)
+            }
+            return .init(re: request.id, error: .init(.refused, "action \(action) was done at \(when) (its answer was too long to keep): not done again; `vibeswitcher status` shows what is now"))
+        }
+        let code = outcome.code.flatMap(NodeWire.Code.init(rawValue:)) ?? .refused
+        let again = code == .gone ? "what it named is gone, so a new attempt can't do it" : "nothing was done, and running the command again is a new attempt"
+        return .init(re: request.id, error: .init(code, "action \(action) failed at \(when): \(ConfigSeal.inert(outcome.note ?? "no reason given", limit: .max)). Not done again: \(again)"))
+    }
+
+    /// What a retry of a recorded action whose reply isn't kept, and whose record says nothing more, is told.
     static func outcomeUnknown(action: String) -> String {
         "action \(action) was recorded before this server restarted (or too long ago for its answer to be kept): whether it was carried out isn't known, and it isn't done again; `vibeswitcher status` shows what is now"
+    }
+
+    /// What a retry of an action that began and has no outcome (its server ended in between) is told, when its kind
+    /// isn't done again.
+    static func begunUnknown(action: String, kind: String, at began: Date) -> String {
+        "action \(action) (\(kind)) began at \(shown(began)) and the server ended before it finished: whether it was carried out isn't known, and it isn't done again, as a second \(kind) wouldn't be the same as one; \(unknownCheck(kind))"
+    }
+
+    /// What to look at to see whether an action of `kind` happened.
+    static func unknownCheck(_ kind: String) -> String {
+        switch kind {
+        case "send", "session.reply": return "the session's screen shows whether the text arrived"
+        case "tell": return "the lead's chat shows whether the message arrived"
+        case "lead", "session.new", "session.reopen": return "`vibeswitcher status` lists the sessions running now"
+        case "answer", "approve": return "`vibeswitcher questions` shows whether the card is still open (a shell request's session shows whether its command ran)"
+        case "push": return "the repository's remote shows whether the push went"
+        case "build.switch": return "`vibeswitcher status` names the build running now"
+        case "web.open": return "`vibeswitcher web open` gives a link again"
+        case "presets.edit": return "`vibeswitcher presets` shows the presets now"
+        default: return "`vibeswitcher status` shows what is now"
+        }
+    }
+
+    /// `date` as a retry's answer says it: local time, to the second.
+    static func shown(_ date: Date) -> String {
+        let format = DateFormatter()
+        format.locale = Locale(identifier: "en_US_POSIX")
+        format.dateFormat = "yyyy-MM-dd HH:mm:ss"
+        return format.string(from: date)
     }
 
     func keep(_ reply: NodeWire.Reply, for action: String) {

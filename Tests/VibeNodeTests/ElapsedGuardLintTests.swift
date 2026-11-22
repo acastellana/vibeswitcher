@@ -25,7 +25,10 @@ struct ElapsedGuardLintTests {
     ]
 
     /// Wall-clock uses kept, by file and the line's text, each with its reason. One that matches nothing is stale.
-    static let allowed: [(path: String, text: String, reason: String)] = []
+    static let allowed: [(path: String, text: String, reason: String)] = [
+        ("Sources/VibeNode/Server/Requests.swift", "Date().timeIntervalSince(began) <= Self.rerunWithin",
+         "a vault record's stamp, written before this server started: only the wall clock spans processes, and a step of seconds on 15 minutes changes nothing"),
+    ]
 
     /// Each refused use in `text`, as "LINE: WHAT: the line".
     static func findings(in text: String) -> [(line: Int, what: String, text: String)] {

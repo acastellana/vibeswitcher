@@ -27,7 +27,8 @@ public protocol WireKind {
 
 /// The kinds typed so far, by name (`WireKindsLintTests` holds the command line to reading them through their types).
 public enum WireKinds {
-    public static let typed: [String] = [Status.kind, Questions.kind, Board.kind, ConfigHeld.kind, Settings.kind, PluginList.kind, ApproveList.kind]
+    public static let typed: [String] = [Status.kind, Questions.kind, Board.kind, ConfigHeld.kind, Settings.kind, PluginList.kind, ApproveList.kind,
+                                         Brief.kind, UpdateCheck.kind, Mail.kind, Presets.kind, Shells.kind, Stats.kind, BaseShow.kind]
 }
 
 /// A kind that takes no arguments: asked with none (`args` absent, as before).

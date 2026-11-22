@@ -251,23 +251,29 @@ public final class UpdateWatch: @unchecked Sendable {
 
     /// `update.check`'s answer (`vibeswitcher status --check-updates`): `value`, with the running build and the notice
     /// `status` now carries. On `queue`.
-    public var checked: NodeWire.Value {
-        var fields = value.object ?? [:]
-        fields["running"] = .string(running)
-        fields["notice"] = notice.map(NodeWire.Value.string) ?? .null
-        return .object(fields)
+    public var checked: NodeWire.Value { NodeWire.Value(wire: checkedResult) }
+
+    /// `update.check`'s reply: `value`'s fields, the build that runs, and the notice.
+    public var checkedResult: WireKinds.UpdateCheck.Result {
+        let shown = value
+        return .init(checkedAt: shown["checkedAt"]?.string, commit: shown["commit"]?.string, aheadBy: shown["aheadBy"]?.int,
+                     install: shown["install"]?.string, problem: shown["problem"]?.string, running: running, notice: notice)
     }
 
     /// What `status --check-updates` says of `checked`: why it couldn't look, the newer build and its install line, or
     /// that there is none.
     public static func lines(_ checked: NodeWire.Value) -> [String] {
+        (try? checked.wire(WireKinds.UpdateCheck.Result.self)).map(lines) ?? []
+    }
+
+    public static func lines(_ checked: WireKinds.UpdateCheck.Result) -> [String] {
         var lines: [String] = []
-        if let problem = checked["problem"]?.string {
+        if let problem = checked.problem {
             lines.append("updates: couldn't check \(branch) for a newer build (\(ConfigSeal.inert(problem, limit: 300)))")
         }
-        if let notice = checked["notice"]?.string {
-            lines.append("updates: " + ConfigSeal.inert(notice, limit: 600) + (checked["problem"]?.string == nil ? "" : " (the last check's answer)"))
-        } else if checked["problem"]?.string == nil, let at = checked["checkedAt"]?.string {
+        if let notice = checked.notice {
+            lines.append("updates: " + ConfigSeal.inert(notice, limit: 600) + (checked.problem == nil ? "" : " (the last check's answer)"))
+        } else if checked.problem == nil, let at = checked.checkedAt {
             lines.append("updates: no newer build on \(branch) that both CI runs (\(workflows.joined(separator: ", "))) passed (checked \(ConfigSeal.inert(at, limit: 40)))")
         }
         return lines

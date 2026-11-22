@@ -27,12 +27,12 @@ enum StatsCommand {
         case .failure(let failure): return Say.failed(failure)
         case .success(let connected): client = connected
         }
-        switch client.request("stats", args: ["range": .string(range ?? "week")]) {
+        switch client.read(WireKinds.Stats.self, .init(range: range ?? "week")) {
         case .failure(let failure): return Say.failed(failure)
-        case .success(let reply):
-            guard reply.ok, let result = reply.result else { return Say.replyError(reply) }
+        case .refused(let reply): return Say.replyError(reply)
+        case .success(let result, let raw):
             if json {
-                Say.out(String(decoding: NodeWire.printable(NodeWire.line(result)).dropLast(), as: UTF8.self))
+                Say.out(String(decoding: NodeWire.printable(NodeWire.line(raw)).dropLast(), as: UTF8.self))
                 return 0
             }
             StatisticsText.lines(result).forEach(Say.out)

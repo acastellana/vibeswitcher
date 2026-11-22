@@ -7,6 +7,9 @@ import VibeCore
 /// the 8-week trend and the estimate against working solo. Every string goes through `ConfigSeal.inert` (the terminal's
 /// own lock: a project's name is a folder's).
 public enum StatisticsText {
+    /// `stats`' typed result said: its figures, rows and quality are the page's shapes, read as values.
+    public static func lines(_ result: WireKinds.Stats.Result) -> [String] { lines(NodeWire.Value(wire: result)) }
+
     static func inert(_ text: String?, limit: Int = 300) -> String { ConfigSeal.inert(text ?? "", limit: limit) }
 
     public static func lines(_ value: NodeWire.Value) -> [String] {

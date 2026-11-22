@@ -22,17 +22,20 @@ extension Requests {
     /// node's shell sessions (`isNodeShell`), each with its id, folder, terminal and whether it's `finished`
     /// (`shellFinished`). A read of the user's (no code): nothing changes.
     func shells(_ request: NodeWire.Request, reply: @escaping (NodeWire.Reply) -> Void) {
-        let folder = request.args?["folder"]?.string.map { ($0 as NSString).standardizingPath }
+        let folder: String?
+        switch request.typedArgs(WireKinds.Shells.Args.self) {
+        case .failure(let failure): return reply(.init(re: request.id, error: failure))
+        case .success(let typed): folder = typed.folder.map { ($0 as NSString).standardizingPath }
+        }
         let found = link.sessions.filter(Self.isNodeShell).filter { session in
             folder.map { session.cwd == $0 || session.cwd.hasPrefix($0 + "/") } ?? true
         }
         let queue = self.queue
         DispatchQueue.global(qos: .userInitiated).async {
-            let values = found.map { session -> NodeWire.Value in
-                .object(["session": .string(NodeIds.session(host: session.id)), "folder": .string(session.cwd),
-                         "terminal": .string(session.tty), "finished": .bool(Self.shellFinished(session))])
+            let shells = found.map { session in
+                WireKinds.Shells.Shell(session: NodeIds.session(host: session.id), folder: session.cwd, terminal: session.tty, finished: Self.shellFinished(session))
             }
-            queue.async { reply(.init(re: request.id, result: .object(["shells": .array(values)]))) }
+            queue.async { reply(.init(re: request.id, typed: WireKinds.Shells.Result(shells: shells))) }
         }
     }
 

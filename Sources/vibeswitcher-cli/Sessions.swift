@@ -255,12 +255,11 @@ enum NewCommand {
     /// The preset `name` for `path`, as the server lists it, shown whole (its variables by name) and started.
     private static func start(preset name: String, in path: String, model: String?, withModel: String) -> Int32 {
         SessionCommand.act("session.new", fetch: { client in
-            switch client.request("session.presets", args: ["folder": .string(path), "values": .bool(true)]) {
+            switch client.read(WireKinds.Presets.self, .init(folder: path, values: true)) {
             case .failure(let failure): return .failure(failure)
-            case .success(let reply):
-                guard reply.ok, let list = reply.result?["presets"]?.array else {
-                    return .failure(.broken(reply.error.map { "\($0.code): \($0.message)" } ?? "the server listed no presets"))
-                }
+            case .refused(let reply): return .failure(.broken(reply.error.map { "\($0.code): \($0.message)" } ?? "the server listed no presets"))
+            case .success(let result, _):
+                guard let list = result.presets else { return .failure(.broken("the server listed no presets")) }
                 guard let found = PresetsCommand.named(name, in: list) else {
                     let names = list.compactMap { $0["name"]?.string }.map { ConfigSeal.inert($0, limit: 40) }.joined(separator: ", ")
                     return .failure(.refused("no preset \(ConfigSeal.inert(name, limit: 80)) for \(ConfigSeal.inert(path, limit: 200)); it has: \(names)"))
@@ -302,11 +301,12 @@ enum PresetsCommand {
         case .failure(let failure): return Say.failed(failure)
         case .success(let connected): client = connected
         }
-        switch client.request("session.presets", args: ["folder": .string(path), "values": .bool(true)]) {
+        switch client.read(WireKinds.Presets.self, .init(folder: path, values: true)) {
         case .failure(let failure): return Say.failed(failure)
-        case .success(let reply):
-            guard reply.ok, let list = reply.result?["presets"]?.array else { return Say.replyError(reply) }
-            for problem in reply.result?["problems"]?.array ?? [] { Say.err("presets: \(ConfigSeal.inert(problem.string ?? "", limit: 400))") }
+        case .refused(let reply): return Say.replyError(reply)
+        case .success(let result, _):
+            let list = result.presets ?? []
+            for problem in result.problems ?? [] { Say.err("presets: \(ConfigSeal.inert(problem, limit: 400))") }
             for preset in list {
                 let why = preset["refused"]?.string.map { "\n    can't start here: " + ConfigSeal.inert($0, limit: 400) } ?? ""
                 Say.out(describe(preset) + why)
