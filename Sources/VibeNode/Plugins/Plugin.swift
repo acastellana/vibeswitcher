@@ -23,7 +23,8 @@ public protocol FeaturePlugin: AnyObject {
     func look(_ desk: PluginDesk, done: @escaping () -> Void)
     /// The user's answer `word` on its card, after the core's checks: the card is marked already (its state is the
     /// action's `marks`, put in the same turn), so a second answer finds it answered. `then` on the engine's queue.
-    func perform(_ word: String, on card: CardStore.Card, desk: PluginDesk,
+    /// `act`: what it may do for this card (start a session), given only here.
+    func perform(_ word: String, on card: CardStore.Card, desk: PluginDesk, act: PluginAct,
                  then: @escaping (Result<NodeWire.Value, LeadEngine.CardFailure>) -> Void)
     /// It was turned off while `card` was open: the desk closed it as withdrawn; the plugin keeps that nothing more comes
     /// of it, and says what its asker is told when the desk's words (`PluginDesk.withdrawnText`) wouldn't be true. On the

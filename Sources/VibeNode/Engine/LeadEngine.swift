@@ -325,6 +325,18 @@ public final class LeadEngine: @unchecked Sendable {
     var pluginNow: () -> Date = Date.init
     /// The plugin requests settled (`PluginKey.name`), as the vault keeps them: never drawn again.
     var pluginSettled: Set<String> = []
+    /// Whether the vault said which requests are settled (nothing is drawn until it did).
+    var pluginSettledKnown = false
+    /// When the vault's record began, as the vault says (a host restart starts it over): what `plugin list` says a
+    /// plugin is at its default since.
+    var pluginRecordSince: Date?
+    /// Each request the reader last gave, by `PluginKey.name`: the stamp it came with (its digest, its session) and when
+    /// it was filed. What a card is drawn from, and who its tells go to.
+    var pluginStamps: [String: PluginStamp] = [:]
+    /// The digest each card was drawn from, by `PluginKey.name`: a request whose bytes changed under its id is dropped.
+    var pluginDrawn: [String: String] = [:]
+    /// The sessions of a team (a worker's, a verifier's) as the vault's roster said at the last look: not the user's.
+    var pluginTeam: Set<String> = []
     /// What must reach a session from VibeSwitcher even while its plugin is off (a withdrawal's words), by key, until it
     /// did or the session is gone; tried again at each plugins' look.
     var pluginTells: [String: (session: UUID, text: String)] = [:]

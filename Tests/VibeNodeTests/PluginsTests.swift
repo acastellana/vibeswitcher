@@ -56,8 +56,12 @@ struct PluginsTests {
                        waiting: "nothing runs until you answer run")
         }
 
-        func perform(_ word: String, on card: CardStore.Card, desk: PluginDesk,
+        /// Called as `perform` starts (a test's look at what holds then).
+        var onPerform: (() -> Void)?
+
+        func perform(_ word: String, on card: CardStore.Card, desk: PluginDesk, act: PluginAct,
                      then: @escaping (Result<NodeWire.Value, LeadEngine.CardFailure>) -> Void) {
+            onPerform?()
             performed.mutate { $0.append(word) }
             guard let request = card.plugin?.request else { return then(.failure(.gone("no request"))) }
             desk.change(request: request, state: word == "run" ? "ran" : "declined", outcome: word == "run" ? "Ran" : "Declined",
@@ -132,7 +136,7 @@ struct PluginsTests {
         let entry = try #require(listed.result?["plugins"]?.array?.first)
         #expect(entry["id"]?.string == "probe" && entry["on"]?.bool == false && entry["known"]?.bool == true, "\(entry)")
         let lines = PluginListText.lines(listed.result?["plugins"]?.array ?? [])
-        #expect(lines.contains("probe  Probes  off (its default)") && lines.contains("  adds for agents: vs-probe: files a probe"), "\(lines)")
+        #expect(lines.contains { $0.hasPrefix("probe  Probes  off (at its default since the session host's vault began") } && lines.contains("  adds for agents: vs-probe: files a probe"), "\(lines)")
 
         // A forged mirror, and a forged vault-looking file: nothing is on.
         let mirror = world.host.root.appendingPathComponent("plugins.json")
@@ -254,7 +258,7 @@ struct PluginsTests {
         let read = { (opened: Set<String>, now: Date) in
             PluginDesk.read(folder: folder, decode: decode, trusted: [:], vault: world.host.vault, opened: opened, now: now, plugin: "probe", note: { _ in }).requests
         }
-        #expect(read(opened, Date()).map(\.id) == [request.id])
+        #expect(read(opened, Date()).map(\.ask.id) == [request.id])
 
         // Not the host's stamp; a stamp for other bytes; a link in the request's place: none decoded.
         let forger = try await world.host.spawn("exec /bin/sleep 600", cwd: world.repo, label: "Forger")
@@ -269,14 +273,16 @@ struct PluginsTests {
         try FileManager.default.copyItem(at: folder.appendingPathComponent("\(request.id).seal"), to: folder.appendingPathComponent("\(linked).seal"))
         decoded.value = 0
         let opened2 = opened.union([forger.id.uuidString.lowercased()])
-        #expect(read(opened2, Date()).map(\.id) == [request.id], "only the stamped one, whole")
+        #expect(read(opened2, Date()).map(\.ask.id) == [request.id], "only the stamped one, whole")
         #expect(decoded.value == 1, "nothing else reached the decoder")
 
         // Its session not one the user opened (ended, or a team's worker): not decoded at all.
         decoded.value = 0
         #expect(read([], Date()).isEmpty && decoded.value == 0)
         let worker = try await world.host.spawn("exec /bin/sleep 600", cwd: world.repo, label: "Worker: fix-login")
-        #expect(!PluginDesk.opened(worker) && PluginDesk.opened(asker))
+        // A label is anyone's to give: the roster says who is a team's, so a session named "Worker: …" the user opened asks.
+        let desk = world.queue.sync { world.engine.desk(world.engine.plugins.plugins[0]) }
+        #expect(world.queue.sync { desk.opened(worker) && desk.opened(asker) })
         #expect(read(opened, request.created.addingTimeInterval(-PluginDesk.aheadAtMost - 60)).isEmpty, "dated ahead of the clock")
     }
 
@@ -362,9 +368,13 @@ struct PluginsTests {
         let world = try await CardWorld.make(scratch, plugins: [probe])
         defer { world.stop() }
         let (asker, request) = try await file(world)
-        // Known first (the vault said which are on), and nothing drawn yet: a look with none of its cards.
-        await withCheckedContinuation { done in world.queue.async { world.engine.askPlugins { done.resume() } } }
+        // Read (the desk keeps its stamp), its card forgotten and unsettled: each draw below is judged afresh.
+        await look(world)
         let desk = world.queue.sync { world.engine.desk(probe) }
+        world.queue.sync {
+            desk.forget(request: request.id, closed: "x")
+            world.engine.pluginSettled.remove("probe:\(request.id)")
+        }
         let asked = Probe.card(request, asker: PluginDesk.asker(asker))
         var card = asked
         card.expiresAt = nil
@@ -375,11 +385,11 @@ struct PluginsTests {
         card.actions[0].marks = PluginCard.waitingState
         #expect(card.refusal?.contains("would leave it waiting") == true)
         card = asked
-        card.session = "\(NodeIds.node):\(UUID().uuidString.lowercased())"
-        #expect(world.queue.sync { desk.draw(card, root: world.repo, at: request.created) }.failure?.description.contains("live session") == true)
+        card.request = UUID().uuidString.lowercased()
+        #expect(world.queue.sync { desk.draw(card, root: world.repo, at: request.created) }.failure?.description.contains("no stamped request") == true)
 
         // Drawn, then past its expiry: the core closes it, settled; never drawn again, by this server or the next.
-        world.queue.sync { _ = desk.draw(asked, root: world.repo, at: request.created) }
+        let again = try world.queue.sync { try desk.draw(asked, root: world.repo, at: request.created).get() }
         await withCheckedContinuation { done in
             world.queue.async {
                 world.engine.pluginNow = { request.expiresAt.addingTimeInterval(1) }
@@ -387,7 +397,7 @@ struct PluginsTests {
                 done.resume()
             }
         }
-        let expired = try #require(self.card(world, request))
+        let expired = try #require(world.card(again.id))
         #expect(!expired.isOpen && expired.plugin?.state == "expired", "\(expired)")
         world.queue.sync { desk.forget(request: request.id, closed: "gone") }
         world.queue.sync { world.engine.pluginNow = Date.init }
@@ -426,7 +436,7 @@ struct PluginsTests {
         world.queue.sync { world.engine.hostRestart = EngineState.Restart(at: Date().timeIntervalSince1970, before: 1, gone: []) }
         let listed = try #require(await world.ask("plugin.list", action: nil))
         let lines = PluginListText.lines(listed.result?["plugins"]?.array ?? [])
-        #expect(lines.contains { $0.hasPrefix("probe  Probes  on (at its default since the session host's restart") }, "\(lines)")
+        #expect(lines.contains { $0.hasPrefix("probe  Probes  on (at its default since the session host's vault began") }, "\(lines)")
         #expect(LeadEngine.resetByRestart.contains("the feature plugins turned on or off"))
         // Set again by the user: no longer "since the restart".
         _ = await turn(world, "probe", on: false)
@@ -448,6 +458,123 @@ struct PluginsTests {
         #expect((try? text.get())?.contains("turn Probes (probe) on for this node") == true, "\(text)")
         let unknown = world.queue.sync { world.requests.approvalCard(NodeWire.Request(id: "d", kind: "plugin.off", args: ["plugin": .string("nope")], action: action)) }
         #expect((try? unknown.get()) == nil)
+    }
+}
+
+// MARK: The second review of steps 1 and 2
+
+extension PluginsTests {
+    /// A request swapped under its id after its card was drawn isn't read again; the card's session, name and filing time
+    /// are the stamped request's, whatever the plugin's card says; an answered card never waits again.
+    @Test func aCardIsTiedToTheStampedRequestItWasDrawnFrom() async throws {
+        let probe = Probe(defaultOn: true)
+        let world = try await CardWorld.make(scratch, plugins: [probe])
+        defer { world.stop() }
+        let (asker, request) = try await file(world)
+        await look(world)
+        let card = try #require(card(world, request))
+        #expect(card.plugin?.session == NodeIds.session(host: asker.id) && card.plugin?.asker == "Asker")
+        let digest = try #require(world.queue.sync { world.engine.pluginDrawn["probe:\(request.id)"] })
+        let folder = world.host.root.appendingPathComponent("probe-requests", isDirectory: true)
+        let read = PluginDesk.read(folder: folder, decode: { try ShellRequest.parse($0) }, trusted: [:], vault: world.host.vault,
+                                   opened: [asker.id.uuidString.lowercased()], drawn: ["probe:\(request.id)": String(repeating: "f", count: 64)],
+                                   now: Date(), plugin: "probe", note: { _ in })
+        #expect(read.requests.isEmpty, "bytes other than the ones drawn from: dropped")
+        #expect(digest.count == 64)
+
+        // The plugin's word for the asker counts for nothing.
+        let desk = world.queue.sync { world.engine.desk(probe) }
+        var claimed = Probe.card(request, asker: "Someone Else")
+        claimed.session = "\(NodeIds.node):\(UUID().uuidString.lowercased())"
+        world.queue.sync { desk.forget(request: request.id, closed: "x") }
+        world.queue.sync { world.engine.pluginSettled.remove("probe:\(request.id)") }
+        let drawn = try world.queue.sync { try desk.draw(claimed, root: world.repo, at: Date().addingTimeInterval(9_999)).get() }
+        #expect(drawn.plugin?.session == NodeIds.session(host: asker.id) && drawn.plugin?.asker == "Asker" && drawn.at == request.created)
+        // Answered: never back to waiting.
+        let ran = try #require(await world.answer(drawn, "decline"))
+        #expect(ran.ok, "\(ran)")
+        world.queue.sync { desk.change(request: request.id, state: PluginCard.waitingState, outcome: nil) }
+        #expect(world.card(drawn.id)?.plugin?.isWaiting == false)
+    }
+
+    /// An acting answer is settled in the vault, confirmed, before the plugin acts; until the vault said which requests
+    /// are settled, nothing is drawn.
+    @Test func anActingAnswerIsSettledBeforeItActs() async throws {
+        let probe = Probe(defaultOn: true)
+        let world = try await CardWorld.make(scratch, plugins: [probe])
+        defer { world.stop() }
+        let (_, request) = try await file(world)
+        await look(world)
+        let card = try #require(card(world, request))
+        let settledFirst = Locked<Bool?>(nil)
+        let key = "probe:\(request.id)"
+        probe.onPerform = { settledFirst.value = world.engine.pluginSettled.contains(key) }
+        let ran = try #require(await world.answer(card, "run"))
+        #expect(ran.ok && settledFirst.value == true, "\(ran)")
+        #expect(try world.world.link.vaultV2.settledRequests().contains(key))
+
+        let desk = world.queue.sync { world.engine.desk(probe) }
+        world.queue.sync { world.engine.pluginSettledKnown = false }
+        var other = Probe.card(request, asker: "Asker")
+        other.request = UUID().uuidString.lowercased()
+        #expect(world.queue.sync { desk.draw(other, root: world.repo, at: Date()) }.failure?.description.contains("settled") == true)
+    }
+
+    /// Turned off while an answer acts on a card: the words say what is true.
+    @Test func offWhileAnsweredSaysWhatIsTrue() async throws {
+        let probe = Probe(defaultOn: true)
+        let world = try await CardWorld.make(scratch, plugins: [probe])
+        defer { world.stop() }
+        let (_, request) = try await file(world)
+        await look(world)
+        world.queue.sync {
+            guard var card = world.engine.cards.cards.values.first(where: { $0.plugin?.request == request.id }) else { return }
+            card.plugin?.state = "starting"
+            world.engine.cards.put(card)
+        }
+        _ = await turn(world, "probe", on: false)
+        let closed = try #require(card(world, request))
+        #expect(closed.closed?.contains("while it was being answered") == true && closed.closed?.contains("nothing ran") == false, "\(String(describing: closed.closed))")
+    }
+
+    /// `plugin list` says since when a plugin is at its default from the vault's own record, never a file of the node's.
+    @Test func atItsDefaultSinceTheVaultsRecordBegan() async throws {
+        let world = try await CardWorld.make(scratch, plugins: [Probe(defaultOn: true)])
+        defer { world.stop() }
+        try Data(#"{"hostRestart":null}"#.utf8).write(to: world.host.root.appendingPathComponent("engine.json"))
+        let listed = try #require(await world.ask("plugin.list", action: nil))
+        let since = try world.world.link.vaultV2.recordSince()
+        #expect(listed.result?["plugins"]?.array?.first?["defaultSince"] == .date(since), "\(listed)")
+        #expect(PluginListText.lines(listed.result?["plugins"]?.array ?? []).contains { $0.contains("at its default since the session host's vault began") })
+        _ = await turn(world, "probe", on: false)
+        let set = try #require(await world.ask("plugin.list", action: nil))
+        #expect(set.result?["plugins"]?.array?.first?["defaultSince"] == .null)
+    }
+
+    /// A Run-card shell's name is an agent's, marked so; a flooded folder can't hide the others' requests for long: junk
+    /// is removed, and what is read a look is bounded.
+    @Test func anAgentsNameIsMarkedAndAFloodIsBounded() async throws {
+        let request = ShellRequest(session: UUID().uuidString, cwd: "/home/u/site", command: "make", label: "build", createdAt: Date())
+        let spawn = ShellAsk.spawnRequest(request)
+        let shell = HostSession(id: UUID(), tty: "ttypts9", childPID: 1, cwd: "/home/u/site", command: spawn.command, label: "Shell: build", agent: nil,
+                                title: "", startedAt: Date(), cols: 80, rows: 24, exit: nil)
+        #expect(PluginDesk.asker(shell) == "a shell an agent asked for, named by it \u{201C}Shell: build\u{201D}")
+
+        let world = try await CardWorld.make(scratch, plugins: [Probe(defaultOn: true)])
+        defer { world.stop() }
+        let (asker, real) = try await file(world)
+        let folder = world.host.root.appendingPathComponent("probe-requests", isDirectory: true)
+        for _ in 0..<(PluginDesk.readAtMost + 6) {
+            try Data("{}".utf8).write(to: folder.appendingPathComponent("\(UUID().uuidString.lowercased()).json"))
+        }
+        let opened: Set<String> = [asker.id.uuidString.lowercased()]
+        let read = { PluginDesk.read(folder: folder, decode: { try ShellRequest.parse($0) }, trusted: [:], vault: world.host.vault, opened: opened,
+                                     now: Date(), plugin: "probe", note: { _ in }).requests.map(\.ask.id) }
+        var found = read()
+        if found.isEmpty { found = read() }
+        #expect(found == [real.id], "the junk removed, the real one read within two looks")
+        let left = try FileManager.default.contentsOfDirectory(atPath: folder.path).filter { $0.hasSuffix(".json") }
+        #expect(left == ["\(real.id).json"], "\(left.count) left")
     }
 }
 

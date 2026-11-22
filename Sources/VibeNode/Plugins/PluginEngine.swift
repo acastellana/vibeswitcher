@@ -23,11 +23,20 @@ extension LeadEngine {
         let client = link.vaultV2
         pluginWork.async { [weak self] in
             let kept = Result { try client.plugins() }
-            let settled = try? client.settledRequests()
+            let settled = Result { try client.settledRequests() }
+            let since = try? client.recordSince()
             self?.queue.async {
                 guard let self else { return }
                 self.pluginAsking = false
-                if let settled { self.pluginSettled.formUnion(settled) }
+                if let since { self.pluginRecordSince = since }
+                // Not known (the vault didn't answer): nothing is drawn until it does.
+                switch settled {
+                case .success(let keys):
+                    self.pluginSettled.formUnion(keys)
+                    self.pluginSettledKnown = true
+                case .failure(let error):
+                    self.note("plugins: the vault didn't say which requests are settled (\(error)); nothing is drawn until it does")
+                }
                 switch kept {
                 case .success(let kept): self.keptPlugins(kept)
                 case .failure(let error): self.note("plugins: the vault didn't say which are on (\(error)); each stays as it was")
@@ -82,9 +91,9 @@ extension LeadEngine {
     /// Each plugin that is on looks at its requests; an off one's folder is emptied unread (what its command filed
     /// anyway, or a file put there). `done` on `queue` once every look is done. On `queue`.
     func lookAtPlugins(done: (() -> Void)? = nil) {
-        guard plugins.known else {
+        guard plugins.known, pluginSettledKnown else {
             return askPlugins { [weak self] in
-                guard let self, self.plugins.known else { done?(); return }
+                guard let self, self.plugins.known, self.pluginSettledKnown else { done?(); return }
                 self.lookAtPlugins(done: done)
             }
         }
@@ -188,10 +197,37 @@ extension LeadEngine {
         if action.acts, let expires = shown.expiresAt, pluginNow() >= expires {
             return then(.failure(.refused("it expired: nothing ran")))
         }
+        // The asker still a live session the user opened (it may have ended since the card was drawn).
+        let desk = desk(plugin)
+        guard action.acts == false || PluginDesk.hostSession(shown.session).flatMap({ id in link.sessions.first { $0.id == id } }).map(desk.opened) == true else {
+            return then(.failure(.refused("its asking session isn't live any more: nothing ran")))
+        }
         var marked = card
         marked.plugin?.state = action.marks
         cards.put(marked)
-        plugin.perform(action.word, on: marked, desk: desk(plugin), then: then)
+        let act = PluginAct { [link] request, done in link.spawn(request, completion: done) }
+        guard action.acts else { return plugin.perform(action.word, on: marked, desk: desk, act: act, then: then) }
+        // An acting answer: settled in the vault, confirmed, before it acts, so no restart draws it again.
+        let key = PluginKey(plugin: shown.plugin, request: shown.request).name
+        let client = link.vaultV2
+        pluginWork.async { [weak self] in
+            let kept = Result { try client.settleRequests([key]) }
+            self?.queue.async {
+                guard let self else { return }
+                switch kept {
+                case .success:
+                    self.pluginSettled.insert(key)
+                    plugin.perform(action.word, on: marked, desk: desk, act: act, then: then)
+                case .failure(let error):
+                    var closed = marked
+                    closed.plugin?.state = "failed"
+                    closed.plugin?.outcome = "Not done: the session host's vault didn't record it"
+                    closed.closed = "not done: the vault didn't record the answer, so nothing ran"
+                    self.cards.put(closed)
+                    then(.failure(.refused("the session host's vault didn't record it as settled, so nothing ran: \(error)")))
+                }
+            }
+        }
     }
 
     /// `plugin` was turned off: each open card of its closes as withdrawn and is settled, its asker is told (until it
@@ -201,14 +237,17 @@ extension LeadEngine {
         let desk = desk(plugin)
         for var card in cards.list() where card.plugin?.plugin == plugin.info.id {
             guard var shown = card.plugin else { continue }
+            // Already being acted on (an answer marked it): what it started may run; say what is true.
+            let underWay = !shown.isWaiting
             shown.state = PluginCard.withdrawnState
-            shown.outcome = "Withdrawn: you turned \(plugin.info.title) off"
+            shown.outcome = "Withdrawn: you turned \(plugin.info.title) off" + (underWay ? " while it was being answered" : "")
             card.plugin = shown
-            card.closed = "withdrawn: \(plugin.info.title) was turned off on this node; nothing ran"
+            card.closed = underWay ? "withdrawn: \(plugin.info.title) was turned off while it was being answered; what that started may still run"
+                : "withdrawn: \(plugin.info.title) was turned off on this node; nothing ran"
             cards.put(card)
             desk.settle(shown.request)
             note("plugin \(plugin.info.id) off: card \(card.id) withdrawn")
-            let said = plugin.withdrawn(shown, desk: desk)
+            let said = plugin.withdrawn(shown, desk: desk) ?? (underWay ? desk.withdrawnWhileAnsweredText(shown) : nil)
             if let session = PluginDesk.hostSession(shown.session) { desk.tellSurely(said ?? desk.withdrawnText(shown), session: session) }
         }
         for (session, text) in plugin.turnedOff(desk) { desk.tellSurely(text, session: session) }
