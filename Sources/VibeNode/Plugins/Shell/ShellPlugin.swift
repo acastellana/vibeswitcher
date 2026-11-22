@@ -29,3 +29,6 @@ public final class ShellPlugin: FeaturePlugin {
 
     public func withdrawn(_ card: PluginCard, desk: PluginDesk) {}
 }
+
+/// A shell request is one the session host stamped for the session it was filed from (`ShellAsk.file`).
+extension ShellRequest: StampedAsk {}
