@@ -19,13 +19,47 @@ public enum LeadVaultV2 {
         public var subject: String?
         public var digest: String
         public var at: Double
+        /// How the act went, written by the server once it finished (`finishUserAction`); nil: begun, and no outcome
+        /// since (still being done, or the server ended in between). One optional field, so a record of a build before it
+        /// reads here as begun, and a build before it reads this record as its own (JSON's unknown key is passed over):
+        /// a handover from an older host and back loses the outcomes, nothing else.
+        public var outcome: Outcome?
 
-        public init(action: String, kind: String, subject: String?, digest: String, at: Double = Date().timeIntervalSince1970) {
+        public init(action: String, kind: String, subject: String?, digest: String, at: Double = Date().timeIntervalSince1970,
+                    outcome: Outcome? = nil) {
             self.action = action
             self.kind = kind
             self.subject = subject
             self.digest = digest
             self.at = at
+            self.outcome = outcome
+        }
+
+        /// A recorded action's end: done, with its answer when that fits (`outcomeBytes`); or failed, with why.
+        public struct Outcome: Codable, Equatable, Sendable {
+            public var done: Bool
+            /// Done: the answer's result, one JSON line, when it fits `outcomeBytes` (nil: it didn't). Failed: why.
+            public var note: String?
+            /// Failed: the wire's error code.
+            public var code: String?
+            public var at: Double
+
+            public init(done: Bool, note: String?, code: String? = nil, at: Double = Date().timeIntervalSince1970) {
+                self.done = done
+                self.note = note.flatMap { $0.utf8.count <= LeadVaultV2.outcomeBytes ? $0 : done ? nil : Self.cut($0) }
+                self.code = code.map { String($0.prefix(32)) }
+                self.at = at
+            }
+
+            /// `text` cut to `outcomeBytes` at a character's end.
+            static func cut(_ text: String) -> String {
+                var kept = ""
+                for character in text {
+                    guard kept.utf8.count + character.utf8.count <= LeadVaultV2.outcomeBytes else { break }
+                    kept.append(character)
+                }
+                return kept
+            }
         }
     }
 
@@ -38,6 +72,13 @@ public enum LeadVaultV2 {
         case userActions(since: Double)
         /// Whether an action `action` was recorded with `digest`.
         case holds(action: String, digest: String)
+        /// The act of `action` of `kind`, recorded first, finished so: kept on its record unless one was kept already
+        /// (the first outcome stands). Answered `ok`; refused when no such action is recorded. A host before this answers
+        /// that it doesn't know the request: the record stays begun.
+        case finishUserAction(action: String, kind: String, outcome: UserAction.Outcome)
+        /// The record of `action` of `kind`, outcome and all: answered `actions`, empty when none (never recorded, or
+        /// gone past `actionsKept`).
+        case userAction(action: String, kind: String)
         /// Whether a held `.user` message may go as the user's after a server restart (the close-out review): an action
         /// `action` of kind `message` was recorded with `digest` for the project `subject`, and no message of it was
         /// posted since (`spendUserActions`). Answered `holds`.
@@ -168,6 +209,9 @@ public enum LeadVaultV2 {
 
     /// How many actions the record keeps (the oldest go first).
     public static let actionsKept = 2_000
+    /// The most an outcome's note keeps: a done act's longer answer isn't kept (its outcome says done, no more), a
+    /// failure's why is cut. 2,000 records of it stay near a megabyte.
+    public static let outcomeBytes = 512
     /// How long a `.user` seal verifies after it was made or last renewed while its message waited untaken (T41
     /// narrowed, EN-D11), unless a scratch host's test sets another (`--test-user-seal-life`).
     public static let defaultSealLife: TimeInterval = 15 * 60
@@ -224,6 +268,14 @@ public enum LeadVaultV2 {
             return .actions(record.actions.filter { $0.at >= since })
         case .holds(let action, let digest):
             return .holds(record.actions.contains { $0.action == action && $0.digest == digest })
+        case .finishUserAction(let action, let kind, let outcome):
+            guard let at = record.actions.lastIndex(where: { $0.action == action && $0.kind == kind }) else {
+                return .refused("No action \(action) of \(kind) is recorded.")
+            }
+            if record.actions[at].outcome == nil { record.actions[at].outcome = outcome }
+            return .ok
+        case .userAction(let action, let kind):
+            return .actions(record.actions.filter { $0.action == action && $0.kind == kind }.suffix(1))
         case .vouches(let action, let digest, let subject):
             guard record.spent[action] == nil else { return .holds(false) }
             return .holds(record.actions.contains { $0.action == action && $0.kind == messageKind && $0.subject == subject && $0.digest == digest })
@@ -407,6 +459,17 @@ public struct LeadVaultV2Client: Sendable {
             throw Refused("The session host answered something else.")
         }
         return first
+    }
+
+    /// The act of a recorded action finished so (`LeadVaultV2.Request.finishUserAction`).
+    public func finishUserAction(_ action: String, kind: String, outcome: LeadVaultV2.UserAction.Outcome) throws {
+        guard case .ok = try call(.finishUserAction(action: action, kind: kind, outcome: outcome)) else { throw Refused("The session host answered something else.") }
+    }
+
+    /// The record of `action` of `kind`, nil when none.
+    public func userAction(_ action: String, kind: String) throws -> LeadVaultV2.UserAction? {
+        guard case .actions(let actions) = try call(.userAction(action: action, kind: kind)) else { throw Refused("The session host answered something else.") }
+        return actions.last
     }
 
     public func userActions(since: Double = 0) throws -> [LeadVaultV2.UserAction] {
