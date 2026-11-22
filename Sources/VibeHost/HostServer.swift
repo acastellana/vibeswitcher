@@ -138,8 +138,9 @@ public final class HostServer {
     private var lockFD: Int32 = -1
     var listenFD: Int32 = -1
     var acceptSource: DispatchSourceRead?
-    /// The accept sources suspended after an accept failed for want of descriptors (`acceptFailed`, V2/HostPathWatch.swift).
-    var acceptsPaused: Set<ObjectIdentifier> = []
+    /// The accept sources suspended after an accept failed for want of descriptors, each with its resume, called once
+    /// (`acceptFailed`, `resumePausedAccepts`, V2/HostPathWatch.swift).
+    var acceptsPaused: [ObjectIdentifier: AcceptResume] = [:]
     private var housekeeping: DispatchSourceTimer?
     /// The watch on `Config.owner`.
     private var ownerWatch: (any Platform.Cancellable)?
@@ -287,6 +288,7 @@ public final class HostServer {
             guard !self.stopped else { return }
             self.stopped = true
             self.log.note("host: stopping, \(self.sessions.values.filter { $0.info.isLive }.count) sessions live\(terminateSessions ? ", ending them" : "")")
+            self.resumePausedAccepts()
             self.acceptSource?.cancel()
             self.housekeeping?.cancel()
             self.ownerWatch?.cancel()

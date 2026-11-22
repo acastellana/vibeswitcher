@@ -311,34 +311,33 @@ final class HostPathWatch {
 
 extension HostServer {
     /// An accept that failed with `code`: for want of descriptors or memory (EMFILE, ENFILE, ENOBUFS, ENOMEM), which
-    /// would fail again at once while the listener's source fires for as long as a connection waits: accepting stops
-    /// for a second, said in the log and on stderr (the architecture review's row 4). The accept source is cancelled,
-    /// not suspended (a suspended source's cancel is put off until it is resumed: `stop` or `replaceListener` closing
-    /// the listener meanwhile would leave libdispatch to unregister a descriptor number another file may have taken by
-    /// then), and a new one made for the same listener a second later, unless the host has stopped or replaced its
-    /// listener since. One pause a listener at a time (`acceptsPaused`, by source); a listener replaced meanwhile is
-    /// paused in its own turn. Anything else: nothing (the source fires again if a connection still waits). On `queue`.
+    /// would fail again at once while the listener's source fires for as long as a connection waits: its source is
+    /// suspended for a second, said in the log and on stderr (the architecture review's row 4). A suspended source is
+    /// never cancelled while suspended with its descriptor closed under it (its cancel is put off until it is resumed,
+    /// and libdispatch would then unregister a descriptor number another file may have taken): its resume
+    /// (`AcceptResume`, once) comes a second later, or first from `stop` (`resumePausedAccepts`), and
+    /// `replaceListener` closes the old listener only from its source's cancel handler. One pause a source at a time
+    /// (`acceptsPaused`); a listener replaced meanwhile is paused in its own turn. Anything else: nothing (the source
+    /// fires again if a connection still waits). On `queue`.
     func acceptFailed(_ code: Int32) {
         guard [EMFILE, ENFILE, ENOBUFS, ENOMEM].contains(code), let source = acceptSource else { return }
         let key = ObjectIdentifier(source as AnyObject)
-        guard acceptsPaused.insert(key).inserted else { return }
+        guard acceptsPaused[key] == nil else { return }
         // On stderr too: the log's file may be what can't be opened.
         note("host: couldn't accept a connection (errno \(code)): accepting again in 1 s")
         log("couldn't accept a connection (errno \(code)): accepting again in 1 s")
-        let listener = listenFD
-        acceptSource = nil
-        source.cancel()
+        let resume = AcceptResume(source)
+        acceptsPaused[key] = resume
+        source.suspend()
         queue.asyncAfter(deadline: .now() + 1) { [weak self] in
-            // Held until its id leaves `acceptsPaused`: let go, its address (its id) could be a new source's meanwhile.
-            withExtendedLifetime(source) {}
-            guard let self else { return }
-            self.acceptsPaused.remove(key)
-            guard !self.stopped, self.acceptSource == nil, self.listenFD == listener, listener >= 0 else { return }
-            let again = DispatchSource.makeReadSource(fileDescriptor: listener, queue: self.queue)
-            again.setEventHandler { [weak self] in self?.acceptAll() }
-            again.resume()
-            self.acceptSource = again
+            resume.resume()
+            self?.acceptsPaused[key] = nil
         }
+    }
+
+    /// Every paused accept source resumed now (each once), before `stop` cancels the one it has. On `queue`.
+    func resumePausedAccepts() {
+        acceptsPaused.values.forEach { $0.resume() }
     }
 
     /// `fd`, a listener bound at the socket's path, accepted from from now on in place of the one before, which is
@@ -357,5 +356,19 @@ extension HostServer {
         } else if old >= 0 {
             Sys.close(old)
         }
+    }
+}
+
+/// A suspended accept source's resume, done once (`HostServer.acceptFailed`): by the pause's end or by `stop`, whichever
+/// comes first; it holds the source until then (a suspended source let go traps), so its id stays its own. On the host's
+/// queue.
+final class AcceptResume {
+    private var source: DispatchSourceRead?
+
+    init(_ source: DispatchSourceRead) { self.source = source }
+
+    func resume() {
+        source?.resume()
+        source = nil
     }
 }
