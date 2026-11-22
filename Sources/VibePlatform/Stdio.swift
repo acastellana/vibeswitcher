@@ -2,9 +2,10 @@ import Foundation
 
 extension Platform {
     /// Standard error and standard output, written with the raw `write(2)` and every failure ignored but said in the
-    /// result. `Platform.Stdio.error(_:)` traps when the write fails (on Linux a SIGILL from its `try!`,
-    /// on the Mac an Objective-C exception): a log line on a full disk (stderr on /dev/full, or a log file on a full
-    /// volume) would end the server, then the host, then every session. A log line lost is better than the process.
+    /// result: these never trap. Foundation's `write(_:)` on `FileHandle`'s standard error does when the write fails
+    /// (on Linux a SIGILL from its `try!`, on the Mac an Objective-C exception): a log line on a full disk (stderr on
+    /// /dev/full, or a log file on a full volume) would end the server, then the host, then every session. A log line
+    /// lost is better than the process.
     /// `StdioWriteLintTests` keeps `FileHandle.standardError`/`standardOutput` writes out of the node's targets.
     public enum Stdio {
         /// Writes `text` to standard error (fd 2). Whether every byte went out.
@@ -51,37 +52,22 @@ extension Platform {
             return rename(path, path + ".1") == 0
         }
 
-        /// While running: when standard error (fd 2) is a regular file opened to append, grown past `limit` (a detached
-        /// host's `<root>/v2/host.log`, which its server child shares, both writing at its end), what it holds is
-        /// copied to `<its path>.1` (replacing an older one) and the file emptied in place, so every process holding
-        /// it writes from the start again. A line written between the copy and the emptying is lost. Nothing for a
-        /// terminal, a pipe or the journal's socket, nor for a file not opened to append (emptied, its writer would
-        /// go on at its old offset). Whether it was emptied.
+        /// While running: when standard error (fd 2) is the file at `path` (the same device and inode), regular, opened
+        /// to append and grown past `limit` (a detached host's `<root>/v2/host.log`, which its server child shares,
+        /// both writing at its end, and which the detached start names to it), what it holds is copied to `path.1`
+        /// (replacing an older one) and the file emptied in place, so every process holding it writes from the start
+        /// again. A line written between the copy and the emptying is lost. Nothing for any other standard error: a
+        /// terminal, a pipe, the journal's socket, a test's output or a user's own `2>>file`, nor for a file not
+        /// opened to append (emptied, its writer would go on at its old offset). Whether it was emptied.
         /// `fd`: another descriptor treated the same way (a test's).
-        @discardableResult public static func capError(_ fd: Int32 = 2, limit: Int = logLimit) -> Bool {
-            var info = stat()
-            guard fstat(fd, &info) == 0, info.st_mode & S_IFMT == S_IFREG, Int(info.st_size) > limit else { return false }
+        @discardableResult public static func capError(_ fd: Int32 = 2, path: String, limit: Int = logLimit) -> Bool {
+            var info = stat(), named = stat()
+            guard fstat(fd, &info) == 0, info.st_mode & S_IFMT == S_IFREG, Int(info.st_size) > limit,
+                  lstat(path, &named) == 0, named.st_dev == info.st_dev, named.st_ino == info.st_ino else { return false }
             let flags = fcntl(fd, F_GETFL)
             guard flags >= 0, flags & O_APPEND != 0 else { return false }
-            if let path = path(of: fd) { copy(from: path, to: path + ".1") }
+            copy(from: path, to: path + ".1")
             return ftruncate(fd, 0) == 0
-        }
-
-        /// The path `fd` was opened by, while it still names it: Linux's /proc/self/fd/N, the Mac's F_GETPATH.
-        private static func path(of fd: Int32) -> String? {
-            var buffer = [CChar](repeating: 0, count: Int(PATH_MAX) + 1)
-            #if canImport(Darwin)
-            guard fcntl(fd, F_GETPATH, &buffer) == 0 else { return nil }
-            let path = String(cString: buffer)
-            #else
-            let length = readlink("/proc/self/fd/\(fd)", &buffer, buffer.count - 1)
-            guard length > 0 else { return nil }
-            let path = String(decoding: buffer[..<length].map { UInt8(bitPattern: $0) }, as: UTF8.self)
-            #endif
-            // Removed or renamed away since: no `.1` beside a name it no longer has.
-            var named = stat(), held = stat()
-            guard path.hasPrefix("/"), stat(path, &named) == 0, fstat(fd, &held) == 0, named.st_dev == held.st_dev, named.st_ino == held.st_ino else { return nil }
-            return path
         }
 
         /// `from`'s bytes into a new file (0600, not through a link) moved over `to`. Nothing when either step fails.

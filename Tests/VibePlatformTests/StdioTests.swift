@@ -55,12 +55,28 @@ struct StdioTests {
         try #require(fd >= 0)
         defer { close(fd) }
         #expect(Platform.Stdio.write(fd, Data(repeating: 0x61, count: 50)))
-        #expect(!Platform.Stdio.capError(fd, limit: 100), "under the limit")
+        #expect(!Platform.Stdio.capError(fd, path: log, limit: 100), "under the limit")
         #expect(Platform.Stdio.write(fd, Data(repeating: 0x62, count: 60)))
-        #expect(Platform.Stdio.capError(fd, limit: 100))
+        #expect(Platform.Stdio.capError(fd, path: log, limit: 100))
         #expect(try Data(contentsOf: URL(fileURLWithPath: log + ".1")) == Data(repeating: 0x61, count: 50) + Data(repeating: 0x62, count: 60))
         #expect(Platform.Stdio.write(fd, Data("next\n".utf8)))
         #expect(try String(contentsOfFile: log, encoding: .utf8) == "next\n", "written from the start again")
+    }
+
+    /// Only the file the detached start named (its device and inode): standard error on any other file, a test's own
+    /// output or a user's `2>>file`, is never emptied, however large.
+    @Test func capErrorLeavesAnyOtherFile() throws {
+        let folder = try TestScriptLinuxTests.scratch("stdio")
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let log = folder.appendingPathComponent("host.log").path, other = folder.appendingPathComponent("test-output").path
+        let fd = open(other, O_WRONLY | O_CREAT | O_APPEND | O_CLOEXEC, 0o600)
+        try #require(fd >= 0)
+        defer { close(fd) }
+        #expect(Platform.Stdio.write(fd, Data(repeating: 0x61, count: 200)))
+        FileManager.default.createFile(atPath: log, contents: Data())
+        #expect(!Platform.Stdio.capError(fd, path: log, limit: 100))
+        #expect(!Platform.Stdio.capError(fd, path: folder.appendingPathComponent("absent").path, limit: 100))
+        #expect(try Data(contentsOf: URL(fileURLWithPath: other)).count == 200)
     }
 
     /// A file not opened to append is left alone: emptied, its writer would go on at its old offset.
@@ -72,7 +88,7 @@ struct StdioTests {
         try #require(fd >= 0)
         defer { close(fd) }
         #expect(Platform.Stdio.write(fd, Data(repeating: 0x61, count: 200)))
-        #expect(!Platform.Stdio.capError(fd, limit: 100))
+        #expect(!Platform.Stdio.capError(fd, path: log, limit: 100))
         #expect(!FileManager.default.fileExists(atPath: log + ".1"))
     }
 }

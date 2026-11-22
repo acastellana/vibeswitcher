@@ -192,10 +192,13 @@ public struct NodeStarter {
 
     // MARK: - The detached start (S3)
 
-    /// The environment of a host started detached (ST-D6): exactly `HOME`, the unit's `PATH` and
-    /// `SWIFT_BACKTRACE=enable=no`; nothing of the command line's own (an `LD_PRELOAD` an edited `.bashrc` set included).
-    public static func detachedEnvironment(home: String, path: String) -> [String] {
-        ["HOME=\(home)", "PATH=\(path)", "SWIFT_BACKTRACE=enable=no"]
+    /// The environment of a host started detached (ST-D6): exactly `HOME`, the unit's `PATH`,
+    /// `SWIFT_BACKTRACE=enable=no` and its log's name; nothing of the command line's own (an `LD_PRELOAD` an edited
+    /// `.bashrc` set included).
+    /// `log`: the file its stdout and stderr go to (`hostLog`), named to it so it caps that file (`StderrCap`), and only
+    /// that.
+    public static func detachedEnvironment(home: String, path: String, log: String? = nil) -> [String] {
+        ["HOME=\(home)", "PATH=\(path)", "SWIFT_BACKTRACE=enable=no"] + (log.map { ["VIBESWITCHER_HOST_LOG=\($0)"] } ?? [])
     }
 
     /// The lock a detached start holds from the record's check to its settle: `<root>/v2/node.pid.lock` (0600).
@@ -301,7 +304,7 @@ public struct NodeStarter {
         }
 
         var spawn = Platform.Spawn(executable: program, arguments: host)
-        spawn.environment = detachedEnvironment(home: home, path: path)
+        spawn.environment = detachedEnvironment(home: home, path: path, log: log)
         spawn.directory = home
         spawn.stdin = .path("/dev/null", flags: O_RDONLY)
         spawn.stdout = .descriptor(fd)
