@@ -73,7 +73,11 @@ extension Requests {
     /// `approve.list`, args `only` (some of `approveGroups`; all when absent).
     func approveList(_ request: NodeWire.Request, reply: @escaping (NodeWire.Reply) -> Void) {
         guard let engine else { return reply(.init(re: request.id, error: .init(.refused, "this server keeps no cards"))) }
-        let only = request.args?["only"]?.array?.compactMap(\.string) ?? Self.approveGroups
+        let only: [String]
+        switch request.typedArgs(WireKinds.ApproveList.Args.self) {
+        case .failure(let failure): return reply(.init(re: request.id, error: failure))
+        case .success(let typed): only = typed.only ?? Self.approveGroups
+        }
         guard !only.isEmpty, only.allSatisfy(Self.approveGroups.contains) else {
             return reply(.init(re: request.id, error: .init(.badArgs, "only names some of config, base and hooks")))
         }
@@ -104,7 +108,7 @@ extension Requests {
                 guard let root = left.first else { return then() }
                 engine.configHeld(root: root, diff: nil) { result in
                     queue.async {
-                        guard case .success(let value) = result, let card = value["card"], let id = card["id"]?.string,
+                        guard case .success(let held) = result, let card = held.card, let id = card["id"]?.string,
                               card["config"]?["items"]?.array?.isEmpty == false, let shown = engine.cards.cards[id]?.config else {
                             return configs(Array(left.dropFirst()), then: then)
                         }
@@ -166,19 +170,17 @@ extension Requests {
         }
         let decide = engine.cards.list().filter { $0.isOpen && [.question, .approval, .plugin].contains($0.kind) }.map(\.value)
         let pushes = engine.leads.leads.values.compactMap { lead in lead.push.map { _ in NodeWire.Value.string(lead.root) } }
-        var result: [String: NodeWire.Value] = ["items": .array(items.map { item in
-            .object(["kind": .string(item.kind), "subject": .string(item.subject), "card": item.card ?? .null,
-                     "reasons": .array(item.reasons.map(NodeWire.Value.string))])
-        }), "decide": .array(decide), "pushes": .array(pushes),
-           "own": .array(own.map { .object(["text": .string($0.text), "command": .string($0.command)]) })]
+        var result = WireKinds.ApproveList.Result(
+            items: items.map { .init(kind: $0.kind, subject: $0.subject, card: $0.card, reasons: $0.reasons) }, decide: decide, pushes: pushes,
+            own: own.map { .init(text: $0.text, command: $0.command) })
         if !items.isEmpty {
             let id = "local:approve:" + UUID().uuidString.lowercased()
             approveBatches.append(ApproveBatch(id: id, items: items, at: Platform.Clock.steadyDate()))
             if approveBatches.count > Self.approveKept { approveBatches.removeFirst(approveBatches.count - Self.approveKept) }
-            result["batch"] = .string(id)
-            result["code"] = .string(NodeIds.code(card: id))
+            result.batch = id
+            result.code = NodeIds.code(card: id)
         }
-        reply(.init(re: request.id, result: .object(result)))
+        reply(.init(re: request.id, typed: result))
     }
 
     /// Why `approve` can't take its batch, or nil: no such batch, another code, or expired (gone with it). Asked before

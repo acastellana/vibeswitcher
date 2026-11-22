@@ -90,17 +90,16 @@ enum StopCommand {
         case .failure(.broken(let why)): return .noHello(why)
         case .success(let connected): client = connected
         }
-        switch client.request("status") {
+        switch client.read(WireKinds.Status.self, WireNoArgs()) {
         case .failure(let failure): return .noHello("\(failure.message) (asked for status)")
-        case .success(let reply):
-            guard reply.ok, let result = reply.result else {
-                let code = reply.error?.code ?? "internal"
-                return .failed(StartRefusal("\(code): \(ConfigSeal.inert(reply.error?.message ?? "no reason", limit: .max))", exitCode: Say.exitCode(replyCode: code)))
-            }
+        case .refused(let reply):
+            let code = reply.error?.code ?? "internal"
+            return .failed(StartRefusal("\(code): \(ConfigSeal.inert(reply.error?.message ?? "no reason", limit: .max))", exitCode: Say.exitCode(replyCode: code)))
+        case .success(let status, _):
             connection.client = client
             // What the server's stop ends: the host's live sessions (`host.liveSessions`), not `sessions`, which lists
             // every agent on a terminal, hosted or not, and no plain program the host runs (the review of S3).
-            return .answered(live: result["host"]?["liveSessions"]?.int ?? 0)
+            return .answered(live: status.host?.liveSessions ?? 0)
         }
     }
 

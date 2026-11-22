@@ -27,14 +27,13 @@ enum BoardCommand {
         case .failure(let failure): return Say.failed(failure)
         case .success(let connected): client = connected
         }
-        var args: [String: NodeWire.Value] = [:]
-        if let folder { args["folder"] = .string(folder) }
-        switch client.request("board", args: args) {
+        switch client.read(WireKinds.Board.self, .init(folder: folder)) {
         case .failure(let failure): return Say.failed(failure)
-        case .success(let reply):
-            guard reply.ok, let boards = reply.result?["boards"]?.array else { return Say.replyError(reply) }
+        case .refused(let reply): return Say.replyError(reply)
+        case .success(let result, let raw):
+            let boards = result.boards ?? []
             if json {
-                Say.out(String(decoding: NodeWire.printable(NodeWire.line(reply.result ?? .null)).dropLast(), as: UTF8.self))
+                Say.out(String(decoding: NodeWire.printable(NodeWire.line(raw)).dropLast(), as: UTF8.self))
                 return 0
             }
             if boards.isEmpty { Say.out("no lead on this node: `vibeswitcher lead FOLDER` starts one") }

@@ -516,7 +516,7 @@ public final class Requests: @unchecked Sendable {
         let answer = { [weak self] in
             guard let self, !waiting.answered else { return }
             waiting.answered = true
-            reply(.init(re: request.id, result: self.statusValue()))
+            reply(.init(re: request.id, typed: self.statusResult()))
         }
         refreshNotes(answer)
         queue.asyncAfter(deadline: .now() + Self.notesWait) { answer() }
@@ -550,61 +550,59 @@ public final class Requests: @unchecked Sendable {
     /// session the vault doesn't bind, E5; a base move that refused a running lead's merge, E7's refresh; a host restart
     /// that ended a project's team, and a running lead the vault gives no role, E8), and the last host restart
     /// (`restart`, E8: the command line shows it with how the host ended). On `queue`.
-    public func statusValue() -> NodeWire.Value {
+    public func statusValue() -> NodeWire.Value { NodeWire.Value(wire: statusResult()) }
+
+    /// `status`'s result, typed (`WireKinds.Status`). On `queue`.
+    public func statusResult() -> WireKinds.Status.Result {
+        typealias Status = WireKinds.Status
         let list = sessions?.sessions ?? []
         // Each once per status (the review's row 19): the switch's blockers walk the host's sessions, the reminders the scan's.
         let switching = switchBlockersNow()
         let due = sessions?.reminders() ?? []
         let reminders = NodeSessions.notices(due)
-        var fields: [String: NodeWire.Value] = [
-            "node": .string(NodeIds.node),
-            "epoch": .string(epoch),
-            "root": .string(root.path),
-            "server": .object(["pid": .int(Int(serverPID)), "startedAt": .date(startedAt), "commit": .string(commit)]),
-            "host": .object(["startedAt": link.hostStartedAt.map(NodeWire.Value.date) ?? .null,
-                             "pid": link.hostPID.map { .int(Int($0)) } ?? .null,
-                             "state": .string(Self.word(link.state)),
-                             "liveSessions": .int(link.sessions.filter(\.isLive).count),
-                             "notes": notes.map { Self.value($0.notes, at: $0.at) } ?? .null]),
-            "rule": .object(["mode": .string(rule.mode.rawValue), "says": .string(rule.says),
-                             "scopes": .array(rule.scopes.map { .string($0.pattern) })]),
-            "sessions": .array(list.map { session in
-                let id = NodeSessions.id(of: session)
-                return session.liveValue(prompt: sessions?.prompts.values[id], draft: sessionDrafts.values[id], queued: heldSends.values[id] ?? [])
-            }),
-            "leads": .array((engine?.leads.leads.values.sorted { $0.root < $1.root } ?? []).map(leadValue)),
-            "cards": Self.counts(engine?.cards.counts() ?? [:]),
-            "plugins": engine?.plugins.onValue ?? .array([]),
-            "accepted": .array(accepted.map(\.value)),
-            "notices": .array(statusNotices(reminders: reminders).map(NodeWire.Value.string)),
-            // The reminders due now, each its session's (the page notifies once an episode: "Remind me about waiting or
-            // stuck sessions", 2026-11-22).
-            "reminders": .array(due.map(\.value)),
-            "restart": engine?.restartValue ?? .null,
-            "reopen": engine?.offeredValue ?? .array([]),
-            "ended": engine?.endedValue ?? .array([]),
-            "ending": engine?.endingValue ?? .array([]),
-            // As last read off the queue (`refreshBuilds`): null until the first read is in.
-            "builds": installRoot == nil ? .null : builds ?? .null,
-            "web": webValue?() ?? NodeStatusStore.webOff,
-            "usage": engine?.usage.map(NodeUsage.value) ?? .null,
-            "boost": engine?.boostValue ?? .null,
-            // What refuses a build switch now (the rule on switches), for `vibeswitcher switch` before its code.
-            // What refuses a switch now (decision 6), less the workers it would park (`SwitchPark`, by the last look).
-            "switchBlockers": .array(switching.blockers.map(NodeWire.Value.string)),
-            "switchParks": .array(switching.parks.map(NodeWire.Value.string)),
-        ]
+        var result = Status.Result()
+        result.node = NodeIds.node
+        result.epoch = epoch
+        result.root = root.path
+        result.server = Status.Server(pid: Int(serverPID), startedAt: NodeWire.dateText(startedAt), commit: commit)
+        result.host = Status.Host(startedAt: link.hostStartedAt.map(NodeWire.dateText), pid: link.hostPID.map { Int($0) }, state: Self.word(link.state),
+                                  liveSessions: link.sessions.filter(\.isLive).count, notes: notes.map { Self.notes($0.notes, at: $0.at) })
+        result.rule = Status.Rule(mode: rule.mode.rawValue, says: rule.says, scopes: rule.scopes.map(\.pattern))
+        result.sessions = list.map { session in
+            let id = NodeSessions.id(of: session)
+            return session.liveValue(prompt: sessions?.prompts.values[id], draft: sessionDrafts.values[id], queued: heldSends.values[id] ?? [])
+        }
+        result.leads = (engine?.leads.leads.values.sorted { $0.root < $1.root } ?? []).map(leadValue)
+        result.cards = Self.counts(engine?.cards.counts() ?? [:])
+        result.plugins = engine?.plugins.onValue ?? .array([])
+        result.accepted = accepted.map(\.value)
+        result.notices = statusNotices(reminders: reminders)
+        // The reminders due now, each its session's (the page notifies once an episode: "Remind me about waiting or
+        // stuck sessions", 2026-11-22).
+        result.reminders = due.map(\.value)
+        result.restart = engine?.restartValue ?? .null
+        result.reopen = engine?.offeredValue ?? .array([])
+        result.ended = engine?.endedValue ?? .array([])
+        result.ending = engine?.endingValue ?? .array([])
+        // As last read off the queue (`refreshBuilds`): null until the first read is in.
+        result.builds = installRoot == nil ? nil : builds.flatMap { try? $0.wire(Status.Builds.self) }
+        result.web = webValue?() ?? NodeStatusStore.webOff
+        result.usage = engine?.usage.map(NodeUsage.value)
+        result.boost = engine?.boostValue
+        // What refuses a switch now (decision 6), less the workers it would park (`SwitchPark`, by the last look).
+        result.switchBlockers = switching.blockers
+        result.switchParks = switching.parks
         // The user's node's tailnet page, for the command line (not in the `node` stream: `NodeStatusStore.value`).
-        if let tailnet { fields["webTailnet"] = tailnet.value() }
+        if let tailnet { result.webTailnet = tailnet.value() }
         // The last update check's answer, for the command line (the page has its notice).
-        if let updates { fields["update"] = updates.value }
+        if let updates { result.update = updates.value }
         // The health digest (`status --health`, the page's This node).
         if let health {
-            fields["health"] = health.value(serverRestarts: notes?.notes.serverRestarts, refusedConnections: notes?.notes.refusedAppConnections,
-                                            hostRestartAt: engine?.restartValue["at"]?.string.flatMap(NodeWire.date),
-                                            waiting: reminders, serverEnd: notes?.notes.lastServerEnd)
+            result.health = health.value(serverRestarts: notes?.notes.serverRestarts, refusedConnections: notes?.notes.refusedAppConnections,
+                                         hostRestartAt: engine?.restartValue["at"]?.string.flatMap(NodeWire.date),
+                                         waiting: reminders, serverEnd: notes?.notes.lastServerEnd)
         }
-        return .object(fields)
+        return result
     }
 
     /// A lead as `status` lists it: the store's, with its open and blocking questions and its open cards (E6), and how
@@ -620,9 +618,8 @@ public final class Requests: @unchecked Sendable {
     }
 
     /// Open cards counted by kind, as `status` gives them.
-    static func counts(_ counts: [CardStore.Kind: Int]) -> NodeWire.Value {
-        .object(["questions": .int(counts[.question] ?? 0), "approvals": .int(counts[.approval] ?? 0),
-                 "config": .int(counts[.configHeld] ?? 0), "base": .int(counts[.baseMove] ?? 0)])
+    static func counts(_ counts: [CardStore.Kind: Int]) -> WireKinds.Status.CardCounts {
+        .init(questions: counts[.question] ?? 0, approvals: counts[.approval] ?? 0, config: counts[.configHeld] ?? 0, base: counts[.baseMove] ?? 0)
     }
 
     static func word(_ state: HostLink.State) -> String {
@@ -633,13 +630,13 @@ public final class Requests: @unchecked Sendable {
         }
     }
 
-    static func value(_ notes: HostNotes, at: Date) -> NodeWire.Value {
-        .object(["startedAt": .date(notes.startedAt), "serverRestarts": .int(notes.serverRestarts),
-                 "replacedPaths": .array(notes.replacedPaths.map(NodeWire.Value.string)),
-                 "refusedAppConnections": .int(notes.refusedAppConnections),
-                 "lockHeldElsewhere": notes.lockHeldElsewhere.map(NodeWire.Value.string) ?? .null,
-                 "build": notes.build.map(NodeWire.Value.string) ?? .null,
-                 "at": .date(at)])
+    static func value(_ notes: HostNotes, at: Date) -> NodeWire.Value { NodeWire.Value(wire: Self.notes(notes, at: at)) }
+
+    /// The host's notes as `status` gives them.
+    static func notes(_ notes: HostNotes, at: Date) -> WireKinds.Status.Notes {
+        .init(startedAt: NodeWire.dateText(notes.startedAt), serverRestarts: notes.serverRestarts, replacedPaths: notes.replacedPaths,
+              refusedAppConnections: notes.refusedAppConnections, lockHeldElsewhere: notes.lockHeldElsewhere, build: notes.build,
+              at: NodeWire.dateText(at))
     }
 
     /// A session as `status` lists it; its status word as `status --probe` writes one.

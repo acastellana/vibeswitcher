@@ -28,21 +28,20 @@ enum ApproveCommand {
         case .failure(let failure): return Say.failed(failure)
         case .success(let connected): client = connected
         }
-        let listed: NodeWire.Value
-        switch client.request("approve.list", args: only.map { ["only": .array($0.map(NodeWire.Value.string))] }, timeout: 120) {
+        let listed: WireKinds.ApproveList.Result
+        switch client.read(WireKinds.ApproveList.self, .init(only: only), timeout: 120) {
         case .failure(let failure): return Say.failed(failure)
-        case .success(let reply):
-            guard reply.ok, let result = reply.result else { return Say.replyError(reply) }
-            listed = result
+        case .refused(let reply): return Say.replyError(reply)
+        case .success(let result, _): listed = result
         }
-        let items = listed["items"]?.array ?? []
+        let items = listed.items ?? []
         // What needs your own decision first: never in the batch, and never scrolled past by it.
         sayDecide(listed)
         for (number, item) in items.enumerated() {
             Say.out("\(number + 1). " + heading(item))
             lines(item).forEach { Say.out("   " + $0) }
         }
-        guard !items.isEmpty, let batch = listed["batch"]?.string, let code = listed["code"]?.string else {
+        guard !items.isEmpty, let batch = listed.batch, let code = listed.code else {
             Say.out("Nothing a plain accept settles is waiting on you.")
             return 0
         }
@@ -80,29 +79,31 @@ enum ApproveCommand {
         return 77
     }
 
-    static func heading(_ item: NodeWire.Value) -> String {
-        switch item["kind"]?.string {
-        case "config.accept": return "Held config, \(inert(item["subject"]?.string)) (config accept):"
-        case "base.accept": return "The base moved, \(inert(item["subject"]?.string)) (base accept):"
-        case "hooks.install": return "The hooks are out of date (hooks install --agent \(inert(item["subject"]?.string))):"
-        default: return inert(item["kind"]?.string)
+    typealias Item = WireKinds.ApproveList.Item
+
+    static func heading(_ item: Item) -> String {
+        switch item.kind {
+        case "config.accept": return "Held config, \(inert(item.subject)) (config accept):"
+        case "base.accept": return "The base moved, \(inert(item.subject)) (base accept):"
+        case "hooks.install": return "The hooks are out of date (hooks install --agent \(inert(item.subject))):"
+        default: return inert(item.kind)
         }
     }
 
     /// The item as its own command shows it: its card (`config held`, `base show`), or why the hooks are out of date.
-    static func lines(_ item: NodeWire.Value) -> [String] {
-        if let card = item["card"], card != .null { return CardText.lines(card) }
-        return (item["reasons"]?.array ?? []).compactMap(\.string).map { inert($0) }
+    static func lines(_ item: Item) -> [String] {
+        if let card = item.card, card != .null { return CardText.lines(card) }
+        return (item.reasons ?? []).map { inert($0) }
     }
 
     /// What needs your own decision, counted, each with the command that settles it: questions, merge approvals and shell
     /// requests (`vibeswitcher questions` shows them), a push asked for, and what the batch leaves to you (a config card
     /// with guard rails or a review floor to record, a base moved from a head the vault can't vouch for, the hooks beside
     /// a config accept).
-    static func sayDecide(_ listed: NodeWire.Value) {
-        let decide = listed["decide"]?.array ?? []
-        let pushes = (listed["pushes"]?.array ?? []).compactMap(\.string)
-        let own = listed["own"]?.array ?? []
+    static func sayDecide(_ listed: WireKinds.ApproveList.Result) {
+        let decide = listed.decide ?? []
+        let pushes = (listed.pushes ?? []).compactMap(\.string)
+        let own = listed.own ?? []
         guard !decide.isEmpty || !pushes.isEmpty || !own.isEmpty else { return }
         Say.out("Waiting on your own decision (not in the batch; each with its own command and code):")
         let count = { (kind: String) in decide.filter { $0["kind"]?.string == kind }.count }
@@ -114,23 +115,23 @@ enum ApproveCommand {
             .filter { $0.1 > 0 }.map { "\($0.1) \($0.0)\($0.1 == 1 ? "" : "s")" }
         if !cards.isEmpty { Say.out("   " + cards.joined(separator: ", ") + ": see vibeswitcher questions (each answered with vibeswitcher answer CARD)") }
         for root in pushes { Say.out("   a push asked for in \(inert(root)): vibeswitcher push \(inert(root)) | decline-push \(inert(root))") }
-        for entry in own { Say.out("   \(inert(entry["text"]?.string)): \(inert(entry["command"]?.string))") }
+        for entry in own { Say.out("   \(inert(entry.text)): \(inert(entry.command))") }
     }
 
     /// One line for an item: what it is, where, what it seals or moves.
-    static func recapLine(_ item: NodeWire.Value) -> String {
-        let folder = inert(item["subject"]?.string)
-        switch item["kind"]?.string {
+    static func recapLine(_ item: Item) -> String {
+        let folder = inert(item.subject)
+        switch item.kind {
         case "config.accept":
-            let names = (item["card"]?["config"]?["items"]?.array ?? []).compactMap { $0["name"]?.string }.map { inert($0) }
+            let names = (item.card?["config"]?["items"]?.array ?? []).compactMap { $0["name"]?.string }.map { inert($0) }
             let shown = names.prefix(3).joined(separator: ", ") + (names.count > 3 ? " and \(names.count - 3) more" : "")
             return "config accept, \(folder): seals \(names.count) (\(shown))"
         case "base.accept":
-            let base = item["card"]?["base"]
+            let base = item.card?["base"]
             let from = String((base?["from"]?.string ?? "?").prefix(8)), to = String((base?["to"]?.string ?? "?").prefix(8))
             return "base accept, \(folder): \(inert(base?["branch"]?.string)) from \(from) to \(to)"
         case "hooks.install": return "hooks install: \(folder)"
-        default: return "\(inert(item["kind"]?.string)), \(folder)"
+        default: return "\(inert(item.kind)), \(folder)"
         }
     }
 

@@ -31,12 +31,13 @@ enum PluginCommand {
         case .failure(let failure): return Say.failed(failure)
         case .success(let connected): client = connected
         }
-        switch client.request("plugin.list") {
+        switch client.read(WireKinds.PluginList.self, WireNoArgs()) {
         case .failure(let failure): return Say.failed(failure)
-        case .success(let reply):
-            guard reply.ok, let plugins = reply.result?["plugins"]?.array else { return Say.replyError(reply) }
+        case .refused(let reply): return Say.replyError(reply)
+        case .success(let result, let raw):
+            let plugins = result.plugins ?? []
             if json {
-                Say.out(String(decoding: NodeWire.printable(NodeWire.line(reply.result ?? .null)).dropLast(), as: UTF8.self))
+                Say.out(String(decoding: NodeWire.printable(NodeWire.line(raw)).dropLast(), as: UTF8.self))
             } else {
                 PluginListText.lines(plugins).forEach(Say.out)
             }
@@ -47,10 +48,11 @@ enum PluginCommand {
     private static func set(_ name: String, on: Bool) -> Int32 {
         let id = name.lowercased()
         return SessionCommand.act("plugin.\(on ? "on" : "off")", fetch: { client in
-            client.request("plugin.list").flatMap { reply in
-                guard reply.ok, let plugins = reply.result?["plugins"]?.array else {
-                    return .failure(.broken(reply.error.map { "\($0.code): \($0.message)" } ?? "the server listed no plugins"))
-                }
+            switch client.read(WireKinds.PluginList.self, WireNoArgs()) {
+            case .failure(let failure): return .failure(failure)
+            case .refused(let reply): return .failure(.broken(reply.error.map { "\($0.code): \($0.message)" } ?? "the server listed no plugins"))
+            case .success(let result, _):
+                guard let plugins = result.plugins else { return .failure(.broken("the server listed no plugins")) }
                 return .success(plugins.first { $0["id"]?.string == id } ?? .null)
             }
         }, refuse: { plugin in

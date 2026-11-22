@@ -18,7 +18,7 @@ extension Requests {
                 fields["defaultSince"] = engine.plugins.kept?[plugin.info.id] == nil ? engine.pluginRecordSince.map(NodeWire.Value.date) ?? .null : .null
                 return .object(fields)
             }
-            reply(.init(re: request.id, result: .object(["plugins": .array(values)])))
+            reply(.init(re: request.id, typed: WireKinds.PluginList.Result(plugins: values)))
         }
         // Until the vault said, ask it first: the list says what the user set.
         engine.plugins.known ? answer() : engine.askPlugins(then: answer)

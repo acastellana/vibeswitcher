@@ -22,11 +22,10 @@ enum ReopenCommand {
         case .success(let connected): client = connected
         }
         let offered: [NodeWire.Value]
-        switch client.request("status") {
+        switch client.read(WireKinds.Status.self, WireNoArgs()) {
         case .failure(let failure): return Say.failed(failure)
-        case .success(let reply):
-            guard reply.ok, let result = reply.result else { return Say.replyError(reply) }
-            offered = result["reopen"]?.array ?? []
+        case .refused(let reply): return Say.replyError(reply)
+        case .success(let status, _): offered = status.reopen?.array ?? []
         }
         guard !arguments.isEmpty else {
             guard !offered.isEmpty else {
@@ -112,12 +111,10 @@ enum ResumeCommand {
         case .success(let connected): client = connected
         }
         let ended: [NodeWire.Value], ending: [NodeWire.Value]
-        switch client.request("status") {
+        switch client.read(WireKinds.Status.self, WireNoArgs()) {
         case .failure(let failure): return Say.failed(failure)
-        case .success(let reply):
-            guard reply.ok, let result = reply.result else { return Say.replyError(reply) }
-            ended = result["ended"]?.array ?? []
-            ending = result["ending"]?.array ?? []
+        case .refused(let reply): return Say.replyError(reply)
+        case .success(let status, _): (ended, ending) = (status.ended?.array ?? [], status.ending?.array ?? [])
         }
         guard let wanted = arguments.first else {
             guard !ended.isEmpty else {

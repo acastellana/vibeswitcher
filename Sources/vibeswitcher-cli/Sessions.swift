@@ -53,12 +53,11 @@ enum SessionCommand {
     /// The session `wanted` names among those `status` lists (`SessionLookup.match`): its id, the terminal name
     /// `status` prints (`ttypts4`), or a prefix of its host id only one has; a name two answer to is refused, naming them.
     static func find(_ wanted: String, client: NodeClient) -> Result<NodeWire.Value, NodeClient.Failure> {
-        switch client.request("status") {
+        switch client.read(WireKinds.Status.self, WireNoArgs()) {
         case .failure(let failure): return .failure(failure)
-        case .success(let reply):
-            guard reply.ok, let sessions = reply.result?["sessions"]?.array else {
-                return .failure(.broken(reply.error.map { "\($0.code): \($0.message)" } ?? "the server listed no sessions"))
-            }
+        case .refused(let reply): return .failure(.broken(reply.error.map { "\($0.code): \($0.message)" } ?? "the server listed no sessions"))
+        case .success(let status, _):
+            guard let sessions = status.sessions else { return .failure(.broken("the server listed no sessions")) }
             return SessionLookup.match(wanted, in: sessions).mapError { .refused($0.description) }
         }
     }
@@ -113,12 +112,11 @@ enum SendCommand {
         // `status` doesn't list yet (its scan runs every 2 s, a session just started) goes to the server as given, which
         // finds it in its host's list, as before; a name two sessions answer to is refused.
         return SessionCommand.act("send", fetch: { client in
-            switch client.request("status") {
+            switch client.read(WireKinds.Status.self, WireNoArgs()) {
             case .failure(let failure): return .failure(failure)
-            case .success(let reply):
-                guard reply.ok, let sessions = reply.result?["sessions"]?.array else {
-                    return .failure(.broken(reply.error.map { "\($0.code): \($0.message)" } ?? "the server listed no sessions"))
-                }
+            case .refused(let reply): return .failure(.broken(reply.error.map { "\($0.code): \($0.message)" } ?? "the server listed no sessions"))
+            case .success(let status, _):
+                guard let sessions = status.sessions else { return .failure(.broken("the server listed no sessions")) }
                 switch SessionLookup.match(session, in: sessions) {
                 case .success(let found): return .success(found)
                 case .failure(let refusal) where refusal.ambiguous: return .failure(.refused(refusal.description))
