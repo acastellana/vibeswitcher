@@ -90,7 +90,7 @@ extension LeadToolsetTests {
         runtime.memory = nil
         #expect(!call(lead, "status").text.contains("memory pressure"))
         // configure lists the holds and where they're kept.
-        #expect(call(lead, "configure").text.contains("- memory: start_worker and audit refuse too while the Mac is short of memory (holds at memory_pressure warning or swap_out_rate 50 pages/s) (Mac-wide defaults kept in mac-limits.json as memoryPressure and swapOutRate, not in Settings)"))
+        #expect(call(lead, "configure").text.contains("- memory: start_worker and audit refuse too while the Mac is short of memory (holds at memory_pressure warning or swap_out_rate 50 pages/s) (Mac-wide defaults kept in \(MacLimits.fileName) as memoryPressure and swapOutRate, not in Settings)"))
     }
 }
 

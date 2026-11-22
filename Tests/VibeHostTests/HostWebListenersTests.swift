@@ -24,6 +24,22 @@ struct HostWebListenersTests {
         return true
     }
 
+    /// A plugin's page is one request's origin: asked again, the place gets a new socket on another port, and the first
+    /// is closed once the second is bound (never served twice on one origin).
+    @Test func aPagePlaceNeverReusesAHeldSocket() throws {
+        let held = HostWebListeners(usersHost: true, note: { _ in })
+        defer { held.closeAll() }
+        _ = try held.listen(.page, address: "127.0.0.1", port: 0).get()
+        let first = try #require(held.port(.page))
+        #expect(!squat(first), "held")
+        _ = try held.listen(.page, address: "127.0.0.1", port: 0).get()
+        let second = try #require(held.port(.page))
+        #expect(second != first, "another port, another origin")
+        #expect(squat(first), "the first closed")
+        #expect(!squat(second))
+        #expect(throws: (any Error).self) { try held.listen(.page, address: "127.0.0.1", port: HostWebListen.port).get() }
+    }
+
     @Test func aSocketIsBoundOnceHeldAndFreedOnRelease() throws {
         let lines = Lines()
         let held = HostWebListeners(usersHost: false, note: { line in lines.add(line) })

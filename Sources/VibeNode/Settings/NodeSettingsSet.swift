@@ -29,7 +29,7 @@ extension NodeSettings {
             case "load_threshold": limits.loadThreshold = value.flatMap(Double.init)
             case "node_heavy_slots": limits.heavySlots = value.flatMap(Int.init) ?? MacLimits.defaultHeavySlots
             case "ignore_usage_limits": limits.ignoreUsageLimits = value == "on"
-            default: throw Refusal("\(setting.key) isn't kept in mac-limits.json")
+            default: throw Refusal("\(setting.key) isn't kept in \(MacLimits.fileName)")
             }
             // Kept as the leads read it (`MacLimits`'s own bounds).
             try MacLimits(maxSessions: limits.maxSessions, loadThreshold: limits.loadThreshold, heavySlots: limits.heavySlots,
@@ -62,6 +62,8 @@ extension NodeSettings {
             try WorkingPolicy.save(value ?? WorkingPolicy.defaultText, to: files.policy)
         case .workflow, .floor:
             throw Refusal("\(setting.key) is a project's")
+        case .plugin:
+            throw Refusal("\(setting.key) is a plugin's, kept in the session host's vault")
         }
         let read = node(files: files).first { $0.setting.key == setting.key }
         let now = read?.value ?? ""

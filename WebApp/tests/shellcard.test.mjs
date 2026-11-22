@@ -52,7 +52,7 @@ test('a new shell card is told as one, its asker and command’s first line', ()
   const told = changes(summarize(state([])), summarize(state([card()])));
   assert.equal(told.length, 1);
   assert.ok(told[0].title.startsWith('A shell asked for'), told[0].title);
-  assert.equal(told[0].body, 'Worker: fix-login: npm run dev -- --port 5173');
+  assert.equal(told[0].body, 'Worker: fix-login, in the agent’s words: “npm run dev -- --port 5173”');
 });
 
 // The card drawn (views/cards.js's pluginCard) on a small stand-in DOM: the command as text, never markup; the only

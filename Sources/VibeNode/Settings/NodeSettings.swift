@@ -8,7 +8,7 @@ import VibeCore
 /// `SettingsWindow.swift`'s Project lead and Boost rows) and the lead's `configure` (`LeadToolset.swift`).
 ///
 /// - The node's own, under its root, as the leads' tool servers read them at each call: the machine-wide limits and
-///   Ignore usage limits (`mac-limits.json`, `MacLimits`), Boost's mode and limits and whether leads message each other
+///   Ignore usage limits (`node-limits.json`, `MacLimits`), Boost's mode and limits and whether leads message each other
 ///   (`settings.plist`, the app's defaults' keys: `boostMode`, `boostLimits`, `leadMail`), the working policy
 ///   (`policy.md`, `WorkingPolicy`).
 /// - A project's: the models and max_workers in its `.vibeswitcher/workflow.md`, written as configure writes them (the
@@ -42,7 +42,7 @@ public enum NodeSettings {
 
     /// Where a setting is kept.
     public enum Home: String, Sendable {
-        /// `<node root>/mac-limits.json`.
+        /// `<node root>/node-limits.json` (`MacLimits.fileName`; the Mac's `mac-limits.json` its alias).
         case limits
         /// `<node root>/settings.plist`.
         case preferences
@@ -52,6 +52,8 @@ public enum NodeSettings {
         case workflow
         /// The session host's vault.
         case floor
+        /// The session host's vault, a feature plugin's (`PluginRegistry`): listed while its plugin is on.
+        case plugin
     }
 
     public struct Setting: Equatable, Sendable {
@@ -179,8 +181,9 @@ public enum NodeSettings {
     }
 
     /// The app's names for the machine-wide limits (`mac_max_sessions`, `mac_heavy_slots`, as workflow.md, the lead's
-    /// tools and the Mac's Settings say them), taken as the node's (`node_…`): `set` takes either. The file stays
-    /// `mac-limits.json`, which the leads' tool servers read (shared with the Mac); it is shown as this node's limits.
+    /// tools and the Mac's Settings say them), taken as the node's (`node_…`): `set` takes either. The file is
+    /// `node-limits.json` on a node (`MacLimits.fileName`), the Mac's `mac-limits.json` read while it isn't there and
+    /// written with it while that is there.
     public static let aliases = ["mac_max_sessions": "node_max_sessions", "mac_heavy_slots": "node_heavy_slots"]
 
     /// The app's settings a node leaves out, and why.
@@ -216,7 +219,7 @@ public enum NodeSettings {
     public struct Files: Sendable {
         public var root: URL
         public init(root: URL) { self.root = root }
-        public var limits: URL { root.appendingPathComponent("mac-limits.json") }
+        public var limits: URL { root.appendingPathComponent(MacLimits.fileName) }
         public var boost: URL { root.appendingPathComponent("boost.json") }
         public var policy: URL { root.appendingPathComponent("policy.md") }
         public var policyTold: URL { root.appendingPathComponent("policy-told.json") }
@@ -237,6 +240,7 @@ public enum NodeSettings {
         case .policy: return files.policy.path
         case .workflow: return project.map(workflowPath(project:)) ?? ".vibeswitcher/workflow.md"
         case .floor: return "the session host's vault"
+        case .plugin: return "the session host's vault (a plugin's setting)"
         }
     }
 

@@ -309,7 +309,7 @@ extension LeadEngine {
                     }
                 }
                 let policy = WorkingPolicy.load(from: nodeRoot.appendingPathComponent("policy.md"))
-                let limits = MacLimits.load(from: nodeRoot.appendingPathComponent("mac-limits.json"))
+                let limits = MacLimits.load(from: nodeRoot.appendingPathComponent(MacLimits.fileName))
                 // lead_model (Fable unless set), Opus while Fable is held back; lead_advisor only on Opus.
                 let base = RecentProjects.shellQuote(program)
                 let run = Self.leadRun(workflow, base: base, nodeRoot: nodeRoot, home: home)

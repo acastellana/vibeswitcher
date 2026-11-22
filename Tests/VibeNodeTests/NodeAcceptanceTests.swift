@@ -858,7 +858,7 @@ struct NodeAcceptanceTests {
         let node = try await ScratchNode(scratch)
         defer { node.stop() }
         let listed = try await node.run(["plugin", "list"])
-        #expect(listed.status == 0 && listed.output.contains("shell  Shell requests  on (its default)") && listed.output.contains("adds for agents: vs-shell"),
+        #expect(listed.status == 0 && listed.output.contains("shell  Shell requests  on (at its default") && listed.output.contains("adds for agents: vs-shell"),
                 "\(listed.output)\(listed.errors)\n\(node.said)")
         let off = try await node.runOnTerminal(["plugin", "off", "shell"])
         #expect(off.status == 0 && off.output.contains("This turns Shell requests off") && off.output.contains("shell is off"), "\(off.output)\(off.errors)")

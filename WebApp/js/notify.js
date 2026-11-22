@@ -47,7 +47,7 @@ function cardBody(card) {
   if (card.approval) return firstLine(card.approval.subject || `Merge ${String(card.approval.commit || '').slice(0, 8)}`);
   if (card.config) return firstLine((card.config.items || []).map((item) => item.name).join(', '));
   // A feature plugin's: who asks, and the first line of what it asks.
-  if (card.plugin) return firstLine(`${card.plugin.asker}: ${(card.plugin.body?.lines || []).join('\n')}`);
+  if (card.plugin) return firstLine(`${card.plugin.asker}, in the agent’s words: “${(card.plugin.body?.lines || [])[0] || ''}”`);
   return '';
 }
 

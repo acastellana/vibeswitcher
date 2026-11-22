@@ -19,7 +19,10 @@ import VibeCore
 /// - **The outcome** (`outcome(before:target:after:refusal:afterTheWait:)`): a refusal is the host's, said as it gave
 ///   it; otherwise the link's next welcome (at most `welcomeWait`) and the host's notes then say who answered. The same
 ///   pid on the target's build is handed over; the old build answering (a fallback), another pid, or no host at all is
-///   a failure, said so.
+///   a failure, said so. When the link has no welcome to give (it gave up reconnecting while the new build came up, or
+///   none came in `welcomeWait`), the host is asked again on connections of its own (`HostCheck`, every `confirmEvery`
+///   for `confirmWait`) before "no build answered" is said: a switch right after a start (2026-11-22, the real node)
+///   said the host went away while it had handed over, its link having given up a moment before the new build listened.
 ///
 /// The server replies with the outcome before its own replacement: a switch to a build whose server's bytes differ
 /// ends the running server child once it is idle, or `ServerChild.idleLimit` after the first look (stage 2's 9d), and
@@ -52,9 +55,12 @@ public struct SwitchRequest {
     public static let lateWait: TimeInterval = 60
     /// How long the link's next welcome is waited for once the host executed the target.
     public static let welcomeWait: TimeInterval = 60
+    /// When the link has no welcome to give: how long the host is asked again on connections of its own, and how often.
+    public static let confirmWait: TimeInterval = 30
+    public static let confirmEvery: TimeInterval = 1
     /// The longest a `build.switch` can take to answer: what the command line waits for at least (S8c). The host's
     /// notes are asked twice (before the plan, after the welcome), each at most `Requests.notesWait`.
-    public static let longestWait: TimeInterval = replyWait + lateWait + welcomeWait + 2 * Requests.notesWait
+    public static let longestWait: TimeInterval = replyWait + lateWait + welcomeWait + confirmWait + HostCheck.patience + 2 * Requests.notesWait
 
     /// The waits a switch runs on; a test shortens them, or arms them on a clock it moves (`later`).
     public struct Timing {
@@ -62,6 +68,8 @@ public struct SwitchRequest {
         public var breadcrumb = SwitchRequest.breadcrumb
         public var lateWait = SwitchRequest.lateWait
         public var welcomeWait = SwitchRequest.welcomeWait
+        public var confirmWait = SwitchRequest.confirmWait
+        public var confirmEvery = SwitchRequest.confirmEvery
         public var notesWait = Requests.notesWait
         /// Where every wait is armed: real time when nil.
         public var later: HostLink.Later?
@@ -132,13 +140,17 @@ public struct SwitchRequest {
     /// (a server with no engine).
     public typealias Park = (_ live: [HostSession], _ commit: String, _ done: @escaping ([String]) -> Void) -> Void
     let park: Park?
+    /// What a session that holds the switch is doing and since when ("working since 09:14, 37 min"), for the refusal;
+    /// nil: its terminal and label only.
+    let describe: ((HostSession) -> String?)?
     /// How long the sessions parked may take to end before the switch is planned again.
     static let parkedEndLimit: TimeInterval = 15
 
     /// A switch on `link`'s host between the builds of `installRoot`, asked through the link's own dialer; `held` asked
     /// before a handover; `park` asked when only workers and verifiers stand in the way.
     public init(link: HostLink, installRoot: String, timing: Timing = Timing(), held: (@Sendable () -> String?)? = nil,
-                park: Park? = nil, note: @escaping (String) -> Void = { _ in }) {
+                park: Park? = nil, describe: ((HostSession) -> String?)? = nil, note: @escaping (String) -> Void = { _ in }) {
+        self.describe = describe
         self.link = link
         self.installRoot = installRoot
         self.timing = timing
@@ -184,7 +196,7 @@ public struct SwitchRequest {
                 reply(.refused(.refused, "\(commit) isn't installed in \(installRoot): install it with install-node.sh, then switch"))
             case .refusedWhileTeamsWork:
                 guard parked == nil, let park else {
-                    let working = Self.blockers(live)
+                    let working = Self.blockers(live, describe: describe)
                     note("build.switch \(commit) refused: \(working.count) workers or verifiers live")
                     return reply(.refused(.refused, Self.blockedText(working)))
                 }
@@ -235,15 +247,37 @@ public struct SwitchRequest {
     /// The live sessions that refuse a switch by the rule on switches (decision 6): each worker's and verifier's, by
     /// its terminal and label ("ttypts4 (Worker · fix-login)"). `status` lists them (`switchBlockers`), so `vibeswitcher
     /// switch` says before its code is asked whether the switch can run now.
-    public static func blockers(_ live: [HostSession]) -> [String] {
+    public static func blockers(_ live: [HostSession], describe: ((HostSession) -> String?)? = nil) -> [String] {
+        holding(live).map { session in "\(session.tty) (\(ConfigSeal.inert(session.label, limit: 80)))" + (describe?(session).map { ": " + $0 } ?? "") }
+    }
+
+    /// The live sessions the rule on switches holds a switch for: each worker's and verifier's.
+    public static func holding(_ live: [HostSession]) -> [HostSession] {
         live.filter { session in session.isLive && (LeadTeams.role(label: session.label).map { $0 != .lead } ?? false) }
-            .map { "\($0.tty) (\(ConfigSeal.inert($0.label, limit: 80)))" }
+    }
+
+    /// What `session` is doing and since when, as a switch's refusal and `status` say it: its state by the node's last
+    /// scan (`status`, `since`) when it has one, else how long it has been live. `now`: the time it is said at.
+    public static func doing(_ session: HostSession, status: SessionStatus?, since: Date?, now: Date) -> String {
+        func clock(_ date: Date) -> String {
+            let formatter = DateFormatter()
+            formatter.locale = Locale(identifier: "en_US_POSIX")
+            formatter.dateFormat = "HH:mm"
+            return formatter.string(from: date)
+        }
+        func span(_ from: Date) -> String {
+            let minutes = max(0, Int(now.timeIntervalSince(from) / 60))
+            return minutes < 1 ? "under a minute" : minutes < 120 ? "\(minutes) min" : "\(minutes / 60) h \(minutes % 60) min"
+        }
+        guard let status, let since else { return "live since \(clock(session.startedAt)) (\(span(session.startedAt)))" }
+        return "\(status.label.lowercased()) since \(clock(since)) (\(span(since)))"
     }
 
     /// The rule's words for `blockers`, as the server's refusal and the command line say them.
     public static func blockedText(_ blockers: [String]) -> String {
         "no switch of builds while a worker or verifier runs (decision 6, the rule on switches): "
-            + blockers.joined(separator: ", ") + " live; switch once they have ended (a lead may stay)"
+            + blockers.joined(separator: "; ") + "; switch once they have ended (a lead may stay; a worker idle since its last report is "
+            + "parked by the switch)"
     }
 
     // MARK: The handover
@@ -274,7 +308,10 @@ public struct SwitchRequest {
                     // The host executes the target (or went): its next welcome, and its notes then, say who answered.
                     self.welcome(after: welcomes) { welcomed in
                         guard welcomed else {
-                            return finish(Self.outcome(before: before, target: target, after: nil, refusal: nil, afterTheWait: afterTheWait))
+                            // Nothing on the link: who runs is asked on connections of its own before "no build answered".
+                            return self.confirm(attempts: max(1, Int(timing.confirmWait / timing.confirmEvery))) { answered in
+                                finish(Self.outcome(before: before, target: target, after: answered, refusal: nil, afterTheWait: afterTheWait))
+                            }
                         }
                         self.notes { notes in
                             finish(Self.outcome(before: before, target: target, after: (link.hostPID, notes?.build), refusal: nil,
@@ -282,6 +319,23 @@ public struct SwitchRequest {
                         }
                     }
                 }
+            }
+        }
+    }
+
+    /// Who runs the host, asked on a connection of its own (`HostCheck`: its welcome's pid, its notes' build), up to
+    /// `attempts` times `confirmEvery` apart: `done` (on the link's queue) with the first answer, nil when none came.
+    private func confirm(attempts: Int, _ done: @escaping ((pid: Int32?, build: String?)?) -> Void) {
+        let (queue, timing, dialer, note) = (link.queue, self.timing, self.dialer, self.note)
+        HostCheck(dialer: dialer, later: timing.later).start { answered in
+            queue.async {
+                if let answered {
+                    note("build.switch: the link had no welcome; asked on a connection of its own, pid \(answered.pid.map(String.init) ?? "?") "
+                         + "runs build \(answered.build ?? "?")")
+                    return done(answered)
+                }
+                guard attempts > 1 else { return done(nil) }
+                Self.arm(timing.confirmEvery, on: timing.later) { queue.async { self.confirm(attempts: attempts - 1, done) } }
             }
         }
     }
@@ -359,6 +413,64 @@ public struct SwitchRequest {
         let rollback = running.flatMap { SwitchPlan.rollbackTarget(installs: installs(in: installRoot), running: $0) }
         return .object(["installRoot": .string(installRoot), "installed": .array(installed(in: installRoot).map(NodeWire.Value.string)),
                         "rollback": rollback.map { .object(["commit": .string($0.commit), "line": .string($0.line)]) } ?? .null])
+    }
+}
+
+/// Who runs the host, asked on a connection of its own: the hello, its welcome's pid, then its notes' build. `done`
+/// once, on this call's queue: the pid and build, or nil when it couldn't connect, closed, or didn't answer in
+/// `patience`.
+final class HostCheck: @unchecked Sendable {
+    /// How long one check waits for its answers.
+    static let patience: TimeInterval = 10
+
+    private let dialer: HostDialer
+    private let later: HostLink.Later?
+    private let queue = DispatchQueue(label: "vibenode.build-switch.check")
+    // On `queue`.
+    private var connection: HostConnection?
+    private var pid: Int32?
+    private var welcomed = false
+    private var notesSeq: Int?
+    private var done: (((pid: Int32?, build: String?)?) -> Void)?
+
+    init(dialer: HostDialer, later: HostLink.Later?) {
+        self.dialer = dialer
+        self.later = later
+    }
+
+    func start(_ done: @escaping ((pid: Int32?, build: String?)?) -> Void) {
+        queue.async { [self] in
+            self.done = done
+            let made: HostConnection
+            do { made = try dialer.connect(queue: queue, patience: 5) } catch { return finish(nil) }
+            connection = made
+            made.onClose = { [self] in finish(nil) }
+            made.onEvent = { [self] envelope in
+                if case .welcome(_, _, _, _, let pid, _) = envelope.event, !welcomed {
+                    welcomed = true
+                    self.pid = pid
+                    do { notesSeq = try made.send(.hostNotes) } catch { finish(nil) }
+                } else if let notesSeq, envelope.replyTo == notesSeq {
+                    if case .hostNotes(let notes) = envelope.event { finish((self.pid, notes.build)) } else { finish((self.pid, nil)) }
+                }
+            }
+            do { try made.send(.hello(protocolVersion: HostProtocol.version, app: "vibeswitcher-server")) } catch { return finish(nil) }
+            SwitchRequest.arm(Self.patience, on: later) { [weak self] in
+                guard let self else { return }
+                self.queue.async { self.finish(nil) }
+            }
+        }
+    }
+
+    private func finish(_ answer: (pid: Int32?, build: String?)?) {
+        guard let done else { return }
+        self.done = nil
+        let open = connection
+        connection = nil
+        open?.onClose = nil
+        open?.onEvent = nil
+        open?.close()
+        done(answer)
     }
 }
 

@@ -746,9 +746,16 @@ public final class Requests: @unchecked Sendable {
     /// The sessions that refuse a switch now (`SwitchRequest.blockers`), less the workers the engine's last look saw only
     /// waiting on their lead, which the switch parks (`parks`). On `queue`.
     func switchBlockersNow() -> (blockers: [String], parks: [String]) {
-        let all = SwitchRequest.blockers(link.sessions)
-        let parks = engine?.switchParkHint(link.sessions).map(\.named) ?? []
-        return (all.filter { !parks.contains($0) }, parks)
+        let hinted = engine?.switchParkHint(link.sessions) ?? []
+        let parked = Set(hinted.map(\.session))
+        let holding = SwitchRequest.holding(link.sessions).filter { !parked.contains($0.id) }
+        return (SwitchRequest.blockers(holding, describe: switchDoing), hinted.map(\.named))
+    }
+
+    /// What a session that holds a switch is doing and since when, by the node's last scan of it.
+    func switchDoing(_ session: HostSession) -> String? {
+        let scanned = sessions?.sessions.first { $0.hostID == session.id }
+        return SwitchRequest.doing(session, status: scanned?.status, since: scanned?.statusSince, now: Date())
     }
 
     private func buildSwitch(_ request: NodeWire.Request, reply: @escaping (NodeWire.Reply) -> Void) {
@@ -769,7 +776,8 @@ public final class Requests: @unchecked Sendable {
                 engine.parkForSwitch(live, commit: commit) { parked in done(parked.map(\.named)) }
             }
         } }
-        SwitchRequest(link: link, installRoot: installRoot, timing: switchTiming, held: held, park: park, note: note).run(commit: commit) { [weak self] answer in
+        SwitchRequest(link: link, installRoot: installRoot, timing: switchTiming, held: held, park: park,
+                      describe: { [weak self] in self?.switchDoing($0) }, note: note).run(commit: commit) { [weak self] answer in
             switch answer {
             case .done(let value): reply(.init(re: request.id, result: value))
             case .refused(let code, let why): reply(.init(re: request.id, error: .init(code, why)))

@@ -249,18 +249,33 @@ public struct MacLimits: Codable, Equatable, Sendable {
         return MacLoad.number(loadLimit) + (loadThreshold == nil ? ", twice the \(MacLoad.processors) cores" : " in Settings")
     }
 
-    public static var file: URL { VibePaths.root.appendingPathComponent("mac-limits.json") }
+    /// The file's name: the Mac's `mac-limits.json`; on a Linux node `node-limits.json` (they are the node's limits),
+    /// with the Mac's name kept as an alias (`legacyFileName`): read while the node's isn't there, and written with it
+    /// while it is there, for what still reads only that name (a tool server of the build before a switch).
+    public static let fileName = Platform.Files.limitsFileName
+    public static let legacyFileName = "mac-limits.json"
 
-    /// The limits as set; the defaults while there's no file (or it can't be read).
-    public static func load(from file: URL = file) -> MacLimits {
-        (try? Data(contentsOf: file)).flatMap { try? JSONDecoder().decode(MacLimits.self, from: $0) } ?? MacLimits()
+    public static var file: URL { VibePaths.root.appendingPathComponent(fileName) }
+
+    /// The alias beside `file`, when `file` is the node's name and the alias is another.
+    static func alias(of file: URL) -> URL? {
+        guard fileName != legacyFileName, file.lastPathComponent == fileName else { return nil }
+        return file.deletingLastPathComponent().appendingPathComponent(legacyFileName)
     }
 
-    /// Writes them (0600).
+    /// The limits as set; the defaults while there's no file (or it can't be read). The alias's while `file` isn't there.
+    public static func load(from file: URL = file) -> MacLimits {
+        let data = (try? Data(contentsOf: file)) ?? alias(of: file).flatMap { try? Data(contentsOf: $0) }
+        return data.flatMap { try? JSONDecoder().decode(MacLimits.self, from: $0) } ?? MacLimits()
+    }
+
+    /// Writes them (0600), and the alias too while one is there.
     public func save(to file: URL = MacLimits.file) throws {
         try VibePaths.ensurePrivate(file.deletingLastPathComponent())
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys]
-        try VibePaths.writePrivate(try encoder.encode(self), to: file)
+        let data = try encoder.encode(self)
+        try VibePaths.writePrivate(data, to: file)
+        if let alias = Self.alias(of: file), FileManager.default.fileExists(atPath: alias.path) { try VibePaths.writePrivate(data, to: alias) }
     }
 }

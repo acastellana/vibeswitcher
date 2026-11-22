@@ -23,7 +23,8 @@ public protocol FeaturePlugin: AnyObject {
     func look(_ desk: PluginDesk, done: @escaping () -> Void)
     /// The user's answer `word` on its card, after the core's checks: the card is marked already (its state is the
     /// action's `marks`, put in the same turn), so a second answer finds it answered. `then` on the engine's queue.
-    func perform(_ word: String, on card: CardStore.Card, desk: PluginDesk,
+    /// `act`: what it may do for this card (start a session), given only here.
+    func perform(_ word: String, on card: CardStore.Card, desk: PluginDesk, act: PluginAct,
                  then: @escaping (Result<NodeWire.Value, LeadEngine.CardFailure>) -> Void)
     /// It was turned off while `card` was open: the desk closed it as withdrawn; the plugin keeps that nothing more comes
     /// of it, and says what its asker is told when the desk's words (`PluginDesk.withdrawnText`) wouldn't be true. On the
@@ -35,12 +36,16 @@ public protocol FeaturePlugin: AnyObject {
     /// `status`'s notices for what waits on the user beyond its cards' own (each open card's is the desk's). On the
     /// engine's queue.
     func notices(_ desk: PluginDesk) -> [String]
+    /// A value the user gives one of its settings (`vibeswitcher set KEY VALUE`, its declared key's name): as kept, nil
+    /// for its default, or why it isn't taken. `value` is the value given ("default": nil).
+    func check(setting name: String, value: String?) -> Result<String?, PluginRefusal>
 }
 
 extension FeaturePlugin {
     public func availability() -> String? { nil }
     public func notices(_ desk: PluginDesk) -> [String] { [] }
     public func turnedOff(_ desk: PluginDesk) -> [(session: UUID, text: String)] { [] }
+    public func check(setting name: String, value: String?) -> Result<String?, PluginRefusal> { .success(value) }
 }
 
 /// What a plugin declares, as data.
@@ -55,20 +60,25 @@ public struct PluginInfo: Codable, Equatable, Sendable {
         }
     }
 
-    /// One entry it adds to the settings catalog, under its own section (`NodeSettings`).
+    /// One entry it adds to the settings catalog, under its own section (`NodeSettings`), kept in the host's vault
+    /// (`LeadVaultV2.Book.pluginSettings`) as `<plugin>.<key>`, so no session's file write changes it.
     public struct Setting: Codable, Equatable, Sendable {
+        /// Its name within the plugin: a short lower-case word (`chains`); the catalog's key is `<plugin>_<key>`.
         public var key: String
         public var title: String
         public var about: String
         /// `NodeSettings.Form`'s word.
         public var form: String
         public var choices: [String]
-        public init(key: String, title: String, about: String, form: String, choices: [String] = []) {
+        /// Its value when the user set none.
+        public var defaultValue: String
+        public init(key: String, title: String, about: String, form: String, choices: [String] = [], defaultValue: String = "") {
             self.key = key
             self.title = title
             self.about = about
             self.form = form
             self.choices = choices
+            self.defaultValue = defaultValue
         }
     }
 
@@ -136,7 +146,7 @@ public struct PluginInfo: Codable, Equatable, Sendable {
     /// `wallet-requests`, which the agents' commands write).
     public static let coreFolders: Set<String> = [
         "account-usage.json", "attachments", "bin", "boost.json", "context", "debug", "disk-watch.json", "headless", "health.json",
-        "host.lock", "host.log", "host.sock", "lead", "mac-limits.json", "open-sessions.json", "outbox.json", "plugins", "plugins.json",
+        "host.lock", "host.log", "host.sock", "lead", "mac-limits.json", "node-limits.json", "open-sessions.json", "outbox.json", "plugins", "plugins.json",
         "policy-told.json", "policy.md", "power.json", "presets.json", "prompt-audit.json", "room-waits", "run-blocks", "session-marks.json",
         "settings", "settings.plist", "sleep-cost.json", "state", "stats", "steer", "swap-samples.json", "tmp", "toolchain.json",
         "update-check.json", "v2", "vault-requests", "engine.json", "journal", "logs",
