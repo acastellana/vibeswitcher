@@ -456,7 +456,7 @@ public final class Requests: @unchecked Sendable {
             guard let self else { return reply(answer) }
             self.queue.async {
                 self.keep(answer, for: action)
-                let (client, kind, outcome) = (self.link.vaultV2, request.kind, Self.outcome(of: answer))
+                let (client, kind, outcome) = (self.link.vaultV2, request.kind, Self.outcome(of: answer, kind: request.kind))
                 DispatchQueue.global(qos: .userInitiated).async { [weak self] in
                     let written = Result { try client.finishUserAction(action, kind: kind, outcome: outcome) }
                     self?.queue.async {
@@ -469,35 +469,68 @@ public final class Requests: @unchecked Sendable {
         }
     }
 
-    /// What the record keeps of `answer`: done with its result (when it fits), or failed with why.
-    static func outcome(of answer: NodeWire.Reply) -> LeadVaultV2.UserAction.Outcome {
+    /// What the record keeps of `answer`: failed with why; done with its result only when `kind`'s rule says its result
+    /// holds no secret (`retryRules`), else done and no more.
+    static func outcome(of answer: NodeWire.Reply, kind: String) -> LeadVaultV2.UserAction.Outcome {
         guard answer.ok else { return .init(done: false, note: answer.error?.message ?? "no reason given", code: answer.error?.code) }
+        guard retryRules[kind]?.keepsResult == true else { return .init(done: true, note: nil) }
         return .init(done: true, note: answer.result.map { String(decoding: NodeWire.line($0).dropLast(), as: UTF8.self) })
     }
 
-    /// The kinds that a second act leaves as one does (each sets a state, or ends or holds what it names), so a retry of
-    /// one whose server ended before its outcome was written does it again: its record's digest the same, and begun
-    /// `rerunWithin` ago at most. Every other recorded kind isn't (it types or sends text, starts a session or a lead,
-    /// answers or runs what a card asks, pushes, switches the build, opens a link): a retry of one is told it began and
-    /// its outcome isn't known (`unknownCheck`).
-    public static let rerunnable: Set<String> = ["start", "stop", "hold", "config.accept", "base.accept", "base.keep",
-                                                 "hooks.install", "hooks.remove", "web.revoke", "session.end", "set",
-                                                 "prompt-audit", "push.decline", "session.rename", "session.pause",
-                                                 "session.resume", "session.close-shells", "plugin.on", "plugin.off"]
+    /// What a retry of a recorded kind may be given and done, stated for every recorded kind (RequestKindsLint holds its
+    /// keys to `recorded`; a kind with none keeps no result and isn't done again).
+    struct RetryRule: Equatable, Sendable {
+        /// Its result holds no secret, so the vault's record keeps it and a retry is given it. Not so (a link with its
+        /// pairing code, a page's address with its token, a setting's value, a card's text): the record says done, no more.
+        var keepsResult: Bool
+        /// A second act leaves things as one does (it sets a state or ends what it names), so a retry of one begun with
+        /// no outcome (its server ended in between) does it again, when nothing later was recorded on the same subject.
+        /// Not so (it types or sends text, starts a session or a lead, answers or runs what a card asks, pushes, switches
+        /// the build, opens a link, stops the node): told it began and its outcome isn't known (`unknownCheck`).
+        /// A card's kind is never done again: its card is in the server's memory alone, so after a restart its id is
+        /// refused (`cardRefusal`) before the record is asked.
+        var rerun: Bool
+    }
+
+    static let retryRules: [String: RetryRule] = [
+        "start": .init(keepsResult: true, rerun: true), "stop": .init(keepsResult: true, rerun: false),
+        "lead": .init(keepsResult: true, rerun: false), "answer": .init(keepsResult: false, rerun: false),
+        "hold": .init(keepsResult: false, rerun: false), "config.accept": .init(keepsResult: false, rerun: false),
+        "base.accept": .init(keepsResult: false, rerun: false), "base.keep": .init(keepsResult: false, rerun: false),
+        "hooks.install": .init(keepsResult: true, rerun: true), "hooks.remove": .init(keepsResult: true, rerun: true),
+        "build.switch": .init(keepsResult: false, rerun: false), "web.open": .init(keepsResult: false, rerun: false),
+        "web.revoke": .init(keepsResult: false, rerun: true), "tell": .init(keepsResult: false, rerun: false),
+        "send": .init(keepsResult: false, rerun: false), "session.new": .init(keepsResult: false, rerun: false),
+        "session.end": .init(keepsResult: false, rerun: true), "session.reply": .init(keepsResult: false, rerun: false),
+        "set": .init(keepsResult: false, rerun: true), "push": .init(keepsResult: false, rerun: false),
+        "push.decline": .init(keepsResult: false, rerun: true), "session.reopen": .init(keepsResult: false, rerun: false),
+        "prompt-audit": .init(keepsResult: true, rerun: true), "session.rename": .init(keepsResult: true, rerun: true),
+        "session.pause": .init(keepsResult: true, rerun: true), "session.resume": .init(keepsResult: true, rerun: true),
+        "session.close-shells": .init(keepsResult: false, rerun: true), "presets.edit": .init(keepsResult: false, rerun: false),
+        "approve": .init(keepsResult: false, rerun: false), "plugin.on": .init(keepsResult: false, rerun: true),
+        "plugin.off": .init(keepsResult: false, rerun: true),
+    ]
+
+    /// The kinds a retry begun with no outcome does again (`RetryRule.rerun`).
+    public static var rerunnable: Set<String> { Set(retryRules.filter(\.value.rerun).keys) }
     /// How old a begun record may be for its retry to do it again: later, something else may have set it since.
     static let rerunWithin: TimeInterval = 15 * 60
 
     /// A retry of `action`, recorded already. Answered from what this server kept when it can (its reply; or that it is
-    /// being done now); else from the vault's record (the architecture review's row 10): done, its recorded result;
-    /// failed, why, and whether a new attempt can do it; begun with no outcome (the server ended in between), done again
-    /// when its kind is `rerunnable`, else that it began and its outcome isn't known, with what to look at. A record the
-    /// host can't give (one before outcomes) is told the outcome isn't known. Never "done" unless it was. On `queue`.
+    /// being done now); else from the vault's record (the architecture review's row 10), and only when asked with the
+    /// arguments it was recorded with (else nothing of it): done, its recorded result when its kind keeps one
+    /// (`RetryRule.keepsResult`), else that it was done; failed, why, and whether a new attempt can do it; begun with no
+    /// outcome (the server ended in between), done again when its kind's rule says so and nothing recorded since names
+    /// the same subject, else that it began and its outcome isn't known, with what to look at. A record the host can't
+    /// give (one before outcomes) is told the outcome isn't known. Never "done" unless it was. On `queue`.
     func retry(_ request: NodeWire.Request, action: String, from facts: PeerFacts, reply: @escaping (NodeWire.Reply) -> Void) {
         if let known = kept(request, action: action) { return reply(known) }
         let (client, kind) = (link.vaultV2, request.kind)
         let digest = LeadVaultV2.digest(String(decoding: NodeWire.line(request.args ?? [:]), as: UTF8.self))
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             let record = Result { try client.userAction(action, kind: kind) }
+            // Begun with no outcome: what was recorded since, which a second act would undo.
+            let since = (try? record.get()).flatMap { $0?.outcome == nil ? $0?.at : nil }.flatMap { try? client.userActions(since: $0) }
             guard let self else { return }
             self.queue.async {
                 // Asked again meanwhile, and done, or under way, since.
@@ -510,11 +543,20 @@ public final class Requests: @unchecked Sendable {
                     reply(.init(re: request.id, error: .init(.refused, Self.outcomeUnknown(action: action))))
                 case .success(let recorded?):
                     let began = Date(timeIntervalSince1970: recorded.at)
+                    guard recorded.digest == digest else {
+                        self.note("\(kind) (action \(action)) asked again with other arguments than its record's: nothing given")
+                        return reply(.init(re: request.id, error: .init(.refused, Self.otherArguments(action: action))))
+                    }
                     if let outcome = recorded.outcome {
                         self.note("\(kind) (action \(action)) was recorded already: answered from its record (\(outcome.done ? "done" : "failed")), not done again")
                         return reply(Self.answer(request, action: action, outcome: outcome))
                     }
-                    if Self.rerunnable.contains(kind), recorded.digest == digest, Date().timeIntervalSince(began) <= Self.rerunWithin {
+                    // Done again only when what was recorded since can be read and changes nothing of the same subject.
+                    if Self.retryRules[kind]?.rerun == true, Date().timeIntervalSince(began) <= Self.rerunWithin, let since {
+                        if Self.changedSince(recorded, by: since) {
+                            self.note("\(kind) (action \(action)) began at \(Self.shown(began)) with no outcome recorded; a later action changed the same thing: not done again")
+                            return reply(.init(re: request.id, error: .init(.refused, Self.changedLater(action: action, kind: kind, at: began))))
+                        }
                         self.note("\(kind) (action \(action)) began at \(Self.shown(began)) with no outcome recorded: done again, as a second act leaves it as one does")
                         return self.perform(request, action: action, from: facts, reply: reply)
                     }
@@ -523,6 +565,22 @@ public final class Requests: @unchecked Sendable {
                 }
             }
         }
+    }
+
+    /// Whether an action recorded after `recorded` (among `since`) names the same subject (one with none: any other
+    /// with none, the node's own), so that doing `recorded` again would undo it.
+    static func changedSince(_ recorded: LeadVaultV2.UserAction, by since: [LeadVaultV2.UserAction]) -> Bool {
+        since.contains { $0.action != recorded.action && $0.at >= recorded.at && $0.subject == recorded.subject }
+    }
+
+    /// What a retry whose arguments aren't its record's is told: nothing of the record.
+    static func otherArguments(action: String) -> String {
+        "action \(action) was recorded with other arguments than these: nothing is given for it, and it isn't done"
+    }
+
+    /// What a retry of a begun action is told when a later action changed the same thing.
+    static func changedLater(action: String, kind: String, at began: Date) -> String {
+        "action \(action) (\(kind)) began at \(shown(began)) and the server ended before it finished; a later action changed the same thing since, so it isn't done again; `vibeswitcher status` shows what is now"
     }
 
     /// The answer a retry gets from this server's memory: the reply it kept, or that its first request is being done.
@@ -545,7 +603,7 @@ public final class Requests: @unchecked Sendable {
             if let note = outcome.note, let result = try? JSONDecoder().decode(NodeWire.Value.self, from: Data(note.utf8)) {
                 return .init(re: request.id, result: result)
             }
-            return .init(re: request.id, error: .init(.refused, "action \(action) was done at \(when) (its answer was too long to keep): not done again; `vibeswitcher status` shows what is now"))
+            return .init(re: request.id, error: .init(.refused, "action \(action) was done at \(when) (its answer isn't kept): not done again; `vibeswitcher status` shows what is now"))
         }
         let code = outcome.code.flatMap(NodeWire.Code.init(rawValue:)) ?? .refused
         let again = code == .gone ? "what it named is gone, so a new attempt can't do it" : "nothing was done, and running the command again is a new attempt"
