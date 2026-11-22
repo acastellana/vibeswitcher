@@ -173,7 +173,8 @@ struct ExternalPluginsTests {
 
         for mode in ["wrong-id", "out-of-order", "oversize"] {
             _ = try await ask(world, ["normal"])
-            await look(world)
+            // A look that began as it was turned on may have read the folder before: look until its card is up.
+            for _ in 0..<5 where !cards(world).contains(where: \.isOpen) { await look(world) }
             #expect(cards(world).contains { $0.isOpen }, "\(mode): a card open before: \(notes.value.suffix(8))")
             _ = try await ask(world, [mode])
             await look(world)

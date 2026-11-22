@@ -171,7 +171,10 @@ final class ExternalPlugin: FeaturePlugin {
             }
             guard !fresh.isEmpty else { return done() }
             self.ensureStarted(desk) { started in
-                guard case .success(let process) = started else { return done() }
+                guard case .success(let process) = started else {
+                    if case .failure(let why) = started { desk.note("plugin \(self.info.id): its program didn't start: \(why)") }
+                    return done()
+                }
                 var left = fresh.count
                 for ask in fresh {
                     self.asking.insert(ask.id)
