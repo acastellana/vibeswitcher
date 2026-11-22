@@ -169,8 +169,8 @@ final class Once<Value> {
 
 /// What the command line prints, and its exit codes: 0, 64 usage, 65 bad input, 69 no node, 77 refused, 1 other.
 enum Say {
-    static func out(_ line: String) { try? FileHandle.standardOutput.write(contentsOf: Data((line + "\n").utf8)) }
-    static func err(_ line: String) { try? FileHandle.standardError.write(contentsOf: Data((line + "\n").utf8)) }
+    static func out(_ line: String) { Platform.Stdio.output(line + "\n") }
+    static func err(_ line: String) { Platform.Stdio.error(line + "\n") }
     static func usage(_ text: String) -> Int32 { err(text); return 64 }
     static func refused(_ why: String) -> Int32 { err("vibeswitcher: refused: \(why)"); return 77 }
     /// The user's node isn't built for this system (`NodeContext.usersNodeRefusal`): said, exit 69.

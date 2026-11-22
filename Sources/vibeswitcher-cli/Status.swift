@@ -53,7 +53,7 @@ enum StatusCommand {
             checked = given
         }
         if asJSON {
-            try? FileHandle.standardOutput.write(contentsOf: NodeWire.printable(NodeWire.line(checked)))
+            Platform.Stdio.output(NodeWire.printable(NodeWire.line(checked)))
         } else {
             Say.out(UpdateWatch.lines(checked).joined(separator: "\n"))
         }
@@ -63,16 +63,11 @@ enum StatusCommand {
     /// Stage 1's read, as it was.
     static func probe(json asJSON: Bool) -> Int32 {
         guard let sessions = LocalSessions().read() else {
-            try? FileHandle.standardError.write(contentsOf: Data("vibeswitcher: the process table couldn't be read; try again\n".utf8))
+            Platform.Stdio.error("vibeswitcher: the process table couldn't be read; try again\n")
             return 1
         }
         let text = asJSON ? json(sessions) : lines(sessions)
-        do {
-            try FileHandle.standardOutput.write(contentsOf: Data((text + "\n").utf8))
-        } catch {
-            return 1
-        }
-        return 0
+        return Platform.Stdio.output(text + "\n") ? 0 : 1
     }
 
     /// `health`: only the health digest (`NodeHealth.lines`; with `json`, its object).
@@ -99,7 +94,7 @@ enum StatusCommand {
         if health {
             guard let digest = result["health"], digest != .null else { return Say.refused("this node's server keeps no health digest (an older build)") }
             if asJSON {
-                try? FileHandle.standardOutput.write(contentsOf: NodeWire.printable(NodeWire.line(digest)))
+                Platform.Stdio.output(NodeWire.printable(NodeWire.line(digest)))
             } else {
                 Say.out(NodeHealth.lines(digest).joined(separator: "\n"))
             }
@@ -116,7 +111,7 @@ enum StatusCommand {
             report["facts"] = .array((facts.lines + modeLines).map(NodeWire.Value.string))
             report["journal"] = .array(journal.map(NodeWire.Value.string))
             let data = NodeWire.printable(NodeWire.line(NodeWire.Value.object(report)))
-            try? FileHandle.standardOutput.write(contentsOf: data)
+            Platform.Stdio.output(data)
             return 0
         }
         var out: [String] = []

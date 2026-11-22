@@ -12,23 +12,23 @@ enum WireCommand {
 
     static func run(_ arguments: [String]) -> Int32 {
         guard arguments.count == 2, arguments[0] == "--out", !arguments[1].isEmpty else {
-            try? FileHandle.standardError.write(contentsOf: Data((usage + "\n").utf8))
+            Platform.Stdio.error(usage + "\n")
             return 64
         }
         let folder = URL(fileURLWithPath: arguments[1])
         var isFolder: ObjCBool = false
         guard FileManager.default.fileExists(atPath: folder.path, isDirectory: &isFolder), isFolder.boolValue else {
-            try? FileHandle.standardError.write(contentsOf: Data("vibeswitcher wire-vectors: no folder \(folder.path)\n".utf8))
+            Platform.Stdio.error("vibeswitcher wire-vectors: no folder \(folder.path)\n")
             return 73
         }
         do {
             for (name, data) in WireVectors.files().sorted(by: { $0.key < $1.key }) {
                 let file = folder.appendingPathComponent(name)
                 try VibePaths.writePrivate(data, to: file)
-                try? FileHandle.standardOutput.write(contentsOf: Data("wrote \(file.path)\n".utf8))
+                Platform.Stdio.output("wrote \(file.path)\n")
             }
         } catch {
-            try? FileHandle.standardError.write(contentsOf: Data("vibeswitcher wire-vectors: \(error.localizedDescription)\n".utf8))
+            Platform.Stdio.error("vibeswitcher wire-vectors: \(error.localizedDescription)\n")
             return 73
         }
         return 0

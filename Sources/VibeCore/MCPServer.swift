@@ -214,7 +214,7 @@ public enum MCPHandover {
     public static func answerProbe() -> Never {
         let data = FileHandle.standardInput.readDataToEndOfFile()
         guard decode(data) != nil else {
-            FileHandle.standardError.write(Data("vibeswitcher-mcp: handover probe: not a state this build takes (format \(format))\n".utf8))
+            Platform.Stdio.error("vibeswitcher-mcp: handover probe: not a state this build takes (format \(format))\n")
             exit(1)
         }
         print(probeAnswer)
@@ -266,7 +266,7 @@ public enum MCPHandover {
             data.append(contentsOf: buffer[0..<count])
         }
         guard let state = decode(data) else {
-            FileHandle.standardError.write(Data("vibeswitcher-mcp: the build before handed over a session this one can't read; starting afresh\n".utf8))
+            Platform.Stdio.error("vibeswitcher-mcp: the build before handed over a session this one can't read; starting afresh\n")
             return nil
         }
         return state
@@ -397,7 +397,7 @@ public final class MCPHostedToolset: MCPToolset, @unchecked Sendable {
             settle(toolset)
             return
         }
-        FileHandle.standardError.write(Data("vibeswitcher-mcp: the session host can't be asked yet, or its session holds no role yet; asking again\n".utf8))
+        Platform.Stdio.error("vibeswitcher-mcp: the session host can't be asked yet, or its session holds no role yet; asking again\n")
         Thread.detachNewThread { [self] in
             let deadline = Date().addingTimeInterval(patience)
             var delay = firstDelay
@@ -408,7 +408,7 @@ public final class MCPHostedToolset: MCPToolset, @unchecked Sendable {
                 toolset = attempt()
             }
             if toolset == nil {
-                FileHandle.standardError.write(Data("vibeswitcher-mcp: the session host didn't answer for \(Int(patience)) s; giving up\n".utf8))
+                Platform.Stdio.error("vibeswitcher-mcp: the session host didn't answer for \(Int(patience)) s; giving up\n")
             }
             settle(toolset ?? giveUp())
             settled()
@@ -755,7 +755,7 @@ public final class MCPServer: @unchecked Sendable {
         lock.unlock()
         guard idle, let build = watch.update() else {
             if watch.goneNow() {
-                FileHandle.standardError.write(Data("vibeswitcher-mcp: \(watch.path) is gone (an install under way, or the app moved); this build serves on\n".utf8))
+                Platform.Stdio.error("vibeswitcher-mcp: \(watch.path) is gone (an install under way, or the app moved); this build serves on\n")
             }
             return
         }
@@ -787,7 +787,7 @@ public final class MCPServer: @unchecked Sendable {
         guard why != MCPHandover.replacedAgain else { return }
         // Said once per build and reason: a retry every minute that fails the same way adds nothing.
         guard watch.failed(build, because: why) else { return }
-        FileHandle.standardError.write(Data("vibeswitcher-mcp: couldn't switch to the new build at \(watch.path): \(why); this build serves on\n".utf8))
+        Platform.Stdio.error("vibeswitcher-mcp: couldn't switch to the new build at \(watch.path): \(why); this build serves on\n")
     }
 
     /// A build as the log names it: its file's time, size and inode.

@@ -32,7 +32,7 @@ public enum ServerStart {
 
     /// A line on the server's stderr, which the host's stderr is (the unit sends it to the journal).
     public static func say(_ line: String) {
-        FileHandle.standardError.write(Data("vibeswitcher-server: \(line)\n".utf8))
+        Platform.Stdio.error("vibeswitcher-server: \(line)\n")
         heard.get()?(line)
     }
 

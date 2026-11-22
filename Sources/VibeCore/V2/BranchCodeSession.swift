@@ -50,7 +50,7 @@ enum BranchCodeSession {
         pthread_sigmask(SIG_SETMASK, &before, nil)
         guard case .success(let pid) = started else {
             if case .failure(let error) = started {
-                FileHandle.standardError.write(Data("vibeswitcher: couldn't run \(argv[0]): \(String(cString: strerror(error.code)))\n".utf8))
+                Platform.Stdio.error("vibeswitcher: couldn't run \(argv[0]): \(String(cString: strerror(error.code)))\n")
             }
             return 126
         }

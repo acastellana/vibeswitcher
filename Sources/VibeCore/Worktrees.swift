@@ -202,7 +202,7 @@ public enum BranchCode {
         let cEnv = passed.map { strdup("\($0.key)=\($0.value)") } + [nil]
         execve(argv[0], cArgs, cEnv)
         let code = errno
-        FileHandle.standardError.write(Data("vibeswitcher: couldn't run \(argv[0]): \(String(cString: strerror(code)))\n".utf8))
+        Platform.Stdio.error("vibeswitcher: couldn't run \(argv[0]): \(String(cString: strerror(code)))\n")
         return 126
     }
 

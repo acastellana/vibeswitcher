@@ -51,7 +51,7 @@ if CommandLine.arguments.count >= 2, CommandLine.arguments[1] == ReadOnlyCommand
                                                base: options.base, records: options.records) {
         // Claude Code gone before it reads the answer: the write fails and the hook exits 0, never ends on SIGPIPE.
         signal(SIGPIPE, SIG_IGN)
-        try? FileHandle.standardOutput.write(contentsOf: answer)
+        Platform.Stdio.output(answer)
     }
     exit(0)
 }
@@ -68,7 +68,7 @@ if CommandLine.arguments.count >= 2, CommandLine.arguments[1] == UsageStatusLine
     let input = (try? FileHandle.standardInput.readToEnd()) ?? Data()
     UsageStatusLine.run(input: input, userOnly: CommandLine.arguments.dropFirst(2).contains(UsageStatusLine.userOnlyArgument),
                         ownCommand: !CommandLine.arguments.dropFirst(2).contains(Porter.boxArgument)) { output in
-        try? FileHandle.standardOutput.write(contentsOf: output)
+        Platform.Stdio.output(output)
     }
     exit(0)
 }
@@ -95,7 +95,7 @@ if CommandLine.arguments.count >= 2, CommandLine.arguments[1] == "--wallet-reque
     let ran = WalletAsk.run(Array(CommandLine.arguments.dropFirst(2)), cwd: FileManager.default.currentDirectoryPath,
                            walletManager: walletManager, vault: .standard)
     if !ran.output.isEmpty { print(ran.output) }
-    if !ran.error.isEmpty { FileHandle.standardError.write(Data((ran.error + "\n").utf8)) }
+    if !ran.error.isEmpty { Platform.Stdio.error(ran.error + "\n") }
     exit(ran.status)
 }
 
@@ -108,7 +108,7 @@ if CommandLine.arguments.count >= 2, CommandLine.arguments[1] == "--shell-reques
     let ran = ShellAsk.run(Array(CommandLine.arguments.dropFirst(2)), cwd: FileManager.default.currentDirectoryPath, vault: .standard,
                            atOnce: defaults?.bool(forKey: "letAgentsOpenShells") ?? false)
     if !ran.output.isEmpty { print(ran.output) }
-    if !ran.error.isEmpty { FileHandle.standardError.write(Data((ran.error + "\n").utf8)) }
+    if !ran.error.isEmpty { Platform.Stdio.error(ran.error + "\n") }
     exit(ran.status)
 }
 
@@ -136,7 +136,7 @@ if CommandLine.arguments.count == 7, CommandLine.arguments[1] == "--verifier-pro
     let model = workflow.auditModel(workerModel: LeadWorkflow.claudeModel(command: "claude", home: NSHomeDirectory()))
     let out: [String: Any] = ["prompt": prompt, "settings": settings, "model": model, "security": security ?? NSNull()]
     let data = (try? JSONSerialization.data(withJSONObject: out, options: [.prettyPrinted, .sortedKeys])) ?? Data()
-    FileHandle.standardOutput.write(data)
+    Platform.Stdio.output(data)
     exit(data.isEmpty ? 1 : 0)
 }
 
@@ -154,7 +154,7 @@ brokenPipes.resume()
 // The MCP session the build before handed over, when this process ran it a moment ago (the client goes on, with no
 // new initialize). The role isn't in it: the toolset asks the session host, as at a fresh start.
 let handover = MCPHandover.take()
-if handover != nil { FileHandle.standardError.write(Data("vibeswitcher-mcp: switched in place to the new build\n".utf8)) }
+if handover != nil { Platform.Stdio.error("vibeswitcher-mcp: switched in place to the new build\n") }
 
 // Its own log (`MCPLog`): why it starts, switches and stops, which Claude Code's says nothing of. The role it was
 // started as names the file.

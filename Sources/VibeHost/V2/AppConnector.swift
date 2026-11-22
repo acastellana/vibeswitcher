@@ -345,7 +345,7 @@ extension HostServer {
         tally.refusedAppConnection()
         let line = "refused an app connection through connector \(number): \(why)"
         note("host: " + line)
-        FileHandle.standardError.write(Data("vibeswitcher-host: \(line)\n".utf8))
+        Platform.Stdio.error("vibeswitcher-host: \(line)\n")
     }
 
     private func closeConnector(_ connector: AppConnector, _ number: Int32, why: String) {

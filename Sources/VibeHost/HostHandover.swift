@@ -211,7 +211,7 @@ public enum HostHandover {
             print(probeAnswer(state.format))
             exit(0)
         } catch {
-            FileHandle.standardError.write(Data("vibeswitcher-host: handover probe: \(error)\n".utf8))
+            Platform.Stdio.error("vibeswitcher-host: handover probe: \(error)\n")
             exit(1)
         }
     }

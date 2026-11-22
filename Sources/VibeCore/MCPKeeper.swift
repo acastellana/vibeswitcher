@@ -312,7 +312,7 @@ public enum MCPKeeper {
                 let line = "vibeswitcher-mcp keeper: the tool server stopped \(restarts.limit + 1) times within \(Int(restarts.window)) s "
                     + "(last: it \(why)); not starting it again"
                 MCPLog.note("keeper: \(line.dropFirst("vibeswitcher-mcp keeper: ".count)); \(calls); exiting with status 1")
-                FileHandle.standardError.write(Data((line + "\n").utf8))
+                Platform.Stdio.error(line + "\n")
                 return false
             }
             MCPLog.note("keeper: the tool server \(why); starting it again" + (delay > 0 ? " in \(delay) s" : "")

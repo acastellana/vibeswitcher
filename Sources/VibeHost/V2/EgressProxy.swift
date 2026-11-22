@@ -79,7 +79,7 @@ public enum EgressProxy {
         let control = arguments.firstIndex(of: controlFlag).flatMap { $0 + 1 < arguments.count ? Int32(arguments[$0 + 1]) : nil }
         if let control, control > STDERR_FILENO { _ = fcntl(control, F_SETFD, fcntl(control, F_GETFD) | FD_CLOEXEC) }
         signal(SIGPIPE, SIG_IGN)
-        func say(_ line: String) { FileHandle.standardError.write(Data("vibeswitcher-egress: \(line)\n".utf8)) }
+        func say(_ line: String) { Platform.Stdio.error("vibeswitcher-egress: \(line)\n") }
         guard !Platform.CodeIdentity.isAvailable else {
             say("not started: this system has no session sandbox")
             exit(69)

@@ -166,7 +166,7 @@ public enum Porter {
 
     /// A line on the porter's stderr (the host's log).
     static func say(_ line: String) {
-        FileHandle.standardError.write(Data("vibeswitcher-porter: \(line)\n".utf8))
+        Platform.Stdio.error("vibeswitcher-porter: \(line)\n")
     }
 
     /// `vibeswitcher-mcp --porter …`: the porter, which never returns. Anything else: returns at once.

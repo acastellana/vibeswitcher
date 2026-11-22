@@ -685,6 +685,6 @@ public final class ServerChild {
     /// A line in the host's log and on its stderr.
     private static func say(_ server: HostServer, _ line: String) {
         server.note("host: " + line)
-        FileHandle.standardError.write(Data("vibeswitcher-host: \(line)\n".utf8))
+        Platform.Stdio.error("vibeswitcher-host: \(line)\n")
     }
 }

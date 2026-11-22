@@ -877,7 +877,7 @@ public final class HostServer {
     }
 
     func log(_ text: String) {
-        FileHandle.standardError.write(Data("vibeswitcher-host: \(text)\n".utf8))
+        Platform.Stdio.error("vibeswitcher-host: \(text)\n")
     }
 
     /// The newest part of `history` that fits in one frame next to the screen (wide lines of box drawing
