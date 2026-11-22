@@ -64,4 +64,37 @@ import Testing
         #expect(HostPathWatch.leadsHere(host.socket) == true)
         _ = try TestClient(host)
     }
+
+    /// A foreign socket recorded as the host's while the checks couldn't run (the bind-then-lstat race, S11 item 5)
+    /// stays only until the checks work again: the first housekeeping then asks the kernel, finds the path isn't the
+    /// listener's, and binds the host's own over it.
+    @Test func aForeignFileRecordedWhileChecksFailIsReplacedOnceTheyWork() throws {
+        let host = try TestHost(watchesItsPath: true)
+        let server = host.server
+        let watch = try #require(server.queue.sync { server.pathWatch })
+        let beside = host.socket + "-f"
+        let foreign = try UnixSocket.listen(path: beside)
+        defer { Sys.close(foreign); unlink(beside) }
+        let foreignFile = try #require(HostPathWatch.identity(atPath: beside))
+        server.queue.sync {
+            watch.leads = { _ in nil }
+            watch.kernel = { _, _ in .cantSay }
+        }
+        try #require(rename(beside, host.socket) == 0, "errno \(errno)")
+        server.queue.sync {
+            watch.socketFile = foreignFile
+            watch.check(atHousekeeping: true)
+        }
+        #expect(server.queue.sync { watch.socketFile } == foreignFile, "the residual: kept while nothing can be checked")
+        server.queue.sync {
+            watch.leads = HostPathWatch.leadsHere
+            watch.kernel = { Platform.Sockets.boundFile(of: $0, at: $1) }
+            watch.check(atHousekeeping: true)
+        }
+        let recorded = server.queue.sync { watch.socketFile }
+        #expect(recorded != foreignFile && HostPathWatch.identity(atPath: host.socket) != foreignFile, "replaced at the first housekeeping that could check")
+        #expect(recorded != nil && recorded == HostPathWatch.identity(atPath: host.socket))
+        #expect(HostPathWatch.leadsHere(host.socket) == true)
+    }
 }
+
