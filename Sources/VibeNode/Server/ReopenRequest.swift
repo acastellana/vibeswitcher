@@ -25,7 +25,7 @@ extension Requests {
         if request.args?["forget"]?.bool == true {
             let count = engine.forgetOffered()
             note("session.reopen: the offer of \(count) session(s) put away")
-            return reply(.init(re: request.id, result: .object(["forgotten": .int(count)])))
+            return reply(.init(re: request.id, typed: WireKinds.ReopenResult(forgotten: count)))
         }
         let ids: Set<UUID>
         if request.args?["all"]?.bool == true {
@@ -81,10 +81,10 @@ extension Requests {
                     giveBack(run.back)
                     note("session.reopen: \(run.reopened.count) reopened, \(run.refused.count) not")
                     guard !run.reopened.isEmpty else {
-                        let why = run.refused.compactMap { $0["why"]?.string }.joined(separator: "; ")
+                        let why = run.refused.compactMap(\.why).joined(separator: "; ")
                         return reply(.init(re: request.id, error: .init(.refused, "nothing reopened: " + why)))
                     }
-                    reply(.init(re: request.id, result: .object(["reopened": .array(run.reopened), "refused": .array(run.refused)])))
+                    reply(.init(re: request.id, typed: WireKinds.ReopenResult(reopened: run.reopened, refused: run.refused)))
                 }
                 func next(_ index: Int) {
                     guard index < checked.count else { return finish() }
@@ -92,7 +92,7 @@ extension Requests {
                     let was = NodeIds.session(host: entry.id)
                     func refuse(_ why: String) {
                         run.back.append(entry)
-                        run.refused.append(.object(["was": .string(was), "folder": .string(entry.folder), "why": .string(why)]))
+                        run.refused.append(.init(was: was, folder: entry.folder, why: why))
                         next(index + 1)
                     }
                     let plan: LeadEngine.Reopening
@@ -113,10 +113,8 @@ extension Requests {
                             switch started {
                             case .success(let session):
                                 note("session.reopen: conversation \(plan.conversation.prefix(8)) reopened in session \(session.id.uuidString.prefix(8)) (\(session.tty))")
-                                run.reopened.append(.object([
-                                    "was": .string(was), "folder": .string(plan.folder), "conversation": .string(plan.conversation),
-                                    "session": .string(NodeIds.session(host: session.id)), "terminal": .string(session.tty),
-                                ]))
+                                run.reopened.append(.init(was: was, folder: plan.folder, conversation: plan.conversation,
+                                                          session: NodeIds.session(host: session.id), terminal: session.tty))
                                 next(index + 1)
                             case .failure(let failure):
                                 refuse("the session host didn't start it: \(failure.message)")
@@ -131,8 +129,8 @@ extension Requests {
 
     /// One reopen's outcome so far, on `queue`.
     private final class ReopenRun: @unchecked Sendable {
-        var reopened: [NodeWire.Value] = []
-        var refused: [NodeWire.Value] = []
+        var reopened: [WireKinds.Reopened] = []
+        var refused: [WireKinds.NotReopened] = []
         var back: [RestartReopen.Entry] = []
     }
 }

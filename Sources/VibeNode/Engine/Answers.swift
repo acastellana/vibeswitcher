@@ -312,10 +312,12 @@ extension LeadEngine {
     /// From any thread.
     /// `version`: the wording the user was shown (the card's now when nil): a revision after it is said to the lead.
     public func answer(card id: String, text: String, version: Int? = nil, action: String?,
-                       then: @escaping (Result<NodeWire.Value, CardFailure>) -> Void) {
+                       then: @escaping (Result<WireKinds.Answer.Result, CardFailure>) -> Void) {
         queue.async { [self] in
-            // A feature plugin's card: its words (`PluginEngine.swift`).
-            if let card = cards.cards[id], card.kind == .plugin { return answerPlugin(card, text: text, then: then) }
+            // A feature plugin's card: its words (`PluginEngine.swift`), its result its own.
+            if let card = cards.cards[id], card.kind == .plugin {
+                return answerPlugin(card, text: text) { then($0.map { WireKinds.Answer.Result(fields: $0.object ?? [:]) }) }
+            }
             guard let card = cards.cards[id], card.kind == .question || card.kind == .approval, let question = card.question else {
                 return then(.failure(.gone("no question card \(id)")))
             }
@@ -365,8 +367,7 @@ extension LeadEngine {
                 }
                 self.cardsChanged()
                 if let message = outcome.message(given: text) { self.tellAsUser(message, root: root, action: action) }
-                then(.success(.object(["outcome": .string(Self.word(outcome)), "notice": notice.map(NodeWire.Value.string) ?? .null,
-                                       "card": self.cards.cards[id]?.value ?? .null])))
+                then(.success(WireKinds.Answer.Result(outcome: Self.word(outcome), notice: notice, card: self.cards.cards[id]?.value)))
                 // The app refreshes after each answer (`LeadController.refresh`): the board as answered, its timers.
                 self.refresh()
             }
@@ -376,7 +377,7 @@ extension LeadEngine {
     /// The user holds the card `id`'s question with a timer (`LeadController.hold`): the card's timer stops, it waits
     /// for an answer like any other, and the lead is told not to go ahead, as the user's, with the question and the
     /// proposal the card showed (never the board's). The board records the hold for the lead's record. From any thread.
-    public func hold(card id: String, action: String?, then: @escaping (Result<NodeWire.Value, CardFailure>) -> Void) {
+    public func hold(card id: String, action: String?, then: @escaping (Result<WireKinds.Hold.Result, CardFailure>) -> Void) {
         queue.async { [self] in
             guard let card = cards.cards[id], let question = card.question else { return then(.failure(.gone("no question card \(id)"))) }
             let refusal = question.isOpen
@@ -402,7 +403,7 @@ extension LeadEngine {
                 }
             }) { [weak self] _ in
                 guard let self else { return }
-                then(.success(.object(["held": .bool(true), "card": self.cards.cards[id]?.value ?? .null])))
+                then(.success(WireKinds.Hold.Result(held: true, card: self.cards.cards[id]?.value)))
                 self.refresh()
             }
         }
@@ -674,7 +675,7 @@ extension LeadEngine {
     /// `inBatch`: an item of `vibeswitcher approve`'s batch, refused when the card would record any guard rail or a review
     /// floor (`ConfigHoldStore.wouldRecord`, asked in the same turn of `work` as the accept, of the card the accept would
     /// record): nothing accepted, the card left open for the folder's own `config held` and `config accept`.
-    public func configAccept(card id: String, inBatch: Bool = false, then: @escaping (Result<NodeWire.Value, CardFailure>) -> Void) {
+    public func configAccept(card id: String, inBatch: Bool = false, then: @escaping (Result<WireKinds.ConfigAccept.Result, CardFailure>) -> Void) {
         queue.async { [self] in
             guard let card = cards.cards[id], let shown = card.config else { return then(.failure(.gone("no held-config card \(id)"))) }
             let (root, vault, node, queue) = (card.root, cardVault, self.root, self.queue)
@@ -716,8 +717,7 @@ extension LeadEngine {
                             self.deliver(built: { "The user accepted the change to \(names.joined(separator: ", ")) at the command line: it's sealed as it is, "
                                 + "and workers, verifiers and merges go ahead again." }, from: .system("the user, at the command line"), root: root, action: nil)
                         }
-                        then(.success(.object(["sealed": .array(names.map(NodeWire.Value.string)),
-                                               "floorRecorded": .bool(floor != nil), "card": self.cards.cards[id]?.value ?? .null])))
+                        then(.success(WireKinds.ConfigAccept.Result(sealed: names, floorRecorded: floor != nil, card: self.cards.cards[id]?.value)))
                     }
                 }
             }
@@ -788,7 +788,7 @@ extension LeadEngine {
 
     /// `base accept CARD`: the head the vault records is where the card showed the base (`setHead`, the commits shown and
     /// no further). From any thread.
-    public func baseAccept(card id: String, then: @escaping (Result<NodeWire.Value, CardFailure>) -> Void) {
+    public func baseAccept(card id: String, then: @escaping (Result<WireKinds.BaseAccept.Result, CardFailure>) -> Void) {
         queue.async { [self] in
             guard let card = cards.cards[id], let shown = card.base else { return then(.failure(.gone("no base card \(id)"))) }
             let root = card.root
@@ -798,7 +798,7 @@ extension LeadEngine {
                     guard let self else { return }
                     if let failure { return then(.failure(.refused("the vault didn't take it: \(failure)"))) }
                     self.work.async { Self.snapshotHead(move.to, branch: move.branch, root: root, node: node) }
-                    then(.success(.object(["head": .string(move.to), "branch": .string(move.branch), "card": self.cards.cards[id]?.value ?? .null])))
+                    then(.success(WireKinds.BaseAccept.Result(head: move.to, branch: move.branch, card: self.cards.cards[id]?.value)))
                 }
             }
             let vault = cardVault
@@ -819,7 +819,7 @@ extension LeadEngine {
                         self.cards.change(other.id) { $0.closed = "accepted" }
                     }
                     self.note("lead: the user recorded \(shown.branch) of \(LeadMail.project(of: root)) at \(shown.to.prefix(8))")
-                    then(.success(.object(["head": .string(shown.to), "branch": .string(shown.branch), "card": self.cards.cards[id]?.value ?? .null])))
+                    then(.success(WireKinds.BaseAccept.Result(head: shown.to, branch: shown.branch, card: self.cards.cards[id]?.value)))
                 }
             }
         }
@@ -836,12 +836,12 @@ extension LeadEngine {
 
     /// `base keep CARD`: the lead's merges stay refused, and this move isn't asked about again until the base moves
     /// again. From any thread.
-    public func baseKeep(card id: String, then: @escaping (Result<NodeWire.Value, CardFailure>) -> Void) {
+    public func baseKeep(card id: String, then: @escaping (Result<WireKinds.BaseKeep.Result, CardFailure>) -> Void) {
         queue.async { [self] in
             guard let card = cards.cards[id], let shown = card.base else { return then(.failure(.gone("no base card \(id)"))) }
             if let move = shown.move { baseMoves.keepRefused(card.root, move: move) }
             cards.change(id) { $0.closed = "kept refused" }
-            then(.success(.object(["kept": .bool(true), "card": cards.cards[id]?.value ?? .null])))
+            then(.success(WireKinds.BaseKeep.Result(kept: true, card: cards.cards[id]?.value)))
         }
     }
 }

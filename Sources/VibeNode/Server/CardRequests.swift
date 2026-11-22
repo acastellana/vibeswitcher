@@ -160,7 +160,7 @@ extension Requests {
             guard let self else { return }
             switch result {
             case .failure(let failure): reply(self.failed(request, failure))
-            case .success(let value): reply(.init(re: request.id, result: value))
+            case .success(let answered): reply(.init(re: request.id, typed: answered))
             }
         }
     }
@@ -171,7 +171,7 @@ extension Requests {
             guard let self else { return }
             switch result {
             case .failure(let failure): reply(self.failed(request, failure))
-            case .success(let value): reply(.init(re: request.id, result: value))
+            case .success(let held): reply(.init(re: request.id, typed: held))
             }
         }
     }
@@ -273,7 +273,7 @@ extension Requests {
             guard let self else { return }
             switch result {
             case .failure(let failure): reply(self.failed(request, failure))
-            case .success(let value): reply(.init(re: request.id, result: value))
+            case .success(let accepted): reply(.init(re: request.id, typed: accepted))
             }
         }
     }
@@ -306,14 +306,13 @@ extension Requests {
 
     func baseAnswer(_ request: NodeWire.Request, reply: @escaping (NodeWire.Reply) -> Void) {
         guard let (engine, card) = engineCard(request) else { return reply(.init(re: request.id, error: .init(.gone, "no such card"))) }
-        let done: (Result<NodeWire.Value, LeadEngine.CardFailure>) -> Void = { [weak self] result in
-            guard let self else { return }
+        func done<R: Encodable>(_ result: Result<R, LeadEngine.CardFailure>) {
             switch result {
-            case .failure(let failure): reply(self.failed(request, failure))
-            case .success(let value): reply(.init(re: request.id, result: value))
+            case .failure(let failure): reply(failed(request, failure))
+            case .success(let typed): reply(.init(re: request.id, typed: typed))
             }
         }
-        if request.kind == "base.accept" { engine.baseAccept(card: card.id, then: done) } else { engine.baseKeep(card: card.id, then: done) }
+        if request.kind == "base.accept" { engine.baseAccept(card: card.id) { done($0) } } else { engine.baseKeep(card: card.id) { done($0) } }
     }
 
     // MARK: The lead's questions

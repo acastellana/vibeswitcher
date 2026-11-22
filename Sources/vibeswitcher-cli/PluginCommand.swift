@@ -46,8 +46,13 @@ enum PluginCommand {
     }
 
     private static func set(_ name: String, on: Bool) -> Int32 {
+        on ? set(name, on: true, as: WireKinds.PluginOn.self) : set(name, on: false, as: WireKinds.PluginOff.self)
+    }
+
+    private static func set<K: WireChangeKind>(_ name: String, on: Bool, as kind: K.Type) -> Int32
+    where K.Args == WireKinds.PluginArgs, K.Result == WireKinds.PluginSetResult {
         let id = name.lowercased()
-        return SessionCommand.act("plugin.\(on ? "on" : "off")", fetch: { client in
+        return SessionCommand.act(K.self, fetch: { client in
             switch client.read(WireKinds.PluginList.self, WireNoArgs()) {
             case .failure(let failure): return .failure(failure)
             case .refused(let reply): return .failure(.broken(reply.error.map { "\($0.code): \($0.message)" } ?? "the server listed no plugins"))
@@ -58,16 +63,16 @@ enum PluginCommand {
         }, refuse: { plugin in
             guard plugin == .null else { return nil }
             return Say.refused("no plugin \(ConfigSeal.inert(name, limit: 40)) in this build: `vibeswitcher plugin list` lists them")
-        }, args: { _ in ["plugin": .string(id)] }, what: { plugin in
+        }, args: { _ in .init(plugin: id) }, what: { plugin in
             let title = ConfigSeal.inert(plugin["title"]?.string ?? id, limit: 80)
             let commands = (plugin["commands"]?.array ?? []).compactMap { $0["name"]?.string }.map { ConfigSeal.inert($0, limit: 40) }
             let adds = commands.isEmpty ? "" : " (agents get \(commands.joined(separator: ", ")))"
             return on ? "This turns \(title) on for this node\(adds): \(ConfigSeal.inert(plugin["summary"]?.string ?? "", limit: 300))"
                 : "This turns \(title) off for this node: its commands file nothing, and its open cards close as withdrawn, their askers told."
         }) { result in
-            let state = result["on"]?.bool == true ? "on" : "off"
-            let withdrawn = result["withdrawn"]?.int ?? 0
-            Say.out("\(ConfigSeal.inert(result["plugin"]?.string ?? id, limit: 40)) is \(state)"
+            let state = result.on == true ? "on" : "off"
+            let withdrawn = result.withdrawn ?? 0
+            Say.out("\(ConfigSeal.inert(result.plugin ?? id, limit: 40)) is \(state)"
                     + (withdrawn > 0 ? "; \(withdrawn) open card\(withdrawn == 1 ? "" : "s") withdrawn, their askers told" : ""))
         }
     }

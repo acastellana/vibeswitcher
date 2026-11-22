@@ -42,25 +42,30 @@ enum WebCommand {
         let id = UUID().uuidString.lowercased()
         let said = TypedWord.said(approval: client.approvalRule, action: id, what: what)
         guard case .success(let typed) = said else { return Say.refused(said.refusal) }
-        let args: [String: NodeWire.Value] = tailnet ? ["tailnet": .bool(true)] : [:]
-        switch client.change(kind, args: args, action: id, typed: typed, timeout: 30) {
-        case .failure(let failure): return Say.failed(failure)
-        case .success(let reply):
-            guard reply.ok, let result = reply.result else { return Say.replyError(reply) }
-            if revoke {
-                let remote = result["tailnetRevoked"]?.int.map { "; on the tailnet: \($0)" } ?? ""
-                Say.out("web tokens dropped: \(result["revoked"]?.int ?? 0)\(remote); every page open on this node was closed")
+        _ = kind
+        if revoke {
+            switch client.change(WireKinds.WebRevoke.self, WireNoArgs(), action: id, typed: typed, timeout: 30) {
+            case .failure(let failure): return Say.failed(failure)
+            case .refused(let reply): return Say.replyError(reply)
+            case .success(let result, _):
+                let remote = result.tailnetRevoked.map { "; on the tailnet: \($0)" } ?? ""
+                Say.out("web tokens dropped: \(result.revoked ?? 0)\(remote); every page open on this node was closed")
                 return 0
             }
-            guard let url = result["url"]?.string, tailnet ? isTailnetAddress(url) : isPageAddress(url) else {
+        }
+        switch client.change(WireKinds.WebOpen.self, .init(tailnet: tailnet ? true : nil), action: id, typed: typed, timeout: 30) {
+        case .failure(let failure): return Say.failed(failure)
+        case .refused(let reply): return Say.replyError(reply)
+        case .success(let result, _):
+            guard let url = result.url, tailnet ? isTailnetAddress(url) : isPageAddress(url) else {
                 return Say.refused("the server's reply holds no address of this node's page")
             }
             if tailnet {
-                Say.err("Open this address in the phone's browser, with Tailscale on, within \(result["expiresIn"]?.int ?? 120) s; it works once:")
+                Say.err("Open this address in the phone's browser, with Tailscale on, within \(result.expiresIn ?? 120) s; it works once:")
                 Say.out(url)
                 return 0
             }
-            Say.err("Open this address in a browser within \(result["expiresIn"]?.int ?? 120) s; it works once:")
+            Say.err("Open this address in a browser within \(result.expiresIn ?? 120) s; it works once:")
             Say.out(url)
             return 0
         }

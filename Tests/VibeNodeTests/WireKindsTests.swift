@@ -58,6 +58,26 @@ struct WireKindsTests {
         }
     }
 
+    /// The state-changing kinds' replies, captured from the whole VibeNodeTests run before their types (every shape each
+    /// kind's replies had, Tests/Fixtures/wire-kinds/changes): each decodes into its kind's result and encodes again byte
+    /// for byte; every typed change kind has one.
+    @Test func eachCapturedChangeReplyIsItsTypeByteForByte() throws {
+        let folder = Self.fixtures.appendingPathComponent("changes")
+        let files = try FileManager.default.contentsOfDirectory(atPath: folder.path).filter { $0.hasSuffix(".json") }.sorted()
+        func again<K: WireKind>(_: K.Type, _ result: NodeWire.Value) throws -> Data { NodeWire.line(try result.wire(K.Result.self)) }
+        var covered: Swift.Set<String> = []
+        for file in files {
+            let kind = String(file.dropLast(".json".count).split(separator: "-").dropLast().joined(separator: "-"))
+            let type = try #require(WireKinds.changes.first { $0.kind == kind }, "\(file): no typed kind \(kind)")
+            let reply = try #require(NodeWire.decode(NodeWire.Reply.self, try Data(contentsOf: folder.appendingPathComponent(file))), "\(file)")
+            let result = try #require(reply.result, "\(file)")
+            let after = try again(type, result)
+            #expect(after == NodeWire.line(result), "\(file): \(String(decoding: after, as: UTF8.self).prefix(400))")
+            covered.insert(kind)
+        }
+        #expect(covered == Swift.Set(WireKinds.changes.map { $0.kind }), "\(Swift.Set(WireKinds.changes.map { $0.kind }).subtracting(covered))")
+    }
+
     /// An older server's reply (fields it didn't have yet) decodes, the missing ones nil; a newer one's field the type
     /// doesn't name is skipped.
     @Test func resultsAreReadWhateverTheServersAge() throws {
@@ -94,23 +114,47 @@ struct WireKindsTests {
     }
 }
 
-/// The command line reads a typed kind (`WireKinds.typed`) only through its type (`NodeClient.read`): a
-/// `request("<kind>"` of one in Sources/vibeswitcher-cli, which would read its reply by string key, fails here.
+/// The command line reads a typed kind (`WireKinds.typed`) only through its type (`NodeClient.read`) and sends a typed
+/// state change (`WireKinds.changes`) only through its (`NodeClient.change(Kind.self, …)`): a `request("<kind>"`,
+/// `change("<kind>"` or `act("<kind>"` of one in Sources/vibeswitcher-cli, which would read or send it by string key,
+/// fails here; so does any `client.request(` or `client.change(` not naming a kind's type (or the generic helpers' `K`),
+/// outside NodeClient itself.
 struct WireKindsLintTests {
-    @Test func theCommandLineReadsTypedKindsThroughTheirTypes() throws {
+    @Test func theCommandLineReadsAndSendsTypedKindsThroughTheirTypes() throws {
         let folder = ServerLintTests.repo.appendingPathComponent("Sources/vibeswitcher-cli")
         let files = try FileManager.default.contentsOfDirectory(atPath: folder.path).filter { $0.hasSuffix(".swift") }.sorted()
         #expect(!files.isEmpty)
+        let kinds = WireKinds.typed + WireKinds.changes.map { $0.kind }
         var found: [String] = []
         for file in files {
             let text = try String(contentsOf: folder.appendingPathComponent(file), encoding: .utf8)
             for (number, line) in text.split(separator: "\n", omittingEmptySubsequences: false).enumerated() {
-                for kind in WireKinds.typed where line.contains("request(\"\(kind)\"") || line.contains("change(\"\(kind)\"") {
-                    found.append("Sources/vibeswitcher-cli/\(file):\(number + 1): \(kind) by string key; ask it with client.read(WireKinds.…)")
+                let place = "Sources/vibeswitcher-cli/\(file):\(number + 1)"
+                for kind in kinds where ["request", "change", "act"].contains(where: { line.contains("\($0)(\"\(kind)\"") }) {
+                    found.append("\(place): \(kind) by string key; ask it with client.read or send it with client.change(WireKinds.…)")
+                }
+                guard file != "NodeClient.swift", !line.trimmingCharacters(in: .whitespaces).hasPrefix("//") else { continue }
+                if line.contains("client.request(") { found.append("\(place): a read not through its type (client.read(WireKinds.…))") }
+                // `K.self`: the generic helpers' (`CardCommand.act`, `SessionCommand.act`), over a `WireChangeKind`.
+                if line.contains("client.change("), !line.contains("client.change(WireKinds."), !line.contains("client.change(K.self") {
+                    found.append("\(place): a state change not through its type (client.change(WireKinds.…))")
                 }
             }
         }
         #expect(found.isEmpty, "\(found.joined(separator: "\n"))")
+    }
+
+    /// A typed state change's keys are its arguments' (`WireArgs.keys`): `RequestArguments` refuses any other, naming it.
+    @Test func aTypedChangeTakesItsArgumentsKeysAndNoOther() throws {
+        func keys<K: WireChangeKind>(_: K.Type) -> Swift.Set<String> { K.Args.keys }
+        for kind in WireKinds.changes { #expect(RequestArguments.taken[kind.kind] == keys(kind), "\(kind.kind)") }
+        #expect(RequestArguments.taken["lead"] == ["folder", "goal", "takeHead", "replace", "resume", "initialized"])
+        let refused = try #require(RequestArguments.refusal(.init(id: "1", kind: "tell", args: ["folder": .string("/p"), "txet": .string("x")], action: "a")))
+        #expect(refused.error?.code == "bad-args" && refused.error?.message.contains("tell doesn't take txet") == true, "\(refused)")
+        // A key of the wrong form: refused naming it, before the vault records anything.
+        let wrong = try #require(RequestArguments.formRefusal(.init(id: "2", kind: "session.pause", args: ["session": .string("s"), "hours": .string("2")], action: "a")))
+        #expect(wrong.error?.code == "bad-args" && wrong.error?.message.contains("hours") == true, "\(wrong)")
+        #expect(RequestArguments.formRefusal(.init(id: "3", kind: "session.pause", args: ["session": .string("s"), "for": .string("off")], action: "a")) == nil)
     }
 }
 

@@ -181,17 +181,15 @@ enum SetCommand {
             + (setting.guardRail ? "\nA guard rail: recorded in the host's vault as yours." : "")
         let said = TypedWord.said(approval: client.approvalRule, action: action, what: what)
         guard case .success(let typed) = said else { return Say.refused(said.refusal) }
-        var args: [String: NodeWire.Value] = ["key": .string(key), "value": .string(given)]
-        if let folder { args["folder"] = .string(folder) }
-        switch client.change("set", args: args, action: action, typed: typed, timeout: 120) {
+        switch client.change(WireKinds.SetSetting.self, .init(key: key, value: given, folder: folder), action: action, typed: typed, timeout: 120) {
         case .failure(let failure): return Say.failed(failure)
-        case .success(let reply):
-            guard reply.ok, let result = reply.result else { return Say.replyError(reply) }
-            let now = result["value"]?.string ?? "?"
-            let was = result["was"]?.string ?? "?"
+        case .refused(let reply): return Say.replyError(reply)
+        case .success(let result, _):
+            let now = result.value ?? "?"
+            let was = result.was ?? "?"
             let shown = { (text: String) in text.contains("\n") ? "(\(text.split(separator: "\n").count) lines)" : ConfigSeal.inert(text, limit: 200) }
             var said = was == now ? "\(named) was \(shown(now)) already" : "set \(named): \(shown(was)) → \(shown(now))"
-            switch result["told"]?.string {
+            switch result.told {
             case "lead": said += "; the project's lead is told at its next step"
             case "leads": said += "; the running leads are told"
             default:

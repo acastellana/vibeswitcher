@@ -24,7 +24,7 @@ extension Requests {
             queue.async {
                 engine.settlePush(root: root, id: id, push: approve) { result in
                     switch result {
-                    case .success(let value): reply(.init(re: request.id, result: value))
+                    case .success(let settled): reply(.init(re: request.id, typed: settled))
                     case .failure(.refused(let why)), .failure(.gone(let why)), .failure(.badArgs(let why)):
                         reply(.init(re: request.id, error: .init(.refused, why)))
                     }

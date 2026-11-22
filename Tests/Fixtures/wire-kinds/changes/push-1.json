@@ -1,0 +1,1 @@
+{"ok":true,"re":"22D03B79-A526-498E-9331-180BCCAAAC83","result":{"ok":false,"request":"3bd55d0a","said":"Not pushed: git push failed.\nfatal: unable to access 'https://example.invalid/r.git/': The requested URL returned error: 403","settled":"failed","target":"origin/main"},"v":1}

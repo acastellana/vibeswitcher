@@ -32,8 +32,15 @@ public enum WireKinds {
 }
 
 /// A kind that takes no arguments: asked with none (`args` absent, as before).
-public struct WireNoArgs: Codable, Sendable, Equatable {
+public struct WireNoArgs: WireArgs, Equatable {
     public init() {}
+
+    public enum CodingKeys: CodingKey, CaseIterable {
+        public var stringValue: String { switch self {} }
+        public init?(stringValue: String) { nil }
+        public var intValue: Int? { nil }
+        public init?(intValue: Int) { nil }
+    }
 }
 
 /// An optional written as `null` when it is nil (a dictionary's `.null`), and read as nil when it is `null` or missing.
@@ -61,6 +68,69 @@ extension KeyedDecodingContainer {
     public func decode<T>(_ type: WireNull<T>.Type, forKey key: Key) throws -> WireNull<T> {
         WireNull(wrappedValue: try decodeIfPresent(T.self, forKey: key))
     }
+}
+
+/// A field the server sometimes leaves out and sometimes writes as `null` (one of a kind's replies has it, another
+/// doesn't): left out when `isPresent` is false, `null` when present with no value. Read as not present when missing.
+@propertyWrapper
+public struct WireMaybe<Wrapped: Codable & Sendable>: Codable, Sendable {
+    public var wrappedValue: Wrapped?
+    public var isPresent: Bool
+
+    public init(wrappedValue: Wrapped?) {
+        self.wrappedValue = wrappedValue
+        isPresent = wrappedValue != nil
+    }
+
+    public init(_ value: Wrapped?, present: Bool) {
+        wrappedValue = value
+        isPresent = present
+    }
+
+    /// `$field`: the wrapper itself, to set a present `null`.
+    public var projectedValue: WireMaybe<Wrapped> {
+        get { self }
+        set { self = newValue }
+    }
+
+    public init(from decoder: Decoder) throws {
+        let single = try decoder.singleValueContainer()
+        wrappedValue = single.decodeNil() ? nil : try single.decode(Wrapped.self)
+        isPresent = true
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var single = encoder.singleValueContainer()
+        if let wrappedValue { try single.encode(wrappedValue) } else { try single.encodeNil() }
+    }
+}
+
+extension WireMaybe: Equatable where Wrapped: Equatable {}
+
+extension KeyedDecodingContainer {
+    /// A `@WireMaybe` field: missing is not present, `null` present with no value.
+    public func decode<T>(_ type: WireMaybe<T>.Type, forKey key: Key) throws -> WireMaybe<T> {
+        guard contains(key) else { return WireMaybe(nil, present: false) }
+        return WireMaybe(try decodeIfPresent(T.self, forKey: key), present: true)
+    }
+}
+
+extension KeyedEncodingContainer {
+    /// A `@WireMaybe` field not present is left out.
+    public mutating func encode<T>(_ value: WireMaybe<T>, forKey key: Key) throws {
+        guard value.isPresent else { return }
+        if let wrapped = value.wrappedValue { try encode(wrapped, forKey: key) } else { try encodeNil(forKey: key) }
+    }
+}
+
+/// A state-changing kind's arguments: the keys it takes, from its coding keys, which `RequestArguments` refuses any
+/// other key by (naming it, as before the types).
+public protocol WireArgs: Codable, Sendable {
+    associatedtype CodingKeys: CodingKey & CaseIterable
+}
+
+extension WireArgs {
+    public static var keys: Set<String> { Set(CodingKeys.allCases.map(\.stringValue)) }
 }
 
 extension NodeWire.Value {

@@ -103,22 +103,20 @@ enum LeadCommand {
                         + (made.files.count == 1 ? "1 file" : "\(made.files.count) files") + ")")
             }
         }
-        var args: [String: NodeWire.Value] = ["folder": .string(asked.folder), "takeHead": .bool(asked.takeHead), "replace": .bool(asked.replace)]
-        if asked.resume { args["resume"] = .bool(true) }
-        if let goal = asked.goal { args["goal"] = .string(goal) }
-        if firstCommit != nil { args["initialized"] = .bool(true) }
-        switch client.change("lead", args: args, action: action, typed: typed, timeout: 180) {
+        let args = WireKinds.Lead.Args(folder: asked.folder, goal: asked.goal, takeHead: asked.takeHead, replace: asked.replace,
+                                       resume: asked.resume ? true : nil, initialized: firstCommit != nil ? true : nil)
+        switch client.change(WireKinds.Lead.self, args, action: action, typed: typed, timeout: 180) {
         case .failure(let failure): return Say.failed(failure)
-        case .success(let reply):
-            guard reply.ok, let result = reply.result else { return Say.replyError(reply) }
-            let happened = result["happened"]?.string ?? "?"
-            let session = ConfigSeal.inert(result["session"]?.string ?? "", limit: 80)
+        case .refused(let reply): return Say.replyError(reply)
+        case .success(let result, _):
+            let happened = result.happened ?? "?"
+            let session = ConfigSeal.inert(result.session ?? "", limit: 80)
             switch happened {
-            case "started": Say.out("the lead started (session \(session)), running \(ConfigSeal.inert(result["program"]?.string ?? "?", limit: 400))")
+            case "started": Say.out("the lead started (session \(session)), running \(ConfigSeal.inert(result.program ?? "?", limit: 400))")
             case "shown": Say.out("the lead runs already (session \(session)): nothing was started")
             default: Say.out("the lead's start \(ConfigSeal.inert(happened, limit: 80))")
             }
-            for note in result["notes"]?.array ?? [] { Say.out("  " + ConfigSeal.inert(note.string ?? "", limit: .max)) }
+            for note in result.notes ?? [] { Say.out("  " + ConfigSeal.inert(note, limit: .max)) }
             return 0
         }
     }

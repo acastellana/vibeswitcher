@@ -6,43 +6,26 @@ import Foundation
 /// switch) had an option it gave silently dropped: a `lead --goal` an older server didn't read would start the lead
 /// with no goal. A key given as `null` is a key given. RequestKindsLint holds the table's kinds to `recorded`'s.
 enum RequestArguments {
-    static let taken: [String: Set<String>] = [
-        "start": [],
-        "stop": [],
-        // `initialized`: `lead --init` made the repository just now (its hooks baseline is seeded empty).
-        "lead": ["folder", "goal", "takeHead", "replace", "resume", "initialized"],
-        // A card's: its id and code (`cardRefusal`); an answer's text and the wording's version it answered.
-        "answer": ["card", "code", "text", "version"],
-        "hold": ["card", "code"],
-        // `batch`: an accept that `approve`'s batch makes (`ApproveRequest`).
-        "config.accept": ["card", "code", "batch"],
-        "base.accept": ["card", "code"],
-        "base.keep": ["card", "code"],
-        "hooks.install": ["agents"],
-        "hooks.remove": ["agents"],
-        "build.switch": ["commit"],
-        "web.open": ["tailnet"],
-        "web.revoke": [],
-        "tell": ["folder", "text"],
-        "send": ["session", "text", "images", "now"],
-        "session.new": ["folder", "preset", "digest", "agent", "model"],
-        "session.end": ["session"],
-        // Bound to the question shown: its wording and options, checked against the screen's.
-        "session.reply": ["session", "choice", "text", "question", "options"],
-        "set": ["key", "value", "folder"],
-        "push": ["folder", "request"],
-        "push.decline": ["folder", "request"],
-        "session.reopen": ["forget", "all", "sessions"],
-        "prompt-audit": ["folder", "do"],
-        "session.rename": ["session", "name"],
-        "session.pause": ["session", "for", "hours"],
-        "session.resume": ["session"],
-        "session.close-shells": ["sessions"],
-        "presets.edit": ["op", "name", "folder", "digest", "rename", "kind", "args", "env", "unset", "keepShell", "default"],
-        "approve": ["batch", "code"],
-        // A feature plugin turned on or off (`PluginRequests`).
-        "plugin.on": ["plugin"], "plugin.off": ["plugin"],
-    ]
+    /// Each recorded kind's keys: a typed kind's from its arguments' coding keys (`WireKinds.changes`, ChangeKinds.swift),
+    /// so the table and the type can't drift; a kind not typed yet, from `untyped`.
+    static let taken: [String: Set<String>] = untyped.merging(Dictionary(uniqueKeysWithValues: WireKinds.changes.map { ($0.kind, keys(of: $0)) })) { $1 }
+
+    /// The recorded kinds not typed yet, and the keys each takes.
+    static let untyped: [String: Set<String>] = [:]
+
+    private static func keys<K: WireChangeKind>(of _: K.Type) -> Set<String> { K.Args.keys }
+
+    /// `request`'s arguments read as its typed kind's (`WireKinds.changes`): `bad-args` naming the field when one is of
+    /// the wrong form, before the vault records anything; nil when they are of their forms, or the kind isn't typed.
+    static func formRefusal(_ request: NodeWire.Request) -> NodeWire.Reply? {
+        guard let type = WireKinds.changes.first(where: { $0.kind == request.kind }) else { return nil }
+        return formRefusal(request, as: type)
+    }
+
+    private static func formRefusal<K: WireChangeKind>(_ request: NodeWire.Request, as _: K.Type) -> NodeWire.Reply? {
+        if case .failure(let failure) = request.typedArgs(K.Args.self) { return .init(re: request.id, error: failure) }
+        return nil
+    }
 
     /// `request`'s `bad-args` refusal when it gives an argument its kind doesn't take; nil when it gives none (or its
     /// kind isn't in the table: a read's arguments aren't checked here).

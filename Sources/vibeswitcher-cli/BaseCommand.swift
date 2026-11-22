@@ -14,15 +14,15 @@ enum BaseCommand {
         case "show": return show(Array(arguments.dropFirst()))
         case "accept":
             guard arguments.count == 2 else { return Say.usage(usage) }
-            return CardCommand.act("base.accept", card: arguments[1], what: { card in
+            return CardCommand.act(WireKinds.BaseAccept.self, card: arguments[1], args: { _, id, code in .init(card: id, code: code) }, what: { card in
                 "This records \(ConfigSeal.inert(card["base"]?["branch"]?.string ?? "the base", limit: 80)) at "
                     + "\(ConfigSeal.inert(card["base"]?["to"]?.string ?? "?", limit: 80)) as the lead's base, the commits shown and no further."
             }) { result in
-                Say.out("recorded: \(ConfigSeal.inert(result["branch"]?.string ?? "", limit: 80)) at \(ConfigSeal.inert(result["head"]?.string ?? "", limit: 80))")
+                Say.out("recorded: \(ConfigSeal.inert(result.branch ?? "", limit: 80)) at \(ConfigSeal.inert(result.head ?? "", limit: 80))")
             }
         case "keep":
             guard arguments.count == 2 else { return Say.usage(usage) }
-            return CardCommand.act("base.keep", card: arguments[1], what: { _ in
+            return CardCommand.act(WireKinds.BaseKeep.self, card: arguments[1], args: { _, id, code in .init(card: id, code: code) }, what: { _ in
                 "This keeps the lead's merges refused for this move: you aren't asked again until the base moves again."
             }) { _ in Say.out("kept refused") }
         default: return Say.usage(usage)

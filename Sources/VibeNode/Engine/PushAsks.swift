@@ -49,7 +49,7 @@ extension LeadEngine {
     /// showed them: the vault hands that request over (nil when it's no longer open: replaced or settled), Push pushes
     /// exactly it (`LeadPush.settle`, off the engine's queue), and the lead is told the outcome. `then` hears on `queue`
     /// what came of it. From any thread.
-    public func settlePush(root: String, id: String, push: Bool, then: @escaping (Result<NodeWire.Value, CardFailure>) -> Void) {
+    public func settlePush(root: String, id: String, push: Bool, then: @escaping (Result<WireKinds.PushResult, CardFailure>) -> Void) {
         queue.async { [self] in
             guard link.state == .connected else {
                 return then(.failure(.refused("the server's link to its host isn't welcomed yet: try again")))
@@ -70,7 +70,7 @@ extension LeadEngine {
 
     /// What settling `root`'s request `id` came to. On `queue`.
     private func settled(root: String, id: String, request: LeadPush.Request?, outcome: LeadPush.Outcome,
-                         then: (Result<NodeWire.Value, CardFailure>) -> Void) {
+                         then: (Result<WireKinds.PushResult, CardFailure>) -> Void) {
         pushSettling.remove(root)
         let shown = request ?? pushAsked[root]
         if pushAsked[root]?.id == id { keepPush(nil, root: root) }
@@ -79,11 +79,8 @@ extension LeadEngine {
         note("lead: \(LeadMail.project(of: root))'s push request \(ConfigSeal.inert(id, limit: 40)): \(ConfigSeal.inert(said, limit: 400))")
         // The lead hears what came of it, from VibeSwitcher (the app's `onSettled`): only of a request the vault handed over.
         if let request { deliver(built: { PushText.scrub(LeadPush.message(Self.shown(request), outcome)) }, from: .system("push"), root: root, action: nil) }
-        then(.success(.object([
-            "request": .string(id), "settled": .string(Self.settledWord(outcome)),
-            "ok": .bool(outcome.pushed || outcome == .declined), "said": .string(said),
-            "target": shown.map { .string($0.target) } ?? .null,
-        ])))
+        then(.success(WireKinds.PushResult(request: id, settled: Self.settledWord(outcome), ok: outcome.pushed || outcome == .declined, said: said,
+                                           target: shown?.target)))
     }
 
     /// `request` as it may be shown: its URL without credentials (`PushText.displayURL`).

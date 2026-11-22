@@ -102,10 +102,11 @@ enum CardCommand {
     /// action id; the accepted request journaled (ids only). `say` prints the result.
     /// `refuse`, given the card found, says the exit status when the request can't go on (nil: it can), before the card
     /// is printed or the code asked.
-    static func act(_ kind: String, card wanted: String, refuse: (NodeWire.Value) -> Int32? = { _ in nil },
-                    args extra: (NodeWire.Value) -> [String: NodeWire.Value] = { _ in [:] },
-                    what: (NodeWire.Value) -> String,
-                    say: (NodeWire.Value) -> Void) -> Int32 {
+    /// `args`: the request's, from the card found, its id and its code.
+    static func act<K: WireChangeKind>(_ kind: K.Type, card wanted: String, refuse: (NodeWire.Value) -> Int32? = { _ in nil },
+                                       args: (_ card: NodeWire.Value, _ id: String, _ code: String) -> K.Args,
+                                       what: (NodeWire.Value) -> String,
+                                       say: (K.Result) -> Void) -> Int32 {
         let context = NodeContext.current()
         context.sayScratch()
         let client: NodeClient
@@ -126,13 +127,10 @@ enum CardCommand {
         // Under the Mac's rule the dialog carries this request's word (its action id's), not the card's code.
         let said = TypedWord.said(approval: client.approvalRule, action: action, code: code, what: what(card))
         guard case .success(let typed) = said else { return Say.refused(said.refusal) }
-        var args = extra(card)
-        args["card"] = .string(id)
-        args["code"] = .string(code)
-        switch client.change(kind, args: args, action: action, typed: typed, timeout: 120) {
+        switch client.change(K.self, args(card, id, code), action: action, typed: typed, timeout: 120) {
         case .failure(let failure): return Say.failed(failure)
-        case .success(let reply):
-            guard reply.ok, let result = reply.result else { return Say.replyError(reply) }
+        case .refused(let reply): return Say.replyError(reply)
+        case .success(let result, _):
             say(result)
             return 0
         }

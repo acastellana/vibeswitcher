@@ -21,15 +21,15 @@ enum ConfigCommand {
             return 0
         case "accept":
             guard arguments.count == 2 else { return Say.usage(usage) }
-            return CardCommand.act("config.accept", card: arguments[1], what: { card in
+            return CardCommand.act(WireKinds.ConfigAccept.self, card: arguments[1], args: { _, id, code in .init(card: id, code: code) }, what: { card in
                 "This accepts the agents' config card \(ConfigSeal.inert(card["id"]?.string ?? "", limit: 80)) showed, sealing exactly that, "
                     + "then records the floor and guard rails workflow.md proposes."
             }) { result in
                 // One line per path sealed, so a long accept reads as a list.
-                let sealed = result["sealed"]?.array?.compactMap(\.string) ?? []
+                let sealed = result.sealed ?? []
                 Say.out(sealed.isEmpty ? "accepted: nothing held" : "accepted \(sealed.count) held change\(sealed.count == 1 ? "" : "s"):")
                 sealed.forEach { Say.out("  " + ConfigSeal.inert($0, limit: 200)) }
-                Say.out(result["floorRecorded"]?.bool == true ? "  the review floor is recorded" : "  no review floor recorded")
+                Say.out(result.floorRecorded == true ? "  the review floor is recorded" : "  no review floor recorded")
             }
         default: return Say.usage(usage)
         }

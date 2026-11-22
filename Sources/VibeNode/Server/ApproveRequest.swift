@@ -210,10 +210,10 @@ extension Requests {
         }
         let batch = approveBatches.remove(at: index)
         note("approve \(id): \(batch.items.count) item\(batch.items.count == 1 ? "" : "s") under action \(action)")
-        var done: [NodeWire.Value] = []
+        var done: [WireKinds.Approve.Done] = []
         func next(_ at: Int) {
             guard at < batch.items.count else {
-                return reply(.init(re: request.id, result: .object(["done": .array(done), "refused": .null, "left": .array([])])))
+                return reply(.init(re: request.id, typed: WireKinds.Approve.Result(done: done, refused: nil, left: [])))
             }
             let item = batch.items[at]
             var args = item.args
@@ -223,17 +223,15 @@ extension Requests {
             let itemRequest = NodeWire.Request(id: "\(request.id).\(at)", kind: item.kind, args: args, action: itemAction)
             voiced(itemRequest, from: facts) { [weak self] answer in
                 guard let self else { return }
-                let shown: NodeWire.Value = .object(["kind": .string(item.kind), "subject": .string(item.subject), "action": .string(itemAction),
-                                                     "result": answer.result ?? .null])
+                let shown = WireKinds.Approve.Done(kind: item.kind, subject: item.subject, action: itemAction, result: answer.result)
                 guard answer.ok else {
-                    let left = batch.items.dropFirst(at + 1).map { NodeWire.Value.object(["kind": .string($0.kind), "subject": .string($0.subject)]) }
+                    let left = batch.items.dropFirst(at + 1).map { WireKinds.Approve.Left(kind: $0.kind, subject: $0.subject) }
                     self.note("approve \(id): stopped at \(item.kind) \(item.subject): \(answer.error?.message ?? "refused")")
-                    return reply(.init(re: request.id, result: .object([
-                        "done": .array(done),
-                        "refused": .object(["kind": .string(item.kind), "subject": .string(item.subject), "action": .string(itemAction),
-                                            "code": .string(answer.error?.code ?? "refused"), "message": .string(answer.error?.message ?? "")]),
-                        "left": .array(Array(left)),
-                    ])))
+                    return reply(.init(re: request.id, typed: WireKinds.Approve.Result(
+                        done: done,
+                        refused: .init(kind: item.kind, subject: item.subject, action: itemAction, code: answer.error?.code ?? "refused",
+                                       message: answer.error?.message ?? ""),
+                        left: Array(left))))
                 }
                 done.append(shown)
                 next(at + 1)

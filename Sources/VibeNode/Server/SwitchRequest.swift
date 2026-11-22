@@ -78,7 +78,7 @@ public struct SwitchRequest {
 
     /// What `run` answers: a result, or a refusal with its code.
     public enum Answer: Equatable, Sendable {
-        case done(NodeWire.Value)
+        case done(WireKinds.BuildSwitch.Result)
         case refused(NodeWire.Code, String)
     }
 
@@ -173,10 +173,9 @@ public struct SwitchRequest {
         let reply = { (answer: Answer) in
             guard let parked, !parked.isEmpty else { return plainReply(answer) }
             switch answer {
-            case .done(let value):
-                var fields = value.object ?? [:]
-                fields["parked"] = .array(parked.map(NodeWire.Value.string))
-                plainReply(.done(.object(fields)))
+            case .done(var result):
+                result.parked = parked
+                plainReply(.done(result))
             case .refused(let code, let why):
                 plainReply(.refused(code, why + " (parked meanwhile, idle since their last report: \(parked.joined(separator: ", ")))"))
             }
@@ -190,8 +189,7 @@ public struct SwitchRequest {
             case .badCommit:
                 reply(.refused(.badArgs, "build.switch needs commit, 40 lowercase hex digits"))
             case .already:
-                reply(.done(.object(["outcome": .string("already"), "commit": .string(commit),
-                                     "said": .string("\(commit) runs already: nothing to switch")])))
+                reply(.done(WireKinds.BuildSwitch.Result(outcome: "already", commit: commit, said: "\(commit) runs already: nothing to switch")))
             case .notInstalled:
                 reply(.refused(.refused, "\(commit) isn't installed in \(installRoot): install it with install-node.sh, then switch"))
             case .refusedWhileTeamsWork:
@@ -290,8 +288,11 @@ public struct SwitchRequest {
         let finish = { (outcome: Outcome) in
             note("build.switch: " + outcome.text)
             guard case .handedOver(let commit, let pid, let afterTheWait) = outcome else { return reply(.refused(.refused, outcome.text)) }
-            reply(.done(.object(["outcome": .string("handed-over"), "commit": .string(commit), "from": before.build.map(NodeWire.Value.string) ?? .null,
-                                 "pid": pid.map { .int(Int($0)) } ?? .null, "afterTheWait": .bool(afterTheWait), "said": .string(outcome.text)])))
+            var result = WireKinds.BuildSwitch.Result(outcome: "handed-over", commit: commit, said: outcome.text)
+            result.$from = WireMaybe(before.build, present: true)
+            result.$pid = WireMaybe(pid.map { Int($0) }, present: true)
+            result.afterTheWait = afterTheWait
+            reply(.done(result))
         }
         HandoverCall(dialer: dialer, executable: executable, timing: timing, note: note).start { result in
             link.queue.async {

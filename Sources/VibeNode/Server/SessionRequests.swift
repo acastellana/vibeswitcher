@@ -188,11 +188,9 @@ extension Requests {
                         switch result {
                         case .success(let session):
                             note("session.new: \(presetName == nil ? kind : "a preset's \(kind)") started in session \(session.id.uuidString.prefix(8)) (\(session.tty))")
-                            reply(.init(re: request.id, result: .object([
-                                "session": .string(NodeIds.session(host: session.id)), "terminal": .string(session.tty),
-                                "agent": .string(kind), "folder": .string(standard), "model": model.map(NodeWire.Value.string) ?? .null,
-                                "preset": presetName.map { _ in .string(label) } ?? .null,
-                            ])))
+                            reply(.init(re: request.id, typed: WireKinds.SessionNew.Result(
+                                session: NodeIds.session(host: session.id), terminal: session.tty, agent: kind, folder: standard, model: model,
+                                preset: presetName.map { _ in label })))
                         case .failure(let failure):
                             reply(.init(re: request.id, error: .init(.refused, "the session host didn't start it: \(failure.message)")))
                         }
@@ -288,8 +286,7 @@ extension Requests {
             guard !waiting.answered else { return }
             waiting.answered = true
             waiting.watch = nil
-            reply(.init(re: request.id, result: .object(["session": .string(NodeIds.session(host: session.id)),
-                                                         "terminal": .string(session.tty), "ended": .bool(ended)])))
+            reply(.init(re: request.id, typed: WireKinds.SessionEnd.Result(session: NodeIds.session(host: session.id), terminal: session.tty, ended: ended)))
         }
         let gone = { [link] in !link.sessions.contains { $0.id == session.id && $0.isLive } }
         waiting.watch = link.changes.subscribe(on: queue) { _ in if gone() { finish(true) } }
@@ -387,10 +384,8 @@ extension Requests {
                 }, confirmed: { typed in
                     note("session.reply to session \(short): \(typed ? "option \(choice) typed" : "not typed: \(stopped.get() ?? "the host didn't take it")")")
                     guard typed else { return refuse(stopped.get() ?? "the host didn't take all of the keys: the answer may not have gone in") }
-                    reply(.init(re: request.id, result: .object([
-                        "session": .string(NodeIds.session(host: session.id)), "terminal": .string(session.tty),
-                        "choice": .int(choice), "option": .string(menu.options[index]), "question": .string(menu.question),
-                    ])))
+                    reply(.init(re: request.id, typed: WireKinds.SessionReply.Result(
+                        session: NodeIds.session(host: session.id), terminal: session.tty, choice: choice, option: menu.options[index], question: menu.question)))
                 })
             }
         }

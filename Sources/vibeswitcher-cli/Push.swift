@@ -38,14 +38,16 @@ enum PushCommand {
         let action = UUID().uuidString.lowercased()
         let said = TypedWord.said(approval: client.approvalRule, action: action, what: PushText.what(push, root: root, approve: approve))
         guard case .success(let typed) = said else { return Say.refused(said.refusal) }
-        let kind = approve ? "push" : "push.decline"
-        switch client.change(kind, args: ["folder": .string(root), "request": .string(id)], action: action, typed: typed, timeout: LeadPush.timeout + 60) {
+        let args = WireKinds.PushArgs(folder: root, request: id)
+        let sent = approve ? client.change(WireKinds.Push.self, args, action: action, typed: typed, timeout: LeadPush.timeout + 60)
+            : client.change(WireKinds.PushDecline.self, args, action: action, typed: typed, timeout: LeadPush.timeout + 60)
+        switch sent {
         case .failure(let failure): return Say.failed(failure)
-        case .success(let reply):
-            guard reply.ok, let result = reply.result else { return Say.replyError(reply) }
-            (result["said"]?.string ?? "settled").split(separator: "\n", omittingEmptySubsequences: false)
+        case .refused(let reply): return Say.replyError(reply)
+        case .success(let result, _):
+            (result.said ?? "settled").split(separator: "\n", omittingEmptySubsequences: false)
                 .forEach { Say.out(ConfigSeal.inert(PushText.scrub(String($0)), limit: 2000)) }
-            return result["ok"]?.bool == true ? 0 : 1
+            return result.ok == true ? 0 : 1
         }
     }
 }

@@ -358,7 +358,7 @@ public final class Requests: @unchecked Sendable {
         guard !records || request.action.map({ UUID(uuidString: $0) != nil }) == true else {
             return reply(.init(re: request.id, error: .init(.badArgs, "\(request.kind) needs an action id (a UUID)")))
         }
-        if let refusal = RequestArguments.refusal(request) { return reply(refusal) }
+        if let refusal = RequestArguments.refusal(request) ?? RequestArguments.formRefusal(request) { return reply(refusal) }
         guard !stopping else { return reply(.init(re: request.id, error: .init(.stopping, "the node is stopping"))) }
         // Before the host's welcome (and while the link reconnects) its session list isn't known: a state change
         // judged on it could be wrong (a `stop` would find nothing live). The command line asks again.
@@ -816,18 +816,17 @@ public final class Requests: @unchecked Sendable {
             // While the host runs another build than this server, a program that isn't its `binaries` entry is the
             // build switch not finished yet (the server restarts onto it once idle), said so.
             (hooks.hostBuild, hooks.serverBuild) = (hostBuild, commit == "unknown" ? nil : commit)
-            let configs = NodeWire.Value.array(agents.map { .string(hooks.configPath($0)) })
+            let configs = agents.map { hooks.configPath($0) }
             if install {
                 switch hooks.install(agents: agents) {
                 case .failure(let refusal): return .init(re: request.id, error: .init(.refused, refusal.text))
                 case .success(let installed):
-                    return .init(re: request.id, result: .object(["programs": .array(installed.programs.map(NodeWire.Value.string)),
-                                                                 "configs": .array(installed.configs.map(NodeWire.Value.string))]))
+                    return .init(re: request.id, typed: WireKinds.HooksInstall.Result(programs: installed.programs, configs: installed.configs))
                 }
             }
             switch hooks.remove(agents: agents) {
             case .failure(let refusal): return .init(re: request.id, error: .init(.refused, refusal.text))
-            case .success: return .init(re: request.id, result: .object(["configs": configs]))
+            case .success: return .init(re: request.id, typed: WireKinds.HooksRemove.Result(configs: configs))
             }
         }
         let note = self.note
@@ -895,7 +894,7 @@ public final class Requests: @unchecked Sendable {
         SwitchRequest(link: link, installRoot: installRoot, timing: switchTiming, held: held, park: park,
                       describe: { [weak self] in self?.switchDoing($0) }, note: note).run(commit: commit) { [weak self] answer in
             switch answer {
-            case .done(let value): reply(.init(re: request.id, result: value))
+            case .done(let result): reply(.init(re: request.id, typed: result))
             case .refused(let code, let why): reply(.init(re: request.id, error: .init(code, why)))
             }
             self?.refreshNotes()
@@ -906,10 +905,8 @@ public final class Requests: @unchecked Sendable {
 
     /// The node runs: its start time. Starting a stopped node is the bootstrap path's step 8's, without the server.
     private func start(_ request: NodeWire.Request, reply: @escaping (NodeWire.Reply) -> Void) {
-        reply(.init(re: request.id, result: .object([
-            "running": .bool(true), "serverStartedAt": .date(startedAt),
-            "hostStartedAt": link.hostStartedAt.map(NodeWire.Value.date) ?? .null, "epoch": .string(epoch),
-        ])))
+        reply(.init(re: request.id, typed: WireKinds.Start.Result(running: true, serverStartedAt: NodeWire.dateText(startedAt),
+                                                                   hostStartedAt: link.hostStartedAt.map(NodeWire.dateText), epoch: epoch)))
     }
 
     // MARK: stop
@@ -976,12 +973,8 @@ public final class Requests: @unchecked Sendable {
     /// A start's outcome as `lead`'s reply.
     static func reply(_ id: String, folder: String, _ outcome: LeadEngine.StartOutcome) -> NodeWire.Reply {
         func result(_ happened: String, session: UUID?, program: String?, notes: [String]) -> NodeWire.Reply {
-            .init(re: id, result: .object([
-                "happened": .string(happened),
-                "session": session.map { .string(NodeIds.session(host: $0)) } ?? .null,
-                "program": program.map(NodeWire.Value.string) ?? .null,
-                "notes": .array(notes.map(NodeWire.Value.string)),
-            ]))
+            .init(re: id, typed: WireKinds.Lead.Result(happened: happened, session: session.map { NodeIds.session(host: $0) }, program: program,
+                                                       notes: notes))
         }
         switch outcome {
         case .started(let session, let program, let notes): return result("started", session: session, program: program, notes: notes)
@@ -1017,7 +1010,7 @@ public final class Requests: @unchecked Sendable {
                     self.note("stop: the host refused to shut down: \(why)")
                     return reply(.init(re: request.id, error: .init(.refused, "\(ended) sessions ended, but the host refused to shut down: \(ConfigSeal.inert(why, limit: .max))")))
                 }
-                reply(.init(re: request.id, result: .object(["sessionsEnded": .int(ended), "host": .string("shutting down")])))
+                reply(.init(re: request.id, typed: WireKinds.Stop.Result(sessionsEnded: ended, host: "shutting down")))
                 self.note("stop: the host accepted; it ends this server")
             }
         }
