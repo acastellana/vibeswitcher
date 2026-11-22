@@ -92,6 +92,8 @@ extension LeadEngine {
         guard let plugin = plugins.plugin(id) else {
             return then(.failure(.gone("no plugin \(ConfigSeal.inert(id, limit: 40)) in this build: `vibeswitcher plugin list` lists them")))
         }
+        // An external plugin whose program ended starts afresh when the user turns it on again.
+        if on, let external = plugin as? ExternalPlugin, external.held == nil { external.ended = nil }
         if on, let why = plugin.availability() { return then(.failure(.refused("\(plugin.info.title) can't run on this node: \(why)"))) }
         let client = link.vaultV2
         let open = cards.list().filter { $0.plugin?.plugin == id }.count

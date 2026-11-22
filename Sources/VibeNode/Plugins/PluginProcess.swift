@@ -114,7 +114,7 @@ final class PluginProcess: @unchecked Sendable {
     private func heard(_ line: Data) {
         guard ended == nil else { return }
         guard let message = try? JSONSerialization.jsonObject(with: line) as? Message else { return breach("it wrote a line that isn't a JSON object") }
-        guard let flight = inFlight, let id = message["id"] as? Int, id == flight.id, !(message["id"] is Bool) else {
+        guard let flight = inFlight, let id = message["id"] as? Int, id == flight.id else {
             return breach("it answered no question, or out of order")
         }
         flight.timer.cancel()

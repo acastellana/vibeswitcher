@@ -1,0 +1,13 @@
+{
+  "protocol": 1,
+  "id": "probe",
+  "version": "1.0.0",
+  "title": "Probe",
+  "summary": "A test plugin that speaks protocol v1, some of its answers hostile on purpose.",
+  "program": "plugin.py",
+  "commands": [{"name": "vs-probe", "about": "asks for a probe"}],
+  "settings": [{"key": "depth", "title": "Probe depth", "about": "How deep a probe goes.", "form": "count", "defaultValue": "1"}],
+  "brief": ["Ask for a probe with vs-probe."],
+  "life": 1800,
+  "page": true
+}

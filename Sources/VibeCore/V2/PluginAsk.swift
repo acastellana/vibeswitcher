@@ -22,20 +22,21 @@ public enum PluginAsk {
     }
 
     /// The folder a plugin's requests are filed in.
-    public static func folder(_ plugin: String) -> URL {
-        VibePaths.root.appendingPathComponent("plugin-requests/\(plugin)", isDirectory: true)
+    public static func folder(_ plugin: String, root: URL = VibePaths.root) -> URL {
+        root.appendingPathComponent("plugin-requests/\(plugin)", isDirectory: true)
     }
 
     /// `vs-ask …` as the tool server runs it: what to print and the exit status. `ask`: the node's server's
     /// `plugin.file` (a JSON request's args in, its result or why not out).
-    public static func run(_ arguments: [String], cwd: String, vault: LeadVault, ask: ([String: Any]) -> Result<[String: Any], Refusal> = askServer)
+    public static func run(_ arguments: [String], cwd: String, vault: LeadVault, root: URL = VibePaths.root,
+                           ask: ([String: Any]) -> Result<[String: Any], Refusal> = askServer)
         -> (status: Int32, output: String, error: String) {
         guard let plugin = arguments.first, !["help", "--help", "-h"].contains(plugin) else {
             return arguments.isEmpty ? (2, "", usage) : (0, usage, "")
         }
         guard arguments.count >= 3, arguments[1] == "--", LeadVaultV2.pluginID(plugin) else { return (2, "", usage) }
         let words = Array(arguments.dropFirst(2))
-        if let refusal = PluginGate.refusal(plugin, command: "vs-ask \(plugin)") { return (1, "", refusal) }
+        if let refusal = PluginGate.refusal(plugin, command: "vs-ask \(plugin)", at: root.appendingPathComponent("plugins.json")) { return (1, "", refusal) }
         do {
             let session: String
             do { session = try vault.walletSession() } catch {
@@ -54,7 +55,7 @@ public enum PluginAsk {
             do { seal = try vault.sealWallet(session: session.lowercased(), digest: digest) } catch {
                 throw Refusal("VibeSwitcher's session host didn't stamp the request (\(error))")
             }
-            let into = folder(plugin)
+            let into = folder(plugin, root: root)
             try VibePaths.ensurePrivate(into)
             try VibePaths.writePrivate(JSONEncoder().encode(WalletStamp(session: session.lowercased(), digest: digest, seal: seal)),
                                        to: into.appendingPathComponent("\(id).seal"))

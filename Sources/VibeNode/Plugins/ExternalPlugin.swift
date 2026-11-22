@@ -166,7 +166,9 @@ final class ExternalPlugin: FeaturePlugin {
         desk.stamped({ try PluginAskEnvelope.decode($0, plugin: id) }) { [weak self] asks in
             guard let self else { return done() }
             let now = desk.now
-            let fresh = asks.filter { self.answers[$0.id] == nil && desk.card(request: $0.id) == nil && !self.asking.contains($0.id) && $0.expires > now }
+            let fresh = asks.filter {
+                self.answers[$0.id] == nil && desk.card(request: $0.id) == nil && !desk.isSettled($0.id) && !self.asking.contains($0.id) && $0.expires > now
+            }
             guard !fresh.isEmpty else { return done() }
             self.ensureStarted(desk) { started in
                 guard case .success(let process) = started else { return done() }
@@ -187,7 +189,14 @@ final class ExternalPlugin: FeaturePlugin {
     }
 
     private func drawCard(_ ask: PluginAskEnvelope, _ answer: Result<PluginProcess.Message, PluginProcess.Breach>, desk: PluginDesk) {
-        guard case .success(let message) = answer else { return }
+        guard case .success(let message) = answer else {
+            // Asked when its program broke the protocol (or ended): this request is settled, never asked again, its asker told.
+            answers[ask.id] = "failed"
+            desk.settle(ask.id)
+            desk.tell("[VibeSwitcher] Your \(info.title) request \(ask.id) wasn't shown: the plugin's program ended while it was asked about it.",
+                      from: "from VibeSwitcher", request: ask.id) { _ in }
+            return
+        }
         if let refuse = message["refuse"] as? String, message.count == 1 {
             answers[ask.id] = "refused"
             desk.settle(ask.id)
@@ -196,10 +205,17 @@ final class ExternalPlugin: FeaturePlugin {
                       from: "from VibeSwitcher", request: ask.id) { _ in }
             return
         }
-        guard let object = message["card"] as? [String: Any], message.count == 1 else { return misshapen("a card is {card} or {refuse}", desk: desk) }
+        guard let object = message["card"] as? [String: Any], message.count == 1 else {
+            answers[ask.id] = "failed"
+            desk.settle(ask.id)
+            return misshapen("a card is {card} or {refuse}", desk: desk)
+        }
         let card: PluginCard
         switch Self.card(object, ask: ask, manifest: manifest, folder: desk.live[ask.session]?.cwd) {
-        case .failure(let why): return misshapen(why.description, desk: desk)
+        case .failure(let why):
+            answers[ask.id] = "failed"
+            desk.settle(ask.id)
+            return misshapen(why.description, desk: desk)
         case .success(let made): card = made
         }
         switch desk.draw(card, root: desk.live[ask.session]?.cwd ?? desk.root.path, at: ask.created) {
@@ -380,7 +396,6 @@ final class ExternalPlugin: FeaturePlugin {
     func turnedOff(_ desk: PluginDesk) -> [(session: UUID, text: String)] {
         process?.stop()
         process = nil
-        ended = nil
         return []
     }
 

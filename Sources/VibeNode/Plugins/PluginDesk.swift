@@ -295,6 +295,9 @@ public struct PluginDesk {
         }
     }
 
+    /// Whether `request` was settled (here or by a server before this one): it won't be drawn, so it isn't asked about.
+    public func isSettled(_ request: String) -> Bool { engine.pluginSettled.contains(PluginKey(plugin: id, request: request).name) }
+
     /// Withdraws every open card of this plugin, telling their askers (its program broke the protocol, say).
     public func withdrawAll() { engine.withdraw(plugin) }
 
