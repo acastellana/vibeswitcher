@@ -97,9 +97,10 @@ struct RecordedRetryTests {
     }
 
     /// Done: the act's reply was given, so its outcome was in the record first; the server killed, and the retry on the
-    /// next is answered with the recorded result, not done again.
+    /// next is answered from the record (done; `set` keeps no result), not done again; asked with other arguments, given
+    /// nothing.
     @Test(NodeTraits.linuxOnly)
-    func aRetryAfterTheServerWasKilledIsAnsweredWithTheRecordedResult() async throws {
+    func aRetryAfterTheServerWasKilledIsAnsweredFromTheRecord() async throws {
         let node = try await ScratchNode(scratch, hostArguments: ["--server-arg", ServerArguments.testStallFlag + "600"])
         defer { node.stop() }
         let request = NodeWire.Request(id: "first", kind: "set", args: ["key": .string("node_max_sessions"), "value": .string("7")],
@@ -107,9 +108,27 @@ struct RecordedRetryTests {
         let first = try await Self.voiced(node, request)
         #expect(first?.ok == true, "\(String(describing: first))\n\(node.said)")
         try await Self.killServer(node)
-        let again = try await Self.voiced(node, request)
-        #expect(again?.ok == true && again?.result == first?.result, "\(String(describing: again))\n\(node.said)")
+        // `set` keeps no result (a value can be a secret): the retry is told it was done, and given nothing of it.
+        let again = try #require(try await Self.voiced(node, request), "\(node.said)")
+        #expect(!again.ok && again.result == nil && again.error?.message.contains("was done at") == true, "\(again)")
         #expect(node.said.contains("answered from its record (done)"), "\(node.said)")
+        // The same action id with other arguments: nothing of the record.
+        var other = request
+        other.args?["value"] = .string("9")
+        let forged = try #require(try await Self.voiced(node, other), "\(node.said)")
+        let action = try #require(request.action)
+        #expect(!forged.ok && forged.error?.message == Requests.otherArguments(action: action), "\(forged)")
+    }
+
+    /// What the record keeps of a reply: a result only for a kind whose rule says it holds no secret.
+    @Test func aResultIsRecordedOnlyForAKindWhoseRuleKeepsIt() {
+        let link = NodeWire.Reply(re: "r", result: .object(["url": .string("http://127.0.0.1:1/#pair=SECRET")]))
+        #expect(Requests.outcome(of: link, kind: "web.open").note == nil)
+        #expect(Requests.outcome(of: link, kind: "answer").note == nil)
+        #expect(Requests.outcome(of: link, kind: "no-such-kind").note == nil, "a kind with no rule keeps none")
+        #expect(Requests.outcome(of: link, kind: "prompt-audit").note?.contains("SECRET") == true)
+        let done = Requests.answer(.init(id: "x", kind: "web.open"), action: "a", outcome: Requests.outcome(of: link, kind: "web.open"))
+        #expect(!done.ok && done.error?.message.contains("SECRET") == false && done.error?.message.contains("was done at") == true, "\(done)")
     }
 
     /// Failed: the retry on the next server is told the failure, under its code, and that a new attempt is allowed.
@@ -151,13 +170,27 @@ struct RecordedRetryTests {
         let setAgain = try #require(try await Self.voiced(node, set), "\(node.said)")
         #expect(setAgain.ok && setAgain.result?["value"]?.string == "5", "\(setAgain)")
         #expect(node.said.contains("with no outcome recorded: done again"), "\(node.said)")
+        // Begun, then the same setting changed by a later action: a retry would undo that, so it isn't done.
+        let toggle = NodeWire.Request(id: "first", kind: "set", args: ["key": .string("node_max_sessions"), "value": .string("3")],
+                                      action: UUID().uuidString.lowercased())
+        _ = FileManager.default.createFile(atPath: node.root.appendingPathComponent("test-hold-act").path, contents: nil)
+        let heldToggle = Task { try await Self.voiced(node, toggle) }
+        #expect(await eventually(timeout: 120) { node.said.contains("set (action \(toggle.action ?? "-")) recorded, and held for good") }, "\(node.said)")
+        try await Self.killServer(node)
+        #expect(try await heldToggle.value == nil)
+        let later = NodeWire.Request(id: "later", kind: "set", args: ["key": .string("node_max_sessions"), "value": .string("6")],
+                                     action: UUID().uuidString.lowercased())
+        #expect(try await Self.voiced(node, later)?.ok == true, "\(node.said)")
+        let undone = try #require(try await Self.voiced(node, toggle), "\(node.said)")
+        #expect(!undone.ok && undone.error?.message.contains("a later action changed the same thing") == true, "\(undone)")
         let sendAgain = try #require(try await Self.voiced(node, send), "\(node.said)")
         let message = sendAgain.error?.message ?? ""
         #expect(!sendAgain.ok && message.contains("began at") && message.contains("isn't known") && message.contains("the session's screen shows"),
                 "\(sendAgain)")
-        // Done again once, so its outcome is recorded now: a third ask is answered from the record, the same.
+        // Done again once, so its outcome is recorded now: a third ask, on the server after one more kill, is answered
+        // from the record (done, `set` keeping no result), not done again.
         let third = try #require(try await Self.voiced(node, set), "\(node.said)")
-        #expect(third.ok && third.result == setAgain.result, "\(third)")
+        #expect(!third.ok && third.error?.message.contains("was done at") == true, "\(third)")
     }
 
     /// Kills the node's server and waits until the host's next one answers its socket.
