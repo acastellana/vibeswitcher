@@ -88,19 +88,14 @@ extension LeadEngine {
             let id = plugin.info.id
             if plugins.isOn(id) {
                 waiting += 1
-                // One look at a time: a look under way is waited for, not started again.
+                // One look at a time: asked for while one is under way, one more look follows it (the one under way may
+                // have read the folder before what this is for was filed), and this waits for that one.
                 if pluginLooking[id] != nil {
-                    pluginLooking[id]?.append(finish)
+                    pluginLookAgain[id, default: []].append(finish)
                     continue
                 }
                 pluginLooking[id] = [finish]
-                plugin.look(desk(plugin)) { [weak self] in
-                    self?.queue.async {
-                        guard let self else { return }
-                        let waiters = self.pluginLooking.removeValue(forKey: id) ?? []
-                        waiters.forEach { $0() }
-                    }
-                }
+                startLook(plugin)
             } else if let relative = plugin.info.folder {
                 waiting += 1
                 let (note, root) = (self.note, self.root)
@@ -112,6 +107,26 @@ extension LeadEngine {
             }
         }
         finish()
+    }
+
+    /// Runs `plugin`'s look; when it ends, its waiters are told, and a look asked for meanwhile starts. On `queue`.
+    private func startLook(_ plugin: FeaturePlugin) {
+        let id = plugin.info.id
+        plugin.look(desk(plugin)) { [weak self] in
+            self?.queue.async {
+                guard let self else { return }
+                let waiters = self.pluginLooking.removeValue(forKey: id) ?? []
+                if let again = self.pluginLookAgain.removeValue(forKey: id) {
+                    if self.plugins.isOn(id) {
+                        self.pluginLooking[id] = again
+                        self.startLook(plugin)
+                    } else {
+                        again.forEach { $0() }
+                    }
+                }
+                waiters.forEach { $0() }
+            }
+        }
     }
 
     /// Removes what a plugin's command files in its folder (`relative` under `root`: `<id>.json`, `<id>.seal`,

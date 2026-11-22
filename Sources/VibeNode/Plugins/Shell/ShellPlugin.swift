@@ -66,7 +66,8 @@ public final class ShellPlugin: FeaturePlugin {
                 }
                 desk.queue.async {
                     self?.draw(requests, answeredOnDisk: answered, desk: desk)
-                    done()
+                    // Done once what the look wrote (answer files, on the same serial work) is written.
+                    desk.work.async { desk.queue.async(execute: done) }
                 }
             }
         }

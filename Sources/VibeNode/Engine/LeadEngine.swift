@@ -315,6 +315,9 @@ public final class LeadEngine: @unchecked Sendable {
     var pluginTrusted: [String: [String: WalletStamp]] = [:]
     /// Each plugin's look under way, and who waits for its end.
     var pluginLooking: [String: [() -> Void]] = [:]
+    /// Each plugin's look asked for while one was under way (which may have read its folder before what this one is
+    /// for was filed): one more look, after it, and who waits for that one.
+    var pluginLookAgain: [String: [() -> Void]] = [:]
     var pluginAsking = false
     var pluginTimer: Subscription?
     var pluginNow: () -> Date = Date.init
