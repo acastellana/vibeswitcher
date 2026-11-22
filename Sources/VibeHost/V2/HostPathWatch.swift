@@ -269,7 +269,12 @@ final class HostPathWatch {
 
     /// `verifiedIdentity(of:listener:)` given the kernel's answer for the path (`Platform.Sockets.boundFile(of:at:)`),
     /// so a test can give any.
-    static func verifiedIdentity(of path: String, kernel: Platform.Sockets.BoundFileAtPath) -> FileIdentity? {
+    ///
+    /// `leads`: `leadsHere`; when it can't say (no descriptor to connect with, out of descriptors), the file named at the
+    /// path, the same before and after, is taken as it was recorded: "couldn't check" is "can't say now", never "not
+    /// ours", or the host would unlink and bind again over its own socket (the review of the runtime hardening).
+    static func verifiedIdentity(of path: String, kernel: Platform.Sockets.BoundFileAtPath,
+                                 leads: (String) -> Bool? = leadsHere) -> FileIdentity? {
         var matched: FileIdentity?
         switch kernel {
         case .bound(let device, let inode): return FileIdentity(device: device, inode: inode)
@@ -281,7 +286,8 @@ final class HostPathWatch {
         guard lstat(path, &info) == 0, info.st_mode & S_IFMT == S_IFSOCK else { return nil }
         let before = FileIdentity(info)
         if let matched, matched != before { return nil }
-        guard leadsHere(path) else { return nil }
+        guard let led = leads(path) else { return identity(atPath: path) == before ? before : nil }
+        guard led else { return nil }
         return identity(atPath: path) == before ? before : nil
     }
 
@@ -289,11 +295,12 @@ final class HostPathWatch {
     /// process (`verifiedIdentity`'s fallback): the connecting end's `SO_PEERCRED` names the process that listened. The
     /// connection is closed at once; the host's listener, when it was that, accepts it and sees it end. A listener this
     /// process has just closed still counts while another descriptor table holds it (a spawn in flight, until its exec
-    /// closes the copy); the next housekeeping's check asks again.
-    static func leadsHere(_ path: String) -> Bool {
+    /// closes the copy); the next housekeeping's check asks again. Nil: it can't say, no socket could be made to ask
+    /// with (out of descriptors).
+    static func leadsHere(_ path: String) -> Bool? {
         guard var address = Platform.Sockets.unixAddress(path) else { return false }
         let fd = Platform.Sockets.makeSocket(type: Platform.Sockets.stream)
-        guard fd >= 0 else { return false }
+        guard fd >= 0 else { return nil }
         defer { Sys.close(fd) }
         _ = fcntl(fd, F_SETFL, fcntl(fd, F_GETFL) | O_NONBLOCK)
         let connected = withUnsafePointer(to: &address) {

@@ -65,9 +65,10 @@ public enum UnixSocket {
     /// the system takes (SOMAXCONN): a burst of callers (leads' tool servers, the app, hooks) each connecting at once
     /// would otherwise be refused once a short queue fills, before the host's next accept.
     public static func listen(path: String) throws -> Int32 {
-        unlink(path)
+        // The socket first: one that can't be made (out of descriptors) leaves the path as it was.
         let fd = Platform.Sockets.makeSocket(type: Platform.Sockets.stream)
         guard fd >= 0 else { throw Failure.system("socket", errno) }
+        unlink(path)
         do {
             let address = try address(path)
             if let failed = Platform.Sockets.bindOwnerOnly(fd, to: address, path: path, mode: 0o600) {
