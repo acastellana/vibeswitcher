@@ -2,7 +2,7 @@ import Foundation
 import VibeCore
 
 /// The node's Run-card shell tidier (the app's `ShellTidier`, the feature review of 2026-11-22): a shell an agent's Run
-/// card opened (`ShellCards.swift`, `ShellTidy.opened`) stays open as an interactive shell when its command ends, so
+/// card opened (the shell plugin, `Plugins/Shell/ShellPlugin.swift`; `ShellTidy.opened`) stays open as an interactive shell when its command ends, so
 /// every request left a session. Every `shellTidyEvery` s the engine ends, as `end` does, each Run-card shell of the
 /// node's whose command exited 0 at least `ShellTidy.idleFor` ago, that is back at its prompt, that nothing was typed
 /// into since its command ended, and whose command left nothing running (`ShellTidy.due`, the app's rules). A failed

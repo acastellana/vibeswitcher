@@ -299,25 +299,14 @@ public final class LeadEngine: @unchecked Sendable {
     var policyWatch: LeadWitness.PolicyWatch?
     /// The health digest (`NodeHealth`): each refresh's time told to it. None in a test's engine unless given.
     public var health: NodeHealth?
-    // Shell requests (`ShellCards.swift`), on `queue`: the stamps the host vouched for (asked once each), each request's
-    // card, the messages under way, a look under way, the 15 s look and the clock. The folder and the host's seal are
-    // read on `shellWork`, one step at a time.
-    var shellTrusted: [String: WalletStamp] = [:]
-    /// What became of each request, the engine's own (never read from the folder's answer files).
-    var shellAnswers: [String: ShellAsk.Answer] = [:]
-    var shellCards: [String: String] = [:]
-    var shellTelling: Set<String> = []
-    var shellTellingEnd: Set<String> = []
-    var shellLooking = false
-    var shellTimer: Subscription?
-    var shellNow: () -> Date = Date.init
     // The Run-card shell tidier (`ShellTidying.swift`), on `queue`: the shells typed into since their command ended, read
-    // once; a look under way; its 30 s look.
+    // once; a look under way; its 30 s look; the clock. Its file is read and written on `shellWork`.
     var shellUsed: Set<UUID> = []
     var shellUsedLoaded = false
     var shellTidying = false
     var shellTidyTimer: Subscription?
-    let shellWork = DispatchQueue(label: "vibenode.lead-engine.shell-requests", qos: .userInitiated)
+    var shellNow: () -> Date = Date.init
+    let shellWork = DispatchQueue(label: "vibenode.lead-engine.shell-tidying", qos: .userInitiated)
     // Feature plugins (`Plugins/`, `PluginEngine.swift`), on `queue`: the registry and what the vault keeps of on and
     // off, each plugin request's card, the stamps the host vouched for (per plugin), the looks under way, the vault asked,
     // the 15 s look, the clock; the folders read on `pluginWork`.

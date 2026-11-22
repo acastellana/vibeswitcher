@@ -164,7 +164,7 @@ extension Requests {
             return reply(.init(re: request.id, error: .init(.refused, "\(items.count) accepts wait, more than one code may cover (\(Self.approveMost)): "
                 + "settle them per folder (vibeswitcher config held FOLDER, base show FOLDER, hooks install), or narrow with --only")))
         }
-        let decide = engine.cards.list().filter { $0.isOpen && [.question, .approval, .shell, .plugin].contains($0.kind) }.map(\.value)
+        let decide = engine.cards.list().filter { $0.isOpen && [.question, .approval, .plugin].contains($0.kind) }.map(\.value)
         let pushes = engine.leads.leads.values.compactMap { lead in lead.push.map { _ in NodeWire.Value.string(lead.root) } }
         var result: [String: NodeWire.Value] = ["items": .array(items.map { item in
             .object(["kind": .string(item.kind), "subject": .string(item.subject), "card": item.card ?? .null,

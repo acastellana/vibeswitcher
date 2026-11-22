@@ -3,7 +3,7 @@ import VibeCore
 import VibeNode
 
 /// `vibeswitcher answer CARD TEXT` and `vibeswitcher hold CARD` (the engine plan's E6): the user's answer to a lead's
-/// question or approval (or `run`/`decline` on a shell request's card, `ShellCards.swift`), and a hold of a question's timer, each in the user's voice after the card's code is typed
+/// question or approval (or one of a feature plugin's words on its card: `run`/`decline` on a shell request's), and a hold of a question's timer, each in the user's voice after the card's code is typed
 /// (EN-D5). The server records it in the host's vault before the lead is told or a merge is approved.
 ///
 /// `vibeswitcher answer CARD` with no text takes the answer a web page drafted on the card (the live plan's F3, LW-D6):
@@ -12,7 +12,7 @@ import VibeNode
 /// with the request's text, never with whatever the card holds by then. A page only leaves the draft; this is the
 /// user's voice, as every answer is.
 enum AnswerCommand {
-    static let usage = "usage: vibeswitcher answer CARD [TEXT]  (no TEXT: the answer drafted on the card's web page; a shell request's card: run or decline)"
+    static let usage = "usage: vibeswitcher answer CARD [TEXT]  (no TEXT: the answer drafted on the card's web page; a plugin's card: one of its words, as it lists them)"
 
     static func run(_ arguments: [String]) -> Int32 {
         if arguments.count == 1 { return takeDraft(arguments[0]) }
@@ -26,13 +26,11 @@ enum AnswerCommand {
                 guard !words.contains(word) else { return nil }
                 return Say.usage("usage: vibeswitcher answer CARD \(words.map { ConfigSeal.inert($0, limit: 20) }.joined(separator: "|"))  (a \(ConfigSeal.inert(plugin["noun"]?.string ?? "plugin", limit: 40))'s card)")
             }
-            // A shell request (`vs-shell run`): run or decline, nothing else.
-            guard card["kind"]?.string == "shell", !["run", "decline"].contains(word) else { return nil }
-            return Say.usage("usage: vibeswitcher answer CARD run|decline  (a shell request's card)")
+            return nil
         }, args: { card in
             // Bound to the wording shown: a revision after it is said to the lead with the answer.
             let plugin = card["plugin"].map { $0 != .null } ?? false
-            return ["text": .string(card["kind"]?.string == "shell" || plugin ? word : text), "version": card["question"]?["version"] ?? .null]
+            return ["text": .string(plugin ? word : text), "version": card["question"]?["version"] ?? .null]
         }, what: { card in
             let id = ConfigSeal.inert(card["id"]?.string ?? "", limit: 80)
             // A plugin's word: what it does, whole, as its card says it.
@@ -40,12 +38,7 @@ enum AnswerCommand {
                 let action = (plugin["actions"]?.array ?? []).first { $0["word"]?.string == word }
                 return "This " + ConfigSeal.inert(action?["does"]?.string ?? "answers card \(id) with \(word)", limit: .max) + "."
             }
-            guard card["kind"]?.string == "shell" else { return "This answers card \(id) with: \(ConfigSeal.inert(text, limit: 400))" }
-            let folder = ConfigSeal.inert(card["shell"]?["cwd"]?.string ?? "?", limit: .max)
-            let size = ShellCards.size(card["shell"]?["command"]?.string ?? "")
-            return word == "run"
-                ? "This runs the command above (\(size)), exactly as shown, in a new shell session in \(folder), as you: it runs with everything your account can do."
-                : "This declines card \(id)'s shell request: nothing runs, and the asking session is told."
+            return "This answers card \(id) with: \(ConfigSeal.inert(text, limit: 400))"
         }, say: said)
     }
 

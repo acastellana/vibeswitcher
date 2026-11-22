@@ -15,7 +15,7 @@ extension Requests {
         }
         let kinds: [CardStore.Kind]
         switch request.kind {
-        case "answer": kinds = [.question, .approval, .shell, .plugin]
+        case "answer": kinds = [.question, .approval, .plugin]
         case "hold": kinds = [.question, .approval]
         case "config.accept": kinds = [.configHeld]
         default: kinds = [.baseMove]
@@ -449,15 +449,6 @@ extension CardStore.Card {
             }
             c["baseBranch"] = text(config.baseBranch)
             fields["config"] = .object(c)
-        }
-        if let shell {
-            let request = shell.request
-            fields["shell"] = .object([
-                "request": .string(request.id), "session": .string("\(NodeIds.node):\(request.session)"),
-                "asker": .string(shell.asker), "cwd": .string(request.cwd), "command": .string(request.command), "label": .string(request.label),
-                "filedAt": .date(request.created), "expiresAt": .date(request.expiresAt), "state": .string(shell.state.rawValue),
-                "shell": text(shell.shell), "name": text(shell.name), "why": text(shell.why),
-            ])
         }
         if let plugin { fields["plugin"] = plugin.value }
         if let base {

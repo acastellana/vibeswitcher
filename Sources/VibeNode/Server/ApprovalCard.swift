@@ -190,19 +190,6 @@ extension Requests {
         switch kind {
         case "answer":
             if let shown = card.plugin { return pluginParts(shown, answer: answer) }
-            if let shell = card.shell {
-                // The same reading `answerShell` acts on (`ShellCards.answerWord`): run, decline, or nothing asked.
-                switch ShellCards.answerWord(answer ?? "") {
-                case nil: return .failure(.init(why: "a shell card is answered run or decline: nothing was asked"))
-                case "decline"?: return .success(("decline an agent's shell request", "in \(Self.place(shell.request.cwd))"))
-                default: break
-                }
-                // The command and the folder whole, or nothing asked.
-                guard !shell.request.command.contains("\n") else {
-                    return .failure(.init(why: "the shell request's command has more than one line, too much to show whole in the Mac's dialog: nothing was asked"))
-                }
-                return .success(("run an agent's command in your login shell: \(Self.whole(shell.request.command)) in \(Self.place(shell.request.cwd))", nil))
-            }
             guard let words = answer, !words.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
                 return .failure(.init(why: "an answer needs words: nothing was asked"))
             }
