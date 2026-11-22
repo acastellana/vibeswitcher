@@ -1,6 +1,6 @@
 import Foundation
 import Testing
-import VibeCore
+@testable import VibeCore
 @testable import VibeNode
 
 /// Starting a lead (the engine plan's E4), on a scratch host in the test process (`NodeTestHost`), the engine given
@@ -547,6 +547,41 @@ struct LeadStartTests {
             world.engine.startLead(folder: world.repo, goal: nil, takeHead: false, replace: false) { outcome in answers.mutate { $0.append(outcome) } }
         }
         return (release, answers)
+    }
+
+    // MARK: lead --init's repository
+
+    /// A repository `lead --init` made (`LeadInit`), and a hook a session put in its `.git` between the install and the
+    /// lead's start. With `initialized` (the request `--init` sends) the hooks baseline is recorded empty before the
+    /// guard's first git there: the hook is listed, never run, never accepted. Without it, the guard's first sight takes
+    /// the hook as accepted (what the seed is for).
+    @Test(arguments: [true, false]) func anInitRepositorysHooksBaselineIsEmptyWhateverWasPlanted(_ initialized: Bool) async throws {
+        let world = try await world(repository: false)
+        defer { world.stop() }
+        let home = scratch.url("init-home")
+        try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
+        try "[user]\n\tname = The User\n\temail = user@example.invalid\n".write(to: home.appendingPathComponent(".gitconfig"), atomically: true, encoding: .utf8)
+        try "a\n".write(toFile: world.repo + "/a.txt", atomically: true, encoding: .utf8)
+        let probes = scratch.url("init-probes")
+        try FileManager.default.createDirectory(at: probes, withIntermediateDirectories: true)
+        let planned = try LeadInit.plan(world.repo, home: home.path, scratch: probes).get()
+        _ = try LeadInit.make(planned, home: home.path, scratch: probes).get()
+        let marker = scratch.url("hook-ran").path
+        try FileManager.default.createDirectory(atPath: world.repo + "/.git/hooks", withIntermediateDirectories: true)
+        try writeClosedOnExec("#!/bin/sh\necho ran >> '\(marker)'\n", to: URL(fileURLWithPath: world.repo + "/.git/hooks/reference-transaction"))
+
+        let answer = Locked<LeadEngine.StartOutcome?>(nil)
+        world.engine.startLead(folder: world.repo, goal: nil, takeHead: false, replace: false, initialized: initialized) { answer.value = $0 }
+        #expect(await eventually(timeout: 180) { answer.value != nil })
+        let common = try #require(GitGuard.gitDirs(of: world.repo)?.common)
+        let accepted = try #require(GitGuard.accepted(commonDir: common))
+        if initialized {
+            #expect(accepted.run.isEmpty && accepted.files.map(\.name) == ["reference-transaction"], "\(accepted)")
+            #expect(Git.run(["update-ref", "refs/heads/probe", "HEAD"], in: world.repo).ok)
+            #expect(!FileManager.default.fileExists(atPath: marker), "the planted hook ran")
+        } else {
+            #expect(accepted.run == ["reference-transaction"], "the guard's first sight accepts what is there: \(accepted)")
+        }
     }
 
     // MARK: Refusals

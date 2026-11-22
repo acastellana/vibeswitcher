@@ -23,7 +23,7 @@ extension Requests {
     static let approvalArguments: [String: Set<String>] = [
         "answer": ["card", "code", "text", "version"], "hold": ["card", "code"], "config.accept": ["card", "code"],
         "base.accept": ["card", "code"], "base.keep": ["card", "code"],
-        "start": [], "stop": [], "lead": ["folder", "goal", "resume", "replace", "takeHead"],
+        "start": [], "stop": [], "lead": ["folder", "goal", "resume", "replace", "takeHead", "initialized"],
         "hooks.install": ["agents"], "hooks.remove": ["agents"], "build.switch": ["commit"], "approve": ["batch", "code"],
         "web.open": ["tailnet"], "web.revoke": [], "tell": ["folder", "text"],
         "send": ["session", "text", "images", "now"],

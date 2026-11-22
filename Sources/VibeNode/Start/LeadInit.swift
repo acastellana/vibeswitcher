@@ -55,6 +55,16 @@ public enum LeadInit {
         /// The folder's device and inode at the plan: the same folder after the code.
         public var device: UInt64
         public var inode: UInt64
+        /// Each committed file as read at the plan (the .gitignore made isn't one): the make refuses any difference.
+        public var fingerprints: [String: Fingerprint]
+    }
+
+    /// A planned file as read: a link or a file, its size, its bytes' SHA-256 (a link's target's), executable or not.
+    public struct Fingerprint: Equatable, Sendable {
+        public var link: Bool
+        public var bytes: Int64
+        public var executable: Bool
+        public var sha256: String
     }
 
     /// The most files a first commit holds here; past it the user makes it.
@@ -181,8 +191,12 @@ public enum LeadInit {
     static func folderRefusal(_ folder: String, home: String) -> String? {
         let shown = ConfigSeal.inert(folder, limit: 400)
         guard kind(folder) == S_IFDIR else { return "\(shown) isn't a folder (or is a link to one: give the folder itself)" }
-        let now = resolved(folder)
-        guard now != "/", now != resolved(home) else { return "--init makes no repository of \(shown): a project's lead goes in a folder of its own" }
+        // By the folder's inode, as the rest is checked: the home folder or `/`, whatever path names them.
+        func same(_ path: String) -> Bool {
+            var one = stat(), other = stat()
+            return stat(folder, &one) == 0 && stat(path, &other) == 0 && one.st_dev == other.st_dev && one.st_ino == other.st_ino
+        }
+        guard !same("/"), !same(home), resolved(folder) != "/" else { return "--init makes no repository of \(shown): a project's lead goes in a folder of its own" }
         return nil
     }
 
@@ -193,11 +207,17 @@ public enum LeadInit {
         if kind((folder as NSString).appendingPathComponent(".git")) != nil {
             return "\(shown) has a .git already: --init is only for a folder in no repository. With commits, start the lead without --init; with none, make the first commit yourself (git add, git commit) or remove the empty .git"
         }
+        // A bare repository's own files (HEAD, objects, refs) in the folder: one, whatever git says of it.
+        let parts = ["HEAD", "objects", "refs"].map { kind((folder as NSString).appendingPathComponent($0)) }
+        if parts[0] == S_IFREG, parts[1] == S_IFDIR, parts[2] == S_IFDIR {
+            return "\(shown) holds HEAD, objects and refs, as a bare repository does: --init is only for a folder in no repository"
+        }
         let found = git(["rev-parse", "--show-toplevel"], in: folder, home: home, scratch: scratch)
         if found.ok {
             return "\(shown) is inside the repository \(ConfigSeal.inert(found.trimmed, limit: 400)): --init is only for a folder in no repository"
         }
-        guard found.error.contains("not a git repository") else {
+        // git's own words for none, from their start: a folder can't put them anywhere else in the message.
+        guard found.error.hasPrefix("fatal: not a git repository (or any") else {
             return "\(shown): git couldn't say it is in no repository (\(ConfigSeal.inert(found.error.trimmingCharacters(in: .whitespacesAndNewlines), limit: 300))): --init refuses"
         }
         return nil
@@ -239,7 +259,13 @@ public enum LeadInit {
         let listing = git(["--git-dir=\(gitDir)", "--work-tree=\(chosen)", "ls-files", "-z", "--others", "--exclude-standard"]
                           + (addsGitignore ? ["--exclude-from=\(builds.path)"] : []), in: chosen, home: home, scratch: probe)
         guard listing.ok else { return .failure(failed("ls-files", listing)) }
-        let all = Set(listing.output.split(separator: "\0").map(String.init)).sorted()
+        let raw = listing.output.split(separator: "\0").map(String.init)
+        // Names that differ only in their Unicode form are equal Strings: one would hide the other.
+        if Set(raw.map { Array($0.utf8) }).count != Set(raw).count {
+            let pair = Dictionary(grouping: raw) { $0 }.first { Set($0.value.map { Array($0.utf8) }).count > 1 }?.value ?? []
+            return .failure(Refusal("\(pair.map { ConfigSeal.inert($0, limit: 200) }.joined(separator: " and ")) differ only in their Unicode form: --init refuses them; rename one, or make the first commit yourself"))
+        }
+        let all = Set(raw).sorted()
         if let odd = all.first(where: { $0.unicodeScalars.contains { $0.value < 0x20 || $0.value == 0x7f } }) {
             return .failure(Refusal("\(ConfigSeal.inert(odd, limit: 200)) has a control character in its name: --init refuses it; rename it, or make the first commit yourself"))
         }
@@ -247,13 +273,55 @@ public enum LeadInit {
             return .failure(Refusal("\(ConfigSeal.inert(nested, limit: 200)) is a repository of its own: --init doesn't commit one inside; make the first commit yourself"))
         }
         var files = all.filter { !looksSecret($0) }
+        let leftOut = all.filter(looksSecret)
         if addsGitignore, !files.contains(".gitignore") { files.append(".gitignore") }
         guard files.count <= maxFiles else {
             return .failure(Refusal("\(shown) has \(files.count) files to commit, more than --init commits (\(maxFiles)): make the first commit yourself"))
         }
+        // A secret left out is kept out of later commits by info/exclude, which a .gitignore of the folder's outranks: one
+        // that un-ignores it (`!.env`) would let a later `git add -A` take it. Asked of git with the exclude as it will be.
+        if !leftOut.isEmpty {
+            do {
+                try VibePaths.ensurePrivate(URL(fileURLWithPath: gitDir + "/info"))
+                try VibePaths.writePrivate(Data(leftOut.map { "/" + escapedPattern($0) + "\n" }.joined().utf8), to: URL(fileURLWithPath: gitDir + "/info/exclude"))
+            } catch { return .failure(Refusal("the files left out couldn't be checked: \(error.localizedDescription)")) }
+            // One a line, unquoted (no name here holds a control character: refused above).
+            // check-ignore takes no pathspec magic: the names as paths (none holds a glob that matters: each is a listed file).
+            let ignored = git(["-c", "core.quotePath=false", "--git-dir=\(gitDir)", "--work-tree=\(chosen)", "check-ignore", "--"] + leftOut,
+                              in: chosen, home: home, scratch: probe, adding: ["GIT_LITERAL_PATHSPECS": "0"])
+            guard ignored.status == 0 || ignored.status == 1 else { return .failure(failed("check-ignore", ignored)) }
+            let kept = Set(ignored.output.split(separator: "\n").map(String.init))
+            if let open = leftOut.first(where: { !kept.contains($0) }) {
+                return .failure(Refusal("\(ConfigSeal.inert(open, limit: 200)) looks like a secret, and the folder's own .gitignore takes it back in (a `!` line): it couldn't be kept out of later commits; fix the .gitignore, or make the first commit yourself"))
+            }
+        }
         guard let id = identityOf(chosen) else { return .failure(Refusal("\(shown) isn't there")) }
-        return .success(Plan(folder: chosen, branch: branch, files: files.sorted(), leftOut: all.filter(looksSecret).sorted(),
-                             addsGitignore: addsGitignore, identity: Identity(name: name, email: email), device: id.device, inode: id.inode))
+        // Each file read now, as the make will read it: what it is, its size and its bytes' hash, so a change refuses.
+        let directory = open(chosen, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)
+        guard directory >= 0 else { return .failure(Refusal("\(shown) couldn't be opened (errno \(errno))")) }
+        defer { close(directory) }
+        var opened = stat()
+        guard fstat(directory, &opened) == 0, UInt64(opened.st_dev) == id.device, UInt64(opened.st_ino) == id.inode else {
+            return .failure(Refusal("\(shown) changed while it was looked at"))
+        }
+        var fingerprints: [String: Fingerprint] = [:]
+        var total: Int64 = 0
+        for (number, path) in files.enumerated() where !(addsGitignore && path == ".gitignore") {
+            let copy = probe.appendingPathComponent("plan-\(number)").path
+            defer { unlink(copy) }
+            switch fingerprint(path, in: directory, copy: copy, limit: maxFileBytes) {
+            case .failure(let refusal): return .failure(refusal)
+            case .success(let print):
+                if !print.link { total += print.bytes }
+                guard total <= maxTotalBytes else {
+                    return .failure(Refusal("the files come to more than --init commits (\(maxTotalBytes) bytes), at \(ConfigSeal.inert(path, limit: 200)): make the first commit yourself"))
+                }
+                fingerprints[path] = print
+            }
+        }
+        return .success(Plan(folder: chosen, branch: branch, files: files.sorted(), leftOut: leftOut,
+                             addsGitignore: addsGitignore, identity: Identity(name: name, email: email), device: id.device, inode: id.inode,
+                             fingerprints: fingerprints))
     }
 
     /// Private folders an interrupted run left in `scratch` (Ctrl-C at the prompt or mid-build), an hour old or more:
@@ -353,6 +421,28 @@ public enum LeadInit {
         }
     }
 
+    /// `read`, then the copy's SHA-256: what the file was.
+    static func fingerprint(_ path: String, in directory: Int32, copy: String, limit: Int64) -> Result<Fingerprint, Refusal> {
+        let found: Found
+        switch read(path, in: directory, to: copy, limit: limit) {
+        case .failure(let refusal): return .failure(refusal)
+        case .success(let read): found = read
+        }
+        guard let handle = FileHandle(forReadingAtPath: copy) else { return .failure(Refusal("a private copy couldn't be read")) }
+        defer { try? handle.close() }
+        var hasher = SHA256()
+        var bytes: Int64 = 0
+        while let chunk = try? handle.read(upToCount: 1 << 20), !chunk.isEmpty {
+            hasher.update(data: chunk)
+            bytes += Int64(chunk.count)
+        }
+        let sha = hasher.finalize().map { String(format: "%02x", $0) }.joined()
+        switch found {
+        case .link: return .success(Fingerprint(link: true, bytes: bytes, executable: false, sha256: sha))
+        case .file(_, let executable): return .success(Fingerprint(link: false, bytes: bytes, executable: executable, sha256: sha))
+        }
+    }
+
     // MARK: Making it
 
     /// The paths hashed or staged in one git call.
@@ -418,16 +508,22 @@ public enum LeadInit {
                 copies.append((path, "100644", copy))
                 continue
             }
-            switch read(path, in: directory, to: copy, limit: maxFile) {
+            let print: Fingerprint
+            switch fingerprint(path, in: directory, copy: copy, limit: maxFile) {
             case .failure(let refusal): return .failure(refusal)
-            case .success(.link): copies.append((path, "120000", copy))
-            case .success(.file(let bytes, let executable)):
-                total += bytes
+            case .success(let read): print = read
+            }
+            // What the code was typed for, exactly: the same kind, size, mode and bytes as at the plan.
+            guard print == plan.fingerprints[path] else {
+                return .failure(Refusal("the folder changed since the code was asked (\(ConfigSeal.inert(path, limit: 200)) isn't what it was): nothing was made"))
+            }
+            if !print.link {
+                total += print.bytes
                 guard total <= maxTotal else {
                     return .failure(Refusal("the files come to more than --init commits (\(maxTotal) bytes here), at \(ConfigSeal.inert(path, limit: 200)): make the first commit yourself"))
                 }
-                copies.append((path, executable ? "100755" : "100644", copy))
             }
+            copies.append((path, print.link ? "120000" : print.executable ? "100755" : "100644", copy))
         }
         var entries: [String: String] = [:]
         var start = 0
@@ -481,39 +577,66 @@ public enum LeadInit {
         return .success((gitDir, Made(files: plan.files, commit: commit.trimmed)))
     }
 
-    /// Installs the private git folder `gitDir` as the folder's `.git` through its descriptor `directory`: `.git` made
-    /// with `mkdirat` (refused when anything is there), kept open, each folder below made and opened `O_NOFOLLOW` from
-    /// its parent's descriptor, each file made new (`O_CREAT|O_EXCL|O_NOFOLLOW`) and written; then `.gitignore` the
-    /// same way; `.git` checked to be the folder made. Why not, after removing what was made, or nil.
+    /// Installs the private git folder `gitDir` as the folder's `.git` through its descriptor `directory`: made under a
+    /// temporary name with `mkdirat` (its inode taken at once with `fstatat`), kept open, each folder below made and
+    /// opened `O_NOFOLLOW` from its parent's descriptor, each file made new (`O_CREAT|O_EXCL|O_NOFOLLOW`) and written;
+    /// `.gitignore` made the same way; then renamed to `.git` only where nothing has that name
+    /// (`Platform.Files.renameExclusive`), so an interrupted install leaves no partial `.git`; `.git` checked to be the
+    /// folder made. Why not, after removing what was made (and saying what couldn't be), or nil.
     static func install(_ gitDir: String, plan: Plan, into directory: Int32) -> Refusal? {
-        guard mkdirat(directory, ".git", 0o755) == 0 else {
-            return Refusal(errno == EEXIST ? "\(ConfigSeal.inert(plan.folder, limit: 400)) has a .git now: nothing was made"
-                                           : ".git couldn't be made (errno \(errno)): nothing was made")
-        }
-        let git = openat(directory, ".git", O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)
+        let temporary = ".git.vs-init-\(UUID().uuidString.prefix(8))"
+        guard mkdirat(directory, temporary, 0o755) == 0 else { return Refusal("the repository's folder couldn't be made (errno \(errno)): nothing was made") }
         var made = stat()
-        guard git >= 0, fstat(git, &made) == 0 else {
-            // Something replaced the folder just made: it isn't ours to remove.
-            return Refusal(".git changed as it was made: look at the folder; nothing of the repository was written")
+        guard fstatat(directory, temporary, &made, AT_SYMLINK_NOFOLLOW) == 0, made.st_mode & S_IFMT == S_IFDIR else {
+            return Refusal("the repository's folder changed as it was made: look at the folder; nothing of the repository was written")
+        }
+        let git = openat(directory, temporary, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)
+        var opened = stat()
+        guard git >= 0, fstat(git, &opened) == 0, opened.st_ino == made.st_ino, opened.st_dev == made.st_dev else {
+            if git >= 0 { close(git) }
+            return Refusal("the repository's folder changed as it was made: look at the folder; nothing of the repository was written")
         }
         defer { close(git) }
+        var named = temporary
+        var madeGitignore = false
         func undo(_ refusal: Refusal) -> Refusal {
             Descriptors.removeContents(of: git)
             var now = stat()
-            if fstatat(directory, ".git", &now, AT_SYMLINK_NOFOLLOW) == 0, now.st_ino == made.st_ino, now.st_dev == made.st_dev {
-                unlinkat(directory, ".git", AT_REMOVEDIR)
+            var left: [String] = []
+            if fstatat(directory, named, &now, AT_SYMLINK_NOFOLLOW) == 0, now.st_ino == made.st_ino, now.st_dev == made.st_dev,
+               unlinkat(directory, named, AT_REMOVEDIR) != 0 {
+                left.append(named)
             }
-            return refusal
+            if madeGitignore, unlinkat(directory, ".gitignore", 0) != 0 { left.append(".gitignore") }
+            guard !left.isEmpty else { return Refusal(refusal.message + ": nothing was left") }
+            return Refusal(refusal.message + "; \(left.joined(separator: " and ")) remain in \(ConfigSeal.inert(plan.folder, limit: 400)) "
+                           + "(something was added meanwhile): look at the folder before trying again")
         }
         if let why = Descriptors.copy(from: gitDir, into: git) { return undo(Refusal(why)) }
-        var now = stat()
-        guard fstatat(directory, ".git", &now, AT_SYMLINK_NOFOLLOW) == 0, now.st_ino == made.st_ino, now.st_dev == made.st_dev else {
-            return undo(Refusal(".git changed while the repository was written: nothing was left"))
-        }
         if plan.addsGitignore {
             guard Descriptors.create(directory, ".gitignore", Data(gitignore.utf8), mode: 0o644) else {
-                return undo(Refusal("the .gitignore couldn't be made in \(ConfigSeal.inert(plan.folder, limit: 400)) (it came meanwhile, or errno \(errno)): nothing was left"))
+                return undo(Refusal("the .gitignore couldn't be made in \(ConfigSeal.inert(plan.folder, limit: 400)) (it came meanwhile, or errno \(errno))"))
             }
+            madeGitignore = true
+        }
+        var renamed = Platform.Files.renameExclusive(in: directory, from: temporary, to: ".git")
+        // A file system without the exclusive rename for a folder (9p: Windows' drives under WSL): a plain rename, which
+        // never replaces a folder with something in it, only where nothing is named .git now.
+        if renamed != 0, errno == EINVAL || errno == ENOSYS {
+            var there = stat()
+            if fstatat(directory, ".git", &there, AT_SYMLINK_NOFOLLOW) == 0 {
+                errno = EEXIST
+            } else if errno == ENOENT {
+                renamed = renameat(directory, temporary, directory, ".git")
+            }
+        }
+        guard renamed == 0 else {
+            return undo(Refusal(errno == EEXIST ? "\(ConfigSeal.inert(plan.folder, limit: 400)) has a .git now" : ".git couldn't be put in place (errno \(errno))"))
+        }
+        named = ".git"
+        var now = stat()
+        guard fstatat(directory, ".git", &now, AT_SYMLINK_NOFOLLOW) == 0, now.st_ino == made.st_ino, now.st_dev == made.st_dev else {
+            return undo(Refusal(".git changed as the repository was put in place"))
         }
         return nil
     }

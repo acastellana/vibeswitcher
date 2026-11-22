@@ -67,6 +67,8 @@ struct LeadInitTests {
     /// Nothing was made: no .git (unless `kept`, one that was there), no .gitignore of ours.
     private func nothingMade(_ folder: String, gitignore: Bool = true, sourceLocation: SourceLocation = #_sourceLocation) {
         #expect(!FileManager.default.fileExists(atPath: folder + "/.git"), sourceLocation: sourceLocation)
+        let partial = ((try? FileManager.default.contentsOfDirectory(atPath: folder)) ?? []).filter { $0.hasPrefix(".git.vs-init") }
+        #expect(partial.isEmpty, "a partial install left: \(partial)", sourceLocation: sourceLocation)
         if gitignore { #expect(!FileManager.default.fileExists(atPath: folder + "/.gitignore"), sourceLocation: sourceLocation) }
     }
 
@@ -115,6 +117,9 @@ struct LeadInitTests {
         #expect(git(["init", "-q", "--bare"], bare, home: home).ok)
         try FileManager.default.createDirectory(atPath: bare + "/refs/x", withIntermediateDirectories: true)
         #expect(refusal(bare + "/refs/x", home: home) != nil)
+        // A bare repository's files in the folder itself, a config whose words could mimic git's: refused as one.
+        let lookalike = try folder(["HEAD": "ref: refs/heads/main\n", "config": "[extensions \"not a git repository\"]\n", "objects/x": "", "refs/x": ""])
+        #expect(refusal(lookalike, home: home)?.contains("as a bare repository does") == true, "\(refusal(lookalike, home: home) ?? "")")
     }
 
     /// A `.git` appearing during the prompt, a folder or a link to one elsewhere: refused with nothing written, its
@@ -128,6 +133,7 @@ struct LeadInitTests {
         #expect(refused.message.contains(".git"), "\(refused)")
         #expect(((try? FileManager.default.contentsOfDirectory(atPath: planted + "/.git")) ?? ["?"]).isEmpty, "the planted .git untouched")
         #expect(!FileManager.default.fileExists(atPath: planted + "/.gitignore"))
+        #expect(((try? FileManager.default.contentsOfDirectory(atPath: planted)) ?? []).sorted() == [".git", "a.txt"], "no partial install left")
 
         let linked = try folder()
         let shown = try plan(linked, home: home)
@@ -167,8 +173,9 @@ struct LeadInitTests {
         nothingMade(gone)
     }
 
-    /// Nothing from outside the folder is pulled in: a planned file swapped for a link to a file outside commits as a
-    /// link (its target's path, never the bytes); a folder on a planned file's way swapped for a link refuses.
+    /// Nothing from outside the folder is pulled in, and nothing but what the code was typed for: a planned file swapped
+    /// for a link to a file outside refuses (it isn't what the plan read); a folder on a planned file's way swapped for a
+    /// link refuses.
     @Test func aFileOrAParentSwappedForALinkPullsNothingFromOutside() throws {
         let home = try home()
         let outside = try folder(["secret.txt": "outside bytes\n", "sub/b.txt": "outside b\n"])
@@ -176,9 +183,9 @@ struct LeadInitTests {
         let planned = try plan(swappedFile, home: home)
         try FileManager.default.removeItem(atPath: swappedFile + "/a.txt")
         try FileManager.default.createSymbolicLink(atPath: swappedFile + "/a.txt", withDestinationPath: outside + "/secret.txt")
-        #expect(made(planned, home: home) == .success([".gitignore", "a.txt"]))
-        #expect(!git(["cat-file", "blob", "HEAD:a.txt"], swappedFile, home: home).output.contains("outside bytes"))
-        #expect(git(["ls-tree", "HEAD", "a.txt"], swappedFile, home: home).output.hasPrefix("120000 "), "committed as the link it is")
+        guard case .failure(let swapped) = made(planned, home: home) else { Issue.record("made with a file swapped for a link"); return }
+        #expect(swapped.message.contains("a.txt isn't what it was"), "\(swapped)")
+        nothingMade(swappedFile)
 
         let swappedParent = try folder(["sub/b.txt": "inside b\n"])
         let shown = try plan(swappedParent, home: home)
@@ -195,9 +202,7 @@ struct LeadInitTests {
         let outside = try folder(["elsewhere.txt": "shared\n"])
         let linked = try folder(["a.txt": "a\n"])
         #expect(link(outside + "/elsewhere.txt", linked + "/b.txt") == 0)
-        let planned = try plan(linked, home: home)
-        guard case .failure(let refused) = made(planned, home: home) else { Issue.record("made with a hard link"); return }
-        #expect(refused.message.contains("b.txt has 2 hard links"), "\(refused)")
+        #expect(refusal(linked, home: home)?.contains("b.txt has 2 hard links") == true, "\(refusal(linked, home: home) ?? "")")
         nothingMade(linked)
 
         let big = try folder(["a.txt": "a\n", "big.bin": String(repeating: "x", count: 4096)])
@@ -209,6 +214,53 @@ struct LeadInitTests {
         guard case .failure(let tooMuch) = made(try plan(many, home: home), home: home, maxTotal: 1000) else { Issue.record("made past the total"); return }
         #expect(tooMuch.message.contains("at b.txt"), "\(tooMuch)")
         nothingMade(many)
+    }
+
+    /// The install is made under a temporary name and put in place last: one that fails before (a .gitignore come
+    /// meanwhile) leaves no `.git`, no partial one, and the .gitignore that came as it was.
+    @Test func aFailedInstallLeavesNoPartialGit() throws {
+        let home = try home()
+        let folder = try folder(["a.txt": "a\n"])
+        let planned = try plan(folder, home: home)
+        try "theirs\n".write(toFile: folder + "/.gitignore", atomically: true, encoding: .utf8)
+        guard case .failure(let refused) = made(planned, home: home) else { Issue.record("made over a .gitignore come meanwhile"); return }
+        #expect(refused.message.contains(".gitignore") && refused.message.contains("nothing was left"), "\(refused)")
+        nothingMade(folder, gitignore: false)
+        #expect(try String(contentsOfFile: folder + "/.gitignore", encoding: .utf8) == "theirs\n")
+    }
+
+    /// Bytes changed during the prompt, with the same size and name: not what the code was typed for, refused.
+    @Test func changedBytesRefuse() throws {
+        let home = try home()
+        let folder = try folder(["a.txt": "good\n"])
+        let planned = try plan(folder, home: home)
+        try "evil\n".write(toFile: folder + "/a.txt", atomically: true, encoding: .utf8)
+        guard case .failure(let refused) = made(planned, home: home) else { Issue.record("made with changed bytes"); return }
+        #expect(refused.message.contains("a.txt isn't what it was"), "\(refused)")
+        nothingMade(folder)
+    }
+
+    /// A secret the folder's own .gitignore takes back in (`!.env`) couldn't be kept out of later commits: refused.
+    @Test func aSecretTheFoldersGitignoreTakesBackInIsRefused() throws {
+        let home = try home()
+        let folder = try folder(["a.txt": "a\n", ".env": "K=1\n", ".gitignore": "*.log\n!.env\n"])
+        #expect(refusal(folder, home: home)?.contains(".env looks like a secret, and the folder's own .gitignore takes it back in") == true,
+                "\(refusal(folder, home: home) ?? "")")
+    }
+
+    /// Two names that differ only in their Unicode form (one would hide the other): refused, naming them.
+    @Test func namesDifferingOnlyInUnicodeFormAreRefused() throws {
+        let home = try home()
+        let folder = try folder(["a.txt": "a\n"])
+        // Not a dictionary: the two names are equal Strings. Made byte for byte.
+        for (name, text) in [("caf\u{E9}.txt", "one\n"), ("cafe\u{301}.txt", "two\n")] {
+            let fd = open(folder + "/" + name, O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, 0o644)
+            try #require(fd >= 0)
+            _ = text.withCString { write(fd, $0, strlen($0)) }
+            close(fd)
+        }
+        #expect(((try? FileManager.default.contentsOfDirectory(atPath: folder)) ?? []).count == 3, "two files on disk")
+        #expect(refusal(folder, home: home)?.contains("differ only in their Unicode form") == true, "\(refusal(folder, home: home) ?? "")")
     }
 
     /// A name with a control character (a newline would add a line to the exclude file), or a repository of its own

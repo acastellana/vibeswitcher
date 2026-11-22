@@ -119,7 +119,7 @@ taken on the Unix socket.
 | `hold` | the user's terminal | yes | yes | yes | `Requests.act` | `card`, `code` |
 | `hooks.install` | the user's terminal | yes | yes |  | `Requests.act` | `agents` |
 | `hooks.remove` | the user's terminal | yes | yes |  | `Requests.act` | `agents` |
-| `lead` | the user's terminal | yes | yes |  | `Requests.act` | `folder`, `goal`, `replace`, `resume`, `takeHead` |
+| `lead` | the user's terminal | yes | yes |  | `Requests.act` | `folder`, `goal`, `initialized`, `replace`, `resume`, `takeHead` |
 | `mail` | the user's terminal, or a page that reads |  |  |  | `Requests.act` |  |
 | `presets.edit` | the user's terminal | yes | yes |  | `Requests.act` | `args`, `default`, `digest`, `env`, `folder`, `keepShell`, `kind`, `name`, `op`, `rename`, `unset` |
 | `prompt-audit` | the user's terminal | yes | yes |  | `Requests.act` | `do`, `folder` |

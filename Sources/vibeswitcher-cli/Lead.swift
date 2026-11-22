@@ -106,6 +106,7 @@ enum LeadCommand {
         var args: [String: NodeWire.Value] = ["folder": .string(asked.folder), "takeHead": .bool(asked.takeHead), "replace": .bool(asked.replace)]
         if asked.resume { args["resume"] = .bool(true) }
         if let goal = asked.goal { args["goal"] = .string(goal) }
+        if firstCommit != nil { args["initialized"] = .bool(true) }
         switch client.change("lead", args: args, action: action, typed: typed, timeout: 180) {
         case .failure(let failure): return Say.failed(failure)
         case .success(let reply):
