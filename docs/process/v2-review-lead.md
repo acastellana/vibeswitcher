@@ -13,7 +13,7 @@ table, most visible first; each row says where it landed.
 
 | Row | Verdict | Why | Fix |
 | --- | --- | --- | --- |
-| Start a lead in a folder, with a goal | improve | V1 offers to make the repository when the folder isn't one, or has no commit (`LeadController`'s first-commit offer); V2 refuses with "git init, and a first commit" and leaves you to do it | `vibeswitcher lead FOLDER --init`: the repository and its first commit made in the folder (`ProjectCreation`'s steps, nothing left on a failure), then the lead, one typed code; the refusal names it |
+| Start a lead in a folder, with a goal | improve | V1 offers to make the repository when the folder isn't one, or has no commit (`LeadController`'s first-commit offer); V2 refuses with "git init, and a first commit" and leaves you to do it | `vibeswitcher lead FOLDER --init`: the repository and its first commit made in the folder (`ProjectCreation`'s steps, nothing left on a failure), then the lead, one typed code; the refusal names it. **Built**: V1's own rules (`FolderRepository`, so an empty repository's own folder too, and secrets left out), NewProjectTests |
 | New Project… | improve | the command line has it (`new-project`); the page has no form for it (V1's sheet) | the page's start screen drafts the `vibeswitcher new-project` line from a form (pages never act) |
 | Message a running lead, or send it a goal | good | `tell` and `lead --goal` reach the bound lead through the vault, held while it can't take them (A13) | |
 | Questions to you, timers, Hold | good | cards, `answer`, `hold`, the timer and its proposal, on the page and the command line (A12, A13) | |

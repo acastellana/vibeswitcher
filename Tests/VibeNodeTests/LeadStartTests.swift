@@ -568,7 +568,7 @@ struct LeadStartTests {
                                 environment: ["HOME": world.repo, "PATH": "/usr/bin:/bin", "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": "/dev/null"])
         try #require(ran.status == 0, "\(ran.errors)")
         let outcome = await world.start()
-        #expect(outcome == .refused("\(world.repo) has no commits yet: workers branch from a commit; make one, then start the lead"))
+        #expect(outcome == .refused("\(world.repo) has no commits yet: workers branch from a commit; make one (`vibeswitcher lead FOLDER --init` makes it of the folder's files), then start the lead"))
         #expect(world.spawns.value.isEmpty)
     }
 
