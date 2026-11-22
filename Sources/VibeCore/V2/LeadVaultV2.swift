@@ -61,6 +61,9 @@ public enum LeadVaultV2 {
         case settledRequests
         /// These plugin requests are settled now (kept `settledKept` at most).
         case settleRequests([String])
+        /// When this record began (its first request since the host's vault began: a host restart starts it over).
+        /// Answered `since`.
+        case recordSince
     }
 
     public enum Reply: Codable, Equatable, Sendable {
@@ -71,6 +74,7 @@ public enum LeadVaultV2 {
         case refused(String)
         case plugins([String: Bool])
         case settled([String])
+        case since(Double)
     }
 
     /// The record in the vault's state (`LeadVault.Book`'s `v2`).
@@ -185,6 +189,7 @@ public enum LeadVaultV2 {
         guard on else { return .refused("This session host keeps no record of the user's actions (the Mac's).") }
         guard caller == .app else { return .refused("Only VibeSwitcher records and reads the user's actions.") }
         var record = book ?? Book()
+        if record.plugin[sinceKey] == nil { record.plugin[sinceKey] = String(now) }
         defer { book = record }
         switch request {
         case .recordUserAction(let action, let kind, let subject, let digest):
@@ -232,6 +237,8 @@ public enum LeadVaultV2 {
             guard pluginID(id) else { return .refused("A plugin's id is a short lower-case word.") }
             record.plugins[id] = on
             return .plugins(record.plugins)
+        case .recordSince:
+            return .since(record.plugin[sinceKey].flatMap(Double.init) ?? now)
         case .settledRequests:
             return .settled(record.settledRequests.keys.sorted())
         case .settleRequests(let keys):
@@ -246,6 +253,9 @@ public enum LeadVaultV2 {
             return .ok
         }
     }
+
+    /// The plugin record's key for when the record began.
+    static let sinceKey = "record:since"
 
     /// How many settled plugin requests the record keeps.
     public static let settledKept = 5_000
@@ -408,6 +418,12 @@ public struct LeadVaultV2Client: Sendable {
     public func plugins() throws -> [String: Bool] {
         guard case .plugins(let plugins) = try call(.plugins) else { throw Refused("The session host answered something else.") }
         return plugins
+    }
+
+    /// When this record began: a host restart starts the vault, and it, over.
+    public func recordSince() throws -> Date {
+        guard case .since(let at) = try call(.recordSince) else { throw Refused("The session host answered something else.") }
+        return Date(timeIntervalSince1970: at)
     }
 
     /// The plugin requests settled (`<plugin>:<id>`).
