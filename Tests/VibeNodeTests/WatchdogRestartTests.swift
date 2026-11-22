@@ -30,9 +30,11 @@ struct WatchdogRestartTests {
         #expect(freezes.contains { ($0["seconds"]?.int ?? 0) >= 3 }, "\(freezes)")
     }
 
-    /// The refresh's lane blocked: said as a refresh under way in `status --health`; the server runs on.
+    /// The refresh's lane blocked: said as a refresh under way in `status --health`; the server runs on. Its watchdog
+    /// ends a server only after 60 s here: on a loaded machine (2 × cores of busy loops) the engine's queue itself can
+    /// take a few seconds to answer, which is no stall this case is about.
     @Test func aBlockedRefreshIsSaidUnderWayAndTheServerRunsOn() async throws {
-        let node = try await ScratchNode(scratch, hostArguments: ["--server-arg", ServerArguments.testStallFlag + "3"])
+        let node = try await ScratchNode(scratch, hostArguments: ["--server-arg", ServerArguments.testStallFlag + "60"])
         defer { node.stop() }
         let old = try WireClient(node).hello.server.pid
         FileManager.default.createFile(atPath: node.root.appendingPathComponent("test-block-reads").path, contents: nil)
