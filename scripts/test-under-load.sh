@@ -401,6 +401,8 @@ if [[ ${#command[@]} -eq 0 ]]; then
     # in a writable scratch home, as test.sh does (a Codex worker cannot write the real ~/.cache).
     mkdir -p "$tool_scratch/home" || exit 1
     export HOME=$tool_scratch/home CFFIXED_USER_HOME=$tool_scratch/home
+    # The suites run in UTC, as test.sh runs them (and CI): the wire vectors' usage resets read the same everywhere.
+    export TZ=UTC
     echo "building…"
     # On this run's slot's share of the cores, VS_HEAVY_CORES from the vs-heavy it runs under (scripts/lib/swift-jobs.sh),
     # as test.sh's and build-app.sh's builds: left to itself SwiftPM compiles on every core, beside the busy loops.
