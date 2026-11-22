@@ -148,7 +148,7 @@ struct LeadChatHistoryTests {
         let fixture = try Fixture()
         let missing = fixture.projects.appendingPathComponent("gone.jsonl").path
         // Not a transcript the chat reads: outside ~/.claude/projects, and a folder named like one.
-        let outside = fixture.scratch.url("outside").appendingPathExtension("jsonl")
+        let outside = fixture.scratch.adopt(fixture.scratch.url("outside").appendingPathExtension("jsonl"))
         try Data("{\"type\":\"user\",\"uuid\":\"x\",\"message\":{\"role\":\"user\",\"content\":\"secret\"}}\n".utf8).write(to: outside)
         let folder = fixture.projects.appendingPathComponent("folder.jsonl")
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
