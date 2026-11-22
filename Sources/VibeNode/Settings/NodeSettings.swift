@@ -188,7 +188,7 @@ public enum NodeSettings {
         ("Also on battery (Boost)", "a node runs on mains: it reads no battery"),
         ("Battery hold, keep awake, memory benches", "the Mac's power and the app's own process"),
         ("Notifications (banners, sound, reminders)", "the page's own: This node's toggle, in each browser"),
-        ("Let agents open shells without asking", "a node has none: every agent's shell request is a card the user answers in a terminal (`ShellCards`)"),
+        ("Let agents open shells without asking", "a node has none: every agent's shell request is a card the user answers in a terminal (the shell plugin, `ShellPlugin`)"),
         ("Appearance, sidebar, launch presets, dictation, phone, wallet", "the Mac app's window and devices"),
         ("Hooks, open at login", "`vibeswitcher hooks install`, `vibeswitcher start --at-login`"),
         ("Mac permissions, the session host", "macOS only; the node's host is `vibeswitcher start` and `stop`"),

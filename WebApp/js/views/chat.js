@@ -35,8 +35,8 @@ import { imageSendLine } from '../actions.js';
 import { tokenAt, accept, IMAGE_TYPES, MAX_IMAGE } from '../composing.js';
 import { allDoneView } from './alldone.js';
 import { talkButton } from '../dictate.js';
-import { shellCardsOf } from '../shellcard.js';
-import { shellCard } from './cards.js';
+import { pluginCardsOf, pluginsOn } from '../plugincard.js';
+import { pluginCard } from './cards.js';
 
 // How close to the end counts as being at the end.
 const NEAR = 48;
@@ -344,12 +344,12 @@ export function chatView(app) {
   // in the conversation's place. A lead's questions still follow below it.
   const later = h('p', { class: 'pane-empty', hidden: true }, 'This node doesn’t send this session’s conversation to the page.');
   const stackSlot = h('div');
-  // This session's shell requests (js/shellcard.js).
-  const shellSlot = h('div', { class: 'stack-cards shell-cards' });
-  let shellDrawn = '';
+  // This session's plugin cards (js/plugincard.js): its shell requests among them.
+  const pluginSlot = h('div', { class: 'stack-cards plugin-cards' });
+  let pluginDrawn = '';
   // The question open on the session's own screen, under its conversation, where the Mac's answer card sits.
   const asking = promptCard(app);
-  const column = h('div', { class: 'chat-column' }, earlier, skeleton, empty, later, above, rowsEl, below, live, stackSlot, shellSlot, asking.el);
+  const column = h('div', { class: 'chat-column' }, earlier, skeleton, empty, later, above, rowsEl, below, live, stackSlot, pluginSlot, asking.el);
   const scroller = h('div', { class: 'chat-scroll' }, column);
   // The "New since you looked" line, placed before its row while that row is drawn.
   const markSummary = h('span', { class: 'new-mark-summary' });
@@ -578,7 +578,7 @@ export function chatView(app) {
   function render() {
     const session = store.state.sessions.get(view.session);
     placeStack(session);
-    drawShells();
+    drawPluginCards();
     const held = chat();
     const pinned = jump || atEnd();
     const following = store.can('chat.page');
@@ -725,12 +725,13 @@ export function chatView(app) {
 
   // A lead's questions, under its chat. Its project can arrive after the session does (the node sends the leads in
   // their own collection), so the stack follows it.
-  function drawShells() {
-    const open = shellCardsOf(store.state.cards.values(), view.session);
-    const key = JSON.stringify(open.map((card) => [card.id, card.shell?.state, card.notice]));
-    if (key === shellDrawn) return;
-    shellDrawn = key;
-    shellSlot.replaceChildren(...open.map(shellCard));
+  function drawPluginCards() {
+    // The feature plugins' cards of this session (a shell request's among them), of the plugins the node has on.
+    const open = pluginCardsOf(store.state.cards.values(), view.session, pluginsOn(store.state));
+    const key = JSON.stringify(open.map((card) => [card.id, card.plugin?.state, card.notice]));
+    if (key === pluginDrawn) return;
+    pluginDrawn = key;
+    pluginSlot.replaceChildren(...open.map(pluginCard));
   }
 
   function placeStack(session) {
@@ -1159,9 +1160,9 @@ export function chatView(app) {
       stackProject = null;
       // The last session's questions leave with it (placeStack only draws when the project changes).
       stackSlot.replaceChildren();
-      shellDrawn = '';
+      pluginDrawn = '';
       placeStack(store.state.sessions.get(id));
-      drawShells();
+      drawPluginCards();
       unsubscribe = store.subscribe('chat:' + id, onChat);
       store.openChat(id);
       render();

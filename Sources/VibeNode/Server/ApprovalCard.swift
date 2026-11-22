@@ -32,7 +32,7 @@ extension Requests {
         "set": ["key", "value", "folder"], "push": ["folder", "request"], "push.decline": ["folder", "request"],
         "session.reopen": ["all", "forget", "sessions"], "prompt-audit": ["folder", "do"],
         "session.rename": ["session", "name"], "session.pause": ["session", "for", "hours"], "session.resume": ["session"],
-        "session.close-shells": ["folder", "sessions"],
+        "session.close-shells": ["folder", "sessions"], "plugin.on": ["plugin"], "plugin.off": ["plugin"],
         "presets.edit": ["op", "name", "kind", "args", "env", "unset", "keepShell", "default", "rename", "digest", "folder"],
     ]
 
@@ -149,6 +149,14 @@ extension Requests {
             if args["forget"]?.bool == true { return .success(("forget the sessions offered to reopen", nil)) }
             let count = args["sessions"]?.array?.count ?? 0
             return .success(("reopen \(args["all"]?.bool == true ? "every session offered" : "\(count) session\(count == 1 ? "" : "s")") in their conversations", nil))
+        case "plugin.on", "plugin.off":
+            // The plugin by its id and its title as this build declares it; one this build doesn't have asks nothing.
+            guard let id = text("plugin"), let plugin = engine?.plugins.plugin(id) else {
+                return .failure(.init(why: "\(kind) names no plugin of this build: nothing was asked"))
+            }
+            let on = kind == "plugin.on"
+            return .success(("turn \(ConfigSeal.inert(plugin.info.title, limit: 80)) (\(ConfigSeal.inert(id, limit: 40))) \(on ? "on" : "off") for this node",
+                             on ? ConfigSeal.inert(plugin.info.summary, limit: 200) : "its open cards close as withdrawn, their askers told"))
         case "prompt-audit":
             guard let folder = text("folder"), let what = text("do"), ["snooze", "off", "on"].contains(what) else {
                 return .failure(.init(why: "prompt-audit needs a folder and snooze, off or on: nothing was asked"))
@@ -189,19 +197,7 @@ extension Requests {
         let asks = card.question.map { "the lead asks \(Self.quoted($0.text, limit: 200))" }
         switch kind {
         case "answer":
-            if let shell = card.shell {
-                // The same reading `answerShell` acts on (`ShellCards.answerWord`): run, decline, or nothing asked.
-                switch ShellCards.answerWord(answer ?? "") {
-                case nil: return .failure(.init(why: "a shell card is answered run or decline: nothing was asked"))
-                case "decline"?: return .success(("decline an agent's shell request", "in \(Self.place(shell.request.cwd))"))
-                default: break
-                }
-                // The command and the folder whole, or nothing asked.
-                guard !shell.request.command.contains("\n") else {
-                    return .failure(.init(why: "the shell request's command has more than one line, too much to show whole in the Mac's dialog: nothing was asked"))
-                }
-                return .success(("run an agent's command in your login shell: \(Self.whole(shell.request.command)) in \(Self.place(shell.request.cwd))", nil))
-            }
+            if let shown = card.plugin { return pluginParts(shown, answer: answer) }
             guard let words = answer, !words.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
                 return .failure(.init(why: "an answer needs words: nothing was asked"))
             }
@@ -224,6 +220,23 @@ extension Requests {
             let move = "\(base.branch) from \(base.from.map { String($0.prefix(10)) } ?? "unknown") to \(base.to.prefix(10)) (\(base.commits.count) commit\(base.commits.count == 1 ? "" : "s"))"
             return .success(("\(kind == "base.accept" ? "accept" : "keep refused") the move of \(ConfigSeal.inert(move, limit: 120)) in \(project)", nil))
         }
+    }
+
+    /// A feature plugin's card (`PluginCard`): an acting word's verb, its body whole on one line and its folder, or
+    /// nothing asked; another word's verb, with the folder as context.
+    private func pluginParts(_ shown: PluginCard, answer: String?) -> Result<(decisive: String, context: String?), ApprovalTextRefusal> {
+        guard let action = shown.action(answer ?? "") else {
+            return .failure(.init(why: "a \(shown.noun) card is answered \(shown.actions.map(\.word).joined(separator: " or ")): nothing was asked"))
+        }
+        // Every fact the plugin marks decisive is shown, whole: a folder as a place, any other as its label and value.
+        let decisive = shown.facts.filter(\.decisive).map { fact in
+            fact.folder ? " in \(Self.place(fact.value))" : "; \(ConfigSeal.inert(fact.label, limit: 80)) \(Self.whole(fact.value))"
+        }.joined()
+        guard action.acts else { return .success((ConfigSeal.inert(action.verb, limit: 200) + decisive, nil)) }
+        guard shown.body.lines.count == 1 else {
+            return .failure(.init(why: "the \(shown.noun)'s \(shown.body.name) has more than one line, too much to show whole in the Mac's dialog: nothing was asked"))
+        }
+        return .success(("\(ConfigSeal.inert(action.verb, limit: 200)): \(Self.whole(shown.body.text))" + decisive, nil))
     }
 
     // MARK: Words

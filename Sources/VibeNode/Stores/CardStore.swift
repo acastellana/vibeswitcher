@@ -14,32 +14,8 @@ public final class CardStore: @unchecked Sendable {
         case approval
         case configHeld = "config"
         case baseMove = "base"
-        /// A shell an agent asked for (`vs-shell run`, `ShellAsk`): Run or Decline (`ShellCards.swift`).
-        case shell
-    }
-
-    /// A shell request's card (`ShellCards.swift`): the request as the host stamped it, never changed, and what became
-    /// of it. What runs is exactly `request.command` in `request.cwd`, as shown.
-    public struct ShellShown: Equatable, Sendable {
-        public enum State: String, Sendable { case waiting, starting, started, declined, expired, failed }
-        public var request: ShellRequest
-        /// The asking session's name as the node lists it.
-        public var asker: String
-        public var state: State
-        /// The shell session started (started): its id and name.
-        public var shell: String?
-        public var name: String?
-        /// Why it didn't start (failed).
-        public var why: String?
-
-        public init(request: ShellRequest, asker: String, state: State = .waiting, shell: String? = nil, name: String? = nil, why: String? = nil) {
-            self.request = request
-            self.asker = asker
-            self.state = state
-            self.shell = shell
-            self.name = name
-            self.why = why
-        }
+        /// A feature plugin's request (`Plugins/`): its card is data (`PluginCard`), answered with its words.
+        case plugin
     }
 
     /// An approval card's facts (S3): what the engine derives itself, never the board's words.
@@ -108,7 +84,8 @@ public final class CardStore: @unchecked Sendable {
         public var approval: ApprovalFacts?
         public var config: ConfigHoldStore.Shown?
         public var base: BaseMoveStore.Shown?
-        public var shell: ShellShown?
+        /// A feature plugin's card (`PluginCard`): what the plugin drew, after the core's checks.
+        public var plugin: PluginCard?
         /// What became of the user's answer, when it wasn't simply taken (`withdrawn`, `afterAutoDecision`,
         /// `alreadyAnswered`, `missing`, an approval not recorded), or of an accept.
         public var notice: String?
@@ -137,7 +114,7 @@ public final class CardStore: @unchecked Sendable {
             case .question: return question?.rank == .blocking
             case .approval, .configHeld, .baseMove: return true
             // The agent waits on it, not the lead's work.
-            case .shell: return false
+            case .plugin: return false
             }
         }
     }

@@ -58,7 +58,8 @@ public enum CardText {
     /// `home`: whose Claude Code link a held card's update hint reads (`ClaudeUpdateHint`; nil: this process's).
     public static func lines(_ card: NodeWire.Value, long: Bool, home: String? = nil) -> [String] {
         let id = inert(card["id"]?.string)
-        let kind = card["kind"]?.string ?? "?"
+        // A plugin's card says its plugin where another says its kind.
+        let kind = card["plugin"]?["plugin"]?.string.map(inert) ?? card["kind"]?.string ?? "?"
         let root = card["root"]?.string ?? ""
         let state = card["open"]?.bool == true ? "open" : "closed: " + inert(card["closed"]?.string)
         var lines = ["\(id)  \(kind)  \(inert((root as NSString).lastPathComponent))  \(state)"]
@@ -149,31 +150,33 @@ public enum CardText {
                 lines.append("    \(inert(String((commit["sha"]?.string ?? "").prefix(12)))) \(inert(commit["subject"]?.string))")
             }
         }
-        if let shell = card["shell"], shell != .null {
-            // Exactly what runs, whole: every line of the command, the folder, the session that asks.
-            lines.append("  \(inert(shell["asker"]?.string)) (session \(inert(shell["session"]?.string))) asks for a new shell session")
-            lines.append("  in the folder: " + inert(shell["cwd"]?.string))
-            let command = shell["command"]?.string ?? ""
-            lines.append("  running exactly this command (an agent's words; \(ShellCards.size(command)), every line shown), "
-                         + "by your login shell, which stays open after it:")
-            for line in command.split(separator: "\n", omittingEmptySubsequences: false) {
-                lines.append("    | " + inert(String(line)))
-            }
-            if let label = shell["label"]?.string, !label.isEmpty { lines.append("  named: Shell: " + inert(label)) }
-            let state = shell["state"]?.string ?? "?"
-            if state == "waiting" {
-                lines.append("  expires \(inert(shell["expiresAt"]?.string)) unanswered; nothing runs until you answer run")
-            } else {
-                var said = "  " + inert(state)
-                if let name = shell["name"]?.string { said += ": session \"\(inert(name))\"" }
-                if let why = shell["why"]?.string { said += ": " + inert(why) }
-                lines.append(said)
-            }
-        }
+        if let plugin = card["plugin"], plugin != .null { lines += pluginLines(plugin) }
         if let notice = card["notice"]?.string { lines.append("  notice: " + inert(notice)) }
         // The user's own words from a web page, never sent until `answer` takes them with the code: whole.
         if let draft = card["draft"], draft != .null, let text = draft["text"]?.string {
             lines.append("  drafted on a web page (not sent; `vibeswitcher answer \(id)` sends it, for version \(draft["version"]?.int ?? 0)): " + inert(text))
+        }
+        return lines
+    }
+
+    /// A feature plugin's card (`PluginCard`, `card.plugin`): who asks, the host's facts, the decisive part whole with its
+    /// size, the agent's own words, then how long it waits or what became of it. Every field inert.
+    static func pluginLines(_ plugin: NodeWire.Value) -> [String] {
+        var lines = ["  \(inert(plugin["asker"]?.string)) (session \(inert(plugin["session"]?.string))) \(inert(plugin["ask"]?.string))"]
+        for fact in plugin["facts"]?.array ?? [] { lines.append("  \(inert(fact["label"]?.string)): \(inert(fact["value"]?.string))") }
+        let body = plugin["body"]
+        let note = body?["note"]?.string.map { ", " + inert($0) } ?? ""
+        lines.append("  \(inert(body?["label"]?.string)) (an agent's words; \(inert(body?["size"]?.string)), every line shown)\(note):")
+        for line in body?["lines"]?.array?.compactMap(\.string) ?? [] { lines.append("    | " + inert(line)) }
+        if let context = plugin["context"], context != .null {
+            // The agent's own words, marked as its own by the renderer whatever the plugin labels them.
+            lines.append("  \(inert(context["label"]?.string)) (the agent's words): \u{201C}\(inert(context["text"]?.string))\u{201D}")
+        }
+        if plugin["state"]?.string == PluginCard.waitingState {
+            let waiting = plugin["waiting"]?.string.map { "; " + inert($0) } ?? ""
+            lines.append(plugin["expiresAt"]?.string.map { "  expires \(inert($0)) unanswered\(waiting)" } ?? "  waits for your answer\(waiting)")
+        } else {
+            lines.append("  " + inert(plugin["outcome"]?.string ?? plugin["state"]?.string))
         }
         return lines
     }

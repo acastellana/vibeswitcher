@@ -103,6 +103,11 @@ export function nodeView(app) {
           node.boost.on ? row('Raised limits', `a load of ${node.boost.limits.loadThreshold}, ${node.boost.limits.maxSessions} team sessions, ${node.boost.limits.maxWorkers} workers per project, ${node.boost.limits.heavySlots} test and build slots`) : null),
         h('a', { class: 'link', href: '#/settings' }, 'Change it in Settings')) : null,
       healthGroup(node.health),
+      // The feature plugins that are on (`vibeswitcher plugin list` lists them all; on and off from a terminal).
+      Array.isArray(node.plugins) ? group('Plugins',
+        h('dl', { class: 'facts-list' }, node.plugins.length ? node.plugins.map((plugin) => row(plugin.title, h('span', { class: 'dot tone-done', 'aria-hidden': 'true' }), 'On'))
+          : row('On', 'None')),
+        h('p', { class: 'node-says' }, 'vibeswitcher plugin list shows every plugin; plugin on NAME and plugin off NAME, in your terminal, change them.')) : null,
       group('Server',
         h('dl', { class: 'facts-list' },
           row('Running for', ago(server.startedAt)),

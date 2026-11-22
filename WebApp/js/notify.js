@@ -21,6 +21,7 @@
 // its own; `notifications(app)` puts it on the page.
 
 import { h } from './dom.js';
+import { pluginOn, pluginsOn } from './plugincard.js';
 
 const PREF = 'vibeswitcher.notifications';
 const SOUND = 'vibeswitcher.sound';
@@ -38,13 +39,14 @@ export function firstLine(text, limit = 120) {
   return chars.length > limit ? chars.slice(0, limit - 1).join('') + '…' : clean;
 }
 
-const CARD_TITLES = { question: 'A question for you', approval: 'An approval for you', config: 'Agents’ config held', base: 'The base moved', shell: 'A shell asked for' };
+const CARD_TITLES = { question: 'A question for you', approval: 'An approval for you', config: 'Agents’ config held', base: 'The base moved' };
 
 function cardBody(card) {
   if (card.question) return firstLine(card.question.text || card.question.short);
   if (card.approval) return firstLine(card.approval.subject || `Merge ${String(card.approval.commit || '').slice(0, 8)}`);
   if (card.config) return firstLine((card.config.items || []).map((item) => item.name).join(', '));
-  if (card.shell) return firstLine(`${card.shell.asker}: ${card.shell.command}`);
+  // A feature plugin's: who asks, and the first line of what it asks.
+  if (card.plugin) return firstLine(`${card.plugin.asker}: ${(card.plugin.body?.lines || []).join('\n')}`);
   return '';
 }
 
@@ -64,7 +66,10 @@ export function summarize(state) {
     // A card that came back under a new id after a server restart keeps its key (store.js `cardKeys`): not told twice.
     const key = 'card:' + (state.cardKeys?.get(card.id) || card.id);
     const session = leadSession(card.project);
-    asks.set(key, { title: `${CARD_TITLES[card.kind] || 'A card for you'} · ${lastPart(card.root) || 'a project'}`, body: cardBody(card), href: session ? href(session) : '#/' });
+    // A plugin's card is told only while the node has its plugin on (`hello.plugins`; null: a node before plugins).
+    if (card.plugin && !pluginOn(pluginsOn(state), card.plugin.plugin)) continue;
+    const title = card.plugin?.title || CARD_TITLES[card.kind] || 'A card for you';
+    asks.set(key, { title: `${title} · ${lastPart(card.root) || 'a project'}`, body: cardBody(card), href: session ? href(session) : '#/' });
   }
   for (const session of state.sessions.values()) {
     const name = session.title || lastPart(session.cwd) || 'A session';

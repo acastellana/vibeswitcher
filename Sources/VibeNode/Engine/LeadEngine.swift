@@ -58,6 +58,8 @@ public final class LeadEngine: @unchecked Sendable {
         /// Writes a briefing for its prompt, blocking (`Requests.brief`): the user's node's server gives headless Claude
         /// with `BriefingPrompts.system`; none by default (the written template).
         public var summarizeBrief: Summarizer.Generate?
+        /// The feature plugins (`PluginRegistry.standard()` by default; a test's own).
+        public var plugins: [FeaturePlugin]?
 
         public init() {}
     }
@@ -297,25 +299,37 @@ public final class LeadEngine: @unchecked Sendable {
     var policyWatch: LeadWitness.PolicyWatch?
     /// The health digest (`NodeHealth`): each refresh's time told to it. None in a test's engine unless given.
     public var health: NodeHealth?
-    // Shell requests (`ShellCards.swift`), on `queue`: the stamps the host vouched for (asked once each), each request's
-    // card, the messages under way, a look under way, the 15 s look and the clock. The folder and the host's seal are
-    // read on `shellWork`, one step at a time.
-    var shellTrusted: [String: WalletStamp] = [:]
-    /// What became of each request, the engine's own (never read from the folder's answer files).
-    var shellAnswers: [String: ShellAsk.Answer] = [:]
-    var shellCards: [String: String] = [:]
-    var shellTelling: Set<String> = []
-    var shellTellingEnd: Set<String> = []
-    var shellLooking = false
-    var shellTimer: Subscription?
-    var shellNow: () -> Date = Date.init
     // The Run-card shell tidier (`ShellTidying.swift`), on `queue`: the shells typed into since their command ended, read
-    // once; a look under way; its 30 s look.
+    // once; a look under way; its 30 s look; the clock. Its file is read and written on `shellWork`.
     var shellUsed: Set<UUID> = []
     var shellUsedLoaded = false
     var shellTidying = false
     var shellTidyTimer: Subscription?
-    let shellWork = DispatchQueue(label: "vibenode.lead-engine.shell-requests", qos: .userInitiated)
+    var shellNow: () -> Date = Date.init
+    let shellWork = DispatchQueue(label: "vibenode.lead-engine.shell-tidying", qos: .userInitiated)
+    // Feature plugins (`Plugins/`, `PluginEngine.swift`), on `queue`: the registry and what the vault keeps of on and
+    // off, each plugin request's card, the stamps the host vouched for (per plugin), the looks under way, the vault asked,
+    // the 15 s look, the clock; the folders read on `pluginWork`.
+    public let plugins: PluginRegistry
+    var pluginCards: [PluginKey: String] = [:]
+    var pluginTrusted: [String: [String: WalletStamp]] = [:]
+    /// Each plugin's look under way, and who waits for its end.
+    var pluginLooking: [String: [() -> Void]] = [:]
+    /// Each plugin's look asked for while one was under way (which may have read its folder before what this one is
+    /// for was filed): one more look, after it, and who waits for that one.
+    var pluginLookAgain: [String: [() -> Void]] = [:]
+    var pluginAsking = false
+    /// Who waits for the vault's answer under way.
+    var pluginAskWaiters: [() -> Void] = []
+    var pluginTimer: Subscription?
+    var pluginNow: () -> Date = Date.init
+    /// The plugin requests settled (`PluginKey.name`), as the vault keeps them: never drawn again.
+    var pluginSettled: Set<String> = []
+    /// What must reach a session from VibeSwitcher even while its plugin is off (a withdrawal's words), by key, until it
+    /// did or the session is gone; tried again at each plugins' look.
+    var pluginTells: [String: (session: UUID, text: String)] = [:]
+    var pluginTelling: Set<String> = []
+    let pluginWork = DispatchQueue(label: "vibenode.lead-engine.plugins", qos: .userInitiated)
     // The developer tools notice (`ToolchainLook.swift`), on `queue`: the notices the last look found, when it ran,
     // whether one is under way; how the node's tools are asked (a test's stand-in) and the clock.
     public internal(set) var toolchainNotices: [String] = []
@@ -405,6 +419,7 @@ public final class LeadEngine: @unchecked Sendable {
         self.sessions = sessions
         self.options = options
         self.note = note
+        plugins = PluginRegistry(options.plugins ?? PluginRegistry.standard())
         queue = link.queue
         reads = BoardReads(handTo: link.queue)
         preflight = NodePreflight(claudeLink: options.claudeLink ?? NodePreflight.claudeLink(root: root), git: options.git)
@@ -456,6 +471,7 @@ public final class LeadEngine: @unchecked Sendable {
 
     /// The host welcomed the link (each welcome, `HostLink.onWelcome`): what waited for its sessions goes on. On `queue`.
     public func welcomed() {
+        askPlugins()
         startPending()
         sessionsChanged()
         restartLook()

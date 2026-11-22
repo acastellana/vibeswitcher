@@ -100,7 +100,9 @@ public enum WireSchema {
                 field("v", .int), field("kind", .words(["hello"])), field("node", .string), field("epoch", .string),
                 field("server", .shape("hello.server")), field("host", .shape("hello.host")), field("kinds", strings),
                 field("peer", .shape("hello.peer")), field("rule", .words(["systemd", "weaker", "closed", "approval"])),
-                optional("auth", .shape("hello.auth")), optional("assets", .string)]),
+                optional("auth", .shape("hello.auth")), optional("assets", .string), optional("plugins", .list(.shape("hello.plugin")))]),
+            // The feature plugins that are on (`PluginRegistry.onValue`, 2026-11-22).
+            shape("hello.plugin", from: "PluginRegistry.onValue", [field("id", .string), field("title", .string)]),
             shape("hello.server", from: "NodeWire.Hello.Server", [field("commit", .string), field("startedAt", .date), field("pid", .int)]),
             shape("hello.host", from: "NodeWire.Hello.Host", [optional("startedAt", .date), optional("notes", .shape("host.notes")),
                                                              optional("pid", .int)]),
@@ -227,7 +229,7 @@ public enum WireSchema {
                 field("restart", Kind.shape("node.restart").orNull), field("reopen", .list(.shape("node.reopen"))), field("ended", .list(.shape("node.ended"))), field("ending", .list(.shape("node.ending"))),
                 field("builds", Kind.any.orNull), field("web", .shape("node.web")), field("usage", Kind.shape("node.usage").orNull),
                 optional("health", .shape("node.health")), field("boost", Kind.shape("node.boost").orNull),
-                optional("update", .shape("node.update"))]),
+                optional("update", .shape("node.update")), optional("plugins", .list(.shape("hello.plugin")))]),
             // A reminder due now (`NodeSessions.Reminder`, 2026-11-22): waiting on you 10 minutes, or no progress for 15.
             shape("node.reminder", from: "NodeSessions.Reminder.value", [
                 field("session", .string), field("kind", .words(["waiting", "stalled"])), field("since", .date), field("dueAt", .date),
@@ -340,13 +342,24 @@ public enum WireSchema {
                 field("root", .string), field("open", .bool), field("closed", Kind.string.orNull), field("notice", Kind.string.orNull),
                 field("at", .date), field("blocking", .bool), optional("question", .shape("card.question")),
                 optional("approval", .shape("card.approval")), optional("config", .shape("card.config")),
-                optional("base", .shape("card.base")), optional("shell", .shape("card.shell")),
-                field("draft", Kind.shape("card.draft").orNull)]),
-            shape("card.shell", from: "CardStore.Card.value (ShellCards.swift, 2026-11-21)", [
-                field("request", .string), field("session", .string), field("asker", .string), field("cwd", .string), field("command", .string),
-                field("label", .string), field("filedAt", .date), field("expiresAt", .date),
-                field("state", .words(["waiting", "starting", "started", "declined", "expired", "failed"])),
-                field("shell", Kind.string.orNull), field("name", Kind.string.orNull), field("why", Kind.string.orNull)]),
+                optional("base", .shape("card.base")), optional("plugin", .shape("card.plugin")), field("draft", Kind.shape("card.draft").orNull)]),
+            // A feature plugin's card (`PluginCard`, Plugins/PluginWire.swift, 2026-11-22): one shape for every plugin.
+            shape("card.plugin", from: "PluginCard.value", [
+                field("plugin", .string), field("request", .string), field("session", .string), field("asker", .string),
+                field("title", .string), field("noun", .string), field("ask", .string),
+                field("facts", .list(.shape("card.plugin.fact"))), field("body", .shape("card.plugin.body")),
+                field("context", Kind.shape("card.plugin.context").orNull),
+                field("severity", .words(PluginCard.Severity.allCases.map(\.rawValue))), field("expiresAt", Kind.date.orNull),
+                field("actions", .list(.shape("card.plugin.action"))), field("waiting", Kind.string.orNull), field("state", .string),
+                field("outcome", Kind.string.orNull)]),
+            shape("card.plugin.fact", from: "PluginCard.Fact", [field("name", .string), field("label", .string), field("value", .string),
+                                                                field("folder", .bool), field("decisive", .bool)]),
+            shape("card.plugin.body", from: "PluginCard.Body", [field("name", .string), field("label", .string), field("note", Kind.string.orNull),
+                                                                field("lines", strings), field("bytes", .int), field("size", .string)]),
+            shape("card.plugin.context", from: "PluginCard.Context", [field("name", .string), field("label", .string), field("text", .string)]),
+            shape("card.plugin.action", from: "PluginCard.Action", [field("word", .string), field("label", .string), field("acts", .bool),
+                                                                    field("short", .string), field("does", .string), field("verb", .string),
+                                                                    field("marks", .string)]),
             shape("card.question", from: "CardStore.Card.value", [
                 field("id", .string), field("short", .string), field("text", .string), field("options", strings),
                 field("priority", .words(["blocking", "important", "whenever"])), field("whyNow", Kind.string.orNull),

@@ -314,8 +314,8 @@ extension LeadEngine {
     public func answer(card id: String, text: String, version: Int? = nil, action: String?,
                        then: @escaping (Result<NodeWire.Value, CardFailure>) -> Void) {
         queue.async { [self] in
-            // A shell request's card: run or decline (`ShellCards.swift`).
-            if let card = cards.cards[id], card.kind == .shell { return answerShell(card, text: text, then: then) }
+            // A feature plugin's card: its words (`PluginEngine.swift`).
+            if let card = cards.cards[id], card.kind == .plugin { return answerPlugin(card, text: text, then: then) }
             guard let card = cards.cards[id], card.kind == .question || card.kind == .approval, let question = card.question else {
                 return then(.failure(.gone("no question card \(id)")))
             }
