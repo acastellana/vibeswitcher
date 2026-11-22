@@ -262,10 +262,10 @@ struct SettingsRequestTests {
         #expect(read.output.contains("Not on a node"), "\(read.output)")
         // The app's search: only the settings holding every word, no left-out list, and a word nothing holds said so.
         let found = try await node.run(["settings", "--find", "team sessions"])
-        #expect(found.status == 0 && found.output.contains("node_max_sessions = 7") && found.output.contains("boost_max_sessions"), "\(found.output)")
+        #expect(found.status == 0 && found.output.contains("node_max_sessions = 7") && found.output.contains("boost_max_sessions"), "\(found.status) \(found.output)\(found.errors)")
         #expect(!found.output.contains("lead_mail") && !found.output.contains("Not on a node"), "\(found.output)")
         let none = try await node.run(["settings", "--find", "nothing-like-this"])
-        #expect(none.status == 0 && none.output.contains("No setting matches"), "\(none.output)")
+        #expect(none.status == 0 && none.output.contains("No setting matches"), "\(none.status) \(none.output)\(none.errors)\n\(node.said)")
         let refused = try await node.run(["set", "node_max_sessions", "0"])
         #expect(refused.status == 77 && refused.errors.contains("1 to 99"), "\(refused.output)\(refused.errors)")
         let usage = try await node.run(["set", "node_max_sessions"])
