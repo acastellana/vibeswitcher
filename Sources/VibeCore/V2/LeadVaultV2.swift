@@ -64,6 +64,11 @@ public enum LeadVaultV2 {
         /// When this record began (its first request since the host's vault began: a host restart starts it over).
         /// Answered `since`.
         case recordSince
+        /// The external plugins the user added (`vibeswitcher plugin add FOLDER`), by id: each one's record (its folder's
+        /// resolved path and the SHA-256 of its manifest and program, as JSON). Answered `external`.
+        case externalPlugins
+        /// The user added (a record) or removed (nil) the external plugin `id`.
+        case setExternalPlugin(id: String, record: String?)
         /// The feature plugins' settings the user set (`vibeswitcher set KEY VALUE` on a plugin's key), by key
         /// (`<plugin>.<name>`): answered `pluginSettings`.
         case pluginSettings
@@ -81,6 +86,7 @@ public enum LeadVaultV2 {
         case plugins([String: Bool])
         case settled([String])
         case since(Double)
+        case external([String: String])
         case pluginSettings([String: String])
     }
 
@@ -255,6 +261,14 @@ public enum LeadVaultV2 {
             guard pluginID(id) else { return .refused("A plugin's id is a short lower-case word.") }
             record.plugins[id] = on
             return .plugins(record.plugins)
+        case .externalPlugins:
+            return .external(Book.part(record.plugin, "ext:"))
+        case .setExternalPlugin(let id, let added):
+            guard pluginID(id) else { return .refused("A plugin's id is a short lower-case word.") }
+            guard (added?.utf8.count ?? 0) <= 4096 else { return .refused("A plugin's record is 4 KiB at most.") }
+            record.plugin["ext:" + id] = added
+            if added == nil { record.plugin["on:" + id] = nil }
+            return .external(Book.part(record.plugin, "ext:"))
         case .recordSince:
             return .since(record.plugin[sinceKey].flatMap(Double.init) ?? now)
         case .settledRequests:
@@ -449,6 +463,21 @@ public struct LeadVaultV2Client: Sendable {
     public func plugins() throws -> [String: Bool] {
         guard case .plugins(let plugins) = try call(.plugins) else { throw Refused("The session host answered something else.") }
         return plugins
+    }
+
+    /// The external plugins the user added, by id: each one's record (JSON).
+    public func externalPlugins() throws -> [String: String] {
+        guard case .external(let records) = try call(.externalPlugins) else { throw Refused("The session host answered something else.") }
+        return records
+    }
+
+    /// Keeps that the user added (`record`) or removed (nil) the external plugin `id`; what is kept now.
+    @discardableResult
+    public func setExternalPlugin(_ id: String, record: String?) throws -> [String: String] {
+        guard case .external(let records) = try call(.setExternalPlugin(id: id, record: record)) else {
+            throw Refused("The session host answered something else.")
+        }
+        return records
     }
 
     /// When this record began: a host restart starts the vault, and it, over.
