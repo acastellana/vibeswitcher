@@ -36,18 +36,20 @@ enum ApproveCommand {
             listed = result
         }
         let items = listed["items"]?.array ?? []
+        // What needs your own decision first: never in the batch, and never scrolled past by it.
+        sayDecide(listed)
         for (number, item) in items.enumerated() {
             Say.out("\(number + 1). " + heading(item))
             lines(item).forEach { Say.out("   " + $0) }
         }
-        sayDecide(listed)
         guard !items.isEmpty, let batch = listed["batch"]?.string, let code = listed["code"]?.string else {
             Say.out("Nothing a plain accept settles is waiting on you.")
             return 0
         }
         let action = UUID().uuidString.lowercased()
-        let what = "This does the \(items.count) accept\(items.count == 1 ? "" : "s") listed above, in that order (config, base, hooks), each "
-            + "recorded as its own action, and stops at the first refusal."
+        // Directly above the code: one line per item, what it does.
+        let recap = items.enumerated().map { "  \($0.offset + 1). " + recapLine($0.element) }.joined(separator: "\n")
+        let what = "The batch, in this order (each recorded as its own action; it stops at the first refusal):\n" + recap
         let outcome = TypedWord.ask(approval: client.approvalRule, code: code, what: what, word: NodeIds.code(action: action))
         guard outcome == .typed else { return Say.refused(TypedWord.refusal(outcome)) }
         let result: NodeWire.Value
@@ -94,14 +96,39 @@ enum ApproveCommand {
         return (item["reasons"]?.array ?? []).compactMap(\.string).map { inert($0) }
     }
 
-    /// What needs your own decision: each card with its own answer line, and a push asked for.
+    /// What needs your own decision, counted, each with the command that settles it: questions, merge approvals and shell
+    /// requests (`vibeswitcher questions` shows them), a push asked for, and what the batch leaves to you (a config card
+    /// with guard rails or a review floor to record, a base moved from a head the vault can't vouch for, the hooks beside
+    /// a config accept).
     static func sayDecide(_ listed: NodeWire.Value) {
         let decide = listed["decide"]?.array ?? []
         let pushes = (listed["pushes"]?.array ?? []).compactMap(\.string)
-        guard !decide.isEmpty || !pushes.isEmpty else { return }
-        Say.out("Waiting on your own decision (not in the batch; each answered with its own line and code):")
-        for card in decide { CardText.lines(card).forEach { Say.out("   " + $0) } }
+        let own = listed["own"]?.array ?? []
+        guard !decide.isEmpty || !pushes.isEmpty || !own.isEmpty else { return }
+        Say.out("Waiting on your own decision (not in the batch; each with its own command and code):")
+        let count = { (kind: String) in decide.filter { $0["kind"]?.string == kind }.count }
+        let cards = [("question", count("question")), ("merge approval", count("approval")), ("shell request", count("shell"))]
+            .filter { $0.1 > 0 }.map { "\($0.1) \($0.0)\($0.1 == 1 ? "" : "s")" }
+        if !cards.isEmpty { Say.out("   " + cards.joined(separator: ", ") + ": see vibeswitcher questions (each answered with vibeswitcher answer CARD)") }
         for root in pushes { Say.out("   a push asked for in \(inert(root)): vibeswitcher push \(inert(root)) | decline-push \(inert(root))") }
+        for entry in own { Say.out("   \(inert(entry["text"]?.string)): \(inert(entry["command"]?.string))") }
+    }
+
+    /// One line for an item: what it is, where, what it seals or moves.
+    static func recapLine(_ item: NodeWire.Value) -> String {
+        let folder = inert(item["subject"]?.string)
+        switch item["kind"]?.string {
+        case "config.accept":
+            let names = (item["card"]?["config"]?["items"]?.array ?? []).compactMap { $0["name"]?.string }.map { inert($0) }
+            let shown = names.prefix(3).joined(separator: ", ") + (names.count > 3 ? " and \(names.count - 3) more" : "")
+            return "config accept, \(folder): seals \(names.count) (\(shown))"
+        case "base.accept":
+            let base = item["card"]?["base"]
+            let from = String((base?["from"]?.string ?? "?").prefix(8)), to = String((base?["to"]?.string ?? "?").prefix(8))
+            return "base accept, \(folder): \(inert(base?["branch"]?.string)) from \(from) to \(to)"
+        case "hooks.install": return "hooks install: \(folder)"
+        default: return "\(inert(item["kind"]?.string)), \(folder)"
+        }
     }
 
     static func summary(_ done: NodeWire.Value) -> String {

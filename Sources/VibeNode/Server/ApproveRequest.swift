@@ -6,10 +6,13 @@ import VibeCore
 /// action now covers a listed batch.
 ///
 /// - **`approve.list`** (the user's, no typed word: it changes nothing, as `config.held` and `base.show`): every held
-///   config card (the account's home and every project folder with a lead, in the vault's roster or in the accepted
-///   snapshot: `config.held`'s card for each, those holding something), every base-move card (`base.show`'s, for each
-///   project folder whose base moved), and the hooks when out of date (`HooksRequest.outOfDate`: a program that isn't
-///   the build's, a config without them; Claude's, and Codex's when its config is there). The list is kept as a batch,
+///   config card (the account's home and every repository with a running lead or in the vault's roster, never the
+///   accepted snapshot an agent could write; `config.held`'s card for each, those holding something) whose guard rails
+///   and review floor are the ones the vault recorded, every base-move card from a head the vault vouches for to
+///   another commit, and the hooks when out of date (`HooksRequest.outOfDate`: a program that isn't the build's, a
+///   config without them; Claude's, and Codex's when its config is there) unless a config accept is in the batch. A card
+///   with rails to record, a base moved from a head it can't vouch for, and hooks beside a config accept are the user's
+///   own decision, each with its command (`own`); at most `approveMost` items, else refused. The list is kept as a batch,
 ///   its code the batch id's (`NodeIds.code(card:)`, as a card's), for `approveLife`; each item is returned with its
 ///   card as `config held` and `base show` show it. What needs the user's own decision (questions, approvals, shell
 ///   requests, a push) is returned beside it, only to be listed with its own answer lines: never in a batch.
@@ -56,6 +59,16 @@ extension Requests {
         return parts.joined(separator: "-")
     }
 
+    /// The most items one code may cover: above it, the list is refused and each folder settled on its own, so nothing
+    /// scrolls past before the code is asked.
+    static let approveMost = 12
+
+    /// What needs the user's own decision rather than a batch: a line to show and the command that settles it.
+    struct ApproveOwn: Sendable {
+        var text: String
+        var command: String
+    }
+
     /// `approve.list`, args `only` (some of `approveGroups`; all when absent).
     func approveList(_ request: NodeWire.Request, reply: @escaping (NodeWire.Reply) -> Void) {
         guard let engine else { return reply(.init(re: request.id, error: .init(.refused, "this server keeps no cards"))) }
@@ -64,22 +77,33 @@ extension Requests {
             return reply(.init(re: request.id, error: .init(.badArgs, "only names some of config, base and hooks")))
         }
         let (vault, home, queue, nodeRoot) = (link.vault, home, queue, self.nodeRoot ?? "")
-        let leadRoots = engine.leads.leads.values.map(\.root)
-        let snapshot = engine.root
+        // The projects of the node: its running leads' and the vault's roster's (never a file an agent could write, as
+        // the accepted snapshot is), each still a repository.
+        let leadRoots = engine.leads.leads.values.filter { $0.session != nil }.map(\.root)
         let binaries = notes?.notes.binaries
-        engine.reads.async({ _ -> (roots: [String], hooks: [String], agents: [Agent]) in
+        engine.reads.async({ _ -> (roots: [String], railsPending: Set<String>, hooks: [String], agents: [Agent]) in
             let roster = (try? vault.roster(root: nil))?.map(\.root) ?? []
-            let accepted = Array(AcceptedSnapshot.load(root: snapshot).projects.keys)
             var seen = Set<String>()
-            let roots = ([home] + (leadRoots + roster + accepted).sorted()).filter { seen.insert($0).inserted }
-            guard only.contains("hooks"), !nodeRoot.isEmpty else { return (roots, [], []) }
+            let projects = (leadRoots + roster).sorted().filter { root in
+                seen.insert(root).inserted && root != home && FileManager.default.fileExists(atPath: (root as NSString).appendingPathComponent(".git"))
+            }
+            let roots = [home] + projects
+            // A root whose guard rails (the review floor's keys among them) aren't the ones the vault recorded, or were
+            // never recorded: its accept would record them, so it is the user's own decision, never a batch's.
+            let railsPending = Set(roots.filter { root in
+                let now = LeadVault.guardedHashes(LeadWorkflow.load(from: ConfigHoldStore.workflowPath(root: root)))
+                guard let recorded = try? vault.guardedSettings(root: root) else { return true }
+                return LeadVault.guardedKeys.contains { now[$0] != recorded[$0] }
+            })
+            guard only.contains("hooks"), !nodeRoot.isEmpty else { return (roots, railsPending, [], []) }
             var agents: [Agent] = [.claude]
             if FileManager.default.fileExists(atPath: HookInstaller.configURL(for: .codex, home: home).path) { agents.append(.codex) }
             let reasons = HooksRequest(nodeRoot: nodeRoot, home: home, binaries: binaries, vault: vault).outOfDate(agents: agents)
-            return (roots, reasons, agents)
+            return (roots, railsPending, reasons, agents)
         }) { [weak self] found in
             guard let self else { return }
             var items: [ApproveItem] = []
+            var own: [ApproveOwn] = []
             let configRoots = only.contains("config") ? found.roots : []
             let baseRoots = only.contains("base") ? found.roots.filter { $0 != home } : []
             func configs(_ left: [String], then: @escaping () -> Void) {
@@ -88,7 +112,12 @@ extension Requests {
                     queue.async {
                         if case .success(let value) = result, let card = value["card"], let id = card["id"]?.string,
                            (card["config"]?["items"]?.array?.isEmpty == false) {
-                            items.append(ApproveItem(kind: "config.accept", args: ["card": .string(id)], subject: root, card: card))
+                            if found.railsPending.contains(root) {
+                                own.append(ApproveOwn(text: "held config in \(root), with guard rails or a review floor to record",
+                                                      command: "vibeswitcher config held \(root)"))
+                            } else {
+                                items.append(ApproveItem(kind: "config.accept", args: ["card": .string(id)], subject: root, card: card))
+                            }
                         }
                         configs(Array(left.dropFirst()), then: then)
                     }
@@ -98,8 +127,14 @@ extension Requests {
                 guard let root = left.first else { return then() }
                 engine.baseShow(root: root, from: nil) { result in
                     queue.async {
-                        if case .success(let card) = result, card.isOpen {
-                            items.append(ApproveItem(kind: "base.accept", args: ["card": .string(card.id)], subject: root, card: card.value))
+                        if case .success(let card) = result, card.isOpen, let shown = card.base {
+                            // Only a move the vault can vouch for: from a recorded (or given) head, to another commit.
+                            if [.recorded, .given].contains(shown.fromIs), let from = shown.from, from != shown.to {
+                                items.append(ApproveItem(kind: "base.accept", args: ["card": .string(card.id)], subject: root, card: card.value))
+                            } else if shown.from != shown.to {
+                                own.append(ApproveOwn(text: "the base of \(root) moved from a head the vault can't vouch for (\(shown.fromIs.rawValue))",
+                                                      command: "vibeswitcher base show \(root)"))
+                            }
                         }
                         bases(Array(left.dropFirst()), then: then)
                     }
@@ -108,23 +143,36 @@ extension Requests {
             configs(configRoots) {
                 bases(baseRoots) {
                     if !found.hooks.isEmpty {
-                        items.append(ApproveItem(kind: "hooks.install", args: ["agents": .array(found.agents.map { .string($0.rawValue) })],
-                                                 subject: found.agents.map(\.rawValue).joined(separator: ","), reasons: found.hooks))
+                        let agents = found.agents.map(\.rawValue)
+                        // Never beside a config accept: the hooks' write into the home's settings, sealed as written,
+                        // stays a step of its own.
+                        if items.contains(where: { $0.kind == "config.accept" }) {
+                            own.append(ApproveOwn(text: "the hooks are out of date: " + found.hooks.joined(separator: "; "),
+                                                  command: "vibeswitcher hooks install" + agents.map { " --agent \($0)" }.joined()))
+                        } else {
+                            items.append(ApproveItem(kind: "hooks.install", args: ["agents": .array(agents.map(NodeWire.Value.string))],
+                                                     subject: agents.joined(separator: ","), reasons: found.hooks))
+                        }
                     }
-                    self.listed(request, items: items, engine: engine, reply: reply)
+                    self.listed(request, items: items, own: own, engine: engine, reply: reply)
                 }
             }
         }
     }
 
     /// The batch kept and its list replied, with what needs the user's own decision beside it. On `queue`.
-    private func listed(_ request: NodeWire.Request, items: [ApproveItem], engine: LeadEngine, reply: (NodeWire.Reply) -> Void) {
+    private func listed(_ request: NodeWire.Request, items: [ApproveItem], own: [ApproveOwn], engine: LeadEngine, reply: (NodeWire.Reply) -> Void) {
+        guard items.count <= Self.approveMost else {
+            return reply(.init(re: request.id, error: .init(.refused, "\(items.count) accepts wait, more than one code may cover (\(Self.approveMost)): "
+                + "settle them per folder (vibeswitcher config held FOLDER, base show FOLDER, hooks install), or narrow with --only")))
+        }
         let decide = engine.cards.list().filter { $0.isOpen && [.question, .approval, .shell].contains($0.kind) }.map(\.value)
         let pushes = engine.leads.leads.values.compactMap { lead in lead.push.map { _ in NodeWire.Value.string(lead.root) } }
         var result: [String: NodeWire.Value] = ["items": .array(items.map { item in
             .object(["kind": .string(item.kind), "subject": .string(item.subject), "card": item.card ?? .null,
                      "reasons": .array(item.reasons.map(NodeWire.Value.string))])
-        }), "decide": .array(decide), "pushes": .array(pushes)]
+        }), "decide": .array(decide), "pushes": .array(pushes),
+           "own": .array(own.map { .object(["text": .string($0.text), "command": .string($0.command)]) })]
         if !items.isEmpty {
             let id = "local:approve:" + UUID().uuidString.lowercased()
             approveBatches.append(ApproveBatch(id: id, items: items, at: Date()))
@@ -135,23 +183,32 @@ extension Requests {
         reply(.init(re: request.id, result: .object(result)))
     }
 
-    /// `approve`, args `batch` and `code`, under the batch's own action (recorded already: `voiced`). On `queue`.
-    func approve(_ request: NodeWire.Request, from facts: PeerFacts, reply: @escaping (NodeWire.Reply) -> Void) {
-        guard let id = request.args?["batch"]?.string, let action = request.action?.lowercased() else {
-            return reply(.init(re: request.id, error: .init(.badArgs, "approve needs batch")))
-        }
+    /// Why `approve` can't take its batch, or nil: no such batch, another code, or expired (gone with it). Asked before
+    /// the request is recorded (`voiced`), as a card's code is, so a refused batch leaves no record; and again when it acts.
+    func approveRefusal(_ request: NodeWire.Request) -> NodeWire.Reply? {
+        guard let id = request.args?["batch"]?.string else { return .init(re: request.id, error: .init(.badArgs, "approve needs batch")) }
         guard let index = approveBatches.firstIndex(where: { $0.id == id }) else {
-            return reply(.init(re: request.id, error: .init(.gone, "no batch \(ConfigSeal.inert(id, limit: 80)) (it was taken, it expired, or the server restarted): run `vibeswitcher approve` again")))
+            return .init(re: request.id, error: .init(.gone, "no batch \(ConfigSeal.inert(id, limit: 80)) (it was taken, it expired, or the server restarted): run `vibeswitcher approve` again"))
         }
-        let batch = approveBatches[index]
         guard request.args?["code"]?.string?.uppercased() == NodeIds.code(card: id) else {
             note("refused approve of \(id): the code typed isn't the batch's")
-            return reply(.init(re: request.id, error: .init(.voice, "code: the code typed isn't batch \(id)'s")))
+            return .init(re: request.id, error: .init(.voice, "code: the code typed isn't batch \(id)'s"))
         }
-        approveBatches.remove(at: index)
-        guard Date().timeIntervalSince(batch.at) < Self.approveLife else {
-            return reply(.init(re: request.id, error: .init(.gone, "batch \(id) expired (\(Int(Self.approveLife / 60)) minutes): run `vibeswitcher approve` again")))
+        guard Date().timeIntervalSince(approveBatches[index].at) < Self.approveLife else {
+            approveBatches.remove(at: index)
+            return .init(re: request.id, error: .init(.gone, "batch \(id) expired (\(Int(Self.approveLife / 60)) minutes): run `vibeswitcher approve` again"))
         }
+        return nil
+    }
+
+    /// `approve`, args `batch` and `code`, under the batch's own action (recorded already: `voiced`). On `queue`.
+    func approve(_ request: NodeWire.Request, from facts: PeerFacts, reply: @escaping (NodeWire.Reply) -> Void) {
+        if let refusal = approveRefusal(request) { return reply(refusal) }
+        guard let id = request.args?["batch"]?.string, let action = request.action?.lowercased(),
+              let index = approveBatches.firstIndex(where: { $0.id == id }) else {
+            return reply(.init(re: request.id, error: .init(.badArgs, "approve needs batch")))
+        }
+        let batch = approveBatches.remove(at: index)
         note("approve \(id): \(batch.items.count) item\(batch.items.count == 1 ? "" : "s") under action \(action)")
         var done: [NodeWire.Value] = []
         func next(_ at: Int) {

@@ -87,11 +87,17 @@ public struct HooksRequest {
         var said: [String] = []
         for name in Self.programs {
             let path = (binFolder as NSString).appendingPathComponent(name)
-            guard let data = FileManager.default.contents(atPath: path) else {
+            var info = stat()
+            guard lstat(path, &info) == 0 else {
                 said.append("\(name) isn't installed in \(Self.shown(binFolder))")
                 continue
             }
-            if let expected = binaries?[name], BuildInfo.sha256(of: data) != expected {
+            // A program is a plain file of a program's size: anything else is said, never read.
+            guard info.st_mode & S_IFMT == S_IFREG, info.st_size <= Self.programLimit else {
+                said.append("\(Self.shown(path)) isn't a plain file of a program's size")
+                continue
+            }
+            if let expected = binaries?[name], Self.sha256(path) != expected {
                 said.append("\(Self.shown(path)) isn't this build's \(name)")
             }
         }
@@ -104,6 +110,18 @@ public struct HooksRequest {
             }
         }
         return said
+    }
+
+    /// The largest file `outOfDate` hashes as a program (the hook and tool server are tens of MB).
+    static let programLimit: Int = 512 << 20
+
+    /// `path`'s SHA-256, read in parts (never whole in memory), or nil when it can't be read.
+    static func sha256(_ path: String) -> String? {
+        guard let handle = FileHandle(forReadingAtPath: path) else { return nil }
+        defer { try? handle.close() }
+        var hasher = SHA256()
+        while let part = try? handle.read(upToCount: 1 << 20), !part.isEmpty { hasher.update(data: part) }
+        return hasher.finalize().map { String(format: "%02x", $0) }.joined()
     }
 
     public func install(agents: [Agent]) -> Result<Installed, StartRefusal> {

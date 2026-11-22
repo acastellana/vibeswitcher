@@ -11,19 +11,44 @@ import Testing
 struct ApproveTests {
     private let scratch = Scratch()
 
-    /// A world whose home's settings changed after the first look: held, for the repo's card (a project of the node's,
-    /// recorded in the accepted snapshot) and the home's.
+    /// A world whose home's settings changed after the first look: held, for the repo's card (a project of the node's:
+    /// its lead in the vault's roster) and the home's, both with their guard rails recorded as they are.
     private func world() async throws -> CardWorld {
         let world = try await CardWorld.make(scratch)
         world.queue.sync { world.requests.home = world.host.home.path }
-        // The repository a project of this node's: in the accepted snapshot, as an accept leaves it.
-        try AcceptedSnapshot.update(root: world.host.root, project: world.repo) { _ in }
+        try await project(world, world.repo)
+        try await recordRails(world, world.host.home.path)
         let settings = world.host.home.appendingPathComponent(".claude/settings.json")
         try FileManager.default.createDirectory(at: settings.deletingLastPathComponent(), withIntermediateDirectories: true)
         try #"{"env":{"A":"1"}}"#.write(to: settings, atomically: true, encoding: .utf8)
         for folder in [world.repo, world.host.home.path] { _ = await world.ask("config.held", ["folder": .string(folder)], action: nil) }
         try #"{"env":{"A":"2"}}"#.write(to: settings, atomically: true, encoding: .utf8)
         return world
+    }
+
+    /// `root` a project of the node's: its lead running (a session labelled as a lead's, started there, the vault's grant
+    /// bound to it), as the engine lists it, and its rails recorded.
+    private func project(_ world: CardWorld, _ root: String) async throws {
+        let session = try await world.host.spawn("exec sleep 600", cwd: root, label: "Lead · \((root as NSString).lastPathComponent)")
+        let vault = world.host.vault
+        try await offPool {
+            let grant = try vault.startLead(root: root, branch: "main")
+            try vault.bind(grant, root: root, session: session.id.uuidString)
+        }
+        try await recordRails(world, root)
+        let project = NodeIds.project(root: root)
+        let listed = await eventually(timeout: 60) {
+            world.engine.refresh()
+            return world.queue.sync { world.engine.leads.leads[project]?.session == session.id }
+        }
+        try #require(listed, "the engine never listed \(root)'s lead")
+    }
+
+    /// `root`'s guard rails recorded as its workflow sets them now (as an accept records them).
+    private func recordRails(_ world: CardWorld, _ root: String) async throws {
+        let vault = world.host.vault
+        let hashes = LeadVault.guardedHashes(LeadWorkflow.load(from: ConfigHoldStore.workflowPath(root: root)))
+        try await offPool { try vault.setGuardedSettings(hashes, root: root) }
     }
 
     private func list(_ world: CardWorld, only: [String] = ["config"]) async throws -> NodeWire.Value {
@@ -111,6 +136,71 @@ struct ApproveTests {
     }
 }
 
+extension ApproveTests {
+    /// The review's fixes: what a batch may hold, and how it is asked.
+    @Test func whatABatchLeavesToTheUserAndWhatItNeverLists() async throws {
+        let world = try await world()
+        defer { world.stop() }
+        // A folder only the accepted snapshot names (a file an agent could write) is never listed.
+        let planted = scratch.url("planted")
+        try FileManager.default.createDirectory(at: planted.appendingPathComponent(".git"), withIntermediateDirectories: true)
+        try AcceptedSnapshot.update(root: world.host.root, project: planted.path) { _ in }
+        // A project whose guard rails changed since they were recorded: its card is the user's own decision.
+        let railed = scratch.url("railed")
+        try await scratchRepository(railed)
+        try await project(world, railed.path)
+        let workflow = URL(fileURLWithPath: ConfigHoldStore.workflowPath(root: railed.path))
+        try FileManager.default.createDirectory(at: workflow.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try "---\ntest_command: make check\n---\n".write(to: workflow, atomically: true, encoding: .utf8)
+        _ = await world.ask("config.held", ["folder": .string(railed.path)], action: nil)
+        let listed = try await list(world, only: ["config", "base"])
+        let subjects = (listed["items"]?.array ?? []).compactMap { $0["subject"]?.string }
+        #expect(!subjects.contains(planted.path) && !subjects.contains(railed.path), "\(subjects)")
+        let own = (listed["own"]?.array ?? []).map { "\($0["text"]?.string ?? "") \($0["command"]?.string ?? "")" }
+        #expect(own.contains { $0.contains("guard rails or a review floor to record") && $0.contains("vibeswitcher config held \(railed.path)") }, "\(own)")
+        // Bases that didn't move list nothing.
+        #expect(!(listed["items"]?.array ?? []).contains { $0["kind"]?.string == "base.accept" }, "\(listed)")
+        let bases = try await list(world, only: ["base"])
+        #expect(bases["items"]?.array?.isEmpty == true && bases["batch"] == nil, "\(bases)")
+        // The hooks out of date: never beside a config accept (their own line), a batch of their own otherwise.
+        world.queue.sync { world.requests.nodeRoot = world.host.folder.path }
+        let withConfig = try await list(world, only: ["config", "hooks"])
+        #expect(!(withConfig["items"]?.array ?? []).contains { $0["kind"]?.string == "hooks.install" }, "\(withConfig)")
+        #expect((withConfig["own"]?.array ?? []).contains { $0["command"]?.string?.hasPrefix("vibeswitcher hooks install --agent claude") == true }, "\(withConfig)")
+        let alone = try await list(world, only: ["hooks"])
+        #expect(alone["items"]?.array?.map { $0["kind"]?.string } == ["hooks.install"], "\(alone)")
+    }
+
+    @Test func moreThanOneCodeMayCoverIsRefusedAndARefusedBatchLeavesNoRecord() async throws {
+        let world = try await world()
+        defer { world.stop() }
+        for index in 0..<Requests.approveMost {
+            let root = scratch.url("project-\(index)")
+            try await scratchRepository(root)
+            try await project(world, root.path)
+            _ = await world.ask("config.held", ["folder": .string(root.path)], action: nil)
+        }
+        let settings = world.host.home.appendingPathComponent(".claude/settings.json")
+        try #"{"env":{"A":"3"}}"#.write(to: settings, atomically: true, encoding: .utf8)
+        let many = try #require(await world.ask("approve.list", ["only": .array([.string("config")])], action: nil))
+        #expect(many.error?.code == NodeWire.Code.refused.rawValue && many.error?.message.contains("settle them per folder") == true, "\(many)")
+        // A batch it doesn't know: refused before anything is recorded (no false mark in `status`'s journal check).
+        let unknown = try #require(await world.ask("approve", ["batch": .string("local:approve:none"), "code": .string("ABCD")]))
+        #expect(unknown.error?.code == NodeWire.Code.gone.rawValue, "\(unknown)")
+        #expect(!world.queue.sync { world.requests.accepted }.contains { $0.kind == "approve" })
+    }
+
+    /// The Mac's approval dialog names a batch within its budget: counts per kind, its folders once.
+    @Test func theMacsDialogNamesABatchCompactly() {
+        let items = (0..<12).map { index in
+            Requests.ApproveItem(kind: index < 9 ? "config.accept" : "base.accept", args: [:], subject: "/home/u/projects/a-long-project-name-\(index % 10)")
+        } + [Requests.ApproveItem(kind: "hooks.install", args: [:], subject: "claude")]
+        let shown = Requests.approveShown(items)
+        #expect(shown.count <= ApprovalVoice.cardLimit - 40 + 20 && shown.hasPrefix("accept 9 held config cards, 3 moved bases, the hooks in "), "\(shown)")
+        #expect(shown.contains("more"), "\(shown)")
+    }
+}
+
 /// The hooks out of date, as `approve` lists them (`HooksRequest.outOfDate`).
 struct HooksOutOfDateTests {
     private let scratch = Scratch()
@@ -128,5 +218,15 @@ struct HooksOutOfDateTests {
         try FileManager.default.createDirectory(atPath: home + "/.vibeswitcher/bin", withIntermediateDirectories: true)
         try Data("other".utf8).write(to: URL(fileURLWithPath: home + "/.vibeswitcher/bin/vibeswitcher-hook"))
         #expect(request.outOfDate(agents: []).contains { $0.contains("isn't this build's vibeswitcher-hook") })
+        // Never read: a file past a program's size (sparse, so it costs nothing here), nor one that isn't a plain file.
+        let mcp = home + "/.vibeswitcher/bin/vibeswitcher-mcp"
+        FileManager.default.createFile(atPath: mcp, contents: nil)
+        let handle = try #require(FileHandle(forWritingAtPath: mcp))
+        try handle.truncate(atOffset: UInt64(HooksRequest.programLimit) + 1)
+        try handle.close()
+        try FileManager.default.removeItem(atPath: home + "/.vibeswitcher/bin/vibeswitcher-hook")
+        try FileManager.default.createDirectory(atPath: home + "/.vibeswitcher/bin/vibeswitcher-hook", withIntermediateDirectories: true)
+        let odd = request.outOfDate(agents: [])
+        #expect(odd.filter { $0.contains("isn't a plain file of a program's size") }.count == 2, "\(odd)")
     }
 }

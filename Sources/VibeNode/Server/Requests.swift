@@ -253,6 +253,10 @@ public final class Requests: @unchecked Sendable {
             return reply(.init(re: request.id, error: .init(.notYet, "the server's link to its host isn't welcomed yet: retry")))
         }
         if Self.carded.contains(request.kind), let refusal = cardRefusal(request) { return reply(refusal) }
+        // A retry of an approve already done (its action's reply kept) is answered as before, below; any other is checked first.
+        if request.kind == "approve", request.action.map({ replies[$0.lowercased()] == nil }) ?? true, let refusal = approveRefusal(request) {
+            return reply(refusal)
+        }
         if records, let action = request.action?.lowercased() {
             return record(request, action: action, from: facts) { [weak self] recorded in
                 guard let self else { return }

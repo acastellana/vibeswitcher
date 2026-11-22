@@ -781,20 +781,34 @@ struct NodeAcceptanceTests {
         #expect(await eventually(timeout: 120) { node.inbox(lead.session.tty).contains { $0.text.contains("start_worker continues there") } }, "\(node.said)")
     }
 
-    @Test("A39: vs approve shows every held config card whole, asks one code, accepts each, each recorded and journaled")
+    @Test("A39: vs approve leaves rails to record to you, then shows held config whole, asks one code, accepts it, recorded and journaled")
     func a39Approve() async throws {
         let node = try await ScratchNode(scratch, holdFirstLook: true)
         defer { node.stop() }
+        // A fresh node: the home's accept would record its guard rails, so it is the user's own, named with its command.
+        let first = try await node.runOnTerminal(["approve", "--only", "config"])
+        #expect(first.status == 0 && first.output.contains("guard rails or a review floor to record")
+                && first.output.contains("vibeswitcher config held \(node.home.path)") && first.output.contains("Nothing a plain accept settles"),
+                "\(first.output)\(first.errors)\n\(node.said)")
+        let held = try await node.run(["config", "held", node.home.path])
+        let card = try #require(ScratchNode.card(held.output, "config accept"), "\(held.output)")
+        let accepted = try await node.runOnTerminal(["config", "accept", card])
+        #expect(accepted.status == 0, "\(accepted.output)\(accepted.errors)")
+        // A change since: a plain accept, in the batch, its recap right above the one code.
+        let settings = node.home.appendingPathComponent(".claude/settings.json")
+        try FileManager.default.createDirectory(at: settings.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try #"{"env":{"A39":"1"}}"#.write(to: settings, atomically: true, encoding: .utf8)
         let approved = try await node.runOnTerminal(["approve", "--only", "config"])
-        #expect(approved.status == 0 && approved.output.contains("1. Held config,") && approved.output.contains("This does the 1 accept listed above")
+        #expect(approved.status == 0 && approved.output.contains("1. Held config,") && approved.output.contains("The batch, in this order")
+                && approved.output.contains("1. config accept, \(node.home.path): seals")
                 && approved.output.contains("done: config accepted") && approved.output.contains("all 1 done"), "\(approved.output)\(approved.errors)\n\(node.said)")
-        // Nothing left to approve, and every accepted request (the batch's, its item's) is in the journal.
+        // Nothing left, and every accepted request (the batch's, its item's) is in the journal.
         let again = try await node.runOnTerminal(["approve", "--only", "config"])
         #expect(again.status == 0 && again.output.contains("Nothing a plain accept settles is waiting on you."), "\(again.output)\(again.errors)")
         let status = try await node.run(["status"])
         #expect(!status.output.contains("the journal has no entry for it"), "\(status.output)")
-        let accepted = ((try await node.statusJSON())["accepted"] as? [[String: Any]] ?? []).compactMap { $0["kind"] as? String }
-        #expect(accepted.contains("approve") && accepted.contains("config.accept"), "\(accepted)")
+        let kinds = ((try await node.statusJSON())["accepted"] as? [[String: Any]] ?? []).compactMap { $0["kind"] as? String }
+        #expect(kinds.contains("approve") && kinds.filter { $0 == "config.accept" }.count == 2, "\(kinds)")
     }
 
     // MARK: The rows a scratch node can't run

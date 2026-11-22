@@ -126,8 +126,9 @@ vs reopen                                # your own sessions the restart ended
 
 `vs approve` lists what a plain accept settles (your home's and each project's held config, each moved base, the hooks
 when a build changed them), each as `vs config held` and `vs base show` show it, asks one code and does them in order,
-stopping at the first refusal; `--only config,base,hooks` narrows it. Questions, merge approvals and pushes it only
-lists: each keeps its own answer. `vs config held FOLDER` and `vs base show FOLDER` still show one at a time.
+stopping at the first refusal; `--only config,base,hooks` narrows it. What needs your own decision it lists first with
+its command, never in the batch: questions, merge approvals and pushes, a project's first accept or changed guard rails
+(`vs config held FOLDER`), a base it can't vouch for (`vs base show FOLDER`), the hooks beside a config accept.
 The seal holds every team until you accept what changed. When Claude Code has updated itself, the card says "this looks
 like Claude Code's own update to X". VibeSwitcher can't tell it from a file a session put there, so it asks you.
 `DISABLE_AUTOUPDATER=1` in Claude Code's settings stops those holds.

@@ -133,8 +133,7 @@ extension Requests {
             guard let id = text("batch"), let batch = approveBatches.first(where: { $0.id == id }) else {
                 return .failure(.init(why: "approve needs a batch this server listed: nothing was asked"))
             }
-            let shown = batch.items.map { "\($0.kind) \(Self.place($0.subject))" }.joined(separator: "; ")
-            return .success(("do \(batch.items.count) listed accept\(batch.items.count == 1 ? "" : "s"): \(shown)", nil))
+            return .success((Self.approveShown(batch.items), nil))
         case "build.switch":
             guard let commit = text("commit"), UpdateWatch.isCommit(commit) else { return .failure(.init(why: "build.switch needs a commit: nothing was asked")) }
             return .success(("switch the node to build \(commit.prefix(12))", nil))
@@ -240,6 +239,32 @@ extension Requests {
     }
 
     /// A folder as the dialog names it: its last part, then where it is.
+    /// A batch named compactly enough for the approval dialog: counts per kind, then its folders once by name (`and N
+    /// more` past the budget).
+    static func approveShown(_ items: [ApproveItem]) -> String {
+        let count = { (kind: String) in items.filter { $0.kind == kind }.count }
+        var parts: [String] = []
+        if count("config.accept") > 0 { parts.append("\(count("config.accept")) held config card\(count("config.accept") == 1 ? "" : "s")") }
+        if count("base.accept") > 0 { parts.append("\(count("base.accept")) moved base\(count("base.accept") == 1 ? "" : "s")") }
+        if count("hooks.install") > 0 { parts.append("the hooks") }
+        var head = "accept " + parts.joined(separator: ", ")
+        var seen = Set<String>()
+        let folders = items.filter { $0.kind != "hooks.install" }.map { ConfigSeal.inert(($0.subject as NSString).lastPathComponent, limit: 40) }
+            .filter { seen.insert($0).inserted }
+        guard !folders.isEmpty else { return head }
+        head += " in "
+        var shown: [String] = []
+        for (index, folder) in folders.enumerated() {
+            let rest = folders.count - index - 1
+            let tail = rest > 0 ? " and \(rest) more" : ""
+            if (head + (shown + [folder]).joined(separator: ", ") + tail).count > approvalBudget - 40 {
+                return head + shown.joined(separator: ", ") + " and \(folders.count - index) more"
+            }
+            shown.append(folder)
+        }
+        return head + shown.joined(separator: ", ")
+    }
+
     static func place(_ path: String) -> String {
         let name = (path as NSString).lastPathComponent
         return "\(ConfigSeal.inert(name, limit: .max)) (\(ConfigSeal.inert(path, limit: .max)))"
