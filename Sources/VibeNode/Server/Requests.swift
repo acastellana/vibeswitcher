@@ -246,6 +246,7 @@ public final class Requests: @unchecked Sendable {
         guard !records || request.action.map({ UUID(uuidString: $0) != nil }) == true else {
             return reply(.init(re: request.id, error: .init(.badArgs, "\(request.kind) needs an action id (a UUID)")))
         }
+        if let refusal = RequestArguments.refusal(request) { return reply(refusal) }
         guard !stopping else { return reply(.init(re: request.id, error: .init(.stopping, "the node is stopping"))) }
         // Before the host's welcome (and while the link reconnects) its session list isn't known: a state change
         // judged on it could be wrong (a `stop` would find nothing live). The command line asks again.
@@ -463,7 +464,7 @@ public final class Requests: @unchecked Sendable {
         if let health {
             fields["health"] = health.value(serverRestarts: notes?.notes.serverRestarts, refusedConnections: notes?.notes.refusedAppConnections,
                                             hostRestartAt: engine?.restartValue["at"]?.string.flatMap(NodeWire.date),
-                                            waiting: sessions?.reminderNotices() ?? [])
+                                            waiting: sessions?.reminderNotices() ?? [], serverEnd: notes?.notes.lastServerEnd)
         }
         return .object(fields)
     }

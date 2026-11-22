@@ -103,6 +103,7 @@ public final class ServerChild {
     public let webListeners = HostWebListeners(usersHost: true, note: { _ in })
     private var delay = ServerChild.firstDelay
     private var restartCount = 0
+    private var lastEndRecord: HostNotes.ServerEnd?
 
     private convenience init(server: HostServer, copy: Platform.ProcessSelf.SealedCopy, launch: Launch) {
         self.init(server: server, image: .sealed(copy), launch: launch)
@@ -408,6 +409,9 @@ public final class ServerChild {
     /// How many times a child was started again after one ended.
     public var restarts: Int { lock.withLock { restartCount } }
 
+    /// How the child last ended on its own (`ended`, not a replacement's end), nil: none under this image.
+    public var lastEnd: HostNotes.ServerEnd? { lock.withLock { lastEndRecord } }
+
     /// The child running now as a handover carries it (`HostHandover.State.serverChild`): nil when none runs, or its
     /// connector has closed (a handover then waits: `handoverRefusal`). On the host's queue.
     var record: HostHandover.ServerChildRecord? {
@@ -580,6 +584,7 @@ public final class ServerChild {
             Self.say(server, "server child pid \(pid) ended for the new build's server: \(HostLog.waitStatus(status)); started again from it now")
             return spawn()
         }
+        lock.withLock { lastEndRecord = HostNotes.ServerEnd(at: Date(), ran: ran, cause: HostNotes.ServerEnd.cause(status: status)) }
         Self.say(server, "server child pid \(pid) ended after \(Int(ran)) s: \(HostLog.waitStatus(status)); started again in \(Int(lock.withLock { delay })) s")
         scheduleRestart()
     }

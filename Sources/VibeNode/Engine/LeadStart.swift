@@ -88,11 +88,11 @@ extension LeadEngine {
         }
         let top = Git.run(["rev-parse", "--show-toplevel"], in: folder)
         guard top.ok, !top.output.isEmpty else {
-            return (nil, nil, "\(folder) isn't in a git repository: a lead needs one (git init, and a first commit)")
+            return (nil, nil, "\(folder) isn't in a git repository: a lead needs one (git init, and a first commit; `vibeswitcher lead FOLDER --init` makes them)")
         }
         let root = (top.output as NSString).standardizingPath
         guard Git.run(["rev-parse", "--verify", "--quiet", "HEAD"], in: root).ok else {
-            return (nil, nil, "\(root) has no commits yet: workers branch from a commit; make one, then start the lead")
+            return (nil, nil, "\(root) has no commits yet: workers branch from a commit; make one (`vibeswitcher lead FOLDER --init` makes it of the folder's files), then start the lead")
         }
         return (root, program, nil)
     }

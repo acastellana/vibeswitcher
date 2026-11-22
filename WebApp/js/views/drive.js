@@ -9,7 +9,7 @@ import { AGENTS } from '../words.js';
 import { copyLine } from './cards.js';
 import {
   sessionShort, shellWord, renameLine, PAUSES, pauseLine, endable, endLine, closeShellsLine, resumeLine, endedEntry, newLine,
-  PRESET_VARIABLES, presetProblem, presetLine, presetArgs, leadLine,
+  PRESET_VARIABLES, presetProblem, presetLine, presetArgs, leadLine, newProjectLine, projectFolderName,
 } from '../actions.js';
 
 // The command line's words for a session and for what the user typed (js/actions.js, where the page's lines are made).
@@ -286,7 +286,7 @@ export function newLeadForm(app) {
     h('div', { class: 'new-head' }, h('h2', { class: 'new-title' }, 'Start a project lead')),
     h('div', { class: 'new-fields' }, path, goal),
     lineSlot,
-    h('p', { class: 'confirm-note' }, 'A lead that runs workers, has their work verified, and merges. Run the line in a terminal on this node: it asks for a code (and, the first time, says to accept the project’s config and base), then starts the lead.'));
+    h('p', { class: 'confirm-note' }, 'A lead that runs workers, has their work verified, and merges. Run the line in a terminal on this node: it asks for a code (and, the first time, says to accept the project’s config and base), then starts the lead. A folder that isn’t a git repository yet, or has no commit: add --init, which makes its first commit of the folder’s files.'));
   function where() {
     const home = app.store.state.node?.home;
     const typed = path.value.trim();
@@ -311,6 +311,32 @@ export function newLeadForm(app) {
     },
     update: draw,
   };
+}
+
+// New Project… (the Mac's sheet): a name, where (the node's projects folder when empty) and a goal, drafted as the
+// `vibeswitcher new-project` line that makes its folder, repository and first commit, then starts its lead.
+export function newProjectForm(app) {
+  const name = h('input', { class: 'answer-input', type: 'text', placeholder: 'Project name', 'aria-label': 'Project name', spellcheck: 'false', autocomplete: 'off' });
+  const location = h('input', { class: 'answer-input', type: 'text', placeholder: 'Where (optional: the node’s projects folder)', 'aria-label': 'Where', spellcheck: 'false', autocomplete: 'off' });
+  const goal = h('textarea', { class: 'answer-input lead-goal', rows: 2, placeholder: 'The goal (optional)', 'aria-label': 'Goal' });
+  const folderNote = h('p', { class: 'confirm-note', hidden: true });
+  const lineSlot = h('div', { class: 'prompt-line' });
+  const el = h('section', { class: 'new-session new-project', 'aria-label': 'New project' },
+    h('div', { class: 'new-head' }, h('h2', { class: 'new-title' }, 'New project')),
+    h('div', { class: 'new-fields' }, name, location, goal),
+    folderNote,
+    lineSlot,
+    h('p', { class: 'confirm-note' }, 'Makes the project’s folder with a git repository and a first commit (README.md, .gitignore), then starts its lead. Run the line in a terminal on this node: it asks for the lead’s code.'));
+  function draw() {
+    const folder = projectFolderName(name.value);
+    folderNote.hidden = !folder;
+    folderNote.textContent = folder ? `Its folder: ${folder}` : '';
+    lineSlot.replaceChildren(folder ? copyLine(newProjectLine(name.value, location.value, goal.value), 'the command that makes the project')
+      : h('p', { class: 'confirm-note' }, 'Give it a name: the line that makes it shows here.'));
+  }
+  for (const field of [name, location, goal]) field.addEventListener('input', draw);
+  draw();
+  return { el, update: draw };
 }
 
 export function newSessionForm(app, { folder }) {

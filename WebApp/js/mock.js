@@ -8,6 +8,7 @@
 //   ?empty        a node with no sessions
 
 import { diffOps, summaryOf } from './chatops.js';
+import { taskGroup, taskState } from './words.js';
 
 const HOME = '/home/dev';
 const SITE = `${HOME}/projects/example-site`;
@@ -57,7 +58,9 @@ export function createMock(store, options = {}) {
       title: null, detail: null, paused: false, lead: null, task: null, prompt: null, draft: null, queued: [],
       startedAt: fields.since || ago(60), activity: null, activitySince: null, branch: 'main',
       agentSession: `${hex.split('').reverse().join('')}-0c2e-4a71-b3d5-9f6e8a1c2b40`, pid: 51022 + 37 * sessions.size,
-      command: hosted ? agent : null, size: hosted ? { cols: 132, rows: 38 } : null, hasTranscript: true, ...fields,
+      command: hosted ? agent : null, size: hosted ? { cols: 132, rows: 38 } : null, hasTranscript: true,
+      // The node's facts the views don't show (WebApp/tests/mock.test.mjs holds the mock to the wire's shapes).
+      project: SITE_PROJECT, hasHooks: true, leadAsks: false, startFolder: null, backgroundJobs: 0, ...fields,
       // A worker's or verifier's task by its slug on the board (the node's `boardTask`; its `task` is words).
       boardTask: fields.boardTask ?? (fields.role && fields.role !== 'lead' ? fields.task : null),
     };
@@ -91,9 +94,17 @@ export function createMock(store, options = {}) {
       subjects: ['c41d7e0 Landing copy', '9b2a65f Hero image'], askedAt: ago(600) },
   }]]);
 
-  const task = (slug, title, status, fields = {}) => ({ id: slug, slug, title, status, since: ago(300), worker: null, verifier: null, branch: 'agent/' + slug, after: [], checkpoints: [], blocker: null, merged: null, ...fields });
+  // A task in the node's shape (BoardValue.task): its group and state as the node words them, its last checkpoint.
+  let position = 0;
+  const task = (slug, title, status, fields = {}) => {
+    const value = { id: slug, slug, title, status, since: ago(300), worker: null, verifier: null, branch: 'agent/' + slug, after: [], checkpoints: [], blocker: null, merged: null,
+      summary: null, line: null, review: status === 'review' ? 'audit' : 'none', position: position++, createdAt: ago(7200), startedAt: status === 'planned' ? null : ago(3600),
+      attempts: status === 'planned' ? 0 : 1, budgetMin: null, overBudget: false, audit: null, ...fields };
+    return { ...value, group: taskGroup(value), state: taskState(value), checkpoint: value.checkpoints.at(-1) || null };
+  };
   const boards = new Map(options.empty ? [] : [[SITE_PROJECT, {
-    project: SITE_PROJECT, root: SITE, baseBranch: 'landing-base',
+    project: SITE_PROJECT, root: SITE, baseBranch: 'landing-base', more: 0, unreadable: null, allDone: null,
+    counts: { attention: 1, running: 2, waiting: 1, done: 2 },
     tasks: [
       task('sync-landing-base', 'Sync landing-base with main', 'running', { since: ago(252), worker: W_SYNC, checkpoints: [{ text: 'Rebased onto main; resolving the hero’s conflicts', at: ago(70) }],
         summary: 'Fixing the landing page’s clashes with the latest main' }),
@@ -132,7 +143,7 @@ export function createMock(store, options = {}) {
   }]]);
 
   const cards = new Map(options.empty ? [] : [[CARD_LAUNCH, {
-    id: CARD_LAUNCH, kind: 'question', project: SITE_PROJECT, root: SITE, open: true, closed: null, notice: null, at: ago(900), blocking: true,
+    id: CARD_LAUNCH, kind: 'question', project: SITE_PROJECT, root: SITE, open: true, closed: null, notice: null, at: ago(900), blocking: true, draft: null,
     question: {
       id: 'q-launch-day', short: 'q-launch', text: 'Launch to the testers on Thursday, or wait for the sidebar fixes?', options: ['Thursday', 'Wait for the fixes'],
       priority: 'blocking', whyNow: 'The testers’ invite goes out tomorrow morning.', version: 2, revisionNote: 'Only the testers get it first',
@@ -154,7 +165,7 @@ export function createMock(store, options = {}) {
     boost: { mode: 'on', on: true, why: 'on in Settings', limits: { loadThreshold: '48', maxSessions: 16, maxWorkers: 6, heavySlots: 4 } },
     health: {
       since: ago(3 * 3600 + 720), stalled: null, freezes: [{ at: ago(5400), seconds: 14 }], slowRefreshes: 2, slowestRefresh: 7,
-      lastSlowRefresh: ago(1800), serverRestarts: 0, refusedConnections: null, hostRestartAt: null, waiting: [],
+      lastSlowRefresh: ago(1800), serverRestarts: 0, refusedConnections: null, hostRestartAt: null, serverEnded: null, waiting: [],
       errors: [{ at: ago(900), line: 'prompt audit: /home/u/.vibeswitcher/prompt-audit.json not written: disk full' }],
       causes: [{ kind: 'prompt audit: not written', count: 1, last: ago(900) }],
     },
@@ -166,10 +177,12 @@ export function createMock(store, options = {}) {
     },
     rule: { mode: 'systemd', says: 'a request is the user’s when its process is in a terminal’s scope of this login', scopes: ['init.scope', 'session-*.scope'] },
     cards: { questions: 1, approvals: 0, config: 0, base: 0 },
-    accepted: [{ kind: 'lead', action: 'b7e0c2d4-5a61-4f38-9c0b-1e2d3f4a5b6c', at: ago(5400), pid: 51022, cgroup: '/init.scope', commandLine: ['vibeswitcher', 'lead', SITE] }],
+    accepted: [{ kind: 'lead', action: 'b7e0c2d4-5a61-4f38-9c0b-1e2d3f4a5b6c', subject: SITE, at: ago(5400), pid: 51022, cgroup: '/init.scope', commandLine: ['vibeswitcher', 'lead', SITE] }],
     notices: options.empty ? [] : ['example-site: landing-base moved outside the lead’s merges; its next merge is refused until you accept the move'],
     restart: null,
     reopen: [],
+    ending: [],
+    web: { state: 'listening', port: 8765, tokens: 1, connections: 1 },
     // Your sessions that ended lately (`vibeswitcher resume`).
     ended: [
       { session: id('5c1e7a92'), folder: `${HOME}/projects/example-api`, name: 'example-api', conversation: '7a3f0c21-9b4d-4e8a-a1f2-3c5d7e9b0a14', at: ago(1500), exit: { status: 0, cause: 'exited 0', at: ago(1510) } },
@@ -410,7 +423,10 @@ export function createMock(store, options = {}) {
 
   function taskOf(slug) { return boards.get(SITE_PROJECT)?.tasks.find((entry) => entry.slug === slug); }
   function setTask(slug, fields) {
-    Object.assign(taskOf(slug), fields);
+    const changed = Object.assign(taskOf(slug), fields);
+    // The node words the group, the state and the last checkpoint again with each change.
+    Object.assign(changed, { group: taskGroup({ status: changed.status }), state: taskState({ status: changed.status }),
+      checkpoint: changed.checkpoints.at(-1) || null });
     return put('boards', boards, SITE_PROJECT);
   }
   const checkpoint = (slug, text) => setTask(slug, { checkpoints: [...taskOf(slug).checkpoints, { text, at: new Date().toISOString() }] });

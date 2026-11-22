@@ -1,8 +1,8 @@
 import Foundation
 import VibeCore
 
-/// Each lead's base, watched (the app's `BaseMoves` 88-217, rebuilt without the window's typed `!` lines, which wait for
-/// a composer, stage 5; the engine plan's E6): when it moved since the lead last left it, and not through its merges,
+/// Each lead's base, watched (the app's `BaseMoves` 88-217; the engine plan's E6): when it moved since the lead last left
+/// it, and not through its merges,
 /// the session host's vault is asked to take the move as the user's own (`LeadVault.judge`). Otherwise (a commit no
 /// session of the user's is seen making, a rewrite, a team member's) it becomes a card, asked once per move: `base
 /// accept` takes the base as the card showed it in the vault, with the lead and its team running on; `base keep` leaves
@@ -10,6 +10,14 @@ import VibeCore
 /// say (`LeadVault.BaseMoveNote`, `BaseMoveRefusal`), as the app writes them, on the engine's reads queue.
 ///
 /// `base show FOLDER [--from COMMIT]` (`show`) makes a card on demand, also with no lead running (a fresh vault's).
+///
+/// **Not the app's typed `!` lines** (on purpose, the independent review of 2026-11-22): a `!` git line the user sends
+/// with `vibeswitcher send` never accounts for a move. A line vouches for a time window, not for the move it made: any
+/// reflog entry that fits the window (whose time `GIT_COMMITTER_DATE` sets) would be taken, a team session's command
+/// the hooks' parser doesn't recognise (`env git …`, `sh -c`, an alias, a script) isn't seen as the team's, and a line
+/// that moved nothing stays open meanwhile; on a node, where every process of the user's can run git in the lead's
+/// folder, nobody can tell who wrote a reflog entry. So the user's own git line draws a card like any other move: one
+/// `vibeswitcher approve` away.
 ///
 /// Looked at from the engine's queue (`main`); git, the vault and the files' stamps are asked off it (`background`).
 public final class BaseMoveStore: @unchecked Sendable {

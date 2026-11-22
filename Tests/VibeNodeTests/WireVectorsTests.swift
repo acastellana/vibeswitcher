@@ -162,6 +162,55 @@ struct WireVectorsTests {
         for (kind, value) in cases { #expect(WireSchema.check(value, as: kind) == nil, "\(kind) in Swift") }
     }
 
+    // MARK: An older server's frames
+
+    /// The vectors of the build installed before this one, frozen (`Tests/Fixtures/wire/vectors-<commit>.json`, the
+    /// architecture review's row 11): right after a switch the command line and the page are one build and the server
+    /// may be the one before, so today's readers must still take what it wrote. Each frame decodes as its envelope
+    /// (`Reply`, `Hello`, `Bye`, `Request`) and passes today's check for its kind, in Swift and in JavaScript.
+    static func olderFrames() throws -> [(what: String, value: NodeWire.Value)] {
+        let folder = repo.appendingPathComponent("Tests/Fixtures/wire")
+        let names = try FileManager.default.contentsOfDirectory(atPath: folder.path).filter { $0.hasPrefix("vectors-") && $0.hasSuffix(".json") }.sorted()
+        var frames: [(String, NodeWire.Value)] = []
+        for name in names {
+            let data = try Data(contentsOf: folder.appendingPathComponent(name))
+            guard case .object(let vectors) = try #require(NodeWire.decode(NodeWire.Value.self, data), "\(name) isn't JSON") else {
+                Issue.record("\(name) isn't an object of vectors"); continue
+            }
+            for (vector, value) in vectors.sorted(by: { $0.key < $1.key }) {
+                let list = value.array ?? [value]
+                for (index, frame) in list.enumerated() { frames.append(("\(name) \(vector) frame \(index)", frame)) }
+            }
+        }
+        return frames
+    }
+
+    @Test func thePreviousBuildsFramesStillRead() throws {
+        let frames = try Self.olderFrames()
+        #expect(frames.count > 40, "\(frames.count)")
+        for (what, frame) in frames {
+            #expect(WireSchema.check(frame, as: "frame") == nil, "\(what): \(WireSchema.check(frame, as: "frame") ?? "")")
+            let line = NodeWire.line(frame).dropLast()
+            switch (frame["re"], frame["kind"]?.string) {
+            case (.some, _): #expect(NodeWire.decode(NodeWire.Reply.self, line) != nil, "\(what) as a reply")
+            case (nil, "hello"): #expect(NodeWire.decode(NodeWire.Hello.self, line) != nil, "\(what) as a hello")
+            case (nil, "bye"): #expect(NodeWire.decode(NodeWire.Bye.self, line) != nil, "\(what) as a bye")
+            case (nil, _) where frame["id"] != nil: #expect(NodeWire.decode(NodeWire.Request.self, line) != nil, "\(what) as a request")
+            default: break
+            }
+        }
+    }
+
+    @Test(.enabled(if: WireVectorsTests.node != nil, "no node on the PATH: the generated JavaScript isn't run"))
+    func thePreviousBuildsFramesPassTodaysValidators() async throws {
+        let frames = try Self.olderFrames()
+        let results = try await javaScript(frames.map { ("frame", $0.value) })
+        #expect(results.count == frames.count)
+        for (index, result) in results.enumerated() where index < frames.count {
+            #expect(result == nil, "\(frames[index].what): \(result ?? "")")
+        }
+    }
+
     // MARK: Helpers
 
     struct Broken {

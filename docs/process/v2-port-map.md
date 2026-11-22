@@ -72,7 +72,8 @@ Not replaced (view or Mac-only): `LeadViews`, `TeamViews`, `TeamRows`, `TeamSumm
 ## Copied from the app
 
 Pure helpers and test helpers copied into `v2`-only files, each kept in step with its source at every merge as the
-rows above are.
+rows above are. CopiedFilesLint diffs the verbatim ones (the Statistics files, `UsageWaits`, `WitnessWork`,
+`TeamReading`) against their originals, each difference listed there with why.
 
 | From | Lines | To | Task |
 | --- | --- | --- | --- |
@@ -399,3 +400,5 @@ numbering (its Global Constraints); calls switched to `VibePlatform` (kind 1), t
 | `Sources/VibeCore/V2/PluginGate.swift` (new, v2 2026-11-22: feature plugins step 1) | what an agent's plugin command reads before filing: the server's mirror of which plugins are on (`<root>/plugins.json`), only what it prints | "off leaves no trace": an off plugin's command files nothing | none: a new v2-only file |
 | `Sources/vibeswitcher-mcp/main.swift` 108 (made, v2 2026-11-22: feature plugins step 2; kind 4) | one hook in the `--shell-request` branch: `PluginGate.refusal("shell", command: "vs-shell")` printed and exit 1 when the node's mirror says shell requests are off; no mirror (the Mac), nothing changes | "off leaves no trace": an off plugin's command files nothing (the server drops what is filed anyway) | low: one line |
 | `Sources/VibeCore/SessionNote.swift` `text(on:)` (38-41) and `output`'s `on:` (made, v2 2026-11-22: feature plugins step 2; kind 5) | the session note for the plugins a node has on (its server's mirror, `PluginGate`): the whole note with none said (the Mac) or the wallet on, the real terminal's part alone with shell requests alone, none with neither | a plugin that is off adds no line to an agent's brief | low: a defaulted argument and a function |
+| `Sources/VibeCore/LeadPush.swift` `waiting(root:mac:)` and `push_remote`'s reply below it, `Sources/VibeCore/LeadToolset.swift` `push_remote`'s description; `Tests/VibeCoreTests/LeadPushTests.swift` one expectation (made, the feature review, 2026-11-22; kind 4) | the reply's "Waiting for the user's …" sentence is `LeadPush.waiting`: the Mac's click on the card where `Platform.CodeIdentity.isAvailable`, else (a Linux node, which has no card for it) `vibeswitcher push ROOT` / `decline-push ROOT`; the description names both; the shared test checks "Waiting for the user's" | the lead told the user to click a card the node hasn't (`v2-review-lead.md`) | low: one sentence moved into a function, one description's words |
+| `Sources/VibeCore/HostProtocol.swift` `HostNotes.lastServerEnd` and its `init` parameter (made, the feature review, 2026-11-22; kind 6) | `lastServerEnd: ServerEnd?` (the type in `Sources/VibeCore/V2/ServerEnd.swift`: when, how long it ran, its wait status in words), optional, nil by default, so an older host's notes still decode; set by `ServerChild` for an end of its own (not a replacement's) and carried by `HostHandover.Tally` | the node's stand-in for the app's crash reports: `status --health` and the page say how the server last ended (`v2-review-lead.md`) | low: `HostNotes` is v2's own struct |

@@ -1,8 +1,16 @@
 // The node's health digest as This node shows it (the `node` value's `health`, the server's `NodeHealth`): freezes of
-// the engine's queue, slow refreshes, the host's restarts and refused connections, sessions left waiting or stuck, and
-// the server's last errors. The parts with no page in them, so the tests can read them.
+// the engine's queue, slow refreshes, the host's restarts and refused connections, how the server last ended on its own
+// (the node's stand-in for the Mac's crash reports), sessions left waiting or stuck, and the server's last errors. The parts with no page in them, so the tests can read them.
 
 const plural = (count, word) => `${count} ${word}${count === 1 ? '' : 's'}`;
+
+// "45 s", "12 min", "3 h", "2 days" (the server's NodeHealth.duration).
+export function duration(seconds) {
+  if (seconds < 120) return `${seconds} s`;
+  if (seconds < 7200) return `${Math.floor(seconds / 60)} min`;
+  if (seconds < 172800) return `${Math.floor(seconds / 3600)} h`;
+  return `${Math.floor(seconds / 86400)} days`;
+}
 
 // The digest as rows and lines: { tone ('done' | 'needs-you'), rows: [[name, value]], lines: [{ at, text }] }, or null
 // when the node keeps none.
@@ -17,12 +25,14 @@ export function healthFacts(health) {
   rows.push(['Slow refreshes', health.slowRefreshes ? `${health.slowRefreshes}, the slowest ${health.slowestRefresh} s` : 'None']);
   if (health.serverRestarts != null) rows.push(['Server restarts', String(health.serverRestarts)]);
   if (health.refusedConnections) rows.push(['Refused connections', String(health.refusedConnections)]);
+  if (health.serverEnded) rows.push(['Server last ended', `${health.serverEnded.cause}, after ${duration(health.serverEnded.ran)}`]);
   rows.push(['Sessions waiting or stuck', waiting.length ? String(waiting.length) : 'None']);
   // The causes (the Mac's digest of error kinds): the most frequent first, a repeat standing out from a one-off.
   const causes = health.causes || [];
   if (causes.length) rows.push(['Causes', causes.slice(0, 3).map((cause) => `${cause.kind} ×${cause.count}`).join(' · ')]);
   const lines = [
     ...freezes.map((freeze) => ({ at: freeze.at, text: `The engine didn’t answer for ${freeze.seconds} s` })),
+    ...(health.serverEnded ? [{ at: health.serverEnded.at, text: `The server ended on its own: ${health.serverEnded.cause}, after ${duration(health.serverEnded.ran)}; the host started it again` }] : []),
     ...waiting.map((text) => ({ at: null, text })),
     ...errors.map((error) => ({ at: error.at, text: error.line })),
   ];
