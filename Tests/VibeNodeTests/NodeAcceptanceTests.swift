@@ -372,6 +372,34 @@ struct NodeAcceptanceTests {
         #expect(Git.run(["--git-dir", origin, "rev-parse", "refs/heads/main"], in: repo.path).output == commit, "nothing pushed")
     }
 
+    @Test("A40: the lead fetches its remote and merges into the base what someone else pushed (fetch_remote, merge_remote)")
+    func a40FetchAndMergeRemote() async throws {
+        let node = try await ScratchNode(scratch, holdFirstLook: true)
+        defer { node.stop() }
+        let repo = try await Self.repository(node)
+        let origin = node.root.appendingPathComponent("origin.git").path
+        for arguments in [["init", "-q", "--bare", "-b", "main", origin], ["-C", repo.path, "remote", "add", "origin", origin],
+                          ["-C", repo.path, "push", "-q", "origin", "main"]] {
+            _ = try await scratchGit(repo.path, arguments)
+        }
+        let lead = try await Self.startLead(node, repo, goal: "keep up with the remote")
+        // Someone else's commit on the remote: a clone of their own, pushed.
+        let other = node.root.appendingPathComponent("other").path
+        _ = try await scratchGit(node.root.path, ["clone", "-q", origin, other])
+        _ = try await scratchGit(other, ["-c", "user.name=Other", "-c", "user.email=other@example.invalid", "commit", "-q", "--allow-empty", "-m", "Theirs"])
+        _ = try await scratchGit(other, ["push", "-q", "origin", "main"])
+        let theirs = try await scratchGit(other, ["rev-parse", "HEAD"])
+
+        let fetched = try await ScratchRunTests.reply(lead.tools, try ScratchRunTests.send(lead.tools, "fetch_remote", [:]))
+        #expect(!fetched.contains("Refused") && fetched.contains("1 commit"), "\(fetched)\n\(node.said)")
+        let merged = try await ScratchRunTests.reply(lead.tools, try ScratchRunTests.send(lead.tools, "merge_remote", [:], seconds: 300), timeout: 360)
+        #expect(merged.hasPrefix("Merged origin/main into main"), "\(merged)\n\(node.said)")
+        #expect(try await scratchGit(repo.path, ["rev-parse", "main"]) == theirs, "a fast-forward: the base had nothing of its own")
+        // The lead's own move: its next merge isn't refused for a base moved outside it.
+        let again = try await ScratchRunTests.reply(lead.tools, try ScratchRunTests.send(lead.tools, "merge_remote", [:], seconds: 300), timeout: 360)
+        #expect(!again.contains("moved"), "\(again)")
+    }
+
     // MARK: A17, settings
 
     @Test("A17: settings shows a project's; set records it, the lead is told, and config held holds nothing for it")
