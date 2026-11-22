@@ -112,3 +112,9 @@ allow: Tests/VibeNodeTests/RealBoxTests.swift | .init("/tmp", .empty(mode: 0o177
 allow: Tests/VibeNodeTests/RealBoxTests.swift | "TMPDIR=/tmp" | the TMPDIR a program in the box is given: the box's own /tmp
 # RefusedGitSpellings: the reported command line, which the guard parses; nothing runs it or opens the path.
 allow: Tests/VibeCoreTests/RefusedGitSpellingsTests.swift | git --git-dir=/tmp/x status | the contract's symptom, a command line the guard reads; nothing runs it
+# The captured fixtures' scrubber (WireFixtures): the scratch folders' names in a captured reply, replaced or looked for; nothing is opened.
+allow: Tests/VibeNodeTests/WireFixtures.swift | static let scratch = "/tmp/vs-test.scratch" | the neutral name a fixture's scratch folder is given; nothing opens it
+allow: Tests/VibeNodeTests/WireFixtures.swift | return text.replacingOccurrences(of: #"/tmp/vs-(test|load) | a pattern of the scratch folders' names in a captured reply; nothing opens it
+allow: Tests/VibeNodeTests/WireFixtures.swift | return text.range(of: #"/tmp/vs-(test|load) | a pattern of the scratch folders' names in a captured reply; nothing opens it
+allow: Tests/VibeNodeTests/WireFixtures.swift | let text = #"{"a":"\#(machine.checkout)/.build/x","b":"/tmp/vs-test.Ab12Cd | a made-up reply the scrubber is tried on; nothing opens it
+allow: Tests/VibeNodeTests/WireFixtures.swift | #expect(scrubbed == #"{"a":"/home/user/vibeswitcher/.build/x","b":"/tmp/vs-test.scratch | the made-up reply as scrubbed; nothing opens it
