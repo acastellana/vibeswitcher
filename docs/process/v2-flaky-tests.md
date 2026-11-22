@@ -8,7 +8,6 @@ later, never to skip it.
 
 | Test | Where it failed | Evidence | First seen |
 | --- | --- | --- | --- |
-| `ProjectAllowListTests.aForgedWorktreePairPassesAsKnown` | Linux CI | failed on CI at `2ceb69f7`, passed on the next runs of the same commit | 2026-11-21 |
 | `WebListenerTests.theListenerBindsToLoopbackOnly` | local, under parallel suites | its descriptor count read 2 where it expects its own listener's alone: another suite's descriptors counted while they run in parallel | 2026-11-21 |
 | `WebListenerTests`' slow-client case | local, under load | the slow client's timing is read against the wall clock under parallel suites | 2026-11-21 |
 | `ComposerDeliveryTests` | the Mac's CI (`v2 macos`, app job) | main's known flake on the runner (see v2-mac-tasks.md, "Main's known flakes on the runner") | 2026-11-21 |
