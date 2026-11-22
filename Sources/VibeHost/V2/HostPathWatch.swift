@@ -342,6 +342,18 @@ extension HostServer {
         }
     }
 
+    /// The accept source cancelled for `stop`, the listener closed from its cancel handler, once libdispatch has let the
+    /// descriptor go (closed right after the cancel, its number could be another file's while the source is still being
+    /// unregistered, and a source made on the reused number never fired: the review of the runtime hardening). Whether
+    /// the listener is closed so; false when there is no source, and `stop` closes it itself. On `queue`.
+    func endAcceptSource() -> Bool {
+        guard let source = acceptSource else { return false }
+        let listener = listenFD
+        if listener >= 0 { source.setCancelHandler { Sys.close(listener) } }
+        source.cancel()
+        return listener >= 0
+    }
+
     /// Every paused accept source resumed now (each once), before `stop` cancels the one it has. On `queue`.
     func resumePausedAccepts() {
         acceptsPaused.values.forEach { $0.resume() }
