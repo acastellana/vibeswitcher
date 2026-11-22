@@ -591,7 +591,7 @@ extension LeadEngine {
     /// it shows (any earlier open one of the project closed), with the floor and rails workflow.md proposes; `diff`,
     /// that held thing's difference too. Asked again with nothing changed, the same open card (its id and code). From
     /// any thread.
-    public func configHeld(root: String, diff: String?, then: @escaping (Result<NodeWire.Value, CardFailure>) -> Void) {
+    public func configHeld(root: String, diff: String?, then: @escaping (Result<WireKinds.ConfigHeld.Result, CardFailure>) -> Void) {
         let (vault, home, node) = (cardVault, self.home, self.root)
         work.async { [weak self] in
             // The last accept the snapshot knows (E8): each held thing said the same, changed or new since.
@@ -624,9 +624,9 @@ extension LeadEngine {
                         self.cards.put(drawn)
                         card = drawn
                     }
-                    var result: [String: NodeWire.Value] = ["card": card.value]
-                    if let diff { result["difference"] = difference.map { .array($0.map(NodeWire.Value.string)) } ?? .string("nothing held is named \(diff)") }
-                    then(.success(.object(result)))
+                    var result = WireKinds.ConfigHeld.Result(card: card.value)
+                    if let diff { result.difference = difference.map { .array($0.map(NodeWire.Value.string)) } ?? .string("nothing held is named \(diff)") }
+                    then(.success(result))
                 }
             }
         }

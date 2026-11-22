@@ -23,11 +23,10 @@ enum PushCommand {
         case .success(let connected): client = connected
         }
         let leads: [NodeWire.Value]
-        switch client.request("status") {
+        switch client.read(WireKinds.Status.self, WireNoArgs()) {
         case .failure(let failure): return Say.failed(failure)
-        case .success(let reply):
-            guard reply.ok, let listed = reply.result?["leads"]?.array else { return Say.replyError(reply) }
-            leads = listed
+        case .refused(let reply): return Say.replyError(reply)
+        case .success(let status, _): leads = status.leads ?? []
         }
         guard let lead = PushText.lead(for: folder, in: leads), let root = lead["root"]?.string else {
             return Say.refused("no lead on this node holds \(ConfigSeal.inert(folder, limit: 400))")

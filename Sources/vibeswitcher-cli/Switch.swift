@@ -48,15 +48,14 @@ enum SwitchCommand {
         case .failure(let failure): return Say.failed(failure)
         case .success(let connected): client = connected
         }
-        let status: NodeWire.Value
-        switch client.request("status") {
+        let status: WireKinds.Status.Result
+        switch client.read(WireKinds.Status.self, WireNoArgs()) {
         case .failure(let failure): return Say.failed(failure)
-        case .success(let reply):
-            guard reply.ok, let result = reply.result else { return Say.replyError(reply) }
-            status = result
+        case .refused(let reply): return Say.replyError(reply)
+        case .success(let result, _): status = result
         }
-        var hostPid = status["host"]?["pid"]?.int.map { pid_t($0) }
-        var running = status["host"]?["notes"]?["build"]?.string
+        var hostPid = status.host?.pid.map { pid_t($0) }
+        var running = status.host?.notes?.build
         // The review of S8c: where the follow-up checks the host, its pid before the switch is known before the code
         // is asked (`status` names none until the server's link is welcomed), or nothing is switched.
         let checksHost: Bool
@@ -72,9 +71,8 @@ enum SwitchCommand {
         let from = running ?? "unknown (the host's notes name no build)"
         let target: String
         if rollback {
-            guard let back = status["builds"]?["rollback"], let commit = back["commit"]?.string, NodeUnit.isCommit(commit),
-                  back["line"]?.string != nil else {
-                let record = status["builds"]?["installRoot"]?.string.map { "\(ConfigSeal.inert($0, limit: .max))/installs" } ?? "the installs record"
+            guard let back = status.builds?.rollback, let commit = back.commit, NodeUnit.isCommit(commit), back.line != nil else {
+                let record = status.builds?.installRoot.map { "\(ConfigSeal.inert($0, limit: .max))/installs" } ?? "the installs record"
                 return Say.refused("no build to roll back to: \(record) names no other commit installed before \(ConfigSeal.inert(from, limit: 64))")
             }
             target = commit
@@ -88,14 +86,14 @@ enum SwitchCommand {
         }
         // Whether it can run now, before any code is asked: the rule on switches refuses it while a worker or verifier
         // runs (the server and the host both hold it), so a confirmation that reads as if it would go ahead is never shown.
-        let blockers = (status["switchBlockers"]?.array ?? []).compactMap(\.string).map { ConfigSeal.inert($0, limit: 120) }
+        let blockers = (status.switchBlockers ?? []).map { ConfigSeal.inert($0, limit: 120) }
         // The idle workers the switch parks first (`SwitchPark`): said in the confirmation, never a refusal.
-        let parks = (status["switchParks"]?.array ?? []).compactMap(\.string).map { ConfigSeal.inert($0, limit: 120) }
+        let parks = (status.switchParks ?? []).map { ConfigSeal.inert($0, limit: 120) }
         if !blockers.isEmpty {
             return Say.refused("\(command) can't run now: " + SwitchRequest.blockedText(blockers) + ". Nothing was asked or switched.")
         }
         let what = (rollback
-            ? NodeTexts.rollback(from: from, to: target, line: status["builds"]?["rollback"]?["line"]?.string ?? "", rewrites: rewrites(context))
+            ? NodeTexts.rollback(from: from, to: target, line: status.builds?.rollback?.line ?? "", rewrites: rewrites(context))
             : NodeTexts.switch(from: from, to: target, rewrites: rewrites(context)))
             + (parks.isEmpty
                 ? "\n  it can run now: no worker or verifier runs (a change the seal holds under the builds or the unit's folder would still stop it: `vs config held`)"
@@ -153,8 +151,8 @@ enum SwitchCommand {
     /// The builds folder the target is checked in before the code: the user's node's prefix on Linux (the follow-up's);
     /// otherwise the server's install root (`status`'s `builds.installRoot`), or none when it names none (a host not
     /// installed refuses `build.switch` itself).
-    static func buildsRoot(_ context: NodeContext, prefix: String, status: NodeWire.Value) -> String? {
-        if case .nothing = rewrites(context) { return status["builds"]?["installRoot"]?.string }
+    static func buildsRoot(_ context: NodeContext, prefix: String, status: WireKinds.Status.Result) -> String? {
+        if case .nothing = rewrites(context) { return status.builds?.installRoot }
         return prefix
     }
 
@@ -206,14 +204,16 @@ enum SwitchCommand {
             case .failure(.refused(let refusal)): return .failure(StartRefusal(refusal, exitCode: 77))
             case .failure(let failure): why = failure.message
             case .success(let client):
-                switch client.request("status") {
+                switch client.read(WireKinds.Status.self, WireNoArgs()) {
                 case .failure(let failure): why = failure.message
-                case .success(let reply):
-                    guard reply.ok, let host = reply.result?["host"] else {
-                        return .failure(StartRefusal("\(reply.error?.code ?? "internal"): \(reply.error?.message ?? "no reason")", exitCode: 1))
+                case .refused(let reply):
+                    return .failure(StartRefusal("\(reply.error?.code ?? "internal"): \(reply.error?.message ?? "no reason")", exitCode: 1))
+                case .success(let status, _):
+                    guard let host = status.host else {
+                        return .failure(StartRefusal("internal: the server's status names no host", exitCode: 1))
                     }
-                    guard let pid = host["pid"]?.int else { why = "the server's status names no host pid yet"; break }
-                    return .success(SwitchFollowUp.Host(pid: pid_t(pid), build: host["notes"]?["build"]?.string))
+                    guard let pid = host.pid else { why = "the server's status names no host pid yet"; break }
+                    return .success(SwitchFollowUp.Host(pid: pid_t(pid), build: host.notes?.build))
                 }
             }
             guard Platform.Clock.steadyDate() < deadline else { return .failure(StartRefusal(why, exitCode: 1)) }

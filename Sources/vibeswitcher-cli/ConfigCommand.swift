@@ -61,14 +61,13 @@ enum ConfigCommand {
         case .failure(let failure): return Say.failed(failure)
         case .success(let connected): client = connected
         }
-        var args: [String: NodeWire.Value] = ["folder": .string(folder ?? FileManager.default.currentDirectoryPath)]
-        if let diff { args["diff"] = .string(diff) }
-        switch client.request("config.held", args: args, timeout: 60) {
+        switch client.read(WireKinds.ConfigHeld.self, .init(folder: folder ?? FileManager.default.currentDirectoryPath, diff: diff), timeout: 60) {
         case .failure(let failure): return Say.failed(failure)
-        case .success(let reply):
-            guard reply.ok, let result = reply.result, let card = result["card"] else { return Say.replyError(reply) }
+        case .refused(let reply): return Say.replyError(reply)
+        case .success(let result, _):
+            guard let card = result.card else { return Say.failed(.broken("the node's server answered config.held with no card")) }
             CardText.lines(card, long: long).forEach(Say.out)
-            if let difference = result["difference"] {
+            if let difference = result.difference {
                 if let lines = difference.array { lines.compactMap(\.string).forEach { Say.out(ConfigSeal.inert($0, limit: .max)) } }
                 else { Say.out(ConfigSeal.inert(difference.string ?? "", limit: .max)) }
             }
