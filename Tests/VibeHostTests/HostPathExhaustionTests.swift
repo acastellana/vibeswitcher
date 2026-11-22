@@ -24,14 +24,16 @@ import Testing
         #expect(HostPathWatch.leadsHere(path) == true, "this process listens there")
     }
 
-    /// A host whose checks can't be made: its own recorded socket stays at the path through a housekeeping's check; a
-    /// socket another process bound at the path is never recorded as the host's.
-    @Test func aHostOutOfDescriptorsKeepsItsSocketAndRecordsNoForeignOne() throws {
+    /// A host whose checks can't be made (the kernel's answer and a connection through the path both failing, as under
+    /// ENFILE): its own recorded socket stays at the path through a housekeeping's check; a socket another process puts
+    /// at the path is replaced at the next change, with a listener of the host's own, and never recorded; the spare
+    /// descriptor is back after each check.
+    @Test func aHostThatCantCheckKeepsItsSocketAndReplacesAForeignOne() throws {
         let host = try TestHost(watchesItsPath: true)
         let server = host.server
         let watch = try #require(server.queue.sync { server.pathWatch })
-        let own = try #require(server.queue.sync { watch.socketFile }, "verified at the start, descriptors to spare")
-        // Out of descriptors: neither the kernel's answer (its netlink socket) nor a connection through the path can be had.
+        let own = try #require(server.queue.sync { watch.socketFile }, "verified at the start")
+        #expect(server.queue.sync { watch.holdsSpare })
         server.queue.sync {
             watch.leads = { _ in nil }
             watch.kernel = { _, _ in .cantSay }
@@ -39,17 +41,27 @@ import Testing
         }
         #expect(HostPathWatch.identity(atPath: host.socket) == own, "the host's own socket not unlinked")
         #expect(server.queue.sync { watch.socketFile } == own)
+        #expect(server.queue.sync { watch.holdsSpare }, "the spare back after the check")
 
-        // Another socket put at the path while the checks still can't be made: bound beside it, then renamed over it
-        // in one step (a bind at the path itself would unlink it first, and the host's folder watch races to bind there).
+        // Another socket put at the path (bound beside it, renamed over it in one step) while the checks can't be made:
+        // the change is checked at once, and the path given back to a listener of the host's own.
         let beside = host.socket + "-f"
         let foreign = try UnixSocket.listen(path: beside)
         defer { Sys.close(foreign); unlink(beside) }
         let foreignFile = try #require(HostPathWatch.identity(atPath: beside))
         try #require(rename(beside, host.socket) == 0, "errno \(errno)")
-        server.queue.sync { watch.check(atHousekeeping: true) }
+        server.queue.sync { watch.check() }
         let recorded = server.queue.sync { watch.socketFile }
-        #expect(recorded != foreignFile, "a socket that couldn't be checked is never recorded as the host's")
-        #expect(recorded == nil && server.queue.sync { watch.socketUnchecked }, "checked again at the next housekeeping")
+        let named = HostPathWatch.identity(atPath: host.socket)
+        #expect(recorded != foreignFile && named != foreignFile, "the foreign socket replaced, never recorded")
+        #expect(recorded != nil && recorded == named, "the host's fresh listener recorded")
+        #expect(server.queue.sync { watch.holdsSpare })
+        // The checks able again: the path leads to this process, the host.
+        server.queue.sync {
+            watch.leads = HostPathWatch.leadsHere
+            watch.kernel = { Platform.Sockets.boundFile(of: $0, at: $1) }
+        }
+        #expect(HostPathWatch.leadsHere(host.socket) == true)
+        _ = try TestClient(host)
     }
 }
