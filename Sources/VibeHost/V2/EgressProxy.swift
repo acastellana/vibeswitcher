@@ -342,10 +342,10 @@ extension EgressProxy {
             _ = fcntl(client, F_SETFL, fcntl(client, F_GETFL) & ~O_NONBLOCK)
             // The header, within its bytes and its time.
             var bytes: [UInt8] = []
-            let deadline = Date().addingTimeInterval(limits.headerSeconds)
+            let deadline = Platform.Clock.steadyDate().addingTimeInterval(limits.headerSeconds)
             while bytes.firstRange(of: [13, 10, 13, 10]) == nil {
                 guard bytes.count < limits.headerBytes else { return Self.reply(client, 431, "the request's header is too long") }
-                let left = deadline.timeIntervalSinceNow
+                let left = deadline.timeIntervalSince(Platform.Clock.steadyDate())
                 guard left > 0, Self.wait(client, seconds: left) else { return }
                 var buffer = [UInt8](repeating: 0, count: min(4_096, limits.headerBytes - bytes.count + 4))
                 let count = Sys.read(client, &buffer, buffer.count)

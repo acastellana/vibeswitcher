@@ -226,7 +226,7 @@ final class NodeClient {
         }
         var lines = NodeWire.Lines()
         var ready: [Data] = []
-        guard let first = read(fd, &lines, &ready, until: Date().addingTimeInterval(timeout)),
+        guard let first = read(fd, &lines, &ready, until: Platform.Clock.steadyDate().addingTimeInterval(timeout)),
               let hello = NodeWire.decode(NodeWire.Hello.self, first), hello.kind == "hello" else {
             Sys.close(fd)
             return .failure(.broken("the node's server sent no hello"))
@@ -250,11 +250,11 @@ final class NodeClient {
     /// is asked again, a quarter second apart, for up to `notYetPatience`; then the last answer is the reply.
     func request(_ kind: String, args: [String: NodeWire.Value]? = nil, action: String? = nil,
                  timeout: TimeInterval = 30) -> Result<NodeWire.Reply, Failure> {
-        let patience = Date().addingTimeInterval(Self.notYetPatience)
+        let patience = Platform.Clock.steadyDate().addingTimeInterval(Self.notYetPatience)
         let timeout = approvalRule && NodeWire.changesState(kind) ? max(timeout, Self.approvalPatience) : timeout
         while true {
             let answer = ask(kind, args: args, action: action, timeout: timeout)
-            guard case .success(let reply) = answer, reply.error?.code == NodeWire.Code.notYet.rawValue, Date() < patience else { return answer }
+            guard case .success(let reply) = answer, reply.error?.code == NodeWire.Code.notYet.rawValue, Platform.Clock.steadyDate() < patience else { return answer }
             usleep(250_000)
         }
     }
@@ -274,7 +274,7 @@ final class NodeClient {
             return true
         }
         guard sent else { return .failure(.broken("the node's server closed the connection")) }
-        let deadline = Date().addingTimeInterval(timeout)
+        let deadline = Platform.Clock.steadyDate().addingTimeInterval(timeout)
         while let next = Self.read(fd, &lines, &ready, until: deadline) {
             guard let envelope = NodeWire.decode(NodeWire.Envelope.self, next) else { continue }
             if envelope.kind == "bye" {
@@ -292,7 +292,7 @@ final class NodeClient {
     private static func read(_ fd: Int32, _ lines: inout NodeWire.Lines, _ ready: inout [Data], until deadline: Date) -> Data? {
         var chunk = [UInt8](repeating: 0, count: 64 * 1024)
         while ready.isEmpty {
-            let left = deadline.timeIntervalSinceNow
+            let left = deadline.timeIntervalSince(Platform.Clock.steadyDate())
             guard left > 0, !lines.tooLong else { return nil }
             var watched = pollfd(fd: fd, events: Int16(POLLIN), revents: 0)
             let woke = poll(&watched, 1, Int32(min(left * 1_000, 60_000)))

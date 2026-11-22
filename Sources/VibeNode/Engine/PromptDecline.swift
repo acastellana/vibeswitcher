@@ -49,10 +49,10 @@ enum PromptDecline {
 
     /// Reads the screen until `condition` holds (`go(true)`) or `keyWait` passes (`go(false)`).
     private static func wait(_ id: UUID, link: HostLink, until condition: @escaping (String) -> Bool, _ go: @escaping (Bool) -> Void,
-                             since: Date = Date()) {
+                             since: Date = Platform.Clock.steadyDate()) {
         link.screen(id) { screen in
             if let screen, condition(screen) { return go(true) }
-            guard Date().timeIntervalSince(since) < keyWait else { return go(false) }
+            guard Platform.Clock.steadyDate().timeIntervalSince(since) < keyWait else { return go(false) }
             link.queue.asyncAfter(deadline: .now() + lookEvery) { wait(id, link: link, until: condition, go, since: since) }
         }
     }

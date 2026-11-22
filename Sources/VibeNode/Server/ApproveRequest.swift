@@ -173,7 +173,7 @@ extension Requests {
            "own": .array(own.map { .object(["text": .string($0.text), "command": .string($0.command)]) })]
         if !items.isEmpty {
             let id = "local:approve:" + UUID().uuidString.lowercased()
-            approveBatches.append(ApproveBatch(id: id, items: items, at: Date()))
+            approveBatches.append(ApproveBatch(id: id, items: items, at: Platform.Clock.steadyDate()))
             if approveBatches.count > Self.approveKept { approveBatches.removeFirst(approveBatches.count - Self.approveKept) }
             result["batch"] = .string(id)
             result["code"] = .string(NodeIds.code(card: id))
@@ -192,7 +192,7 @@ extension Requests {
             note("refused approve of \(id): the code typed isn't the batch's")
             return .init(re: request.id, error: .init(.voice, "code: the code typed isn't batch \(id)'s"))
         }
-        guard Date().timeIntervalSince(approveBatches[index].at) < Self.approveLife else {
+        guard Platform.Clock.steadyDate().timeIntervalSince(approveBatches[index].at) < Self.approveLife else {
             approveBatches.remove(at: index)
             return .init(re: request.id, error: .init(.gone, "batch \(id) expired (\(Int(Self.approveLife / 60)) minutes): run `vibeswitcher approve` again"))
         }

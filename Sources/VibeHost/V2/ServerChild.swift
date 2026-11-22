@@ -522,7 +522,7 @@ public final class ServerChild {
             }
             Sys.close(connector)
             let watch = Platform.ProcessExit.watch(pid, queue: queue) { [weak self] in self?.ended(pid) }
-            lock.withLock { child = (pid, token, connector, Date(), watch) }
+            lock.withLock { child = (pid, token, connector, Platform.Clock.steadyDate(), watch) }
             Self.say(server, "server child pid \(pid) started from \(from), connector \(connector)")
         }
     }
@@ -554,11 +554,11 @@ public final class ServerChild {
         }
         let watch = Platform.ProcessExit.watch(pid, queue: queue) { [weak self] in self?.ended(pid) }
         lock.withLock {
-            child = (pid, token, record.connector, Date(), watch)
+            child = (pid, token, record.connector, Platform.Clock.steadyDate(), watch)
             self.due = due.map { (pid, $0) }
         }
         Self.say(server, "server child pid \(pid) carried over from the build before, connector \(record.connector)")
-        if due != nil { replaceWhenIdle(pid, carriedAt: Date()) }
+        if due != nil { replaceWhenIdle(pid, carriedAt: Platform.Clock.steadyDate()) }
     }
 
     /// The child `pid` ended: its connector closed (its connections with it), it reaped, and started again. On `queue`.
@@ -568,7 +568,7 @@ public final class ServerChild {
         server.closeAppConnector(running.connector)
         var status: Int32 = 0
         while waitpid(pid, &status, 0) < 0, errno == EINTR {}
-        let ran = Date().timeIntervalSince(running.startedAt)
+        let ran = Platform.Clock.steadyDate().timeIntervalSince(running.startedAt)
         let replaced = lock.withLock { () -> Bool in
             child = nil
             if due?.pid == pid { due = nil }
@@ -603,12 +603,12 @@ public final class ServerChild {
         }
         if let hold = Self.replaceHold, access(hold, F_OK) != 0 { return again(nil) }
         if firstLook == nil, let carriedAt, server.appConnectionsMade(through: running.connector) == 0,
-           Date().timeIntervalSince(carriedAt) < Self.reconnectGrace {
+           Platform.Clock.steadyDate().timeIntervalSince(carriedAt) < Self.reconnectGrace {
             return again(nil)
         }
-        let since = firstLook ?? Date()
+        let since = firstLook ?? Platform.Clock.steadyDate()
         let open = server.appConnectionsOpen(through: running.connector)
-        guard open == 0 || Date().timeIntervalSince(since) >= Self.idleLimit else { return again(since) }
+        guard open == 0 || Platform.Clock.steadyDate().timeIntervalSince(since) >= Self.idleLimit else { return again(since) }
         lock.withLock { replacing = running.pid }
         Self.say(server, open == 0
                  ? "server child pid \(running.pid) idle: ended, to start again from the new build's server"

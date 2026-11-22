@@ -143,7 +143,7 @@ public final class HostServer {
     private var housekeeping: DispatchSourceTimer?
     /// The watch on `Config.owner`.
     private var ownerWatch: (any Platform.Cancellable)?
-    private var lastBusy = Date()
+    private var lastBusy = Platform.Clock.steadyDate()
     private(set) var stopped = false
     /// A `shutdown` was accepted: the host stops in a moment and starts nothing more.
     private var shuttingDown = false
@@ -261,7 +261,7 @@ public final class HostServer {
         let programs = sessions.values.filter(\.info.isLive).map(\.info.childPID)
         log.note("host: owner pid \(owner) is gone, ending \(programs.count) sessions and exiting")
         stop(terminateSessions: true)
-        exitOnceEnded(programs, deadline: Date().addingTimeInterval(6))
+        exitOnceEnded(programs, deadline: Platform.Clock.steadyDate().addingTimeInterval(6))
     }
 
     /// Exits once the sessions' programs and their groups are gone (reaped here: closed sessions no longer reap them),
@@ -272,7 +272,7 @@ public final class HostServer {
             let reaped = waitpid(pid, &status, WNOHANG)
             return (reaped == 0 || (reaped < 0 && errno == EINTR)) || Sys.kill(-pid, 0) == 0
         }
-        guard left.isEmpty || Date() >= deadline else {
+        guard left.isEmpty || Platform.Clock.steadyDate() >= deadline else {
             return queue.asyncAfter(deadline: .now() + 0.1) { self.exitOnceEnded(left, deadline: deadline) }
         }
         onExit?()
@@ -1010,8 +1010,8 @@ public final class HostServer {
             if let exit = session.info.exit, now.timeIntervalSince(exit.at) > config.keepEnded { forget(session.id) }
         }
         if !clients.isEmpty || sessions.values.contains(where: { $0.info.isLive }) || serverChild?.isRunning == true {
-            lastBusy = now
-        } else if let idle = config.idleExit, now.timeIntervalSince(lastBusy) >= idle {
+            lastBusy = Platform.Clock.steadyDate()
+        } else if let idle = config.idleExit, Platform.Clock.steadyDate().timeIntervalSince(lastBusy) >= idle {
             log.note("host: idle \(Int(idle)) s with no session and no app, exiting")
             stop(terminateSessions: false)
             onExit?()

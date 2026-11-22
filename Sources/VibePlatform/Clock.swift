@@ -17,6 +17,17 @@ extension Platform {
             #endif
         }
 
+        /// A date that moves with `awakeSeconds`, from the wall clock read once (at the first call): for an elapsed-time
+        /// guard ("10 s since the last typing", "60 s since the ask"), never a stamp stored or shown. The wall clock
+        /// steps (this machine's by up to 7 s when Windows sets it, WSL after a sleep), and a guard on it shrinks or
+        /// grows with the step; two of these dates are always the awake time apart. It falls behind the wall clock by
+        /// the time the machine slept. `ElapsedGuardLintTests` keeps `Date()` out of such guards.
+        public static func steadyDate() -> Date {
+            steadyAnchor.wall.addingTimeInterval(awakeSeconds() - steadyAnchor.awake)
+        }
+
+        private static let steadyAnchor = (wall: Date(), awake: awakeSeconds())
+
         /// The name of the clock `awakeSeconds` reads, as C and Perl's Time::HiRes call it: for a program run in a test
         /// to print the same clock (`clock_gettime(CLOCK_UPTIME_RAW)` on the Mac, `CLOCK_MONOTONIC` on Linux).
         public static let awakeClockName: String = {

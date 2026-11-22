@@ -132,7 +132,7 @@ extension Requests {
                             // A command may open a picker (`/model`, `/resume`): the reply says so, as the app's composer
                             // watches the screen for one.
                             guard text.hasPrefix("/"), images.isEmpty else { return answer(nil, nil, false, nil) }
-                            Self.watchForMenu(session.id, link: self.link, queue: queue, until: Date().addingTimeInterval(Self.pickerWait)) { answer(nil, $0, false, nil) }
+                            Self.watchForMenu(session.id, link: self.link, queue: queue, until: Platform.Clock.steadyDate().addingTimeInterval(Self.pickerWait)) { answer(nil, $0, false, nil) }
                         case .menuOpen(let open):
                             // A question that takes typed words: they go in as its free-text answer, as the app's composer
                             // sends them; else held until it closes.
@@ -220,7 +220,7 @@ extension Requests {
         link.type(writes, into: session.id, gate: { index, go in
             if index > 0 {
                 guard !images.isEmpty else { return go(true) }
-                return Self.waitForImages(images, in: session.id, link: link, queue: queue, until: Date().addingTimeInterval(Self.imageWait), go)
+                return Self.waitForImages(images, in: session.id, link: link, queue: queue, until: Platform.Clock.steadyDate().addingTimeInterval(Self.imageWait), go)
             }
             link.screen(session.id) { screen in
                 guard let screen else {
@@ -253,7 +253,7 @@ extension Requests {
         link.screen(id) { screen in
             queue.async {
                 if let screen, let open = openMenu(screen) { return found(open) }
-                guard Date() < deadline else { return found(nil) }
+                guard Platform.Clock.steadyDate() < deadline else { return found(nil) }
                 queue.asyncAfter(deadline: .now() + 0.2) { watchForMenu(id, link: link, queue: queue, until: deadline, found) }
             }
         }
@@ -268,7 +268,7 @@ extension Requests {
                 if let screen, case .draft(let typed) = LeadDelivery.box(in: screen), ComposerText.imagesTaken(typed, images: images) {
                     return go(true)
                 }
-                guard Date() < deadline else { return go(true) }
+                guard Platform.Clock.steadyDate() < deadline else { return go(true) }
                 queue.asyncAfter(deadline: .now() + 0.1) { waitForImages(images, in: id, link: link, queue: queue, until: deadline, go) }
             }
         }
@@ -312,7 +312,7 @@ extension Requests {
                         }
                     }
                     guard step == moves else { return going(true) }
-                    Self.cursorReaches(index, of: menu, in: session.id, link: link, since: Date(), done: going)
+                    Self.cursorReaches(index, of: menu, in: session.id, link: link, since: Platform.Clock.steadyDate(), done: going)
                 }, confirmed: { typed in
                     queue.async {
                         let outcome: FreeTextOutcome = typed ? .answered(field) : wordsWent.get() ? .partly : .notTyped

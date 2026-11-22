@@ -120,7 +120,7 @@ public final class BaseMoveStore: @unchecked Sendable {
     }
 
     /// The leads' roots, at each refresh. The reflog's and workflow.md's stamps are taken off the engine's queue.
-    public func look(_ roots: Set<String>, now: Date = Date()) {
+    public func look(_ roots: Set<String>, now: Date = Platform.Clock.steadyDate()) {
         if !Set(asking.keys).isSubset(of: roots) { asking = asking.filter { roots.contains($0.key) } }
         for root in roots where !looking.contains(root) {
             let (known, last) = (branches[root], stamps[root])

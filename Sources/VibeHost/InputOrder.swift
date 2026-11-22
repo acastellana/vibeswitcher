@@ -154,7 +154,7 @@ final class InputOrder {
             guard let self, self.step == current else { return }
             self.step += 1
             let after = self.step
-            let wait = self.starting ? self.lastUnit.addingTimeInterval(Self.unitGap).timeIntervalSinceNow : part.writes[index].delay
+            let wait = self.starting ? self.lastUnit.addingTimeInterval(Self.unitGap).timeIntervalSince(Platform.Clock.steadyDate()) : part.writes[index].delay
             self.queue.asyncAfter(deadline: .now() + max(0, wait)) { [weak self] in
                 guard let self, self.step == after else { return }
                 self.starting = false
@@ -197,7 +197,7 @@ final class InputOrder {
         holderGone = false
         nextParts = []
         current = nil
-        lastUnit = Date()
+        lastUnit = Platform.Clock.steadyDate()
         guard !waiting.isEmpty else {
             refusing = false
             return

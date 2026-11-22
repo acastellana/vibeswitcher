@@ -18,10 +18,10 @@ public enum HostStart {
         }
         var data = Data()
         var buffer = [UInt8](repeating: 0, count: 64)
-        let deadline = Date().addingTimeInterval(waiting)
+        let deadline = Platform.Clock.steadyDate().addingTimeInterval(waiting)
         while data.count <= AppProof.keySize {
             var ready = pollfd(fd: 0, events: Int16(POLLIN), revents: 0)
-            guard poll(&ready, 1, Int32(max(0, deadline.timeIntervalSinceNow * 1000))) > 0 else { break }
+            guard poll(&ready, 1, Int32(max(0, deadline.timeIntervalSince(Platform.Clock.steadyDate()) * 1000))) > 0 else { break }
             let count = read(0, &buffer, buffer.count)
             guard count > 0 else { break }
             data.append(contentsOf: buffer[0..<count])
