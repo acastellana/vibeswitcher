@@ -7356,7 +7356,7 @@ public final class LeadToolset: MCPToolset {
         let limits = macLimits()
         lines += ["", "Mac-wide, set by the user in VibeSwitcher's Settings › Performance (not here; configure doesn't set them):",
                   "- load_threshold: \(limits.loadLimitText) (above this load, the greater of the 1- and 5-minute averages, start_worker and audit refuse and merge waits)",
-                  "- memory: start_worker and audit refuse too while the Mac is short of memory \(MacMemory.limitsText(limits)) (Mac-wide defaults kept in mac-limits.json as memoryPressure and swapOutRate, not in Settings)",
+                  "- memory: start_worker and audit refuse too while the Mac is short of memory \(MacMemory.limitsText(limits)) (Mac-wide defaults kept in \(MacLimits.fileName) as memoryPressure and swapOutRate, not in Settings)",
                   "- mac_max_sessions: \(limits.maxSessionsText) (workers and verifiers of all projects on this Mac; start_worker and audit refuse at it)"]
         if !workflow.ignoredKeys.isEmpty { lines.append(Self.ignoredText(workflow)) }
         let warnings = workflowWarnings(workflow)

@@ -210,7 +210,7 @@ extension LeadEngine {
                 var workflow = LeadWorkflow.load(from: store.folder + "/workflow.md")
                 workflow.baseBranch = workflow.baseBranch ?? store.load().baseBranch
                 let policy = WorkingPolicy.load(from: nodeRoot.appendingPathComponent("policy.md"))
-                let limits = MacLimits.load(from: nodeRoot.appendingPathComponent("mac-limits.json"))
+                let limits = MacLimits.load(from: nodeRoot.appendingPathComponent(MacLimits.fileName))
                 let name = "lead-\(Slug.make(project, taken: []))"
                 let base = RecentProjects.shellQuote(program)
                 let run = Self.leadRun(workflow, base: base, nodeRoot: nodeRoot, home: home)

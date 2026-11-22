@@ -143,7 +143,8 @@ slots=$(/usr/bin/perl -MJSON::PP -e '
     sub json { open(my $h, "<", shift) or return undef; local $/; my $j = eval { JSON::PP->new->decode(scalar <$h>) }; ref $j eq "HASH" ? $j : undef }
     sub count { my ($v, $default) = @_; return $default unless defined $v && !ref $v && $v =~ /^-?[0-9]+$/; $v < 1 ? 1 : $v > $ncpu ? $ncpu : $v + 0 }
     my $default = int($ncpu / 6) || 1;
-    my $limits = json("$root/mac-limits.json");
+    # On Linux the node name first (node-limits.json, MacLimits.fileName there), then the Mac name, as MacLimits.load reads them.
+    my $limits = ($^O eq "linux" ? json("$root/node-limits.json") : undef) // json("$root/mac-limits.json");
     my $slots = $own ne "" ? $own : count($limits ? $limits->{heavySlots} : undef, $default);
     my $set = $limits ? $limits->{loadThreshold} : undef;
     my $limit = defined $set && !ref $set && $set =~ /^[0-9]+(\.[0-9]+)?$/ && $set > 0 ? $set + 0 : 2 * $ncpu;

@@ -788,6 +788,13 @@ struct TestLockTests {
         try boost(on: true, slots: 3, age: BoostState.staleAfter + 30)
         #expect(try cores("stale") == "cores=6")
         #expect(swiftSide() == 2)
+        #if os(Linux)
+        // A node's own file (node-limits.json) over the Mac's name, for both.
+        try Data(#"{"heavySlots": 3}"#.utf8).write(to: home.appendingPathComponent("node-limits.json"))
+        #expect(swiftSide() == 3)
+        if MacLoad.processors == 12 { #expect(try cores("node file") == "cores=4") }
+        try FileManager.default.removeItem(at: home.appendingPathComponent("node-limits.json"))
+        #endif
         // Forged past the cores: no more than a slot per core.
         let forged = #"{"on": true, "why": "w", "at": \#(Date().timeIntervalSince1970), "limits": {"heavySlots": 64}}"#
         try Data(forged.utf8).write(to: home.appendingPathComponent("boost.json"))

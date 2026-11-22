@@ -108,7 +108,7 @@ public struct TestLock: Sendable {
     /// folder `environment` names (`VibePaths.root(environment:)`), read as `vs-heavy` reads them.
     public static func slotCount(_ environment: [String: String] = ProcessInfo.processInfo.environment, now: Date = Date()) -> Int {
         let root = VibePaths.root(environment: environment, fallbackHome: NSHomeDirectory())
-        let limits = MacLimits.current(file: root.appendingPathComponent("mac-limits.json"), boostFile: root.appendingPathComponent("boost.json"), now: now)
+        let limits = MacLimits.current(file: root.appendingPathComponent(MacLimits.fileName), boostFile: root.appendingPathComponent("boost.json"), now: now)
         return limits.heavySlotsInForce(slotsSet(environment))
     }
 

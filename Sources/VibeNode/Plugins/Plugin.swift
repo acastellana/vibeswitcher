@@ -136,7 +136,7 @@ public struct PluginInfo: Codable, Equatable, Sendable {
     /// `wallet-requests`, which the agents' commands write).
     public static let coreFolders: Set<String> = [
         "account-usage.json", "attachments", "bin", "boost.json", "context", "debug", "disk-watch.json", "headless", "health.json",
-        "host.lock", "host.log", "host.sock", "lead", "mac-limits.json", "open-sessions.json", "outbox.json", "plugins", "plugins.json",
+        "host.lock", "host.log", "host.sock", "lead", "mac-limits.json", "node-limits.json", "open-sessions.json", "outbox.json", "plugins", "plugins.json",
         "policy-told.json", "policy.md", "power.json", "presets.json", "prompt-audit.json", "room-waits", "run-blocks", "session-marks.json",
         "settings", "settings.plist", "sleep-cost.json", "state", "stats", "steer", "swap-samples.json", "tmp", "toolchain.json",
         "update-check.json", "v2", "vault-requests", "engine.json", "journal", "logs",

@@ -15,7 +15,7 @@ public enum NodeUsage {
         public var usage = AccountUsage()
         /// The model workers start on: Claude's settings in the node's home (nil: Claude's default).
         public var workerModel: String?
-        /// Settings' Ignore usage limits (`mac-limits.json`).
+        /// Settings' Ignore usage limits (`node-limits.json`, `MacLimits.fileName`).
         public var ignoring = false
         public var now = Date()
 

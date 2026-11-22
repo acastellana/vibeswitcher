@@ -95,7 +95,20 @@ extension LeadToolsetTests {
         #expect(MacLimits(maxSessions: 0, loadThreshold: -3) == MacLimits(maxSessions: 1))
         try Data("{\"maxSessions\": \"lots\"}".utf8).write(to: file)
         #expect(MacLimits.load(from: file) == defaults)
+        #if os(Linux)
+        #expect(MacLimits.file == VibePaths.root.appendingPathComponent("node-limits.json"))
+        // A node's file: the Mac's name read while the node's isn't there, and written with it while that is there.
+        let node = folder.appendingPathComponent("node-limits.json"), mac = folder.appendingPathComponent("mac-limits.json")
+        try MacLimits(maxSessions: 3).save(to: mac)
+        #expect(MacLimits.load(from: node).maxSessions == 3, "the alias read")
+        try MacLimits(maxSessions: 5).save(to: node)
+        #expect(MacLimits.load(from: node).maxSessions == 5 && MacLimits.load(from: mac).maxSessions == 5, "both written")
+        try FileManager.default.removeItem(at: mac)
+        try MacLimits(maxSessions: 6).save(to: node)
+        #expect(!FileManager.default.fileExists(atPath: mac.path), "no alias made where there was none")
+        #else
         #expect(MacLimits.file == VibePaths.root.appendingPathComponent("mac-limits.json"))
+        #endif
         // workflow.md's keys are ignored, and said so; the template no longer has them.
         let set = LeadWorkflow.parse("---\nload_threshold: 30.5\nmac_max_sessions: 20\nmax_workers: 4\n---")
         #expect(set.ignoredKeys == ["load_threshold", "mac_max_sessions"] && set.maxWorkers == 4)

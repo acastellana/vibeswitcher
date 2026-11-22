@@ -87,7 +87,7 @@ enum SettingsCommand {
                 if about.hasSuffix(".") { about.removeLast() }
                 if let limits = setting["limits"]?.string { about += " (\(ConfigSeal.inert(limits, limit: 120)))" }
                 out.append("        \(about).")
-                // The machine-wide limits' file keeps the Mac's name (mac-limits.json, which the leads' tools read): this node's.
+                // The machine-wide limits' file (node-limits.json on a node; the Mac's mac-limits.json its alias): this node's.
                 var place = (setting["home"]?.string == "limits" ? "In this node's limits, " : "In ") + shown(setting["where"]?.string ?? "?")
                 if setting["guardRail"]?.bool == true { place += "; a guard rail: a change here is recorded in the vault as yours" }
                 out.append("        \(place).")
@@ -174,7 +174,9 @@ enum SetCommand {
         let shownValue = value.map { $0.contains("\n") ? "this text:\n" + $0.split(separator: "\n", omittingEmptySubsequences: false)
             .map { "  | " + ConfigSeal.inert(String($0), limit: 400) }.joined(separator: "\n") : ConfigSeal.inert($0, limit: 400) } ?? "its default"
         let place = folder.map { "the project in \(ConfigSeal.inert($0, limit: 300))" } ?? "this node, for every project"
-        let what = "This sets \(key) (\(setting.title)) for \(place) to \(shownValue)"
+        // The Mac's name for a node's setting (`NodeSettings.aliases`) is taken, and said as the node's.
+        let named = setting.key == key ? key : "\(setting.key) (as \(ConfigSeal.inert(key, limit: 80)))"
+        let what = "This sets \(named) (\(setting.title)) for \(place) to \(shownValue)"
             + (setting.guardRail ? "\nA guard rail: recorded in the host's vault as yours." : "")
         let said = TypedWord.said(approval: client.approvalRule, action: action, what: what)
         guard case .success(let typed) = said else { return Say.refused(said.refusal) }
@@ -187,7 +189,7 @@ enum SetCommand {
             let now = result["value"]?.string ?? "?"
             let was = result["was"]?.string ?? "?"
             let shown = { (text: String) in text.contains("\n") ? "(\(text.split(separator: "\n").count) lines)" : ConfigSeal.inert(text, limit: 200) }
-            var said = was == now ? "\(key) was \(shown(now)) already" : "set \(key): \(shown(was)) → \(shown(now))"
+            var said = was == now ? "\(named) was \(shown(now)) already" : "set \(named): \(shown(was)) → \(shown(now))"
             switch result["told"]?.string {
             case "lead": said += "; the project's lead is told at its next step"
             case "leads": said += "; the running leads are told"
