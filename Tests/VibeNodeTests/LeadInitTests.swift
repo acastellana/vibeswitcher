@@ -258,7 +258,7 @@ struct LeadInitTests {
         // Replaced by another real folder at the same path: not the folder the code was typed for.
         let swapped = try self.folder()
         let swappedPlan = try plan(swapped, home: home)
-        try FileManager.default.moveItem(atPath: swapped, toPath: swapped + "-moved")
+        try FileManager.default.moveItem(atPath: swapped, toPath: scratch.url("moved").path)
         try FileManager.default.createDirectory(atPath: swapped, withIntermediateDirectories: false)
         guard case .failure(let replaced) = made(swappedPlan, home: home) else { Issue.record("made in a replaced folder"); return }
         #expect(replaced.message.contains("isn't the folder it was"), "\(replaced)")
