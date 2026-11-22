@@ -197,4 +197,58 @@ struct ShellCardsTests {
         for scalar: Unicode.Scalar in [" ", "\t", "a", "é", "→"] { #expect(!PluginText.blank(scalar)) }
         #expect(PluginText.size("a\nbé") == "2 lines, 5 bytes")
     }
+
+    // MARK: Off leaves no trace (the plugins definition, step 2)
+
+    /// `plugin off shell` with a card open: the card closes as withdrawn and its asker is told; then `vs-shell` says the
+    /// node doesn't have it on and files nothing, a request put in the folder anyway is dropped unread, no card is drawn,
+    /// and nothing of it is in `hello`, `status`, the brief's waiting list or the settings. On again, a new request is a
+    /// card as before.
+    @Test func offLeavesNoTrace() async throws {
+        let world = try await CardWorld.make(scratch)
+        defer { world.stop() }
+        let (asker, request) = try await file(world, label: "before-off")
+        await look(world)
+        let card = try #require(shellCard(world, request))
+        #expect(plugin(world).info.tools.isEmpty, "no MCP tool to list")
+
+        let off = try #require(await world.ask("plugin.off", ["plugin": .string(ShellPlugin.id)]))
+        #expect(off.ok && off.result?["withdrawn"]?.int == 1, "\(off)")
+        let withdrawn = try #require(shellCard(world, request))
+        #expect(!withdrawn.isOpen && withdrawn.plugin?.state == PluginCard.withdrawnState, "\(withdrawn)")
+        #expect(answers(world, request.id)?.state == .declined && answers(world, request.id)?.told == true, "kept settled across a restart")
+        let late = try #require(await world.answer(card, "run"))
+        #expect(!late.ok, "\(late)")
+        #expect(try world.host.sessions().allSatisfy { $0.label != "Shell: before-off" })
+
+        // The command: refused from the mirror, nothing filed.
+        let mirror = world.host.root.appendingPathComponent("plugins.json")
+        try #require(await eventually(timeout: 30) { PluginGate.mirror(at: mirror)?.on == [] })
+        #expect(PluginGate.refusal(ShellPlugin.id, command: "vs-shell", at: mirror)?.contains("vs-shell: this node doesn't have shell on") == true)
+        // A request filed anyway (straight into the folder, stamped): dropped unread, never a card.
+        let session = asker.id.uuidString.lowercased()
+        let vault = world.host.book.vault(folder: scratch.url("asker-vault-off"), as: { .session(session) }, userOpened: true)
+        let folder = asked(world)
+        let filed = await offPool { ShellAsk.run(["run", "--label", "while-off", "--", "true"], cwd: world.repo, folder: folder, vault: vault) }
+        try #require(filed.status == 0, "\(filed)")
+        let second = try #require(ShellAsk.filed(in: folder).requests.first { $0.label == "while-off" })
+        await look(world)
+        #expect(!FileManager.default.fileExists(atPath: folder.appendingPathComponent("\(second.id).json").path))
+        #expect(shellCard(world, second) == nil)
+        let status = try #require(await world.ask("status", action: nil))
+        #expect(!(status.result?["notices"]?.array?.compactMap(\.string) ?? []).contains { $0.contains("shell request") })
+        #expect(status.result?["plugins"] == .array([]))
+        #expect(world.queue.sync { world.requests.hello(peer: nil) }.plugins == .array([]))
+        let open = world.queue.sync { world.engine.cards.list() }
+        #expect(NodeBrief.extra(boards: [], cards: open, roots: [world.repo], now: Date()).notes.isEmpty, "no brief line")
+        #expect(NodeSettings.all.allSatisfy { !$0.key.contains("shell") && $0.section != plugin(world).info.title }, "no settings")
+        #expect(SessionNote.text(on: PluginGate.mirror(at: mirror)?.on) == nil, "no line in a session's note")
+
+        // On again: a new request is a card.
+        let on = try #require(await world.ask("plugin.on", ["plugin": .string(ShellPlugin.id)]))
+        #expect(on.ok, "\(on)")
+        let (_, third) = try await file(world, label: "after-on")
+        await look(world)
+        #expect(shellCard(world, third)?.isOpen == true)
+    }
 }

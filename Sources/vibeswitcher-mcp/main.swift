@@ -104,6 +104,8 @@ if CommandLine.arguments.count >= 2, CommandLine.arguments[1] == "--wallet-reque
 // (see `ShellAsk`). Nothing starts from here. The app's defaults say only what the output tells (whether Settings ›
 // Agents lets agents open shells without asking); the app decides.
 if CommandLine.arguments.count >= 2, CommandLine.arguments[1] == "--shell-request" {
+    // A node with shell requests off (its server's mirror, `PluginGate`): nothing is filed.
+    if let refusal = PluginGate.refusal("shell", command: "vs-shell") { FileHandle.standardError.write(Data((refusal + "\n").utf8)); exit(1) }
     let defaults = Platform.settings()
     let ran = ShellAsk.run(Array(CommandLine.arguments.dropFirst(2)), cwd: FileManager.default.currentDirectoryPath, vault: .standard,
                            atOnce: defaults?.bool(forKey: "letAgentsOpenShells") ?? false)

@@ -98,4 +98,17 @@ struct SessionNoteTests {
             #expect(SessionNote.output(payload: ["hook_event_name": event], environment: Self.session) == nil)
         }
     }
+
+    /// A node says which feature plugins are on (`PluginGate`): a plugin that is off adds no line. None said (the Mac),
+    /// the note as it is.
+    @Test func theNoteHasOnlyThePluginsThatAreOn() throws {
+        #expect(SessionNote.text(on: nil) == SessionNote.text)
+        #expect(SessionNote.text(on: ["shell", "wallet"]) == SessionNote.text)
+        let shell = try #require(SessionNote.text(on: ["shell"]))
+        #expect(shell.contains("vs-shell run") && !shell.contains("vs-wallet"), "\(shell)")
+        #expect(SessionNote.text(on: []) == nil)
+        #expect(SessionNote.output(payload: Self.start(), environment: Self.session, on: []) == nil)
+        let context = try #require(try Self.context(SessionNote.output(payload: Self.start(), environment: Self.session, on: ["shell"])))
+        #expect(context == shell)
+    }
 }
