@@ -268,13 +268,13 @@ struct SettingsRequestTests {
         #expect(set.status == 0, "\(set.output)\(set.errors)\n\(node.said)")
         #expect(set.output.contains("set node_max_sessions: \(MacLimits.defaultMaxSessions) → 7"), "\(set.output)")
         let read = try await node.run(["settings"])
-        #expect(read.status == 0 && read.output.contains("node_max_sessions = 7"), "\(read.output)\(read.errors)\n\(Self.listenerState(read.errors))")
+        #expect(read.status == 0 && read.output.contains("node_max_sessions = 7"), "\(read.output)\(read.errors)\n\(Self.listenerState(read.errors))\n\(node.said)")
         #expect(read.output.contains("In this node's limits, ") && read.output.contains("mac-limits.json") && !read.output.contains("mac_max_sessions"),
                 "\(read.output)")
         #expect(read.output.contains("Not on a node"), "\(read.output)")
         // The app's search: only the settings holding every word, no left-out list, and a word nothing holds said so.
         let found = try await node.run(["settings", "--find", "team sessions"])
-        #expect(found.status == 0 && found.output.contains("node_max_sessions = 7") && found.output.contains("boost_max_sessions"), "\(found.status) \(found.output)\(found.errors)\n\(Self.listenerState(found.errors))")
+        #expect(found.status == 0 && found.output.contains("node_max_sessions = 7") && found.output.contains("boost_max_sessions"), "\(found.status) \(found.output)\(found.errors)\n\(Self.listenerState(found.errors))\n\(node.said)")
         #expect(!found.output.contains("lead_mail") && !found.output.contains("Not on a node"), "\(found.output)")
         let none = try await node.run(["settings", "--find", "nothing-like-this"])
         #expect(none.status == 0 && none.output.contains("No setting matches"),
