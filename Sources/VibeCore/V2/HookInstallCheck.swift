@@ -26,6 +26,17 @@ extension HookInstaller {
         }
     }
 
+    /// Whether an install would change `agent`'s config (it lacks our hooks, or holds other ones for them): `checkInstall`'s
+    /// read, and its comparison, writing nothing. Throws what `checkInstall` throws. A config that isn't there needs them.
+    /// (`vibeswitcher approve`'s "hooks out of date".)
+    public static func needsInstall(agent: Agent, at url: URL? = nil, hookBinary: String = VibePaths.hookBinary.path) throws -> Bool {
+        let url = url ?? configURL(for: agent)
+        let target = try fileBehindLinks(url)
+        let data = Stamp(of: target) == nil ? Data() : try Data(contentsOf: target)
+        let current = try parse(data, path: url.path)
+        return !Platform.sameJSON(addingOurs(to: current, agent: agent, hookBinary: hookBinary), current)
+    }
+
     /// Why an install, an uninstall or `checkInstall` threw, to follow the config's path in a sentence ("… wasn't
     /// changed: it isn't valid JSON (…)"). Linux's Foundation describes its own errors as "The operation could not be
     /// completed. (NSCocoaErrorDomain error 512.)", which names neither the file nor the reason.

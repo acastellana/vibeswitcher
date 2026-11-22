@@ -80,6 +80,32 @@ public struct HooksRequest {
     /// Where `agent` reads its hooks in this home.
     public func configPath(_ agent: Agent) -> String { HookInstaller.configURL(for: agent, home: home).path }
 
+    /// What an install would change now, one line each (none: the hooks are up to date): a program in the bin folder that
+    /// isn't there or isn't the build's (its SHA-256 isn't `binaries`'), an agent's config without our hooks. A program the
+    /// host's notes name no hash for is said unknown, never out of date. (`vibeswitcher approve`'s list.)
+    public func outOfDate(agents: [Agent]) -> [String] {
+        var said: [String] = []
+        for name in Self.programs {
+            let path = (binFolder as NSString).appendingPathComponent(name)
+            guard let data = FileManager.default.contents(atPath: path) else {
+                said.append("\(name) isn't installed in \(Self.shown(binFolder))")
+                continue
+            }
+            if let expected = binaries?[name], BuildInfo.sha256(of: data) != expected {
+                said.append("\(Self.shown(path)) isn't this build's \(name)")
+            }
+        }
+        let hook = (binFolder as NSString).appendingPathComponent("vibeswitcher-hook")
+        for agent in agents {
+            switch Result(catching: { try HookInstaller.needsInstall(agent: agent, at: URL(fileURLWithPath: configPath(agent)), hookBinary: hook) }) {
+            case .success(true): said.append("\(Self.shown(configPath(agent))) lacks VibeSwitcher's hooks for \(agent.rawValue)")
+            case .success(false): break
+            case .failure(let error): said.append("\(Self.shown(configPath(agent))) can't take the hooks: \(Self.why(error))")
+            }
+        }
+        return said
+    }
+
     public func install(agents: [Agent]) -> Result<Installed, StartRefusal> {
         guard !agents.isEmpty else { return .failure(StartRefusal("no agent named")) }
         if let refusal = buildsRefusal() { return .failure(refusal) }
