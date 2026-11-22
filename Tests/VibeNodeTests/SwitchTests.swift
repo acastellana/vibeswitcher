@@ -619,19 +619,47 @@ struct SwitchTests {
     }
 
     /// The host goes, socket and all: the link's end answers the switch's wait for a welcome at once (the switch's own
-    /// waits are on a clock the test never moves, so only the link's end can), and the session it listed is ended.
+    /// waits are on a clock the test moves), the host is asked again on connections of its own for `confirmWait`, and
+    /// only then is "no build answered" said; the session it listed is ended.
     @Test(NodeTraits.linuxOnly, .timeLimit(.minutes(2))) func aHostThatGoesAwayIsAFailure() async throws {
         let world = try await StubWorld(scratch, onHandover: .quit)
         #expect(world.live == 1)
         let clock = ManualClock()
         var timing = SwitchRequest.Timing()
         timing.later = clock.schedule
-        let answer = await Self.answer(world.run(timing))
+        let running = world.run(timing)
+        let link = world.link
+        #expect(await eventually { link.queue.sync { if case .gone = link.state { true } else { false } } })
+        // Each second of the confirming wait, one more check on a connection of its own (the socket is gone: each fails
+        // and arms the next): the clock is moved once each is armed.
+        var seen = 0
+        for _ in 0..<(2 * Int(SwitchRequest.confirmWait)) where running.value == nil {
+            _ = await eventually(timeout: 10) { clock.armed.count > seen || running.value != nil }
+            seen = clock.armed.count
+            clock.advance(SwitchRequest.confirmEvery)
+        }
+        let answer = await Self.answer(running)
         let failed = "handover failed: the host (pid 31589) went away and no build answered"
         #expect(answer == .refused(.refused, failed))
         #expect(world.handover == ["build.switch: " + failed], "\(world.notes.value)")
-        let link = world.link
         #expect(link.queue.sync { link.sessions.count == 1 && link.sessions.allSatisfy { !$0.isLive } })
+    }
+
+    /// The real node's switch right after a start (2026-11-22): the host handed over, but the new build listened only
+    /// after the link had given up reconnecting. The switch asks the host on a connection of its own before it says
+    /// anything failed, and says it handed over.
+    @Test(NodeTraits.linuxOnly, .timeLimit(.minutes(2))) func aHandoverTheLinkGaveUpOnIsHandedOver() async throws {
+        let world = try await StubWorld(scratch, onHandover: .away(build: Self.b))
+        var timing = SwitchRequest.Timing()
+        timing.confirmEvery = 0.1
+        let running = world.run(timing)
+        let link = world.link
+        try #require(await eventually { link.queue.sync { if case .gone = link.state { true } else { false } } }, "\(world.notes.value)")
+        #expect(running.value == nil, "nothing said while the host may still come")
+        try world.stub.listenAgain()
+        let answer = await Self.answer(running)
+        #expect(Self.said(answer) == "handed over (pid 31589, build \(Self.b))", "\(String(describing: answer)) \(world.notes.value)")
+        #expect(world.notes.value.contains { $0.contains("asked on a connection of its own, pid 31589 runs build \(Self.b)") }, "\(world.notes.value)")
     }
 
     @Test(NodeTraits.linuxOnly, .timeLimit(.minutes(2))) func aRefusalIsAFailure() async throws {
