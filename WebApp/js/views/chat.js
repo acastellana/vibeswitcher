@@ -698,14 +698,20 @@ export function chatView(app) {
     if (drafting()) {
       // While it works, as the app's ↩ steers and ⌥↩ queues: ↩ leaves a draft that steers it now, ⌥↩ one for after.
       const steers = working && session.agent === 'claude';
-      input.placeholder = steers ? `Steer ${agent} while it works… (↩ leaves a send-now draft, ⌥↩ one for after its turn)`
-        : `Message ${agent}… (↩ leaves a draft)`;
+      // On a phone the words that fit one line; the keys are a keyboard's (the send button's title says what it does).
+      input.placeholder = narrow() ? (steers ? `Steer ${agent}…` : `Message ${agent}…`)
+        : steers ? `Steer ${agent} while it works… (↩ leaves a send-now draft, ⌥↩ one for after its turn)`
+          : `Message ${agent}… (↩ leaves a draft)`;
       sendButton.title = steers ? 'Leave as a send-now draft: it steers the agent at its next step (↩)' : 'Leave as a draft (↩)';
       sendButton.setAttribute('aria-label', steers ? 'Leave as a send-now draft' : 'Leave as a draft');
     } else {
-      input.placeholder = working ? `Steer ${agent} while it works — ↩ sends it to its next step` : `Message ${agent}…`;
+      input.placeholder = working ? (narrow() ? `Steer ${agent}…` : `Steer ${agent} while it works — ↩ sends it to its next step`) : `Message ${agent}…`;
     }
   }
+  // A phone's width (style.css's own breakpoint): the composer's words kept to one line. Drawn again as it changes.
+  const narrowQuery = globalThis.matchMedia?.('(max-width: 760px)');
+  const narrow = () => !!narrowQuery?.matches;
+  narrowQuery?.addEventListener?.('change', () => { if (view.session) schedule(); });
 
   const schedule = framed(render);
   const scrolled = framed(() => {
