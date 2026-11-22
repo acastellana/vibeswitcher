@@ -232,8 +232,8 @@ public enum WireSchema {
                                                                field("why", .string), field("limits", .shape("node.boost.limits"))]),
             shape("node.boost.limits", from: "LeadEngine.boostValue", [field("loadThreshold", .string), field("maxSessions", .int),
                                                                       field("maxWorkers", .int), field("heavySlots", .int)]),
-            shape("node.health", from: "NodeHealth.value (2026-11-21)", [
-                field("since", .date), field("stalled", Kind.int.orNull), field("freezes", .list(.shape("node.health.freeze"))),
+            shape("node.health", from: "NodeHealth.value (2026-11-22)", [
+                field("since", .date), field("stalled", Kind.int.orNull), field("refreshing", Kind.int.orNull), field("freezes", .list(.shape("node.health.freeze"))),
                 field("slowRefreshes", .int), field("slowestRefresh", Kind.int.orNull), field("lastSlowRefresh", Kind.date.orNull),
                 field("serverRestarts", Kind.int.orNull), field("refusedConnections", Kind.int.orNull), field("hostRestartAt", Kind.date.orNull),
                 field("waiting", strings), field("errors", .list(.shape("node.health.error"))), field("causes", .list(.shape("node.health.cause")))]),

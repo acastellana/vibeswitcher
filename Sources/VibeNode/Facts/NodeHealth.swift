@@ -6,9 +6,15 @@ import VibeCore
 /// counts (server restarts, refused connections) and the sessions left waiting or stuck (`NodeSessions.reminderNotices`).
 ///
 /// - Freezes: a watchdog on a thread of its own pings the engine's queue every `beat` seconds; a ping not answered
-///   within `stallAfter` is a stall, shown as under way while it lasts and kept as a freeze, with how long, once the
-///   queue answers. The app's freeze report is a sample of the main thread, which a node can't take (no debugger, the
-///   rule): a node reports when and how long.
+///   within `stallAfter` is a stall, shown as under way while it lasts and kept as a freeze at once (saved from the
+///   watchdog's thread, so a stall that never ends still shows after the restart), its length brought up to date once
+///   the queue answers. The app's freeze report is a sample of the main thread, which a node can't take (no debugger,
+///   the rule): a node reports when and how long.
+/// - Stuck: a ping left unanswered for `exitAfter` (120 s of awake time; the longest legitimate block found on the
+///   queue is about 5 s) ends the server (`stuck`: one raw line on stderr, then `_exit(70)`). The host starts it again
+///   in 1 s (`ServerChild`) and the sessions run on in the host; nothing else would ever unstick it.
+/// - The refresh's reads (`BoardReads`' queue, the `reads` lane): pinged the same way, a ping unanswered for
+///   `stallAfter` said as a refresh under way, never acted on (a board or transcript read may be long).
 /// - Slow refreshes: the engine's 3 s refresh taking longer than `slowRefresh` (its reads of the boards and the
 ///   transcripts), counted, with the slowest and the last.
 /// - The last errors: the server's own log lines that say something failed (`problem(_:)`), the newest `kept`, as the
@@ -24,6 +30,22 @@ public final class NodeHealth: @unchecked Sendable {
     public static let stallAfter: TimeInterval = 10
     public static let slowRefresh: TimeInterval = 5
     public static let kept = 10
+    public static let exitAfter: TimeInterval = 120
+
+    /// The watchdog's periods: the standard ones, or a scratch node's test's (`--test-stall=`).
+    public struct Timing: Sendable {
+        public var beat: TimeInterval
+        public var stallAfter: TimeInterval
+        public var exitAfter: TimeInterval
+
+        public init(beat: TimeInterval = NodeHealth.beat, stallAfter: TimeInterval = NodeHealth.stallAfter, exitAfter: TimeInterval = NodeHealth.exitAfter) {
+            self.beat = beat
+            self.stallAfter = stallAfter
+            self.exitAfter = exitAfter
+        }
+
+        public static let standard = Timing()
+    }
 
     public struct Freeze: Codable, Equatable, Sendable {
         public var at: Date
@@ -49,14 +71,27 @@ public final class NodeHealth: @unchecked Sendable {
     private var causes: [String: (count: Int, last: Date)] = [:]
     /// The ping waiting for the queue: when it was sent (the monotonic clock) and the date then.
     private var pending: (sent: TimeInterval, at: Date)?
+    /// Whether the last of `freezes` is the stall under way (kept at `stallAfter`, its length brought up to date when
+    /// the queue answers).
+    private var open = false
+    /// The ping waiting for the reads lane, when it was sent.
+    private var pendingReads: TimeInterval?
+    /// Whether `stuck` was called (once).
+    private var ended = false
+    private let timing: Timing
+    private let stuck: @Sendable (String) -> Void
     private var timer: DispatchSourceTimer?
     private let watch = DispatchQueue(label: "vibenode.health-watchdog", qos: .utility)
 
     /// `file`: where freezes are kept (nil: nowhere). `clock`: seconds on a monotonic clock; `date`: the wall clock.
-    public init(file: URL?, clock: @escaping () -> TimeInterval = { MacTime.real.awake() }, date: @escaping () -> Date = Date.init) {
+    /// `stuck`: what a ping unanswered for `timing.exitAfter` does, with the line saying so (the server's: `exitStuck`).
+    public init(file: URL?, clock: @escaping () -> TimeInterval = { MacTime.real.awake() }, date: @escaping () -> Date = Date.init,
+                timing: Timing = .standard, stuck: @escaping @Sendable (String) -> Void = { _ in }) {
         self.file = file
         self.clock = clock
         self.date = date
+        self.timing = timing
+        self.stuck = stuck
         started = date()
         if let file, let data = try? Data(contentsOf: file), data.count < 256 * 1024 {
             let decoder = JSONDecoder()
@@ -67,46 +102,98 @@ public final class NodeHealth: @unchecked Sendable {
 
     // MARK: The watchdog
 
-    /// Pings `queue` every `beat` seconds from a thread of its own, until released.
-    public func watch(_ queue: DispatchQueue) {
+    /// The server's `stuck`: one line on stderr with the raw `write(2)` (nothing that could wait on the stuck queue or
+    /// a lock it holds), then `_exit(70)` (EX_SOFTWARE), no atexit handler run. The host starts the server again.
+    public static let exitStuck: @Sendable (String) -> Void = { line in
+        Platform.Stdio.error("vibeswitcher-server: \(line)\n")
+        _exit(70)
+    }
+
+    /// Pings `queue` (and `reads`, the refresh's lane, when given) every `beat` seconds from a thread of its own, until
+    /// released.
+    public func watch(_ queue: DispatchQueue, reads: DispatchQueue? = nil) {
         let source = DispatchSource.makeTimerSource(queue: watch)
-        source.schedule(deadline: .now() + Self.beat, repeating: Self.beat, leeway: .seconds(1))
-        source.setEventHandler { [weak self] in self?.tick(queue) }
+        let beat = DispatchTimeInterval.milliseconds(Int(timing.beat * 1000))
+        source.schedule(deadline: .now() + beat, repeating: beat, leeway: .milliseconds(Int(min(1, timing.beat / 5) * 1000)))
+        source.setEventHandler { [weak self] in self?.tick(queue, reads: reads) }
         source.resume()
         lock.withLock { timer = source }
     }
 
     deinit { timer?.cancel() }
 
-    /// One beat: a ping sent when none waits (its answer ends any stall, kept as a freeze when it lasted `stallAfter`).
-    func tick(_ queue: DispatchQueue) {
+    /// One beat: a ping sent to each lane when none waits there (the queue's answer ends any stall). A ping the queue
+    /// has left waiting for `stallAfter` is kept as a freeze now, saved; for `exitAfter`, `stuck` is called, once,
+    /// the freeze saved with its length first.
+    func tick(_ queue: DispatchQueue, reads: DispatchQueue? = nil) {
         let now = clock()
-        let send: Bool = lock.withLock {
-            guard pending == nil else { return false }
-            pending = (now, date())
+        enum Step { case send, wait, save, end(TimeInterval) }
+        let step: Step = lock.withLock {
+            guard let ping = pending else {
+                pending = (now, date())
+                return .send
+            }
+            let waited = now - ping.sent
+            guard waited >= timing.stallAfter else { return .wait }
+            if open, !freezes.isEmpty {
+                freezes[freezes.count - 1].seconds = waited
+            } else {
+                freezes.append(Freeze(at: ping.at, seconds: waited))
+                freezes = Array(freezes.suffix(Self.kept))
+                open = true
+                if waited < timing.exitAfter { return .save }
+            }
+            guard waited >= timing.exitAfter, !ended else { return .wait }
+            ended = true
+            return .end(waited)
+        }
+        switch step {
+        case .send: queue.async { [weak self] in self?.answered() }
+        case .wait: break
+        case .save: save()
+        case .end(let waited):
+            save()
+            stuck("the engine's queue hasn't answered for \(Int(waited.rounded())) s: exiting, for the host to start the server again (the sessions run on)")
+        }
+        guard let reads else { return }
+        let sendReads: Bool = lock.withLock {
+            guard pendingReads == nil else { return false }
+            pendingReads = now
             return true
         }
-        guard send else { return }
-        queue.async { [weak self] in self?.answered() }
+        if sendReads { reads.async { [weak self] in self?.lock.withLock { self?.pendingReads = nil } } }
     }
 
     private func answered() {
         let now = clock()
-        lock.withLock {
-            guard let ping = pending else { return }
+        let changed: Bool = lock.withLock {
+            guard let ping = pending else { return false }
             pending = nil
             let waited = now - ping.sent
-            guard waited >= Self.stallAfter else { return }
+            defer { open = false }
+            if open, !freezes.isEmpty {
+                freezes[freezes.count - 1].seconds = waited
+                return true
+            }
+            guard waited >= timing.stallAfter else { return false }
             freezes.append(Freeze(at: ping.at, seconds: waited))
             freezes = Array(freezes.suffix(Self.kept))
+            return true
         }
-        save()
+        if changed { save() }
     }
 
     /// How long the queue has left the waiting ping unanswered, when that's a stall (`stallAfter` or more).
     public var stalled: TimeInterval? {
         let now = clock()
-        return lock.withLock { pending.map { now - $0.sent }.flatMap { $0 >= Self.stallAfter ? $0 : nil } }
+        return lock.withLock { pending.map { now - $0.sent }.flatMap { $0 >= timing.stallAfter ? $0 : nil } }
+    }
+
+    /// How long the refresh's reads lane has left its ping unanswered, when that's `stallAfter` or more: a refresh
+    /// (or another read of the boards) under way that long.
+    public var refreshing: TimeInterval? {
+        let now = clock()
+        return lock.withLock { pendingReads.map { now - $0 }.flatMap { $0 >= timing.stallAfter ? $0 : nil } }
     }
 
     private func save() {
@@ -181,6 +268,7 @@ public final class NodeHealth: @unchecked Sendable {
         return .object([
             "since": .date(started),
             "stalled": stalled.map { .int(Int($0.rounded())) } ?? .null,
+            "refreshing": refreshing.map { .int(Int($0.rounded())) } ?? .null,
             "freezes": .array(freezes.reversed().map { .object(["at": .date($0.at), "seconds": .int(Int($0.seconds.rounded()))]) }),
             "slowRefreshes": .int(slow),
             "slowestRefresh": slow > 0 ? .int(Int(slowest.rounded())) : .null,
@@ -200,6 +288,7 @@ public final class NodeHealth: @unchecked Sendable {
         func inert(_ text: String?) -> String { ConfigSeal.inert(text ?? "?", limit: 300) }
         var out = ["health since the server started \(inert(health["since"]?.string)):"]
         if let stalled = health["stalled"]?.int { out.append("  the engine's queue hasn't answered for \(stalled) s: it is stalled now") }
+        if let refreshing = health["refreshing"]?.int { out.append("  refresh under way \(refreshing) s (the boards' and transcripts' reads)") }
         let freezes = health["freezes"]?.array ?? []
         out.append(freezes.isEmpty ? "  freezes: none" : "  freezes (the engine's queue not answering for \(Int(stallAfter)) s or more), newest first:")
         for freeze in freezes { out.append("    \(inert(freeze["at"]?.string)): \(freeze["seconds"]?.int ?? 0) s") }

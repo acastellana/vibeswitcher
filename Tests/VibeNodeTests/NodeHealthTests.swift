@@ -16,6 +16,14 @@ struct NodeHealthTests {
         func advance(_ seconds: TimeInterval) { lock.withLock { value += seconds } }
     }
 
+    /// What `stuck` was called with.
+    final class Lines: @unchecked Sendable {
+        private let lock = NSLock()
+        private var lines: [String] = []
+        var all: [String] { lock.withLock { lines } }
+        func add(_ line: String) { lock.withLock { lines.append(line) } }
+    }
+
     private func value(_ health: NodeHealth) -> NodeWire.Value {
         health.value(serverRestarts: 1, refusedConnections: 0, hostRestartAt: nil, waiting: ["reminder: waiting on you, on ttypts4"])
     }
@@ -45,6 +53,79 @@ struct NodeHealthTests {
         #expect(await eventually(timeout: 30) { FileManager.default.fileExists(atPath: file.path) })
         let again = NodeHealth(file: file, clock: { clock.now })
         #expect(value(again)["freezes"]?.array?.count == 1)
+    }
+
+    /// A stall is kept, and saved, once it passes `stallAfter`, while it still lasts (a stall that ends in an exit still
+    /// shows after the restart); the queue's answer brings its length up to date, one freeze, not two.
+    @Test func aStallIsSavedWhileItLastsAndUpdatedOnceItAnswers() async throws {
+        let clock = Clock()
+        let file = scratch.url("health.json")
+        let health = NodeHealth(file: file, clock: { clock.now })
+        let queue = DispatchQueue(label: "health-test-queue")
+        let release = DispatchSemaphore(value: 0)
+        queue.async { release.wait() }
+        health.tick(queue)
+        clock.advance(NodeHealth.stallAfter + 1)
+        health.tick(queue)
+        let saved = NodeHealth(file: file, clock: { clock.now })
+        #expect(value(saved)["freezes"]?.array?.first?["seconds"]?.int == Int(NodeHealth.stallAfter + 1), "saved while the stall lasts")
+        clock.advance(4)
+        health.tick(queue)
+        release.signal()
+        queue.sync {}
+        let freezes = value(health)["freezes"]?.array ?? []
+        #expect(freezes.count == 1 && freezes.first?["seconds"]?.int == Int(NodeHealth.stallAfter + 5), "\(freezes)")
+        #expect(value(NodeHealth(file: file, clock: { clock.now }))["freezes"]?.array?.first?["seconds"]?.int == Int(NodeHealth.stallAfter + 5))
+    }
+
+    /// A ping unanswered for `exitAfter` calls `stuck`, once, with the freeze saved first with its length.
+    @Test func aQueueStuckForExitAfterEndsTheServerOnce() throws {
+        let clock = Clock()
+        let file = scratch.url("health.json")
+        let ended = Lines()
+        let health = NodeHealth(file: file, clock: { clock.now }, stuck: { ended.add($0) })
+        let queue = DispatchQueue(label: "health-test-queue")
+        let release = DispatchSemaphore(value: 0)
+        defer { release.signal() }
+        queue.async { release.wait() }
+        health.tick(queue)
+        clock.advance(NodeHealth.exitAfter - 1)
+        health.tick(queue)
+        #expect(ended.all.isEmpty, "a long stall, not yet stuck")
+        clock.advance(1)
+        health.tick(queue)
+        clock.advance(5)
+        health.tick(queue)
+        let lines = ended.all
+        #expect(lines == ["the engine's queue hasn't answered for \(Int(NodeHealth.exitAfter)) s: exiting, for the host to start the server again (the sessions run on)"], "\(lines)")
+        let saved = NodeHealth(file: file, clock: { clock.now })
+        #expect(value(saved)["freezes"]?.array?.first?["seconds"]?.int == Int(NodeHealth.exitAfter))
+    }
+
+    /// The refresh's reads lane, pinged beside the engine's queue: left waiting `stallAfter`, said as a refresh under way,
+    /// never acted on.
+    @Test func aLongRefreshIsSaidUnderWay() throws {
+        let clock = Clock()
+        let stuck = Lines()
+        let health = NodeHealth(file: nil, clock: { clock.now }, stuck: { stuck.add($0) })
+        let queue = DispatchQueue(label: "health-test-queue"), reads = DispatchQueue(label: "health-test-reads")
+        let release = DispatchSemaphore(value: 0)
+        reads.async { release.wait() }
+        health.tick(queue, reads: reads)
+        queue.sync {}
+        clock.advance(NodeHealth.exitAfter + 3)
+        health.tick(queue, reads: reads)
+        queue.sync {}
+        #expect(health.stalled == nil)
+        #expect(health.refreshing == NodeHealth.exitAfter + 3)
+        let digest = value(health)
+        #expect(digest["refreshing"]?.int == Int(NodeHealth.exitAfter + 3))
+        #expect(WireSchema.check(digest, as: "node.health", strict: true) == nil, "\(digest)")
+        #expect(NodeHealth.lines(digest).contains("  refresh under way \(Int(NodeHealth.exitAfter + 3)) s (the boards' and transcripts' reads)"))
+        #expect(stuck.all.isEmpty)
+        release.signal()
+        reads.sync {}
+        #expect(health.refreshing == nil)
     }
 
     @Test func slowRefreshesAndFailingLinesAreKept() throws {

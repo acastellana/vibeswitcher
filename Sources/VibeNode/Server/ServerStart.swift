@@ -130,11 +130,15 @@ public enum ServerStart {
         requests.engine = engine
         // The health digest (`NodeHealth`): the engine's queue watched from a thread of its own, its refreshes timed,
         // the server's failing lines kept.
-        let health = NodeHealth(file: root.appendingPathComponent("health.json"))
+        // A queue left stalled for 120 s ends the server (`NodeHealth.exitStuck`): the host starts it again, the sessions
+        // run on.
+        let timing = parsed.testStall.map { NodeHealth.Timing(beat: 0.25, stallAfter: 1, exitAfter: $0) } ?? .standard
+        let health = NodeHealth(file: root.appendingPathComponent("health.json"), timing: timing, stuck: NodeHealth.exitStuck)
         requests.health = health
         engine.health = health
         heard.set { health.heard($0) }
-        health.watch(queue)
+        health.watch(queue, reads: engine.reads.queue)
+        if parsed.testStall != nil { testBlocks(root: root, engine: queue, reads: engine.reads.queue) }
         requests.nodeRoot = parsed.nodeRoot
         // Where `build.switch` finds the builds: the account's own install folder on the node, a test's on a scratch node.
         requests.installRoot = accountHome.map { NodeFolders.defaultPrefix(accountHome: $0) } ?? parsed.testInstallRoot
@@ -207,6 +211,25 @@ public enum ServerStart {
         spawn.stdin = .path("/dev/null", flags: O_RDONLY)
         spawn.stdout = .path("/dev/null", flags: O_WRONLY)
         if case .failure(let error) = spawn.start() { say("the test child \(path) didn't start (errno \(error.code))") }
+    }
+
+    /// A scratch server's test of its watchdog (`--test-stall=`): `<root>/test-block-engine` or `<root>/test-block-reads`
+    /// made by the test is removed, and that lane (the engine's queue, the refresh's reads) blocked for good, as a hang
+    /// would. Looked for every 0.2 s on a thread of its own, and each block done on the lane itself.
+    static func testBlocks(root: URL, engine: DispatchQueue, reads: DispatchQueue) {
+        let thread = Thread {
+            while true {
+                for (name, lane) in [("test-block-engine", engine), ("test-block-reads", reads)] {
+                    let trigger = root.appendingPathComponent(name).path
+                    guard unlink(trigger) == 0 else { continue }
+                    say("a scratch node's test: \(name), blocking that lane for good")
+                    lane.async { while true { sleep(60) } }
+                }
+                usleep(200_000)
+            }
+        }
+        thread.name = "test-blocks"
+        thread.start()
     }
 
     /// What `run` keeps alive for the process's life.
