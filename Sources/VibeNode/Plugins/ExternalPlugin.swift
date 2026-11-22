@@ -330,20 +330,29 @@ final class ExternalPlugin: FeaturePlugin {
             return then(.failure(.refused("\(info.title)'s page wasn't served: \(why)")))
         }
         act.openPage(spec, take: { [weak self] bytes, answer in
-            guard let self else { return answer(false) }
+            // Only while its page waits (its card open, shown as the page): marked before the plugin hears it, so a
+            // second answer, a withdrawal or the page's end in between finds it taken (automated review 2).
+            guard let self, self.answers[id] == "answering", let card = desk.card(request: id), card.isOpen, card.plugin?.state == "page" else {
+                return answer(false)
+            }
+            self.answers[id] = "taking"
+            let refused = {
+                if self.answers[id] == "taking" { self.answers[id] = "answering" }
+                answer(false)
+            }
             process.call("page.answer", ["request": id, "payload": ask.payload, "answer": String(decoding: bytes, as: UTF8.self)]) { reply in
                 desk.queue.async {
-                    guard case .success(let message) = reply else { return answer(false) }
-                    if message["refuse"] is String, message.count == 1 { return answer(false) }
+                    guard case .success(let message) = reply else { return refused() }
+                    if message["refuse"] is String, message.count == 1 { return refused() }
                     guard let outcome = message["outcome"] as? [String: Any], message.count == 1, self.apply(outcome, request: id, desk: desk) != nil else {
                         self.misshapen("page.answer answers {outcome} or {refuse}", desk: desk)
-                        return answer(false)
+                        return refused()
                     }
                     answer(true)
                 }
             }
         }, ended: { [weak self] taken in
-            guard let self, !taken else { return }
+            guard let self, !taken, self.answers[id] == "answering" else { return }
             _ = self.apply(["state": "no-answer", "person": "No answer came back from its page", "agent": "Its page got no answer before it stopped: it may or may not have been done. Ask the user before asking again."],
                            request: id, desk: desk)
         }) { opened in
@@ -352,10 +361,10 @@ final class ExternalPlugin: FeaturePlugin {
                 self.answers[id] = nil
                 desk.change(request: id, state: "failed", outcome: "Its page wasn't served: \(why)", closed: "its page wasn't served: \(why)")
                 then(.failure(.refused("\(self.info.title)'s page wasn't served: \(why)")))
-            case .success(let url):
+            case .success:
+                // The address is the core's to print, in this answer's reply; the plugin never sees it.
                 desk.change(request: id, state: "page", outcome: "Its page is open (its address went to your terminal)")
-                then(.success(.object(["outcome": .string("page"), "notice": .null, "say": .array([
-                    .string("Open this page in your browser (it works once, \(life / 60) minutes at most):"), .string("  " + url.absoluteString)])])))
+                then(.success(.object(["outcome": .string("page"), "notice": .null])))
             }
         }
     }

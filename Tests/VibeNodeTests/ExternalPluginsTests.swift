@@ -152,11 +152,51 @@ struct ExternalPluginsTests {
         _ = client.send("GET \(path) HTTP/1.1\r\nHost: \(place)\r\n\r\n")
         let page = try #require(client.response())
         #expect(page.head.contains("script-src 'sha256-") && page.body.contains("document.title"), "\(page.head)")
+        let cookie = try #require(PluginsTests.cookie(page.head), "\(page.head)")
         let answer = try WebTestClient(port: port)
-        try #require(answer.upgrade(path: path + "answer", host: place, origin: "http://" + place)?.hasPrefix("HTTP/1.1 101") == true)
+        try #require(answer.upgrade(path: path + "answer", host: place, origin: "http://" + place, extra: [cookie])?.hasPrefix("HTTP/1.1 101") == true)
         _ = answer.send(WebTestClient.text(#"{"ok":true}"#))
         #expect(answer.message()?.text == "ok")
         #expect(await eventually(timeout: 30) { world.card(card.id)?.plugin?.state == "answered" })
+    }
+
+    /// The page's answer is taken only while its request waits on the page, marked before the plugin hears it: a second
+    /// answer in the same turn, or one after the card closed, never reaches the program (automated review 2).
+    @Test func aPagesAnswerReachesThePluginOnce() async throws {
+        let world = try await CardWorld.make(scratch, plugins: [ShellPlugin()])
+        defer { world.stop() }
+        _ = try await added(world)
+        _ = try await ask(world, ["page"])
+        await look(world)
+        let card = try #require(cards(world).first)
+        let plugin = try #require(probe(world))
+        let take = Locked<((Data, @escaping (Bool) -> Void) -> Void)?>(nil)
+        let act = PluginAct(start: { _, _ in }, page: { _, given, _, opened in
+            take.value = given
+            opened(.success(()))
+        })
+        let performed = Locked<Result<NodeWire.Value, LeadEngine.CardFailure>?>(nil)
+        world.queue.async {
+            var marked = card
+            marked.plugin?.state = "answering"
+            world.engine.cards.put(marked)
+            plugin.perform("run", on: marked, desk: world.engine.desk(plugin), act: act) { performed.value = $0 }
+        }
+        #expect(await eventually(timeout: 30) { performed.value != nil && take.value != nil })
+        #expect(world.card(card.id)?.plugin?.state == "page")
+        let answered = Locked<[Bool]>([])
+        let given = try #require(take.value)
+        world.queue.async {
+            given(Data(#"{"ok":true}"#.utf8)) { taken in answered.mutate { $0.append(taken) } }
+            given(Data(#"{"ok":true}"#.utf8)) { taken in answered.mutate { $0.append(taken) } }
+        }
+        #expect(await eventually(timeout: 30) { answered.value.count == 2 })
+        #expect(answered.value.filter { $0 }.count == 1 && answered.value.count == 2, "\(answered.value)")
+        #expect(world.card(card.id)?.plugin?.state == "answered")
+        let late = Locked<Bool?>(nil)
+        world.queue.async { given(Data(#"{"ok":true}"#.utf8)) { late.value = $0 } }
+        #expect(await eventually(timeout: 30) { late.value != nil })
+        #expect(late.value == false, "a card answered: no answer taken after it")
     }
 
     /// Hostile answers: a card with an escape is refused (the program runs on); a wrong id, an answer out of order, a line

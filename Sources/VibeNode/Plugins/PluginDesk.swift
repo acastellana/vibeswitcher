@@ -257,6 +257,8 @@ public struct PluginDesk {
         guard let expires = card.expiresAt, expires > stamp.created, expires.timeIntervalSince(stamp.created) <= plugin.info.life + 1 else {
             return .failure(PluginRefusal("its expiry isn't within \(plugin.info.title)'s declared life (\(Int(plugin.info.life / 60)) minutes) of its filing"))
         }
+        // Expired already: never drawn (the review of 6e91f053, L2).
+        guard expires > now else { return .failure(PluginRefusal("request \(shown.request) expired before it was drawn")) }
         guard engine.pluginCards[key] == nil else { return .failure(PluginRefusal("request \(shown.request) has a card already")) }
         guard !engine.pluginSettled.contains(key.name) else { return .failure(PluginRefusal("request \(shown.request) was settled already")) }
         var made = CardStore.Card(root: root, kind: .plugin, at: stamp.created)
@@ -346,16 +348,17 @@ struct PluginStamp: Equatable {
 /// What a plugin's `perform` may do for the card it answers, and nothing else: start a session (the host's spawn).
 public struct PluginAct {
     let start: (SpawnRequest, @escaping (Result<HostSession, HostLink.Failure>) -> Void) -> Void
-    let page: (PluginPage.Spec, @escaping (Data, @escaping (Bool) -> Void) -> Void, @escaping (Bool) -> Void, @escaping (Result<URL, PluginRefusal>) -> Void) -> Void
+    let page: (PluginPage.Spec, @escaping (Data, @escaping (Bool) -> Void) -> Void, @escaping (Bool) -> Void, @escaping (Result<Void, PluginRefusal>) -> Void) -> Void
 
     /// Starts a session through the host; `then` with it, off the engine's queue.
     public func spawn(_ request: SpawnRequest, then: @escaping (Result<HostSession, HostLink.Failure>) -> Void) { start(request, then) }
 
     /// Serves `spec` once (`PluginPage`): `take` hears each answer's bytes (true: taken), `ended` whether one was taken
-    /// when the page stops; `then` with its address, for the answering terminal only, or why not (one page at a time on
-    /// a node). Callbacks on the engine's queue.
+    /// when the page stops; `then` with whether it opened, or why not (one page at a time on a node; only an acting
+    /// answer opens one). The plugin never sees the page's address: the core prints it in the answering terminal's
+    /// reply itself (the review of 6e91f053, L1). Callbacks on the engine's queue.
     public func openPage(_ spec: PluginPage.Spec, take: @escaping (Data, @escaping (Bool) -> Void) -> Void, ended: @escaping (Bool) -> Void,
-                         then: @escaping (Result<URL, PluginRefusal>) -> Void) { page(spec, take, ended, then) }
+                         then: @escaping (Result<Void, PluginRefusal>) -> Void) { page(spec, take, ended, then) }
 }
 
 /// A plugin's card, by its request.

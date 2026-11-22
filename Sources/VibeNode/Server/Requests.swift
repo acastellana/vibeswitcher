@@ -472,6 +472,12 @@ public final class Requests: @unchecked Sendable {
     }
 
     func keep(_ reply: NodeWire.Reply, for action: String) {
+        var reply = reply
+        // A plugin page's address goes to the answer's own terminal once: a retry is told where it went, not given it.
+        if case .object(var fields)? = reply.result, fields["once"]?.bool == true {
+            fields["say"] = .array([.string("Its page's address went to the terminal that answered first: it works once.")])
+            reply.result = .object(fields)
+        }
         replies[action] = reply
         replyOrder.append(action)
         if replyOrder.count > Self.repliesKept { replies[replyOrder.removeFirst()] = nil }

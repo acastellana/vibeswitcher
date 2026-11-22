@@ -190,6 +190,15 @@ Everything in "What stays the core's" holds, and the core does more of the work 
   once on an origin of its own (a loopback port the session host holds), with its own one-time token in the address,
   printed only in the answering terminal; checks Host, Origin and token; takes one answer of bounded size; and hands
   it to `page.answer`. The plugin never listens on a port and never sees the token.
+  The page is served once: that one load gets a second secret (an HttpOnly, SameSite=Strict cookie) the answer
+  needs, so a process that learns the address later can't answer; one answer socket at a time, one answer in flight;
+  a refused upgrade costs the person no try, an answer over the size does. The address is printed by the core in the
+  answering terminal's reply only (a retry of the same action is told where it went, not given it); only an acting
+  answer opens a page; a plugin turned off or removed takes its page with it; the node's one page slot is freed only
+  once the host has let the port go, a failed start included.
+  Its limits, accepted: after a server death the host holds the page's port until the next page or a release; any
+  local process can fill the page's connection slots (16) while it lives, which keeps the person from answering
+  until it ends (a denial among the person's own processes, which can already end the server).
 - **Settings** are kept in the vault and set by the user's voice; the plugin only checks a value.
 - **Nothing else.** A plugin has no way to ask the core to act: it can't start a session, type into one, read the
   vault or other sessions, answer a card, or reach the node's socket (its program is refused there as any other
