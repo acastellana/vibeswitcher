@@ -29,7 +29,13 @@ import Testing
         var thread = pthread_t()
         #endif
         let made = pthread_create(&thread, &attributes, { argument in
-            Unmanaged<Work>.fromOpaque(argument!).takeRetainedValue().body()
+            // The Mac's start routine takes a pointer, Linux's an optional one.
+            #if canImport(Darwin)
+            let pointer = argument
+            #else
+            guard let pointer = argument else { return nil }
+            #endif
+            Unmanaged<Work>.fromOpaque(pointer).takeRetainedValue().body()
             return nil
         }, work)
         guard made == 0 else { return -1 }

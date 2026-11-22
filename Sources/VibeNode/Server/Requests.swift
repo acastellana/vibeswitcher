@@ -135,6 +135,7 @@ public final class Requests: @unchecked Sendable {
     public init(link: HostLink, sessions: NodeSessions?, rule: VoiceRule, root: URL, hostSocket: String, commit: String,
                 hostPID: pid_t = getppid(), note: @escaping (String) -> Void = { _ in }) {
         queue = link.queue
+        queue.setSpecific(key: Self.onQueue, value: true)
         self.link = link
         self.sessions = sessions
         self.rule = rule
@@ -291,8 +292,28 @@ public final class Requests: @unchecked Sendable {
     /// recorded in the host's vault with its action id and digest (`LeadVaultV2Client.recordUserAction`) before it is
     /// acted on: one the vault doesn't take is refused, and an action the vault holds already (a retry) is answered as
     /// it was, not done again.
+    /// Set on `queue`: whether an answer is given on it (`handle`).
+    static let onQueue = DispatchSpecificKey<Bool>()
+    private let offQueueLock = NSLock()
+    nonisolated(unsafe) private var offQueue: Set<String> = []
+
+    /// The kinds of the requests answered off `queue` so far (each noted once). Empty: every answer came on it.
+    public var offQueueReplies: Set<String> { offQueueLock.withLock { offQueue } }
+
+    private func noteOffQueue(_ kind: String) {
+        let first = offQueueLock.withLock { offQueue.insert(kind).inserted }
+        if first { note("internal: \(kind) answered off the requests' queue") }
+    }
+
     public func handle(_ request: NodeWire.Request, from facts: PeerFacts, token: Platform.PeerToken? = nil,
-                       reply: @escaping (NodeWire.Reply) -> Void) {
+                       reply given: @escaping (NodeWire.Reply) -> Void) {
+        // Each answer comes on `queue` (the server writes it from there); one given elsewhere is noted by its kind
+        // (`offQueueReplies`), which the tests' worlds expect empty (`settings` answered from its reading queue until
+        // 2026-11-22, and the server crashed on the race).
+        let reply = { [weak self] (answer: NodeWire.Reply) in
+            if DispatchQueue.getSpecific(key: Self.onQueue) != true { self?.noteOffQueue(request.kind) }
+            given(answer)
+        }
         let needs = NodeWire.kinds[request.kind] ?? .user
         if needs == .leadToolServer { return questionPost(request, from: facts, reply: reply) }
         // A draft comes from a web page (`NodeLive` hands those to `draft` itself): from here it is no one's to leave.
@@ -324,7 +345,12 @@ public final class Requests: @unchecked Sendable {
 
     /// A user's-voice request whose voice passed: its action id, the card's code, the vault's record, then the act. On
     /// `queue`.
-    func voiced(_ request: NodeWire.Request, from facts: PeerFacts, reply: @escaping (NodeWire.Reply) -> Void) {
+    func voiced(_ request: NodeWire.Request, from facts: PeerFacts, reply given: @escaping (NodeWire.Reply) -> Void) {
+        // Checked here too: `approve` calls this for each of its batch's items, which `handle` doesn't see.
+        let reply = { [weak self] (answer: NodeWire.Reply) in
+            if DispatchQueue.getSpecific(key: Self.onQueue) != true { self?.noteOffQueue(request.kind) }
+            given(answer)
+        }
         let records = Self.recorded.contains(request.kind)
         guard !records || request.action.map({ UUID(uuidString: $0) != nil }) == true else {
             return reply(.init(re: request.id, error: .init(.badArgs, "\(request.kind) needs an action id (a UUID)")))
