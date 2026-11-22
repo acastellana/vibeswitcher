@@ -20,6 +20,12 @@ import Testing
         for kind in Requests.recorded { #expect(NodeWire.taken.contains(kind), "\(kind) is recorded but not taken") }
     }
 
+    /// Every recorded kind says which arguments it takes (`RequestArguments`): one it doesn't is refused, not ignored.
+    @Test func everyRecordedKindListsItsArguments() {
+        #expect(Set(RequestArguments.taken.keys) == Requests.recorded,
+                "\(Set(RequestArguments.taken.keys).symmetricDifference(Requests.recorded).sorted())")
+    }
+
     /// A kind on a card (its code checked) is recorded too: a card's answer never acts unrecorded.
     @Test func everyCardedKindIsRecorded() {
         #expect(Requests.carded.isSubset(of: Requests.recorded), "\(Requests.carded.subtracting(Requests.recorded).sorted())")
