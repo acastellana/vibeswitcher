@@ -177,6 +177,27 @@ struct NodeServerBoundsTests {
                 "a request still being answered (an engine's wait) isn't quiet")
     }
 
+    /// A command that asks first (`end` looks its session up), then waits at the typed-code prompt past the quiet limit
+    /// (2 s here; 10 minutes on the user's node, the time to read an `approve` batch): its connection closed meanwhile,
+    /// it connects again, once and silently, and the session ends. The code is the action's (`NodeIds.code(action:)`),
+    /// not the connection's.
+    @Test func aCommandThatAskedFirstThenWaitedAtThePromptStillGoesThrough() async throws {
+        let node = try await ScratchNode(scratch, hostArguments: ["--server-arg", ServerArguments.testIdleFlag + "1"])
+        defer { node.stop() }
+        let (session, _) = try await NodeAcceptanceTests.newClaude(node)
+        let short = NodeAcceptanceTests.short(session)
+        let path = node.serverSocket
+        let ended = try await node.runOnTerminal(["end", short]) { code in
+            // Held until a connection that asked once, made now, has been closed for its quiet: the command line's, which
+            // asked before it, has been too.
+            guard let later = try? Raw(path), Self.isHello(later.line()),
+                  later.sendAll(NodeWire.line(NodeWire.Request(id: "q", kind: "no.such.kind"))) else { return code }
+            while let line = later.line(timeout: 30) { if Self.bye(line) != nil { break } }
+            return code
+        }
+        #expect(ended.status == 0 && ended.output.contains("ended: session \(short)"), "\(ended.output)\(ended.errors)\n\(node.said)")
+    }
+
     /// The command line connects before it asks for the typed code, which can take longer than the hello's limit: its
     /// connection closed meanwhile, it connects again, once and silently, and the change goes through.
     @Test func aTypedCodeSlowerThanTheHelloLimitStillGoesThrough() async throws {
