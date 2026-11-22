@@ -422,3 +422,5 @@
 - 2026-11-22 13:37 Pipeline held: the-node-s-gate ready to merge with none landing; cause: the gate not installed
 - 2026-11-22 13:37 Pipeline held: the-node-s-gate ready to merge with none landing; cause: the gate not installed
 - 2026-11-22 13:37 Kept the-node-s-gate unmerged: Waits on the user's approval of 7fec90da94192226c060bed641f9e8eb6debb3d2 (question 5AF85424, sensitive paths); its audit passed there (round 4). Kept only to stop the half-hourly "merges are held" notices: on the approval the lead sets it back to planned and merges.
+- 2026-11-22 14:28 Handed the lead over to a fresh session: the last one had been idle 50 minutes with 194k tokens of context, past handover_idle_min 50 and handover_tokens 150k
+- 2026-11-22 14:28 Automatically (auto_advance): The account's usage is near a limit: the weekly limit (every model): 92% used, resets Nov 26, 12:00. At 80% of a limit VibeSwitcher starts no workers or audits on any model, so the limit doesn't stop one mid-task; sessions already running go on. Tell the user. Nothing on it starts by itself until the reset, then it does; start_worker or audit with override_usage: true starts one anyway.
