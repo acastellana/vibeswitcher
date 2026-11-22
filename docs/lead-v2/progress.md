@@ -358,3 +358,50 @@
 - 2026-11-21 09:25 Audit of team-sessions-start: finder 1 of 2 submitted (blocked, clean, 3 findings)
 - 2026-11-21 09:59 Handed the lead over to a fresh session: the last one had been idle 50 minutes with 170k tokens of context, past handover_idle_min 50 and handover_tokens 150k
 - 2026-11-21 13:06 Automatically (auto_advance): Didn't audit team-sessions-start: Not audited, no verifier started: the lead held team-sessions-start's audit (update_task hold_audit). It starts once an exception is recorded (update_task(team-sessions-start, exception: {scope, reason, evidence})), or with hold_audit: false.
+- 2026-11-21 13:20 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: ~/.claude/shell-snapshots
+- 2026-11-21 13:20 Started a worker on turn-this-incident-into-4
+- 2026-11-21 13:20 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: ~/.claude/shell-snapshots and ~/.vibeswitcher/lead/run
+- 2026-11-21 13:20 Started a worker on the-node-s-gate
+- 2026-11-21 13:36 Workflow: handover_idle_min = `10`, handover_tokens = •••
+- 2026-11-21 13:53 Handed the lead over to a fresh session: the last one had been idle 10 minutes with 205k tokens of context, past handover_idle_min 10 and handover_tokens 100k
+- 2026-11-21 13:53 Automatically (auto_advance): Didn't audit team-sessions-start: Not audited, no verifier started: the lead held team-sessions-start's audit (update_task hold_audit). It starts once an exception is recorded (update_task(team-sessions-start, exception: {scope, reason, evidence})), or with hold_audit: false.
+- 2026-11-21 13:53 Workflow: handover_idle_min = `50`, handover_tokens = •••
+- 2026-11-21 13:54 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: ~/.claude/shell-snapshots
+- 2026-11-21 14:25 You accepted 114 commits on v2 from the command line: cab3e90 Merge remote-tracking branch 'lead/v2' into v2; e41dcae Merge branch 'v2-small-rows' into v2; c4ecdbd v2 shell requests (the review): what became of a request is the engine's own, never read from the folder's answer files (no forged outcome told, no second run, the end report from the shell the engine started); a request with characters that draw as blank isn't shown; the card and the code prompt give the command's lines and bytes; …
+- 2026-11-21 14:25 Started a worker on the-node-s-gate
+- 2026-11-21 14:47 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: ~/.vibeswitcher/lead/run
+- 2026-11-21 14:47 Audit of the-node-s-gate at 11b39661 by 2 finders (contract and acceptance; bugs, regressions and security); the shared run: test command failed
+- 2026-11-21 14:48 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: ~/.claude/shell-snapshots and ~/.vibeswitcher/lead/run
+- 2026-11-21 14:48 Started a worker on sb5-the-host-confines
+- 2026-11-21 14:54 Planned measured-with-a-real: Measured with a real Windows program: no box starts one or reaches the Windows side (WSL interop's F flag), and what is still open is closed (review audit, for security)
+- 2026-11-21 14:54 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: ~/.claude/shell-snapshots
+- 2026-11-21 14:55 Started a worker on measured-with-a-real
+- 2026-11-21 14:59 Audit of the-node-s-gate: finder 2 of 2 submitted (incomplete, clean, 5 findings)
+- 2026-11-21 15:00 Audit of the-node-s-gate: incomplete, clean, round 1: 1 Important open, 4 Nit (1 open, 3 unconfirmed), 2 Pre-existing unconfirmed (2 finders voted: 2 new findings confirmed, 5 unconfirmed)
+- 2026-11-21 15:00 Dismissed the-node-s-gate:F5: Resolved by the lead reading the log the finders were told not to open (.vibeswitcher/audit/the-node-s-gate/11b396615b65/test.log:11-13): the run failed at the build ("Fetching … error: Git command 'git -C /tmp/vs-test.Q8quJp/home/.cache/org.swift.swiftpm/repositories/SwiftTerm-74b92343 …' failed", "retry-failed: not retried: the build failed"), no test ran or failed; it is finding F1.
+- 2026-11-21 15:00 Sent measured-with-a-real's worker contract v2 (it had v1)
+- 2026-11-21 15:03 Automatically (auto_advance): The account's usage is near a limit: the weekly limit (every model): 80% used, resets Nov 26, 12:00. At 80% of a limit VibeSwitcher starts no workers or audits on any model, so the limit doesn't stop one mid-task; sessions already running go on. Tell the user. Nothing on it starts by itself until the reset, then it does; start_worker or audit with override_usage: true starts one anyway.
+- 2026-11-21 15:08 Automatically (auto_advance): Nudged sb5-the-host-confines's worker: its turn ended at 15:06 without a report reaching you, so VibeSwitcher sent it the standard prompt (report done or blocked now, and stay until the report answers). It's sent once: if it stops again without reporting, you're told.
+- 2026-11-21 15:15 The worker on the-node-s-gate answered findings: the-node-s-gate:F1 fixed at 68bc0375: Fixed at 505fd6f8 (script-only, so no reinstall is needed). swiftpm_run_cache in scripts/lib/swift-jobs.sh runs before test.sh (and test-under-load.sh) replace HOME. When the caller is in a box, swiftpm_options then passes SwiftPM `--cache-path <caller HOME>/.cache/org.swift.swiftpm`. In a box means: /proc/self/uid_map maps no uid 0, HOME holds that cache, and HOME isn't the account's home from getent. test.sh hands the value to vs-heavy's bash, the retry ru…
+- 2026-11-21 15:18 Update: Interop measurement, phase 1: on the installed build a box starts WSL's /init but can't reach Windows; with the gate branch's fix /init never starts — For the supervisor's finding of today. Measured by the worker of `measured-with-a-real` with the two-byte MZ stub; not yet audited, and the real-Windows-program cells are still pending (question F1B79…
+- 2026-11-21 15:34 The worker on the-node-s-gate answered findings: the-node-s-gate:F1 fixed at fe043af2: Fixed in 505fd6f8, 907c4444 and fe043af2, all script-only, so no reinstall is needed. **How it works.** scripts/lib/swift-jobs.sh gains swiftpm_run_cache. test.sh and test-under-load.sh call it before they replace HOME. It decides from two kernel facts: - /proc/self/uid_map maps no uid 0 (a box); - the caller's $HOME/.cache/org.swift.swiftpm is a mount point in /proc/self/mountinfo (the overlay BranchRun puts under the run's home). When both hold, swiftpm_op…
+- 2026-11-21 16:03 Audit of the-node-s-gate at fe043af2 by 2 finders (contract and acceptance; bugs, regressions and security); the shared run: test command failed
+- 2026-11-21 16:07 Update: Interop measurement with a real Windows program: no box starts one, on the installed build or with the fix — The real-program half of the measurement your supervisor asked for. Measured by the worker of `measured-with-a-real`, not yet audited. `cmd.exe /c exit 7` and `whoami.exe` (the copies you placed) were…
+- 2026-11-21 16:11 Audit of the-node-s-gate: finder 1 of 2 submitted (complete, clean, 3 findings)
+- 2026-11-21 16:11 Audit of the-node-s-gate: complete, clean, round 2: 1 Important closed, 5 Nit (2 open, 2 unconfirmed), 2 Pre-existing unconfirmed (2 finders voted: 1 new finding confirmed, 0 unconfirmed)
+- 2026-11-21 16:31 Pipeline held: the-node-s-gate ready to merge with none landing; cause: every test slot held
+- 2026-11-21 16:31 Pipeline held: the-node-s-gate ready to merge with none landing; cause: every test slot held
+- 2026-11-21 17:01 Pipeline held: the-node-s-gate ready to merge with none landing; cause: the gate not installed
+- 2026-11-21 17:01 Incident: After a lead handover the replaced lead's Claude session and its tool server stay alive: this project has three lead tool servers at once, two of them on the ol… (in the-node-s-gate); planned turn-this-incident-into-5 to turn it into a check
+- 2026-11-21 17:31 Pipeline held: the-node-s-gate ready to merge with none landing; cause: every test slot held
+- 2026-11-21 17:31 Pipeline held: the-node-s-gate ready to merge with none landing; cause: every test slot held
+- 2026-11-21 17:31 Pipeline held: the-node-s-gate ready to merge with none landing; cause: every test slot held
+- 2026-11-21 18:01 Pipeline held: the-node-s-gate ready to merge with none landing; cause: nothing VibeSwitcher sees
+- 2026-11-21 18:01 Pipeline held: the-node-s-gate ready to merge with none landing; cause: the gate not installed
+- 2026-11-21 18:01 Pipeline held: the-node-s-gate ready to merge with none landing; cause: the gate not installed
+- 2026-11-21 18:31 Pipeline held: the-node-s-gate ready to merge with none landing; cause: nothing VibeSwitcher sees
+- 2026-11-21 18:31 Pipeline held: the-node-s-gate ready to merge with none landing; cause: the gate not installed
+- 2026-11-21 18:31 Pipeline held: the-node-s-gate ready to merge with none landing; cause: the gate not installed
+- 2026-11-21 18:31 Kept the-node-s-gate unmerged: Waits on the user: approval of fe043af2a944ffdf13b968eba8305390fe9c98fc (question BC07914D, sensitive paths) and a fix for v2's own failing test SteerNowTests.theCommandLineSteersAWorkingSession (question A5D36154), without which the merge's test run fails. The lead sets it back and merges (accept_stale_verdict: the context gained only a state note after the audit) once both are answered.
+- 2026-11-21 19:21 Handed the lead over to a fresh session: the last one had been idle 50 minutes with 322k tokens of context, past handover_idle_min 50 and handover_tokens 150k
+- 2026-11-21 19:21 Automatically (auto_advance): The account's usage is near a limit: the weekly limit (every model): 86% used, resets Nov 26, 12:00. At 80% of a limit VibeSwitcher starts no workers or audits on any model, so the limit doesn't stop one mid-task; sessions already running go on. Tell the user. Nothing on it starts by itself until the reset, then it does; start_worker or audit with override_usage: true starts one anyway.
