@@ -223,7 +223,7 @@ public enum WireSchema {
             shape("node", from: contractNode, [
                 field("node", .string), field("epoch", .string), field("root", .string), field("server", .shape("node.server")),
                 field("host", .shape("node.host")), field("rule", .shape("node.rule")), field("cards", .shape("node.cards")),
-                field("accepted", .list(.shape("node.accepted"))), field("notices", strings), field("reminders", .list(.shape("node.reminder"))),
+                field("accepted", .list(.shape("node.accepted"))), field("notices", strings), optional("reminders", .list(.shape("node.reminder"))),
                 field("restart", Kind.shape("node.restart").orNull), field("reopen", .list(.shape("node.reopen"))), field("ended", .list(.shape("node.ended"))), field("ending", .list(.shape("node.ending"))),
                 field("builds", Kind.any.orNull), field("web", .shape("node.web")), field("usage", Kind.shape("node.usage").orNull),
                 optional("health", .shape("node.health")), field("boost", Kind.shape("node.boost").orNull)]),
