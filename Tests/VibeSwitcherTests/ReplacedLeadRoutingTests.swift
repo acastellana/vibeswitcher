@@ -146,6 +146,15 @@ struct ReplacedLeadRoutingTests {
         let row = WindowRow(content: .hosted(old), project: world.project)
         #expect(model.state(of: row, now: Date()).text == replaced.label)
         #expect(model.state(of: WindowRow(content: .hosted(new), project: world.project), now: Date()).text != replaced.label)
+        // The new lead's chat carries the old one's conversation: the handover is in the project's record, with the
+        // old lead's transcript, and the new lead's row reads it (the old lead's own row has none before it).
+        #expect(await until { LeadChatHistory.load(root: world.root).last?.to == new.id.uuidString })
+        let handover = try #require(LeadChatHistory.load(root: world.root).last)
+        #expect(handover.from == old.id.uuidString && handover.reason == LeadChatHistory.startedReason)
+        #expect(handover.transcript?.hasSuffix("/old.jsonl") == true)
+        #expect(model.chatHistory(for: WindowRow(content: .hosted(new), project: world.project))?.session == new.id.uuidString)
+        let parts = LeadChatHistory.parts(session: new.id.uuidString, root: world.root, home: world.home)
+        #expect(parts.first?.entries.isEmpty == false)
 
         // Typed into its terminal (keys, then Enter): the live lead's inbox gets it, sealed as yours, saying where it
         // was typed; the old session gets nothing.
