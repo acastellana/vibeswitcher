@@ -264,6 +264,41 @@ struct LeadStartTests {
         #expect(value["replaced"]?.array == [.string(NodeIds.session(host: old))])
     }
 
+    /// A lead replaced by a start (`--replace`, its role lost) ends once the new lead is up (2026-11-22: replaced leads
+    /// lived on beside the lead, each with its tool server): marked replaced, it runs on while held by the test; once the
+    /// vault binds the role to the new lead, the old session ends and exactly one lead session of the project is live,
+    /// said in progress.md. (Its tool calls refused: `LeadToolsetTests`'s replaced lead.)
+    @Test func aReplacedLeadEndsOnceTheNewLeadIsUp() async throws {
+        let world = try await world()
+        defer { world.stop() }
+        let old = try started(await world.start())
+        let oldSession = try #require(world.leads().first { $0.id == old })
+        let oldHarness = NodeHarness(found: oldSession, on: world.host, fake: world.fake)
+        try await oldHarness.waitFor { oldHarness.agentPid != nil }
+        try BoardStore(root: world.repo).update { board in board.leadSession = old.uuidString }
+        world.queue.sync { world.engine.replacedEndsHeld = true }
+        // The vault lost its grant (a start replaces only a lead without its role), and the user starts another.
+        let grant = try #require(world.host.vault.current(.lead, root: world.repo, task: nil)?.id)
+        try world.host.vault.revoke(grant, root: world.repo)
+        let new = try started(await world.start(replace: true))
+        #expect(await eventually(timeout: 60) { world.leads().count == 2 })
+        #expect(world.holder() == new.uuidString)
+        #expect(await eventually(timeout: 30) { world.stored?.replaced[old] == new }, "\(String(describing: world.stored))")
+        #expect(world.leads().contains { $0.id == old }, "held by the test")
+
+        // The new lead up: the old one ends; one lead session of the project is live.
+        world.queue.sync { world.engine.replacedEndsHeld = false }
+        let ended = await eventually(timeout: 60) {
+            world.engine.refresh()
+            return !world.leads().contains { $0.id == old }
+        }
+        #expect(ended, "\(world.leadEnds())")
+        #expect(world.leads().map(\.id) == [new], "\(world.leadEnds())")
+        #expect(await eventually(timeout: 30) {
+            ((try? String(contentsOfFile: BoardStore(root: world.repo).recordPath("progress.md"), encoding: .utf8)) ?? "").contains("Ended the replaced lead session \(old.uuidString.prefix(8))")
+        })
+    }
+
     /// The sweep's review: a `.user` message the server posted to the replaced lead, withdrawn by the handover (held for
     /// the new lead under a new id), is retired by name and no longer looked for, though the old inbox it left reads
     /// empty (which says nothing at a look: a rewriter of the inbox leaves it empty for a moment).

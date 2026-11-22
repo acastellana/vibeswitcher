@@ -230,6 +230,10 @@ public final class LeadEngine: @unchecked Sendable {
     /// Each root's workers its witness's last look saw idle between turns with nothing waiting (lowercased session ids):
     /// what `status` says a switch would park (`SwitchPark`). On `queue`.
     var idleWorkers: [String: Set<String>] = [:]
+    /// The replaced lead sessions asked to end (`endReplacedLeads`), until they are no longer live. On `queue`.
+    var endingReplaced: Set<UUID> = []
+    /// A test's hold on `endReplacedLeads` (a replaced lead looked at before it ends). On `queue`.
+    var replacedEndsHeld = false
     /// The account's usage as the last refresh read it (`NodeUsage`): `status`'s `usage`. On `queue`.
     public internal(set) var usage: NodeUsage.Reading?
     /// Each lead's review rows waiting on a limit (`UsageWaits`), by root: the boards show them (`LiveBoards`).

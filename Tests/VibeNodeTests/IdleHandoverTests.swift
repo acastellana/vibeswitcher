@@ -206,6 +206,47 @@ struct IdleHandoverTests {
         #expect(await eventually(timeout: 60) { world.queue.sync { world.engine.leads.leads[world.project]?.replaced[world.lead.session.id] != nil } })
     }
 
+    /// The rotated lead ends, with what it started, once the fresh lead holds the role (2026-11-22: replaced leads lived on
+    /// beside the lead): while a merge or audit holds the rotation gate it waits; then its session and the processes it
+    /// started (a child standing in for the tool server Claude keeps) end, and exactly one lead session of the project is
+    /// live. (A replaced lead's tool call refused: `LeadStartTests`, whose leads have their tool servers.)
+    @Test func theRotatedLeadEndsWithItsToolServerOnceTheFreshOneIsUp() async throws {
+        let world = try await World(scratch)
+        defer { world.stop() }
+        let old = world.lead!
+        old.tell(["op": "child"])
+        let child = try #require(await eventually(timeout: 60) { (old.agent["children"] as? [Int])?.first != nil } ? (old.agent["children"] as? [Int])?.first : nil)
+        world.queue.sync { world.engine.replacedEndsHeld = true }
+        try world.write(age: 70 * 60)
+        let fresh = try await world.handedOver()
+        #expect(await eventually(timeout: 60) { world.queue.sync { world.engine.leads.leads[world.project]?.replaced[old.session.id] != nil } })
+        #expect(try world.host.sessions().contains { $0.id == old.session.id && $0.isLive }, "held by the test")
+
+        // A merge or audit holds the rotation gate: it waits, and says so.
+        let gate = try #require(FileLock.attempt(LeadRotation.gate(world.repo), shared: true))
+        world.queue.sync { world.engine.replacedEndsHeld = false }
+        let before = world.queue.sync { world.engine.witnessLooks[world.repo] ?? 0 }
+        world.engine.refresh()
+        _ = await eventually(timeout: 60) { world.queue.sync { (world.engine.witnessLooks[world.repo] ?? 0) > before } }
+        try await Task.sleep(nanoseconds: 300_000_000)
+        #expect(try world.host.sessions().contains { $0.id == old.session.id && $0.isLive }, "not while the gate is held")
+        gate.release()
+
+        // Then it ends, the processes it started with it.
+        let ended = await eventually(timeout: 60) {
+            world.engine.refresh()
+            return (try? world.host.sessions().contains { $0.id == old.session.id && $0.isLive }) == false
+        }
+        #expect(ended, "\(String(describing: try? world.host.sessions()))")
+        #expect(await eventually(timeout: 60) { if case .brief(let brief) = Platform.Processes.brief(Int32(child)) { return brief.state == .zombie || brief.exiting }; return true },
+                "the child it started, pid \(child), still runs")
+        let leads = try world.host.sessions().filter { $0.isLive && $0.label == "Lead · \(world.name)" }
+        #expect(leads.map(\.id) == [fresh], "\(leads)")
+        #expect(await eventually(timeout: 30) {
+            ((try? String(contentsOfFile: BoardStore(root: world.repo).recordPath("progress.md"), encoding: .utf8)) ?? "").contains("Ended the replaced lead session \(old.session.id.uuidString.prefix(8))")
+        })
+    }
+
     @Test func beforeTheThresholdTheLeadStaysAndOnAWarmCacheItIsAskedForItsOwnNote() async throws {
         let world = try await World(scratch)
         defer { world.stop() }

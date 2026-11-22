@@ -400,10 +400,17 @@ public final class LeadToolset: MCPToolset {
             Thread.sleep(forTimeInterval: 0.1)
         } while true
         var refusal: String?
+        // Started as the lead in a session the role has gone from to another, bound one (a rotation, a replacing start):
+        // it is a replaced lead, told so at once and where the lead is, never left waiting for a role (v2, 2026-11-22).
+        let leadElsewhere = member == nil && problem == nil && expected == .lead
+            ? vault.current(.lead, root: root, task: nil).flatMap { holder in holder.session.map { (holder, $0) } } : nil
         if let unknownRole {
             refusal = "There's no role \"\(unknownRole)\": the roles are lead, worker and verifier. Refused."
         } else if let problem, member == nil {
             refusal = "This tool server couldn't ask the session host which role its session holds: \(problem) Its tools are off."
+        } else if let (holder, session) = leadElsewhere {
+            refusal = "This session no longer holds the lead's role: VibeSwitcher started a new lead at \(LeadBoard.clock(holder.issuedAt)), in session "
+                + "\(session.prefix(8)). Its tools are off here, and reconnecting them won't bring them back. Tell the user to continue in that session."
         } else if member == nil {
             refusal = "This tool server doesn't run in a session VibeSwitcher started for a project lead's team (or its role went to a newer session), so it has no role, whatever --role says. Its tools are off."
         } else if let expected, expected != member?.role {
@@ -412,7 +419,7 @@ public final class LeadToolset: MCPToolset {
             refusal = "This tool server was started for task \(expectedTask), but its session is for \(member?.task ?? "no task"). Refused."
         }
         self.refusal = refusal
-        awaitsRole = unknownRole == nil && problem == nil && member == nil
+        awaitsRole = unknownRole == nil && problem == nil && member == nil && leadElsewhere == nil
         grant = refusal == nil ? member?.id : nil
         role = refusal == nil ? member?.role : nil
         taskID = refusal == nil ? member?.task : nil

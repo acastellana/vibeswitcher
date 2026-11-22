@@ -136,6 +136,8 @@ extension LeadEngine {
         lookAtBases()
         lookAtConfig()
         retireTaken()
+        // A replaced lead ends once the current one is up (`ReplacedLeads.swift`).
+        endReplacedLeads()
         // A base move that refused one of the lead's merges waits on the user: in `status` while it does (the app's
         // alert), and in the log once per move while it stands.
         var standing: [String: [String]] = [:]

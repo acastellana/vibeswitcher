@@ -15,8 +15,9 @@ import VibeCore
 /// re-send its whole context): the engine writes the note itself (`LeadRotation.coldNote`). Then a fresh lead is spawned
 /// with the old one's last turns and the note, and only after the spawn the board and the vault's role move to it
 /// (`LeadVault.rotateLead`, which checks the old lead still holds the role), both put back when either step fails. What
-/// waited in the old lead's inbox is held for the new one, the old session stays running as a replaced lead
-/// (`LeadStore.replacing`), and progress.md says why.
+/// waited in the old lead's inbox is held for the new one, the old session is marked a replaced lead
+/// (`LeadStore.replacing`) and ended with its tool server at a refresh once the fresh lead holds the role
+/// (`ReplacedLeads.swift`; on the Mac it ran on), and progress.md says why.
 ///
 /// **Not here, as on the Mac:** the user's typing into the lead (the app's `noteLeadInput`, its input held during the
 /// commit, and its count of deliveries that cancels an ask): the node has no record of it, so the two-minute quiet

@@ -68,6 +68,31 @@ struct LeadHandoverTests: LeadTeamFixture {
         for summary in ["first try", "second try", "third try", "fourth try"] { #expect(listed.contains(summary)) }
     }
 
+    /// A tool server started anew in a replaced lead's session (its client restarted it, after a rotation or a replacing
+    /// start) is told at once that the lead's role went to another session, which it names, and waits for no role
+    /// (v2, 2026-11-22: it answered "the session host is restarting" for 45 s, then that it ran in no team's session).
+    /// While the new lead's session isn't bound yet, a fresh server still waits for its role, as one starting first does.
+    @Test func aFreshToolServerInAReplacedLeadsSessionIsToldWhereTheLeadIs() throws {
+        let root = try repo()
+        let runtime = FakeRuntime()
+        _ = try lead(root, runtime)
+        let grant = try vault.startLead(root: root, branch: "main")
+        let oldSeat = FakeSeat(runtime, agent: old)
+        let waiting = LeadToolset(root: root, runtime: oldSeat, vault: vault(for: oldSeat), expected: .lead)
+        #expect(waiting.awaitsRole && waiting.refusal?.contains("no longer holds") != true, "the new lead isn't bound yet: \(waiting.refusal ?? "")")
+        try vault.bind(grant, root: root, session: try #require(new.session))
+        let replaced = LeadToolset(root: root, runtime: oldSeat, vault: vault(for: oldSeat), expected: .lead)
+        #expect(!replaced.awaitsRole)
+        let said = try #require(replaced.refusal)
+        #expect(said.contains("This session no longer holds the lead's role") && said.contains("in session \(new.session!.prefix(8))")
+                && said.contains("Tell the user to continue in that session"), "\(said)")
+        let call = replaced.call("status", [:])
+        #expect(call.isError && call.text == said, "\(call.text)")
+        // A worker's server in a session with no role still waits for it (its lead binds it after the start).
+        let worker = LeadToolset(root: root, runtime: oldSeat, vault: vault(for: oldSeat), expected: .worker)
+        #expect(worker.awaitsRole)
+    }
+
     @Test func wakesWaitingForTheReplacedLeadGoToTheNewOne() throws {
         let root = try repo()
         let inbox = temp.url("steer")
