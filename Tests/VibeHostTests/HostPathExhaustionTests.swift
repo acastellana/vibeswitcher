@@ -68,7 +68,10 @@ import Testing
     /// A foreign socket recorded as the host's while the checks couldn't run (the bind-then-lstat race, S11 item 5)
     /// stays only until the checks work again: the first housekeeping then asks the kernel, finds the path isn't the
     /// listener's, and binds the host's own over it.
-    @Test func aForeignFileRecordedWhileChecksFailIsReplacedOnceTheyWork() throws {
+    /// Linux only: the replacement needs the kernel's answer (`Platform.Sockets.boundFile`, Linux's unix_diag); the Mac's
+    /// kernel can't say, so there the file recorded stays, as the verdict's own case above shows (v2 macos at 5625a3f4).
+    @Test(.enabled(if: !Platform.CodeIdentity.isAvailable, "Linux's unix_diag: the Mac's kernel can't say which socket a path is bound to"))
+    func aForeignFileRecordedWhileChecksFailIsReplacedOnceTheyWork() throws {
         let host = try TestHost(watchesItsPath: true)
         let server = host.server
         let watch = try #require(server.queue.sync { server.pathWatch })
