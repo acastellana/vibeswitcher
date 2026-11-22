@@ -127,7 +127,11 @@ extension LeadEngine {
         let url = URL(fileURLWithPath: path)
         guard url.pathExtension == "jsonl" else { return nil }
         let stem = url.deletingPathExtension().lastPathComponent
-        return UUID(uuidString: stem) != nil ? stem : nil
+        if UUID(uuidString: stem) != nil { return stem }
+        // A Codex rollout (`rollout-<when>-<id>.jsonl`): its id is the name's last 36 characters.
+        guard stem.hasPrefix("rollout-"), stem.count > 44 else { return nil }
+        let id = String(stem.suffix(36))
+        return UUID(uuidString: id) != nil && stem.dropLast(36).hasSuffix("-") ? id : nil
     }
 
     /// The board's workers that were running: each task's worker not stopped nor released, with its branch.

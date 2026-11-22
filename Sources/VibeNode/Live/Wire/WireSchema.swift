@@ -264,13 +264,14 @@ public enum WireSchema {
             shape("node.restart", from: "LeadEngine.restartValue", [field("at", .date), field("before", .date), field("gone", strings),
                                                                    field("reset", .string), field("sessions", .int)]),
             shape("node.reopen", from: "LeadEngine.offeredValue (the stability lane, 2026-11-20)", [
-                field("session", .string), field("folder", .string), field("name", .string), field("conversation", Kind.string.orNull)]),
+                field("session", .string), field("folder", .string), field("name", .string), field("conversation", Kind.string.orNull),
+                optional("agent", .words(["claude", "codex"]))]),
             // Ended within the grace, listed for `resume` at `listedAt` (2026-11-21).
             shape("node.ending", from: "LeadEngine.endingValue", [field("session", .string), field("folder", .string), field("name", .string),
                                                                  field("at", .date), field("listedAt", .date)]),
             shape("node.ended", from: "LeadEngine.endedValue (the stability lane, 2026-11-20)", [
                 field("session", .string), field("folder", .string), field("name", .string), field("conversation", Kind.string.orNull),
-                field("at", .date), field("exit", Kind.shape("node.ended.exit").orNull)]),
+                field("at", .date), field("exit", Kind.shape("node.ended.exit").orNull), optional("agent", .words(["claude", "codex"]))]),
             // How it ended (the inspector's Exit, 2026-11-21): `HostSession.Exit`'s status, its `cause` and when.
             shape("node.ended.exit", from: "LeadEngine.endedValue", [field("status", .int), field("cause", .string), field("at", .date)]),
             shape("node.web", from: contractNode, [field("state", .string), field("port", Kind.int.orNull), field("tokens", .int),
