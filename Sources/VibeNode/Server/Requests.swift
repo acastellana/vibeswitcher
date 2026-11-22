@@ -149,6 +149,30 @@ public final class Requests: @unchecked Sendable {
     /// The live sessions now, for the voice rule. On `queue`.
     public var live: LiveSessions { LiveSessions(link.sessions, host: hostPID, server: serverPID) }
 
+    /// A refusal of a request from `pid`, in the log: at most `refusalsPerWindow` lines a sender in each
+    /// `refusalWindow`, the rest counted and said in one line when the next window opens (a peer pipelining refused
+    /// requests would otherwise write a line for each: the review of the runtime hardening). On `queue`.
+    func refusalNote(_ pid: pid_t, _ line: String) {
+        let now = MacTime.real.awake()
+        var entry = refusals[pid] ?? (since: now, said: 0, held: 0)
+        if now - entry.since >= Self.refusalWindow {
+            if entry.held > 0 { note("\(entry.held) more refusals from pid \(pid) weren't logged") }
+            entry = (now, 0, 0)
+        }
+        if entry.said < Self.refusalsPerWindow {
+            entry.said += 1
+            note(line + (entry.said == Self.refusalsPerWindow ? " (more from pid \(pid) in the next \(Int(Self.refusalWindow)) s are counted, not logged)" : ""))
+        } else {
+            entry.held += 1
+        }
+        refusals[pid] = entry
+        if refusals.count > 256 { refusals = refusals.filter { now - $0.value.since < Self.refusalWindow } }
+    }
+
+    static let refusalsPerWindow = 5
+    static let refusalWindow: TimeInterval = 10
+    private var refusals: [pid_t: (since: TimeInterval, said: Int, held: Int)] = [:]
+
     /// Whether the process `facts` reads may be the user's voice, as a connection's accept judges it (the slots only it
     /// takes, `NodeServer.reservedForUser`): the voice rule's verdict; under the Mac's rule (asked per request) a process
     /// that isn't a session's. Never a judgment of a request: each is judged again as it comes. On `queue`.
@@ -246,7 +270,7 @@ public final class Requests: @unchecked Sendable {
         if needs == .leadToolServer { return questionPost(request, from: facts, reply: reply) }
         // A draft comes from a web page (`NodeLive` hands those to `draft` itself): from here it is no one's to leave.
         if needs == .webDraft {
-            note("refused \(request.kind) from pid \(facts.pid): a draft comes from a web page")
+            refusalNote(facts.pid, "refused \(request.kind) from pid \(facts.pid): a draft comes from a web page")
             return reply(.init(re: request.id, error: .init(.voice, "a draft comes from a web page; in a terminal, `vibeswitcher answer CARD TEXT` answers and `vibeswitcher send SESSION TEXT` sends")))
         }
         if request.kind == "web.open", openWebForAnyone, request.args?["tailnet"] == nil {
@@ -259,11 +283,11 @@ public final class Requests: @unchecked Sendable {
             // The Mac's rule: the caller checks, then Touch ID for a state change, off `queue` (`approvalVoice`).
             if rule.mode == .approval { return approvalVoice(request, from: facts, token: token, reply: reply) }
             if case .notUser(let why) = Voice.judge(facts, live: live, rule: rule) {
-                note("refused \(request.kind) from pid \(facts.pid): not the user's voice: \(why)")
+                refusalNote(facts.pid, "refused \(request.kind) from pid \(facts.pid): not the user's voice: \(why)")
                 return reply(.init(re: request.id, error: .init(.voice, "not the user's voice: \(why)")))
             }
             if let why = Voice.handsRefusal(facts, kind: request.kind, rule: rule) {
-                note("refused \(request.kind) from pid \(facts.pid): \(why)")
+                refusalNote(facts.pid, "refused \(request.kind) from pid \(facts.pid): \(why)")
                 return reply(.init(re: request.id, error: .init(.voice, why)))
             }
             return voiced(request, from: facts, reply: reply)

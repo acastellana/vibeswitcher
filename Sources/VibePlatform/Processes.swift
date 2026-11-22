@@ -148,11 +148,28 @@ extension Platform {
 
         /// The arguments a process was started with, its program's name first. Empty: they can't be read (gone, a
         /// zombie, a process being set up; on the Mac another user's; on Linux a kernel thread).
-        public static func arguments(_ pid: pid_t) -> [String] { System.arguments(pid) }
+        /// `limit`: the most bytes of it read (Linux), past which what was read is given: a reader that needs only the
+        /// first words (a sender's ancestors, `PeerFacts`) keeps a process from costing it megabytes.
+        public static func arguments(_ pid: pid_t, limit: Int) -> [String] { System.arguments(pid, limit: limit) }
+
+        /// `arguments` up to `argumentsLimit`.
+        public static func arguments(_ pid: pid_t) -> [String] { System.arguments(pid, limit: argumentsLimit) }
+
+        /// The most of a command line `arguments` reads by default: past `ARG_MAX`'s usual 2 MiB for arguments and
+        /// environment together, nothing real is cut.
+        public static let argumentsLimit = 2 << 20
+
+        /// The most of an environment `environment` reads by default; past it, nil (unreadable, which the voice rule
+        /// refuses: `PeerFacts.sessionMarker`).
+        public static let environmentLimit = 2 << 20
 
         /// The environment a process was started with, each "NAME=value" (what it set later isn't there); nil when it
         /// can't be read (another user's, a zombie, gone).
-        public static func environment(_ pid: pid_t) -> [String]? { System.environment(pid) }
+        /// `limit`: past it (Linux), nil, as for one that can't be read.
+        public static func environment(_ pid: pid_t, limit: Int) -> [String]? { System.environment(pid, limit: limit) }
+
+        /// `environment` up to `environmentLimit`.
+        public static func environment(_ pid: pid_t) -> [String]? { System.environment(pid, limit: environmentLimit) }
 
         /// The folder a process works in, as the kernel names it (symlinks resolved); nil when it can't be read
         /// (another user's, a zombie, gone) or the folder has been removed.

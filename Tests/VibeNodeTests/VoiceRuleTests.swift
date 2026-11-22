@@ -404,8 +404,9 @@ struct VoiceRuleTests {
         // The one call that reads runners: the start's, of the server itself (below).
         #expect(files["runners(above:"] == ["ServerStart.swift"], "\(files)")
         #expect(reads.sorted() == [
-            "NodeServer.swift: let facts = PeerFacts.read(pid: sender.pid, token: sender, cgroupRoot: cgroupRoot, runnersAbove: runnersAbove)",
+            // At the accept; then a request's sender, read again unless its kind is `anyone`'s (then as read at the accept).
             "NodeServer.swift: let facts = PeerFacts.read(pid: token.pid, token: token, cgroupRoot: cgroupRoot, runnersAbove: runnersAbove)",
+            "NodeServer.swift: let facts = atAccept ?? PeerFacts.read(pid: sender.pid, token: sender, cgroupRoot: cgroupRoot, runnersAbove: runnersAbove)",
             "ServerStart.swift: clock: clock, cgroupRoot: parsed.testCgroupRoot, runnersAbove: runnersAbove, note: say)",
             // Of the server itself, and only with the flag.
             "ServerStart.swift: let runnersAbove = parsed.testRunnerAbove ? PeerFacts.runners(above: getpid()) : []",

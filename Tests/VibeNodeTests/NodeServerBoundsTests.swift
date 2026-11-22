@@ -235,6 +235,53 @@ struct NodeServerBoundsTests {
         return ran.status == 0 && descriptorLimits(pid)?.soft == soft
     }
 
+    /// One connection pipelining thousands of requests each judged afresh (a draft, refused on the socket): they are taken
+    /// a share a turn (`NodeServer.requestsPerTurn`), every one answered, in order, while another connection is answered
+    /// meanwhile; and the refusals' log lines stop at their share (`Requests.refusalsPerWindow`).
+    @Test func aPipelinedFloodIsTakenAShareATurnAndEveryRequestAnswered() async throws {
+        let node = try await ScratchNode(scratch)
+        defer { node.stop() }
+        let flood = try Raw(node.serverSocket)
+        try #require(Self.isHello(flood.line()))
+        let count = 2_000
+        var lines = Data()
+        for index in 0..<count { lines.append(NodeWire.line(NodeWire.Request(id: "a\(index)", kind: "draft"))) }
+        let sent = await offPool { flood.sendAll(lines) }
+        #expect(sent)
+        let other = try Raw(node.serverSocket)
+        try #require(Self.isHello(other.line()))
+        #expect(other.sendAll(NodeWire.line(NodeWire.Request(id: "b", kind: "no.such.kind"))))
+        let answered = await offPool { () -> (other: TimeInterval?, last: TimeInterval?, ids: [String]) in
+            var ids: [String] = []
+            var last: TimeInterval?
+            let otherAt = other.line(timeout: 120).map { _ in MacTime.real.awake() }
+            while ids.count < count, let line = flood.line(timeout: 120) {
+                if let reply = NodeWire.decode(NodeWire.Reply.self, line) { ids.append(reply.re) }
+                last = MacTime.real.awake()
+            }
+            return (otherAt, last, ids)
+        }
+        #expect(answered.ids == (0..<count).map { "a\($0)" }, "every request answered once, in order: \(answered.ids.count)")
+        let otherAt = try #require(answered.other, "the other connection got no reply")
+        #expect(otherAt < (answered.last ?? 0), "the other connection was answered before the flood's last reply")
+        let refusals = node.said.components(separatedBy: "\n").filter { $0.contains("refused draft from pid") }
+        #expect(refusals.count == Requests.refusalsPerWindow, "\(refusals.count) refusal lines")
+        #expect(refusals.last?.contains("are counted, not logged") == true, "\(refusals.last ?? "")")
+    }
+
+    /// What a sender's facts read of `/proc` is capped: an environment past its limit is unreadable (which the voice
+    /// rule refuses), a command line past its limit is read to it.
+    @Test func whatIsReadOfAProcessIsCapped() throws {
+        let environment = try #require(Platform.Processes.environment(getpid()))
+        let size = environment.reduce(0) { $0 + $1.utf8.count + 1 }
+        #expect(Platform.Processes.environment(getpid(), limit: size - 1) == nil)
+        #expect(Platform.Processes.environment(getpid(), limit: size)?.count == environment.count)
+        let arguments = Platform.Processes.arguments(getpid())
+        try #require(!arguments.isEmpty)
+        #expect(Platform.Processes.arguments(getpid(), limit: 3) == [String(arguments[0].prefix(3))])
+        #expect(PeerFacts.deepest <= 64 && PeerFacts.ancestorArguments <= 16 * 1024)
+    }
+
     /// A turn's reads stop after `chunksPerTurn`, however much more waits.
     @Test func aTurnsReadsStopAtTheirShare() {
         var calls = 0

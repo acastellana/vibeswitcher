@@ -164,20 +164,21 @@ extension Platform.Processes {
 
         /// A file the kernel writes as it's read (its size says nothing), whole; or the error number of the open or
         /// read that failed.
-        static func contents(_ path: String) -> Result<[UInt8], Platform.Errno> {
+        /// `limit`: the most bytes read; one more is read to tell a file past it (`pastLimit`).
+        static func contents(_ path: String, limit: Int = .max) -> Result<[UInt8], Platform.Errno> {
             let fd = open(path, O_RDONLY | O_CLOEXEC)
             guard fd >= 0 else { return .failure(Platform.Errno(code: errno)) }
             defer { close(fd) }
-            return contents(of: fd)
+            return contents(of: fd, limit: limit)
         }
 
-        /// The same, of a file already open, read from where it stands to its end.
-        static func contents(of fd: Int32) -> Result<[UInt8], Platform.Errno> {
+        /// The same, of a file already open, read from where it stands to its end (or past `limit` by a byte at most).
+        static func contents(of fd: Int32, limit: Int = .max) -> Result<[UInt8], Platform.Errno> {
             var bytes: [UInt8] = []
             var failure: Int32 = 0
             withUnsafeTemporaryAllocation(of: UInt8.self, capacity: 4096) { chunk in
-                while true {
-                    let got = read(fd, chunk.baseAddress, chunk.count)
+                while bytes.count <= limit {
+                    let got = read(fd, chunk.baseAddress, min(chunk.count, limit == .max ? chunk.count : limit + 1 - bytes.count))
                     if got > 0 {
                         bytes.append(contentsOf: UnsafeMutableBufferPointer(rebasing: chunk[..<got]))
                     } else if got == 0 {
@@ -307,15 +308,15 @@ extension Platform.Processes {
         }
 
         /// cmdline: any user's is given. A zombie's and a kernel thread's are empty.
-        static func arguments(_ pid: pid_t) -> [String] {
-            guard case .success(let bytes) = contents("/proc/\(pid)/cmdline") else { return [] }
-            return strings(bytes, keepingEmpty: true)
+        static func arguments(_ pid: pid_t, limit: Int) -> [String] {
+            guard case .success(let bytes) = contents("/proc/\(pid)/cmdline", limit: limit) else { return [] }
+            return strings(Array(bytes.prefix(limit)), keepingEmpty: true)
         }
 
         /// environ: the owner's alone. A zombie's opens and reads empty, as a process started with none does: only
         /// the second has an environment.
-        static func environment(_ pid: pid_t) -> [String]? {
-            guard case .success(let bytes) = contents("/proc/\(pid)/environ") else { return nil }
+        static func environment(_ pid: pid_t, limit: Int) -> [String]? {
+            guard case .success(let bytes) = contents("/proc/\(pid)/environ", limit: limit), bytes.count <= limit else { return nil }
             if bytes.isEmpty {
                 guard case .line(let line) = statLine(pid), !line.isZombie else { return nil }
             }

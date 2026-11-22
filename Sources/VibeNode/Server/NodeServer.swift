@@ -284,10 +284,16 @@ public final class NodeServer: @unchecked Sendable {
         return false
     }
 
+    /// What a connection sent is taken a turn at a time: at most `requestsPerTurn` lines, the rest kept, its reads
+    /// stopped (its read source suspended) until they are taken, in the next turns, after whatever else waits on the
+    /// queue (the review of the runtime hardening: 1 MiB of minimal lines is some 33,000 requests, each judged afresh,
+    /// and one block of them would hold the queue past the watchdog). Then up to `chunksPerTurn` reads.
     private func readable(_ connection: Connection) {
+        if !connection.turnAsked { connection.taken = 0 }
+        guard takeWaiting(connection) else { return }
         var chunk = [UInt8](repeating: 0, count: 64 * 1024)
         Self.readTurn { [self] in
-            guard !connection.closing else { return false }
+            guard !connection.closing, connection.waiting.isEmpty else { return false }
             let (count, sender) = chunk.withUnsafeMutableBytes { Platform.Sockets.receive(connection.fd, into: $0) }
             if count == 0 {
                 close(connection)
@@ -302,16 +308,56 @@ public final class NodeServer: @unchecked Sendable {
                 bye("a request came from another process than the one that connected", connection)
                 return false
             }
-            for line in connection.lines.append(Data(chunk[0..<count])) {
-                take(line, from: sender, on: connection)
-                if connection.closing { return false }
-            }
+            connection.waiting += connection.lines.append(Data(chunk[0..<count])).map { ($0, sender) }
             if connection.lines.tooLong {
                 bye("a line over \(NodeWire.maxLine) bytes", connection)
                 return false
             }
-            return true
+            return takeWaiting(connection)
         }
+    }
+
+    /// The requests taken in one turn of the queue, from one connection.
+    public static let requestsPerTurn = 32
+
+    /// Takes what `connection` sent and isn't taken yet, within this turn's share (`requestsPerTurn`, counted on the
+    /// connection). Whether all of it is taken: if not, its reads are stopped and the next share comes in a later turn.
+    private func takeWaiting(_ connection: Connection) -> Bool {
+        while !connection.waiting.isEmpty, !connection.closing {
+            guard connection.taken < Self.requestsPerTurn else {
+                laterTurn(connection)
+                return false
+            }
+            let (line, sender) = connection.waiting.removeFirst()
+            connection.taken += 1
+            take(line, from: sender, on: connection)
+        }
+        resumeReading(connection)
+        return !connection.closing
+    }
+
+    /// The connection's reads stopped and its next share asked for a later turn of the queue (after what waits on it).
+    private func laterTurn(_ connection: Connection) {
+        if !connection.readStopped, let reading = connection.reading {
+            reading.suspend()
+            connection.readStopped = true
+        }
+        guard !connection.turnAsked else { return }
+        connection.turnAsked = true
+        queue.async { [weak self, weak connection] in
+            guard let self, let connection else { return }
+            connection.turnAsked = false
+            connection.taken = 0
+            guard !connection.closing else { return }
+            if self.takeWaiting(connection) { self.readable(connection) }
+        }
+    }
+
+    /// The connection's reads started again (its share taken), when they were stopped.
+    private func resumeReading(_ connection: Connection) {
+        guard connection.readStopped else { return }
+        connection.readStopped = false
+        connection.reading?.resume()
     }
 
     private func take(_ line: Data, from sender: Platform.PeerToken, on connection: Connection) {
@@ -339,9 +385,8 @@ public final class NodeServer: @unchecked Sendable {
         }
         // A kind any process may ask takes what was read of its sender at the accept (the same process: every read's
         // sender is checked against it); every other kind judges the sender as it is now.
-        let facts = NodeWire.kinds[request.kind] == .anyone ? connection.facts
-            ?? PeerFacts.read(pid: sender.pid, token: sender, cgroupRoot: cgroupRoot, runnersAbove: runnersAbove)
-            : PeerFacts.read(pid: sender.pid, token: sender, cgroupRoot: cgroupRoot, runnersAbove: runnersAbove)
+        let atAccept = NodeWire.kinds[request.kind] == .anyone ? connection.facts : nil
+        let facts = atAccept ?? PeerFacts.read(pid: sender.pid, token: sender, cgroupRoot: cgroupRoot, runnersAbove: runnersAbove)
         // `Requests` answers on `queue`.
         requests.handle(request, from: facts, token: sender) { [weak self, weak connection] reply in
             guard let self, let connection else { return }
@@ -361,6 +406,8 @@ public final class NodeServer: @unchecked Sendable {
         guard !connection.closing else { return }
         send(NodeWire.line(NodeWire.Bye(reason: reason, code: code)), on: connection)
         connection.closing = true
+        connection.waiting = []
+        resumeReading(connection)
         connection.reading?.cancel()
         connection.reading = nil
         if connection.pending.isEmpty { close(connection) }
@@ -413,6 +460,9 @@ public final class NodeServer: @unchecked Sendable {
         connection.closed = true
         connection.closing = true
         connection.pending = Data()
+        connection.waiting = []
+        // A suspended source cancelled ends only once resumed: its descriptor would never be closed.
+        resumeReading(connection)
         connection.reading?.cancel()
         connection.writing?.cancel()
         connection.reading = nil
@@ -437,6 +487,13 @@ public final class NodeServer: @unchecked Sendable {
         let token: Platform.PeerToken
         var lines = NodeWire.Lines()
         var pending = Data()
+        /// Lines read and not yet taken (past a turn's share), each with the process that sent it.
+        var waiting: [(Data, Platform.PeerToken)] = []
+        /// The lines taken in this turn; whether its reads are stopped (its source suspended); whether a later turn
+        /// is asked for.
+        var taken = 0
+        var readStopped = false
+        var turnAsked = false
         /// What was read of the process at its accept (for the hello and its `anyone` requests).
         var facts: PeerFacts?
         /// Whether its process may be the user's voice, at its accept (`Requests.mayBeUsersVoice`).

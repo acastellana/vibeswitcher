@@ -152,11 +152,11 @@ extension Platform.Processes {
         }
 
         /// A process's argv as it is now: empty when it can't be read.
-        static func arguments(_ pid: pid_t) -> [String] { procargs(pid: pid).map { Platform.Processes.parse(procargs: $0).arguments } ?? [] }
+        static func arguments(_ pid: pid_t, limit: Int) -> [String] { procargs(pid: pid).map { Platform.Processes.parse(procargs: $0).arguments } ?? [] }
 
         /// The environment a process was started with (what it set later isn't there): nil when it can't be read
         /// (another user's, a zombie).
-        static func environment(_ pid: pid_t) -> [String]? { procargs(pid: pid).map { Platform.Processes.parse(procargs: $0).environment } }
+        static func environment(_ pid: pid_t, limit: Int) -> [String]? { procargs(pid: pid).map { Platform.Processes.parse(procargs: $0).environment } }
 
         /// The kernel's record of a process's argv and environment (KERN_PROCARGS2): only the user's own processes give it.
         static func procargs(pid: Int32) -> [UInt8]? {
