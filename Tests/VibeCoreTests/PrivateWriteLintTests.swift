@@ -37,6 +37,7 @@ struct PrivateWriteLintTests {
         "Sources/VibeCore/ProductInventory.swift": (2, "a scratch folder in the temporary directory, removed after: the commit's script and inputs, run there"),
         "Sources/VibeCore/HookInstaller.swift": (2, "the agents' settings (~/.claude, ~/.codex): theirs"),
         "Sources/VibeCore/ProjectCreation.swift": (3, "a new project the user makes, with its usual modes"),
+        "Sources/VibeNode/Start/LeadInit.swift": (3, "`lead --init`'s folder, the user's: git's .git/info/exclude and its folder, with their usual modes; an empty repository's index and exclude put back as they were"),
         "Sources/VibeCore/FolderRepository.swift": (4, "a folder the user chose for a lead: its .gitignore, and git's .git/info/exclude, with their usual modes; an empty repository's index and exclude put back as they were"),
         "Sources/VibeSwitcher/AppDelegate.swift": (4, "the hook binary (bin/, a program: 0755) and snapshots to paths the user gives"),
         "Sources/VibeSwitcher/Snapshot.swift": (1, "a snapshot to a path the user gives"),

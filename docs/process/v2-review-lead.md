@@ -77,7 +77,7 @@ table, most visible first; each row says where it landed.
 Each its own commit with tests, the most visible first; the parity rows say where.
 
 1. `push_remote`'s reply on a node names `vibeswitcher push` / `decline-push` (`LeadPush.waiting`; shared file, a port-map row).
-2. `vibeswitcher lead FOLDER --init` (`FirstCommit`, `FolderRepository`); the lead's refusals name it.
+2. `vibeswitcher lead FOLDER --init`; the lead's refusals name it. Hardened after the independent review (`LeadInit`: no hooks, no baseline, exact files, refused configs, global identity, more secrets named, rechecked folder, not under the Mac's rule).
 3. `send` is the user's input: the rotation's quiet and a dropped ask (`noteUserInput`). Its `!` git lines vouching for
    a base move were built and then removed after the independent review (above): such a move draws a card.
 4. How the server last ended (`HostNotes.ServerEnd`; `HostProtocol.swift` shared, a port-map row), in `status --health`
