@@ -147,7 +147,7 @@ struct HandoverEndsReplacedLeadTests {
         #expect(told.map(\.old) == [old.id] && told.map(\.new) == [new.id] && told.map(\.typed) == ["and the blog"])
         #expect(model.selectedID == "host:\(new.id)")
         // In the old one's place.
-        #expect(world.controller.leadPlaces == [new.id: old.startedAt])
+        #expect(world.controller.leadPlaces == [new.id: RowPlace(start: old.startedAt, tty: old.tty)])
         model.leadPlaces = world.controller.leadPlaces
         model.update(sessions: [], hosted: world.host.sessions, table: TableRead())
         #expect(model.sections.first?.rows.map(\.hostID) == [new.id, mine.id, old.id])

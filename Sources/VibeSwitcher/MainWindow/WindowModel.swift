@@ -42,7 +42,7 @@ final class WindowModel: ObservableObject {
     /// Leads another session of their project replaced (see `LeadController.replacedLeads`), by window session.
     @Published var replacedLeads: [UUID: ReplacedLead] = [:]
     /// Leads a handover put in place of an ended one, each listed where that one was (see `LeadController.leadPlaces`).
-    var leadPlaces: [UUID: Date] = [:] {
+    var leadPlaces: [UUID: RowPlace] = [:] {
         didSet {
             guard leadPlaces != oldValue else { return }
             let placed = WindowRows.placed(sections, places: leadPlaces)

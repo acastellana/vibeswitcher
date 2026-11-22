@@ -657,7 +657,7 @@ final class LeadController: ObservableObject {
     var handedOver: (_ old: UUID, _ new: UUID, _ typed: String) -> Void = { _, _, _ in }
     /// Where each lead a handover put in place of an ended one goes in the list: its window session → the start of the
     /// lead it replaced (the first of a chain), as that one's row had it (`WindowRows.placed`).
-    @Published private(set) var leadPlaces: [UUID: Date] = [:]
+    @Published private(set) var leadPlaces: [UUID: RowPlace] = [:]
     /// New leads seen to have ended a turn: once, it's known for good.
     private var turnEnded: Set<UUID> = []
     /// Replaced leads a handover ended: never marked replaced again while the host still lists them live.
@@ -1520,9 +1520,9 @@ final class LeadController: ObservableObject {
         else { return false }
         let typed = lines[old.id]?.draft ?? lead.draft
         // Its row's place, as the list had it: the scan's start for its agent, else its session's.
-        let start = store.sessions.first { $0.hostID == old.id }?.startedAt ?? old.startedAt
+        let place = RowPlace(start: store.sessions.first { $0.hostID == old.id }?.startedAt ?? old.startedAt, tty: old.tty)
         var places = leadPlaces
-        places[new] = places.removeValue(forKey: old.id) ?? start
+        places[new] = places.removeValue(forKey: old.id) ?? place
         leadPlaces = places
         handedOver(old.id, new, typed)
         replacedLeads[old.id] = nil
