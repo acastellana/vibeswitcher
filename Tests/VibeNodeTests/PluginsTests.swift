@@ -694,6 +694,24 @@ extension PluginsTests {
     }
 }
 
+extension PluginsTests {
+    /// The engine's one page slot is freed only once the host has let the page's port go: a release not yet confirmed
+    /// keeps the slot taken, so two pages never overlap.
+    @Test func aPagesEndWaitsForTheHostsRelease() async throws {
+        let gate = DispatchSemaphore(value: 0)
+        let released = Locked(false)
+        let bind = WebBind(listen: WebBind.direct.listen, release: { _ in gate.wait(); released.value = true })
+        let page = PluginPage(spec: Self.pageSpec)
+        let ended = Locked<Bool?>(nil)
+        let clock = NodeClock(queue: DispatchQueue(label: "test.page-clock"))
+        _ = try await offPool { try page.start(bind: bind, clock: clock, take: { _ in true }, ended: { ended.value = $0 }) }
+        page.stop()
+        #expect(await eventually(timeout: 2) { ended.value != nil } == false, "the release not yet confirmed: not ended")
+        gate.signal()
+        #expect(await eventually(timeout: 30) { ended.value == false && released.value })
+    }
+}
+
 extension Result {
     var failure: Failure? { if case .failure(let failure) = self { return failure } else { return nil } }
 }

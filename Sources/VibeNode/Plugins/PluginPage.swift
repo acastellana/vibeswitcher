@@ -146,8 +146,12 @@ public final class PluginPage: @unchecked Sendable {
             defer { self.listener = nil; self.bind = nil; self.take = nil; self.ended = nil }
             return (self.listener, self.bind, self.ended)
         }
-        ended?(taken)
-        listener?.stop { bind?.release(.page) }
+        // The engine's one-page slot is freed (`ended`) only once the host has let the port go.
+        guard let listener else { return ended?(taken) ?? () }
+        listener.stop {
+            bind?.release(.page)
+            ended?(taken)
+        }
     }
 
     /// Every answer's headers: the page's own policy, no framing, sniffing, referrer or cache.
