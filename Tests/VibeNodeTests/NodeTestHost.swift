@@ -26,7 +26,8 @@ final class NodeTestHost: @unchecked Sendable {
     /// The host's root: what `VibePaths.root` is in its sessions (`.vibeswitcher` in their `HOME`). The steer inbox,
     /// the state folder and the vault's launch files go here.
     let root: URL
-    /// The host's socket, in a short folder of its own (a socket's path is limited to 108 bytes).
+    /// The host's socket, `<root>/host.sock`, where its sessions look for it (a socket's path is limited to 108 bytes:
+    /// the host's folder is short).
     let socket: String
     let server: HostServer
     /// The host's lead vault.
@@ -41,12 +42,15 @@ final class NodeTestHost: @unchecked Sendable {
     var baseEnvironment: [String: String] { ["HOME": home.path, "PATH": "/usr/bin:/bin"] }
 
     init(_ scratch: Scratch, holdsFirstLook: Bool = false, projectAllowList: URL? = nil) throws {
-        folder = scratch.url("node-host")
+        // Its whole folder short (`Scratch.shortFolder`): its socket is `<root>/host.sock`, where its sessions' processes
+        // look for the host (`VibePaths.hostSocket` under their `HOME`), within a socket path's 108 bytes. (Before, the
+        // socket was in a folder of its own, and a session's tool server found no host: `connect: No such file`.)
+        folder = try scratch.shortFolder("vnh")
         home = folder.appendingPathComponent("home", isDirectory: true)
         root = home.appendingPathComponent(".vibeswitcher", isDirectory: true)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
-        socketFolder = try scratch.shortFolder("vsn")
-        socket = socketFolder.appendingPathComponent("h.sock").path
+        socketFolder = folder
+        socket = root.appendingPathComponent("host.sock").path
         book = LeadVault.Book()
         // Its agents' config (a config check's hashes) and its seal copies are in its sessions' HOME, as on a node,
         // where the two are one folder; never this process's home, which every test in it shares.

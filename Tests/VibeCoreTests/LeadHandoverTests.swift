@@ -84,8 +84,8 @@ struct LeadHandoverTests: LeadTeamFixture {
         let replaced = LeadToolset(root: root, runtime: oldSeat, vault: vault(for: oldSeat), expected: .lead)
         #expect(!replaced.awaitsRole)
         let said = try #require(replaced.refusal)
-        #expect(said.contains("This session no longer holds the lead's role") && said.contains("in session \(new.session!.prefix(8))")
-                && said.contains("Tell the user to continue in that session"), "\(said)")
+        #expect(said.contains("This session holds no role here: the lead's role is session \(new.session!.prefix(8))'s")
+                && said.contains("If this session was the project's lead, it was replaced: tell the user to continue in that session"), "\(said)")
         let call = replaced.call("status", [:])
         #expect(call.isError && call.text == said, "\(call.text)")
         // A worker's server in a session with no role still waits for it (its lead binds it after the start).

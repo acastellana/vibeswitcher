@@ -94,7 +94,8 @@ struct NodeTestHostTests {
     @Test func aLineTheHostLogsAfterItsStopLeavesNothing() throws {
         let host = try NodeTestHost(scratch)
         host.stop()
-        try FileManager.default.removeItem(at: host.folder)
+        // The stop removed it already (the host's folder is its socket's short folder); as the scratch would, else.
+        try? FileManager.default.removeItem(at: host.folder)
         host.server.note("host: a line after the stop")
         #expect(!FileManager.default.fileExists(atPath: host.folder.path))
     }

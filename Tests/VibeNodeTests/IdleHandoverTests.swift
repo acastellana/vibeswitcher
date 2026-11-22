@@ -29,6 +29,8 @@ struct IdleHandoverTests {
         let clock = Locked(Date().addingTimeInterval(5 * 60))
         var lead: NodeHarness!
         var transcript: URL!
+        /// The node's build folder: its `bin/vibeswitcher-mcp` is the built tool server.
+        let nodeRoot: URL
 
         init(_ scratch: Scratch) async throws {
             host = try NodeTestHost(scratch)
@@ -36,7 +38,7 @@ struct IdleHandoverTests {
             let folder = host.folder.appendingPathComponent("repo", isDirectory: true)
             try await scratchRepository(folder)
             repo = folder.resolvingSymlinksInPath().path
-            let nodeRoot = host.folder.appendingPathComponent("build", isDirectory: true)
+            nodeRoot = host.folder.appendingPathComponent("build", isDirectory: true)
             try FileManager.default.createDirectory(at: nodeRoot.appendingPathComponent("bin"), withIntermediateDirectories: true)
             try FileManager.default.createSymbolicLink(atPath: nodeRoot.appendingPathComponent("bin/vibeswitcher-mcp").path,
                                                        withDestinationPath: builtProducts.appendingPathComponent("vibeswitcher-mcp").path)
@@ -73,7 +75,12 @@ struct IdleHandoverTests {
         /// The fake as the repository's lead: its role bound, the board naming it, its hooks between turns with the
         /// transcript the test writes.
         private func startLead() async throws {
-            lead = try await NodeHarness.start(on: host, fake: fake, cwd: repo, label: "Lead · \(name)")
+            // Its tool server as a lead's session starts it (`LeadLaunch`'s mcp.json, without the keeper): the built
+            // vibeswitcher-mcp, which finds the host by its session's VIBESWITCHER_HOME.
+            let server = nodeRoot.appendingPathComponent("bin/vibeswitcher-mcp").path
+            let mcp = try JSONSerialization.data(withJSONObject: ["mcpServers": ["vibeswitcher": ["command": server, "args": ["--role", "lead", "--root", repo]]]])
+            lead = try await NodeHarness.start(on: host, fake: fake, arguments: ["--mcp-config", String(decoding: mcp, as: UTF8.self)],
+                                               cwd: repo, label: "Lead · \(name)")
             let pid = try #require(lead.agentPid)
             let (vault, repo, id, tty) = (host.vault, repo, lead.session.id, lead.session.tty)
             try await offPool {
@@ -204,6 +211,28 @@ struct IdleHandoverTests {
         #expect(progress.contains("Handed the lead over to a fresh session: the last one had been idle 70 minutes with 238k tokens of context"))
         // The old session runs on as a replaced lead, without the role.
         #expect(await eventually(timeout: 60) { world.queue.sync { world.engine.leads.leads[world.project]?.replaced[world.lead.session.id] != nil } })
+    }
+
+    /// Through the real path (the fake's tool server is the built vibeswitcher-mcp, finding this host by its session's
+    /// VIBESWITCHER_HOME): the lead's tool call works while it leads, and once it is rotated, a fresh server in its
+    /// session (as its client restarts one) refuses at once, naming the session that leads now.
+    @Test func aRotatedLeadsFreshToolServerRefusesThroughTheRealPath() async throws {
+        let world = try await World(scratch)
+        defer { world.stop() }
+        let old = world.lead!
+        try old.files.call("status", [:])
+        #expect(await eventually(timeout: 120) { old.files.calls().count == 1 })
+        let leading = old.files.text(of: old.files.calls()[0])
+        #expect(old.files.calls()[0]["reply"] != nil && !leading.contains("no longer holds") && !leading.contains("restarting")
+                && !leading.contains("Error"), "\(leading)")
+        world.queue.sync { world.engine.replacedEndsHeld = true }
+        try world.write(age: 70 * 60)
+        let fresh = try await world.handedOver()
+        try old.files.call("status", [:])
+        #expect(await eventually(timeout: 120) { old.files.calls().count == 2 })
+        let refused = old.files.text(of: old.files.calls()[1])
+        #expect(refused.contains("This session holds no role here: the lead's role is session \(fresh.uuidString.prefix(8))'s")
+                && refused.contains("it was replaced: tell the user to continue in that session"), "\(refused)")
     }
 
     /// The rotated lead ends, with what it started, once the fresh lead holds the role (2026-11-22: replaced leads lived on

@@ -409,8 +409,9 @@ public final class LeadToolset: MCPToolset {
         } else if let problem, member == nil {
             refusal = "This tool server couldn't ask the session host which role its session holds: \(problem) Its tools are off."
         } else if let (holder, session) = leadElsewhere {
-            refusal = "This session no longer holds the lead's role: VibeSwitcher started a new lead at \(LeadBoard.clock(holder.issuedAt)), in session "
-                + "\(session.prefix(8)). Its tools are off here, and reconnecting them won't bring them back. Tell the user to continue in that session."
+            refusal = "This session holds no role here: the lead's role is session \(session.prefix(8))'s (VibeSwitcher started that lead at "
+                + "\(LeadBoard.clock(holder.issuedAt))). Its tools are off here, and reconnecting them won't bring them back. If this session was the "
+                + "project's lead, it was replaced: tell the user to continue in that session."
         } else if member == nil {
             refusal = "This tool server doesn't run in a session VibeSwitcher started for a project lead's team (or its role went to a newer session), so it has no role, whatever --role says. Its tools are off."
         } else if let expected, expected != member?.role {
