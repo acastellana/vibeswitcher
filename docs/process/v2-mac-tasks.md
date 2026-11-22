@@ -222,7 +222,23 @@ or decided. Done on Linux, tested on both systems (`ApprovalJudgmentTests`, `App
      `scripts/install-node.sh` has no Mac arm yet (its checks are Linux's throughout: `getent`, the ELF interpreter,
      `readelf`, `sha256sum`, the root-owned toolchain), so nothing calls the signing; the Mac arm calls
      `mac_sign_hardened` on each staged copy before its first hash, and adds `lib/mac-sign.sh` to the libraries it
-     checks against the commit's blobs.
+     checks against the commit's blobs. Done as its own script (below).
+   - The Mac's install, `scripts/install-node-mac.sh` (2026-11-21, `v2-small-rows`; install-node.sh untouched): the
+     same steps and exit codes with the Mac's tools (`id -P` for the home, `shlock`, BSD `stat`/`realpath`/`mv -h`,
+     `shasum`, `/usr/bin/jq`); GitHub's compare and runs through `/usr/bin/curl` with gh's keychain token (no gh binary:
+     Homebrew's is the user's); the developer folder's toolchain and SDK root's; a release build without
+     `--static-swift-stdlib`; each product Mach-O, arm64/x86_64 slices with this Mac's, an executable, loading only
+     `/usr/lib/…` and `/System/Library/Frameworks/…`, no run path but `/usr/lib/swift`, no `LC_DYLD_ENVIRONMENT`; signed
+     (`mac_sign_hardened`) before its first hash; `lib/mac-sign.sh` checked and sourced from the commit's blob; then
+     `vibeswitcher agent-plist` (`NodeAgent.installed`) writes `<prefix>/dev.vibeswitcher.node.plist` and the
+     launchctl lines are printed, never run. Its dry run (`scripts/ci/macos-install-dry-run.sh`, its own workflow
+     `v2 macos install`, which install-node.sh's CI check doesn't ask until it has been green a while) builds HEAD for real from a scratch origin into a scratch prefix with an injected green
+     answer, and checks the refusals it can reach. **Needs an independent review** (it is the Mac's S9). **Only a real
+     Mac**: gh's token in the login keychain (`security find-generic-password -s gh:github.com`, its
+     `go-keyring-base64:` form), GitHub's answers through curl, an App Store Xcode passing the toolchain check (and how
+     long its `find` takes), launchd taking the written agent and the host starting from it, and whether the host
+     needs entitlements build-app.sh gives the app's (`VibeSwitcherHost.entitlements`). Known gap: BSD `mv` has no
+     `-T`, so the build's rename checks its target absent under the lock, then checks the result.
    - A card for a kind with no arguments (`stop`, `start`, `web.revoke`): done, `approvalCard` names what each does
      (`stop` the live sessions it ends).
 8. **(LOW, done in `6f367200`, `03f406c9`)** A replayed action id answered before any dialog; the command line's
@@ -235,6 +251,39 @@ or decided. Done on Linux, tested on both systems (`ApprovalJudgmentTests`, `App
    LaunchAgent (`NodeAgent`'s `Sockets` key). Until then the Mac node keeps `web` refused, or behind an explicit opt-in
    that says the port can be squatted. **Real Mac**: whichever is built, that the server gets the descriptor and that a
    second process can't bind the port while the host holds it.
+
+10. **(BLOCKER before approvalMeasured, design; the review of 2026-11-21, its fifth finding)** A fake server passes the
+   command line's server check on the Mac with no race. Every anchor the check uses is the user's to write: the job's
+   label and plist (`launchctl bootout`, then `bootstrap` a plist from any path with the same label and a program of
+   one's choosing), the builds folder (`~/.vibeswitcher/v2/builds/<commit>/bin/…` can be made by any session with a
+   genuine host and an evil server, so `NodeCheck.installedServer` and the cdhash read from that file vouch for
+   nothing), and any reference file beside them. (The server's path is now resolved and must be the file itself.) Needs an anchor a session can't write. Options:
+   - **cdhashes pinned at install in a root-owned place** (`/Library/Application Support/VibeSwitcher/<uid>/pins`,
+     written by a one-time `sudo` step or a privileged helper): the command line checks the server's running cdhash
+     against the pin, not against a file. Costs a password at each install; the pin moves only with root.
+   - **A Keychain item bound to the command line's code** (an access control list naming the CLI's designated
+     requirement, written by the install): holds the expected server cdhash; a session's process can't read or
+     rewrite it without the CLI's code. Ad-hoc signing changes the requirement at every build, so the install rewrites
+     the ACL, and the item needs the user's login keychain unlocked.
+   - **A Developer ID team identifier**: check the server against a requirement on a team the user can't sign as.
+     Needs a paid signing identity; then the requirement is fixed and no pin is needed.
+   Until one is built, the Mac's server check proves only "a hardened binary the user's account could have placed".
+11. **(BLOCKER before approvalMeasured; the review's sixth finding)** The Mac's ancestry is unreadable for a Terminal or
+   ssh user: `proc_pidinfo(PROC_PIDTBSDINFO)` is refused for root's processes (`login`, `sshd-session`), and so is
+   `KERN_PROCARGS2`, so a chain through them ends unread and the peer is refused. The fix reads the short record
+   (`PROC_PIDT_SHORTBSDINFO`, any user's: parent and start) and `sysctl KERN_PROC_PID` for the rest, each still bound
+   to the token as `Link.isProcess(of:)` binds it; never "unreadable is fine". **Real Mac**: a chain from Terminal and
+   one from ssh read whole.
+12. **(BEFORE the Mac node's switch; the review's eighth finding)** `launchctl print`'s `program` line is the job's
+   configured program, not the running image: after an in-place switch (the job's plist rewritten, the host handed
+   over to the next build) the check would compare the genuine server against the next build and refuse it. And
+   `launchctl print`'s output isn't an API (its format changes between releases). Options: the host reports its own
+   build to the command line over a channel the check already trusts, or the check reads the host's executable by
+   its pid and token (`proc_pidpath` bound to the token) instead of the job's line.
+13. **(Owed, the review of 2026-11-21)** The Mac's checked node start (`HostImages.isCheckedMacNode`, false): until it
+   exists no Mac host runs a `--server` child on the account's locks, none is a node host, and the record of the
+   user's actions, its hooks and the vaultV2 capability stay off on the Mac (fixes `6e0798d9`, `a0a596d8`,
+   `b45bb7b0`). It depends on item 10's anchor: a check against the user's own files proves nothing.
 
 ## What `v2` found on the Mac and doesn't change
 

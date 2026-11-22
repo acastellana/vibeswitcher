@@ -15,12 +15,14 @@ enum ServerCheck {
     /// Why the server at the other end of `fd` isn't the node's, or nil when it passes.
     static func refusal(fd: Int32, context: NodeContext) -> String? {
         guard let pid = Platform.Sockets.peerPID(fd) else { return "the process listening on the server's socket can't be read" }
-        var listener = NodeCheck.listener(pid: pid)
-        // The Mac (the review of 2026-11-21): no dumpable state to read, so the listener's code instead, by its audit
-        // token, before anything it says (its hello's rule) is trusted: the server of the build the job runs.
+        // The Mac (the review of 2026-11-21): no dumpable state to read, so the listener's code instead, before anything
+        // it says (its hello's rule) is trusted: the server of the build the job runs; the parent, the session and the
+        // code all bound to the one audit token the socket gave (`NodeCheck.macListener`).
         let codeIdentity = Platform.CodeIdentity.isAvailable
         let job = codeIdentity && context.mode == .node ? macJob(context) : nil
-        if codeIdentity { listener.code = job.flatMap { macServerCode(fd: fd, job: $0) } }
+        let listener = codeIdentity
+            ? NodeCheck.macListener(pid: pid, token: Platform.Sockets.peerToken(fd), code: { token in job.flatMap { macServerCode(token: token, job: $0) } })
+            : NodeCheck.listener(pid: pid)
         let expected: pid_t?
         switch context.mode {
         case .scratch(let root):
@@ -55,15 +57,17 @@ enum ServerCheck {
         return printed.pid.map { $0 > 0 } == true && printed.program != nil ? printed : nil
     }
 
-    /// The Mac: whether the peer of `fd` (its audit token) runs the server of the installed build the job runs
+    /// The Mac: whether the process `token` names runs the server of the installed build the job runs
     /// (`bin/vibeswitcher-server` beside the job's program, resolved, under `<prefix>`; its running slice's cdhash,
     /// Security's dynamic check) with the Hardened Runtime; nil when the token or the build can't be read. Only the
     /// user's node: a scratch node's server is no installed build, so it is refused there (`code` nil), as before.
-    static func macServerCode(fd: Int32, job: NodeAgent.Printed) -> Bool? {
-        guard let program = job.program, let token = Platform.Sockets.peerToken(fd),
+    static func macServerCode(token: Platform.PeerToken, job: NodeAgent.Printed) -> Bool? {
+        guard let program = job.program,
               let prefix = resolved(NodeFolders.defaultPrefix(accountHome: VibePaths.accountHome)),
               let host = resolved(program) else { return nil }
         guard let server = NodeCheck.installedServer(host: host, prefix: prefix) else { return false }
+        // The server file itself, not a link elsewhere (the review of 2026-11-21).
+        guard resolved(server) == server else { return false }
         guard Platform.CodeIdentity.runs(token, executable: server) else { return false }
         return Platform.CodeIdentity.isHardened(token) == true
     }

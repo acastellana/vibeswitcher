@@ -297,7 +297,8 @@ extension Platform.Processes.System {
     static func isDumpable(_ pid: pid_t) -> Bool? { nil }
 
     /// One read of `proc_pidinfo(PROC_PIDTBSDINFO)`: the process's parent, its start (microseconds since 1970, from
-    /// `pbi_start_tvsec` and `pbi_start_tvusec`: a process started later has no smaller one, and an exec keeps it) and
+    /// `pbi_start_tvsec` and `pbi_start_tvusec`, the wall clock's: a step of the clock can give a later process a smaller
+    /// one, so it orders nothing, and an exec keeps it; it names the process only with the pid, and the token's check) and
     /// its controlling terminal (`e_tdev`, named as its record names it: `ttys004`). nil when it has gone, isn't the
     /// user's to read, or the answer is short or names another pid.
     static func link(_ pid: pid_t) -> Platform.Processes.Link? {

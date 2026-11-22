@@ -234,7 +234,8 @@ extension Platform.Processes {
     public struct Link: Equatable, Sendable {
         public var pid: pid_t
         public var parent: pid_t
-        /// When it started, in the system's clock ticks since boot: a process started later has no fewer.
+        /// When it started: Linux, the system's clock ticks since boot (a process started later has no fewer); the
+        /// Mac, microseconds of the wall clock (a clock step can reorder them: it names the process with its pid only).
         public var startTicks: UInt64
         /// Its controlling terminal's name (`Terminals`), nil for none.
         public var terminal: String?

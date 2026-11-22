@@ -13,17 +13,21 @@ struct VaultV2HandlerTests {
 
     @Test func aNodesHostRecordsTheUsersActionOnceAndAnswersItsRetry() {
         let book = LeadVault.Book()
-        #expect(VaultV2Handler.answer(record, from: .app, vault: book, nodeHost: true) == .recorded(first: true))
-        #expect(VaultV2Handler.answer(record, from: .app, vault: book, nodeHost: true) == .recorded(first: false))
+        #expect(VaultV2Handler.answer(record, from: .app, vault: book, nodeHost: true, viaConnector: true) == .recorded(first: true))
+        #expect(VaultV2Handler.answer(record, from: .app, vault: book, nodeHost: true, viaConnector: true) == .recorded(first: false))
+        // The Mac: `.app` from a socket's peer that proved itself isn't the server child (the review of 2026-11-21).
+        let socket = VaultV2Handler.answer(record, from: .app, vault: book, nodeHost: true, viaConnector: false)
+        if Platform.CodeIdentity.isAvailable { #expect(socket == .refused(HostProtocol.unauthorized)) } else { #expect(socket == .recorded(first: false)) }
         // Nothing but the app; nothing with no vault.
-        #expect(VaultV2Handler.answer(record, from: .session("x"), vault: book, nodeHost: true) == .refused(HostProtocol.unauthorized))
-        #expect(VaultV2Handler.answer(record, from: .unknown, vault: book, nodeHost: true) == .refused(HostProtocol.unauthorized))
-        if case .refused = VaultV2Handler.answer(record, from: .app, vault: nil, nodeHost: true) {} else { Issue.record("a host with no vault recorded") }
+        #expect(VaultV2Handler.answer(record, from: .session("x"), vault: book, nodeHost: true, viaConnector: true) == .refused(HostProtocol.unauthorized))
+        #expect(VaultV2Handler.answer(record, from: .unknown, vault: book, nodeHost: true, viaConnector: true) == .refused(HostProtocol.unauthorized))
+        if case .refused = VaultV2Handler.answer(record, from: .app, vault: nil, nodeHost: true, viaConnector: true) {} else { Issue.record("a host with no vault recorded") }
     }
 
     /// The Mac app's host (no server child) keeps no record, as before; Linux's hosts all do.
     @Test func theMacAppsHostKeepsNoRecord() {
-        let answer = VaultV2Handler.answer(record, from: .app, vault: LeadVault.Book(), nodeHost: false)
+        let answer = VaultV2Handler.answer(record, from: .app, vault: LeadVault.Book(), nodeHost: false, viaConnector: true)
+        #expect(!HostImages.isCheckedMacNode, "no Mac host is a node host until its start is checked")
         if Platform.CodeIdentity.isAvailable {
             #expect(answer == .refused("This session host keeps no record of the user's actions (the Mac app's)."))
         } else {

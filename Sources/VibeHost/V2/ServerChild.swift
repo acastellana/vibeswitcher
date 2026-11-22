@@ -174,6 +174,12 @@ public final class ServerChild {
             // The Mac: no sealed copy was loaded or carried, and no handover's record names a child (`record`).
             if let copy { Sys.close(copy.fd) }
             if let carried { Sys.close(carried.fd) }
+            // The review of 2026-11-21: a child's connections are the app's, so only a scratch host runs one until the
+            // Mac's node start is checked (`HostImages.macServerRefusal`).
+            if let why = HostImages.macServerRefusal(lockPath: config.lockPath, ownsLaunchers: ownsLaunchers) {
+                say(server, "refused --server: \(why)")
+                return nil
+            }
             return start(launch, server: server)
         }
         if let restored, let record = restored.serverChild {

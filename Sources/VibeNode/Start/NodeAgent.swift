@@ -68,6 +68,19 @@ public enum NodeAgent {
         }
     }
 
+    /// The property list for an installed build, as `scripts/install-node-mac.sh` writes it for the user to load
+    /// (`vibeswitcher agent-plist`): the build `commit` under `prefix`, the account's swift and node folders (`folders`,
+    /// `NodeFolders.toolFolders`), the node's root, no start at login; or why it can't be made.
+    public static func installed(prefix: String, commit: String, home: String,
+                                 folders: (String) -> Result<(swiftBin: String, nodeBin: String), StartRefusal> = {
+                                     NodeFolders.toolFolders(accountHome: $0, nodeVersion: nil, existingUnit: nil)
+                                 }) -> Result<Data, StartRefusal> {
+        folders(home).flatMap { tools in
+            plist(NodeUnit.Inputs(prefix: prefix, commit: commit, home: home, swiftBin: tools.swiftBin, nodeBin: tools.nodeBin),
+                  nodeRoot: NodeFolders.nodeRoot(accountHome: home), atLogin: false)
+        }
+    }
+
     /// Why the property list `data` (the file as read back) isn't exactly the agent for these inputs, or nil: not a
     /// property list, a key added or missing, a value changed (a `KeepAlive`, an environment variable, another program).
     public static func check(_ data: Data, inputs: NodeUnit.Inputs, nodeRoot: String, atLogin: Bool) -> String? {

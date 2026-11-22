@@ -158,12 +158,17 @@ public final class HostServer {
     /// on the Mac.
     var appConnectors: [Int32: AppConnector] = [:]
     /// The server child, the app on Linux (see V2/ServerChild.swift); on the Mac only a node's host's (`--server`, the
-    /// node on the Mac's step 3); none without `--server`.
-    var serverChild: ServerChild?
+    /// node on the Mac's step 3); none without `--server`. A Mac node host's vault keeps the record of the user's
+    /// actions, its hooks included, from then on (`LeadVaultV2.recordsOnThisHost`).
+    var serverChild: ServerChild? {
+        didSet { if isMacNodeHost { LeadVaultV2.recordsOnThisHost = true } }
+    }
 
     /// A node's host on the Mac: it runs a server child and keeps a vault. It answers `vaultV2` there (the record of the
     /// user's actions, `VaultV2Handler`) and lists it in its welcome; the Mac app's host has no server child and doesn't.
-    var isMacNodeHost: Bool { Platform.CodeIdentity.isAvailable && serverChild != nil && config.vault != nil }
+    /// Only from a checked node start (`HostImages.isCheckedMacNode`, never yet), never from "has a server child": any
+    /// host can be given `--server` (the review of 2026-11-21).
+    var isMacNodeHost: Bool { Platform.CodeIdentity.isAvailable && HostImages.isCheckedMacNode && serverChild != nil && config.vault != nil }
 
     /// What the welcome lists: the configured capabilities, and on a Mac node's host `vaultV2` too.
     var welcomeCapabilities: [String] {
@@ -367,7 +372,9 @@ public final class HostServer {
     /// else sends on it.
     private func prove(_ answer: Data, from client: ClientConnection) -> HostEvent {
         let refusal: String
-        if !client.runsAppCode {
+        if isMacNodeHost {
+            refusal = "A node's session host on the Mac takes no proof: its app is its server, through its connector."
+        } else if !client.runsAppCode {
             refusal = "This connection isn't VibeSwitcher's: its process doesn't run the app's code outside every session, or something else sent on it."
         } else if let key = appKey {
             if AppProof.isValid(answer, to: client.challenge, key: key) {
@@ -384,7 +391,7 @@ public final class HostServer {
 
     /// A host with no app key takes the first one the app's code gives it (a build before challenges handed over).
     private func enroll(_ key: Data, from client: ClientConnection) {
-        guard client.runsAppCode, appKey == nil, key.count == AppProof.keySize else { return }
+        guard client.runsAppCode, !isMacNodeHost, appKey == nil, key.count == AppProof.keySize else { return }
         if let vault = config.vault { vault.adoptAppKey(key) } else { looseAppKey = SymmetricKey(data: key) }
         log.note("host: took the app's first key (it held none), \(HostLog.peer(client.peerPID))")
     }
@@ -393,6 +400,7 @@ public final class HostServer {
     /// verifier is there to race it).
     private func replaceAppKey(_ key: Data, from client: ClientConnection) -> HostEvent {
         let live = sessions.values.filter { $0.info.isLive }.count
+        guard !isMacNodeHost else { return .error("A node's session host on the Mac takes no app key: its app is its server.") }
         guard client.runsAppCode, live == 0, key.count == AppProof.keySize else {
             log.note("host: refused to replace the app's key (\(client.runsAppCode ? "\(live) sessions live" : "not the app's code")), \(HostLog.peer(client.peerPID))")
             return .error(client.runsAppCode ? "End every session first: the session host replaces VibeSwitcher's key only while none runs."
@@ -497,7 +505,8 @@ public final class HostServer {
         case .hostNotes:
             reply(.hostNotes(hostNotes(startedAt: startedAt)))
         case .vaultV2(let request):
-            reply(.vaultV2(VaultV2Handler.answer(request, from: caller(of: client), vault: config.vault, nodeHost: isMacNodeHost)))
+            reply(.vaultV2(VaultV2Handler.answer(request, from: caller(of: client), vault: config.vault, nodeHost: isMacNodeHost,
+                                                 viaConnector: client.viaConnector)))
         case .watch(let id):
             watch(id, from: client, reply: reply)
         case .spawn(let request):
@@ -754,9 +763,14 @@ public final class HostServer {
     func identify(_ token: Platform.PeerToken?) -> LeadVault.Caller {
         guard let token, token.pid > 1, ProcessTable.ancestry(of: token.pid) != nil else { return .unknown }
         if let session = session(of: token.pid) { return .session(session) }
-        if let app = config.appExecutable, AppCode.runs(token, executable: app) { return .app }
+        if let app = appExecutableInForce, AppCode.runs(token, executable: app) { return .app }
         return .unknown
     }
+
+    /// The app's executable a socket's peer is checked against (`identify`), nil on a Mac node host: its folder's
+    /// `VibeSwitcher` is the command line's `bin/vibeswitcher` on a case-insensitive volume, the user's to replace, and
+    /// the app is the server child through the connector there (the review of 2026-11-21's second HIGH).
+    var appExecutableInForce: String? { isMacNodeHost ? nil : config.appExecutable }
 
     /// The live session `pid` runs in (its program or anything under it, by parent processes, or with the session's
     /// terminal), by id; nil for none. Branch code (see `identify`) runs in none. On Linux, by token, with the chain

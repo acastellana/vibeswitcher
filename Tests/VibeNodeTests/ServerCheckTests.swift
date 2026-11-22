@@ -318,4 +318,32 @@ struct MacServerCheckTests {
             #expect(NodeCheck.installedServer(host: host, prefix: prefix) == nil, "\(host)")
         }
     }
+
+    /// Every fact of the Mac's listener bound to the socket's one token (the review of 2026-11-21's MEDIUM): its pid
+    /// the socket's peer, the link read before and after the session and the code, the same process both times and
+    /// still the token's; else parent, session and code unread, and the check refuses.
+    @Test func theMacsListenerIsBoundToTheSocketsToken() throws {
+        let (one, other) = try #require(Platform.Sockets.pair(type: Platform.Sockets.stream))
+        defer { close(one); close(other) }
+        let token = try #require(Platform.Sockets.peerToken(one))
+        let pid = token.pid
+        let link = Platform.Processes.Link(pid: pid, parent: 40, startTicks: 7, terminal: nil)
+        let good = NodeCheck.macListener(pid: pid, token: token, link: { _ in link }, session: { _ in 40 }, code: { _ in true }, bound: { _, _ in true })
+        #expect(good.parent == 40 && good.session == 40 && good.code == true)
+        #expect(NodeCheck.refusal(good, mode: .node, expectedParent: 40, parentSession: 40, codeIdentity: true) == nil)
+        var unread: [NodeCheck.Listener] = []
+        unread.append(NodeCheck.macListener(pid: pid, token: nil, link: { _ in link }, session: { _ in 40 }, code: { _ in true }, bound: { _, _ in true }))
+        unread.append(NodeCheck.macListener(pid: pid + 1, token: token, link: { _ in link }, session: { _ in 40 }, code: { _ in true }, bound: { _, _ in true }))
+        unread.append(NodeCheck.macListener(pid: pid, token: token, link: { _ in link }, session: { _ in 40 }, code: { _ in true }, bound: { _, _ in false }))
+        var reads = 0
+        unread.append(NodeCheck.macListener(pid: pid, token: token, link: { _ in
+            reads += 1
+            return reads == 1 ? link : Platform.Processes.Link(pid: pid, parent: 40, startTicks: 8, terminal: nil)
+        }, session: { _ in 40 }, code: { _ in true }, bound: { _, _ in true }))
+        unread.append(NodeCheck.macListener(pid: pid, token: token, link: { _ in nil }, session: { _ in 40 }, code: { _ in true }, bound: { _, _ in true }))
+        for (index, listener) in unread.enumerated() {
+            #expect(listener.parent == nil && listener.session == nil && listener.code == nil, "case \(index)")
+            #expect(NodeCheck.refusal(listener, mode: .node, expectedParent: 40, parentSession: 40, codeIdentity: true) != nil, "case \(index)")
+        }
+    }
 }
