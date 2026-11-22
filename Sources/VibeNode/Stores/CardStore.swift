@@ -153,6 +153,9 @@ public final class CardStore: @unchecked Sendable {
     /// How many closed held-config cards are kept: each `config held` after a change, and each look that finds
     /// something new held, draws one, so they are the most and the least read once closed.
     public static let keptClosedConfig = 10
+    /// The encoded bytes of the closed cards kept at most, all together (`prune`): with the open ones, a cards
+    /// snapshot fits a line (the architecture review's row 14; `LiveHub.fitted` trims one that still doesn't).
+    public static let keptClosedBytes = 384 * 1024
     /// How long a closed card is kept at most.
     public static let closedLife: TimeInterval = 24 * 60 * 60
 
@@ -173,22 +176,26 @@ public final class CardStore: @unchecked Sendable {
 
     /// The closed cards kept bounded (2026-11-20: a node kept every card it ever drew, 329 after a day, 1.4 MB, past a
     /// line's limit, and `answer` broke): the held-config ones past the newest `keptClosedConfig` go first, then any
-    /// closed longer than `closedLife` ago, then the oldest closed past `keptClosed`. An open card is never pruned. A
+    /// closed longer than `closedLife` ago, then the oldest closed past `keptClosed`, then the oldest closed past
+    /// `keptClosedBytes` of their encoded values together (`value`). An open card is never pruned. A
     /// pruned card is told to the stream as gone; asked for later it is `gone`, as after a restart (S3: cards are memory
     /// only). On the engine's queue.
     func prune() {
         let closed = cards.values.filter { !$0.isOpen }.sorted { ($0.closedAt ?? $0.at, $0.id) > ($1.closedAt ?? $1.at, $1.id) }
         guard !closed.isEmpty else { return }
         let oldest = now().addingTimeInterval(-Self.closedLife)
-        var kept = 0, keptConfig = 0
+        var kept = 0, keptConfig = 0, bytes = 0, full = false
         for card in closed {
             let at = card.closedAt ?? card.at
             let config = card.kind == .configHeld
-            if (config && keptConfig >= Self.keptClosedConfig) || at < oldest || kept >= Self.keptClosed {
+            let size = full ? 0 : NodeWire.message(card.value).count
+            if !full, bytes + size > Self.keptClosedBytes { full = true }
+            if (config && keptConfig >= Self.keptClosedConfig) || at < oldest || kept >= Self.keptClosed || full {
                 remove(card.id)
                 continue
             }
             kept += 1
+            bytes += size
             if config { keptConfig += 1 }
         }
     }
