@@ -242,6 +242,8 @@ public final class WebAccess: WebGate, @unchecked Sendable {
     /// terminals are watched only (`TerminalRelay.Mode.watch`), a scratch server's may be typed into (LW-D12).
     public static func refusal(for request: NodeWire.Request, rights: LiveRights, terminals: Bool = false) -> NodeWire.Reply? {
         let kind = ConfigSeal.inert(request.kind, limit: 80)
+        // An agent's vs-ask files through its tool server, stamped by the host: a page files nothing.
+        if request.kind == "plugin.file" { return .init(re: request.id, error: .init(.voice, "a page files nothing")) }
         switch NodeWire.kinds[request.kind] {
         case nil:
             return .init(re: request.id, error: .init(.unknownKind, "this server doesn't take \(kind)"))

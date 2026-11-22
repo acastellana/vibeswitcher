@@ -53,6 +53,23 @@ extension LeadEngine {
         }
     }
 
+    /// `wrappers` (command name: plugin id) as the scripts in `bin`, and nothing else there. Blocks.
+    static func writeWrappers(_ wrappers: [String: String], in bin: URL, note: (String) -> Void) {
+        try? VibePaths.ensurePrivate(bin.deletingLastPathComponent())
+        try? VibePaths.ensurePrivate(bin)
+        for name in (try? FileManager.default.contentsOfDirectory(atPath: bin.path)) ?? [] where wrappers[name] == nil {
+            unlink(bin.appendingPathComponent(name).path)
+        }
+        for (name, id) in wrappers {
+            let script = "#!/bin/sh\n# The node's wrapper for its external plugin \(id): `vibeswitcher plugin list`.\nexec vs-ask \(id) -- \"$@\"\n"
+            let file = bin.appendingPathComponent(name)
+            do {
+                try VibePaths.writePrivate(Data(script.utf8), to: file)
+                chmod(file.path, 0o700)
+            } catch { note("plugins: the wrapper \(name) not written: \(error)") }
+        }
+    }
+
     /// The external plugins the vault's records name, each built from its folder's manifest as it is now: one whose
     /// manifest no longer reads, or reads another hash, is held (it runs nothing until added again). Reads the disk.
     static func externalPlugins(_ records: [String: String], builtIn: Set<String>) -> [String: ExternalPlugin] {
@@ -80,8 +97,14 @@ extension LeadEngine {
         for plugin in plugins.plugins where wasOn.contains(plugin.info.id) && !plugins.isOn(plugin.info.id) { withdraw(plugin) }
         let (data, file) = (plugins.mirror, root.appendingPathComponent("plugins.json"))
         let note = self.note
+        // The external plugins' wrappers (`vs-<name> …` is `vs-ask <id> -- …`), only while each is on.
+        let wrappers = Dictionary(plugins.on.compactMap { $0 as? ExternalPlugin }.flatMap { plugin in
+            plugin.info.commands.map { ($0.name, plugin.info.id) }
+        }) { first, _ in first }
+        let bin = root.appendingPathComponent("plugins/bin", isDirectory: true)
         pluginWork.async {
             do { try VibePaths.writePrivate(data, to: file) } catch { note("plugins: \(file.lastPathComponent) not written: \(error)") }
+            Self.writeWrappers(wrappers, in: bin, note: note)
         }
         if plugins.on.contains(where: { !wasOn.contains($0.info.id) }) { lookAtPlugins() }
     }

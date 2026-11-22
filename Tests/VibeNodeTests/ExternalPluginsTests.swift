@@ -110,6 +110,9 @@ struct ExternalPluginsTests {
         let off = try await ask(world, ["normal"])
         #expect(off.output.status == 1, "\(off.output)")
         _ = try #require(await world.ask("plugin.on", ["plugin": .string("probe")]))
+        // Its wrapper beside the node's commands while it is on (the host puts the folder last on sessions' PATH).
+        let wrapper = world.host.root.appendingPathComponent("plugins/bin/vs-probe")
+        #expect(await eventually(timeout: 30) { (try? String(contentsOf: wrapper, encoding: .utf8))?.contains("exec vs-ask probe -- \"$@\"") == true })
 
         let filed = try await ask(world, ["normal", "deep"])
         #expect(filed.output.status == 0 && filed.output.output.contains("Filed Probe request"), "\(filed.output)")
@@ -129,6 +132,7 @@ struct ExternalPluginsTests {
         #expect(removed.ok, "\(removed)")
         #expect(try world.world.link.vaultV2.externalPlugins()["probe"] == nil)
         #expect(probe(world) == nil)
+        #expect(await eventually(timeout: 30) { !FileManager.default.fileExists(atPath: wrapper.path) }, "its wrapper gone with it")
     }
 
     /// The plugin's page is served by the core: the address only in the answer's reply, the answer handed to the plugin.

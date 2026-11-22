@@ -43,8 +43,10 @@ final class PluginProcess: @unchecked Sendable {
     /// Starts `copy` (its sealed copy) in `work`. Blocks briefly.
     func start(copy: Platform.ProcessSelf.SealedCopy, work: URL) -> Result<Void, PluginRefusal> {
         var toChild: [Int32] = [-1, -1], fromChild: [Int32] = [-1, -1], errChild: [Int32] = [-1, -1]
-        guard pipe(&toChild) == 0, pipe(&fromChild) == 0, pipe(&errChild) == 0 else { return .failure(PluginRefusal("no pipes (errno \(errno))")) }
-        for fd in [toChild[1], fromChild[0], errChild[0]] { _ = fcntl(fd, F_SETFD, FD_CLOEXEC) }
+        // Close-on-exec from their making: the spawn gives the child its ends as its standard ones.
+        guard Sys.pipeClosedOnExec(&toChild) == 0, Sys.pipeClosedOnExec(&fromChild) == 0, Sys.pipeClosedOnExec(&errChild) == 0 else {
+            return .failure(PluginRefusal("no pipes (errno \(errno))"))
+        }
         // A write to a program that has gone is an error for the write, not the server's end.
         signal(SIGPIPE, SIG_IGN)
         var spawn = Platform.Spawn(executable: copy.path, arguments: [copy.path])
@@ -196,9 +198,9 @@ final class PluginProcess: @unchecked Sendable {
         Sys.close(fds[0])
         DispatchQueue.global().async {
             var status: Int32 = 0
-            let deadline = Date().addingTimeInterval(1)
+            let deadline = MacTime.real.awake() + 1
             while waitpid(pid, &status, WNOHANG) == 0 {
-                if Date() > deadline { Darwin_or_Glibc_kill(-pid, SIGKILL); _ = waitpid(pid, &status, 0); break }
+                if MacTime.real.awake() > deadline { Darwin_or_Glibc_kill(-pid, SIGKILL); _ = waitpid(pid, &status, 0); break }
                 usleep(20_000)
             }
             Sys.close(fds[1])

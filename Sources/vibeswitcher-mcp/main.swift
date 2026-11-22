@@ -106,8 +106,8 @@ if CommandLine.arguments.count >= 2, CommandLine.arguments[1] == "--wallet-reque
 // `vibeswitcher-mcp --ask PLUGIN -- WORDS…`, as Resources/bin/vs-ask runs it: an external plugin's request (`PluginAsk`).
 if CommandLine.arguments.count >= 2, CommandLine.arguments[1] == "--ask" {
     let ran = PluginAsk.run(Array(CommandLine.arguments.dropFirst(2)), cwd: FileManager.default.currentDirectoryPath, vault: .standard)
-    if !ran.output.isEmpty { print(ran.output) }
-    if !ran.error.isEmpty { FileHandle.standardError.write(Data((ran.error + "\n").utf8)) }
+    if !ran.output.isEmpty { Platform.Stdio.output(ran.output + "\n") }
+    if !ran.error.isEmpty { Platform.Stdio.error(ran.error + "\n") }
     exit(ran.status)
 }
 

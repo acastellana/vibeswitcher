@@ -80,6 +80,7 @@ public struct PluginManifest: Codable, Equatable, Sendable {
             return "program: a path inside the plugin's folder"
         }
         for command in commands ?? [] {
+            guard !["vs-ask", "vs-shell", "vs-heavy"].contains(command.name) else { return "commands: \(command.name) is the node's own" }
             guard command.name.hasPrefix("vs-"), command.name.count <= 32, LeadVaultV2.pluginID(String(command.name.dropFirst(3))),
                   Self.plain(command.about, limit: 300) else { return "commands: each a vs-<word> with a plain line about it" }
         }
