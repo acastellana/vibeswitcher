@@ -1,6 +1,6 @@
 #!/bin/bash
-# scripts/ci/check-workflows.sh: every workflow under .github/workflows/ runs for pushes to v2 and by hand, and for
-# nothing else; reads the repository and nothing more; uses only the two actions named below, by commit; bounds every
+# scripts/ci/check-workflows.sh: every workflow under .github/workflows/ runs for pushes to v2 and by hand (a nightly:
+# on one schedule and by hand), and for nothing else; reads the repository and nothing more; uses only the two actions named below, by commit; bounds every
 # job's time (under 100 minutes); names no secret; has no expression outside its concurrency group; runs on GitHub's
 # own runners. One line a failure, exit 1; "no workflows" and exit 1 when there are none. The Ubuntu workflow runs it
 # first, so a workflow widened by accident fails its own run. A lint, not a boundary: it lives in the commit it
@@ -33,8 +33,10 @@ if (( ${#files[@]} == 0 )); then
 fi
 
 for file in "${files[@]}"; do
-    [[ $(block "$file" on) == $'on:\npush:\nbranches: [v2]\nworkflow_dispatch:' ]] \
-        || fail "$file" "on: must be exactly a push to v2 and workflow_dispatch"
+    # A push to v2 and by hand; or, a nightly's, a schedule of one cron line and by hand.
+    on=$(block "$file" on)
+    [[ $on == $'on:\npush:\nbranches: [v2]\nworkflow_dispatch:' || $on =~ ^on:$'\n'schedule:$'\n''- cron: "'[0-9*/,\ -]+'"'$'\n'workflow_dispatch:$ ]] \
+        || fail "$file" "on: must be exactly a push to v2 and workflow_dispatch, or one schedule cron and workflow_dispatch"
     [[ $(block "$file" permissions) == $'permissions:\ncontents: read' ]] \
         || fail "$file" "permissions: must be exactly contents: read"
     # A job's own permissions: would override the file's.

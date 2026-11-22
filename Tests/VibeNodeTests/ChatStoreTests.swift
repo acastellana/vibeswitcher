@@ -354,7 +354,8 @@ final class ChatWorld: @unchecked Sendable {
     let hub: LiveHub
     let chats: ChatStore
 
-    init(now: (@Sendable () -> TimeInterval)? = nil) throws {
+    init(now: (@Sendable () -> TimeInterval)? = nil,
+         window: (items: Int, bytes: Int) = (TranscriptFollow.windowItems, TranscriptFollow.windowBytes)) throws {
         scratch = Scratch()
         home = scratch.url("chat-home")
         transcript = home.appendingPathComponent(".claude/projects/-work-p/0f6c2c1e-8a5b-4c1d-9e0f-2b7a6d5c4e3f.jsonl")
@@ -363,7 +364,7 @@ final class ChatWorld: @unchecked Sendable {
         queue = DispatchQueue(label: "chat-engine")
         hub = LiveHub(queue: queue, epoch: UUID().uuidString, now: { LiveWorld.fixed })
         chats = ChatStore(queue: queue, home: home.path, sessions: sessions, now: now ?? { Date().timeIntervalSince1970 },
-                          date: { LiveWorld.fixed })
+                          date: { LiveWorld.fixed }, window: window)
         hub.chats = chats
         var made = LiveWorld.session("pts/3")
         made.transcriptPath = transcript.path

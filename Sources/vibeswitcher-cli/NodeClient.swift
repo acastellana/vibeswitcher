@@ -194,8 +194,8 @@ final class NodeClient {
         }
     }
 
-    let fd: Int32
-    let hello: NodeWire.Hello
+    private(set) var fd: Int32
+    private(set) var hello: NodeWire.Hello
     /// Where the request's journal entries go (`change`, `journal`).
     private let context: NodeContext
     private var lines = NodeWire.Lines()
@@ -213,7 +213,33 @@ final class NodeClient {
         self.ready = ready
     }
 
-    deinit { Sys.close(fd) }
+    deinit { if fd >= 0 { Sys.close(fd) } }
+
+    /// Before a request goes: when the server has closed this connection already (its end read, or a `bye`, as it does
+    /// to one that sat with no request past its limit, `NodeServer.Idle`: a typed code can take longer than that to
+    /// type), a new connection in its place, once and silently, the server checked again and its hello read. A
+    /// connection still open, or one whose server can't be reached again, is left as it is: the request then says so.
+    private func reconnectIfClosed() {
+        var watched = pollfd(fd: fd, events: Int16(POLLIN), revents: 0)
+        guard poll(&watched, 1, 0) > 0 else { return }
+        var chunk = [UInt8](repeating: 0, count: 64 * 1024)
+        while true {
+            let count = Sys.read(fd, &chunk, chunk.count)
+            if count < 0, errno == EINTR { continue }
+            if count < 0, errno == EAGAIN { break }
+            if count <= 0 { return replace() }
+            ready += lines.append(Data(chunk[0..<count]))
+            if ready.contains(where: { NodeWire.decode(NodeWire.Bye.self, $0)?.kind == "bye" }) { return replace() }
+        }
+    }
+
+    /// This connection's descriptor, hello and lines taken from a new one to the same server.
+    private func replace() {
+        guard case .success(let fresh) = NodeClient.connect(context) else { return }
+        Sys.close(fd)
+        (fd, hello, lines, ready) = (fresh.fd, fresh.hello, fresh.lines, fresh.ready)
+        fresh.fd = -1
+    }
 
     /// Connects to `context`'s server, checks it, and reads its hello.
     static func connect(_ context: NodeContext, timeout: TimeInterval = 15) -> Result<NodeClient, Failure> {
@@ -319,6 +345,7 @@ final class NodeClient {
     /// Sends one request and waits for its reply. Answered `not-yet`, it is asked again, a quarter second apart, for up
     /// to `notYetPatience`; then the last answer is the reply.
     private func send(_ kind: String, args: [String: NodeWire.Value]?, action: String?, timeout: TimeInterval) -> Result<NodeWire.Reply, Failure> {
+        reconnectIfClosed()
         let patience = Platform.Clock.steadyDate().addingTimeInterval(Self.notYetPatience)
         let timeout = approvalRule && NodeWire.changesState(kind) ? max(timeout, Self.approvalPatience) : timeout
         while true {

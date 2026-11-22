@@ -75,7 +75,10 @@ public final class NodeServer: @unchecked Sendable {
 
     /// Why a connection accepted at `accepted`, its last request at `lastRequest` (nil: none since its hello), holding a
     /// subscription or not (`subscribed`), is closed at `now` (all on the awake clock), or nil while it may stay.
-    static func idleReason(accepted: TimeInterval, lastRequest: TimeInterval?, subscribed: Bool, now: TimeInterval, idle: Idle) -> String? {
+    /// A connection with a request still being answered (`answering`, an engine's wait) isn't idle.
+    static func idleReason(accepted: TimeInterval, lastRequest: TimeInterval?, subscribed: Bool, answering: Bool = false,
+                           now: TimeInterval, idle: Idle) -> String? {
+        guard !answering else { return nil }
         guard let last = lastRequest else {
             return now - accepted >= idle.hello ? "no request since the hello (\(Int(idle.hello)) s)" : nil
         }
@@ -173,7 +176,7 @@ public final class NodeServer: @unchecked Sendable {
         for connection in connections.values where !connection.closing {
             let subscribed = connection.lineTransport.map { hub?.subscribes($0) ?? false } ?? false
             guard let why = Self.idleReason(accepted: connection.accepted, lastRequest: connection.lastRequest, subscribed: subscribed,
-                                            now: now, idle: idle) else { continue }
+                                            answering: connection.answering > 0, now: now, idle: idle) else { continue }
             bye(why, code: "busy", connection)
         }
     }
@@ -442,12 +445,16 @@ public final class NodeServer: @unchecked Sendable {
         let atAccept = NodeWire.kinds[request.kind] == .anyone ? connection.facts : nil
         let facts = atAccept ?? PeerFacts.read(pid: sender.pid, token: sender, cgroupRoot: cgroupRoot, runnersAbove: runnersAbove)
         // `Requests` answers on `queue`.
+        connection.answering += 1
         requests.handle(request, from: facts, token: sender) { [weak self, weak connection] reply in
             guard let self else { return }
             // Written from the queue alone: a reply given on another (a request's reading queue) is taken there first.
             // Two writes at once raced on the connection's pending bytes, and the server crashed (2026-11-22).
             let deliver = { [weak self, weak connection] in
                 guard let self, let connection else { return }
+                // Its reply is the connection's last activity: the quiet limit counts from it.
+                connection.answering -= 1
+                connection.lastRequest = MacTime.real.awake()
                 // Never a line over the limit: the reader would drop it and close (`replyLine`).
                 let line = NodeWire.replyLine(reply)
                 guard line.count - 1 <= NodeWire.maxLine else { return self.bye("a reply over \(NodeWire.maxLine) bytes", code: "too-long", connection) }
@@ -573,6 +580,8 @@ public final class NodeServer: @unchecked Sendable {
         /// Its accept and its last request (nil: none since its hello), on the awake clock (`closeIdle`).
         var accepted: TimeInterval = 0
         var lastRequest: TimeInterval?
+        /// Its requests being answered now (`Requests.handle` not yet replied): while any is, it isn't idle.
+        var answering = 0
         /// No more is read: what is pending goes, then the close.
         var closing = false
         var closed = false

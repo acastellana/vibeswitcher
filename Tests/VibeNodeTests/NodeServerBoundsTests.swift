@@ -173,6 +173,23 @@ struct NodeServerBoundsTests {
         #expect(NodeServer.idleReason(accepted: 0, lastRequest: 10, subscribed: false, now: 609, idle: idle) == nil)
         #expect(NodeServer.idleReason(accepted: 0, lastRequest: 10, subscribed: false, now: 610, idle: idle) == "no request and no subscription for 10 minutes")
         #expect(NodeServer.idleReason(accepted: 0, lastRequest: 10, subscribed: true, now: 10_000, idle: idle) == nil)
+        #expect(NodeServer.idleReason(accepted: 0, lastRequest: 10, subscribed: false, answering: true, now: 10_000, idle: idle) == nil,
+                "a request still being answered (an engine's wait) isn't quiet")
+    }
+
+    /// The command line connects before it asks for the typed code, which can take longer than the hello's limit: its
+    /// connection closed meanwhile, it connects again, once and silently, and the change goes through.
+    @Test func aTypedCodeSlowerThanTheHelloLimitStillGoesThrough() async throws {
+        let node = try await ScratchNode(scratch, hostArguments: ["--server-arg", ServerArguments.testIdleFlag + "1"])
+        defer { node.stop() }
+        let path = node.serverSocket
+        let set = try await node.runOnTerminal(["set", "node_max_sessions", "7"]) { code in
+            // Held until a connection made now has been closed for sitting idle: the command line's, made before it, has too.
+            guard let later = try? Raw(path), Self.isHello(later.line()) else { return code }
+            while let line = later.line(timeout: 30) { if Self.bye(line) != nil { break } }
+            return code
+        }
+        #expect(set.status == 0 && set.output.contains("set node_max_sessions: \(MacLimits.defaultMaxSessions) → 7"), "\(set.output)\(set.errors)\n\(node.said)")
     }
 
     /// On a scratch node whose limits are 1 s and 2 s (`--test-idle=1`): a connection that never asks is told why and
