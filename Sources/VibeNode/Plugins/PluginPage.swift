@@ -62,8 +62,8 @@ public final class PluginPage: @unchecked Sendable {
     private var bound: UInt16 = 0
     private var done = false
     private var tries = 0
-    /// Hands an answer's bytes to the plugin, which says whether it took it (on the page's queue).
-    private var take: ((Data) -> Bool)?
+    /// Hands an answer's bytes to the plugin, which says (later) whether it took it.
+    private var take: ((Data, @escaping (Bool) -> Void) -> Void)?
     private var ended: ((Bool) -> Void)?
 
     init(spec: Spec, token: String = Base64URL.encode(WebPush.randomBytes(32))) {
@@ -77,7 +77,7 @@ public final class PluginPage: @unchecked Sendable {
     /// Listens (the socket from `bind`) and serves; `take` hears each answer (true: taken, the page stops); `ended` once,
     /// with whether an answer was taken, when it stops (taken, its life over, too many garbled answers, or `stop`).
     /// Throws when the page is refused or can't listen.
-    func start(bind: WebBind, clock: NodeClock, take: @escaping (Data) -> Bool, ended: @escaping (Bool) -> Void) throws -> URL {
+    func start(bind: WebBind, clock: NodeClock, take: @escaping (Data, @escaping (Bool) -> Void) -> Void, ended: @escaping (Bool) -> Void) throws -> URL {
         if let why = spec.refusal { throw PluginRefusal(why) }
         let listener = WebListener(queue: queue, clock: clock, policy: { [weak self] host, origin, path, _ in
             guard let self else { return false }
@@ -106,16 +106,21 @@ public final class PluginPage: @unchecked Sendable {
             socket.onText = { text in
                 guard let self else { return socket.close() }
                 let bytes = Data(text.utf8)
-                let taker: ((Data) -> Bool)? = self.lock.withLock {
+                let taker: ((Data, @escaping (Bool) -> Void) -> Void)? = self.lock.withLock {
                     guard !self.done, bytes.count <= Self.answerBytesAtMost else { return nil }
                     self.tries += 1
                     return self.take
                 }
-                let taken = taker?(bytes) ?? false
-                _ = socket.send(text: taken ? "ok" : "refused")
-                socket.close()
-                let over = self.lock.withLock { self.tries >= Self.triesAtMost }
-                if taken || over { self.stop(taken: taken) }
+                let answer = { (taken: Bool) in
+                    self.queue.async {
+                        _ = socket.send(text: taken ? "ok" : "refused")
+                        socket.close()
+                        let over = self.lock.withLock { self.tries >= Self.triesAtMost }
+                        if taken || over { self.stop(taken: taken) }
+                    }
+                }
+                guard let taker else { return answer(false) }
+                taker(bytes, answer)
             }
         }
         lock.withLock {

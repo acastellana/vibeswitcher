@@ -295,6 +295,9 @@ public struct PluginDesk {
         }
     }
 
+    /// Withdraws every open card of this plugin, telling their askers (its program broke the protocol, say).
+    public func withdrawAll() { engine.withdraw(plugin) }
+
     /// `request` is settled (it got no card, or its card closed): never drawn again, this server's or the next's
     /// (kept in the vault).
     public func settle(_ request: String) { engine.settlePluginRequests([PluginKey(plugin: id, request: request).name]) }
@@ -340,7 +343,7 @@ struct PluginStamp: Equatable {
 /// What a plugin's `perform` may do for the card it answers, and nothing else: start a session (the host's spawn).
 public struct PluginAct {
     let start: (SpawnRequest, @escaping (Result<HostSession, HostLink.Failure>) -> Void) -> Void
-    let page: (PluginPage.Spec, @escaping (Data) -> Bool, @escaping (Bool) -> Void, @escaping (Result<URL, PluginRefusal>) -> Void) -> Void
+    let page: (PluginPage.Spec, @escaping (Data, @escaping (Bool) -> Void) -> Void, @escaping (Bool) -> Void, @escaping (Result<URL, PluginRefusal>) -> Void) -> Void
 
     /// Starts a session through the host; `then` with it, off the engine's queue.
     public func spawn(_ request: SpawnRequest, then: @escaping (Result<HostSession, HostLink.Failure>) -> Void) { start(request, then) }
@@ -348,7 +351,7 @@ public struct PluginAct {
     /// Serves `spec` once (`PluginPage`): `take` hears each answer's bytes (true: taken), `ended` whether one was taken
     /// when the page stops; `then` with its address, for the answering terminal only, or why not (one page at a time on
     /// a node). Callbacks on the engine's queue.
-    public func openPage(_ spec: PluginPage.Spec, take: @escaping (Data) -> Bool, ended: @escaping (Bool) -> Void,
+    public func openPage(_ spec: PluginPage.Spec, take: @escaping (Data, @escaping (Bool) -> Void) -> Void, ended: @escaping (Bool) -> Void,
                          then: @escaping (Result<URL, PluginRefusal>) -> Void) { page(spec, take, ended, then) }
 }
 

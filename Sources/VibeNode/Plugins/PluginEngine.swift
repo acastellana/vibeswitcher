@@ -258,7 +258,7 @@ extension LeadEngine {
 
     /// Serves a plugin's page once (`PluginPage`), one at a time on the node: started off the engine's queue (the host
     /// binds its socket); every callback on the engine's queue. On `queue`.
-    func openPluginPage(_ spec: PluginPage.Spec, take: @escaping (Data) -> Bool, ended: @escaping (Bool) -> Void,
+    func openPluginPage(_ spec: PluginPage.Spec, take: @escaping (Data, @escaping (Bool) -> Void) -> Void, ended: @escaping (Bool) -> Void,
                         then: @escaping (Result<URL, PluginRefusal>) -> Void) {
         guard pluginPage == nil else { return then(.failure(PluginRefusal("a plugin's page is open already: answer it, or wait for it to stop"))) }
         let page = PluginPage(spec: spec)
@@ -266,7 +266,7 @@ extension LeadEngine {
         let (bind, clock, queue) = (options.pluginBind ?? .direct, clock ?? pluginClock, self.queue)
         pluginWork.async { [weak self] in
             let started = Result {
-                try page.start(bind: bind, clock: clock, take: { bytes in queue.sync { take(bytes) } }, ended: { taken in
+                try page.start(bind: bind, clock: clock, take: { bytes, answer in queue.async { take(bytes, answer) } }, ended: { taken in
                     queue.async {
                         if self?.pluginPage === page { self?.pluginPage = nil }
                         ended(taken)

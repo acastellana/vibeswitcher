@@ -77,10 +77,10 @@ struct PluginsTests {
             guard let request = card.plugin?.request else { return then(.failure(.gone("no request"))) }
             if let page = pageSpec, word == "run" {
                 // A page for the answer: the core serves it; the plugin hears the bytes.
-                return act.openPage(page, take: { [weak self] bytes in
+                return act.openPage(page, take: { [weak self] bytes, answer in
                     let taken = bytes == Data(#"{"ok":true}"#.utf8)
                     if taken { self?.pageAnswers.mutate { $0.append(bytes) } }
-                    return taken
+                    answer(taken)
                 }, ended: { [weak self] taken in self?.pageEnded.value = taken }) { opened in
                     switch opened {
                     case .success(let url): then(.success(.object(["outcome": .string("page"), "say": .array([.string(url.absoluteString)])])))
@@ -704,7 +704,7 @@ extension PluginsTests {
         let page = PluginPage(spec: Self.pageSpec)
         let ended = Locked<Bool?>(nil)
         let clock = NodeClock(queue: DispatchQueue(label: "test.page-clock"))
-        _ = try await offPool { try page.start(bind: bind, clock: clock, take: { _ in true }, ended: { ended.value = $0 }) }
+        _ = try await offPool { try page.start(bind: bind, clock: clock, take: { _, answer in answer(true) }, ended: { ended.value = $0 }) }
         page.stop()
         #expect(await eventually(timeout: 2) { ended.value != nil } == false, "the release not yet confirmed: not ended")
         gate.signal()

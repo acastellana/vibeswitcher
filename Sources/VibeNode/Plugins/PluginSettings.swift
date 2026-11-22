@@ -40,11 +40,21 @@ extension LeadEngine {
     func setPluginSetting(_ key: String, given: String, then: @escaping (Result<(value: String, was: String), CardFailure>) -> Void) {
         guard let (plugin, setting) = pluginSetting(key) else { return then(.failure(.gone("no setting \(key) of a plugin that is on"))) }
         let reset = NodeSettings.resetWords.contains(given.trimmingCharacters(in: .whitespacesAndNewlines).lowercased())
-        let checked: String?
-        switch plugin.check(setting: setting.key, value: reset ? nil : given) {
-        case .failure(let refusal): return then(.failure(.badArgs("\(key): \(refusal.description)")))
-        case .success(let value): checked = value
+        plugin.check(setting: setting.key, value: reset ? nil : given) { [weak self] checked in
+            self?.queue.async { self?.checkedPluginSetting(checked, key: key, plugin: plugin, setting: setting, then: then) }
         }
+    }
+
+    private func checkedPluginSetting(_ checked: Result<String?, PluginRefusal>, key: String, plugin: FeaturePlugin, setting: PluginInfo.Setting,
+                                      then: @escaping (Result<(value: String, was: String), CardFailure>) -> Void) {
+            switch checked {
+            case .failure(let refusal): then(.failure(.badArgs("\(key): \(refusal.description)")))
+            case .success(let value): keepPluginSetting(key, plugin: plugin, setting: setting, value: value, then: then)
+            }
+    }
+
+    private func keepPluginSetting(_ key: String, plugin: FeaturePlugin, setting: PluginInfo.Setting, value checked: String?,
+                                   then: @escaping (Result<(value: String, was: String), CardFailure>) -> Void) {
         let stored = "\(plugin.info.id).\(setting.key)"
         let was = pluginSettings[stored] ?? setting.defaultValue
         let client = link.vaultV2
