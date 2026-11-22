@@ -266,8 +266,15 @@ public enum LeadVaultV2 {
         case .setExternalPlugin(let id, let added):
             guard pluginID(id) else { return .refused("A plugin's id is a short lower-case word.") }
             guard (added?.utf8.count ?? 0) <= 4096 else { return .refused("A plugin's record is 4 KiB at most.") }
+            // Removed, or added with another record (other bytes, another folder): nothing of the old one carries over,
+            // so the plugin starts off with its default settings. The same record again (a retry) changes nothing.
+            // Settled request names stay (`settled:<id>:<request>`, gone by age): a request answered, withdrawn or
+            // expired is never drawn again, and its file may still be in the plugin's folder when an id is added back.
+            if record.plugin["ext:" + id] != added {
+                record.plugin["on:" + id] = nil
+                for key in record.plugin.keys where key.hasPrefix("setting:" + id + ".") { record.plugin[key] = nil }
+            }
             record.plugin["ext:" + id] = added
-            if added == nil { record.plugin["on:" + id] = nil }
             return .external(Book.part(record.plugin, "ext:"))
         case .recordSince:
             return .since(record.plugin[sinceKey].flatMap(Double.init) ?? now)

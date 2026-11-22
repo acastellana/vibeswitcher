@@ -270,6 +270,44 @@ struct ExternalPluginsTests {
         #expect(cards(world).contains { $0.isOpen }, "on again: it starts afresh")
     }
 
+    /// A copy of the probe plugin in `name`, its program with `extra` appended (other bytes, the same id).
+    private func copy(_ name: String, extra: String = "") throws -> URL {
+        let folder = scratch.url(name)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let source = URL(fileURLWithPath: Self.probe)
+        try writeClosedOnExec(String(contentsOf: source.appendingPathComponent(PluginManifest.fileName), encoding: .utf8),
+                              to: folder.appendingPathComponent(PluginManifest.fileName), mode: 0o644)
+        let program = try String(contentsOf: source.appendingPathComponent("plugin.py"), encoding: .utf8)
+        try writeClosedOnExec(program + extra, to: folder.appendingPathComponent("plugin.py"))
+        return folder
+    }
+
+    /// Removed, then another program added under the same id: off, its settings at their defaults, nothing of the
+    /// old one inherited (automated review 1). (An id already listed is refused at `plugin add`: removing comes first.)
+    @Test func aPluginAddedBackUnderItsIdInheritsNothing() async throws {
+        let world = try await CardWorld.make(scratch, plugins: [ShellPlugin()])
+        defer { world.stop() }
+        let first = try copy("probe-first")
+        _ = try await added(world, folder: first.path)
+        _ = try await ask(world, ["normal"])
+        for _ in 0..<5 where !cards(world).contains(where: \.isOpen) { await look(world) }
+        let set = try #require(await world.ask("set", ["key": .string("probe_depth"), "value": .string("3")]))
+        try #require(set.ok, "\(set)")
+        let vault = world.world.link.vaultV2
+        #expect(try vault.pluginSettings()["probe.depth"] == "3")
+
+        let removed = try #require(await world.ask("plugin.remove", ["plugin": .string("probe")]))
+        try #require(removed.ok, "\(removed)")
+        #expect(try vault.pluginSettings()["probe.depth"] == nil && vault.plugins()["probe"] == nil, "removed: none of its keys left")
+
+        let second = try copy("probe-second", extra: "\n# another program\n")
+        _ = try await added(world, folder: second.path, on: false)
+        #expect(try vault.plugins()["probe"] == nil && vault.pluginSettings().isEmpty, "added back: off, at its defaults")
+        let listed = try #require(await world.ask("plugin.list", action: nil))
+        #expect(listed.result?["plugins"]?.array?.contains { $0["id"]?.string == "probe" && $0["on"]?.bool == false } == true, "\(listed)")
+
+    }
+
     /// Its settings are checked by its program and kept in the vault; a program changed since it was added is held.
     @Test func settingsAreCheckedAndAChangedProgramIsHeld() async throws {
         let world = try await CardWorld.make(scratch, plugins: [ShellPlugin()])
