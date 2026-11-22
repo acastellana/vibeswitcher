@@ -125,3 +125,24 @@ test('each kind is told only while its choice is on: something needs me, a sessi
   assert.deepEqual(wanted(told, { needs: false, done: true }).map((note) => note.key), ['stopped:l1', 'finished:s2']);
   assert.equal(sounding(wanted(told, { needs: false, done: true })), false, 'no sound for what isn’t told');
 });
+
+test('a reminder from the node is told once a wait or a stall, as its own kind, not for a paused session', () => {
+  const reminder = (session, kind, since, fields = {}) => ({ session, kind, since, dueAt: since, title: 'example-app is still waiting for you',
+    subtitle: 'For 11 min', body: 'Bash: npm test\u001b[2J', ...fields });
+  const withNode = (reminders, sessions = [session('s1', { status: 'needs-you' })]) => ({ ...state({ sessions }), node: { reminders } });
+  const none = summarize(withNode([]));
+  const due = summarize(withNode([reminder('s1', 'waiting', '2026-11-22T09:00:00.000Z')]));
+  const told = changes(none, due);
+  assert.deepEqual(told.map((note) => [note.key, note.title, note.body, note.href]), [[
+    'reminder:s1:waiting:2026-11-22T09:00:00.000Z', 'example-app is still waiting for you', 'For 11 min · Bash: npm test[2J', '#/s/s1']]);
+  assert.equal(kindOf(told[0]), 'reminders');
+  // The same reminder standing: told once. A new wait (another episode): told again.
+  assert.deepEqual(changes(due, summarize(withNode([reminder('s1', 'waiting', '2026-11-22T09:00:00.000Z')]))), []);
+  assert.equal(changes(due, summarize(withNode([reminder('s1', 'waiting', '2026-11-22T10:00:00.000Z')]))).length, 1);
+  // Not counted as needing you (the title's count), and turned off by its own choice.
+  assert.equal(due.asks.size, 1);
+  assert.deepEqual(wanted(told, { needs: true, done: true, reminders: false }), []);
+  assert.equal(wanted(told, { needs: false, done: false, reminders: true }).length, 1);
+  // A paused session isn't reminded of.
+  assert.equal(summarize(withNode([reminder('s1', 'stalled', 'x')], [session('s1', { paused: true })])).reminders.size, 0);
+});

@@ -162,3 +162,13 @@ test('a chat of more than 60 pictures drawn again asks for none again, and the k
   assert.equal(big.known('s1', huge('h1')), null, 'past 96 MB the least lately used went');
   assert.ok(big.known('s1', huge('h0')) && big.known('s1', huge('h13')));
 });
+
+test('a chat opens where you were reading it, else at what is new since you looked, else at its end', async () => {
+  const { openingPlace } = await import('../js/chatops.js');
+  const keys = ['a', 'b', 'c', 'd'];
+  assert.deepEqual(openingPlace({ saved: { key: 'b', offset: 30 }, markKey: 'c', keys }), { kind: 'saved', index: 1, offset: 30 });
+  assert.deepEqual(openingPlace({ saved: { key: 'gone', offset: 30 }, markKey: 'c', keys }), { kind: 'marker', index: 2, offset: 0 });
+  assert.deepEqual(openingPlace({ markKey: 'c', keys }), { kind: 'marker', index: 2, offset: 0 });
+  assert.deepEqual(openingPlace({ keys }), { kind: 'end', index: 3, offset: 0 });
+  assert.deepEqual(openingPlace({ saved: { key: 'a', offset: -5 }, keys }), { kind: 'saved', index: 0, offset: 0 });
+});
