@@ -303,13 +303,17 @@ struct ExternalPluginsTests {
         }
         let ends = process.readEnds
         try #require(ends.count == 2)
+        // Each read end's file ("pipe:[inode]"): closed, or its number another file's now (another test may take it first).
+        let file = { (fd: Int32) in try? FileManager.default.destinationOfSymbolicLink(atPath: "/proc/self/fd/\(fd)") }
+        let pipes = ends.map(file)
+        try #require(pipes.allSatisfy { $0?.hasPrefix("pipe:") == true }, "\(pipes)")
         let ended = Locked<String?>(nil)
         process.onEnd = { ended.value = $0 }
         let payload = Data(#"{"words":["linger"]}"#.utf8).base64EncodedString()
         process.call("card", ["request": "r1", "payload": payload, "settings": [String: String]()]) { _ in }
         #expect(await eventually(timeout: 30) { ended.value != nil }, "the wrong id ended it")
         // Its read ends' numbers let go: pipes made now take the lowest free numbers, theirs among them.
-        #expect(await eventually(timeout: 30) { ends.allSatisfy { fcntl($0, F_GETFD) == -1 } }, "its descriptors closed")
+        #expect(await eventually(timeout: 30) { zip(ends, pipes).allSatisfy { file($0) != $1 } }, "its descriptors closed")
         for _ in 0..<16 {
             var pair: [Int32] = [-1, -1]
             guard Sys.pipeClosedOnExec(&pair) == 0 else { break }
