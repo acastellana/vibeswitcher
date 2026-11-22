@@ -125,6 +125,8 @@ public struct ApprovalVoice: Sendable {
         case "hooks.install": return "install VibeSwitcher's hooks"
         case "approve": return "accept the batch you listed"
         case "hooks.remove": return "remove VibeSwitcher's hooks"
+        case "plugin.on": return "turn a plugin on for you"
+        case "plugin.off": return "turn a plugin off for you"
         case "build.switch": return "switch your node to another build"
         case "web.open": return "open the web page to a device"
         case "web.revoke": return "revoke a device's web access"
