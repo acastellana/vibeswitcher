@@ -61,14 +61,18 @@ extension Requests {
     /// naming each reason. On `queue`.
     func resume(_ taken: [RestartReopen.Entry], engine: LeadEngine, request: NodeWire.Request,
                 giveBack: @escaping ([RestartReopen.Entry]) -> Void, reply: @escaping (NodeWire.Reply) -> Void) {
-        let (home, claudeLink) = (engine.home, engine.preflight.claudeLink)
+        let (home, claudeLink, nodeRoot) = (engine.home, engine.preflight.claudeLink, root)
         let environment = VibePaths.isAccountRoot(root, accountHome: VibePaths.accountHome) ? [:] : ["VIBESWITCHER_HOME": root.path]
         let (link, queue, note) = (self.link, self.queue, self.note)
         // Off the queue: the folders, the transcripts and the link are read from the disk.
         DispatchQueue.global(qos: .userInitiated).async {
-            let program = NodePreflight.resolve(claudeLink)
+            // Each agent's program by its link (never a PATH lookup): Claude's, and Codex's for the user's own Codex sessions.
+            let claude = NodePreflight.resolve(claudeLink)
+            let codex = taken.contains { $0.agent == .codex } ? NodePreflight.codex(root: nodeRoot) : (path: nil, why: nil)
+            let programOf = { (entry: RestartReopen.Entry) in entry.agent == .codex ? codex : claude }
             let checked = taken.map { entry -> (RestartReopen.Entry, Result<LeadEngine.Reopening, LeadEngine.Refused>) in
-                guard program.path != nil else { return (entry, .failure(.init(program.why ?? "no claude for this node"))) }
+                let program = programOf(entry)
+                guard program.path != nil else { return (entry, .failure(.init(program.why ?? "no \(entry.agent.rawValue) for this node"))) }
                 return (entry, LeadEngine.reopenable(entry, home: home))
             }
             queue.async {
@@ -96,10 +100,14 @@ extension Requests {
                     case .failure(let refused): return refuse(refused.description)
                     case .success(let found): plan = found
                     }
-                    guard let path = program.path else { return refuse(program.why ?? "no claude for this node") }
-                    let spawn = SpawnRequest(cwd: plan.folder, command: Self.claudeCommand(program: path, model: plan.model, resume: plan.conversation),
-                                             env: environment, cols: plan.cols, rows: plan.rows, keepShell: false,
-                                             label: Self.sessionLabels["claude"] ?? "Claude", agent: "claude")
+                    let program = programOf(entry)
+                    guard let path = program.path else { return refuse(program.why ?? "no \(plan.agent) for this node") }
+                    // Codex resumes as `codex resume <id>` (the app's `LaunchPlan.resumeCommand`), with the model it kept.
+                    let command = plan.agent == "codex"
+                        ? RecentProjects.shellQuote(path) + " resume " + RecentProjects.shellQuote(plan.conversation)
+                        : Self.claudeCommand(program: path, model: plan.model, resume: plan.conversation)
+                    let spawn = SpawnRequest(cwd: plan.folder, command: command, env: environment, cols: plan.cols, rows: plan.rows, keepShell: false,
+                                             label: Self.sessionLabels[plan.agent] ?? "Claude", agent: plan.agent)
                     link.spawn(spawn) { started in
                         queue.async {
                             switch started {

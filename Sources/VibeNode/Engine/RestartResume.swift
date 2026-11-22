@@ -130,6 +130,18 @@ extension LeadEngine {
         return UUID(uuidString: stem) != nil ? stem : nil
     }
 
+    /// The conversation a Codex rollout's name gives (`rollout-<when>-<id>.jsonl`: its last 36 characters), only for a
+    /// Codex transcript inside Codex's sessions folder (`TranscriptReader.checkedURL` says `.codex`); nil for anything
+    /// else, a file so named among Claude's transcripts included. Never `conversation(ofTranscript:)`'s, which the lead's
+    /// resume and Claude's sessions take: only the user's own Codex sessions (`SessionReopen.swift`) ask this.
+    static func conversation(ofCodexRollout path: String, home: String) -> String? {
+        guard let (url, format) = TranscriptReader.checkedURL(path, home: home), format == .codex, url.pathExtension == "jsonl" else { return nil }
+        let stem = url.deletingPathExtension().lastPathComponent
+        guard stem.hasPrefix("rollout-"), stem.count > 44 else { return nil }
+        let id = String(stem.suffix(36))
+        return UUID(uuidString: id) != nil && stem.dropLast(36).hasSuffix("-") ? id : nil
+    }
+
     /// The board's workers that were running: each task's worker not stopped nor released, with its branch.
     static func runningWorkers(_ board: LeadBoard) -> [EngineState.Reopen.Worker] {
         working(board).compactMap { task in

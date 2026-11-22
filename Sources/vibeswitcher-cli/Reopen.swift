@@ -57,7 +57,7 @@ enum ReopenCommand {
         let what = forget
             ? "This puts away the offer to reopen \(chosen.count) session\(chosen.count == 1 ? "" : "s") (they stay in Claude's history):\n"
                 + chosen.map { "  " + line($0) }.joined(separator: "\n")
-            : "This reopens, as you, each in its same conversation (Claude with --resume, in its folder):\n"
+            : "This reopens, as you, each in its same conversation (Claude with --resume, Codex with resume, in its folder):\n"
                 + chosen.map { "  " + line($0) }.joined(separator: "\n")
         let action = UUID().uuidString.lowercased()
         let outcome = TypedWord.ask(approval: client.approvalRule, code: NodeIds.code(action: action), what: what)
@@ -132,7 +132,9 @@ enum ResumeCommand {
             for session in ended {
                 Say.out("  " + ReopenCommand.line(session) + "  ended \(ConfigSeal.inert(session["at"]?.string ?? "?", limit: 40))")
                 if let conversation = session["conversation"]?.string {
-                    Say.out("      by hand: cd \(RecentProjects.shellQuote(ConfigSeal.inert(session["folder"]?.string ?? "", limit: .max))) && claude --resume "
+                    // Codex resumes as `codex resume <id>` (the app's `LaunchPlan.resumeCommand`), Claude with --resume.
+                    let resume = session["agent"]?.string == "codex" ? "codex resume " : "claude --resume "
+                    Say.out("      by hand: cd \(RecentProjects.shellQuote(ConfigSeal.inert(session["folder"]?.string ?? "", limit: .max))) && \(resume)"
                         + RecentProjects.shellQuote(ConfigSeal.inert(conversation, limit: 40)))
                 }
             }
@@ -151,7 +153,8 @@ enum ResumeCommand {
         }
         let action = UUID().uuidString.lowercased()
         let outcome = TypedWord.ask(approval: client.approvalRule, code: NodeIds.code(action: action),
-                                    what: "This starts again, as you, in its same conversation (Claude with --resume, in its folder):\n  " + ReopenCommand.line(session))
+                                    what: "This starts again, as you, in its same conversation (\(session["agent"]?.string == "codex" ? "Codex with resume" : "Claude with --resume"), in its folder):\n  "
+                                        + ReopenCommand.line(session))
         guard outcome == .typed else { return Say.refused(TypedWord.refusal(outcome)) }
         switch client.request("session.resume", args: ["session": session["session"] ?? .string(wanted)], action: action, timeout: 180) {
         case .failure(let failure): return Say.failed(failure)

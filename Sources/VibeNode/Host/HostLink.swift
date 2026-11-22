@@ -525,6 +525,10 @@ public final class HostLink: @unchecked Sendable {
         }
     }
 
+    /// Told on `queue` of each session something is about to be typed into (`type`, `input`; never a terminal's own
+    /// answers): the Run-card shell tidier's (`ShellTidying.swift`), which then leaves a shell the user took over alone.
+    public var onTyped: ((UUID) -> Void)?
+
     /// Writes these into the session as one unit (`HostRequest.inputUnit`: nothing anyone else types goes in between),
     /// each after its delay and once the one before went in, then tells `confirmed` (on `queue`) whether all of them
     /// did. Once one didn't, the rest aren't sent: an Enter after a paste cut short would submit what did go in. `gate`
@@ -534,6 +538,7 @@ public final class HostLink: @unchecked Sendable {
         perform { [self] in
             guard !writes.isEmpty else { return confirmed(true) }
             guard !isGone else { return confirmed(false) }
+            onTyped?(id)
             units[id, default: []].append(Unit(writes: writes, gate: gate, confirmed: confirmed))
             if units[id]?.count == 1 { runUnit(id) }
         }
@@ -718,6 +723,7 @@ public final class HostLink: @unchecked Sendable {
     public func input(_ id: UUID, bytes: Data) {
         perform { [self] in
             guard let terminal = terminals[id], !terminal.watch, state == .connected, !bytes.isEmpty else { return }
+            onTyped?(id)
             send(.input(id: id, bytes: bytes, reply: false), holdable: false)
         }
     }

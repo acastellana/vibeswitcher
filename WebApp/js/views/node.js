@@ -7,6 +7,8 @@ import { since, plural, tilde } from '../words.js';
 import { usageFacts } from '../settings.js';
 import { dictationGroup } from '../dictate.js';
 import { healthFacts } from '../health.js';
+import { updateFacts } from '../updates.js';
+import { copyLine } from './cards.js';
 
 const row = (name, ...value) => h('div', { class: 'fact' }, h('dt', null, name), h('dd', null, value));
 const ago = (iso) => (iso ? h('time', { data: { since: iso }, title: new Date(iso).toLocaleString() }, since(iso)) : 'unknown');
@@ -34,6 +36,21 @@ export function healthGroup(health) {
       ? row(name, h('span', { class: facts.tone === 'done' ? 'dot tone-done' : 'dot tone-needs-you', 'aria-hidden': 'true' }), value)
       : row(name, value))),
     facts.lines.length ? h('ul', { class: 'lines' }, facts.lines.map((line) => h('li', null, line.at ? [ago(line.at), ' · '] : null, line.text))) : null);
+}
+
+// Check for Updates (the node's `update`): up to date or a newer build, the last look's time, why a look failed, and
+// the lines to copy (install, switch, check now). A page asks GitHub nothing.
+export function updatesGroup(update) {
+  const facts = updateFacts(update);
+  if (!facts) return null;
+  const tone = facts.tone === 'done' ? 'dot tone-done' : facts.tone === 'needs-you' ? 'dot tone-needs-you' : 'dot';
+  return group('Updates',
+    h('dl', { class: 'facts-list' },
+      row('State', h('span', { class: tone, 'aria-hidden': 'true' }), facts.state),
+      facts.checkedAt ? row('Last checked', ago(facts.checkedAt), ' ago') : null,
+      facts.problem ? row('Last try', `couldn’t look: ${facts.problem}`) : null),
+    h('div', { class: 'card-command' }, h('span', { class: 'card-command-label' }, 'In a terminal'),
+      facts.lines.map((line) => copyLine(line.text, line.label))));
 }
 
 export function nodeView(app) {
@@ -98,6 +115,7 @@ export function nodeView(app) {
           row('State', node.web.state === 'listening' ? `Listening on 127.0.0.1:${node.web.port}` : node.web.state === 'off' ? 'Off' : node.web.state),
           row('Pages paired', String(node.web.tokens)),
           row('Open now', String(node.web.connections)))) : null,
+      updatesGroup(node.update),
       group('Build',
         h('dl', { class: 'facts-list' },
           row('Running', h('code', null, notes?.build || server.commit)),
