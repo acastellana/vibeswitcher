@@ -94,10 +94,36 @@ public enum LeadVaultV2 {
         /// it sealed it (the security follow-ups' item 19). Only that session's own check, as a lead's, is a taking. None
         /// once a seal under the id was made for another while its earlier one lived (see `sealed`).
         public var targets: [String: String] = [:]
+        /// The feature plugins' record in one field: on and off (`on:<id>`), the settled requests (`settled:<plugin>:<id>`,
+        /// when), the settings (`setting:<plugin>.<name>`). One field, not three: a tenth stored field on this record made
+        /// the host crash (SIGSEGV) on a config look (`config held`), which reads like a stack too near its end on that
+        /// path; see the plugins report of 2026-11-22.
+        public var plugin: [String: String] = [:]
+
         /// Each feature plugin the user turned on or off, by id (`setPlugin`).
-        public var plugins: [String: Bool] = [:]
+        public var plugins: [String: Bool] {
+            get { Self.part(plugin, "on:").mapValues { $0 == "true" } }
+            set { Self.setPart(&plugin, "on:", newValue.mapValues { $0 ? "true" : "false" }) }
+        }
         /// Each plugin request settled, by `<plugin>:<id>`: when (`settleRequests`).
-        public var settledRequests: [String: Double] = [:]
+        public var settledRequests: [String: Double] {
+            get { Self.part(plugin, "settled:").compactMapValues(Double.init) }
+            set { Self.setPart(&plugin, "settled:", newValue.mapValues { String($0) }) }
+        }
+        /// Each feature plugin's setting the user set, by key (`setPluginSetting`).
+        public var pluginSettings: [String: String] {
+            get { Self.part(plugin, "setting:") }
+            set { Self.setPart(&plugin, "setting:", newValue) }
+        }
+
+        static func part(_ record: [String: String], _ prefix: String) -> [String: String] {
+            Dictionary(uniqueKeysWithValues: record.filter { $0.key.hasPrefix(prefix) }.map { (String($0.key.dropFirst(prefix.count)), $0.value) })
+        }
+
+        static func setPart(_ record: inout [String: String], _ prefix: String, _ part: [String: String]) {
+            record = record.filter { !$0.key.hasPrefix(prefix) }
+            for (key, value) in part { record[prefix + key] = value }
+        }
 
         public init() {}
 
@@ -111,8 +137,7 @@ public enum LeadVaultV2 {
             first = try container.decodeIfPresent([String: Double].self, forKey: .first) ?? [:]
             spent = try container.decodeIfPresent([String: Double].self, forKey: .spent) ?? [:]
             targets = try container.decodeIfPresent([String: String].self, forKey: .targets) ?? [:]
-            plugins = try container.decodeIfPresent([String: Bool].self, forKey: .plugins) ?? [:]
-            settledRequests = try container.decodeIfPresent([String: Double].self, forKey: .settledRequests) ?? [:]
+            plugin = try container.decodeIfPresent([String: String].self, forKey: .plugin) ?? [:]
         }
     }
 
