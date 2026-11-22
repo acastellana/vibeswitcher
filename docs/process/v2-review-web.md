@@ -60,7 +60,7 @@ user notices), **missing**, **blocked** (waits on a user decision or a real Mac)
 
 The improve rows, most visible first, each its own commit with tests (see the parity rows):
 
-1. The chat opens where you left it, else at "New since you looked".
-2. Reminders about waiting or stuck sessions notify on the page, with their toggle.
-3. The sidebar's all-done check and replaced leads.
-4. A short composer placeholder on a phone.
+1. The chat opens where you left it, else at "New since you looked" (`c005d8cb`).
+2. Reminders about waiting or stuck sessions notify on the page, with their toggle (`fc1ec96c`, `f9ea53a0`).
+3. The sidebar's all-done check and replaced leads (`21cc9c20`).
+4. A short composer placeholder on a phone (`ea496b0b`).
