@@ -26,16 +26,17 @@ struct SessionResumeTests {
         world.queue.sync { world.engine.noteOpenSessions() }
         #expect(world.queue.sync { world.engine.openSessions?.entries.map(\.id) } == [id])
 
-        // It ends; past the grace it's on the ended list.
+        // It ends; past the grace it's on the ended list. The engine's clock fixed before the end (its own refresh may
+        // note the end first, and then notes it at this same time), and on a whole second: the wire carries dates to
+        // the millisecond, rounded, so a time a fraction of a millisecond past one came back that much later and the
+        // "listed in" words, rounded up, read 27 s (the CI flake of 2026-11-22).
+        let endedAt = Date(timeIntervalSince1970: Date().timeIntervalSince1970.rounded(.down))
+        world.queue.sync { world.engine.openNow = { endedAt } }
         world.queue.sync { world.world.link.kill(id) }
         try #require(await eventually(timeout: 60) { !live() })
         // Within the grace: not listed yet, but `status`'s `ending` says it ended and when it will be listed, and
         // `resume`'s words say so rather than "none ended" (the acceptance run's A8).
-        let endedAt = Date()
-        world.queue.sync {
-            world.engine.openNow = { endedAt }
-            world.engine.noteOpenSessions()
-        }
+        world.queue.sync { world.engine.noteOpenSessions() }
         #expect(world.queue.sync { world.engine.endedSessions.isEmpty })
         let ending = try #require(world.queue.sync { world.engine.endingValue.array })
         #expect(ending.count == 1 && ending[0]["session"]?.string == NodeIds.session(host: id), "\(ending)")

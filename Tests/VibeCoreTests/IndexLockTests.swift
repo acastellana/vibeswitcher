@@ -189,7 +189,10 @@ struct IndexLockHolderTests {
         let path = root + "/.git/index.lock"
         let holder = try await holdOpen(path)
         defer { holder.terminate(); waitForEnd(holder) }
-        let lock = try #require(IndexLock.find(in: root))
+        // The search given all the time it takes: these ask who holds it, not how soon that's known (the Mac CI's flake
+        // of 2026-11-22: a whole-table search on a loaded runner ran past the default 10 s, so a stale lock read as
+        // unchecked; the deadline's own cases are below, with a search of the test's).
+        let lock = try #require(IndexLock.find(in: root, timeLimit: hangGuard))
         #expect(lock.holder?.pid == holder.processIdentifier)
         #expect(lock.holder?.command == "sleep 300")
         #expect(lock.description.contains("held by pid \(holder.processIdentifier) (sleep 300)"))
@@ -213,7 +216,7 @@ struct IndexLockHolderTests {
         try git.run()
         defer { kill(-git.processIdentifier, SIGTERM); waitForEnd(git) }
         #expect(await eventually { FileManager.default.fileExists(atPath: editing) })
-        let lock = try #require(IndexLock.find(in: root))
+        let lock = try #require(IndexLock.find(in: root, timeLimit: hangGuard))
         #expect(lock.holder?.pid == git.processIdentifier)
         #expect(lock.holder?.command.contains("commit -q -a") == true)
         #expect(!lock.removeIfStale(minimumAge: 0))
@@ -223,7 +226,7 @@ struct IndexLockHolderTests {
         let root = try repo()
         let path = root + "/.git/index.lock"
         let written = leaveStaleLock(path, age: 17 * 60)
-        let lock = try #require(IndexLock.find(in: root))
+        let lock = try #require(IndexLock.find(in: root, timeLimit: hangGuard))
         #expect(lock.stale && lock.size == 0)
         #expect(lock.path.hasSuffix("/.git/index.lock"))
         #expect(lock.description.contains("\(lock.path) is stale: no process has it open and no git runs in \(root)"))
@@ -232,9 +235,9 @@ struct IndexLockHolderTests {
         #expect(lock.age() >= 17 * 60)
         // One just made may be a git at work that wasn't seen yet: left.
         leaveStaleLock(path, age: 5)
-        #expect(!(try #require(IndexLock.find(in: root))).removeIfStale())
+        #expect(!(try #require(IndexLock.find(in: root, timeLimit: hangGuard))).removeIfStale(timeLimit: hangGuard))
         leaveStaleLock(path, age: 120)
-        #expect(try #require(IndexLock.find(in: root)).removeIfStale())
+        #expect(try #require(IndexLock.find(in: root, timeLimit: hangGuard)).removeIfStale(timeLimit: hangGuard))
         #expect(!FileManager.default.fileExists(atPath: path))
     }
 
@@ -256,7 +259,7 @@ struct IndexLockHolderTests {
             try burner.run()
             burners.append(burner)
         }
-        let lock = try #require(IndexLock.find(in: root))
+        let lock = try #require(IndexLock.find(in: root, timeLimit: hangGuard))
         #expect(lock.checked && lock.stale, "\(lock.description)")
     }
 
@@ -288,8 +291,8 @@ struct IndexLockHolderTests {
         defer { kill(-git.processIdentifier, SIGTERM); waitForEnd(git) }
         #expect(await eventually { FileManager.default.fileExists(atPath: editing) })
         leaveStaleLock(root + "/.git/index.lock", age: 600)
-        #expect(IndexLock.find(in: root)?.stale == true)
-        #expect(IndexLock.find(in: worktree)?.holder?.pid == git.processIdentifier)
+        #expect(IndexLock.find(in: root, timeLimit: hangGuard)?.stale == true)
+        #expect(IndexLock.find(in: worktree, timeLimit: hangGuard)?.holder?.pid == git.processIdentifier)
     }
 
     /// A search for the holder that runs out of time (the process table takes minutes on a loaded Mac) says so, with

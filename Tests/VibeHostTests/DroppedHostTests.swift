@@ -46,10 +46,12 @@ final class DroppingHost {
                     _ = frame.withUnsafeBytes { Sys.write(fd, $0.baseAddress, $0.count) }
                     _ = Self.frame(fd)
                 }
-                close(fd)
+                // Counted before the close: a client that sees its connection end can count on it (the CI flake of
+                // 2026-11-22: the test read `dropped` once its call failed, before the count went up).
                 self?.lock.lock()
                 self?.count += 1
                 self?.lock.unlock()
+                close(fd)
             }
         }
     }

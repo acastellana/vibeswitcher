@@ -21,7 +21,11 @@ struct ProjectAllowListTests {
     /// A repository with one commit, in a new folder.
     func repository(_ name: String) throws -> String {
         let root = try folder(name)
-        for args in [["init", "-q", "-b", "main"], ["config", "user.email", "t@t"], ["config", "user.name", "T"], ["config", "commit.gpgsign", "false"]] {
+        // No automatic maintenance: git 2.5x's commit starts `maintenance run --auto` in the background, whose
+        // worktree-prune task removed a test's `.git/worktrees` entry while it was being written (the CI flake of
+        // 2026-11-21: "gitdir" couldn't be written, its folder gone).
+        for args in [["init", "-q", "-b", "main"], ["config", "user.email", "t@t"], ["config", "user.name", "T"], ["config", "commit.gpgsign", "false"],
+                     ["config", "maintenance.auto", "false"], ["config", "gc.auto", "0"]] {
             #expect(Git.run(args, in: root).ok)
         }
         try "a\n".write(toFile: root + "/a.txt", atomically: true, encoding: .utf8)
