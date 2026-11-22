@@ -459,6 +459,7 @@ extension CardStore.Card {
                 "shell": text(shell.shell), "name": text(shell.name), "why": text(shell.why),
             ])
         }
+        if let plugin { fields["plugin"] = plugin.value }
         if let base {
             var b: [String: NodeWire.Value] = [:]
             b["branch"] = .string(base.branch)

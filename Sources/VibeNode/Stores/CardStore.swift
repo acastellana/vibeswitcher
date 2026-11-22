@@ -16,6 +16,8 @@ public final class CardStore: @unchecked Sendable {
         case baseMove = "base"
         /// A shell an agent asked for (`vs-shell run`, `ShellAsk`): Run or Decline (`ShellCards.swift`).
         case shell
+        /// A feature plugin's request (`Plugins/`): its card is data (`PluginCard`), answered with its words.
+        case plugin
     }
 
     /// A shell request's card (`ShellCards.swift`): the request as the host stamped it, never changed, and what became
@@ -109,6 +111,8 @@ public final class CardStore: @unchecked Sendable {
         public var config: ConfigHoldStore.Shown?
         public var base: BaseMoveStore.Shown?
         public var shell: ShellShown?
+        /// A feature plugin's card (`PluginCard`): what the plugin drew, after the core's checks.
+        public var plugin: PluginCard?
         /// What became of the user's answer, when it wasn't simply taken (`withdrawn`, `afterAutoDecision`,
         /// `alreadyAnswered`, `missing`, an approval not recorded), or of an accept.
         public var notice: String?
@@ -137,7 +141,7 @@ public final class CardStore: @unchecked Sendable {
             case .question: return question?.rank == .blocking
             case .approval, .configHeld, .baseMove: return true
             // The agent waits on it, not the lead's work.
-            case .shell: return false
+            case .shell, .plugin: return false
             }
         }
     }

@@ -191,9 +191,12 @@ public enum NodeWire {
         /// The build of the web files this server holds (`/build.json`'s `assets`). Nil, and not written, on the Unix
         /// socket.
         public var assets: String?
+        /// The feature plugins that are on, each `{id, title}` (`PluginRegistry.onValue`): a plugin that is off isn't
+        /// listed, and the page draws nothing for it. Nil, and not written, from a server with no engine.
+        public var plugins: Value?
 
         public init(node: String, epoch: String, server: Server, host: Host, kinds: [String], peer: Peer, rule: String,
-                    auth: Value? = nil, assets: String? = nil) {
+                    auth: Value? = nil, assets: String? = nil, plugins: Value? = nil) {
             v = NodeWire.version
             kind = "hello"
             self.node = node
@@ -205,6 +208,7 @@ public enum NodeWire {
             self.rule = rule
             self.auth = auth
             self.assets = assets
+            self.plugins = plugins
         }
     }
 
@@ -331,6 +335,8 @@ public enum NodeWire {
         // `vibeswitcher approve` (2026-11-22): the list of what a plain accept settles changes nothing (no typed word);
         // the batch's go-ahead is the user's voice, one typed code, each item recorded as its own action.
         "approve.list": .user, "approve": .user,
+        // The feature plugins (2026-11-22): the list a read, on and off the user's voice.
+        "plugin.list": .anyone, "plugin.on": .user, "plugin.off": .user,
     ]
 
     /// The user's-voice kinds that change nothing (EN-D5: no typed word): `start` to a running node says when it
@@ -370,7 +376,7 @@ public enum NodeWire {
                                "push", "push.decline",
                                "session.reopen", "mail", "prompt-audit", "session.rename", "session.pause",
                                "session.resume", "shells", "session.close-shells", "presets.edit",
-                               "recent", "brief", "update.check", "approve.list", "approve"]
+                               "recent", "brief", "update.check", "approve.list", "approve", "plugin.list", "plugin.on", "plugin.off"]
 
     // MARK: Lines
 

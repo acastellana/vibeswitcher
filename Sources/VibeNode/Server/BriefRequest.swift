@@ -114,6 +114,8 @@ public enum NodeBrief {
                 case .configHeld: return "held config to look at"
                 case .baseMove: return "a moved base to accept or keep"
                 case .shell: return "a shell an agent asks to open"
+                // A feature plugin's: what one is called (`PluginCard.noun`), as its plugin says it.
+                case .plugin: return "a " + NodeBrief.clean(card.plugin?.noun ?? "request from an agent")
                 case .question: return "a question"
                 }
             }

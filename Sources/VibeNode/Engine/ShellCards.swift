@@ -41,6 +41,8 @@ extension LeadEngine {
     /// Looks at the folder now: stamps checked with the host (once each), what's past its time expired, cards drawn,
     /// the askers told; `done` on `queue` once drawn (a look under way: at once). On `queue`.
     func lookAtShellRequests(done: (() -> Void)? = nil) {
+        // Off (`plugin off shell`), or not known yet: nothing is looked at (the plugins' look drops what's filed).
+        guard plugins.isOn(ShellPlugin.id) else { done?(); return }
         guard !shellLooking else { done?(); return }
         shellLooking = true
         let (folder, vault, trusted, now, note) = (shellFolder, cardVault, shellTrusted, shellNow(), self.note)

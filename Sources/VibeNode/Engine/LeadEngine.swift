@@ -58,6 +58,8 @@ public final class LeadEngine: @unchecked Sendable {
         /// Writes a briefing for its prompt, blocking (`Requests.brief`): the user's node's server gives headless Claude
         /// with `BriefingPrompts.system`; none by default (the written template).
         public var summarizeBrief: Summarizer.Generate?
+        /// The feature plugins (`PluginRegistry.standard()` by default; a test's own).
+        public var plugins: [FeaturePlugin]?
 
         public init() {}
     }
@@ -310,6 +312,17 @@ public final class LeadEngine: @unchecked Sendable {
     var shellTimer: Subscription?
     var shellNow: () -> Date = Date.init
     let shellWork = DispatchQueue(label: "vibenode.lead-engine.shell-requests", qos: .userInitiated)
+    // Feature plugins (`Plugins/`, `PluginEngine.swift`), on `queue`: the registry and what the vault keeps of on and
+    // off, each plugin request's card, the stamps the host vouched for (per plugin), the looks under way, the vault asked,
+    // the 15 s look, the clock; the folders read on `pluginWork`.
+    public let plugins: PluginRegistry
+    var pluginCards: [PluginKey: String] = [:]
+    var pluginTrusted: [String: [String: WalletStamp]] = [:]
+    var pluginLooking: Set<String> = []
+    var pluginAsking = false
+    var pluginTimer: Subscription?
+    var pluginNow: () -> Date = Date.init
+    let pluginWork = DispatchQueue(label: "vibenode.lead-engine.plugins", qos: .userInitiated)
     // The developer tools notice (`ToolchainLook.swift`), on `queue`: the notices the last look found, when it ran,
     // whether one is under way; how the node's tools are asked (a test's stand-in) and the clock.
     public internal(set) var toolchainNotices: [String] = []
@@ -396,6 +409,7 @@ public final class LeadEngine: @unchecked Sendable {
         self.sessions = sessions
         self.options = options
         self.note = note
+        plugins = PluginRegistry(options.plugins ?? PluginRegistry.standard())
         queue = link.queue
         reads = BoardReads(handTo: link.queue)
         preflight = NodePreflight(claudeLink: options.claudeLink ?? NodePreflight.claudeLink(root: root), git: options.git)
@@ -443,6 +457,7 @@ public final class LeadEngine: @unchecked Sendable {
 
     /// The host welcomed the link (each welcome, `HostLink.onWelcome`): what waited for its sessions goes on. On `queue`.
     public func welcomed() {
+        askPlugins()
         startPending()
         sessionsChanged()
         restartLook()

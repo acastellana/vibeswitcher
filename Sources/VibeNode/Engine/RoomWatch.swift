@@ -28,6 +28,8 @@ extension LeadEngine {
             }
             // Shell requests (`ShellCards.swift`): the folder looked at every 15 s.
             shellTimer = clock?.every(Self.shellLookEvery) { [weak self] in self?.queue.async { self?.lookAtShellRequests() } }
+            // The feature plugins (`Plugins/PluginEngine.swift`): each that is on looks every 15 s.
+            pluginTimer = clock?.every(Self.pluginLookEvery) { [weak self] in self?.queue.async { self?.lookAtPlugins() } }
         }
     }
 
