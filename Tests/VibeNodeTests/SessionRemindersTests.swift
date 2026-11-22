@@ -52,6 +52,10 @@ struct SessionRemindersTests {
         let first = waiting.first ?? ""
         #expect(waiting.count == 1, "\(waiting)")
         #expect(first.contains("is still waiting for you (For 11 min") && first.contains("on ttypts980"), "\(waiting)")
+        // The same, structured, for the page (the node stream's `reminders`): its session, kind and episode.
+        let due = nodes.queue.sync { nodes.reminders() }
+        #expect(due.count == 1 && due[0].kind == "waiting" && due[0].terminal == "ttypts980" && due[0].episode == started - 30, "\(due)")
+        #expect(due.first.map { WireSchema.check($0.value, as: "node.reminder", strict: true) } == .some(nil))
 
         // Looked at: the wait counts from the look.
         let id = try #require(nodes.queue.sync { nodes.sessions.first { $0.tty == "ttypts980" }.map(NodeSessions.id(of:)) })
@@ -66,6 +70,8 @@ struct SessionRemindersTests {
         #expect(stalled.count == 1, "\(notices())")
         #expect(line.contains("one command running for 16 min"), "\(line)")
         #expect(!line.contains("\u{1B}"), "\(line)")
+        let stalledReminder = nodes.queue.sync { nodes.reminders() }.first { $0.terminal == "ttypts981" }
+        #expect(stalledReminder?.kind == "stalled" && stalledReminder?.body.contains("\u{1B}") == false, "\(String(describing: stalledReminder))")
 
         // Paused (`vibeswitcher pause`): nothing reminds you of it.
         let marks = SessionMarks(root: root)

@@ -223,10 +223,14 @@ public enum WireSchema {
             shape("node", from: contractNode, [
                 field("node", .string), field("epoch", .string), field("root", .string), field("server", .shape("node.server")),
                 field("host", .shape("node.host")), field("rule", .shape("node.rule")), field("cards", .shape("node.cards")),
-                field("accepted", .list(.shape("node.accepted"))), field("notices", strings),
+                field("accepted", .list(.shape("node.accepted"))), field("notices", strings), field("reminders", .list(.shape("node.reminder"))),
                 field("restart", Kind.shape("node.restart").orNull), field("reopen", .list(.shape("node.reopen"))), field("ended", .list(.shape("node.ended"))), field("ending", .list(.shape("node.ending"))),
                 field("builds", Kind.any.orNull), field("web", .shape("node.web")), field("usage", Kind.shape("node.usage").orNull),
                 optional("health", .shape("node.health")), field("boost", Kind.shape("node.boost").orNull)]),
+            // A reminder due now (`NodeSessions.Reminder`, 2026-11-22): waiting on you 10 minutes, or no progress for 15.
+            shape("node.reminder", from: "NodeSessions.Reminder.value", [
+                field("session", .string), field("kind", .words(["waiting", "stalled"])), field("since", .date), field("dueAt", .date),
+                field("title", .string), field("subtitle", Kind.string.orNull), field("body", .string)]),
             // Boost (the app's `BoostMark`, 2026-11-21): null before the engine's first look.
             shape("node.boost", from: "LeadEngine.boostValue", [field("mode", .words(BoostMode.allCases.map(\.rawValue))), field("on", .bool),
                                                                field("why", .string), field("limits", .shape("node.boost.limits"))]),

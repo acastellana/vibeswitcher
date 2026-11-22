@@ -436,6 +436,9 @@ public final class Requests: @unchecked Sendable {
             "cards": Self.counts(engine?.cards.counts() ?? [:]),
             "accepted": .array(accepted.map(\.value)),
             "notices": .array(statusNotices().map(NodeWire.Value.string)),
+            // The reminders due now, each its session's (the page notifies once an episode: "Remind me about waiting or
+            // stuck sessions", 2026-11-22).
+            "reminders": .array((sessions?.reminders() ?? []).map(\.value)),
             "restart": engine?.restartValue ?? .null,
             "reopen": engine?.offeredValue ?? .array([]),
             "ended": engine?.endedValue ?? .array([]),
