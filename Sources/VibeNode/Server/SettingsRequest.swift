@@ -18,9 +18,11 @@ extension Requests {
         let folder = request.args?["folder"]?.string
         if let folder, !folder.hasPrefix("/") { return reply(.init(re: request.id, error: .init(.badArgs, "folder is an absolute path"))) }
         let (find, vault, home) = (repositoryOf, link.vault, self.home)
+        // The plugins that are on add their own sections (`PluginSettings.swift`); an off one's are absent.
+        let plugins = engine?.pluginSettingsShown ?? []
         (engine?.work ?? DispatchQueue.global(qos: .userInitiated)).async {
             var result: [String: NodeWire.Value] = [
-                "node": .object(["root": .string(files.root.path), "settings": .array(NodeSettings.node(files: files).map(\.wire))]),
+                "node": .object(["root": .string(files.root.path), "settings": .array((NodeSettings.node(files: files) + plugins).map(\.wire))]),
                 "project": .null,
                 "leftOut": .array(NodeSettings.leftOut.map { .object(["title": .string($0.title), "why": .string($0.why)]) }),
                 // The account's usage, read here (off the engine's queue) as the account watch reads it.
@@ -46,6 +48,21 @@ extension Requests {
 
     func set(_ request: NodeWire.Request, reply: @escaping (NodeWire.Reply) -> Void) {
         let refuse = { (code: NodeWire.Code, why: String) in reply(.init(re: request.id, error: .init(code, why))) }
+        // A plugin's setting (one that is on): kept in the vault (`LeadEngine.setPluginSetting`).
+        if let asked = request.args?["key"]?.string, NodeSettings.setting(asked) == nil, let engine, engine.pluginSetting(asked) != nil {
+            guard request.args?["folder"] == nil else { return refuse(.badArgs, "\(asked) is the node's, for every project: name no folder") }
+            guard let given = request.args?["value"]?.string else { return refuse(.badArgs, "set needs value (default puts it back)") }
+            return engine.setPluginSetting(asked, given: given) { result in
+                switch result {
+                case .failure(.badArgs(let why)): refuse(.badArgs, why)
+                case .failure(.gone(let why)), .failure(.refused(let why)): refuse(.refused, why)
+                case .success(let applied):
+                    reply(.init(re: request.id, result: .object(["key": .string(asked), "value": .string(Self.capped(applied.value)),
+                                                                 "was": .string(Self.capped(applied.was)), "scope": .string("node"),
+                                                                 "project": .null, "told": .null])))
+                }
+            }
+        }
         guard let asked = request.args?["key"]?.string, let setting = NodeSettings.setting(asked) else {
             return refuse(.badArgs, "set needs key, one of `vibeswitcher settings`'s")
         }

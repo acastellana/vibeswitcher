@@ -62,6 +62,8 @@ extension NodeSettings {
             try WorkingPolicy.save(value ?? WorkingPolicy.defaultText, to: files.policy)
         case .workflow, .floor:
             throw Refusal("\(setting.key) is a project's")
+        case .plugin:
+            throw Refusal("\(setting.key) is a plugin's, kept in the session host's vault")
         }
         let read = node(files: files).first { $0.setting.key == setting.key }
         let now = read?.value ?? ""

@@ -64,6 +64,12 @@ public enum LeadVaultV2 {
         /// When this record began (its first request since the host's vault began: a host restart starts it over).
         /// Answered `since`.
         case recordSince
+        /// The feature plugins' settings the user set (`vibeswitcher set KEY VALUE` on a plugin's key), by key
+        /// (`<plugin>.<name>`): answered `pluginSettings`.
+        case pluginSettings
+        /// The user set a plugin's setting `key` to `value` (nil: back to its default): kept here, where no session's write
+        /// reaches, as on and off are.
+        case setPluginSetting(key: String, value: String?)
     }
 
     public enum Reply: Codable, Equatable, Sendable {
@@ -75,6 +81,7 @@ public enum LeadVaultV2 {
         case plugins([String: Bool])
         case settled([String])
         case since(Double)
+        case pluginSettings([String: String])
     }
 
     /// The record in the vault's state (`LeadVault.Book`'s `v2`).
@@ -251,6 +258,16 @@ public enum LeadVaultV2 {
                 record.settledRequests = Dictionary(uniqueKeysWithValues: kept.map { ($0.key, $0.value) })
             }
             return .ok
+        case .pluginSettings:
+            return .pluginSettings(record.pluginSettings)
+        case .setPluginSetting(let key, let value):
+            let parts = key.split(separator: ".", omittingEmptySubsequences: false)
+            guard parts.count == 2, pluginID(String(parts[0])), pluginID(String(parts[1])) else {
+                return .refused("A plugin's setting is named <plugin>.<name>, each a short lower-case word.")
+            }
+            guard (value?.utf8.count ?? 0) <= pluginSettingBytes else { return .refused("A plugin's setting is \(pluginSettingBytes / 1024) KiB at most.") }
+            record.pluginSettings[key] = value
+            return .pluginSettings(record.pluginSettings)
         }
     }
 
@@ -259,6 +276,9 @@ public enum LeadVaultV2 {
 
     /// How many settled plugin requests the record keeps.
     public static let settledKept = 5_000
+
+    /// The most a plugin's setting holds.
+    public static let pluginSettingBytes = 8 * 1024
 
     /// A feature plugin's id as the record keeps it: 1 to 32 of a-z, 0-9 and -, starting with a letter.
     public static func pluginID(_ id: String) -> Bool {
@@ -436,6 +456,21 @@ public struct LeadVaultV2Client: Sendable {
     public func settleRequests(_ keys: [String]) throws {
         guard !keys.isEmpty else { return }
         _ = try call(.settleRequests(keys))
+    }
+
+    /// The feature plugins' settings the user set, by key (`<plugin>.<name>`).
+    public func pluginSettings() throws -> [String: String] {
+        guard case .pluginSettings(let settings) = try call(.pluginSettings) else { throw Refused("The session host answered something else.") }
+        return settings
+    }
+
+    /// Keeps the user's `value` for a plugin's setting `key` (nil: its default); what is kept now.
+    @discardableResult
+    public func setPluginSetting(_ key: String, to value: String?) throws -> [String: String] {
+        guard case .pluginSettings(let settings) = try call(.setPluginSetting(key: key, value: value)) else {
+            throw Refused("The session host answered something else.")
+        }
+        return settings
     }
 
     /// Keeps that the user turned `id` on or off; what is kept now.

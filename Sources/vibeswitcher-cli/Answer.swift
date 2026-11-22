@@ -71,8 +71,11 @@ enum AnswerCommand {
             Say.out("started: a new shell session on \(ConfigSeal.inert(result["terminal"]?.string ?? "?", limit: 80)) "
                     + "(\(ConfigSeal.inert(result["session"]?.string ?? "?", limit: 120))); the asking session is told")
         case "declined": Say.out("declined: nothing ran; the asking session is told")
+        // A plugin's own words for what its answer did (a page to open, and until when).
+        case _ where result["say"]?.array != nil: break
         default: Say.out("not taken as an answer: \(ConfigSeal.inert(outcome, limit: 80))")
         }
+        for line in result["say"]?.array?.compactMap(\.string) ?? [] { Say.out(ConfigSeal.inert(line, limit: 2_000)) }
         if let notice = result["notice"]?.string { Say.out("  " + ConfigSeal.inert(notice, limit: .max)) }
     }
 }

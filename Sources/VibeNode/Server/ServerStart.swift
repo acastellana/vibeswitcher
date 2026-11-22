@@ -125,6 +125,8 @@ public enum ServerStart {
         options.summarize = parsed.node ? NodeSummaries.headless(root: root) : nil
         options.summarizeBatch = parsed.node ? NodeSummaries.headless(root: root, system: BatchSummaryPrompts.system, timeout: ClaudeHeadless.briefingTimeout) : nil
         options.summarizeBrief = parsed.node ? NodeSummaries.headless(root: root, system: BriefingPrompts.system, timeout: ClaudeHeadless.briefingTimeout) : nil
+        // A plugin's page for the browser (the wallet's signing page) on a socket the session host holds, as the web's (H1).
+        options.pluginBind = .forServer(connector: parsed.connector, note: say)
         let engine = LeadEngine(root: root, nodeRoot: parsed.nodeRoot.map { URL(fileURLWithPath: $0, isDirectory: true) }, link: link,
                                 clock: clock, sessions: sessions, options: options, note: say)
         requests.engine = engine

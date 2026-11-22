@@ -36,12 +36,16 @@ public protocol FeaturePlugin: AnyObject {
     /// `status`'s notices for what waits on the user beyond its cards' own (each open card's is the desk's). On the
     /// engine's queue.
     func notices(_ desk: PluginDesk) -> [String]
+    /// A value the user gives one of its settings (`vibeswitcher set KEY VALUE`, its declared key's name): as kept, nil
+    /// for its default, or why it isn't taken. `value` is the value given ("default": nil).
+    func check(setting name: String, value: String?) -> Result<String?, PluginRefusal>
 }
 
 extension FeaturePlugin {
     public func availability() -> String? { nil }
     public func notices(_ desk: PluginDesk) -> [String] { [] }
     public func turnedOff(_ desk: PluginDesk) -> [(session: UUID, text: String)] { [] }
+    public func check(setting name: String, value: String?) -> Result<String?, PluginRefusal> { .success(value) }
 }
 
 /// What a plugin declares, as data.
@@ -56,20 +60,25 @@ public struct PluginInfo: Codable, Equatable, Sendable {
         }
     }
 
-    /// One entry it adds to the settings catalog, under its own section (`NodeSettings`).
+    /// One entry it adds to the settings catalog, under its own section (`NodeSettings`), kept in the host's vault
+    /// (`LeadVaultV2.Book.pluginSettings`) as `<plugin>.<key>`, so no session's file write changes it.
     public struct Setting: Codable, Equatable, Sendable {
+        /// Its name within the plugin: a short lower-case word (`chains`); the catalog's key is `<plugin>_<key>`.
         public var key: String
         public var title: String
         public var about: String
         /// `NodeSettings.Form`'s word.
         public var form: String
         public var choices: [String]
-        public init(key: String, title: String, about: String, form: String, choices: [String] = []) {
+        /// Its value when the user set none.
+        public var defaultValue: String
+        public init(key: String, title: String, about: String, form: String, choices: [String] = [], defaultValue: String = "") {
             self.key = key
             self.title = title
             self.about = about
             self.form = form
             self.choices = choices
+            self.defaultValue = defaultValue
         }
     }
 

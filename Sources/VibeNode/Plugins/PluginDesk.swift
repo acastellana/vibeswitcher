@@ -38,6 +38,17 @@ public struct PluginDesk {
     public var queue: DispatchQueue { engine.queue }
     public var work: DispatchQueue { engine.pluginWork }
 
+    /// This plugin's settings as the user set them, by name (none set: its default).
+    public var settings: [String: String] {
+        Dictionary(uniqueKeysWithValues: plugin.info.settings.map { ($0.key, engine.pluginSettings["\(id).\($0.key)"] ?? $0.defaultValue) })
+    }
+
+    /// Where a page for the person's browser gets its listening socket (the session host's, held as the web's).
+    public var bind: WebBind { engine.options.pluginBind ?? .direct }
+
+    /// The engine's clock, or one of the plugins' own on the engine's queue (a test's engine has none).
+    public var clock: NodeClock { engine.clock ?? engine.pluginClock }
+
     /// Where this plugin's command files requests (`PluginInfo.folder` under the root), when it does.
     public var folder: URL? { plugin.info.folder.map { root.appendingPathComponent($0, isDirectory: true) } }
 
@@ -329,9 +340,16 @@ struct PluginStamp: Equatable {
 /// What a plugin's `perform` may do for the card it answers, and nothing else: start a session (the host's spawn).
 public struct PluginAct {
     let start: (SpawnRequest, @escaping (Result<HostSession, HostLink.Failure>) -> Void) -> Void
+    let page: (PluginPage.Spec, @escaping (Data) -> Bool, @escaping (Bool) -> Void, @escaping (Result<URL, PluginRefusal>) -> Void) -> Void
 
     /// Starts a session through the host; `then` with it, off the engine's queue.
     public func spawn(_ request: SpawnRequest, then: @escaping (Result<HostSession, HostLink.Failure>) -> Void) { start(request, then) }
+
+    /// Serves `spec` once (`PluginPage`): `take` hears each answer's bytes (true: taken), `ended` whether one was taken
+    /// when the page stops; `then` with its address, for the answering terminal only, or why not (one page at a time on
+    /// a node). Callbacks on the engine's queue.
+    public func openPage(_ spec: PluginPage.Spec, take: @escaping (Data) -> Bool, ended: @escaping (Bool) -> Void,
+                         then: @escaping (Result<URL, PluginRefusal>) -> Void) { page(spec, take, ended, then) }
 }
 
 /// A plugin's card, by its request.

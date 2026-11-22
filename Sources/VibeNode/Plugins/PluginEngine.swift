@@ -25,10 +25,12 @@ extension LeadEngine {
             let kept = Result { try client.plugins() }
             let settled = Result { try client.settledRequests() }
             let since = try? client.recordSince()
+            let settings = try? client.pluginSettings()
             self?.queue.async {
                 guard let self else { return }
                 self.pluginAsking = false
                 if let since { self.pluginRecordSince = since }
+                if let settings { self.pluginSettings = settings }
                 // Not known (the vault didn't answer): nothing is drawn until it does.
                 switch settled {
                 case .success(let keys):
@@ -205,7 +207,8 @@ extension LeadEngine {
         var marked = card
         marked.plugin?.state = action.marks
         cards.put(marked)
-        let act = PluginAct { [link] request, done in link.spawn(request, completion: done) }
+        let act = PluginAct(start: { [link] request, done in link.spawn(request, completion: done) },
+                            page: { [weak self] spec, take, ended, then in self?.openPluginPage(spec, take: take, ended: ended, then: then) })
         guard action.acts else { return plugin.perform(action.word, on: marked, desk: desk, act: act, then: then) }
         // An acting answer: settled in the vault, confirmed, before it acts, so no restart draws it again.
         let key = PluginKey(plugin: shown.plugin, request: shown.request).name
@@ -251,6 +254,30 @@ extension LeadEngine {
             if let session = PluginDesk.hostSession(shown.session) { desk.tellSurely(said ?? desk.withdrawnText(shown), session: session) }
         }
         for (session, text) in plugin.turnedOff(desk) { desk.tellSurely(text, session: session) }
+    }
+
+    /// Serves a plugin's page once (`PluginPage`), one at a time on the node: started off the engine's queue (the host
+    /// binds its socket); every callback on the engine's queue. On `queue`.
+    func openPluginPage(_ spec: PluginPage.Spec, take: @escaping (Data) -> Bool, ended: @escaping (Bool) -> Void,
+                        then: @escaping (Result<URL, PluginRefusal>) -> Void) {
+        guard pluginPage == nil else { return then(.failure(PluginRefusal("a plugin's page is open already: answer it, or wait for it to stop"))) }
+        let page = PluginPage(spec: spec)
+        pluginPage = page
+        let (bind, clock, queue) = (options.pluginBind ?? .direct, clock ?? pluginClock, self.queue)
+        pluginWork.async { [weak self] in
+            let started = Result {
+                try page.start(bind: bind, clock: clock, take: { bytes in queue.sync { take(bytes) } }, ended: { taken in
+                    queue.async {
+                        if self?.pluginPage === page { self?.pluginPage = nil }
+                        ended(taken)
+                    }
+                })
+            }
+            queue.async {
+                if case .failure = started, self?.pluginPage === page { self?.pluginPage = nil }
+                then(started.mapError { $0 as? PluginRefusal ?? PluginRefusal("\($0)") })
+            }
+        }
     }
 
     /// Settles `keys` (`PluginKey.name`): never drawn again, here and in the vault. On `queue`.

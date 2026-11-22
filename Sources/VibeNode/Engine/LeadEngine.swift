@@ -60,6 +60,10 @@ public final class LeadEngine: @unchecked Sendable {
         public var summarizeBrief: Summarizer.Generate?
         /// The feature plugins (`PluginRegistry.standard()` by default; a test's own).
         public var plugins: [FeaturePlugin]?
+        /// Where a plugin's page for a person's browser gets its listening socket (the wallet's signing page): the
+        /// server gives the session host's (`WebBind.forServer`, H1's hold); none: bound in this process (`WebBind.direct`,
+        /// a test's).
+        public var pluginBind: WebBind?
 
         public init() {}
     }
@@ -327,6 +331,8 @@ public final class LeadEngine: @unchecked Sendable {
     var pluginSettled: Set<String> = []
     /// Whether the vault said which requests are settled (nothing is drawn until it did).
     var pluginSettledKnown = false
+    /// The plugin page open now (one at a time on a node).
+    var pluginPage: PluginPage?
     /// When the vault's record began, as the vault says (a host restart starts it over): what `plugin list` says a
     /// plugin is at its default since.
     var pluginRecordSince: Date?
@@ -341,6 +347,10 @@ public final class LeadEngine: @unchecked Sendable {
     /// did or the session is gone; tried again at each plugins' look.
     var pluginTells: [String: (session: UUID, text: String)] = [:]
     var pluginTelling: Set<String> = []
+    /// The plugins' settings the user set, as the vault last said (`<plugin>.<name>`).
+    public internal(set) var pluginSettings: [String: String] = [:]
+    /// A clock for the plugins' pages when the engine has none (a test's engine), on its queue.
+    lazy var pluginClock = NodeClock(queue: queue)
     let pluginWork = DispatchQueue(label: "vibenode.lead-engine.plugins", qos: .userInitiated)
     // The developer tools notice (`ToolchainLook.swift`), on `queue`: the notices the last look found, when it ran,
     // whether one is under way; how the node's tools are asked (a test's stand-in) and the clock.

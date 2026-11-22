@@ -52,6 +52,8 @@ public enum NodeSettings {
         case workflow
         /// The session host's vault.
         case floor
+        /// The session host's vault, a feature plugin's (`PluginRegistry`): listed while its plugin is on.
+        case plugin
     }
 
     public struct Setting: Equatable, Sendable {
@@ -237,6 +239,7 @@ public enum NodeSettings {
         case .policy: return files.policy.path
         case .workflow: return project.map(workflowPath(project:)) ?? ".vibeswitcher/workflow.md"
         case .floor: return "the session host's vault"
+        case .plugin: return "the session host's vault (a plugin's setting)"
         }
     }
 

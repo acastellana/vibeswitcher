@@ -23,6 +23,7 @@ struct PluginsTests {
         init(id: String = "probe", defaultOn: Bool = false, unavailable: String? = nil, blankFacts: Bool = false) {
             info = PluginInfo(id: id, title: "Probes", summary: "A probe for tests.", defaultOn: defaultOn,
                               commands: [.init(name: "vs-probe", about: "files a probe")], tools: ["probe_tool"], folder: "\(id)-requests",
+                              settings: [.init(key: "depth", title: "Probe depth", about: "How deep a probe goes.", form: "count", defaultValue: "1")],
                               brief: ["Ask for a probe with vs-probe."])
             self.unavailable = unavailable
             self.blankFacts = blankFacts
@@ -58,12 +59,35 @@ struct PluginsTests {
 
         /// Called as `perform` starts (a test's look at what holds then).
         var onPerform: (() -> Void)?
+        /// A page `run` opens instead of acting, and what came of it.
+        var pageSpec: PluginPage.Spec?
+        let pageAnswers = Locked<[Data]>([])
+        let pageEnded = Locked<Bool?>(nil)
+
+        func check(setting name: String, value: String?) -> Result<String?, PluginRefusal> {
+            guard name == "depth" else { return .failure(PluginRefusal("no setting \(name)")) }
+            guard let value else { return .success(nil) }
+            return Int(value).map { (1...9).contains($0) } == true ? .success(value) : .failure(PluginRefusal("1 to 9"))
+        }
 
         func perform(_ word: String, on card: CardStore.Card, desk: PluginDesk, act: PluginAct,
                      then: @escaping (Result<NodeWire.Value, LeadEngine.CardFailure>) -> Void) {
             onPerform?()
             performed.mutate { $0.append(word) }
             guard let request = card.plugin?.request else { return then(.failure(.gone("no request"))) }
+            if let page = pageSpec, word == "run" {
+                // A page for the answer: the core serves it; the plugin hears the bytes.
+                return act.openPage(page, take: { [weak self] bytes in
+                    let taken = bytes == Data(#"{"ok":true}"#.utf8)
+                    if taken { self?.pageAnswers.mutate { $0.append(bytes) } }
+                    return taken
+                }, ended: { [weak self] taken in self?.pageEnded.value = taken }) { opened in
+                    switch opened {
+                    case .success(let url): then(.success(.object(["outcome": .string("page"), "say": .array([.string(url.absoluteString)])])))
+                    case .failure(let why): then(.failure(.refused(why.description)))
+                    }
+                }
+            }
             desk.change(request: request, state: word == "run" ? "ran" : "declined", outcome: word == "run" ? "Ran" : "Declined",
                         closed: word == "run" ? "ran" : "declined")
             then(.success(.object(["outcome": .string(word == "run" ? "ran" : "declined"), "notice": .null])))
@@ -575,6 +599,87 @@ extension PluginsTests {
         #expect(found == [real.id], "the junk removed, the real one read within two looks")
         let left = try FileManager.default.contentsOfDirectory(atPath: folder.path).filter { $0.hasSuffix(".json") }
         #expect(left == ["\(real.id).json"], "\(left.count) left")
+    }
+}
+
+// MARK: What the core keeps of the wallet: the page, the settings
+
+extension PluginsTests {
+    static let pageHTML = "<!doctype html><title>probe</title><script>window.x=1</script>"
+    static var pageSpec: PluginPage.Spec {
+        PluginPage.Spec(html: pageHTML, scripts: [PluginPage.hash("window.x=1")], styles: [], life: 60)
+    }
+
+    /// The core serves a plugin's page once on its own loopback origin: its Host and token only, its own Origin for the
+    /// answer, a garbled answer refused, one taken, then gone; a page it won't serve is refused.
+    @Test func aPluginsPageIsTheCoresAndTakesOneAnswer() async throws {
+        #expect(PluginPage.Spec(html: "x", scripts: ["nope"], styles: [], life: 60).refusal != nil, "not a hash")
+        #expect(PluginPage.Spec(html: "x", scripts: [], styles: [], life: 16 * 60).refusal != nil, "past 15 minutes")
+        #expect(PluginPage.Spec(html: "x", scripts: [], styles: [], life: 60).csp.contains("script-src 'none'"), "no hashes: nothing runs")
+        #expect(HostWebListen.refusal(.page, address: "127.0.0.1", port: HostWebListen.port, usersHost: true) != nil)
+        #expect(HostWebListen.refusal(.page, address: "127.0.0.1", port: 0, usersHost: true) == nil)
+        #expect(HostWebListen.refusal(.page, address: "0.0.0.0", port: 0, usersHost: false) != nil)
+
+        let probe = Probe(defaultOn: true)
+        probe.pageSpec = Self.pageSpec
+        let world = try await CardWorld.make(scratch, plugins: [probe])
+        defer { world.stop() }
+        let (_, request) = try await file(world)
+        await look(world)
+        let card = try #require(card(world, request))
+        let ran = try #require(await world.answer(card, "run"))
+        let address = try #require(ran.result?["say"]?.array?.first?.string, "\(ran)")
+        let url = try #require(URL(string: address))
+        let port = try #require(url.port.map(UInt16.init))
+        let place = "127.0.0.1:\(port)", path = String(address.dropFirst("http://\(place)".count))
+        #expect(port != HostWebListen.port && path.hasSuffix("/"))
+        let get = { (host: String, path: String) throws -> String? in
+            let client = try WebTestClient(port: port)
+            _ = client.send("GET \(path) HTTP/1.1\r\nHost: \(host)\r\n\r\n")
+            return client.response().map { $0.head + "\n\n" + $0.body }
+        }
+        let page = try #require(try get(place, path))
+        #expect(page.hasPrefix("HTTP/1.1 200") && page.contains("script-src 'sha256-") && page.contains(Self.pageHTML), "\(page)")
+        #expect(try get("localhost:\(port)", path)?.hasPrefix("HTTP/1.1 421") == true)
+        #expect(try get(place, "/nottoken/")?.hasPrefix("HTTP/1.1 404") == true)
+        let foreign = try WebTestClient(port: port)
+        #expect(foreign.upgrade(path: path + "answer", host: place, origin: "http://evil.example")?.hasPrefix("HTTP/1.1 403") == true)
+        let garbled = try WebTestClient(port: port)
+        try #require(garbled.upgrade(path: path + "answer", host: place, origin: "http://" + place)?.hasPrefix("HTTP/1.1 101") == true)
+        _ = garbled.send(WebTestClient.text("garbage"))
+        #expect(garbled.message()?.text == "refused")
+        let answer = try WebTestClient(port: port)
+        try #require(answer.upgrade(path: path + "answer", host: place, origin: "http://" + place)?.hasPrefix("HTTP/1.1 101") == true)
+        _ = answer.send(WebTestClient.text(#"{"ok":true}"#))
+        #expect(answer.message()?.text == "ok")
+        #expect(await eventually(timeout: 30) { probe.pageEnded.value == true })
+        #expect(probe.pageAnswers.value == [Data(#"{"ok":true}"#.utf8)])
+        #expect(await eventually(timeout: 30) { (try? WebTestClient(port: port)) == nil }, "the port let go")
+        #expect(world.queue.sync { world.engine.pluginPage } == nil)
+    }
+
+    /// A plugin's settings: listed under its own title while it is on, kept in the vault (a file a session writes changes
+    /// nothing), checked by the plugin, absent and refused while it is off.
+    @Test func aPluginsSettingsAreKeptInTheVault() async throws {
+        let world = try await CardWorld.make(scratch, plugins: [Probe(defaultOn: true)])
+        defer { world.stop() }
+        _ = try #require(await world.ask("plugin.list", action: nil))
+        let set = try #require(await world.ask("set", ["key": .string("probe_depth"), "value": .string("3")]))
+        #expect(set.ok && set.result?["value"]?.string == "3" && set.result?["was"]?.string == "1", "\(set)")
+        #expect(try world.world.link.vaultV2.pluginSettings() == ["probe.depth": "3"])
+        let bad = try #require(await world.ask("set", ["key": .string("probe_depth"), "value": .string("99")]))
+        #expect(bad.error?.code == NodeWire.Code.badArgs.rawValue, "\(bad)")
+        let settings = try #require(await world.ask("settings", action: nil))
+        let shown = try #require((settings.result?["node"]?["settings"]?.array ?? []).first { $0["key"]?.string == "probe_depth" })
+        #expect(shown["section"]?.string == "Probes" && shown["home"]?.string == "plugin" && shown["value"]?.string == "3", "\(shown)")
+        #expect(WireSchema.check(shown, as: "setting", strict: true) == nil)
+        try Data("x".utf8).write(to: world.host.root.appendingPathComponent("settings.plist"))
+        #expect(world.queue.sync { world.engine.pluginSettings["probe.depth"] } == "3")
+        _ = await turn(world, "probe", on: false)
+        let off = try #require(await world.ask("settings", action: nil))
+        #expect(!(off.result?["node"]?["settings"]?.array ?? []).contains { $0["key"]?.string == "probe_depth" }, "off: no settings")
+        let refused = try #require(await world.ask("set", ["key": .string("probe_depth"), "value": .string("2")]))
+        #expect(!refused.ok, "\(refused)")
     }
 }
 
