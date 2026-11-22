@@ -103,6 +103,14 @@ if CommandLine.arguments.count >= 2, CommandLine.arguments[1] == "--wallet-reque
 // request for a new shell session running a command, which waits on its card in this session's chat for the user's Run
 // (see `ShellAsk`). Nothing starts from here. The app's defaults say only what the output tells (whether Settings ›
 // Agents lets agents open shells without asking); the app decides.
+// `vibeswitcher-mcp --ask PLUGIN -- WORDS…`, as Resources/bin/vs-ask runs it: an external plugin's request (`PluginAsk`).
+if CommandLine.arguments.count >= 2, CommandLine.arguments[1] == "--ask" {
+    let ran = PluginAsk.run(Array(CommandLine.arguments.dropFirst(2)), cwd: FileManager.default.currentDirectoryPath, vault: .standard)
+    if !ran.output.isEmpty { print(ran.output) }
+    if !ran.error.isEmpty { FileHandle.standardError.write(Data((ran.error + "\n").utf8)) }
+    exit(ran.status)
+}
+
 if CommandLine.arguments.count >= 2, CommandLine.arguments[1] == "--shell-request" {
     // A node with shell requests off (its server's mirror, `PluginGate`): nothing is filed.
     if let refusal = PluginGate.refusal("shell", command: "vs-shell") { Platform.Stdio.error(refusal + "\n"); exit(1) }

@@ -7,7 +7,7 @@ import VibeNode
 /// user's voice: what it does shown, the typed code, then the request, which the server records in the host's vault
 /// before it acts. Off, a plugin adds nothing, and its open cards close as withdrawn, their askers told.
 enum PluginCommand {
-    static let usage = "usage: vibeswitcher plugin list [--json] | plugin on NAME | plugin off NAME"
+    static let usage = "usage: vibeswitcher plugin list [--json] | plugin on NAME | plugin off NAME | plugin add FOLDER | plugin remove NAME"
 
     static func run(_ arguments: [String]) -> Int32 {
         switch arguments.first {
@@ -18,8 +18,46 @@ enum PluginCommand {
         case "on", "off":
             guard arguments.count == 2, !arguments[1].hasPrefix("-") else { return Say.usage(usage) }
             return set(arguments[1], on: arguments[0] == "on")
+        case "add":
+            guard arguments.count == 2 else { return Say.usage(usage) }
+            return add(CardCommand.absolute(arguments[1]))
+        case "remove":
+            guard arguments.count == 2, !arguments[1].hasPrefix("-") else { return Say.usage(usage) }
+            let id = arguments[1].lowercased()
+            return SessionCommand.act("plugin.remove", args: { _ in ["plugin": .string(id)] }, what: { _ in
+                "This removes the plugin \(ConfigSeal.inert(id, limit: 40)) from this node: its program stops, its open cards close as withdrawn, "
+                    + "and the node forgets it (add its folder again to have it back)."
+            }) { result in
+                let withdrawn = result["withdrawn"]?.int ?? 0
+                Say.out("removed \(ConfigSeal.inert(id, limit: 40))" + (withdrawn > 0 ? "; \(withdrawn) open card(s) withdrawn" : ""))
+            }
         default:
             return Say.usage(usage)
+        }
+    }
+
+    /// `plugin add FOLDER`: the folder read by the server (`plugin.inspect`), everything it found shown, then the typed
+    /// code, then `plugin.add` bound to the SHA-256 of the manifest and program shown.
+    private static func add(_ folder: String) -> Int32 {
+        SessionCommand.act("plugin.add", fetch: { client in
+            client.request("plugin.inspect", args: ["folder": .string(folder)]).flatMap { reply in
+                guard reply.ok, let found = reply.result else {
+                    return .failure(.refused(reply.error.map { ConfigSeal.inert($0.message, limit: 600) } ?? "the server read nothing"))
+                }
+                return .success(found)
+            }
+        }, args: { found in
+            ["folder": .string(folder), "manifest": found["manifestSHA"] ?? .null, "program": found["programSHA"] ?? .null]
+        }, what: { found in
+            let say = { (key: String) in ConfigSeal.inert(found[key]?.string ?? "?", limit: 300) }
+            let commands = (found["commands"]?.array ?? []).compactMap(\.string).map { ConfigSeal.inert($0, limit: 40) }
+            return "This adds the plugin \(say("id")) (\(say("title")) \(say("version"))): \(say("summary"))\n"
+                + "  its program: \(say("program"))\n  its program's SHA-256: \(say("programSHA"))\n  its manifest's SHA-256: \(say("manifestSHA"))\n"
+                + (commands.isEmpty ? "" : "  agents get: \(commands.joined(separator: ", "))\n")
+                + (found["page"]?.bool == true ? "  it serves a one-request page for your browser, through VibeSwitcher\n" : "")
+                + "It starts off: `vibeswitcher plugin on \(say("id"))` runs its program, as you."
+        }) { result in
+            Say.out("added \(ConfigSeal.inert(result["plugin"]?.string ?? "?", limit: 40)), off: `vibeswitcher plugin on \(ConfigSeal.inert(result["plugin"]?.string ?? "?", limit: 40))` runs it")
         }
     }
 
