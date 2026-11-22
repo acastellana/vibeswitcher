@@ -86,7 +86,11 @@ struct NodeHealthTests {
         let health = NodeHealth(file: file, clock: { clock.now }, stuck: { ended.add($0) })
         let queue = DispatchQueue(label: "health-test-queue")
         let release = DispatchSemaphore(value: 0)
-        defer { release.signal() }
+        // Its answer saves the freeze again: waited for, so nothing is written after the scratch goes.
+        defer {
+            release.signal()
+            queue.sync {}
+        }
         queue.async { release.wait() }
         health.tick(queue)
         clock.advance(NodeHealth.exitAfter - 1)
