@@ -101,12 +101,12 @@ extension LeadEngine {
                         waiters.forEach { $0() }
                     }
                 }
-            } else if let folder = desk(plugin).folder {
+            } else if let relative = plugin.info.folder {
                 waiting += 1
-                let note = self.note
+                let (note, root) = (self.note, self.root)
                 pluginWork.async { [weak self] in
-                    let dropped = Self.dropUnread(folder)
-                    if dropped > 0 { note("plugin \(id) is off: \(dropped) file(s) in \(folder.lastPathComponent) dropped unread") }
+                    let dropped = Self.dropUnread(root: root, relative: relative)
+                    if dropped > 0 { note("plugin \(id) is off: \(dropped) file(s) in \(relative) dropped unread") }
                     self?.queue.async { finish() }
                 }
             }
@@ -114,15 +114,32 @@ extension LeadEngine {
         finish()
     }
 
-    /// Removes every file and link in `folder` (not a folder inside it), reading none: how many. Blocks: on `pluginWork`.
-    static func dropUnread(_ folder: URL) -> Int {
-        let names = (try? FileManager.default.contentsOfDirectory(atPath: folder.path)) ?? []
+    /// Removes what a plugin's command files in its folder (`relative` under `root`: `<id>.json`, `<id>.seal`,
+    /// `.<id>.answer`, regular files and links, never a folder), reading none: how many. Each component of the folder is
+    /// opened without following a link (a session could make `shell-requests/asked` a link to a folder of the user's),
+    /// and each name is removed relative to the folder opened, so nothing outside it is touched. Blocks: on `pluginWork`.
+    static func dropUnread(root: URL, relative: String) -> Int {
+        var fd = open(root.path, O_RDONLY | O_DIRECTORY | O_CLOEXEC)
+        guard fd >= 0 else { return 0 }
+        for part in relative.split(separator: "/") {
+            let next = openat(fd, String(part), O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)
+            close(fd)
+            guard next >= 0 else { return 0 }
+            fd = next
+        }
+        guard let directory = fdopendir(fd) else { close(fd); return 0 }
+        defer { closedir(directory) }
+        var names: [String] = []
+        while let entry = readdir(directory) {
+            let name = withUnsafePointer(to: entry.pointee.d_name) { $0.withMemoryRebound(to: CChar.self, capacity: Int(NAME_MAX) + 1) { String(cString: $0) } }
+            if name.hasSuffix(".json") || name.hasSuffix(".seal") || name.hasSuffix(".answer") { names.append(name) }
+        }
         var dropped = 0
         for name in names {
-            let path = folder.appendingPathComponent(name).path
             var info = stat()
-            guard lstat(path, &info) == 0, info.st_mode & S_IFMT != S_IFDIR else { continue }
-            if unlink(path) == 0 { dropped += 1 }
+            guard fstatat(fd, name, &info, AT_SYMLINK_NOFOLLOW) == 0,
+                  info.st_mode & S_IFMT == S_IFREG || info.st_mode & S_IFMT == S_IFLNK else { continue }
+            if unlinkat(fd, name, 0) == 0 { dropped += 1 }
         }
         return dropped
     }

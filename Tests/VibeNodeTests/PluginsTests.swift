@@ -267,6 +267,29 @@ struct PluginsTests {
 
     // MARK: Off leaves no trace
 
+    /// Dropping an off plugin's files touches its folder only: a folder (or a parent) that is a link drops nothing, a
+    /// folder inside is left, and only the shapes a command files go.
+    @Test func droppingTouchesItsFolderOnlyAndFollowsNoLink() throws {
+        let root = scratch.url("drop-root")
+        let mine = root.appendingPathComponent("probe-requests", isDirectory: true)
+        try FileManager.default.createDirectory(at: mine.appendingPathComponent("inner"), withIntermediateDirectories: true)
+        for name in ["a.json", "a.seal", ".a.answer", "notes.txt"] { try Data("x".utf8).write(to: mine.appendingPathComponent(name)) }
+        #expect(LeadEngine.dropUnread(root: root, relative: "probe-requests") == 3)
+        #expect(Set(try FileManager.default.contentsOfDirectory(atPath: mine.path)) == ["inner", "notes.txt"])
+
+        let users = scratch.url("users-folder")
+        try FileManager.default.createDirectory(at: users, withIntermediateDirectories: true)
+        try Data("keep".utf8).write(to: users.appendingPathComponent("keep.json"))
+        let linked = scratch.url("linked-root")
+        try FileManager.default.createDirectory(at: linked, withIntermediateDirectories: true)
+        try FileManager.default.createSymbolicLink(at: linked.appendingPathComponent("probe-requests"), withDestinationURL: users)
+        #expect(LeadEngine.dropUnread(root: linked, relative: "probe-requests") == 0)
+        try FileManager.default.createDirectory(at: linked.appendingPathComponent("deep"), withIntermediateDirectories: true)
+        try FileManager.default.createSymbolicLink(at: linked.appendingPathComponent("deep/x"), withDestinationURL: users.deletingLastPathComponent())
+        #expect(LeadEngine.dropUnread(root: linked, relative: "deep/x/users-folder") == 0, "a parent that is a link")
+        #expect(FileManager.default.fileExists(atPath: users.appendingPathComponent("keep.json").path))
+    }
+
     /// Turned off with a card open: the card closes as withdrawn and the plugin is told; while off, what is filed is
     /// dropped unread, nothing is drawn or answered, and nothing of it is in `hello`, `status`'s notices or the list's on.
     @Test func offWithdrawsItsCardsAndLeavesNoTrace() async throws {
