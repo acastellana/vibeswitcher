@@ -6,9 +6,19 @@ import VibeCore
 /// `plugin` (the user's voice, recorded in the vault before it acts, as every state-changing request is; never part of
 /// `approve`'s batch). On the engine's queue, as `Requests.handle` calls them.
 extension Requests {
-    func pluginList(_ request: NodeWire.Request, reply: @escaping (NodeWire.Reply) -> Void) {
+    /// `page`: a web page asks: only the plugins that are on (off leaves no trace); the whole list is the user's.
+    func pluginList(_ request: NodeWire.Request, page: Bool, reply: @escaping (NodeWire.Reply) -> Void) {
         guard let engine else { return reply(.init(re: request.id, error: .init(.refused, "this server keeps no plugins"))) }
-        let answer = { reply(.init(re: request.id, result: .object(["plugins": .array(engine.plugins.plugins.map(engine.plugins.value))]))) }
+        let answer = {
+            let listed = page ? engine.plugins.on : engine.plugins.plugins
+            let values = listed.map { plugin -> NodeWire.Value in
+                guard case .object(var fields) = engine.plugins.value(plugin) else { return .null }
+                // A fresh vault after the host's restart: what the user set is gone, each back at its default.
+                fields["restarted"] = .bool(engine.hostRestart != nil && engine.plugins.kept?[plugin.info.id] == nil)
+                return .object(fields)
+            }
+            reply(.init(re: request.id, result: .object(["plugins": .array(values)])))
+        }
         // Until the vault said, ask it first: the list says what the user set.
         engine.plugins.known ? answer() : engine.askPlugins(then: answer)
     }

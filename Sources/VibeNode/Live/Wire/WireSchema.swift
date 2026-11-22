@@ -346,14 +346,14 @@ public enum WireSchema {
             // A feature plugin's card (`PluginCard`, Plugins/PluginWire.swift, 2026-11-22): one shape for every plugin.
             shape("card.plugin", from: "PluginCard.value", [
                 field("plugin", .string), field("request", .string), field("session", .string), field("asker", .string),
-                field("title", .string), field("noun", .string), field("ask", .string), field("summary", .string),
+                field("title", .string), field("noun", .string), field("ask", .string),
                 field("facts", .list(.shape("card.plugin.fact"))), field("body", .shape("card.plugin.body")),
                 field("context", Kind.shape("card.plugin.context").orNull),
                 field("severity", .words(PluginCard.Severity.allCases.map(\.rawValue))), field("expiresAt", Kind.date.orNull),
                 field("actions", .list(.shape("card.plugin.action"))), field("waiting", Kind.string.orNull), field("state", .string),
                 field("outcome", Kind.string.orNull)]),
             shape("card.plugin.fact", from: "PluginCard.Fact", [field("name", .string), field("label", .string), field("value", .string),
-                                                                field("folder", .bool)]),
+                                                                field("folder", .bool), field("decisive", .bool)]),
             shape("card.plugin.body", from: "PluginCard.Body", [field("name", .string), field("label", .string), field("note", Kind.string.orNull),
                                                                 field("lines", strings), field("bytes", .int), field("size", .string)]),
             shape("card.plugin.context", from: "PluginCard.Context", [field("name", .string), field("label", .string), field("text", .string)]),

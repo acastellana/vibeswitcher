@@ -15,8 +15,8 @@ const actions = [
 ];
 const shell = (fields = {}) => ({
   plugin: 'shell', request: 'r1', session: 'local:3f6c2c1e-8a5b-4c1d-9e0f-2b7a6d5c4e3f', asker: 'Worker: fix-login',
-  title: 'A shell asked for', noun: 'shell request', ask: 'asks for a new shell session', summary: 'asks to run `npm run dev -- --port 5173 …` in /home/u/site',
-  facts: [{ name: 'folder', label: 'in the folder', value: '/home/u/site', folder: true }],
+  title: 'A shell asked for', noun: 'shell request', ask: 'asks for a new shell session',
+  facts: [{ name: 'folder', label: 'in the folder', value: '/home/u/site', folder: true, decisive: true }],
   body: { name: 'command', label: 'running exactly this command', note: 'by your login shell, which stays open after it', lines: COMMAND.split('\n'), bytes: 43, size: '2 lines, 43 bytes' },
   context: { name: 'label', label: 'named', text: 'Shell: dev server' }, severity: 'important', expiresAt: '2026-11-21T10:30:00.000Z',
   actions, waiting: 'nothing runs until you answer run', state: 'waiting', outcome: null, ...fields,

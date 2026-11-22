@@ -25,9 +25,13 @@ public protocol FeaturePlugin: AnyObject {
     /// action's `marks`, put in the same turn), so a second answer finds it answered. `then` on the engine's queue.
     func perform(_ word: String, on card: CardStore.Card, desk: PluginDesk,
                  then: @escaping (Result<NodeWire.Value, LeadEngine.CardFailure>) -> Void)
-    /// It was turned off while `card` was open: the desk closed it as withdrawn and tells its asker
-    /// (`PluginDesk.withdrawnText`); the plugin keeps that nothing more comes of it. On the engine's queue.
-    func withdrawn(_ card: PluginCard, desk: PluginDesk)
+    /// It was turned off while `card` was open: the desk closed it as withdrawn; the plugin keeps that nothing more comes
+    /// of it, and says what its asker is told when the desk's words (`PluginDesk.withdrawnText`) wouldn't be true. On the
+    /// engine's queue.
+    func withdrawn(_ card: PluginCard, desk: PluginDesk) -> String?
+    /// It was turned off: what is still under way (a card settled, but something it started still followed) and who must
+    /// hear that nothing more will be said of it, as (session, words). On the engine's queue.
+    func turnedOff(_ desk: PluginDesk) -> [(session: UUID, text: String)]
     /// `status`'s notices for what waits on the user beyond its cards' own (each open card's is the desk's). On the
     /// engine's queue.
     func notices(_ desk: PluginDesk) -> [String]
@@ -36,6 +40,7 @@ public protocol FeaturePlugin: AnyObject {
 extension FeaturePlugin {
     public func availability() -> String? { nil }
     public func notices(_ desk: PluginDesk) -> [String] { [] }
+    public func turnedOff(_ desk: PluginDesk) -> [(session: UUID, text: String)] { [] }
 }
 
 /// What a plugin declares, as data.
@@ -115,11 +120,27 @@ public struct PluginInfo: Codable, Equatable, Sendable {
         guard life > 0, life <= Self.longestLife || !(lifeWhy ?? "").trimmingCharacters(in: .whitespaces).isEmpty else {
             return "plugin \(id): a card's life past \(Int(Self.longestLife / 60)) minutes needs a reason"
         }
-        if let folder, folder.isEmpty || folder.hasPrefix("/") || folder.split(separator: "/").contains("..") {
-            return "plugin \(id): its folder is a plain path under the node's root"
+        if let folder {
+            let parts = folder.split(separator: "/", omittingEmptySubsequences: false).map(String.init)
+            guard !folder.hasPrefix("/"), parts.allSatisfy({ !$0.isEmpty && $0 != "." && $0 != ".." }) else {
+                return "plugin \(id): its folder is a plain path under the node's root"
+            }
+            guard let first = parts.first, !Self.coreFolders.contains(first) else {
+                return "plugin \(id): its folder \(folder) is in the node's own state (\(parts.first ?? ""))"
+            }
         }
         return nil
     }
+
+    /// What the node keeps at its root for itself: no plugin's folder is in one (the plugins' are `shell-requests` and
+    /// `wallet-requests`, which the agents' commands write).
+    public static let coreFolders: Set<String> = [
+        "account-usage.json", "attachments", "bin", "boost.json", "context", "debug", "disk-watch.json", "headless", "health.json",
+        "host.lock", "host.log", "host.sock", "lead", "mac-limits.json", "open-sessions.json", "outbox.json", "plugins", "plugins.json",
+        "policy-told.json", "policy.md", "power.json", "presets.json", "prompt-audit.json", "room-waits", "run-blocks", "session-marks.json",
+        "settings", "settings.plist", "sleep-cost.json", "state", "stats", "steer", "swap-samples.json", "tmp", "toolchain.json",
+        "update-check.json", "v2", "vault-requests", "engine.json", "journal", "logs",
+    ]
 }
 
 /// A plugin's card, as data (the definition's "The card is data"): one shape for every plugin, drawn by one renderer
@@ -134,13 +155,17 @@ public struct PluginCard: Codable, Equatable, Sendable {
         /// As shown ("in the folder").
         public var label: String
         public var value: String
-        /// A folder: shown as a path, and named where the decision is (the Mac's dialog).
+        /// A folder: shown as a path.
         public var folder: Bool
-        public init(name: String, label: String, value: String, folder: Bool = false) {
+        /// Part of the decision: shown wherever the decisive part is (the Mac's dialog shows each, or asks nothing; the
+        /// notice names each).
+        public var decisive: Bool
+        public init(name: String, label: String, value: String, folder: Bool = false, decisive: Bool = false) {
             self.name = name
             self.label = label
             self.value = value
             self.folder = folder
+            self.decisive = decisive
         }
     }
 
@@ -158,7 +183,8 @@ public struct PluginCard: Codable, Equatable, Sendable {
             self.name = name
             self.label = label
             self.note = note
-            lines = text.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+            // By scalars: "\r\n" is one Character, two lines' worth of bytes.
+            lines = text.unicodeScalars.split(separator: "\n", omittingEmptySubsequences: false).map { String(String.UnicodeScalarView($0)) }
             bytes = text.utf8.count
         }
         public var text: String { lines.joined(separator: "\n") }
@@ -222,8 +248,6 @@ public struct PluginCard: Codable, Equatable, Sendable {
     public var noun: String
     /// What the asker asks, after its name ("asks for a new shell session").
     public var ask: String
-    /// What the asker asks, short, after its name in a notice ("asks to run `make` in /home/u/site").
-    public var summary: String
     public var facts: [Fact]
     public var body: Body
     public var context: Context?
@@ -238,7 +262,7 @@ public struct PluginCard: Codable, Equatable, Sendable {
     public var outcome: String?
 
     public init(plugin: String, request: String, session: String, asker: String, title: String, noun: String, ask: String,
-                summary: String, facts: [Fact], body: Body, context: Context? = nil, severity: Severity = .important,
+                facts: [Fact], body: Body, context: Context? = nil, severity: Severity = .important,
                 expiresAt: Date?, actions: [Action], waiting: String? = nil, state: String = PluginCard.waitingState,
                 outcome: String? = nil) {
         self.plugin = plugin
@@ -248,7 +272,6 @@ public struct PluginCard: Codable, Equatable, Sendable {
         self.title = title
         self.noun = noun
         self.ask = ask
-        self.summary = summary
         self.facts = facts
         self.body = body
         self.context = context
@@ -280,16 +303,25 @@ public struct PluginCard: Codable, Equatable, Sendable {
     /// The agent's words are cut past this.
     public static let contextAtMost = 400
 
-    /// Why this card isn't drawn (nil: it may be): a value that draws as blank or nothing (`PluginText.blank`), a body
-    /// past what is shown whole, no actions, a word twice. Its asker is told why.
+    /// Why this card isn't drawn (nil: it may be): a value that draws as blank or nothing (`PluginText.blank`) or holds a
+    /// control character but a tab or a line feed, a body past what is shown whole, no actions, a word twice, an action
+    /// that would leave it waiting. The asker's name (the user's, or the host's) is checked for control characters only:
+    /// an emoji's variation selector there refuses nothing. Its asker is told why.
     public var refusal: String? {
-        var named: [(String, String)] = facts.map { ($0.name, $0.value) } + [(body.name, body.text), ("asker", asker)]
+        var named: [(String, String)] = facts.map { ($0.name, $0.value) } + [(body.name, body.text)]
         if let context { named.append((context.name, context.text)) }
         for (name, text) in named {
             if let scalar = text.unicodeScalars.first(where: PluginText.blank) {
                 return "its \(name) holds a character that draws as blank or nothing (U+\(String(format: "%04X", scalar.value))), "
                     + "which could hide part of it on the card: it wasn't shown, and nothing ran. File it again with plain spaces"
             }
+            if let scalar = text.unicodeScalars.first(where: { PluginText.control($0) && $0 != "\n" && $0 != "\t" }) {
+                return "its \(name) holds a control character (U+\(String(format: "%04X", scalar.value))): it wasn't shown, and nothing ran"
+            }
+        }
+        if asker.unicodeScalars.contains(where: PluginText.control) { return "its asker's name holds a control character" }
+        if let waiting = actions.first(where: { $0.marks == Self.waitingState }) {
+            return "its answer \(waiting.word) would leave it waiting: an answer is taken once"
         }
         guard body.bytes <= Self.bodyBytesAtMost, body.lines.count <= Self.bodyLinesAtMost else {
             return "its \(body.name) is \(body.size), more than a card shows whole (\(Self.bodyLinesAtMost) lines, "
@@ -321,11 +353,14 @@ public enum PluginText {
             || [0x115F, 0x1160, 0x3164, 0xFFA0, 0x2800].contains(scalar.value)
     }
 
+    /// Whether `scalar` is a control character (C0, DEL, C1).
+    public static func control(_ scalar: Unicode.Scalar) -> Bool { scalar.value < 0x20 || (0x7F...0x9F).contains(scalar.value) }
+
     /// "2 lines, 43 bytes".
     public static func size(lines: Int, bytes: Int) -> String { "\(lines) line\(lines == 1 ? "" : "s"), \(bytes) bytes" }
 
     /// `text`'s size as a body's: its lines and UTF-8 bytes.
     public static func size(_ text: String) -> String {
-        size(lines: text.split(separator: "\n", omittingEmptySubsequences: false).count, bytes: text.utf8.count)
+        size(lines: text.unicodeScalars.split(separator: "\n", omittingEmptySubsequences: false).count, bytes: text.utf8.count)
     }
 }

@@ -169,7 +169,8 @@ public enum CardText {
         lines.append("  \(inert(body?["label"]?.string)) (an agent's words; \(inert(body?["size"]?.string)), every line shown)\(note):")
         for line in body?["lines"]?.array?.compactMap(\.string) ?? [] { lines.append("    | " + inert(line)) }
         if let context = plugin["context"], context != .null {
-            lines.append("  \(inert(context["label"]?.string)): \(inert(context["text"]?.string))")
+            // The agent's own words, marked as its own by the renderer whatever the plugin labels them.
+            lines.append("  \(inert(context["label"]?.string)) (the agent's words): \u{201C}\(inert(context["text"]?.string))\u{201D}")
         }
         if plugin["state"]?.string == PluginCard.waitingState {
             let waiting = plugin["waiting"]?.string.map { "; " + inert($0) } ?? ""

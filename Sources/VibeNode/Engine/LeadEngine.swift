@@ -321,6 +321,12 @@ public final class LeadEngine: @unchecked Sendable {
     var pluginAsking = false
     var pluginTimer: Subscription?
     var pluginNow: () -> Date = Date.init
+    /// The plugin requests settled (`PluginKey.name`), as the vault keeps them: never drawn again.
+    var pluginSettled: Set<String> = []
+    /// What must reach a session from VibeSwitcher even while its plugin is off (a withdrawal's words), by key, until it
+    /// did or the session is gone; tried again at each plugins' look.
+    var pluginTells: [String: (session: UUID, text: String)] = [:]
+    var pluginTelling: Set<String> = []
     let pluginWork = DispatchQueue(label: "vibenode.lead-engine.plugins", qos: .userInitiated)
     // The developer tools notice (`ToolchainLook.swift`), on `queue`: the notices the last look found, when it ran,
     // whether one is under way; how the node's tools are asked (a test's stand-in) and the clock.

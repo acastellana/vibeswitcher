@@ -13,7 +13,8 @@ export function pluginFacts(card) {
     asker: p.asker || 'a session', ask: p.ask || '',
     facts: (p.facts || []).map((fact) => ({ label: cap(fact.label), value: fact.value || '', folder: !!fact.folder })),
     body: { name: cap(body.name || 'request'), lines: Array.isArray(body.lines) ? body.lines : [], size: body.size || '', note: body.note || '' },
-    context: p.context ? { label: cap(p.context.label), text: p.context.text || '' } : null,
+    // The agent's own words, marked as its own here whatever the plugin labels them.
+    context: p.context ? { label: `${cap(p.context.label)} (the agent’s words)`, text: `“${p.context.text || ''}”` } : null,
     state: p.state || 'waiting', expiresAt: p.expiresAt || null, waiting: p.waiting || '',
     outcome: p.outcome || null,
     actions: (p.actions || []).map((action) => ({ word: action.word, label: action.label, line: `vibeswitcher answer ${short} ${action.word}`, says: `the command that ${action.short}` })),

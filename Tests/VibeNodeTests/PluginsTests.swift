@@ -31,7 +31,7 @@ struct PluginsTests {
         func availability() -> String? { unavailable }
 
         func look(_ desk: PluginDesk, done: @escaping () -> Void) {
-            desk.stamped({ ShellAsk.filed(in: $0) }) { requests in
+            desk.stamped({ try ShellRequest.parse($0) }) { requests in
                 let live = desk.live
                 for request in requests where desk.card(request: request.id) == nil {
                     guard let asker = live[request.session] else { continue }
@@ -45,8 +45,7 @@ struct PluginsTests {
         static func card(_ request: ShellRequest, asker: String, id: String = "probe", blank: Bool = false) -> PluginCard {
             PluginCard(plugin: id, request: request.id, session: "\(NodeIds.node):\(request.session)", asker: asker,
                        title: "A probe asked for", noun: "probe request", ask: "asks for a probe",
-                       summary: "asks to probe `\(request.command)`",
-                       facts: [.init(name: "folder", label: "in the folder", value: blank ? request.cwd + "\u{3000}" : request.cwd, folder: true)],
+                       facts: [.init(name: "folder", label: "in the folder", value: blank ? request.cwd + "\u{3000}" : request.cwd, folder: true, decisive: true)],
                        body: .init(name: "command", label: "probing exactly this", note: "as you", text: request.command),
                        context: request.label.isEmpty ? nil : .init(name: "label", label: "named", text: request.label),
                        expiresAt: request.expiresAt,
@@ -66,7 +65,10 @@ struct PluginsTests {
             then(.success(.object(["outcome": .string(word == "run" ? "ran" : "declined"), "notice": .null])))
         }
 
-        func withdrawn(_ card: PluginCard, desk: PluginDesk) { withdrawnRequests.mutate { $0.append(card.request) } }
+        func withdrawn(_ card: PluginCard, desk: PluginDesk) -> String? {
+            withdrawnRequests.mutate { $0.append(card.request) }
+            return nil
+        }
     }
 
     // MARK: Helpers
@@ -194,11 +196,11 @@ struct PluginsTests {
         #expect(lines.first?.contains("  probe  ") == true, "the plugin where the kind goes: \(lines)")
         #expect(lines.contains("  in the folder: \(world.repo)") && lines.contains("    | make probe"), "\(lines)")
         #expect(lines.contains("  probing exactly this (an agent's words; 1 line, 10 bytes, every line shown), as you:"), "\(lines)")
-        #expect(lines.contains("  named: probe"), "\(lines)")
+        #expect(lines.contains("  named (the agent's words): \u{201C}probe\u{201D}"), "the renderer marks the agent's words: \(lines)")
         // `status` says it waits, with the lines that answer it.
         let status = try #require(await world.ask("status", action: nil))
         let notices = status.result?["notices"]?.array?.compactMap(\.string) ?? []
-        #expect(notices.contains { $0.hasPrefix("a probe request waits for you: Asker asks to probe `make probe`.") && $0.contains("vibeswitcher answer \(card.id) run") }, "\(notices)")
+        #expect(notices.contains { $0.hasPrefix("a probe request waits for you: Asker asks for a probe (in the folder \(world.repo)); its command, the agent's words: \u{201C}make probe\u{201D}.") && $0.contains("vibeswitcher answer \(card.id) run") }, "\(notices)")
 
         let other = try #require(await world.answer(card, "maybe"))
         #expect(other.error?.code == NodeWire.Code.badArgs.rawValue && other.error?.message.contains("run or decline") == true, "\(other)")
@@ -236,18 +238,46 @@ struct PluginsTests {
         shown.context = .init(name: "label", label: "named", text: String(repeating: "w", count: 1000))
         #expect(shown.drawn.context?.text.count == PluginCard.contextAtMost + 2, "the agent's words cut, marked")
 
-        // Unstamped: never given to the plugin.
-        let asker = try await world.host.spawn("exec /bin/sleep 600", cwd: world.repo, label: "Forger")
-        let forged = ShellRequest(session: asker.id.uuidString, cwd: world.repo, command: "echo forged", label: "forged", createdAt: Date())
-        let bytes = try forged.encoded()
+    }
+
+    /// Rule 1 is the desk's, before any plugin's decoder runs: the bytes read here (no link followed), the stamp's digest
+    /// of those bytes, the host's own stamp, the stamp's session the request's, a live session the user opened.
+    @Test func theDeskHoldsRuleOneBeforeAnyDecoder() async throws {
+        let world = try await CardWorld.make(scratch, plugins: [Probe(defaultOn: true)])
+        defer { world.stop() }
+        let (asker, request) = try await file(world)
         let folder = world.host.root.appendingPathComponent("probe-requests", isDirectory: true)
+        let opened = Set(world.queue.sync { world.engine.desk(world.engine.plugins.plugins[0]).live.keys })
+        #expect(opened.contains(asker.id.uuidString.lowercased()))
+        let decoded = Locked(0)
+        let decode: (Data) throws -> ShellRequest = { decoded.mutate { $0 += 1 }; return try ShellRequest.parse($0) }
+        let read = { (opened: Set<String>, now: Date) in
+            PluginDesk.read(folder: folder, decode: decode, trusted: [:], vault: world.host.vault, opened: opened, now: now, plugin: "probe", note: { _ in }).requests
+        }
+        #expect(read(opened, Date()).map(\.id) == [request.id])
+
+        // Not the host's stamp; a stamp for other bytes; a link in the request's place: none decoded.
+        let forger = try await world.host.spawn("exec /bin/sleep 600", cwd: world.repo, label: "Forger")
+        let forged = ShellRequest(session: forger.id.uuidString, cwd: world.repo, command: "echo forged", label: "forged", createdAt: Date())
+        let bytes = try forged.encoded()
         try ShellAsk.file(forged, stamp: WalletStamp(session: forged.session, digest: WalletStamp.digest(bytes), seal: String(repeating: "0", count: 64)), in: folder)
-        let read = PluginDesk.read(folder: folder, parse: { ShellAsk.filed(in: $0) }, trusted: [:], vault: world.host.vault, now: Date(),
-                                   plugin: "probe", note: { _ in })
-        #expect(read.requests.map(\.id) == [request.id], "only the stamped one")
-        let early = PluginDesk.read(folder: folder, parse: { ShellAsk.filed(in: $0) }, trusted: [:], vault: world.host.vault,
-                                    now: request.created.addingTimeInterval(-PluginDesk.aheadAtMost - 60), plugin: "probe", note: { _ in })
-        #expect(early.requests.isEmpty, "dated ahead of the clock")
+        let swapped = ShellRequest(session: asker.id.uuidString, cwd: world.repo, command: "echo swapped", label: "", createdAt: Date())
+        try FileManager.default.copyItem(at: folder.appendingPathComponent("\(request.id).seal"), to: folder.appendingPathComponent("\(swapped.id).seal"))
+        try swapped.encoded().write(to: folder.appendingPathComponent("\(swapped.id).json"))
+        let linked = UUID().uuidString.lowercased()
+        try FileManager.default.createSymbolicLink(at: folder.appendingPathComponent("\(linked).json"), withDestinationURL: folder.appendingPathComponent("\(request.id).json"))
+        try FileManager.default.copyItem(at: folder.appendingPathComponent("\(request.id).seal"), to: folder.appendingPathComponent("\(linked).seal"))
+        decoded.value = 0
+        let opened2 = opened.union([forger.id.uuidString.lowercased()])
+        #expect(read(opened2, Date()).map(\.id) == [request.id], "only the stamped one, whole")
+        #expect(decoded.value == 1, "nothing else reached the decoder")
+
+        // Its session not one the user opened (ended, or a team's worker): not decoded at all.
+        decoded.value = 0
+        #expect(read([], Date()).isEmpty && decoded.value == 0)
+        let worker = try await world.host.spawn("exec /bin/sleep 600", cwd: world.repo, label: "Worker: fix-login")
+        #expect(!PluginDesk.opened(worker) && PluginDesk.opened(asker))
+        #expect(read(opened, request.created.addingTimeInterval(-PluginDesk.aheadAtMost - 60)).isEmpty, "dated ahead of the clock")
     }
 
     @Test func anActingAnswerPastItsTimeIsRefused() async throws {
@@ -322,4 +352,105 @@ struct PluginsTests {
         #expect(status.result?["plugins"] == .array([]))
         #expect(world.queue.sync { world.requests.hello(peer: nil) }.plugins == .array([]))
     }
+
+    // MARK: The review of step 1
+
+    /// Rule 4 and rule 7 at the desk: no expiry or one past the plugin's declared life, an action that leaves it waiting,
+    /// a plugin that is off, a settled request: not drawn. An open card past its expiry is closed by the core.
+    @Test func theDeskDrawsOnlyWhatRulesFourAndSevenLet() async throws {
+        let probe = Probe(defaultOn: true)
+        let world = try await CardWorld.make(scratch, plugins: [probe])
+        defer { world.stop() }
+        let (asker, request) = try await file(world)
+        // Known first (the vault said which are on), and nothing drawn yet: a look with none of its cards.
+        await withCheckedContinuation { done in world.queue.async { world.engine.askPlugins { done.resume() } } }
+        let desk = world.queue.sync { world.engine.desk(probe) }
+        let asked = Probe.card(request, asker: PluginDesk.asker(asker))
+        var card = asked
+        card.expiresAt = nil
+        #expect(world.queue.sync { desk.draw(card, root: world.repo, at: request.created) }.failure?.description.contains("declared life") == true)
+        card.expiresAt = request.created.addingTimeInterval(probe.info.life + 60)
+        #expect(world.queue.sync { desk.draw(card, root: world.repo, at: request.created) }.failure != nil)
+        card = asked
+        card.actions[0].marks = PluginCard.waitingState
+        #expect(card.refusal?.contains("would leave it waiting") == true)
+        card = asked
+        card.session = "\(NodeIds.node):\(UUID().uuidString.lowercased())"
+        #expect(world.queue.sync { desk.draw(card, root: world.repo, at: request.created) }.failure?.description.contains("live session") == true)
+
+        // Drawn, then past its expiry: the core closes it, settled; never drawn again, by this server or the next.
+        world.queue.sync { _ = desk.draw(asked, root: world.repo, at: request.created) }
+        await withCheckedContinuation { done in
+            world.queue.async {
+                world.engine.pluginNow = { request.expiresAt.addingTimeInterval(1) }
+                world.engine.expirePluginCards()
+                done.resume()
+            }
+        }
+        let expired = try #require(self.card(world, request))
+        #expect(!expired.isOpen && expired.plugin?.state == "expired", "\(expired)")
+        world.queue.sync { desk.forget(request: request.id, closed: "gone") }
+        world.queue.sync { world.engine.pluginNow = Date.init }
+        #expect(world.queue.sync { desk.draw(asked, root: world.repo, at: request.created) }.failure?.description.contains("settled") == true)
+        #expect(await eventually(timeout: 30) { (try? world.world.link.vaultV2.settledRequests())?.contains("probe:\(request.id)") == true })
+
+        // Off: nothing drawn, whatever a look that hopped queues brings.
+        _ = await turn(world, "probe", on: false)
+        var fresh = asked
+        fresh.request = UUID().uuidString.lowercased()
+        #expect(world.queue.sync { desk.draw(fresh, root: world.repo, at: request.created) }.failure?.description.contains("off") == true)
+    }
+
+    /// Lines by scalars (CRLF is two), control characters refused but a tab and a line feed, the asker's name checked for
+    /// control characters only.
+    @Test func linesAreScalarsAndControlsAreRefused() {
+        let request = ShellRequest(session: UUID().uuidString, cwd: "/home/u/site", command: "true", label: "", createdAt: Date())
+        var card = Probe.card(request, asker: "Claude ✍️")
+        #expect(card.refusal == nil, "an emoji's variation selector in a session's name refuses nothing")
+        card.body = .init(name: "command", label: "x", text: "a\r\nb")
+        #expect(card.body.lines.count == 2 && card.body.size == "2 lines, 4 bytes")
+        #expect(card.refusal?.contains("control character (U+000D)") == true, "\(String(describing: card.refusal))")
+        card.body = .init(name: "command", label: "x", text: "a\tb\nc")
+        #expect(card.refusal == nil)
+        card.body = .init(name: "command", label: "x", text: "a\u{1B}[2Jb")
+        #expect(card.refusal?.contains("U+001B") == true)
+        card = Probe.card(request, asker: "evil\u{1B}]0;x")
+        #expect(card.refusal?.contains("asker") == true)
+        #expect(PluginText.size("a\r\nb") == "2 lines, 4 bytes")
+    }
+
+    /// A fresh vault after the host's restart: each plugin back at its default, and the list and the restart notice say so.
+    @Test func afterAHostRestartEachIsAtItsDefaultAndSaysSo() async throws {
+        let world = try await CardWorld.make(scratch, plugins: [Probe(defaultOn: true)])
+        defer { world.stop() }
+        world.queue.sync { world.engine.hostRestart = EngineState.Restart(at: Date().timeIntervalSince1970, before: 1, gone: []) }
+        let listed = try #require(await world.ask("plugin.list", action: nil))
+        let lines = PluginListText.lines(listed.result?["plugins"]?.array ?? [])
+        #expect(lines.contains { $0.hasPrefix("probe  Probes  on (at its default since the session host's restart") }, "\(lines)")
+        #expect(LeadEngine.resetByRestart.contains("the feature plugins turned on or off"))
+        // Set again by the user: no longer "since the restart".
+        _ = await turn(world, "probe", on: false)
+        let again = try #require(await world.ask("plugin.list", action: nil))
+        #expect(!PluginListText.lines(again.result?["plugins"]?.array ?? []).contains { $0.contains("since the session host's restart") })
+    }
+
+    /// A page lists only the plugins that are on; the user's terminal lists them all. The Mac's dialog words on and off.
+    @Test func aPageListsOnlyWhatIsOnAndTheMacDialogWordsOnAndOff() async throws {
+        let world = try await CardWorld.make(scratch, plugins: [Probe(defaultOn: false), Probe(id: "other", defaultOn: true)])
+        defer { world.stop() }
+        _ = try #require(await world.ask("plugin.list", action: nil))
+        let page = try #require(await world.ask("plugin.list", action: nil, from: NodeLive.webPeer))
+        #expect(page.result?["plugins"]?.array?.compactMap { $0["id"]?.string } == ["other"], "\(page)")
+        let all = try #require(await world.ask("plugin.list", action: nil))
+        #expect(all.result?["plugins"]?.array?.compactMap { $0["id"]?.string } == ["probe", "other"])
+        let action = UUID().uuidString.lowercased()
+        let text = world.queue.sync { world.requests.approvalCard(NodeWire.Request(id: "d", kind: "plugin.on", args: ["plugin": .string("probe")], action: action)) }
+        #expect((try? text.get())?.contains("turn Probes (probe) on for this node") == true, "\(text)")
+        let unknown = world.queue.sync { world.requests.approvalCard(NodeWire.Request(id: "d", kind: "plugin.off", args: ["plugin": .string("nope")], action: action)) }
+        #expect((try? unknown.get()) == nil)
+    }
+}
+
+extension Result {
+    var failure: Failure? { if case .failure(let failure) = self { return failure } else { return nil } }
 }

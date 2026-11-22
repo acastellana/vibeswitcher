@@ -392,14 +392,14 @@ enum Samples {
         let run = PluginCard.Action(word: "run", label: "Run", acts: true, short: "runs it", does: "runs it", verb: "run it", marks: "starting")
         var plugin = CardStore.Card(id: "local:card:00000000-0000-4000-8000-00000000000d", root: root, kind: .plugin, at: at)
         plugin.plugin = PluginCard(plugin: "probe", request: request.id, session: "local:\(request.session)", asker: "Claude · acme-site",
-                                   title: "A probe asked for", noun: "probe request", ask: "asks for a probe", summary: "asks to probe",
-                                   facts: [.init(name: "folder", label: "in the folder", value: root, folder: true)],
+                                   title: "A probe asked for", noun: "probe request", ask: "asks for a probe",
+                                   facts: [.init(name: "folder", label: "in the folder", value: root, folder: true, decisive: true)],
                                    body: .init(name: "command", label: "running exactly this", note: "as you", text: "make install\nmake check"),
                                    context: .init(name: "label", label: "named", text: "install"), expiresAt: at, actions: [run],
                                    waiting: "nothing runs until you answer run")
         var settledPlugin = CardStore.Card(id: "local:card:00000000-0000-4000-8000-00000000000e", root: root, kind: .plugin, at: at)
         settledPlugin.plugin = PluginCard(plugin: "probe", request: request.id, session: "local:\(request.session)", asker: "Claude",
-                                          title: "A probe asked for", noun: "probe request", ask: "asks for a probe", summary: "asks to probe",
+                                          title: "A probe asked for", noun: "probe request", ask: "asks for a probe",
                                           facts: [], body: .init(name: "command", label: "running", text: "true"), expiresAt: nil,
                                           actions: [run], state: PluginCard.withdrawnState, outcome: "Withdrawn")
         settledPlugin.closed = "withdrawn"

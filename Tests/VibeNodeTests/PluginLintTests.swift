@@ -1,5 +1,6 @@
 import Foundation
 import Testing
+@testable import VibeNode
 
 /// Nothing outside a plugin's folder names it (docs/superpowers/specs/2026-11-22-v2-feature-plugins.md, "What a plugin
 /// is"): outside `Sources/VibeNode/Plugins/<Name>/` and the registry's list (`PluginRegistry.swift`), no source of the
@@ -23,19 +24,22 @@ struct PluginLintTests {
             || path == "Sources/VibeNode/Plugins/PluginRegistry.swift")
     }
 
+    /// The plugins' ids, as the registry lists them: `shell|wallet`.
+    static let ids = PluginRegistry.standard().map(\.info.id).joined(separator: "|")
+
     /// What the rule refuses, each with what it says.
     static let refused: [(pattern: String, what: String)] = [
         // Swift: the card kind, the card's own field, the hand-wired types. (A launch preset's `.shell` is a preset's.)
-        (#"\bKind\.(shell|wallet)\b|\bCard\(.*\bkind\s*:\s*\.(shell|wallet)\b|\bcase\s+\.(shell|wallet)\b|\[\s*\.question\b[^\]]*\.(shell|wallet)\b|\bcard\.kind\s*==\s*\.(shell|wallet)\b"#, "a card kind"),
-        (#"\b(card|\$0|closed|existing|updated|shown)\??\.(shell|wallet)\b"#, "a card's field"),
+        (#"\bKind\.(\#(ids))\b|\bCard\(.*\bkind\s*:\s*\.(\#(ids))\b|\bcase\s+\.(\#(ids))\b|\[\s*\.question\b[^\]]*\.(\#(ids))\b|\bcard\.kind\s*==\s*\.(\#(ids))\b"#, "a card kind"),
+        (#"\b(card|\$0|closed|existing|updated|shown)\??\.(\#(ids))\b"#, "a card's field"),
         (#"\b(ShellShown|WalletShown|answerShell|shellNotices|shellCards|lookAtShellRequests)\b|\bShellCards\s*\."#, "a hand-wired card"),
-        (#"\bcard\["kind"\]\??\.string\s*==\s*"(shell|wallet)""#, "a card kind"),
-        (#"\[\s*"(shell|wallet)"\s*\]\??\[\s*""#, "a card's field"),
+        (#"\bcard\["kind"\]\??\.string\s*==\s*"(\#(ids))""#, "a card kind"),
+        (#"\[\s*"(\#(ids))"\s*\]\??\[\s*""#, "a card's field"),
         (#"\[\s*"run"\s*,\s*"decline"\s*\]|"sign"\s*,\s*"decline""#, "answer words"),
         (#"\(\s*"shell request"\s*,"#, "a card kind"),
         // The page: the kind, the field, the hand-wired view.
-        (#"\b(card|c)\.kind\s*===\s*'(shell|wallet)'"#, "a card kind"),
-        (#"\b(card|c)\??\.(shell|wallet)\b"#, "a card's field"),
+        (#"\b(card|c)\.kind\s*===\s*'(\#(ids))'"#, "a card kind"),
+        (#"\b(card|c)\??\.(\#(ids))\b"#, "a card's field"),
         (#"\b(shellcard\.js|shellFacts|shellCardsOf|shellCard|walletCard)\b"#, "a hand-wired view"),
         (#"\bshell:\s*'A shell asked for'"#, "a card kind"),
     ]
@@ -134,5 +138,35 @@ struct PluginLintTests {
         #expect(Self.breaks(#"const how = preset.kind === 'shell' ? ' --agent shell' : '';"#).isEmpty)
         #expect(Self.exempt("Sources/VibeNode/Plugins/Shell/ShellPlugin.swift") && Self.exempt("Sources/VibeNode/Plugins/PluginRegistry.swift"))
         #expect(!Self.exempt("Sources/VibeNode/Plugins/PluginEngine.swift"))
+    }
+
+    /// A new card kind or a new field on a card is the registry's to judge (a hand-wired card would start as one): this
+    /// list moves only with a plugin system's change, reviewed.
+    @Test func noNewCardKindOrFieldOutsideTheRegistry() {
+        #expect(CardStore.Kind.allCases.map(\.rawValue) == ["question", "approval", "config", "base", "plugin"])
+        let fields = Mirror(reflecting: CardStore.Card(root: "/r", kind: .plugin)).children.compactMap(\.label)
+        #expect(fields == ["id", "code", "project", "root", "kind", "question", "approval", "config", "base", "plugin", "notice", "closed", "at",
+                           "closedAt", "draft"], "\(fields)")
+    }
+
+    /// A plugin's own code (`Plugins/<Name>/`) reaches the node through its desk only: no card store, no host link, no
+    /// engine, no file manager of its own.
+    @Test func aPluginReachesTheNodeThroughItsDeskOnly() throws {
+        let base = Self.repo.appendingPathComponent("Sources/VibeNode/Plugins")
+        let names = FileManager.default.enumerator(atPath: base.path)?.compactMap { $0 as? String } ?? []
+        var checked = 0
+        for name in names where name.contains("/") && name.hasSuffix(".swift") {
+            let code = Self.uncommented(try String(contentsOf: base.appendingPathComponent(name), encoding: .utf8))
+            checked += 1
+            for (pattern, what) in [(#"\bFileManager\b"#, "a file manager"), (#"\bengine\b"#, "the engine"), (#"\.link\b"#, "the host link"),
+                                    (#"\bcards\s*\."#, "the card store"), (#"\bCardStore\s*\.\s*Card\s*\("#, "a card made by hand")] {
+                #expect(code.range(of: pattern, options: .regularExpression) == nil, "Plugins/\(name) reaches \(what): go through its desk")
+            }
+        }
+        #expect(checked > 0)
+        #expect(PluginInfo(id: "x", title: "X", summary: "x", defaultOn: false, folder: ".").refusal != nil)
+        #expect(PluginInfo(id: "x", title: "X", summary: "x", defaultOn: false, folder: "state/x").refusal != nil, "shared with the node's state")
+        #expect(PluginInfo(id: "x", title: "X", summary: "x", defaultOn: false, folder: "x-requests/./asked").refusal != nil)
+        #expect(PluginInfo(id: "x", title: "X", summary: "x", defaultOn: false, folder: "x-requests/asked").refusal == nil)
     }
 }

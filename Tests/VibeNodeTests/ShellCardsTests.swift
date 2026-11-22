@@ -251,4 +251,26 @@ struct ShellCardsTests {
         await look(world)
         #expect(shellCard(world, third)?.isOpen == true)
     }
+
+    /// `plugin off shell` after a shell started: its asker hears that it won't be told how the command ends (no look
+    /// follows the shell while off), kept as told so turning it on again tells nothing late.
+    @Test func offTellsAStartedShellsAskerItWontHearTheEnd() async throws {
+        let world = try await CardWorld.make(scratch)
+        defer { world.stop() }
+        let (_, request) = try await file(world, command: ["sleep", "300"], label: "long")
+        await look(world)
+        let card = try #require(shellCard(world, request))
+        let ran = try #require(await world.answer(card, "run"))
+        try #require(ran.ok, "\(ran)")
+        var told = false
+        for _ in 0..<300 where !told {
+            await look(world)
+            told = await eventually(timeout: 0.2) { self.answers(world, request.id)?.told == true }
+        }
+        try #require(told)
+        let said = world.queue.sync { plugin(world).turnedOff(world.engine.desk(plugin(world))) }
+        #expect(said.count == 1 && said.first?.text.contains("you won't be told how its command ends") == true, "\(said)")
+        #expect(answers(world, request.id)?.endTold == true)
+        #expect(world.queue.sync { plugin(world).turnedOff(world.engine.desk(plugin(world))) }.isEmpty, "once")
+    }
 }

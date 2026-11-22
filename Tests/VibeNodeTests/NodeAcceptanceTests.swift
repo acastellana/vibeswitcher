@@ -891,7 +891,7 @@ struct NodeAcceptanceTests {
         #expect(card?["kind"] as? String == "plugin")
         let shown = try await node.run(["questions"])
         #expect(shown.output.contains(id) && shown.output.contains("  in the folder: \(node.home.path)") && shown.output.contains("    | echo a41-ran")
-                && shown.output.contains("  named: Shell: a41"), "\(shown.output)")
+                && shown.output.contains("  named (the agent's words): \u{201C}Shell: a41\u{201D}"), "\(shown.output)")
         let ran = try await node.runOnTerminal(["answer", id, "run"])
         #expect(ran.status == 0 && ran.output.contains("This runs the command above (1 line, 12 bytes), exactly as shown")
                 && ran.output.contains("started: a new shell session"), "\(ran.output)\(ran.errors)\n\(node.said)")

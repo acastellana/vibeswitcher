@@ -55,7 +55,7 @@ public final class ShellPlugin: FeaturePlugin {
     // MARK: The look
 
     public func look(_ desk: PluginDesk, done: @escaping () -> Void) {
-        desk.stamped({ ShellAsk.filed(in: $0) }) { [weak self] requests in
+        desk.stamped({ try ShellRequest.parse($0) }) { [weak self] requests in
             guard let folder = desk.folder else { return done() }
             // Which have an answer file beside them (its contents never read): on the desk's work.
             desk.work.async {
@@ -154,14 +154,11 @@ public final class ShellPlugin: FeaturePlugin {
     /// The request as a card of data: the host's facts (the asking session, the folder), the command whole, the
     /// agent's label as its words.
     static func card(_ request: ShellRequest, asker: String) -> PluginCard {
-        let first = request.command.split(separator: "\n").first.map(String.init) ?? ""
-        let more = request.command.contains("\n") || first.count > 100 ? " …" : ""
         let folder = ConfigSeal.inert(request.cwd, limit: 200)
         return PluginCard(
             plugin: id, request: request.id, session: "\(NodeIds.node):\(request.session)", asker: asker,
             title: "A shell asked for", noun: "shell request", ask: "asks for a new shell session",
-            summary: "asks to run `\(ConfigSeal.inert(String(first.prefix(100)), limit: 120))\(more)` in \(folder)",
-            facts: [.init(name: "folder", label: "in the folder", value: request.cwd, folder: true)],
+            facts: [.init(name: "folder", label: "in the folder", value: request.cwd, folder: true, decisive: true)],
             body: .init(name: "command", label: "running exactly this command", note: "by your login shell, which stays open after it",
                         text: request.command),
             context: request.label.isEmpty ? nil : .init(name: "label", label: "named", text: "Shell: " + request.label),
@@ -258,7 +255,7 @@ public final class ShellPlugin: FeaturePlugin {
 
     /// Looks again through the engine (one look at a time), then `done`.
     private func lookAgain(_ desk: PluginDesk, done: @escaping () -> Void) {
-        desk.engine.lookAtPlugins(done: done)
+        desk.lookAgain(done: done)
     }
 
     /// Starts the request's shell session (the host's spawn), keeps what came of it (the shell the plugin started, by
@@ -268,7 +265,7 @@ public final class ShellPlugin: FeaturePlugin {
         // A scratch node's hooks and tools keep to its root, as its sessions' do.
         if desk.isScratch { spawn.env["VIBESWITCHER_HOME"] = desk.root.path }
         let note = desk.note
-        desk.link.spawn(spawn) { [weak self] result in
+        desk.spawn(spawn) { [weak self] result in
             let answer: ShellAsk.Answer
             let reply: Result<NodeWire.Value, LeadEngine.CardFailure>
             switch result {
@@ -315,9 +312,9 @@ public final class ShellPlugin: FeaturePlugin {
     /// the host's answer to the spawn), once, when the host's list shows it, or that the shell went first. A shell the
     /// host doesn't list yet just after it started isn't called gone.
     private func tellEnd(_ request: ShellRequest, _ answer: ShellAsk.Answer, now: Date, desk: PluginDesk) {
-        guard answer.awaitsEnd, answer.told, desk.link.state == .connected, !tellingEnd.contains(request.id),
+        guard answer.awaitsEnd, answer.told, desk.connected, !tellingEnd.contains(request.id),
               let asker = UUID(uuidString: request.session) else { return }
-        let session = answer.shell.flatMap(UUID.init(uuidString:)).flatMap { id in desk.link.sessions.first { $0.id == id } }
+        let session = answer.shell.flatMap(UUID.init(uuidString:)).flatMap(desk.session)
         if session == nil, now.timeIntervalSince1970 - answer.at < Self.startingFor { return }
         guard let text = ShellAsk.ending(request, answer, session: session) else { return }
         tellingEnd.insert(request.id)
@@ -340,11 +337,29 @@ public final class ShellPlugin: FeaturePlugin {
 
     /// Turned off with this card open: the desk closed it and told its asker; nothing more comes of it here, after a
     /// restart either (its answer file says it was settled).
-    public func withdrawn(_ card: PluginCard, desk: PluginDesk) {
+    public func withdrawn(_ card: PluginCard, desk: PluginDesk) -> String? {
         withdrawnRequests.insert(card.request)
         let answer = ShellAsk.Answer(state: .declined, at: desk.now, told: true)
         answers[card.request] = answer
         recordFile(answer, for: card.request, desk: desk)
+        return nil
+    }
+
+    /// Turned off: each asker whose shell started and whose command's end it hasn't heard of yet hears that it won't
+    /// (no look follows the shell while off). Kept as told, so turning it on again doesn't tell it late.
+    public func turnedOff(_ desk: PluginDesk) -> [(session: UUID, text: String)] {
+        var said: [(session: UUID, text: String)] = []
+        for (id, answer) in answers where answer.awaitsEnd && answer.told {
+            guard let request = shown[id], let asker = UUID(uuidString: request.session) else { continue }
+            said.append((asker, "[VibeSwitcher] Your shell request \(id) started in session \"\(answer.name ?? ShellAsk.sessionLabel(request))\", "
+                         + "but the user turned Shell requests off on this node, so you won't be told how its command ends. "
+                         + "Look at that session's output yourself if you need it, or ask the user."))
+            var kept = answer
+            kept.endTold = true
+            answers[id] = kept
+            recordFile(kept, for: id, desk: desk)
+        }
+        return said
     }
 }
 

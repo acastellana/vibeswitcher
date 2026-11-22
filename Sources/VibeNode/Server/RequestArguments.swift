@@ -39,6 +39,8 @@ enum RequestArguments {
         "session.close-shells": ["sessions"],
         "presets.edit": ["op", "name", "folder", "digest", "rename", "kind", "args", "env", "unset", "keepShell", "default"],
         "approve": ["batch", "code"],
+        // A feature plugin turned on or off (`PluginRequests`).
+        "plugin.on": ["plugin"], "plugin.off": ["plugin"],
     ]
 
     /// `request`'s `bad-args` refusal when it gives an argument its kind doesn't take; nil when it gives none (or its

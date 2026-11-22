@@ -297,7 +297,7 @@ public final class Requests: @unchecked Sendable {
         case "update.check": updateCheck(request, reply: reply)
         case "approve.list": approveList(request, reply: reply)
         case "approve": approve(request, from: facts, reply: reply)
-        case "plugin.list": pluginList(request, reply: reply)
+        case "plugin.list": pluginList(request, page: facts.pid == NodeLive.webPeer.pid, reply: reply)
         case "plugin.on", "plugin.off": pluginSet(request, reply: reply)
         case "session.ports": sessionPorts(request, reply: reply)
         case "set": set(request, reply: reply)

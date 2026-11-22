@@ -21,9 +21,11 @@ extension LeadEngine {
         let client = link.vaultV2
         pluginWork.async { [weak self] in
             let kept = Result { try client.plugins() }
+            let settled = try? client.settledRequests()
             self?.queue.async {
                 guard let self else { return }
                 self.pluginAsking = false
+                if let settled { self.pluginSettled.formUnion(settled) }
                 switch kept {
                 case .success(let kept): self.keptPlugins(kept)
                 case .failure(let error): self.note("plugins: the vault didn't say which are on (\(error)); each stays as it was")
@@ -82,6 +84,8 @@ extension LeadEngine {
                 self.lookAtPlugins(done: done)
             }
         }
+        retryPluginTells()
+        expirePluginCards()
         var waiting = 1
         let finish = { waiting -= 1; if waiting == 0 { done?() } }
         for plugin in plugins.plugins {
@@ -186,8 +190,9 @@ extension LeadEngine {
         plugin.perform(action.word, on: marked, desk: desk(plugin), then: then)
     }
 
-    /// `plugin` was turned off: each open card of its closes as withdrawn, its asker is told, and the plugin keeps that
-    /// nothing more comes of it. On `queue`.
+    /// `plugin` was turned off: each open card of its closes as withdrawn and is settled, its asker is told (until it
+    /// heard, the plugin off or not), and the plugin keeps that nothing more comes of it; whoever waits on something it
+    /// started is told nothing more will be said. On `queue`.
     func withdraw(_ plugin: FeaturePlugin) {
         let desk = desk(plugin)
         for var card in cards.list() where card.plugin?.plugin == plugin.info.id {
@@ -197,15 +202,59 @@ extension LeadEngine {
             card.plugin = shown
             card.closed = "withdrawn: \(plugin.info.title) was turned off on this node; nothing ran"
             cards.put(card)
+            desk.settle(shown.request)
             note("plugin \(plugin.info.id) off: card \(card.id) withdrawn")
-            if let session = PluginDesk.hostSession(shown.session) {
-                desk.tell(desk.withdrawnText(shown), from: "from VibeSwitcher", session: session) { _ in }
-            }
-            plugin.withdrawn(shown, desk: desk)
+            let said = plugin.withdrawn(shown, desk: desk)
+            if let session = PluginDesk.hostSession(shown.session) { desk.tellSurely(said ?? desk.withdrawnText(shown), session: session) }
+        }
+        for (session, text) in plugin.turnedOff(desk) { desk.tellSurely(text, session: session) }
+    }
+
+    /// Settles `keys` (`PluginKey.name`): never drawn again, here and in the vault. On `queue`.
+    func settlePluginRequests(_ keys: [String]) {
+        let new = keys.filter { pluginSettled.insert($0).inserted }
+        guard !new.isEmpty else { return }
+        let (client, note) = (link.vaultV2, self.note)
+        pluginWork.async {
+            do { try client.settleRequests(new) } catch { note("plugins: \(new.count) settled request(s) not kept in the vault: \(error)") }
         }
     }
 
-    /// `status`'s notice for each plugin card waiting on the user, then each plugin's own. On `queue`.
+    /// Tells `session` `text` from VibeSwitcher until it reached it or the session is gone (`pluginTells`). On `queue`.
+    func tellSurely(_ text: String, session: UUID, key: String) {
+        pluginTells[key] = (session, text)
+        retryPluginTells()
+    }
+
+    /// Each message `pluginTells` holds, tried again (one at a time a message). On `queue`.
+    func retryPluginTells() {
+        for (key, entry) in pluginTells where pluginTelling.insert(key).inserted {
+            tell(entry.text, from: .system("from VibeSwitcher"), session: entry.session) { [weak self] delivery in
+                guard let self else { return }
+                self.pluginTelling.remove(key)
+                if delivery != .notYet { self.pluginTells[key] = nil }
+            }
+        }
+    }
+
+    /// Rule 4, the core's: an open plugin card still waiting past its expiry closes as expired, and is settled (the
+    /// plugin tells its asker at its look). On `queue`.
+    func expirePluginCards() {
+        let now = pluginNow()
+        for var card in cards.list() where card.kind == .plugin {
+            guard var shown = card.plugin, shown.isWaiting, let expires = shown.expiresAt, now >= expires else { continue }
+            shown.state = "expired"
+            shown.outcome = "Expired unanswered"
+            card.plugin = shown
+            card.closed = "expired unanswered"
+            cards.put(card)
+            settlePluginRequests([PluginKey(plugin: shown.plugin, request: shown.request).name])
+            note("plugin \(shown.plugin): card \(card.id) expired unanswered")
+        }
+    }
+
+    /// `status`'s notice for each plugin card waiting on the user, then each plugin's own. The agent's words are marked as
+    /// its own, quoted: the first line of what it asks. On `queue`.
     var pluginNotices: [String] {
         let waiting = cards.list().compactMap { card -> String? in
             guard card.kind == .plugin, let shown = card.plugin, shown.isWaiting, plugins.isOn(shown.plugin) else { return nil }
@@ -213,7 +262,12 @@ extension LeadEngine {
             let answers = shown.actions.enumerated().map { index, action in
                 "`vibeswitcher answer \(card.id) \(action.word)` \(index == 0 ? "shows it whole and " : "")\(inert(action.short))"
             }.joined(separator: ", ")
-            return "a \(inert(shown.noun)) waits for you: \(inert(shown.asker)) \(inert(shown.summary)). \(answers)"
+            let facts = shown.facts.filter(\.decisive).map { "\(inert($0.label)) \(inert($0.value))" }
+            let first = shown.body.lines.first ?? ""
+            let more = shown.body.lines.count > 1 || first.count > 100 ? " …" : ""
+            return "a \(inert(shown.noun)) waits for you: \(inert(shown.asker)) \(inert(shown.ask))"
+                + (facts.isEmpty ? "" : " (\(facts.joined(separator: ", ")))")
+                + "; its \(inert(shown.body.name)), the agent's words: \u{201C}\(ConfigSeal.inert(String(first.prefix(100)), limit: 120))\(more)\u{201D}. \(answers)"
                 + (shown.expiresAt.map { "; it expires at \(NodeWire.dateText($0))" } ?? "")
         }
         return waiting + plugins.on.flatMap { $0.notices(desk($0)) }

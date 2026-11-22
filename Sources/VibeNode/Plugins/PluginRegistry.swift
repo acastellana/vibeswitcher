@@ -25,6 +25,8 @@ public final class PluginRegistry {
             if let refusal = plugin.info.refusal { preconditionFailure(refusal) }
         }
         precondition(Set(plugins.map(\.info.id)).count == plugins.count, "a plugin id twice")
+        let folders = plugins.compactMap(\.info.folder)
+        precondition(Set(folders).count == folders.count, "a plugin folder twice")
         self.plugins = plugins
     }
 

@@ -13,8 +13,8 @@ const card = (fields = {}, plugin = {}) => ({
   closed: null, notice: null, at: '2026-11-22T10:00:00.000Z', blocking: false, draft: null,
   plugin: {
     plugin: 'probe', request: 'r1', session: 'local:3f6c2c1e-8a5b-4c1d-9e0f-2b7a6d5c4e3f', asker: 'Worker: fix-login',
-    title: 'A probe asked for', noun: 'probe request', ask: 'asks for a probe', summary: 'asks to probe /home/u/site',
-    facts: [{ name: 'folder', label: 'in the folder', value: '/home/u/site', folder: true }],
+    title: 'A probe asked for', noun: 'probe request', ask: 'asks for a probe',
+    facts: [{ name: 'folder', label: 'in the folder', value: '/home/u/site', folder: true, decisive: true }],
     body: { name: 'command', label: 'running exactly this', note: 'as you', lines: ['probe --deep', 'echo "done ✓"'], bytes: 28, size: '2 lines, 28 bytes' },
     context: { name: 'label', label: 'named', text: 'deep probe' }, severity: 'important', expiresAt: '2026-11-22T10:30:00.000Z',
     actions: [action('run', 'runs it', true), action('decline', 'declines it', false)], waiting: 'nothing runs until you answer run',
@@ -30,7 +30,7 @@ test('the card is the node’s shape, and says what it asks whole, with the line
   assert.equal(said.body.size, '2 lines, 28 bytes');
   assert.equal(said.body.name, 'Command');
   assert.deepEqual(said.facts, [{ label: 'In the folder', value: '/home/u/site', folder: true }]);
-  assert.deepEqual(said.context, { label: 'Named', text: 'deep probe' });
+  assert.deepEqual(said.context, { label: 'Named (the agent’s words)', text: '“deep probe”' }, 'the agent’s words marked as its own');
   assert.deepEqual(said.actions.map((a) => a.line), ['vibeswitcher answer 0a1b2c3d run', 'vibeswitcher answer 0a1b2c3d decline']);
   assert.deepEqual(said.actions.map((a) => a.says), ['the command that runs it', 'the command that declines it']);
   assert.equal(said.outcome, null);

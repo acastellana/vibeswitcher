@@ -17,6 +17,8 @@ public enum PluginListText {
                 state = "off until the session host's vault says (try again in a moment)"
             } else if let why = plugin["unavailable"]?.string {
                 state = "off: can't run on this node: " + inert(why)
+            } else if plugin["restarted"]?.bool == true {
+                state += " (at its default since the session host's restart, whose vault started over: `vibeswitcher plugin \(on ? "off" : "on") \(id)` to change it)"
             } else if plugin["set"]?.bool == plugin["defaultOn"]?.bool {
                 state += " (its default)"
             }
