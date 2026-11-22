@@ -150,13 +150,13 @@ extension Platform {
             port(of: fd) { getsockname($0, $1, $2) }
         }
 
-        /// Whether `fd` is a TCP socket that listens (`SO_ACCEPTCONN`): what the host hands its server for the web (H1).
+        /// Whether `fd` is a TCP socket that listens: what the host hands its server for the web (H1). Linux asks
+        /// `SO_ACCEPTCONN`; the Mac reads the socket's own options as `proc_pidfdinfo` gives them for this process
+        /// (`acceptsConnections`, TCP+Darwin.swift): its kernel doesn't read that option back.
         public static func isListening(_ fd: Int32) -> Bool {
-            var on: Int32 = 0
-            var length = socklen_t(MemoryLayout<Int32>.size)
             var type: Int32 = 0
             var typeLength = socklen_t(MemoryLayout<Int32>.size)
-            return localPort(fd) != nil && getsockopt(fd, SOL_SOCKET, SO_ACCEPTCONN, &on, &length) == 0 && on != 0
+            return localPort(fd) != nil && acceptsConnections(fd)
                 && getsockopt(fd, SOL_SOCKET, SO_TYPE, &type, &typeLength) == 0 && type == Platform.Sockets.stream
         }
 
