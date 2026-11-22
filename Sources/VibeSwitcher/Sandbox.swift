@@ -883,8 +883,9 @@ private final class Driver: NSObject, NSApplicationDelegate {
         for path in [(lead.transcript as NSString).deletingLastPathComponent, (lead.state as NSString).deletingLastPathComponent] {
             try? VibePaths.ensurePrivate(URL(fileURLWithPath: path))
         }
-        // Its first turn, over as it starts.
-        try? VibePaths.writePrivate(Data(Driver.firstTurn.utf8), to: URL(fileURLWithPath: lead.transcript))
+        // Its first turn, over as it starts: its start prompt (which its chat leaves out after the old lead's turns), its
+        // greeting, and a turn with you.
+        try? VibePaths.writePrivate(Data(Self.handoverTurn.utf8), to: URL(fileURLWithPath: lead.transcript))
         try? VibePaths.writePrivate(Data(), to: URL(fileURLWithPath: lead.control))
         try? FileManager.default.removeItem(atPath: lead.state)
         stopped(old)
@@ -946,6 +947,20 @@ private final class Driver: NSObject, NSApplicationDelegate {
                 + tool(2, "Read", #"{"file_path":"jobs/schedule.py"}"#, "def is_due(job):")
                 + tool(3, "Bash", #"{"command":"git log --oneline -3 -- jobs/payouts.py"}"#, "4c1d2e9 Run the payout job per region")
                 + [usage]).joined(separator: "\n") + "\n"
+    }()
+
+    /// The first turns of the lead a `handover` starts: what its chat shows below the handover's line.
+    static let handoverTurn: String = {
+        let stamp = ISO8601DateFormatter().string(from: Date())
+        func line(_ type: String, _ id: String, _ content: String) -> String {
+            let message = type == "user" ? #""\#(content)""# : #"[{"type":"text","text":"\#(content)"}]"#
+            return #"{"type":"\#(type)","uuid":"\#(id)","timestamp":"\#(stamp)","isSidechain":false,"message":{"role":"\#(type)","content":\#(message)}}"#
+        }
+        return [line("user", "h0", LeadPrompts.startOpening + " You replace the lead on /dev/ttys001: read its last turns first."),
+                line("assistant", "h1", "Took over from the last lead: the payout fix is next, its tests first. Nothing else is open."),
+                line("user", "h2", "Go ahead with the lock fix."),
+                line("assistant", "h3", "On it: a worker takes the lock first in `jobs/payouts.py` and runs its tests.")]
+            .joined(separator: "\n") + "\n"
     }()
 
     /// The fake lead's first prompt: its title, and the first line of its conversation.
