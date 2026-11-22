@@ -198,6 +198,38 @@ leads by root, cards by `at` then id) and a client may sort its own way. **A sna
 over:** the client keeps each row whose id is in `entries` (updating its value in place), adds the new ones, removes
 the ones no longer there, all in one render. It never empties the list first.
 
+### Snapshots in parts
+
+A snapshot is bounded by construction, not by how much a collection holds (the architecture review's row 14). A client
+that sends `"parts": true` in `subscribe` gets every snapshot of a keyed collection as one or more messages of at most
+`NodeWire.partBytes` (256 KiB) each, so none can pass the Unix socket's 1 MiB line or a WebSocket frame's limit:
+
+```json
+{"v":1,"kind":"snapshot","sub":"s4","collection":"boards","epoch":"…","seq":9,"entries":[…],"part":0,"final":false}
+{"v":1,"kind":"snapshot","sub":"s4","collection":"boards","epoch":"…","seq":9,"entries":[…],"part":1,"final":true,"withheld":["…"]}
+```
+
+| Field | Type | Meaning |
+| --- | --- | --- |
+| `part` | int | this message's place, from 0; every part carries the snapshot's `epoch` and `seq` |
+| `final` | bool | true on the last part; one part that holds everything is `part` 0, `final` true |
+| `withheld` | [string]? | ids of entries too large for a part even when cut (below): they exist, and weren't sent |
+
+- **The client holds the parts and takes them together** when `final` comes: one reconcile, as for a single-message
+  snapshot. Nothing of a part is shown before. A part out of its place (not the next, or another `epoch`/`seq`) drops
+  what was held, and the client subscribes again. The server writes a snapshot's parts back to back: nothing of the
+  same subscription comes between them.
+- **An entry is bounded by its collection's own rule** under a part's room (`NodeWire.entryBytes`): a board by
+  `BoardValue.mostBytes` (its last tasks go to `more`). One past it anyway has its longest texts cut, each keeping its
+  start and ending `… [cut: N bytes]` (a question of a megabyte); one that still doesn't fit is withheld and named. The
+  rest of the snapshot is always sent; it is never dropped for one entry.
+- **A delta larger than a part** is never sent: the subscriber gets the stream as a snapshot in parts instead.
+- **A client that doesn't ask** (a page or a client from before parts) gets one message as before, entries left out
+  until it fits a line and `truncated` set, and a delta past a line becomes such a snapshot rather than a message the
+  socket would refuse. An older page loads the newer server's files at once anyway (`hello.assets`); no command-line
+  command subscribes.
+- `chat` snapshots are bounded by their items (`ChatStream`) and don't come in parts.
+
 ### Deltas
 
 ```json

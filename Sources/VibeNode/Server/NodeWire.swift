@@ -12,6 +12,14 @@ public enum NodeWire {
     public static let version = 1
     /// The longest line either side takes, its newline excluded: a longer one gets `bye` and the close.
     public static let maxLine = 1 << 20
+    /// The most bytes one part of a snapshot takes (the architecture review's row 14): a client that asks for parts
+    /// (`subscribe`'s `parts`) gets a snapshot as messages of at most this, each a part of it, whatever the collection
+    /// holds (`LiveHub.parted`).
+    public static let partBytes = 256 << 10
+    /// The most bytes one entry of a keyed collection takes, encoded: a part's room once its envelope is counted. Each
+    /// collection's value keeps its entries under it by its own rule (a board's `BoardValue.mostBytes`); an entry
+    /// past it anyway is withheld from a snapshot in parts, named in its `withheld`, never the snapshot dropped.
+    public static let entryBytes = partBytes - (8 << 10)
 
     // MARK: Values
 

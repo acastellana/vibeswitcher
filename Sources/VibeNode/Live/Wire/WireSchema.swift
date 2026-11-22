@@ -122,7 +122,7 @@ public enum WireSchema {
                 field("v", .int), field("kind", .words(["snapshot"])), field("sub", .string), field("collection", collection),
                 optional("key", .string), field("epoch", .string), field("seq", .int), optional("entries", .list(.shape("entry"))),
                 optional("after", Kind.string.orNull), optional("more", .bool), optional("items", .list(.shape("chat.item"))),
-                optional("truncated", .bool)]),
+                optional("truncated", .bool), optional("part", .int), optional("final", .bool), optional("withheld", .list(.string))]),
             shape("entry", from: contractLive, [field("id", .string), field("value", .any)]),
             shape("delta", from: contractLive, [
                 field("v", .int), field("kind", .words(["delta"])), field("sub", .string), field("prev", .int), field("seq", .int),
@@ -139,7 +139,8 @@ public enum WireSchema {
                                                           optional("assets", .string)]),
             shape("subscribe.args", from: "the contract's §3", [
                 field("sub", .string), field("collection", collection), optional("key", .string),
-                optional("since", .shape("subscribe.since")), optional("after", Kind.string.orNull), optional("limit", .int)]),
+                optional("since", .shape("subscribe.since")), optional("after", Kind.string.orNull), optional("limit", .int),
+                optional("parts", .bool)]),
             shape("subscribe.since", from: "the contract's §3", [field("epoch", .string), field("seq", .int)]),
             shape("subscribe.result", from: contractLive, [field("sub", .string), field("mode", .words(["snapshot", "resume", "tail"]))]),
             shape("unsubscribe.args", from: "the contract's §3", [field("sub", .string)]),

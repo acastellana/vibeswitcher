@@ -25,8 +25,16 @@ extension NodeWire {
         public var epoch: String
         public var seq: Int
         public var entries: [Entry]
-        /// Some entries left out, so the message fits a line (`LiveHub.fitted`); absent otherwise.
+        /// Some entries left out, so the message fits a line (`LiveHub.fitted`, for a client that didn't ask for parts);
+        /// absent otherwise.
         public var truncated: Bool?
+        /// A snapshot in parts (`LiveHub.parted`, for a client that asked for them): this message's place, from 0, and
+        /// whether it is the last. The client holds the parts' entries and takes them together, as one snapshot, when
+        /// the last comes. Absent: the snapshot is this one message.
+        public var part: Int?
+        public var final: Bool?
+        /// The ids of entries past `NodeWire.entryBytes`, left out of a snapshot in parts: they exist, too large to send.
+        public var withheld: [String]?
 
         public init(sub: String, collection: String, epoch: String, seq: Int, entries: [Entry]) {
             v = NodeWire.version
