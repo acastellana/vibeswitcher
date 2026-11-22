@@ -379,9 +379,11 @@ struct NodeServerBoundsTests {
         #expect(answered.ids == (0..<count).map { "a\($0)" }, "every request answered once, in order: \(answered.ids.count)")
         let otherAt = try #require(answered.other, "the other connection got no reply")
         #expect(otherAt < (answered.last ?? 0), "the other connection was answered before the flood's last reply")
+        // At most `refusalsPerWindow` lines a window (a loaded machine may take more than one window for them all), the
+        // fifth saying the rest are counted.
         let refusals = node.said.components(separatedBy: "\n").filter { $0.contains("refused draft from pid") }
-        #expect(refusals.count == Requests.refusalsPerWindow, "\(refusals.count) refusal lines")
-        #expect(refusals.last?.contains("are counted, not logged") == true, "\(refusals.last ?? "")")
+        #expect(refusals.count >= Requests.refusalsPerWindow && refusals.count < count / 20, "\(refusals.count) refusal lines")
+        #expect(refusals.count >= Requests.refusalsPerWindow && refusals[Requests.refusalsPerWindow - 1].contains("are counted, not logged"), "\(refusals)")
     }
 
     /// What a sender's facts read of `/proc` is capped: an environment past its limit is unreadable (which the voice
