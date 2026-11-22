@@ -169,6 +169,9 @@ public final class Requests: @unchecked Sendable {
         if refusals.count > 256 { refusals = refusals.filter { now - $0.value.since < Self.refusalWindow } }
     }
 
+    /// How many stuck ends in a row of the server (`HostNotes.serverStuckInARow`) `status` says.
+    static let stuckNoticeAfter = 3
+
     static let refusalsPerWindow = 5
     static let refusalWindow: TimeInterval = 10
     private var refusals: [pid_t: (since: TimeInterval, said: Int, held: Int)] = [:]
@@ -481,6 +484,9 @@ public final class Requests: @unchecked Sendable {
         notices += engine?.toolchainNotices ?? []
         notices += engine?.shellNotices ?? []
         notices += reminders ?? sessions?.reminderNotices() ?? []
+        if let stuck = notes?.notes.serverStuckInARow, stuck >= Self.stuckNoticeAfter {
+            notices.append("the server ended stuck \(stuck) times in a row (its engine's queue didn't answer), and the host started it again each time: its log says what it was doing; if it goes on, `vibeswitcher stop`, then `vibeswitcher start`")
+        }
         if let notice = updates?.notice { notices.append(notice) }
         return notices
     }

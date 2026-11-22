@@ -77,7 +77,7 @@ extension HostServer {
         HostNotes(startedAt: startedAt, serverRestarts: tally.earlierServerRestarts + (serverChild?.restarts ?? 0),
                   replacedPaths: tally.replacedPaths, refusedAppConnections: tally.refusedAppConnections,
                   lockHeldElsewhere: tally.lockHeldElsewhere, lockHeldElsewhereCount: tally.lockHeldElsewhereCount,
-                  build: HostStartLine.commit, binaries: HostStartLine.binaries)
+                  build: HostStartLine.commit, binaries: HostStartLine.binaries, serverStuckInARow: serverChild?.stuckInARow)
     }
 
     /// `tally` for a handover's state (`HostHandover.State.tally`): nil on the Mac, which counts nothing (no connector,

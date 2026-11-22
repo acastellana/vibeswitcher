@@ -121,9 +121,13 @@ public final class NodeHealth: @unchecked Sendable {
     // MARK: The watchdog
 
     /// The server's `stuck`: one line on stderr with the raw `write(2)` (nothing that could wait on the stuck queue or
-    /// a lock it holds), then `_exit(70)` (EX_SOFTWARE), no atexit handler run. The host starts the server again.
+    /// a lock it holds); then SIGTERM to its process group (the host starts it in a group of its own), itself ignoring
+    /// it, so the programs it started (git, a headless summary) don't run on untimed after it; then `_exit(70)`
+    /// (EX_SOFTWARE, `ServerChild.stuckExit`), no atexit handler run. The host starts the server again.
     public static let exitStuck: @Sendable (String) -> Void = { line in
         Platform.Stdio.error("vibeswitcher-server: \(line)\n")
+        signal(SIGTERM, SIG_IGN)
+        if getpgrp() == getpid() { kill(0, SIGTERM) }
         _exit(70)
     }
 

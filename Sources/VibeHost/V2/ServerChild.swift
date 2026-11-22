@@ -103,6 +103,8 @@ public final class ServerChild {
     public let webListeners = HostWebListeners(usersHost: true, note: { _ in })
     private var delay = ServerChild.firstDelay
     private var restartCount = 0
+    /// The children that ended stuck in a row (`stuckExit`); a child that ends any other way resets it. Under `lock`.
+    private var stuckCount = 0
 
     private convenience init(server: HostServer, copy: Platform.ProcessSelf.SealedCopy, launch: Launch) {
         self.init(server: server, image: .sealed(copy), launch: launch)
@@ -408,6 +410,13 @@ public final class ServerChild {
     /// How many times a child was started again after one ended.
     public var restarts: Int { lock.withLock { restartCount } }
 
+    /// How many children in a row ended stuck: the server's watchdog's exit (`stuckExit`), its engine's queue
+    /// unanswered for its limit. The host's notes carry it, and the next server's `status` says so past a few.
+    public var stuckInARow: Int { lock.withLock { stuckCount } }
+
+    /// The exit code of a server that ends itself stuck (`NodeHealth.exitStuck`): EX_SOFTWARE.
+    public static let stuckExit: Int32 = 70
+
     /// The child running now as a handover carries it (`HostHandover.State.serverChild`): nil when none runs, or its
     /// connector has closed (a handover then waits: `handoverRefusal`). On the host's queue.
     var record: HostHandover.ServerChildRecord? {
@@ -569,8 +578,10 @@ public final class ServerChild {
         var status: Int32 = 0
         while waitpid(pid, &status, 0) < 0, errno == EINTR {}
         let ran = Platform.Clock.steadyDate().timeIntervalSince(running.startedAt)
+        let stuck = status & 0x7f == 0 && (status >> 8) & 0xff == Self.stuckExit
         let replaced = lock.withLock { () -> Bool in
             child = nil
+            stuckCount = stuck ? stuckCount + 1 : 0
             if due?.pid == pid { due = nil }
             if ran >= Self.steadyRun { delay = Self.firstDelay }
             defer { if replacing == pid { replacing = nil } }
@@ -580,7 +591,9 @@ public final class ServerChild {
             Self.say(server, "server child pid \(pid) ended for the new build's server: \(HostLog.waitStatus(status)); started again from it now")
             return spawn()
         }
-        Self.say(server, "server child pid \(pid) ended after \(Int(ran)) s: \(HostLog.waitStatus(status)); started again in \(Int(lock.withLock { delay })) s")
+        let inARow = lock.withLock { stuckCount }
+        Self.say(server, "server child pid \(pid) ended after \(Int(ran)) s: \(HostLog.waitStatus(status))"
+                 + (stuck ? " (stuck: its engine's queue didn't answer; \(inARow) in a row)" : "") + "; started again in \(Int(lock.withLock { delay })) s")
         scheduleRestart()
     }
 
