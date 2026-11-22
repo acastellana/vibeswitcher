@@ -321,18 +321,24 @@ enum Samples {
                           reason: "not a session's")
         var bareBase = CardStore.Card(id: "local:card:00000000-0000-4000-8000-000000000009", root: root, kind: .baseMove, at: at)
         bareBase.base = .init(branch: "main", from: nil, fromIs: .none, to: "3333333", commits: [])
-        // A shell request's cards (`ShellCards.swift`): one waiting, one started, one that failed.
+        // A shell request's cards (the shell plugin, `ShellPlugin.card`): one waiting, one started, one that failed.
         let request = ShellRequest(id: "5b1e9a20-7c4d-4f3e-9a8b-1c2d3e4f5a6b", session: "3f6c2c1e-8a5b-4c1d-9e0f-2b7a6d5c4e3f", cwd: root,
                                    command: "make install", label: "install", createdAt: at)
-        var shell = CardStore.Card(id: "local:card:00000000-0000-4000-8000-00000000000a", root: root, kind: .shell, at: at)
-        shell.shell = .init(request: request, asker: "Claude · acme-site")
-        var startedShell = CardStore.Card(id: "local:card:00000000-0000-4000-8000-00000000000b", root: root, kind: .shell, at: at)
-        startedShell.shell = .init(request: request, asker: "Claude · acme-site", state: .started, shell: "7a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d",
-                                   name: "Shell: install")
-        startedShell.closed = "run: started in a new shell session \"Shell: install\""
-        var failedShell = CardStore.Card(id: "local:card:00000000-0000-4000-8000-00000000000c", root: root, kind: .shell, at: at)
-        failedShell.shell = .init(request: request, asker: "Claude · acme-site", state: .failed, why: "the folder isn't allowed")
-        failedShell.closed = "didn't start: the folder isn't allowed"
+        var shell = CardStore.Card(id: "local:card:00000000-0000-4000-8000-00000000000a", root: root, kind: .plugin, at: at)
+        shell.plugin = ShellPlugin.card(request, asker: "Claude · acme-site")
+        var startedShell = CardStore.Card(id: "local:card:00000000-0000-4000-8000-00000000000b", root: root, kind: .plugin, at: at)
+        let started = ShellAsk.Answer(state: .started, at: at, shell: "7a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d", name: "Shell: install")
+        startedShell.plugin = ShellPlugin.card(request, asker: "Claude · acme-site")
+        startedShell.plugin?.state = ShellPlugin.state(started)
+        startedShell.plugin?.outcome = ShellPlugin.outcome(started)
+        startedShell.closed = ShellPlugin.closed(request, started)
+        var failedShell = CardStore.Card(id: "local:card:00000000-0000-4000-8000-00000000000c", root: root, kind: .plugin, at: at)
+        let failed = ShellAsk.Answer(state: .failed, at: at, why: "the folder isn't allowed")
+        failedShell.plugin = ShellPlugin.card(ShellRequest(id: request.id, session: request.session, cwd: root, command: "make install",
+                                                           label: "", createdAt: at), asker: "Claude · acme-site")
+        failedShell.plugin?.state = ShellPlugin.state(failed)
+        failedShell.plugin?.outcome = ShellPlugin.outcome(failed)
+        failedShell.closed = ShellPlugin.closed(request, failed)
         // A feature plugin's cards (`PluginCard`): one waiting with every field, one settled with none of the optional ones.
         let run = PluginCard.Action(word: "run", label: "Run", acts: true, short: "runs it", does: "runs it", verb: "run it", marks: "starting")
         var plugin = CardStore.Card(id: "local:card:00000000-0000-4000-8000-00000000000d", root: root, kind: .plugin, at: at)

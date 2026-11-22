@@ -7,8 +7,8 @@ import Testing
 /// view. Everything else asks the registry and draws the generic card. Comments don't count; string literals do (a
 /// kind is a string on the wire).
 ///
-/// `pending`: the files still wired by hand, until their plugin moves onto the system (the definition's steps 2 and 3).
-/// A file that no longer matches must leave the list, so it only shrinks.
+/// `pending`: the files still wired by hand (none since step 2). A file that no longer matches must leave the list, so it
+/// only shrinks.
 struct PluginLintTests {
     static let repo = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
 
@@ -40,28 +40,8 @@ struct PluginLintTests {
         (#"\bshell:\s*'A shell asked for'"#, "a card kind"),
     ]
 
-    /// The files still wired by hand (the definition's step 2 moves shell; then this list is empty).
-    static let pending: Set<String> = [
-        "Sources/VibeNode/Engine/Answers.swift",
-        "Sources/VibeNode/Engine/LeadEngine.swift",
-        "Sources/VibeNode/Engine/RoomWatch.swift",
-        "Sources/VibeNode/Engine/ShellCards.swift",
-        "Sources/VibeNode/Live/Wire/WireSchema.swift",
-        "Sources/VibeNode/Server/ApprovalCard.swift",
-        "Sources/VibeNode/Server/ApproveRequest.swift",
-        "Sources/VibeNode/Server/BriefRequest.swift",
-        "Sources/VibeNode/Server/CardRequests.swift",
-        "Sources/VibeNode/Server/CardText.swift",
-        "Sources/VibeNode/Server/Requests.swift",
-        "Sources/VibeNode/Stores/CardStore.swift",
-        "Sources/vibeswitcher-cli/Answer.swift",
-        "Sources/vibeswitcher-cli/Approve.swift",
-        "WebApp/js/notify.js",
-        "WebApp/js/shellcard.js",
-        "WebApp/js/views/board.js",
-        "WebApp/js/views/cards.js",
-        "WebApp/js/views/chat.js",
-    ]
+    /// The files still wired by hand: none since shell requests moved onto the plugin system (the definition's step 2).
+    static let pending: Set<String> = []
 
     /// `text` with its comments blanked (each byte but a newline made a space), string literals kept.
     static func uncommented(_ text: String) -> String {
