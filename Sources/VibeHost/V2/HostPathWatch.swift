@@ -311,12 +311,13 @@ final class HostPathWatch {
 
 extension HostServer {
     /// An accept that failed with `code`: for want of descriptors or memory (EMFILE, ENFILE, ENOBUFS, ENOMEM), which
-    /// would fail again at once while the listener's source fires for as long as a connection waits, accepting is
-    /// suspended for a second, said in the log and on stderr (the architecture review's row 4). The source suspended is the one
-    /// resumed, whatever happened to it meanwhile (`replaceListener` or `stop` may cancel it: a source cancelled while
-    /// suspended ends only once resumed, and mustn't be let go suspended). Each source paused once at a time
-    /// (`acceptsPaused`, by source): a listener replaced meanwhile has its own source, paused in its turn. Anything
-    /// else: nothing (the source fires again if a connection still waits). On `queue`.
+    /// would fail again at once while the listener's source fires for as long as a connection waits: accepting stops
+    /// for a second, said in the log and on stderr (the architecture review's row 4). The accept source is cancelled,
+    /// not suspended (a suspended source's cancel is put off until it is resumed: `stop` or `replaceListener` closing
+    /// the listener meanwhile would leave libdispatch to unregister a descriptor number another file may have taken by
+    /// then), and a new one made for the same listener a second later, unless the host has stopped or replaced its
+    /// listener since. One pause a listener at a time (`acceptsPaused`, by source); a listener replaced meanwhile is
+    /// paused in its own turn. Anything else: nothing (the source fires again if a connection still waits). On `queue`.
     func acceptFailed(_ code: Int32) {
         guard [EMFILE, ENFILE, ENOBUFS, ENOMEM].contains(code), let source = acceptSource else { return }
         let key = ObjectIdentifier(source as AnyObject)
@@ -324,10 +325,19 @@ extension HostServer {
         // On stderr too: the log's file may be what can't be opened.
         note("host: couldn't accept a connection (errno \(code)): accepting again in 1 s")
         log("couldn't accept a connection (errno \(code)): accepting again in 1 s")
-        source.suspend()
+        let listener = listenFD
+        acceptSource = nil
+        source.cancel()
         queue.asyncAfter(deadline: .now() + 1) { [weak self] in
-            source.resume()
-            self?.acceptsPaused.remove(key)
+            // Held until its id leaves `acceptsPaused`: let go, its address (its id) could be a new source's meanwhile.
+            withExtendedLifetime(source) {}
+            guard let self else { return }
+            self.acceptsPaused.remove(key)
+            guard !self.stopped, self.acceptSource == nil, self.listenFD == listener, listener >= 0 else { return }
+            let again = DispatchSource.makeReadSource(fileDescriptor: listener, queue: self.queue)
+            again.setEventHandler { [weak self] in self?.acceptAll() }
+            again.resume()
+            self.acceptSource = again
         }
     }
 
