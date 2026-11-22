@@ -93,3 +93,36 @@ public enum WindowRows {
         return order.map { WindowSection(project: $0, rows: rows[$0] ?? []) }
     }
 }
+
+extension WindowRows {
+    /// Each lead a handover put in place of an ended one, moved to where that one's row was (`places`: the new lead's
+    /// window session → the start of the lead it replaced): before the first other live window session of its project
+    /// that started after that, else where it is. The other rows keep their order; Terminal's own sessions (ordered as
+    /// the screen has them) and ended rows (folded away) aren't counted.
+    public static func placed(_ sections: [WindowSection], places: [UUID: Date]) -> [WindowSection] {
+        guard !places.isEmpty else { return sections }
+        func start(_ row: WindowRow) -> Date {
+            switch row.content {
+            case .agent(let session): return session.startedAt
+            case .hosted(let info): return info.startedAt
+            }
+        }
+        func live(_ row: WindowRow) -> Bool {
+            switch row.content {
+            case .agent: return true
+            case .hosted(let info): return info.isLive
+            }
+        }
+        let ordered = places.sorted { ($0.value, $0.key.uuidString) < ($1.value, $1.key.uuidString) }
+        return sections.map { section in
+            var rows = section.rows
+            for (id, place) in ordered {
+                guard let from = rows.firstIndex(where: { $0.hostID == id }) else { continue }
+                let row = rows.remove(at: from)
+                let to = rows.firstIndex { $0.hostID != nil && live($0) && start($0) > place } ?? from
+                rows.insert(row, at: min(to, from))
+            }
+            return WindowSection(project: section.project, rows: rows)
+        }
+    }
+}

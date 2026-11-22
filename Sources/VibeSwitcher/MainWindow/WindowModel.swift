@@ -41,6 +41,17 @@ final class WindowModel: ObservableObject {
     }
     /// Leads another session of their project replaced (see `LeadController.replacedLeads`), by window session.
     @Published var replacedLeads: [UUID: ReplacedLead] = [:]
+    /// Leads a handover put in place of an ended one, each listed where that one was (see `LeadController.leadPlaces`).
+    var leadPlaces: [UUID: Date] = [:] {
+        didSet {
+            guard leadPlaces != oldValue else { return }
+            let placed = WindowRows.placed(sections, places: leadPlaces)
+            if placed != sections {
+                sections = placed
+                arrange()
+            }
+        }
+    }
     /// The agent's own session id last seen in each window session, so it can be resumed once it ends.
     private(set) var agentSessions: [UUID: (agent: Agent, sessionID: String, transcript: String?)] = [:]
     /// The middle pane shows the conversation (Chat) rather than the terminal, where there is one.
@@ -197,7 +208,8 @@ final class WindowModel: ObservableObject {
         let known = Set(hosted.map(\.id))
         agentSessions = agentSessions.filter { known.contains($0.key) }
         let labels = Dictionary(uniqueKeysWithValues: hosted.map { ($0.id, $0.label) })
-        let fresh = WindowRows.sections(sessions: sessions, hosted: hosted, table: table) { SessionNaming.name(forProjectRoot: $0) }
+        let fresh = WindowRows.placed(WindowRows.sections(sessions: sessions, hosted: hosted, table: table) { SessionNaming.name(forProjectRoot: $0) },
+                                      places: leadPlaces)
         let labelsChanged = labels != hostLabels, sectionsChanged = fresh != sections
         if labelsChanged { hostLabels = labels }
         if sectionsChanged { sections = fresh }
@@ -211,6 +223,15 @@ final class WindowModel: ObservableObject {
     }
 
     func select(hostID: UUID) { selectedID = "host:\(hostID)" }
+
+    /// A replaced lead a handover ended (`LeadController.handedOver`): the selection on its row goes to the lead that
+    /// took its place. Whether it moved.
+    @discardableResult
+    func handedOver(_ old: UUID, to new: UUID) -> Bool {
+        guard selectedID == "host:\(old)" else { return false }
+        select(hostID: new)
+        return true
+    }
 
     func select(tty: String) {
         if let row = allRows.first(where: { $0.session?.tty == tty }) { selectedID = row.id }

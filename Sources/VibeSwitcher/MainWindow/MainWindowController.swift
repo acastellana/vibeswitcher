@@ -163,6 +163,13 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
             return !(chat.composer.drafts[key] ?? "").isEmpty || !(chat.composer.attachments[key] ?? []).isEmpty
                 || chat.outbox.outbox.entries.contains { $0.key == key }
         }
+        // A replaced lead a handover ends: its selection goes to the new lead, and its unsent text with it (the
+        // composer's, and what was typed into its terminal), ahead of what the new lead's box holds.
+        leads.handedOver = { [weak self] old, new, typed in
+            guard let self else { return }
+            self.model.handedOver(old, to: new)
+            Self.carryDraft(self.chat.composer, from: "host:\(old)", to: "host:\(new)", typed: typed)
+        }
         // A Claude Code session's dictation goes through its own /voice.
         dictation?.claudeSession = { [weak self] key in self?.sync.claudeVoice(key: key, folder: self?.model.selectedRow?.cwd) }
         // A message sent over it cancels it, and goes once it's stopped.
@@ -238,6 +245,9 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
                     self?.seeSelectedLead()
                 }
             }
+            .store(in: &cancellables)
+        leads.$leadPlaces.receiveLatest(on: RunLoop.main)
+            .sink { [weak self] places in self?.model.leadPlaces = places }
             .store(in: &cancellables)
         leads.$replacedLeads.receiveLatest(on: RunLoop.main)
             .sink { [weak self] replaced in
@@ -632,6 +642,19 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
     private func updateViewing() {
         let row = model.selectedRow
         store.windowViewingTTY = window?.isKeyWindow == true && row?.hostID != nil ? row?.session?.tty : nil
+    }
+
+    /// A replaced lead's unsent text, carried to the lead that took its place (`from`, `to`: their composers' keys):
+    /// its composer's draft and attachments, and what was typed into its terminal (`typed`), before what the new
+    /// lead's box holds already. Nothing is dropped.
+    static func carryDraft(_ composer: ComposerDrafts, from old: String, to new: String, typed: String) {
+        let parts = [composer.drafts[old] ?? "", typed, composer.drafts[new] ?? ""]
+            .filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+        if !parts.isEmpty { composer.drafts[new] = parts.joined(separator: "\n") }
+        composer.drafts[old] = nil
+        let attached = (composer.attachments[old] ?? []) + (composer.attachments[new] ?? [])
+        if !attached.isEmpty { composer.attachments[new] = attached.reduce(into: []) { if !$0.contains($1) { $0.append($1) } } }
+        composer.attachments[old] = nil
     }
 
     // MARK: NSWindowDelegate
