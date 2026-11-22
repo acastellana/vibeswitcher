@@ -127,6 +127,9 @@ public enum LeadVaultV2 {
             set { Self.setPart(&plugin, "setting:", newValue) }
         }
 
+        /// The names a build before the one field kept them under: read, never written.
+        enum OldKeys: String, CodingKey { case plugins, settledRequests, pluginSettings }
+
         static func part(_ record: [String: String], _ prefix: String) -> [String: String] {
             Dictionary(uniqueKeysWithValues: record.filter { $0.key.hasPrefix(prefix) }.map { (String($0.key.dropFirst(prefix.count)), $0.value) })
         }
@@ -148,7 +151,15 @@ public enum LeadVaultV2 {
             first = try container.decodeIfPresent([String: Double].self, forKey: .first) ?? [:]
             spent = try container.decodeIfPresent([String: Double].self, forKey: .spent) ?? [:]
             targets = try container.decodeIfPresent([String: String].self, forKey: .targets) ?? [:]
-            plugin = try container.decodeIfPresent([String: String].self, forKey: .plugin) ?? [:]
+            if let one = try container.decodeIfPresent([String: String].self, forKey: .plugin) {
+                plugin = one
+            } else {
+                // A record from a build that kept these as fields of their own (a handover carries it): taken as it was.
+                let old = try decoder.container(keyedBy: OldKeys.self)
+                plugins = try old.decodeIfPresent([String: Bool].self, forKey: .plugins) ?? [:]
+                settledRequests = try old.decodeIfPresent([String: Double].self, forKey: .settledRequests) ?? [:]
+                pluginSettings = try old.decodeIfPresent([String: String].self, forKey: .pluginSettings) ?? [:]
+            }
         }
     }
 

@@ -148,6 +148,17 @@ struct PluginsTests {
         let data = try JSONEncoder().encode(try #require(book))
         #expect(try JSONDecoder().decode(LeadVaultV2.Book.self, from: data).plugins == ["probe": true])
         #expect(try JSONDecoder().decode(LeadVaultV2.Book.self, from: Data("{}".utf8)).plugins == [:])
+        // A record in the shape a build before the one field wrote (its own fields), as a handover carries it: kept.
+        let old = Data(#"{"actions":[],"seals":{},"plugins":{"shell":false},"settledRequests":{"shell:abc":12.5},"pluginSettings":{"probe.depth":"3"}}"#.utf8)
+        let kept = try JSONDecoder().decode(LeadVaultV2.Book.self, from: old)
+        #expect(kept.plugins == ["shell": false] && kept.settledRequests == ["shell:abc": 12.5] && kept.pluginSettings == ["probe.depth": "3"])
+        let again = try JSONDecoder().decode(LeadVaultV2.Book.self, from: JSONEncoder().encode(kept))
+        #expect(again == kept && again.plugins == ["shell": false], "written in the one field, read back the same")
+        // A vault's serialized state from a build with the old shape, as a handover hands it over: restored, kept.
+        var saved = try #require(try JSONSerialization.jsonObject(with: LeadVault.Book(restoring: nil).serialized) as? [String: Any])
+        saved["v2"] = try JSONSerialization.jsonObject(with: old)
+        let restored = LeadVault.Book(restoring: try JSONSerialization.data(withJSONObject: saved))
+        #expect(restored.v2 { $0?.plugins } == ["shell": false] && restored.v2 { $0?.settledRequests["shell:abc"] } == 12.5)
     }
 
     /// `plugin on` and `off` are the user's voice, recorded in the vault before they act; the vault keeps what they set,
