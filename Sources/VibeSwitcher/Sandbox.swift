@@ -772,15 +772,21 @@ private final class Driver: NSObject, NSApplicationDelegate {
 
     /// The project `startlead` starts a real lead in, and its fake Claude's files.
     private var newLead: (folder: String, transcript: String, control: String, state: String) {
-        let folder = (home as NSString).appendingPathComponent("projects/new-lead")
-        let files = state.appendingPathComponent("lead-new-lead", isDirectory: true).path
-        let transcript = (home as NSString).appendingPathComponent(".claude/projects/-sandbox-new-lead/lead.jsonl")
+        leadFiles((home as NSString).appendingPathComponent("projects/new-lead"))
+    }
+
+    /// The fake Claude's files for a lead the app starts in `folder` (`startlead`'s, `handover`'s).
+    private func leadFiles(_ folder: String) -> (folder: String, transcript: String, control: String, state: String) {
+        let slug = (folder as NSString).lastPathComponent
+        let files = state.appendingPathComponent("lead-\(slug)", isDirectory: true).path
+        let transcript = (home as NSString).appendingPathComponent(".claude/projects/-sandbox-\(slug)/lead.jsonl")
         return (folder, transcript, files + "/control.jsonl", files + "/state.json")
     }
 
-    /// What a lead started in `folder` runs: the fake Claude on `startlead`'s files (a shell's `cat` without its script).
+    /// What a lead started in `folder` runs: the fake Claude on that folder's files (`leadFiles`; a shell's `cat`
+    /// without its script).
     func leadCommand(_ folder: String) -> String {
-        let lead = newLead
+        let lead = leadFiles(folder)
         guard let fakeClaude else { return "exec /bin/cat" }
         return "exec /usr/bin/python3 -I -u '\(fakeClaude)' '\(lead.transcript)' '\(lead.control)' '\(lead.state)'"
     }
@@ -820,6 +826,89 @@ private final class Driver: NSObject, NSApplicationDelegate {
                 if let problem { return reply(false, problem) }
                 self.chat("Lead") { ok, text in
                     reply(ok, ok ? "lead started (the host was \(hostWas) before): \(text)" : text)
+                }
+            }
+        }
+    }
+
+    /// `handover start`: a lead in a project of its own (a fake Claude, named on its board, holding no role: as after
+    /// an install), selected, with a session of yours started after it. `handover`: Project Lead starts a new lead there
+    /// (`LeadController.startLead`, its question answered Start a New Lead; its agent a fake Claude), and once the new
+    /// one has ended its first turn, the old one, between turns, ends by itself and the new one takes its row.
+    func handover(_ step: String, _ reply: @escaping (Bool, String) -> Void) {
+        let slug = "handover-site", label = "Lead · handover-site"
+        let folder = (home as NSString).appendingPathComponent("projects/\(slug)")
+        // Its hooks' state as it is now (`adopt`'s is from before the session started, which a lead's look doesn't take).
+        func stopped(_ fake: Fake) {
+            var hook = HookState(agent: .claude, tty: fake.tty, lastEvent: "Stop", lastEventAt: Date().timeIntervalSince1970)
+            hook.agentPid = fake.pid
+            hook.cwd = folder
+            hook.transcriptPath = fake.transcript
+            try? hook.save(to: VibePaths.stateFile(tty: fake.tty))
+        }
+        if step == "start" {
+            guard !fakeList.contains(where: { $0.label == label }) else { return reply(false, "already started: handover") }
+            return startFake(label: label, slug: slug, firstPrompt: Self.leadFirstPrompt) { [weak self] problem in
+                guard let self else { return }
+                if let problem { return reply(false, problem) }
+                guard let old = self.fakeList.first(where: { $0.label == label }) else { return reply(false, "the old lead didn't start") }
+                try? VibePaths.writePrivate(Data("# Handover site\n".utf8), to: URL(fileURLWithPath: folder + "/README.md"))
+                let made = FileManager.default.fileExists(atPath: folder + "/.git")
+                for args in [["init", "-q", "-b", "main"], ["config", "user.email", "sandbox@example.invalid"], ["config", "user.name", "Sandbox"],
+                             ["add", "README.md"], ["commit", "-q", "-m", "First commit"]] where !made {
+                    guard Git.run(args, in: folder).ok else { return reply(false, "couldn't make its repository: git \(args.joined(separator: " "))") }
+                }
+                do {
+                    try BoardStore(root: folder).prepare()
+                    try BoardStore(root: folder).update { board in
+                        board.leadSession = old.id.uuidString
+                        board.leadPid = old.pid
+                        board.leadTTY = old.tty
+                    }
+                } catch { return reply(false, "couldn't write its board: \(error)") }
+                stopped(old)
+                self.startFake(label: "Claude", slug: slug) { [weak self] problem in
+                    guard let self else { return }
+                    if let problem { return reply(false, problem) }
+                    self.model.select(hostID: old.id)
+                    self.waitFor({ [weak self] in self?.model.selectedRow?.hostID == old.id }) { [weak self] met in
+                        self?.settle { reply(met, met ? "\(label) selected, a session of yours after it" : "its row didn't show") }
+                    }
+                }
+            }
+        }
+        guard let old = fakeList.first(where: { $0.label == label }) else { return reply(false, "no lead to hand over: handover start first") }
+        guard host.sessions.contains(where: { $0.id == old.id && $0.isLive }) else { return reply(false, "its lead was handed over already") }
+        let lead = leadFiles(folder)
+        for path in [(lead.transcript as NSString).deletingLastPathComponent, (lead.state as NSString).deletingLastPathComponent] {
+            try? VibePaths.ensurePrivate(URL(fileURLWithPath: path))
+        }
+        // Its first turn, over as it starts.
+        try? VibePaths.writePrivate(Data(Driver.firstTurn.utf8), to: URL(fileURLWithPath: lead.transcript))
+        try? VibePaths.writePrivate(Data(), to: URL(fileURLWithPath: lead.control))
+        try? FileManager.default.removeItem(atPath: lead.state)
+        stopped(old)
+        let confirm = leads.confirm
+        leads.confirm = { title, text, buttons in title.contains("without its role") ? 1 : confirm(title, text, buttons) }
+        leads.startLead(in: folder)
+        waitFor({ [weak self] in self?.host.sessions.contains { $0.label == label && $0.isLive && $0.id != old.id } ?? true }) { [weak self] _ in
+            guard let self else { return }
+            self.leads.confirm = confirm
+            guard let new = self.host.sessions.first(where: { $0.label == label && $0.isLive && $0.id != old.id }) else {
+                return reply(false, "the new lead didn't start: \(self.refused.joined(separator: "; "))")
+            }
+            self.adopt(new, label: label, folder: folder, transcript: lead.transcript, control: lead.control, agentState: lead.state, agent: .claude) { [weak self] problem in
+                guard let self else { return }
+                if let problem { return reply(false, problem) }
+                if let fake = self.fakeList.first(where: { $0.id == new.id }) { stopped(fake) }
+                self.leads.refresh()
+                self.waitFor({ [weak self] in self?.host.sessions.contains { $0.id == old.id && $0.isLive } == false }, tries: 600) { [weak self] ended in
+                    guard let self else { return }
+                    let selected = self.model.selectedRow?.hostID == new.id
+                    self.settle {
+                        reply(ended && selected, ended ? "the old lead ended by itself; the new one is " + (selected ? "selected" : "not selected")
+                              : "the old lead still runs (replaced: \(self.leads.replacedLeads[old.id] != nil))")
+                    }
                 }
             }
         }
@@ -1475,6 +1564,7 @@ private final class Driver: NSObject, NSApplicationDelegate {
         ("publish [N]", "has the lead controller publish N times (default 50), each laid out and drawn, and times them"),
         ("hangs [reset]", "the sandbox's main-thread freezes (its hang reports, as the health digest tells them) and its longest wait between two beats (reset: from now on)"),
         ("startlead", "starts a real project lead (LeadController.startLead, as Project Lead does: the host first if none runs, its vault grant) in a new repository, its agent a fake Claude, and shows its chat; first thing after `run --empty`, no session host runs before it"),
+        ("handover [start]", "with start: a project lead (a fake Claude named on its board, holding no role, as after an install) in a project of its own, selected, a session of yours after it; then without: Project Lead starts a new lead there, and once its first turn is over the old one ends by itself, the new one in its row and selected"),
         ("lead [FILE]", "shows a fake project lead's chat, at its end (started the first time, on FILE's transcript if given): a board of tasks, a withdrawn question, tool runs and workers' messages"),
         ("team", "starts a fake worker on the fake lead's running task, in its worktree (start the lead first); select it and tell it a permission to see it wait on its lead"),
         ("team wall", "puts a running team task on the fake lead's board (start the lead first): 3 members with their parts and progress, one waiting on a teammate, and 5 posts on its wall; shows the Team tab with its lane opened to the Wall section"),
@@ -2672,6 +2762,7 @@ private final class Driver: NSObject, NSApplicationDelegate {
                 reply(problem == nil, problem ?? "started")
             }
         case "startlead": startRealLead(reply)
+        case "handover": handover(rest, reply)
         case "lead":
             // Started once; then its chat, once its board is read, at the end (where its pinned questions are).
             let show = { [weak self] in
