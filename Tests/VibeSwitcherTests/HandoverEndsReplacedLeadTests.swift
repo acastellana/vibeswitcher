@@ -315,11 +315,13 @@ struct HandoverEndsReplacedLeadTests {
         let stamp = ISO8601DateFormatter().string(from: Date())
         let lines = [
             #"{"type":"user","message":{"role":"user","content":"make the films page"},"uuid":"u1","timestamp":"\#(stamp)"}"#,
-            #"{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Done: the films page is a task."}]},"uuid":"a1","timestamp":"\#(stamp)"}"#,
+            #"{"type":"assistant","message":{"role":"assistant","stop_reason":"end_turn","content":[{"type":"text","text":"Done: the films page is a task."}]},"uuid":"a1","timestamp":"\#(stamp)"}"#,
         ]
         try (lines.joined(separator: "\n") + "\n").write(to: folder.appendingPathComponent("other-lead.jsonl"), atomically: true, encoding: .utf8)
         let observer = LeadObserver(home: world.home, stateFile: { _ in routing.temp.url("no-hook-state.json") })
-        #expect(observer.transcript(session, hook: nil) != nil)  // The name-and-folder lookup finds it.
+        // The name-and-folder lookup finds it, and it ends on a finished turn.
+        let found = try #require(observer.transcript(session, hook: nil))
+        #expect(TranscriptTail.read(url: URL(fileURLWithPath: found))?.state == .turnOver(apiError: nil))
         let read = Reading.read(observer, session, agentPid: session.childPID, background: nil)
         #expect(read == Reading(activity: .unknown, asking: false, turnEnded: false))
     }
