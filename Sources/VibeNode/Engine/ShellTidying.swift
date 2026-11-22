@@ -27,9 +27,8 @@ extension LeadEngine {
     private func saveShellUsed() {
         let file = shellUsedFile
         do {
-            try FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true,
-                                                    attributes: [.posixPermissions: 0o700])
-            try JSONEncoder().encode(shellUsed.sorted { $0.uuidString < $1.uuidString }).write(to: file, options: .atomic)
+            try VibePaths.ensurePrivate(file.deletingLastPathComponent())
+            try VibePaths.writePrivate(JSONEncoder().encode(shellUsed.sorted { $0.uuidString < $1.uuidString }), to: file)
         } catch {
             note("shell tidy: the record of shells typed into wasn't written: \(error)")
         }
