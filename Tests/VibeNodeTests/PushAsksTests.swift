@@ -40,6 +40,15 @@ struct PushAsksTests {
         await world.ask(push ? "push" : "push.decline", ["folder": .string(world.repo), "request": .string(id)], action: action, from: facts)
     }
 
+    /// The lead's tool reply says what the user does on a node: the command, not a click on a card the node hasn't.
+    @Test func theRequestsReplyNamesTheCommandsOnANode() {
+        let node = LeadPush.waiting(root: "/home/u/dev/app", mac: false)
+        #expect(node.contains("`vibeswitcher push /home/u/dev/app`") && node.contains("`vibeswitcher decline-push /home/u/dev/app`"), "\(node)")
+        #expect(!node.contains("click"), "\(node)")
+        #expect(LeadPush.waiting(root: "/r", mac: false) == LeadPush.waiting(root: "/r"), "this node has no code identity: the node's words")
+        #expect(LeadPush.waiting(root: "/r", mac: true).contains("click Push on its card"))
+    }
+
     @Test func anOpenRequestIsOnTheLeadAndInStatusWithTheCommandsAndTheLeadIsToldNothing() async throws {
         let world = try await CardWorld.make(scratch)
         defer { world.stop() }
