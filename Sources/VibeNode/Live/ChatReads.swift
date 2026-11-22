@@ -154,21 +154,3 @@ enum ChatImageBytes {
                                "data": .string(image.data[start..<end].base64EncodedString())]))
     }
 }
-
-extension TranscriptFollow {
-    /// The image `id` of the chat as last read: a prompt's or a tool result's. Nil for any id it doesn't hold. On the
-    /// store's `reads` queue.
-    func image(_ id: String) -> ChatImage? {
-        for item in items {
-            switch item {
-            case .prompt(let entry):
-                if case .prompt(_, let images) = entry.kind, let found = images.first(where: { $0.id == id }) { return found }
-            case .tools(_, let tools):
-                for tool in tools { if let found = tool.result?.images.first(where: { $0.id == id }) { return found } }
-            default:
-                continue
-            }
-        }
-        return nil
-    }
-}
