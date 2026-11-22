@@ -138,8 +138,8 @@ public final class HostServer {
     private var lockFD: Int32 = -1
     var listenFD: Int32 = -1
     var acceptSource: DispatchSourceRead?
-    /// Accepting suspended after it failed for want of descriptors (`acceptFailed`, V2/HostPathWatch.swift).
-    var acceptPaused = false
+    /// The accept sources suspended after an accept failed for want of descriptors (`acceptFailed`, V2/HostPathWatch.swift).
+    var acceptsPaused: Set<ObjectIdentifier> = []
     private var housekeeping: DispatchSourceTimer?
     /// The watch on `Config.owner`.
     private var ownerWatch: (any Platform.Cancellable)?

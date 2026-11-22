@@ -314,18 +314,20 @@ extension HostServer {
     /// would fail again at once while the listener's source fires for as long as a connection waits, accepting is
     /// suspended for a second, said in the log and on stderr (the architecture review's row 4). The source suspended is the one
     /// resumed, whatever happened to it meanwhile (`replaceListener` or `stop` may cancel it: a source cancelled while
-    /// suspended ends only once resumed, and mustn't be let go suspended). Anything else: nothing (the source fires
-    /// again if a connection still waits). On `queue`.
+    /// suspended ends only once resumed, and mustn't be let go suspended). Each source paused once at a time
+    /// (`acceptsPaused`, by source): a listener replaced meanwhile has its own source, paused in its turn. Anything
+    /// else: nothing (the source fires again if a connection still waits). On `queue`.
     func acceptFailed(_ code: Int32) {
-        guard [EMFILE, ENFILE, ENOBUFS, ENOMEM].contains(code), !acceptPaused, let source = acceptSource else { return }
-        acceptPaused = true
+        guard [EMFILE, ENFILE, ENOBUFS, ENOMEM].contains(code), let source = acceptSource else { return }
+        let key = ObjectIdentifier(source as AnyObject)
+        guard acceptsPaused.insert(key).inserted else { return }
         // On stderr too: the log's file may be what can't be opened.
         note("host: couldn't accept a connection (errno \(code)): accepting again in 1 s")
         log("couldn't accept a connection (errno \(code)): accepting again in 1 s")
         source.suspend()
         queue.asyncAfter(deadline: .now() + 1) { [weak self] in
             source.resume()
-            self?.acceptPaused = false
+            self?.acceptsPaused.remove(key)
         }
     }
 
