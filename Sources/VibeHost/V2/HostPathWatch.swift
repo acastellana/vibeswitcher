@@ -63,7 +63,14 @@ final class HostPathWatch {
     let socketPath: String
     let lockPath: String
     /// What the socket path should name: the listener's file, checked (`verifiedIdentity`). Nil: nothing checked yet.
-    private var socketFile: FileIdentity?
+    private(set) var socketFile: FileIdentity?
+    /// The socket path's file couldn't be checked yet (out of descriptors at `start`, or for a fresh listener): neither
+    /// recorded nor unlinked, checked again at each housekeeping until it can be.
+    private(set) var socketUnchecked = false
+    /// How a connection is made through the path to check it (`leadsHere`), and how the kernel is asked what file a
+    /// listener is bound to (`Platform.Sockets.boundFile`): a test's own, to stand for a host out of descriptors.
+    var leads: (String) -> Bool? = HostPathWatch.leadsHere
+    var kernel: (Int32, String) -> Platform.Sockets.BoundFileAtPath = { Platform.Sockets.boundFile(of: $0, at: $1) }
     /// Every attempt of the last rebind lost: the folder's changes don't start another, the next housekeeping does.
     private var rebindAtHousekeeping = false
     /// The file the server's own lock is on (its descriptor's `fstat`, as the watch began).
@@ -95,7 +102,11 @@ final class HostPathWatch {
     /// `config.watchesItsPath`.
     static func start(for server: HostServer, config: HostServer.Config, lockFD: Int32) -> HostPathWatch {
         let watch = HostPathWatch(server: server, socketPath: config.socketPath, lockPath: config.lockPath)
-        watch.socketFile = verifiedIdentity(of: config.socketPath, listener: server.listenFD)
+        switch verdict(of: config.socketPath, listener: server.listenFD, leads: watch.leads, recorded: nil, kernel: watch.kernel) {
+        case .ours(let file): watch.socketFile = file
+        case .cantSay: watch.socketUnchecked = true
+        case .notOurs: break
+        }
         var info = stat()
         if fstat(lockFD, &info) == 0 {
             watch.firstLock = FileIdentity(info)
@@ -147,8 +158,22 @@ final class HostPathWatch {
     private func checkSocket(_ server: HostServer, probing: Bool) {
         let now = Self.identity(atPath: socketPath)
         let what: String
-        if let now, now == socketFile {
-            guard probing, Self.verifiedIdentity(of: socketPath, listener: server.listenFD) != now else {
+        if socketUnchecked {
+            // Nothing verified yet, and the last check couldn't be made: the file is left as it is until one can.
+            guard probing else { return }
+            switch Self.verdict(of: socketPath, listener: server.listenFD, leads: leads, recorded: nil, kernel: kernel) {
+            case .ours(let file):
+                socketFile = file
+                socketUnchecked = false
+                return
+            case .cantSay:
+                return sayOnce(server, socketPath, "socket path \(socketPath) can't be checked now (no descriptor to check with): left as it is, checked again at the next housekeeping")
+            case .notOurs:
+                socketUnchecked = false
+                what = now == nil ? "nothing" : "a socket that isn't the host's"
+            }
+        } else if let now, now == socketFile {
+            guard probing, Self.verdict(of: socketPath, listener: server.listenFD, leads: leads, recorded: socketFile, kernel: kernel) != .ours(now) else {
                 said[socketPath] = nil
                 return
             }
@@ -172,9 +197,20 @@ final class HostPathWatch {
             }
             Platform.Sockets.enableCredentials(fresh)
             afterBind?()
-            guard let bound = Self.verifiedIdentity(of: socketPath, listener: fresh) else {
+            let bound: FileIdentity
+            switch Self.verdict(of: socketPath, listener: fresh, leads: leads, recorded: nil, kernel: kernel) {
+            case .ours(let file): bound = file
+            case .notOurs:
                 Sys.close(fresh)
                 continue
+            case .cantSay:
+                // Not verified, so not kept; and no further try, whose bind would unlink the path again.
+                Sys.close(fresh)
+                failure = "the fresh listener couldn't be checked (no descriptor to check with)"
+                socketFile = nil
+                socketUnchecked = true
+                rebindAtHousekeeping = true
+                return sayOnce(server, socketPath, "socket path \(socketPath) names \(what), and \(failure): tried again at the next housekeeping")
             }
             socketFile = bound
             rebindAtHousekeeping = false
@@ -264,31 +300,55 @@ final class HostPathWatch {
     /// connection that led to this process. Each housekeeping's check asks again, so that connection is made again
     /// there. Nil otherwise.
     static func verifiedIdentity(of path: String, listener: Int32) -> FileIdentity? {
-        verifiedIdentity(of: path, kernel: Platform.Sockets.boundFile(of: listener, at: path))
+        guard case .ours(let file) = verdict(of: path, listener: listener, leads: leadsHere, recorded: nil) else { return nil }
+        return file
+    }
+
+    /// What a check of the path found: the host's file, a file that isn't, or nothing it could say (no descriptor to
+    /// check with: out of descriptors).
+    enum Verdict: Equatable {
+        case ours(FileIdentity)
+        case notOurs
+        case cantSay
+    }
+
+    /// `verifiedIdentity(of:listener:)` as a verdict, `leads` its connection through the path, `recorded` the file an
+    /// earlier verified check recorded (nil: none yet).
+    static func verdict(of path: String, listener: Int32, leads: (String) -> Bool?, recorded: FileIdentity?,
+                        kernel: (Int32, String) -> Platform.Sockets.BoundFileAtPath = { Platform.Sockets.boundFile(of: $0, at: $1) }) -> Verdict {
+        verdict(of: path, kernel: kernel(listener, path), leads: leads, recorded: recorded)
     }
 
     /// `verifiedIdentity(of:listener:)` given the kernel's answer for the path (`Platform.Sockets.boundFile(of:at:)`),
     /// so a test can give any.
-    ///
-    /// `leads`: `leadsHere`; when it can't say (no descriptor to connect with, out of descriptors), the file named at the
-    /// path, the same before and after, is taken as it was recorded: "couldn't check" is "can't say now", never "not
-    /// ours", or the host would unlink and bind again over its own socket (the review of the runtime hardening).
-    static func verifiedIdentity(of path: String, kernel: Platform.Sockets.BoundFileAtPath,
-                                 leads: (String) -> Bool? = leadsHere) -> FileIdentity? {
+    static func verifiedIdentity(of path: String, kernel: Platform.Sockets.BoundFileAtPath) -> FileIdentity? {
+        guard case .ours(let file) = verdict(of: path, kernel: kernel, leads: leadsHere, recorded: nil) else { return nil }
+        return file
+    }
+
+    /// The verdict given the kernel's answer. Where the check can't be made (`leads` nil: no descriptor to connect
+    /// with), the file counts as the host's only when it is the one an earlier verified check recorded (`recorded`),
+    /// before and after: anything else (a worker's socket bound at the path while the host is out of descriptors) is
+    /// `cantSay`, which no caller records, and none unlinks (the review of the runtime hardening).
+    static func verdict(of path: String, kernel: Platform.Sockets.BoundFileAtPath, leads: (String) -> Bool?,
+                        recorded: FileIdentity?) -> Verdict {
         var matched: FileIdentity?
         switch kernel {
-        case .bound(let device, let inode): return FileIdentity(device: device, inode: inode)
-        case .another: return nil
+        case .bound(let device, let inode): return .ours(FileIdentity(device: device, inode: inode))
+        case .another: return .notOurs
         case .sharesLowBits(let device, let inode): matched = FileIdentity(device: device, inode: inode)
         case .cantSay: break
         }
         var info = stat()
-        guard lstat(path, &info) == 0, info.st_mode & S_IFMT == S_IFSOCK else { return nil }
+        guard lstat(path, &info) == 0, info.st_mode & S_IFMT == S_IFSOCK else { return .notOurs }
         let before = FileIdentity(info)
-        if let matched, matched != before { return nil }
-        guard let led = leads(path) else { return identity(atPath: path) == before ? before : nil }
-        guard led else { return nil }
-        return identity(atPath: path) == before ? before : nil
+        if let matched, matched != before { return .notOurs }
+        guard let led = leads(path) else {
+            guard let recorded, before == recorded, identity(atPath: path) == before else { return .cantSay }
+            return .ours(before)
+        }
+        guard led else { return .notOurs }
+        return identity(atPath: path) == before ? .ours(before) : .notOurs
     }
 
     /// Whether a connection made through `path` now (not waiting: a full backlog is a no) reaches a listener of this
