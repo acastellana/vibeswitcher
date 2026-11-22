@@ -1114,6 +1114,8 @@ final class LeadController: ObservableObject {
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             var issued: String?
             var replacedSession: UUID?
+            // The replaced lead and its transcript, for the new lead's chat (`LeadChatHistory`).
+            var replacedChat: (session: UUID, transcript: String?)?
             var waiting: [SteerMessage] = []
             // In its prompt: it isn't told it again (see `LeadWitness.PolicyWatch`).
             let policy = WorkingPolicy.load()
@@ -1156,6 +1158,7 @@ final class LeadController: ObservableObject {
                 if resume == nil, let old, let tty = handover.replaced?.tty ?? running?.tty {
                     let transcript = transcripts[old.uuidString]
                         ?? running.flatMap { TranscriptLocator.claude(cwd: root, name: name, startedAt: $0.startedAt, home: home) }
+                    replacedChat = (old, transcript)
                     let turns = transcript.flatMap { LastTurns.read(transcript: $0, tty: tty, home: home) }
                     if let file = try LeadLaunch.writeTurns(turns, root: root) { handed = (tty, file) }
                     Breadcrumbs.shared.note("lead: the replaced lead on \(tty) " + (handed != nil ? "left its last turns for the new one"
@@ -1189,13 +1192,15 @@ final class LeadController: ObservableObject {
                     self.replacing = self.replacing.filter { $0.value != root }
                     self.alert("The lead didn't start.", "\(error)")
                 case .success(let (grant, launch)):
-                    self.spawnLead(root: root, project: project, grant: grant, launch: launch, policy: policy, show: show)
+                    self.spawnLead(root: root, project: project, grant: grant, launch: launch, policy: policy, show: show, replaced: replacedChat)
                 }
             }
         }
     }
 
-    private func spawnLead(root: String, project: String, grant: String, launch: LeadLaunch.Prepared, policy: String, show: Bool) {
+    /// `replaced`: the lead this one takes the place of, and its transcript: the new lead's chat carries its conversation.
+    private func spawnLead(root: String, project: String, grant: String, launch: LeadLaunch.Prepared, policy: String, show: Bool,
+                           replaced: (session: UUID, transcript: String?)? = nil) {
         let boardStore = BoardStore(root: root)
         let vault = self.vault
         host.spawn(SpawnRequest(cwd: root, command: launch.command, env: launch.environment, cols: 120, rows: 40, keepShell: false,
@@ -1209,6 +1214,8 @@ final class LeadController: ObservableObject {
                     }
                 }
                 self?.reads.async { _ in try? boardStore.update { board in LeadHandover.started(session.id.uuidString, on: &board) } }
+                if let replaced { self?.recordHandover(root: root, from: replaced.session, to: session.id, transcript: replaced.transcript,
+                                                       reason: LeadChatHistory.startedReason, at: Date()) }
                 self?.policyWatch?.started(session.id.uuidString, with: policy)
                 // You chose to start the lead here: answer Claude's trust question for this folder.
                 if self?.answersTrust == true { self?.answerTrust(session.id, folder: root) }
@@ -2402,7 +2409,7 @@ final class LeadController: ObservableObject {
             }
             guard let asked, asked.session == session.id else {
                 reading.gate?.release()
-                let marker = "VIBESWITCHER_HANDOVER_" + UUID().uuidString
+                let marker = LeadRotation.noteMarker + UUID().uuidString
                 self.rotationAsked[root] = (session.id, now, reading.reason, marker)
                 let message = LeadRotation.request + " Start your reply with this line:\n" + marker + "\nThen write the handover note."
                 let done: (Bool) -> Void = { [weak self] sent in
@@ -2554,7 +2561,9 @@ final class LeadController: ObservableObject {
                         self.replacing[old.id] = root; self.replacements += 1
                         self.holders[root] = fresh.id
                         self.markReplaced(holders: self.holders)
-                        let notice = LeadRotation.notice(reason: reason, at: self.rotationNow())
+                        let at = self.rotationNow()
+                        let notice = LeadRotation.notice(reason: reason, at: at)
+                        self.recordHandover(root: root, from: old.id, to: fresh.id, transcript: path, reason: reason, at: at)
                         self.rotationNotices[fresh.id] = notice
                         self.rotationNotices[old.id] = notice
                         if self.answersTrust { self.answerTrust(fresh.id, folder: root) }
@@ -2569,6 +2578,16 @@ final class LeadController: ObservableObject {
     }
 
     private enum RotationError: Error { case noTurns, changed }
+
+    /// A handover in the project's record (off the main thread): the new lead's chat shows the old one's conversation
+    /// above a line where it began (`LeadChatHistory`).
+    private func recordHandover(root: String, from old: UUID, to new: UUID, transcript: String?, reason: String, at: Date) {
+        let handover = LeadChatHistory.Handover(from: old.uuidString, to: new.uuidString, transcript: transcript,
+                                                at: at.timeIntervalSince1970, reason: reason, root: root)
+        reads.async { _ in
+            do { try LeadChatHistory.record(handover) } catch { Breadcrumbs.shared.note("lead handover not recorded for its chat: \(error)") }
+        }
+    }
 
 }
 

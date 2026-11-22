@@ -446,7 +446,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
         let shown = model.showsChat && path != nil
         // Only read a conversation that's on screen.
         let previous = chat.path
-        chat.show(path: shown ? path : nil, key: shown ? row?.draftKey : nil)
+        chat.show(path: shown ? path : nil, key: shown ? row?.draftKey : nil, history: shown ? row.flatMap(model.chatHistory(for:)) : nil)
         if chat.path != previous { Breadcrumbs.shared.note("chat: show \(chat.path.map { ($0 as NSString).lastPathComponent } ?? "none")") }
         if shown, chat.path != previous {
             chat.loadCompletions(agent: row?.session?.agent ?? row?.hosted?.agent.flatMap(Agent.init(rawValue:)) ?? .claude,

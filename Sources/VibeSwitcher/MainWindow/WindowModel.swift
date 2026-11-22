@@ -187,6 +187,11 @@ final class WindowModel: ObservableObject {
         row.session?.transcriptPath ?? row.hostID.flatMap { agentSessions[$0]?.transcript }
     }
 
+    /// Whose earlier sessions the row's chat shows above its own: a project lead's, in its project (`LeadChatHistory`).
+    func chatHistory(for row: WindowRow) -> LeadChatHistory.Source? {
+        LeadChatHistory.source(label: label(of: row), session: row.hostID, cwd: row.startFolder ?? row.cwd)
+    }
+
     /// The session whose wallet cards sit under its terminal: a window session with no conversation to pin them under
     /// (a New Shell session running a program that files with vs-wallet). One with a transcript has them in its chat.
     func walletUnderTerminal(for row: WindowRow?) -> UUID? {

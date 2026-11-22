@@ -46,11 +46,11 @@ public enum LeadRotation {
         return log
     }
 
-    /// The transcript's last megabyte, from its first whole line.
-    private static func tailData(path: String) throws -> Data {
+    /// The transcript's last `bytes` (a megabyte), from its first whole line.
+    static func tailData(path: String, bytes: UInt64 = 1024 * 1024) throws -> Data {
         let handle = try FileHandle(forReadingFrom: URL(fileURLWithPath: path))
         defer { try? handle.close() }
-        let size = try handle.seekToEnd(), start = size > 1024 * 1024 ? size - 1024 * 1024 : 0
+        let size = try handle.seekToEnd(), start = size > bytes ? size - bytes : 0
         try handle.seek(toOffset: start)
         var data = try handle.readToEnd() ?? Data()
         if start > 0 { data = data.subdata(in: TranscriptReader.tailStart(data)..<data.count) }
@@ -164,6 +164,9 @@ public enum LeadRotation {
         clock.dateFormat = "HH:mm"
         return "Started a fresh lead session at \(clock.string(from: at)) (\(reason))"
     }
+
+    /// What the line the old lead's note starts with begins with (a fresh id follows).
+    public static let noteMarker = "VIBESWITCHER_HANDOVER_"
 
     public static let request = "VibeSwitcher is preparing a scheduled rotation to a fresh lead session. In your final reply within one minute, write a short handover note: open threads, promises made to the user, and timers due. Do no new work; finish this turn after the note. The board and its unanswered questions stay in place."
 }

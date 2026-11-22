@@ -75,7 +75,9 @@ final class ChatModel: ObservableObject {
     var assembling: Bool { staging != nil && stagingOpens }
     @Published private(set) var state = State.none
     /// Part of the file before what's loaded.
-    @Published private(set) var hasEarlier = false
+    @Published private(set) var hasEarlier = false {
+        didSet { if hasEarlier != oldValue, !historyItems.isEmpty { updateItems() } }
+    }
     @Published private(set) var loadingEarlier = false
     /// The last entry you had seen when this chat opened (the "new since you looked" marker goes after it).
     @Published private(set) var markerAfter: String? {
@@ -184,8 +186,16 @@ final class ChatModel: ObservableObject {
         updateItems()
     }
 
+    /// A project lead's earlier sessions (`LeadChatHistory`), read once as its chat opens: their items above the live
+    /// session's, once the live transcript is loaded from its start (Show Earlier's pages reach it). Display only.
+    private(set) var historySource: LeadChatHistory.Source?
+    private(set) var history: [LeadChatHistory.Part] = []
+    private var historyItems: [ChatItem] = []
+
     private func updateItems() {
-        let timeline = ChatTimeline.items(log.entries, newAfter: markerAfter)
+        // After a handover the live session's start prompt is the handover's, not the user's conversation.
+        let live = history.isEmpty ? log.entries : LeadChatHistory.conversation(log.entries, startedByHandover: true)
+        let timeline = (hasEarlier ? [] : historyItems) + ChatTimeline.items(live, newAfter: markerAfter)
         // Bursts of VibeSwitcher's cards for the lead folded last: a closed question or an all-done card ends one.
         let new = ChatTimeline.foldUpdates(ChatTimeline.placeQuestions(questions, notices: questionNotices, in: BatchSummary.place(allDone, in: timeline)))
         guard new != items else { return }
@@ -229,7 +239,8 @@ final class ChatModel: ObservableObject {
     private var restoreAsked = ChatWindow.page
 
     /// Shows the conversation in `path` (nil: none), the one `key`'s composer sends to. Same path: nothing changes.
-    func show(path: String?, key: String? = nil) {
+    /// `history`: a project lead's, whose earlier sessions show above it.
+    func show(path: String?, key: String? = nil, history: LeadChatHistory.Source? = nil) {
         if outboxKey != key {
             outboxKey = key
             if path == self.path { syncOutbox() }
@@ -243,6 +254,9 @@ final class ChatModel: ObservableObject {
         }
         generation += 1
         self.path = path
+        historySource = history
+        self.history = []
+        historyItems = []
         log = ChatLog()
         let restored = path.flatMap { kept[$0] }
         expanded = restored?.expanded ?? []
@@ -279,17 +293,22 @@ final class ChatModel: ObservableObject {
         self.format = format
         markerAfter = Self.seen[path]
         state = .loading
-        let generation = self.generation
+        let generation = self.generation, home = self.home
         reading = true
         queue.async {
             let read = Self.readTail(url: url, format: format)
+            let parts = history.map { LeadChatHistory.parts(session: $0.session, root: $0.root, home: home) } ?? []
             DispatchQueue.main.async {
                 guard generation == self.generation else { return }
                 self.reading = false
                 guard let read else { return self.state = .failed("Couldn't read the conversation.") }
                 var log = ChatLog()
                 log.append(read.events)
+                self.history = parts
+                self.historyItems = LeadChatHistory.items(parts)
                 self.log = log
+                // An empty conversation doesn't change the log: the earlier sessions still show.
+                if !parts.isEmpty { self.updateItems() }
                 self.cursor = read.cursor
                 self.earliest = read.start
                 Breadcrumbs.shared.note("chat: loaded \(log.entries.count) entries, \(self.items.count) items from \(url.lastPathComponent)")
@@ -315,7 +334,7 @@ final class ChatModel: ObservableObject {
         // Not there yet (a new session writes its transcript with the first message): try again.
         if case .failed = state, let path, !reading {
             self.path = nil
-            return show(path: path, key: outboxKey)
+            return show(path: path, key: outboxKey, history: historySource)
         }
         guard let url, state == .ready, !reading else { return }
         let generation = self.generation, cursor = self.cursor, format = self.format
@@ -329,7 +348,7 @@ final class ChatModel: ObservableObject {
                     self.reading = false
                     let path = self.path
                     self.path = nil
-                    self.show(path: path, key: self.outboxKey)
+                    self.show(path: path, key: self.outboxKey, history: self.historySource)
                 }
                 return
             }

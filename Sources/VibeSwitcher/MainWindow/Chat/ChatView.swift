@@ -699,7 +699,29 @@ struct ChatItemRow: View {
                 Rectangle().fill(Color.accentColor).frame(height: 1)
             }
             .padding(.vertical, 4)
+        case .handover(_, let notice, _):
+            HandoverDivider(notice: notice)
         }
+    }
+}
+
+/// Where a fresh lead session began after a handover: the earlier sessions' conversation above it, the new one's below.
+struct HandoverDivider: View {
+    let notice: String
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Rectangle().fill(Color.secondary.opacity(0.45)).frame(height: 1)
+            Label(notice, systemImage: "arrow.triangle.2.circlepath")
+                .font(.system(size: 11, weight: .medium)).foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
+                .layoutPriority(1)
+            Rectangle().fill(Color.secondary.opacity(0.45)).frame(height: 1)
+        }
+        .padding(.vertical, 6)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(notice)
     }
 }
 
