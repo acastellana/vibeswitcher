@@ -356,6 +356,7 @@ Settings (⌘,), category by category: each option, under its section, with the 
 - `publish [N]` — has the lead controller publish N times (default 50), each laid out and drawn, and times them — `Sources/VibeSwitcher/Sandbox.swift`
 - `hangs [reset]` — the sandbox's main-thread freezes (its hang reports, as the health digest tells them) and its longest wait… — `Sources/VibeSwitcher/Sandbox.swift`
 - `startlead` — starts a real project lead (LeadController.startLead, as Project Lead does: the host first if none runs, its… — `Sources/VibeSwitcher/Sandbox.swift`
+- `handover [start]` — with start: a project lead (a fake Claude named on its board, holding no role, as after an install) in a… — `Sources/VibeSwitcher/Sandbox.swift`
 - `lead [FILE]` — shows a fake project lead's chat, at its end (started the first time, on FILE's transcript if given): a board… — `Sources/VibeSwitcher/Sandbox.swift`
 - `team` — starts a fake worker on the fake lead's running task, in its worktree (start the lead first); select it and… — `Sources/VibeSwitcher/Sandbox.swift`
 - `team wall` — puts a running team task on the fake lead's board (start the lead first): 3 members with their parts and… — `Sources/VibeSwitcher/Sandbox.swift`

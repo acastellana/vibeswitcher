@@ -4315,3 +4315,4 @@ Proposed task 1: Find why dictations end with no text
 - 2026-11-22 11:21 Automatically (auto_advance): Started the audit of a-lead-handover-keeps at f373d9f0 (Its review is audit).
 - 2026-11-22 11:21 Exception on a-lead-handover-keeps by lead of vibeswitcher: edits to Sources/VibeCore/WindowRows.swift, Sources/VibeSwitcher/MainWindow/MainWindowController.swift accepted. Reason: The lead accepts these. WindowRows.swift is the sidebar's row ordering, which the boundaries name by role (RowPlace / WindowRows.placed keep the new lead in the old row's place). MainWindowController.…
 - 2026-11-22 11:24 Audit of a-lead-handover-keeps: complete, clean
+- 2026-11-22 11:40 Merged a-lead-handover-keeps: A lead handover keeps one lead row: the old session ends by itself (build 837739f3ee80)
