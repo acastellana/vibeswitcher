@@ -907,6 +907,40 @@ struct NodeAcceptanceTests {
         #expect(try node.sessions().filter { $0.label == "Shell: a41" }.count == 1)
     }
 
+    @Test("A43: an external plugin (the test plugin): plugin add shows its program and SHA-256 and takes the code, plugin on runs it, an agent's vs-ask files a request the host stamps, its card is answered run, plugin remove forgets it")
+    func a43ExternalPlugin() async throws {
+        let node = try await ScratchNode(scratch)
+        defer { node.stop() }
+        let folder = ExternalPluginsTests.probe
+        let added = try await node.runOnTerminal(["plugin", "add", folder])
+        #expect(added.status == 0 && added.output.contains("This adds the plugin probe") && added.output.contains("its program's SHA-256:")
+                && added.output.contains("added probe, off"), "\(added.output)\(added.errors)\n\(node.said)")
+        let on = try await node.runOnTerminal(["plugin", "on", "probe"])
+        #expect(on.status == 0 && on.output.contains("probe is on"), "\(on.output)\(on.errors)")
+        let mirror = node.root.appendingPathComponent("plugins.json")
+        try #require(await eventually(timeout: 30) { PluginGate.mirror(at: mirror)?.on.contains("probe") == true })
+
+        let out = node.root.appendingPathComponent("a43.out")
+        let mcp = builtProducts.appendingPathComponent("vibeswitcher-mcp").path
+        let asker = try await node.spawn("env VIBESWITCHER_HOME='\(node.root.path)' '\(mcp)' --ask probe -- normal a43 > '\(out.path).part' 2>&1; "
+                                         + "echo \"status $?\" >> '\(out.path).part'; mv '\(out.path).part' '\(out.path)'; exec sleep 600", label: "Asker")
+        try #require(await eventually(timeout: 60) { FileManager.default.fileExists(atPath: out.path) }, "\(node.screen(asker.id) ?? "")")
+        let filed = try String(contentsOf: out, encoding: .utf8)
+        #expect(filed.contains("Filed Probe request") && filed.contains("status 0"), "\(filed)\n\(node.said)")
+        let waited = try await node.run(["questions", "--wait", "--json"])
+        let cards = ((try? JSONSerialization.jsonObject(with: Data(waited.output.utf8)) as? [String: Any])?["cards"] as? [[String: Any]]) ?? []
+        let id = try #require(cards.first { ($0["plugin"] as? [String: Any])?["plugin"] as? String == "probe" }?["id"] as? String, "\(waited.output)")
+        let shown = try await node.run(["questions"])
+        #expect(shown.output.contains("  Probe says, depth: 1") && shown.output.contains("    | normal a43"), "\(shown.output)")
+        let ran = try await node.runOnTerminal(["answer", id, "run"])
+        #expect(ran.status == 0 && ran.output.contains("This runs the probe") && ran.output.contains("Ran the probe"), "\(ran.output)\(ran.errors)\n\(node.said)")
+
+        let removed = try await node.runOnTerminal(["plugin", "remove", "probe"])
+        #expect(removed.status == 0 && removed.output.contains("removed probe"), "\(removed.output)\(removed.errors)")
+        let listed = try await node.run(["plugin", "list"])
+        #expect(!listed.output.contains("probe  Probe"), "\(listed.output)")
+    }
+
     // MARK: The rows a scratch node can't run
 
     @Test("A19: the page notifies of a question or prompt, and its title counts them",
