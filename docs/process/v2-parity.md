@@ -79,7 +79,7 @@ Sizes to close: S is about a day, M a few days, L a week or more.
 
 | Feature | V1 (where) | V2 state | Where in V2 / what's missing | Size | Note |
 | --- | --- | --- | --- | --- | --- |
-| The session list with its states (needs you, working, background, done, idle) | `MainWindow/SessionListView.swift`, `Sources/VibeCore/Attention.swift` | has it | `vibeswitcher status`; the web sidebar (`WebApp/js/views/sidebar.js`), live | | |
+| The session list with its states (needs you, working, background, done, idle) | `MainWindow/SessionListView.swift`, `Sources/VibeCore/Attention.swift` | has it | `vibeswitcher status`; the web sidebar (`WebApp/js/views/sidebar.js`), live. Since 2026-11-22 the Mac's row marks too (`ui.js` `leadMarks`): a lead's green check while its board's all-done mark is unseen, and a lead another session replaced reads "replaced" with its tag grey | | |
 | Group by attention or by project, filter | `MainWindow/MainMenu.swift` | has it | the web page (`WebApp/js/ui.js`), ⌥F | | |
 | Next needing you (⌘J), sessions 1–9, next and previous | `MainWindow/MainMenu.swift` | has it | the web page's keys (`WebApp/README.md`, Keys) | | ⌥ in place of ⌘ where the browser keeps ⌘ |
 | Command palette (⌘K) | `MainWindow/CommandPalette.swift` | has it | `WebApp/js/views/palette.js`: jumps to sessions and view commands; the session's Rename, Pause, End and Close Finished Shells; "New PRESET in FOLDER" for the recent folders and each one's presets (2026-11-20: the start page's form with them, and its line); "Start Project Lead in FOLDER" for the shown session's folder and the recent ones, the Mac's (2026-11-20: the start page's lead form with that folder, a goal to write, and its `vibeswitcher lead FOLDER --goal …` line) | S | closed 2026-11-20 |
