@@ -235,6 +235,23 @@ private let serveAsAHardenedProcess: @convention(c) () -> Void = { HardenedHelpe
     /// probe of the lock path says (a same-user process renaming that path at the probe makes it say "scratch"): it
     /// may only become more the user's, never less. Without a carried value (the Mac's state, a build before it) the
     /// probe decides, as it does on the Mac whatever the state says.
+    /// A scratch host says where it is loaded (so a crash's trace symbolizes offline); the user's host says nothing of
+    /// it. The base is this program's own image's start, as the kernel mapped it (`/proc/self/maps`).
+    @Test func aScratchHostSaysItsImageBaseAndTheUsersHostDoesnt() throws {
+        guard !Platform.CodeIdentity.isAvailable else { return }
+        let base = try #require(HostHardening.imageBase)
+        let line = try #require(HostHardening.imageBaseLine(ownsLaunchers: false, program: "/x/vibeswitcher-host"))
+        #expect(line.hasPrefix("image base 0x\(String(base, radix: 16)) of /x/vibeswitcher-host"), "\(line)")
+        do {
+            #expect(HostHardening.imageBaseLine(ownsLaunchers: true) == nil)
+            let exe = try FileManager.default.destinationOfSymbolicLink(atPath: "/proc/self/exe")
+            let maps = try String(contentsOfFile: "/proc/self/maps", encoding: .utf8)
+            let first = maps.split(separator: "\n").first { $0.hasSuffix(" " + exe) || $0.hasSuffix(exe) }
+            let start = try #require(first?.split(separator: "-").first.flatMap { UInt($0, radix: 16) })
+            #expect(start == HostHardening.imageBase, "maps: \(first ?? "none")")
+        }
+    }
+
     @Test func aHandoverNeverMakesTheUsersHostAScratchHost() {
         if Platform.CodeIdentity.isAvailable {
             for carried in [true, false, nil] as [Bool?] {
