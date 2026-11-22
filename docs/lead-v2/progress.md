@@ -417,3 +417,8 @@
 - 2026-11-22 13:07 Pipeline held: the-node-s-gate ready to merge with none landing; cause: the gate not installed
 - 2026-11-22 13:07 Pipeline held: the-node-s-gate ready to merge with none landing; cause: nothing VibeSwitcher sees
 - 2026-11-22 13:07 Pipeline held: the-node-s-gate ready to merge with none landing; cause: the gate not installed
+- 2026-11-22 13:37 Pipeline held: the-node-s-gate ready to merge with none landing; cause: nothing VibeSwitcher sees
+- 2026-11-22 13:37 Pipeline held: the-node-s-gate ready to merge with none landing; cause: nothing VibeSwitcher sees
+- 2026-11-22 13:37 Pipeline held: the-node-s-gate ready to merge with none landing; cause: the gate not installed
+- 2026-11-22 13:37 Pipeline held: the-node-s-gate ready to merge with none landing; cause: the gate not installed
+- 2026-11-22 13:37 Kept the-node-s-gate unmerged: Waits on the user's approval of 7fec90da94192226c060bed641f9e8eb6debb3d2 (question 5AF85424, sensitive paths); its audit passed there (round 4). Kept only to stop the half-hourly "merges are held" notices: on the approval the lead sets it back to planned and merges.
