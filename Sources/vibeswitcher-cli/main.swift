@@ -12,11 +12,11 @@ signal(SIGPIPE, SIG_IGN)
 
 let usage = """
     usage: vibeswitcher status [--json] | status --health [--json] | status --probe [--json] | status --check-updates [--json] | status --ack
-           vibeswitcher doctor
+           vibeswitcher doctor | logs [--lines N] [--sessions]
            vibeswitcher start [--interop-is-on] [--at-login] [--node-version vX.Y.Z]
            vibeswitcher stop
            vibeswitcher switch COMMIT | rollback
-           vibeswitcher lead FOLDER [--goal TEXT | --resume] [--take-head] [--replace]
+           vibeswitcher lead FOLDER [--goal TEXT | --resume] [--take-head] [--replace] [--init]
            vibeswitcher questions [FOLDER] [--all] [--json]
            vibeswitcher board [FOLDER] [--json]
            vibeswitcher stats [today|week|month] [--json]
@@ -45,6 +45,8 @@ case "status":
     exit(StatusCommand.run(Array(words.dropFirst())))
 case "doctor":
     exit(DoctorCommand.run(Array(words.dropFirst())))
+case "logs":
+    exit(LogsCommand.run(Array(words.dropFirst())))
 case "start":
     exit(StartCommand.run(Array(words.dropFirst())))
 case "stop":

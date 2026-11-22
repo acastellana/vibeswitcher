@@ -67,7 +67,7 @@ table, most visible first; each row says where it landed.
 | Row | Verdict | Why | Fix |
 | --- | --- | --- | --- |
 | Sessions and the raw hook state | good | `status [--json]`, `status --probe` | |
-| Logs | improve | V1's log is one file the Debug menu opens; the node's are the host's `debug/host.log` and the unit's journal, which a user has to know to look for | `vibeswitcher logs [--lines N]`: the host's log's last lines (already redacted), and where the server's are |
+| Logs | improve | V1's log is one file the Debug menu opens; the node's are the host's `debug/host.log` and the unit's journal, which a user has to know to look for | `vibeswitcher logs [--lines N]`: the host's log's last lines (already redacted), and where the server's are. **Built**: `logs` (the unit's journal or the detached host's log) and `logs --sessions` (the session log), LogsTests |
 | The health digest, freeze reports | improve | V1 keeps crash reports; the node counts the server's restarts but never says how the last one ended | the host's notes keep how its server child last ended (signal or status, how long it ran, when): `status --health` and the page say it ("the server last ended: killed by signal 11 after 3 h"). **Built** (`HostNotes.ServerEnd`, carried by a handover; ServerChildTests, NodeHealthTests, health.test.mjs) |
 | The developer tools notice | good | `NodeToolchain`, `ToolchainLook` | |
 | What plain mode doesn't promise | good | Linux-only, said by `start` and `status` | |
