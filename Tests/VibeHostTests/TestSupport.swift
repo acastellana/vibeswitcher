@@ -290,8 +290,11 @@ func installScript(_ text: String, atPath path: String, mode: Int = 0o755) throw
 /// writing anywhere ("Text file busy", ETXTBSY: `OrphanSweepTests`' copies of `vibeswitcher-mcp` in a full run,
 /// 2026-11-17). `cp` is started with `Platform.Spawn` and reaped by a bounded `waitpid(WNOHANG)`, never Foundation's
 /// `waitUntilExit`, which hung for good on the Mac's CI after its child was gone. Its folder must be there.
-func installProgram(_ source: String, atPath path: String, mode: Int = 0o755) throws {
-    var copy = Platform.Spawn(executable: "/bin/cp", arguments: ["/bin/cp", source, path])
+/// `appending`: text added at the copy's end, by the same child (`/bin/sh`'s `cat` and `printf`), so this process never
+/// opens the copy for writing either (a build "with other bytes" for a hash).
+func installProgram(_ source: String, atPath path: String, mode: Int = 0o755, appending: String = "") throws {
+    var copy = appending.isEmpty ? Platform.Spawn(executable: "/bin/cp", arguments: ["/bin/cp", source, path])
+        : Platform.Spawn(executable: "/bin/sh", arguments: ["/bin/sh", "-c", "cat \"$1\" > \"$2\" && printf %s \"$3\" >> \"$2\"", "sh", source, path, appending])
     copy.stdin = .path("/dev/null", flags: O_RDONLY)
     guard case .success(let pid) = copy.start() else { throw CocoaError(.fileWriteUnknown, userInfo: [NSFilePathErrorKey: path]) }
     var status: Int32 = 0

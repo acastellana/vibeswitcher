@@ -758,7 +758,7 @@ extension HostHardeningTests {
         defer { try? FileManager.default.removeItem(atPath: dir) }
         let home = dir + "/home", socket = dir + "/h.sock", image = dir + "/build/vibeswitcher-host", output = dir + "/host.out"
         for folder in [home, dir + "/build"] { try FileManager.default.createDirectory(atPath: folder, withIntermediateDirectories: true) }
-        try FileManager.default.copyItem(atPath: hostLauncher, toPath: image)
+        try installProgram(hostLauncher, atPath: image)
         let copy = try Platform.ProcessSelf.sealedCopy(of: image, name: "vibeswitcher-host").get()
         defer { Sys.close(copy.fd) }
         // This process is the host's app through a connector, as `TestHosts.connectAsApp` makes one.

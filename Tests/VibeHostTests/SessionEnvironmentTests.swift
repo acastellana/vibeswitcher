@@ -82,7 +82,7 @@ struct SessionEnvironmentTests {
         let build = "\(shortScratchRoot)/vsbp-\(UUID().uuidString.prefix(8))"
         defer { try? FileManager.default.removeItem(atPath: build) }
         for folder in ["/bin", "/Resources/bin"] { try FileManager.default.createDirectory(atPath: build + folder, withIntermediateDirectories: true) }
-        try FileManager.default.copyItem(atPath: hostLauncher, toPath: build + "/bin/vibeswitcher-host")
+        try installProgram(hostLauncher, atPath: build + "/bin/vibeswitcher-host")
         try installScript("#!/bin/sh\necho vs-heavy-here\n", atPath: build + "/Resources/bin/" + TestLock.command, mode: 0o755)
         let imaged = try await ScratchHostProcess(arguments: ["--image-path", build + "/bin/vibeswitcher-host"],
                                                   environment: ["PATH": "/usr/local/bin:/usr/bin:/bin"])
