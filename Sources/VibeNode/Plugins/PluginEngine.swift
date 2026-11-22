@@ -87,12 +87,18 @@ extension LeadEngine {
         for plugin in plugins.plugins {
             let id = plugin.info.id
             if plugins.isOn(id) {
-                guard pluginLooking.insert(id).inserted else { continue }
                 waiting += 1
+                // One look at a time: a look under way is waited for, not started again.
+                if pluginLooking[id] != nil {
+                    pluginLooking[id]?.append(finish)
+                    continue
+                }
+                pluginLooking[id] = [finish]
                 plugin.look(desk(plugin)) { [weak self] in
                     self?.queue.async {
-                        self?.pluginLooking.remove(id)
-                        finish()
+                        guard let self else { return }
+                        let waiters = self.pluginLooking.removeValue(forKey: id) ?? []
+                        waiters.forEach { $0() }
                     }
                 }
             } else if let folder = desk(plugin).folder {

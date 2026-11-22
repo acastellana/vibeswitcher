@@ -324,7 +324,8 @@ public final class LeadEngine: @unchecked Sendable {
     public let plugins: PluginRegistry
     var pluginCards: [PluginKey: String] = [:]
     var pluginTrusted: [String: [String: WalletStamp]] = [:]
-    var pluginLooking: Set<String> = []
+    /// Each plugin's look under way, and who waits for its end.
+    var pluginLooking: [String: [() -> Void]] = [:]
     var pluginAsking = false
     var pluginTimer: Subscription?
     var pluginNow: () -> Date = Date.init
