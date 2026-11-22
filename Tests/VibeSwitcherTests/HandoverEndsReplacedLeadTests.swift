@@ -304,6 +304,26 @@ struct HandoverEndsReplacedLeadTests {
         #expect(Reading.read(observer, session, agentPid: session.childPID, background: nil).activity == .unknown)
     }
 
+    /// Before its first hook, a lead's turn is read from nothing: not from a transcript found by its folder and name,
+    /// which may be the other lead's (the replaced one shares both, and its turn just ended).
+    @Test func noHookReadsAsUnknownNotAsTheOtherLeadsTranscript() async throws {
+        let world = try routing.world()
+        defer { world.stop() }
+        let session = try await routing.oldLead(in: world)
+        let folder = URL(fileURLWithPath: world.home).appendingPathComponent(".claude/projects/\(RecentProjects.claudeSlug(for: world.root))")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let stamp = ISO8601DateFormatter().string(from: Date())
+        let lines = [
+            #"{"type":"user","message":{"role":"user","content":"make the films page"},"uuid":"u1","timestamp":"\#(stamp)"}"#,
+            #"{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Done: the films page is a task."}]},"uuid":"a1","timestamp":"\#(stamp)"}"#,
+        ]
+        try (lines.joined(separator: "\n") + "\n").write(to: folder.appendingPathComponent("other-lead.jsonl"), atomically: true, encoding: .utf8)
+        let observer = LeadObserver(home: world.home, stateFile: { _ in routing.temp.url("no-hook-state.json") })
+        #expect(observer.transcript(session, hook: nil) != nil)  // The name-and-folder lookup finds it.
+        let read = Reading.read(observer, session, agentPid: session.childPID, background: nil)
+        #expect(read == Reading(activity: .unknown, asking: false, turnEnded: false))
+    }
+
     /// The old lead's unsent text goes to the new lead's box, ahead of what's there: nothing is dropped.
     @Test func theOldLeadsUnsentTextIsCarriedToTheNewLeadsBox() {
         let composer = ComposerDrafts()
