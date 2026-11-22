@@ -90,7 +90,9 @@ struct EndingASessionTests {
         let folder = scratch.url("app-carrying-a-session")
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         let appPath = folder.appendingPathComponent("VibeSwitcher").path
-        try FileManager.default.copyItem(atPath: OrphanSweepTests.built, toPath: appPath)
+        // Copied by a child (`installProgram`): a copy this process writes can be held open for writing by another
+        // test's child, and then the copy won't run (ETXTBSY, the CI failure of 2026-11-22).
+        try installProgram(OrphanSweepTests.built, atPath: appPath)
         let link = folder.appendingPathComponent("linked").path
         try FileManager.default.createSymbolicLink(atPath: link, withDestinationPath: folder.path)
         let id = UUID()
@@ -122,7 +124,9 @@ struct EndingASessionTests {
         let folder = scratch.url("app-carrying-a-session")
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         let appPath = folder.appendingPathComponent("VibeSwitcher").path
-        try FileManager.default.copyItem(atPath: OrphanSweepTests.built, toPath: appPath)
+        // Copied by a child (`installProgram`): a copy this process writes can be held open for writing by another
+        // test's child, and then the copy won't run (ETXTBSY, the CI failure of 2026-11-22).
+        try installProgram(OrphanSweepTests.built, atPath: appPath)
         let id = UUID()
         let (app, appInput) = try Self.waiter(appPath, environment: ["VIBESWITCHER_SESSION": id.uuidString])
         let (stray, strayInput) = try Self.waiter(environment: ["VIBESWITCHER_SESSION": id.uuidString])

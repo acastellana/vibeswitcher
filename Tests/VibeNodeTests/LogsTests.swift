@@ -21,8 +21,18 @@ struct LogsTests {
 
         let two = try await node.run(["logs", "--sessions", "--lines", "2"])
         #expect(two.status == 0, "\(two.output)\(two.errors)")
-        #expect(two.output.contains("  second test line") && !two.output.contains("first test line"), "\(two.output)")
-        #expect(!two.output.contains("\u{1B}") && two.output.contains("third "), "inert: \(two.output)")
+        // The host goes on writing its own lines (a connection its server makes while the command runs: the CI flake of
+        // 2026-11-22), so the last two can be later than the test's: two consecutive lines of the log from the test's
+        // second on, never its first, each inert.
+        let said = two.output.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+        let header = said.firstIndex { $0.contains("its last 2 lines:") } ?? said.count
+        let shown = said.dropFirst(header + 1).prefix(2).map { String($0.drop { $0 == " " }) }
+        let lines = ((try? String(contentsOf: log, encoding: .utf8)) ?? "").split(separator: "\n").map { $0.replacingOccurrences(of: "\u{1B}", with: "�") }
+        let tail = Array(lines.drop { !$0.hasPrefix("second test line") })
+        let pairs = zip(tail, tail.dropFirst()).map { [$0, $1] }
+        #expect(shown.count == 2 && !two.output.contains("first test line") && pairs.contains(shown), "\(shown) of \(tail)")
+        #expect(!two.output.contains("\u{1B}"), "inert: \(two.output)")
+        if shown.first == "second test line" { #expect(shown.last?.hasPrefix("third ") == true, "\(shown)") }
         #expect(two.output.contains("the host's session log: \(log.path)"), "\(two.output)")
 
         let server = try await node.run(["logs"])

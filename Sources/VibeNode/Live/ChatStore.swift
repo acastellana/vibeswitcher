@@ -11,6 +11,11 @@ import VibeCore
 /// item anywhere but the end (which a transcript, appended to, doesn't make) removes what follows the first item out of
 /// place and adds it again, in order: a client applying the ops always holds the list the server holds.
 ///
+/// **A window, not the whole chat.** The store gives the stream the newest items only (`TranscriptFollow`'s window):
+/// items that leave its front leave silently (no `remove`: a client keeps what it holds, and asks for older pages by
+/// `chat.page`, which reads them from the file), and `older` says items exist before the window. An append changes the
+/// stream at its tail (`apply`): only the items from where it changed are compared, never the whole window.
+///
 /// **No `seq` is reused for a session.** A stream starts at the `seq` after the last one its session's stream reached
 /// before it was dropped (`ChatStore`), and remembers nothing before it: a client that held the old stream gets a tail
 /// or a snapshot, never another stream's ops.
@@ -52,7 +57,12 @@ public final class ChatStream: @unchecked Sendable {
     /// The `seq` before the oldest op kept: a resume is answered from it on.
     public private(set) var floor: Int
     private var ops: [Op] = []
+    /// Each item's place counted from the stream's first item ever (`base` is the first held one's): an item leaving
+    /// the front moves no other's.
     private var index: [String: Int] = [:]
+    private var base = 0
+    /// Items exist before the window, in the file.
+    public internal(set) var older = false
     private var waiting: [() -> Void] = []
     private let now: @Sendable () -> Date
     /// Told after each batch of ops (the hub's).
@@ -85,8 +95,48 @@ public final class ChatStream: @unchecked Sendable {
             ready.forEach { $0() }
             return true
         }
+        // Items gone from the window's front, before the first one kept: gone silently.
+        if let first = new.first?.id, let at = position(of: first), at > 0 {
+            let kept = Set(new.map(\.id))
+            if !items[..<at].contains(where: { kept.contains($0.id) }) { dropFront(at) }
+        }
         let made = Self.ops(from: items, to: new)
         guard !made.isEmpty else { return false }
+        record(made)
+        items = new.map { Item(id: $0.id, value: $0.value) }
+        reindex()
+        changedAt = now()
+        onChange?()
+        return true
+    }
+
+    /// An append's change (`TranscriptFollow.Change`): `dropped` items gone from the front silently, then the items
+    /// from `from` on compared with `tail` and replaced by it, ops for what differs. Only the tail is looked at. Whether
+    /// anything changed. (Before the stream is loaded, the tail is its first list.)
+    @discardableResult
+    func apply(dropped: Int, from: Int, tail: [(id: String, value: NodeWire.Value)]) -> Bool {
+        guard loaded else { return take(tail) }
+        if dropped > 0 { dropFront(min(dropped, items.count)) }
+        let from = min(max(0, from), items.count)
+        let made = Self.ops(from: Array(items[from...]), to: tail)
+        guard !made.isEmpty else { return false }
+        record(made)
+        for item in items[from...] { index[item.id] = nil }
+        items.replaceSubrange(from..., with: tail.map { Item(id: $0.id, value: $0.value) })
+        for position in from..<items.count { index[items[position].id] = base + position }
+        changedAt = now()
+        onChange?()
+        return true
+    }
+
+    /// The first `count` items out, silently.
+    private func dropFront(_ count: Int) {
+        for item in items[..<count] { index[item.id] = nil }
+        items.removeFirst(count)
+        base += count
+    }
+
+    private func record(_ made: [Op]) {
         for op in made {
             seq += 1
             var kept = op
@@ -98,16 +148,17 @@ public final class ChatStream: @unchecked Sendable {
             floor = ops[dropped - 1].seq
             ops.removeFirst(dropped)
         }
-        items = new.map { Item(id: $0.id, value: $0.value) }
-        reindex()
-        changedAt = now()
-        onChange?()
-        return true
+    }
+
+    /// Where item `id` is in the window now; nil when it isn't there.
+    func position(of id: String) -> Int? {
+        guard let absolute = index[id], absolute >= base, absolute - base < items.count else { return nil }
+        return absolute - base
     }
 
     private func reindex() {
         index = [:]
-        for (position, item) in items.enumerated() { index[item.id] = position }
+        for (position, item) in items.enumerated() { index[item.id] = base + position }
     }
 
     /// The ops that take `old` to `new`, in order, their `seq` not yet given.
@@ -156,22 +207,22 @@ public final class ChatStream: @unchecked Sendable {
     public func snapshot(limit: Int = ChatStream.snapshotItems) -> (items: [NodeWire.Value], more: Bool) {
         let count = min(max(limit, 1), Self.mostItems)
         let start = max(0, items.count - count)
-        return (items[start...].map(\.value), start > 0)
+        return (items[start...].map(\.value), start > 0 || older)
     }
 
     /// The item `after` as it is now and everything after it (a `tail`, the contract's §4), and whether older items
     /// exist before it; nil when the stream has no such item.
     public func tail(after: String) -> (items: [NodeWire.Value], more: Bool)? {
-        guard let start = index[after] else { return nil }
-        return (items[start...].map(\.value), start > 0)
+        guard let start = position(of: after) else { return nil }
+        return (items[start...].map(\.value), start > 0 || older)
     }
 
     /// The `limit` items just before `before`, oldest first, and whether more exist before them; nil when the stream
     /// has no such item.
     public func page(before: String, limit: Int = ChatStream.snapshotItems) -> (items: [NodeWire.Value], more: Bool)? {
-        guard let end = index[before] else { return nil }
+        guard let end = position(of: before) else { return nil }
         let start = max(0, end - min(max(limit, 1), Self.mostItems))
-        return (items[start..<end].map(\.value), start > 0)
+        return (items[start..<end].map(\.value), start > 0 || older)
     }
 
     /// The ops after `since`, as one delta's range: consecutive `text` ops of one item joined. Nil when the stream can't
@@ -218,6 +269,9 @@ extension NodeWire {
 /// - **Which file.** The session's `transcriptPath` (`NodeSessions`' read of its hook), checked again here by
 ///   `TranscriptReader.checkedURL`: a regular `.jsonl` inside the agents' own folders of the node's home, after links
 ///   and `..`. A session with no transcript, or one outside them, is `gone`.
+/// - **What is held.** A tail window of the chat (`TranscriptFollow`: its newest items, bounded in count and bytes); an
+///   append is a change at the window's tail, given to the stream as one (`ChatStream.apply`), never a pass over the
+///   whole chat on the engine's queue. Older items are read from the file when a page asks (`page`), off the queue.
 /// - **When it is read.** At once when it is written (`Platform.FileWatch` on the file), when its session changes (a
 ///   hook writes as the agent works), and at each of the clock's looks (every `lookEvery` s), for a file that can't be
 ///   watched or a write the watch missed. Each read takes only the bytes after the last one's, off the engine's queue
@@ -233,6 +287,9 @@ public final class ChatStore: @unchecked Sendable {
     /// How often the clock looks: each file read again (nothing when it didn't grow), and the streams nobody followed
     /// for `idleDrop` dropped.
     public static let lookEvery = 2
+    /// Each chat's window (`TranscriptFollow`): its most items, and its most bytes of the transcript's lines.
+    public static let windowItems = 600
+    public static let windowBytes = 24 << 20
 
     public let queue: DispatchQueue
     private let home: String
@@ -255,6 +312,8 @@ public final class ChatStore: @unchecked Sendable {
     /// placed by its time among the transcript's items.
     private let extras: Changes<[NodeWire.Value]>?
     private var extrasWatch: Subscription?
+    /// Each chat's window (`TranscriptFollow`): its most items and bytes.
+    private let window: (items: Int, bytes: Int)
 
     /// One session's chat: its stream, the file it is read from, and who follows it.
     private final class Feed {
@@ -285,7 +344,9 @@ public final class ChatStore: @unchecked Sendable {
                 now: @escaping @Sendable () -> TimeInterval = { Date().timeIntervalSince1970 },
                 date: @escaping @Sendable () -> Date = { Date() }, note: @escaping @Sendable (String) -> Void = { _ in },
                 summaries: Changes<String>? = nil, ask: (@Sendable (String, String, TeamMessage) -> Void)? = nil,
-                extras: Changes<[NodeWire.Value]>? = nil) {
+                extras: Changes<[NodeWire.Value]>? = nil,
+                window: (items: Int, bytes: Int) = (ChatStore.windowItems, ChatStore.windowBytes)) {
+        self.window = window
         self.queue = queue
         self.home = home
         self.sessions = sessions
@@ -331,7 +392,12 @@ public final class ChatStore: @unchecked Sendable {
 
     /// The feed's items, each long message's `team` item with its TL;DR as `summary` once one came.
     private func decorated(_ feed: Feed) -> [(id: String, value: NodeWire.Value)] {
-        let raw = Self.placed(feed.raw, extras: extras?.values[feed.session] ?? [])
+        // Extras older than the window's first item belong with the older items, in the file: not at its front.
+        var shown = extras?.values[feed.session] ?? []
+        if feed.stream.older, let first = feed.raw.first?.value["at"]?.string {
+            shown = shown.filter { ($0["at"]?.string).map { $0 >= first } ?? true }
+        }
+        let raw = Self.placed(feed.raw, extras: shown)
         guard let lines = summaries?.values, !lines.isEmpty else { return raw }
         return raw.map { item in
             guard case .object(var fields) = item.value, fields["type"] == .string("team"),
@@ -387,6 +453,11 @@ public final class ChatStore: @unchecked Sendable {
     var clock: TimeInterval { now() }
     /// How many usage reads ran (tests).
     var usageReadsRun = 0
+    /// The reads' results taken on `queue`, and the time they took there (the chat bench's, `ChatBenchTests`).
+    var resultsTaken = 0
+    var resultsSeconds: TimeInterval = 0
+    /// The time the reads took off it (`reads`), all of them.
+    let readSeconds = Locked<TimeInterval>(0)
 
     /// Whether `session`'s chat is held now. On `queue`.
     public func holds(_ session: String) -> Bool {
@@ -407,7 +478,7 @@ public final class ChatStore: @unchecked Sendable {
             return .refused(.init(.gone, "that session's transcript isn't in the agents' own folders"))
         }
         let stream = ChatStream(session: session, start: reached[session].map { $0 + 1 } ?? 0, now: date)
-        let feed = Feed(session: session, stream: stream, follow: TranscriptFollow(url: url, format: format))
+        let feed = Feed(session: session, stream: stream, follow: TranscriptFollow(url: url, format: format, windowItems: window.items, windowBytes: window.bytes))
         feed.idleSince = now()
         feeds[session] = feed
         watch(feed)
@@ -465,7 +536,7 @@ public final class ChatStore: @unchecked Sendable {
     private func look(_ feed: Feed) {
         if let path = sessions.values[feed.session]?.transcriptPath, let (url, format) = TranscriptReader.checkedURL(path, home: home),
            url != feed.follow.url, !feed.reading {
-            feed.follow = TranscriptFollow(url: url, format: format)
+            feed.follow = TranscriptFollow(url: url, format: format, windowItems: window.items, windowBytes: window.bytes)
             feed.watch?.stop()
             feed.watch = nil
         }
@@ -498,16 +569,21 @@ public final class ChatStore: @unchecked Sendable {
         feed.reading = true
         let follow = feed.follow
         let queue = self.queue
+        let readSeconds = self.readSeconds
         reads.async { [weak self] in
-            let items = follow.read()
+            let began = ProcessInfo.processInfo.systemUptime
+            let change = follow.read()
             let long = follow.long
+            readSeconds.set(readSeconds.get() + ProcessInfo.processInfo.systemUptime - began)
             queue.async { [weak self] in
                 guard let self else { return }
                 feed.reading = false
-                if let items, self.feeds[feed.session] === feed, follow === feed.follow {
-                    feed.raw = items
-                    feed.stream.take(self.decorated(feed))
+                if let change, self.feeds[feed.session] === feed, follow === feed.follow {
+                    let began = ProcessInfo.processInfo.systemUptime
+                    self.take(change, into: feed)
                     self.askSummaries(feed, long)
+                    self.resultsTaken += 1
+                    self.resultsSeconds += ProcessInfo.processInfo.systemUptime - began
                 }
                 if feed.again {
                     feed.again = false
@@ -517,91 +593,64 @@ public final class ChatStore: @unchecked Sendable {
         }
     }
 
+    /// A read's change given to the feed's stream: the window's raw items kept in step (`feed.raw`), and the stream told
+    /// the change at its tail, each item with its TL;DR; with extras for the chat (a lead's all-done cards, placed among
+    /// the items by time), or a whole window read anew, the window decorated whole (it is bounded). On `queue`.
+    private func take(_ change: TranscriptFollow.Change, into feed: Feed) {
+        feed.stream.older = change.older
+        if change.reset {
+            feed.raw = change.tail
+            feed.stream.take(decorated(feed))
+            return
+        }
+        feed.raw.removeFirst(min(change.dropped, feed.raw.count))
+        let from = min(change.from, feed.raw.count)
+        feed.raw.replaceSubrange(from..., with: change.tail)
+        if let placed = extras?.values[feed.session], !placed.isEmpty {
+            feed.stream.take(decorated(feed))
+        } else {
+            feed.stream.apply(dropped: change.dropped, from: from, tail: summarized(change.tail, session: feed.session))
+        }
+    }
+
+    /// `items`, each long message's `team` item with its TL;DR as `summary` once one came.
+    private func summarized(_ items: [(id: String, value: NodeWire.Value)], session: String) -> [(id: String, value: NodeWire.Value)] {
+        guard let lines = summaries?.values, !lines.isEmpty else { return items }
+        return items.map { item in
+            guard case .object(var fields) = item.value, fields["type"] == .string("team"), let line = lines["\(session)|\(item.id)"] else { return item }
+            fields["summary"] = .string(BoardValue.line(line))
+            return (item.id, .object(fields))
+        }
+    }
+
     /// The items just before `before` in `session`'s chat, opened for it if no client follows it (and dropped after,
-    /// as any stream nobody follows), once it is read: `chat.page`'s reply. On `queue`; `reply` on `queue`.
+    /// as any stream nobody follows), once it is read: `chat.page`'s reply. From the window when it holds enough; else
+    /// what it holds before `before` and the rest read from the file, off the queue (`TranscriptFollow.older`), as is a
+    /// page before an item no longer in the window (found by its bookmark). On `queue`; `reply` on `queue`.
     func page(_ session: String, before: String, limit: Int, reply: @escaping (Paged) -> Void) {
         switch open(session) {
         case .refused(let failure): reply(.refused(failure))
         case .opened(let stream):
-            stream.whenLoaded {
-                guard let page = stream.page(before: before, limit: limit) else {
-                    return reply(.refused(.init(.badArgs, "no item \(ConfigSeal.inert(before, limit: 80)) in that chat")))
+            stream.whenLoaded { [weak self] in
+                guard let self else { return }
+                let unknown = Paged.refused(.init(.badArgs, "no item \(ConfigSeal.inert(before, limit: 80)) in that chat"))
+                let held = stream.position(of: before)
+                if let held, held >= limit || !stream.older, let page = stream.page(before: before, limit: limit) {
+                    return reply(.page(items: page.items, more: page.more))
                 }
-                reply(.page(items: page.items, more: page.more))
+                guard let follow = self.follow(of: session) else { return reply(unknown) }
+                let inWindow = held.map { stream.page(before: before, limit: $0)?.items ?? [] } ?? []
+                let need = limit - inWindow.count
+                let queue = self.queue
+                self.reads.async {
+                    let end = held != nil ? follow.earliest : follow.bookmark(before)
+                    let found = end.flatMap { follow.older(before: $0, need: need) }
+                    queue.async { [weak self] in
+                        guard let self, let found else { return reply(unknown) }
+                        reply(.page(items: self.summarized(found.items, session: session).map(\.value) + inWindow, more: found.more))
+                    }
+                }
             }
         }
-    }
-}
-
-/// One transcript as a chat follows it: the bytes read so far, the conversation they make, and its wire items. On the
-/// store's `reads` queue only.
-final class TranscriptFollow: @unchecked Sendable {
-    let url: URL
-    let format: TranscriptReader.Format
-    private var offset = 0
-    /// The file read (its device and inode): another one at the path is read from its start.
-    private var file: (device: UInt64, inode: UInt64)?
-    private var log = ChatLog()
-    /// Each item as last read, with its wire value: one that reads the same isn't written again.
-    private var made: [String: (item: ChatItem, value: NodeWire.Value)] = [:]
-    private var values: [(id: String, value: NodeWire.Value)] = []
-    private var readOnce = false
-    /// The messages VibeSwitcher handed over that are long enough for a TL;DR (`TeamMessage.needsSummary`), oldest first.
-    private(set) var long: [(id: String, message: TeamMessage)] = []
-
-    init(url: URL, format: TranscriptReader.Format) {
-        self.url = url
-        self.format = format
-    }
-
-    /// The chat's items as last read (each a wire item's), in no order.
-    var items: [ChatItem] { made.values.map(\.item) }
-
-    /// The chat's wire items after reading what was written since the last read; nil when nothing new was read (the
-    /// first read always says its items, none when the file can't be read).
-    func read() -> [(id: String, value: NodeWire.Value)]? {
-        let first = !readOnce
-        readOnce = true
-        guard let attributes = try? FileManager.default.attributesOfItem(atPath: url.path),
-              let size = (attributes[.size] as? NSNumber)?.intValue else { return first ? [] : nil }
-        let device = (attributes[.systemNumber] as? NSNumber)?.uint64Value ?? 0
-        let inode = (attributes[.systemFileNumber] as? NSNumber)?.uint64Value ?? 0
-        let same = file.map { $0.device == device && $0.inode == inode } ?? false
-        if !same || size < offset {
-            // Another file, or one cut short: read from its start.
-            offset = 0
-            log = ChatLog()
-            file = (device, inode)
-        }
-        guard size > offset else { return first ? values : nil }
-        guard let handle = try? FileHandle(forReadingFrom: url) else { return first ? values : nil }
-        defer { try? handle.close() }
-        guard (try? handle.seek(toOffset: UInt64(offset))) != nil, let data = try? handle.readToEnd(), !data.isEmpty else {
-            return first ? values : nil
-        }
-        let (events, consumed) = ChatReader.read(data, format: format)
-        guard consumed > 0 else { return first ? values : nil }
-        offset += consumed
-        log.append(events)
-        var next: [String: (item: ChatItem, value: NodeWire.Value)] = [:]
-        var list: [(id: String, value: NodeWire.Value)] = []
-        var long: [(id: String, message: TeamMessage)] = []
-        for item in ChatTimeline.items(log.entries, newAfter: nil) {
-            if case .team(_, let message) = item, message.needsSummary { long.append((item.id, message)) }
-            let value: NodeWire.Value
-            if let known = made[item.id], known.item == item {
-                value = known.value
-            } else if let fresh = ChatValue.value(item) {
-                value = fresh
-            } else {
-                continue
-            }
-            next[item.id] = (item, value)
-            list.append((item.id, value))
-        }
-        made = next
-        values = list
-        self.long = long
-        return list
     }
 }

@@ -172,7 +172,7 @@ extension LeadEngine {
 
     /// Every 6 s at most, off the engine's queue: the finished tasks' role sessions end, in every project (`RoleSweep`).
     /// On `queue`.
-    func sweepRoles(now: Date = Date()) {
+    func sweepRoles(now: Date = Platform.Clock.steadyDate()) {
         guard let roleSweep, !sweeping, now.timeIntervalSince(sweptAt) >= 6 else { return }
         sweeping = true
         sweptAt = now

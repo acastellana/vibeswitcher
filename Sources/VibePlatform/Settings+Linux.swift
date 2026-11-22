@@ -87,7 +87,7 @@ final class FileSettings: SettingsStore, @unchecked Sendable {
 
     /// `line` and a newline on stderr.
     static func toStandardError(_ line: String) {
-        FileHandle.standardError.write(Data((line + "\n").utf8))
+        Platform.Stdio.error(line + "\n")
     }
 
     deinit {

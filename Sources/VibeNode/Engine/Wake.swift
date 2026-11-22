@@ -102,7 +102,7 @@ extension LeadEngine {
             }
         case .ready:
             // A prompt typed a moment ago (its hooks haven't said it's working yet) is one in flight too.
-            guard !flushing.contains(lead.tty), Date().timeIntervalSince(typedAt[lead.tty] ?? .distantPast) > 10 else { return }
+            guard !flushing.contains(lead.tty), Platform.Clock.steadyDate().timeIntervalSince(typedAt[lead.tty] ?? .distantPast) > 10 else { return }
             flushing.insert(lead.tty)
             link.styledScreen(id) { [weak self] screen in
                 guard let self else { return }
@@ -134,7 +134,7 @@ extension LeadEngine {
                     case .success(let reports):
                         var state = self.wakes[key] ?? LeadWake()
                         state.type(reports: reports, box: box) { text in
-                            self.typedAt[lead.tty] = Date()
+                            self.typedAt[lead.tty] = Platform.Clock.steadyDate()
                             self.type(text, into: id) { taken in
                                 guard !taken else { return }
                                 // Not in: the next look wakes it again (the reports keep their mark until that wake-up
@@ -159,7 +159,7 @@ extension LeadEngine {
     /// binds it and the board names it. On `queue`.
     func flush(_ agent: LeadAgent, lead root: String? = nil) {
         guard let id = agent.session.flatMap(UUID.init(uuidString:)), let hosted = link.sessions.first(where: { $0.id == id }),
-              !flushing.contains(agent.tty), Date().timeIntervalSince(typedAt[agent.tty] ?? .distantPast) > 10 else { return }
+              !flushing.contains(agent.tty), Platform.Clock.steadyDate().timeIntervalSince(typedAt[agent.tty] ?? .distantPast) > 10 else { return }
         let (observer, inbox, inboxRead) = (observer, self.root, self.inboxRead)
         // Whether something waits for it and it's between turns: its inbox and its transcript, read on `reads`.
         reads.async({ _ -> Bool in
@@ -174,7 +174,7 @@ extension LeadEngine {
 
     /// What waits for an agent between turns, typed once its box is empty (`flush`). On `queue`.
     private func type(waiting agent: LeadAgent, id: UUID, lead root: String?) {
-        guard !flushing.contains(agent.tty), Date().timeIntervalSince(typedAt[agent.tty] ?? .distantPast) > 10 else { return }
+        guard !flushing.contains(agent.tty), Platform.Clock.steadyDate().timeIntervalSince(typedAt[agent.tty] ?? .distantPast) > 10 else { return }
         flushing.insert(agent.tty)
         link.styledScreen(id) { [weak self] screen in
             guard let self else { return }
@@ -203,7 +203,7 @@ extension LeadEngine {
                 case .failure(let why):
                     self.wakeStep(.notTyped(session: id, why: why.description))
                 case .success(let waiting):
-                    self.typedAt[agent.tty] = Date()
+                    self.typedAt[agent.tty] = Platform.Clock.steadyDate()
                     self.type(waiting.prompt, into: id) { taken in
                         guard !taken else { return }
                         // Not in: what was taken waits in the inbox again (behind what came meanwhile), typed at the next look.

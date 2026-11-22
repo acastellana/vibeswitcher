@@ -97,7 +97,8 @@ final class ScratchNode: @unchecked Sendable {
     init(_ scratch: Scratch, userScopes: [String]? = ScratchNode.ownScope.map { [$0] }, housekeeping: Int? = nil,
          path: String = "/usr/bin:/bin", holdFirstLook: Bool = false, serverKnowsFirstLook: Bool = true, testChild: String? = nil,
          socketName: String = "host.sock", sealLife: Int? = nil, owner: pid_t = getpid(), reusing: URL? = nil, waitForServer: Bool = true,
-         build: URL? = nil, hostArguments: [String] = [], installRoot: URL? = nil, claudeProgram: String = "claude") async throws {
+         build: URL? = nil, hostArguments: [String] = [], installRoot: URL? = nil, claudeProgram: String = "claude",
+         hostPrefix: [String] = [], hostBacktrace: Bool = false) async throws {
         root = try reusing ?? scratch.shortFolder("vsn")
         home = root.appendingPathComponent("home", isDirectory: true)
         nodeRoot = build ?? root.appendingPathComponent("build", isDirectory: true)
@@ -155,12 +156,14 @@ final class ScratchNode: @unchecked Sendable {
         // stdin, the other registered for its socket, so this process can start sessions on it.
         guard let (hostEnd, testEnd) = Platform.Sockets.pair(type: Platform.Sockets.seqpacket) else { throw CancellationError() }
         Platform.Sockets.enableCredentials(hostEnd)
-        var spawn = Platform.Spawn(executable: executable,
-                                   arguments: [executable] + arguments + ["--test-app-pid", String(getpid()), "--test-app-connector", "0"])
+        // `hostPrefix`: a program that execs the host after setting something up (util-linux's prlimit, say).
+        var spawn = Platform.Spawn(executable: hostPrefix.first ?? executable,
+                                   arguments: hostPrefix + [executable] + arguments + ["--test-app-pid", String(getpid()), "--test-app-connector", "0"])
         spawn.environment = ["HOME=\(home.path)", "CFFIXED_USER_HOME=\(home.path)", "VIBESWITCHER_HOME=\(root.path)", "SHELL=/bin/sh",
                              "PATH=\(path)", "TMPDIR=\(root.appendingPathComponent("tmp").path)/",
-                             // As the node's unit gives its host (ST-D4): the host's start line says it (S5).
-                             "SWIFT_BACKTRACE=enable=no"]
+                             // As the node's unit gives its host (ST-D4): the host's start line says it (S5). The
+                             // host-probe nightly's (`hostBacktrace`) asks the trace of a crash on its stderr.
+                             hostBacktrace ? "SWIFT_BACKTRACE=enable=yes,interactive=no,output-to=stderr,symbolicate=full" : "SWIFT_BACKTRACE=enable=no"]
         spawn.stdin = .descriptor(hostEnd)
         spawn.stdout = .path(output, flags: O_WRONLY | O_APPEND)
         spawn.stderr = .path(output, flags: O_WRONLY | O_APPEND)

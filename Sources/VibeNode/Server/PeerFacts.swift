@@ -55,8 +55,14 @@ public struct PeerFacts: Equatable, Sendable {
     /// The variable every session's program carries (`HostedSession.environment`).
     public static let sessionMarkerName = "VIBESWITCHER_SESSION"
 
-    /// The longest ancestry read: past it, the chain counts as unreadable (a loop the reads made of reused pids).
-    static let deepest = 256
+    /// The longest ancestry read: past it, the chain counts as unreadable (a loop the reads made of reused pids, or a
+    /// chain made to cost each request: the architecture review of the runtime hardening), which every rule refuses.
+    static let deepest = 64
+    /// The most of an ancestor's command line read: `BranchCode.isRunner` judges its first words.
+    static let ancestorArguments = 16 * 1024
+    /// The most of the sender's environment read (the session marker's); past it, unreadable, which the voice rule
+    /// refuses.
+    static let environmentLimit = 1 << 20
 
     /// The process `pid` as it reads now (Linux: `/proc`; the Mac: `proc_pidinfo`'s links, each bound to the peer's
     /// audit token by Security's check after the read, `Platform.Processes.Link.isProcess(of:)`; its environment and
@@ -89,7 +95,7 @@ public struct PeerFacts: Equatable, Sendable {
         var underRunner: Bool? = false
         if readable {
             for ancestor in ancestry {
-                switch runner(ancestor, peerUID: uid, arguments: Platform.Processes.arguments(ancestor.pid), runnersAbove: runnersAbove,
+                switch runner(ancestor, peerUID: uid, arguments: Platform.Processes.arguments(ancestor.pid, limit: ancestorArguments), runnersAbove: runnersAbove,
                               owner: { brief in if case .brief(let read) = Platform.Processes.brief(brief) { read.uid } else { nil } }) {
                 case true?: underRunner = true
                 case nil: underRunner = nil
@@ -100,7 +106,7 @@ public struct PeerFacts: Equatable, Sendable {
         } else {
             underRunner = nil
         }
-        let environment = Platform.Processes.environment(pid)
+        let environment = Platform.Processes.environment(pid, limit: environmentLimit)
         let cgroup = Platform.Processes.cgroup(pid).map { lines in cgroupRoot.map { rerooted(lines, at: $0) } ?? lines }
         return PeerFacts(pid: pid, uid: uid, cgroup: cgroup, ancestry: readable ? ancestry : nil,
                          terminal: readable ? terminal : .unreadable,

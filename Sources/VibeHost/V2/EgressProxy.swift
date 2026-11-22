@@ -79,7 +79,7 @@ public enum EgressProxy {
         let control = arguments.firstIndex(of: controlFlag).flatMap { $0 + 1 < arguments.count ? Int32(arguments[$0 + 1]) : nil }
         if let control, control > STDERR_FILENO { _ = fcntl(control, F_SETFD, fcntl(control, F_GETFD) | FD_CLOEXEC) }
         signal(SIGPIPE, SIG_IGN)
-        func say(_ line: String) { FileHandle.standardError.write(Data("vibeswitcher-egress: \(line)\n".utf8)) }
+        func say(_ line: String) { Platform.Stdio.error("vibeswitcher-egress: \(line)\n") }
         guard !Platform.CodeIdentity.isAvailable else {
             say("not started: this system has no session sandbox")
             exit(69)
@@ -342,10 +342,10 @@ extension EgressProxy {
             _ = fcntl(client, F_SETFL, fcntl(client, F_GETFL) & ~O_NONBLOCK)
             // The header, within its bytes and its time.
             var bytes: [UInt8] = []
-            let deadline = Date().addingTimeInterval(limits.headerSeconds)
+            let deadline = Platform.Clock.steadyDate().addingTimeInterval(limits.headerSeconds)
             while bytes.firstRange(of: [13, 10, 13, 10]) == nil {
                 guard bytes.count < limits.headerBytes else { return Self.reply(client, 431, "the request's header is too long") }
-                let left = deadline.timeIntervalSinceNow
+                let left = deadline.timeIntervalSince(Platform.Clock.steadyDate())
                 guard left > 0, Self.wait(client, seconds: left) else { return }
                 var buffer = [UInt8](repeating: 0, count: min(4_096, limits.headerBytes - bytes.count + 4))
                 let count = Sys.read(client, &buffer, buffer.count)

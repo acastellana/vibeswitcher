@@ -25,6 +25,17 @@ extension NodeWire {
         public var epoch: String
         public var seq: Int
         public var entries: [Entry]
+        /// Some entries left out, so the message fits a line (`LiveHub.fitted`, for a client that didn't ask for parts);
+        /// absent otherwise.
+        public var truncated: Bool?
+        /// A snapshot in parts (`LiveHub.parted`, for a client that asked for them): this message's place, from 0, and
+        /// whether it is the last. The client holds the parts' entries and takes them together, as one snapshot, when
+        /// the last comes. Absent: the snapshot is this one message.
+        public var part: Int?
+        public var final: Bool?
+        /// The entries past `NodeWire.entryBytes` left out of a snapshot in parts, whole (`LiveStream.Oversized`): they
+        /// exist, too large to send.
+        public var withheld: [Withheld]?
 
         public init(sub: String, collection: String, epoch: String, seq: Int, entries: [Entry]) {
             v = NodeWire.version
@@ -34,6 +45,20 @@ extension NodeWire {
             self.epoch = epoch
             self.seq = seq
             self.entries = entries
+        }
+    }
+
+    /// An entry left out of a snapshot in parts: its id, its bytes, and what its collection says of it in its place
+    /// (`LiveStream.Oversized.withhold`'s stub: a card's place and the command that shows it whole), or nothing.
+    public struct Withheld: Codable, Equatable, Sendable {
+        public var id: String
+        public var bytes: Int
+        public var stub: Value?
+
+        public init(id: String, bytes: Int, stub: Value? = nil) {
+            self.id = id
+            self.bytes = bytes
+            self.stub = stub
         }
     }
 
@@ -76,6 +101,17 @@ extension NodeWire {
 /// What it keeps is bounded by the collection's own size and `removalsKept`: no journal. A resume from a `seq` is one
 /// delta, every entry changed after it and every id removed after it, as long as no removal after it was forgotten.
 public final class LiveStream: @unchecked Sendable {
+    /// What a snapshot in parts does with an entry past a part's room (`LiveHub.parted`). Text a person decides on (a
+    /// card's question, its options, a plugin's body, a commit's facts; a session's prompt; a lead's push) is shown whole
+    /// or not at all, never cut (the plugin spec's rule 3): a collection that may hold it withholds such an entry whole.
+    public enum Oversized {
+        /// Withheld whole, named; `stub` (its value and bytes) says what stands in its place, nil for nothing.
+        case withhold(stub: ((NodeWire.Value, Int) -> NodeWire.Value?)?)
+        /// Its longest texts cut, each marked, until it fits: only a collection holding nothing a person decides on (the
+        /// boards: a task's notes, the lead's records).
+        case cut
+    }
+
     /// How a snapshot orders its entries (the contract: sessions by terminal, leads by root, cards by `at` then id).
     public enum Order: Sendable {
         /// By id.
@@ -85,6 +121,10 @@ public final class LiveStream: @unchecked Sendable {
 
         public static func field(_ name: String) -> Order { .fields([name]) }
     }
+
+    /// What its snapshots in parts do with an entry too large for a part: withheld whole unless the collection says it
+    /// may be cut. Set before a client subscribes.
+    public var oversized: Oversized = .withhold(stub: nil)
 
     /// One entry as the stream holds it.
     public struct Held: Equatable, Sendable {

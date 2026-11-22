@@ -224,9 +224,9 @@ public struct SwitchRequest {
     /// live in the link's list, or `parkedEndLimit` later.
     private func whenEnded(names: [String], of live: [HostSession], then: @escaping () -> Void) {
         let ids = Set(live.filter { session in names.contains("\(session.tty) (\(ConfigSeal.inert(session.label, limit: 80)))") }.map(\.id))
-        let (link, deadline) = (self.link, Date().addingTimeInterval(Self.parkedEndLimit))
+        let (link, deadline) = (self.link, Platform.Clock.steadyDate().addingTimeInterval(Self.parkedEndLimit))
         func look() {
-            if Date() >= deadline || !link.sessions.contains(where: { ids.contains($0.id) && $0.isLive }) { return then() }
+            if Platform.Clock.steadyDate() >= deadline || !link.sessions.contains(where: { ids.contains($0.id) && $0.isLive }) { return then() }
             link.queue.asyncAfter(deadline: .now() + 0.1) { look() }
         }
         look()

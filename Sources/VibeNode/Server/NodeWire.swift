@@ -12,6 +12,14 @@ public enum NodeWire {
     public static let version = 1
     /// The longest line either side takes, its newline excluded: a longer one gets `bye` and the close.
     public static let maxLine = 1 << 20
+    /// The most bytes one part of a snapshot takes (the architecture review's row 14): a client that asks for parts
+    /// (`subscribe`'s `parts`) gets a snapshot as messages of at most this, each a part of it, whatever the collection
+    /// holds (`LiveHub.parted`).
+    public static let partBytes = 256 << 10
+    /// The most bytes one entry of a keyed collection takes, encoded: a part's room once its envelope is counted. Each
+    /// collection's value keeps its entries under it by its own rule (a board's `BoardValue.mostBytes`); an entry
+    /// past it anyway is withheld from a snapshot in parts, named in its `withheld`, never the snapshot dropped.
+    public static let entryBytes = partBytes - (8 << 10)
 
     // MARK: Values
 
@@ -134,6 +142,23 @@ public enum NodeWire {
     }
 
     /// The first message on each connection, from the server, unasked.
+    /// Why a connection's first line is no hello (`greeting`).
+    public struct NoHello: Error, Equatable, CustomStringConvertible {
+        public var description: String
+    }
+
+    /// A connection's first line (nil: none came) as a client reads it: the hello; or, when the server closed it at
+    /// once with a `bye` (one process past its share of connections, a full server), its reason, so the user sees why.
+    /// The reason is the server's words as sent: a terminal shows them through `ConfigSeal.inert`.
+    public static func greeting(_ first: Data?) -> Result<Hello, NoHello> {
+        guard let first else { return .failure(NoHello(description: "the node's server sent no hello")) }
+        if let hello = decode(Hello.self, first), hello.kind == "hello" { return .success(hello) }
+        if let bye = decode(Bye.self, first), bye.kind == "bye" {
+            return .failure(NoHello(description: "the node's server closed the connection: \(bye.reason)"))
+        }
+        return .failure(NoHello(description: "the node's server sent no hello"))
+    }
+
     public struct Hello: Codable, Equatable, Sendable {
         public struct Server: Codable, Equatable, Sendable {
             public var commit: String
@@ -218,7 +243,8 @@ public enum NodeWire {
         public var kind: String
         public var reason: String
         /// Why, as a word a client acts on (the live wire contract's §10): `auth`, `revoked`, `version`, `too-long`,
-        /// `not-object`, `not-request`, `must` or `stopping`. Nil, and not written, from a server before it.
+        /// `not-object`, `not-request`, `must`, `stopping` or `busy` (no room for the connection: its process holds its
+        /// share, or the server is full). Nil, and not written, from a server before it.
         public var code: String?
 
         public init(reason: String, code: String? = nil) {

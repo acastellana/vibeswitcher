@@ -108,7 +108,7 @@ public enum HostHardening {
     /// said on stderr) when refused.
     static func hardenAsParser() {
         if case .refused(let why) = atStart(mode: .parser) {
-            FileHandle.standardError.write(Data("vibeswitcher-host: parser not started: \(why)\n".utf8))
+            Platform.Stdio.error("vibeswitcher-host: parser not started: \(why)\n")
             _exit(1)
         }
     }
@@ -152,7 +152,7 @@ public enum HostHardening {
         case .users: return true
         case .scratch: return false
         case .link:
-            FileHandle.standardError.write(Data("vibeswitcher-host: not started: the lock \(lockPath) is a symbolic link\n".utf8))
+            Platform.Stdio.error("vibeswitcher-host: not started: the lock \(lockPath) is a symbolic link\n")
             exit(1)
         }
     }
@@ -253,7 +253,12 @@ public enum HostHardening {
         if !refused.isEmpty {
             let line = "refused test-only flags (the user's host takes none): \(refused.joined(separator: ", "))"
             server.note("host: " + line)
-            FileHandle.standardError.write(Data("vibeswitcher-host: \(line)\n".utf8))
+            Platform.Stdio.error("vibeswitcher-host: \(line)\n")
+        }
+        // A scratch host's image base, so a crash's backtrace (SWIFT_BACKTRACE on, its addresses only) symbolizes offline.
+        if let line = imageBaseLine(ownsLaunchers: ownsLaunchers) {
+            server.note("host: " + line)
+            Platform.Stdio.error("vibeswitcher-host: \(line)\n")
         }
         if !Platform.CodeIdentity.isAvailable, !ownsLaunchers, arguments.contains(staysDumpableFlag) {
             _ = Platform.ProcessSelf.makeDumpable()
@@ -262,6 +267,30 @@ public enum HostHardening {
            let hold = HostImages.value(after: HostImages.launcherTestHoldFlag, in: arguments) {
             HostImages.holdLaunchers(until: hold)
         }
+    }
+
+    /// Where this program is loaded (its image's start: the packages are linked into it), for a scratch
+    /// host only (`takesTestFlags`, never the user's host, whose log keeps no address): the line its start says, with
+    /// how a trace's address becomes a source line (the host-probe nightly reads it, scripts/ci/host-probe.sh).
+    public static func imageBaseLine(ownsLaunchers: Bool, program: String = CommandLine.arguments.first ?? "?") -> String? {
+        guard !ownsLaunchers, takesTestFlags(ownsLaunchers: ownsLaunchers), let imageBase else { return nil }
+        return "image base 0x\(String(imageBase, radix: 16)) of \(program) (an address A in a crash's trace: llvm-symbolizer --obj=PROGRAM --adjust-vma=BASE A)"
+    }
+
+    /// This program's image's start, as the kernel mapped it (`/proc/self/maps`: the first mapping of the file holding
+    /// `#dsohandle`, a symbol inside the image); nil where there's no such file (the Mac).
+    public static var imageBase: UInt? {
+        let inside = UInt(bitPattern: #dsohandle)
+        guard let maps = try? String(contentsOfFile: "/proc/self/maps", encoding: .utf8) else { return nil }
+        // "start-end perms offset dev inode path"
+        let rows = maps.split(separator: "\n").compactMap { line -> (start: UInt, end: UInt, path: String)? in
+            let fields = line.split(separator: " ", maxSplits: 5, omittingEmptySubsequences: true)
+            let range = fields.first?.split(separator: "-").compactMap { UInt($0, radix: 16) } ?? []
+            guard range.count == 2, fields.count == 6 else { return nil }
+            return (range[0], range[1], fields[5].trimmingCharacters(in: .whitespaces))
+        }
+        guard let path = rows.first(where: { $0.start <= inside && inside < $0.end })?.path, path.hasPrefix("/") else { return nil }
+        return rows.filter { $0.path == path }.map(\.start).min()
     }
 
     // MARK: Who an unreadable process is

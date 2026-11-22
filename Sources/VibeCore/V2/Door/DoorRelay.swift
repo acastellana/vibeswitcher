@@ -81,7 +81,7 @@ public enum DoorRelay {
             alarm(hookPatience)
         }
         func fail(_ why: String) -> Never {
-            FileHandle.standardError.write(Data("vibeswitcher: \(why)\n".utf8))
+            Platform.Stdio.error("vibeswitcher: \(why)\n")
             exit(unavailable)
         }
         guard let line = DoorProtocol.line(hello) else { fail("this helper's arguments are too long for the session's door") }

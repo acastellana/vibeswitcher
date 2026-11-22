@@ -138,10 +138,13 @@ public final class HostServer {
     private var lockFD: Int32 = -1
     var listenFD: Int32 = -1
     var acceptSource: DispatchSourceRead?
+    /// The accept sources suspended after an accept failed for want of descriptors, each with its resume, called once
+    /// (`acceptFailed`, `resumePausedAccepts`, V2/HostPathWatch.swift).
+    var acceptsPaused: [ObjectIdentifier: AcceptResume] = [:]
     private var housekeeping: DispatchSourceTimer?
     /// The watch on `Config.owner`.
     private var ownerWatch: (any Platform.Cancellable)?
-    private var lastBusy = Date()
+    private var lastBusy = Platform.Clock.steadyDate()
     private(set) var stopped = false
     /// A `shutdown` was accepted: the host stops in a moment and starts nothing more.
     private var shuttingDown = false
@@ -259,7 +262,7 @@ public final class HostServer {
         let programs = sessions.values.filter(\.info.isLive).map(\.info.childPID)
         log.note("host: owner pid \(owner) is gone, ending \(programs.count) sessions and exiting")
         stop(terminateSessions: true)
-        exitOnceEnded(programs, deadline: Date().addingTimeInterval(6))
+        exitOnceEnded(programs, deadline: Platform.Clock.steadyDate().addingTimeInterval(6))
     }
 
     /// Exits once the sessions' programs and their groups are gone (reaped here: closed sessions no longer reap them),
@@ -270,7 +273,7 @@ public final class HostServer {
             let reaped = waitpid(pid, &status, WNOHANG)
             return (reaped == 0 || (reaped < 0 && errno == EINTR)) || Sys.kill(-pid, 0) == 0
         }
-        guard left.isEmpty || Date() >= deadline else {
+        guard left.isEmpty || Platform.Clock.steadyDate() >= deadline else {
             return queue.asyncAfter(deadline: .now() + 0.1) { self.exitOnceEnded(left, deadline: deadline) }
         }
         onExit?()
@@ -285,7 +288,9 @@ public final class HostServer {
             guard !self.stopped else { return }
             self.stopped = true
             self.log.note("host: stopping, \(self.sessions.values.filter { $0.info.isLive }.count) sessions live\(terminateSessions ? ", ending them" : "")")
-            self.acceptSource?.cancel()
+            self.resumePausedAccepts()
+            // The listener closed by its source's cancel handler, once libdispatch has let it go (V2/HostPathWatch.swift).
+            let closedBySource = self.endAcceptSource()
             self.housekeeping?.cancel()
             self.ownerWatch?.cancel()
             self.serverChild?.stop()
@@ -298,7 +303,7 @@ public final class HostServer {
                 session.close()
             }
             self.sessions = [:]
-            if self.listenFD >= 0 { Sys.close(self.listenFD); unlink(self.config.socketPath) }
+            if self.listenFD >= 0 { if !closedBySource { Sys.close(self.listenFD) }; unlink(self.config.socketPath) }
             if self.lockFD >= 0 { Sys.close(self.lockFD) }
             self.listenFD = -1
             self.lockFD = -1
@@ -311,7 +316,8 @@ public final class HostServer {
     func acceptAll() {
         while true {
             let fd = Platform.Sockets.accept(listenFD)
-            guard fd >= 0 else { return }
+            // No descriptor or memory left: accepting paused a second (V2/HostPathWatch.swift).
+            guard fd >= 0 else { return acceptFailed(errno) }
             guard UnixSocket.peerUID(fd) == getuid() else {
                 Sys.close(fd)
                 continue
@@ -877,7 +883,7 @@ public final class HostServer {
     }
 
     func log(_ text: String) {
-        FileHandle.standardError.write(Data("vibeswitcher-host: \(text)\n".utf8))
+        Platform.Stdio.error("vibeswitcher-host: \(text)\n")
     }
 
     /// The newest part of `history` that fits in one frame next to the screen (wide lines of box drawing
@@ -1007,8 +1013,8 @@ public final class HostServer {
             if let exit = session.info.exit, now.timeIntervalSince(exit.at) > config.keepEnded { forget(session.id) }
         }
         if !clients.isEmpty || sessions.values.contains(where: { $0.info.isLive }) || serverChild?.isRunning == true {
-            lastBusy = now
-        } else if let idle = config.idleExit, now.timeIntervalSince(lastBusy) >= idle {
+            lastBusy = Platform.Clock.steadyDate()
+        } else if let idle = config.idleExit, Platform.Clock.steadyDate().timeIntervalSince(lastBusy) >= idle {
             log.note("host: idle \(Int(idle)) s with no session and no app, exiting")
             stop(terminateSessions: false)
             onExit?()

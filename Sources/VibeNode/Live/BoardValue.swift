@@ -52,8 +52,9 @@ public enum BoardValue {
     public static let lineBytes = 600
     /// The most combining marks kept on one base character (a Zalgo string is a few characters of thousands of marks).
     public static let marksKept = 4
-    /// The most bytes a project's whole value takes, encoded: past it, the last tasks go to `more` until it fits.
-    public static let mostBytes = 512 << 10
+    /// The most bytes a project's whole value takes, encoded: past it, the last tasks go to `more` until it fits. Under
+    /// a snapshot part's room for one entry (`NodeWire.entryBytes`, with space for its id), so a board is never withheld.
+    public static let mostBytes = 240 << 10
     /// The groups, in the order shown.
     public static let groups = ["attention", "running", "waiting", "done"]
 

@@ -165,10 +165,14 @@ struct EgressProxyTests {
         let client = try box.connect()
         defer { Sys.close(client) }
         egressSend(client, "CONNECT a.example:443 HTTP/1.1\r\nHost: a.example:443\r\n\r\nearly ")
-        #expect(egressReceive(client, until: "\r\n\r\n").hasPrefix("HTTP/1.1 200 "))
+        // The tunnel's first echoed bytes can come in the same read as the reply's head: kept, as what was echoed (the CI
+        // flake of 2026-11-22: "early " was in the first read, and the echo read without it).
+        let head = egressReceive(client, until: "\r\n\r\n")
+        #expect(head.hasPrefix("HTTP/1.1 200 "))
+        let already = head.range(of: "\r\n\r\n").map { String(head[$0.upperBound...]) } ?? ""
         let big = String(repeating: "0123456789", count: 50_000)
         egressSend(client, big + "end")
-        let echoed = await Task.detached { egressReceive(client, until: "end") }.value
+        let echoed = await Task.detached { already + egressReceive(client, until: "end") }.value
         #expect(echoed == "early " + big + "end")
         #expect(world.connections == [EgressRules.Address("203.0.113.7")!])
     }

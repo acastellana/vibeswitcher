@@ -239,6 +239,16 @@ or decided. Done on Linux, tested on both systems (`ApprovalJudgmentTests`, `App
      long its `find` takes), launchd taking the written agent and the host starting from it, and whether the host
      needs entitlements build-app.sh gives the app's (`VibeSwitcherHost.entitlements`). Known gap: BSD `mv` has no
      `-T`, so the build's rename checks its target absent under the lock, then checks the result.
+     **The toolchain's run paths (2026-11-22, the first dry run):** a release build for this package's deployment
+     target carries an `LC_RPATH` into the developer folder (Swift's back-deploy folder,
+     `…/XcodeDefault.xctoolchain/usr/lib/swift-6.2/macosx`), a folder the user can write. The install deletes every run
+     path under the developer folder, and any other but `/usr/lib/swift`, from each staged copy before it signs it
+     (`install_name_tool -delete_rpath`), the check then refuses any non-system run path left, and the installed
+     command line must start (`vibeswitcher help`). **This assumes macOS 26 or later**, whose `/usr/lib/swift` holds the
+     Swift 6.2 runtime the products link (they load nothing through a run path: absolute system paths only). The
+     cleaner fix, for a main merge and the user's call: raise the package's macOS deployment target to 26, so the
+     back-deploy run path isn't added at all (Package.swift is shared with main, and the target decides which Macs
+     the app runs on).
    - A card for a kind with no arguments (`stop`, `start`, `web.revoke`): done, `approvalCard` names what each does
      (`stop` the live sessions it ends).
 8. **(LOW, done in `6f367200`, `03f406c9`)** A replayed action id answered before any dialog; the command line's

@@ -33,7 +33,7 @@ public enum TestAppPrincipal {
         guard restored != nil || named != nil || pid != nil else { return }
         func say(_ line: String) {
             server.note("host: " + line)
-            FileHandle.standardError.write(Data("vibeswitcher-host: \(line)\n".utf8))
+            Platform.Stdio.error("vibeswitcher-host: \(line)\n")
         }
         guard !ownsLaunchers else {
             return say("refused \(pidFlag) and \(connectorFlag): the user's host takes no test stand-in for the app")

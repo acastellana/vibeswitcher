@@ -135,6 +135,7 @@ public final class LeadEngine: @unchecked Sendable {
     /// Terminals being typed into, and when something was last typed into each (its hooks need a moment to say it's
     /// working again; until then another would type a second prompt).
     var flushing: Set<String> = []
+    /// When each terminal was last typed into, on the steady clock (`Platform.Clock.steadyDate`): a guard, never shown.
     var typedAt: [String: Date] = [:]
     /// The user's steered messages this node posted, by id, watched until taken (`watchSteered`).
     var steerWatched: [String: Steered] = [:]

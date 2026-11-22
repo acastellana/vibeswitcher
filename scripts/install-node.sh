@@ -216,7 +216,10 @@ install_node_main() {
         git_run -C / config --file "$check/config" "$key" "$value" || fail 65 "can't tell whether $top is clean (its $key)"
     done
     if [[ -f $gitdir/index ]]; then
-        /bin/cp -- "$gitdir/index" "$check/index" || fail 65 "can't tell whether $top is clean (can't copy its index)"
+        # With its own time (`-p`): git takes an entry whose stat matches for unchanged only when the index is newer than
+        # the entry, else it compares the bytes ("racily clean"). A copy made now was always newer, so a same-size change
+        # in the entry's second passed (2026-11-22, InstallTests' aRacilyCleanChangeIsStillFound).
+        /bin/cp -p -- "$gitdir/index" "$check/index" || fail 65 "can't tell whether $top is clean (can't copy its index)"
     fi
     for line in "$gitdir"/sharedindex.*; do
         [[ ! -f $line ]] || /bin/cp -- "$line" "$check/" || fail 65 "can't tell whether $top is clean (can't copy $line)"

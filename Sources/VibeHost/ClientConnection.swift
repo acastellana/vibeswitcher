@@ -73,7 +73,7 @@ final class ClientConnection {
             // Too large for a frame (or not encodable): a reply says so instead, or its asker would wait for it.
             // (A case with values reflects as one child named after the case; describing the event could be megabytes.)
             let name = Mirror(reflecting: envelope.event).children.first?.label ?? "\(envelope.event)"
-            FileHandle.standardError.write(Data("vibeswitcher-host: \(name) too large to send\n".utf8))
+            Platform.Stdio.error("vibeswitcher-host: \(name) too large to send\n")
             guard let seq = envelope.replyTo, envelope.event != Self.tooLarge else { return }
             return send(HostEventEnvelope(replyTo: seq, event: Self.tooLarge))
         }

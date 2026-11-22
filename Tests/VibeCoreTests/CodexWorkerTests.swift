@@ -156,10 +156,13 @@ struct CodexWorkerTests: LeadTeamFixture {
         let verdict = try self.seat("verify-add-b", runtime).call("submit_audit", ["completion": "complete", "integrity": "clean", "summary": "one problem",
                                                                                     "tests": "passed", "findings": [finding]])
         #expect(!verdict.isError, "\(verdict.text)")
+        // Waited for both: the message reaches the worker first, and the task is set back to running after it (the
+        // CI flake of 2026-11-22 read the status in between).
         #expect(await advancing.until {
             runtime.calls.lock()
-            defer { runtime.calls.unlock() }
-            return runtime.steered.contains { $0.target == worker && $0.text.contains("F1") }
+            let sent = runtime.steered.contains { $0.target == worker && $0.text.contains("F1") }
+            runtime.calls.unlock()
+            return sent && task("add-b", root)?.status == .running
         })
         #expect(task("add-b", root)?.status == .running && !Git.run(["show", "main:b.txt"], in: root).ok)
     }

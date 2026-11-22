@@ -156,6 +156,9 @@ public final class NodeLive: @unchecked Sendable {
         let sessionsStream = LiveStream(collection: "sessions", order: .field("terminal"))
         let leadsStream = LiveStream(collection: "leads", order: .field("root"))
         let cardsStream = LiveStream(collection: "cards", order: .fields(["at"]))
+        // A card too large for a snapshot's part is withheld whole, never cut (what it asks is decided on whole): its
+        // stub keeps its place on the page, with the command that shows it.
+        cardsStream.oversized = .withhold(stub: CardStore.Card.tooLargeStub)
         let nodeStream = LiveStream(collection: "node")
         for stream in [sessionsStream, leadsStream, cardsStream, nodeStream] { hub.add(collection: stream.collection, stream) }
         if let sessions {
@@ -199,6 +202,9 @@ public final class NodeLive: @unchecked Sendable {
         let boards = LiveBoards(queue: queue, leads: engine.leads.changes, usageWaits: engine.usageWaits, summaries: engine.teamSummaries,
                                 decisions: engine.boardDecisions, note: note)
         let stream = LiveStream(collection: "boards", order: .field("project"))
+        // A board holds nothing a person decides on (its tasks' notes, the lead's records; a question is a card): one
+        // past a part, which its own budget keeps it under, may have its longest texts cut.
+        stream.oversized = .cut
         hub.add(collection: stream.collection, stream)
         boards.start(clock: clock)
         hub.follow(boards.changes, into: stream) { $0 }

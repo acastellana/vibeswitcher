@@ -141,10 +141,27 @@ public enum NodeCheck {
 
     /// The process `pid` as the command line reads it (`ServerCheck`): whether it is dumpable, its parent, its cgroup
     /// lines and its session.
-    public static func listener(pid: pid_t) -> Listener {
+    public static func listener(pid: pid_t, patience: TimeInterval = dumpablePatience) -> Listener {
         let session = getsid(pid)
-        return Listener(pid: pid, dumpable: Platform.Processes.isDumpable(pid), parent: Platform.Processes.link(pid)?.parent,
+        return Listener(pid: pid, dumpable: dumpable(pid, patience: patience), parent: Platform.Processes.link(pid)?.parent,
                         cgroup: Platform.Processes.cgroup(pid), session: session > 0 ? session : nil)
+    }
+
+    /// How long the command line reads the listener's dumpable state again while it can't be told
+    /// (`Platform.Processes.isDumpable` nil: one of its /proc reads didn't answer). On a loaded CI runner one look came back
+    /// unreadable and `settings --find` was refused (exit 77, 2026-11-22); a live server's state is there a moment later.
+    public static let dumpablePatience: TimeInterval = 3
+
+    /// The listener's dumpable state, read again every 50 ms while it can't be told, for at most `patience`; a process
+    /// that has gone stays unreadable (nil), and is refused as before.
+    static func dumpable(_ pid: pid_t, patience: TimeInterval, read: (pid_t) -> Bool? = Platform.Processes.isDumpable,
+                         now: () -> Date = Date.init, wait: () -> Void = { usleep(50_000) }) -> Bool? {
+        let deadline = now().addingTimeInterval(patience)
+        while true {
+            if let told = read(pid) { return told }
+            guard now() < deadline, kill(pid, 0) == 0 || errno == EPERM else { return nil }
+            wait()
+        }
     }
 
     /// The Mac's listener (the review of 2026-11-21), every fact bound to the one audit token the socket gave

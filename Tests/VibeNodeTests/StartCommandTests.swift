@@ -199,7 +199,7 @@ extension StartCommandTests {
 
     @Test func theUnitUnsetsTheListedNamesAndSetsBacktraceOff() throws {
         #expect(NodeUnit.unset == ["LD_PRELOAD", "LD_AUDIT", "LD_LIBRARY_PATH", "GCONV_PATH", "BASH_ENV", "ENV", "VIBESWITCHER_HOME",
-                                   "CFFIXED_USER_HOME", "SSH_AUTH_SOCK"])
+                                   "CFFIXED_USER_HOME", "VIBESWITCHER_HOST_NOFILE_BEFORE", "SSH_AUTH_SOCK"])
         let unit = NodeUnit.parse(try NodeUnit.text(Self.inputs).get())
         #expect(unit["UnsetEnvironment"] == [NodeUnit.unset.joined(separator: " ")])
         #expect(unit["Environment"]?.contains("SWIFT_BACKTRACE=enable=no") == true, "\(unit)")
@@ -1681,13 +1681,20 @@ extension StartCommandTests {
         }
         #expect(moved.text.contains("changed since the stop was shown") && moved.text.contains("nothing ended"), "\(moved)")
         #expect(record.isLive())
+        let stopStarted = Date()
         let stopped = NodeStopper.stopDetached(root: host.root.path, lock: host.lock, isHost: { $0 == host.command }, shown: record)
+        let stopTook = Int(Date().timeIntervalSince(stopStarted))
         #expect((try? stopped.get()) != nil, "\(stopped)")
         var status: Int32 = 0
         let reaped = waitpid(pid, &status, WNOHANG)
         ended = reaped == -1
         #expect(reaped == -1 && errno == ECHILD, "the host is still this process's child, or a zombie (waitpid \(reaped), state \(String(describing: Platform.Processes.kernelRecord(pid)?.state)))")
-        #expect(!under.contains(where: ScratchNode.runs), "\(under.filter(ScratchNode.runs))")
+        let stillRunning = under.filter(ScratchNode.runs)
+        let seen = stillRunning.map { link in
+            "\(link.pid): \((try? String(contentsOfFile: "/proc/\(link.pid)/stat", encoding: .utf8))?.prefix(160) ?? "no stat") "
+                + "threads \((try? FileManager.default.contentsOfDirectory(atPath: "/proc/\(link.pid)/task"))?.count ?? -1)"
+        }
+        #expect(stillRunning.isEmpty, "\(stillRunning) \(seen) stop took \(stopTook) s")
         #expect(NodeRecord.read(root: host.root.path) == nil)
     }
 
@@ -1724,8 +1731,10 @@ extension StartCommandTests {
         defer { DetachedScratch.end(record.pid) }
         try #require(await eventually(timeout: 120) { Platform.Processes.isDumpable(record.pid) == true })
         let environment = try #require(Platform.Processes.environment(record.pid))
-        #expect(environment == ["HOME=\(host.home.path)", "PATH=\(DetachedScratch.path)", "SWIFT_BACKTRACE=enable=no"], "\(environment)")
-        #expect(environment == NodeStarter.detachedEnvironment(home: host.home.path, path: DetachedScratch.path))
+        let log = NodeStarter.hostLog(root: host.root.path)
+        #expect(environment == ["HOME=\(host.home.path)", "PATH=\(DetachedScratch.path)", "SWIFT_BACKTRACE=enable=no",
+                                "\(StderrCap.logVariable)=\(log)"], "\(environment)")
+        #expect(environment == NodeStarter.detachedEnvironment(home: host.home.path, path: DetachedScratch.path, log: log))
         #expect(ProcessInfo.processInfo.environment.count > 3)
         // A dumpable process isn't the node's host: stop refuses it, and it still runs.
         guard case .failure(let refused) = NodeStopper.stopDetached(root: host.root.path, lock: host.lock, isHost: { $0 == host.command }) else {

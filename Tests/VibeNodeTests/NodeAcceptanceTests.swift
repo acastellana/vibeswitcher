@@ -376,6 +376,9 @@ struct NodeAcceptanceTests {
     func a40FetchAndMergeRemote() async throws {
         let node = try await ScratchNode(scratch, holdFirstLook: true)
         defer { node.stop() }
+        // merge_remote waits for the machine's load to drop below load_threshold before it tests (`waitForLoad`): the
+        // test machine's own load isn't the case's (the CI flake of 2026-11-22: a loaded runner held it past its 300 s).
+        try node.noLoadHold()
         let repo = try await Self.repository(node)
         let origin = node.root.appendingPathComponent("origin.git").path
         for arguments in [["init", "-q", "--bare", "-b", "main", origin], ["-C", repo.path, "remote", "add", "origin", origin],

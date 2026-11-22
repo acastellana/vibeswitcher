@@ -238,8 +238,11 @@ public final class NodeSessions: @unchecked Sendable {
     /// since it began to or since someone last looked at it (`acknowledge`), or one its hooks say works with no hook event
     /// for 15. A team's are silent, a lead's only while it waits on you (`AlertRules.nudge`), a paused one's too. A wait from before this
     /// store started counts from its start. Every word a session wrote is inert. On `queue`.
-    public func reminderNotices() -> [String] {
-        reminders().map { reminder in
+    public func reminderNotices() -> [String] { Self.notices(reminders()) }
+
+    /// `reminders` as `status`'s notices say them (`reminderNotices`), for a caller that has them already.
+    public static func notices(_ reminders: [Reminder]) -> [String] {
+        reminders.map { reminder in
             let subtitle = reminder.subtitle.map { " (\($0))" } ?? ""
             let body = reminder.body.isEmpty ? "" : ": " + reminder.body
             return "reminder: \(reminder.title)\(subtitle), on \(ConfigSeal.inert(reminder.terminal, limit: 20))\(body)"
