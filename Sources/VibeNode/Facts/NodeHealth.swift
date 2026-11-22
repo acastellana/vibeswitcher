@@ -70,12 +70,30 @@ public final class NodeHealth: @unchecked Sendable {
     private var lastSlow: Date?
     private var causes: [String: (count: Int, last: Date)] = [:]
     /// The ping waiting for the queue: when it was sent (the monotonic clock) and the date then.
-    private var pending: (sent: TimeInterval, at: Date)?
+    private var pending: Ping?
     /// Whether the last of `freezes` is the stall under way (kept at `stallAfter`, its length brought up to date when
     /// the queue answers).
     private var open = false
     /// The ping waiting for the reads lane, when it was sent.
-    private var pendingReads: TimeInterval?
+    private var pendingReads: Ping?
+
+    /// A ping waiting: when it was sent (its date, for the freeze), how long it is counted as waited, and the clock's
+    /// reading that count is up to. Each tick adds the time since that reading, but at most two beats (`credit`): the
+    /// monotonic clock runs on while the process is stopped (SIGSTOP, a cgroup's freezer), and the first tick after a
+    /// continue must not count the stop as the queue's stall and end a healthy server.
+    private struct Ping {
+        var at: Date
+        var waited: TimeInterval = 0
+        var last: TimeInterval
+    }
+
+    /// `ping` with the time since its last reading counted, two beats at most.
+    private func credit(_ ping: Ping, now: TimeInterval) -> Ping {
+        var ping = ping
+        ping.waited += min(max(0, now - ping.last), 2 * timing.beat)
+        ping.last = now
+        return ping
+    }
     /// Whether `stuck` was called (once).
     private var ended = false
     private let timing: Timing
@@ -129,11 +147,13 @@ public final class NodeHealth: @unchecked Sendable {
         let now = clock()
         enum Step { case send, wait, save, end(TimeInterval) }
         let step: Step = lock.withLock {
-            guard let ping = pending else {
-                pending = (now, date())
+            guard let waiting = pending else {
+                pending = Ping(at: date(), last: now)
                 return .send
             }
-            let waited = now - ping.sent
+            let ping = credit(waiting, now: now)
+            pending = ping
+            let waited = ping.waited
             guard waited >= timing.stallAfter else { return .wait }
             if open, !freezes.isEmpty {
                 freezes[freezes.count - 1].seconds = waited
@@ -157,8 +177,11 @@ public final class NodeHealth: @unchecked Sendable {
         }
         guard let reads else { return }
         let sendReads: Bool = lock.withLock {
-            guard pendingReads == nil else { return false }
-            pendingReads = now
+            if let waiting = pendingReads {
+                pendingReads = credit(waiting, now: now)
+                return false
+            }
+            pendingReads = Ping(at: date(), last: now)
             return true
         }
         if sendReads { reads.async { [weak self] in self?.lock.withLock { self?.pendingReads = nil } } }
@@ -167,9 +190,10 @@ public final class NodeHealth: @unchecked Sendable {
     private func answered() {
         let now = clock()
         let changed: Bool = lock.withLock {
-            guard let ping = pending else { return false }
+            guard let waiting = pending else { return false }
             pending = nil
-            let waited = now - ping.sent
+            let ping = credit(waiting, now: now)
+            let waited = ping.waited
             defer { open = false }
             if open, !freezes.isEmpty {
                 freezes[freezes.count - 1].seconds = waited
@@ -186,14 +210,14 @@ public final class NodeHealth: @unchecked Sendable {
     /// How long the queue has left the waiting ping unanswered, when that's a stall (`stallAfter` or more).
     public var stalled: TimeInterval? {
         let now = clock()
-        return lock.withLock { pending.map { now - $0.sent }.flatMap { $0 >= timing.stallAfter ? $0 : nil } }
+        return lock.withLock { pending.map { credit($0, now: now).waited }.flatMap { $0 >= timing.stallAfter ? $0 : nil } }
     }
 
     /// How long the refresh's reads lane has left its ping unanswered, when that's `stallAfter` or more: a refresh
     /// (or another read of the boards) under way that long.
     public var refreshing: TimeInterval? {
         let now = clock()
-        return lock.withLock { pendingReads.map { now - $0 }.flatMap { $0 >= timing.stallAfter ? $0 : nil } }
+        return lock.withLock { pendingReads.map { credit($0, now: now).waited }.flatMap { $0 >= timing.stallAfter ? $0 : nil } }
     }
 
     private func save() {
