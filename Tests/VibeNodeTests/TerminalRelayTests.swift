@@ -153,6 +153,11 @@ struct TerminalRelayTests {
             + "printf '\\033[c'; da=''; while :; do ch=$(dd bs=1 count=1 2>/dev/null | od -An -c | tr -d ' \\n'); "
             + "da=\"$da$ch\"; [ \"$ch\" = c ] && break; done; "
             + "stty sane; printf 'dsr:%s da:%s end\\n' \"$dsr\" \"$da\"; exec sleep 600")
+        // Its line on its screen before the page opens it: the replay is what the host holds then (the CI flake of
+        // 2026-11-22: on a loaded runner the page opened the terminal before the shell had printed, and the replay was empty).
+        let socket = node.socket
+        try #require(await eventually(timeout: 60) { HostCall.styledScreen(session.id, socket: socket, appKey: nil)?.text.contains("before-the-page") == true },
+                     "\(node.said)")
         let page = try TermPage.paired(node)
         let kinds = page.hello?["kinds"]?.array?.compactMap(\.string) ?? []
         #expect(kinds.contains("term.open") && kinds.contains("term.close"), "\(kinds)")
