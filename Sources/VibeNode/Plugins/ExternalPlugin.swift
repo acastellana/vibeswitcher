@@ -71,6 +71,8 @@ final class ExternalPlugin: FeaturePlugin {
 
     /// The program, started once (from a sealed copy whose SHA-256 is the record's) and greeted; `then` on the engine's
     /// queue.
+    func startedProcess(_ desk: PluginDesk, then: @escaping (Result<PluginProcess, PluginRefusal>) -> Void) { ensureStarted(desk, then: then) }
+
     private func ensureStarted(_ desk: PluginDesk, then: @escaping (Result<PluginProcess, PluginRefusal>) -> Void) {
         if let process, process.ended == nil { return then(.success(process)) }
         starting.append(then)

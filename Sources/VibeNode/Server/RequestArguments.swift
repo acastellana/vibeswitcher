@@ -42,6 +42,7 @@ enum RequestArguments {
         "approve": ["batch", "code"],
         // A feature plugin turned on or off (`PluginRequests`).
         "plugin.on": ["plugin"], "plugin.off": ["plugin"],
+        "plugin.add": ["folder", "manifest", "program"], "plugin.remove": ["plugin"],
     ]
 
     /// `request`'s `bad-args` refusal when it gives an argument its kind doesn't take; nil when it gives none (or its

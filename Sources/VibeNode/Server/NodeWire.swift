@@ -363,12 +363,15 @@ public enum NodeWire {
         "approve.list": .user, "approve": .user,
         // The feature plugins (2026-11-22): the list a read, on and off the user's voice.
         "plugin.list": .anyone, "plugin.on": .user, "plugin.off": .user,
+        // External plugins (2026-11-22): what an add shows a read of the user's; add and remove the user's voice; an
+        // agent's vs-ask files through its tool server (the host stamps it there), never a page.
+        "plugin.inspect": .user, "plugin.add": .user, "plugin.remove": .user, "plugin.file": .anyone,
     ]
 
     /// The user's-voice kinds that change nothing (EN-D5: no typed word): `start` to a running node says when it
     /// started; `config.held` and `base.show` make the card the next request takes; `shells` lists the node's shells for
     /// Close Finished Shells; `update.check` asks GitHub now and keeps only its answer. (`mail`, a read of the user's or a page's, is `webRead`: it changes nothing either.)
-    public static let changesNothing: Set<String> = ["start", "config.held", "base.show", "shells", "update.check", "approve.list"]
+    public static let changesNothing: Set<String> = ["start", "config.held", "base.show", "shells", "update.check", "approve.list", "plugin.inspect"]
 
     /// Whether `kind` changes state: every user's-voice kind but `changesNothing`'s, a kind added later included, and
     /// every web client's kind (a draft, a terminal). A kind missing from `kinds` needs the user's voice, as
@@ -402,7 +405,8 @@ public enum NodeWire {
                                "push", "push.decline",
                                "session.reopen", "mail", "prompt-audit", "session.rename", "session.pause",
                                "session.resume", "shells", "session.close-shells", "presets.edit",
-                               "recent", "brief", "update.check", "approve.list", "approve", "plugin.list", "plugin.on", "plugin.off"]
+                               "recent", "brief", "update.check", "approve.list", "approve", "plugin.list", "plugin.on", "plugin.off",
+                               "plugin.inspect", "plugin.add", "plugin.remove", "plugin.file"]
 
     // MARK: Lines
 

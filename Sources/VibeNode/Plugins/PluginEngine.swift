@@ -26,11 +26,14 @@ extension LeadEngine {
             let settled = Result { try client.settledRequests() }
             let since = try? client.recordSince()
             let settings = try? client.pluginSettings()
+            let builtIn = self?.plugins.builtIn ?? []
+            let external = (try? client.externalPlugins()).map { Self.externalPlugins($0, builtIn: builtIn) }
             self?.queue.async {
                 guard let self else { return }
                 self.pluginAsking = false
                 if let since { self.pluginRecordSince = since }
                 if let settings { self.pluginSettings = settings }
+                if let external { self.plugins.takeExternal(external.mapValues(\.record)) { id, _ in external[id] } }
                 // Not known (the vault didn't answer): nothing is drawn until it does.
                 switch settled {
                 case .success(let keys):
@@ -48,6 +51,25 @@ extension LeadEngine {
                 waiters.forEach { $0() }
             }
         }
+    }
+
+    /// The external plugins the vault's records name, each built from its folder's manifest as it is now: one whose
+    /// manifest no longer reads, or reads another hash, is held (it runs nothing until added again). Reads the disk.
+    static func externalPlugins(_ records: [String: String], builtIn: Set<String>) -> [String: ExternalPlugin] {
+        var made: [String: ExternalPlugin] = [:]
+        for (id, text) in records {
+            guard let record = PluginRecord.read(text) else { continue }
+            let bytes = PluginDesk.bounded(URL(fileURLWithPath: record.folder).appendingPathComponent(PluginManifest.fileName), limit: PluginManifest.bytesAtMost)
+            if let bytes, BuildInfo.sha256(of: bytes) == record.manifest, case .success(let manifest) = PluginManifest.read(bytes, builtIn: builtIn), manifest.id == id {
+                made[id] = ExternalPlugin(manifest: manifest, record: record)
+            } else {
+                let held = PluginManifest(protocol: 1, id: id, version: "?", title: id, summary: "an external plugin whose folder changed", program: "?",
+                                          commands: nil, settings: nil, brief: nil, life: nil, lifeWhy: nil, page: nil, defaultOn: nil)
+                made[id] = ExternalPlugin(manifest: held, record: record,
+                                          held: "its manifest changed since you added it, or isn't there: `vibeswitcher plugin add \(record.folder)` again")
+            }
+        }
+        return made
     }
 
     /// The vault keeps `kept`: the registry takes it; a plugin no longer on withdraws its open cards; the mirror is
