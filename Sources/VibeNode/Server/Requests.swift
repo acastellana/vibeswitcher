@@ -149,6 +149,15 @@ public final class Requests: @unchecked Sendable {
     /// The live sessions now, for the voice rule. On `queue`.
     public var live: LiveSessions { LiveSessions(link.sessions, host: hostPID, server: serverPID) }
 
+    /// Whether the process `facts` reads may be the user's voice, as a connection's accept judges it (the slots only it
+    /// takes, `NodeServer.reservedForUser`): the voice rule's verdict; under the Mac's rule (asked per request) a process
+    /// that isn't a session's. Never a judgment of a request: each is judged again as it comes. On `queue`.
+    func mayBeUsersVoice(_ facts: PeerFacts) -> Bool {
+        if rule.mode == .approval { return facts.uid == rule.uid && facts.sessionMarker == false }
+        if case .user = Voice.judge(facts, live: live, rule: rule) { return true }
+        return false
+    }
+
     /// The hello a new connection from `peer` gets. On `queue`.
     public func hello(peer: PeerFacts?, token: Platform.PeerToken? = nil) -> NodeWire.Hello {
         // Under the Mac's rule a read's voice (no dialog: `status` changes nothing) says whether the peer passes the

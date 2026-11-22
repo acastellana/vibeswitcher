@@ -85,13 +85,15 @@ struct NodeServerBoundsTests {
     static func isHello(_ line: Data?) -> Bool { line.flatMap { NodeWire.decode(NodeWire.Hello.self, $0) } != nil }
     static func bye(_ line: Data?) -> NodeWire.Bye? { line.flatMap { NodeWire.decode(NodeWire.Bye.self, $0) } }
 
-    @Test func theNewestConnectionPastTheLimitIsToldWhyAndClosed() async throws {
+    /// One process holding its share (`NodeServer.maxPerPeer`) is told why its next connection is closed, and can't
+    /// keep a second process (the command line) from connecting and getting `status`.
+    @Test func oneProcessAtItsShareCantLockOutAnother() async throws {
         let node = try await ScratchNode(scratch)
         defer { node.stop() }
         let path = node.serverSocket
         var (open, refused) = try await offPool { Result { () throws -> ([Raw], NodeWire.Bye?) in
             var open: [Raw] = []
-            for _ in 0...NodeServer.maxConnections {
+            for _ in 0...NodeServer.maxPerPeer {
                 let raw = try Raw(path)
                 let first = raw.line()
                 if let bye = Self.bye(first) { return (open, bye) }
@@ -101,10 +103,11 @@ struct NodeServerBoundsTests {
             return (open, nil)
         } }.get()
         let bye = try #require(refused, "no bye after \(open.count) connections")
-        #expect(open.count <= NodeServer.maxConnections)
-        #expect(bye.reason.contains("\(NodeServer.maxConnections) connections open"), "\(bye)")
-        #expect(await eventually(timeout: 30) { node.said.contains("newer ones are closed") }, "\(node.said)")
-        // One closed: there is room again.
+        #expect(open.count == NodeServer.maxPerPeer)
+        #expect(bye.reason.contains("this process has \(NodeServer.maxPerPeer) connections open"), "\(bye)")
+        let status = try await node.run(["status"])
+        #expect(status.status == 0, "\(status.output)\(status.errors)\n\(node.said)")
+        // One closed: this process has room again.
         refused = nil
         open.removeLast()
         let again = await offPool { () -> Bool in
@@ -116,6 +119,25 @@ struct NodeServerBoundsTests {
         }
         #expect(again, "\(node.said)")
         open.removeAll()
+    }
+
+    /// At the limit the newcomer displaces the heaviest holder's longest-idle connection, one with no request first; a
+    /// newcomer that isn't the user's displaces only connections that aren't either.
+    @Test func theEvictionTakesTheHeaviestHoldersIdlestConnection() {
+        func holder(_ pid: pid_t, voice: Bool = false, requested: Bool = true, idle: TimeInterval) -> NodeServer.Holder {
+            NodeServer.Holder(id: ObjectIdentifier(NSObject()), pid: pid, voice: voice, requested: requested, idleSince: idle)
+        }
+        let quiet = holder(7, requested: false, idle: 50)
+        let busy = [holder(7, idle: 10), holder(7, idle: 20), quiet]
+        let lighter = [holder(8, idle: 1), holder(8, idle: 2)]
+        let user = [holder(9, voice: true, requested: false, idle: 0)]
+        let open = busy + lighter + user
+        #expect(NodeServer.evictee(open, newcomerVoice: false) == quiet.id, "the heaviest holder's, one with no request since its hello first")
+        #expect(NodeServer.evictee(open, newcomerVoice: true) == quiet.id)
+        #expect(NodeServer.evictee(user, newcomerVoice: false) == nil, "the user's connections aren't another's to displace")
+        #expect(NodeServer.evictee(user, newcomerVoice: true) == user[0].id)
+        let ties = [holder(1, idle: 30), holder(2, idle: 5)]
+        #expect(NodeServer.evictee(ties, newcomerVoice: false) == ties[1].id, "of equal holders, the longest idle")
     }
 
     /// A client that sends requests and never reads its replies: once more than `maxPending` bytes wait for it, it is
