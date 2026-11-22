@@ -80,11 +80,14 @@ import Testing
             watch.leads = { _ in nil }
             watch.kernel = { _, _ in .cantSay }
         }
-        try #require(rename(beside, host.socket) == 0, "errno \(errno)")
-        server.queue.sync {
+        // The rename and the record in one turn of the host's queue: its folder watch's check of the rename comes after.
+        let renamed = server.queue.sync { () -> Bool in
+            guard rename(beside, host.socket) == 0 else { return false }
             watch.socketFile = foreignFile
-            watch.check(atHousekeeping: true)
+            return true
         }
+        try #require(renamed, "errno \(errno)")
+        server.queue.sync { watch.check(atHousekeeping: true) }
         #expect(server.queue.sync { watch.socketFile } == foreignFile, "the residual: kept while nothing can be checked")
         server.queue.sync {
             watch.leads = HostPathWatch.leadsHere
