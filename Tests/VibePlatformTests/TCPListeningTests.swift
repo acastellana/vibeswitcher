@@ -11,6 +11,11 @@ struct TCPListeningTests {
         let listener = try Platform.TCP.listen(family: .ipv4, address: "127.0.0.1", port: 0, backlog: 1).get()
         defer { Sys.close(listener) }
         #expect(Platform.TCP.isListening(listener))
+        // For the record (the cause on the Mac): what getsockopt(SO_ACCEPTCONN) answers for a listener here.
+        var on: Int32 = 0
+        var length = socklen_t(MemoryLayout<Int32>.size)
+        let asked = getsockopt(listener, SOL_SOCKET, SO_ACCEPTCONN, &on, &length)
+        print("TCPListeningTests: getsockopt(SO_ACCEPTCONN) on a listener: \(asked == 0 ? "value \(on)" : "errno \(errno)")")
         if case .success(let six) = Platform.TCP.listen(family: .ipv6, address: "::1", port: 0, backlog: 1) {
             #expect(Platform.TCP.isListening(six))
             Sys.close(six)
