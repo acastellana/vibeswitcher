@@ -5,7 +5,10 @@ import VibeCore
 
 /// A retry of a recorded action (the architecture review's row 10): the vault says it was recorded already, so it is
 /// never done again; it is answered with the reply it got when this server kept it, and otherwise told honestly that
-/// whether it was carried out isn't known (a server restarted since its record), never "done".
+/// whether it was carried out isn't known (a server restarted since its record), never "done". Linux only: the Mac's
+/// host keeps no record of the user's actions until a checked node start exists (`HostImages.isCheckedMacNode`,
+/// docs/process/v2-mac-tasks.md items 13 and 14), so there every recorded request is refused, by design, before it acts.
+@Suite(NodeTraits.linuxOnly)
 struct RecordedRetryTests {
     private let scratch = Scratch()
 
