@@ -57,7 +57,7 @@ final class SessionAttachments {
 
     /// Part `part` of `parts` of upload `id` for `session`, `type`, `data`. A part that came before is taken again
     /// (a page's retry). Uploads older than `uploadLife` are dropped first.
-    func take(id: String, session: String, type: String, part: Int, parts: Int, data: Data, now: Date = Date()) -> Taken {
+    func take(id: String, session: String, type: String, part: Int, parts: Int, data: Data, now: Date = Platform.Clock.steadyDate()) -> Taken {
         uploads = uploads.filter { now.timeIntervalSince($0.value.started) < Self.uploadLife }
         guard Self.types[type] != nil else { return .refused(.badArgs, "an attached image is png, jpeg, gif or webp, not \(ConfigSeal.inert(type, limit: 40))") }
         guard (1...Self.maxParts).contains(parts), (0..<parts).contains(part) else {

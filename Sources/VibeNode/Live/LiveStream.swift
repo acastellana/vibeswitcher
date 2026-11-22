@@ -25,6 +25,8 @@ extension NodeWire {
         public var epoch: String
         public var seq: Int
         public var entries: [Entry]
+        /// Some entries left out, so the message fits a line (`LiveHub.fitted`); absent otherwise.
+        public var truncated: Bool?
 
         public init(sub: String, collection: String, epoch: String, seq: Int, entries: [Entry]) {
             v = NodeWire.version

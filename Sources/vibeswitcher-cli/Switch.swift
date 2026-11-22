@@ -199,7 +199,7 @@ enum SwitchCommand {
     /// The host as a freshly connected and checked server (`ServerCheck`) sees it: its pid (the welcome's) and the build
     /// its notes name (`status`'s `host`). A server that isn't the node's fails it at once.
     static func hostCheck(_ context: NodeContext) -> Result<SwitchFollowUp.Host, StartRefusal> {
-        let deadline = Date().addingTimeInterval(hostCheckPatience)
+        let deadline = Platform.Clock.steadyDate().addingTimeInterval(hostCheckPatience)
         var why = "no server answered"
         while true {
             switch NodeClient.connect(context) {
@@ -216,7 +216,7 @@ enum SwitchCommand {
                     return .success(SwitchFollowUp.Host(pid: pid_t(pid), build: host["notes"]?["build"]?.string))
                 }
             }
-            guard Date() < deadline else { return .failure(StartRefusal(why, exitCode: 1)) }
+            guard Platform.Clock.steadyDate() < deadline else { return .failure(StartRefusal(why, exitCode: 1)) }
             usleep(500_000)
         }
     }
@@ -239,7 +239,7 @@ enum SwitchCommand {
     }
 
     static func journalStartLine(_ context: NodeContext, commit: String) -> String {
-        let deadline = Date().addingTimeInterval(startLinePatience)
+        let deadline = Platform.Clock.steadyDate().addingTimeInterval(startLinePatience)
         while true {
             let entries: [JournalEntry]
             switch context.journalEntries() {
@@ -253,7 +253,7 @@ enum SwitchCommand {
             if let detail = start.detail, detail.contains(" build \(commit) ") {
                 return "journal: the host's start line: \(ConfigSeal.inert(detail, limit: 400))"
             }
-            guard Date() < deadline else {
+            guard Platform.Clock.steadyDate() < deadline else {
                 return "journal: the host's start line doesn't name \(commit) yet: "
                     + (start.detail.map { ConfigSeal.inert($0, limit: 400) } ?? "none from the unit's main pid since its start")
             }
@@ -268,13 +268,13 @@ enum SwitchCommand {
         let log = NodeStarter.hostLog(root: NodeFolders.nodeRoot(accountHome: VibePaths.accountHome))
         let shown = ConfigSeal.inert(log, limit: .max)
         guard let hostPid else { return "\(shown): the host's pid isn't known, so its start line isn't read" }
-        let deadline = Date().addingTimeInterval(startLinePatience)
+        let deadline = Platform.Clock.steadyDate().addingTimeInterval(startLinePatience)
         while true {
             let line = readTail(log).flatMap { NodeJournal.hostLogStart($0, pid: hostPid) }
             if let line, line.contains(" build \(commit) ") {
                 return "\(shown) (any worker can write it): the host's start line: \(ConfigSeal.inert(line, limit: 400))"
             }
-            guard Date() < deadline else {
+            guard Platform.Clock.steadyDate() < deadline else {
                 return "\(shown) (any worker can write it): the host's start line doesn't name \(commit) yet: "
                     + (line.map { ConfigSeal.inert($0, limit: 400) } ?? "none from pid \(hostPid)")
             }

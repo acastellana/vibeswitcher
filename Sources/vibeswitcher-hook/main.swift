@@ -100,13 +100,13 @@ for (root, step) in GitMoves.steps(for: payload) { try? LeadVault.standard.recor
 
 // A session VibeSwitcher started hears, as it starts, that it can ask for a transaction (vs-wallet).
 if agent == .claude, let note = SessionNote.output(payload: payload, environment: ProcessInfo.processInfo.environment) {
-    try? FileHandle.standardOutput.write(contentsOf: note)
+    Platform.Stdio.output(note)
 }
 
 // Messages sent to this agent while it works (Claude Code; Codex takes typed input mid-turn itself). Only the main
 // thread's hooks take them (a subagent's would put them in its context instead), and a message is marked delivered
 // only once its reply is written: a closed pipe leaves it waiting rather than lost.
 if agent == .claude, let pid = agentPid {
-    SteerReply.answer(payload, tty: tty, agentPid: pid) { (try? FileHandle.standardOutput.write(contentsOf: $0)) != nil }
+    SteerReply.answer(payload, tty: tty, agentPid: pid) { Platform.Stdio.output($0) }
 }
 exit(0)

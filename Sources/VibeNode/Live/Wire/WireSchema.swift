@@ -111,7 +111,7 @@ public enum WireSchema {
                                                            field("expiresAt", .date)]),
             shape("bye", from: "NodeWire.Bye", [field("v", .int), field("kind", .words(["bye"])), field("reason", .string),
                                                 optional("code", .words(["auth", "revoked", "version", "too-long", "not-object",
-                                                                         "not-request", "must", "stopping"]))]),
+                                                                         "not-request", "must", "stopping", "busy"]))]),
             shape("event", from: "any event a client doesn't know", [field("v", .int), field("kind", .string), optional("must", .bool)]),
         ]
 
@@ -121,7 +121,8 @@ public enum WireSchema {
             shape("snapshot", from: contractLive, [
                 field("v", .int), field("kind", .words(["snapshot"])), field("sub", .string), field("collection", collection),
                 optional("key", .string), field("epoch", .string), field("seq", .int), optional("entries", .list(.shape("entry"))),
-                optional("after", Kind.string.orNull), optional("more", .bool), optional("items", .list(.shape("chat.item")))]),
+                optional("after", Kind.string.orNull), optional("more", .bool), optional("items", .list(.shape("chat.item"))),
+                optional("truncated", .bool)]),
             shape("entry", from: contractLive, [field("id", .string), field("value", .any)]),
             shape("delta", from: contractLive, [
                 field("v", .int), field("kind", .words(["delta"])), field("sub", .string), field("prev", .int), field("seq", .int),
@@ -244,8 +245,8 @@ public enum WireSchema {
                                                                field("why", .string), field("limits", .shape("node.boost.limits"))]),
             shape("node.boost.limits", from: "LeadEngine.boostValue", [field("loadThreshold", .string), field("maxSessions", .int),
                                                                       field("maxWorkers", .int), field("heavySlots", .int)]),
-            shape("node.health", from: "NodeHealth.value (2026-11-21)", [
-                field("since", .date), field("stalled", Kind.int.orNull), field("freezes", .list(.shape("node.health.freeze"))),
+            shape("node.health", from: "NodeHealth.value (2026-11-22)", [
+                field("since", .date), field("stalled", Kind.int.orNull), field("refreshing", Kind.int.orNull), field("freezes", .list(.shape("node.health.freeze"))),
                 field("slowRefreshes", .int), field("slowestRefresh", Kind.int.orNull), field("lastSlowRefresh", Kind.date.orNull),
                 field("serverRestarts", Kind.int.orNull), field("refusedConnections", Kind.int.orNull), field("hostRestartAt", Kind.date.orNull),
                 field("serverEnded", Kind.shape("node.health.serverEnd").orNull),

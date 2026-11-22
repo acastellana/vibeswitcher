@@ -1724,8 +1724,10 @@ extension StartCommandTests {
         defer { DetachedScratch.end(record.pid) }
         try #require(await eventually(timeout: 120) { Platform.Processes.isDumpable(record.pid) == true })
         let environment = try #require(Platform.Processes.environment(record.pid))
-        #expect(environment == ["HOME=\(host.home.path)", "PATH=\(DetachedScratch.path)", "SWIFT_BACKTRACE=enable=no"], "\(environment)")
-        #expect(environment == NodeStarter.detachedEnvironment(home: host.home.path, path: DetachedScratch.path))
+        let log = NodeStarter.hostLog(root: host.root.path)
+        #expect(environment == ["HOME=\(host.home.path)", "PATH=\(DetachedScratch.path)", "SWIFT_BACKTRACE=enable=no",
+                                "\(StderrCap.logVariable)=\(log)"], "\(environment)")
+        #expect(environment == NodeStarter.detachedEnvironment(home: host.home.path, path: DetachedScratch.path, log: log))
         #expect(ProcessInfo.processInfo.environment.count > 3)
         // A dumpable process isn't the node's host: stop refuses it, and it still runs.
         guard case .failure(let refused) = NodeStopper.stopDetached(root: host.root.path, lock: host.lock, isHost: { $0 == host.command }) else {

@@ -108,7 +108,7 @@ public enum HostHardening {
     /// said on stderr) when refused.
     static func hardenAsParser() {
         if case .refused(let why) = atStart(mode: .parser) {
-            FileHandle.standardError.write(Data("vibeswitcher-host: parser not started: \(why)\n".utf8))
+            Platform.Stdio.error("vibeswitcher-host: parser not started: \(why)\n")
             _exit(1)
         }
     }
@@ -152,7 +152,7 @@ public enum HostHardening {
         case .users: return true
         case .scratch: return false
         case .link:
-            FileHandle.standardError.write(Data("vibeswitcher-host: not started: the lock \(lockPath) is a symbolic link\n".utf8))
+            Platform.Stdio.error("vibeswitcher-host: not started: the lock \(lockPath) is a symbolic link\n")
             exit(1)
         }
     }
@@ -253,7 +253,7 @@ public enum HostHardening {
         if !refused.isEmpty {
             let line = "refused test-only flags (the user's host takes none): \(refused.joined(separator: ", "))"
             server.note("host: " + line)
-            FileHandle.standardError.write(Data("vibeswitcher-host: \(line)\n".utf8))
+            Platform.Stdio.error("vibeswitcher-host: \(line)\n")
         }
         if !Platform.CodeIdentity.isAvailable, !ownsLaunchers, arguments.contains(staysDumpableFlag) {
             _ = Platform.ProcessSelf.makeDumpable()

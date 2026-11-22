@@ -289,7 +289,7 @@ public final class HostedSession {
         link.stop()
         parser = nil
         defer { resumeReading() }
-        let now = Date()
+        let now = Platform.Clock.steadyDate()
         parserFailures = parserFailures.filter { now.timeIntervalSince($0) < 60 } + [now]
         let what = "parser (pid \(link.pid)) \(reason) with \(unparsed) bytes unparsed"
         guard parserFailures.count <= Self.maxParserFailures, let ring else {
@@ -865,7 +865,7 @@ public final class HostedSession {
         // Its exit is no longer watched: a program told to end is reaped as it goes (`terminate` kills it 5 s on at
         // the latest), or a host that runs on (a test's, in the test runner) keeps it a zombie for good: 431 of them
         // in one full suite's runner, 2026-11-01. One not told to end is left alone: a handover's new image reaps it.
-        if ending, info.isLive { Self.reap([info.childPID], until: Date().addingTimeInterval(Self.reapPatience)) }
+        if ending, info.isLive { Self.reap([info.childPID], until: Platform.Clock.steadyDate().addingTimeInterval(Self.reapPatience)) }
         let fd = masterFD
         done.notify(queue: queue) { Sys.close(fd) }
     }
@@ -882,7 +882,7 @@ public final class HostedSession {
             let reaped = waitpid(pid, &status, WNOHANG)
             return reaped == 0 || (reaped < 0 && errno == EINTR)
         }
-        guard !left.isEmpty, Date() < deadline else { return }
+        guard !left.isEmpty, Platform.Clock.steadyDate() < deadline else { return }
         reaper.asyncAfter(deadline: .now() + 0.1) { reap(left, until: deadline) }
     }
 

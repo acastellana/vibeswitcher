@@ -20,7 +20,7 @@ signal(SIGHUP, SIG_IGN)
 // The host, hardened before it reads or takes anything (see `HostHardening`); refused, it doesn't start (or goes back).
 var hardening = HostHardening.atStart(mode: .host)
 if let why = HostHardening.refusal(hardening, arguments: CommandLine.arguments) {
-    FileHandle.standardError.write(Data("vibeswitcher-host: not started: \(why)\n".utf8))
+    Platform.Stdio.error("vibeswitcher-host: not started: \(why)\n")
     exit(1)
 }
 
@@ -30,7 +30,7 @@ func value(after flag: String) -> String? {
     return arguments[index + 1]
 }
 func notStarted(_ why: String) -> Never {
-    FileHandle.standardError.write(Data("vibeswitcher-host: not started: \(why)\n".utf8))
+    Platform.Stdio.error("vibeswitcher-host: not started: \(why)\n")
     exit(1)
 }
 
@@ -143,7 +143,7 @@ config.arguments = HostHardening.withoutTestFlags(arguments.dropFirst().enumerat
 // this path only names it, as `--handover-fallback-image` (its build and folders). The Mac: its launcher copy, by path.
 config.fallback = images.own != nil ? folders.image : config.launcher == executable ? nil : config.launcher
 
-func log(_ text: String) { FileHandle.standardError.write(Data("vibeswitcher-host: \(text)\n".utf8)) }
+func log(_ text: String) { Platform.Stdio.error("vibeswitcher-host: \(text)\n") }
 
 /// Back to the build that handed over, after this one couldn't take over: it reads its own state (keeping every
 /// descriptor this image inherited). Nobody able to carry the sessions, this host quits: that hangs up their terminals,
@@ -211,6 +211,10 @@ server.onExit = { exit(0) }
 // The test-only flags the user's host refuses, said; who an unreadable process is to this host (see `HostHardening`).
 HostHardening.afterConfig(arguments: Array(arguments.dropFirst()), ownsLaunchers: ownsLaunchers, server: server)
 HostHardening.watch(server)
+// A detached host's log (its stderr, shared with its server child) kept to about 2 MB and one older copy (V2/StderrCap.swift).
+StderrCap.start()
+// Its soft limit on descriptors raised to the hard one; its sessions' programs get the old one back (V2/HostImages.swift).
+HostImages.raiseDescriptorLimit()
 // The vault is what a build this one hands over to must hold in memory too.
 if let vault = config.vault { server.secretsForHandover = { vault.serialized } }
 // What a held first look kept from being recorded, in the host's log.
@@ -288,5 +292,5 @@ if ownsLaunchers {
 }
 // On Linux: its pid, its build and SWIFT_BACKTRACE, the journal's start line (see V2/HostStartLine.swift).
 HostStartLine.say()
-FileHandle.standardError.write(Data("vibeswitcher-host: started \(Date())\n".utf8))
+Platform.Stdio.error("vibeswitcher-host: started \(Date())\n")
 dispatchMain()

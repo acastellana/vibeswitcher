@@ -11,15 +11,15 @@ enum AgentPlistCommand {
 
     static func run(_ words: [String]) -> Int32 {
         guard words.count == 2 else {
-            try? FileHandle.standardError.write(contentsOf: Data((usage + "\n").utf8))
+            Platform.Stdio.error(usage + "\n")
             return 64
         }
         switch NodeAgent.installed(prefix: words[0], commit: words[1], home: VibePaths.accountHome) {
         case .success(let data):
-            FileHandle.standardOutput.write(data)
+            Platform.Stdio.output(data)
             return 0
         case .failure(let refusal):
-            try? FileHandle.standardError.write(contentsOf: Data((refusal.text + "\n").utf8))
+            Platform.Stdio.error(refusal.text + "\n")
             return 1
         }
     }

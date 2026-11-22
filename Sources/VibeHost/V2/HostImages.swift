@@ -460,14 +460,52 @@ public enum HostImages {
     /// environment as given (the Mac's launcher, a test's in-process host's). A copy whose mode can't be put back is
     /// not kept, so the child isn't started from it.
     static func launching(_ launcher: String, environment: [String]) -> (keep: [Int32], environment: [String]) {
+        let limit = descriptorSoftBefore.get().map { ["\(descriptorLimitVariable)=\($0)"] } ?? []
         let prefix = "/proc/self/fd/"
+        let unlimited = environment.filter { !$0.hasPrefix(descriptorLimitVariable + "=") }
         guard launcher.hasPrefix(prefix), let fd = Int32(launcher.dropFirst(prefix.count)), fd > STDERR_FILENO,
-              fcntl(fd, F_GETFD) >= 0 else { return ([], environment) }
+              fcntl(fd, F_GETFD) >= 0 else { return ([], unlimited + limit) }
         let variable = Platform.ProcessSelf.imageVariable
-        let given = environment.filter { !$0.hasPrefix(variable + "=") && !$0.hasPrefix(launcherTestHoldVariable + "=") }
+        let given = unlimited.filter { !$0.hasPrefix(variable + "=") && !$0.hasPrefix(launcherTestHoldVariable + "=") } + limit
         guard Platform.ProcessSelf.restoreMode(of: fd) else { return ([], given) }
         let hold = sessions { $0.launcher == launcher ? $0.hold : nil }
         return ([fd], given + ["\(variable)=\(fd)"] + (hold.map { ["\(launcherTestHoldVariable)=\($0)"] } ?? []))
+    }
+
+    /// The host's soft limit on open descriptors raised to its hard limit, at its start (the architecture review's row
+    /// 4): it holds a descriptor per session, parser and client, and its server child (which inherits the limit) one per
+    /// connection, where the usual soft 1,024 is reached long before the hard limit. A session's program gets the soft
+    /// limit back (`beforeProgram`, through `descriptorLimitVariable`): it may use `select`, which can't take a
+    /// descriptor past 1,023. Any system; once.
+    ///
+    /// The soft limit before is carried across a handover in the host's own environment (`descriptorCarriedVariable`,
+    /// which both forms of the handover's exec pass on): the new image starts with the limit raised already, and would
+    /// otherwise give its sessions the hard one.
+    public static func raiseDescriptorLimit() {
+        guard descriptorSoftBefore.get() == nil else { return }
+        if let carried = getenv(descriptorCarriedVariable).flatMap({ UInt64(String(cString: $0)) }) {
+            descriptorSoftBefore.set(carried)
+            Platform.ProcessSelf.raiseDescriptorLimit()
+            return
+        }
+        guard let before = Platform.ProcessSelf.raiseDescriptorLimit() else { return }
+        descriptorSoftBefore.set(before)
+        setenv(descriptorCarriedVariable, String(before), 1)
+    }
+
+    /// The host's soft limit before it raised it, in its own environment, for the image a handover starts.
+    static let descriptorCarriedVariable = "VIBESWITCHER_HOST_NOFILE_BEFORE"
+
+    /// The soft limit the host had before `raiseDescriptorLimit`, nil when it raised none.
+    static let descriptorSoftBefore = SoftLimit()
+    /// How the soft limit before reaches a session's launcher: set by `launching`, read and unset by `beforeProgram`.
+    static let descriptorLimitVariable = "VIBESWITCHER_LAUNCHER_NOFILE"
+
+    final class SoftLimit: @unchecked Sendable {
+        private let lock = NSLock()
+        private var value: UInt64?
+        func get() -> UInt64? { lock.withLock { value } }
+        func set(_ new: UInt64?) { lock.withLock { value = new } }
     }
 
     /// The launcher's last act before it execs the session's program, after its terminal check (Linux; the Mac:
@@ -478,6 +516,9 @@ public enum HostImages {
     /// host named exists (`holdLaunchers(until:)`, at most a minute), the hold's variable gone from what the program
     /// gets.
     static func beforeProgram() {
+        // The host's soft limit on descriptors before it raised it (`raiseDescriptorLimit`), given back, on any system.
+        if let given = getenv(descriptorLimitVariable).flatMap({ UInt64(String(cString: $0)) }) { Platform.ProcessSelf.setDescriptorSoftLimit(given) }
+        unsetenv(descriptorLimitVariable)
         guard !Platform.CodeIdentity.isAvailable else { return }
         let hold = getenv(launcherTestHoldVariable).map { String(cString: $0) }
         unsetenv(launcherTestHoldVariable)

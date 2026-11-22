@@ -39,8 +39,8 @@ extension Requests {
     /// is a dialog shown. On `queue`.
     func approvalJudgment(_ request: NodeWire.Request, from facts: PeerFacts, token: Platform.PeerToken?,
                           done: @escaping (NodeWire.Reply?) -> Void) {
-        let refuse = { [note] (why: String) in
-            note("refused \(request.kind) from pid \(facts.pid): not the user's voice: \(why)")
+        let refuse = { (why: String) in
+            self.refusalNote(facts.pid, "refused \(request.kind) from pid \(facts.pid): not the user's voice: \(why)")
             done(.init(re: request.id, error: .init(.voice, "not the user's voice: \(why)")))
         }
         guard let approval else { return refuse(Self.approvalUnset) }
@@ -70,7 +70,7 @@ extension Requests {
         let card: String
         switch approvalCard(request) {
         case .failure(let refusal):
-            note("refused \(request.kind) from pid \(facts.pid): \(refusal.why)")
+            refusalNote(facts.pid, "refused \(request.kind) from pid \(facts.pid): \(refusal.why)")
             return done(.init(re: request.id, error: .init(.refused, refusal.why)))
         case .success(let text): card = text
         }

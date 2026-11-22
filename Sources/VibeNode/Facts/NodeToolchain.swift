@@ -193,12 +193,12 @@ public enum NodeToolchain {
         defer { Sys.close(ends[0]) }
         guard case .success(let pid) = started else { return nil }
         _ = fcntl(ends[0], F_SETFL, fcntl(ends[0], F_GETFL) | O_NONBLOCK)
-        let deadline = Date().addingTimeInterval(timeout)
+        let deadline = Platform.Clock.steadyDate().addingTimeInterval(timeout)
         var output = [UInt8]()
         var chunk = [UInt8](repeating: 0, count: 4096)
         var status: Int32 = 0
         var exited = false
-        while Date() < deadline, output.count < 64 * 1024 {
+        while Platform.Clock.steadyDate() < deadline, output.count < 64 * 1024 {
             var poller = pollfd(fd: ends[0], events: Int16(POLLIN), revents: 0)
             _ = poll(&poller, 1, 100)
             let got = read(ends[0], &chunk, chunk.count)

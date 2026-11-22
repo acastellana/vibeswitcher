@@ -305,11 +305,41 @@ final class HostPathWatch {
     /// A line in the host's log and on its stderr.
     private static func say(_ server: HostServer, _ line: String) {
         server.note("host: " + line)
-        FileHandle.standardError.write(Data("vibeswitcher-host: \(line)\n".utf8))
+        Platform.Stdio.error("vibeswitcher-host: \(line)\n")
     }
 }
 
 extension HostServer {
+    /// An accept that failed with `code`: for want of descriptors or memory (EMFILE, ENFILE, ENOBUFS, ENOMEM), which
+    /// would fail again at once while the listener's source fires for as long as a connection waits: its source is
+    /// suspended for a second, said in the log and on stderr (the architecture review's row 4). A suspended source is
+    /// never cancelled while suspended with its descriptor closed under it (its cancel is put off until it is resumed,
+    /// and libdispatch would then unregister a descriptor number another file may have taken): its resume
+    /// (`AcceptResume`, once) comes a second later, or first from `stop` (`resumePausedAccepts`), and
+    /// `replaceListener` closes the old listener only from its source's cancel handler. One pause a source at a time
+    /// (`acceptsPaused`); a listener replaced meanwhile is paused in its own turn. Anything else: nothing (the source
+    /// fires again if a connection still waits). On `queue`.
+    func acceptFailed(_ code: Int32) {
+        guard [EMFILE, ENFILE, ENOBUFS, ENOMEM].contains(code), let source = acceptSource else { return }
+        let key = ObjectIdentifier(source as AnyObject)
+        guard acceptsPaused[key] == nil else { return }
+        // On stderr too: the log's file may be what can't be opened.
+        note("host: couldn't accept a connection (errno \(code)): accepting again in 1 s")
+        log("couldn't accept a connection (errno \(code)): accepting again in 1 s")
+        let resume = AcceptResume(source)
+        acceptsPaused[key] = resume
+        source.suspend()
+        queue.asyncAfter(deadline: .now() + 1) { [weak self] in
+            resume.resume()
+            self?.acceptsPaused[key] = nil
+        }
+    }
+
+    /// Every paused accept source resumed now (each once), before `stop` cancels the one it has. On `queue`.
+    func resumePausedAccepts() {
+        acceptsPaused.values.forEach { $0.resume() }
+    }
+
     /// `fd`, a listener bound at the socket's path, accepted from from now on in place of the one before, which is
     /// closed once its accept source has stopped. On `queue`.
     func replaceListener(_ fd: Int32) {
@@ -326,5 +356,19 @@ extension HostServer {
         } else if old >= 0 {
             Sys.close(old)
         }
+    }
+}
+
+/// A suspended accept source's resume, done once (`HostServer.acceptFailed`): by the pause's end or by `stop`, whichever
+/// comes first; it holds the source until then (a suspended source let go traps), so its id stays its own. On the host's
+/// queue.
+final class AcceptResume {
+    private var source: DispatchSourceRead?
+
+    init(_ source: DispatchSourceRead) { self.source = source }
+
+    func resume() {
+        source?.resume()
+        source = nil
     }
 }

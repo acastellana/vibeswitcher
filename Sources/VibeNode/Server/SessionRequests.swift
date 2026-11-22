@@ -375,7 +375,7 @@ extension Requests {
                         }
                     }
                     guard step == moves else { return go(true) }
-                    Self.cursorReaches(index, of: menu, in: session.id, link: link, since: Date()) { reached in
+                    Self.cursorReaches(index, of: menu, in: session.id, link: link, since: Platform.Clock.steadyDate()) { reached in
                         if !reached {
                             stopped.set("the cursor didn't reach option \(choice) on its screen (a key lost?): nothing chosen, answer again")
                         }
@@ -406,7 +406,7 @@ extension Requests {
         link.screen(id) { screen in
             let now = screen.flatMap(SessionPrompt.menu(on:))
             if let now, now.sameQuestion(as: menu), now.selected == index { return done(true) }
-            guard Date().timeIntervalSince(since) < replyCursorWait else { return done(false) }
+            guard Platform.Clock.steadyDate().timeIntervalSince(since) < replyCursorWait else { return done(false) }
             link.queue.asyncAfter(deadline: .now() + replyCursorEvery) {
                 cursorReaches(index, of: menu, in: id, link: link, since: since, done: done)
             }

@@ -192,16 +192,20 @@ public struct NodeStarter {
 
     // MARK: - The detached start (S3)
 
-    /// The environment of a host started detached (ST-D6): exactly `HOME`, the unit's `PATH` and
-    /// `SWIFT_BACKTRACE=enable=no`; nothing of the command line's own (an `LD_PRELOAD` an edited `.bashrc` set included).
-    public static func detachedEnvironment(home: String, path: String) -> [String] {
-        ["HOME=\(home)", "PATH=\(path)", "SWIFT_BACKTRACE=enable=no"]
+    /// The environment of a host started detached (ST-D6): exactly `HOME`, the unit's `PATH`,
+    /// `SWIFT_BACKTRACE=enable=no` and its log's name; nothing of the command line's own (an `LD_PRELOAD` an edited
+    /// `.bashrc` set included).
+    /// `log`: the file its stdout and stderr go to (`hostLog`), named to it so it caps that file (`StderrCap`), and only
+    /// that.
+    public static func detachedEnvironment(home: String, path: String, log: String? = nil) -> [String] {
+        ["HOME=\(home)", "PATH=\(path)", "SWIFT_BACKTRACE=enable=no"] + (log.map { ["VIBESWITCHER_HOST_LOG=\($0)"] } ?? [])
     }
 
     /// The lock a detached start holds from the record's check to its settle: `<root>/v2/node.pid.lock` (0600).
     public static func detachedLock(root: String) -> String { NodeFolders.join(root, "v2/node.pid.lock") }
 
-    /// Where a detached host's stdout and stderr go: `<root>/v2/host.log`.
+    /// Where a detached host's stdout and stderr go: `<root>/v2/host.log`, kept to about `Platform.Stdio.logLimit` and one
+    /// older copy (`host.log.1`): rotated at each detached start, and emptied by the running host past it (`StderrCap`).
     public static func hostLog(root: String) -> String { NodeFolders.join(root, "v2/host.log") }
 
     /// How long `startDetached` watches the host it started for an exit at once.
@@ -286,6 +290,9 @@ public struct NodeStarter {
         if let old = NodeRecord.read(root: root), case .host = NodeCheck.recordedHost(old, isHost: isHost, lock: hostLock) {
             return .failure(StartRefusal("the recorded host (pid \(old.pid), \(ConfigSeal.inert(NodeRecord.path(root: root), limit: .max))) still runs, but its server didn't answer: `vibeswitcher stop` ends it, then run start again", exitCode: 1))
         }
+        // Past its limit, the log before is kept as `host.log.1` and this host starts a new one; the running host caps it
+        // the same way (`StderrCap`).
+        Platform.Stdio.rotate(path: log)
         let fd = Sys.open(log, O_WRONLY | O_APPEND | O_CREAT | O_NOFOLLOW | O_NOCTTY | O_CLOEXEC, 0o600)
         guard fd >= 0 else {
             return .failure(StartRefusal("the host's log \(ConfigSeal.inert(log, limit: .max)) can't be opened: \(String(cString: strerror(errno)))", exitCode: 1))
@@ -297,7 +304,7 @@ public struct NodeStarter {
         }
 
         var spawn = Platform.Spawn(executable: program, arguments: host)
-        spawn.environment = detachedEnvironment(home: home, path: path)
+        spawn.environment = detachedEnvironment(home: home, path: path, log: log)
         spawn.directory = home
         spawn.stdin = .path("/dev/null", flags: O_RDONLY)
         spawn.stdout = .descriptor(fd)
