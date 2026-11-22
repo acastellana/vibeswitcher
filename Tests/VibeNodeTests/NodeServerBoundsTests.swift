@@ -137,46 +137,30 @@ struct NodeServerBoundsTests {
         #expect(none.description == "the node's server sent no hello" && other == none)
     }
 
-    /// The caps as one decision (`NodeServer.admission`), over every connection that holds a descriptor: a process at its
-    /// share, a share that isn't the user's at its own (its processes together), the reserved slots, and eviction only
-    /// from a share holding more than the newcomer's would, never a kept one, never the user's for another's.
-    @Test func theAdmissionHoldsEachShareToItsOwn() {
-        // Each holder's id an object kept for the test's length: one let go at once could give its address to the next.
-        var objects: [NSObject] = []
-        defer { objects.removeAll() }
-        func holder(_ pid: pid_t, _ share: String, voice: Bool = false, requested: Bool = true, idle: TimeInterval = 0, kept: Bool = false) -> NodeServer.Holder {
-            let object = NSObject()
-            objects.append(object)
-            return NodeServer.Holder(id: ObjectIdentifier(object), pid: pid, share: share, voice: voice, requested: requested, idleSince: idle, kept: kept)
+    /// The caps as one decision (`NodeServer.refusal`), over every connection that holds a descriptor (closing ones
+    /// too): a process at its share, a share that isn't the user's at its own (its processes together), the slots kept
+    /// for the user, and a full server: each newcomer past one is refused, saying why; nothing open is ever closed for it.
+    @Test func theCapsRefuseANewcomerAndCloseNothing() {
+        func holders(_ count: Int, pid: (Int) -> pid_t, share: String) -> [NodeServer.Holder] {
+            (0..<count).map { NodeServer.Holder(pid: pid($0), share: share) }
         }
-        // A process at its share is refused, closing connections and all (the server passes every one it holds).
-        let eight = (0..<NodeServer.maxPerPeer).map { _ in holder(7, "pid 7") }
-        guard case .refuse(let why) = NodeServer.admission(eight, pid: 7, share: "pid 7", voice: false) else { Issue.record("admitted past its share"); return }
-        #expect(why.contains("this process has \(NodeServer.maxPerPeer) connections"))
+        let eight = holders(NodeServer.maxPerPeer, pid: { _ in 7 }, share: "pid 7")
+        #expect(NodeServer.refusal(eight, pid: 7, share: "pid 7", voice: false)?.contains("this process has \(NodeServer.maxPerPeer) connections") == true)
+        #expect(NodeServer.refusal(eight, pid: 7, share: "pid 7", voice: true)?.contains("this process has") == true, "the user's process too")
+        #expect(NodeServer.refusal(eight, pid: 8, share: "pid 8", voice: false) == nil)
         // A share's processes together (a peer that forks): held to `maxPerShare` when it isn't the user's.
-        let forked = (0..<NodeServer.maxPerShare).map { holder(pid_t(100 + $0 / 4), "session 99") }
-        guard case .refuse(let share) = NodeServer.admission(forked, pid: 200, share: "session 99", voice: false) else { Issue.record("a forking share went past its own"); return }
-        #expect(share.contains("share (session 99)"))
-        #expect(NodeServer.admission(forked, pid: 200, share: "session 99", voice: true) == .admit, "the user's aren't held to a share")
-
-        // A full server, two shares of 28 each: a newcomer whose share would hold 1 evicts from the larger, the idlest
-        // with no request first; one whose share would equal it evicts nothing.
-        let quiet = holder(1, "cgroup /a", requested: false, idle: 50)
-        var full = (0..<27).map { holder(pid_t(1 + $0 / 8), "cgroup /a", idle: TimeInterval($0)) } + [quiet]
-        full += (0..<28).map { holder(pid_t(10 + $0 / 8), "cgroup /b", idle: TimeInterval($0)) }
-        full += (0..<NodeServer.reservedForUser).map { holder(pid_t(50 + $0), "cgroup /user", voice: true) }
+        let forked = holders(NodeServer.maxPerShare, pid: { pid_t(100 + $0 / 4) }, share: "session 99")
+        #expect(NodeServer.refusal(forked, pid: 200, share: "session 99", voice: false)?.contains("share (session 99)") == true)
+        #expect(NodeServer.refusal(forked, pid: 200, share: "session 99", voice: true) == nil, "the user's aren't held to a share")
+        // The slots kept for the user: one that isn't the user's is refused there; the user's still gets in.
+        let most = holders(NodeServer.maxConnections - NodeServer.reservedForUser, pid: { pid_t(300 + $0 / 4) }, share: "")
+            .enumerated().map { NodeServer.Holder(pid: $0.element.pid, share: "cgroup /s\($0.offset / 8)") }
+        #expect(NodeServer.refusal(most, pid: 900, share: "cgroup /x", voice: false)?.contains("kept for the user's own") == true)
+        #expect(NodeServer.refusal(most, pid: 900, share: "cgroup /x", voice: true) == nil)
+        // Full: everyone is refused, the user's too.
+        let full = most + holders(NodeServer.reservedForUser, pid: { pid_t(800 + $0) }, share: "cgroup /user")
         #expect(full.count == NodeServer.maxConnections)
-        #expect(NodeServer.admission(full, pid: 90, share: "cgroup /new", voice: false) == .evict(quiet.id))
-        let equal = Array(full.prefix(28)) + (0..<28).map { holder(pid_t(60 + $0 / 8), "cgroup /c") } + Array(full.suffix(NodeServer.reservedForUser))
-        if case .evict = NodeServer.admission(equal, pid: 70, share: "cgroup /c", voice: true) { Issue.record("evicted at an equal share") }
-        // A kept connection (a live subscription, a tool server's) is never the one closed.
-        let kept = full.map { var keep = $0; keep.kept = keep.share == "cgroup /a"; return keep }
-        guard case .evict(let other) = NodeServer.admission(kept, pid: 90, share: "cgroup /new", voice: false) else { Issue.record("refused"); return }
-        #expect(kept.first { $0.id == other }?.share == "cgroup /b")
-        // The user's connections aren't another's to displace; under the reserved slots a newcomer that isn't the user's
-        // finds room only by eviction.
-        let users = (0..<NodeServer.maxConnections).map { holder(pid_t(300 + $0 / 8), "cgroup /user\($0 / 8)", voice: true) }
-        guard case .refuse = NodeServer.admission(users, pid: 900, share: "cgroup /x", voice: false) else { Issue.record("displaced the user's"); return }
+        #expect(NodeServer.refusal(full, pid: 901, share: "cgroup /y", voice: true)?.contains("\(NodeServer.maxConnections) connections open") == true)
     }
 
     /// Under the Mac's rule the reserved slots go by what a session's process can't change: a process under a live

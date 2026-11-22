@@ -198,7 +198,7 @@ public final class Requests: @unchecked Sendable {
         }
     }
 
-    /// The share a connection from `facts` counts toward (`NodeServer`'s caps and eviction), by what the process can't
+    /// The share a connection from `facts` counts toward (`NodeServer`'s caps), by what the process can't
     /// change: the live session its ancestry runs under; else, under the systemd rule, its cgroup (a scope: a
     /// terminal's, an app's, the host's service); else its pid alone. A process that forks for more connections stays
     /// in its session's or cgroup's share. On `queue`.

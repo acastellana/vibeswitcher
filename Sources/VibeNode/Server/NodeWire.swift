@@ -236,7 +236,7 @@ public enum NodeWire {
         public var reason: String
         /// Why, as a word a client acts on (the live wire contract's §10): `auth`, `revoked`, `version`, `too-long`,
         /// `not-object`, `not-request`, `must`, `stopping` or `busy` (no room for the connection: its process holds its
-        /// share, the server is full, or it was closed to make room). Nil, and not written, from a server before it.
+        /// share, or the server is full). Nil, and not written, from a server before it.
         public var code: String?
 
         public init(reason: String, code: String? = nil) {
