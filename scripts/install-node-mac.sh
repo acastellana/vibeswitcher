@@ -551,11 +551,11 @@ install_node_mac_main() {
         || fail 1 "can't make $partial/Resources"
     for file in "$src"/Resources/bin/vs-*; do
         [[ -f $file && ! -L $file ]] || fail 1 "$commit's ${file#"$src/"} isn't a regular file"
-        /bin/cp -- "$file" "$partial/Resources/bin/" && /bin/chmod 0755 -- "$partial/Resources/bin/${file##*/}" \
+        /bin/cp -- "$file" "$partial/Resources/bin/" && /bin/chmod 0755 "$partial/Resources/bin/${file##*/}" \
             || fail 1 "can't copy ${file#"$src/"} into $partial"
     done
     /bin/cp -- "$src/scripts/install-node-mac.sh" "$partial/Resources/install-node-mac.sh" \
-        && /bin/chmod 0755 -- "$partial/Resources/install-node-mac.sh" \
+        && /bin/chmod 0755 "$partial/Resources/install-node-mac.sh" \
         && /bin/cp -- "$src/scripts/lib/scratch.sh" "$src/scripts/lib/swift-jobs.sh" "$src/scripts/lib/mac-sign.sh" "$partial/Resources/lib/" \
         || fail 1 "can't copy the install script and its libraries into $partial"
     i=0
@@ -564,7 +564,7 @@ install_node_mac_main() {
         [[ $product == vibeswitcher-cli ]] && installed=vibeswitcher
         file=$partial/bin/$installed
         [[ -f $file && ! -L $file ]] || fail 1 "$file isn't a regular file any more: refused before it runs"
-        /bin/chmod 0755 -- "$file" || fail 1 "can't make $file 0755"
+        /bin/chmod 0755 "$file" || fail 1 "can't make $file 0755"
         line=$(sha_of "$file") || fail 1 "can't hash $file"
         [[ $line == "${product_sha[i]}" ]] || fail 1 "$file changed since its check (sha256 $line, not ${product_sha[i]}): refused before it runs"
         i=$((i + 1))
@@ -591,7 +591,7 @@ install_node_mac_main() {
     done
     # BSD mv has no -T: the target is checked absent here, under the lock (a folder there would take the build in).
     [[ ! -e $final && ! -L $final ]] || fail 1 "$final is there already: $commit is installed"
-    /bin/chmod 0755 -- "$partial" "$partial/bin" || fail 1 "can't make $partial 0755"
+    /bin/chmod 0755 "$partial" "$partial/bin" || fail 1 "can't make $partial 0755"
     /bin/mv -- "$partial" "$final" || fail 1 "can't rename $partial to $final"
     [[ -f $final/build-info && ! -e $final/${partial##*/} ]] || fail 1 "the rename of $partial to $final didn't make $final the build"
     install_partial=""
