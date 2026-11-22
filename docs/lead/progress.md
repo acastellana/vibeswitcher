@@ -4326,3 +4326,6 @@ Proposed task 1: Find why dictations end with no text
 - 2026-11-22 12:18 Exception on the-lead-s-chat-2 by lead of vibeswitcher: edits to Sources/VibeSwitcher/MainWindow/Lead/LeadController.swift, Sources/VibeCore/LeadChatHistory.swift, Sources/VibeSwitcher/MainWindow/MainWindowController.swift accepted. Reason: The lead accepts these. The contract allowed adding the smallest durable record at the handover when none existed. LeadController.recordHandover and passing the replaced and reopened sessions into spa…
 - 2026-11-22 12:24 Audit of the-lead-s-chat-2: complete, clean, round 1: 2 Nit open
 - 2026-11-22 12:42 Merged the-lead-s-chat-2: The lead's chat continues across a handover, with a line where the fresh lead started (build 837739f3ee80)
+- 2026-11-22 12:42 Automatically (auto_advance): Merged the-lead-s-chat-2 (The lead's chat continues across a handover, with a line where the fresh lead started) into main at cca6bd7e, on its passing audit and the full test run.
+- 2026-11-22 12:42 Automatically (auto_advance): Cleaned up the-lead-s-chat-2 (freed 2.6 GB of build output and temporary folders). It stays done.
+- 2026-11-22 12:42 Update: Merged: a lead handover now looks like one continuous lead — **What you asked for:** no more "finished lead, replaced by another". One session, with a signal when a fresh lead took over.
