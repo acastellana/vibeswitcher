@@ -13,6 +13,9 @@ later, never to skip it.
 | `ComposerDeliveryTests` | the Mac's CI (`v2 macos`, app job) | main's known flake on the runner (see v2-mac-tasks.md, "Main's known flakes on the runner") | 2026-11-21 |
 | `ShellDeskTests` | the Mac's CI (`v2 macos`, app job) | main's known flake on the runner (as above) | 2026-11-21 |
 | `NodeAcceptanceTests` A30 (its second `settings --find`) | local, under load (`test-under-load.sh --load 24`, with the race tests beside it) | once in 12 load runs: the command exited non-zero with nothing on stdout; its stderr wasn't in the message then (it is now, with the server's log), so the cause isn't known yet; the next 9 runs passed. Likely the cause `SettingsRequestTests`' was (below, `808e2a13`): kept here until a nightly shows it gone | 2026-11-21 |
+| `NodeAcceptanceTests` A40 (`merge_remote`, :396) | Linux CI at `c49ef5ba` | the lead's `merge_remote` got no reply in 360 s ("no reply to request 2"); the scratch node's log shows no server crash or restart (not the reply-queue race), so the tool server's merge itself ran long or hung under the full run's load; cause not known yet | 2026-11-22 |
+| `CodexWorkerTests.aCodexWorkerReportsAndAutoAdvanceAuditsItWithAClaudeVerifierAndSendsFindingsBack` (:164) | Linux CI at `c49ef5ba`, 672 s into the run | the task wasn't `running` when looked at; no server crash in its run's log (not the reply-queue race); cause not known yet | 2026-11-22 |
+| `InstallTests.aFilterInTheCheckoutsOwnConfigNeverRuns` (:776) | Linux CI at `c49ef5ba` | the courtesy check let a same-size change to `.swift-version` through (69, not 65); suspected: the check's `cp` of the index resets its mtime, so git's racy-entry check is lost and a change within the entry's second passes on stat (unproven; the fix, `cp -p` in install-node.sh, waits for the lead) | 2026-11-22 |
 
 ## Fixed
 
