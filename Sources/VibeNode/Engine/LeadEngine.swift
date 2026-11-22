@@ -309,6 +309,12 @@ public final class LeadEngine: @unchecked Sendable {
     var shellLooking = false
     var shellTimer: Subscription?
     var shellNow: () -> Date = Date.init
+    // The Run-card shell tidier (`ShellTidying.swift`), on `queue`: the shells typed into since their command ended, read
+    // once; a look under way; its 30 s look.
+    var shellUsed: Set<UUID> = []
+    var shellUsedLoaded = false
+    var shellTidying = false
+    var shellTidyTimer: Subscription?
     let shellWork = DispatchQueue(label: "vibenode.lead-engine.shell-requests", qos: .userInitiated)
     // The developer tools notice (`ToolchainLook.swift`), on `queue`: the notices the last look found, when it ran,
     // whether one is under way; how the node's tools are asked (a test's stand-in) and the clock.
@@ -407,6 +413,10 @@ public final class LeadEngine: @unchecked Sendable {
         if options.sweepsRoles { roleSweep = makeRoleSweep() }
         refreshTimer = clock?.every(3) { [weak self] in self?.refresh() }
         promptAuditTimer = clock?.every(Int(Self.promptAuditEvery)) { [weak self] in self?.queue.async { self?.lookAtPromptAudits() } }
+        // Run-card shells (`ShellTidying.swift`): what is typed into told by the link (on its queue, this one), the due
+        // ones ended every 30 s.
+        link.onTyped = { [weak self] id in self?.shellTyped(id) }
+        shellTidyTimer = clock?.every(Self.shellTidyEvery) { [weak self] in self?.queue.async { self?.tidyShells() } }
         // Each screen the session scan reads: a popup on a team session declined, a dialog nothing reads noted.
         sessions?.sawScreen = { [weak self] session, text in self?.lookAt(screen: text, of: session) }
         batchModel = options.summarizeBatch
