@@ -5,7 +5,10 @@ import Testing
 
 /// The watchdog acts (the architecture review's row 3): a scratch node's server whose engine queue is blocked for good
 /// exits once its watchdog has waited `--test-stall=` seconds (120 on the user's node), the host starts it again, the
-/// sessions run on in the host, and the freeze is in `health.json`, saved by the watchdog before the exit.
+/// sessions run on in the host, and the freeze is in `health.json`, saved by the watchdog before the exit. Linux only, as
+/// every `ScratchNode` suite: a scratch node's server child and its connector are Linux's (on the Mac the node never came
+/// up, and the three cases were cancelled together at their time limit, v2 macos at e14045a0).
+@Suite(NodeTraits.linuxOnly)
 struct WatchdogRestartTests {
     private let scratch = Scratch()
 
