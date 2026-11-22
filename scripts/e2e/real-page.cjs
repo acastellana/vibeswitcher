@@ -11,9 +11,9 @@
 //
 // Usage: node real-page.cjs URL OUT-FOLDER [CHROME]
 'use strict';
-const { spawn } = require('child_process');
 const fs = require('fs');
 const path = require('path');
+const { launch, Protocol, pause } = require('./chrome-cdp.cjs');
 
 const [url, out, chromePath = '/opt/google/chrome/chrome'] = process.argv.slice(2);
 if (!url || !out) {
@@ -23,100 +23,6 @@ if (!url || !out) {
 const origin = new URL(url).origin;
 const results = [];
 const record = (row, outcome, detail) => results.push({ row, outcome, detail: String(detail ?? '') });
-const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-
-// MARK: Chrome and the protocol
-
-async function launch() {
-  const profile = path.join(out, `chrome-profile-${process.pid}`);
-  fs.mkdirSync(profile, { recursive: true });
-  const chrome = spawn(chromePath, ['--headless=new', '--no-sandbox', '--remote-debugging-port=0', `--user-data-dir=${profile}`,
-    '--no-first-run', '--no-default-browser-check', '--disable-extensions', '--window-size=1500,950', 'about:blank'],
-  { stdio: ['ignore', 'ignore', 'pipe'] });
-  chrome.stderr.on('data', () => {});
-  const portFile = path.join(profile, 'DevToolsActivePort');
-  for (let i = 0; i < 150 && !fs.existsSync(portFile); i++) await pause(100);
-  const [port, browserPath] = fs.readFileSync(portFile, 'utf8').split('\n');
-  return { chrome, profile, endpoint: `ws://127.0.0.1:${port}${browserPath}` };
-}
-
-class Protocol {
-  constructor(endpoint) {
-    this.next = 1;
-    this.waiting = new Map();
-    this.listeners = [];
-    this.socket = new WebSocket(endpoint);
-    this.opened = new Promise((resolve, reject) => { this.socket.onopen = resolve; this.socket.onerror = reject; });
-    this.socket.onmessage = (event) => {
-      const message = JSON.parse(event.data);
-      if (message.id && this.waiting.has(message.id)) {
-        const { resolve, reject } = this.waiting.get(message.id);
-        this.waiting.delete(message.id);
-        if (message.error) reject(new Error(message.error.message)); else resolve(message.result);
-      } else if (message.method) {
-        for (const listener of this.listeners) listener(message);
-      }
-    };
-  }
-
-  send(method, params = {}, sessionId) {
-    const id = this.next++;
-    this.socket.send(JSON.stringify({ id, method, params, ...(sessionId ? { sessionId } : {}) }));
-    return new Promise((resolve, reject) => {
-      this.waiting.set(id, { resolve, reject });
-      setTimeout(() => { if (this.waiting.delete(id)) reject(new Error(`${method}: no answer in 30 s`)); }, 30000);
-    });
-  }
-}
-
-// MARK: The page
-
-class Page {
-  constructor(protocol, sessionId) {
-    this.protocol = protocol;
-    this.sessionId = sessionId;
-    this.consoleErrors = [];
-    protocol.listeners.push((message) => {
-      if (message.sessionId !== sessionId) return;
-      if (message.method === 'Runtime.consoleAPICalled' && message.params.type === 'error') {
-        this.consoleErrors.push(message.params.args.map((arg) => arg.value ?? arg.description ?? '').join(' '));
-      } else if (message.method === 'Runtime.exceptionThrown') {
-        this.consoleErrors.push('exception: ' + (message.params.exceptionDetails.exception?.description || message.params.exceptionDetails.text));
-      } else if (message.method === 'Log.entryAdded' && message.params.entry.level === 'error') {
-        this.consoleErrors.push('log: ' + message.params.entry.text);
-      }
-    });
-  }
-
-  send(method, params) { return this.protocol.send(method, params, this.sessionId); }
-
-  async evaluate(expression) {
-    const result = await this.send('Runtime.evaluate', { expression, awaitPromise: true, returnByValue: true });
-    if (result.exceptionDetails) throw new Error(result.exceptionDetails.exception?.description || result.exceptionDetails.text);
-    return result.result.value;
-  }
-
-  // Waits until `expression` is truthy (its value), or `ms`: the value, or null.
-  async until(expression, ms = 10000) {
-    const end = Date.now() + ms;
-    while (Date.now() < end) {
-      const value = await this.evaluate(expression).catch(() => null);
-      if (value) return value;
-      await pause(200);
-    }
-    return null;
-  }
-
-  async go(hash) {
-    await this.evaluate(`location.hash = ${JSON.stringify(hash)}`);
-    await pause(400);
-  }
-
-  async shot(name) {
-    const { data } = await this.send('Page.captureScreenshot', { format: 'png' });
-    fs.writeFileSync(path.join(out, `${name}.png`), Buffer.from(data, 'base64'));
-  }
-}
 
 // Clicks the first element `selector` matches whose text is `text` (a view tab): never a control that acts.
 const clickTab = (selector, text) => `(() => {
@@ -130,14 +36,14 @@ const clickTab = (selector, text) => `(() => {
 
 async function run() {
   fs.mkdirSync(out, { recursive: true });
-  const { chrome, profile, endpoint } = await launch();
-  const protocol = new Protocol(endpoint);
+  const browser = await launch(chromePath, out);
+  const protocol = new Protocol(browser.endpoint);
   try {
     await protocol.opened;
-    const { targetId } = await protocol.send('Target.createTarget', { url: 'about:blank' });
-    const { sessionId } = await protocol.send('Target.attachToTarget', { targetId, flatten: true });
-    const page = new Page(protocol, sessionId);
-    await Promise.all(['Page.enable', 'Runtime.enable', 'Log.enable'].map((method) => page.send(method)));
+    const page = await protocol.tab(out);
+    // This script's rows look a moment after each route (the page draws it): the CI's check waits on each view instead.
+    const route = page.go.bind(page);
+    page.go = async (hash) => { await route(hash); await pause(400); };
     await page.send('Emulation.setDeviceMetricsOverride', { width: 1500, height: 950, deviceScaleFactor: 1, mobile: false });
     // A19: notifications granted to the page's origin, as the user's click would.
     const granted = await protocol.send('Browser.grantPermissions', { origin, permissions: ['notifications'] }).then(() => true, () => false);
@@ -277,9 +183,7 @@ async function run() {
     record('run', 'fail', error.message);
   } finally {
     try { protocol.socket.close(); } catch {}
-    chrome.kill('SIGKILL');
-    await pause(300);
-    fs.rmSync(profile, { recursive: true, force: true });
+    await browser.close().catch((error) => record('cleanup', 'fail', error.message));
     fs.writeFileSync(path.join(out, 'report.json'), JSON.stringify(results, null, 2));
     const width = Math.max(...results.map((r) => r.row.length));
     console.log(`${'row'.padEnd(width)}  outcome  detail`);
