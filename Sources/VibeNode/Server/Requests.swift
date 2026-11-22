@@ -186,6 +186,27 @@ public final class Requests: @unchecked Sendable {
             guard let self else { return done() }
             self.queue.async {
                 if let notes { self.notes = (notes, Date()) }
+                self.refreshBuilds(done)
+            }
+        }
+    }
+
+    /// `status`'s `builds` as last read (`refreshBuilds`), for the build that ran then: the install root's folders and its
+    /// `installs` file are read off `queue` (the architecture review's row 19), never by `statusValue`, which every
+    /// change of the node's stream calls. On `queue`.
+    private var builds: NodeWire.Value?
+    private let buildsReads = DispatchQueue(label: "vibenode.status-builds", qos: .utility)
+
+    /// The install root read again on a queue of its own, `builds` set on `queue`, then `done` there. At each
+    /// `refreshNotes` (each `status`, and each housekeeping). Nothing without an install root.
+    func refreshBuilds(_ done: @escaping () -> Void = {}) {
+        guard let installRoot else { return done() }
+        let running = notes?.notes.build
+        buildsReads.async { [weak self] in
+            let value = SwitchRequest.buildsValue(installRoot: installRoot, running: running)
+            guard let self else { return }
+            self.queue.async {
+                self.builds = value
                 done()
             }
         }
@@ -415,7 +436,8 @@ public final class Requests: @unchecked Sendable {
     /// `status`'s notices, in order: the node stopping; each lead's (E5); the refresh's (E7); a host restart's and a lead
     /// with no role (E8); a project due a prompt audit, a team session behind a dialog nothing reads, a board that
     /// cleared, and a session left alone (2026-11-20). On `queue`.
-    func statusNotices() -> [String] {
+    /// `reminders`: the sessions' (`NodeSessions.reminderNotices`), when the caller has them already.
+    func statusNotices(reminders: [String]? = nil) -> [String] {
         var notices = stopping ? ["the node is stopping"] : []
         notices += engine?.leads.leads.values.sorted { $0.root < $1.root }.compactMap(\.notice) ?? []
         notices += engine?.notices.sorted { $0.key < $1.key }.flatMap(\.value) ?? []
@@ -425,7 +447,7 @@ public final class Requests: @unchecked Sendable {
         notices += engine?.allDoneNotices ?? []
         notices += engine?.toolchainNotices ?? []
         notices += engine?.shellNotices ?? []
-        notices += sessions?.reminderNotices() ?? []
+        notices += reminders ?? sessions?.reminderNotices() ?? []
         if let notice = updates?.notice { notices.append(notice) }
         return notices
     }
@@ -438,6 +460,9 @@ public final class Requests: @unchecked Sendable {
     /// (`restart`, E8: the command line shows it with how the host ended). On `queue`.
     public func statusValue() -> NodeWire.Value {
         let list = sessions?.sessions ?? []
+        // Each once per status (the review's row 19): the switch's blockers walk the host's sessions, the reminders the scan's.
+        let switching = switchBlockersNow()
+        let reminders = sessions?.reminderNotices() ?? []
         var fields: [String: NodeWire.Value] = [
             "node": .string(NodeIds.node),
             "epoch": .string(epoch),
@@ -457,19 +482,20 @@ public final class Requests: @unchecked Sendable {
             "leads": .array((engine?.leads.leads.values.sorted { $0.root < $1.root } ?? []).map(leadValue)),
             "cards": Self.counts(engine?.cards.counts() ?? [:]),
             "accepted": .array(accepted.map(\.value)),
-            "notices": .array(statusNotices().map(NodeWire.Value.string)),
+            "notices": .array(statusNotices(reminders: reminders).map(NodeWire.Value.string)),
             "restart": engine?.restartValue ?? .null,
             "reopen": engine?.offeredValue ?? .array([]),
             "ended": engine?.endedValue ?? .array([]),
             "ending": engine?.endingValue ?? .array([]),
-            "builds": installRoot.map { SwitchRequest.buildsValue(installRoot: $0, running: notes?.notes.build) } ?? .null,
+            // As last read off the queue (`refreshBuilds`): null until the first read is in.
+            "builds": installRoot == nil ? .null : builds ?? .null,
             "web": webValue?() ?? NodeStatusStore.webOff,
             "usage": engine?.usage.map(NodeUsage.value) ?? .null,
             "boost": engine?.boostValue ?? .null,
             // What refuses a build switch now (the rule on switches), for `vibeswitcher switch` before its code.
             // What refuses a switch now (decision 6), less the workers it would park (`SwitchPark`, by the last look).
-            "switchBlockers": .array(switchBlockersNow().blockers.map(NodeWire.Value.string)),
-            "switchParks": .array(switchBlockersNow().parks.map(NodeWire.Value.string)),
+            "switchBlockers": .array(switching.blockers.map(NodeWire.Value.string)),
+            "switchParks": .array(switching.parks.map(NodeWire.Value.string)),
         ]
         // The user's node's tailnet page, for the command line (not in the `node` stream: `NodeStatusStore.value`).
         if let tailnet { fields["webTailnet"] = tailnet.value() }
@@ -479,7 +505,7 @@ public final class Requests: @unchecked Sendable {
         if let health {
             fields["health"] = health.value(serverRestarts: notes?.notes.serverRestarts, refusedConnections: notes?.notes.refusedAppConnections,
                                             hostRestartAt: engine?.restartValue["at"]?.string.flatMap(NodeWire.date),
-                                            waiting: sessions?.reminderNotices() ?? [])
+                                            waiting: reminders)
         }
         return .object(fields)
     }
