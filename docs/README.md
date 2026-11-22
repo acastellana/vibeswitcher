@@ -12,6 +12,7 @@ area in depth; the records further down are history, kept as written.
 | [The project lead](guide/project-lead.md) | How a lead plans, the task contract, workers in worktrees, review levels and audits, the review rules floor, the merge gate, the config seal, provenance, the remote, auto_advance, Mac-wide limits and Boost, the battery hold, receipts, revert, the board archive, and a table of every default with its source. |
 | [Phone access](guide/phone-access.md) | Tailscale, pairing, what the phone shows, replies, dictation and answering a lead, dev pages, how it's kept safe. |
 | [Architecture](guide/architecture.md) | The app, the session host and its handover, parsers, hooks, status detection, the tool server and its keeper, the vault and roles, the host's security model and the census, privacy, the files in `~/.vibeswitcher`. |
+| [VibeSwitcher 2: how it works](guide/v2-architecture.md) | The Linux node today: its processes and who starts whom, who may do what, a request's path, what survives a restart, the test tiers, and every request kind (generated from the code). |
 | [Development](guide/development.md) | Worktree setup, `scripts/test.sh`, the lints, tests under load, the sandbox, other scripts. |
 
 The rules for agents working in this repository are in [AGENTS.md](../AGENTS.md); what a reviewer checks is in

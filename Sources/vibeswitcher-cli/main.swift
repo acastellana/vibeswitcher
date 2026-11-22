@@ -120,6 +120,9 @@ case "wire-vectors":
     // The vectors name times (a usage limit's reset): written in UTC, so they read the same on every machine and CI.
     NSTimeZone.default = TimeZone(identifier: "UTC")!
     exit(WireCommand.run(Array(words.dropFirst())))
+case "kinds-doc":
+    // Not in the usage text: docs/guide/v2-architecture.md's kinds table is written with it (KindsTable).
+    exit(KindsDocCommand.run(Array(words.dropFirst())))
 case "agent-plist":
     // Not in the usage text: `scripts/install-node-mac.sh` runs it from the build it has just installed, and writes what
     // it prints for the user to load (the Mac's LaunchAgent, `NodeAgent`); `start` on the Mac stays refused.
