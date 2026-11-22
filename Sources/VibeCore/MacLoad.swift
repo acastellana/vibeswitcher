@@ -252,11 +252,7 @@ public struct MacLimits: Codable, Equatable, Sendable {
     /// The file's name: the Mac's `mac-limits.json`; on a Linux node `node-limits.json` (they are the node's limits),
     /// with the Mac's name kept as an alias (`legacyFileName`): read while the node's isn't there, and written with it
     /// while it is there, for what still reads only that name (a tool server of the build before a switch).
-    #if os(Linux)
-    public static let fileName = "node-limits.json"
-    #else
-    public static let fileName = "mac-limits.json"
-    #endif
+    public static let fileName = Platform.Files.limitsFileName
     public static let legacyFileName = "mac-limits.json"
 
     public static var file: URL { VibePaths.root.appendingPathComponent(fileName) }

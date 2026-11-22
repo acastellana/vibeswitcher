@@ -48,4 +48,14 @@ extension Platform.Files {
         "/tmp"
         #endif
     }
+
+    /// The machine-wide limits' file under VibeSwitcher's root (`MacLimits.fileName`): the Mac's `mac-limits.json`; a
+    /// Linux node's `node-limits.json`, the Mac's name its alias.
+    public static var limitsFileName: String {
+        #if canImport(Darwin)
+        "mac-limits.json"
+        #else
+        "node-limits.json"
+        #endif
+    }
 }
