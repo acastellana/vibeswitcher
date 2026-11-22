@@ -199,6 +199,9 @@ final class NodeClient {
     private var lines = NodeWire.Lines()
     private var ready: [Data] = []
     private var counter = 0
+    /// Called with the kind and the action id of a state change the server never answered (it closed the connection,
+    /// or the time passed): `connect` writes it to the journal (`unanswered`), beside the command's own `request` entry.
+    var onUnanswered: ((String, String) -> Void)?
 
     private init(fd: Int32, hello: NodeWire.Hello, lines: NodeWire.Lines, ready: [Data]) {
         self.fd = fd
@@ -231,7 +234,11 @@ final class NodeClient {
             Sys.close(fd)
             return .failure(.broken("the node's server sent no hello"))
         }
-        return .success(NodeClient(fd: fd, hello: hello, lines: lines, ready: ready))
+        let client = NodeClient(fd: fd, hello: hello, lines: lines, ready: ready)
+        client.onUnanswered = { kind, action in
+            context.writeJournal(NodeJournal.entry(event: "unanswered", action: action, kind: kind, epoch: hello.epoch))
+        }
+        return .success(client)
     }
 
     /// Whether this connection's server is on the Mac's rule (`VoiceRule.Mode.approval`): it asks the person at the Mac
@@ -273,19 +280,36 @@ final class NodeClient {
             }
             return true
         }
-        guard sent else { return .failure(.broken("the node's server closed the connection")) }
+        guard sent else { return unanswered(kind, action, "the node's server closed the connection") }
         let deadline = Platform.Clock.steadyDate().addingTimeInterval(timeout)
         while let next = Self.read(fd, &lines, &ready, until: deadline) {
             guard let envelope = NodeWire.decode(NodeWire.Envelope.self, next) else { continue }
             if envelope.kind == "bye" {
                 let reason = NodeWire.decode(NodeWire.Bye.self, next)?.reason ?? "no reason"
-                return .failure(.broken("the node's server closed the connection: \(ConfigSeal.inert(reason, limit: .max))"))
+                return unanswered(kind, action, "the node's server closed the connection: \(ConfigSeal.inert(reason, limit: .max))")
             }
             if envelope.re == id, let reply = NodeWire.decode(NodeWire.Reply.self, next) { return .success(reply) }
         }
         // An older server's reply past the line's limit (today's says so in a reply of its own: `NodeWire.replyLine`).
         if lines.tooLong { return .failure(.broken("the node's server answered \(kind) with a line past the limit of \(NodeWire.maxLine) bytes: ask for less")) }
-        return .failure(.broken("the node's server didn't answer \(kind)"))
+        if Platform.Clock.steadyDate() < deadline {
+            return unanswered(kind, action, "the node's server closed the connection before answering \(kind) (it may have restarted)")
+        }
+        return unanswered(kind, action, "the node's server didn't answer \(kind) in \(Int(timeout)) s")
+    }
+
+    /// No reply came to `kind`: `why`, and for a state change with an action id that id and that its outcome isn't
+    /// known (it may have been recorded, and done, before the server went), written to the journal too (the
+    /// architecture review's row 10).
+    private func unanswered(_ kind: String, _ action: String?, _ why: String) -> Result<NodeWire.Reply, Failure> {
+        guard let action, NodeWire.changesState(kind) else { return .failure(.broken(why)) }
+        onUnanswered?(kind, action)
+        return .failure(.broken(Self.outcomeUnknown(why, action: action)))
+    }
+
+    /// What the command line says of a state change that got no reply.
+    static func outcomeUnknown(_ why: String, action: String) -> String {
+        "\(why). Action \(action): whether it was carried out isn't known; `vibeswitcher status` shows what is now"
     }
 
     /// The next whole line from `fd`, waiting until `deadline`; nil at the end, or past it.

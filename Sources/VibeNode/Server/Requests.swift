@@ -78,6 +78,8 @@ public final class Requests: @unchecked Sendable {
     /// answered so).
     var replies: [String: NodeWire.Reply] = [:]
     private var replyOrder: [String] = []
+    /// The recorded actions being done now (recorded, their reply not yet given). On `queue`.
+    private var doing: Set<String> = []
     /// Each request as it is acted on, after the voice, the code and the vault's record (for tests). On `queue`.
     public var acting: (NodeWire.Request) -> Void = { _ in }
     /// The build's folder (`ServerArguments.nodeRoot`): where `hooks.install` reads the programs it installs; none:
@@ -266,11 +268,11 @@ public final class Requests: @unchecked Sendable {
                     reply(.init(re: request.id, error: .init(.internal, "not recorded in the host's vault, so not done: \(ConfigSeal.inert(why.description, limit: .max))")))
                 case .success(false):
                     self.note("\(request.kind) (action \(action)) was recorded already: answered as before, not done again")
-                    var again = self.replies[action] ?? .init(re: request.id, result: .object(["again": .bool(true), "said": .string("this action was done already")]))
-                    again.re = request.id
-                    reply(again)
+                    reply(self.again(request, action: action))
                 case .success(true):
+                    self.doing.insert(action)
                     self.act(request, from: facts) { [weak self] answer in
+                        self?.doing.remove(action)
                         self?.keep(answer, for: action)
                         reply(answer)
                     }
@@ -333,6 +335,26 @@ public final class Requests: @unchecked Sendable {
             if request.kind == "web.open" { webOpen(request, web: web, reply: reply) } else { webRevoke(request, web: web, reply: reply) }
         default: reply(.init(re: request.id, error: .init(.unknownKind, "this server doesn't take \(request.kind)")))
         }
+    }
+
+    /// The answer to a retry of `action`, recorded already: the reply it got, when kept; otherwise what is known, never
+    /// "done": while it is being done, that it is; else (recorded before this server restarted, or too long ago for its
+    /// reply to be kept) that whether it was carried out isn't known (the architecture review's row 10). Not done again
+    /// either way. On `queue`.
+    func again(_ request: NodeWire.Request, action: String) -> NodeWire.Reply {
+        if var kept = replies[action] {
+            kept.re = request.id
+            return kept
+        }
+        if doing.contains(action) {
+            return .init(re: request.id, error: .init(.refused, "action \(action) is being done now, from its first request: not done again; that request's answer says how it went"))
+        }
+        return .init(re: request.id, error: .init(.refused, Self.outcomeUnknown(action: action)))
+    }
+
+    /// What a retry of a recorded action whose reply isn't kept is told.
+    static func outcomeUnknown(action: String) -> String {
+        "action \(action) was recorded before this server restarted (or too long ago for its answer to be kept): whether it was carried out isn't known, and it isn't done again; `vibeswitcher status` shows what is now"
     }
 
     func keep(_ reply: NodeWire.Reply, for action: String) {
