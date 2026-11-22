@@ -299,17 +299,37 @@ extension Platform.Processes.System {
     /// One read of `proc_pidinfo(PROC_PIDTBSDINFO)`: the process's parent, its start (microseconds since 1970, from
     /// `pbi_start_tvsec` and `pbi_start_tvusec`, the wall clock's: a step of the clock can give a later process a smaller
     /// one, so it orders nothing, and an exec keeps it; it names the process only with the pid, and the token's check) and
-    /// its controlling terminal (`e_tdev`, named as its record names it: `ttys004`). nil when it has gone, isn't the
-    /// user's to read, or the answer is short or names another pid.
+    /// its controlling terminal (`e_tdev`, named as its record names it: `ttys004`). Another user's process (root's
+    /// `login` under Terminal, `sshd-session` under ssh), which `PROC_PIDTBSDINFO` refuses, is read from the kernel's
+    /// record instead (sysctl `KERN_PROC_PID`, any user's: `e_ppid`, `p_starttime`, `e_tdev`; `linkFromKernel`), so a
+    /// chain through it reads whole (v2-mac-tasks item 11). nil when it has gone, or the answer is short or names
+    /// another pid.
     static func link(_ pid: pid_t) -> Platform.Processes.Link? {
         guard pid > 0 else { return nil }
         var info = proc_bsdinfo()
         let size = Int32(MemoryLayout<proc_bsdinfo>.size)
-        guard proc_pidinfo(pid, PROC_PIDTBSDINFO, 0, &info, size) == size, info.pbi_pid == UInt32(pid) else { return nil }
+        let read = proc_pidinfo(pid, PROC_PIDTBSDINFO, 0, &info, size)
+        guard read == size else { return read < 0 && errno == ESRCH ? nil : linkFromKernel(pid) }
+        guard info.pbi_pid == UInt32(pid) else { return nil }
         let start = UInt64(info.pbi_start_tvsec) &* 1_000_000 &+ UInt64(info.pbi_start_tvusec)
         // Named as its record names it (`kernelRecord`): nil for none (NODEV).
         let terminal = Platform.Terminals.name(device: dev_t(bitPattern: info.e_tdev))
         return Platform.Processes.Link(pid: pid, parent: pid_t(bitPattern: info.pbi_ppid), startTicks: start, terminal: terminal)
+    }
+
+    /// The link from the kernel's record (sysctl `KERN_PROC_PID`), for a process `PROC_PIDTBSDINFO` won't read: the same
+    /// start (`p_starttime`, the value `pbi_start_tvsec`/`usec` give) and terminal; nil when it has gone, is a zombie,
+    /// or the record names another pid.
+    static func linkFromKernel(_ pid: pid_t) -> Platform.Processes.Link? {
+        var mib: [Int32] = [CTL_KERN, KERN_PROC, KERN_PROC_PID, pid]
+        var kinfo = kinfo_proc()
+        var size = MemoryLayout<kinfo_proc>.stride
+        guard sysctl(&mib, 4, &kinfo, &size, nil, 0) == 0, size > 0, kinfo.kp_proc.p_pid == pid,
+              Int32(kinfo.kp_proc.p_stat) != SZOMB else { return nil }
+        let started = kinfo.kp_proc.p_un.__p_starttime
+        let start = UInt64(started.tv_sec) &* 1_000_000 &+ UInt64(started.tv_usec)
+        return Platform.Processes.Link(pid: pid, parent: kinfo.kp_eproc.e_ppid, startTicks: start,
+                                       terminal: Platform.Terminals.name(device: kinfo.kp_eproc.e_tdev))
     }
 
     /// Whether `link` (read first) is the process `token` names: the same pid, and the token still valid once the link

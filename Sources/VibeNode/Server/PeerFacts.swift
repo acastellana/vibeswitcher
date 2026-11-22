@@ -89,10 +89,13 @@ public struct PeerFacts: Equatable, Sendable {
         var underRunner: Bool? = false
         if readable {
             for ancestor in ancestry {
-                let arguments = Platform.Processes.arguments(ancestor.pid)
-                guard !arguments.isEmpty else { underRunner = nil; break }
-                // Any runner but one above the whole scratch node: the same process, by its pid and its start.
-                if BranchCode.isRunner(arguments), !runnersAbove.contains(ancestor) { underRunner = true; break }
+                switch runner(ancestor, peerUID: uid, arguments: Platform.Processes.arguments(ancestor.pid), runnersAbove: runnersAbove,
+                              owner: { brief in if case .brief(let read) = Platform.Processes.brief(brief) { read.uid } else { nil } }) {
+                case true?: underRunner = true
+                case nil: underRunner = nil
+                case false?: continue
+                }
+                break
             }
         } else {
             underRunner = nil
@@ -103,6 +106,22 @@ public struct PeerFacts: Equatable, Sendable {
                          terminal: readable ? terminal : .unreadable,
                          sessionMarker: environment.map { $0.contains { $0.hasPrefix(sessionMarkerName + "=") } },
                          underRunner: underRunner, commandLine: Platform.Processes.arguments(pid))
+    }
+
+    /// Whether `ancestor` is a branch code runner (`BranchCode.isRunner`) a sender runs under: true, false, or nil when
+    /// that can't be told. Its arguments (`arguments`) tell; one above the whole scratch node (`runnersAbove`, by pid and
+    /// start) doesn't count. Arguments that can't be read (the Mac refuses `KERN_PROCARGS2` for another user's process:
+    /// root's `login` under Terminal, `sshd-session` under ssh; v2-mac-tasks item 11) tell nothing, unless its owner
+    /// (`owner`, the short record any user's process gives) is root while the sender (`peerUID`) isn't: a runner is the
+    /// user's own code, started as the user, and a process of root's is none (the runner, if any, is below it in the
+    /// chain, the user's again, and read). Any other unreadable ancestor: nil, as before.
+    static func runner(_ ancestor: Ancestor, peerUID: uid_t?, arguments: [String], runnersAbove: [Ancestor],
+                       owner: (pid_t) -> uid_t?) -> Bool? {
+        if arguments.isEmpty {
+            guard let peerUID, peerUID != 0, owner(ancestor.pid) == 0 else { return nil }
+            return false
+        }
+        return BranchCode.isRunner(arguments) && !runnersAbove.contains(ancestor)
     }
 
     /// The branch code runners `pid` runs under (`BranchCode.isRunner`), nearest first, each by its pid and its start:

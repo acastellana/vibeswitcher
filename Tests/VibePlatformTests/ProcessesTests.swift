@@ -1043,6 +1043,10 @@ struct ProcessesTests {
         #expect(link.pid == getpid() && link.parent == getppid())
         #expect(link.terminal == Processes.kernelRecord(getpid())?.terminal)
         #expect(Processes.link(0) == nil && Processes.link(-1) == nil)
+        // Another user's process (launchd, root's), which PROC_PIDTBSDINFO refuses: read from the kernel's record
+        // (v2-mac-tasks item 11), so a chain through root's login or sshd reads whole.
+        let launchd = try #require(Processes.link(1))
+        #expect(launchd.pid == 1 && launchd.parent == 0 && launchd.startTicks > 0)
         // The token of this process, as a socket names its peer (a pair's ends are both this process's).
         let (one, other) = try #require(Platform.Sockets.pair(type: Platform.Sockets.stream))
         defer { close(one); close(other) }
