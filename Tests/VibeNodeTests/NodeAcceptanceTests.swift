@@ -876,7 +876,7 @@ struct NodeAcceptanceTests {
         let on = try await node.runOnTerminal(["plugin", "on", "shell"])
         #expect(on.status == 0 && on.output.contains("shell is on"), "\(on.output)\(on.errors)")
         let again = try await node.run(["plugin", "list"])
-        #expect(again.output.contains("shell  Shell requests  on (at its default"), "\(again.output)")
+        #expect(again.output.contains("shell  Shell requests  on (its default)"), "\(again.output)")
         #expect(try await node.run(["status"]).output.contains("plugins on: shell"))
     }
 
