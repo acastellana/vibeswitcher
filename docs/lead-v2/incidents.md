@@ -27,3 +27,10 @@ Evidence: 2026-11-21 09:17, witness report: "The verifier on team-sessions-start
 Task: team-sessions-start
 Check: task turn-this-incident-into-4 turns it into a check that runs before merge.
 
+## 2026-11-21 17:01:47 After a lead handover the replaced lead's Claude session and its tool server stay alive: this project has three lead tool servers at once, two of them on the old build e0984442, and their auto_advance still reports on the board (and could act through the old, broken gate)
+
+Evidence: 2026-11-21 18:25, `ps -eo pid,ppid,lstart,etime,stat,args`: three sessions named lead-vibeswitcher-v2-lead under the node's host (pid 2716): pid 2870 (started 09:05:58, the lead replaced at 09:59), pid 47011 (started 09:59:46, the lead replaced at 13:53) and pid 546027 (started 13:53:10, the current lead). Each still has its `vibeswitcher-mcp --keeper --role lead --root …/vibeswitcher-v2-lead` and `--role lead` child: 3043/3060 and 47161/47173 from builds/e09844422e92…, 546212/546224 from builds/2ceb69f7…. progress.md has both handovers ("Handed the lead over to a fresh session", 09:59 and 13:53). Since about 17:50 the current lead receives auto_advance reports that VibeSwitcher's own hook marks "unverified sender, marked as VibeSwitcher's (auto_advance); not its word", three so far, e.g. "Merges are held: the-node-s-gate has been ready to merge for 50 min … Cause: the gate not installed … merges run the installed build (e09844422e92). Ask the user to install the app from v2": the build they name is the stale servers', not the current lead's (2ceb69f7) nor the node's current (5c23336a). Not yet seen: a stale server acting (a start, audit or merge); the usage hold (81%) and the per-task holds (auto_advance off on the-node-s-gate and hookscommandtests-hooks, hold_audit on three tasks) currently keep auto_advance from moving anything. Risk when a hold is lifted: whichever server's auto_advance runs first acts, and a stale one runs branch runs through build e0984442's gate, where swift can't run.
+
+Task: the-node-s-gate
+Check: task turn-this-incident-into-5 turns it into a check that runs before merge.
+
