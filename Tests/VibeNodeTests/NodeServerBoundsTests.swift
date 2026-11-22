@@ -202,7 +202,7 @@ struct NodeServerBoundsTests {
     }
 
     /// The host started with a soft limit of 512 open files (`prlimit --nofile=512:` execs it): it raises its own to
-    /// the hard limit, its server child inherits that, and a session's program gets 512 back.
+    /// the hard limit, its server child inherits that, and a session's program gets 512 back, after a handover too.
     @Test(.enabled(if: FileManager.default.isExecutableFile(atPath: prlimit), "util-linux's prlimit starts the host with a lower limit"))
     func theHostRaisesItsDescriptorLimitAndItsSessionsGetTheOldOne() async throws {
         let hard = try #require(Self.descriptorLimits(getpid())?.hard)
@@ -217,6 +217,15 @@ struct NodeServerBoundsTests {
         _ = try await node.spawn("ulimit -n > \(out); sleep 60")
         let read = await eventually(timeout: 60) { ((try? String(contentsOfFile: out, encoding: .utf8)) ?? "").hasSuffix("\n") }
         #expect(read && (try? String(contentsOfFile: out, encoding: .utf8)) == "512\n", "\((try? String(contentsOfFile: out, encoding: .utf8)) ?? "nothing")\n\(node.said)")
+
+        // Handed over to the same build: the new image starts with the limit raised, and its sessions still get 512.
+        try await node.handOver()
+        let after = node.root.appendingPathComponent("ulimit-after.txt").path
+        _ = try await node.spawn("ulimit -n > \(after); sleep 60")
+        let readAfter = await eventually(timeout: 60) { ((try? String(contentsOfFile: after, encoding: .utf8)) ?? "").hasSuffix("\n") }
+        #expect(readAfter && (try? String(contentsOfFile: after, encoding: .utf8)) == "512\n",
+                "\((try? String(contentsOfFile: after, encoding: .utf8)) ?? "nothing")\n\(node.said)")
+        #expect(Self.descriptorLimits(node.hostPID)?.soft == hard)
     }
 
     static let prlimit = "/usr/bin/prlimit"

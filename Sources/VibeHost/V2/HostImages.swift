@@ -477,10 +477,24 @@ public enum HostImages {
     /// connection, where the usual soft 1,024 is reached long before the hard limit. A session's program gets the soft
     /// limit back (`beforeProgram`, through `descriptorLimitVariable`): it may use `select`, which can't take a
     /// descriptor past 1,023. Any system; once.
+    ///
+    /// The soft limit before is carried across a handover in the host's own environment (`descriptorCarriedVariable`,
+    /// which both forms of the handover's exec pass on): the new image starts with the limit raised already, and would
+    /// otherwise give its sessions the hard one.
     public static func raiseDescriptorLimit() {
-        guard descriptorSoftBefore.get() == nil, let before = Platform.ProcessSelf.raiseDescriptorLimit() else { return }
+        guard descriptorSoftBefore.get() == nil else { return }
+        if let carried = getenv(descriptorCarriedVariable).flatMap({ UInt64(String(cString: $0)) }) {
+            descriptorSoftBefore.set(carried)
+            Platform.ProcessSelf.raiseDescriptorLimit()
+            return
+        }
+        guard let before = Platform.ProcessSelf.raiseDescriptorLimit() else { return }
         descriptorSoftBefore.set(before)
+        setenv(descriptorCarriedVariable, String(before), 1)
     }
+
+    /// The host's soft limit before it raised it, in its own environment, for the image a handover starts.
+    static let descriptorCarriedVariable = "VIBESWITCHER_HOST_NOFILE_BEFORE"
 
     /// The soft limit the host had before `raiseDescriptorLimit`, nil when it raised none.
     static let descriptorSoftBefore = SoftLimit()
