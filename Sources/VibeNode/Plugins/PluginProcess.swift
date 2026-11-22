@@ -9,6 +9,12 @@ import VibeCore
 /// the asker's `id`, one call at a time, 10 s each. A line too long, an answer to no question or out of order, a line
 /// that isn't an object, a call unanswered in time, or the program ending: a breach, which ends it (its whole group)
 /// and fails every call waiting. Its answers are data: whoever calls checks each one's shape.
+///
+/// Its descriptors (automated review 1): each reader owns its pipe and closes it when it ends, and the writer owns the
+/// input; none is closed under a thread still using it. Ending closes the write end of one cancel pipe, which wakes every
+/// reader and the writer from `poll` (a child of the plugin that kept the pipes open can't hold them); the cancel pipe's
+/// read end is closed once all three have let go. Writes are non-blocking and off the process's queue, so a program
+/// that doesn't read its input never holds the queue (its call times out). Reaping is bounded.
 final class PluginProcess: @unchecked Sendable {
     typealias Message = [String: Any]
 
@@ -27,6 +33,12 @@ final class PluginProcess: @unchecked Sendable {
     private var input: Int32 = -1
     private var output: Int32 = -1
     private var errors: Int32 = -1
+    /// The cancel pipe: closing `cancel[1]` ends the readers and the writer.
+    private var cancel: [Int32] = [-1, -1]
+    private let users = DispatchGroup()
+    private let writes: DispatchQueue
+    /// The numbers its two readers' descriptors had (a test's look at their reuse).
+    private(set) var readEnds: [Int32] = []
     private var nextID = 1
     private var waiting: [(id: Int, line: Data, then: (Result<Message, Breach>) -> Void)] = []
     private var inFlight: (id: Int, then: (Result<Message, Breach>) -> Void, timer: DispatchWorkItem)?
@@ -38,13 +50,16 @@ final class PluginProcess: @unchecked Sendable {
         self.id = id
         self.note = note
         queue = DispatchQueue(label: "vibenode.plugin.\(id)")
+        writes = DispatchQueue(label: "vibenode.plugin.\(id).writes")
     }
 
     /// Starts `copy` (its sealed copy) in `work`. Blocks briefly.
     func start(copy: Platform.ProcessSelf.SealedCopy, work: URL) -> Result<Void, PluginRefusal> {
-        var toChild: [Int32] = [-1, -1], fromChild: [Int32] = [-1, -1], errChild: [Int32] = [-1, -1]
+        var toChild: [Int32] = [-1, -1], fromChild: [Int32] = [-1, -1], errChild: [Int32] = [-1, -1], cancel: [Int32] = [-1, -1]
         // Close-on-exec from their making: the spawn gives the child its ends as its standard ones.
-        guard Sys.pipeClosedOnExec(&toChild) == 0, Sys.pipeClosedOnExec(&fromChild) == 0, Sys.pipeClosedOnExec(&errChild) == 0 else {
+        guard Sys.pipeClosedOnExec(&toChild) == 0, Sys.pipeClosedOnExec(&fromChild) == 0, Sys.pipeClosedOnExec(&errChild) == 0,
+              Sys.pipeClosedOnExec(&cancel) == 0 else {
+            for fd in toChild + fromChild + errChild + cancel where fd >= 0 { Sys.close(fd) }
             return .failure(PluginRefusal("no pipes (errno \(errno))"))
         }
         // A write to a program that has gone is an error for the write, not the server's end.
@@ -61,17 +76,23 @@ final class PluginProcess: @unchecked Sendable {
         for fd in [toChild[0], fromChild[1], errChild[1]] { Sys.close(fd) }
         switch started {
         case .failure(let error):
-            for fd in [toChild[1], fromChild[0], errChild[0]] { Sys.close(fd) }
+            for fd in [toChild[1], fromChild[0], errChild[0]] + cancel { Sys.close(fd) }
             return .failure(PluginRefusal("its program didn't start (errno \(error.code))"))
         case .success(let child):
+            _ = fcntl(toChild[1], F_SETFL, fcntl(toChild[1], F_GETFL) | O_NONBLOCK)
             queue.sync {
                 pid = child
                 input = toChild[1]
                 output = fromChild[0]
                 errors = errChild[0]
+                readEnds = [fromChild[0], errChild[0]]
+                self.cancel = cancel
             }
-            read(output, lines: true)
-            read(errors, lines: false)
+            // The writer is a user of the cancel pipe from now until it lets the input go (`kill`).
+            users.enter()
+            read(fromChild[0], lines: true, cancel: cancel[0])
+            read(errChild[0], lines: false, cancel: cancel[0])
+            users.notify(queue: .global()) { Sys.close(cancel[0]) }
             return .success(())
         }
     }
@@ -100,16 +121,38 @@ final class PluginProcess: @unchecked Sendable {
         let timer = DispatchWorkItem { [weak self] in self?.breach("it didn't answer within \(Int(Self.callTimeout)) s") }
         inFlight = (next.id, next.then, timer)
         queue.asyncAfter(deadline: .now() + Self.callTimeout, execute: timer)
-        var sent = 0
-        next.line.withUnsafeBytes { raw in
-            while sent < raw.count {
-                let count = Darwin_or_Glibc_write(input, raw.baseAddress! + sent, raw.count - sent)
-                if count < 0, errno == EINTR { continue }
-                guard count > 0 else { break }
-                sent += count
-            }
+        let (input, cancel) = (self.input, self.cancel[0])
+        writes.async { [weak self] in
+            guard !Self.write(next.line, to: input, cancel: cancel) else { return }
+            self?.queue.async { self?.breach("its input closed") }
         }
-        if sent < next.line.count { breach("its input closed") }
+    }
+
+    /// Writes `line` whole to the non-blocking `fd`, waiting in `poll` while its pipe is full; false when the pipe
+    /// closed, or the cancel pipe did (the program ending). On the writer's queue.
+    private static func write(_ line: Data, to fd: Int32, cancel: Int32) -> Bool {
+        guard fd >= 0 else { return false }
+        var sent = 0
+        return line.withUnsafeBytes { raw in
+            while sent < raw.count {
+                let count = Darwin_or_Glibc_write(fd, raw.baseAddress! + sent, raw.count - sent)
+                if count > 0 { sent += count; continue }
+                guard count < 0, errno == EINTR || errno == EAGAIN else { return false }
+                if errno == EAGAIN, !wait(for: fd, events: Int16(POLLOUT), cancel: cancel) { return false }
+            }
+            return true
+        }
+    }
+
+    /// Waits until `fd` is ready for `events`: false when the cancel pipe closed (or poll failed).
+    private static func wait(for fd: Int32, events: Int16, cancel: Int32) -> Bool {
+        var polled = [pollfd(fd: fd, events: events, revents: 0), pollfd(fd: cancel, events: Int16(POLLIN), revents: 0)]
+        while true {
+            let count = poll(&polled, nfds_t(polled.count), -1)
+            if count < 0, errno == EINTR { continue }
+            guard count > 0, polled[1].revents == 0 else { return false }
+            if polled[0].revents != 0 { return true }
+        }
     }
 
     /// A line from the program: its answer to the call in flight, or a breach.
@@ -127,13 +170,21 @@ final class PluginProcess: @unchecked Sendable {
         sendNext()
     }
 
-    /// Reads `fd` on a thread of its own: lines of the protocol, or the log's (inert, capped).
-    private func read(_ fd: Int32, lines: Bool) {
+    /// Reads `fd` on a thread of its own, which owns it and closes it when it ends (its end of file, an error, a breach,
+    /// or the cancel pipe closing): lines of the protocol, or the log's (inert, capped).
+    private func read(_ fd: Int32, lines: Bool, cancel: Int32) {
+        users.enter()
+        let users = self.users
         let thread = Thread { [weak self] in
+            defer {
+                Sys.close(fd)
+                users.leave()
+            }
             var buffer = Data()
             var logged = 0
             var chunk = [UInt8](repeating: 0, count: 64 * 1024)
             while true {
+                guard Self.wait(for: fd, events: Int16(POLLIN), cancel: cancel) else { return }
                 let count = chunk.withUnsafeMutableBytes { Darwin_or_Glibc_read(fd, $0.baseAddress!, $0.count) }
                 if count < 0, errno == EINTR { continue }
                 guard count > 0 else { break }
@@ -189,22 +240,31 @@ final class PluginProcess: @unchecked Sendable {
         }
     }
 
-    /// Its whole group ended (TERM, then KILL a second on), its pipes closed, reaped without waiting on anyone else's child.
+    /// Its whole group ended (TERM, then KILL a second on), its readers and writer told to let their descriptors go (the
+    /// cancel pipe), reaped without waiting on anyone else's child, for a few seconds at most. On `queue`.
     private func kill() {
-        let (pid, fds) = (self.pid, [input, output, errors])
-        input = -1
+        let (pid, input, cancel, note, id) = (self.pid, self.input, self.cancel[1], self.note, self.id)
+        (self.input, self.output, self.errors, self.cancel[1]) = (-1, -1, -1, -1)
         guard pid > 0 else { return }
         Darwin_or_Glibc_kill(-pid, SIGTERM)
-        Sys.close(fds[0])
+        // Wakes the readers (each closes its own pipe) and a writer waiting on a full pipe; the writer then lets the
+        // input go, after any write it is in.
+        if cancel >= 0 { Sys.close(cancel) }
+        let users = self.users
+        writes.async {
+            if input >= 0 { Sys.close(input) }
+            users.leave()
+        }
         DispatchQueue.global().async {
             var status: Int32 = 0
-            let deadline = MacTime.real.awake() + 1
+            let killAt = MacTime.real.awake() + 1, giveUpAt = killAt + 5
+            var killed = false
             while waitpid(pid, &status, WNOHANG) == 0 {
-                if MacTime.real.awake() > deadline { Darwin_or_Glibc_kill(-pid, SIGKILL); _ = waitpid(pid, &status, 0); break }
+                let now = MacTime.real.awake()
+                if !killed, now > killAt { Darwin_or_Glibc_kill(-pid, SIGKILL); killed = true }
+                if now > giveUpAt { return note("plugin \(id): its program (pid \(pid)) wasn't reaped 6 s after it was ended") }
                 usleep(20_000)
             }
-            Sys.close(fds[1])
-            Sys.close(fds[2])
         }
     }
 }

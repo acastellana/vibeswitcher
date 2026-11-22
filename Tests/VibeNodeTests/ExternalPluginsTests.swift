@@ -31,28 +31,28 @@ struct ExternalPluginsTests {
     }
 
     /// The probe added (inspected, then added with what was shown) and, when `on`, turned on.
-    private func added(_ world: CardWorld, folder: String = ExternalPluginsTests.probe, on: Bool = true) async throws -> NodeWire.Reply {
+    private func added(_ world: CardWorld, folder: String = ExternalPluginsTests.probe, on: Bool = true, id: String = "probe") async throws -> NodeWire.Reply {
         let inspected = try #require(await world.ask("plugin.inspect", ["folder": .string(folder)], action: nil))
         try #require(inspected.ok, "\(inspected)")
         let added = try #require(await world.ask("plugin.add", ["folder": .string(folder), "manifest": inspected.result?["manifestSHA"] ?? .null,
                                                                "program": inspected.result?["programSHA"] ?? .null]))
         try #require(added.ok, "\(added)")
         if on {
-            let turned = try #require(await world.ask("plugin.on", ["plugin": .string("probe")]))
+            let turned = try #require(await world.ask("plugin.on", ["plugin": .string(id)]))
             try #require(turned.ok, "\(turned)")
         }
         return inspected
     }
 
     /// `vs-ask probe -- WORDS` from a scratch session: the filer as the tool server runs it, the host stamping it.
-    private func ask(_ world: CardWorld, _ words: [String]) async throws -> (asker: HostSession, output: (status: Int32, output: String, error: String)) {
+    private func ask(_ world: CardWorld, _ words: [String], id: String = "probe") async throws -> (asker: HostSession, output: (status: Int32, output: String, error: String)) {
         let asker = try await world.host.spawn("exec /bin/sleep 600", cwd: world.repo, label: "Asker")
         try #require(await eventually(timeout: 60) { world.queue.sync { world.engine.link.sessions.contains { $0.id == asker.id && $0.isLive } } })
         let session = asker.id.uuidString.lowercased()
         let vault = world.host.book.vault(folder: scratch.url("asker-\(UUID().uuidString.prefix(6))"), as: { .session(session) }, userOpened: true)
         let facts = CardWorld.toolServer(of: asker)
         let ran = await offPool {
-            PluginAsk.run(["probe", "--"] + words, cwd: world.repo, vault: vault, root: world.host.root) { args in
+            PluginAsk.run([id, "--"] + words, cwd: world.repo, vault: vault, root: world.host.root) { args in
                 let wire = NodeWire.Value.object(args.mapValues { value -> NodeWire.Value in
                     if let text = value as? String { return .string(text) }
                     return .array((value as? [String] ?? []).map(NodeWire.Value.string))
@@ -270,16 +270,65 @@ struct ExternalPluginsTests {
         #expect(cards(world).contains { $0.isOpen }, "on again: it starts afresh")
     }
 
-    /// A copy of the probe plugin in `name`, its program with `extra` appended (other bytes, the same id).
-    private func copy(_ name: String, extra: String = "") throws -> URL {
+    /// A copy of the probe plugin in `name`, its program with `extra` appended (other bytes), under `id`.
+    private func copy(_ name: String, extra: String = "", id: String = "probe") throws -> URL {
         let folder = scratch.url(name)
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         let source = URL(fileURLWithPath: Self.probe)
-        try writeClosedOnExec(String(contentsOf: source.appendingPathComponent(PluginManifest.fileName), encoding: .utf8),
+        let manifest = try String(contentsOf: source.appendingPathComponent(PluginManifest.fileName), encoding: .utf8)
+        try writeClosedOnExec(manifest.replacingOccurrences(of: #""id": "probe""#, with: #""id": "\#(id)""#),
                               to: folder.appendingPathComponent(PluginManifest.fileName), mode: 0o644)
         let program = try String(contentsOf: source.appendingPathComponent("plugin.py"), encoding: .utf8)
-        try writeClosedOnExec(program + extra, to: folder.appendingPathComponent("plugin.py"))
+        try writeClosedOnExec(program.replacingOccurrences(of: #""plugin": "probe""#, with: #""plugin": "\#(id)""#) + extra,
+                              to: folder.appendingPathComponent("plugin.py"))
         return folder
+    }
+
+    /// A plugin's program that breached while a child of its (in a session of its own) holds its pipes open, the
+    /// process still held: no reader is left in `read` on a descriptor closed under it, so a pipe that takes its number
+    /// afterwards is never read (automated review 1: each reader owns its descriptor and ends at the cancel pipe).
+    @Test func aBreachedProgramsReadersNeverReadAReusedDescriptor() async throws {
+        let work = scratch.url("linger-work")
+        try FileManager.default.createDirectory(at: work, withIntermediateDirectories: true)
+        let copy = try Platform.ProcessSelf.sealedCopy(of: Self.probe + "/plugin.py", name: "plugin-linger").get()
+        let process = PluginProcess(id: "linger", note: { _ in })
+        let started = process.start(copy: copy, work: work)
+        Sys.close(copy.fd)
+        try started.get()
+        var strangers: [[Int32]] = []
+        defer {
+            try? Data().write(to: work.appendingPathComponent("stop"))
+            for pair in strangers { pair.forEach { Sys.close($0) } }
+            process.stop()
+        }
+        let ends = process.readEnds
+        try #require(ends.count == 2)
+        let ended = Locked<String?>(nil)
+        process.onEnd = { ended.value = $0 }
+        let payload = Data(#"{"words":["linger"]}"#.utf8).base64EncodedString()
+        process.call("card", ["request": "r1", "payload": payload, "settings": [String: String]()]) { _ in }
+        #expect(await eventually(timeout: 30) { ended.value != nil }, "the wrong id ended it")
+        // Its read ends' numbers let go: pipes made now take the lowest free numbers, theirs among them.
+        #expect(await eventually(timeout: 30) { ends.allSatisfy { fcntl($0, F_GETFD) == -1 } }, "its descriptors closed")
+        for _ in 0..<16 {
+            var pair: [Int32] = [-1, -1]
+            guard Sys.pipeClosedOnExec(&pair) == 0 else { break }
+            _ = fcntl(pair[0], F_SETFL, fcntl(pair[0], F_GETFL) | O_NONBLOCK)
+            _ = pair[1].withMarker { write(pair[1], $0, 6) }
+            strangers.append(pair)
+        }
+        try Data().write(to: work.appendingPathComponent("go"))
+        #expect(await eventually(timeout: 30) { FileManager.default.fileExists(atPath: work.appendingPathComponent("wrote").path) })
+        let stolen = {
+            strangers.contains { pair in
+                var buffer = [UInt8](repeating: 0, count: 6)
+                let count = read(pair[0], &buffer, 6)
+                if count > 0 { _ = pair[1].withMarker { write(pair[1], $0, count) } }
+                return count != 6
+            }
+        }
+        #expect(await eventually(timeout: 3) { stolen() } == false, "a reader read a pipe that took its descriptor's number")
+        withExtendedLifetime(process) {}
     }
 
     /// Removed, then another program added under the same id: off, its settings at their defaults, nothing of the
@@ -336,4 +385,9 @@ struct ExternalPluginsTests {
         await look(world)
         #expect(await eventually(timeout: 30) { self.probe(world)?.held?.contains("changed since you added it") == true })
     }
+}
+
+private extension Int32 {
+    /// Calls `body` with the marker a test puts in a pipe ("marker", 6 bytes).
+    func withMarker<T>(_ body: (UnsafeRawPointer) -> T) -> T { Array("marker".utf8).withUnsafeBytes { body($0.baseAddress!) } }
 }

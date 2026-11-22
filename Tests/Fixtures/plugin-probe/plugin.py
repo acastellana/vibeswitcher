@@ -2,8 +2,9 @@
 # The node's test plugin (docs/superpowers/specs/2026-11-22-v2-feature-plugins.md, "External plugins"): protocol v1 on
 # stdin and stdout, one JSON object a line. A request's first word chooses how it behaves, hostile ones included:
 # normal, page, nohash, controls (a card with an escape), wrong-id, out-of-order, oversize (a 300 KiB line), hang
-# (no answer to card), refuse (file refuses). It ends at the end of its input.
-import base64, json, sys
+# (no answer to card), refuse (file refuses), linger (a child in a session of its own keeps the node's pipes open, until
+# a file `stop` is in the working folder or 20 s, and the card's answer has a wrong id). It ends at the end of its input.
+import base64, json, os, sys, time
 
 def say(message):
     sys.stdout.write(json.dumps(message, separators=(",", ":")) + "\n")
@@ -33,6 +34,25 @@ for line in sys.stdin:
         words = words_of(ask["payload"])
         mode = words[0] if words else "normal"
         if mode == "hang":
+            continue
+        if mode == "linger":
+            if os.fork() == 0:
+                os.setsid()
+                if os.fork() == 0:
+                    end = time.time() + 20
+                    while time.time() < end and not os.path.exists("stop") and not os.path.exists("go"):
+                        time.sleep(0.05)
+                    try:
+                        os.write(1, b"{}\n")
+                    except OSError:
+                        pass
+                    open("wrote", "w").close()
+                    while time.time() < end and not os.path.exists("stop"):
+                        time.sleep(0.05)
+                    os._exit(0)
+                os._exit(0)
+            os.wait()
+            say({"id": rid + 1, "card": {}})
             continue
         if mode == "oversize":
             say({"id": rid, "card": {"title": "x" * (300 * 1024)}})
