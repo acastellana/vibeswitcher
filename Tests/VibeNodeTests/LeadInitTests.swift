@@ -133,6 +133,31 @@ struct LeadInitTests {
         #expect(LeadInit.repo(["ls-tree", "HEAD", "run.sh"], folder).output.hasPrefix("100755 "))
     }
 
+    /// Nothing from outside the folder is pulled into the commit: a planned file swapped for a link to a file outside
+    /// commits as a link (its target's path, never the file's bytes); a folder on a planned file's way swapped for a link
+    /// refuses with no commit.
+    @Test func aFileOrAParentSwappedForALinkPullsNothingFromOutside() throws {
+        let home = try home()
+        let outside = try folder(["secret.txt": "outside bytes\n", "sub/b.txt": "outside b\n"])
+        let swappedFile = try folder(["a.txt": "a\n"])
+        let planned = try plan(swappedFile, home: home)
+        try FileManager.default.removeItem(atPath: swappedFile + "/a.txt")
+        try FileManager.default.createSymbolicLink(atPath: swappedFile + "/a.txt", withDestinationPath: outside + "/secret.txt")
+        _ = made(planned, home: home)
+        let blob = LeadInit.repo(["cat-file", "blob", "HEAD:a.txt"], swappedFile)
+        #expect(!blob.output.contains("outside bytes"), "the outside file's bytes were committed")
+        if blob.ok { #expect(LeadInit.repo(["ls-tree", "HEAD", "a.txt"], swappedFile).output.hasPrefix("120000 "), "committed as the link it is") }
+
+        let swappedParent = try folder(["sub/b.txt": "inside b\n"])
+        let shown = try plan(swappedParent, home: home)
+        #expect(shown.files.contains("sub/b.txt"))
+        try FileManager.default.removeItem(atPath: swappedParent + "/sub")
+        try FileManager.default.createSymbolicLink(atPath: swappedParent + "/sub", withDestinationPath: outside + "/sub")
+        guard case .failure(let refused) = made(shown, home: home) else { Issue.record("made through a linked parent"); return }
+        #expect(refused.message.contains("sub/b.txt"), "\(refused)")
+        #expect(!FileManager.default.fileExists(atPath: swappedParent + "/.git"), "nothing left")
+    }
+
     /// A filter a .gitattributes in the folder names, defined in the repository's config, never runs as the files are
     /// staged (`hash-object --no-filters`); and a config that gains one after the plan is refused before anything runs.
     @Test func aPlantedFilterNeverRuns() throws {
@@ -147,7 +172,9 @@ struct LeadInitTests {
         try LeadInit.gitignore.write(toFile: folder + "/.gitignore", atomically: true, encoding: .utf8)
         let probe = scratch.url("stage-probe")
         try FileManager.default.createDirectory(at: probe, withIntermediateDirectories: true)
-        let staged = LeadInit.stage(planned, probe: probe, index: ["GIT_INDEX_FILE": probe.appendingPathComponent("index").path])
+        let directory = open(folder, O_RDONLY | O_DIRECTORY | O_CLOEXEC)
+        defer { close(directory) }
+        let staged = LeadInit.stage(planned, directory: directory, probe: probe, index: ["GIT_INDEX_FILE": probe.appendingPathComponent("index").path])
         guard case .success(let entries) = staged else { Issue.record("\(staged)"); return }
         let raw = LeadInit.repo(["hash-object", "--no-filters", "--", folder + "/a.txt"], folder).output.trimmingCharacters(in: .whitespacesAndNewlines)
         #expect(entries["a.txt"]?.object == raw)

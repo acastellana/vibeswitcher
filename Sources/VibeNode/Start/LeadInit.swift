@@ -363,7 +363,7 @@ public enum LeadInit {
         do { try VibePaths.ensurePrivate(probe) } catch { return undo(Refusal("a scratch folder couldn't be made: \(error.localizedDescription)")) }
         let own = ["GIT_INDEX_FILE": probe.appendingPathComponent("index").path]
         let entries: [String: Entry]
-        switch stage(plan, probe: probe, index: own) {
+        switch stage(plan, directory: directory, probe: probe, index: own) {
         case .failure(let refusal): return undo(refusal)
         case .success(let staged): entries = staged
         }
@@ -388,43 +388,92 @@ public enum LeadInit {
         return .success(Made(files: files, note: same() ? note : (note.map { $0 + "; " } ?? "") + "the folder changed during the commit: look at it before the lead starts"))
     }
 
-    /// Each planned path hashed as it is on disk (no filter: `--no-filters`; a link's target as its blob, a nested
-    /// repository by its HEAD), staged by mode and object into the index `index` names, then compared with it entry by
-    /// entry. Any path that isn't what the plan listed refuses.
-    static func stage(_ plan: Plan, probe: URL, index: [String: String]) -> Result<[String: Entry], Refusal> {
+    /// What is at a planned path, read relative to the folder's descriptor `directory` one component at a time
+    /// (`openat` with `O_NOFOLLOW`: a folder on the way swapped for a link refuses), never through the path.
+    enum Found {
+        case file(Data, executable: Bool)
+        case link(String)
+        case folder
+    }
+
+    static func read(_ path: String, in directory: Int32) -> Result<Found, Refusal> {
+        let shown = ConfigSeal.inert(path, limit: 200)
+        let parts = path.split(separator: "/").map(String.init)
+        guard let name = parts.last, !parts.contains(".."), !parts.contains(".") else { return .failure(Refusal("\(shown) isn't a path in the folder")) }
+        var parent = dup(directory)
+        guard parent >= 0 else { return .failure(Refusal("\(shown) couldn't be read (errno \(errno))")) }
+        defer { close(parent) }
+        for part in parts.dropLast() {
+            let next = openat(parent, part, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)
+            guard next >= 0 else {
+                return .failure(Refusal("the folder changed since the code was asked (\(shown): a folder on its way isn't one now, or is a link): nothing was committed"))
+            }
+            close(parent)
+            parent = next
+        }
+        var info = stat()
+        guard fstatat(parent, name, &info, AT_SYMLINK_NOFOLLOW) == 0 else {
+            return .failure(Refusal("the folder changed since the code was asked (shown and gone: \(shown)): nothing was committed"))
+        }
+        switch info.st_mode & S_IFMT {
+        case S_IFLNK:
+            var buffer = [CChar](repeating: 0, count: Int(PATH_MAX) + 1)
+            let count = readlinkat(parent, name, &buffer, Int(PATH_MAX))
+            guard count >= 0 else { return .failure(Refusal("\(shown) couldn't be read as a link (errno \(errno))")) }
+            return .success(.link(String(decoding: buffer.prefix(count).map { UInt8(bitPattern: $0) }, as: UTF8.self)))
+        case S_IFDIR:
+            return .success(.folder)
+        case S_IFREG:
+            let fd = openat(parent, name, O_RDONLY | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC)
+            guard fd >= 0 else { return .failure(Refusal("the folder changed since the code was asked (\(shown) couldn't be opened as a file): nothing was committed")) }
+            defer { close(fd) }
+            var opened = stat()
+            guard fstat(fd, &opened) == 0, opened.st_mode & S_IFMT == S_IFREG else {
+                return .failure(Refusal("the folder changed since the code was asked (\(shown) isn't a plain file now): nothing was committed"))
+            }
+            let data = (try? FileHandle(fileDescriptor: fd, closeOnDealloc: false).readToEnd()) ?? Data()
+            return .success(.file(data, executable: opened.st_mode & 0o111 != 0))
+        default:
+            return .failure(Refusal("\(shown) isn't a file now: nothing was committed"))
+        }
+    }
+
+    /// Each planned path read relative to the folder's descriptor (`read`: never through the path, so nothing from
+    /// outside the folder is pulled in), its bytes (a link's target) copied into the private `probe` and hashed from
+    /// there with no filter (`--no-filters`; a nested repository by its HEAD), staged by mode and object into the index
+    /// `index` names, then compared with it entry by entry. Any path that isn't what the plan listed refuses.
+    static func stage(_ plan: Plan, directory: Int32, probe: URL, index: [String: String]) -> Result<[String: Entry], Refusal> {
         let folder = plan.folder
         var entries: [String: Entry] = [:]
-        var regular: [(path: String, mode: String)] = []
+        var copies: [(path: String, mode: String, copy: String)] = []
         for (number, path) in plan.files.enumerated() {
-            let full = (folder as NSString).appendingPathComponent(path)
-            var info = stat()
-            guard lstat(full, &info) == 0 else { return .failure(Refusal("the folder changed since the code was asked (shown and gone: \(ConfigSeal.inert(path, limit: 200))): nothing was committed")) }
-            switch info.st_mode & S_IFMT {
-            case S_IFREG:
-                regular.append((path, info.st_mode & 0o111 != 0 ? "100755" : "100644"))
-            case S_IFLNK:
-                guard let target = try? FileManager.default.destinationOfSymbolicLink(atPath: full) else {
-                    return .failure(Refusal("\(ConfigSeal.inert(path, limit: 200)) couldn't be read as a link"))
-                }
-                let copy = probe.appendingPathComponent("link-\(number)")
-                guard FileManager.default.createFile(atPath: copy.path, contents: Data(target.utf8)) else { return .failure(Refusal("a scratch file couldn't be made")) }
-                let hashed = repo(["hash-object", "--no-filters", "-w", "--", copy.path], folder)
-                guard hashed.ok, !hashed.output.isEmpty else { return .failure(failed("hash-object", hashed)) }
-                entries[path] = Entry(mode: "120000", object: hashed.output.trimmingCharacters(in: .whitespacesAndNewlines))
-            case S_IFDIR where plan.nested.contains(path):
-                let nested = git(["rev-parse", "--verify", "--quiet", "HEAD^{commit}"], in: full)
+            let found: Found
+            switch read(path, in: directory) {
+            case .failure(let refusal): return .failure(refusal)
+            case .success(let read): found = read
+            }
+            let copy = probe.appendingPathComponent("blob-\(number)").path
+            switch found {
+            case .file(let data, let executable):
+                guard scratchCopy(data, at: copy) else { return .failure(Refusal("a scratch copy couldn't be made")) }
+                copies.append((path, executable ? "100755" : "100644", copy))
+            case .link(let target):
+                guard scratchCopy(Data(target.utf8), at: copy) else { return .failure(Refusal("a scratch copy couldn't be made")) }
+                copies.append((path, "120000", copy))
+            case .folder:
+                guard plan.nested.contains(path) else { return .failure(Refusal("\(ConfigSeal.inert(path, limit: 200)) is a folder now: nothing was committed")) }
+                // A reference: its commit's id only, nothing of its files.
+                let nested = git(["rev-parse", "--verify", "--quiet", "HEAD^{commit}"], in: (folder as NSString).appendingPathComponent(path))
                 guard nested.ok, !nested.output.isEmpty else {
                     return .failure(Refusal("\(ConfigSeal.inert(path, limit: 200)) is a repository of its own with no commit: it can't be committed as a reference"))
                 }
                 entries[path] = Entry(mode: "160000", object: nested.output.trimmingCharacters(in: .whitespacesAndNewlines))
-            default:
-                return .failure(Refusal("\(ConfigSeal.inert(path, limit: 200)) isn't a file now: nothing was committed"))
             }
         }
         var start = 0
-        while start < regular.count {
-            let slice = Array(regular[start..<min(start + batch, regular.count)])
-            let hashed = repo(["hash-object", "--no-filters", "-w", "--"] + slice.map { (folder as NSString).appendingPathComponent($0.path) }, folder)
+        while start < copies.count {
+            let slice = Array(copies[start..<min(start + batch, copies.count)])
+            let hashed = repo(["hash-object", "--no-filters", "-w", "--"] + slice.map(\.copy), folder)
             let objects = hashed.output.split(whereSeparator: \.isNewline).map(String.init)
             guard hashed.ok, objects.count == slice.count else { return .failure(failed("hash-object", hashed)) }
             for (item, object) in zip(slice, objects) { entries[item.path] = Entry(mode: item.mode, object: object) }
@@ -452,6 +501,11 @@ public enum LeadInit {
             return .failure(Refusal("the index read back isn't what was hashed from the folder: nothing was committed"))
         }
         return .success(entries)
+    }
+
+    /// `data` as a new private file at `path`, in the call's own scratch folder.
+    static func scratchCopy(_ data: Data, at path: String) -> Bool {
+        FileManager.default.createFile(atPath: path, contents: data, attributes: [.posixPermissions: 0o600])
     }
 
     /// The folder's `.gitignore` and `.git/info/exclude`, written relative to the folder's descriptor: each folder
