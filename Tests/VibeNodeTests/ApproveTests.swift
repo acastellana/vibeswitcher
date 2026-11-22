@@ -28,14 +28,14 @@ struct ApproveTests {
 
     /// `root` a project of the node's: its lead running (a session labelled as a lead's, started there, the vault's grant
     /// bound to it), as the engine lists it, and its rails recorded.
-    private func project(_ world: CardWorld, _ root: String) async throws {
+    private func project(_ world: CardWorld, _ root: String, floor: Bool = true) async throws {
         let session = try await world.host.spawn("exec sleep 600", cwd: root, label: "Lead · \((root as NSString).lastPathComponent)")
         let vault = world.host.vault
         try await offPool {
             let grant = try vault.startLead(root: root, branch: "main")
             try vault.bind(grant, root: root, session: session.id.uuidString)
         }
-        try await recordRails(world, root)
+        try await recordRails(world, root, floor: floor)
         let project = NodeIds.project(root: root)
         let listed = await eventually(timeout: 60) {
             world.engine.refresh()
@@ -44,11 +44,22 @@ struct ApproveTests {
         try #require(listed, "the engine never listed \(root)'s lead")
     }
 
-    /// `root`'s guard rails recorded as its workflow sets them now (as an accept records them).
-    private func recordRails(_ world: CardWorld, _ root: String) async throws {
+    /// `root`'s guard rails and review floor recorded as its workflow sets them now, exactly as an accept records them
+    /// (`ConfigHoldStore.recordedHashes`, `base_branch` among them; the floor it proposes).
+    private func recordRails(_ world: CardWorld, _ root: String, floor: Bool = true) async throws {
         let vault = world.host.vault
-        let hashes = LeadVault.guardedHashes(LeadWorkflow.load(from: ConfigHoldStore.workflowPath(root: root)))
-        try await offPool { try vault.setGuardedSettings(hashes, root: root) }
+        let workflow = LeadWorkflow.load(from: ConfigHoldStore.workflowPath(root: root))
+        try await offPool {
+            try vault.setGuardedSettings(ConfigHoldStore.recordedHashes(workflow), root: root)
+            if floor { _ = try vault.setReviewFloor(LeadReviewFloor.starting(from: workflow), root: root) }
+        }
+    }
+
+    /// `root`'s workflow.md set to `text`.
+    private func workflow(_ root: String, _ text: String) throws {
+        let url = URL(fileURLWithPath: ConfigHoldStore.workflowPath(root: root))
+        try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try text.write(to: url, atomically: true, encoding: .utf8)
     }
 
     private func list(_ world: CardWorld, only: [String] = ["config"]) async throws -> NodeWire.Value {
@@ -149,9 +160,7 @@ extension ApproveTests {
         let railed = scratch.url("railed")
         try await scratchRepository(railed)
         try await project(world, railed.path)
-        let workflow = URL(fileURLWithPath: ConfigHoldStore.workflowPath(root: railed.path))
-        try FileManager.default.createDirectory(at: workflow.deletingLastPathComponent(), withIntermediateDirectories: true)
-        try "---\ntest_command: make check\n---\n".write(to: workflow, atomically: true, encoding: .utf8)
+        try workflow(railed.path, "---\ntest_command: make check\n---\n")
         _ = await world.ask("config.held", ["folder": .string(railed.path)], action: nil)
         let listed = try await list(world, only: ["config", "base"])
         let subjects = (listed["items"]?.array ?? []).compactMap { $0["subject"]?.string }
@@ -188,6 +197,69 @@ extension ApproveTests {
         let unknown = try #require(await world.ask("approve", ["batch": .string("local:approve:none"), "code": .string("ABCD")]))
         #expect(unknown.error?.code == NodeWire.Code.gone.rawValue, "\(unknown)")
         #expect(!world.queue.sync { world.requests.accepted }.contains { $0.kind == "approve" })
+    }
+
+    /// The rails gate is the card's own, and the accept's: a base_branch changed counts as a rail, a floor the vault
+    /// hasn't recorded while the workflow proposes one counts; and a batch's card whose accept would record a rail
+    /// (the vault's record changed between the list and the code) is refused at approve, recording nothing.
+    @Test func aBatchNeverRecordsARailOrAFloorEvenIfTheRecordChangesMeanwhile() async throws {
+        let world = try await world()
+        defer { world.stop() }
+        let vault = world.host.vault
+        // base_branch changed since it was recorded: a rail to record.
+        let based = scratch.url("based")
+        try await scratchRepository(based)
+        try await project(world, based.path)
+        try workflow(based.path, "---\nbase_branch: develop\n---\n")
+        _ = await world.ask("config.held", ["folder": .string(based.path)], action: nil)
+        // No floor recorded while the workflow proposes one.
+        let floorless = scratch.url("floorless")
+        try await scratchRepository(floorless)
+        try await project(world, floorless.path, floor: false)
+        let unset = try await offPool { try vault.reviewFloor(root: floorless.path) }
+        try #require(unset == nil)
+        _ = await world.ask("config.held", ["folder": .string(floorless.path)], action: nil)
+        let listed = try await list(world)
+        let subjects = (listed["items"]?.array ?? []).compactMap { $0["subject"]?.string }
+        let own = (listed["own"]?.array ?? []).compactMap { $0["command"]?.string }
+        #expect(!subjects.contains(based.path) && own.contains("vibeswitcher config held \(based.path)"), "\(subjects) \(own)")
+        #expect(!subjects.contains(floorless.path) && own.contains("vibeswitcher config held \(floorless.path)"), "\(subjects) \(own)")
+        #expect(subjects.contains(world.repo), "\(listed)")
+
+        // Between the list and the code, the vault's record of the repo's rails changes (another accept, a newer
+        // workflow): the batch's card would write its older rails back. Refused at approve; nothing recorded.
+        let batch = try #require(listed["batch"]?.string)
+        let code = try #require(listed["code"]?.string)
+        let changed = ["test_command": LeadVault.hash("make other")]
+        try await offPool { try vault.setGuardedSettings(changed, root: world.repo) }
+        let before = try await offPool { try vault.guardedSettings(root: world.repo) }
+        let floorBefore = try await offPool { try vault.reviewFloor(root: world.repo) }
+        let done = try #require(await world.ask("approve", ["batch": .string(batch), "code": .string(code)]))
+        let result = try #require(done.result, "\(done)")
+        let refused = try #require(result["refused"], "\(result)")
+        #expect(refused["subject"]?.string == world.repo && refused["message"]?.string?.contains("which a batch never does") == true
+                && refused["message"]?.string?.contains("vibeswitcher config held \(world.repo)") == true, "\(result)")
+        let after = try await offPool { try vault.guardedSettings(root: world.repo) }
+        let floorAfter = try await offPool { try vault.reviewFloor(root: world.repo) }
+        #expect(after == before, "no rail recorded")
+        #expect(floorAfter == floorBefore, "no floor recorded")
+        let card = try #require((listed["items"]?.array ?? []).first { $0["subject"]?.string == world.repo }?["card"]?["id"]?.string)
+        #expect(world.queue.sync { world.engine.cards.cards[card]?.isOpen } == true, "the card left open for the folder's own accept")
+    }
+
+    @Test func aWorkflowEditedBetweenTheListAndTheCodeRecordsNoRail() async throws {
+        let world = try await world()
+        defer { world.stop() }
+        let vault = world.host.vault
+        let listed = try await list(world)
+        try #require((listed["items"]?.array ?? []).contains { $0["subject"]?.string == world.repo }, "\(listed)")
+        let before = try await offPool { try vault.guardedSettings(root: world.repo) }
+        try workflow(world.repo, "---\ntest_command: make edited\nbase_branch: edited\n---\n")
+        let batch = try #require(listed["batch"]?.string)
+        let code = try #require(listed["code"]?.string)
+        _ = try #require(await world.ask("approve", ["batch": .string(batch), "code": .string(code)]))
+        let after = try await offPool { try vault.guardedSettings(root: world.repo) }
+        #expect(after == before, "the edit's rails are never recorded by the batch")
     }
 
     /// The Mac's approval dialog names a batch within its budget: counts per kind, its folders once.

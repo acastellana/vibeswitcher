@@ -109,6 +109,17 @@ public enum ConfigHoldStore {
     /// said. First, look or not, the server's own config writes the host didn't take when they were made are asked
     /// again (`retrySealingAppWrites`): only the hashes those writes left are sealed so. `snapshot`: the project's last accepts (E8's `AcceptedSnapshot`), which say of each held thing and guard rail
     /// whether it's the same, changed or new since. Fails when the record can't be read.
+    /// What accepting `shown` would record besides its seals, exactly as `accept` records it (each guard rail of the card's
+    /// `rails` whose hash isn't the one the vault recorded, `base_branch` among them, or that it never recorded; and
+    /// "the review floor" when the card proposes one and the vault has none): empty when it records nothing of the kind.
+    /// `vibeswitcher approve` keeps such a card out of its batches, and refuses its accept inside one (`inBatch`).
+    public static func wouldRecord(_ shown: Shown, root: String, vault: LeadVault) throws -> [String] {
+        let recorded = try vault.guardedSettings(root: root) ?? [:]
+        var said = shown.rails.keys.sorted().filter { recorded[$0] != shown.rails[$0] }
+        if shown.floor != nil, try vault.reviewFloor(root: root) == nil { said.append("the review floor") }
+        return said
+    }
+
     public static func held(root: String, vault: LeadVault, home: String, look: Bool = true,
                             snapshot: AcceptedSnapshot.Project? = nil) -> Result<Shown, Error> {
         // The server's own writes of the agents' config (`hooks install`) the host couldn't seal when they were made,

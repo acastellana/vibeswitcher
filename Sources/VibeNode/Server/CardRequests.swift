@@ -257,7 +257,9 @@ extension Requests {
 
     func configAccept(_ request: NodeWire.Request, reply: @escaping (NodeWire.Reply) -> Void) {
         guard let (engine, card) = engineCard(request) else { return reply(.init(re: request.id, error: .init(.gone, "no such card"))) }
-        engine.configAccept(card: card.id) { [weak self] result in
+        // An item of `vibeswitcher approve`'s batch (`batch`, which the batch's own items set): refused when it would
+        // record a guard rail or a review floor. Without it, the user's own accept, as before.
+        engine.configAccept(card: card.id, inBatch: request.args?["batch"]?.bool == true) { [weak self] result in
             guard let self else { return }
             switch result {
             case .failure(let failure): reply(self.failed(request, failure))

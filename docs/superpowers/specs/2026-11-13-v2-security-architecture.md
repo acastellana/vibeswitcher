@@ -524,7 +524,11 @@ accepts (`vibeswitcher approve`).** The voice rule above is unchanged: the same 
 terminal under the weaker rule), and one typed code per user action. What changes is that one action may be a batch the
 user is shown whole first. `approve.list` (the user's voice, no typed word: it changes nothing) gathers, for the
 account's home and each repository with a running lead or in the vault's roster (never the accepted snapshot, a file an
-agent could write), every held config card whose guard rails and review floor are the ones the vault recorded, every
+agent could write), every held config card whose accept would record no guard rail and no review floor (of the card
+actually drawn: each of its rails, `base_branch` among them, as the vault recorded it, and a floor recorded when it
+proposes one; and, the guarantee, checked again inside the accept itself, in the same turn as the accept: a batch's
+config accept that would write any rail or floor is refused, nothing recorded, the card left open for
+`vs config held FOLDER`), every
 base-move card from a head the vault recorded (or the user gave) to another commit, and the hooks when out of date, but
 never beside a config accept (the hooks' write into the home's settings, sealed as written by `appWrite`, stays a step
 of its own; `appWrite` is unchanged). A card whose accept would record rails or a floor, a base moved from a head the

@@ -7,8 +7,9 @@ import VibeCore
 ///
 /// - **`approve.list`** (the user's, no typed word: it changes nothing, as `config.held` and `base.show`): every held
 ///   config card (the account's home and every repository with a running lead or in the vault's roster, never the
-///   accepted snapshot an agent could write; `config.held`'s card for each, those holding something) whose guard rails
-///   and review floor are the ones the vault recorded, every base-move card from a head the vault vouches for to
+///   accepted snapshot an agent could write; `config.held`'s card for each, those holding something) whose accept would
+///   record no guard rail and no review floor (`ConfigHoldStore.wouldRecord`, of the card drawn; and again, the
+///   guarantee, in the accept itself: `LeadEngine.configAccept(inBatch:)`), every base-move card from a head the vault vouches for to
 ///   another commit, and the hooks when out of date (`HooksRequest.outOfDate`: a program that isn't the build's, a
 ///   config without them; Claude's, and Codex's when its config is there) unless a config accept is in the batch. A card
 ///   with rails to record, a base moved from a head it can't vouch for, and hooks beside a config accept are the user's
@@ -81,25 +82,18 @@ extension Requests {
         // the accepted snapshot is), each still a repository.
         let leadRoots = engine.leads.leads.values.filter { $0.session != nil }.map(\.root)
         let binaries = notes?.notes.binaries
-        engine.reads.async({ _ -> (roots: [String], railsPending: Set<String>, hooks: [String], agents: [Agent]) in
+        engine.reads.async({ _ -> (roots: [String], hooks: [String], agents: [Agent]) in
             let roster = (try? vault.roster(root: nil))?.map(\.root) ?? []
             var seen = Set<String>()
             let projects = (leadRoots + roster).sorted().filter { root in
                 seen.insert(root).inserted && root != home && FileManager.default.fileExists(atPath: (root as NSString).appendingPathComponent(".git"))
             }
             let roots = [home] + projects
-            // A root whose guard rails (the review floor's keys among them) aren't the ones the vault recorded, or were
-            // never recorded: its accept would record them, so it is the user's own decision, never a batch's.
-            let railsPending = Set(roots.filter { root in
-                let now = LeadVault.guardedHashes(LeadWorkflow.load(from: ConfigHoldStore.workflowPath(root: root)))
-                guard let recorded = try? vault.guardedSettings(root: root) else { return true }
-                return LeadVault.guardedKeys.contains { now[$0] != recorded[$0] }
-            })
-            guard only.contains("hooks"), !nodeRoot.isEmpty else { return (roots, railsPending, [], []) }
+            guard only.contains("hooks"), !nodeRoot.isEmpty else { return (roots, [], []) }
             var agents: [Agent] = [.claude]
             if FileManager.default.fileExists(atPath: HookInstaller.configURL(for: .codex, home: home).path) { agents.append(.codex) }
             let reasons = HooksRequest(nodeRoot: nodeRoot, home: home, binaries: binaries, vault: vault).outOfDate(agents: agents)
-            return (roots, railsPending, reasons, agents)
+            return (roots, reasons, agents)
         }) { [weak self] found in
             guard let self else { return }
             var items: [ApproveItem] = []
@@ -110,16 +104,20 @@ extension Requests {
                 guard let root = left.first else { return then() }
                 engine.configHeld(root: root, diff: nil) { result in
                     queue.async {
-                        if case .success(let value) = result, let card = value["card"], let id = card["id"]?.string,
-                           (card["config"]?["items"]?.array?.isEmpty == false) {
-                            if found.railsPending.contains(root) {
+                        guard case .success(let value) = result, let card = value["card"], let id = card["id"]?.string,
+                              card["config"]?["items"]?.array?.isEmpty == false, let shown = engine.cards.cards[id]?.config else {
+                            return configs(Array(left.dropFirst()), then: then)
+                        }
+                        // Of the card actually drawn: what its accept would record besides its seals (as `accept` would).
+                        engine.reads.async({ _ in try? ConfigHoldStore.wouldRecord(shown, root: root, vault: vault) }) { pending in
+                            if pending?.isEmpty == true {
+                                items.append(ApproveItem(kind: "config.accept", args: ["card": .string(id), "batch": .bool(true)], subject: root, card: card))
+                            } else {
                                 own.append(ApproveOwn(text: "held config in \(root), with guard rails or a review floor to record",
                                                       command: "vibeswitcher config held \(root)"))
-                            } else {
-                                items.append(ApproveItem(kind: "config.accept", args: ["card": .string(id)], subject: root, card: card))
                             }
+                            configs(Array(left.dropFirst()), then: then)
                         }
-                        configs(Array(left.dropFirst()), then: then)
                     }
                 }
             }
