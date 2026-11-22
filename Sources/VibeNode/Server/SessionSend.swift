@@ -158,7 +158,7 @@ extension Requests {
                 engine.steerAsUser(message, session: session, agentPid: pid) { outcome in
                     switch outcome {
                     case .steered:
-                        engine.noteUserInput(session, typed: nil)
+                        engine.noteUserInput(session)
                         answer(nil, nil, true, nil)
                     case .idle:
                         // Its turn is over (or its hooks say nothing): a steer would wait for a step that never comes.
@@ -240,7 +240,7 @@ extension Requests {
             switch outcome {
             case .typed:
                 note("send to session \(short): typed in, \(held.message.count) characters, \(images.count) image(s)")
-                queue.async { [weak self] in self?.engine?.noteUserInput(session, typed: images.isEmpty ? held.text : nil) }
+                queue.async { [weak self] in self?.engine?.noteUserInput(session) }
             case .menuOpen(let open): note("send to session \(short): held, \(open)")
             case .refused(let why): note("send to session \(short): not typed: \(why)")
             }

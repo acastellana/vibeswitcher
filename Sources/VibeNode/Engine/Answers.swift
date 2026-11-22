@@ -746,7 +746,7 @@ extension LeadEngine {
         moves.onTaken = { [weak self] root, move, taker in
             guard let self else { return }
             for old in self.cards.list(project: NodeIds.project(root: root)) where old.kind == .baseMove {
-                self.cards.change(old.id) { $0.closed = taker == .you ? "accepted" : taker == .typed ? "taken: a git command the user sent made it" : "taken by the vault as the user's" }
+                self.cards.change(old.id) { $0.closed = taker == .you ? "accepted" : "taken by the vault as the user's" }
             }
             guard taker == .you, self.leads.leads[NodeIds.project(root: root)] != nil else { return }
             self.deliver(built: { "The user accepted \(move.count) on \(move.branch) at the command line (\(move.from.prefix(8)) → \(move.to.prefix(8))): "

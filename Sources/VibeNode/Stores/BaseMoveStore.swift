@@ -2,17 +2,22 @@ import Foundation
 import VibeCore
 
 /// Each lead's base, watched (the app's `BaseMoves` 88-217; the engine plan's E6): when it moved since the lead last left
-/// it, and not through its merges, the session host's vault is asked to take the move as the user's own
-/// (`LeadVault.judge`); when it doesn't, a `!` line with a git command the user sent into a session with `vibeswitcher
-/// send` (`typed`, the app's lines sent from its window: a shell command the agent runs with no hook seeing it) may
-/// account for it, judged as the app judges it (`LeadVault.runs`, `judge`, no slack), never for a move a team session
-/// could have made, each line used once. Otherwise (a commit no
+/// it, and not through its merges,
+/// the session host's vault is asked to take the move as the user's own (`LeadVault.judge`). Otherwise (a commit no
 /// session of the user's is seen making, a rewrite, a team member's) it becomes a card, asked once per move: `base
 /// accept` takes the base as the card showed it in the vault, with the lead and its team running on; `base keep` leaves
 /// the lead's merges refused and isn't asked again until it moves again. What it does is noted for the lead's merge to
 /// say (`LeadVault.BaseMoveNote`, `BaseMoveRefusal`), as the app writes them, on the engine's reads queue.
 ///
 /// `base show FOLDER [--from COMMIT]` (`show`) makes a card on demand, also with no lead running (a fresh vault's).
+///
+/// **Not the app's typed `!` lines** (on purpose, the independent review of 2026-11-22): a `!` git line the user sends
+/// with `vibeswitcher send` never accounts for a move. A line vouches for a time window, not for the move it made: any
+/// reflog entry that fits the window (whose time `GIT_COMMITTER_DATE` sets) would be taken, a team session's command
+/// the hooks' parser doesn't recognise (`env git …`, `sh -c`, an alias, a script) isn't seen as the team's, and a line
+/// that moved nothing stays open meanwhile; on a node, where every process of the user's can run git in the lead's
+/// folder, nobody can tell who wrote a reflog entry. So the user's own git line draws a card like any other move: one
+/// `vibeswitcher approve` away.
 ///
 /// Looked at from the engine's queue (`main`); git, the vault and the files' stamps are asked off it (`background`).
 public final class BaseMoveStore: @unchecked Sendable {
@@ -66,8 +71,6 @@ public final class BaseMoveStore: @unchecked Sendable {
         case vault
         /// The user, with `base accept`.
         case you
-        /// A `!` line the user sent into a session (`vibeswitcher send`).
-        case typed
     }
 
     public enum Outcome: Equatable, Sendable {
@@ -109,11 +112,6 @@ public final class BaseMoveStore: @unchecked Sendable {
     private var kept: [String: String] = [:]
     /// How often a base is looked at with nothing changed.
     public static let period: TimeInterval = 30
-    /// The `!` git lines the user sent lately (`typed`), on `main`'s queue.
-    public private(set) var sent: [LeadVault.Typed] = []
-    /// How long one is kept for a look to come (what it accounts for is `Typed.lasts` after it was sent), and used once:
-    /// by the move it's looked at for, taken or asked about.
-    public static let typedFor: TimeInterval = 300
 
     struct Stamps: Equatable {
         var reflog: BoardFiles.Stamp?
@@ -129,19 +127,9 @@ public final class BaseMoveStore: @unchecked Sendable {
         self.main = main
     }
 
-    /// The user sent `text` into the session `session`, which runs in `cwd` (`vibeswitcher send`, typed in): kept when
-    /// it's a `!` line with a git command that can move a branch (the app's `BaseMoves.typed`). On `main`'s queue.
-    public func typed(_ text: String, session: String, cwd: String, at: Date = Date()) {
-        let now = at.timeIntervalSince1970
-        sent.removeAll { now - $0.at > Self.typedFor }
-        guard let line = LeadVault.Typed.shell(text), !GitMoves.commands(in: line, cwd: cwd).isEmpty else { return }
-        sent = Array((sent + [LeadVault.Typed(session: session, line: line, cwd: cwd, at: now)]).suffix(50))
-    }
-
     /// The leads' roots, at each refresh. The reflog's and workflow.md's stamps are taken off the engine's queue.
     public func look(_ roots: Set<String>, now: Date = Date()) {
         if !Set(asking.keys).isSubset(of: roots) { asking = asking.filter { roots.contains($0.key) } }
-        let typed = sent.filter { now.timeIntervalSince1970 - $0.at <= Self.typedFor }
         for root in roots where !looking.contains(root) {
             let (known, last) = (branches[root], stamps[root])
             let due = lookedAt[root].map { now.timeIntervalSince($0) >= Self.period } ?? true
@@ -151,11 +139,11 @@ public final class BaseMoveStore: @unchecked Sendable {
                     return self.main { self.looking.remove(root) }
                 }
                 let branch = Self.base(root: root)
-                let found = Self.check(vault: vault, root: root, branch: branch, typed: typed, now: now)
-                let stamps = found.outcome == .waiting ? nil : self.stamps(root: root, branch: branch)
+                let outcome = Self.check(vault: vault, root: root, branch: branch)
+                let stamps = outcome == .waiting ? nil : self.stamps(root: root, branch: branch)
                 self.main {
                     self.lookedAt[root] = now
-                    self.looked(root, branch: branch, found.outcome, stamps: stamps, byTyped: found.byTyped, used: found.used)
+                    self.looked(root, branch: branch, outcome, stamps: stamps)
                 }
             }
         }
@@ -163,36 +151,19 @@ public final class BaseMoveStore: @unchecked Sendable {
 
     /// Asks the vault about the base's move, if it moved.
     public static func check(vault: LeadVault, root: String, branch: String) -> Outcome {
-        check(vault: vault, root: root, branch: branch, typed: [], now: Date()).outcome
-    }
-
-    /// The same, and when the vault doesn't take it, whether the `!` lines the user sent account for it (the app's
-    /// `BaseMoves.check`): `byTyped` when they did (the vault's head set where they moved it), and the lines looked at
-    /// for this move (`used`, gone after, taken or asked about).
-    static func check(vault: LeadVault, root: String, branch: String, typed: [LeadVault.Typed], now: Date)
-        -> (outcome: Outcome, byTyped: Bool, used: [LeadVault.Typed]) {
-        guard vault.headMoved(root: root, branch: branch) != nil, let move = try? vault.acceptMove(root: root, branch: branch) else { return (.still, false, []) }
-        if move.accepted { return (move.from == move.to ? .still : .taken(move), false, []) }
-        if move.waiting == true { return (.waiting, false, []) }
-        // A team session's command could have made it: only the user says so.
-        guard move.team != true, !typed.isEmpty,
-              let history = LeadVault.BaseHistory.read(root: root, branch: branch, since: move.from), history.head == move.to else { return (.ask(move), false, []) }
-        let at = now.timeIntervalSince1970
-        let used = typed.filter { !LeadVault.runs(typed: [$0], root: root, branch: branch, recorded: move.from, head: history.head, now: at).isEmpty }
-        let runs = LeadVault.runs(typed: used, root: root, branch: branch, recorded: move.from, head: history.head, now: at)
-        let yours = LeadVault.judge(from: move.from, history: history, branch: branch, runs: runs, now: at, slack: 0)
-        guard yours.accepted, (try? vault.setHead(yours.to, root: root, branch: branch)) != nil else { return (.ask(move), false, used) }
-        return (.taken(yours), true, used)
+        guard vault.headMoved(root: root, branch: branch) != nil, let move = try? vault.acceptMove(root: root, branch: branch) else { return .still }
+        if move.accepted { return move.from == move.to ? .still : .taken(move) }
+        if move.waiting == true { return .waiting }
+        return .ask(move)
     }
 
     /// What a look found, on `main`'s queue, with the stamps it took after (nil: none, while a command still runs).
-    func looked(_ root: String, branch: String, _ outcome: Outcome, stamps taken: Stamps?, byTyped: Bool = false, used: [LeadVault.Typed] = []) {
+    func looked(_ root: String, branch: String, _ outcome: Outcome, stamps taken: Stamps?) {
         looking.remove(root)
         branches[root] = branch
         // Still running: look again at the next refresh, whatever the reflog says.
         guard outcome != .waiting, let taken else { return }
         stamps[root] = taken
-        sent.removeAll { used.contains($0) }
         switch outcome {
         case .still, .waiting:
             asking[root] = nil
@@ -200,8 +171,8 @@ public final class BaseMoveStore: @unchecked Sendable {
         case .taken(let move):
             asking[root] = nil
             note(nil, root)
-            tell(root, move, byTyped ? .typed : .vault)
-            onTaken(root, move, byTyped ? .typed : .vault)
+            tell(root, move, .vault)
+            onTaken(root, move, .vault)
         case .ask(let move):
             guard kept[root] != move.to, asking[root] != move else { return }
             let new = asking[root]?.to != move.to
@@ -256,7 +227,6 @@ public final class BaseMoveStore: @unchecked Sendable {
         switch taker {
         case .vault: line = move.acceptedLine
         case .you: line = "You accepted \(move.count) on \(move.branch) from the command line: " + commits
-        case .typed: line = "accepted \(move.count) on \(move.branch) that you ran with vibeswitcher send: " + commits
         }
         log("lead: \(line) (\(move.from.prefix(8)) → \(move.to.prefix(8)))")
         let store = BoardStore(root: root)

@@ -53,21 +53,34 @@ struct SendTests {
         #expect(prompts(harness) == ["Run the tests\nthen tell me", "And the next"], "\(prompts(harness))")
     }
 
-    /// What the user typed is the engine's to know: the session's input (a lead's rotation quiet), and a `!` git line
-    /// kept for the base move it may make (`BaseMoveStore.typed`); words to the agent aren't a command of the user's.
-    @Test func aTypedMessageIsTheSessionsInputAndABangGitLineIsKept() async throws {
+    /// What the user typed is the session's input (a lead's rotation quiet), and only that: a `!` git line sent, and a
+    /// move of the lead's base after it, still draws a base-move card (`BaseMoveStore`'s doc: a line vouches for a time
+    /// window, not for the move it made). The fake runs nothing it's sent; the test makes the move.
+    @Test func aTypedMessageIsTheSessionsInputAndABangGitLineVouchesForNoBaseMove() async throws {
         let world = try await CardWorld.make(scratch)
         defer { world.stop() }
+        let lead = try await world.sleepingLead()
+        #expect(await eventually(timeout: 60) { world.queue.sync { world.engine.leads.leads[world.project]?.session == lead.id } })
         let harness = try await claude(world)
         let short = String(harness.session.id.uuidString.lowercased().prefix(8))
-        #expect(try #require(await send(world, short, "commit it for me")).ok)
-        try await harness.waitFor { prompts(harness).contains("commit it for me") }
+        try await taskBranch(world.repo, task: "mine")
+        #expect(try #require(await send(world, short, "! git merge -q --ff-only agent/mine")).ok)
+        // Typed in (a `!` line is Claude Code's shell mode, not a prompt: the fake's transcript doesn't have it).
         #expect(await eventually(timeout: 30) { world.queue.sync { world.engine.userInput[harness.session.id] != nil } })
-        #expect(world.queue.sync { world.engine.baseMoves.sent.isEmpty })
-        #expect(try #require(await send(world, short, "! git commit -am mine")).ok)
-        let kept = await eventually(timeout: 30) { world.queue.sync { world.engine.baseMoves.sent.map(\.line) == ["git commit -am mine"] } }
-        #expect(kept, "\(world.queue.sync { world.engine.baseMoves.sent })")
-        #expect(world.queue.sync { world.engine.baseMoves.sent.first?.session } == harness.session.id.uuidString)
+        #expect(Git.run(["merge", "-q", "--ff-only", "agent/mine"], in: world.repo).ok)
+        func baseCard() -> CardStore.Card? {
+            world.queue.sync { world.engine.cards.list(project: world.project).first { $0.kind == .baseMove && $0.closed == nil } }
+        }
+        // Each refresh drained before the next, as RefreshTests' base-move case waits on it.
+        var asked = false
+        for _ in 0..<300 where !asked {
+            world.engine.refresh()
+            await world.drained()
+            asked = baseCard() != nil
+            if !asked { try await Task.sleep(nanoseconds: 200_000_000) }
+        }
+        #expect(asked, "the user's own git line drew no card: \(world.queue.sync { world.engine.cards.list(project: world.project) })")
+        #expect(world.host.vault.headMoved(root: world.repo, branch: "main") != nil, "the vault took the move")
     }
 
     /// A question open on its screen that takes typed words (its "Type something." row, the app's free-text row): the

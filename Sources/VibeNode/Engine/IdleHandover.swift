@@ -323,14 +323,13 @@ extension LeadEngine {
 }
 
 extension LeadEngine {
-    /// The user typed into `session` with `vibeswitcher send` (`typed`: the words typed in, nil for a steer, which no
-    /// shell runs), on `queue`: a lead's quiet counts from now and a note asked of it is dropped (the app's
-    /// `noteLeadInput`), and a `!` git line may account for its base's move (`BaseMoveStore.typed`).
-    func noteUserInput(_ session: HostSession, typed: String?) {
+    /// The user typed into `session` with `vibeswitcher send` (or steered it), on `queue`: a lead's quiet counts from
+    /// now and a note asked of it is dropped (the app's `noteLeadInput`). What was typed is never a voucher for a base
+    /// move (`BaseMoveStore`'s doc says why): only the time is kept.
+    func noteUserInput(_ session: HostSession) {
         let now = handoverNow()
         userInput = userInput.filter { now.timeIntervalSince($0.value) < 86_400 }
         userInput[session.id] = now
         rotationAsked = rotationAsked.filter { $0.value.session != session.id }
-        if let typed { baseMoves.typed(typed, session: session.id.uuidString, cwd: session.cwd) }
     }
 }

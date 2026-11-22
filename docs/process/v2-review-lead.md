@@ -27,7 +27,7 @@ table, most visible first; each row says where it landed.
 | Rotation | improve | V1 counts the user's typing into the lead (its two-minute quiet, a delivery cancelling an ask); V2 counts from the engine's start, so a lead you just typed to can be rotated mid-thought | the user's `vibeswitcher send` to a lead session restarts its quiet (`IdleHandover`). **Built** (`noteUserInput`, typed or steered; drops an ask), IdleHandoverTests, SendTests |
 | A server or host restart | good | the lead rebound, held messages kept, `status` says how the host ended (RestartTests) | |
 | The config seal and Accept cards | good | `config held`, `config accept`, now `approve`; Claude Code's self-updates stay held with the card saying so: a user decision (verify against Anthropic's manifest, or pin) | |
-| Base moves | improve | V1 takes a move your own `!` git command (sent into the lead from the window) made without asking; V2 asks a card for it | a `!` line with a git command sent to a lead with `vibeswitcher send` accounts for the move it makes (V1's `typed`, `LeadVault.runs` and `judge`), within 5 minutes; a team session's command never does. **Built**: V1's five cases ported (BaseMoveStoreTests), the line noted once actually typed (a held message counts from when it goes in) |
+| Base moves | improve, then partly on purpose | V1 takes a move your own `!` git command (sent into the lead from the window) made without asking; V2 asks a card for it | built (4af65bc5), then removed after the independent review: a line vouches for a time window, not for the move it made, and on a node nobody can tell who wrote a reflog entry (a worker's `env GIT_COMMITTER_DATE=… git merge` within the window would have been taken). The user's own line draws a card, one `vibeswitcher approve` away (SendTests) |
 | Push to the remote | improve | the lead's tool reply tells it the user will "click Push on its card in VibeSwitcher", which the node has no card for: the lead says the wrong thing | on Linux the reply names `vibeswitcher push FOLDER` / `decline-push FOLDER` (shared file: a port-map row). **Built** (`LeadPush.waiting`, PushAsksTests) |
 | Fetch from and merge the remote | improve (unverified) | a shared tool no node run had used (fetch is used by A16's push request) | a scratch node run: `fetch_remote` then `merge_remote` brings a remote commit into the base. **Built**: acceptance A40 (passes: verified, no code change needed) |
 | Leads messaging each other, Between leads | good | `tell_lead` delivered, `mail` and the page's Between leads | |
@@ -78,9 +78,8 @@ Each its own commit with tests, the most visible first; the parity rows say wher
 
 1. `push_remote`'s reply on a node names `vibeswitcher push` / `decline-push` (`LeadPush.waiting`; shared file, a port-map row).
 2. `vibeswitcher lead FOLDER --init` (`FirstCommit`, `FolderRepository`); the lead's refusals name it.
-3. `send` is the user's input: the rotation's quiet and a dropped ask (`noteUserInput`), and a `!` git line accounts for
-   the base move it makes (`BaseMoveStore.typed`, the app's judgement). **For an independent review**: it lets a line
-   the user typed set the vault's head without a card.
+3. `send` is the user's input: the rotation's quiet and a dropped ask (`noteUserInput`). Its `!` git lines vouching for
+   a base move were built and then removed after the independent review (above): such a move draws a card.
 4. How the server last ended (`HostNotes.ServerEnd`; `HostProtocol.swift` shared, a port-map row), in `status --health`
    and the page.
 5. `vibeswitcher logs [--lines N] [--sessions]`.

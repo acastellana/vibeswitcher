@@ -389,12 +389,12 @@ struct IdleHandoverTests {
         defer { world.stop() }
         try world.write(age: 52 * 60)
         let session = try #require(world.link.sessions.first { $0.id == world.lead.session.id })
-        world.queue.sync { world.engine.noteUserInput(session, typed: "where are we?") }
+        world.queue.sync { world.engine.noteUserInput(session) }
         #expect(await world.look() == "quiet")
         #expect(world.asks.value.isEmpty, "typed to a minute ago: not asked")
         world.advance(121)
         #expect(await world.look() == "asked")
-        world.queue.sync { world.engine.noteUserInput(session, typed: nil) }
+        world.queue.sync { world.engine.noteUserInput(session) }
         #expect(world.queue.sync { world.engine.rotationAsked[world.repo] == nil }, "the user's words come before its note: the ask is dropped")
         #expect(await world.look() == "quiet")
         #expect(world.spawns.value.isEmpty)
