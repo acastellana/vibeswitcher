@@ -347,3 +347,33 @@ struct MacServerCheckTests {
         }
     }
 }
+
+/// Whether the server is dumpable, read patiently (`NodeCheck.patientDumpable`): an answer of "can't be told" is looked at
+/// again while the process is there, up to the patience; a process gone, or one still not told, is nil. The clock is
+/// the test's own.
+struct PatientDumpableTests {
+    final class Clock: @unchecked Sendable {
+        var now: TimeInterval = 0
+    }
+
+    @Test func cantBeToldIsAskedAgainUntilItIsTold() {
+        let clock = Clock()
+        var answers: [Bool?] = [nil, nil, false]
+        let read = { (_: pid_t) -> Bool? in answers.isEmpty ? false : answers.removeFirst() }
+        let told = NodeCheck.patientDumpable(4242, read: read, patience: 2, awake: { clock.now }, sleep: { clock.now += $0 }, alive: { _ in true })
+        #expect(told == false && answers.isEmpty)
+    }
+
+    @Test func neverToldOrGoneIsNil() {
+        let clock = Clock()
+        var reads = 0
+        let never = NodeCheck.patientDumpable(4242, read: { _ in reads += 1; return nil }, patience: 1, pause: 0.25,
+                                              awake: { clock.now }, sleep: { clock.now += $0 }, alive: { _ in true })
+        #expect(never == nil && reads == 5, "\(reads) reads in a second's patience a quarter apart")
+        reads = 0
+        let gone = NodeCheck.patientDumpable(4242, read: { _ in reads += 1; return nil }, awake: { clock.now }, sleep: { clock.now += $0 },
+                                             alive: { _ in false })
+        #expect(gone == nil && reads == 1, "a process gone isn't asked again")
+    }
+}
+

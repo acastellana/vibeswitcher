@@ -139,12 +139,33 @@ public enum NodeCheck {
         return nil
     }
 
-    /// The process `pid` as the command line reads it (`ServerCheck`): whether it is dumpable, its parent, its cgroup
-    /// lines and its session.
+    /// The process `pid` as the command line reads it (`ServerCheck`): whether it is dumpable (`patientDumpable`), its
+    /// parent, its cgroup lines and its session.
     public static func listener(pid: pid_t) -> Listener {
         let session = getsid(pid)
-        return Listener(pid: pid, dumpable: Platform.Processes.isDumpable(pid), parent: Platform.Processes.link(pid)?.parent,
+        return Listener(pid: pid, dumpable: patientDumpable(pid), parent: Platform.Processes.link(pid)?.parent,
                         cgroup: Platform.Processes.cgroup(pid), session: session > 0 ? session : nil)
+    }
+
+    /// How long the command line looks again at whether the server is dumpable while the answer is "can't be told".
+    public static let dumpablePatience: TimeInterval = 2
+
+    /// Whether `pid` is dumpable (`read`), looked at again every `pause` for up to `patience` of awake time while the
+    /// answer is "can't be told" and the process is still there: under load one read of its /proc entries can fail
+    /// (the 2026-11-21 flake of A30: the command line refused the node's own server, exit 77), as one look at
+    /// /proc/locks can miss a held lock (`lockPatience`). A process that is gone, or still can't be told, is nil.
+    public static func patientDumpable(_ pid: pid_t, read: (pid_t) -> Bool? = Platform.Processes.isDumpable,
+                                       patience: TimeInterval = dumpablePatience, pause: TimeInterval = 0.02,
+                                       awake: () -> TimeInterval = MacTime.real.awake,
+                                       sleep: (TimeInterval) -> Void = { usleep(useconds_t($0 * 1_000_000)) },
+                                       alive: (pid_t) -> Bool = { kill($0, 0) == 0 || errno == EPERM }) -> Bool? {
+        var answer = read(pid)
+        let deadline = awake() + patience
+        while answer == nil, awake() < deadline, alive(pid) {
+            sleep(pause)
+            answer = read(pid)
+        }
+        return answer
     }
 
     /// The Mac's listener (the review of 2026-11-21), every fact bound to the one audit token the socket gave
