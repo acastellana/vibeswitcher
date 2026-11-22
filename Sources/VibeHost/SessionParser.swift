@@ -225,7 +225,11 @@ final class ParserLink {
     /// Left once the read side is cancelled.
     private let readFinished = DispatchGroup()
     private var writeSource: DispatchSourceWrite?
+    /// What waits to be written to the parser, from `outboxSent` on: written bytes are skipped by the offset, and dropped
+    /// only once all of it went or the front passed half of it (removing the front of `Data` copies the rest: per write,
+    /// a replay of 8 MiB was copied some 128 times over).
     private var outbox = Data()
+    private var outboxSent = 0
     private var stopped = false
 
     /// Shared with `readQueue`, under `lock`.
@@ -423,16 +427,24 @@ final class ParserLink {
     }
 
     private func flush() {
-        while !outbox.isEmpty {
-            let written = outbox.withUnsafeBytes { Sys.write(fd, $0.baseAddress, $0.count) }
+        while outboxSent < outbox.count {
+            let written = outbox.withUnsafeBytes { Sys.write(fd, $0.baseAddress! + outboxSent, $0.count - outboxSent) }
             if written > 0 {
-                outbox = Data(outbox.dropFirst(written))
+                outboxSent += written
                 continue
             }
             if written < 0, errno == EINTR { continue }
             if written < 0, errno == EAGAIN { break }
             // The parser is gone: `gone` follows from the read side.
             outbox = Data()
+            outboxSent = 0
+        }
+        if outboxSent >= outbox.count {
+            outbox = Data()
+            outboxSent = 0
+        } else if outboxSent > outbox.count / 2 {
+            outbox = Data(outbox[(outbox.startIndex + outboxSent)...])
+            outboxSent = 0
         }
         if outbox.isEmpty {
             writeSource?.cancel()

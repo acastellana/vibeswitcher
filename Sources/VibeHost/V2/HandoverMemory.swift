@@ -245,6 +245,18 @@ public enum HandoverMemory {
     /// still when the new image went back before adopting it) closed when still held as inherited;
     /// every other descriptor `state` names that is still held as inherited made close-on-exec. A scratch host says
     /// what it found (`reports`). The Mac: nothing.
+    /// `state` without its sessions' output (each in its ring once restored): what `main` keeps for `finish`, which
+    /// needs only the descriptors, without some 8 MiB a full session (the architecture review's row 19).
+    public static func withoutOutput(_ state: HostHandover.State) -> HostHandover.State {
+        var kept = state
+        kept.sessions = state.sessions.map { session in
+            var light = session
+            light.output = Data()
+            return light
+        }
+        return kept
+    }
+
     public static func finish(_ state: HostHandover.State, statePath: String, server: HostServer) {
         guard !Platform.CodeIdentity.isAvailable else { return }
         let own = HostImages.ownCopy?.fd

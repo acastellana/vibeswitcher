@@ -224,7 +224,9 @@ public final class HostedSession {
             // output isn't known, and the end says so).
             session.captureOutput(saved.output, quietly: true)
             if let on = saved.focusEvents { session.focus = FocusEvents(on: on) } else { session.focus.feed(saved.output) }
-            session.startParser(replay: saved.output)
+            // Its parser rebuilt from the tail an attach is given (`restoredReplayLimit`), not all of it: the parser keeps
+            // only `SessionParser.scrollback` lines, and more lines come from the ring (`longView`), which holds it all.
+            session.startParser(replay: session.ring?.replay(limit: Self.restoredReplayLimit) ?? saved.output)
         }
         guard let fd else {
             session.closed = true
@@ -242,6 +244,12 @@ public final class HostedSession {
         session.write(saved.pendingInput)
         return session
     }
+
+    /// The most of a restored session's output its new parser is fed: the tail, from a line start (or from the latest
+    /// reset, when that is nearer), as an attach is replayed. Fed all of a full ring (8 MiB), each session's parser held
+    /// its own copy in flight and the host scanned it all for queries (the handover's cost, the architecture review's
+    /// row 19).
+    static let restoredReplayLimit = 1 << 20
 
     /// A parser for this session, rebuilt from `replay` (fed quietly), and the watchdog over it.
     private func startParser(replay: Data) {
