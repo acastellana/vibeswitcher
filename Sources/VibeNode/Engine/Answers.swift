@@ -677,18 +677,19 @@ extension LeadEngine {
     public func configAccept(card id: String, inBatch: Bool = false, then: @escaping (Result<NodeWire.Value, CardFailure>) -> Void) {
         queue.async { [self] in
             guard let card = cards.cards[id], let shown = card.config else { return then(.failure(.gone("no held-config card \(id)"))) }
-            let (root, vault, node) = (card.root, cardVault, self.root)
+            let (root, vault, node, queue) = (card.root, cardVault, self.root, self.queue)
             work.async { [weak self] in
                 if inBatch {
+                    // Answered on `queue`, as every other outcome (`Requests.offQueueReplies` found these from `work`).
                     let pending: [String]
                     do { pending = try ConfigHoldStore.wouldRecord(shown, root: root, vault: vault) } catch {
-                        return then(.failure(.refused("the vault can't say what this accept would record (\(error)): nothing was accepted")))
+                        return queue.async { then(.failure(.refused("the vault can't say what this accept would record (\(error)): nothing was accepted"))) }
                     }
                     if !pending.isEmpty {
                         let why = "this accept would record " + pending.map { ConfigSeal.inert($0, limit: 80) }.joined(separator: ", ")
                             + ", which a batch never does: nothing was accepted; accept it on its own: vibeswitcher config held \(root)"
                         self?.note("config accept of \(id) in a batch refused: \(why)")
-                        return then(.failure(.refused(why)))
+                        return queue.async { then(.failure(.refused(why))) }
                     }
                 }
                 let accepted = ConfigHoldStore.accept(shown, root: root, vault: vault, snapshotRoot: node)
