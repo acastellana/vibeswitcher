@@ -226,7 +226,13 @@ public enum WireSchema {
                 field("accepted", .list(.shape("node.accepted"))), field("notices", strings),
                 field("restart", Kind.shape("node.restart").orNull), field("reopen", .list(.shape("node.reopen"))), field("ended", .list(.shape("node.ended"))), field("ending", .list(.shape("node.ending"))),
                 field("builds", Kind.any.orNull), field("web", .shape("node.web")), field("usage", Kind.shape("node.usage").orNull),
-                optional("health", .shape("node.health")), field("boost", Kind.shape("node.boost").orNull)]),
+                optional("health", .shape("node.health")), field("boost", Kind.shape("node.boost").orNull),
+                optional("update", .shape("node.update"))]),
+            // Check for Updates (`UpdateWatch.value`, the feature review of 2026-11-22): the user's node's last look for this
+            // build; a scratch node's has none (the field is left out).
+            shape("node.update", from: "UpdateWatch.value (2026-11-22)", [
+                field("checkedAt", Kind.date.orNull), field("commit", Kind.string.orNull), field("aheadBy", Kind.int.orNull),
+                field("install", Kind.string.orNull), field("problem", Kind.string.orNull)]),
             // Boost (the app's `BoostMark`, 2026-11-21): null before the engine's first look.
             shape("node.boost", from: "LeadEngine.boostValue", [field("mode", .words(BoostMode.allCases.map(\.rawValue))), field("on", .bool),
                                                                field("why", .string), field("limits", .shape("node.boost.limits"))]),
