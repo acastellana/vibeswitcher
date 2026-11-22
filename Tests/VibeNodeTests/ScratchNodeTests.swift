@@ -115,11 +115,22 @@ struct ScratchNodeTests {
                           "session.usage", "chat.image", "stats", "settings", "mail", "recent", "session.ports", "board.task", "board.image", "brief",
                           "plugin.list"], "\(kinds)")
         var seq: [String: Int] = [:]
+        // The next frame that isn't a delta of a subscription made already (the node's value can change between one
+        // subscribe and the next, and its delta come first: the CI flake of 2026-11-22), each such delta checked in
+        // order (its `prev` the last `seq`).
+        func nextOwn() throws -> NodeWire.Value? {
+            while let frame = try socket.next() {
+                guard frame["kind"]?.string == "delta", let sub = frame["sub"]?.string, seq[sub] != nil else { return frame }
+                #expect(frame["prev"]?.int == seq[sub], "\(frame)")
+                seq[sub] = frame["seq"]?.int
+            }
+            return nil
+        }
         for (sub, collection) in [("s0", "node"), ("s1", "sessions"), ("s2", "leads"), ("s3", "cards")] {
             let id = try socket.send("subscribe", ["sub": .string(sub), "collection": .string(collection)])
-            let reply = try #require(try socket.next())
+            let reply = try #require(try nextOwn())
             #expect(reply["re"]?.string == id && reply["result"]?["mode"]?.string == "snapshot", "\(reply)")
-            let snapshot = try #require(try socket.next())
+            let snapshot = try #require(try nextOwn())
             #expect(snapshot["kind"]?.string == "snapshot" && snapshot["sub"]?.string == sub && snapshot["epoch"]?.string == hello["epoch"]?.string,
                     "\(snapshot)")
             seq[sub] = snapshot["seq"]?.int

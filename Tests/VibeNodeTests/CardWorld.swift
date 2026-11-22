@@ -59,7 +59,11 @@ final class CardWorld: @unchecked Sendable {
         return CardWorld(world: world, engine: LeadEngine(root: world.host.root, nodeRoot: nil, link: world.link, clock: nil, options: options))
     }
 
-    func stop() { world.stop() }
+    /// Stops the world, expecting every answer its server gave came on the requests' queue (`Requests.offQueueReplies`).
+    func stop() {
+        #expect(requests.offQueueReplies.isEmpty, "answered off the requests' queue: \(requests.offQueueReplies.sorted())")
+        world.stop()
+    }
 
     var project: String { NodeIds.project(root: repo) }
 
