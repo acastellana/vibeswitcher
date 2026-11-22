@@ -24,7 +24,7 @@ extension Requests {
         "answer": ["card", "code", "text", "version"], "hold": ["card", "code"], "config.accept": ["card", "code"],
         "base.accept": ["card", "code"], "base.keep": ["card", "code"],
         "start": [], "stop": [], "lead": ["folder", "goal", "resume", "replace", "takeHead"],
-        "hooks.install": ["agents"], "hooks.remove": ["agents"], "build.switch": ["commit"],
+        "hooks.install": ["agents"], "hooks.remove": ["agents"], "build.switch": ["commit"], "approve": ["batch", "code"],
         "web.open": ["tailnet"], "web.revoke": [], "tell": ["folder", "text"],
         "send": ["session", "text", "images", "now"],
         "session.new": ["folder", "agent", "model", "preset", "digest", "values"],
@@ -129,6 +129,12 @@ extension Requests {
             let agents = (args["agents"]?.array ?? []).compactMap(\.string).filter { Agent(rawValue: $0) != nil }
             guard !agents.isEmpty else { return .failure(.init(why: "\(kind) needs claude or codex: nothing was asked")) }
             return .success(("\(kind == "hooks.install" ? "install" : "remove") the hooks for \(agents.joined(separator: " and "))", nil))
+        case "approve":
+            guard let id = text("batch"), let batch = approveBatches.first(where: { $0.id == id }) else {
+                return .failure(.init(why: "approve needs a batch this server listed: nothing was asked"))
+            }
+            let shown = batch.items.map { "\($0.kind) \(Self.place($0.subject))" }.joined(separator: "; ")
+            return .success(("do \(batch.items.count) listed accept\(batch.items.count == 1 ? "" : "s"): \(shown)", nil))
         case "build.switch":
             guard let commit = text("commit"), UpdateWatch.isCommit(commit) else { return .failure(.init(why: "build.switch needs a commit: nothing was asked")) }
             return .success(("switch the node to build \(commit.prefix(12))", nil))

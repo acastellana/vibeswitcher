@@ -107,6 +107,8 @@ public final class Requests: @unchecked Sendable {
     public var health: NodeHealth?
     /// Check for Updates (`UpdateWatch`): the user's node's only. Its notice is `status`'s, its last answer `update`.
     public var updates: UpdateWatch?
+    /// The batches `approve.list` kept for `approve` (`ApproveRequest.swift`). On `queue`.
+    var approveBatches: [ApproveBatch] = []
     /// The waits a `build.switch` runs on (a test's shorter ones).
     public var switchTiming = SwitchRequest.Timing()
     /// The web's gate and tokens (the live plan's I1, `NodeLive`): what `web.open` and `web.revoke` act on; none:
@@ -192,7 +194,8 @@ public final class Requests: @unchecked Sendable {
                                                "hooks.install", "hooks.remove", "build.switch", "web.open", "web.revoke", "tell",
                                                "send", "session.new", "session.end", "session.reply",
                                                "set", "push", "push.decline", "session.reopen", "prompt-audit",
-                                               "session.rename", "session.pause", "session.resume", "session.close-shells", "presets.edit"]
+                                               "session.rename", "session.pause", "session.resume", "session.close-shells", "presets.edit",
+                                               "approve"]
     /// The kinds on a card: the card's code (EN-D5), typed by the user, is checked here.
     public static let carded: Set<String> = ["answer", "hold", "config.accept", "base.accept", "base.keep"]
     /// How many replies to recorded actions are kept, so a repeated action (a retry) gets the reply it got.
@@ -287,6 +290,8 @@ public final class Requests: @unchecked Sendable {
         case "recent": recent(request, reply: reply)
         case "brief": brief(request, reply: reply)
         case "update.check": updateCheck(request, reply: reply)
+        case "approve.list": approveList(request, reply: reply)
+        case "approve": approve(request, from: facts, reply: reply)
         case "session.ports": sessionPorts(request, reply: reply)
         case "set": set(request, reply: reply)
         case "answer": answer(request, reply: reply)

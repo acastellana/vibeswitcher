@@ -218,6 +218,8 @@ struct RequestsTests {
                                   "brief",
                                   // Check for Updates now (2026-11-21): the user's; it keeps only the watch's answer.
                                   "update.check",
+                                  // `vibeswitcher approve`'s list (2026-11-22): it changes nothing; the batch is its own.
+                                  "approve.list",
                                   // A session's dev servers (2026-11-21).
                                   "session.ports",
                                   // A board task's details, a result's screenshot (2026-11-21).
@@ -240,7 +242,9 @@ struct RequestsTests {
                                     // A session renamed, paused, resumed; finished shells closed (2026-11-20).
                                     "session.rename", "session.pause", "session.resume", "session.close-shells",
                                     // A launch preset edited (2026-11-20).
-                                    "presets.edit"]
+                                    "presets.edit",
+                                    // `vibeswitcher approve`'s batch (2026-11-22), each item recorded as its own action too.
+                                    "approve"]
         #expect(Set(NodeWire.kinds.keys) == reads.union(changes), "a kind added to NodeWire.kinds is classified here")
         for kind in reads { #expect(!NodeWire.changesState(kind), "\(kind)") }
         for kind in changes { #expect(NodeWire.changesState(kind), "\(kind)") }

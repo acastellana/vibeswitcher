@@ -123,6 +123,7 @@ public struct ApprovalVoice: Sendable {
         case "base.accept": return "accept a moved base branch"
         case "base.keep": return "keep a base branch where it was"
         case "hooks.install": return "install VibeSwitcher's hooks"
+        case "approve": return "accept the batch you listed"
         case "hooks.remove": return "remove VibeSwitcher's hooks"
         case "build.switch": return "switch your node to another build"
         case "web.open": return "open the web page to a device"

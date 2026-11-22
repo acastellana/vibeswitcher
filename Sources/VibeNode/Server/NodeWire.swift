@@ -328,12 +328,15 @@ public enum NodeWire {
         // Check for Updates now (`status --check-updates`, 2026-11-21): it asks GitHub and keeps the answer in the update
         // watch's own record, changing nothing else; the user's, with no typed word, never a session's or a page's.
         "update.check": .user,
+        // `vibeswitcher approve` (2026-11-22): the list of what a plain accept settles changes nothing (no typed word);
+        // the batch's go-ahead is the user's voice, one typed code, each item recorded as its own action.
+        "approve.list": .user, "approve": .user,
     ]
 
     /// The user's-voice kinds that change nothing (EN-D5: no typed word): `start` to a running node says when it
     /// started; `config.held` and `base.show` make the card the next request takes; `shells` lists the node's shells for
     /// Close Finished Shells; `update.check` asks GitHub now and keeps only its answer. (`mail`, a read of the user's or a page's, is `webRead`: it changes nothing either.)
-    public static let changesNothing: Set<String> = ["start", "config.held", "base.show", "shells", "update.check"]
+    public static let changesNothing: Set<String> = ["start", "config.held", "base.show", "shells", "update.check", "approve.list"]
 
     /// Whether `kind` changes state: every user's-voice kind but `changesNothing`'s, a kind added later included, and
     /// every web client's kind (a draft, a terminal). A kind missing from `kinds` needs the user's voice, as
@@ -367,7 +370,7 @@ public enum NodeWire {
                                "push", "push.decline",
                                "session.reopen", "mail", "prompt-audit", "session.rename", "session.pause",
                                "session.resume", "shells", "session.close-shells", "presets.edit",
-                               "recent", "brief", "update.check"]
+                               "recent", "brief", "update.check", "approve.list", "approve"]
 
     // MARK: Lines
 
