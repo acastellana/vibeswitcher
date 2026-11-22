@@ -228,3 +228,12 @@ export function summary(store) {
   if (working) parts.push(`${working} working`);
   return parts.join(' · ');
 }
+
+// A lead's row marks (the Mac's `WindowRowView`): `replaced` when another session of its project replaced it (the
+// lead's record lists it), `allDone` while its board's all-done mark is unseen (never on a replaced one).
+export function leadMarks(state, session) {
+  if (session?.role !== 'lead') return { replaced: false, allDone: false };
+  const replaced = !!state.leads.get(session.lead)?.replaced?.includes(session.id);
+  const done = state.boards.get(session.lead)?.allDone;
+  return { replaced, allDone: !replaced && !!done && !done.seen };
+}

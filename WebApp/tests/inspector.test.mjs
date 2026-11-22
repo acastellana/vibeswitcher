@@ -110,3 +110,14 @@ test('the ledger keeps the newest rows, counts an edit once however often it is 
   assert.deepEqual(ledger([{ id: 'n', kind: 'team', text: 'A report' }, { id: 'u', kind: 'tool', name: 'Other', title: 'Other', at: at(0) },
     { id: 'v', kind: 'tool', name: 'Todo', title: 'Todo', at: at(0), detail: { type: 'todos', todos: [] }, result: null }]), []);
 });
+
+test('a lead’s row says it was replaced, and shows the all-done check while its board’s mark is unseen', async () => {
+  const { leadMarks } = await import('../js/ui.js');
+  const state = (replaced, allDone) => ({ leads: new Map([['p', { project: 'p', session: 'new', replaced }]]), boards: new Map([['p', { project: 'p', allDone }]]) });
+  const lead = (id) => ({ id, role: 'lead', lead: 'p' });
+  assert.deepEqual(leadMarks(state(['old'], null), lead('old')), { replaced: true, allDone: false });
+  assert.deepEqual(leadMarks(state([], { id: 'm', seen: false }), lead('new')), { replaced: false, allDone: true });
+  assert.deepEqual(leadMarks(state([], { id: 'm', seen: true }), lead('new')), { replaced: false, allDone: false });
+  assert.deepEqual(leadMarks(state(['old'], { id: 'm', seen: false }), lead('old')), { replaced: true, allDone: false });
+  assert.deepEqual(leadMarks(state([], null), { id: 'w', role: 'worker', lead: 'p' }), { replaced: false, allDone: false });
+});

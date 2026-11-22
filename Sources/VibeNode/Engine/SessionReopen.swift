@@ -36,11 +36,12 @@ extension LeadEngine {
         let transcripts = Dictionary(hooked.compactMap { session in session.hostID.map { ($0, session.transcriptPath) } }, uniquingKeysWith: { $1 })
         let previous = openSessions.flatMap { abs($0.hostStartedAt - started) <= 0.001 ? $0.entries : nil } ?? []
         let live = RestartReopen.entries(hosted: link.sessions, sessions: hooked, previous: previous, replacedLeads: replaced)
-            .filter { $0.role == .user && $0.agent == .claude }
+            .filter { $0.role == .user && ($0.agent == .claude || $0.agent == .codex) }
             .map { entry -> RestartReopen.Entry in
                 guard entry.agentSessionID == nil, let path = transcripts[entry.id] ?? nil else { return entry }
                 var entry = entry
-                entry.agentSessionID = Self.conversation(ofTranscript: path)
+                // Claude's by the transcript's name; the user's own Codex session's by its rollout's, Codex's alone.
+                entry.agentSessionID = entry.agent == .codex ? Self.conversation(ofCodexRollout: path, home: home) : Self.conversation(ofTranscript: path)
                 return entry
             }
         let now = openNow(), liveIDs = Set(live.map(\.id))
@@ -94,7 +95,7 @@ extension LeadEngine {
     var offeredValue: NodeWire.Value {
         .array(offeredSessions.map { entry in
             .object(["session": .string(NodeIds.session(host: entry.id)), "folder": .string(entry.folder), "name": .string(entry.name),
-                     "conversation": entry.agentSessionID.map(NodeWire.Value.string) ?? .null])
+                     "conversation": entry.agentSessionID.map(NodeWire.Value.string) ?? .null, "agent": .string(entry.agent.rawValue)])
         })
     }
 
@@ -131,6 +132,8 @@ extension LeadEngine {
 
     /// What a reopen starts, from an entry that checked out.
     struct Reopening: Equatable {
+        /// `claude` or `codex` (the user's own Codex session, the feature review of 2026-11-22).
+        var agent: String = "claude"
         var folder: String
         var conversation: String
         var model: String?
@@ -149,7 +152,7 @@ extension LeadEngine {
     static func reopenable(_ entry: RestartReopen.Entry, home: String) -> Result<Reopening, Refused> {
         let shown = ConfigSeal.inert(entry.folder, limit: .max)
         func refused(_ why: String) -> Result<Reopening, Refused> { .failure(Refused("\(ConfigSeal.inert(entry.name, limit: 60)) in \(shown): \(why)")) }
-        guard entry.role == .user, entry.agent == .claude else { return refused("not one of your own Claude sessions") }
+        guard entry.role == .user, entry.agent == .claude || entry.agent == .codex else { return refused("not one of your own Claude or Codex sessions") }
         guard entry.folder.hasPrefix("/") else { return refused("its folder isn't an absolute path") }
         let parts = entry.folder.split(separator: "/", omittingEmptySubsequences: false).dropFirst()
         guard entry.folder == "/" || !parts.contains(where: { $0.isEmpty || $0 == "." || $0 == ".." }) else {
@@ -164,6 +167,11 @@ extension LeadEngine {
         }
         guard let id = entry.agentSessionID, !id.isEmpty else { return refused("its conversation id wasn't known") }
         guard UUID(uuidString: id) != nil else { return refused("its conversation id isn't one") }
+        let size = (cols: (20...500).contains(entry.cols) ? entry.cols : 120, rows: (5...200).contains(entry.rows) ? entry.rows : 36)
+        if entry.agent == .codex {
+            if let why = codexRefusal(conversation: id, folder: canonical, home: home) { return refused(why) }
+            return .success(Reopening(agent: "codex", folder: canonical, conversation: id.lowercased(), model: nil, cols: size.cols, rows: size.rows))
+        }
         let projects = URL(fileURLWithPath: home).appendingPathComponent(".claude/projects").resolvingSymlinksInPath()
         let folder = projects.appendingPathComponent(RecentProjects.claudeSlug(for: canonical)).path
         let path = URL(fileURLWithPath: folder).appendingPathComponent("\(id).jsonl").path
@@ -185,8 +193,52 @@ extension LeadEngine {
             guard Requests.isModelName(said) else { return refused("its recorded model \(ConfigSeal.inert(said, limit: 64)) isn't a model's name") }
             model = said
         }
-        return .success(Reopening(folder: canonical, conversation: id.lowercased(), model: model,
-                                  cols: (20...500).contains(entry.cols) ? entry.cols : 120, rows: (5...200).contains(entry.rows) ? entry.rows : 36))
+        return .success(Reopening(folder: canonical, conversation: id.lowercased(), model: model, cols: size.cols, rows: size.rows))
+    }
+
+    /// Why the Codex conversation `id` can't be resumed in `folder` (nil: it can), the record being only a hint: its
+    /// rollout must be in Codex's sessions folder in `home` (`<home>/.codex/sessions/YYYY/MM/DD/rollout-…-<id>.jsonl`, one
+    /// file, found by its name only in those three levels), a regular Codex transcript there (`TranscriptReader
+    /// .checkedURL`), whose first line is its `session_meta` naming that same id and `folder` as its `cwd`. A cold
+    /// rollout Codex compressed (`.jsonl.zst`) isn't resumed here: the line to resume it by hand is `vibeswitcher
+    /// resume`'s. Off the engine's queue (the disk).
+    static func codexRefusal(conversation id: String, folder: String, home: String) -> String? {
+        let lower = id.lowercased()
+        let sessions = URL(fileURLWithPath: home).appendingPathComponent(".codex/sessions").resolvingSymlinksInPath()
+        let manager = FileManager.default
+        func folders(_ url: URL) -> [URL] {
+            ((try? manager.contentsOfDirectory(atPath: url.path)) ?? []).filter { $0.count <= 4 && $0.allSatisfy(\.isNumber) }.sorted().suffix(400)
+                .map { url.appendingPathComponent($0) }
+        }
+        var found: [URL] = []
+        for year in folders(sessions) {
+            for month in folders(year) {
+                for day in folders(month) {
+                    for name in (try? manager.contentsOfDirectory(atPath: day.path)) ?? []
+                    where name.hasPrefix("rollout-") && name.lowercased().hasSuffix("-\(lower).jsonl") {
+                        found.append(day.appendingPathComponent(name))
+                    }
+                }
+            }
+        }
+        guard found.count == 1, let rollout = found.first else {
+            return found.isEmpty ? "Codex keeps no conversation \(lower) in its sessions folder (or only a compressed one: `codex resume \(lower)` in that folder resumes it)"
+                : "Codex keeps \(found.count) rollouts for conversation \(lower): it isn't resumed from a hint that names more than one"
+        }
+        guard let (url, format) = TranscriptReader.checkedURL(rollout.path, home: home), format == .codex,
+              url.path.hasPrefix(sessions.path + "/") else {
+            return "its rollout isn't a Codex transcript inside Codex's sessions folder"
+        }
+        guard let ends = edges(of: url), let first = ends.split(separator: UInt8(ascii: "\n"), maxSplits: 1).first,
+              let object = try? JSONSerialization.jsonObject(with: Data(first)) as? [String: Any],
+              object["type"] as? String == "session_meta", let payload = object["payload"] as? [String: Any] else {
+            return "its rollout doesn't start with Codex's session record"
+        }
+        guard (payload["id"] as? String)?.lowercased() == lower else { return "its rollout's session record names another conversation" }
+        guard let cwd = payload["cwd"] as? String, cwd == folder else {
+            return "its rollout ran in \(ConfigSeal.inert(payload["cwd"] as? String ?? "no folder", limit: .max)), not in this folder"
+        }
+        return nil
     }
 
     /// The folder a Claude transcript says it ran in: the first line of `data` (its first and last 64 KB, `edges`) that is
@@ -222,6 +274,7 @@ extension LeadEngine {
         .array(endedSessions.map { ended in
             .object(["session": .string(NodeIds.session(host: ended.entry.id)), "folder": .string(ended.entry.folder),
                      "name": .string(ended.entry.name), "conversation": ended.entry.agentSessionID.map(NodeWire.Value.string) ?? .null,
+                     "agent": .string(ended.entry.agent.rawValue),
                      "at": .date(Date(timeIntervalSince1970: ended.at)),
                      "exit": ended.exit.map { exit in
                          .object(["status": .int(Int(exit.status)), "cause": .string(exit.cause), "at": .date(exit.at)])

@@ -389,7 +389,7 @@ public enum WireVectors {
                              "liveSessions": .int(3), "notes": Requests.value(notes, at: date("2026-11-17T09:13:59.020Z"))]),
             "rule": .object(["mode": .string("systemd"), "says": .string("the user's voice is a terminal's process outside the node's unit"),
                              "scopes": .array([.string("/init.scope")])]),
-            "cards": Requests.counts([.question: 1]), "accepted": .array([]), "notices": .array([]), "restart": .null, "reopen": .array([]), "ended": .array([]), "builds": .null,
+            "cards": Requests.counts([.question: 1]), "accepted": .array([]), "notices": .array([]), "reminders": .array([]), "restart": .null, "reopen": .array([]), "ended": .array([]), "builds": .null,
             "ending": .array([.object(["session": .string(NodeIds.session(host: UUID(uuidString: "5c1e7a92-0000-4000-8000-000000000001")!)),
                                        "folder": .string("/home/u/notes"), "name": .string("notes"), "at": .string("2026-11-17T09:13:40.000Z"),
                                        "listedAt": .string("2026-11-17T09:14:10.000Z")])]),

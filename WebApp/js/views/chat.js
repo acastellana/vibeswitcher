@@ -11,6 +11,8 @@
 // - A reply that grows is drawn again in its own row only, keeping the blocks that didn't change.
 // - It stays where you are: new rows keep the view at the end only if it was there, and otherwise a small "Latest"
 //   button counts them.
+// - It opens where you were reading it in this page, else with "New since you looked" at the top, else at its end (the
+//   Mac's `ChatView.initialScroll`): coming back to a busy chat you start at what you haven't read.
 // - Its images drawn (images.js: their bytes asked of the node, `chat.image`), a picture that opens wide when tapped.
 // - A prompt's Copy, Edit in Composer and Send Again (a draft, as every message this page leaves), a reply's Copy as
 //   Markdown; the whole chat copied as Markdown or exported as a .md file (the Mac's Export Chat); and find in the
@@ -24,7 +26,7 @@ import { agentMark, statusMark, setMark, icon } from '../marks.js';
 import { since, short, clock, plural, tilde, stateOf, AGENTS, STATES, KEY } from '../words.js';
 import { markdown, diffView, codeBlock } from '../text.js';
 import { runnable } from '../runnable.js';
-import { summaryOf, newSince, sinceSummary, chatMarkdown, exportName, findIn, fold } from '../chatops.js';
+import { summaryOf, newSince, sinceSummary, chatMarkdown, exportName, findIn, fold, openingPlace } from '../chatops.js';
 import { imageLoader } from '../images.js';
 import { questionStack, askCard } from './cards.js';
 import { draftBox, promptCard, queuedStrip, drivable } from './drive.js';
@@ -453,6 +455,12 @@ export function chatView(app) {
   let jump = true;
   let shownQuestions = 0;
   let structural = true;
+  // Where each chat was left, by session: its top row's key and how far it was above the view's top (this page only).
+  const readAt = new Map();
+  // This chat's first view placed yet (where it opens: `openingPlace`).
+  let opened = false;
+  // A chat just shown, this turn: the session view's `reveal` after it leaves where it opens alone.
+  let shownJustNow = false;
   // The marker's row (its key) once the chat's items came; `marking`: not worked out yet for this chat.
   let markKey = null;
   let marking = true;
@@ -607,7 +615,17 @@ export function chatView(app) {
     const fresh = stack ? stack.update() : 0;
     renderLive(session);
     renderComposer(session);
-    if (loaded && pinned) {
+    if (loaded && !opened && jump) {
+      // Its first view: where it was left, else at what's new, else at the end.
+      opened = true;
+      const placed = placeOpening(list);
+      if (!placed) toEnd(false);
+      else {
+        latest.hidden = false;
+        setText(latestCount, '');
+      }
+      noteLooked(list);
+    } else if (loaded && pinned) {
       toEnd(false);
       noteLooked(list);
     }
@@ -617,6 +635,34 @@ export function chatView(app) {
     }
     shownQuestions = fresh;
     if (loaded) jump = false;
+  }
+
+  // The chat's first view at a row: the one it was left at (its offset kept), or the marker's (the marker at the top).
+  // False when it opens at the end.
+  function placeOpening(list) {
+    const place = openingPlace({ saved: readAt.get(view.session), markKey, keys: list.map(keyOf) });
+    if (place.kind === 'end') return false;
+    draw(list, Math.max(0, place.index - 8), Math.min(list.length, place.index + Math.max(FIRST_ROWS, 12)));
+    measure();
+    const row = rows.get(keyOf(list[place.index]));
+    if (!row) return false;
+    const top = place.kind === 'marker' && mark.parentNode === rowsEl ? mark.offsetTop : row.el.offsetTop;
+    // A marker a little below the top, so it reads as a line across; a row left at exactly where it was.
+    scroller.scrollTop = Math.max(0, top + place.offset - (place.kind === 'marker' ? 8 : 0));
+    // At the end anyway (a short chat): nothing to point at below.
+    if (atEnd()) return false;
+    follow();
+    return true;
+  }
+
+  // The row at the view's top, and how far above it is, for where the chat opens next time in this page.
+  function leftAt() {
+    const top = scroller.scrollTop;
+    for (const [key, row] of rows) {
+      if (row.el.hidden || row.el.parentNode !== rowsEl) continue;
+      if (row.el.offsetTop + row.el.offsetHeight > top) return { key, offset: Math.max(0, top - row.el.offsetTop) };
+    }
+    return null;
   }
 
   function renderLive(session) {
@@ -653,14 +699,20 @@ export function chatView(app) {
     if (drafting()) {
       // While it works, as the app's ↩ steers and ⌥↩ queues: ↩ leaves a draft that steers it now, ⌥↩ one for after.
       const steers = working && session.agent === 'claude';
-      input.placeholder = steers ? `Steer ${agent} while it works… (↩ leaves a send-now draft, ⌥↩ one for after its turn)`
-        : `Message ${agent}… (↩ leaves a draft)`;
+      // On a phone the words that fit one line; the keys are a keyboard's (the send button's title says what it does).
+      input.placeholder = narrow() ? (steers ? `Steer ${agent}…` : `Message ${agent}…`)
+        : steers ? `Steer ${agent} while it works… (↩ leaves a send-now draft, ⌥↩ one for after its turn)`
+          : `Message ${agent}… (↩ leaves a draft)`;
       sendButton.title = steers ? 'Leave as a send-now draft: it steers the agent at its next step (↩)' : 'Leave as a draft (↩)';
       sendButton.setAttribute('aria-label', steers ? 'Leave as a send-now draft' : 'Leave as a draft');
     } else {
-      input.placeholder = working ? `Steer ${agent} while it works — ↩ sends it to its next step` : `Message ${agent}…`;
+      input.placeholder = working ? (narrow() ? `Steer ${agent}…` : `Steer ${agent} while it works — ↩ sends it to its next step`) : `Message ${agent}…`;
     }
   }
+  // A phone's width (style.css's own breakpoint): the composer's words kept to one line. Drawn again as it changes.
+  const narrowQuery = globalThis.matchMedia?.('(max-width: 760px)');
+  const narrow = () => !!narrowQuery?.matches;
+  narrowQuery?.addEventListener?.('change', () => { if (view.session) schedule(); });
 
   const schedule = framed(render);
   const scrolled = framed(() => {
@@ -1072,6 +1124,14 @@ export function chatView(app) {
     show(id) {
       if (view.session === id) return;
       unsubscribe?.();
+      // Where this one was left, for when it opens again; at its end, it opens at its end again.
+      if (view.session && chat()?.loaded) {
+        const here = atEnd() ? null : leftAt();
+        if (here) readAt.set(view.session, here); else readAt.delete(view.session);
+      }
+      opened = false;
+      shownJustNow = true;
+      queueMicrotask(() => { shownJustNow = false; });
       if (view.session) store.closeChat(view.session);
       view.session = id;
       view.open = new Set();
@@ -1110,8 +1170,14 @@ export function chatView(app) {
       store.openChat(id);
       render();
     },
-    // Shown again after another pane had its place: back at the end.
-    reveal() { jump = true; structural = true; render(); },
+    // Shown again after another pane had its place: back at the end. Not as it opens (the session view reveals the
+    // chat it has just shown): then it opens where `openingPlace` says.
+    reveal() {
+      if (shownJustNow) return;
+      jump = true;
+      structural = true;
+      render();
+    },
     // Runs `work`, which changes the chat's width (its lines wrap again): at the end before, at the end after.
     hold(work) {
       const pinned = atEnd();
