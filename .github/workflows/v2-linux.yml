@@ -71,6 +71,7 @@ jobs:
         run: |
           swift --version
           node --version
+          google-chrome --version
       - name: Tests
         run: bash scripts/test.sh --filter 'VibeCoreTests|VibeNodeTests'
   host:
