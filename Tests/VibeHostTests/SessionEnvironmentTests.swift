@@ -38,6 +38,9 @@ struct SessionEnvironmentTests {
         let session = try await client.spawn("touch '\(ran)'; \(keepRunning)")
         defer { kill(-session.childPID, SIGKILL) }
         #expect(await eventually { FileManager.default.fileExists(atPath: ran) }, "\(host.log)")
+        // Waited for, not read once: bash execs the line's last command in its own process, and an environment read
+        // during that exec comes back empty (the CI flake of 2026-11-22). Its environment is the same after it.
+        try #require(await eventually { Self.environment(of: session.childPID) != nil }, "\(host.log)")
         return try #require(Self.environment(of: session.childPID), "\(host.log)")
     }
 
@@ -79,7 +82,7 @@ struct SessionEnvironmentTests {
         let build = "\(shortScratchRoot)/vsbp-\(UUID().uuidString.prefix(8))"
         defer { try? FileManager.default.removeItem(atPath: build) }
         for folder in ["/bin", "/Resources/bin"] { try FileManager.default.createDirectory(atPath: build + folder, withIntermediateDirectories: true) }
-        try FileManager.default.copyItem(atPath: hostLauncher, toPath: build + "/bin/vibeswitcher-host")
+        try installProgram(hostLauncher, atPath: build + "/bin/vibeswitcher-host")
         try installScript("#!/bin/sh\necho vs-heavy-here\n", atPath: build + "/Resources/bin/" + TestLock.command, mode: 0o755)
         let imaged = try await ScratchHostProcess(arguments: ["--image-path", build + "/bin/vibeswitcher-host"],
                                                   environment: ["PATH": "/usr/local/bin:/usr/bin:/bin"])
@@ -215,6 +218,8 @@ struct SessionEnvironmentTests {
         #expect(await eventually { app.reply(to: seq) != nil })
         guard case .spawned(let started)? = app.reply(to: seq) else { Issue.record("the app's refused: \(String(describing: app.reply(to: seq)))"); return }
         #expect(await eventually { FileManager.default.fileExists(atPath: ran) })
+        // Waited for: a read during bash's exec of the line's last command comes back empty (as `sessionEnvironment`).
+        #expect(await eventually { Self.environment(of: started.childPID) != nil })
         let environment = Self.environment(of: started.childPID)
         // A bash that isn't interactive unsets `PS1` and `PS2` as it starts, so the program its command ends in doesn't have it.
         for name in names where name != "PS1" { #expect(environment?[name] == refused[name], "\(name): \(String(describing: environment))") }

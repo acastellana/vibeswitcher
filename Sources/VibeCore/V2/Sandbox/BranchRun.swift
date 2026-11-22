@@ -333,7 +333,7 @@ public enum BranchRun {
         func refuse(_ why: String) -> Never {
             // Whoever would read it may have gone: the write fails then, and this still ends as refused.
             signal(SIGPIPE, SIG_IGN)
-            FileHandle.standardError.write(Data("vibeswitcher: this branch run wasn't started: \(why). Nothing of it ran.\n".utf8))
+            Platform.Stdio.error("vibeswitcher: this branch run wasn't started: \(why). Nothing of it ran.\n")
             exit(refused)
         }
         guard let request = Request(arguments: arguments) else { refuse("its box's launcher was given no whole request") }

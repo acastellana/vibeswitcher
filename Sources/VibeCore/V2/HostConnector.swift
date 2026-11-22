@@ -42,11 +42,15 @@ public enum HostConnector {
     /// on each connector in this process (a lock), so each reply goes to its asker; one that came after its asker
     /// gave up goes to the next, which is harmless: every connection the host makes this way is alike. Throws when no
     /// connection came: the host's end closed, a reply without exactly one descriptor, or `timeout` passed.
+    ///
+    /// `timeout` bounds the whole call, the wait for the lock included (the review of the runtime hardening: the
+    /// server's engine queue asks over it, and another asker holding the lock up to its own patience must not hold
+    /// that queue past this call's).
     public static func connect(over connector: Int32, timeout: TimeInterval) throws -> Int32 {
-        let lock = locks.lock(for: connector)
-        lock.lock()
-        defer { lock.unlock() }
         let deadline = Date().addingTimeInterval(timeout)
+        let lock = locks.lock(for: connector)
+        guard lock.lock(before: deadline) else { throw Failure.timedOut }
+        defer { lock.unlock() }
         // A host gone is EPIPE, not SIGPIPE: on the Mac the socket's own switch (`SO_NOSIGPIPE`, which `send`'s write
         // relies on there), set by `Platform.Sockets.pair` as it makes the connector's pair: here only for a connector
         // made elsewhere, as the Mac takes it only while the host's end is open; nothing on Linux, whose `send` says so.

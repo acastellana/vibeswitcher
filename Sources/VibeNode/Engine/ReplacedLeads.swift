@@ -61,12 +61,12 @@ extension LeadEngine {
             reads.async({ _ in
                 try? BoardStore(root: root).appendProgress("Ended the replaced lead session\(replaced.count == 1 ? "" : "s") \(ended) and \(replaced.count == 1 ? "its tool server" : "their tool servers"): only the current lead acts")
             }) { _ in }
-            releaseWhenEnded(gate, sessions: Set(replaced), until: Date().addingTimeInterval(Self.replacedEndLimit))
+            releaseWhenEnded(gate, sessions: Set(replaced), until: Platform.Clock.steadyDate().addingTimeInterval(Self.replacedEndLimit))
         }
     }
 
     private func releaseWhenEnded(_ gate: FileLock, sessions: Set<UUID>, until: Date) {
-        if Date() >= until || !link.sessions.contains(where: { sessions.contains($0.id) && $0.isLive }) { return gate.release() }
+        if Platform.Clock.steadyDate() >= until || !link.sessions.contains(where: { sessions.contains($0.id) && $0.isLive }) { return gate.release() }
         queue.asyncAfter(deadline: .now() + 0.1) { [weak self] in
             guard let self else { return gate.release() }
             self.releaseWhenEnded(gate, sessions: sessions, until: until)

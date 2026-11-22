@@ -69,11 +69,11 @@ extension Platform {
             }
         }
         if pending.isEmpty { stopWriting() }
-        let deadline = Date().addingTimeInterval(patience)
+        let deadline = Platform.Clock.awakeSeconds() + patience
         var chunk = [UInt8](repeating: 0, count: 65_536)
         withoutBrokenPipeSignal {
             while !(exited && ended), !stopped {
-                let left = deadline.timeIntervalSinceNow
+                let left = deadline - Platform.Clock.awakeSeconds()
                 guard left > 0 else { break }
                 // A descriptor below 0 is passed over: the writer once the input is written, the reader at its end.
                 var polled = [pollfd(fd: notes, events: Int16(POLLIN), revents: 0),

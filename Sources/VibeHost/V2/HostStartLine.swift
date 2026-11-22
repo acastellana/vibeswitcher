@@ -37,6 +37,6 @@ public enum HostStartLine {
     public static func say() {
         guard !Platform.CodeIdentity.isAvailable else { return }
         let backtrace = getenv("SWIFT_BACKTRACE").map { String(cString: $0) }
-        FileHandle.standardError.write(Data((text(pid: getpid(), commit: commit, backtrace: backtrace) + "\n").utf8))
+        Platform.Stdio.error(text(pid: getpid(), commit: commit, backtrace: backtrace) + "\n")
     }
 }

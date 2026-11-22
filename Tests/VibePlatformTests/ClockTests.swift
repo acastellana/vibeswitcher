@@ -3,6 +3,25 @@ import Testing
 import VibePlatform
 
 struct ClockTests {
+    /// The steady date moves with the awake clock, never back, and starts at the wall clock (read once): two readings
+    /// are the awake time apart, whatever the wall clock does between them.
+    @Test func theSteadyDateMovesWithTheAwakeClock() {
+        let awake = Platform.Clock.awakeSeconds()
+        let steady = Platform.Clock.steadyDate()
+        var last = steady
+        for _ in 0..<1000 {
+            let now = Platform.Clock.steadyDate()
+            #expect(now >= last)
+            last = now
+        }
+        let awakeAfter = Platform.Clock.awakeSeconds()
+        let moved = Platform.Clock.steadyDate().timeIntervalSince(steady)
+        #expect(moved >= 0 && moved <= Platform.Clock.awakeSeconds() - awake + 0.001, "moved \(moved), awake \(awakeAfter - awake)")
+        // Anchored to the wall clock: a steady date falls behind it only by the time the machine slept since the
+        // process's first reading, never runs ahead of it.
+        #expect(Platform.Clock.steadyDate() <= Date().addingTimeInterval(1))
+    }
+
     @Test func awakeSecondsNeverGoesBack() {
         var last = Platform.Clock.awakeSeconds()
         #expect(last > 0)

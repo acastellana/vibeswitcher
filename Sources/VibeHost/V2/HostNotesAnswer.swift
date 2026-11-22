@@ -85,7 +85,7 @@ extension HostServer {
         HostNotes(startedAt: startedAt, serverRestarts: tally.earlierServerRestarts + (serverChild?.restarts ?? 0),
                   replacedPaths: tally.replacedPaths, refusedAppConnections: tally.refusedAppConnections,
                   lockHeldElsewhere: tally.lockHeldElsewhere, lockHeldElsewhereCount: tally.lockHeldElsewhereCount,
-                  build: HostStartLine.commit, binaries: HostStartLine.binaries,
+                  build: HostStartLine.commit, binaries: HostStartLine.binaries, serverStuckInARow: serverChild?.stuckInARow,
                   lastServerEnd: serverChild?.lastEnd ?? tally.earlierServerEnd)
     }
 

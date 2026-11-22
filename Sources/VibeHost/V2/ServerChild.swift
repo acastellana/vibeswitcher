@@ -103,6 +103,8 @@ public final class ServerChild {
     public let webListeners = HostWebListeners(usersHost: true, note: { _ in })
     private var delay = ServerChild.firstDelay
     private var restartCount = 0
+    /// The children that ended stuck in a row (`stuckExit`); a child that ends any other way resets it. Under `lock`.
+    private var stuckCount = 0
     private var lastEndRecord: HostNotes.ServerEnd?
 
     private convenience init(server: HostServer, copy: Platform.ProcessSelf.SealedCopy, launch: Launch) {
@@ -409,6 +411,12 @@ public final class ServerChild {
     /// How many times a child was started again after one ended.
     public var restarts: Int { lock.withLock { restartCount } }
 
+    /// How many children in a row ended stuck: the server's watchdog's exit (`stuckExit`), its engine's queue
+    /// unanswered for its limit. The host's notes carry it, and the next server's `status` says so past a few.
+    public var stuckInARow: Int { lock.withLock { stuckCount } }
+
+    /// The exit code of a server that ends itself stuck (`NodeHealth.exitStuck`): EX_SOFTWARE.
+    public static let stuckExit: Int32 = 70
     /// How the child last ended on its own (`ended`, not a replacement's end), nil: none under this image.
     public var lastEnd: HostNotes.ServerEnd? { lock.withLock { lastEndRecord } }
 
@@ -526,7 +534,7 @@ public final class ServerChild {
             }
             Sys.close(connector)
             let watch = Platform.ProcessExit.watch(pid, queue: queue) { [weak self] in self?.ended(pid) }
-            lock.withLock { child = (pid, token, connector, Date(), watch) }
+            lock.withLock { child = (pid, token, connector, Platform.Clock.steadyDate(), watch) }
             Self.say(server, "server child pid \(pid) started from \(from), connector \(connector)")
         }
     }
@@ -558,11 +566,11 @@ public final class ServerChild {
         }
         let watch = Platform.ProcessExit.watch(pid, queue: queue) { [weak self] in self?.ended(pid) }
         lock.withLock {
-            child = (pid, token, record.connector, Date(), watch)
+            child = (pid, token, record.connector, Platform.Clock.steadyDate(), watch)
             self.due = due.map { (pid, $0) }
         }
         Self.say(server, "server child pid \(pid) carried over from the build before, connector \(record.connector)")
-        if due != nil { replaceWhenIdle(pid, carriedAt: Date()) }
+        if due != nil { replaceWhenIdle(pid, carriedAt: Platform.Clock.steadyDate()) }
     }
 
     /// The child `pid` ended: its connector closed (its connections with it), it reaped, and started again. On `queue`.
@@ -572,9 +580,11 @@ public final class ServerChild {
         server.closeAppConnector(running.connector)
         var status: Int32 = 0
         while waitpid(pid, &status, 0) < 0, errno == EINTR {}
-        let ran = Date().timeIntervalSince(running.startedAt)
+        let ran = Platform.Clock.steadyDate().timeIntervalSince(running.startedAt)
+        let stuck = status & 0x7f == 0 && (status >> 8) & 0xff == Self.stuckExit
         let replaced = lock.withLock { () -> Bool in
             child = nil
+            stuckCount = stuck ? stuckCount + 1 : 0
             if due?.pid == pid { due = nil }
             if ran >= Self.steadyRun { delay = Self.firstDelay }
             defer { if replacing == pid { replacing = nil } }
@@ -584,8 +594,10 @@ public final class ServerChild {
             Self.say(server, "server child pid \(pid) ended for the new build's server: \(HostLog.waitStatus(status)); started again from it now")
             return spawn()
         }
+        let inARow = lock.withLock { stuckCount }
         lock.withLock { lastEndRecord = HostNotes.ServerEnd(at: Date(), ran: ran, cause: HostNotes.ServerEnd.cause(status: status)) }
-        Self.say(server, "server child pid \(pid) ended after \(Int(ran)) s: \(HostLog.waitStatus(status)); started again in \(Int(lock.withLock { delay })) s")
+        Self.say(server, "server child pid \(pid) ended after \(Int(ran)) s: \(HostLog.waitStatus(status))"
+                 + (stuck ? " (stuck: its engine's queue didn't answer; \(inARow) in a row)" : "") + "; started again in \(Int(lock.withLock { delay })) s")
         scheduleRestart()
     }
 
@@ -608,12 +620,12 @@ public final class ServerChild {
         }
         if let hold = Self.replaceHold, access(hold, F_OK) != 0 { return again(nil) }
         if firstLook == nil, let carriedAt, server.appConnectionsMade(through: running.connector) == 0,
-           Date().timeIntervalSince(carriedAt) < Self.reconnectGrace {
+           Platform.Clock.steadyDate().timeIntervalSince(carriedAt) < Self.reconnectGrace {
             return again(nil)
         }
-        let since = firstLook ?? Date()
+        let since = firstLook ?? Platform.Clock.steadyDate()
         let open = server.appConnectionsOpen(through: running.connector)
-        guard open == 0 || Date().timeIntervalSince(since) >= Self.idleLimit else { return again(since) }
+        guard open == 0 || Platform.Clock.steadyDate().timeIntervalSince(since) >= Self.idleLimit else { return again(since) }
         lock.withLock { replacing = running.pid }
         Self.say(server, open == 0
                  ? "server child pid \(running.pid) idle: ended, to start again from the new build's server"
@@ -690,6 +702,6 @@ public final class ServerChild {
     /// A line in the host's log and on its stderr.
     private static func say(_ server: HostServer, _ line: String) {
         server.note("host: " + line)
-        FileHandle.standardError.write(Data("vibeswitcher-host: \(line)\n".utf8))
+        Platform.Stdio.error("vibeswitcher-host: \(line)\n")
     }
 }

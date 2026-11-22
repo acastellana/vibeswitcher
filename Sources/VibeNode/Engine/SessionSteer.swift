@@ -95,7 +95,7 @@ extension LeadEngine {
     /// new id and watched. On `queue`.
     private func typeSteered(_ id: String) {
         guard let steered = steerWatched[id], !flushing.contains(steered.agent.tty),
-              Date().timeIntervalSince(typedAt[steered.agent.tty] ?? .distantPast) > 10 else { return }
+              Platform.Clock.steadyDate().timeIntervalSince(typedAt[steered.agent.tty] ?? .distantPast) > 10 else { return }
         let agent = steered.agent
         flushing.insert(agent.tty)
         link.styledScreen(steered.hostID) { [weak self] screen in
@@ -117,7 +117,7 @@ extension LeadEngine {
                 self.steerWatched[id] = nil
                 // Out of the inbox by the node's own hand: its seal retired by name (`retireTaken`).
                 self.withdrawnUser.insert(id)
-                self.typedAt[agent.tty] = Date()
+                self.typedAt[agent.tty] = Platform.Clock.steadyDate()
                 self.note("steer to session \(steered.hostID): its turn ended before a step took it: typed in")
                 self.type(steered.text, into: steered.hostID) { [weak self] taken in
                     guard let self, !taken else { return }

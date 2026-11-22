@@ -375,7 +375,37 @@ public final class LiveHub: WebSocketHandler, @unchecked Sendable {
 
     private func snapshot(of stream: LiveStream, sub: String) -> Data {
         let (seq, entries) = stream.snapshot()
-        return NodeWire.message(NodeWire.Snapshot(sub: sub, collection: stream.collection, epoch: epoch, seq: seq, entries: entries))
+        return Self.fitted(NodeWire.Snapshot(sub: sub, collection: stream.collection, epoch: epoch, seq: seq, entries: entries))
+    }
+
+    /// The headroom a fitted snapshot leaves under the line's limit, for its envelope.
+    static let snapshotHeadroom = 16 * 1024
+
+    /// `snapshot` as a message, which fits a line (`NodeWire.maxLine`, the Unix socket's and a WebSocket message's
+    /// limit: one past it is never delivered, and its subscriber would ask again for good). When it doesn't, entries
+    /// are left out until it does, and it says `truncated` (the architecture review's row 14): a closed card first
+    /// (`open` false), the largest first, then any entry, the largest first. The deltas after it go on as ever.
+    static func fitted(_ snapshot: NodeWire.Snapshot) -> Data {
+        let whole = NodeWire.message(snapshot)
+        guard whole.count > NodeWire.maxLine else { return whole }
+        let budget = NodeWire.maxLine - snapshotHeadroom
+        var sized = snapshot.entries.enumerated().map { (index: $0.offset, entry: $0.element, bytes: NodeWire.message($0.element).count + 1) }
+        var total = sized.reduce(0) { $0 + $1.bytes }
+        // The order they go in: closed ones before open ones, larger before smaller.
+        let going = sized.sorted { one, other in
+            let (oneClosed, otherClosed) = (one.entry.value["open"] == .bool(false), other.entry.value["open"] == .bool(false))
+            return oneClosed != otherClosed ? oneClosed : one.bytes > other.bytes
+        }
+        var dropped = Set<Int>()
+        for candidate in going where total > budget {
+            dropped.insert(candidate.index)
+            total -= candidate.bytes
+        }
+        sized.removeAll { dropped.contains($0.index) }
+        var fitted = snapshot
+        fitted.entries = sized.map(\.entry)
+        fitted.truncated = true
+        return NodeWire.message(fitted)
     }
 
     /// `work` on `queue`: at once when this is it, else next, after what was asked before.

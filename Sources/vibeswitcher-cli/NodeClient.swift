@@ -201,6 +201,9 @@ final class NodeClient {
     private var lines = NodeWire.Lines()
     private var ready: [Data] = []
     private var counter = 0
+    /// Whether the last `send` got no reply (the connection closed, a bye, the time passed): `change` journals such a
+    /// state change as `unanswered`.
+    private var unansweredLast = false
 
     private init(fd: Int32, hello: NodeWire.Hello, context: NodeContext, lines: NodeWire.Lines, ready: [Data]) {
         self.fd = fd
@@ -229,10 +232,13 @@ final class NodeClient {
         }
         var lines = NodeWire.Lines()
         var ready: [Data] = []
-        guard let first = read(fd, &lines, &ready, until: Date().addingTimeInterval(timeout)),
-              let hello = NodeWire.decode(NodeWire.Hello.self, first), hello.kind == "hello" else {
+        let first = read(fd, &lines, &ready, until: Platform.Clock.steadyDate().addingTimeInterval(timeout))
+        let hello: NodeWire.Hello
+        switch NodeWire.greeting(first) {
+        case .success(let given): hello = given
+        case .failure(let why):
             Sys.close(fd)
-            return .failure(.broken("the node's server sent no hello"))
+            return .failure(.broken(ConfigSeal.inert(why.description, limit: 500)))
         }
         warnOfBuild(server: hello.server.commit)
         return .success(NodeClient(fd: fd, hello: hello, context: context, lines: lines, ready: ready))
@@ -290,9 +296,15 @@ final class NodeClient {
         if NodeWire.changesState(kind), typed?.vouches(for: action) != true {
             return .failure(.refused("\(kind) wasn't sent: no typed code was asked for it"))
         }
+        unansweredLast = false
         let answer = send(kind, args: args, action: action, timeout: timeout)
         if case .success(let reply) = answer, reply.ok || (when == .accepted && reply.error?.code == NodeWire.Code.refused.rawValue) {
             context.writeJournal(NodeJournal.entry(event: "request", action: action, kind: kind, epoch: hello.epoch))
+        }
+        // No reply came (the connection closed, a bye, the time passed): the action may have been recorded, and done,
+        // before the server went, so its outcome isn't known; said with its id (`unanswered`) and journaled so.
+        if case .failure = answer, unansweredLast {
+            context.writeJournal(NodeJournal.entry(event: "unanswered", action: action, kind: kind, epoch: hello.epoch))
         }
         return answer
     }
@@ -307,11 +319,11 @@ final class NodeClient {
     /// Sends one request and waits for its reply. Answered `not-yet`, it is asked again, a quarter second apart, for up
     /// to `notYetPatience`; then the last answer is the reply.
     private func send(_ kind: String, args: [String: NodeWire.Value]?, action: String?, timeout: TimeInterval) -> Result<NodeWire.Reply, Failure> {
-        let patience = Date().addingTimeInterval(Self.notYetPatience)
+        let patience = Platform.Clock.steadyDate().addingTimeInterval(Self.notYetPatience)
         let timeout = approvalRule && NodeWire.changesState(kind) ? max(timeout, Self.approvalPatience) : timeout
         while true {
             let answer = ask(kind, args: args, action: action, timeout: timeout)
-            guard case .success(let reply) = answer, reply.error?.code == NodeWire.Code.notYet.rawValue, Date() < patience else { return answer }
+            guard case .success(let reply) = answer, reply.error?.code == NodeWire.Code.notYet.rawValue, Platform.Clock.steadyDate() < patience else { return answer }
             usleep(250_000)
         }
     }
@@ -330,26 +342,43 @@ final class NodeClient {
             }
             return true
         }
-        guard sent else { return .failure(.broken("the node's server closed the connection")) }
-        let deadline = Date().addingTimeInterval(timeout)
+        guard sent else { return unanswered(kind, action, "the node's server closed the connection") }
+        let deadline = Platform.Clock.steadyDate().addingTimeInterval(timeout)
         while let next = Self.read(fd, &lines, &ready, until: deadline) {
             guard let envelope = NodeWire.decode(NodeWire.Envelope.self, next) else { continue }
             if envelope.kind == "bye" {
                 let reason = NodeWire.decode(NodeWire.Bye.self, next)?.reason ?? "no reason"
-                return .failure(.broken("the node's server closed the connection: \(ConfigSeal.inert(reason, limit: .max))"))
+                return unanswered(kind, action, "the node's server closed the connection: \(ConfigSeal.inert(reason, limit: .max))")
             }
             if envelope.re == id, let reply = NodeWire.decode(NodeWire.Reply.self, next) { return .success(reply) }
         }
         // An older server's reply past the line's limit (today's says so in a reply of its own: `NodeWire.replyLine`).
         if lines.tooLong { return .failure(.broken("the node's server answered \(kind) with a line past the limit of \(NodeWire.maxLine) bytes: ask for less")) }
-        return .failure(.broken("the node's server didn't answer \(kind)"))
+        if Platform.Clock.steadyDate() < deadline {
+            return unanswered(kind, action, "the node's server closed the connection before answering \(kind) (it may have restarted)")
+        }
+        return unanswered(kind, action, "the node's server didn't answer \(kind) in \(Int(timeout)) s")
+    }
+
+    /// No reply came to `kind`: `why`, and for a state change with an action id that id and that its outcome isn't
+    /// known (it may have been recorded, and done, before the server went), which `change` journals (the
+    /// architecture review's row 10).
+    private func unanswered(_ kind: String, _ action: String?, _ why: String) -> Result<NodeWire.Reply, Failure> {
+        guard let action, NodeWire.changesState(kind) else { return .failure(.broken(why)) }
+        unansweredLast = true
+        return .failure(.broken(Self.outcomeUnknown(why, action: action)))
+    }
+
+    /// What the command line says of a state change that got no reply.
+    static func outcomeUnknown(_ why: String, action: String) -> String {
+        "\(why). Action \(action): whether it was carried out isn't known; `vibeswitcher status` shows what is now"
     }
 
     /// The next whole line from `fd`, waiting until `deadline`; nil at the end, or past it.
     private static func read(_ fd: Int32, _ lines: inout NodeWire.Lines, _ ready: inout [Data], until deadline: Date) -> Data? {
         var chunk = [UInt8](repeating: 0, count: 64 * 1024)
         while ready.isEmpty {
-            let left = deadline.timeIntervalSinceNow
+            let left = deadline.timeIntervalSince(Platform.Clock.steadyDate())
             guard left > 0, !lines.tooLong else { return nil }
             var watched = pollfd(fd: fd, events: Int16(POLLIN), revents: 0)
             let woke = poll(&watched, 1, Int32(min(left * 1_000, 60_000)))

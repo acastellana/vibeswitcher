@@ -166,7 +166,7 @@ public enum HandoverMemory {
     static func startProbe() {
         Platform.ProcessSelf.closeInheritedImage()
         if case .refused(let why) = HostHardening.atStart(mode: .parser) {
-            FileHandle.standardError.write(Data("vibeswitcher-host: handover probe: not started: \(why)\n".utf8))
+            Platform.Stdio.error("vibeswitcher-host: handover probe: not started: \(why)\n")
             exit(1)
         }
     }
@@ -353,8 +353,8 @@ public enum HandoverMemory {
         let carried = carriedOwnsLaunchers(arguments: arguments, hardening: hardening, refused: refused)
         let owns = HostHardening.ownsLaunchers(probed: probed, carried: carried)
         if owns, !probed {
-            FileHandle.standardError.write(Data(("vibeswitcher-host: its lock path's probe found a lock of its own, but the state the image "
-                + "before wrote says this is the user's host: it is the user's host\n").utf8))
+            Platform.Stdio.error("vibeswitcher-host: its lock path's probe found a lock of its own, but the state the image "
+                + "before wrote says this is the user's host: it is the user's host\n")
         }
         return owns
     }
@@ -371,7 +371,7 @@ public enum HandoverMemory {
     /// A line in the host's log and on its stderr.
     static func say(_ server: HostServer, _ line: String) {
         server.note("host: " + line)
-        FileHandle.standardError.write(Data("vibeswitcher-host: \(line)\n".utf8))
+        Platform.Stdio.error("vibeswitcher-host: \(line)\n")
     }
 
     // MARK: Test flags, stale files

@@ -231,4 +231,26 @@ struct HostConnectorTests {
         _ = shutdown(host, Int32(SHUT_RDWR))
         await asking.value
     }
+
+    /// A connection's bound covers its wait for the connector's lock too (the review of the runtime hardening: the
+    /// server's engine queue asks over it): one asked for meanwhile, which the host never answers, holds the lock for its
+    /// own 30 s, and a second gives up at its own 0.5 s, while the first still waits.
+    @Test func aConnectionsBoundCoversTheLocksWait() async throws {
+        let (host, connector) = try #require(Platform.Sockets.pair(type: Platform.Sockets.connectorType))
+        defer { Sys.close(host); Sys.close(connector) }
+        let firstEnded = LockedFlag()
+        let asking = Task.detached {
+            _ = try? HostConnector.connect(over: connector, timeout: 30)
+            firstEnded.set(true)
+        }
+        var byte: UInt8 = 0
+        let (count, _) = await offPool { withUnsafeMutableBytes(of: &byte) { Platform.Sockets.receive(host, into: $0) } }
+        #expect(count == 1)
+        await #expect(throws: HostConnector.Failure.timedOut) {
+            try await offPool { _ = try HostConnector.connect(over: connector, timeout: 0.5) }
+        }
+        #expect(firstEnded.value == nil, "the second waited for the first to give up")
+        _ = shutdown(host, Int32(SHUT_RDWR))
+        await asking.value
+    }
 }

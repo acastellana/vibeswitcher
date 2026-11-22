@@ -20,7 +20,7 @@ final class SessionCompletions: @unchecked Sendable {
 
     /// The commands `/` offers in `folder` for `agent`, the user's from `home` (`~/.claude/commands`, `~/.claude/skills`,
     /// Codex's `~/.codex/prompts`). Reads the disk: never on the engine's queue.
-    func commands(agent: Agent, folder: String, home: URL, now: Date = Date()) -> [SlashCommand] {
+    func commands(agent: Agent, folder: String, home: URL, now: Date = Platform.Clock.steadyDate()) -> [SlashCommand] {
         let key = "\(agent.rawValue)\n\(folder)\n\(home.path)"
         if let hit = lock.withLock({ commands[key] }), now.timeIntervalSince(hit.at) < Self.kept { return hit.list }
         var list: [SlashCommand]
@@ -40,7 +40,7 @@ final class SessionCompletions: @unchecked Sendable {
 
     /// The files `@` offers in `folder`, relative to it: one walk of a folder at a time (asked meanwhile, the last
     /// list, or none). Reads the disk: never on the engine's queue.
-    func files(in folder: String, now: Date = Date()) -> [String] {
+    func files(in folder: String, now: Date = Platform.Clock.steadyDate()) -> [String] {
         let (hit, walk) = lock.withLock { () -> ((at: Date, list: [String])?, Bool) in
             let hit = files[folder]
             if let hit, now.timeIntervalSince(hit.at) < Self.kept { return (hit, false) }

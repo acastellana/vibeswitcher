@@ -37,13 +37,13 @@ final class ScratchHostProcess {
         sessionLog = dir + "/session.log"
         let files = FileManager.default
         for folder in [home, dir + "/old", dir + "/new"] { try files.createDirectory(atPath: folder, withIntermediateDirectories: true) }
-        // APFS clones: no extra disk for the copies.
-        try files.copyItem(atPath: old, toPath: oldBinary)
-        try files.copyItem(atPath: hostLauncher, toPath: newBinary)
+        // Copied by a child (`installProgram`): never open for writing in this process, so they run (no ETXTBSY).
+        try installProgram(old, atPath: oldBinary)
+        try installProgram(hostLauncher, atPath: newBinary)
         // The app beside each build is this test process's own binary (the same code, so the same cdhash): its
         // clients are the app once they answer the challenge with `appKey`, given to the host on stdin as the app does.
         let runner = try #require(HostServer.executable(of: getpid()))
-        for folder in ["old", "new"] { try files.copyItem(atPath: runner, toPath: dir + "/\(folder)/VibeSwitcher") }
+        for folder in ["old", "new"] { try installProgram(runner, atPath: dir + "/\(folder)/VibeSwitcher") }
         let now = Date().timeIntervalSince1970.rounded(.down)
         try files.setAttributes([.modificationDate: Date(timeIntervalSince1970: now - 2_000)], ofItemAtPath: oldBinary)
         try files.setAttributes([.modificationDate: Date(timeIntervalSince1970: now - 1_000)], ofItemAtPath: newBinary)

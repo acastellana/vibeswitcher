@@ -63,10 +63,10 @@ extension Platform {
         var ended = queue < 0 || !watch(reader, EVFILT_READ)
         if pending.isEmpty || exited || queue < 0 || !watch(writer, EVFILT_WRITE) { stopWriting() }
         var stopped = false
-        let deadline = Date().addingTimeInterval(patience)
+        let deadline = Platform.Clock.awakeSeconds() + patience
         var chunk = [UInt8](repeating: 0, count: 65_536)
         while !(exited && ended), !stopped {
-            let left = deadline.timeIntervalSinceNow
+            let left = deadline - Platform.Clock.awakeSeconds()
             guard left > 0 else { break }
             var wait = timespec(tv_sec: Int(left), tv_nsec: Int((left - left.rounded(.down)) * 1e9))
             var events = Array(repeating: kevent(), count: 4)

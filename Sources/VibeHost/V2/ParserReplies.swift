@@ -271,7 +271,7 @@ struct ParserReplies {
 
     /// `line` goes to the log only once a second at most: it is made only then (or by `flushDropped`, for the first
     /// `namedHeldBack` held back).
-    private mutating func dropped(log: ((String) -> Void)?, now: Date = Date(), _ line: @escaping () -> String) {
+    private mutating func dropped(log: ((String) -> Void)?, now: Date = Platform.Clock.steadyDate(), _ line: @escaping () -> String) {
         guard now.timeIntervalSince(lastLogged) >= 1 else {
             unlogged += 1
             if heldBack.count < Self.namedHeldBack { heldBack.append(line) }

@@ -78,6 +78,8 @@ public final class Requests: @unchecked Sendable {
     /// answered so).
     var replies: [String: NodeWire.Reply] = [:]
     private var replyOrder: [String] = []
+    /// The recorded actions being done now (recorded, their reply not yet given). On `queue`.
+    private var doing: Set<String> = []
     /// Each request as it is acted on, after the voice, the code and the vault's record (for tests). On `queue`.
     public var acting: (NodeWire.Request) -> Void = { _ in }
     /// The build's folder (`ServerArguments.nodeRoot`): where `hooks.install` reads the programs it installs; none:
@@ -147,6 +149,66 @@ public final class Requests: @unchecked Sendable {
     /// The live sessions now, for the voice rule. On `queue`.
     public var live: LiveSessions { LiveSessions(link.sessions, host: hostPID, server: serverPID) }
 
+    /// A refusal of a request from `pid`, in the log: at most `refusalsPerWindow` lines a sender in each
+    /// `refusalWindow`, the rest counted and said in one line when the next window opens (a peer pipelining refused
+    /// requests would otherwise write a line for each: the review of the runtime hardening). On `queue`.
+    func refusalNote(_ pid: pid_t, _ line: String) {
+        let now = MacTime.real.awake()
+        var entry = refusals[pid] ?? (since: now, said: 0, held: 0)
+        if now - entry.since >= Self.refusalWindow {
+            if entry.held > 0 { note("\(entry.held) more refusals from pid \(pid) weren't logged") }
+            entry = (now, 0, 0)
+        }
+        if entry.said < Self.refusalsPerWindow {
+            entry.said += 1
+            note(line + (entry.said == Self.refusalsPerWindow ? " (more from pid \(pid) in the next \(Int(Self.refusalWindow)) s are counted, not logged)" : ""))
+        } else {
+            entry.held += 1
+        }
+        refusals[pid] = entry
+        if refusals.count > 256 { refusals = refusals.filter { now - $0.value.since < Self.refusalWindow } }
+    }
+
+    /// How many stuck ends in a row of the server (`HostNotes.serverStuckInARow`) `status` says.
+    static let stuckNoticeAfter = 3
+
+    static let refusalsPerWindow = 5
+    static let refusalWindow: TimeInterval = 10
+    private var refusals: [pid_t: (since: TimeInterval, said: Int, held: Int)] = [:]
+
+    /// Whether the process `facts` reads may be the user's voice, as a connection's accept judges it (the slots only it
+    /// takes, `NodeServer.reservedForUser`): the voice rule's verdict; under the Mac's rule (asked per request) a process
+    /// that isn't a session's. Never a judgment of a request: each is judged again as it comes. On `queue`.
+    ///
+    /// Under the Mac's rule only what a session's process can't change counts (its environment's marker is its own to
+    /// set): its user, an ancestry read whole with no live session's program, the host or the server in it, no branch
+    /// code runner above it, and a terminal that isn't a live session's (`Voice.judge`'s own checks of these).
+    func mayBeUsersVoice(_ facts: PeerFacts) -> Bool {
+        guard rule.mode == .approval else {
+            if case .user = Voice.judge(facts, live: live, rule: rule) { return true }
+            return false
+        }
+        let live = self.live
+        guard facts.uid == rule.uid, let ancestry = facts.ancestry, facts.underRunner == false else { return false }
+        guard !ancestry.contains(where: { $0.pid == live.host || $0.pid == live.server || live.programs.contains($0.pid) }) else { return false }
+        switch facts.terminal {
+        case .unreadable: return false
+        case .named(let name): return !live.terminals.contains(name)
+        case .none: return true
+        }
+    }
+
+    /// The share a connection from `facts` counts toward (`NodeServer`'s caps), by what the process can't
+    /// change: the live session its ancestry runs under; else, under the systemd rule, its cgroup (a scope: a
+    /// terminal's, an app's, the host's service); else its pid alone. A process that forks for more connections stays
+    /// in its session's or cgroup's share. On `queue`.
+    func share(_ facts: PeerFacts) -> String {
+        let live = self.live
+        if let program = facts.ancestry?.first(where: { live.programs.contains($0.pid) }) { return "session \(program.pid)" }
+        if rule.mode == .systemd, let lines = facts.cgroup, let last = lines.last, !last.isEmpty { return "cgroup \(last)" }
+        return "pid \(facts.pid)"
+    }
+
     /// The hello a new connection from `peer` gets. On `queue`.
     public func hello(peer: PeerFacts?, token: Platform.PeerToken? = nil) -> NodeWire.Hello {
         // Under the Mac's rule a read's voice (no dialog: `status` changes nothing) says whether the peer passes the
@@ -184,6 +246,27 @@ public final class Requests: @unchecked Sendable {
             guard let self else { return done() }
             self.queue.async {
                 if let notes { self.notes = (notes, Date()) }
+                self.refreshBuilds(done)
+            }
+        }
+    }
+
+    /// `status`'s `builds` as last read (`refreshBuilds`), for the build that ran then: the install root's folders and its
+    /// `installs` file are read off `queue` (the architecture review's row 19), never by `statusValue`, which every
+    /// change of the node's stream calls. On `queue`.
+    private var builds: NodeWire.Value?
+    private let buildsReads = DispatchQueue(label: "vibenode.status-builds", qos: .utility)
+
+    /// The install root read again on a queue of its own, `builds` set on `queue`, then `done` there. At each
+    /// `refreshNotes` (each `status`, and each housekeeping). Nothing without an install root.
+    func refreshBuilds(_ done: @escaping () -> Void = {}) {
+        guard let installRoot else { return done() }
+        let running = notes?.notes.build
+        buildsReads.async { [weak self] in
+            let value = SwitchRequest.buildsValue(installRoot: installRoot, running: running)
+            guard let self else { return }
+            self.queue.async {
+                self.builds = value
                 done()
             }
         }
@@ -214,7 +297,7 @@ public final class Requests: @unchecked Sendable {
         if needs == .leadToolServer { return questionPost(request, from: facts, reply: reply) }
         // A draft comes from a web page (`NodeLive` hands those to `draft` itself): from here it is no one's to leave.
         if needs == .webDraft {
-            note("refused \(request.kind) from pid \(facts.pid): a draft comes from a web page")
+            refusalNote(facts.pid, "refused \(request.kind) from pid \(facts.pid): a draft comes from a web page")
             return reply(.init(re: request.id, error: .init(.voice, "a draft comes from a web page; in a terminal, `vibeswitcher answer CARD TEXT` answers and `vibeswitcher send SESSION TEXT` sends")))
         }
         if request.kind == "web.open", openWebForAnyone, request.args?["tailnet"] == nil {
@@ -227,11 +310,11 @@ public final class Requests: @unchecked Sendable {
             // The Mac's rule: the caller checks, then Touch ID for a state change, off `queue` (`approvalVoice`).
             if rule.mode == .approval { return approvalVoice(request, from: facts, token: token, reply: reply) }
             if case .notUser(let why) = Voice.judge(facts, live: live, rule: rule) {
-                note("refused \(request.kind) from pid \(facts.pid): not the user's voice: \(why)")
+                refusalNote(facts.pid, "refused \(request.kind) from pid \(facts.pid): not the user's voice: \(why)")
                 return reply(.init(re: request.id, error: .init(.voice, "not the user's voice: \(why)")))
             }
             if let why = Voice.handsRefusal(facts, kind: request.kind, rule: rule) {
-                note("refused \(request.kind) from pid \(facts.pid): \(why)")
+                refusalNote(facts.pid, "refused \(request.kind) from pid \(facts.pid): \(why)")
                 return reply(.init(re: request.id, error: .init(.voice, why)))
             }
             return voiced(request, from: facts, reply: reply)
@@ -267,11 +350,11 @@ public final class Requests: @unchecked Sendable {
                     reply(.init(re: request.id, error: .init(.internal, "not recorded in the host's vault, so not done: \(ConfigSeal.inert(why.description, limit: .max))")))
                 case .success(false):
                     self.note("\(request.kind) (action \(action)) was recorded already: answered as before, not done again")
-                    var again = self.replies[action] ?? .init(re: request.id, result: .object(["again": .bool(true), "said": .string("this action was done already")]))
-                    again.re = request.id
-                    reply(again)
+                    reply(self.again(request, action: action))
                 case .success(true):
+                    self.doing.insert(action)
                     self.act(request, from: facts) { [weak self] answer in
+                        self?.doing.remove(action)
                         self?.keep(answer, for: action)
                         reply(answer)
                     }
@@ -338,6 +421,26 @@ public final class Requests: @unchecked Sendable {
         }
     }
 
+    /// The answer to a retry of `action`, recorded already: the reply it got, when kept; otherwise what is known, never
+    /// "done": while it is being done, that it is; else (recorded before this server restarted, or too long ago for its
+    /// reply to be kept) that whether it was carried out isn't known (the architecture review's row 10). Not done again
+    /// either way. On `queue`.
+    func again(_ request: NodeWire.Request, action: String) -> NodeWire.Reply {
+        if var kept = replies[action] {
+            kept.re = request.id
+            return kept
+        }
+        if doing.contains(action) {
+            return .init(re: request.id, error: .init(.refused, "action \(action) is being done now, from its first request: not done again; that request's answer says how it went"))
+        }
+        return .init(re: request.id, error: .init(.refused, Self.outcomeUnknown(action: action)))
+    }
+
+    /// What a retry of a recorded action whose reply isn't kept is told.
+    static func outcomeUnknown(action: String) -> String {
+        "action \(action) was recorded before this server restarted (or too long ago for its answer to be kept): whether it was carried out isn't known, and it isn't done again; `vibeswitcher status` shows what is now"
+    }
+
     func keep(_ reply: NodeWire.Reply, for action: String) {
         replies[action] = reply
         replyOrder.append(action)
@@ -396,7 +499,8 @@ public final class Requests: @unchecked Sendable {
     /// `status`'s notices, in order: the node stopping; each lead's (E5); the refresh's (E7); a host restart's and a lead
     /// with no role (E8); a project due a prompt audit, a team session behind a dialog nothing reads, a board that
     /// cleared, and a session left alone (2026-11-20). On `queue`.
-    func statusNotices() -> [String] {
+    /// `reminders`: the sessions' (`NodeSessions.reminderNotices`), when the caller has them already.
+    func statusNotices(reminders: [String]? = nil) -> [String] {
         var notices = stopping ? ["the node is stopping"] : []
         notices += engine?.leads.leads.values.sorted { $0.root < $1.root }.compactMap(\.notice) ?? []
         notices += engine?.notices.sorted { $0.key < $1.key }.flatMap(\.value) ?? []
@@ -406,7 +510,10 @@ public final class Requests: @unchecked Sendable {
         notices += engine?.allDoneNotices ?? []
         notices += engine?.toolchainNotices ?? []
         notices += engine?.pluginNotices ?? []
-        notices += sessions?.reminderNotices() ?? []
+        notices += reminders ?? sessions?.reminderNotices() ?? []
+        if let stuck = notes?.notes.serverStuckInARow, stuck >= Self.stuckNoticeAfter {
+            notices.append("the server ended stuck \(stuck) times in a row (its engine's queue didn't answer), and the host started it again each time: its log says what it was doing; if it goes on, `vibeswitcher stop`, then `vibeswitcher start`")
+        }
         if let notice = updates?.notice { notices.append(notice) }
         return notices
     }
@@ -419,6 +526,10 @@ public final class Requests: @unchecked Sendable {
     /// (`restart`, E8: the command line shows it with how the host ended). On `queue`.
     public func statusValue() -> NodeWire.Value {
         let list = sessions?.sessions ?? []
+        // Each once per status (the review's row 19): the switch's blockers walk the host's sessions, the reminders the scan's.
+        let switching = switchBlockersNow()
+        let due = sessions?.reminders() ?? []
+        let reminders = NodeSessions.notices(due)
         var fields: [String: NodeWire.Value] = [
             "node": .string(NodeIds.node),
             "epoch": .string(epoch),
@@ -439,22 +550,23 @@ public final class Requests: @unchecked Sendable {
             "cards": Self.counts(engine?.cards.counts() ?? [:]),
             "plugins": engine?.plugins.onValue ?? .array([]),
             "accepted": .array(accepted.map(\.value)),
-            "notices": .array(statusNotices().map(NodeWire.Value.string)),
+            "notices": .array(statusNotices(reminders: reminders).map(NodeWire.Value.string)),
             // The reminders due now, each its session's (the page notifies once an episode: "Remind me about waiting or
             // stuck sessions", 2026-11-22).
-            "reminders": .array((sessions?.reminders() ?? []).map(\.value)),
+            "reminders": .array(due.map(\.value)),
             "restart": engine?.restartValue ?? .null,
             "reopen": engine?.offeredValue ?? .array([]),
             "ended": engine?.endedValue ?? .array([]),
             "ending": engine?.endingValue ?? .array([]),
-            "builds": installRoot.map { SwitchRequest.buildsValue(installRoot: $0, running: notes?.notes.build) } ?? .null,
+            // As last read off the queue (`refreshBuilds`): null until the first read is in.
+            "builds": installRoot == nil ? .null : builds ?? .null,
             "web": webValue?() ?? NodeStatusStore.webOff,
             "usage": engine?.usage.map(NodeUsage.value) ?? .null,
             "boost": engine?.boostValue ?? .null,
             // What refuses a build switch now (the rule on switches), for `vibeswitcher switch` before its code.
             // What refuses a switch now (decision 6), less the workers it would park (`SwitchPark`, by the last look).
-            "switchBlockers": .array(switchBlockersNow().blockers.map(NodeWire.Value.string)),
-            "switchParks": .array(switchBlockersNow().parks.map(NodeWire.Value.string)),
+            "switchBlockers": .array(switching.blockers.map(NodeWire.Value.string)),
+            "switchParks": .array(switching.parks.map(NodeWire.Value.string)),
         ]
         // The user's node's tailnet page, for the command line (not in the `node` stream: `NodeStatusStore.value`).
         if let tailnet { fields["webTailnet"] = tailnet.value() }
@@ -464,7 +576,7 @@ public final class Requests: @unchecked Sendable {
         if let health {
             fields["health"] = health.value(serverRestarts: notes?.notes.serverRestarts, refusedConnections: notes?.notes.refusedAppConnections,
                                             hostRestartAt: engine?.restartValue["at"]?.string.flatMap(NodeWire.date),
-                                            waiting: sessions?.reminderNotices() ?? [], serverEnd: notes?.notes.lastServerEnd)
+                                            waiting: reminders, serverEnd: notes?.notes.lastServerEnd)
         }
         return .object(fields)
     }

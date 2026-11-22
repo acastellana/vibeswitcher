@@ -90,7 +90,7 @@ keychain code is reachable from a test any other way. The one test of the real k
 Run them before you call a change done; they take seconds:
 
 ```sh
-bash scripts/test.sh --filter 'AccessibilityLint|AgentExportLint|ArchitectureDocLint|CLIChangeLint|CloseOnExecLint|CopiedFilesLint|DebugAidsLint|DocLinksLint|ElapsedTimeLint|HomePathLint|KeychainLint|MacOnlyTestsLint|MCPLint|PhoneMainSyncLint|PlatformLint|PluginLint|PreferencesLint|PrivateNamesLint|PrivateWriteLint|RequestKindsLint|SandboxLint|ScriptScratchLint|SecretShapeLint|SecurityDocumentLint|ServerLint|ShebangWriteLint|TemporaryFolderLint|WebAppLint'
+bash scripts/test.sh --filter 'AccessibilityLint|AgentExportLint|ArchitectureDocLint|CLIChangeLint|CloseOnExecLint|CopiedFilesLint|DebugAidsLint|DocLinksLint|ElapsedGuardLint|ElapsedTimeLint|HomePathLint|KeychainLint|MacOnlyTestsLint|MCPLint|PhoneMainSyncLint|PlatformLint|PluginLint|PreferencesLint|PrivateNamesLint|PrivateWriteLint|RequestKindsLint|SandboxLint|ScriptScratchLint|SecretShapeLint|SecurityDocumentLint|ServerLint|ShebangWriteLint|StdioWriteLint|TemporaryFolderLint|WebAppLint'
 bash scripts/test.sh --filter 'LintTests/'   # the same suites, as AGENTS.md runs them: every `…LintTests` type
 ```
 
@@ -104,6 +104,7 @@ bash scripts/test.sh --filter 'LintTests/'   # the same suites, as AGENTS.md run
 | `CopiedFilesLint` | A verbatim copy of the Mac app's code in `Sources/VibeNode` (the port map's "Copied from the app": the Statistics files, `UsageWaits`, `WitnessWork`, `TeamReading`) that drifted from its original, other than its listed differences. |
 | `DebugAidsLint` | A notification handler that writes a session's screen where the (unknown) sender says. |
 | `DocLinksLint` | A relative link or `#anchor` in README.md or `docs/**/*.md` that doesn't resolve, an image in `docs/images` no doc shows, or a lint suite missing from the command above. |
+| `ElapsedGuardLint` | An elapsed-time guard in the node's processes on the wall clock (`Date().timeIntervalSince(`, `.timeIntervalSinceNow`, a deadline on `Date()`, `Date()` compared): the wall clock steps; `Platform.Clock.steadyDate()` doesn't. |
 | `ElapsedTimeLint` | A correctness test judging an elapsed time against a bare number (`took < 0.05`, `Date().timeIntervalSince(x) < 5`): it judges the order of events, a baseline from the same test, or it's a `.perf` bench; the short allow list is in `ElapsedTimeLintTests.swift`. |
 | `HomePathLint` | A path under the home folder worked out once per process. |
 | `KeychainLint` | A test that can reach the real keychain. |
@@ -121,6 +122,7 @@ bash scripts/test.sh --filter 'LintTests/'   # the same suites, as AGENTS.md run
 | `SecurityDocumentLint` | A numbered section of the [security architecture document](../superpowers/specs/2026-11-13-v2-security-architecture.md) whose `Held by:` line names a test (`Suite.test`) that no type or extension under `Tests/` declares, or puts a path in backticks; or a section with no `Doesn't promise` part, or no `Before the bootstrap:` line answering `yes` or `no`. |
 | `ServerLint` | An exec in the server (`Sources/vibeswitcher-server`, `Sources/VibeNode`): `execve` or `execv`, `Platform.Spawn(…).replaceProcess`, `HostHandover.exec`, `BinaryWatch`, or a connection to the host by its path (`viaConnector: false`). |
 | `ShebangWriteLint` | A test that writes a program (a `#!` text, or a helper that writes a parameter and gives it an execute mode) with Foundation's `write(to:)` or `createFile`, which a child forked meanwhile holds open ("Text file busy"): `installScript`, `writeClosedOnExec`, `copyClosedOnExec` or `ScratchNode.script` instead, or an exemption with its reason. |
+| `StdioWriteLint` | `FileHandle.standardError` or `standardOutput` in a portable target: its `write(_:)` traps on a failed write (a full disk ends the process); `Platform.Stdio` writes with `write(2)` and ignores the failure. |
 | `TemporaryFolderLint` | A test using the system temporary folder instead of its scratch folder; allowed uses are listed in `scripts/temporary-folder-lint.txt`. |
 | `WebAppLint` | A file the web page runs (`WebApp/`, outside its Node tests' folders) that builds markup or code from text: `innerHTML`, `outerHTML`, `insertAdjacentHTML`, `document.write`, `DOMParser`, `createContextualFragment`, `setHTML`, `srcdoc`, `eval(`, `Function(`, a string given to `setTimeout`, an `on…` attribute set, a `javascript:` address, or in a page an inline script or handler. |
 
