@@ -74,4 +74,19 @@ table, most visible first; each row says where it landed.
 
 ## Built
 
-Each its own commit with tests; the parity rows say where.
+Each its own commit with tests, the most visible first; the parity rows say where.
+
+1. `push_remote`'s reply on a node names `vibeswitcher push` / `decline-push` (`LeadPush.waiting`; shared file, a port-map row).
+2. `vibeswitcher lead FOLDER --init` (`FirstCommit`, `FolderRepository`); the lead's refusals name it.
+3. `send` is the user's input: the rotation's quiet and a dropped ask (`noteUserInput`), and a `!` git line accounts for
+   the base move it makes (`BaseMoveStore.typed`, the app's judgement). **For an independent review**: it lets a line
+   the user typed set the vault's head without a card.
+4. How the server last ended (`HostNotes.ServerEnd`; `HostProtocol.swift` shared, a port-map row), in `status --health`
+   and the page.
+5. `vibeswitcher logs [--lines N] [--sessions]`.
+6. The page's New project form; the lead form says `--init`.
+7. Acceptance A40: `fetch_remote` and `merge_remote` on a scratch node (no code change: it worked).
+
+Judged good and left alone: the rows marked good above, each for the reason given; the blocked ones wait on the H1
+decisions (one-click answers), security decision 15 (Codex workers), the 2026-11-21 seal decision (Codex's trust), and
+a Linux laptop node (battery, keep awake).
