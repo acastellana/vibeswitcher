@@ -1681,13 +1681,20 @@ extension StartCommandTests {
         }
         #expect(moved.text.contains("changed since the stop was shown") && moved.text.contains("nothing ended"), "\(moved)")
         #expect(record.isLive())
+        let stopStarted = Date()
         let stopped = NodeStopper.stopDetached(root: host.root.path, lock: host.lock, isHost: { $0 == host.command }, shown: record)
+        let stopTook = Int(Date().timeIntervalSince(stopStarted))
         #expect((try? stopped.get()) != nil, "\(stopped)")
         var status: Int32 = 0
         let reaped = waitpid(pid, &status, WNOHANG)
         ended = reaped == -1
         #expect(reaped == -1 && errno == ECHILD, "the host is still this process's child, or a zombie (waitpid \(reaped), state \(String(describing: Platform.Processes.kernelRecord(pid)?.state)))")
-        #expect(!under.contains(where: ScratchNode.runs), "\(under.filter(ScratchNode.runs))")
+        let stillRunning = under.filter(ScratchNode.runs)
+        let seen = stillRunning.map { link in
+            "\(link.pid): \((try? String(contentsOfFile: "/proc/\(link.pid)/stat", encoding: .utf8))?.prefix(160) ?? "no stat") "
+                + "threads \((try? FileManager.default.contentsOfDirectory(atPath: "/proc/\(link.pid)/task"))?.count ?? -1)"
+        }
+        #expect(stillRunning.isEmpty, "\(stillRunning) \(seen) stop took \(stopTook) s")
         #expect(NodeRecord.read(root: host.root.path) == nil)
     }
 
