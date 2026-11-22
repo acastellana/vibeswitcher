@@ -481,6 +481,19 @@ install_node_mac_main() {
         file=$partial/bin/$installed
         /bin/cp -- "$bin/$product" "$file" || fail 1 "can't copy $product into $partial/bin"
         [[ -f $file && ! -L $file ]] || fail 69 "$product: its copy $file isn't a regular file"
+        # The toolchain's own run paths go before the signature (which they'd break): Swift's back-deploy folder
+        # (`<developer dir>/Toolchains/…/usr/lib/swift-6.2/macosx`, the first dry run's, 2026-11-22) is a folder the user
+        # can write, and the products load nothing through a run path (the load check below: absolute system paths
+        # only). Deleted: every run path under the developer folder, and any other but the system's /usr/lib/swift. The
+        # check below still refuses whatever run path is left that isn't /usr/lib/swift. This assumes macOS 26 or later,
+        # whose /usr/lib/swift holds the Swift 6.2 runtime (docs/process/v2-mac-tasks.md).
+        local rpath
+        while IFS= read -r rpath; do
+            [[ -n $rpath && $rpath != /usr/lib/swift ]] || continue
+            /usr/bin/install_name_tool -delete_rpath "$rpath" "$file" 2> /dev/null \
+                || fail 69 "$product: its run path $rpath couldn't be deleted from $file"
+        done < <(/usr/bin/otool -l "$file" 2> /dev/null | /usr/bin/grep -A2 -w LC_RPATH | /usr/bin/grep -w path \
+                 | /usr/bin/sed -e 's/^ *path //' -e 's/ (offset [0-9]*)$//' | /usr/bin/sort -u)
         # Signed before its first hash: a signature changes the file.
         mac_sign_hardened "$file" 2>&1 | /usr/bin/sed 's/^/install-node-mac: /' >&2
         (( PIPESTATUS[0] == 0 )) || fail 69 "$product: its copy $file couldn't be signed with the Hardened Runtime"
@@ -556,6 +569,9 @@ install_node_mac_main() {
         [[ $line == "${product_sha[i]}" ]] || fail 1 "$file changed since its check (sha256 $line, not ${product_sha[i]}): refused before it runs"
         i=$((i + 1))
     done
+    # It still starts with its run paths gone: the command line's usage, from the system's Swift runtime alone.
+    /usr/bin/env -i HOME="$tool_scratch/home" PATH=/usr/bin:/bin "$partial/bin/vibeswitcher" help > /dev/null 2>&1 \
+        || fail 69 "vibeswitcher: the installed copy doesn't start (\`vibeswitcher help\` failed): its runtime isn't the system's"
     local recorded
     recorded=$(/usr/bin/env -i HOME="$tool_scratch/home" PATH=/usr/bin:/bin "$partial/bin/vibeswitcher" install-record \
         "$partial" --commit "$commit" --swift-version-output "$swift_version_file" --resolved "$src/Package.resolved" 2>&1) \
