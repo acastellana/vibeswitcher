@@ -27,32 +27,37 @@ extension Requests {
     /// queue.
     func mail(_ request: NodeWire.Request, reply: @escaping (NodeWire.Reply) -> Void) {
         guard let engine else { return reply(.init(re: request.id, error: .init(.refused, "this server keeps no leads"))) }
-        let folder = request.args?["folder"]?.string
+        let args: WireKinds.Mail.Args
+        switch request.typedArgs(WireKinds.Mail.Args.self) {
+        case .failure(let failure): return reply(.init(re: request.id, error: failure))
+        case .success(let typed): args = typed
+        }
+        let folder = args.folder
         if let folder, !folder.hasPrefix("/") { return reply(.init(re: request.id, error: .init(.badArgs, "folder is an absolute path"))) }
-        let all = request.args?["all"]?.bool == true
+        let all = args.all == true
         let roots = Set(engine.leads.leads.values.map(\.root)).sorted()
         let (find, queue) = (repositoryOf, self.queue)
         engine.work.async {
             let chosen = folder.map { [find($0)] } ?? roots
-            let projects = chosen.map { root -> NodeWire.Value in
+            let projects = chosen.map { root -> WireKinds.Mail.Project in
                 let records = LeadMail.load(root: root)
                 let project = LeadMail.project(of: root)
                 let shown = all ? records : Array(records.suffix(Self.mailShown))
-                return .object(["root": .string(root), "project": .string(project), "total": .int(records.count),
-                                "messages": .array(shown.reversed().map { Self.mailValue($0, project: project) })])
+                return .init(root: root, project: project, total: records.count, messages: shown.reversed().map { Self.mailMessage($0, project: project) })
             }
-            queue.async { reply(.init(re: request.id, result: .object(["projects": .array(projects)]))) }
+            queue.async { reply(.init(re: request.id, typed: WireKinds.Mail.Result(projects: projects))) }
         }
     }
 
     /// One message as `mail` gives it: when, from and to which project, whether it came to `project`'s lead
     /// (`received`), its kind (null: refused for its kind), its text (masked where it's kept), what became of it and
     /// what `tell_lead` answered. The text and the detail are a lead's words: shown inert.
-    static func mailValue(_ record: LeadMail.Record, project: String) -> NodeWire.Value {
+    static func mailValue(_ record: LeadMail.Record, project: String) -> NodeWire.Value { NodeWire.Value(wire: mailMessage(record, project: project)) }
+
+    static func mailMessage(_ record: LeadMail.Record, project: String) -> WireKinds.Mail.Message {
         let received = record.to.caseInsensitiveCompare(project) == .orderedSame && record.from.caseInsensitiveCompare(project) != .orderedSame
-        return .object(["at": .date(Date(timeIntervalSince1970: record.at)), "from": .string(record.from), "to": .string(record.to),
-                        "received": .bool(received), "kind": record.kind.map { .string($0.rawValue) } ?? .null, "text": .string(record.text),
-                        "outcome": .string(record.outcome.rawValue), "sent": .bool(record.outcome.sent), "detail": .string(record.detail)])
+        return .init(at: NodeWire.dateText(Date(timeIntervalSince1970: record.at)), from: record.from, to: record.to, received: received,
+                     kind: record.kind?.rawValue, text: record.text, outcome: record.outcome.rawValue, sent: record.outcome.sent, detail: record.detail)
     }
 }
 
@@ -63,22 +68,26 @@ public enum MailText {
     static let textLimit = 300
 
     public static func lines(_ project: NodeWire.Value, whole: Bool = false) -> [String] {
-        let name = ConfigSeal.inert(project["project"]?.string ?? "?", limit: 80)
-        let total = project["total"]?.int ?? 0
-        let messages = project["messages"]?.array ?? []
+        (try? project.wire(WireKinds.Mail.Project.self)).map { lines($0, whole: whole) } ?? []
+    }
+
+    public static func lines(_ project: WireKinds.Mail.Project, whole: Bool = false) -> [String] {
+        let name = ConfigSeal.inert(project.project ?? "?", limit: 80)
+        let total = project.total ?? 0
+        let messages = project.messages ?? []
         var lines = ["Between leads · \(name) (\(total) message\(total == 1 ? "" : "s")"
                      + (messages.count < total ? ", the newest \(messages.count) shown: --all for every one" : "") + ")"]
         if messages.isEmpty { lines.append("  no message sent or received with tell_lead") }
         for message in messages {
-            let at = message["at"]?.string.flatMap(NodeWire.date).map(shortDate) ?? "?"
-            let way = message["received"]?.bool == true ? "from the lead of \(ConfigSeal.inert(message["from"]?.string ?? "?", limit: 80))"
-                : "to the lead of \(ConfigSeal.inert(message["to"]?.string ?? "?", limit: 80))"
-            let kind = message["kind"]?.string.map { $0.prefix(1).uppercased() + $0.dropFirst() } ?? "No kind"
-            lines.append("  \(at)  \(way) · \(kind) · \(outcome(message["outcome"]?.string))")
-            let text = ConfigSeal.inert(message["text"]?.string ?? "", limit: whole ? .max : textLimit)
+            let at = message.at.flatMap(NodeWire.date).map(shortDate) ?? "?"
+            let way = message.received == true ? "from the lead of \(ConfigSeal.inert(message.from ?? "?", limit: 80))"
+                : "to the lead of \(ConfigSeal.inert(message.to ?? "?", limit: 80))"
+            let kind = message.kind.map { $0.prefix(1).uppercased() + $0.dropFirst() } ?? "No kind"
+            lines.append("  \(at)  \(way) · \(kind) · \(outcome(message.outcome))")
+            let text = ConfigSeal.inert(message.text ?? "", limit: whole ? .max : textLimit)
             lines += text.split(separator: "\n", omittingEmptySubsequences: false).map { "      " + $0 }
-            if message["sent"]?.bool == false {
-                lines.append("      why: " + ConfigSeal.inert(message["detail"]?.string ?? "", limit: whole ? .max : textLimit))
+            if message.sent == false {
+                lines.append("      why: " + ConfigSeal.inert(message.detail ?? "", limit: whole ? .max : textLimit))
             }
         }
         return lines

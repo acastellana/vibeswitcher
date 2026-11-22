@@ -9,7 +9,11 @@ import VibeCore
 /// reads; nothing changes. One collector a server, so a file unchanged is parsed once.
 extension Requests {
     func stats(_ request: NodeWire.Request, reply: @escaping (NodeWire.Reply) -> Void) {
-        let word = request.args?["range"]?.string ?? StatisticsRange.week.rawValue
+        let word: String
+        switch request.typedArgs(WireKinds.Stats.Args.self) {
+        case .failure(let failure): return reply(.init(re: request.id, error: failure))
+        case .success(let typed): word = typed.range ?? StatisticsRange.week.rawValue
+        }
         guard let range = StatisticsRange(rawValue: word) else {
             return reply(.init(re: request.id, error: .init(.badArgs, "stats' range is today, week or month")))
         }
@@ -18,8 +22,8 @@ extension Requests {
         let interval = range.interval(now: Date())
         let queue = self.queue
         collector.collect(projects: projects, range: interval) { stats in
-            let value = StatisticsWire.value(StatisticsPage(stats), range: range)
-            queue.async { reply(.init(re: request.id, result: value)) }
+            let result = StatisticsWire.result(StatisticsPage(stats), range: range)
+            queue.async { reply(.init(re: request.id, typed: result)) }
         }
     }
 
@@ -35,15 +39,11 @@ extension Requests {
 
 /// A `StatisticsPage` as `stats` carries it: the Mac's words, its bars as per mille (0–1000) so the wire stays in ints.
 enum StatisticsWire {
-    static func value(_ page: StatisticsPage, range: StatisticsRange) -> NodeWire.Value {
-        .object([
-            "range": .string(range.rawValue), "title": .string(range.title), "span": .string(page.span),
-            "mac": .array(page.mac.map(figure)),
-            "columns": .array(StatisticsPage.columns.map(NodeWire.Value.string)),
-            "projects": .array(page.projects.map(row)),
-            "total": page.total.map(row) ?? .null,
-            "quality": page.quality.map(quality) ?? .null,
-        ])
+    static func value(_ page: StatisticsPage, range: StatisticsRange) -> NodeWire.Value { NodeWire.Value(wire: result(page, range: range)) }
+
+    static func result(_ page: StatisticsPage, range: StatisticsRange) -> WireKinds.Stats.Result {
+        .init(range: range.rawValue, title: range.title, span: page.span, mac: page.mac.map(figure), columns: StatisticsPage.columns,
+              projects: page.projects.map(row), total: page.total.map(row), quality: page.quality.map(quality))
     }
 
     static func permille(_ value: Double) -> NodeWire.Value { .int(Int((min(1, max(0, value)) * 1000).rounded())) }

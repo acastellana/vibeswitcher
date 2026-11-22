@@ -239,8 +239,13 @@ extension Requests {
     func presets(_ request: NodeWire.Request, terminal: Bool = false, reply: @escaping (NodeWire.Reply) -> Void) {
         // The variables' values (a secret-looking one masked) only to a process of the uid asking for them, for its
         // confirmation: never to a web page, whatever it asks.
-        let values = terminal && request.args?["values"]?.bool == true
-        let folder = request.args?["folder"]?.string.flatMap { $0.isEmpty ? nil : $0 }
+        let args: WireKinds.Presets.Args
+        switch request.typedArgs(WireKinds.Presets.Args.self) {
+        case .failure(let failure): return reply(.init(re: request.id, error: failure))
+        case .success(let typed): args = typed
+        }
+        let values = terminal && args.values == true
+        let folder = args.folder.flatMap { $0.isEmpty ? nil : $0 }
         if let folder, !folder.hasPrefix("/") {
             return reply(.init(re: request.id, error: .init(.badArgs, "session.presets' folder is an absolute path")))
         }
@@ -249,10 +254,8 @@ extension Requests {
             let loaded = SessionPresets.load(root: nodeRoot)
             let listed = SessionPresets.list(loaded.presets, folder: folder)
             queue.async {
-                reply(.init(re: request.id, result: .object([
-                    "presets": .array(listed.map { SessionPresets.value($0, values: values) }),
-                    "problems": .array(loaded.problems.map(NodeWire.Value.string)),
-                ])))
+                reply(.init(re: request.id, typed: WireKinds.Presets.Result(presets: listed.map { SessionPresets.value($0, values: values) },
+                                                                            problems: loaded.problems)))
             }
         }
     }

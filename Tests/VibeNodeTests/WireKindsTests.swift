@@ -17,6 +17,9 @@ struct WireKindsTests {
         ("board", "board"), ("board-folder", "board"), ("config.held", "config.held"), ("config.held-repo", "config.held"),
         ("settings", "settings"), ("settings-folder", "settings"), ("plugin.list", "plugin.list"), ("approve.list", "approve.list"),
         ("approve.list-config", "approve.list"),
+        ("brief-folder", "brief"), ("update.check", "update.check"), ("update.check-problem", "update.check"), ("mail", "mail"),
+        ("mail-folder", "mail"), ("mail-messages", "mail"), ("session.presets", "session.presets"), ("session.presets-values", "session.presets"),
+        ("shells", "shells"), ("stats", "stats"), ("stats-today", "stats"), ("base.show", "base.show"),
     ]
 
     /// `result` (a fixture's) through `kind`'s type and back: the bytes the wire writes.
@@ -30,6 +33,13 @@ struct WireKindsTests {
         case "settings": return try again(WireKinds.Settings.self)
         case "plugin.list": return try again(WireKinds.PluginList.self)
         case "approve.list": return try again(WireKinds.ApproveList.self)
+        case "brief": return try again(WireKinds.Brief.self)
+        case "update.check": return try again(WireKinds.UpdateCheck.self)
+        case "mail": return try again(WireKinds.Mail.self)
+        case "session.presets": return try again(WireKinds.Presets.self)
+        case "shells": return try again(WireKinds.Shells.self)
+        case "stats": return try again(WireKinds.Stats.self)
+        case "base.show": return try again(WireKinds.BaseShow.self)
         default: throw CocoaError(.featureUnsupported)
         }
     }
@@ -114,7 +124,8 @@ struct WireKindsServerTests {
         defer { node.stop() }
         let client = try WireClient(node)
         func keys(_ value: NodeWire.Value?) -> Set<String> { Set(value?.object?.keys.map { $0 } ?? []) }
-        for (file, kind) in [("status", "status"), ("settings", "settings"), ("plugin.list", "plugin.list"), ("questions", "questions"), ("board", "board")] {
+        for (file, kind) in [("status", "status"), ("settings", "settings"), ("plugin.list", "plugin.list"), ("questions", "questions"), ("board", "board"),
+                             ("shells", "shells"), ("session.presets", "session.presets"), ("stats", "stats")] {
             let reply = try #require(WireClient.reply(client.request(kind, action: nil)), "\(kind)")
             let captured = try Data(contentsOf: WireKindsTests.fixtures.appendingPathComponent(file + ".json"))
             let before = try #require(NodeWire.decode(NodeWire.Reply.self, captured)?.result)

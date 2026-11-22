@@ -117,14 +117,11 @@ enum PresetEditCommand {
         }
         // An edit or a remove: the preset as the node lists it now, shown, and bound to what was shown by its digest.
         return SessionCommand.act("presets.edit", fetch: { client in
-            var listArgs: [String: NodeWire.Value] = ["values": .bool(true)]
-            if let folder = parsed.folder { listArgs["folder"] = .string(folder) }
-            switch client.request("session.presets", args: listArgs) {
+            switch client.read(WireKinds.Presets.self, .init(folder: parsed.folder, values: true)) {
             case .failure(let failure): return .failure(failure)
-            case .success(let reply):
-                guard reply.ok, let list = reply.result?["presets"]?.array else {
-                    return .failure(.broken(reply.error.map { "\($0.code): \($0.message)" } ?? "the server listed no presets"))
-                }
+            case .refused(let reply): return .failure(.broken(reply.error.map { "\($0.code): \($0.message)" } ?? "the server listed no presets"))
+            case .success(let result, _):
+                guard let list = result.presets else { return .failure(.broken("the server listed no presets")) }
                 // Only those of the place named: a folder's own, or every folder's.
                 let mine = list.filter { $0["builtIn"]?.bool != true && ($0["project"]?.bool == true) == (parsed.folder != nil) }
                 guard let found = PresetsCommand.named(parsed.name, in: mine) else {

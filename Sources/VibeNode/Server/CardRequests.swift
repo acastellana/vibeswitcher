@@ -282,6 +282,11 @@ extension Requests {
 
     func baseShow(_ request: NodeWire.Request, reply: @escaping (NodeWire.Reply) -> Void) {
         guard let engine else { return reply(.init(re: request.id, error: .init(.refused, "this server keeps no cards"))) }
+        let args: WireKinds.BaseShow.Args
+        switch request.typedArgs(WireKinds.BaseShow.Args.self) {
+        case .failure(let failure): return reply(.init(re: request.id, error: failure))
+        case .success(let typed): args = typed
+        }
         namedRoot(request, required: true) { [weak self] named in
             guard let self else { return }
             let root: String
@@ -289,11 +294,11 @@ extension Requests {
             case .failure(let refusal): return reply(refusal)
             case .root(let given): root = given ?? ""
             }
-            engine.baseShow(root: root, from: request.args?["from"]?.string.flatMap { $0.isEmpty ? nil : $0 }) { [weak self] result in
+            engine.baseShow(root: root, from: args.from.flatMap { $0.isEmpty ? nil : $0 }) { [weak self] result in
                 guard let self else { return }
                 switch result {
                 case .failure(let failure): reply(self.failed(request, failure))
-                case .success(let card): reply(.init(re: request.id, result: .object(["card": card.value])))
+                case .success(let card): reply(.init(re: request.id, typed: WireKinds.BaseShow.Result(card: card.value)))
                 }
             }
         }

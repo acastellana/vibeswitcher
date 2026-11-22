@@ -45,19 +45,18 @@ enum StatusCommand {
         case .failure(let failure): return Say.failed(failure)
         case .success(let connected): client = connected
         }
-        let checked: NodeWire.Value
-        switch client.request("update.check", timeout: Requests.updateCheckPatience) {
+        let checked: WireKinds.UpdateCheck.Result, raw: NodeWire.Value
+        switch client.read(WireKinds.UpdateCheck.self, WireNoArgs(), timeout: Requests.updateCheckPatience) {
         case .failure(let failure): return Say.failed(failure)
-        case .success(let reply):
-            guard reply.ok, let given = reply.result else { return Say.replyError(reply) }
-            checked = given
+        case .refused(let reply): return Say.replyError(reply)
+        case .success(let given, let whole): (checked, raw) = (given, whole)
         }
         if asJSON {
-            Platform.Stdio.output(NodeWire.printable(NodeWire.line(checked)))
+            Platform.Stdio.output(NodeWire.printable(NodeWire.line(raw)))
         } else {
             Say.out(UpdateWatch.lines(checked).joined(separator: "\n"))
         }
-        return checked["problem"]?.string == nil ? 0 : 1
+        return checked.problem == nil ? 0 : 1
     }
 
     /// Stage 1's read, as it was.
