@@ -13,7 +13,7 @@ table, most visible first; each row says where it landed.
 
 | Row | Verdict | Why | Fix |
 | --- | --- | --- | --- |
-| Start a lead in a folder, with a goal | improve | V1 offers to make the repository when the folder isn't one, or has no commit (`LeadController`'s first-commit offer); V2 refuses with "git init, and a first commit" and leaves you to do it | `vibeswitcher lead FOLDER --init`: the repository and its first commit made in the folder (`ProjectCreation`'s steps, nothing left on a failure), then the lead, one typed code; the refusal names it. **Built**: V1's own rules (`FolderRepository`, so an empty repository's own folder too, and secrets left out), NewProjectTests |
+| Start a lead in a folder, with a goal | improve | V1 offers to make the repository when the folder isn't one, or has no commit (`LeadController`'s first-commit offer); V2 refuses with "git init, and a first commit" and leaves you to do it | `vibeswitcher lead FOLDER --init` for a folder in no repository (narrowed by the reviews: a folder with a `.git` is the user's to commit): the repository built privately and installed through the folder's descriptor, then the lead, one typed code; the refusal names it. **Built**: V1's own rules (`FolderRepository`, so an empty repository's own folder too, and secrets left out), NewProjectTests |
 | New Project… | improve | the command line has it (`new-project`); the page has no form for it (V1's sheet) | the page's start screen drafts the `vibeswitcher new-project` line from a form (pages never act). **Built** (`newProjectForm`; the lead form says `--init`), actions.test.mjs |
 | Message a running lead, or send it a goal | good | `tell` and `lead --goal` reach the bound lead through the vault, held while it can't take them (A13) | |
 | Questions to you, timers, Hold | good | cards, `answer`, `hold`, the timer and its proposal, on the page and the command line (A12, A13) | |
@@ -77,7 +77,7 @@ table, most visible first; each row says where it landed.
 Each its own commit with tests, the most visible first; the parity rows say where.
 
 1. `push_remote`'s reply on a node names `vibeswitcher push` / `decline-push` (`LeadPush.waiting`; shared file, a port-map row).
-2. `vibeswitcher lead FOLDER --init`; the lead's refusals name it. Hardened after the independent review (`LeadInit`: no hooks, no baseline, exact files, refused configs, global identity, more secrets named, rechecked folder, not under the Mac's rule).
+2. `vibeswitcher lead FOLDER --init`; the lead's refusal names it. After three review rounds narrowed to a folder in no repository, the repository built privately and installed through the folder's descriptor (`LeadInit`).
 3. `send` is the user's input: the rotation's quiet and a dropped ask (`noteUserInput`). Its `!` git lines vouching for
    a base move were built and then removed after the independent review (above): such a move draws a card.
 4. How the server last ended (`HostNotes.ServerEnd`; `HostProtocol.swift` shared, a port-map row), in `status --health`

@@ -92,7 +92,7 @@ extension LeadEngine {
         }
         let root = (top.output as NSString).standardizingPath
         guard Git.run(["rev-parse", "--verify", "--quiet", "HEAD"], in: root).ok else {
-            return (nil, nil, "\(root) has no commits yet: workers branch from a commit; make one (`vibeswitcher lead FOLDER --init` makes it of the folder's files), then start the lead")
+            return (nil, nil, "\(root) has no commits yet: workers branch from a commit; make one (git add, git commit), then start the lead")
         }
         return (root, program, nil)
     }

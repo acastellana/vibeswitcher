@@ -11,12 +11,12 @@ import VibeNode
 /// the code it prints the program the lead will run, `claude` resolved as the server resolves it (EN-D13); the reply
 /// says the one it ran. The accepted request is written to the journal (ids only: no goal, no folder).
 /// `--init` is the app's offer for a folder a lead can't start in yet (`LeadController`'s first commit,
-/// `ProjectFolderStart`'s question): a folder in no repository gets `git init` and a first commit of its files, an empty
-/// repository's own folder a first commit (`LeadInit`: nothing of the folder's git runs, exactly the files shown are
-/// committed, as the user's global identity, secrets left out and named), shown before the code and made after it, by
-/// this process as `git init` in a terminal is; nothing left on a refusal. A folder with commits needs nothing; one inside
-/// a repository with no commits, the home folder or `/` is refused. Not under the Mac's approval rule yet (its dialog is
-/// the server's, after this process would have made the commit).
+/// `ProjectFolderStart`'s question), narrowed to a folder in no repository: a git repository and a first commit of its
+/// files (`LeadInit`: built privately, installed through the folder's descriptor, every committed name shown before the
+/// code, as the user's global identity, secrets left out and named), made after the code by this process as `git init`
+/// in a terminal is; nothing left on a refusal. A folder with any `.git`, inside a repository, the home folder or `/` is
+/// refused, and so is everything when no claude is there for the lead. Not under the Mac's approval rule yet (its
+/// dialog is the server's, after this process would have made the commit).
 enum LeadCommand {
     static let usage = "usage: vibeswitcher lead FOLDER [--goal TEXT | --resume] [--take-head] [--replace] [--init]"
 
@@ -67,7 +67,10 @@ enum LeadCommand {
         }
         let program: String
         switch NodePreflight(claudeLink: NodePreflight.claudeLink(root: context.root)).check() {
-        case .failure(let refusal): program = "none found (\(refusal.missing.joined(separator: "; "))): the server will refuse"
+        case .failure(let refusal):
+            // Nothing is made for a lead the server will refuse to start.
+            if asked.initialize { return Say.refused("no claude for the lead (\(refusal.missing.joined(separator: "; "))): nothing was made") }
+            program = "none found (\(refusal.missing.joined(separator: "; "))): the server will refuse"
         case .success(let path): program = path
         }
         var firstCommit: LeadInit.Plan?
@@ -96,9 +99,8 @@ enum LeadCommand {
             switch LeadInit.make(firstCommit, home: home, scratch: context.root.appendingPathComponent("scratch", isDirectory: true)) {
             case .failure(let why): return Say.refused("the first commit wasn't made, nothing was left: \(why.message)")
             case .success(let made):
-                Say.out("made: " + (firstCommit.inRepository ? "a first commit" : "a git repository with a first commit")
-                        + " in \(ConfigSeal.inert(firstCommit.folder, limit: 400)) (\(made.files.count == 1 ? "1 file" : "\(made.files.count) files"))")
-                if let note = made.note { Say.err("note: " + note) }
+                Say.out("made: a git repository with a first commit \(made.commit.prefix(8)) in \(ConfigSeal.inert(firstCommit.folder, limit: 400)) ("
+                        + (made.files.count == 1 ? "1 file" : "\(made.files.count) files") + ")")
             }
         }
         var args: [String: NodeWire.Value] = ["folder": .string(asked.folder), "takeHead": .bool(asked.takeHead), "replace": .bool(asked.replace)]
