@@ -20,6 +20,9 @@ struct LiveSubscribe: Equatable {
     var since: Since?
     var after: String?
     var limit: Int?
+    /// The client takes a snapshot in parts (`NodeWire.partBytes` each); otherwise it gets one message, entries left out
+    /// if it must to fit a line (`LiveHub.fitted`), as before parts.
+    var parts = false
 
     /// The longest `sub` a client may name a subscription.
     static let subLength = 32
@@ -54,6 +57,6 @@ struct LiveSubscribe: Equatable {
             since = Since(epoch: epoch, seq: seq)
         }
         return .success(LiveSubscribe(sub: sub, collection: collection, key: key, since: since, after: args["after"]?.string,
-                                      limit: args["limit"]?.int))
+                                      limit: args["limit"]?.int, parts: args["parts"]?.bool == true))
     }
 }

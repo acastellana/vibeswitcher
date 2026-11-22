@@ -175,7 +175,7 @@ test('aGapSubscribesAgainWithSince', async () => {
   r.socket().say(vector('delta.session-gone'));
   const again = r.sent('subscribe').slice(FOLLOWED);
   assert.equal(again.length, 1);
-  assert.deepEqual(again[0].args, { sub: 's1', collection: 'sessions', since: { epoch: EPOCH, seq: 41 } });
+  assert.deepEqual(again[0].args, { sub: 's1', collection: 'sessions', parts: true, since: { epoch: EPOCH, seq: 41 } });
   // One ask per gap, not one per delta that follows it.
   r.socket().say({ ...vector('delta.session-gone'), prev: 45, seq: 46 });
   assert.equal(r.sent('subscribe').length, FOLLOWED + 1);
@@ -242,6 +242,66 @@ test('a server restart is a snapshot of a new epoch, reconciled with no empty fr
   assert.equal(r.store.state.sessions.size, 2);
   for (const [topic, changes] of r.page.renders) assert.ok(changes.every((change) => change.type === 'reset'), `${topic} reconciled whole`);
   assert.equal(r.store.state.connection, 'live');
+});
+
+// Snapshots in parts (the contract's §4): the page asks for them on every keyed collection (a chat's snapshot is bounded
+// by its own items), holds the parts, and takes them together when the last comes, as one snapshot.
+test('the keyed subscriptions ask for snapshots in parts, as the vector does', async () => {
+  const r = rig();
+  await r.feed.start();
+  r.socket().accept();
+  r.socket().say(vector('hello.web'));
+  assert.ok(r.sent('subscribe').every((m) => m.args.parts === true), 'every keyed collection asks for parts');
+  const asked = r.sent('subscribe').find((m) => m.args.collection === 'sessions');
+  assert.deepEqual(asked.args, vector('subscribe.parts').args);
+});
+
+test('a snapshot in parts is taken whole when its last part comes, nothing before', async () => {
+  const r = await live();
+  const [first, last] = vector('snapshot.parts');
+  // A change the parts replace: a row the new snapshot doesn't hold.
+  const lead = vector('snapshot.sessions').entries[0];
+  r.socket().say({ ...vector('snapshot.sessions'), sub: 's1', seq: 40,
+    entries: [{ id: 'local:pts/40', value: { ...lead.value, id: 'local:pts/40', terminal: 'pts/40', role: null } }] });
+  assert.deepEqual([...r.store.state.sessions.keys()], ['local:pts/40']);
+  r.page.renders.length = 0;
+  r.socket().say({ ...first, sub: 's1', epoch: EPOCH, seq: 41 });
+  assert.deepEqual([...r.store.state.sessions.keys()], ['local:pts/40'], 'nothing of a part is shown before the last');
+  assert.equal(r.page.renders.filter(([topic]) => topic === 'sessions').length, 0);
+  r.socket().say({ ...last, sub: 's1', epoch: EPOCH, seq: 41 });
+  assert.deepEqual([...r.store.state.sessions.keys()].sort(), [first.entries[0].id, last.entries[0].id].sort(), 'both parts, the old row gone');
+  assert.equal(r.page.renders.filter(([topic]) => topic === 'sessions').length, 1, 'one render for the whole snapshot');
+  assert.ok(r.page.warnings.some((w) => w.includes('too large to send') && w.includes('local:pts/9')), 'the withheld entry is said');
+  // Deltas go on from its seq.
+  const delta = vector('delta.session-status');
+  delta.changes[0].value.shownStatus = 'working';
+  r.socket().say(delta);
+  assert.equal(statusOf(r), 'working');
+});
+
+test('a card too large for a part comes withheld whole: its stub takes its place, nothing of what it asks', async () => {
+  const r = await live();
+  assert.ok(r.store.state.cards.get(CARD).question, 'the whole card first');
+  const part = vector('snapshot.parts-card');
+  r.socket().say({ ...part, sub: 's3', epoch: EPOCH });
+  const card = r.store.state.cards.get(CARD);
+  assert.ok(card, 'the card keeps its place');
+  assert.equal(card.tooLarge.command, 'vibeswitcher questions');
+  assert.equal(card.question, undefined, 'nothing of what it asks, cut or whole');
+  assert.equal(card.project, vector('snapshot.cards').entries[0].value.project);
+  assert.equal(card.open, true);
+  assert.ok(!r.page.warnings.some((w) => w.includes('too large to send')), 'a stub shown is not a warning');
+});
+
+test('a part out of its place takes nothing and asks again', async () => {
+  const r = await live();
+  const before = [...r.store.state.sessions.keys()];
+  const [, last] = vector('snapshot.parts');
+  const asked = r.sent('subscribe').length;
+  r.socket().say({ ...last, sub: 's1', epoch: EPOCH, seq: 41 });
+  assert.deepEqual([...r.store.state.sessions.keys()], before, 'a lone last part changes nothing');
+  assert.equal(r.sent('subscribe').length, asked + 1);
+  assert.equal(r.sent('subscribe').at(-1).args.sub, 's1');
 });
 
 test('aCardKeepsItsPlaceAcrossANewCardId', async () => {

@@ -42,6 +42,7 @@ export function firstLine(text, limit = 120) {
 const CARD_TITLES = { question: 'A question for you', approval: 'An approval for you', config: 'Agents’ config held', base: 'The base moved' };
 
 function cardBody(card) {
+  if (card.tooLarge) return 'A card too large for the page: read it with ' + (card.tooLarge.command || 'vibeswitcher questions');
   if (card.question) return firstLine(card.question.text || card.question.short);
   if (card.approval) return firstLine(card.approval.subject || `Merge ${String(card.approval.commit || '').slice(0, 8)}`);
   if (card.config) return firstLine((card.config.items || []).map((item) => item.name).join(', '));

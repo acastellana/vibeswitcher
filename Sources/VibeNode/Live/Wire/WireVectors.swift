@@ -280,6 +280,17 @@ public enum WireVectors {
                                    "entries": .array(entries.map { .object(["id": .string($0.0), "value": $0.1]) })]))
     }
 
+    /// One part of a snapshot in parts, as `LiveHub.parted` writes it.
+    static func part(_ sub: String, _ collection: String, seq: Int, part: Int, final: Bool, entries: [(String, NodeWire.Value)],
+                     withheld: [NodeWire.Withheld]? = nil) -> Frame {
+        var snapshot = NodeWire.Snapshot(sub: sub, collection: collection, epoch: WireVectors.epoch, seq: seq,
+                                         entries: entries.map { NodeWire.Entry(id: $0.0, value: $0.1) })
+        snapshot.part = part
+        snapshot.final = final
+        snapshot.withheld = withheld
+        return frame("snapshot", encoded(snapshot))
+    }
+
     static func delta(_ sub: String, _ collection: String, prev: Int, seq: Int, at: String, changes: [(String, NodeWire.Value)]) -> Frame {
         frame("delta.\(collection)", .object([
             "v": .int(NodeWire.version), "kind": .string("delta"), "sub": .string(sub), "prev": .int(prev), "seq": .int(seq),
@@ -680,6 +691,17 @@ public enum WireVectors {
             ("snapshot.sessions", [snapshot("s1", "sessions", seq: 41,
                                             entries: [(leadSession, lead(status: "working", since: "2026-11-17T09:13:20.000Z")),
                                                       (notesSession, notes)])]),
+            // §4, snapshots in parts: a subscription that asks for them, and a snapshot as two parts (each at most
+            // `NodeWire.partBytes`; here two small ones): the second the last, naming an entry too large to send.
+            ("subscribe.parts", [subscribe("2", "s1", "sessions", extra: ["parts": .bool(true)])]),
+            ("snapshot.parts", [part("s1", "sessions", seq: 41, part: 0, final: false,
+                                     entries: [(leadSession, lead(status: "working", since: "2026-11-17T09:13:20.000Z"))]),
+                                part("s1", "sessions", seq: 41, part: 1, final: true, entries: [(notesSession, notes)],
+                                     withheld: [NodeWire.Withheld(id: "local:pts/9", bytes: 300_000)])]),
+            // A card too large for a part: withheld whole, never cut, its stub in its place.
+            ("snapshot.parts-card", [part("s3", "cards", seq: 58, part: 0, final: true, entries: [],
+                                          withheld: [NodeWire.Withheld(id: card, bytes: 300_000,
+                                                                       stub: CardStore.Card.tooLargeStub(questionCard, bytes: 300_000))])]),
             ("snapshot.leads", [snapshot("s2", "leads", seq: 12, entries: [(NodeIds.project(root: root), leadValue)])]),
             ("snapshot.cards", [snapshot("s3", "cards", seq: 57, entries: [(card, questionCard)])]),
             ("snapshot.node", [snapshot("s0", "node", seq: 3, entries: [(NodeIds.node, node)])]),
