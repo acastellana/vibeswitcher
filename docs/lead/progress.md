@@ -4332,3 +4332,5 @@ Proposed task 1: Find why dictations end with no text
 - 2026-11-22 13:31 Automatically (auto_advance): Held: on battery under your 10 % limit, so nothing starts, audits or merges by itself until AC power returns: no task paused yet, since 13:31.
 - 2026-11-22 13:32 Automatically (auto_advance): Held: on battery under your 10 % limit, so nothing starts, audits or merges by itself until AC power returns: no task paused yet, since 13:32.
 - 2026-11-22 13:42 Automatically (auto_advance): Released: on AC power, after 10 min.
+- 2026-11-22 14:32 Handed the lead over to a fresh session: the last one had been idle 50 minutes with 176k tokens of context, past handover_idle_min 50 and handover_tokens 150k
+- 2026-11-22 14:33 Update: Today: Nov 22 — lead handovers now look like one continuous lead — **Landed (2 merges, both on their first test run; not pushed to GitHub, not installed):**
