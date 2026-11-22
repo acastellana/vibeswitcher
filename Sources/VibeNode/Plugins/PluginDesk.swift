@@ -301,7 +301,8 @@ public struct PluginDesk {
     public func isSettled(_ request: String) -> Bool { engine.pluginSettled.contains(PluginKey(plugin: id, request: request).name) }
 
     /// Withdraws every open card of this plugin, telling their askers (its program broke the protocol, say).
-    public func withdrawAll() { engine.withdraw(plugin) }
+    /// Every open card of this plugin's withdrawn, its askers told: `ended`, its program ended (why), else turned off.
+    public func withdrawAll(ended: String? = nil) { engine.withdraw(plugin, ended: ended) }
 
     /// `request` is settled (it got no card, or its card closed): never drawn again, this server's or the next's
     /// (kept in the vault).
@@ -329,6 +330,12 @@ public struct PluginDesk {
     public func withdrawnWhileAnsweredText(_ card: PluginCard) -> String {
         "[VibeSwitcher] Your \(card.noun) \(card.request) was being answered when the user turned \(plugin.info.title) off on this node: "
             + "what the answer started may still run, but you won't hear more of it from VibeSwitcher."
+    }
+
+    /// What an asker is told when its card was withdrawn because the plugin's program ended (`why`).
+    public func endedText(_ card: PluginCard, why: String) -> String {
+        "[VibeSwitcher] Your \(card.noun) \(card.request) was withdrawn: \(plugin.info.title)'s program ended (\(why)), "
+            + "so nothing more will be done for it. Don't file it again unless the user turns \(plugin.info.title) off and on."
     }
 
     /// What an asker is told when its card was withdrawn: the user turned the plugin off.

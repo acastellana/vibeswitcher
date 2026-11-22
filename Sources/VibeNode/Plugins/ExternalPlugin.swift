@@ -74,6 +74,8 @@ final class ExternalPlugin: FeaturePlugin {
     func startedProcess(_ desk: PluginDesk, then: @escaping (Result<PluginProcess, PluginRefusal>) -> Void) { ensureStarted(desk, then: then) }
 
     private func ensureStarted(_ desk: PluginDesk, then: @escaping (Result<PluginProcess, PluginRefusal>) -> Void) {
+        // Held (changed since added) or ended (a breach): not started again until the user's off and on, or a re-add.
+        if let why = held ?? ended.map({ "its program ended (\($0))" }) { return then(.failure(PluginRefusal(why))) }
         if let process, process.ended == nil { return then(.success(process)) }
         starting.append(then)
         guard starting.count == 1 else { return }
@@ -150,7 +152,8 @@ final class ExternalPlugin: FeaturePlugin {
         ended = why
         process = nil
         desk.note("plugin \(info.id): \(why); its open cards withdrawn")
-        desk.withdrawAll()
+        // Withdrawn in its own words, not through `turnedOff`: it stays ended until the user turns it off and on.
+        desk.withdrawAll(ended: why)
     }
 
     /// A breach of the program's answer's shape: its program is ended.
@@ -169,7 +172,8 @@ final class ExternalPlugin: FeaturePlugin {
             let fresh = asks.filter {
                 self.answers[$0.id] == nil && desk.card(request: $0.id) == nil && !desk.isSettled($0.id) && !self.asking.contains($0.id) && $0.expires > now
             }
-            guard !fresh.isEmpty else { return done() }
+            // Held or ended: nothing is asked (`plugin list` says why); its requests wait, and expire.
+            guard !fresh.isEmpty, self.held == nil, self.ended == nil else { return done() }
             self.ensureStarted(desk) { started in
                 guard case .success(let process) = started else {
                     if case .failure(let why) = started { desk.note("plugin \(self.info.id): its program didn't start: \(why)") }

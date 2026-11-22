@@ -308,25 +308,40 @@ extension LeadEngine {
     /// `plugin` was turned off: each open card of its closes as withdrawn and is settled, its asker is told (until it
     /// heard, the plugin off or not), and the plugin keeps that nothing more comes of it; whoever waits on something it
     /// started is told nothing more will be said. On `queue`.
-    func withdraw(_ plugin: FeaturePlugin) {
+    func withdraw(_ plugin: FeaturePlugin, ended: String? = nil) {
         let desk = desk(plugin)
         // Its page goes with it (the review of 6e91f053, M2): the host lets the port go, then the slot is freed.
         if let slot = pluginPage, slot.plugin == plugin.info.id { slot.page.stop() }
+        let title = plugin.info.title
         for var card in cards.list() where card.plugin?.plugin == plugin.info.id {
             guard var shown = card.plugin else { continue }
             // Already being acted on (an answer marked it): what it started may run; say what is true.
             let underWay = !shown.isWaiting && !pluginSettling.contains(PluginKey(plugin: shown.plugin, request: shown.request).name)
             shown.state = PluginCard.withdrawnState
-            shown.outcome = "Withdrawn: you turned \(plugin.info.title) off" + (underWay ? " while it was being answered" : "")
+            if let ended {
+                let said = ConfigSeal.inert(ended, limit: 200)
+                shown.outcome = "Withdrawn: its program ended (\(said))"
+                card.closed = "withdrawn: \(title)'s program ended (\(said))" + (underWay ? "; what the answer started may still run" : "; nothing ran")
+            } else {
+                shown.outcome = "Withdrawn: you turned \(title) off" + (underWay ? " while it was being answered" : "")
+                card.closed = underWay ? "withdrawn: \(title) was turned off while it was being answered; what that started may still run"
+                    : "withdrawn: \(title) was turned off on this node; nothing ran"
+            }
             card.plugin = shown
-            card.closed = underWay ? "withdrawn: \(plugin.info.title) was turned off while it was being answered; what that started may still run"
-                : "withdrawn: \(plugin.info.title) was turned off on this node; nothing ran"
             cards.put(card)
             desk.settle(shown.request)
-            note("plugin \(plugin.info.id) off: card \(card.id) withdrawn")
-            let said = plugin.withdrawn(shown, desk: desk) ?? (underWay ? desk.withdrawnWhileAnsweredText(shown) : nil)
-            if let session = PluginDesk.hostSession(shown.session) { desk.tellSurely(said ?? desk.withdrawnText(shown), session: session) }
+            note("plugin \(plugin.info.id) \(ended == nil ? "off" : "ended"): card \(card.id) withdrawn")
+            // The plugin keeps that nothing more comes of it (its words count only when it was turned off).
+            let own = plugin.withdrawn(shown, desk: desk)
+            if let session = PluginDesk.hostSession(shown.session) {
+                if let ended {
+                    desk.tellSurely(desk.endedText(shown, why: ConfigSeal.inert(ended, limit: 200)), session: session)
+                } else {
+                    desk.tellSurely(own ?? (underWay ? desk.withdrawnWhileAnsweredText(shown) : desk.withdrawnText(shown)), session: session)
+                }
+            }
         }
+        guard ended == nil else { return }
         for (session, text) in plugin.turnedOff(desk) { desk.tellSurely(text, session: session) }
     }
 

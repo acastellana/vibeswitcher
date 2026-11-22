@@ -231,6 +231,45 @@ struct ExternalPluginsTests {
         #expect(await eventually(timeout: 60) { self.probe(world)?.ended?.contains("didn't answer") == true }, "a hang ends it after 10 s")
     }
 
+    /// A program that broke the protocol stays ended across further requests (nothing starts it again, nothing is filed,
+    /// `plugin list` says why) until the user's `plugin off` and `on`; its cards are withdrawn as ended, not turned off
+    /// (automated review 2).
+    @Test func aBreachStaysEndedUntilOffAndOn() async throws {
+        let notes = Locked<[String]>([])
+        let world = try await CardWorld.make(scratch, plugins: [ShellPlugin()], note: { line in notes.mutate { $0.append(line) } })
+        defer { world.stop() }
+        _ = try await added(world)
+        _ = try await ask(world, ["normal"])
+        for _ in 0..<5 where !cards(world).contains(where: \.isOpen) { await look(world) }
+        let open = try #require(cards(world).first { $0.isOpen }, "\(notes.value.suffix(8))")
+        _ = try await ask(world, ["wrong-id"])
+        await look(world)
+        #expect(await eventually(timeout: 30) { self.probe(world)?.ended != nil })
+        let withdrawn = try #require(world.card(open.id))
+        #expect(withdrawn.closed?.contains("program ended") == true, "\(String(describing: withdrawn.closed))")
+        for _ in 0..<2 {
+            let refused = try await ask(world, ["normal"])
+            #expect(refused.output.status != 0, "nothing filed while it is ended: \(refused.output)")
+            await look(world)
+            #expect(probe(world)?.ended != nil, "still ended")
+        }
+        // Asked to start directly (a look whose read was in flight at the breach, an answer): refused while ended.
+        let plugin = try #require(probe(world))
+        let restarted = Locked<Bool?>(nil)
+        world.queue.async { plugin.startedProcess(world.engine.desk(plugin)) { restarted.value = (try? $0.get()) != nil } }
+        #expect(await eventually(timeout: 30) { restarted.value != nil })
+        #expect(restarted.value == false, "not started again while ended")
+        let listed = try #require(await world.ask("plugin.list", action: nil))
+        #expect(PluginListText.lines(listed.result?["plugins"]?.array ?? []).contains { $0.contains("its program ended") })
+        _ = await world.ask("plugin.off", ["plugin": .string("probe")])
+        _ = await world.ask("plugin.on", ["plugin": .string("probe")])
+        #expect(probe(world)?.ended == nil)
+        let filed = try await ask(world, ["normal"])
+        #expect(filed.output.status == 0, "\(filed.output)")
+        for _ in 0..<5 where !cards(world).contains(where: \.isOpen) { await look(world) }
+        #expect(cards(world).contains { $0.isOpen }, "on again: it starts afresh")
+    }
+
     /// Its settings are checked by its program and kept in the vault; a program changed since it was added is held.
     @Test func settingsAreCheckedAndAChangedProgramIsHeld() async throws {
         let world = try await CardWorld.make(scratch, plugins: [ShellPlugin()])
@@ -244,7 +283,8 @@ struct ExternalPluginsTests {
         try writeClosedOnExec(program, to: folder.appendingPathComponent("plugin.py"))
         _ = try await added(world, folder: folder.path)
         _ = try await ask(world, ["normal"])
-        await look(world)
+        // A look that began as it was turned on may have read the folder before: look until its card is up (its program runs).
+        for _ in 0..<5 where !cards(world).contains(where: \.isOpen) { await look(world) }
         let set = try #require(await world.ask("set", ["key": .string("probe_depth"), "value": .string("3")]))
         #expect(set.ok, "\(set)")
         let refused = try #require(await world.ask("set", ["key": .string("probe_depth"), "value": .string("99")]))
