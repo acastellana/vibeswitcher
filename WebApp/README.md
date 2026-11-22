@@ -48,7 +48,7 @@ Screenshots of each screen, light and dark, desktop and phone, are in `shots/`.
 | `js/socket.js` | The node's live feed: pairing, the token, the four subscriptions and each shown chat's, the contract's order rules, reconnecting. |
 | `js/chatops.js` | A chat's ops (`add`, `text`, `set`, `remove`), applied all or none; the mock makes them as the node does. |
 | `js/wire.js` | The node's values in the shapes the views read, inventing nothing (a field the node doesn't send stays empty). |
-| `js/mock.js` | Stands in for the node with `?mock`. |
+| `js/mock.js` | Stands in for the node with `?mock`: imported only then, and left out of the node's embedded page (`serve.sh` serves it). |
 | `wire/` | The validators and vectors, generated from the node's encoders (`vibeswitcher wire-vectors`): don't edit them. |
 | `js/ui.js` | What this window shows: the route (`#/s/<id>`, `#/node`), grouping, filter, panes, the inspector; the list's arrangement. |
 | `js/words.js` | The vocabulary: state words, durations, a task's words (from `VibeCore`). |

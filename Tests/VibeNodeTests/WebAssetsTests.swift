@@ -312,7 +312,7 @@ struct WebAssetsTests {
         }
         // Left out, not refused: what the page never loads.
         let root = try page()
-        for path in ["shots/a.png", "test/a.test.mjs", "tests/b.test.mjs", ".DS_Store", "js/.hidden.svg", "README.md", "js/notes.md", "serve.sh", "wire/vectors.json"] {
+        for path in ["shots/a.png", "test/a.test.mjs", "tests/b.test.mjs", ".DS_Store", "js/.hidden.svg", "README.md", "js/notes.md", "serve.sh", "wire/vectors.json", "js/mock.js"] {
             let url = root.appendingPathComponent(path)
             try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
             try Data("x".utf8).write(to: url)
