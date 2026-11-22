@@ -17,7 +17,11 @@ extension Requests {
         let files = NodeSettings.Files(root: root)
         let folder = request.args?["folder"]?.string
         if let folder, !folder.hasPrefix("/") { return reply(.init(re: request.id, error: .init(.badArgs, "folder is an absolute path"))) }
-        let (find, vault, home) = (repositoryOf, link.vault, self.home)
+        let (find, vault, home, queue) = (repositoryOf, link.vault, self.home, self.queue)
+        // Read off the queue, answered on it (`Requests` answers on `queue`: the server writes the reply from there). It
+        // answered from the reading queue until 2026-11-22, racing the server's own writes on the connection: the
+        // server crashed under load ("Can't remove more items", `NodeServer.flush`), and the CLI found it gone.
+        let reply = { (answer: NodeWire.Reply) in queue.async { reply(answer) } }
         (engine?.work ?? DispatchQueue.global(qos: .userInitiated)).async {
             var result: [String: NodeWire.Value] = [
                 "node": .object(["root": .string(files.root.path), "settings": .array(NodeSettings.node(files: files).map(\.wire))]),
