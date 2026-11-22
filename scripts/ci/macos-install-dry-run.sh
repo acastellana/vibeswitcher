@@ -4,7 +4,8 @@
 # the test flags (a file:// origin, an injected "green" CI answer, the runner's Xcode unchecked: it isn't root's there),
 # built for real (a release build, signed). Then what the install made is checked, and the refusals a dry run can reach:
 #   1. installed: exit 0; current names HEAD; build-info records HEAD and five programs; the server and the command line
-#      signed with the Hardened Runtime; no LaunchAgent written (a test install never writes one)
+#      signed with the Hardened Runtime; no run path left but /usr/lib/swift (the toolchain's deleted); no LaunchAgent
+#      written (a test install never writes one)
 #   2. again: refused (1), installed already
 #   3. a red CI answer, on a fresh prefix: refused (67) before any build
 #   4. the test flags with the account's builds folder: refused (64)
@@ -63,6 +64,11 @@ else
             fail_case "$program isn't signed with the Hardened Runtime: $(printf '%s' "$shown" | grep -m1 flags=)"
         fi
         codesign --verify --strict "$builds/$commit/bin/$program" 2> /dev/null && pass_case "$program's signature verifies" || fail_case "$program's signature doesn't verify"
+    done
+    # The toolchain's run paths deleted before the signature: none left but the system's Swift.
+    for program in vibeswitcher-host vibeswitcher-server vibeswitcher vibeswitcher-hook vibeswitcher-mcp; do
+        left=$(otool -l "$builds/$commit/bin/$program" | grep -A2 -w LC_RPATH | grep -w path | sed -e 's/^ *path //' -e 's/ (offset [0-9]*)$//' | grep -vx /usr/lib/swift)
+        [[ -z $left ]] && pass_case "$program keeps no run path but /usr/lib/swift" || fail_case "$program keeps the run paths $left"
     done
     grep -q "no LaunchAgent written" "$work/out" && pass_case "no LaunchAgent written" || fail_case "the install didn't say it wrote no LaunchAgent"
     [[ ! -e $builds/dev.vibeswitcher.node.plist ]] || fail_case "a LaunchAgent was written into $builds"
