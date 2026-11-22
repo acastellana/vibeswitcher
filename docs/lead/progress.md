@@ -4329,3 +4329,5 @@ Proposed task 1: Find why dictations end with no text
 - 2026-11-22 12:42 Automatically (auto_advance): Merged the-lead-s-chat-2 (The lead's chat continues across a handover, with a line where the fresh lead started) into main at cca6bd7e, on its passing audit and the full test run.
 - 2026-11-22 12:42 Automatically (auto_advance): Cleaned up the-lead-s-chat-2 (freed 2.6 GB of build output and temporary folders). It stays done.
 - 2026-11-22 12:42 Update: Merged: a lead handover now looks like one continuous lead — **What you asked for:** no more "finished lead, replaced by another". One session, with a signal when a fresh lead took over.
+- 2026-11-22 13:31 Automatically (auto_advance): Held: on battery under your 10 % limit, so nothing starts, audits or merges by itself until AC power returns: no task paused yet, since 13:31.
+- 2026-11-22 13:32 Automatically (auto_advance): Held: on battery under your 10 % limit, so nothing starts, audits or merges by itself until AC power returns: no task paused yet, since 13:32.
