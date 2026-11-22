@@ -10,10 +10,17 @@ lists), which keep their name and code.
 
 ## What a plugin is
 
-A plugin is one folder under `Sources/VibeNode/Plugins/<Name>/` that declares, in one place, everything its feature
-adds. It is compiled into this repository: no third-party code is loaded (the design's line on that stands). Every
-value that crosses the plugin's edge is plain data (`Codable`, no closures in the shapes), so that a later plugin can
-be a separate process speaking the same shapes; that process form is not built now.
+A plugin declares, in one place, everything its feature adds. It comes in two forms with the same shapes:
+
+- **Built in**: one folder under `Sources/VibeNode/Plugins/<Name>/`, compiled into this repository. Shell requests
+  are this, on by default.
+- **External** (the user's decision of 2026-11-22: "the wallet plugin as an actually separate plugin and
+  repository"): a program in a repository of its own, which the person adds to a node and which speaks the plugin
+  protocol over its standard input and output. No plugin code is ever loaded into the node's process. The wallet is
+  this, and the pattern for anyone's own.
+
+Every value that crosses a plugin's edge is plain data (`Codable`, no closures in the shapes), the same for both
+forms.
 
 A plugin declares:
 
@@ -101,13 +108,89 @@ vibeswitcher answer CARD WORD            # unchanged: a plugin's action words ar
    test and acceptance case passes unchanged in what it asserts; the hand-wired `shell` cases in `CardStore`,
    `CardRequests`, `Answers`, `CardText`, `ApprovalCard`, `ApproveRequest`, `BriefRequest`, the page's `cards.js`
    and `shellcard.js` go. Then: off leaves no trace, tested.
-3. **The wallet plugin**, off by default, Linux's slice: signing in the browser's wallet. An agent's `vs-wallet`
-   request (`WalletAsk`, host-stamped) becomes a card whose facts are the chain and the asking session and whose
-   body is the transaction whole (to, value, data, as `WalletRequestFormat` words them). `answer CARD sign` (the
-   user's voice) opens a one-request signing page on its own origin for the person's browser wallet; the signed
-   result or the refusal is recorded and told to the agent. `decline` declines. The author's chains (GenLayer) are
-   its configuration, not its code. This step stops for an independent security review before it merges.
+3. **External plugins** (below): a plugin as a separate program in its own repository, speaking a protocol.
+4. **The wallet, as the first external plugin, in its own repository.** Nothing of the wallet is compiled into
+   this repository.
 
 The Mac app keeps its present wiring (milestone 5 changes it on a Mac): nothing under `Sources/VibeSwitcher` is
 edited, and `VibeCore`'s `ShellAsk` and `Wallet*` are used as they are (a needed change there is minimal, with a
 port-map row).
+
+## External plugins
+
+### Adding one
+
+A plugin's folder holds a manifest, `vibeswitcher-plugin.json`: the protocol version, `id`, `title`, `summary`, the
+program to run (a path inside the folder), `defaultOn` (ignored: an added plugin starts off), the commands it gives
+agents, its settings, its brief lines, a card's life, and what it asks of the core (`page`, when it serves a
+one-request page).
+
+```
+vibeswitcher plugin add FOLDER      # the user's voice: shows the manifest, the program's path and SHA-256, what it asks for
+vibeswitcher plugin remove ID       # the user's voice: its cards withdrawn, its record gone
+vibeswitcher plugin on ID | off ID
+```
+
+`add` records, in the vault, the folder's resolved path and the SHA-256 of the manifest and of the program. The
+node runs the program only from a copy it made and checked against that record (as the host runs its server child
+from a sealed copy): a program changed since the add is not run, its plugin is held, and `plugin list` says so
+until the person adds it again. A plugin whose id is a built-in's is refused.
+
+### The process
+
+The server starts an on plugin's program as a child: no terminal, its own process group, a clean environment (PATH
+of root-owned folders, HOME, LANG, and nothing of the node's or the agents'), its working folder a private one under
+the node's root, standard input and output as the protocol's two pipes, standard error to the node's log (inert,
+capped). It is ended when the plugin goes off, on `stop`, and when it breaks the protocol. It runs in a box when
+the sandbox gives the node one for programs of this kind (the sandbox plan's later slice); until then it runs as
+the person, which is what installing a program means.
+
+### The protocol
+
+JSON, one object a line, each line at most 256 KiB; the node asks and the plugin answers (every message has the
+asker's `id`; a plugin never speaks first); a call unanswered for 10 s, a line too long, or an answer that doesn't
+fit its shape ends the program, withdraws its open cards and says why in `plugin list`. Version 1:
+
+| The node asks | With | The plugin answers |
+|---|---|---|
+| `hello` | the protocol version, the node's build | its `id` and version (must equal the manifest's) |
+| `file` | an agent's command words and working folder | the request's `payload` (bytes, base64) and its expiry, or `refuse` with why (told to the agent at once) |
+| `card` | a verified request: its id, payload, the plugin's settings | a card of data (below), or `refuse` |
+| `perform` | the request, the action word, after the user's voice | an `outcome`; or `page` (the page to serve once) |
+| `page.answer` | what the page sent back | an `outcome`, or `refuse` (a garbled answer) |
+| `settings.check` | a key and a value | ok, or `refuse` |
+| `withdrawn` | a request id | ok |
+
+An **outcome** is a state word for the card, a line for the person and a line for the asking agent.
+
+### What the core does that an external plugin can't
+
+Everything in "What stays the core's" holds, and the core does more of the work itself:
+
+- **Filing.** One command of the core's files for any plugin: `vs-ask ID -- WORDS` (through the node's tool server).
+  The core asks the plugin's `file` for the payload, and the **session host stamps it**; the plugin never writes a
+  request. A plugin's own command names (`vs-wallet`) are thin wrappers the node generates beside its own commands
+  while the plugin is on.
+- **The card's facts are split.** The asking session and its folder are the host's, drawn by the core. What the
+  plugin says (the chain, the decoded call) is shown as the plugin's, named ("the wallet plugin says"). The body,
+  the context's marking, inert text, whole-or-refused, expiry and once-only are the core's checks on the plugin's
+  data, exactly as for a built-in plugin.
+- **The page is the core's.** A plugin that asks for `page` gives the page as data: its HTML, the scripts' and
+  styles' hashes for the content security policy, and how long it may live (at most 15 minutes). The core serves it
+  once on an origin of its own (a loopback port the session host holds), with its own one-time token in the address,
+  printed only in the answering terminal; checks Host, Origin and token; takes one answer of bounded size; and hands
+  it to `page.answer`. The plugin never listens on a port and never sees the token.
+- **Settings** are kept in the vault and set by the user's voice; the plugin only checks a value.
+- **Nothing else.** A plugin has no way to ask the core to act: it can't start a session, type into one, read the
+  vault or other sessions, answer a card, or reach the node's socket (its program is refused there as any other
+  process of the person's that isn't in a terminal).
+
+### The wallet's repository
+
+`vibeswitcher-wallet` (a repository of its own; nothing of the node's code in it, and it needs none: it speaks the
+protocol). It holds the wallet's logic that this repository's `VibeCore/Wallet*` holds for the Mac app (the
+request's shape and validation, the call decoding, the chain table, the signing page), a manifest, its tests against
+a recorded protocol transcript, and a short guide: `git clone`, build, `vibeswitcher plugin add`, `plugin on
+wallet`, `set wallet_chains …`. The author's chains (GenLayer) are its settings' example, not its code. This
+repository keeps a test plugin (`Tests/Fixtures/plugin-probe/`) that speaks the protocol, so the node's tests need
+no wallet.
