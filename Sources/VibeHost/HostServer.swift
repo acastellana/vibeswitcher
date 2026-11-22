@@ -138,6 +138,8 @@ public final class HostServer {
     private var lockFD: Int32 = -1
     var listenFD: Int32 = -1
     var acceptSource: DispatchSourceRead?
+    /// Accepting suspended after it failed for want of descriptors (`acceptFailed`, V2/HostPathWatch.swift).
+    var acceptPaused = false
     private var housekeeping: DispatchSourceTimer?
     /// The watch on `Config.owner`.
     private var ownerWatch: (any Platform.Cancellable)?
@@ -311,7 +313,8 @@ public final class HostServer {
     func acceptAll() {
         while true {
             let fd = Platform.Sockets.accept(listenFD)
-            guard fd >= 0 else { return }
+            // No descriptor or memory left: accepting paused a second (V2/HostPathWatch.swift).
+            guard fd >= 0 else { return acceptFailed(errno) }
             guard UnixSocket.peerUID(fd) == getuid() else {
                 Sys.close(fd)
                 continue

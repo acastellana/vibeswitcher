@@ -310,6 +310,25 @@ final class HostPathWatch {
 }
 
 extension HostServer {
+    /// An accept that failed with `code`: for want of descriptors or memory (EMFILE, ENFILE, ENOBUFS, ENOMEM), which
+    /// would fail again at once while the listener's source fires for as long as a connection waits, accepting is
+    /// suspended for a second, said in the log and on stderr (the architecture review's row 4). The source suspended is the one
+    /// resumed, whatever happened to it meanwhile (`replaceListener` or `stop` may cancel it: a source cancelled while
+    /// suspended ends only once resumed, and mustn't be let go suspended). Anything else: nothing (the source fires
+    /// again if a connection still waits). On `queue`.
+    func acceptFailed(_ code: Int32) {
+        guard [EMFILE, ENFILE, ENOBUFS, ENOMEM].contains(code), !acceptPaused, let source = acceptSource else { return }
+        acceptPaused = true
+        // On stderr too: the log's file may be what can't be opened.
+        note("host: couldn't accept a connection (errno \(code)): accepting again in 1 s")
+        log("couldn't accept a connection (errno \(code)): accepting again in 1 s")
+        source.suspend()
+        queue.asyncAfter(deadline: .now() + 1) { [weak self] in
+            source.resume()
+            self?.acceptPaused = false
+        }
+    }
+
     /// `fd`, a listener bound at the socket's path, accepted from from now on in place of the one before, which is
     /// closed once its accept source has stopped. On `queue`.
     func replaceListener(_ fd: Int32) {
