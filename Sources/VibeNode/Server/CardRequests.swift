@@ -15,7 +15,7 @@ extension Requests {
         }
         let kinds: [CardStore.Kind]
         switch request.kind {
-        case "answer": kinds = [.question, .approval, .shell]
+        case "answer": kinds = [.question, .approval, .shell, .plugin]
         case "hold": kinds = [.question, .approval]
         case "config.accept": kinds = [.configHeld]
         default: kinds = [.baseMove]

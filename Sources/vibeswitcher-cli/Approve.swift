@@ -107,7 +107,11 @@ enum ApproveCommand {
         guard !decide.isEmpty || !pushes.isEmpty || !own.isEmpty else { return }
         Say.out("Waiting on your own decision (not in the batch; each with its own command and code):")
         let count = { (kind: String) in decide.filter { $0["kind"]?.string == kind }.count }
-        let cards = [("question", count("question")), ("merge approval", count("approval")), ("shell request", count("shell"))]
+        // A feature plugin's cards, counted by what one is called (`PluginCard.noun`).
+        var nouns: [String] = []
+        for card in decide { if let noun = card["plugin"]?["noun"]?.string, !nouns.contains(noun) { nouns.append(noun) } }
+        let plugins = nouns.map { noun in (inert(noun), decide.filter { $0["plugin"]?["noun"]?.string == noun }.count) }
+        let cards = ([("question", count("question")), ("merge approval", count("approval")), ("shell request", count("shell"))] + plugins)
             .filter { $0.1 > 0 }.map { "\($0.1) \($0.0)\($0.1 == 1 ? "" : "s")" }
         if !cards.isEmpty { Say.out("   " + cards.joined(separator: ", ") + ": see vibeswitcher questions (each answered with vibeswitcher answer CARD)") }
         for root in pushes { Say.out("   a push asked for in \(inert(root)): vibeswitcher push \(inert(root)) | decline-push \(inert(root))") }

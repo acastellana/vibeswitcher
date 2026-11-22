@@ -32,6 +32,7 @@ let usage = """
            vibeswitcher new-project NAME [--in LOCATION] [--folder NAME] [--goal TEXT] [--no-lead]
            vibeswitcher mail [FOLDER] [--all] [--json] | brief [FOLDER] [--json] | prompt-audit FOLDER snooze|off|on
            vibeswitcher approve [--only config,base,hooks]   (every held config, base move and hooks update, one code)
+           vibeswitcher plugin list [--json] | plugin on NAME | plugin off NAME
            vibeswitcher config held [FOLDER] [--diff NAME] [--long] | config accept CARD | config startup
            vibeswitcher base show FOLDER [--from COMMIT] | base accept CARD | base keep CARD
            vibeswitcher settings [FOLDER] [--find WORDS] [--json] | set [FOLDER] KEY VALUE
@@ -103,6 +104,8 @@ case "prompt-audit":
     exit(PromptAuditCommand.run(Array(words.dropFirst())))
 case "approve":
     exit(ApproveCommand.run(Array(words.dropFirst())))
+case "plugin":
+    exit(PluginCommand.run(Array(words.dropFirst())))
 case "config":
     exit(ConfigCommand.run(Array(words.dropFirst())))
 case "base":

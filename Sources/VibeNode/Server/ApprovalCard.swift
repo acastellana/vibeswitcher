@@ -189,6 +189,7 @@ extension Requests {
         let asks = card.question.map { "the lead asks \(Self.quoted($0.text, limit: 200))" }
         switch kind {
         case "answer":
+            if let shown = card.plugin { return pluginParts(shown, answer: answer) }
             if let shell = card.shell {
                 // The same reading `answerShell` acts on (`ShellCards.answerWord`): run, decline, or nothing asked.
                 switch ShellCards.answerWord(answer ?? "") {
@@ -224,6 +225,20 @@ extension Requests {
             let move = "\(base.branch) from \(base.from.map { String($0.prefix(10)) } ?? "unknown") to \(base.to.prefix(10)) (\(base.commits.count) commit\(base.commits.count == 1 ? "" : "s"))"
             return .success(("\(kind == "base.accept" ? "accept" : "keep refused") the move of \(ConfigSeal.inert(move, limit: 120)) in \(project)", nil))
         }
+    }
+
+    /// A feature plugin's card (`PluginCard`): an acting word's verb, its body whole on one line and its folder, or
+    /// nothing asked; another word's verb, with the folder as context.
+    private func pluginParts(_ shown: PluginCard, answer: String?) -> Result<(decisive: String, context: String?), ApprovalTextRefusal> {
+        guard let action = shown.action(answer ?? "") else {
+            return .failure(.init(why: "a \(shown.noun) card is answered \(shown.actions.map(\.word).joined(separator: " or ")): nothing was asked"))
+        }
+        let place = shown.folder.map(Self.place)
+        guard action.acts else { return .success((ConfigSeal.inert(action.verb, limit: 200), place.map { "in \($0)" })) }
+        guard shown.body.lines.count == 1 else {
+            return .failure(.init(why: "the \(shown.noun)'s \(shown.body.name) has more than one line, too much to show whole in the Mac's dialog: nothing was asked"))
+        }
+        return .success(("\(ConfigSeal.inert(action.verb, limit: 200)): \(Self.whole(shown.body.text))" + (place.map { " in \($0)" } ?? ""), nil))
     }
 
     // MARK: Words

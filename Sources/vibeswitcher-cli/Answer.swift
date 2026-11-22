@@ -20,14 +20,26 @@ enum AnswerCommand {
         let text = arguments[1]
         let word = text.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         return CardCommand.act("answer", card: arguments[0], refuse: { card in
+            // A feature plugin's card: one of its words, nothing else.
+            if let plugin = card["plugin"], plugin != .null {
+                let words = (plugin["actions"]?.array ?? []).compactMap { $0["word"]?.string }
+                guard !words.contains(word) else { return nil }
+                return Say.usage("usage: vibeswitcher answer CARD \(words.map { ConfigSeal.inert($0, limit: 20) }.joined(separator: "|"))  (a \(ConfigSeal.inert(plugin["noun"]?.string ?? "plugin", limit: 40))'s card)")
+            }
             // A shell request (`vs-shell run`): run or decline, nothing else.
             guard card["kind"]?.string == "shell", !["run", "decline"].contains(word) else { return nil }
             return Say.usage("usage: vibeswitcher answer CARD run|decline  (a shell request's card)")
         }, args: { card in
             // Bound to the wording shown: a revision after it is said to the lead with the answer.
-            ["text": .string(card["kind"]?.string == "shell" ? word : text), "version": card["question"]?["version"] ?? .null]
+            let plugin = card["plugin"].map { $0 != .null } ?? false
+            return ["text": .string(card["kind"]?.string == "shell" || plugin ? word : text), "version": card["question"]?["version"] ?? .null]
         }, what: { card in
             let id = ConfigSeal.inert(card["id"]?.string ?? "", limit: 80)
+            // A plugin's word: what it does, whole, as its card says it.
+            if let plugin = card["plugin"], plugin != .null {
+                let action = (plugin["actions"]?.array ?? []).first { $0["word"]?.string == word }
+                return "This " + ConfigSeal.inert(action?["does"]?.string ?? "answers card \(id) with \(word)", limit: .max) + "."
+            }
             guard card["kind"]?.string == "shell" else { return "This answers card \(id) with: \(ConfigSeal.inert(text, limit: 400))" }
             let folder = ConfigSeal.inert(card["shell"]?["cwd"]?.string ?? "?", limit: .max)
             let size = ShellCards.size(card["shell"]?["command"]?.string ?? "")
