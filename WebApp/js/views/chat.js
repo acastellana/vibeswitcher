@@ -34,7 +34,8 @@ import { tokenAt, accept, IMAGE_TYPES, MAX_IMAGE } from '../composing.js';
 import { allDoneView } from './alldone.js';
 import { talkButton } from '../dictate.js';
 import { shellCardsOf } from '../shellcard.js';
-import { shellCard } from './cards.js';
+import { pluginCardsOf, pluginsOn } from '../plugincard.js';
+import { shellCard, pluginCard } from './cards.js';
 
 // How close to the end counts as being at the end.
 const NEAR = 48;
@@ -675,10 +676,13 @@ export function chatView(app) {
   // their own collection), so the stack follows it.
   function drawShells() {
     const open = shellCardsOf(store.state.cards.values(), view.session);
-    const key = JSON.stringify(open.map((card) => [card.id, card.shell?.state, card.notice]));
+    // The feature plugins' cards of this session, of the plugins the node has on (`hello.plugins`).
+    const plugins = pluginCardsOf(store.state.cards.values(), view.session, pluginsOn(store.state));
+    const key = JSON.stringify([...open.map((card) => [card.id, card.shell?.state, card.notice]),
+      ...plugins.map((card) => [card.id, card.plugin?.state, card.notice])]);
     if (key === shellDrawn) return;
     shellDrawn = key;
-    shellSlot.replaceChildren(...open.map(shellCard));
+    shellSlot.replaceChildren(...open.map(shellCard), ...plugins.map(pluginCard));
   }
 
   function placeStack(session) {

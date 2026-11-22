@@ -228,7 +228,8 @@ public enum WireSchema {
                 field("accepted", .list(.shape("node.accepted"))), field("notices", strings),
                 field("restart", Kind.shape("node.restart").orNull), field("reopen", .list(.shape("node.reopen"))), field("ended", .list(.shape("node.ended"))), field("ending", .list(.shape("node.ending"))),
                 field("builds", Kind.any.orNull), field("web", .shape("node.web")), field("usage", Kind.shape("node.usage").orNull),
-                optional("health", .shape("node.health")), field("boost", Kind.shape("node.boost").orNull)]),
+                optional("health", .shape("node.health")), field("boost", Kind.shape("node.boost").orNull),
+                optional("plugins", .list(.shape("hello.plugin")))]),
             // Boost (the app's `BoostMark`, 2026-11-21): null before the engine's first look.
             shape("node.boost", from: "LeadEngine.boostValue", [field("mode", .words(BoostMode.allCases.map(\.rawValue))), field("on", .bool),
                                                                field("why", .string), field("limits", .shape("node.boost.limits"))]),

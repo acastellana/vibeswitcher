@@ -333,7 +333,22 @@ enum Samples {
         var failedShell = CardStore.Card(id: "local:card:00000000-0000-4000-8000-00000000000c", root: root, kind: .shell, at: at)
         failedShell.shell = .init(request: request, asker: "Claude · acme-site", state: .failed, why: "the folder isn't allowed")
         failedShell.closed = "didn't start: the folder isn't allowed"
-        return [asked, timed, plain, approval, vouchless, config, bareConfig, base, bareBase, shell, startedShell, failedShell]
+        // A feature plugin's cards (`PluginCard`): one waiting with every field, one settled with none of the optional ones.
+        let run = PluginCard.Action(word: "run", label: "Run", acts: true, short: "runs it", does: "runs it", verb: "run it", marks: "starting")
+        var plugin = CardStore.Card(id: "local:card:00000000-0000-4000-8000-00000000000d", root: root, kind: .plugin, at: at)
+        plugin.plugin = PluginCard(plugin: "probe", request: request.id, session: "local:\(request.session)", asker: "Claude · acme-site",
+                                   title: "A probe asked for", noun: "probe request", ask: "asks for a probe", summary: "asks to probe",
+                                   facts: [.init(name: "folder", label: "in the folder", value: root, folder: true)],
+                                   body: .init(name: "command", label: "running exactly this", note: "as you", text: "make install\nmake check"),
+                                   context: .init(name: "label", label: "named", text: "install"), expiresAt: at, actions: [run],
+                                   waiting: "nothing runs until you answer run")
+        var settledPlugin = CardStore.Card(id: "local:card:00000000-0000-4000-8000-00000000000e", root: root, kind: .plugin, at: at)
+        settledPlugin.plugin = PluginCard(plugin: "probe", request: request.id, session: "local:\(request.session)", asker: "Claude",
+                                          title: "A probe asked for", noun: "probe request", ask: "asks for a probe", summary: "asks to probe",
+                                          facts: [], body: .init(name: "command", label: "running", text: "true"), expiresAt: nil,
+                                          actions: [run], state: PluginCard.withdrawnState, outcome: "Withdrawn")
+        settledPlugin.closed = "withdrawn"
+        return [asked, timed, plain, approval, vouchless, config, bareConfig, base, bareBase, shell, startedShell, failedShell, plugin, settledPlugin]
     }
 
     static var leads: [LeadStore.Lead] {
@@ -360,7 +375,7 @@ enum Samples {
                                     pid: 1),
                         kinds: ["status"], peer: .init(voice: "other", why: "a web client"), rule: "systemd",
                         auth: .object(["rights": .array([.string("read")]), "token": .string("t"), "expiresAt": .date(at)]),
-                        assets: "9f2c61d0"),
+                        assets: "9f2c61d0", plugins: .array([.object(["id": .string("shell"), "title": .string("Shell requests")])])),
          NodeWire.Hello(node: "local", epoch: "e", server: .init(commit: "c", startedAt: NodeWire.dateText(at), pid: 2),
                         host: .init(startedAt: nil, notes: nil, pid: nil), kinds: [], peer: .init(voice: "user", why: nil), rule: "weaker"),
          NodeWire.Hello(node: "local", epoch: "e", server: .init(commit: "c", startedAt: NodeWire.dateText(at), pid: 2),

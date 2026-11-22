@@ -37,6 +37,8 @@ export function createStore() {
     connection: 'connecting',
     // What this connection may send (`hello.kinds`); null: anything (the mock).
     kinds: null,
+    // The feature plugins the node has on (`hello.plugins`: [{ id, title }]); null: a node before plugins (or the mock).
+    plugins: null,
     // The collections the feed follows; null: all of them (the mock). The node sends no lead's board yet.
     follows: null,
     // A card's place across a server restart: card ids are the server's memory and change, so a card that comes back
@@ -449,8 +451,9 @@ export function createStore() {
     follows: (collection) => state.follows === null || state.follows.includes(collection),
     // A card's stable key (its first id, across a server restart's new ones).
     cardKey: (id) => state.cardKeys.get(id) || id,
-    setKinds(kinds) {
+    setKinds(kinds, plugins = null) {
       state.kinds = kinds;
+      state.plugins = Array.isArray(plugins) ? plugins : null;
       emit(new Map([['connection', [{ connection: state.connection }]]]));
     },
     setConnection: (connection) => setConnection(connection),

@@ -15,6 +15,7 @@ import { since, until, clock, plural } from '../words.js';
 import { pushLines } from '../push.js';
 import { talkButton } from '../dictate.js';
 import { shellFacts } from '../shellcard.js';
+import { pluginFacts } from '../plugincard.js';
 
 const PRIORITY = { blocking: 'Blocking', important: 'Important', whenever: 'Whenever' };
 
@@ -319,6 +320,24 @@ export function shellCard(card) {
       f.label ? fact('Named', `Shell: ${f.label}`) : null)),
     wait ? h('div', { class: 'card-command' }, h('span', { class: 'card-command-label' }, 'Settle it in a terminal; nothing runs before its code'),
       copyLine(f.run, 'the command that runs it'), copyLine(f.decline, 'the command that declines it'))
+      : h('p', { class: 'card-notice' }, f.outcome || f.state),
+    card.notice ? h('p', { class: 'card-notice' }, card.notice) : null);
+}
+
+// A feature plugin's card (js/plugincard.js): who asks, the node's facts, what it asks whole, the agent's own words,
+// and the lines that settle it. Never acts.
+export function pluginCard(card) {
+  const f = pluginFacts(card), wait = f.state === 'waiting', fact = (n, ...v) => [h('dt', null, n), h('dd', null, v)];
+  return h('article', { class: 'card' + (wait ? '' : ' closed') },
+    h('header', { class: 'card-head' }, h('span', { class: `priority ${PRIORITY[f.severity] ? f.severity : 'important'}` }, f.title),
+      wait && f.expiresAt ? h('time', { class: 'asked', data: { until: f.expiresAt } }, `expires ${until(f.expiresAt)}`) : null),
+    h('div', { class: 'facts' }, h('div', { class: 'facts-head' }, 'Exactly what it asks'), h('dl', null,
+      fact('Asked by', f.asker),
+      f.facts.map((item) => fact(item.label, item.folder ? h('code', null, item.value) : item.value)),
+      fact(f.body.name, h('pre', { class: 'plugin-body' }, f.body.lines.join('\n')), f.body.note ? `${f.body.size}, ${f.body.note}` : f.body.size),
+      f.context ? fact(f.context.label, f.context.text) : null)),
+    wait ? h('div', { class: 'card-command' }, h('span', { class: 'card-command-label' }, 'Settle it in a terminal; nothing happens before its code'),
+      f.actions.map((action) => copyLine(action.line, action.says)))
       : h('p', { class: 'card-notice' }, f.outcome || f.state),
     card.notice ? h('p', { class: 'card-notice' }, card.notice) : null);
 }
