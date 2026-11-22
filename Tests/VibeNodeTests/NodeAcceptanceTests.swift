@@ -781,6 +781,22 @@ struct NodeAcceptanceTests {
         #expect(await eventually(timeout: 120) { node.inbox(lead.session.tty).contains { $0.text.contains("start_worker continues there") } }, "\(node.said)")
     }
 
+    @Test("A39: vs approve shows every held config card whole, asks one code, accepts each, each recorded and journaled")
+    func a39Approve() async throws {
+        let node = try await ScratchNode(scratch, holdFirstLook: true)
+        defer { node.stop() }
+        let approved = try await node.runOnTerminal(["approve", "--only", "config"])
+        #expect(approved.status == 0 && approved.output.contains("1. Held config,") && approved.output.contains("This does the 1 accept listed above")
+                && approved.output.contains("done: config accepted") && approved.output.contains("all 1 done"), "\(approved.output)\(approved.errors)\n\(node.said)")
+        // Nothing left to approve, and every accepted request (the batch's, its item's) is in the journal.
+        let again = try await node.runOnTerminal(["approve", "--only", "config"])
+        #expect(again.status == 0 && again.output.contains("Nothing a plain accept settles is waiting on you."), "\(again.output)\(again.errors)")
+        let status = try await node.run(["status"])
+        #expect(!status.output.contains("the journal has no entry for it"), "\(status.output)")
+        let accepted = ((try await node.statusJSON())["accepted"] as? [[String: Any]] ?? []).compactMap { $0["kind"] as? String }
+        #expect(accepted.contains("approve") && accepted.contains("config.accept"), "\(accepted)")
+    }
+
     // MARK: The rows a scratch node can't run
 
     @Test("A19: the page notifies of a question or prompt, and its title counts them",

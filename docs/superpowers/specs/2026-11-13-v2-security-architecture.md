@@ -519,6 +519,28 @@ even with a terminal on stdin) it refuses, saying why. An agent's Bash tool has 
 user's own Claude Code acting on text it read, not a lock. The user also puts deny rules for these subcommands in the
 user's own Claude Code settings (decision 14).
 
+**(user's go-ahead, 2026-11-22)** **One code may cover a listed batch of plain accepts (`vibeswitcher approve`).** The
+voice rule above is unchanged: the same checks of the peer (and the controlling terminal under the weaker rule), and
+one typed code per user action. What changes is that one action may be a batch the user is shown whole first:
+`approve.list` (the user's voice, no typed word: it changes nothing) gathers every held config card (the account's home
+and every project folder with a lead, in the vault's roster or in the accepted snapshot), every base-move card and the
+hooks when out of date, and the server keeps that list as a batch with its own code (`NodeIds.code(card:)`, as a
+card's) for 15 minutes; the command line prints each item exactly as `config held`, `base show` and `hooks install`
+would, then asks the batch's one code. `approve` (the user's voice, recorded under its own action) is taken once, with
+that code, and settles the batch's items in their order (config, base, hooks), each through the user's-voice path as
+its own request: each recorded in the vault as its own action (derived from the batch's action and its place, so a
+retry meets the records and does nothing twice), its card's code checked against the card (the batch's code stood for
+it), done as its own command does it. The first refusal (a card that changed or closed since the list, a seal held
+again) stops the batch, and the reply says what was done, what refused and what's left. The command line journals the
+batch's action and each item's. What needs the user's own decision is never in a batch: questions, approval cards
+(merges), switches, shell requests and pushes are listed beside it with their own answer lines only. Kept by
+`ApproveTests` and acceptance A39. *For an independent review:* that the batch can't be changed between its list and its
+code (the server holds it; the command line names only its id); that an item carries no code of the user's but the
+card's own, filled by the server only for a card the batch named; that the derived actions can't collide with another
+request's (a SHA-256 of the batch's action and the place); that `approve.list` gathers nothing a plain accept wouldn't
+settle (no question, approval, switch, shell card or push); that the Mac's approval rule asks once, for the batch, with
+its items named (`ApprovalCard`'s `approve`); and that a batch expired, taken or unknown refuses before anything is done.
+
 **(call, new)** **What the user answers is built by the engine, not read from the board.** An approval card the command
 line shows is made by the engine from facts it derives: the task, the full commit, the files and diffstat from git,
 the verdict from the vault, the sensitive paths touched. The answer is bound to that card's id, held in the server's

@@ -119,12 +119,15 @@ vs rollback
 
 ```sh
 vs start --interop-is-on                 # two codes the first time: what plain mode doesn't promise
-vs config held ; vs config accept CARD   # what changed in your home; vs config held FOLDER for a project
-vs base show FOLDER ; vs base accept CARD
+vs approve                               # every held config, moved base and hooks update shown whole, one code
 vs lead FOLDER --resume                  # the lead comes back in its own conversation
 vs reopen                                # your own sessions the restart ended
 ```
 
+`vs approve` lists what a plain accept settles (your home's and each project's held config, each moved base, the hooks
+when a build changed them), each as `vs config held` and `vs base show` show it, asks one code and does them in order,
+stopping at the first refusal; `--only config,base,hooks` narrows it. Questions, merge approvals and pushes it only
+lists: each keeps its own answer. `vs config held FOLDER` and `vs base show FOLDER` still show one at a time.
 The seal holds every team until you accept what changed. When Claude Code has updated itself, the card says "this looks
 like Claude Code's own update to X". VibeSwitcher can't tell it from a file a session put there, so it asks you.
 `DISABLE_AUTOUPDATER=1` in Claude Code's settings stops those holds.
