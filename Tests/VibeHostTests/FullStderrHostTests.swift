@@ -17,7 +17,16 @@ struct FullStderrHostTests {
         let socket = folder.appendingPathComponent("h.sock").path, log = folder.appendingPathComponent("host.log").path
         let home = folder.appendingPathComponent("home")
         try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
-        let full = try #require(FileHandle(forWritingAtPath: "/dev/full"))
+        // Every write fails: /dev/full where there is one; on the Mac (none) a pipe whose reader has gone (EPIPE; the host
+        // ignores SIGPIPE).
+        let full: FileHandle
+        if FileManager.default.fileExists(atPath: "/dev/full") {
+            full = try #require(FileHandle(forWritingAtPath: "/dev/full"))
+        } else {
+            let pipe = Pipe()
+            try pipe.fileHandleForReading.close()
+            full = pipe.fileHandleForWriting
+        }
         let host = Process()
         host.executableURL = URL(fileURLWithPath: hostLauncher)
         host.arguments = ["--socket", socket, "--lock", socket + ".lock", "--log", log, "--idle-exit", "1"]
