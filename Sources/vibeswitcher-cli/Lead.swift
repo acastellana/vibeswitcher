@@ -93,11 +93,12 @@ enum LeadCommand {
         let said = TypedWord.said(approval: client.approvalRule, action: action, what: what)
         guard case .success(let typed) = said else { return Say.refused(said.refusal) }
         if let firstCommit {
-            switch LeadInit.make(firstCommit, home: home) {
+            switch LeadInit.make(firstCommit, home: home, scratch: context.root.appendingPathComponent("scratch", isDirectory: true)) {
             case .failure(let why): return Say.refused("the first commit wasn't made, nothing was left: \(why.message)")
-            case .success(let committed):
+            case .success(let made):
                 Say.out("made: " + (firstCommit.inRepository ? "a first commit" : "a git repository with a first commit")
-                        + " in \(ConfigSeal.inert(firstCommit.folder, limit: 400)) (\(committed.count == 1 ? "1 file" : "\(committed.count) files"))")
+                        + " in \(ConfigSeal.inert(firstCommit.folder, limit: 400)) (\(made.files.count == 1 ? "1 file" : "\(made.files.count) files"))")
+                if let note = made.note { Say.err("note: " + note) }
             }
         }
         var args: [String: NodeWire.Value] = ["folder": .string(asked.folder), "takeHead": .bool(asked.takeHead), "replace": .bool(asked.replace)]

@@ -48,6 +48,11 @@ struct LeadInitTests {
         return nil
     }
 
+    /// `make`'s outcome: the files the commit holds, or the refusal's words.
+    private func made(_ plan: LeadInit.Plan, home: String) -> Result<[String], LeadInit.Refusal> {
+        LeadInit.make(plan, home: home, scratch: probes).map(\.files)
+    }
+
     private func tree(_ folder: String) -> [String] {
         LeadInit.repo(["ls-tree", "-r", "-z", "--name-only", "HEAD"], folder).output.split(separator: "\0").map(String.init).sorted()
     }
@@ -64,7 +69,7 @@ struct LeadInitTests {
         }
         let planned = try plan(folder, home: home)
         #expect(planned.inRepository && planned.files == [".gitignore", "a.txt"], "\(planned)")
-        let made = LeadInit.make(planned, home: home)
+        let made = made(planned, home: home)
         #expect(made == .success([".gitignore", "a.txt"]), "\(made)")
         #expect(!FileManager.default.fileExists(atPath: marker), "a hook ran: \((try? String(contentsOfFile: marker, encoding: .utf8)) ?? "")")
         let common = folder + "/.git"
@@ -72,20 +77,20 @@ struct LeadInitTests {
                 "no baseline of the folder's hooks")
     }
 
-    /// The commit holds exactly the planned files: a file come during the prompt isn't added; one gone, or one staged by
-    /// someone else meanwhile, refuses with nothing left (a new repository removed, an existing one's index put back).
+    /// The commit holds exactly the planned files: a file come during the prompt isn't added, nor one staged by someone
+    /// else meanwhile (the commit is staged in an index of its own); one gone refuses with nothing left.
     @Test func aChangeDuringThePromptIsntCommittedOrRefuses() throws {
         let home = try home()
         let added = try folder(["a.txt": "a\n"])
         let planned = try plan(added, home: home)
         try "b\n".write(toFile: added + "/b.txt", atomically: true, encoding: .utf8)
-        #expect(LeadInit.make(planned, home: home) == .success([".gitignore", "a.txt"]))
+        #expect(made(planned, home: home) == .success([".gitignore", "a.txt"]))
         #expect(tree(added) == [".gitignore", "a.txt"], "b.txt came after the code was asked: not committed")
 
         let gone = try folder(["a.txt": "a\n", "c.txt": "c\n"])
         let shown = try plan(gone, home: home)
         try FileManager.default.removeItem(atPath: gone + "/c.txt")
-        guard case .failure(let refused) = LeadInit.make(shown, home: home) else { Issue.record("made with a shown file gone"); return }
+        guard case .failure(let refused) = made(shown, home: home) else { Issue.record("made with a shown file gone"); return }
         #expect(refused.message.contains("c.txt"), "\(refused)")
         #expect(!FileManager.default.fileExists(atPath: gone + "/.git") && !FileManager.default.fileExists(atPath: gone + "/.gitignore"), "nothing left")
 
@@ -94,11 +99,82 @@ struct LeadInitTests {
         let asked = try plan(staged, home: home)
         try "x\n".write(toFile: staged + "/x.txt", atomically: true, encoding: .utf8)
         #expect(LeadInit.repo(["add", "x.txt"], staged).ok)
-        let indexBefore = FileManager.default.contents(atPath: staged + "/.git/index")
-        guard case .failure(let refusedStaged) = LeadInit.make(asked, home: home) else { Issue.record("made with a file staged meanwhile"); return }
-        #expect(refusedStaged.message.contains("staged and not shown: x.txt"), "\(refusedStaged)")
-        #expect(FileManager.default.contents(atPath: staged + "/.git/index") == indexBefore, "the index put back")
-        #expect(!LeadInit.repo(["rev-parse", "--verify", "--quiet", "HEAD"], staged).ok)
+        #expect(made(asked, home: home) == .success([".gitignore", "a.txt"]))
+        #expect(tree(staged) == [".gitignore", "a.txt"], "x.txt was staged by someone else: not committed")
+        #expect(LeadInit.repo(["ls-files"], staged).output == ".gitignore\na.txt", "the repository's index is the commit's")
+    }
+
+    /// A different blob staged under a planned name before the prompt isn't what is committed: each file is hashed as it
+    /// is on disk, into an index of the call's own.
+    @Test func aPreStagedDifferentBlobIsReplacedByTheFileOnDisk() throws {
+        let home = try home()
+        let folder = try folder(["a.txt": "good\n"])
+        #expect(LeadInit.git(["init", "-q"], in: folder).ok)
+        let evil = scratch.url("evil.txt")
+        try "evil\n".write(to: evil, atomically: true, encoding: .utf8)
+        let blob = LeadInit.repo(["hash-object", "-w", "--", evil.path], folder).output.trimmingCharacters(in: .whitespacesAndNewlines)
+        #expect(LeadInit.repo(["update-index", "--add", "--cacheinfo", "100755,\(blob),a.txt"], folder).ok)
+        let planned = try plan(folder, home: home)
+        #expect(made(planned, home: home) == .success([".gitignore", "a.txt"]))
+        #expect(LeadInit.repo(["cat-file", "blob", "HEAD:a.txt"], folder).output == "good", "the file's own content")
+        #expect(LeadInit.repo(["ls-tree", "HEAD", "a.txt"], folder).output.hasPrefix("100644 "), "the file's own mode")
+    }
+
+    /// A link is committed as git commits one (its target as the blob, never what it points at), an executable as one.
+    @Test func aLinkAndAnExecutableAreCommittedAsGitWould() throws {
+        let home = try home()
+        let folder = try folder(["a.txt": "a\n"])
+        try FileManager.default.createSymbolicLink(atPath: folder + "/l", withDestinationPath: "a.txt")
+        try writeClosedOnExec("#!/bin/sh\nexit 0\n", to: URL(fileURLWithPath: folder + "/run.sh"))
+        let planned = try plan(folder, home: home)
+        #expect(made(planned, home: home) == .success([".gitignore", "a.txt", "l", "run.sh"]))
+        #expect(LeadInit.repo(["ls-tree", "HEAD", "l"], folder).output.hasPrefix("120000 "))
+        #expect(LeadInit.repo(["cat-file", "blob", "HEAD:l"], folder).output == "a.txt")
+        #expect(LeadInit.repo(["ls-tree", "HEAD", "run.sh"], folder).output.hasPrefix("100755 "))
+    }
+
+    /// A filter a .gitattributes in the folder names, defined in the repository's config, never runs as the files are
+    /// staged (`hash-object --no-filters`); and a config that gains one after the plan is refused before anything runs.
+    @Test func aPlantedFilterNeverRuns() throws {
+        let home = try home()
+        let folder = try folder(["a.txt": "raw\n", ".gitattributes": "* filter=evil\n"])
+        #expect(LeadInit.git(["init", "-q"], in: folder).ok)
+        let planned = try plan(folder, home: home)
+        let marker = scratch.url("filter-ran").path
+        #expect(LeadInit.git(["config", "--file", folder + "/.git/config", "filter.evil.clean", "sh -c 'echo ran >> \(marker); cat'"], in: "/").ok)
+        #expect(LeadInit.git(["config", "--file", folder + "/.git/config", "filter.evil.required", "true"], in: "/").ok)
+        // Staging alone, as if the config changed between the checks (the .gitignore `make` would have written first).
+        try LeadInit.gitignore.write(toFile: folder + "/.gitignore", atomically: true, encoding: .utf8)
+        let probe = scratch.url("stage-probe")
+        try FileManager.default.createDirectory(at: probe, withIntermediateDirectories: true)
+        let staged = LeadInit.stage(planned, probe: probe, index: ["GIT_INDEX_FILE": probe.appendingPathComponent("index").path])
+        guard case .success(let entries) = staged else { Issue.record("\(staged)"); return }
+        let raw = LeadInit.repo(["hash-object", "--no-filters", "--", folder + "/a.txt"], folder).output.trimmingCharacters(in: .whitespacesAndNewlines)
+        #expect(entries["a.txt"]?.object == raw)
+        #expect(!FileManager.default.fileExists(atPath: marker), "the filter ran")
+        // The whole make: the config checked again first.
+        try FileManager.default.removeItem(atPath: folder + "/.gitignore")
+        guard case .failure(let refused) = made(planned, home: home) else { Issue.record("made under a filter"); return }
+        #expect(refused.message.contains("filter.evil"), "\(refused)")
+        #expect(!FileManager.default.fileExists(atPath: marker) && !LeadInit.repo(["rev-parse", "--verify", "--quiet", "HEAD"], folder).ok)
+    }
+
+    /// `.git/info` swapped for a link to another folder between the plan and the make: the exclude file is written
+    /// relative to the folder's descriptor, so the link is refused and nothing is written through it.
+    @Test func infoSwappedForALinkIsRefused() throws {
+        let home = try home()
+        let folder = try folder(["a.txt": "a\n", ".npmrc": "token\n"])
+        #expect(LeadInit.git(["init", "-q"], in: folder).ok)
+        let planned = try plan(folder, home: home)
+        #expect(planned.leftOut == [".npmrc"])
+        let elsewhere = scratch.url("elsewhere-info")
+        try FileManager.default.createDirectory(at: elsewhere, withIntermediateDirectories: true)
+        try FileManager.default.removeItem(atPath: folder + "/.git/info")
+        try FileManager.default.createSymbolicLink(atPath: folder + "/.git/info", withDestinationPath: elsewhere.path)
+        guard case .failure(let refused) = made(planned, home: home) else { Issue.record("made through a link"); return }
+        #expect(refused.message.contains(".git/info"), "\(refused)")
+        #expect(((try? FileManager.default.contentsOfDirectory(atPath: elsewhere.path)) ?? []).isEmpty, "nothing written through the link")
+        #expect(!FileManager.default.fileExists(atPath: folder + "/.gitignore"), "the .gitignore made is removed")
     }
 
     /// A repository whose config sets core.worktree, a filter or a hooks path, whose .git is a file, or which is a
@@ -136,7 +212,7 @@ struct LeadInitTests {
         #expect(planned.leftOut == [".npmrc", "Prod.ENV"] && planned.files == [".gitignore", "a.txt"], "\(planned)")
         let words = LeadInit.words(planned)
         #expect(words.contains("Left out, as they look like secrets: .npmrc, Prod.ENV") && words.contains("Committed: .gitignore, a.txt"), "\(words)")
-        #expect(LeadInit.make(planned, home: home) == .success([".gitignore", "a.txt"]))
+        #expect(made(planned, home: home) == .success([".gitignore", "a.txt"]))
         let exclude = try String(contentsOfFile: folder + "/.git/info/exclude", encoding: .utf8)
         #expect(exclude.contains("/.npmrc\n") && exclude.contains("/Prod.ENV\n"), "kept out of later commits: \(exclude)")
     }
@@ -160,7 +236,7 @@ struct LeadInitTests {
         #expect(LeadInit.git(["config", "--file", folder + "/.git/config", "user.name", "An Agent"], in: "/").ok)
         #expect(LeadInit.git(["config", "--file", folder + "/.git/config", "user.email", "agent@example.invalid"], in: "/").ok)
         let planned = try plan(folder, home: home)
-        #expect(LeadInit.make(planned, home: home) == .success([".gitignore", "a.txt"]))
+        #expect(made(planned, home: home) == .success([".gitignore", "a.txt"]))
         let author = LeadInit.repo(["log", "-1", "--format=%an <%ae> / %cn <%ce>"], folder).output
         #expect(author == "The User <user@example.invalid> / The User <user@example.invalid>", "\(author)")
         let nobody = try self.home(identity: false)
@@ -176,9 +252,16 @@ struct LeadInitTests {
         let other = try self.folder(["z.txt": "z\n"])
         try FileManager.default.removeItem(atPath: folder)
         try FileManager.default.createSymbolicLink(atPath: folder, withDestinationPath: other)
-        guard case .failure(let refused) = LeadInit.make(planned, home: home) else { Issue.record("made through a link"); return }
+        guard case .failure(let refused) = made(planned, home: home) else { Issue.record("made through a link"); return }
         #expect(refused.message.contains("isn't a folder"), "\(refused)")
         #expect(!FileManager.default.fileExists(atPath: other + "/.git"))
+        // Replaced by another real folder at the same path: not the folder the code was typed for.
+        let swapped = try self.folder()
+        let swappedPlan = try plan(swapped, home: home)
+        try FileManager.default.moveItem(atPath: swapped, toPath: swapped + "-moved")
+        try FileManager.default.createDirectory(atPath: swapped, withIntermediateDirectories: false)
+        guard case .failure(let replaced) = made(swappedPlan, home: home) else { Issue.record("made in a replaced folder"); return }
+        #expect(replaced.message.contains("isn't the folder it was"), "\(replaced)")
         let linkToHome = scratch.url("to-home").path
         try FileManager.default.createSymbolicLink(atPath: linkToHome, withDestinationPath: home)
         #expect(refusal(home, home: home)?.contains("a folder of its own") == true)

@@ -15,9 +15,12 @@ import VibeCore
 ///   recorded anywhere.
 /// - An existing repository is taken only when its `.git` is a folder of its own (not a link, not a file, no
 ///   `commondir`) whose config holds only plain keys (`allowedKeys`): no filter, hook path, include or `core.worktree`.
-/// - The files are added by path, the ones planned; the index is compared with the plan before the commit, and any
-///   difference (a file come or gone during the prompt) refuses, leaving the folder as it was. What is printed after is
-///   what the commit holds.
+/// - The files are hashed as they are on disk with no filter and staged by mode and object into an index of the call's
+///   own (nothing the repository's index held counts), compared entry by entry, and committed with plumbing (no index
+///   refresh, no filter, no hook, no signing: those keys forced off on every call). The config and the folder (its
+///   inode) are checked again right before the commit. A file gone during the prompt refuses, leaving the folder as it
+///   was. What is printed after is what the commit holds.
+/// - `.gitignore` and `.git/info/exclude` are written relative to the folder's descriptor, never through a link.
 /// - The author is the user's, from their global git config (`git config --global`), never the folder's.
 /// - What looks like a secret (`secretNames`, the app's list and more, matched without case) is left out, named in the
 ///   prompt, and kept out of later commits (`.git/info/exclude`).
@@ -51,6 +54,9 @@ public enum LeadInit {
         /// The folder has no .gitignore: `gitignore` is written and committed.
         public var addsGitignore: Bool
         public var identity: Identity
+        /// The folder's device and inode at the plan: the same folder after the code, and after each git call.
+        public var device: UInt64
+        public var inode: UInt64
     }
 
     /// File names that look like secrets: the app's (`FolderRepository.secretNames`) and more, matched without case.
@@ -91,10 +97,15 @@ public enum LeadInit {
     /// pathspecs; `gitDir` and `workTree` given when the repository is there. Never `Git.run` (no baseline).
     static func git(_ args: [String], in directory: String, gitDir: String? = nil, workTree: String? = nil,
                     env: [String: String] = [:]) -> Git.Result {
-        var environment = Git.environment.merging(["GIT_LITERAL_PATHSPECS": "1"]) { $1 }
+        var environment = Git.environment.merging(["GIT_LITERAL_PATHSPECS": "1", "GIT_ATTR_NOSYSTEM": "1", "GIT_PAGER": "cat",
+                                                   "GIT_EDITOR": "/bin/false", "GIT_ASKPASS": "/bin/false"]) { $1 }
         if let gitDir { environment["GIT_DIR"] = gitDir }
         if let workTree { environment["GIT_WORK_TREE"] = workTree }
-        let front = ["-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", "-c", "protocol.allow=never", "-c", "submodule.recurse=false"]
+        // Forced on every call, over whatever the repository's config says by then (`-c` wins over its files): the
+        // config is checked once and again before the commit, but it stays writable between git calls.
+        let front = ["-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", "-c", "protocol.allow=never", "-c", "submodule.recurse=false",
+                     "-c", "commit.gpgSign=false", "-c", "tag.gpgSign=false", "-c", "gpg.program=/bin/false", "-c", "core.attributesFile=/dev/null",
+                     "-c", "core.pager=cat", "-c", "core.sshCommand=/bin/false"]
         return Shell.run(executable: Platform.Tools.git, args: front + args, in: directory, env: environment.merging(env) { $1 }, timeout: 120)
     }
 
@@ -158,6 +169,13 @@ public enum LeadInit {
         guard !repo(["rev-parse", "--verify", "--quiet", "HEAD"], folder).ok else { return false }
         let refs = repo(["for-each-ref", "--count=1"], folder)
         return refs.ok && refs.output.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    /// The folder's device and inode, not following a link.
+    static func identityOf(_ path: String) -> (device: UInt64, inode: UInt64)? {
+        var info = stat()
+        guard lstat(path, &info) == 0 else { return nil }
+        return (UInt64(info.st_dev), UInt64(info.st_ino))
     }
 
     /// Why `folder` (as `chosen` resolved at the plan) isn't one to make a repository in, or nil.
@@ -229,8 +247,10 @@ public enum LeadInit {
         let nested = all.filter { $0.hasSuffix("/") }.map { String($0.dropLast()) }
         var files = all.filter { !looksSecret($0) }.map { $0.hasSuffix("/") ? String($0.dropLast()) : $0 }
         if addsGitignore, !files.contains(".gitignore") { files.append(".gitignore") }
+        guard let id = identityOf(chosen) else { return .failure(Refusal("\(shown) isn't there")) }
         return .success(Plan(folder: chosen, inRepository: inRepository, branch: branch, files: files.sorted(),
-                             leftOut: all.filter(looksSecret).sorted(), nested: nested.sorted(), addsGitignore: addsGitignore, identity: who))
+                             leftOut: all.filter(looksSecret).sorted(), nested: nested.sorted(), addsGitignore: addsGitignore, identity: who,
+                             device: id.device, inode: id.inode))
     }
 
     static func count(_ files: Int) -> String { files == 1 ? "1 file" : "\(files) files" }
@@ -253,107 +273,238 @@ public enum LeadInit {
         if !plan.files.isEmpty { text += "\nCommitted: \(some(plan.files))." }
         if !plan.leftOut.isEmpty { text += "\nLeft out, as they look like secrets: \(some(plan.leftOut))." }
         if !plan.nested.isEmpty { text += "\nA repository of its own, committed as a reference (its files aren't included): \(some(plan.nested))." }
+        if plan.inRepository { text += "\nEach file is committed as it is on disk: what its index held before isn't." }
         text += "\nNothing of the folder's git runs (no hooks, no filters), and anything changed in the folder before the code is typed refuses it."
         return text
     }
 
     // MARK: Making it
 
-    /// The paths added in one `git add`.
-    static let addBatch = 200
+    /// The paths hashed or staged in one git call.
+    static let batch = 200
 
-    /// Makes what `plan` says, or nothing: the folder checked again, git init (unless in a repository), the .gitignore
-    /// if planned, the files left out noted in `.git/info/exclude`, the planned files added by path, the index compared
-    /// with the plan, then the commit. On any refusal what this made is removed (a repository's index and exclude file
-    /// put back). The paths the commit holds.
-    public static func make(_ plan: Plan, home: String) -> Result<[String], Refusal> {
+    /// What `make` made: the paths the commit holds, and a note when something after the commit didn't go as asked.
+    public struct Made: Equatable, Sendable {
+        public var files: [String]
+        public var note: String?
+    }
+
+    /// One entry of the commit: its mode and object.
+    struct Entry: Equatable {
+        var mode: String
+        var object: String
+    }
+
+    /// Makes what `plan` says, or nothing. The folder checked again (its resolved path, not a link, the same inode), the
+    /// repository's config again; git init (unless in a repository); the .gitignore made new and the files left out noted
+    /// in `.git/info/exclude`, both through descriptors (never through a link); then each planned file hashed as it is on
+    /// disk with no filter (`hash-object --no-filters`), staged into an index of this call's own by mode and object
+    /// (`update-index --cacheinfo`: nothing the repository's index held counts), the index compared entry by entry, the
+    /// config and the folder checked once more, and the commit made with plumbing (`write-tree`, `commit-tree`,
+    /// `update-ref` of a branch that must not exist yet: no index refresh, no filter, no hook). The repository's own index
+    /// is then read from the commit. On a refusal before the commit what this made is removed (an existing repository's
+    /// exclude file put back).
+    public static func make(_ plan: Plan, home: String, scratch: URL) -> Result<Made, Refusal> {
         let folder = plan.folder
+        let shown = ConfigSeal.inert(folder, limit: 400)
         if let refused = folderRefusal(folder, chosen: folder, home: home) { return .failure(Refusal(refused)) }
+        func same() -> Bool { identityOf(folder).map { $0.device == plan.device && $0.inode == plan.inode } ?? false }
+        guard same() else { return .failure(Refusal("\(shown) isn't the folder it was when the code was asked")) }
+        let directory = open(folder, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)
+        guard directory >= 0 else { return .failure(Refusal("\(shown) couldn't be opened (errno \(errno))")) }
+        defer { close(directory) }
+        var opened = stat()
+        guard fstat(directory, &opened) == 0, UInt64(opened.st_dev) == plan.device, UInt64(opened.st_ino) == plan.inode else {
+            return .failure(Refusal("\(shown) isn't the folder it was when the code was asked"))
+        }
         let dotGit = (folder as NSString).appendingPathComponent(".git")
-        let gitignorePath = (folder as NSString).appendingPathComponent(".gitignore")
-        let exclude = (dotGit as NSString).appendingPathComponent("info/exclude")
-        let index = (dotGit as NSString).appendingPathComponent("index")
-        var kept: [(path: String, data: Data?)] = []
+        var keptExclude: Data??
         var wroteGitignore = false
+        var madeGit = false
         if plan.inRepository {
             if let refused = repositoryRefusal(folder) { return .failure(Refusal(refused)) }
-            guard isEmpty(folder) else { return .failure(Refusal("\(ConfigSeal.inert(folder, limit: 400)) has a commit now: nothing was made")) }
-            for path in [index, (exclude as NSString).deletingLastPathComponent, exclude] where kind(path) == S_IFLNK {
-                return .failure(Refusal("\(ConfigSeal.inert(path, limit: 400)) is a link: --init writes only into the repository's own files"))
-            }
-            kept = [index, exclude].map { ($0, FileManager.default.contents(atPath: $0)) }
+            guard isEmpty(folder) else { return .failure(Refusal("\(shown) has a commit now: nothing was made")) }
         } else {
-            guard kind(dotGit) == nil else { return .failure(Refusal("\(ConfigSeal.inert(folder, limit: 400)) has a .git now: nothing was made")) }
+            guard kind(dotGit) == nil else { return .failure(Refusal("\(shown) has a .git now: nothing was made")) }
         }
-        func undo(_ refusal: Refusal) -> Result<[String], Refusal> {
-            if plan.inRepository {
-                for (path, data) in kept {
-                    if let data { try? data.write(to: URL(fileURLWithPath: path), options: .atomic) } else { try? FileManager.default.removeItem(atPath: path) }
-                }
-            } else if kind(dotGit) == S_IFDIR {
-                try? FileManager.default.removeItem(atPath: dotGit)
-            }
-            if wroteGitignore { unlink(gitignorePath) }
+        func undo(_ refusal: Refusal) -> Result<Made, Refusal> {
+            if madeGit, kind(dotGit) == S_IFDIR, same() { try? FileManager.default.removeItem(atPath: dotGit) }
+            if let kept = keptExclude { _ = Descriptors.writeExclude(directory, kept) }
+            if wroteGitignore { unlinkat(directory, ".gitignore", 0) }
             return .failure(refusal)
         }
         if !plan.inRepository {
             // In the folder itself, with nothing given: git init makes `.git` there, never anywhere a variable names.
             let made = git(["init", "--quiet", "--initial-branch=\(plan.branch ?? "main")"], in: folder)
+            madeGit = made.ok || kind(dotGit) == S_IFDIR
             guard made.ok else { return undo(failed("init", made)) }
-            guard kind(dotGit) == S_IFDIR, repositoryRefusal(folder) == nil else { return undo(Refusal("the new repository isn't as git init makes it: nothing was made")) }
+            guard same(), kind(dotGit) == S_IFDIR, repositoryRefusal(folder) == nil else { return undo(Refusal("the new repository isn't as git init makes it: nothing was made")) }
         }
         if plan.addsGitignore {
-            // Made new (never through a link, never over a file that came meanwhile: that one is the folder's own and the
-            // index check below refuses the difference).
-            let fd = open(gitignorePath, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0o644)
-            guard fd >= 0 else { return undo(Refusal("the .gitignore couldn't be written in \(ConfigSeal.inert(folder, limit: 400)) (errno \(errno))")) }
+            // Made new, relative to the folder's descriptor (never through a link, never over a file that came meanwhile).
+            guard Descriptors.create(directory, ".gitignore", Data(gitignore.utf8)) else {
+                return undo(Refusal("the .gitignore couldn't be made in \(shown) (it came meanwhile, or errno \(errno))"))
+            }
             wroteGitignore = true
-            let data = Data(gitignore.utf8)
-            let wrote = data.withUnsafeBytes { write(fd, $0.baseAddress, $0.count) }
-            close(fd)
-            guard wrote == data.count else { return undo(Refusal("the .gitignore couldn't be written in \(ConfigSeal.inert(folder, limit: 400))")) }
         }
         if !plan.leftOut.isEmpty {
-            guard kind(exclude) != S_IFLNK, kind((exclude as NSString).deletingLastPathComponent) != S_IFLNK else {
-                return undo(Refusal("\(ConfigSeal.inert(exclude, limit: 400)) is a link: --init writes only into the repository's own files"))
-            }
-            do {
-                try FileManager.default.createDirectory(atPath: (exclude as NSString).deletingLastPathComponent, withIntermediateDirectories: true)
-                var existing = (try? String(contentsOfFile: exclude, encoding: .utf8)) ?? ""
-                if !existing.isEmpty, !existing.hasSuffix("\n") { existing += "\n" }
-                let lines = plan.leftOut.map { "/" + escapedPattern($0) }.joined(separator: "\n") + "\n"
-                try Data((existing + lines).utf8).write(to: URL(fileURLWithPath: exclude), options: .atomic)
-            } catch {
-                return undo(Refusal("the files left out couldn't be noted in .git/info/exclude: \(error.localizedDescription)"))
+            switch Descriptors.readExclude(directory) {
+            case .failure(let why): return undo(why)
+            case .success(let existing):
+                keptExclude = .some(existing)
+                var text = existing.map { String(decoding: $0, as: UTF8.self) } ?? ""
+                if !text.isEmpty, !text.hasSuffix("\n") { text += "\n" }
+                text += plan.leftOut.map { "/" + escapedPattern($0) }.joined(separator: "\n") + "\n"
+                if let why = Descriptors.writeExclude(directory, Data(text.utf8)) { return undo(Refusal(why)) }
             }
         }
+        let probe = scratch.appendingPathComponent("lead-init-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: probe) }
+        do { try VibePaths.ensurePrivate(probe) } catch { return undo(Refusal("a scratch folder couldn't be made: \(error.localizedDescription)")) }
+        let own = ["GIT_INDEX_FILE": probe.appendingPathComponent("index").path]
+        let entries: [String: Entry]
+        switch stage(plan, probe: probe, index: own) {
+        case .failure(let refusal): return undo(refusal)
+        case .success(let staged): entries = staged
+        }
+        // Checked again right before the commit: the config git read meanwhile, and the folder.
+        if let refused = repositoryRefusal(folder) { return undo(Refusal(refused)) }
+        guard same() else { return undo(Refusal("\(shown) isn't the folder it was when the code was asked")) }
         let identity = ["GIT_AUTHOR_NAME": plan.identity.name, "GIT_AUTHOR_EMAIL": plan.identity.email,
                         "GIT_COMMITTER_NAME": plan.identity.name, "GIT_COMMITTER_EMAIL": plan.identity.email]
-        // Already in the index (a repository's staged files) needn't be added again; the rest by path, in batches.
-        let staged = repo(["ls-files", "-z", "--cached"], folder)
-        guard staged.ok else { return undo(failed("ls-files", staged)) }
-        let before = Set(staged.output.split(separator: "\0").map(String.init))
-        let toAdd = plan.files.filter { !before.contains($0) }
+        let tree = repo(["write-tree"], folder, env: own)
+        guard tree.ok, !tree.output.isEmpty else { return undo(failed("write-tree", tree)) }
+        let commit = repo(["commit-tree", tree.output.trimmingCharacters(in: .whitespacesAndNewlines), "-m", ProjectCreation.commitMessage], folder, env: identity)
+        guard commit.ok, !commit.output.isEmpty else { return undo(failed("commit-tree", commit)) }
+        let head = commit.output.trimmingCharacters(in: .whitespacesAndNewlines)
+        // The branch HEAD names, which must not exist yet (empty old value): a commit that came meanwhile isn't replaced.
+        let moved = repo(["update-ref", "-m", "lead --init: " + ProjectCreation.commitMessage, "HEAD", head, ""], folder)
+        guard moved.ok else { return undo(failed("update-ref", moved)) }
+        let listed = repo(["ls-tree", "-r", "-z", "--name-only", head], folder)
+        let files = listed.ok ? listed.output.split(separator: "\0").map(String.init).sorted() : entries.keys.sorted()
+        // The repository's own index, now the commit's (read-tree touches the index alone, never a file).
+        let read = repo(["read-tree", head], folder)
+        let note = read.ok ? nil : "the commit is made, but its index wasn't updated (\(ConfigSeal.inert(read.error, limit: 200))): `git reset` in the folder puts it right"
+        return .success(Made(files: files, note: same() ? note : (note.map { $0 + "; " } ?? "") + "the folder changed during the commit: look at it before the lead starts"))
+    }
+
+    /// Each planned path hashed as it is on disk (no filter: `--no-filters`; a link's target as its blob, a nested
+    /// repository by its HEAD), staged by mode and object into the index `index` names, then compared with it entry by
+    /// entry. Any path that isn't what the plan listed refuses.
+    static func stage(_ plan: Plan, probe: URL, index: [String: String]) -> Result<[String: Entry], Refusal> {
+        let folder = plan.folder
+        var entries: [String: Entry] = [:]
+        var regular: [(path: String, mode: String)] = []
+        for (number, path) in plan.files.enumerated() {
+            let full = (folder as NSString).appendingPathComponent(path)
+            var info = stat()
+            guard lstat(full, &info) == 0 else { return .failure(Refusal("the folder changed since the code was asked (shown and gone: \(ConfigSeal.inert(path, limit: 200))): nothing was committed")) }
+            switch info.st_mode & S_IFMT {
+            case S_IFREG:
+                regular.append((path, info.st_mode & 0o111 != 0 ? "100755" : "100644"))
+            case S_IFLNK:
+                guard let target = try? FileManager.default.destinationOfSymbolicLink(atPath: full) else {
+                    return .failure(Refusal("\(ConfigSeal.inert(path, limit: 200)) couldn't be read as a link"))
+                }
+                let copy = probe.appendingPathComponent("link-\(number)")
+                guard FileManager.default.createFile(atPath: copy.path, contents: Data(target.utf8)) else { return .failure(Refusal("a scratch file couldn't be made")) }
+                let hashed = repo(["hash-object", "--no-filters", "-w", "--", copy.path], folder)
+                guard hashed.ok, !hashed.output.isEmpty else { return .failure(failed("hash-object", hashed)) }
+                entries[path] = Entry(mode: "120000", object: hashed.output.trimmingCharacters(in: .whitespacesAndNewlines))
+            case S_IFDIR where plan.nested.contains(path):
+                let nested = git(["rev-parse", "--verify", "--quiet", "HEAD^{commit}"], in: full)
+                guard nested.ok, !nested.output.isEmpty else {
+                    return .failure(Refusal("\(ConfigSeal.inert(path, limit: 200)) is a repository of its own with no commit: it can't be committed as a reference"))
+                }
+                entries[path] = Entry(mode: "160000", object: nested.output.trimmingCharacters(in: .whitespacesAndNewlines))
+            default:
+                return .failure(Refusal("\(ConfigSeal.inert(path, limit: 200)) isn't a file now: nothing was committed"))
+            }
+        }
         var start = 0
-        while start < toAdd.count {
-            let batch = Array(toAdd[start..<min(start + addBatch, toAdd.count)])
-            let added = repo(["add", "--"] + batch, folder, env: identity)
-            guard added.ok else { return undo(failed("add", added)) }
-            start += addBatch
+        while start < regular.count {
+            let slice = Array(regular[start..<min(start + batch, regular.count)])
+            let hashed = repo(["hash-object", "--no-filters", "-w", "--"] + slice.map { (folder as NSString).appendingPathComponent($0.path) }, folder)
+            let objects = hashed.output.split(whereSeparator: \.isNewline).map(String.init)
+            guard hashed.ok, objects.count == slice.count else { return .failure(failed("hash-object", hashed)) }
+            for (item, object) in zip(slice, objects) { entries[item.path] = Entry(mode: item.mode, object: object) }
+            start += batch
         }
-        let now = repo(["ls-files", "-z", "--cached"], folder)
-        guard now.ok else { return undo(failed("ls-files", now)) }
-        let inIndex = Set(now.output.split(separator: "\0").map(String.init))
-        guard inIndex == Set(plan.files) else {
-            let extra = inIndex.subtracting(plan.files).sorted(), missing = Set(plan.files).subtracting(inIndex).sorted()
-            return undo(Refusal("the folder changed since the code was asked (" + [extra.isEmpty ? nil : "staged and not shown: \(some(extra))",
-                                                                                    missing.isEmpty ? nil : "shown and gone: \(some(missing))"]
-                .compactMap { $0 }.joined(separator: "; ") + "): nothing was committed"))
+        let ordered = entries.sorted { $0.key < $1.key }
+        start = 0
+        while start < ordered.count {
+            let slice = ordered[start..<min(start + batch, ordered.count)]
+            let staged = repo(["update-index", "--add"] + slice.flatMap { ["--cacheinfo", "\($0.value.mode),\($0.value.object),\($0.key)"] }, folder, env: index)
+            guard staged.ok else { return .failure(failed("update-index", staged)) }
+            start += batch
         }
-        let committed = repo(["commit", "--quiet", "--no-verify", "--allow-empty", "-m", ProjectCreation.commitMessage], folder, env: identity)
-        guard committed.ok else { return undo(failed("commit", committed)) }
-        let tree = repo(["ls-tree", "-r", "-z", "--name-only", "HEAD"], folder)
-        return .success(tree.ok ? tree.output.split(separator: "\0").map(String.init).sorted() : plan.files)
+        // The index as git wrote it, entry by entry: exactly the planned paths, each with the mode and object hashed.
+        let listed = repo(["ls-files", "-s", "-z"], folder, env: index)
+        guard listed.ok else { return .failure(failed("ls-files", listed)) }
+        var inIndex: [String: Entry] = [:]
+        for record in listed.output.split(separator: "\0") {
+            let parts = record.split(separator: "\t", maxSplits: 1)
+            let head = parts.first?.split(separator: " ") ?? []
+            guard parts.count == 2, head.count == 3 else { return .failure(Refusal("the index read back isn't one git writes")) }
+            inIndex[String(parts[1])] = Entry(mode: String(head[0]), object: String(head[1]))
+        }
+        guard inIndex == entries, Set(entries.keys) == Set(plan.files) else {
+            return .failure(Refusal("the index read back isn't what was hashed from the folder: nothing was committed"))
+        }
+        return .success(entries)
+    }
+
+    /// The folder's `.gitignore` and `.git/info/exclude`, written relative to the folder's descriptor: each folder
+    /// opened `O_NOFOLLOW`, each file made new (`O_EXCL`) and renamed in, so a link put in their place is refused, never
+    /// written through.
+    enum Descriptors {
+        static func create(_ directory: Int32, _ name: String, _ data: Data) -> Bool {
+            let fd = openat(directory, name, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0o644)
+            guard fd >= 0 else { return false }
+            defer { close(fd) }
+            return data.withUnsafeBytes { write(fd, $0.baseAddress, $0.count) } == data.count
+        }
+
+        /// `.git/info` opened from the folder's descriptor (made when missing), never through a link; -1 and why.
+        static func info(_ directory: Int32) -> (Int32, String?) {
+            let git = openat(directory, ".git", O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)
+            guard git >= 0 else { return (-1, ".git couldn't be opened as a folder of its own (errno \(errno)): nothing was made") }
+            defer { close(git) }
+            if mkdirat(git, "info", 0o755) != 0, errno != EEXIST { return (-1, ".git/info couldn't be made (errno \(errno))") }
+            let info = openat(git, "info", O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)
+            guard info >= 0 else { return (-1, ".git/info isn't a folder of the repository's own (a link?): --init writes only into the repository's own files") }
+            return (info, nil)
+        }
+
+        /// The exclude file's bytes (nil: there's none).
+        static func readExclude(_ directory: Int32) -> Result<Data?, Refusal> {
+            let (info, why) = info(directory)
+            guard info >= 0 else { return .failure(Refusal(why ?? "")) }
+            defer { close(info) }
+            let fd = openat(info, "exclude", O_RDONLY | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC)
+            if fd < 0 { return errno == ENOENT ? .success(nil) : .failure(Refusal(".git/info/exclude isn't a file of the repository's own (a link?)")) }
+            defer { close(fd) }
+            var kind = stat()
+            guard fstat(fd, &kind) == 0, kind.st_mode & S_IFMT == S_IFREG else { return .failure(Refusal(".git/info/exclude isn't a plain file")) }
+            let handle = FileHandle(fileDescriptor: fd, closeOnDealloc: false)
+            return .success((try? handle.readToEnd()) ?? Data())
+        }
+
+        /// Writes `data` as the exclude file (nil: removes it); why not.
+        @discardableResult
+        static func writeExclude(_ directory: Int32, _ data: Data?) -> String? {
+            let (info, why) = info(directory)
+            guard info >= 0 else { return why }
+            defer { close(info) }
+            guard let data else { unlinkat(info, "exclude", 0); return nil }
+            let temporary = "exclude.vs-\(UUID().uuidString.prefix(8))"
+            guard create(info, temporary, data) else { return ".git/info/exclude couldn't be written (errno \(errno))" }
+            guard renameat(info, temporary, info, "exclude") == 0 else {
+                unlinkat(info, temporary, 0)
+                return ".git/info/exclude couldn't be written (errno \(errno))"
+            }
+            return nil
+        }
     }
 
     /// A path as a gitignore pattern that matches only itself.
