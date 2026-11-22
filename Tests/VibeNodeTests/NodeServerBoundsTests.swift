@@ -163,6 +163,54 @@ struct NodeServerBoundsTests {
         #expect(NodeServer.refusal(full, pid: 901, share: "cgroup /y", voice: true)?.contains("\(NodeServer.maxConnections) connections open") == true)
     }
 
+    /// Who sits idle (`NodeServer.idleReason`): no request within the hello's limit; then, with no subscription the hub
+    /// serves, no request within the quiet limit. A subscriber may sit for good once it has asked.
+    @Test func whoSitsIdleIsSaid() {
+        let idle = NodeServer.Idle(hello: 30, quiet: 600)
+        #expect(NodeServer.idleReason(accepted: 0, lastRequest: nil, subscribed: false, now: 29, idle: idle) == nil)
+        #expect(NodeServer.idleReason(accepted: 0, lastRequest: nil, subscribed: false, now: 30, idle: idle) == "no request since the hello (30 s)")
+        #expect(NodeServer.idleReason(accepted: 0, lastRequest: nil, subscribed: true, now: 30, idle: idle) != nil, "a subscription comes with a request")
+        #expect(NodeServer.idleReason(accepted: 0, lastRequest: 10, subscribed: false, now: 609, idle: idle) == nil)
+        #expect(NodeServer.idleReason(accepted: 0, lastRequest: 10, subscribed: false, now: 610, idle: idle) == "no request and no subscription for 10 minutes")
+        #expect(NodeServer.idleReason(accepted: 0, lastRequest: 10, subscribed: true, now: 10_000, idle: idle) == nil)
+    }
+
+    /// On a scratch node whose limits are 1 s and 2 s (`--test-idle=1`): a connection that never asks is told why and
+    /// closed; one that asked once, then sat, is too; a subscriber older than both still answers.
+    @Test func connectionsThatOnlySitThereAreClosed() async throws {
+        let node = try await ScratchNode(scratch, hostArguments: ["--server-arg", ServerArguments.testIdleFlag + "1"])
+        defer { node.stop() }
+        let path = node.serverSocket
+        let subscriber = try Raw(path)
+        try #require(Self.isHello(subscriber.line()))
+        #expect(subscriber.sendAll(NodeWire.line(NodeWire.Request(id: "s", kind: "subscribe", args: ["sub": .string("s1"), "collection": .string("sessions")]))))
+        let silent = try Raw(path)
+        try #require(Self.isHello(silent.line()))
+        let once = try Raw(path)
+        try #require(Self.isHello(once.line()))
+        #expect(once.sendAll(NodeWire.line(NodeWire.Request(id: "q", kind: "no.such.kind"))))
+        let silentBye = await offPool { () -> NodeWire.Bye? in
+            while let line = silent.line(timeout: 30) { if let bye = Self.bye(line) { return bye } }
+            return nil
+        }
+        #expect(silentBye?.reason == "no request since the hello (1 s)" && silentBye?.code == "busy", "\(String(describing: silentBye))")
+        let onceBye = await offPool { () -> NodeWire.Bye? in
+            while let line = once.line(timeout: 30) { if let bye = Self.bye(line) { return bye } }
+            return nil
+        }
+        #expect(onceBye?.reason.hasPrefix("no request and no subscription for") == true, "\(String(describing: onceBye))")
+        // The subscriber, which asked before both and has sat since, still answers.
+        #expect(subscriber.sendAll(NodeWire.line(NodeWire.Request(id: "after", kind: "no.such.kind"))))
+        let answered = await offPool { () -> Bool in
+            while let line = subscriber.line(timeout: 30) {
+                if Self.bye(line) != nil { return false }
+                if NodeWire.decode(NodeWire.Reply.self, line)?.re == "after" { return true }
+            }
+            return false
+        }
+        #expect(answered, "\(node.said)")
+    }
+
     /// Under the Mac's rule the reserved slots go by what a session's process can't change: a process under a live
     /// session's program, the host or the server isn't the user's whatever its environment says.
     @Test func theReservedSlotsUnderTheMacsRuleIgnoreTheSessionMarker() throws {

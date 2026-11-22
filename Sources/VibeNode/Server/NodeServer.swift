@@ -9,10 +9,24 @@ import VibeCore
 /// `bye` and the close.
 ///
 /// Bounded as the host's and the web's listeners are (the architecture review's row 4), so no process of the user can
-/// starve the engine's queue or grow the server's memory: at most `maxConnections` connections (the newest past it gets
-/// `bye` and the close), at most `maxPending` bytes waiting to be written to one (a reader that doesn't read is closed),
-/// at most `chunksPerTurn` reads of a connection and `acceptsPerTurn` accepts a turn of the queue, and an accept that
-/// fails for want of descriptors or memory suspends accepting for `acceptPause` instead of firing again at once.
+/// starve the engine's queue or grow the server's memory:
+/// - connections: `maxPerPeer` a process, `maxPerShare` a share that isn't the user's (a session by ancestry, else a
+///   cgroup under the systemd rule, else a pid: `Requests.share`), `maxConnections` in all with `reservedForUser` of them
+///   only for a peer that may be the user's voice; every connection that holds a descriptor counts, a closing one too
+///   (closed within `closingLife`; a protocol error's at once). A newcomer past any of them is refused with a `busy` bye
+///   saying why (`refusal`); nothing open is closed to make room;
+/// - a connection that only sits there is closed (`Idle`, `idleReason`): no request within 30 s of its hello, or no
+///   request and no subscription for 10 minutes;
+/// - at most `maxPending` bytes waiting to be written to one (a reader that doesn't read is closed), `requestsPerTurn`
+///   requests and `chunksPerTurn` reads of a connection and `acceptsPerTurn` accepts a turn of the queue, what a sender's
+///   facts read of /proc capped (`PeerFacts`), and an accept that fails for want of descriptors or memory suspends
+///   accepting for `acceptPause` instead of firing again at once.
+///
+/// Not bounded, and accepted (2026-11-22): processes outside any session or systemd cgroup are shares of one pid each,
+/// so a process that forks, each child holding its 8 and sending a request now and then, can take every slot that isn't
+/// kept for the user and keep the leads' tool servers out until it stops; the user's own 8 stay theirs. That is a denial
+/// among the user's own processes, any of which can already end the server outright; eviction, which could stop it,
+/// was removed because a rule choosing whom to close could itself be gamed.
 ///
 /// What a sender is (`PeerFacts`, its ancestry, cgroup, environment and terminal from /proc) is read once per
 /// connection, at its accept, for the hello and its `anyone` requests; every request whose kind judges the sender (the
@@ -41,6 +55,33 @@ public final class NodeServer: @unchecked Sendable {
     public static let maxPerShare = 16
     /// How long a connection told `bye` may take to be written its last bytes before it is closed outright.
     public static let closingLife: TimeInterval = 2
+
+    /// How long a connection may only sit there (`idleReason`): its first request within `hello` of its hello, and,
+    /// with no subscription the hub serves, a request within `quiet` of its last. On the awake clock. `every`: how often
+    /// they are looked at.
+    public struct Idle: Sendable {
+        public var hello: TimeInterval
+        public var quiet: TimeInterval
+        public var every: TimeInterval
+
+        public init(hello: TimeInterval = 30, quiet: TimeInterval = 600, every: TimeInterval = 5) {
+            self.hello = hello
+            self.quiet = quiet
+            self.every = every
+        }
+
+        public static let standard = Idle()
+    }
+
+    /// Why a connection accepted at `accepted`, its last request at `lastRequest` (nil: none since its hello), holding a
+    /// subscription or not (`subscribed`), is closed at `now` (all on the awake clock), or nil while it may stay.
+    static func idleReason(accepted: TimeInterval, lastRequest: TimeInterval?, subscribed: Bool, now: TimeInterval, idle: Idle) -> String? {
+        guard let last = lastRequest else {
+            return now - accepted >= idle.hello ? "no request since the hello (\(Int(idle.hello)) s)" : nil
+        }
+        guard !subscribed else { return nil }
+        return now - last >= idle.quiet ? "no request and no subscription for \(Int(idle.quiet / 60)) minutes" : nil
+    }
     /// The bytes waiting to be written to one connection past which it is closed (its reader doesn't read).
     public static let maxPending = 8 << 20
     /// Reads of one connection (each up to 64 KiB) in a turn of the queue; the source fires again while more waits.
@@ -73,6 +114,8 @@ public final class NodeServer: @unchecked Sendable {
     private var watched: (device: UInt64, inode: UInt64)?
     private var ticks: Subscription?
     private var connections: [ObjectIdentifier: Connection] = [:]
+    private let idle: Idle
+    private var idleSweep: DispatchSourceTimer?
     /// Accepting suspended (`pauseAccepting`); said once per pause. A process refused said once until it is admitted.
     private var acceptPaused = false
     private var capNoted: Set<pid_t> = []
@@ -84,8 +127,10 @@ public final class NodeServer: @unchecked Sendable {
     /// of the host's notes), on `clock` (none: only on the folder's changes). `note`: the server's log. `cgroupRoot`
     /// and `runnersAbove`: a scratch server's test's, or nil and none.
     public init(root: URL, requests: Requests, housekeeping: Int = ServerArguments.housekeeping, clock: NodeClock?,
-                cgroupRoot: String? = nil, runnersAbove: [PeerFacts.Ancestor] = [], note: @escaping (String) -> Void = { _ in }) {
+                cgroupRoot: String? = nil, runnersAbove: [PeerFacts.Ancestor] = [], idle: Idle = .standard,
+                note: @escaping (String) -> Void = { _ in }) {
         self.requests = requests
+        self.idle = idle
         self.cgroupRoot = cgroupRoot
         self.runnersAbove = runnersAbove
         queue = requests.queue
@@ -112,6 +157,24 @@ public final class NodeServer: @unchecked Sendable {
             guard let self else { return }
             self.checkPath()
             self.requests.refreshNotes()
+        }
+        let sweep = DispatchSource.makeTimerSource(queue: queue)
+        let every = DispatchTimeInterval.milliseconds(Int(idle.every * 1000))
+        sweep.schedule(deadline: .now() + every, repeating: every)
+        sweep.setEventHandler { [weak self] in self?.closeIdle() }
+        sweep.resume()
+        idleSweep = sweep
+    }
+
+    /// The connections that only sit there closed (`idleReason`), each told why with a `busy` bye: a slot held by one
+    /// that sends nothing is free for another. On `queue`.
+    private func closeIdle() {
+        let now = MacTime.real.awake()
+        for connection in connections.values where !connection.closing {
+            let subscribed = connection.lineTransport.map { hub?.subscribes($0) ?? false } ?? false
+            guard let why = Self.idleReason(accepted: connection.accepted, lastRequest: connection.lastRequest, subscribed: subscribed,
+                                            now: now, idle: idle) else { continue }
+            bye(why, code: "busy", connection)
         }
     }
 
@@ -203,6 +266,7 @@ public final class NodeServer: @unchecked Sendable {
             let connection = Connection(fd: fd, token: token)
             connection.voice = voice
             connection.share = share
+            connection.accepted = MacTime.real.awake()
             connections[ObjectIdentifier(connection)] = connection
             let read = DispatchSource.makeReadSource(fileDescriptor: fd, queue: queue)
             read.setEventHandler { [weak self, weak connection] in
@@ -353,7 +417,9 @@ public final class NodeServer: @unchecked Sendable {
     private func take(_ line: Data, from sender: Platform.PeerToken, on connection: Connection) {
         let request: NodeWire.Request
         switch NodeWire.unwrap(line) {
-        case .request(let unwrapped): request = unwrapped
+        case .request(let unwrapped):
+            request = unwrapped
+            connection.lastRequest = MacTime.real.awake()
         case .refused(let reply, let code, let reason):
             if let reply { send(NodeWire.line(reply), on: connection) }
             return bye(reason, code: code, connection, hard: true)
@@ -504,6 +570,9 @@ public final class NodeServer: @unchecked Sendable {
         /// (`Requests.share`).
         var voice = false
         var share = ""
+        /// Its accept and its last request (nil: none since its hello), on the awake clock (`closeIdle`).
+        var accepted: TimeInterval = 0
+        var lastRequest: TimeInterval?
         /// No more is read: what is pending goes, then the close.
         var closing = false
         var closed = false

@@ -301,6 +301,12 @@ public final class LiveHub: WebSocketHandler, @unchecked Sendable {
         transport.send(NodeWire.message(reply))
     }
 
+    /// Whether `transport` holds a subscription the hub accepted and still serves (`subscribe`, not since
+    /// `unsubscribe`d or ended). On the hub's queue.
+    public func subscribes(_ transport: LiveTransport) -> Bool {
+        connections[ObjectIdentifier(transport)].map { !$0.subs.isEmpty } ?? false
+    }
+
     /// The hub's record of `transport`, made on its first subscription (the Unix socket's) or when the listener opens
     /// it (a WebSocket's), with its drain told to the hub.
     private func connection(for transport: LiveTransport, rights: LiveRights) -> Connection {
