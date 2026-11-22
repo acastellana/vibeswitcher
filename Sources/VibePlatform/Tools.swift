@@ -353,7 +353,8 @@ extension Platform {
             for folder in ["~/.config/systemd", "~/.config/environment.d", "~/.vibeswitcher/v2", "~/.vibeswitcher/lead"] {
                 rules.append("Edit(\(folder)/**)")
             }
-            return rules + ["Read(//mnt/c/**)", "Edit(//mnt/c/**)"]
+            // A node's limits under their own name (`MacLimits.fileName`; the Mac's name is `LeadLaunch.userSettings`'s).
+            return rules + ["Read(//mnt/c/**)", "Edit(//mnt/c/**)", "Edit(~/.vibeswitcher/node-limits.json)"]
             #endif
         }
 

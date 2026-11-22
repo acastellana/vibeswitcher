@@ -80,6 +80,9 @@ public final class Requests: @unchecked Sendable {
     private var replyOrder: [String] = []
     /// The recorded actions being done now (recorded, their reply not yet given). On `queue`.
     private var doing: Set<String> = []
+    /// A scratch server's test (`--test-stall=`): true once for each `<root>/test-hold-act` made, and that recorded
+    /// action is held for good after its record, before its act, as a server that ends in between leaves it.
+    var testHoldsAct: (() -> Bool)?
     /// Each request as it is acted on, after the voice, the code and the vault's record (for tests). On `queue`.
     public var acting: (NodeWire.Request) -> Void = { _ in }
     /// The build's folder (`ServerArguments.nodeRoot`): where `hooks.install` reads the programs it installs; none:
@@ -375,15 +378,12 @@ public final class Requests: @unchecked Sendable {
                     self.note("refused \(request.kind) (action \(action)): not recorded in the vault: \(why)")
                     reply(.init(re: request.id, error: .init(.internal, "not recorded in the host's vault, so not done: \(ConfigSeal.inert(why.description, limit: .max))")))
                 case .success(false):
-                    self.note("\(request.kind) (action \(action)) was recorded already: answered as before, not done again")
-                    reply(self.again(request, action: action))
+                    self.retry(request, action: action, from: facts, reply: reply)
                 case .success(true):
-                    self.doing.insert(action)
-                    self.act(request, from: facts) { [weak self] answer in
-                        self?.doing.remove(action)
-                        self?.keep(answer, for: action)
-                        reply(answer)
+                    if self.testHoldsAct?() == true {
+                        return self.note("a scratch node's test: \(request.kind) (action \(action)) recorded, and held for good before its act")
                     }
+                    self.perform(request, action: action, from: facts, reply: reply)
                 }
             }
         }
@@ -451,11 +451,146 @@ public final class Requests: @unchecked Sendable {
         }
     }
 
-    /// The answer to a retry of `action`, recorded already: the reply it got, when kept; otherwise what is known, never
-    /// "done": while it is being done, that it is; else (recorded before this server restarted, or too long ago for its
-    /// reply to be kept) that whether it was carried out isn't known (the architecture review's row 10). Not done again
-    /// either way. On `queue`.
-    func again(_ request: NodeWire.Request, action: String) -> NodeWire.Reply {
+    /// The act of a recorded action (its record made first), then its outcome written on that record, through the host
+    /// as the record was (`finishUserAction`), before the answer goes: an answer someone saw is in the record. A host
+    /// that doesn't take the outcome (one before it) leaves the record begun, noted. On `queue`.
+    private func perform(_ request: NodeWire.Request, action: String, from facts: PeerFacts, reply: @escaping (NodeWire.Reply) -> Void) {
+        doing.insert(action)
+        act(request, from: facts) { [weak self] answer in
+            guard let self else { return reply(answer) }
+            self.queue.async {
+                self.keep(answer, for: action)
+                let (client, kind, outcome) = (self.link.vaultV2, request.kind, Self.outcome(of: answer, kind: request.kind))
+                DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+                    let written = Result { try client.finishUserAction(action, kind: kind, outcome: outcome) }
+                    self?.queue.async {
+                        if case .failure(let why) = written { self?.note("\(kind) (action \(action)): its outcome isn't in the vault's record: \(why)") }
+                        self?.doing.remove(action)
+                        reply(answer)
+                    }
+                }
+            }
+        }
+    }
+
+    /// What the record keeps of `answer`: failed with why; done with its result only when `kind`'s rule says its result
+    /// holds no secret (`retryRules`), else done and no more.
+    static func outcome(of answer: NodeWire.Reply, kind: String) -> LeadVaultV2.UserAction.Outcome {
+        guard answer.ok else { return .init(done: false, note: answer.error?.message ?? "no reason given", code: answer.error?.code) }
+        guard retryRules[kind]?.keepsResult == true else { return .init(done: true, note: nil) }
+        return .init(done: true, note: answer.result.map { String(decoding: NodeWire.line($0).dropLast(), as: UTF8.self) })
+    }
+
+    /// What a retry of a recorded kind may be given and done, stated for every recorded kind (RequestKindsLint holds its
+    /// keys to `recorded`; a kind with none keeps no result and isn't done again).
+    struct RetryRule: Equatable, Sendable {
+        /// Its result holds no secret, so the vault's record keeps it and a retry is given it. Not so (a link with its
+        /// pairing code, a page's address with its token, a setting's value, a card's text): the record says done, no more.
+        var keepsResult: Bool
+        /// A second act leaves things as one does (it sets a state or ends what it names), so a retry of one begun with
+        /// no outcome (its server ended in between) does it again, when nothing later was recorded on the same subject.
+        /// Not so (it types or sends text, starts a session or a lead, answers or runs what a card asks, pushes, switches
+        /// the build, opens a link, stops the node): told it began and its outcome isn't known (`unknownCheck`).
+        /// A card's kind is never done again: its card is in the server's memory alone, so after a restart its id is
+        /// refused (`cardRefusal`) before the record is asked.
+        var rerun: Bool
+    }
+
+    static let retryRules: [String: RetryRule] = [
+        "start": .init(keepsResult: true, rerun: true), "stop": .init(keepsResult: true, rerun: false),
+        "lead": .init(keepsResult: true, rerun: false), "answer": .init(keepsResult: false, rerun: false),
+        "hold": .init(keepsResult: false, rerun: false), "config.accept": .init(keepsResult: false, rerun: false),
+        "base.accept": .init(keepsResult: false, rerun: false), "base.keep": .init(keepsResult: false, rerun: false),
+        "hooks.install": .init(keepsResult: true, rerun: true), "hooks.remove": .init(keepsResult: true, rerun: true),
+        "build.switch": .init(keepsResult: false, rerun: false), "web.open": .init(keepsResult: false, rerun: false),
+        "web.revoke": .init(keepsResult: false, rerun: true), "tell": .init(keepsResult: false, rerun: false),
+        "send": .init(keepsResult: false, rerun: false), "session.new": .init(keepsResult: false, rerun: false),
+        "session.end": .init(keepsResult: false, rerun: true), "session.reply": .init(keepsResult: false, rerun: false),
+        "set": .init(keepsResult: false, rerun: true), "push": .init(keepsResult: false, rerun: false),
+        "push.decline": .init(keepsResult: false, rerun: true), "session.reopen": .init(keepsResult: false, rerun: false),
+        "prompt-audit": .init(keepsResult: true, rerun: true), "session.rename": .init(keepsResult: true, rerun: true),
+        "session.pause": .init(keepsResult: true, rerun: true), "session.resume": .init(keepsResult: true, rerun: true),
+        "session.close-shells": .init(keepsResult: false, rerun: true), "presets.edit": .init(keepsResult: false, rerun: false),
+        "approve": .init(keepsResult: false, rerun: false), "plugin.on": .init(keepsResult: false, rerun: true),
+        "plugin.off": .init(keepsResult: false, rerun: true),
+        // An add begun with no outcome isn't added again (the person adds it again, seeing its SHA-256s); a remove is.
+        "plugin.add": .init(keepsResult: false, rerun: false), "plugin.remove": .init(keepsResult: false, rerun: true),
+    ]
+
+    /// The kinds a retry begun with no outcome does again (`RetryRule.rerun`).
+    public static var rerunnable: Set<String> { Set(retryRules.filter(\.value.rerun).keys) }
+    /// How old a begun record may be for its retry to do it again: later, something else may have set it since.
+    static let rerunWithin: TimeInterval = 15 * 60
+
+    /// A retry of `action`, recorded already. Answered from what this server kept when it can (its reply; or that it is
+    /// being done now); else from the vault's record (the architecture review's row 10), and only when asked with the
+    /// arguments it was recorded with (else nothing of it): done, its recorded result when its kind keeps one
+    /// (`RetryRule.keepsResult`), else that it was done; failed, why, and whether a new attempt can do it; begun with no
+    /// outcome (the server ended in between), done again when its kind's rule says so and nothing recorded since names
+    /// the same subject, else that it began and its outcome isn't known, with what to look at. A record the host can't
+    /// give (one before outcomes) is told the outcome isn't known. Never "done" unless it was. On `queue`.
+    func retry(_ request: NodeWire.Request, action: String, from facts: PeerFacts, reply: @escaping (NodeWire.Reply) -> Void) {
+        if let known = kept(request, action: action) { return reply(known) }
+        let (client, kind) = (link.vaultV2, request.kind)
+        let digest = LeadVaultV2.digest(String(decoding: NodeWire.line(request.args ?? [:]), as: UTF8.self))
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            let record = Result { try client.userAction(action, kind: kind) }
+            // Begun with no outcome: what was recorded since, which a second act would undo.
+            let since = (try? record.get()).flatMap { $0?.outcome == nil ? $0?.at : nil }.flatMap { try? client.userActions(since: $0) }
+            guard let self else { return }
+            self.queue.async {
+                // Asked again meanwhile, and done, or under way, since.
+                if let known = self.kept(request, action: action) { return reply(known) }
+                switch record {
+                case .failure(let why):
+                    self.note("\(kind) (action \(action)) was recorded already; its record can't be read (\(why)): its outcome isn't known")
+                    reply(.init(re: request.id, error: .init(.refused, Self.outcomeUnknown(action: action))))
+                case .success(nil):
+                    reply(.init(re: request.id, error: .init(.refused, Self.outcomeUnknown(action: action))))
+                case .success(let recorded?):
+                    let began = Date(timeIntervalSince1970: recorded.at)
+                    guard recorded.digest == digest else {
+                        self.note("\(kind) (action \(action)) asked again with other arguments than its record's: nothing given")
+                        return reply(.init(re: request.id, error: .init(.refused, Self.otherArguments(action: action))))
+                    }
+                    if let outcome = recorded.outcome {
+                        self.note("\(kind) (action \(action)) was recorded already: answered from its record (\(outcome.done ? "done" : "failed")), not done again")
+                        return reply(Self.answer(request, action: action, outcome: outcome))
+                    }
+                    // Done again only when what was recorded since can be read and changes nothing of the same subject.
+                    if Self.retryRules[kind]?.rerun == true, Date().timeIntervalSince(began) <= Self.rerunWithin, let since {
+                        if Self.changedSince(recorded, by: since) {
+                            self.note("\(kind) (action \(action)) began at \(Self.shown(began)) with no outcome recorded; a later action changed the same thing: not done again")
+                            return reply(.init(re: request.id, error: .init(.refused, Self.changedLater(action: action, kind: kind, at: began))))
+                        }
+                        self.note("\(kind) (action \(action)) began at \(Self.shown(began)) with no outcome recorded: done again, as a second act leaves it as one does")
+                        return self.perform(request, action: action, from: facts, reply: reply)
+                    }
+                    self.note("\(kind) (action \(action)) began at \(Self.shown(began)) with no outcome recorded: not done again")
+                    reply(.init(re: request.id, error: .init(.refused, Self.begunUnknown(action: action, kind: kind, at: began))))
+                }
+            }
+        }
+    }
+
+    /// Whether an action recorded after `recorded` (among `since`) names the same subject (one with none: any other
+    /// with none, the node's own), so that doing `recorded` again would undo it.
+    static func changedSince(_ recorded: LeadVaultV2.UserAction, by since: [LeadVaultV2.UserAction]) -> Bool {
+        since.contains { $0.action != recorded.action && $0.at >= recorded.at && $0.subject == recorded.subject }
+    }
+
+    /// What a retry whose arguments aren't its record's is told: nothing of the record.
+    static func otherArguments(action: String) -> String {
+        "action \(action) was recorded with other arguments than these: nothing is given for it, and it isn't done"
+    }
+
+    /// What a retry of a begun action is told when a later action changed the same thing.
+    static func changedLater(action: String, kind: String, at began: Date) -> String {
+        "action \(action) (\(kind)) began at \(shown(began)) and the server ended before it finished; a later action changed the same thing since, so it isn't done again; `vibeswitcher status` shows what is now"
+    }
+
+    /// The answer a retry gets from this server's memory: the reply it kept, or that its first request is being done.
+    private func kept(_ request: NodeWire.Request, action: String) -> NodeWire.Reply? {
         if var kept = replies[action] {
             kept.re = request.id
             return kept
@@ -463,12 +598,56 @@ public final class Requests: @unchecked Sendable {
         if doing.contains(action) {
             return .init(re: request.id, error: .init(.refused, "action \(action) is being done now, from its first request: not done again; that request's answer says how it went"))
         }
-        return .init(re: request.id, error: .init(.refused, Self.outcomeUnknown(action: action)))
+        return nil
     }
 
-    /// What a retry of a recorded action whose reply isn't kept is told.
+    /// A retry's answer from a recorded outcome: done, the result recorded (or that it was done, when its answer was too
+    /// long to keep); failed, why, under the code it failed with, and whether running the command again can do it.
+    static func answer(_ request: NodeWire.Request, action: String, outcome: LeadVaultV2.UserAction.Outcome) -> NodeWire.Reply {
+        let when = shown(Date(timeIntervalSince1970: outcome.at))
+        if outcome.done {
+            if let note = outcome.note, let result = try? JSONDecoder().decode(NodeWire.Value.self, from: Data(note.utf8)) {
+                return .init(re: request.id, result: result)
+            }
+            return .init(re: request.id, error: .init(.refused, "action \(action) was done at \(when) (its answer isn't kept): not done again; `vibeswitcher status` shows what is now"))
+        }
+        let code = outcome.code.flatMap(NodeWire.Code.init(rawValue:)) ?? .refused
+        let again = code == .gone ? "what it named is gone, so a new attempt can't do it" : "nothing was done, and running the command again is a new attempt"
+        return .init(re: request.id, error: .init(code, "action \(action) failed at \(when): \(ConfigSeal.inert(outcome.note ?? "no reason given", limit: .max)). Not done again: \(again)"))
+    }
+
+    /// What a retry of a recorded action whose reply isn't kept, and whose record says nothing more, is told.
     static func outcomeUnknown(action: String) -> String {
         "action \(action) was recorded before this server restarted (or too long ago for its answer to be kept): whether it was carried out isn't known, and it isn't done again; `vibeswitcher status` shows what is now"
+    }
+
+    /// What a retry of an action that began and has no outcome (its server ended in between) is told, when its kind
+    /// isn't done again.
+    static func begunUnknown(action: String, kind: String, at began: Date) -> String {
+        "action \(action) (\(kind)) began at \(shown(began)) and the server ended before it finished: whether it was carried out isn't known, and it isn't done again, as a second \(kind) wouldn't be the same as one; \(unknownCheck(kind))"
+    }
+
+    /// What to look at to see whether an action of `kind` happened.
+    static func unknownCheck(_ kind: String) -> String {
+        switch kind {
+        case "send", "session.reply": return "the session's screen shows whether the text arrived"
+        case "tell": return "the lead's chat shows whether the message arrived"
+        case "lead", "session.new", "session.reopen": return "`vibeswitcher status` lists the sessions running now"
+        case "answer", "approve": return "`vibeswitcher questions` shows whether the card is still open (a shell request's session shows whether its command ran)"
+        case "push": return "the repository's remote shows whether the push went"
+        case "build.switch": return "`vibeswitcher status` names the build running now"
+        case "web.open": return "`vibeswitcher web open` gives a link again"
+        case "presets.edit": return "`vibeswitcher presets` shows the presets now"
+        default: return "`vibeswitcher status` shows what is now"
+        }
+    }
+
+    /// `date` as a retry's answer says it: local time, to the second.
+    static func shown(_ date: Date) -> String {
+        let format = DateFormatter()
+        format.locale = Locale(identifier: "en_US_POSIX")
+        format.dateFormat = "yyyy-MM-dd HH:mm:ss"
+        return format.string(from: date)
     }
 
     func keep(_ reply: NodeWire.Reply, for action: String) {
@@ -526,7 +705,7 @@ public final class Requests: @unchecked Sendable {
         let answer = { [weak self] in
             guard let self, !waiting.answered else { return }
             waiting.answered = true
-            reply(.init(re: request.id, result: self.statusValue()))
+            reply(.init(re: request.id, typed: self.statusResult()))
         }
         refreshNotes(answer)
         queue.asyncAfter(deadline: .now() + Self.notesWait) { answer() }
@@ -560,61 +739,59 @@ public final class Requests: @unchecked Sendable {
     /// session the vault doesn't bind, E5; a base move that refused a running lead's merge, E7's refresh; a host restart
     /// that ended a project's team, and a running lead the vault gives no role, E8), and the last host restart
     /// (`restart`, E8: the command line shows it with how the host ended). On `queue`.
-    public func statusValue() -> NodeWire.Value {
+    public func statusValue() -> NodeWire.Value { NodeWire.Value(wire: statusResult()) }
+
+    /// `status`'s result, typed (`WireKinds.Status`). On `queue`.
+    public func statusResult() -> WireKinds.Status.Result {
+        typealias Status = WireKinds.Status
         let list = sessions?.sessions ?? []
         // Each once per status (the review's row 19): the switch's blockers walk the host's sessions, the reminders the scan's.
         let switching = switchBlockersNow()
         let due = sessions?.reminders() ?? []
         let reminders = NodeSessions.notices(due)
-        var fields: [String: NodeWire.Value] = [
-            "node": .string(NodeIds.node),
-            "epoch": .string(epoch),
-            "root": .string(root.path),
-            "server": .object(["pid": .int(Int(serverPID)), "startedAt": .date(startedAt), "commit": .string(commit)]),
-            "host": .object(["startedAt": link.hostStartedAt.map(NodeWire.Value.date) ?? .null,
-                             "pid": link.hostPID.map { .int(Int($0)) } ?? .null,
-                             "state": .string(Self.word(link.state)),
-                             "liveSessions": .int(link.sessions.filter(\.isLive).count),
-                             "notes": notes.map { Self.value($0.notes, at: $0.at) } ?? .null]),
-            "rule": .object(["mode": .string(rule.mode.rawValue), "says": .string(rule.says),
-                             "scopes": .array(rule.scopes.map { .string($0.pattern) })]),
-            "sessions": .array(list.map { session in
-                let id = NodeSessions.id(of: session)
-                return session.liveValue(prompt: sessions?.prompts.values[id], draft: sessionDrafts.values[id], queued: heldSends.values[id] ?? [])
-            }),
-            "leads": .array((engine?.leads.leads.values.sorted { $0.root < $1.root } ?? []).map(leadValue)),
-            "cards": Self.counts(engine?.cards.counts() ?? [:]),
-            "plugins": engine?.plugins.onValue ?? .array([]),
-            "accepted": .array(accepted.map(\.value)),
-            "notices": .array(statusNotices(reminders: reminders).map(NodeWire.Value.string)),
-            // The reminders due now, each its session's (the page notifies once an episode: "Remind me about waiting or
-            // stuck sessions", 2026-11-22).
-            "reminders": .array(due.map(\.value)),
-            "restart": engine?.restartValue ?? .null,
-            "reopen": engine?.offeredValue ?? .array([]),
-            "ended": engine?.endedValue ?? .array([]),
-            "ending": engine?.endingValue ?? .array([]),
-            // As last read off the queue (`refreshBuilds`): null until the first read is in.
-            "builds": installRoot == nil ? .null : builds ?? .null,
-            "web": webValue?() ?? NodeStatusStore.webOff,
-            "usage": engine?.usage.map(NodeUsage.value) ?? .null,
-            "boost": engine?.boostValue ?? .null,
-            // What refuses a build switch now (the rule on switches), for `vibeswitcher switch` before its code.
-            // What refuses a switch now (decision 6), less the workers it would park (`SwitchPark`, by the last look).
-            "switchBlockers": .array(switching.blockers.map(NodeWire.Value.string)),
-            "switchParks": .array(switching.parks.map(NodeWire.Value.string)),
-        ]
+        var result = Status.Result()
+        result.node = NodeIds.node
+        result.epoch = epoch
+        result.root = root.path
+        result.server = Status.Server(pid: Int(serverPID), startedAt: NodeWire.dateText(startedAt), commit: commit)
+        result.host = Status.Host(startedAt: link.hostStartedAt.map(NodeWire.dateText), pid: link.hostPID.map { Int($0) }, state: Self.word(link.state),
+                                  liveSessions: link.sessions.filter(\.isLive).count, notes: notes.map { Self.notes($0.notes, at: $0.at) })
+        result.rule = Status.Rule(mode: rule.mode.rawValue, says: rule.says, scopes: rule.scopes.map(\.pattern))
+        result.sessions = list.map { session in
+            let id = NodeSessions.id(of: session)
+            return session.liveValue(prompt: sessions?.prompts.values[id], draft: sessionDrafts.values[id], queued: heldSends.values[id] ?? [])
+        }
+        result.leads = (engine?.leads.leads.values.sorted { $0.root < $1.root } ?? []).map(leadValue)
+        result.cards = Self.counts(engine?.cards.counts() ?? [:])
+        result.plugins = engine?.plugins.onValue ?? .array([])
+        result.accepted = accepted.map(\.value)
+        result.notices = statusNotices(reminders: reminders)
+        // The reminders due now, each its session's (the page notifies once an episode: "Remind me about waiting or
+        // stuck sessions", 2026-11-22).
+        result.reminders = due.map(\.value)
+        result.restart = engine?.restartValue ?? .null
+        result.reopen = engine?.offeredValue ?? .array([])
+        result.ended = engine?.endedValue ?? .array([])
+        result.ending = engine?.endingValue ?? .array([])
+        // As last read off the queue (`refreshBuilds`): null until the first read is in.
+        result.builds = installRoot == nil ? nil : builds.flatMap { try? $0.wire(Status.Builds.self) }
+        result.web = webValue?() ?? NodeStatusStore.webOff
+        result.usage = engine?.usage.map(NodeUsage.value)
+        result.boost = engine?.boostValue
+        // What refuses a switch now (decision 6), less the workers it would park (`SwitchPark`, by the last look).
+        result.switchBlockers = switching.blockers
+        result.switchParks = switching.parks
         // The user's node's tailnet page, for the command line (not in the `node` stream: `NodeStatusStore.value`).
-        if let tailnet { fields["webTailnet"] = tailnet.value() }
+        if let tailnet { result.webTailnet = tailnet.value() }
         // The last update check's answer, for the command line (the page has its notice).
-        if let updates { fields["update"] = updates.value }
+        if let updates { result.update = updates.value }
         // The health digest (`status --health`, the page's This node).
         if let health {
-            fields["health"] = health.value(serverRestarts: notes?.notes.serverRestarts, refusedConnections: notes?.notes.refusedAppConnections,
-                                            hostRestartAt: engine?.restartValue["at"]?.string.flatMap(NodeWire.date),
-                                            waiting: reminders, serverEnd: notes?.notes.lastServerEnd)
+            result.health = health.value(serverRestarts: notes?.notes.serverRestarts, refusedConnections: notes?.notes.refusedAppConnections,
+                                         hostRestartAt: engine?.restartValue["at"]?.string.flatMap(NodeWire.date),
+                                         waiting: reminders, serverEnd: notes?.notes.lastServerEnd)
         }
-        return .object(fields)
+        return result
     }
 
     /// A lead as `status` lists it: the store's, with its open and blocking questions and its open cards (E6), and how
@@ -630,9 +807,8 @@ public final class Requests: @unchecked Sendable {
     }
 
     /// Open cards counted by kind, as `status` gives them.
-    static func counts(_ counts: [CardStore.Kind: Int]) -> NodeWire.Value {
-        .object(["questions": .int(counts[.question] ?? 0), "approvals": .int(counts[.approval] ?? 0),
-                 "config": .int(counts[.configHeld] ?? 0), "base": .int(counts[.baseMove] ?? 0)])
+    static func counts(_ counts: [CardStore.Kind: Int]) -> WireKinds.Status.CardCounts {
+        .init(questions: counts[.question] ?? 0, approvals: counts[.approval] ?? 0, config: counts[.configHeld] ?? 0, base: counts[.baseMove] ?? 0)
     }
 
     static func word(_ state: HostLink.State) -> String {
@@ -643,13 +819,13 @@ public final class Requests: @unchecked Sendable {
         }
     }
 
-    static func value(_ notes: HostNotes, at: Date) -> NodeWire.Value {
-        .object(["startedAt": .date(notes.startedAt), "serverRestarts": .int(notes.serverRestarts),
-                 "replacedPaths": .array(notes.replacedPaths.map(NodeWire.Value.string)),
-                 "refusedAppConnections": .int(notes.refusedAppConnections),
-                 "lockHeldElsewhere": notes.lockHeldElsewhere.map(NodeWire.Value.string) ?? .null,
-                 "build": notes.build.map(NodeWire.Value.string) ?? .null,
-                 "at": .date(at)])
+    static func value(_ notes: HostNotes, at: Date) -> NodeWire.Value { NodeWire.Value(wire: Self.notes(notes, at: at)) }
+
+    /// The host's notes as `status` gives them.
+    static func notes(_ notes: HostNotes, at: Date) -> WireKinds.Status.Notes {
+        .init(startedAt: NodeWire.dateText(notes.startedAt), serverRestarts: notes.serverRestarts, replacedPaths: notes.replacedPaths,
+              refusedAppConnections: notes.refusedAppConnections, lockHeldElsewhere: notes.lockHeldElsewhere, build: notes.build,
+              at: NodeWire.dateText(at))
     }
 
     /// A session as `status` lists it; its status word as `status --probe` writes one.
@@ -756,9 +932,16 @@ public final class Requests: @unchecked Sendable {
     /// The sessions that refuse a switch now (`SwitchRequest.blockers`), less the workers the engine's last look saw only
     /// waiting on their lead, which the switch parks (`parks`). On `queue`.
     func switchBlockersNow() -> (blockers: [String], parks: [String]) {
-        let all = SwitchRequest.blockers(link.sessions)
-        let parks = engine?.switchParkHint(link.sessions).map(\.named) ?? []
-        return (all.filter { !parks.contains($0) }, parks)
+        let hinted = engine?.switchParkHint(link.sessions) ?? []
+        let parked = Set(hinted.map(\.session))
+        let holding = SwitchRequest.holding(link.sessions).filter { !parked.contains($0.id) }
+        return (SwitchRequest.blockers(holding, describe: switchDoing), hinted.map(\.named))
+    }
+
+    /// What a session that holds a switch is doing and since when, by the node's last scan of it.
+    func switchDoing(_ session: HostSession) -> String? {
+        let scanned = sessions?.sessions.first { $0.hostID == session.id }
+        return SwitchRequest.doing(session, status: scanned?.status, since: scanned?.statusSince, now: Date())
     }
 
     private func buildSwitch(_ request: NodeWire.Request, reply: @escaping (NodeWire.Reply) -> Void) {
@@ -779,7 +962,8 @@ public final class Requests: @unchecked Sendable {
                 engine.parkForSwitch(live, commit: commit) { parked in done(parked.map(\.named)) }
             }
         } }
-        SwitchRequest(link: link, installRoot: installRoot, timing: switchTiming, held: held, park: park, note: note).run(commit: commit) { [weak self] answer in
+        SwitchRequest(link: link, installRoot: installRoot, timing: switchTiming, held: held, park: park,
+                      describe: { [weak self] in self?.switchDoing($0) }, note: note).run(commit: commit) { [weak self] answer in
             switch answer {
             case .done(let value): reply(.init(re: request.id, result: value))
             case .refused(let code, let why): reply(.init(re: request.id, error: .init(code, why)))

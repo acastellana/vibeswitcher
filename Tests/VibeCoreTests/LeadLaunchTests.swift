@@ -107,18 +107,21 @@ struct LeadLaunchTests {
     /// worker raising mac_max_sessions there would start more of itself). The app writes them as ever.
     @Test func noRoleMayWriteTheUsersMacWideSettings() throws {
         let root = try root()
-        let rules = ["Edit(~/.vibeswitcher/mac-limits.json)", "Write(~/.vibeswitcher/mac-limits.json)",
+        var rules = ["Edit(~/.vibeswitcher/mac-limits.json)", "Write(~/.vibeswitcher/mac-limits.json)",
                      "Edit(~/.vibeswitcher/boost.json)", "Write(~/.vibeswitcher/boost.json)",
                      "Edit(~/.vibeswitcher/policy.md)", "Write(~/.vibeswitcher/policy.md)",
                      // The restart card's record: it runs each recorded session's command on the user's click.
                      "Edit(~/.vibeswitcher/open-sessions.json)", "Write(~/.vibeswitcher/open-sessions.json)"]
+        #if os(Linux)
+        rules.append("Edit(~/.vibeswitcher/node-limits.json)")  // a node's limits under their own name
+        #endif
         for role in [LeadLaunch.Role.lead, .worker, .verifier] {
             let launch = try LeadLaunch.prepare(role: role, root: root, task: role == .lead ? nil : "fix", base: "claude",
                                                 prompt: "p", start: "s", server: "/App/vibeswitcher-mcp", name: "\(role.rawValue)-fix")
             let settings = try LaunchArguments.json("--settings", in: launch.command) as [String: Any]?
             let deny = (settings?["permissions"] as? [String: Any])?["deny"] as? [String] ?? []
             for rule in rules { #expect(deny.contains(rule), "\(role): \(rule)") }
-            #expect(!((settings?["permissions"] as? [String: Any])?["allow"] as? [String] ?? []).contains { $0.contains("mac-limits") || $0.contains("boost.json") || $0.contains("policy.md") })
+            #expect(!((settings?["permissions"] as? [String: Any])?["allow"] as? [String] ?? []).contains { $0.contains("mac-limits") || $0.contains("node-limits") || $0.contains("boost.json") || $0.contains("policy.md") })
         }
         // The app's own writes (Settings' save) go through, as before.
         let file = URL(fileURLWithPath: root).appendingPathComponent("home/mac-limits.json")
@@ -237,7 +240,7 @@ struct LeadLaunchTests {
                              "Bash(systemd-run:*)", "Bash(loginctl:*)", "Bash(crontab:*)", "Bash(at:*)", "Bash(wsl.exe:*)", "Bash(cmd.exe:*)",
                              "Bash(powershell.exe:*)", "Bash(gh:*)", "Bash(git credential:*)", "Bash(git -c credential*)",
                              "Edit(~/.config/systemd/**)", "Edit(~/.config/environment.d/**)", "Edit(~/.vibeswitcher/v2/**)",
-                             "Edit(~/.vibeswitcher/lead/**)", "Read(//mnt/c/**)", "Edit(//mnt/c/**)"]
+                             "Edit(~/.vibeswitcher/lead/**)", "Read(//mnt/c/**)", "Edit(//mnt/c/**)", "Edit(~/.vibeswitcher/node-limits.json)"]
 
     /// Each role's rules as its session gets them, for the four shapes `prepare` is called with.
     func rulesOfEachRole() throws -> [(role: LeadLaunch.Role, deny: [String])] {

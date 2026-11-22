@@ -58,8 +58,14 @@ On the server:
    takes (`RequestArguments`). The node must not be stopping, and the host link must be welcomed. A card's kind needs
    its code; `approve` needs its batch.
 5. **Vault record** (`LeadVaultV2.recordUserAction`, in the host). If the vault doesn't take it, the action isn't done.
-   An action it holds already (a retry) gets the reply it got before and isn't done again.
-6. **Act** (`Requests.act` and the feature's file). The reply is kept for retries.
+   An action it holds already (a retry, `Requests.retry`) gets the reply this server kept; else, asked with the
+   arguments it was recorded with, its record's outcome (done: the recorded result when its kind keeps one, a kind's
+   `Requests.retryRules` saying whether its result holds no secret; failed: why, and whether running the command again
+   can do it); a record begun with no outcome (the server ended in between) is done again only for a kind whose rule
+   says a second act leaves things as one does, and only when nothing recorded since names the same subject; otherwise
+   it is told it began, that its outcome isn't known, and what to look at.
+6. **Act** (`Requests.act` and the feature's file). Its outcome goes on the vault's record (`finishUserAction`, through
+   the host) before the reply, which is also kept for retries.
 
 RequestKindsLint holds the lists a kind appears in to one another: `NodeWire.kinds`, `changesNothing`, `taken`,
 `Requests.recorded`, `carded`, `RequestArguments`, the `act` switch and the hub's kinds.

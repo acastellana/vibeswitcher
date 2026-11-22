@@ -20,13 +20,17 @@ extension Requests {
 
     func brief(_ request: NodeWire.Request, reply: @escaping (NodeWire.Reply) -> Void) {
         guard let engine else { return reply(.init(re: request.id, error: .init(.refused, "this server keeps no leads"))) }
-        let folder = request.args?["folder"]?.string
+        let folder: String?
+        switch request.typedArgs(WireKinds.Brief.Args.self) {
+        case .failure(let failure): return reply(.init(re: request.id, error: failure))
+        case .success(let typed): folder = typed.folder
+        }
         if let folder, !folder.hasPrefix("/") { return reply(.init(re: request.id, error: .init(.badArgs, "folder is an absolute path"))) }
         let (find, queue) = (repositoryOf, self.queue)
         let now = engine.briefNow()
         let scope = folder.map(find) ?? ""
         if let kept = engine.briefs[scope], now.timeIntervalSince1970 - kept.at < Self.briefKept {
-            return reply(.init(re: request.id, result: Self.briefValue(kept.text, asks: kept.asks, kept: true)))
+            return reply(.init(re: request.id, typed: Self.briefResult(kept.text, asks: kept.asks, kept: true)))
         }
         // What the engine knows now, on its queue; the logs read and the model asked off it.
         let leads = engine.leads.leads.values.map(\.root).sorted()
@@ -52,20 +56,23 @@ extension Requests {
             queue.async {
                 engine.briefed[scope] = now.timeIntervalSince1970
                 engine.briefs[scope] = (text, asks, now.timeIntervalSince1970)
-                reply(.init(re: request.id, result: Self.briefValue(text, asks: asks, kept: false)))
+                reply(.init(re: request.id, typed: Self.briefResult(text, asks: asks, kept: false)))
             }
         }
     }
 
     /// As the wire carries it (`WireSchema`'s `brief.result`): the briefing's words, by the model or the template, when,
     /// what it says when it isn't the model's, how many things wait on you, and whether it was given again.
-    static func briefValue(_ text: BriefingText, asks: Int, kept: Bool) -> NodeWire.Value {
-        briefValue(text: text.text, byModel: text.byModel, language: text.language.code, at: text.at, notice: text.notice, asks: asks, kept: kept)
+    static func briefResult(_ text: BriefingText, asks: Int, kept: Bool) -> WireKinds.Brief.Result {
+        briefResult(text: text.text, byModel: text.byModel, language: text.language.code, at: text.at, notice: text.notice, asks: asks, kept: kept)
+    }
+
+    static func briefResult(text: String, byModel: Bool, language: String, at: Double, notice: String?, asks: Int, kept: Bool) -> WireKinds.Brief.Result {
+        .init(text: text, byModel: byModel, language: language, at: NodeWire.dateText(Date(timeIntervalSince1970: at)), notice: notice, asks: asks, kept: kept)
     }
 
     static func briefValue(text: String, byModel: Bool, language: String, at: Double, notice: String?, asks: Int, kept: Bool) -> NodeWire.Value {
-        .object(["text": .string(text), "byModel": .bool(byModel), "language": .string(language), "at": .date(Date(timeIntervalSince1970: at)),
-                 "notice": notice.map(NodeWire.Value.string) ?? .null, "asks": .int(asks), "kept": .bool(kept)])
+        NodeWire.Value(wire: briefResult(text: text, byModel: byModel, language: language, at: at, notice: notice, asks: asks, kept: kept))
     }
 }
 
@@ -147,12 +154,16 @@ public enum NodeBrief {
 /// `vibeswitcher brief`'s text: the briefing's words (inert), what waits on you, and who wrote it.
 public enum BriefCommandLines {
     public static func lines(_ result: NodeWire.Value) -> [String] {
-        let asks = result["asks"]?.int ?? 0
-        var out = [ConfigSeal.inert(result["text"]?.string ?? "", limit: 4_000)]
+        (try? result.wire(WireKinds.Brief.Result.self)).map(lines) ?? []
+    }
+
+    public static func lines(_ result: WireKinds.Brief.Result) -> [String] {
+        let asks = result.asks ?? 0
+        var out = [ConfigSeal.inert(result.text ?? "", limit: 4_000)]
         out.append(asks == 0 ? "Nothing waits on you."
             : "\(asks) thing\(asks == 1 ? "" : "s") wait\(asks == 1 ? "s" : "") on you: `vibeswitcher questions` lists the cards.")
-        if let notice = result["notice"]?.string { out.append(ConfigSeal.inert(notice, limit: 300)) }
-        out.append(result["byModel"]?.bool == true ? "(written by Claude Haiku from the boards and logs)" : "(written from the boards and logs, no model asked)")
+        if let notice = result.notice { out.append(ConfigSeal.inert(notice, limit: 300)) }
+        out.append(result.byModel == true ? "(written by Claude Haiku from the boards and logs)" : "(written from the boards and logs, no model asked)")
         return out
     }
 }

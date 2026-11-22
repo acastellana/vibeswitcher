@@ -36,25 +36,24 @@ enum QuestionsCommand {
         case .success(let connected): client = connected
         }
         guard !(all && wait) else { return Say.usage(usage) }
-        var args: [String: NodeWire.Value] = ["all": .bool(all)]
-        if let folder { args["folder"] = .string(folder) }
-        if wait { args["wait"] = .bool(true) }
+        let args = WireKinds.Questions.Args(folder: folder, all: all, wait: wait ? true : nil)
         // A wait the server ends with no card (`Requests.cardWait`) is asked again: until a card needs the user.
-        var answer = client.request("questions", args: args, timeout: wait ? Requests.cardWait + 30 : 30)
-        while wait, case .success(let reply) = answer, reply.ok, reply.result?["waited"]?.bool == true {
-            answer = client.request("questions", args: args, timeout: Requests.cardWait + 30)
+        var answer = client.read(WireKinds.Questions.self, args, timeout: wait ? Requests.cardWait + 30 : 30)
+        while wait, case .success(let result, _) = answer, result.waited == true {
+            answer = client.read(WireKinds.Questions.self, args, timeout: Requests.cardWait + 30)
         }
         switch answer {
         case .failure(let failure): return Say.failed(failure)
-        case .success(let reply):
-            guard reply.ok, let cards = reply.result?["cards"]?.array else { return Say.replyError(reply) }
+        case .refused(let reply): return Say.replyError(reply)
+        case .success(let result, let raw):
+            let cards = result.cards ?? []
             if json {
-                Say.out(String(decoding: NodeWire.printable(NodeWire.line(reply.result ?? .null)).dropLast(), as: UTF8.self))
+                Say.out(String(decoding: NodeWire.printable(NodeWire.line(raw)).dropLast(), as: UTF8.self))
                 return 0
             }
             if cards.isEmpty { Say.out(all ? "no cards" : "no open cards") }
             for card in cards { CardText.lines(card).forEach(Say.out) }
-            if let more = reply.result?["more"]?.int, more > 0 { Say.out(moreLine(more)) }
+            if let more = result.more, more > 0 { Say.out(moreLine(more)) }
             return 0
         }
     }
@@ -72,18 +71,17 @@ enum CardCommand {
     /// card (2026-11-19: 329 cards, 1.4 MB, past a line's limit, and no card could be answered). A server from before
     /// `card` lists its open cards for it (it ignores the field), then all of them, and the match is made here.
     static func find(_ wanted: String, client: NodeClient) -> Result<NodeWire.Value, NodeClient.Failure> {
-        if case .success(let card) = find(wanted, client: client, args: ["card": .string(wanted)]) { return .success(card) }
-        if case .success(let card) = find(wanted, client: client, args: nil) { return .success(card) }
-        return find(wanted, client: client, args: ["all": .bool(true)])
+        if case .success(let card) = find(wanted, client: client, args: .init(card: wanted)) { return .success(card) }
+        if case .success(let card) = find(wanted, client: client, args: .init()) { return .success(card) }
+        return find(wanted, client: client, args: .init(all: true))
     }
 
-    private static func find(_ wanted: String, client: NodeClient, args: [String: NodeWire.Value]?) -> Result<NodeWire.Value, NodeClient.Failure> {
-        switch client.request("questions", args: args) {
+    private static func find(_ wanted: String, client: NodeClient, args: WireKinds.Questions.Args) -> Result<NodeWire.Value, NodeClient.Failure> {
+        switch client.read(WireKinds.Questions.self, args) {
         case .failure(let failure): return .failure(failure)
-        case .success(let reply):
-            guard reply.ok, let cards = reply.result?["cards"]?.array else {
-                return .failure(.broken(reply.error.map { "\($0.code): \($0.message)" } ?? "the server answered no cards"))
-            }
+        case .refused(let reply): return .failure(.broken(reply.error.map { "\($0.code): \($0.message)" } ?? "the server answered no cards"))
+        case .success(let result, _):
+            guard let cards = result.cards else { return .failure(.broken("the server answered no cards")) }
             let wanted = wanted.lowercased()
             let prefix = "\(NodeIds.node):card:"
             let part = wanted.hasPrefix(prefix) ? String(wanted.dropFirst(prefix.count)) : wanted

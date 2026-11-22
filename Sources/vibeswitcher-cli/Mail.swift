@@ -28,15 +28,13 @@ enum MailCommand {
         case .failure(let failure): return Say.failed(failure)
         case .success(let connected): client = connected
         }
-        var args: [String: NodeWire.Value] = [:]
-        if let folder { args["folder"] = .string(folder) }
-        if all { args["all"] = .bool(true) }
-        switch client.request("mail", args: args) {
+        switch client.read(WireKinds.Mail.self, .init(folder: folder, all: all ? true : nil)) {
         case .failure(let failure): return Say.failed(failure)
-        case .success(let reply):
-            guard reply.ok, let projects = reply.result?["projects"]?.array else { return Say.replyError(reply) }
+        case .refused(let reply): return Say.replyError(reply)
+        case .success(let result, let raw):
+            let projects = result.projects ?? []
             if json {
-                Say.out(String(decoding: NodeWire.printable(NodeWire.line(reply.result ?? .null)).dropLast(), as: UTF8.self))
+                Say.out(String(decoding: NodeWire.printable(NodeWire.line(raw)).dropLast(), as: UTF8.self))
                 return 0
             }
             if projects.isEmpty { Say.out("no lead on this node: `vibeswitcher mail FOLDER` shows a project's messages") }

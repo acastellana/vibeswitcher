@@ -619,19 +619,47 @@ struct SwitchTests {
     }
 
     /// The host goes, socket and all: the link's end answers the switch's wait for a welcome at once (the switch's own
-    /// waits are on a clock the test never moves, so only the link's end can), and the session it listed is ended.
+    /// waits are on a clock the test moves), the host is asked again on connections of its own for `confirmWait`, and
+    /// only then is "no build answered" said; the session it listed is ended.
     @Test(NodeTraits.linuxOnly, .timeLimit(.minutes(2))) func aHostThatGoesAwayIsAFailure() async throws {
         let world = try await StubWorld(scratch, onHandover: .quit)
         #expect(world.live == 1)
         let clock = ManualClock()
         var timing = SwitchRequest.Timing()
         timing.later = clock.schedule
-        let answer = await Self.answer(world.run(timing))
+        let running = world.run(timing)
+        let link = world.link
+        #expect(await eventually { link.queue.sync { if case .gone = link.state { true } else { false } } })
+        // Each second of the confirming wait, one more check on a connection of its own (the socket is gone: each fails
+        // and arms the next): the clock is moved once each is armed.
+        var seen = 0
+        for _ in 0..<(2 * Int(SwitchRequest.confirmWait)) where running.value == nil {
+            _ = await eventually(timeout: 10) { clock.armed.count > seen || running.value != nil }
+            seen = clock.armed.count
+            clock.advance(SwitchRequest.confirmEvery)
+        }
+        let answer = await Self.answer(running)
         let failed = "handover failed: the host (pid 31589) went away and no build answered"
         #expect(answer == .refused(.refused, failed))
         #expect(world.handover == ["build.switch: " + failed], "\(world.notes.value)")
-        let link = world.link
         #expect(link.queue.sync { link.sessions.count == 1 && link.sessions.allSatisfy { !$0.isLive } })
+    }
+
+    /// The real node's switch right after a start (2026-11-22): the host handed over, but the new build listened only
+    /// after the link had given up reconnecting. The switch asks the host on a connection of its own before it says
+    /// anything failed, and says it handed over.
+    @Test(NodeTraits.linuxOnly, .timeLimit(.minutes(2))) func aHandoverTheLinkGaveUpOnIsHandedOver() async throws {
+        let world = try await StubWorld(scratch, onHandover: .away(build: Self.b))
+        var timing = SwitchRequest.Timing()
+        timing.confirmEvery = 0.1
+        let running = world.run(timing)
+        let link = world.link
+        try #require(await eventually { link.queue.sync { if case .gone = link.state { true } else { false } } }, "\(world.notes.value)")
+        #expect(running.value == nil, "nothing said while the host may still come")
+        try world.stub.listenAgain()
+        let answer = await Self.answer(running)
+        #expect(Self.said(answer) == "handed over (pid 31589, build \(Self.b))", "\(String(describing: answer)) \(world.notes.value)")
+        #expect(world.notes.value.contains { $0.contains("asked on a connection of its own, pid 31589 runs build \(Self.b)") }, "\(world.notes.value)")
     }
 
     @Test(NodeTraits.linuxOnly, .timeLimit(.minutes(2))) func aRefusalIsAFailure() async throws {
@@ -802,6 +830,41 @@ struct SwitchTests {
         #expect(try node.sessions().contains { $0.id == lead.id && $0.isLive })
         // The rollback's target is A now.
         #expect(Self.status(client)?["builds"]?["rollback"]?["commit"]?.string == Self.a)
+    }
+
+    /// A switch waits on every worker and verifier the switch can't park (a real one waited hours): its refusal, `status`'s
+    /// switchBlockers and `vibeswitcher status` name each with what it does and since when.
+    @Test(NodeTraits.linuxOnly, .timeLimit(.minutes(10))) func aSwitchsRefusalAndStatusSayWhoHoldsItAndSinceWhen() async throws {
+        let builds = scratch.url("builds")
+        let a = try ScratchBuilds.install(commit: Self.a, into: builds)
+        try ScratchBuilds.install(commit: Self.b, into: builds)
+        let node = try await ScratchNode(scratch, build: a, installRoot: builds)
+        defer { node.stop() }
+        let lead = try await node.spawn("sleep 600", label: "Lead · project")
+        let worker = try await node.spawn("sleep 600", label: "Worker: task-1")
+        let client = try WireClient(node)
+        #expect(await eventually { Self.host(client).live == 2 })
+        let blockers = (Self.status(client)?["switchBlockers"]?.array ?? []).compactMap(\.string)
+        #expect(blockers.count == 1 && blockers[0].hasPrefix("\(worker.tty) (Worker: task-1): ") && blockers[0].contains(" since "), "\(blockers)")
+        let refused = try #require(WireClient.reply(client.request("build.switch", args: ["commit": .string(Self.b)])))
+        let message = refused.error?.message ?? ""
+        #expect(message.contains("\(worker.tty) (Worker: task-1): ") && message.contains(" since ") && !message.contains(lead.tty), "\(message)")
+        let shown = try await node.run(["status"])
+        #expect(shown.output.contains("a build switch waits now on: \(worker.tty) (Worker: task-1): "), "\(shown.output)")
+        let said = try await node.runOnTerminal(["switch", Self.b])
+        #expect(said.status == 77 && said.output.contains("\(worker.tty) (Worker: task-1): ") && said.output.contains(" since "), "\(said.output)")
+        #expect(Self.host(client).build == Self.a)
+    }
+
+    /// What a holder is said to be doing: its state since when by the node's scan, else how long it has been live.
+    @Test func aHoldersStateIsSaidWithSinceWhen() {
+        let started = Date(timeIntervalSince1970: 1_800_000_000)
+        let session = StubHost.session(title: "Worker: x", tty: "ttypts4")
+        let working = SwitchRequest.doing(session, status: .working, since: started, now: started.addingTimeInterval(37 * 60))
+        #expect(working.hasPrefix("working since ") && working.hasSuffix(" (37 min)"), "\(working)")
+        #expect(SwitchRequest.doing(session, status: .needsInput, since: started, now: started.addingTimeInterval(30)).hasSuffix("(under a minute)"))
+        #expect(SwitchRequest.doing(session, status: .idle, since: started, now: started.addingTimeInterval(3 * 3600 + 5 * 60)).hasSuffix("(3 h 5 min)"))
+        #expect(SwitchRequest.doing(session, status: nil, since: nil, now: Date()).hasPrefix("live since "))
     }
 
     /// The app's `aNewBuildWhoseProbeTakesTwentySecondsIsHandedOverWithNoFalseFailure`: the host holds the handover

@@ -20,6 +20,13 @@ struct CloseShellsTests {
         let lead = try await world.sleepingLead()
         let liveIDs = { world.queue.sync { Set(world.world.link.sessions.filter(\.isLive).map { NodeIds.session(host: $0.id) }) } }
         try #require(await eventually(timeout: 60) { liveIDs().isSuperset(of: [idleID, NodeIds.session(host: busy.id), NodeIds.session(host: lead.id)]) })
+        // The busy shell running its command in the foreground before anything is listed: its sleep started and holding
+        // the terminal. Before that a "not finished" can be its launcher's state (no terminal of its own yet, unreadable),
+        // and the shell then holds its prompt's terminal a moment before it starts the sleep (the CI flake of 2026-11-22:
+        // the listing read busy as not finished that early, and close-shells found it at its prompt).
+        try #require(await eventually(timeout: 60) {
+            !Platform.Processes.children(busy.childPID).isEmpty && ProcessTable.holdsForeground(pid: busy.childPID) == false
+        }, "the busy shell's sleep never took the terminal")
 
         // Listed: the two shells (never the lead), the idle one finished once its prompt holds the terminal.
         var listed: [String: Bool] = [:]

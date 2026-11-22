@@ -64,4 +64,43 @@ import Testing
         #expect(HostPathWatch.leadsHere(host.socket) == true)
         _ = try TestClient(host)
     }
+
+    /// A foreign socket recorded as the host's while the checks couldn't run (the bind-then-lstat race, S11 item 5)
+    /// stays only until the checks work again: the first housekeeping then asks the kernel, finds the path isn't the
+    /// listener's, and binds the host's own over it.
+    /// Linux only: the replacement needs the kernel's answer (`Platform.Sockets.boundFile`, Linux's unix_diag); the Mac's
+    /// kernel can't say, so there the file recorded stays, as the verdict's own case above shows (v2 macos at 5625a3f4).
+    @Test(.enabled(if: !Platform.CodeIdentity.isAvailable, "Linux's unix_diag: the Mac's kernel can't say which socket a path is bound to"))
+    func aForeignFileRecordedWhileChecksFailIsReplacedOnceTheyWork() throws {
+        let host = try TestHost(watchesItsPath: true)
+        let server = host.server
+        let watch = try #require(server.queue.sync { server.pathWatch })
+        let beside = host.socket + "-f"
+        let foreign = try UnixSocket.listen(path: beside)
+        defer { Sys.close(foreign); unlink(beside) }
+        let foreignFile = try #require(HostPathWatch.identity(atPath: beside))
+        server.queue.sync {
+            watch.leads = { _ in nil }
+            watch.kernel = { _, _ in .cantSay }
+        }
+        // The rename and the record in one turn of the host's queue: its folder watch's check of the rename comes after.
+        let renamed = server.queue.sync { () -> Bool in
+            guard rename(beside, host.socket) == 0 else { return false }
+            watch.socketFile = foreignFile
+            return true
+        }
+        try #require(renamed, "errno \(errno)")
+        server.queue.sync { watch.check(atHousekeeping: true) }
+        #expect(server.queue.sync { watch.socketFile } == foreignFile, "the residual: kept while nothing can be checked")
+        server.queue.sync {
+            watch.leads = HostPathWatch.leadsHere
+            watch.kernel = { Platform.Sockets.boundFile(of: $0, at: $1) }
+            watch.check(atHousekeeping: true)
+        }
+        let recorded = server.queue.sync { watch.socketFile }
+        #expect(recorded != foreignFile && HostPathWatch.identity(atPath: host.socket) != foreignFile, "replaced at the first housekeeping that could check")
+        #expect(recorded != nil && recorded == HostPathWatch.identity(atPath: host.socket))
+        #expect(HostPathWatch.leadsHere(host.socket) == true)
+    }
 }
+

@@ -269,8 +269,16 @@ struct SettingsRequestTests {
         #expect(set.output.contains("set node_max_sessions: \(MacLimits.defaultMaxSessions) → 7"), "\(set.output)")
         let read = try await node.run(["settings"])
         #expect(read.status == 0 && read.output.contains("node_max_sessions = 7"), "\(read.output)\(read.errors)\n\(Self.listenerState(read.errors))\n\(node.said)")
-        #expect(read.output.contains("In this node's limits, ") && read.output.contains("mac-limits.json") && !read.output.contains("mac_max_sessions"),
-                "\(read.output)")
+        #expect(read.output.contains("In this node's limits, ") && read.output.contains("node-limits.json") && !read.output.contains("mac-limits.json")
+                && !read.output.contains("mac_max_sessions") && !read.output.contains("mac_heavy_slots"), "\(read.output)")
+        // The Mac's names are aliases: set takes mac_heavy_slots, the node's file holds it, and the Mac's file the node
+        // had (written by a build before) is kept in step for what reads only that name.
+        let legacy = node.root.appendingPathComponent("mac-limits.json")
+        if !FileManager.default.fileExists(atPath: legacy.path) { try MacLimits(maxSessions: 7).save(to: legacy) }
+        let aliased = try await node.runOnTerminal(["set", "mac_heavy_slots", "3"])
+        #expect(aliased.status == 0 && aliased.output.contains("set node_heavy_slots (as mac_heavy_slots):"), "OUT[\(aliased.output)] ERR[\(aliased.errors)]")
+        #expect(MacLimits.load(from: node.root.appendingPathComponent("node-limits.json")).heavySlots == 3)
+        #expect(MacLimits.load(from: legacy).heavySlots == 3 && MacLimits.load(from: legacy).maxSessions == 7)
         #expect(read.output.contains("Not on a node"), "\(read.output)")
         // The app's search: only the settings holding every word, no left-out list, and a word nothing holds said so.
         let found = try await node.run(["settings", "--find", "team sessions"])

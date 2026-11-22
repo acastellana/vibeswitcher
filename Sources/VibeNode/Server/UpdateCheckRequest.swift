@@ -14,6 +14,6 @@ extension Requests {
         guard let updates else {
             return reply(.init(re: request.id, error: .init(.refused, "this server doesn't check for updates (a scratch node asks GitHub nothing)")))
         }
-        updates.look { reply(.init(re: request.id, result: updates.checked)) }
+        updates.look { reply(.init(re: request.id, typed: updates.checkedResult)) }
     }
 }

@@ -400,7 +400,7 @@ public enum WireVectors {
                              "liveSessions": .int(3), "notes": Requests.value(notes, at: date("2026-11-17T09:13:59.020Z"))]),
             "rule": .object(["mode": .string("systemd"), "says": .string("the user's voice is a terminal's process outside the node's unit"),
                              "scopes": .array([.string("/init.scope")])]),
-            "cards": Requests.counts([.question: 1]), "accepted": .array([]), "notices": .array([]), "reminders": .array([]), "restart": .null, "reopen": .array([]), "ended": .array([]), "builds": .null,
+            "cards": NodeWire.Value(wire: Requests.counts([.question: 1])), "accepted": .array([]), "notices": .array([]), "reminders": .array([]), "restart": .null, "reopen": .array([]), "ended": .array([]), "builds": .null,
             "ending": .array([.object(["session": .string(NodeIds.session(host: UUID(uuidString: "5c1e7a92-0000-4000-8000-000000000001")!)),
                                        "folder": .string("/home/u/notes"), "name": .string("notes"), "at": .string("2026-11-17T09:13:40.000Z"),
                                        "listedAt": .string("2026-11-17T09:14:10.000Z")])]),
@@ -653,8 +653,8 @@ public enum WireVectors {
         let workflow = root + "/.vibeswitcher/workflow.md"
         return .object([
             "node": .object(["root": .string(node), "settings": .array([
-                shown("node_max_sessions", "8", String(MacLimits.defaultMaxSessions), place: node + "/mac-limits.json"),
-                shown("ignore_usage_limits", "off", "off", place: node + "/mac-limits.json"),
+                shown("node_max_sessions", "8", String(MacLimits.defaultMaxSessions), place: node + "/node-limits.json"),
+                shown("ignore_usage_limits", "off", "off", place: node + "/node-limits.json"),
                 shown("boost", "on", "off", place: node + "/settings.plist"),
                 shown("lead_mail", "on", "on", place: node + "/settings.plist"),
                 shown("policy", "- Ship small.\n- Ask before deleting data.", WorkingPolicy.defaultText, place: node + "/policy.md"),

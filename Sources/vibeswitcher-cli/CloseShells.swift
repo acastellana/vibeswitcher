@@ -17,14 +17,13 @@ enum CloseShellsCommand {
         case .failure(let failure): return Say.failed(failure)
         case .success(let connected): client = connected
         }
-        var args: [String: NodeWire.Value] = [:]
-        if let folder = arguments.first { args["folder"] = .string(CardCommand.absolute(folder)) }
-        let finished: [NodeWire.Value]
-        switch client.request("shells", args: args) {
+        let finished: [WireKinds.Shells.Shell]
+        switch client.read(WireKinds.Shells.self, .init(folder: arguments.first.map { CardCommand.absolute($0) })) {
         case .failure(let failure): return Say.failed(failure)
-        case .success(let reply):
-            guard reply.ok, let shells = reply.result?["shells"]?.array else { return Say.replyError(reply) }
-            finished = shells.filter { $0["finished"]?.bool == true }
+        case .refused(let reply): return Say.replyError(reply)
+        case .success(let result, _):
+            let shells = result.shells ?? []
+            finished = shells.filter { $0.finished == true }
             let busy = shells.count - finished.count
             if finished.isEmpty {
                 Say.out("no finished shell to close" + (busy > 0 ? " (\(busy) still running something)" : ""))
@@ -33,14 +32,14 @@ enum CloseShellsCommand {
             if busy > 0 { Say.out("\(busy) shell\(busy == 1 ? "" : "s") still running something: left open") }
         }
         let lines = finished.map { shell in
-            "  \(SessionCommand.short(shell["session"]?.string)) on \(ConfigSeal.inert(shell["terminal"]?.string ?? "?", limit: 20)) in "
-                + ConfigSeal.inert(shell["folder"]?.string ?? "?", limit: .max)
+            "  \(SessionCommand.short(shell.session)) on \(ConfigSeal.inert(shell.terminal ?? "?", limit: 20)) in "
+                + ConfigSeal.inert(shell.folder ?? "?", limit: .max)
         }
         let action = UUID().uuidString.lowercased()
         let said = TypedWord.said(approval: client.approvalRule, action: action, what: "This ends \(finished.count) shell\(finished.count == 1 ? "" : "s") "
             + "back at its prompt, with anything it left running:\n" + lines.joined(separator: "\n"))
         guard case .success(let typed) = said else { return Say.refused(said.refusal) }
-        switch client.change("session.close-shells", args: ["sessions": .array(finished.compactMap { $0["session"] })], action: action, typed: typed) {
+        switch client.change("session.close-shells", args: ["sessions": .array(finished.compactMap { $0.session.map(NodeWire.Value.string) })], action: action, typed: typed) {
         case .failure(let failure): return Say.failed(failure)
         case .success(let reply):
             guard reply.ok, let result = reply.result else { return Say.replyError(reply) }

@@ -5,10 +5,23 @@ import VibePlatform
 /// `Platform.Stdio`: a failed write says false and never traps; a log past its limit is rotated, at a start by its
 /// name and while running through the descriptor that appends to it. Files are a test's own, in the run's scratch folder.
 struct StdioTests {
-    /// /dev/full fails every write with ENOSPC: what a full disk does to a log. `FileHandle.write(_:)` traps there.
+    /// A descriptor every write to fails: /dev/full (ENOSPC, what a full disk does to a log) where there is one; the Mac
+    /// has none, so there a pipe whose reader has gone, without SIGPIPE (EPIPE). Nil when neither can be made.
+    static func failingWrites() -> Int32? {
+        if FileManager.default.fileExists(atPath: "/dev/full") {
+            let fd = open("/dev/full", O_WRONLY | O_CLOEXEC)
+            return fd >= 0 ? fd : nil
+        }
+        var fds: [Int32] = [-1, -1]
+        guard Sys.pipeClosedOnExec(&fds) == 0 else { return nil }
+        close(fds[0])
+        Platform.Sockets.noSigPipe(fds[1])
+        return fds[1]
+    }
+
+    /// Every write fails (`failingWrites`). `FileHandle.write(_:)` traps there.
     @Test func aWriteToAFullDeviceSaysFalseAndReturns() throws {
-        let fd = open("/dev/full", O_WRONLY | O_CLOEXEC)
-        try #require(fd >= 0, "open /dev/full: errno \(errno)")
+        let fd = try #require(Self.failingWrites(), "no descriptor that fails its writes: errno \(errno)")
         defer { close(fd) }
         #expect(!Platform.Stdio.write(fd, Data("a line\n".utf8)))
         #expect(Platform.Stdio.write(fd, Data()))

@@ -53,12 +53,11 @@ enum SessionCommand {
     /// The session `wanted` names among those `status` lists (`SessionLookup.match`): its id, the terminal name
     /// `status` prints (`ttypts4`), or a prefix of its host id only one has; a name two answer to is refused, naming them.
     static func find(_ wanted: String, client: NodeClient) -> Result<NodeWire.Value, NodeClient.Failure> {
-        switch client.request("status") {
+        switch client.read(WireKinds.Status.self, WireNoArgs()) {
         case .failure(let failure): return .failure(failure)
-        case .success(let reply):
-            guard reply.ok, let sessions = reply.result?["sessions"]?.array else {
-                return .failure(.broken(reply.error.map { "\($0.code): \($0.message)" } ?? "the server listed no sessions"))
-            }
+        case .refused(let reply): return .failure(.broken(reply.error.map { "\($0.code): \($0.message)" } ?? "the server listed no sessions"))
+        case .success(let status, _):
+            guard let sessions = status.sessions else { return .failure(.broken("the server listed no sessions")) }
             return SessionLookup.match(wanted, in: sessions).mapError { .refused($0.description) }
         }
     }
@@ -113,12 +112,11 @@ enum SendCommand {
         // `status` doesn't list yet (its scan runs every 2 s, a session just started) goes to the server as given, which
         // finds it in its host's list, as before; a name two sessions answer to is refused.
         return SessionCommand.act("send", fetch: { client in
-            switch client.request("status") {
+            switch client.read(WireKinds.Status.self, WireNoArgs()) {
             case .failure(let failure): return .failure(failure)
-            case .success(let reply):
-                guard reply.ok, let sessions = reply.result?["sessions"]?.array else {
-                    return .failure(.broken(reply.error.map { "\($0.code): \($0.message)" } ?? "the server listed no sessions"))
-                }
+            case .refused(let reply): return .failure(.broken(reply.error.map { "\($0.code): \($0.message)" } ?? "the server listed no sessions"))
+            case .success(let status, _):
+                guard let sessions = status.sessions else { return .failure(.broken("the server listed no sessions")) }
                 switch SessionLookup.match(session, in: sessions) {
                 case .success(let found): return .success(found)
                 case .failure(let refusal) where refusal.ambiguous: return .failure(.refused(refusal.description))
@@ -257,12 +255,11 @@ enum NewCommand {
     /// The preset `name` for `path`, as the server lists it, shown whole (its variables by name) and started.
     private static func start(preset name: String, in path: String, model: String?, withModel: String) -> Int32 {
         SessionCommand.act("session.new", fetch: { client in
-            switch client.request("session.presets", args: ["folder": .string(path), "values": .bool(true)]) {
+            switch client.read(WireKinds.Presets.self, .init(folder: path, values: true)) {
             case .failure(let failure): return .failure(failure)
-            case .success(let reply):
-                guard reply.ok, let list = reply.result?["presets"]?.array else {
-                    return .failure(.broken(reply.error.map { "\($0.code): \($0.message)" } ?? "the server listed no presets"))
-                }
+            case .refused(let reply): return .failure(.broken(reply.error.map { "\($0.code): \($0.message)" } ?? "the server listed no presets"))
+            case .success(let result, _):
+                guard let list = result.presets else { return .failure(.broken("the server listed no presets")) }
                 guard let found = PresetsCommand.named(name, in: list) else {
                     let names = list.compactMap { $0["name"]?.string }.map { ConfigSeal.inert($0, limit: 40) }.joined(separator: ", ")
                     return .failure(.refused("no preset \(ConfigSeal.inert(name, limit: 80)) for \(ConfigSeal.inert(path, limit: 200)); it has: \(names)"))
@@ -304,11 +301,12 @@ enum PresetsCommand {
         case .failure(let failure): return Say.failed(failure)
         case .success(let connected): client = connected
         }
-        switch client.request("session.presets", args: ["folder": .string(path), "values": .bool(true)]) {
+        switch client.read(WireKinds.Presets.self, .init(folder: path, values: true)) {
         case .failure(let failure): return Say.failed(failure)
-        case .success(let reply):
-            guard reply.ok, let list = reply.result?["presets"]?.array else { return Say.replyError(reply) }
-            for problem in reply.result?["problems"]?.array ?? [] { Say.err("presets: \(ConfigSeal.inert(problem.string ?? "", limit: 400))") }
+        case .refused(let reply): return Say.replyError(reply)
+        case .success(let result, _):
+            let list = result.presets ?? []
+            for problem in result.problems ?? [] { Say.err("presets: \(ConfigSeal.inert(problem, limit: 400))") }
             for preset in list {
                 let why = preset["refused"]?.string.map { "\n    can't start here: " + ConfigSeal.inert($0, limit: 400) } ?? ""
                 Say.out(describe(preset) + why)

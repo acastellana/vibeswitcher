@@ -140,7 +140,11 @@ public enum ServerStart {
         engine.health = health
         heard.set { health.heard($0) }
         health.watch(queue, reads: engine.reads.queue)
-        if parsed.testStall != nil { testBlocks(root: root, engine: queue, reads: engine.reads.queue) }
+        if parsed.testStall != nil {
+            testBlocks(root: root, engine: queue, reads: engine.reads.queue)
+            let hold = root.appendingPathComponent("test-hold-act").path
+            requests.testHoldsAct = { unlink(hold) == 0 }
+        }
         requests.nodeRoot = parsed.nodeRoot
         // Where `build.switch` finds the builds: the account's own install folder on the node, a test's on a scratch node.
         requests.installRoot = accountHome.map { NodeFolders.defaultPrefix(accountHome: $0) } ?? parsed.testInstallRoot

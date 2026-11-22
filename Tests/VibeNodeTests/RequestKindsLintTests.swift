@@ -18,6 +18,15 @@ import Testing
         #expect(Requests.recorded == expected,
                 "missing from recorded: \(expected.subtracting(Requests.recorded).sorted()); not the user's state change: \(Requests.recorded.subtracting(expected).sorted())")
         for kind in Requests.recorded { #expect(NodeWire.taken.contains(kind), "\(kind) is recorded but not taken") }
+        // Each recorded kind states what its retry is given and whether it is done again (the review of 1b175c70).
+        let ruled = Set(Requests.retryRules.keys)
+        #expect(ruled == Requests.recorded, "no retry rule: \(Requests.recorded.subtracting(ruled).sorted()); a rule for no recorded kind: \(ruled.subtracting(Requests.recorded).sorted())")
+        // Those whose result carries a secret (web.open's pairing link, a plugin page's address with its token) keep none.
+        for kind in ["web.open", "answer", "approve", "set"] { #expect(Requests.retryRules[kind]?.keepsResult == false, "\(kind) keeps its result") }
+        // Never done again: stopping the node, a card's act (its card is gone after a restart), anything that types or starts.
+        for kind in ["stop", "answer", "hold", "config.accept", "base.accept", "base.keep", "send", "tell", "session.reply", "session.new", "lead", "approve"] {
+            #expect(Requests.retryRules[kind]?.rerun == false, "\(kind) is done again")
+        }
     }
 
     /// Every recorded kind says which arguments it takes (`RequestArguments`): one it doesn't is refused, not ignored.

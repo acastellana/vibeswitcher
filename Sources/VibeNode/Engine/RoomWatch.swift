@@ -42,7 +42,7 @@ extension LeadEngine {
         reads.async({ _ -> [(root: String, text: String)] in
             var mac = mac
             mac.memory = memory()
-            let limits = given ?? MacLimits.current(file: root.appendingPathComponent("mac-limits.json"),
+            let limits = given ?? MacLimits.current(file: root.appendingPathComponent(MacLimits.fileName),
                                                     boostFile: root.appendingPathComponent("boost.json"))
             return roomWaits.look(mac: mac, limits: limits)
         }) { [weak self] due in

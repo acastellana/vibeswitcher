@@ -33,12 +33,12 @@ enum SettingsCommand {
         case .failure(let failure): return Say.failed(failure)
         case .success(let connected): client = connected
         }
-        switch client.request("settings", args: folder.map { ["folder": .string($0)] } ?? [:]) {
+        switch client.read(WireKinds.Settings.self, .init(folder: folder)) {
         case .failure(let failure): return Say.failed(failure)
-        case .success(let reply):
-            guard reply.ok, let result = reply.result else { return Say.replyError(reply) }
+        case .refused(let reply): return Say.replyError(reply)
+        case .success(let result, let raw):
             if json {
-                Say.out(String(decoding: NodeWire.printable(NodeWire.line(result)).dropLast(), as: UTF8.self))
+                Say.out(String(decoding: NodeWire.printable(NodeWire.line(raw)).dropLast(), as: UTF8.self))
                 return 0
             }
             lines(result, home: ProcessInfo.processInfo.environment["HOME"], find: find).forEach(Say.out)
@@ -47,65 +47,66 @@ enum SettingsCommand {
     }
 
     /// The reply as a person reads it.
-    static func lines(_ result: NodeWire.Value, home: String?, find: String? = nil) -> [String] {
+    static func lines(_ result: WireKinds.Settings.Result, home: String?, find: String? = nil) -> [String] {
+        typealias Setting = WireKinds.Settings.Setting
         var out: [String] = []
         let words = (find ?? "").lowercased().split(whereSeparator: \.isWhitespace).map(String.init)
         // The app's search: every word in the setting's key, title, description or section.
-        let found = { (setting: NodeWire.Value) -> Bool in
-            let text = ["key", "title", "about", "section"].compactMap { setting[$0]?.string }.joined(separator: " ").lowercased()
+        let found = { (setting: Setting) -> Bool in
+            let text = [setting.key, setting.title, setting.about, setting.section].compactMap { $0 }.joined(separator: " ").lowercased()
             return words.allSatisfy { text.contains($0) }
         }
         let shown = { (path: String) -> String in
             guard let home, !home.isEmpty, path.hasPrefix(home + "/") else { return ConfigSeal.inert(path, limit: 300) }
             return "~" + ConfigSeal.inert(String(path.dropFirst(home.count)), limit: 300)
         }
-        func section(_ heading: String, _ all: [NodeWire.Value], folder: String?) {
+        func section(_ heading: String, _ all: [Setting], folder: String?) {
             let settings = all.filter(found)
             if !words.isEmpty, settings.isEmpty { return }
             out.append(heading)
             var last: String?
             for setting in settings {
-                let section = setting["section"]?.string ?? ""
+                let section = setting.section ?? ""
                 if section != last {
                     out.append("")
                     out.append("  \(ConfigSeal.inert(section, limit: 80))")
                     last = section
                 }
-                let key = setting["key"]?.string ?? "?"
-                let value = setting["value"]?.string ?? ""
-                let isDefault = setting["isDefault"]?.bool == true
-                let mark = isDefault ? "  (the default)" : "  (default: \(ConfigSeal.inert(setting["default"]?.string ?? "", limit: 80)))"
+                let key = setting.key ?? "?"
+                let value = setting.value ?? ""
+                let isDefault = setting.isDefault == true
+                let mark = isDefault ? "  (the default)" : "  (default: \(ConfigSeal.inert(setting.default ?? "", limit: 80)))"
                 let valueLines = value.split(separator: "\n", omittingEmptySubsequences: false)
                 if valueLines.count > 1 {
                     out.append("    \(key):" + (isDefault ? "  (the default)" : ""))
                     valueLines.forEach { out.append("      | " + ConfigSeal.inert(String($0), limit: 400)) }
                 } else {
-                    out.append("    \(key) = \(ConfigSeal.inert(value, limit: 400))" + (setting["form"]?.string == "text" ? "" : mark))
+                    out.append("    \(key) = \(ConfigSeal.inert(value, limit: 400))" + (setting.form == "text" ? "" : mark))
                 }
                 // What it does (the page shows its title), and what it takes.
-                var about = ConfigSeal.inert(setting["about"]?.string ?? "", limit: 300)
+                var about = ConfigSeal.inert(setting.about ?? "", limit: 300)
                 if about.hasSuffix(".") { about.removeLast() }
-                if let limits = setting["limits"]?.string { about += " (\(ConfigSeal.inert(limits, limit: 120)))" }
+                if let limits = setting.limits { about += " (\(ConfigSeal.inert(limits, limit: 120)))" }
                 out.append("        \(about).")
-                // The machine-wide limits' file keeps the Mac's name (mac-limits.json, which the leads' tools read): this node's.
-                var place = (setting["home"]?.string == "limits" ? "In this node's limits, " : "In ") + shown(setting["where"]?.string ?? "?")
-                if setting["guardRail"]?.bool == true { place += "; a guard rail: a change here is recorded in the vault as yours" }
+                // The machine-wide limits' file (node-limits.json on a node; the Mac's mac-limits.json its alias): this node's.
+                var place = (setting.home == "limits" ? "In this node's limits, " : "In ") + shown(setting.where ?? "?")
+                if setting.guardRail == true { place += "; a guard rail: a change here is recorded in the vault as yours" }
                 out.append("        \(place).")
-                if let note = setting["note"]?.string { out.append("        \(ConfigSeal.inert(note, limit: 300)).") }
+                if let note = setting.note { out.append("        \(ConfigSeal.inert(note, limit: 300)).") }
             }
             out.append("")
             out.append("  Set one: vibeswitcher set \(folder.map { shown($0) + " " } ?? "")KEY VALUE (default puts it back)")
         }
-        if let node = result["node"] {
-            section("This node's settings (\(shown(node["root"]?.string ?? "?"))), for every project:", node["settings"]?.array ?? [], folder: nil)
+        if let node = result.node {
+            section("This node's settings (\(shown(node.root ?? "?"))), for every project:", node.settings ?? [], folder: nil)
         }
-        if let project = result["project"], project != .null {
+        if let project = result.project {
             out.append("")
-            let root = project["root"]?.string ?? "?"
+            let root = project.root ?? "?"
             section("Project \(ConfigSeal.inert((root as NSString).lastPathComponent, limit: 80)) (\(shown(root))):",
-                    project["settings"]?.array ?? [], folder: root)
+                    project.settings ?? [], folder: root)
         }
-        let usage = words.isEmpty ? NodeUsage.lines(result["usage"]) : []
+        let usage = words.isEmpty ? NodeUsage.lines(result.usage) : []
         if !usage.isEmpty {
             out.append("")
             out += usage
@@ -114,11 +115,11 @@ enum SettingsCommand {
             if out.isEmpty { out.append("No setting matches \u{201C}\(ConfigSeal.inert(find ?? "", limit: 80))\u{201D}.") }
             return out
         }
-        if let left = result["leftOut"]?.array, !left.isEmpty {
+        if let left = result.leftOut, !left.isEmpty {
             out.append("")
             out.append("Not on a node (the app's Settings has them):")
             for item in left {
-                out.append("  \(ConfigSeal.inert(item["title"]?.string ?? "", limit: 120)): \(ConfigSeal.inert(item["why"]?.string ?? "", limit: 200))")
+                out.append("  \(ConfigSeal.inert(item.title ?? "", limit: 120)): \(ConfigSeal.inert(item.why ?? "", limit: 200))")
             }
         }
         return out
@@ -174,7 +175,9 @@ enum SetCommand {
         let shownValue = value.map { $0.contains("\n") ? "this text:\n" + $0.split(separator: "\n", omittingEmptySubsequences: false)
             .map { "  | " + ConfigSeal.inert(String($0), limit: 400) }.joined(separator: "\n") : ConfigSeal.inert($0, limit: 400) } ?? "its default"
         let place = folder.map { "the project in \(ConfigSeal.inert($0, limit: 300))" } ?? "this node, for every project"
-        let what = "This sets \(key) (\(setting.title)) for \(place) to \(shownValue)"
+        // The Mac's name for a node's setting (`NodeSettings.aliases`) is taken, and said as the node's.
+        let named = setting.key == key ? key : "\(setting.key) (as \(ConfigSeal.inert(key, limit: 80)))"
+        let what = "This sets \(named) (\(setting.title)) for \(place) to \(shownValue)"
             + (setting.guardRail ? "\nA guard rail: recorded in the host's vault as yours." : "")
         let said = TypedWord.said(approval: client.approvalRule, action: action, what: what)
         guard case .success(let typed) = said else { return Say.refused(said.refusal) }
@@ -187,7 +190,7 @@ enum SetCommand {
             let now = result["value"]?.string ?? "?"
             let was = result["was"]?.string ?? "?"
             let shown = { (text: String) in text.contains("\n") ? "(\(text.split(separator: "\n").count) lines)" : ConfigSeal.inert(text, limit: 200) }
-            var said = was == now ? "\(key) was \(shown(now)) already" : "set \(key): \(shown(was)) → \(shown(now))"
+            var said = was == now ? "\(named) was \(shown(now)) already" : "set \(named): \(shown(was)) → \(shown(now))"
             switch result["told"]?.string {
             case "lead": said += "; the project's lead is told at its next step"
             case "leads": said += "; the running leads are told"

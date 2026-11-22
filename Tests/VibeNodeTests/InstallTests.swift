@@ -2,6 +2,7 @@ import Foundation
 import Testing
 import VibeCore
 import VibeNode
+import VibePlatform
 
 /// The install's build record (the start plan's S4a, ST-D13): `BuildRecord.write` in process, on scratch build folders,
 /// and the command line's unlisted `install-record` that `scripts/install-node.sh` runs from the just-built binary.
@@ -799,7 +800,7 @@ extension InstallTests {
         try handle.write(contentsOf: Data(other.utf8))
         try handle.close()
         var info = stat()
-        #expect(stat(version.path, &info) == 0 && Int(info.st_mtim.tv_sec) == second && Int(info.st_ctim.tv_sec) == second,
+        #expect(stat(version.path, &info) == 0 && Int(Platform.Files.modified(info).tv_sec) == second && Int(Platform.Files.changed(info).tv_sec) == second,
                 "the change left the entry's second: run again")
         // The check then runs in a later second, as it did on the loaded runner: a copy of the index made now is newer
         // than the entry, so only the index's own time keeps git comparing the bytes.

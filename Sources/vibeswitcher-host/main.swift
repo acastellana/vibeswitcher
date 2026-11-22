@@ -255,6 +255,9 @@ if let handoverPath, let state = restoring {
     do {
         if arguments.contains("--handover-fail-restore") { throw HostHandover.Failure.unreadable("--handover-fail-restore, after its secrets") }
         _ = try server.start(restoring: state)
+        // Each session's output is in its ring now: the decoded copies let go (V2/HandoverMemory.swift).
+        restoring = restoring.map(HandoverMemory.withoutOutput)
+        handedOver = handedOver.map(HandoverMemory.withoutOutput)
         if HandoverMemory.descriptor(named: handoverPath) == nil { unlink(handoverPath) }
         if let testSecret { log("test secret carried: \(restoredSecrets == testSecret ? "yes" : "no")") }
         log("took over \(state.sessions.count) sessions\(restoredSecrets.map { " and \($0.count) bytes of secrets" } ?? "") from build \(state.fromBuild) \(Date())")

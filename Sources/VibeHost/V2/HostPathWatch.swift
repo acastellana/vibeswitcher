@@ -63,7 +63,8 @@ final class HostPathWatch {
     let socketPath: String
     let lockPath: String
     /// What the socket path should name: the listener's file, checked (`verifiedIdentity`). Nil: nothing checked yet.
-    private(set) var socketFile: FileIdentity?
+    /// Set by a test, too, to stand for a file recorded through the bind-then-lstat race (S11 item 5).
+    var socketFile: FileIdentity?
     /// A descriptor kept for the checks (on /dev/null): let go just before the kernel's answer or a connection through
     /// the path needs one, opened again right after (`withSpare`), so a host out of descriptors (EMFILE) can still
     /// check its path. -1 while let go, or when it couldn't be opened again.

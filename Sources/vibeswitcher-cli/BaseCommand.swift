@@ -53,12 +53,11 @@ enum BaseCommand {
         case .failure(let failure): return Say.failed(failure)
         case .success(let connected): client = connected
         }
-        var args: [String: NodeWire.Value] = ["folder": .string(folder)]
-        if let from { args["from"] = .string(from) }
-        switch client.request("base.show", args: args, timeout: 60) {
+        switch client.read(WireKinds.BaseShow.self, .init(folder: folder, from: from), timeout: 60) {
         case .failure(let failure): return Say.failed(failure)
-        case .success(let reply):
-            guard reply.ok, let card = reply.result?["card"] else { return Say.replyError(reply) }
+        case .refused(let reply): return Say.replyError(reply)
+        case .success(let result, _):
+            guard let card = result.card else { return Say.failed(.broken("the node's server answered base.show with no card")) }
             CardText.lines(card).forEach(Say.out)
             Say.out("accept it with: vibeswitcher base accept \(ConfigSeal.inert(card["id"]?.string ?? "", limit: 80))")
             return 0

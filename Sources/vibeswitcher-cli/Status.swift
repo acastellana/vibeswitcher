@@ -45,19 +45,18 @@ enum StatusCommand {
         case .failure(let failure): return Say.failed(failure)
         case .success(let connected): client = connected
         }
-        let checked: NodeWire.Value
-        switch client.request("update.check", timeout: Requests.updateCheckPatience) {
+        let checked: WireKinds.UpdateCheck.Result, raw: NodeWire.Value
+        switch client.read(WireKinds.UpdateCheck.self, WireNoArgs(), timeout: Requests.updateCheckPatience) {
         case .failure(let failure): return Say.failed(failure)
-        case .success(let reply):
-            guard reply.ok, let given = reply.result else { return Say.replyError(reply) }
-            checked = given
+        case .refused(let reply): return Say.replyError(reply)
+        case .success(let given, let whole): (checked, raw) = (given, whole)
         }
         if asJSON {
-            Platform.Stdio.output(NodeWire.printable(NodeWire.line(checked)))
+            Platform.Stdio.output(NodeWire.printable(NodeWire.line(raw)))
         } else {
             Say.out(UpdateWatch.lines(checked).joined(separator: "\n"))
         }
-        return checked["problem"]?.string == nil ? 0 : 1
+        return checked.problem == nil ? 0 : 1
     }
 
     /// Stage 1's read, as it was.
@@ -84,15 +83,14 @@ enum StatusCommand {
             return Say.failed(failure)
         case .success(let connected): client = connected
         }
-        let result: NodeWire.Value
-        switch client.request("status") {
+        let result: WireKinds.Status.Result, raw: NodeWire.Value
+        switch client.read(WireKinds.Status.self, WireNoArgs()) {
         case .failure(let failure): return Say.failed(failure)
-        case .success(let reply):
-            guard reply.ok, let given = reply.result else { return Say.replyError(reply) }
-            result = given
+        case .refused(let reply): return Say.replyError(reply)
+        case .success(let given, let whole): (result, raw) = (given, whole)
         }
         if health {
-            guard let digest = result["health"], digest != .null else { return Say.refused("this node's server keeps no health digest (an older build)") }
+            guard let digest = result.health, digest != .null else { return Say.refused("this node's server keeps no health digest (an older build)") }
             if asJSON {
                 Platform.Stdio.output(NodeWire.printable(NodeWire.line(digest)))
             } else {
@@ -103,10 +101,9 @@ enum StatusCommand {
         let facts = context.facts()
         // A node started detached: the weaker rule, and its pid file any worker can write (the start plan's S3).
         let modeLines = NodeTexts.statusLines(mode: context.mode)
-        let journal = journalLines(context, accepted: result["accepted"]?.array ?? [], epoch: result["epoch"]?.string,
-                                   restart: result["restart"])
+        let journal = journalLines(context, accepted: result.accepted ?? [], epoch: result.epoch, restart: result.restart)
         if asJSON {
-            var report = result.object ?? [:]
+            var report = raw.object ?? [:]
             report["format"] = .int(format)
             report["facts"] = .array((facts.lines + modeLines).map(NodeWire.Value.string))
             report["journal"] = .array(journal.map(NodeWire.Value.string))
@@ -115,37 +112,42 @@ enum StatusCommand {
             return 0
         }
         var out: [String] = []
-        let server = result["server"], host = result["host"]
-        out.append("node \(inert(result["node"]?.string)), server pid \(server?["pid"]?.int.map(String.init) ?? "?") since \(inert(server?["startedAt"]?.string)), build \(inert(server?["commit"]?.string))")
-        let notes = host?["notes"]
+        let server = result.server, host = result.host
+        out.append("node \(inert(result.node)), server pid \(server?.pid.map(String.init) ?? "?") since \(inert(server?.startedAt)), build \(inert(server?.commit))")
+        let notes = host?.notes
         // The host's pid (its welcome's) and its build (its notes', the build-info its start checked; the start plan's S5).
-        out.append("host pid \(host?["pid"]?.int.map(String.init) ?? "?") since \(inert(host?["startedAt"]?.string)) (\(inert(host?["state"]?.string)))"
-                   + (notes?.object != nil ? ", server restarts: \(notes?["serverRestarts"]?.int ?? 0), refused app connections: \(notes?["refusedAppConnections"]?.int ?? 0)" : "")
-                   + ", build \(notes?["build"]?.string.map { inert($0) } ?? "unknown")")
-        for path in notes?["replacedPaths"]?.array ?? [] { out.append("the host took back its path \(inert(path.string))") }
+        out.append("host pid \(host?.pid.map(String.init) ?? "?") since \(inert(host?.startedAt)) (\(inert(host?.state)))"
+                   + (notes != nil ? ", server restarts: \(notes?.serverRestarts ?? 0), refused app connections: \(notes?.refusedAppConnections ?? 0)" : "")
+                   + ", build \(notes?.build.map { inert($0) } ?? "unknown")")
+        for path in notes?.replacedPaths ?? [] { out.append("the host took back its path \(inert(path))") }
         out += facts.lines + modeLines
-        out.append("voice rule: \(inert(result["rule"]?["says"]?.string))")
-        if let line = webLine(result["web"]) { out.append(line) }
-        if let line = tailnetLine(result["webTailnet"]) { out.append(line) }
-        out += NodeUsage.lines(result["usage"])
-        if let line = LeadEngine.boostLine(result["boost"]) { out.append(line) }
-        let sessions = result["sessions"]?.array ?? []
+        out.append("voice rule: \(inert(result.rule?.says))")
+        if let line = webLine(result.web) { out.append(line) }
+        if let line = tailnetLine(result.webTailnet) { out.append(line) }
+        out += NodeUsage.lines(result.usage)
+        if let line = LeadEngine.boostLine(result.boost) { out.append(line) }
+        let sessions = result.sessions ?? []
         out.append(sessions.isEmpty ? "No agent sessions." : "sessions:")
         for session in sessions {
             let name = session["name"]?.string.map { "  \u{201C}\(inert($0))\u{201D}" } ?? ""
             let paused = session["pausedUntil"]?.string == nil ? "" : "  (paused)"
             out.append("  \(inert(session["terminal"]?.string))  \(inert(session["agent"]?.string))  \(inert(session["cwd"]?.string))  \(inert(session["status"]?.string))\(name)\(paused)")
         }
-        out += CardText.statusLines(leads: result["leads"]?.array ?? [], cards: result["cards"])
+        out += CardText.statusLines(leads: result.leads ?? [], cards: result.cards.map(NodeWire.Value.init(wire:)))
+        // What a build switch would wait on now, each with what it does and since when (the rule on switches).
+        let holders = (result.switchBlockers ?? []).map { inert($0) }
+        if !holders.isEmpty { out.append("a build switch waits now on: " + holders.joined(separator: "; ")) }
+        let parks = (result.switchParks ?? []).map { inert($0) }
+        if !parks.isEmpty { out.append("a build switch would park first (idle since their last report): " + parks.joined(separator: ", ")) }
         // The feature plugins that are on (a server before them says nothing).
-        if let plugins = result["plugins"]?.array {
+        if let plugins = result.plugins?.array {
             out.append("plugins on: " + (plugins.isEmpty ? "none" : plugins.map { inert($0["id"]?.string) }.joined(separator: ", ")) + " (`vibeswitcher plugin list`)")
         }
-        for accepted in result["accepted"]?.array ?? [] {
+        for accepted in result.accepted ?? [] {
             out.append("accepted: \(inert(accepted["kind"]?.string)) at \(inert(accepted["at"]?.string)) from pid \(accepted["pid"]?.int.map(String.init) ?? "?") in \(inert(accepted["cgroup"]?.string)): \(inert(accepted["commandLine"]?.array?.compactMap(\.string).joined(separator: " ")))")
         }
-        for notice in result["notices"]?.array ?? [] { out.append("notice: \(inert(notice.string))") }
-        if let line = updateLine(result["update"]) { out.append(line) }
+        for notice in result.notices ?? [] { out.append("notice: \(inert(notice))") }
+        if let line = updateLine(result.update) { out.append(line) }
         out += journal
         Say.out(out.joined(separator: "\n"))
         return 0

@@ -46,12 +46,21 @@ final class StubHost: @unchecked Sendable {
         welcomeCapabilities = capabilities
         listed = sessions
         path = try scratch.shortFolder("vss").appendingPathComponent("h.sock").path
+        try listen()
+    }
+
+    private func listen() throws {
         let fd = try UnixSocket.listen(path: path)
         let source = DispatchSource.makeReadSource(fileDescriptor: fd, queue: queue)
         source.setEventHandler { [weak self] in self?.accept(fd) }
         source.setCancelHandler { Sys.close(fd) }
         source.resume()
         listener = source
+    }
+
+    /// Its socket back, after an `.away` handover: it welcomes as the build it went to.
+    func listenAgain() throws {
+        try queue.sync { try listen() }
     }
 
     deinit { quit() }
@@ -107,6 +116,9 @@ final class StubHost: @unchecked Sendable {
         case replacedBy(pid: Int32, build: String)
         /// Gone, socket and all.
         case quit
+        /// Executes in place as `build`, its socket away until the test says (`listenAgain()`): the new build coming up
+        /// slower than the link's reconnects.
+        case away(build: String)
         /// Says no, and carries on.
         case refuse(String)
         /// The probe ends when the test says so (`cue()`), then the rest as `then`.
@@ -231,6 +243,12 @@ final class StubHost: @unchecked Sendable {
             notesBuild = build
             Array(clients.keys).forEach(drop)
         case .quit:
+            Array(clients.keys).forEach(drop)
+            listener?.cancel()
+            listener = nil
+            unlink(path)
+        case .away(let build):
+            notesBuild = build
             Array(clients.keys).forEach(drop)
             listener?.cancel()
             listener = nil
