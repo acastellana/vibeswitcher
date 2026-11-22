@@ -361,6 +361,24 @@ extension Requests {
 }
 
 extension CardStore.Card {
+    /// The command that shows every card whole, whatever its size.
+    public static let wholeCommand = "vibeswitcher questions"
+
+    /// What stands in the place of a card withheld from a snapshot in parts (`LiveStream.Oversized`): `value`'s place
+    /// (its id, kind, project and root, whether it is open, when, whether it blocks; a plugin card's plugin, asking
+    /// session and asker, the host's), none of what it asks, and `tooLarge`: its bytes and the command that shows it
+    /// whole. The page draws it as a card too large to show there.
+    public static func tooLargeStub(_ value: NodeWire.Value, bytes: Int) -> NodeWire.Value? {
+        var stub: [String: NodeWire.Value] = [:]
+        for key in ["id", "kind", "project", "root", "open", "closed", "at", "blocking"] { stub[key] = value[key] ?? .null }
+        if let plugin = value["plugin"] {
+            stub["plugin"] = .object(["plugin": plugin["plugin"] ?? .null, "session": plugin["session"] ?? .null,
+                                      "asker": plugin["asker"] ?? .null, "title": plugin["title"] ?? .null])
+        }
+        stub["tooLarge"] = .object(["bytes": .int(bytes), "command": .string(wholeCommand)])
+        return .object(stub)
+    }
+
     /// A draft as the card's `draft` carries it.
     static func draftValue(_ draft: CardStore.Draft) -> NodeWire.Value {
         .object(["text": .string(draft.text), "version": .int(draft.version), "at": .date(draft.at), "action": .string(draft.action)])

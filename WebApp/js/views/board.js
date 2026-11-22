@@ -122,7 +122,7 @@ function askRow(app) {
   return {
     el,
     update({ card, lead }) {
-      const words = card.question?.text || (card.kind === 'approval' ? `Approve the merge of ${card.approval?.commit?.slice(0, 8) || 'a commit'}` : card.kind === 'config' ? 'Held config waits for you' : card.kind === 'base' ? 'A base move waits for you' : card.plugin ? `${card.plugin.asker} ${card.plugin.ask}` : 'The lead asks you something');
+      const words = card.tooLarge ? 'A card too large for the page: read it with ' + (card.tooLarge.command || 'vibeswitcher questions') : card.question?.text || (card.kind === 'approval' ? `Approve the merge of ${card.approval?.commit?.slice(0, 8) || 'a commit'}` : card.kind === 'config' ? 'Held config waits for you' : card.kind === 'base' ? 'A base move waits for you' : card.plugin ? `${card.plugin.asker} ${card.plugin.ask}` : 'The lead asks you something');
       setText(text, words);
       setClass(el, 'blocking', !!card.blocking);
       const asker = card.plugin ? card.plugin.session : lead?.session;

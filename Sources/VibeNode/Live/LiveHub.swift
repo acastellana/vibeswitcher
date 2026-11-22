@@ -62,6 +62,8 @@ public final class LiveHub: WebSocketHandler, @unchecked Sendable {
         var ready = true
         var limit = ChatStream.snapshotItems
         var serial = 0
+        /// It takes snapshots in parts (`subscribe`'s `parts`).
+        var parts = false
     }
 
     /// Tells one chat subscription from the one that replaced it under the same name.
@@ -165,11 +167,11 @@ public final class LiveHub: WebSocketHandler, @unchecked Sendable {
             "sub": .string(ask.sub), "mode": .string(resume == nil ? "snapshot" : "resume"),
         ]))))
         if let resume {
-            connection.subs[ask.sub] = Sub(collection: ask.collection, sent: resume.prev)
+            connection.subs[ask.sub] = Sub(collection: ask.collection, sent: resume.prev, parts: ask.parts)
             if transport.writable { push(ask.sub, of: connection) }
         } else {
-            connection.subs[ask.sub] = Sub(collection: ask.collection, sent: stream.seq)
-            transport.send(snapshot(of: stream, sub: ask.sub))
+            connection.subs[ask.sub] = Sub(collection: ask.collection, sent: stream.seq, parts: ask.parts)
+            snapshot(of: stream, sub: ask.sub, parts: ask.parts).forEach(transport.send)
         }
     }
 
@@ -349,15 +351,19 @@ public final class LiveHub: WebSocketHandler, @unchecked Sendable {
     }
 
     /// One event that brings subscription `name` to its stream's `seq`: a delta from the `seq` it was sent last, or a
-    /// snapshot when the stream no longer remembers what changed after it. Nothing when it is current.
+    /// snapshot when the stream no longer remembers what changed after it. Nothing when it is current. A delta larger
+    /// than a part (a subscriber that takes parts) or than a line (one that doesn't) is a snapshot instead: a message
+    /// past the line's limit would end the connection, and the same delta would be due again on the next one.
     private func push(_ name: String, of connection: Connection) {
         if let session = connection.subs[name]?.chat { return pushChat(name, session: session, of: connection) }
         guard var sub = connection.subs[name], let stream = streams[sub.collection], sub.sent != stream.seq else { return }
-        if let range = stream.changes(since: sub.sent) {
-            connection.transport.send(NodeWire.message(NodeWire.Delta(sub: name, prev: range.prev, seq: range.seq,
-                                                                      at: stream.changedAt ?? now(), changes: range.changes)))
+        let delta = stream.changes(since: sub.sent).map { range in
+            NodeWire.message(NodeWire.Delta(sub: name, prev: range.prev, seq: range.seq, at: stream.changedAt ?? now(), changes: range.changes))
+        }
+        if let delta, delta.count <= (sub.parts ? NodeWire.partBytes : NodeWire.maxLine) {
+            connection.transport.send(delta)
         } else {
-            connection.transport.send(snapshot(of: stream, sub: name))
+            snapshot(of: stream, sub: name, parts: sub.parts).forEach(connection.transport.send)
         }
         sub.sent = stream.seq
         connection.subs[name] = sub
@@ -379,9 +385,127 @@ public final class LiveHub: WebSocketHandler, @unchecked Sendable {
         connection.subs[name] = sub
     }
 
-    private func snapshot(of stream: LiveStream, sub: String) -> Data {
+    /// `stream` now as subscription `sub`'s snapshot: in parts when it takes them, else one message, fitted.
+    private func snapshot(of stream: LiveStream, sub: String, parts: Bool) -> [Data] {
         let (seq, entries) = stream.snapshot()
-        return Self.fitted(NodeWire.Snapshot(sub: sub, collection: stream.collection, epoch: epoch, seq: seq, entries: entries))
+        let snapshot = NodeWire.Snapshot(sub: sub, collection: stream.collection, epoch: epoch, seq: seq, entries: entries)
+        return parts ? Self.parted(snapshot, oversized: stream.oversized) : [Self.fitted(snapshot)]
+    }
+
+    /// `snapshot` as its parts (the architecture review's row 14, bounded by construction): messages of at most
+    /// `NodeWire.partBytes` each, whatever the collection holds, so none can pass a line (the Unix socket's 1 MiB) or a
+    /// WebSocket message. Each carries the snapshot's `epoch` and `seq`, its `part` (0, 1, ...), and `final` on the
+    /// last; the entries go in order, as many to a part as fit. An entry that can't fit a part on its own (past
+    /// `NodeWire.entryBytes`: its collection's own rule didn't keep it under, as a board's does) is withheld whole and
+    /// named in a part's `withheld`, after the entries, with its collection's stub (a card's place and the command that
+    /// shows it whole); a collection that holds nothing a person decides on (`oversized` `.cut`: the boards) has its
+    /// longest texts cut instead, until it fits, and withheld only when its shape alone is too large. Text a person
+    /// decides on is never cut. The rest of the snapshot is sent whole, never dropped. One part, `part` 0 and `final`,
+    /// when it all fits. The hub writes a snapshot's parts in one turn of its queue, so nothing of the subscription
+    /// comes between them.
+    static func parted(_ snapshot: NodeWire.Snapshot, oversized: LiveStream.Oversized = .withhold(stub: nil)) -> [Data] {
+        // The envelope's bytes at their most: the widest part number, `final` false, and `withheld`'s brackets.
+        var head = snapshot
+        head.entries = []
+        head.part = Int.max
+        head.final = false
+        let room = NodeWire.partBytes - NodeWire.message(head).count - #","withheld":[]"#.utf8.count
+        var parts: [(entries: [NodeWire.Entry], withheld: [NodeWire.Withheld])] = [([], [])]
+        var size = 0
+        // A place for `bytes` more in the part being filled, or a new part.
+        func place(_ bytes: Int) {
+            if size + bytes > room {
+                parts.append(([], []))
+                size = 0
+            }
+            size += bytes
+        }
+        var withheld: [NodeWire.Withheld] = []
+        for whole in snapshot.entries {
+            let size = NodeWire.message(whole).count + 1
+            var fitting: NodeWire.Entry?
+            if size <= room { fitting = whole } else if case .cut = oversized { fitting = Self.cut(whole, room: room) }
+            guard let entry = fitting else {
+                var stub: NodeWire.Value?
+                if case .withhold(let made) = oversized { stub = made?(whole.value, size) }
+                withheld.append(NodeWire.Withheld(id: whole.id, bytes: size, stub: stub))
+                continue
+            }
+            let bytes = NodeWire.message(entry).count + 1
+            place(bytes)
+            parts[parts.count - 1].entries.append(entry)
+        }
+        // Each named, its stub with it while that fits a part (a stub is a few fields); one whose id alone is too long to
+        // name is only left out.
+        for var item in withheld {
+            if NodeWire.message(item).count + 1 > room { item.stub = nil }
+            let bytes = NodeWire.message(item).count + 1
+            guard bytes <= room else { continue }
+            place(bytes)
+            parts[parts.count - 1].withheld.append(item)
+        }
+        return parts.enumerated().map { index, contents in
+            var part = snapshot
+            part.entries = contents.entries
+            part.withheld = contents.withheld.isEmpty ? nil : contents.withheld
+            part.part = index
+            part.final = index == parts.count - 1
+            return NodeWire.message(part)
+        }
+    }
+
+    /// The shortest a cut text is left (and the shortest text `cut` cuts): an id, a name or a state is never cut.
+    static let cutFloor = 1_024
+
+    /// `entry` with its longest texts cut, one at a time, until it takes at most `room` bytes with its comma: each keeps
+    /// its start and ends `… [cut: N bytes]`. Nil when it can't be made to fit by cutting texts longer than `cutFloor`.
+    /// Only for a collection whose `oversized` is `.cut`: nothing in it is text a person decides on.
+    static func cut(_ entry: NodeWire.Entry, room: Int) -> NodeWire.Entry? {
+        var value = entry.value
+        for _ in 0..<256 {
+            let over = NodeWire.message(NodeWire.Entry(id: entry.id, value: value)).count + 1 - room
+            if over <= 0 { return NodeWire.Entry(id: entry.id, value: value) }
+            let longest = Self.longestText(value)
+            guard longest > cutFloor else { return nil }
+            var done = false
+            value = Self.cutting(value, length: longest, keep: max(cutFloor, longest - over - 64), done: &done)
+        }
+        return nil
+    }
+
+    /// The most UTF-8 bytes of any string in `value`.
+    private static func longestText(_ value: NodeWire.Value) -> Int {
+        switch value {
+        case .string(let text): return text.utf8.count
+        case .array(let items): return items.map(longestText).max() ?? 0
+        case .object(let fields): return fields.values.map(longestText).max() ?? 0
+        default: return 0
+        }
+    }
+
+    /// `value` with its first string of `length` bytes (in key order) cut to its first `keep` bytes, marked.
+    private static func cutting(_ value: NodeWire.Value, length: Int, keep: Int, done: inout Bool) -> NodeWire.Value {
+        guard !done else { return value }
+        switch value {
+        case .string(let text) where text.utf8.count == length:
+            done = true
+            var kept = "", bytes = 0
+            for character in text {
+                let size = character.utf8.count
+                if bytes + size > keep { break }
+                kept.append(character)
+                bytes += size
+            }
+            return .string(kept + "… [cut: \(length - bytes) bytes]")
+        case .array(let items):
+            return .array(items.map { cutting($0, length: length, keep: keep, done: &done) })
+        case .object(let fields):
+            var cut = fields
+            for key in fields.keys.sorted() where !done { cut[key] = cutting(fields[key]!, length: length, keep: keep, done: &done) }
+            return .object(cut)
+        default:
+            return value
+        }
     }
 
     /// The headroom a fitted snapshot leaves under the line's limit, for its envelope.

@@ -353,6 +353,9 @@ final class RawClient {
 
     /// How long any one read waits for its event before the case fails (a hang guard, never a pace).
     static let wait: TimeInterval = 30
+    /// The largest frame this client takes from the server: a larger one fails the read. A case reading snapshots in
+    /// parts raises it to a part (`NodeWire.partBytes`).
+    var mostFrame = 65536
 
     let fd: Int32
     private var buffer = Data()
@@ -480,7 +483,7 @@ final class RawClient {
     func nextFrame() throws -> Frame? {
         let deadline = Date().addingTimeInterval(Self.wait)
         while true {
-            if let parsed = Self.parseFrame(&buffer, masked: false) {
+            if let parsed = Self.parseFrame(&buffer, masked: false, most: mostFrame) {
                 guard let frame = parsed else { throw Failure("a frame the server shouldn't send") }
                 return frame
             }
@@ -536,7 +539,7 @@ final class RawClient {
 
     /// The first frame in `buffer`, taken out of it: nil when it isn't whole yet; `.some(nil)` when it isn't masked as
     /// `masked` says or is longer than 64 KiB.
-    static func parseFrame(_ buffer: inout Data, masked: Bool) -> Frame?? {
+    static func parseFrame(_ buffer: inout Data, masked: Bool, most: Int = 65536) -> Frame?? {
         let bytes = [UInt8](buffer)
         guard bytes.count >= 2 else { return nil }
         let isMasked = bytes[1] & 0x80 != 0
@@ -552,7 +555,7 @@ final class RawClient {
             length = bytes[2..<10].reduce(0) { $0 << 8 | Int($1) }
             at = 10
         }
-        guard length <= 65536 else { return .some(nil) }
+        guard length <= most else { return .some(nil) }
         let key = masked ? Array(bytes[at..<min(at + 4, bytes.count)]) : []
         if masked { at += 4 }
         guard bytes.count >= at + length else { return nil }

@@ -198,6 +198,46 @@ leads by root, cards by `at` then id) and a client may sort its own way. **A sna
 over:** the client keeps each row whose id is in `entries` (updating its value in place), adds the new ones, removes
 the ones no longer there, all in one render. It never empties the list first.
 
+### Snapshots in parts
+
+A snapshot is bounded by construction, not by how much a collection holds (the architecture review's row 14). A client
+that sends `"parts": true` in `subscribe` gets every snapshot of a keyed collection as one or more messages of at most
+`NodeWire.partBytes` (256 KiB) each, so none can pass the Unix socket's 1 MiB line or a WebSocket frame's limit:
+
+```json
+{"v":1,"kind":"snapshot","sub":"s4","collection":"boards","epoch":"…","seq":9,"entries":[…],"part":0,"final":false}
+{"v":1,"kind":"snapshot","sub":"s3","collection":"cards","epoch":"…","seq":9,"entries":[…],"part":1,"final":true,
+ "withheld":[{"id":"local:card:…","bytes":307300,"stub":{"id":"local:card:…","kind":"plugin","project":"…","open":true,"…":"…",
+ "tooLarge":{"bytes":307300,"command":"vibeswitcher questions"}}}]}
+```
+
+| Field | Type | Meaning |
+| --- | --- | --- |
+| `part` | int | this message's place, from 0; every part carries the snapshot's `epoch` and `seq` |
+| `final` | bool | true on the last part; one part that holds everything is `part` 0, `final` true |
+| `withheld` | [{`id`, `bytes`, `stub`?}]? | entries too large for a part, left out whole (below): they exist, and weren't sent; `stub`, when the collection gives one, stands in their place |
+
+- **The client holds the parts and takes them together** when `final` comes: one reconcile, as for a single-message
+  snapshot. Nothing of a part is shown before. A part out of its place (not the next, or another `epoch`/`seq`) drops
+  what was held, and the client subscribes again. The server writes a snapshot's parts back to back: nothing of the
+  same subscription comes between them.
+- **An entry is bounded by its collection's own rule** under a part's room (`NodeWire.entryBytes`): a board by
+  `BoardValue.mostBytes` (its last tasks go to `more`), a plugin card's body by `PluginCard.bodyBytesAtMost` (16 KiB,
+  refused past it). **Text a person decides on is never cut** (the plugin spec's rule 3): one past the room anyway is
+  withheld whole. `cards`: with a stub (its id, kind, project and root, open, when, blocking; a plugin card's plugin,
+  asking session, asker and title; `tooLarge` with its bytes and `vibeswitcher questions`, which shows it whole), drawn
+  in its place as "This card is too large for the page: read it with `vibeswitcher questions`". `sessions` (a prompt),
+  `leads` (a push) and `node`: withheld with no stub. `boards` alone, which hold nothing a person decides on (tasks'
+  notes, the lead's records; a question is a card), may have their longest texts cut instead, each keeping its start
+  and ending `… [cut: N bytes]`; one whose shape alone doesn't fit is withheld. The rest of the snapshot is always
+  sent; it is never dropped for one entry.
+- **A delta larger than a part** is never sent: the subscriber gets the stream as a snapshot in parts instead.
+- **A client that doesn't ask** (a page or a client from before parts) gets one message as before, entries left out
+  until it fits a line and `truncated` set, and a delta past a line becomes such a snapshot rather than a message the
+  socket would refuse. An older page loads the newer server's files at once anyway (`hello.assets`); no command-line
+  command subscribes.
+- `chat` snapshots are bounded by their items (`ChatStream`) and don't come in parts.
+
 ### Deltas
 
 ```json

@@ -100,3 +100,30 @@ test('the card shows the body whole as text, and its only buttons copy the lines
     Object.assign(globalThis, before);
   }
 });
+
+// A card the node withheld whole, too large for a snapshot's part (its stub, `tooLarge`): drawn in its place as too large
+// for the page, with the command that shows it whole, and nothing of what it asks; told so in a notification.
+test('a card too large for the page is drawn as such, with the command that shows it whole', async () => {
+  const before = { Node: globalThis.Node, document: globalThis.document };
+  globalThis.Node = FakeNode;
+  globalThis.document = { createElement: (tag) => new FakeNode(tag), createElementNS: (_, tag) => new FakeNode(tag), createTextNode: (text) => new FakeNode('#text', text) };
+  try {
+    const { pluginCard } = await import('../js/views/cards.js');
+    const stub = { id: card().id, kind: 'plugin', project: 'local:project:x', root: '/home/u/site', open: true, closed: null, at: card().at, blocking: false,
+      plugin: { plugin: 'shell', session: card().plugin.session, asker: 'Worker: fix-login', title: 'A shell asked for' },
+      tooLarge: { bytes: 307300, command: 'vibeswitcher questions' } };
+    const el = pluginCard(stub);
+    const text = el.textContent;
+    assert.ok(text.includes('This card is too large for the page: read it with vibeswitcher questions'), text);
+    assert.ok(text.includes('A shell asked for'));
+    assert.deepEqual(el.all('pre'), [], 'no body, cut or whole');
+    assert.ok(!text.includes('vibeswitcher answer'), 'no line that settles what it doesn’t show');
+    assert.equal(el.all('button').length, 1, 'one copy button: the command');
+  } finally {
+    Object.assign(globalThis, before);
+  }
+  const state = (cards) => ({ sessions: new Map(), leads: new Map(), cards: new Map(cards.map((c) => [c.id, c])), cardKeys: new Map(), plugins: null });
+  const told = changes(summarize(state([])), summarize(state([{ ...card(), plugin: { plugin: 'probe', session: card().plugin.session, title: 'A probe asked for' }, tooLarge: { bytes: 1, command: 'vibeswitcher questions' } }])));
+  assert.equal(told.length, 1);
+  assert.equal(told[0].body, 'A card too large for the page: read it with vibeswitcher questions');
+});
