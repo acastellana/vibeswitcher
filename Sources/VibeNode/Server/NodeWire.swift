@@ -134,6 +134,23 @@ public enum NodeWire {
     }
 
     /// The first message on each connection, from the server, unasked.
+    /// Why a connection's first line is no hello (`greeting`).
+    public struct NoHello: Error, Equatable, CustomStringConvertible {
+        public var description: String
+    }
+
+    /// A connection's first line (nil: none came) as a client reads it: the hello; or, when the server closed it at
+    /// once with a `bye` (one process past its share of connections, a full server), its reason, so the user sees why.
+    /// The reason is the server's words as sent: a terminal shows them through `ConfigSeal.inert`.
+    public static func greeting(_ first: Data?) -> Result<Hello, NoHello> {
+        guard let first else { return .failure(NoHello(description: "the node's server sent no hello")) }
+        if let hello = decode(Hello.self, first), hello.kind == "hello" { return .success(hello) }
+        if let bye = decode(Bye.self, first), bye.kind == "bye" {
+            return .failure(NoHello(description: "the node's server closed the connection: \(bye.reason)"))
+        }
+        return .failure(NoHello(description: "the node's server sent no hello"))
+    }
+
     public struct Hello: Codable, Equatable, Sendable {
         public struct Server: Codable, Equatable, Sendable {
             public var commit: String

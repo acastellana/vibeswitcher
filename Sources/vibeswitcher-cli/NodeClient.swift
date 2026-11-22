@@ -229,10 +229,13 @@ final class NodeClient {
         }
         var lines = NodeWire.Lines()
         var ready: [Data] = []
-        guard let first = read(fd, &lines, &ready, until: Platform.Clock.steadyDate().addingTimeInterval(timeout)),
-              let hello = NodeWire.decode(NodeWire.Hello.self, first), hello.kind == "hello" else {
+        let first = read(fd, &lines, &ready, until: Platform.Clock.steadyDate().addingTimeInterval(timeout))
+        let hello: NodeWire.Hello
+        switch NodeWire.greeting(first) {
+        case .success(let given): hello = given
+        case .failure(let why):
             Sys.close(fd)
-            return .failure(.broken("the node's server sent no hello"))
+            return .failure(.broken(ConfigSeal.inert(why.description, limit: 500)))
         }
         let client = NodeClient(fd: fd, hello: hello, lines: lines, ready: ready)
         client.onUnanswered = { kind, action in

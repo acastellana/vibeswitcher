@@ -121,6 +121,22 @@ struct NodeServerBoundsTests {
         open.removeAll()
     }
 
+    /// A client given a bye for its hello (a process past its share, a full server) says the server's reason, not
+    /// only that no hello came (`NodeWire.greeting`, which the command line reads its first line with).
+    @Test func aByeInPlaceOfTheHelloSaysWhy() {
+        let bye = NodeWire.line(NodeWire.Bye(reason: "this process has 8 connections open to the server: close one first", code: nil))
+        guard case .failure(let why) = NodeWire.greeting(bye.dropLast()) else {
+            Issue.record("a bye taken as a hello")
+            return
+        }
+        #expect(why.description == "the node's server closed the connection: this process has 8 connections open to the server: close one first")
+        guard case .failure(let none) = NodeWire.greeting(nil), case .failure(let other) = NodeWire.greeting(Data("{}".utf8)) else {
+            Issue.record("nothing taken as a hello")
+            return
+        }
+        #expect(none.description == "the node's server sent no hello" && other == none)
+    }
+
     /// At the limit the newcomer displaces the heaviest holder's longest-idle connection, one with no request first; a
     /// newcomer that isn't the user's displaces only connections that aren't either.
     @Test func theEvictionTakesTheHeaviestHoldersIdlestConnection() {
