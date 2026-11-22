@@ -532,6 +532,12 @@ runner's.
 Failures of main's own tests, in code `v2` leaves as main has it, seen on the hosted Mac. They aren't skipped: each is
 re-run, and fixed on main.
 
+- **`BrokenPipeProbeTests/aChildRunsSIGPIPENamesItsWriterAndTheFlakeLogKeepsIt` (core)**: the probe's child found "no
+  thread of 5 in a write or a send" in its SIGPIPE snapshot, every block (run 45072995987, `e14045a0`); the next run
+  (`5625a3f4`) passed it. The handler ran on the main thread, in its run loop (`mach_msg2_trap`): the signal for the
+  writer's EPIPE was delivered to another thread, and by the time the handler took its snapshot the writer had moved
+  on. Nothing signal-related changed between the last pass (`1c1c6f37`) and it. A race in which thread takes the
+  signal: the probe's own (main's), left to main.
 - **`ComposerDeliveryTests/pastedImagesAndTheirTextArriveOnce` (app)**: a pasted image goes to the fake unbracketed,
   as its path. Seen twice in about 21 `v2 macos` app jobs, in different cases: run 43451992452 (`1fc49ad7`, "an image
   alone, the Send button": the input was the quoted `.png` path, `0 image(s)`, where `[Image #1] | 1 image(s)` was
