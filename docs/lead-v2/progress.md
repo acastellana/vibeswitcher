@@ -413,3 +413,7 @@
 - 2026-11-22 12:45 Audit of the-node-s-gate at 7fec90da by 2 finders (contract and acceptance; bugs, regressions and security); the shared run: the test command passed
 - 2026-11-22 12:47 Audit of the-node-s-gate: finder 2 of 2 submitted (complete, clean, 2 findings)
 - 2026-11-22 12:47 Audit of the-node-s-gate: complete, clean, round 4: 1 Important closed, 5 Nit (2 open, 2 unconfirmed), 2 Pre-existing unconfirmed (2 finders voted: 0 new findings confirmed, 0 unconfirmed)
+- 2026-11-22 13:07 Pipeline held: the-node-s-gate ready to merge with none landing; cause: nothing VibeSwitcher sees
+- 2026-11-22 13:07 Pipeline held: the-node-s-gate ready to merge with none landing; cause: the gate not installed
+- 2026-11-22 13:07 Pipeline held: the-node-s-gate ready to merge with none landing; cause: nothing VibeSwitcher sees
+- 2026-11-22 13:07 Pipeline held: the-node-s-gate ready to merge with none landing; cause: the gate not installed
