@@ -213,13 +213,25 @@ extension LeadEngine {
         // An acting answer: settled in the vault, confirmed, before it acts, so no restart draws it again.
         let key = PluginKey(plugin: shown.plugin, request: shown.request).name
         let client = link.vaultV2
+        pluginSettling.insert(key)
         pluginWork.async { [weak self] in
             let kept = Result { try client.settleRequests([key]) }
             self?.queue.async {
                 guard let self else { return }
+                self.pluginSettling.remove(key)
                 switch kept {
                 case .success:
                     self.pluginSettled.insert(key)
+                    // Turned off (or the card withdrawn) while the vault was asked: nothing runs; the settle stands.
+                    guard self.plugins.isOn(shown.plugin), let now = self.cards.cards[marked.id], now.isOpen,
+                          now.plugin?.state == action.marks else {
+                        self.note("plugin \(shown.plugin): card \(marked.id) not acted on: turned off while it was being answered")
+                        if let session = PluginDesk.hostSession(shown.session) {
+                            self.tellSurely("[VibeSwitcher] Your \(shown.noun) \(shown.request) wasn't done: the user turned \(plugin.info.title) off "
+                                            + "before it ran.", session: session, key: "\(shown.plugin):\(shown.request):not-run")
+                        }
+                        return then(.failure(.refused("\(plugin.info.title) was turned off while it was being answered: nothing ran")))
+                    }
                     plugin.perform(action.word, on: marked, desk: desk, act: act, then: then)
                 case .failure(let error):
                     var closed = marked
@@ -241,7 +253,7 @@ extension LeadEngine {
         for var card in cards.list() where card.plugin?.plugin == plugin.info.id {
             guard var shown = card.plugin else { continue }
             // Already being acted on (an answer marked it): what it started may run; say what is true.
-            let underWay = !shown.isWaiting
+            let underWay = !shown.isWaiting && !pluginSettling.contains(PluginKey(plugin: shown.plugin, request: shown.request).name)
             shown.state = PluginCard.withdrawnState
             shown.outcome = "Withdrawn: you turned \(plugin.info.title) off" + (underWay ? " while it was being answered" : "")
             card.plugin = shown
