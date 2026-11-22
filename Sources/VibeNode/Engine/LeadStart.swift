@@ -56,13 +56,21 @@ extension LeadEngine {
     /// Starts the project lead for the repository holding `folder`, or shows the one already running; `completion`
     /// (on `queue`) hears what it did. A `goal` goes into a new lead's first prompt, or is held for the running one (E5
     /// delivers it). `resume`: reopen the lead a host restart ended, in its same conversation (`RestartResume.swift`).
-    /// From any thread.
-    public func startLead(folder: String, goal: String?, takeHead: Bool, replace: Bool, resume: Bool = false,
+    /// `initialized`: `lead --init` made the repository at `folder` just now (`LeadInit`): before any git of the guard's
+    /// runs there, its hooks baseline is recorded empty (`GitGuard.accept(only: [])`), so a hook a session put in its
+    /// `.git` between the install and this start is listed, never run, until the lead accepts it. From any thread.
+    public func startLead(folder: String, goal: String?, takeHead: Bool, replace: Bool, resume: Bool = false, initialized: Bool = false,
                           completion: @escaping (StartOutcome) -> Void) {
         let (preflight, looked) = (self.preflight, preflightLooked)
         // git can be slow: the repository is found off the engine's queue, and first what's missing (without git, git
         // below would only say the folder isn't a repository).
         work.async { [weak self] in
+            if initialized {
+                do { _ = try GitGuard.accept(root: folder, only: [], baseline: true) } catch {
+                    self?.queue.async { completion(.refused("the new repository's hooks baseline couldn't be recorded (\(error)): the lead wasn't started")) }
+                    return
+                }
+            }
             let found = Self.repository(folder, preflight: preflight, looked: looked)
             guard let self else { return }
             self.queue.async {
@@ -92,7 +100,7 @@ extension LeadEngine {
         }
         let root = (top.output as NSString).standardizingPath
         guard Git.run(["rev-parse", "--verify", "--quiet", "HEAD"], in: root).ok else {
-            return (nil, nil, "\(root) has no commits yet: workers branch from a commit; make one (`vibeswitcher lead FOLDER --init` makes it of the folder's files), then start the lead")
+            return (nil, nil, "\(root) has no commits yet: workers branch from a commit; make one (git add, git commit), then start the lead")
         }
         return (root, program, nil)
     }
