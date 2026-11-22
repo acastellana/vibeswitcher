@@ -480,17 +480,43 @@ public enum HostImages {
     ///
     /// The soft limit before is carried across a handover in the host's own environment (`descriptorCarriedVariable`,
     /// which both forms of the handover's exec pass on): the new image starts with the limit raised already, and would
-    /// otherwise give its sessions the hard one.
-    public static func raiseDescriptorLimit() {
+    /// otherwise give its sessions the hard one. Taken only by an image a handover started (`handedOver`), and only
+    /// within `carriedValue`'s bounds: a fresh start's environment is the user manager's, which any process of the user
+    /// can set (`systemctl --user set-environment`), and a value of 0 would leave every session unable to open a file.
+    /// A value refused is said on stderr; the variable is unset either way before this image sets its own.
+    public static func raiseDescriptorLimit(handedOver: Bool) {
         guard descriptorSoftBefore.get() == nil else { return }
-        if let carried = getenv(descriptorCarriedVariable).flatMap({ UInt64(String(cString: $0)) }) {
+        let given = getenv(descriptorCarriedVariable).map { String(cString: $0) }
+        unsetenv(descriptorCarriedVariable)
+        let hard = Platform.ProcessSelf.descriptorLimits()?.hard
+        switch carriedValue(given, handedOver: handedOver, hard: hard) {
+        case .some(.success(let carried)):
             descriptorSoftBefore.set(carried)
             Platform.ProcessSelf.raiseDescriptorLimit()
+            setenv(descriptorCarriedVariable, String(carried), 1)
             return
+        case .some(.failure(let why)):
+            Platform.Stdio.error("vibeswitcher-host: \(descriptorCarriedVariable) not taken: \(why)\n")
+        case nil:
+            break
         }
         guard let before = Platform.ProcessSelf.raiseDescriptorLimit() else { return }
         descriptorSoftBefore.set(before)
         setenv(descriptorCarriedVariable, String(before), 1)
+    }
+
+    /// The fewest open files a session is given back (`carriedValue`): the soft limit systemd and most systems start with.
+    static let descriptorFloor: UInt64 = 1024
+
+    /// What the carried soft limit `given` says: nil when there is none; the value, for an image a handover started
+    /// (`handedOver`), from `descriptorFloor` to the hard limit (`hard`, when known); why it is refused otherwise.
+    static func carriedValue(_ given: String?, handedOver: Bool, hard: UInt64?) -> Result<UInt64, Refused>? {
+        guard let given else { return nil }
+        guard handedOver else { return .failure(Refused("a fresh start takes none (only an image a handover started)")) }
+        guard let value = UInt64(given) else { return .failure(Refused("\(ConfigSeal.inert(given, limit: 40)) isn't a number")) }
+        guard value >= descriptorFloor else { return .failure(Refused("\(value) is under \(descriptorFloor)")) }
+        if let hard, value > hard { return .failure(Refused("\(value) is over the hard limit, \(hard)")) }
+        return .success(value)
     }
 
     /// The host's soft limit before it raised it, in its own environment, for the image a handover starts.

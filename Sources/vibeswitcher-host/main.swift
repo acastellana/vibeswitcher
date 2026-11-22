@@ -214,7 +214,7 @@ HostHardening.watch(server)
 // A detached host's log (its stderr, shared with its server child) kept to about 2 MB and one older copy (V2/StderrCap.swift).
 StderrCap.start()
 // Its soft limit on descriptors raised to the hard one; its sessions' programs get the old one back (V2/HostImages.swift).
-HostImages.raiseDescriptorLimit()
+HostImages.raiseDescriptorLimit(handedOver: handoverPath != nil)
 // The vault is what a build this one hands over to must hold in memory too.
 if let vault = config.vault { server.secretsForHandover = { vault.serialized } }
 // What a held first look kept from being recorded, in the host's log.

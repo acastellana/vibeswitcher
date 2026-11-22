@@ -38,7 +38,7 @@ public enum NodeUnit {
     /// applies `UnsetEnvironment=` after `Environment=`, and a name here would remove the unit's own assignment too
     /// (`systemd.exec(5)`; `noNameIsBothUnsetAndAssigned`).
     public static let unset = ["LD_PRELOAD", "LD_AUDIT", "LD_LIBRARY_PATH", "GCONV_PATH", "BASH_ENV", "ENV", "VIBESWITCHER_HOME",
-                               "CFFIXED_USER_HOME"] + unsetFromManager
+                               "CFFIXED_USER_HOME", "VIBESWITCHER_HOST_NOFILE_BEFORE"] + unsetFromManager
 
     /// The names a desktop session's manager holds here that the unit unsets, and `start` therefore doesn't refuse
     /// (`NodeFolders.managerRefusal`): `SSH_AUTH_SOCK`, gnome-keyring's agent socket (D9: no agent socket reaches the

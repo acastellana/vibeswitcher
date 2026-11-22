@@ -199,7 +199,7 @@ extension StartCommandTests {
 
     @Test func theUnitUnsetsTheListedNamesAndSetsBacktraceOff() throws {
         #expect(NodeUnit.unset == ["LD_PRELOAD", "LD_AUDIT", "LD_LIBRARY_PATH", "GCONV_PATH", "BASH_ENV", "ENV", "VIBESWITCHER_HOME",
-                                   "CFFIXED_USER_HOME", "SSH_AUTH_SOCK"])
+                                   "CFFIXED_USER_HOME", "VIBESWITCHER_HOST_NOFILE_BEFORE", "SSH_AUTH_SOCK"])
         let unit = NodeUnit.parse(try NodeUnit.text(Self.inputs).get())
         #expect(unit["UnsetEnvironment"] == [NodeUnit.unset.joined(separator: " ")])
         #expect(unit["Environment"]?.contains("SWIFT_BACKTRACE=enable=no") == true, "\(unit)")
