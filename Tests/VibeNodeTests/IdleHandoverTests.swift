@@ -382,6 +382,24 @@ struct IdleHandoverTests {
         #expect(world.spawns.value.isEmpty && world.holder() == world.lead.session.id.uuidString)
     }
 
+    /// The user's `send` into the lead is its input (the app's `noteLeadInput`): its two-minute quiet counts from it,
+    /// and a note asked for before it is dropped.
+    @Test func theUsersSendIntoTheLeadRestartsItsQuietAndDropsAnAsk() async throws {
+        let world = try await World(scratch)
+        defer { world.stop() }
+        try world.write(age: 52 * 60)
+        let session = try #require(world.link.sessions.first { $0.id == world.lead.session.id })
+        world.queue.sync { world.engine.noteUserInput(session) }
+        #expect(await world.look() == "quiet")
+        #expect(world.asks.value.isEmpty, "typed to a minute ago: not asked")
+        world.advance(121)
+        #expect(await world.look() == "asked")
+        world.queue.sync { world.engine.noteUserInput(session) }
+        #expect(world.queue.sync { world.engine.rotationAsked[world.repo] == nil }, "the user's words come before its note: the ask is dropped")
+        #expect(await world.look() == "quiet")
+        #expect(world.spawns.value.isEmpty)
+    }
+
     @Test func aQuestionJustAskedOrARunningTurnKeepsTheLead() async throws {
         let world = try await World(scratch)
         defer { world.stop() }

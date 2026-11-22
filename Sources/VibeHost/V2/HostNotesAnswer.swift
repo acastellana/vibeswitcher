@@ -14,6 +14,8 @@ final class HostTally {
     private(set) var replacedPaths: [String] = []
     /// The server child's restarts under the images before this one.
     private(set) var earlierServerRestarts = 0
+    /// How the server child last ended under the images before this one.
+    private(set) var earlierServerEnd: HostNotes.ServerEnd?
     /// The lock path while the file it names is another process's to lock (`HostPathWatch`); nil: not now. Not
     /// carried: the next image's watch checks the path as it begins (and a handover is refused meanwhile).
     private(set) var lockHeldElsewhere: String?
@@ -40,13 +42,15 @@ final class HostTally {
         replacedPaths = Array(record.replacedPaths.suffix(Self.pathsKept))
         earlierServerRestarts = max(0, record.serverRestarts)
         lockHeldElsewhereCount = max(0, record.lockHeldElsewhereCount ?? 0)
+        earlierServerEnd = record.lastServerEnd
     }
 
-    /// The counts as a handover carries them, with `serverRestarts` this image's.
-    func record(serverRestarts: Int) -> HostHandover.Tally {
+    /// The counts as a handover carries them, with `serverRestarts` and `lastServerEnd` this image's.
+    func record(serverRestarts: Int, lastServerEnd: HostNotes.ServerEnd? = nil) -> HostHandover.Tally {
         HostHandover.Tally(serverRestarts: earlierServerRestarts + serverRestarts, replacedPaths: replacedPaths,
                            refusedAppConnections: refusedAppConnections,
-                           lockHeldElsewhereCount: lockHeldElsewhereCount > 0 ? lockHeldElsewhereCount : nil)
+                           lockHeldElsewhereCount: lockHeldElsewhereCount > 0 ? lockHeldElsewhereCount : nil,
+                           lastServerEnd: lastServerEnd ?? earlierServerEnd)
     }
 }
 
@@ -59,12 +63,16 @@ extension HostHandover {
         public var refusedAppConnections: Int
         /// `HostTally.lockHeldElsewhereCount`; nil: none, or a build that didn't count it.
         public var lockHeldElsewhereCount: Int?
+        /// How the server child last ended on its own, under any image so far; nil: never, or a build that didn't keep it.
+        public var lastServerEnd: HostNotes.ServerEnd?
 
-        public init(serverRestarts: Int, replacedPaths: [String], refusedAppConnections: Int, lockHeldElsewhereCount: Int? = nil) {
+        public init(serverRestarts: Int, replacedPaths: [String], refusedAppConnections: Int, lockHeldElsewhereCount: Int? = nil,
+                    lastServerEnd: HostNotes.ServerEnd? = nil) {
             self.serverRestarts = serverRestarts
             self.replacedPaths = replacedPaths
             self.refusedAppConnections = refusedAppConnections
             self.lockHeldElsewhereCount = lockHeldElsewhereCount
+            self.lastServerEnd = lastServerEnd
         }
     }
 }
@@ -77,12 +85,13 @@ extension HostServer {
         HostNotes(startedAt: startedAt, serverRestarts: tally.earlierServerRestarts + (serverChild?.restarts ?? 0),
                   replacedPaths: tally.replacedPaths, refusedAppConnections: tally.refusedAppConnections,
                   lockHeldElsewhere: tally.lockHeldElsewhere, lockHeldElsewhereCount: tally.lockHeldElsewhereCount,
-                  build: HostStartLine.commit, binaries: HostStartLine.binaries)
+                  build: HostStartLine.commit, binaries: HostStartLine.binaries,
+                  lastServerEnd: serverChild?.lastEnd ?? tally.earlierServerEnd)
     }
 
     /// `tally` for a handover's state (`HostHandover.State.tally`): nil on the Mac, which counts nothing (no connector,
     /// no path watch), so its state stays as it was. On `queue`.
     var tallyForHandover: HostHandover.Tally? {
-        Platform.CodeIdentity.isAvailable ? nil : tally.record(serverRestarts: serverChild?.restarts ?? 0)
+        Platform.CodeIdentity.isAvailable ? nil : tally.record(serverRestarts: serverChild?.restarts ?? 0, lastServerEnd: serverChild?.lastEnd)
     }
 }

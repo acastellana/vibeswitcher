@@ -53,6 +53,36 @@ struct SendTests {
         #expect(prompts(harness) == ["Run the tests\nthen tell me", "And the next"], "\(prompts(harness))")
     }
 
+    /// What the user typed is the session's input (a lead's rotation quiet), and only that: a `!` git line sent, and a
+    /// move of the lead's base after it, still draws a base-move card (`BaseMoveStore`'s doc: a line vouches for a time
+    /// window, not for the move it made). The fake runs nothing it's sent; the test makes the move.
+    @Test func aTypedMessageIsTheSessionsInputAndABangGitLineVouchesForNoBaseMove() async throws {
+        let world = try await CardWorld.make(scratch)
+        defer { world.stop() }
+        let lead = try await world.sleepingLead()
+        #expect(await eventually(timeout: 60) { world.queue.sync { world.engine.leads.leads[world.project]?.session == lead.id } })
+        let harness = try await claude(world)
+        let short = String(harness.session.id.uuidString.lowercased().prefix(8))
+        try await taskBranch(world.repo, task: "mine")
+        #expect(try #require(await send(world, short, "! git merge -q --ff-only agent/mine")).ok)
+        // Typed in (a `!` line is Claude Code's shell mode, not a prompt: the fake's transcript doesn't have it).
+        #expect(await eventually(timeout: 30) { world.queue.sync { world.engine.userInput[harness.session.id] != nil } })
+        #expect(Git.run(["merge", "-q", "--ff-only", "agent/mine"], in: world.repo).ok)
+        func baseCard() -> CardStore.Card? {
+            world.queue.sync { world.engine.cards.list(project: world.project).first { $0.kind == .baseMove && $0.closed == nil } }
+        }
+        // Each refresh drained before the next, as RefreshTests' base-move case waits on it.
+        var asked = false
+        for _ in 0..<300 where !asked {
+            world.engine.refresh()
+            await world.drained()
+            asked = baseCard() != nil
+            if !asked { try await Task.sleep(nanoseconds: 200_000_000) }
+        }
+        #expect(asked, "the user's own git line drew no card: \(world.queue.sync { world.engine.cards.list(project: world.project) })")
+        #expect(world.host.vault.headMoved(root: world.repo, branch: "main") != nil, "the vault took the move")
+    }
+
     /// A question open on its screen that takes typed words (its "Type something." row, the app's free-text row): the
     /// message goes in as that answer, as the app's composer sends it, not held; a `/` command isn't an answer (held), and
     /// a multi-select is ticked in its terminal (held).

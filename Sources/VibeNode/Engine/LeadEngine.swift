@@ -337,8 +337,11 @@ public final class LeadEngine: @unchecked Sendable {
     // The lead's rotation and idle handover (main's `26923f7c`, `IdleHandover.swift`), on `queue`.
     /// The time the rotation judges by (now; a test's later).
     var handoverNow: () -> Date = Date.init
-    /// When this engine started: the node keeps no record of the user's typing into a lead, so its quiet counts from here.
+    /// When this engine started: a lead's quiet counts from here until the user types into it (`userInput`).
     let handoverStarted = Date()
+    /// When the user last typed into each session with `vibeswitcher send` (`noteUserInput`, the app's
+    /// `noteLeadInput`): a lead's two-minute quiet counts from it.
+    var userInput: [UUID: Date] = [:]
     /// Roots whose idle look or handover is under way, and when each may be looked at again after a handover ended.
     var handingOver: Set<String> = []
     var handoverRetry: [String: Date] = [:]

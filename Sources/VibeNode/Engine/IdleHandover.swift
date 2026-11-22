@@ -19,9 +19,10 @@ import VibeCore
 /// (`LeadStore.replacing`) and ended with its tool server at a refresh once the fresh lead holds the role
 /// (`ReplacedLeads.swift`; on the Mac it ran on), and progress.md says why.
 ///
-/// **Not here, as on the Mac:** the user's typing into the lead (the app's `noteLeadInput`, its input held during the
-/// commit, and its count of deliveries that cancels an ask): the node has no record of it, so the two-minute quiet
-/// counts from the engine's start, an idle stretch's tries (`LeadRotation.maxIdleAttempts`) count until the lead
+/// The user's typing into the lead with `vibeswitcher send` (or steering it, `--now`) is its input (`noteUserInput`, the
+/// app's `noteLeadInput`): the two-minute quiet counts from it (from the engine's start before any), and it drops a note
+/// asked for. **Not here, as on the Mac:** keys typed straight into the lead's terminal (the node sees only `send`'s),
+/// its input held during the commit, and its count of deliveries that cancels an ask; an idle stretch's tries (`LeadRotation.maxIdleAttempts`) count until the lead
 /// answers anything but the engine's own ask (where the Mac counts until the user types), and the commit's last check
 /// (between turns, nothing in its inbox) is what keeps a turn that began meanwhile.
 extension LeadEngine {
@@ -73,9 +74,9 @@ extension LeadEngine {
         }
         guard !stopping, starting[root] == nil, !handingOver.contains(root), now >= (handoverRetry[root] ?? .distantPast),
               leads.held[project]?.isEmpty != false, !sendingHeld.contains(root), !posting.contains(root) else { return }
-        // The node keeps no record of the user's typing into the lead: its quiet counts from the engine's start.
-        let lastInput = handoverStarted
-        guard now.timeIntervalSince(lastInput) >= 120 else { return }
+        // The user's last `send` into the lead, else the engine's start.
+        let lastInput = max(handoverStarted, userInput[session.id] ?? .distantPast)
+        guard now.timeIntervalSince(lastInput) >= 120 else { return handoverEvent("quiet") }
         handingOver.insert(root)
         let (observer, inbox, vault, tries, asked) = (observer, self.root, link.vault, handoverAttempts[session.id], rotationAsked[root])
         let context = LeadContextStore(root: self.root, home: home)
@@ -318,5 +319,17 @@ extension LeadEngine {
 
     private struct HandoverChanged: Error, CustomStringConvertible {
         var description: String { "the running lead changed" }
+    }
+}
+
+extension LeadEngine {
+    /// The user typed into `session` with `vibeswitcher send` (or steered it), on `queue`: a lead's quiet counts from
+    /// now and a note asked of it is dropped (the app's `noteLeadInput`). What was typed is never a voucher for a base
+    /// move (`BaseMoveStore`'s doc says why): only the time is kept.
+    func noteUserInput(_ session: HostSession) {
+        let now = handoverNow()
+        userInput = userInput.filter { now.timeIntervalSince($0.value) < 86_400 }
+        userInput[session.id] = now
+        rotationAsked = rotationAsked.filter { $0.value.session != session.id }
     }
 }

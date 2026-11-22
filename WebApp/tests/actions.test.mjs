@@ -10,7 +10,7 @@ import { fileURLToPath } from 'node:url';
 import {
   sessionShort, shellWord, sessionWord, renameLine, pauseLine, PAUSES, endable, endLine, closeShellsLine, resumeLine, endedEntry,
   recentFolders, newEntries, newLine, presetProblem, presetLine, presetArgs, PRESET_VARIABLES, leadFolders, leadLine,
-  recentProjects, projectLines,
+  recentProjects, projectLines, newProjectLine, projectFolderName,
 } from '../js/actions.js';
 import { validate } from '../wire/validators.js';
 import { createMock } from '../js/mock.js';
@@ -159,6 +159,14 @@ test('“Start Project Lead in …”: the shown session’s folder first, then 
   assert.equal(leadLine('/home/me/site', '  '), 'vibeswitcher lead /home/me/site');
   const line = leadLine('/home/me/my site', 'add a subtract function; with a test $(rm -rf ~)');
   assert.deepEqual(words(line), ['vibeswitcher', 'lead', '/home/me/my site', '--goal', 'add a subtract function; with a test $(rm -rf ~)']);
+});
+
+test('New project: the folder its name makes, and the new-project line with each typed thing one word', () => {
+  assert.equal(projectFolderName('  My   App '), 'my-app');
+  assert.equal(projectFolderName('   '), '');
+  assert.equal(newProjectLine('Acme'), 'vibeswitcher new-project Acme');
+  const line = newProjectLine('My App', '~/work things', 'plan it; $(rm -rf ~)');
+  assert.deepEqual(words(line), ['vibeswitcher', 'new-project', 'My App', '--in', '~/work things', '--goal', 'plan it; $(rm -rf ~)']);
 });
 
 test('recent projects: the node’s hosted and ended folders first, then those Claude Code and Codex know, each once with its lead', () => {

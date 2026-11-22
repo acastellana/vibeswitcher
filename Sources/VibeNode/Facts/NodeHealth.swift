@@ -3,7 +3,8 @@ import VibeCore
 
 /// The node's health digest (the app's health digest and freeze reports, `AppHealthWatcher.swift`, `AppHealth.swift`;
 /// the parity table's row): what `vibeswitcher status --health` and the page's This node show beside the host's own
-/// counts (server restarts, refused connections) and the sessions left waiting or stuck (`NodeSessions.reminderNotices`).
+/// counts (server restarts, refused connections, how the server last ended: `HostNotes.ServerEnd`, the node's stand-in
+/// for the app's crash reports) and the sessions left waiting or stuck (`NodeSessions.reminderNotices`).
 ///
 /// - Freezes: a watchdog on a thread of its own pings the engine's queue every `beat` seconds; a ping not answered
 ///   within `stallAfter` is a stall, shown as under way while it lasts and kept as a freeze, with how long, once the
@@ -173,7 +174,8 @@ public final class NodeHealth: @unchecked Sendable {
 
     /// The digest as `status` carries it (`health`): `restarts` and `refused` the host's counts, `waiting` the
     /// sessions' reminders (left waiting or stuck).
-    public func value(serverRestarts: Int?, refusedConnections: Int?, hostRestartAt: Date?, waiting: [String]) -> NodeWire.Value {
+    public func value(serverRestarts: Int?, refusedConnections: Int?, hostRestartAt: Date?, waiting: [String],
+                      serverEnd: HostNotes.ServerEnd? = nil) -> NodeWire.Value {
         let (freezes, problems, slow, slowest, lastSlow, causes) = lock.withLock {
             (self.freezes, self.problems, self.slow, self.slowest, self.lastSlow, self.causes)
         }
@@ -188,6 +190,8 @@ public final class NodeHealth: @unchecked Sendable {
             "serverRestarts": serverRestarts.map { .int($0) } ?? .null,
             "refusedConnections": refusedConnections.map { .int($0) } ?? .null,
             "hostRestartAt": hostRestartAt.map(NodeWire.Value.date) ?? .null,
+            "serverEnded": serverEnd.map { .object(["at": .date($0.at), "ran": .int(Int($0.ran.rounded())),
+                                                    "cause": .string(ConfigSeal.inert($0.cause, limit: 120))]) } ?? .null,
             "waiting": .array(waiting.map(NodeWire.Value.string)),
             "errors": .array(problems.reversed().map { .object(["at": .date($0.at), "line": .string(ConfigSeal.inert($0.line, limit: 300))]) }),
             "causes": .array(ranked.map { .object(["kind": .string(ConfigSeal.inert($0.key, limit: 80)), "count": .int($0.value.count),
@@ -196,6 +200,11 @@ public final class NodeHealth: @unchecked Sendable {
     }
 
     /// The digest as the command line prints it (`status --health`), from `health` (`value`'s shape). Every line inert.
+    /// "45 s", "12 min", "3 h", "2 days".
+    static func duration(_ seconds: Int) -> String {
+        seconds < 120 ? "\(seconds) s" : seconds < 7200 ? "\(seconds / 60) min" : seconds < 172_800 ? "\(seconds / 3600) h" : "\(seconds / 86_400) days"
+    }
+
     public static func lines(_ health: NodeWire.Value) -> [String] {
         func inert(_ text: String?) -> String { ConfigSeal.inert(text ?? "?", limit: 300) }
         var out = ["health since the server started \(inert(health["since"]?.string)):"]
@@ -209,6 +218,9 @@ public final class NodeHealth: @unchecked Sendable {
         if let restarts = health["serverRestarts"]?.int { out.append("  server restarts by the host: \(restarts)") }
         if let refused = health["refusedConnections"]?.int { out.append("  connections the host refused: \(refused)") }
         if let at = health["hostRestartAt"]?.string { out.append("  the host last restarted at \(inert(at))") }
+        if let ended = health["serverEnded"], ended["at"] != nil {
+            out.append("  the server last ended on its own at \(inert(ended["at"]?.string)): \(inert(ended["cause"]?.string)), after \(Self.duration(ended["ran"]?.int ?? 0))")
+        }
         let waiting = health["waiting"]?.array ?? []
         out.append(waiting.isEmpty ? "  sessions left waiting or stuck: none" : "  sessions left waiting or stuck:")
         for line in waiting { out.append("    " + inert(line.string)) }

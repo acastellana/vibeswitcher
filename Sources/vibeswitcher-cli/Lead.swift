@@ -10,8 +10,15 @@ import VibeNode
 /// restart card: `status` offers it), after the same accepts, telling it which workers ended. Before
 /// the code it prints the program the lead will run, `claude` resolved as the server resolves it (EN-D13); the reply
 /// says the one it ran. The accepted request is written to the journal (ids only: no goal, no folder).
+/// `--init` is the app's offer for a folder a lead can't start in yet (`LeadController`'s first commit,
+/// `ProjectFolderStart`'s question): a folder in no repository gets `git init` and a first commit of its files, an empty
+/// repository's own folder a first commit (`LeadInit`: nothing of the folder's git runs, exactly the files shown are
+/// committed, as the user's global identity, secrets left out and named), shown before the code and made after it, by
+/// this process as `git init` in a terminal is; nothing left on a refusal. A folder with commits needs nothing; one inside
+/// a repository with no commits, the home folder or `/` is refused. Not under the Mac's approval rule yet (its dialog is
+/// the server's, after this process would have made the commit).
 enum LeadCommand {
-    static let usage = "usage: vibeswitcher lead FOLDER [--goal TEXT | --resume] [--take-head] [--replace]"
+    static let usage = "usage: vibeswitcher lead FOLDER [--goal TEXT | --resume] [--take-head] [--replace] [--init]"
 
     struct Asked: Equatable {
         var folder: String
@@ -19,6 +26,7 @@ enum LeadCommand {
         var takeHead = false
         var replace = false
         var resume = false
+        var initialize = false
     }
 
     /// The arguments read; nil when they're not the command's.
@@ -36,13 +44,14 @@ enum LeadCommand {
             case "--take-head": asked.takeHead = true
             case "--replace": asked.replace = true
             case "--resume": asked.resume = true
+            case "--init": asked.initialize = true
             default:
                 guard folder == nil, !word.hasPrefix("--") else { return nil }
                 folder = word
             }
             index += 1
         }
-        guard let folder, !folder.isEmpty, !(asked.resume && asked.goal != nil) else { return nil }
+        guard let folder, !folder.isEmpty, !(asked.resume && asked.goal != nil), !(asked.resume && asked.initialize) else { return nil }
         asked.folder = URL(fileURLWithPath: folder, relativeTo: URL(fileURLWithPath: cwd, isDirectory: true)).standardizedFileURL.path
         return asked
     }
@@ -61,8 +70,20 @@ enum LeadCommand {
         case .failure(let refusal): program = "none found (\(refusal.missing.joined(separator: "; "))): the server will refuse"
         case .success(let path): program = path
         }
+        var firstCommit: LeadInit.Plan?
+        let home = ProcessInfo.processInfo.environment["HOME"] ?? NSHomeDirectory()
+        if asked.initialize {
+            guard !client.approvalRule else {
+                return Say.refused("--init isn't offered where the Mac asks its approval yet: make the first commit yourself, then start the lead")
+            }
+            switch LeadInit.plan(asked.folder, home: home, scratch: context.root.appendingPathComponent("scratch", isDirectory: true)) {
+            case .failure(let why): return Say.refused(why.message)
+            case .success(let plan): firstCommit = plan
+            }
+        }
         let action = UUID().uuidString.lowercased()
-        var what = asked.resume
+        var what = firstCommit.map { LeadInit.words($0) + "\n" } ?? ""
+        what += asked.resume
             ? "This reopens the project lead for \(ConfigSeal.inert(asked.folder, limit: 400)) that the session host's restart ended, in its same conversation"
             : "This starts the project lead for \(ConfigSeal.inert(asked.folder, limit: 400)) (or shows the one running)"
         if asked.takeHead { what += ", taking its base branch as it is now" }
@@ -71,6 +92,14 @@ enum LeadCommand {
         if let goal = asked.goal { what += "\nIts goal: \(ConfigSeal.inert(goal, limit: 400))" }
         let said = TypedWord.said(approval: client.approvalRule, action: action, what: what)
         guard case .success(let typed) = said else { return Say.refused(said.refusal) }
+        if let firstCommit {
+            switch LeadInit.make(firstCommit, home: home) {
+            case .failure(let why): return Say.refused("the first commit wasn't made, nothing was left: \(why.message)")
+            case .success(let committed):
+                Say.out("made: " + (firstCommit.inRepository ? "a first commit" : "a git repository with a first commit")
+                        + " in \(ConfigSeal.inert(firstCommit.folder, limit: 400)) (\(committed.count == 1 ? "1 file" : "\(committed.count) files"))")
+            }
+        }
         var args: [String: NodeWire.Value] = ["folder": .string(asked.folder), "takeHead": .bool(asked.takeHead), "replace": .bool(asked.replace)]
         if asked.resume { args["resume"] = .bool(true) }
         if let goal = asked.goal { args["goal"] = .string(goal) }

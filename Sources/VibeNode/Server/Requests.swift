@@ -461,7 +461,7 @@ public final class Requests: @unchecked Sendable {
         if let health {
             fields["health"] = health.value(serverRestarts: notes?.notes.serverRestarts, refusedConnections: notes?.notes.refusedAppConnections,
                                             hostRestartAt: engine?.restartValue["at"]?.string.flatMap(NodeWire.date),
-                                            waiting: sessions?.reminderNotices() ?? [])
+                                            waiting: sessions?.reminderNotices() ?? [], serverEnd: notes?.notes.lastServerEnd)
         }
         return .object(fields)
     }

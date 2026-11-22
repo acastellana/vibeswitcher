@@ -246,9 +246,11 @@ public enum WireSchema {
                 field("since", .date), field("stalled", Kind.int.orNull), field("freezes", .list(.shape("node.health.freeze"))),
                 field("slowRefreshes", .int), field("slowestRefresh", Kind.int.orNull), field("lastSlowRefresh", Kind.date.orNull),
                 field("serverRestarts", Kind.int.orNull), field("refusedConnections", Kind.int.orNull), field("hostRestartAt", Kind.date.orNull),
+                field("serverEnded", Kind.shape("node.health.serverEnd").orNull),
                 field("waiting", strings), field("errors", .list(.shape("node.health.error"))), field("causes", .list(.shape("node.health.cause")))]),
             shape("node.health.cause", from: "NodeHealth.value", [field("kind", .string), field("count", .int), field("last", .date)]),
             shape("node.health.freeze", from: "NodeHealth.value", [field("at", .date), field("seconds", .int)]),
+            shape("node.health.serverEnd", from: "NodeHealth.value (HostNotes.ServerEnd, 2026-11-22)", [field("at", .date), field("ran", .int), field("cause", .string)]),
             shape("node.health.error", from: "NodeHealth.value", [field("at", .date), field("line", .string)]),
             shape("node.server", from: "Requests.statusValue", [field("pid", .int), field("startedAt", .date), field("commit", .string)]),
             shape("node.host", from: "Requests.statusValue", [

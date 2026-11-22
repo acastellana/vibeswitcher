@@ -16,6 +16,13 @@ import Foundation
 ///   fast-forward. Its outcome (pushed, rejected as not a fast-forward, the remote's refusal, an auth or network
 ///   error with git's own words) goes to the lead as a VibeSwitcher message and to the progress log; so does a decline.
 public enum LeadPush {
+    /// What the push request's reply says the user does: on the Mac, a click on its card; on a node (no code identity:
+    /// Linux), which has no card for it, `vibeswitcher push` with the user's typed code.
+    public static func waiting(root: String, mac: Bool = Platform.CodeIdentity.isAvailable) -> String {
+        mac ? "Waiting for the user's click: nothing is pushed until they click Push on its card in VibeSwitcher (Decline pushes nothing). "
+            : "Waiting for the user's word: nothing is pushed until they run `vibeswitcher push \(root)` on the node (`vibeswitcher decline-push \(root)` pushes nothing). "
+    }
+
     /// A push the lead asked for, as the vault keeps it.
     public struct Request: Codable, Equatable, Sendable, Identifiable {
         public var id: String
@@ -297,7 +304,7 @@ extension LeadToolset {
         do { try vault.requestPush(request, root: root) } catch { throw Problem(text: "\(not): the session host didn't record the request (\(error)).") }
         try? store.appendProgress("Asked the user to push \(base) at \(head.prefix(8)) (\(Self.commits(ahead))) to \(label)")
         var lines = ["Push request \(request.id): \(base) at \(head.prefix(8)), \(Self.commits(ahead)) ahead of \(label), to \(url). "
-                     + "Waiting for the user's click: nothing is pushed until they click Push on its card in VibeSwitcher (Decline pushes nothing). "
+                     + LeadPush.waiting(root: root)
                      + "Don't wait on it: the outcome comes as a VibeSwitcher message. Push pushes \(head.prefix(8)) itself, as a fast-forward only, even if \(base) moves on meanwhile; push_remote again asks for a newer head."]
         if let replaced { lines.append("It replaces your open request \(replaced.id) (\(replaced.short)).") }
         lines.append("The commits, newest first\(ahead > subjects.count ? " (the first \(subjects.count))" : ""):")
