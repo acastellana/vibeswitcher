@@ -98,7 +98,7 @@ vibeswitcher answer CARD WORD            # unchanged: a plugin's action words ar
 
 `status` and the page's This node list the plugins that are on.
 
-## The build, in three steps (each merged on its own)
+## The build, in four steps (each merged on its own)
 
 1. **The registry and the generic card.** `Plugins/Plugin.swift` (the shapes above), `PluginRegistry`, the on/off
    state and its two commands, the one reader of stamped requests, `card.plugin` on the wire, the generic renderers
