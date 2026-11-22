@@ -39,14 +39,11 @@ enum SessionCommand {
             if let status = refuse(session) { return status }
         }
         let action = UUID().uuidString.lowercased()
-        let outcome = TypedWord.ask(approval: client.approvalRule, code: NodeIds.code(action: action), what: what(session))
-        guard outcome == .typed else { return Say.refused(TypedWord.refusal(outcome)) }
-        switch client.request(kind, args: args(session), action: action, timeout: timeout) {
+        let said = TypedWord.said(approval: client.approvalRule, action: action, what: what(session))
+        guard case .success(let typed) = said else { return Say.refused(said.refusal) }
+        switch client.change(kind, args: args(session), action: action, typed: typed, timeout: timeout) {
         case .failure(let failure): return Say.failed(failure)
         case .success(let reply):
-            if reply.ok || reply.error?.code == NodeWire.Code.refused.rawValue {
-                context.writeJournal(NodeJournal.entry(event: "request", action: action, kind: kind, epoch: client.hello.epoch))
-            }
             guard reply.ok, let result = reply.result else { return Say.replyError(reply) }
             say(result)
             return 0

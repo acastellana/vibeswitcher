@@ -8,7 +8,46 @@ import VibeNode
 /// since the server's weaker rule refuses a state change from a peer with no controlling terminal (S3) and the code
 /// would be typed for nothing. A guard rail against a request run without the user's hands (an agent's Bash tool has
 /// no terminal; `script` gives it one), not a lock.
+/// What only `TypedWord.said` makes, once its prompt was answered (the code typed, or, under the Mac's rule, what the
+/// request does shown with the dialog's word): the words it showed. `NodeClient.change`, the one way a state change is
+/// sent, takes it, and sends only an action whose word (`NodeIds.code(action:)`) it showed, so no command can send a
+/// state change without the prompt (the architecture review's row 5, 2026-11-22). A guard rail, as the prompt is: the
+/// server checks the terminal and the vault records the action either way.
+struct Typed: Sendable {
+    /// The codes the prompt showed: the one typed (the action's, a card's or a batch's) and the word the Mac's dialog
+    /// starts with.
+    fileprivate let words: Set<String>
+
+    fileprivate init(words: Set<String>) { self.words = words }
+
+    /// Whether the prompt showed `action`'s word, so `action` may go out as the request it named.
+    func vouches(for action: String) -> Bool { words.contains(NodeIds.code(action: action)) }
+}
+
+/// The prompt answered otherwise than with the code (`TypedOutcome`'s other outcomes): what the command says, refused.
+struct NotTyped: Error {
+    let outcome: TypedOutcome
+    var refusal: String { outcome.refusal }
+}
+
 enum TypedWord {
+    /// Asks as `ask` does, for `action` (its code, `NodeIds.code(action:)`, unless `code` names another: a card's or a
+    /// batch's, the action's then the Mac's dialog's `word`), and gives the token `NodeClient.change` takes.
+    static func said(approval: Bool, action: String, code: String? = nil, what: String) -> Result<Typed, NotTyped> {
+        let word = NodeIds.code(action: action)
+        let shown = code ?? word
+        let outcome = ask(approval: approval, code: shown, what: what, word: code == nil ? nil : word)
+        guard outcome == .typed else { return .failure(NotTyped(outcome: outcome)) }
+        return .success(Typed(words: [shown, word]))
+    }
+
+    /// The token for a code a sequence of `VibeNode`'s asked through `ask` and was typed (`StopSequence`'s `typed`
+    /// step, which hands the action to the stop after): `ask` itself, then the token for `code`.
+    static func asked(code: String, what: String) -> (TypedOutcome, Typed?) {
+        let outcome = ask(code: code, what: what)
+        return (outcome, outcome == .typed ? Typed(words: [code]) : nil)
+    }
+
     /// What the command line says under the Mac's rule, in place of asking the code: the word the dialog will start with.
     static func approvalNote(_ word: String) -> String {
         "The Mac now asks for Touch ID or your login password. Its dialog starts with \(word): approve only a dialog that does "
@@ -47,5 +86,13 @@ enum TypedWord {
         }
         let typed = String(decoding: line, as: UTF8.self).trimmingCharacters(in: .whitespaces).uppercased()
         return typed == code ? .typed : .wrong
+    }
+}
+
+extension Result where Success == Typed, Failure == NotTyped {
+    /// What the command says when the prompt wasn't answered with the code (empty once it was).
+    var refusal: String {
+        if case .failure(let not) = self { return not.refusal }
+        return ""
     }
 }
