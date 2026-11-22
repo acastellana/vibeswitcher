@@ -134,6 +134,7 @@ public final class NodeServer: @unchecked Sendable {
         self.cgroupRoot = cgroupRoot
         self.runnersAbove = runnersAbove
         queue = requests.queue
+        queue.setSpecific(key: Self.onQueue, value: true)
         folder = root.appendingPathComponent("v2", isDirectory: true)
         socketPath = folder.appendingPathComponent("server.sock").path
         self.housekeeping = housekeeping
@@ -442,13 +443,22 @@ public final class NodeServer: @unchecked Sendable {
         let facts = atAccept ?? PeerFacts.read(pid: sender.pid, token: sender, cgroupRoot: cgroupRoot, runnersAbove: runnersAbove)
         // `Requests` answers on `queue`.
         requests.handle(request, from: facts, token: sender) { [weak self, weak connection] reply in
-            guard let self, let connection else { return }
-            // Never a line over the limit: the reader would drop it and close (`replyLine`).
-            let line = NodeWire.replyLine(reply)
-            guard line.count - 1 <= NodeWire.maxLine else { return self.bye("a reply over \(NodeWire.maxLine) bytes", code: "too-long", connection) }
-            self.send(line, on: connection)
+            guard let self else { return }
+            // Written from the queue alone: a reply given on another (a request's reading queue) is taken there first.
+            // Two writes at once raced on the connection's pending bytes, and the server crashed (2026-11-22).
+            let deliver = { [weak self, weak connection] in
+                guard let self, let connection else { return }
+                // Never a line over the limit: the reader would drop it and close (`replyLine`).
+                let line = NodeWire.replyLine(reply)
+                guard line.count - 1 <= NodeWire.maxLine else { return self.bye("a reply over \(NodeWire.maxLine) bytes", code: "too-long", connection) }
+                self.send(line, on: connection)
+            }
+            if DispatchQueue.getSpecific(key: Self.onQueue) == true { deliver() } else { self.queue.async(execute: deliver) }
         }
     }
+
+    /// Set on `queue`: whether a reply is given on it (`answer`).
+    static let onQueue = DispatchSpecificKey<Bool>()
 
     /// The connections open now (tests).
     public var connectionCount: Int { queue.sync { connections.count } }
