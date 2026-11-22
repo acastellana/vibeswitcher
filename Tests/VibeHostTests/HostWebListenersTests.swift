@@ -9,6 +9,13 @@ import Testing
 /// before binding; a handover's socket is held again only when it is one; and only the server child's connector gets
 /// one, beside its connection requests, which work as before.
 struct HostWebListenersTests {
+    /// The device and inode `fd` names now, nil when it names nothing.
+    static func identity(_ fd: Int32) -> [UInt64]? {
+        var info = stat()
+        guard fstat(fd, &info) == 0 else { return nil }
+        return [UInt64(info.st_dev), UInt64(info.st_ino)]
+    }
+
     private let scratch = Scratch()
 
     private func squat(_ port: UInt16) -> Bool {
@@ -62,6 +69,10 @@ struct HostWebListenersTests {
         _ = fcntl(carried, F_SETFD, 0)
         let wrong = try Platform.TCP.listen(family: .ipv4, address: "127.0.0.1", port: 0, backlog: 4).get()
         _ = fcntl(wrong, F_SETFD, 0)
+        // What `wrong` is, by identity: once closed its number can be another test's open in this process, so the check
+        // below asks whether that number still names this socket, not whether it names anything (the CI flake of
+        // 2026-11-22).
+        let wrongIdentity = Self.identity(wrong)
         let made = try Platform.TCP.listen(family: .ipv4, address: "127.0.0.1", port: 0, backlog: 4).get()
         defer { Sys.close(made) }
         held.adopt([.init(place: "loopback", address: "127.0.0.1", port: port, fd: carried),
@@ -71,7 +82,7 @@ struct HostWebListenersTests {
                     .init(place: "phone", address: "127.0.0.1", port: 2, fd: 99_999)], others: [])
         #expect(held.port(.loopback) == port && held.port(.tailnet) == nil)
         #expect(fcntl(carried, F_GETFD) & FD_CLOEXEC != 0, "made close-on-exec once held again")
-        #expect(fcntl(wrong, F_GETFD) < 0, "a socket not held again is closed")
+        #expect(wrongIdentity != nil && Self.identity(wrong) != wrongIdentity, "a socket not held again is closed")
         #expect(fcntl(made, F_GETFD) >= 0, "a descriptor this image made is never closed for a record")
         #expect(held.records == [.init(place: "loopback", address: "127.0.0.1", port: port, fd: carried)])
         #expect(try held.listen(.loopback, address: "127.0.0.1", port: port).get() == carried)

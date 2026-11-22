@@ -117,6 +117,10 @@ public final class LiveHub: WebSocketHandler, @unchecked Sendable {
 
     // MARK: Requests
 
+    /// The kinds `handle` takes on any server: the Unix socket hands these, and only these, to the hub. A server with
+    /// terminals takes `NodeLive.terminalKinds` here too (a page's only).
+    public static let kinds: Set<String> = ["subscribe", "unsubscribe", "chat.page", "chat.image", "session.usage"]
+
     /// Takes `request` when it is the hub's (`subscribe`, `unsubscribe`): writes its reply on `transport`, then, for a
     /// subscription, its first event, and returns true. False, writing nothing, for any other kind: the caller answers
     /// it. On `queue`.
@@ -442,18 +446,18 @@ public final class LiveHub: WebSocketHandler, @unchecked Sendable {
 
     private func take(_ message: Data, on transport: LiveTransport) {
         guard let connection = connections[ObjectIdentifier(transport)] else { return }
-        guard NodeWire.isObject(message) else { return refuse(transport, code: "not-object", reason: "a message that isn't a JSON object") }
-        guard let request = NodeWire.decode(NodeWire.Request.self, message) else {
-            return refuse(transport, code: "not-request", reason: "a message that isn't a request")
-        }
-        guard request.v <= NodeWire.version else {
-            transport.send(NodeWire.message(NodeWire.Reply(re: request.id, error: .init(.version, "this server speaks v\(NodeWire.version)"))))
-            return refuse(transport, code: "version", reason: "a newer protocol than the server's")
+        let request: NodeWire.Request
+        switch NodeWire.unwrap(message) {
+        case .request(let unwrapped): request = unwrapped
+        case .refused(let reply, let code, let reason):
+            if let reply { transport.send(NodeWire.message(reply)) }
+            return refuse(transport, code: code, reason: reason)
         }
         if handle(request, on: transport, rights: connection.rights) { return }
         if let others { return others(request, transport, connection.rights) }
-        transport.send(NodeWire.message(NodeWire.Reply(re: request.id, error: .init(.unknownKind, "this server doesn't take \(request.kind)"))))
-        if request.must == true { refuse(transport, code: "must", reason: "a kind this server doesn't take, which the client must have") }
+        let (reply, end) = NodeWire.unknownKind(request)
+        transport.send(NodeWire.message(reply))
+        if let end { refuse(transport, code: end.code, reason: end.reason) }
     }
 
     private func refuse(_ transport: LiveTransport, code: String, reason: String) {

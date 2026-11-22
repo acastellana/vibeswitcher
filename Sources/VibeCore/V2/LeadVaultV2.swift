@@ -51,6 +51,16 @@ public enum LeadVaultV2 {
         /// retired, no check has passed it yet (`Book.checked`), and it was first made less than `renewedLifeCap` ago
         /// (`Book.first`). A message that waits while its lead's tool call runs long stays the user's when taken.
         case renewUserSeals([String])
+        /// Which feature plugins the user turned on or off (`vibeswitcher plugin on|off NAME`, the user's voice, recorded
+        /// first as its own action), by id: answered `plugins`. A plugin with nothing here is as its plugin says by default.
+        case plugins
+        /// The user turned `id` on or off: kept here, where no session's write reaches (the plugins definition's rule 5).
+        case setPlugin(id: String, on: Bool)
+        /// The plugin requests settled (answered, withdrawn, expired, gone), by `<plugin>:<id>`: answered `settled`. A
+        /// request still on disk is never drawn again once settled, across the server's restarts.
+        case settledRequests
+        /// These plugin requests are settled now (kept `settledKept` at most).
+        case settleRequests([String])
     }
 
     public enum Reply: Codable, Equatable, Sendable {
@@ -59,6 +69,8 @@ public enum LeadVaultV2 {
         case holds(Bool)
         case ok
         case refused(String)
+        case plugins([String: Bool])
+        case settled([String])
     }
 
     /// The record in the vault's state (`LeadVault.Book`'s `v2`).
@@ -82,6 +94,10 @@ public enum LeadVaultV2 {
         /// it sealed it (the security follow-ups' item 19). Only that session's own check, as a lead's, is a taking. None
         /// once a seal under the id was made for another while its earlier one lived (see `sealed`).
         public var targets: [String: String] = [:]
+        /// Each feature plugin the user turned on or off, by id (`setPlugin`).
+        public var plugins: [String: Bool] = [:]
+        /// Each plugin request settled, by `<plugin>:<id>`: when (`settleRequests`).
+        public var settledRequests: [String: Double] = [:]
 
         public init() {}
 
@@ -95,6 +111,8 @@ public enum LeadVaultV2 {
             first = try container.decodeIfPresent([String: Double].self, forKey: .first) ?? [:]
             spent = try container.decodeIfPresent([String: Double].self, forKey: .spent) ?? [:]
             targets = try container.decodeIfPresent([String: String].self, forKey: .targets) ?? [:]
+            plugins = try container.decodeIfPresent([String: Bool].self, forKey: .plugins) ?? [:]
+            settledRequests = try container.decodeIfPresent([String: Double].self, forKey: .settledRequests) ?? [:]
         }
     }
 
@@ -183,7 +201,34 @@ public enum LeadVaultV2 {
                 record.seals[id] = now
             }
             return .ok
+        case .plugins:
+            return .plugins(record.plugins)
+        case .setPlugin(let id, let on):
+            guard pluginID(id) else { return .refused("A plugin's id is a short lower-case word.") }
+            record.plugins[id] = on
+            return .plugins(record.plugins)
+        case .settledRequests:
+            return .settled(record.settledRequests.keys.sorted())
+        case .settleRequests(let keys):
+            guard keys.count <= 1_000, keys.allSatisfy({ $0.utf8.count <= 80 }) else { return .refused("At most 1000 request names of 80 bytes.") }
+            for key in keys { record.settledRequests[key] = now }
+            // A request lives 7 days at most: its name is kept a day past that, then goes; the newest `settledKept` at most.
+            record.settledRequests = record.settledRequests.filter { now - $0.value < 8 * 86_400 }
+            if record.settledRequests.count > settledKept {
+                let kept = record.settledRequests.sorted { $0.value > $1.value }.prefix(settledKept)
+                record.settledRequests = Dictionary(uniqueKeysWithValues: kept.map { ($0.key, $0.value) })
+            }
+            return .ok
         }
+    }
+
+    /// How many settled plugin requests the record keeps.
+    public static let settledKept = 5_000
+
+    /// A feature plugin's id as the record keeps it: 1 to 32 of a-z, 0-9 and -, starting with a letter.
+    public static func pluginID(_ id: String) -> Bool {
+        guard let first = id.unicodeScalars.first, ("a"..."z").contains(first), id.unicodeScalars.count <= 32 else { return false }
+        return id.unicodeScalars.allSatisfy { ("a"..."z").contains($0) || ("0"..."9").contains($0) || $0 == "-" }
     }
 
     /// The `.seal` hook: a `.user` seal the host is about to make for `message` is recorded with its time and its
@@ -332,5 +377,30 @@ public struct LeadVaultV2Client: Sendable {
     public func renewUserSeals(_ ids: [String]) throws {
         guard !ids.isEmpty else { return }
         _ = try call(.renewUserSeals(ids))
+    }
+
+    /// The feature plugins the user turned on or off, by id (none: each as its plugin says by default).
+    public func plugins() throws -> [String: Bool] {
+        guard case .plugins(let plugins) = try call(.plugins) else { throw Refused("The session host answered something else.") }
+        return plugins
+    }
+
+    /// The plugin requests settled (`<plugin>:<id>`).
+    public func settledRequests() throws -> [String] {
+        guard case .settled(let keys) = try call(.settledRequests) else { throw Refused("The session host answered something else.") }
+        return keys
+    }
+
+    /// These plugin requests are settled now.
+    public func settleRequests(_ keys: [String]) throws {
+        guard !keys.isEmpty else { return }
+        _ = try call(.settleRequests(keys))
+    }
+
+    /// Keeps that the user turned `id` on or off; what is kept now.
+    @discardableResult
+    public func setPlugin(_ id: String, on: Bool) throws -> [String: Bool] {
+        guard case .plugins(let plugins) = try call(.setPlugin(id: id, on: on)) else { throw Refused("The session host answered something else.") }
+        return plugins
     }
 }

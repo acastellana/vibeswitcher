@@ -185,6 +185,9 @@ code, pre, kbd { font-family: var(--mono); }
 .row-asks { flex: none; align-self: center; display: inline-flex; align-items: center; gap: 3px; margin-left: 8px; color: var(--working); font-weight: 500; }
 .row-asks.blocking { color: var(--needs-you); }
 .lead-tag { flex: none; align-self: center; padding: 0 5px; border-radius: 4px; background: var(--accent-fill); color: var(--accent); font-size: 10px; font-weight: 600; letter-spacing: 0.04em; line-height: 15px; text-transform: uppercase; }
+.lead-tag.replaced { background: var(--fill-2); color: var(--ink-3); }
+.row-state.replaced { color: var(--ink-3); font-style: italic; }
+.row-done { flex: none; align-self: center; display: inline-flex; margin-left: 4px; color: var(--done); }
 .team-toggle { position: relative; z-index: 1; display: flex; align-items: center; gap: 3px; max-width: 100%; margin-top: 1px; color: var(--ink-2); font-size: var(--small); text-align: left; }
 .team-toggle > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .team-toggle:hover { color: var(--ink); }
@@ -977,4 +980,4 @@ kbd { padding: 1px 6px; border-radius: 5px; box-shadow: inset 0 0 0 1px var(--li
 .brief-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .brief-text { font-size: 15px; line-height: 1.5; margin: 6px 0; }
 .talk-button.listening { color: var(--needs-you); }
-.shell-command { white-space: pre-wrap; overflow-wrap: anywhere; margin: 0; font-size: 12px; }
+.shell-command, .plugin-body { white-space: pre-wrap; overflow-wrap: anywhere; margin: 0; font-size: 12px; }

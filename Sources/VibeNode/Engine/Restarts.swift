@@ -131,7 +131,8 @@ extension LeadEngine {
 
     /// What a host restart resets (the security document's S7).
     public static let resetByRestart = "the team's roles and grants, verdicts, audits, approvals, the recorded heads, the guard rails' hashes, "
-        + "the review floor, the config seal and the user's sealing key"
+        + "the review floor, the config seal and the user's sealing key, and the feature plugins turned on or off (each back at its "
+        + "default: `vibeswitcher plugin list`)"
 
     /// `status`'s `restart`: the last host restart, while a project's notice stands. On `queue`.
     var restartValue: NodeWire.Value {

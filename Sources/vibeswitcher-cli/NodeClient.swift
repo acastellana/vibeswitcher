@@ -196,16 +196,19 @@ final class NodeClient {
 
     let fd: Int32
     let hello: NodeWire.Hello
+    /// Where the request's journal entries go (`change`, `journal`).
+    private let context: NodeContext
     private var lines = NodeWire.Lines()
     private var ready: [Data] = []
     private var counter = 0
-    /// Called with the kind and the action id of a state change the server never answered (it closed the connection,
-    /// or the time passed): `connect` writes it to the journal (`unanswered`), beside the command's own `request` entry.
-    var onUnanswered: ((String, String) -> Void)?
+    /// Whether the last `send` got no reply (the connection closed, a bye, the time passed): `change` journals such a
+    /// state change as `unanswered`.
+    private var unansweredLast = false
 
-    private init(fd: Int32, hello: NodeWire.Hello, lines: NodeWire.Lines, ready: [Data]) {
+    private init(fd: Int32, hello: NodeWire.Hello, context: NodeContext, lines: NodeWire.Lines, ready: [Data]) {
         self.fd = fd
         self.hello = hello
+        self.context = context
         self.lines = lines
         self.ready = ready
     }
@@ -237,11 +240,18 @@ final class NodeClient {
             Sys.close(fd)
             return .failure(.broken(ConfigSeal.inert(why.description, limit: 500)))
         }
-        let client = NodeClient(fd: fd, hello: hello, lines: lines, ready: ready)
-        client.onUnanswered = { kind, action in
-            context.writeJournal(NodeJournal.entry(event: "unanswered", action: action, kind: kind, epoch: hello.epoch))
-        }
-        return .success(client)
+        warnOfBuild(server: hello.server.commit)
+        return .success(NodeClient(fd: fd, hello: hello, context: context, lines: lines, ready: ready))
+    }
+
+    /// Whether this process said already that the server runs another build (`BuildMismatch`): once is enough.
+    private static var warnedOfBuild = false
+
+    /// Says, once, on stderr, when the server runs another build than this command line's own.
+    private static func warnOfBuild(server: String) {
+        guard !warnedOfBuild, let warning = BuildMismatch.warning(own: BuildMismatch.own(executable: "/proc/self/exe"), server: server) else { return }
+        warnedOfBuild = true
+        Say.err("vibeswitcher: \(warning)")
     }
 
     /// Whether this connection's server is on the Mac's rule (`VoiceRule.Mode.approval`): it asks the person at the Mac
@@ -256,10 +266,59 @@ final class NodeClient {
     /// How long a request answered `not-yet` (the server's link to its host isn't welcomed yet) is asked again for.
     static let notYetPatience: TimeInterval = 15
 
-    /// Sends one request and waits for its reply (a `bye` instead, or the time passing, fails). Answered `not-yet`, it
-    /// is asked again, a quarter second apart, for up to `notYetPatience`; then the last answer is the reply.
-    func request(_ kind: String, args: [String: NodeWire.Value]? = nil, action: String? = nil,
-                 timeout: TimeInterval = 30) -> Result<NodeWire.Reply, Failure> {
+    /// Whether `kind` goes only through `change`: it changes state (`NodeWire.changesState`, a kind this build doesn't
+    /// know among them), or the vault records it (`Requests.recorded`: `start` too).
+    static func changes(_ kind: String) -> Bool { NodeWire.changesState(kind) || Requests.recorded.contains(kind) }
+
+    /// Sends one request that changes nothing (a read, a list) and waits for its reply (a `bye` instead, or the time
+    /// passing, fails). A kind that changes state, or that the vault records, is refused here, unsent: it goes through
+    /// `change`, after the typed word.
+    func request(_ kind: String, args: [String: NodeWire.Value]? = nil, timeout: TimeInterval = 30) -> Result<NodeWire.Reply, Failure> {
+        guard !Self.changes(kind) else {
+            return .failure(.refused("\(kind) changes state: the command line sends it only after its typed code (NodeClient.change)"))
+        }
+        return send(kind, args: args, action: nil, timeout: timeout)
+    }
+
+    /// When `change` writes the request's journal entry: once the server accepted it (`accepted`: it answered, or its
+    /// engine refused after the vault's record; the server's own refusals before it, `voice`, `stopping`, `not-yet`,
+    /// aren't an accepted request), or only once it answered (`ok`).
+    enum JournalWhen { case accepted, ok }
+
+    /// The one way a state change is sent (the architecture review's row 5): `kind` with `action`, under `typed`, the
+    /// token of the prompt that showed `action`'s word (`TypedWord.said`; nil only for a recorded kind that changes
+    /// nothing, `start`, whose server asks no code). Then, as `when` says, the request's journal entry (ids only), so
+    /// `status` finds the user's own request accounted for. A kind that doesn't change state is refused here: it is
+    /// `request`'s.
+    func change(_ kind: String, args: [String: NodeWire.Value]? = nil, action: String, typed: Typed?, timeout: TimeInterval = 30,
+                journal when: JournalWhen = .accepted) -> Result<NodeWire.Reply, Failure> {
+        guard Self.changes(kind) else { return .failure(.refused("\(kind) changes nothing: it is sent as a request, with no typed code")) }
+        if NodeWire.changesState(kind), typed?.vouches(for: action) != true {
+            return .failure(.refused("\(kind) wasn't sent: no typed code was asked for it"))
+        }
+        unansweredLast = false
+        let answer = send(kind, args: args, action: action, timeout: timeout)
+        if case .success(let reply) = answer, reply.ok || (when == .accepted && reply.error?.code == NodeWire.Code.refused.rawValue) {
+            context.writeJournal(NodeJournal.entry(event: "request", action: action, kind: kind, epoch: hello.epoch))
+        }
+        // No reply came (the connection closed, a bye, the time passed): the action may have been recorded, and done,
+        // before the server went, so its outcome isn't known; said with its id (`unanswered`) and journaled so.
+        if case .failure = answer, unansweredLast {
+            context.writeJournal(NodeJournal.entry(event: "unanswered", action: action, kind: kind, epoch: hello.epoch))
+        }
+        return answer
+    }
+
+    /// The journal entry of an action the server took though `change` didn't see it accepted (a stop or a switch whose
+    /// server ended before its reply), or that a batch did (each item recorded as its own action): under `typed`, the
+    /// token of the prompt that asked.
+    func journal(_ kind: String, action: String, typed: Typed) {
+        context.writeJournal(NodeJournal.entry(event: "request", action: action, kind: kind, epoch: hello.epoch))
+    }
+
+    /// Sends one request and waits for its reply. Answered `not-yet`, it is asked again, a quarter second apart, for up
+    /// to `notYetPatience`; then the last answer is the reply.
+    private func send(_ kind: String, args: [String: NodeWire.Value]?, action: String?, timeout: TimeInterval) -> Result<NodeWire.Reply, Failure> {
         let patience = Platform.Clock.steadyDate().addingTimeInterval(Self.notYetPatience)
         let timeout = approvalRule && NodeWire.changesState(kind) ? max(timeout, Self.approvalPatience) : timeout
         while true {
@@ -302,11 +361,11 @@ final class NodeClient {
     }
 
     /// No reply came to `kind`: `why`, and for a state change with an action id that id and that its outcome isn't
-    /// known (it may have been recorded, and done, before the server went), written to the journal too (the
+    /// known (it may have been recorded, and done, before the server went), which `change` journals (the
     /// architecture review's row 10).
     private func unanswered(_ kind: String, _ action: String?, _ why: String) -> Result<NodeWire.Reply, Failure> {
         guard let action, NodeWire.changesState(kind) else { return .failure(.broken(why)) }
-        onUnanswered?(kind, action)
+        unansweredLast = true
         return .failure(.broken(Self.outcomeUnknown(why, action: action)))
     }
 

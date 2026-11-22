@@ -200,7 +200,7 @@ public final class Requests: @unchecked Sendable {
                               host: .init(startedAt: link.hostStartedAt.map(NodeWire.dateText), notes: notes.map { Self.value($0.notes, at: $0.at) },
                                           pid: link.hostPID),
                               kinds: NodeWire.taken, peer: .init(voice: voice == .user ? "user" : "other", why: why),
-                              rule: rule.mode.rawValue)
+                              rule: rule.mode.rawValue, plugins: engine?.plugins.onValue)
     }
 
     /// The hello a web connection gets once its `auth` was admitted (the live wire contract's §2): the Unix socket's,
@@ -254,7 +254,7 @@ public final class Requests: @unchecked Sendable {
                                                "send", "session.new", "session.end", "session.reply",
                                                "set", "push", "push.decline", "session.reopen", "prompt-audit",
                                                "session.rename", "session.pause", "session.resume", "session.close-shells", "presets.edit",
-                                               "approve"]
+                                               "approve", "plugin.on", "plugin.off"]
     /// The kinds on a card: the card's code (EN-D5), typed by the user, is checked here.
     public static let carded: Set<String> = ["answer", "hold", "config.accept", "base.accept", "base.keep"]
     /// How many replies to recorded actions are kept, so a repeated action (a retry) gets the reply it got.
@@ -305,6 +305,7 @@ public final class Requests: @unchecked Sendable {
         guard !records || request.action.map({ UUID(uuidString: $0) != nil }) == true else {
             return reply(.init(re: request.id, error: .init(.badArgs, "\(request.kind) needs an action id (a UUID)")))
         }
+        if let refusal = RequestArguments.refusal(request) { return reply(refusal) }
         guard !stopping else { return reply(.init(re: request.id, error: .init(.stopping, "the node is stopping"))) }
         // Before the host's welcome (and while the link reconnects) its session list isn't known: a state change
         // judged on it could be wrong (a `stop` would find nothing live). The command line asks again.
@@ -355,6 +356,8 @@ public final class Requests: @unchecked Sendable {
         case "update.check": updateCheck(request, reply: reply)
         case "approve.list": approveList(request, reply: reply)
         case "approve": approve(request, from: facts, reply: reply)
+        case "plugin.list": pluginList(request, page: facts.pid == NodeLive.webPeer.pid, reply: reply)
+        case "plugin.on", "plugin.off": pluginSet(request, reply: reply)
         case "session.ports": sessionPorts(request, reply: reply)
         case "set": set(request, reply: reply)
         case "answer": answer(request, reply: reply)
@@ -450,7 +453,7 @@ public final class Requests: @unchecked Sendable {
     /// The card or project a request names, as recorded and shown.
     static func subject(_ request: NodeWire.Request) -> String? {
         request.args?["card"]?.string ?? request.args?["project"]?.string ?? request.args?["folder"]?.string
-            ?? request.args?["session"]?.string ?? request.args?["key"]?.string
+            ?? request.args?["session"]?.string ?? request.args?["key"]?.string ?? request.args?["plugin"]?.string
     }
 
     // MARK: status
@@ -482,7 +485,7 @@ public final class Requests: @unchecked Sendable {
         notices += engine?.unknownDialogNotices ?? []
         notices += engine?.allDoneNotices ?? []
         notices += engine?.toolchainNotices ?? []
-        notices += engine?.shellNotices ?? []
+        notices += engine?.pluginNotices ?? []
         notices += reminders ?? sessions?.reminderNotices() ?? []
         if let stuck = notes?.notes.serverStuckInARow, stuck >= Self.stuckNoticeAfter {
             notices.append("the server ended stuck \(stuck) times in a row (its engine's queue didn't answer), and the host started it again each time: its log says what it was doing; if it goes on, `vibeswitcher stop`, then `vibeswitcher start`")
@@ -501,7 +504,8 @@ public final class Requests: @unchecked Sendable {
         let list = sessions?.sessions ?? []
         // Each once per status (the review's row 19): the switch's blockers walk the host's sessions, the reminders the scan's.
         let switching = switchBlockersNow()
-        let reminders = sessions?.reminderNotices() ?? []
+        let due = sessions?.reminders() ?? []
+        let reminders = NodeSessions.notices(due)
         var fields: [String: NodeWire.Value] = [
             "node": .string(NodeIds.node),
             "epoch": .string(epoch),
@@ -520,8 +524,12 @@ public final class Requests: @unchecked Sendable {
             }),
             "leads": .array((engine?.leads.leads.values.sorted { $0.root < $1.root } ?? []).map(leadValue)),
             "cards": Self.counts(engine?.cards.counts() ?? [:]),
+            "plugins": engine?.plugins.onValue ?? .array([]),
             "accepted": .array(accepted.map(\.value)),
             "notices": .array(statusNotices(reminders: reminders).map(NodeWire.Value.string)),
+            // The reminders due now, each its session's (the page notifies once an episode: "Remind me about waiting or
+            // stuck sessions", 2026-11-22).
+            "reminders": .array(due.map(\.value)),
             "restart": engine?.restartValue ?? .null,
             "reopen": engine?.offeredValue ?? .array([]),
             "ended": engine?.endedValue ?? .array([]),
@@ -544,7 +552,7 @@ public final class Requests: @unchecked Sendable {
         if let health {
             fields["health"] = health.value(serverRestarts: notes?.notes.serverRestarts, refusedConnections: notes?.notes.refusedAppConnections,
                                             hostRestartAt: engine?.restartValue["at"]?.string.flatMap(NodeWire.date),
-                                            waiting: reminders)
+                                            waiting: reminders, serverEnd: notes?.notes.lastServerEnd)
         }
         return .object(fields)
     }
@@ -785,7 +793,8 @@ public final class Requests: @unchecked Sendable {
         let goal = request.args?["goal"]?.string.flatMap { $0.isEmpty ? nil : $0 }
         guard let engine else { return reply(.init(re: request.id, error: .init(.refused, "this server starts no leads"))) }
         engine.startLead(folder: folder, goal: goal, takeHead: request.args?["takeHead"]?.bool == true,
-                         replace: request.args?["replace"]?.bool == true, resume: request.args?["resume"]?.bool == true) { outcome in
+                         replace: request.args?["replace"]?.bool == true, resume: request.args?["resume"]?.bool == true,
+                         initialized: request.args?["initialized"]?.bool == true) { outcome in
             reply(Self.reply(request.id, folder: folder, outcome))
         }
     }

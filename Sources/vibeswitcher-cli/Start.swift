@@ -84,14 +84,13 @@ enum StartCommand {
         case .success(let connected): client = connected
         }
         let action = UUID().uuidString.lowercased()
-        switch client.request("start", action: action) {
+        switch client.change("start", action: action, typed: nil, journal: .ok) {
         case .failure(let failure): return .failed(StartRefusal(failure.message, exitCode: failure.exitCode))
         case .success(let reply):
             guard reply.ok, let result = reply.result else {
                 let code = reply.error?.code ?? "internal"
                 return .failed(StartRefusal("\(code): \(ConfigSeal.inert(reply.error?.message ?? "no reason", limit: .max))", exitCode: Say.exitCode(replyCode: code)))
             }
-            context.writeJournal(NodeJournal.entry(event: "request", action: action, kind: "start", epoch: client.hello.epoch))
             Say.out("the node runs: its server since \(ConfigSeal.inert(result["serverStartedAt"]?.string ?? "?", limit: 64)), its host since \(ConfigSeal.inert(result["hostStartedAt"]?.string ?? "?", limit: 64))")
             return .running
         }

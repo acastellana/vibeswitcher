@@ -162,6 +162,55 @@ struct WireVectorsTests {
         for (kind, value) in cases { #expect(WireSchema.check(value, as: kind) == nil, "\(kind) in Swift") }
     }
 
+    // MARK: An older server's frames
+
+    /// The vectors of the build installed before this one, frozen (`Tests/Fixtures/wire/vectors-<commit>.json`, the
+    /// architecture review's row 11): right after a switch the command line and the page are one build and the server
+    /// may be the one before, so today's readers must still take what it wrote. Each frame decodes as its envelope
+    /// (`Reply`, `Hello`, `Bye`, `Request`) and passes today's check for its kind, in Swift and in JavaScript.
+    static func olderFrames() throws -> [(what: String, value: NodeWire.Value)] {
+        let folder = repo.appendingPathComponent("Tests/Fixtures/wire")
+        let names = try FileManager.default.contentsOfDirectory(atPath: folder.path).filter { $0.hasPrefix("vectors-") && $0.hasSuffix(".json") }.sorted()
+        var frames: [(String, NodeWire.Value)] = []
+        for name in names {
+            let data = try Data(contentsOf: folder.appendingPathComponent(name))
+            guard case .object(let vectors) = try #require(NodeWire.decode(NodeWire.Value.self, data), "\(name) isn't JSON") else {
+                Issue.record("\(name) isn't an object of vectors"); continue
+            }
+            for (vector, value) in vectors.sorted(by: { $0.key < $1.key }) {
+                let list = value.array ?? [value]
+                for (index, frame) in list.enumerated() { frames.append(("\(name) \(vector) frame \(index)", frame)) }
+            }
+        }
+        return frames
+    }
+
+    @Test func thePreviousBuildsFramesStillRead() throws {
+        let frames = try Self.olderFrames()
+        #expect(frames.count > 40, "\(frames.count)")
+        for (what, frame) in frames {
+            #expect(WireSchema.check(frame, as: "frame") == nil, "\(what): \(WireSchema.check(frame, as: "frame") ?? "")")
+            let line = NodeWire.line(frame).dropLast()
+            switch (frame["re"], frame["kind"]?.string) {
+            case (.some, _): #expect(NodeWire.decode(NodeWire.Reply.self, line) != nil, "\(what) as a reply")
+            case (nil, "hello"): #expect(NodeWire.decode(NodeWire.Hello.self, line) != nil, "\(what) as a hello")
+            case (nil, "bye"): #expect(NodeWire.decode(NodeWire.Bye.self, line) != nil, "\(what) as a bye")
+            case (nil, _) where frame["id"] != nil: #expect(NodeWire.decode(NodeWire.Request.self, line) != nil, "\(what) as a request")
+            default: break
+            }
+        }
+    }
+
+    @Test(.enabled(if: WireVectorsTests.node != nil, "no node on the PATH: the generated JavaScript isn't run"))
+    func thePreviousBuildsFramesPassTodaysValidators() async throws {
+        let frames = try Self.olderFrames()
+        let results = try await javaScript(frames.map { ("frame", $0.value) })
+        #expect(results.count == frames.count)
+        for (index, result) in results.enumerated() where index < frames.count {
+            #expect(result == nil, "\(frames[index].what): \(result ?? "")")
+        }
+    }
+
     // MARK: Helpers
 
     struct Broken {
@@ -321,19 +370,40 @@ enum Samples {
                           reason: "not a session's")
         var bareBase = CardStore.Card(id: "local:card:00000000-0000-4000-8000-000000000009", root: root, kind: .baseMove, at: at)
         bareBase.base = .init(branch: "main", from: nil, fromIs: .none, to: "3333333", commits: [])
-        // A shell request's cards (`ShellCards.swift`): one waiting, one started, one that failed.
+        // A shell request's cards (the shell plugin, `ShellPlugin.card`): one waiting, one started, one that failed.
         let request = ShellRequest(id: "5b1e9a20-7c4d-4f3e-9a8b-1c2d3e4f5a6b", session: "3f6c2c1e-8a5b-4c1d-9e0f-2b7a6d5c4e3f", cwd: root,
                                    command: "make install", label: "install", createdAt: at)
-        var shell = CardStore.Card(id: "local:card:00000000-0000-4000-8000-00000000000a", root: root, kind: .shell, at: at)
-        shell.shell = .init(request: request, asker: "Claude · acme-site")
-        var startedShell = CardStore.Card(id: "local:card:00000000-0000-4000-8000-00000000000b", root: root, kind: .shell, at: at)
-        startedShell.shell = .init(request: request, asker: "Claude · acme-site", state: .started, shell: "7a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d",
-                                   name: "Shell: install")
-        startedShell.closed = "run: started in a new shell session \"Shell: install\""
-        var failedShell = CardStore.Card(id: "local:card:00000000-0000-4000-8000-00000000000c", root: root, kind: .shell, at: at)
-        failedShell.shell = .init(request: request, asker: "Claude · acme-site", state: .failed, why: "the folder isn't allowed")
-        failedShell.closed = "didn't start: the folder isn't allowed"
-        return [asked, timed, plain, approval, vouchless, config, bareConfig, base, bareBase, shell, startedShell, failedShell]
+        var shell = CardStore.Card(id: "local:card:00000000-0000-4000-8000-00000000000a", root: root, kind: .plugin, at: at)
+        shell.plugin = ShellPlugin.card(request, asker: "Claude · acme-site")
+        var startedShell = CardStore.Card(id: "local:card:00000000-0000-4000-8000-00000000000b", root: root, kind: .plugin, at: at)
+        let started = ShellAsk.Answer(state: .started, at: at, shell: "7a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d", name: "Shell: install")
+        startedShell.plugin = ShellPlugin.card(request, asker: "Claude · acme-site")
+        startedShell.plugin?.state = ShellPlugin.state(started)
+        startedShell.plugin?.outcome = ShellPlugin.outcome(started)
+        startedShell.closed = ShellPlugin.closed(request, started)
+        var failedShell = CardStore.Card(id: "local:card:00000000-0000-4000-8000-00000000000c", root: root, kind: .plugin, at: at)
+        let failed = ShellAsk.Answer(state: .failed, at: at, why: "the folder isn't allowed")
+        failedShell.plugin = ShellPlugin.card(ShellRequest(id: request.id, session: request.session, cwd: root, command: "make install",
+                                                           label: "", createdAt: at), asker: "Claude · acme-site")
+        failedShell.plugin?.state = ShellPlugin.state(failed)
+        failedShell.plugin?.outcome = ShellPlugin.outcome(failed)
+        failedShell.closed = ShellPlugin.closed(request, failed)
+        // A feature plugin's cards (`PluginCard`): one waiting with every field, one settled with none of the optional ones.
+        let run = PluginCard.Action(word: "run", label: "Run", acts: true, short: "runs it", does: "runs it", verb: "run it", marks: "starting")
+        var plugin = CardStore.Card(id: "local:card:00000000-0000-4000-8000-00000000000d", root: root, kind: .plugin, at: at)
+        plugin.plugin = PluginCard(plugin: "probe", request: request.id, session: "local:\(request.session)", asker: "Claude · acme-site",
+                                   title: "A probe asked for", noun: "probe request", ask: "asks for a probe",
+                                   facts: [.init(name: "folder", label: "in the folder", value: root, folder: true, decisive: true)],
+                                   body: .init(name: "command", label: "running exactly this", note: "as you", text: "make install\nmake check"),
+                                   context: .init(name: "label", label: "named", text: "install"), expiresAt: at, actions: [run],
+                                   waiting: "nothing runs until you answer run")
+        var settledPlugin = CardStore.Card(id: "local:card:00000000-0000-4000-8000-00000000000e", root: root, kind: .plugin, at: at)
+        settledPlugin.plugin = PluginCard(plugin: "probe", request: request.id, session: "local:\(request.session)", asker: "Claude",
+                                          title: "A probe asked for", noun: "probe request", ask: "asks for a probe",
+                                          facts: [], body: .init(name: "command", label: "running", text: "true"), expiresAt: nil,
+                                          actions: [run], state: PluginCard.withdrawnState, outcome: "Withdrawn")
+        settledPlugin.closed = "withdrawn"
+        return [asked, timed, plain, approval, vouchless, config, bareConfig, base, bareBase, shell, startedShell, failedShell, plugin, settledPlugin]
     }
 
     static var leads: [LeadStore.Lead] {
@@ -360,7 +430,7 @@ enum Samples {
                                     pid: 1),
                         kinds: ["status"], peer: .init(voice: "other", why: "a web client"), rule: "systemd",
                         auth: .object(["rights": .array([.string("read")]), "token": .string("t"), "expiresAt": .date(at)]),
-                        assets: "9f2c61d0"),
+                        assets: "9f2c61d0", plugins: .array([.object(["id": .string("shell"), "title": .string("Shell requests")])])),
          NodeWire.Hello(node: "local", epoch: "e", server: .init(commit: "c", startedAt: NodeWire.dateText(at), pid: 2),
                         host: .init(startedAt: nil, notes: nil, pid: nil), kinds: [], peer: .init(voice: "user", why: nil), rule: "weaker"),
          NodeWire.Hello(node: "local", epoch: "e", server: .init(commit: "c", startedAt: NodeWire.dateText(at), pid: 2),

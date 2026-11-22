@@ -100,7 +100,9 @@ public enum WireSchema {
                 field("v", .int), field("kind", .words(["hello"])), field("node", .string), field("epoch", .string),
                 field("server", .shape("hello.server")), field("host", .shape("hello.host")), field("kinds", strings),
                 field("peer", .shape("hello.peer")), field("rule", .words(["systemd", "weaker", "closed", "approval"])),
-                optional("auth", .shape("hello.auth")), optional("assets", .string)]),
+                optional("auth", .shape("hello.auth")), optional("assets", .string), optional("plugins", .list(.shape("hello.plugin")))]),
+            // The feature plugins that are on (`PluginRegistry.onValue`, 2026-11-22).
+            shape("hello.plugin", from: "PluginRegistry.onValue", [field("id", .string), field("title", .string)]),
             shape("hello.server", from: "NodeWire.Hello.Server", [field("commit", .string), field("startedAt", .date), field("pid", .int)]),
             shape("hello.host", from: "NodeWire.Hello.Host", [optional("startedAt", .date), optional("notes", .shape("host.notes")),
                                                              optional("pid", .int)]),
@@ -109,7 +111,7 @@ public enum WireSchema {
                                                            field("expiresAt", .date)]),
             shape("bye", from: "NodeWire.Bye", [field("v", .int), field("kind", .words(["bye"])), field("reason", .string),
                                                 optional("code", .words(["auth", "revoked", "version", "too-long", "not-object",
-                                                                         "not-request", "must", "stopping"]))]),
+                                                                         "not-request", "must", "stopping", "busy"]))]),
             shape("event", from: "any event a client doesn't know", [field("v", .int), field("kind", .string), optional("must", .bool)]),
         ]
 
@@ -224,10 +226,20 @@ public enum WireSchema {
             shape("node", from: contractNode, [
                 field("node", .string), field("epoch", .string), field("root", .string), field("server", .shape("node.server")),
                 field("host", .shape("node.host")), field("rule", .shape("node.rule")), field("cards", .shape("node.cards")),
-                field("accepted", .list(.shape("node.accepted"))), field("notices", strings),
+                field("accepted", .list(.shape("node.accepted"))), field("notices", strings), optional("reminders", .list(.shape("node.reminder"))),
                 field("restart", Kind.shape("node.restart").orNull), field("reopen", .list(.shape("node.reopen"))), field("ended", .list(.shape("node.ended"))), field("ending", .list(.shape("node.ending"))),
                 field("builds", Kind.any.orNull), field("web", .shape("node.web")), field("usage", Kind.shape("node.usage").orNull),
-                optional("health", .shape("node.health")), field("boost", Kind.shape("node.boost").orNull)]),
+                optional("health", .shape("node.health")), field("boost", Kind.shape("node.boost").orNull),
+                optional("update", .shape("node.update")), optional("plugins", .list(.shape("hello.plugin")))]),
+            // A reminder due now (`NodeSessions.Reminder`, 2026-11-22): waiting on you 10 minutes, or no progress for 15.
+            shape("node.reminder", from: "NodeSessions.Reminder.value", [
+                field("session", .string), field("kind", .words(["waiting", "stalled"])), field("since", .date), field("dueAt", .date),
+                field("title", .string), field("subtitle", Kind.string.orNull), field("body", .string)]),
+            // Check for Updates (`UpdateWatch.value`, the feature review of 2026-11-22): the user's node's last look for this
+            // build; a scratch node's has none (the field is left out).
+            shape("node.update", from: "UpdateWatch.value (2026-11-22)", [
+                field("checkedAt", Kind.date.orNull), field("commit", Kind.string.orNull), field("aheadBy", Kind.int.orNull),
+                field("install", Kind.string.orNull), field("problem", Kind.string.orNull)]),
             // Boost (the app's `BoostMark`, 2026-11-21): null before the engine's first look.
             shape("node.boost", from: "LeadEngine.boostValue", [field("mode", .words(BoostMode.allCases.map(\.rawValue))), field("on", .bool),
                                                                field("why", .string), field("limits", .shape("node.boost.limits"))]),
@@ -237,9 +249,11 @@ public enum WireSchema {
                 field("since", .date), field("stalled", Kind.int.orNull), field("refreshing", Kind.int.orNull), field("freezes", .list(.shape("node.health.freeze"))),
                 field("slowRefreshes", .int), field("slowestRefresh", Kind.int.orNull), field("lastSlowRefresh", Kind.date.orNull),
                 field("serverRestarts", Kind.int.orNull), field("refusedConnections", Kind.int.orNull), field("hostRestartAt", Kind.date.orNull),
+                field("serverEnded", Kind.shape("node.health.serverEnd").orNull),
                 field("waiting", strings), field("errors", .list(.shape("node.health.error"))), field("causes", .list(.shape("node.health.cause")))]),
             shape("node.health.cause", from: "NodeHealth.value", [field("kind", .string), field("count", .int), field("last", .date)]),
             shape("node.health.freeze", from: "NodeHealth.value", [field("at", .date), field("seconds", .int)]),
+            shape("node.health.serverEnd", from: "NodeHealth.value (HostNotes.ServerEnd, 2026-11-22)", [field("at", .date), field("ran", .int), field("cause", .string)]),
             shape("node.health.error", from: "NodeHealth.value", [field("at", .date), field("line", .string)]),
             shape("node.server", from: "Requests.statusValue", [field("pid", .int), field("startedAt", .date), field("commit", .string)]),
             shape("node.host", from: "Requests.statusValue", [
@@ -259,13 +273,14 @@ public enum WireSchema {
             shape("node.restart", from: "LeadEngine.restartValue", [field("at", .date), field("before", .date), field("gone", strings),
                                                                    field("reset", .string), field("sessions", .int)]),
             shape("node.reopen", from: "LeadEngine.offeredValue (the stability lane, 2026-11-20)", [
-                field("session", .string), field("folder", .string), field("name", .string), field("conversation", Kind.string.orNull)]),
+                field("session", .string), field("folder", .string), field("name", .string), field("conversation", Kind.string.orNull),
+                optional("agent", .words(["claude", "codex"]))]),
             // Ended within the grace, listed for `resume` at `listedAt` (2026-11-21).
             shape("node.ending", from: "LeadEngine.endingValue", [field("session", .string), field("folder", .string), field("name", .string),
                                                                  field("at", .date), field("listedAt", .date)]),
             shape("node.ended", from: "LeadEngine.endedValue (the stability lane, 2026-11-20)", [
                 field("session", .string), field("folder", .string), field("name", .string), field("conversation", Kind.string.orNull),
-                field("at", .date), field("exit", Kind.shape("node.ended.exit").orNull)]),
+                field("at", .date), field("exit", Kind.shape("node.ended.exit").orNull), optional("agent", .words(["claude", "codex"]))]),
             // How it ended (the inspector's Exit, 2026-11-21): `HostSession.Exit`'s status, its `cause` and when.
             shape("node.ended.exit", from: "LeadEngine.endedValue", [field("status", .int), field("cause", .string), field("at", .date)]),
             shape("node.web", from: contractNode, [field("state", .string), field("port", Kind.int.orNull), field("tokens", .int),
@@ -328,13 +343,24 @@ public enum WireSchema {
                 field("root", .string), field("open", .bool), field("closed", Kind.string.orNull), field("notice", Kind.string.orNull),
                 field("at", .date), field("blocking", .bool), optional("question", .shape("card.question")),
                 optional("approval", .shape("card.approval")), optional("config", .shape("card.config")),
-                optional("base", .shape("card.base")), optional("shell", .shape("card.shell")),
-                field("draft", Kind.shape("card.draft").orNull)]),
-            shape("card.shell", from: "CardStore.Card.value (ShellCards.swift, 2026-11-21)", [
-                field("request", .string), field("session", .string), field("asker", .string), field("cwd", .string), field("command", .string),
-                field("label", .string), field("filedAt", .date), field("expiresAt", .date),
-                field("state", .words(["waiting", "starting", "started", "declined", "expired", "failed"])),
-                field("shell", Kind.string.orNull), field("name", Kind.string.orNull), field("why", Kind.string.orNull)]),
+                optional("base", .shape("card.base")), optional("plugin", .shape("card.plugin")), field("draft", Kind.shape("card.draft").orNull)]),
+            // A feature plugin's card (`PluginCard`, Plugins/PluginWire.swift, 2026-11-22): one shape for every plugin.
+            shape("card.plugin", from: "PluginCard.value", [
+                field("plugin", .string), field("request", .string), field("session", .string), field("asker", .string),
+                field("title", .string), field("noun", .string), field("ask", .string),
+                field("facts", .list(.shape("card.plugin.fact"))), field("body", .shape("card.plugin.body")),
+                field("context", Kind.shape("card.plugin.context").orNull),
+                field("severity", .words(PluginCard.Severity.allCases.map(\.rawValue))), field("expiresAt", Kind.date.orNull),
+                field("actions", .list(.shape("card.plugin.action"))), field("waiting", Kind.string.orNull), field("state", .string),
+                field("outcome", Kind.string.orNull)]),
+            shape("card.plugin.fact", from: "PluginCard.Fact", [field("name", .string), field("label", .string), field("value", .string),
+                                                                field("folder", .bool), field("decisive", .bool)]),
+            shape("card.plugin.body", from: "PluginCard.Body", [field("name", .string), field("label", .string), field("note", Kind.string.orNull),
+                                                                field("lines", strings), field("bytes", .int), field("size", .string)]),
+            shape("card.plugin.context", from: "PluginCard.Context", [field("name", .string), field("label", .string), field("text", .string)]),
+            shape("card.plugin.action", from: "PluginCard.Action", [field("word", .string), field("label", .string), field("acts", .bool),
+                                                                    field("short", .string), field("does", .string), field("verb", .string),
+                                                                    field("marks", .string)]),
             shape("card.question", from: "CardStore.Card.value", [
                 field("id", .string), field("short", .string), field("text", .string), field("options", strings),
                 field("priority", .words(["blocking", "important", "whenever"])), field("whyNow", Kind.string.orNull),

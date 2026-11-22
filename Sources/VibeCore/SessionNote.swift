@@ -32,10 +32,18 @@ public enum SessionNote {
         \(realTerminal)
         """
 
+    /// The note for the feature plugins a node has on (`on`, its server's mirror, `PluginGate`): the whole note where
+    /// none is said (the Mac) or the wallet is on; only the real terminal's part with shell requests alone; none with
+    /// neither (a plugin that is off adds no line to a brief).
+    public static func text(on: [String]?) -> String? {
+        guard let on, !on.contains("wallet") else { return text }
+        return on.contains("shell") ? "[VibeSwitcher · session note] This session runs in VibeSwitcher. " + realTerminal : nil
+    }
+
     /// The hook's reply to `payload`: the note at a Claude Code session's start (a new one, a resumed one, one cleared
     /// with /clear; not the restart after a compaction, whose context keeps it), on its main thread, in a session
     /// VibeSwitcher started that isn't a lead's, worker's or verifier's. Nil otherwise.
-    public static func output(payload: [String: Any], environment: [String: String]) -> Data? {
+    public static func output(payload: [String: Any], environment: [String: String], on: [String]? = PluginGate.mirror()?.on) -> Data? {
         guard payload["hook_event_name"] as? String == "SessionStart",
               ["startup", "resume", "clear"].contains(payload["source"] as? String ?? "startup") else { return nil }
         switch payload["agent_id"] {
@@ -44,8 +52,8 @@ public enum SessionNote {
         default: return nil
         }
         guard let session = environment["VIBESWITCHER_SESSION"], UUID(uuidString: session) != nil,
-              (environment[roleVariable] ?? "").isEmpty else { return nil }
-        let object = ["hookSpecificOutput": ["hookEventName": "SessionStart", "additionalContext": text]]
+              (environment[roleVariable] ?? "").isEmpty, let note = text(on: on) else { return nil }
+        let object = ["hookSpecificOutput": ["hookEventName": "SessionStart", "additionalContext": note]]
         return try? JSONSerialization.data(withJSONObject: object)
     }
 }

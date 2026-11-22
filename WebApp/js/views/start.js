@@ -6,7 +6,7 @@
 import { h, setText, framed } from '../dom.js';
 import { KEY, tilde, lastPart } from '../words.js';
 import { summary } from '../ui.js';
-import { newSessionForm, newLeadForm } from './drive.js';
+import { newSessionForm, newLeadForm, newProjectForm } from './drive.js';
 import { resumeLine, recentProjects, projectLines } from '../actions.js';
 import { boardHref } from '../ui.js';
 import { copyLine } from './cards.js';
@@ -35,6 +35,7 @@ export function startView(app) {
   };
   const starting = newSessionForm(app, { folder });
   const leading = newLeadForm(app);
+  const project = newProjectForm(app);
   // Your sessions that ended lately (the node's `ended`): the line that resumes one, and its conversation's id.
   const endedList = h('div', { class: 'ended-list' });
   const ended = h('section', { class: 'ended', 'aria-label': 'Ended lately', hidden: true },
@@ -123,7 +124,7 @@ export function startView(app) {
     speak(voice, briefResult.text, briefResult.language || 'en', () => { speaking = false; speakButton.textContent = 'Speak'; });
   }
   const el = h('section', { class: 'start', 'aria-label': 'Start page' },
-    h('div', { class: 'start-column' }, title, sub, brief, starting.el, leading.el, recent, ended,
+    h('div', { class: 'start-column' }, title, sub, brief, starting.el, leading.el, project.el, recent, ended,
       h('dl', { class: 'keys' }, keys.map(([key, what]) => h('div', null, h('dt', null, h('kbd', null, key)), h('dd', null, what))))));
 
   function render() {
@@ -133,6 +134,7 @@ export function startView(app) {
       setText(sub, 'Connecting to the node…');
       starting.el.hidden = true;
       leading.el.hidden = true;
+      project.el.hidden = true;
       return;
     }
     if ((state.connection === 'unpaired' || state.connection === 'revoked') && state.sessions.size === 0) {
@@ -140,10 +142,12 @@ export function startView(app) {
       setText(sub, 'Run vibeswitcher web in a terminal, then open the address it prints in this browser.');
       starting.el.hidden = true;
       leading.el.hidden = true;
+      project.el.hidden = true;
       return;
     }
     starting.el.hidden = state.connection === 'unpaired' || state.connection === 'revoked';
     leading.el.hidden = starting.el.hidden;
+    project.el.hidden = starting.el.hidden;
     starting.update();
     brief.hidden = !store.can?.('brief');
     drawEnded();

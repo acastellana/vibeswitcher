@@ -12,11 +12,11 @@ signal(SIGPIPE, SIG_IGN)
 
 let usage = """
     usage: vibeswitcher status [--json] | status --health [--json] | status --probe [--json] | status --check-updates [--json] | status --ack
-           vibeswitcher doctor
+           vibeswitcher doctor | logs [--lines N] [--sessions]
            vibeswitcher start [--interop-is-on] [--at-login] [--node-version vX.Y.Z]
            vibeswitcher stop
            vibeswitcher switch COMMIT | rollback
-           vibeswitcher lead FOLDER [--goal TEXT | --resume] [--take-head] [--replace]
+           vibeswitcher lead FOLDER [--goal TEXT | --resume] [--take-head] [--replace] [--init]
            vibeswitcher questions [FOLDER] [--all] [--json]
            vibeswitcher board [FOLDER] [--json]
            vibeswitcher stats [today|week|month] [--json]
@@ -32,6 +32,7 @@ let usage = """
            vibeswitcher new-project NAME [--in LOCATION] [--folder NAME] [--goal TEXT] [--no-lead]
            vibeswitcher mail [FOLDER] [--all] [--json] | brief [FOLDER] [--json] | prompt-audit FOLDER snooze|off|on
            vibeswitcher approve [--only config,base,hooks]   (every held config, base move and hooks update, one code)
+           vibeswitcher plugin list [--json] | plugin on NAME | plugin off NAME
            vibeswitcher config held [FOLDER] [--diff NAME] [--long] | config accept CARD | config startup
            vibeswitcher base show FOLDER [--from COMMIT] | base accept CARD | base keep CARD
            vibeswitcher settings [FOLDER] [--find WORDS] [--json] | set [FOLDER] KEY VALUE
@@ -45,6 +46,8 @@ case "status":
     exit(StatusCommand.run(Array(words.dropFirst())))
 case "doctor":
     exit(DoctorCommand.run(Array(words.dropFirst())))
+case "logs":
+    exit(LogsCommand.run(Array(words.dropFirst())))
 case "start":
     exit(StartCommand.run(Array(words.dropFirst())))
 case "stop":
@@ -103,6 +106,8 @@ case "prompt-audit":
     exit(PromptAuditCommand.run(Array(words.dropFirst())))
 case "approve":
     exit(ApproveCommand.run(Array(words.dropFirst())))
+case "plugin":
+    exit(PluginCommand.run(Array(words.dropFirst())))
 case "config":
     exit(ConfigCommand.run(Array(words.dropFirst())))
 case "base":
@@ -120,6 +125,9 @@ case "wire-vectors":
     // The vectors name times (a usage limit's reset): written in UTC, so they read the same on every machine and CI.
     NSTimeZone.default = TimeZone(identifier: "UTC")!
     exit(WireCommand.run(Array(words.dropFirst())))
+case "kinds-doc":
+    // Not in the usage text: docs/guide/v2-architecture.md's kinds table is written with it (KindsTable).
+    exit(KindsDocCommand.run(Array(words.dropFirst())))
 case "agent-plist":
     // Not in the usage text: `scripts/install-node-mac.sh` runs it from the build it has just installed, and writes what
     // it prints for the user to load (the Mac's LaunchAgent, `NodeAgent`); `start` on the Mac stays refused.

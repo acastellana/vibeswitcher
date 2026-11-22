@@ -5,13 +5,15 @@
 import { h, keyed, setText, setClass, framed } from '../dom.js';
 import { sessionMark, icon } from '../marks.js';
 import { STATES, stateOf, since, plural, boostMarkText } from '../words.js';
-import { arrange, summary, sessionHref, boardHref, projectOf, teamSummary } from '../ui.js';
+import { arrange, summary, sessionHref, boardHref, projectOf, teamSummary, leadMarks } from '../ui.js';
 
 function sessionRow(app) {
   const mark = sessionMark(20);
   const role = h('span', { class: 'role' });
   const lead = h('span', { class: 'lead-tag' }, 'Lead');
   const title = h('span', { class: 'row-title' });
+  // A lead whose board cleared since you last opened it (the board's all-done mark, unseen): the Mac's green check.
+  const allDone = h('span', { class: 'row-done', title: 'All tasks finished', role: 'img', 'aria-label': 'All tasks finished', hidden: true }, icon('check', 12));
   const time = h('time', { class: 'row-time' });
   const project = h('span', { class: 'row-project' });
   const state = h('span', { class: 'row-state' });
@@ -19,7 +21,7 @@ function sessionRow(app) {
   const teamText = h('span');
   const team = h('button', { class: 'team-toggle', type: 'button' }, teamText, icon('chevron', 9));
   const link = h('a', { class: 'row-link' },
-    h('span', { class: 'row-line' }, lead, title, time),
+    h('span', { class: 'row-line' }, lead, title, allDone, time),
     h('span', { class: 'row-line sub' }, project, state, asks));
   const el = h('li', { class: 'row' }, role, mark.el, h('div', { class: 'row-text' }, link, team));
   let id = null;
@@ -47,10 +49,18 @@ function sessionRow(app) {
       const showProject = app.ui.state.grouping === 'attention' && !nested && Boolean(session.title);
       project.hidden = !showProject;
       setText(project, projectOf(session));
+      // A lead another session of its project replaced (the lead's `replaced`): it says so, as the Mac's row, in
+      // place of its status, its tag grey.
+      const marks = leadMarks(app.store.state, session);
+      const replaced = marks.replaced;
+      setClass(lead, 'replaced', replaced);
+      allDone.hidden = !marks.allDone;
       // What it's doing when it says, else the state's word.
-      const text = (word === 'working' || word === 'background') && session.detail ? session.detail : STATES[word].one;
+      const text = replaced ? 'replaced: the project’s lead goes on in a newer session'
+        : (word === 'working' || word === 'background') && session.detail ? session.detail : STATES[word].one;
       setText(state, text);
-      setClass(state, 'needs', word === 'needs-you');
+      setClass(state, 'needs', word === 'needs-you' && !replaced);
+      setClass(state, 'replaced', replaced);
       const questions = session.role === 'lead' ? app.store.state.leads.get(session.lead)?.questions : null;
       asks.hidden = !(questions?.open > 0);
       if (questions?.open > 0) {
@@ -67,8 +77,8 @@ function sessionRow(app) {
       // One sentence for a screen reader, as the Mac's row has: "Lead: Sync…, example-site, Claude, needs you".
       const spoken = [
         (nested ? (session.role === 'verifier' ? 'Verifier: ' : 'Worker: ') : session.role === 'lead' ? 'Lead: ' : '') + (session.title || projectOf(session)),
-        showProject ? projectOf(session) : null, session.agent === 'codex' ? 'Codex' : 'Claude', STATES[word].one,
-        questions?.open > 0 ? asks.title : null,
+        showProject ? projectOf(session) : null, session.agent === 'codex' ? 'Codex' : 'Claude', replaced ? 'replaced' : STATES[word].one,
+        questions?.open > 0 ? asks.title : null, allDone.hidden ? null : 'all tasks finished',
       ].filter(Boolean).join(', ');
       link.setAttribute('aria-label', spoken);
     },

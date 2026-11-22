@@ -712,7 +712,8 @@ client shows it as text. The codes, `NodeWire.Code`'s:
 | `internal` | not done, and why | takes the action back, shows the message |
 
 `bye` is the last message before the server closes: `{v, kind: "bye", reason, code}`. `code` (**new**) is one of
-`auth`, `revoked`, `version`, `too-long`, `not-object`, `not-request`, `must`, `stopping`. A client reconnects after
+`auth`, `revoked`, `version`, `too-long`, `not-object`, `not-request`, `must`, `stopping`, `busy` (the Unix socket's
+connection caps, 2026-11-22: no room for the connection, or it was closed to make room). A client reconnects after
 every `bye` but `auth` and `revoked` (it shows "run `vibeswitcher web` again") and `version` (it reloads).
 
 **Versions** (rule 3):

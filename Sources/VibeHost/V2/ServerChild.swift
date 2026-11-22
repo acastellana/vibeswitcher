@@ -105,6 +105,7 @@ public final class ServerChild {
     private var restartCount = 0
     /// The children that ended stuck in a row (`stuckExit`); a child that ends any other way resets it. Under `lock`.
     private var stuckCount = 0
+    private var lastEndRecord: HostNotes.ServerEnd?
 
     private convenience init(server: HostServer, copy: Platform.ProcessSelf.SealedCopy, launch: Launch) {
         self.init(server: server, image: .sealed(copy), launch: launch)
@@ -416,6 +417,8 @@ public final class ServerChild {
 
     /// The exit code of a server that ends itself stuck (`NodeHealth.exitStuck`): EX_SOFTWARE.
     public static let stuckExit: Int32 = 70
+    /// How the child last ended on its own (`ended`, not a replacement's end), nil: none under this image.
+    public var lastEnd: HostNotes.ServerEnd? { lock.withLock { lastEndRecord } }
 
     /// The child running now as a handover carries it (`HostHandover.State.serverChild`): nil when none runs, or its
     /// connector has closed (a handover then waits: `handoverRefusal`). On the host's queue.
@@ -592,6 +595,7 @@ public final class ServerChild {
             return spawn()
         }
         let inARow = lock.withLock { stuckCount }
+        lock.withLock { lastEndRecord = HostNotes.ServerEnd(at: Date(), ran: ran, cause: HostNotes.ServerEnd.cause(status: status)) }
         Self.say(server, "server child pid \(pid) ended after \(Int(ran)) s: \(HostLog.waitStatus(status))"
                  + (stuck ? " (stuck: its engine's queue didn't answer; \(inARow) in a row)" : "") + "; started again in \(Int(lock.withLock { delay })) s")
         scheduleRestart()

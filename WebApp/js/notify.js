@@ -13,18 +13,20 @@
 // clicked on it), a short soft chime made on the page (`chime`: no file fetched), not played for the session you're
 // looking at.
 //
-// Which kinds are told is a choice on This node, kept in this browser: something needs me, a session finishes (both on
-// by default, the Mac's Settings › Notifications).
+// Which kinds are told is a choice on This node, kept in this browser: something needs me, a session finishes, and a
+// reminder about a session left waiting on you 10 minutes or showing no progress for 15 (the node's `reminders`, the
+// Mac's "Remind me about waiting or stuck sessions": once a wait or a stall); all on by default, as the Mac's.
 //
 // What it decides (`summarize`, `changes`, `wanted`, `firstLine`, `titled`, `sounding`) knows nothing of the page and is tested on
 // its own; `notifications(app)` puts it on the page.
 
 import { h } from './dom.js';
+import { pluginOn, pluginsOn } from './plugincard.js';
 
 const PREF = 'vibeswitcher.notifications';
 const SOUND = 'vibeswitcher.sound';
 // Each kind's choice (`kindOf`): 'off' turns it off; on otherwise, as the Mac's defaults.
-const KINDS = { needs: 'vibeswitcher.notify.needs', done: 'vibeswitcher.notify.done' };
+const KINDS = { needs: 'vibeswitcher.notify.needs', done: 'vibeswitcher.notify.done', reminders: 'vibeswitcher.notify.reminders' };
 const href = (id) => '#/s/' + encodeURIComponent(id);
 const lastPart = (path) => String(path || '').split('/').filter(Boolean).pop() || '';
 
@@ -37,13 +39,14 @@ export function firstLine(text, limit = 120) {
   return chars.length > limit ? chars.slice(0, limit - 1).join('') + '…' : clean;
 }
 
-const CARD_TITLES = { question: 'A question for you', approval: 'An approval for you', config: 'Agents’ config held', base: 'The base moved', shell: 'A shell asked for' };
+const CARD_TITLES = { question: 'A question for you', approval: 'An approval for you', config: 'Agents’ config held', base: 'The base moved' };
 
 function cardBody(card) {
   if (card.question) return firstLine(card.question.text || card.question.short);
   if (card.approval) return firstLine(card.approval.subject || `Merge ${String(card.approval.commit || '').slice(0, 8)}`);
   if (card.config) return firstLine((card.config.items || []).map((item) => item.name).join(', '));
-  if (card.shell) return firstLine(`${card.shell.asker}: ${card.shell.command}`);
+  // A feature plugin's: who asks, and the first line of what it asks.
+  if (card.plugin) return firstLine(`${card.plugin.asker}: ${(card.plugin.body?.lines || []).join('\n')}`);
   return '';
 }
 
@@ -63,7 +66,10 @@ export function summarize(state) {
     // A card that came back under a new id after a server restart keeps its key (store.js `cardKeys`): not told twice.
     const key = 'card:' + (state.cardKeys?.get(card.id) || card.id);
     const session = leadSession(card.project);
-    asks.set(key, { title: `${CARD_TITLES[card.kind] || 'A card for you'} · ${lastPart(card.root) || 'a project'}`, body: cardBody(card), href: session ? href(session) : '#/' });
+    // A plugin's card is told only while the node has its plugin on (`hello.plugins`; null: a node before plugins).
+    if (card.plugin && !pluginOn(pluginsOn(state), card.plugin.plugin)) continue;
+    const title = card.plugin?.title || CARD_TITLES[card.kind] || 'A card for you';
+    asks.set(key, { title: `${title} · ${lastPart(card.root) || 'a project'}`, body: cardBody(card), href: session ? href(session) : '#/' });
   }
   for (const session of state.sessions.values()) {
     const name = session.title || lastPart(session.cwd) || 'A session';
@@ -74,10 +80,19 @@ export function summarize(state) {
     if (session.role === 'lead' && session.leadAsks) continue;
     asks.set(`prompt:${session.id}:${session.since || ''}`, { title: `${name} needs you`, body: firstLine(session.detail || session.activity || 'It’s waiting for you.'), href: href(session.id) });
   }
+  // The node's reminders due now (`reminders`): one key a wait or a stall (its episode), so each is told once.
+  const reminders = new Map();
+  for (const reminder of state.node?.reminders || []) {
+    const session = state.sessions.get(reminder.session);
+    if (session?.paused || session?.ended) continue;
+    reminders.set(`reminder:${reminder.session}:${reminder.kind}:${reminder.since}`, {
+      title: firstLine(reminder.title), body: firstLine([reminder.subtitle, reminder.body].filter(Boolean).join(' · ')), href: href(reminder.session),
+    });
+  }
   // The engine's newest freeze (the node's health digest): '' for none yet, null while the node keeps no digest.
   const health = state.node?.health;
   const freeze = health ? (health.freezes?.[0]?.at || '') : null;
-  return { asks, leads, own, freeze, freezeSeconds: health?.freezes?.[0]?.seconds || 0 };
+  return { asks, leads, own, reminders, freeze, freezeSeconds: health?.freezes?.[0]?.seconds || 0 };
 }
 
 // What to tell between two summaries: each ask that wasn't there, and each lead that was working and now isn't (done,
@@ -85,6 +100,7 @@ export function summarize(state) {
 export function changes(before, after) {
   const told = [];
   for (const [key, ask] of after.asks) if (!before.asks.has(key)) told.push({ key, ...ask });
+  for (const [key, reminder] of after.reminders || []) if (!(before.reminders || new Map()).has(key)) told.push({ key, ...reminder });
   // A freeze kept since the last look (never one from before this page looked: `before.freeze` null).
   if (before.freeze != null && after.freeze && after.freeze !== before.freeze) {
     told.push({ key: `freeze:${after.freeze}`, title: 'The node froze', body: `Its engine didn’t answer for ${after.freezeSeconds} s. This node shows its health.`, href: '#/node' });
@@ -104,9 +120,9 @@ export function changes(before, after) {
   return told;
 }
 
-// The kind a note is of, for Settings › Notifications' choices: `needs` (a card, a prompt waiting, the node frozen) or
-// `done` (a lead stopped, a session of yours finished).
-export const kindOf = (note) => (/^(stopped|finished):/.test(note.key) ? 'done' : 'needs');
+// The kind a note is of, for Settings › Notifications' choices: `needs` (a card, a prompt waiting, the node frozen),
+// `done` (a lead stopped, a session of yours finished) or `reminders` (left waiting, or no progress).
+export const kindOf = (note) => (/^(stopped|finished):/.test(note.key) ? 'done' : /^reminder:/.test(note.key) ? 'reminders' : 'needs');
 
 // The kinds told by the choices kept: each on unless turned off.
 export function wanted(told, choices) {
@@ -179,14 +195,17 @@ export function notifications(app, env = {}) {
   const kindBoxes = {
     needs: h('input', { type: 'checkbox', class: 'notify-kind', onchange: () => choose('needs', kindBoxes.needs.checked) }),
     done: h('input', { type: 'checkbox', class: 'notify-kind', onchange: () => choose('done', kindBoxes.done.checked) }),
+    reminders: h('input', { type: 'checkbox', class: 'notify-kind', onchange: () => choose('reminders', kindBoxes.reminders.checked) }),
   };
   const el = h('section', { class: 'node-group notify' }, h('h2', { class: 'section-title' }, 'Notifications'),
     h('label', { class: 'notify-line' }, box, ' Tell me when something happens, while this page is open'), said,
     h('label', { class: 'notify-line notify-sub' }, kindBoxes.needs, ' When a session or a lead needs me (a question, an approval, a prompt waiting)'),
     h('label', { class: 'notify-line notify-sub' }, kindBoxes.done, ' When a lead stops or a session of mine finishes'),
+    h('label', { class: 'notify-line notify-sub' }, kindBoxes.reminders, ' Remind me about waiting or stuck sessions (waiting on me 10 minutes, no progress for 15)'),
     h('label', { class: 'notify-line' }, ring, ' Play a sound when something needs me'));
 
-  const choices = () => ({ needs: stored(storage, KINDS.needs) !== 'off', done: stored(storage, KINDS.done) !== 'off' });
+  const choices = () => ({ needs: stored(storage, KINDS.needs) !== 'off', done: stored(storage, KINDS.done) !== 'off',
+    reminders: stored(storage, KINDS.reminders) !== 'off' });
   function choose(kind, on) {
     store(storage, on ? 'on' : 'off', KINDS[kind]);
     draw();

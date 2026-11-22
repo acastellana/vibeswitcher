@@ -176,17 +176,13 @@ enum SetCommand {
         let place = folder.map { "the project in \(ConfigSeal.inert($0, limit: 300))" } ?? "this node, for every project"
         let what = "This sets \(key) (\(setting.title)) for \(place) to \(shownValue)"
             + (setting.guardRail ? "\nA guard rail: recorded in the host's vault as yours." : "")
-        let outcome = TypedWord.ask(approval: client.approvalRule, code: NodeIds.code(action: action), what: what)
-        guard outcome == .typed else { return Say.refused(TypedWord.refusal(outcome)) }
+        let said = TypedWord.said(approval: client.approvalRule, action: action, what: what)
+        guard case .success(let typed) = said else { return Say.refused(said.refusal) }
         var args: [String: NodeWire.Value] = ["key": .string(key), "value": .string(given)]
         if let folder { args["folder"] = .string(folder) }
-        switch client.request("set", args: args, action: action, timeout: 120) {
+        switch client.change("set", args: args, action: action, typed: typed, timeout: 120) {
         case .failure(let failure): return Say.failed(failure)
         case .success(let reply):
-            // Accepted (the voice passed and the server recorded it): a refusal (`refused`) comes after that.
-            if reply.ok || reply.error?.code == NodeWire.Code.refused.rawValue {
-                context.writeJournal(NodeJournal.entry(event: "request", action: action, kind: "set", epoch: client.hello.epoch))
-            }
             guard reply.ok, let result = reply.result else { return Say.replyError(reply) }
             let now = result["value"]?.string ?? "?"
             let was = result["was"]?.string ?? "?"

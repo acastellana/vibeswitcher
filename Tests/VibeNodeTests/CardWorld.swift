@@ -49,6 +49,16 @@ final class CardWorld: @unchecked Sendable {
         return CardWorld(world: world, engine: LeadEngine(root: world.host.root, nodeRoot: nil, link: world.link, clock: nil, options: options))
     }
 
+    /// A world whose engine has `plugins` (in place of the registry's list), on the host's vault.
+    static func make(_ scratch: Scratch, plugins: [FeaturePlugin]) async throws -> CardWorld {
+        let world = try await DeliveryWorld.make(scratch)
+        var options = LeadEngine.Options()
+        options.answersTrust = false
+        options.home = world.host.home.path
+        options.plugins = plugins
+        return CardWorld(world: world, engine: LeadEngine(root: world.host.root, nodeRoot: nil, link: world.link, clock: nil, options: options))
+    }
+
     func stop() { world.stop() }
 
     var project: String { NodeIds.project(root: repo) }

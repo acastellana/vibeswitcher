@@ -371,10 +371,13 @@ public struct HostNotes: Codable, Equatable, Sendable {
     /// How many times in a row its server child ended stuck (its watchdog's exit, 70) without a start between that
     /// ran its course. Nil: a host that doesn't count it (the Mac's).
     public var serverStuckInARow: Int?
+    /// How its server child last ended on its own (`ServerEnd`, in `V2/ServerEnd.swift`). Nil: none since the host
+    /// started, or a host that doesn't say.
+    public var lastServerEnd: ServerEnd?
 
     public init(startedAt: Date, serverRestarts: Int, replacedPaths: [String], refusedAppConnections: Int,
                 lockHeldElsewhere: String? = nil, lockHeldElsewhereCount: Int? = nil, build: String? = nil,
-                binaries: [String: String]? = nil, serverStuckInARow: Int? = nil) {
+                binaries: [String: String]? = nil, serverStuckInARow: Int? = nil, lastServerEnd: ServerEnd? = nil) {
         self.serverStuckInARow = serverStuckInARow
         self.startedAt = startedAt
         self.serverRestarts = serverRestarts
@@ -384,6 +387,7 @@ public struct HostNotes: Codable, Equatable, Sendable {
         self.lockHeldElsewhereCount = lockHeldElsewhereCount
         self.build = build
         self.binaries = binaries
+        self.lastServerEnd = lastServerEnd
     }
 }
 

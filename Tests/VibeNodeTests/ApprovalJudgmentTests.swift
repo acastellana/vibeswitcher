@@ -190,15 +190,15 @@ struct ApprovalJudgmentTests {
     @Test func aShellCardShowsItsCommandAndFolder() throws {
         let requests = requests(ApprovalVoiceTests.Person(.approved))
         let request = ShellRequest(session: "3f6c2c1e-8a5b-4c1d-9e0f-2b7a6d5c4e3f", cwd: "/Users/u/shop", command: "make install", label: "", createdAt: Date())
-        var card = CardStore.Card(root: "/Users/u/shop", kind: .shell)
-        card.shell = .init(request: request, asker: "Claude")
+        var card = CardStore.Card(root: "/Users/u/shop", kind: .plugin)
+        card.plugin = ShellPlugin.card(request, asker: "Claude")
         put(card, requests)
         let action = UUID().uuidString.lowercased()
         let text = try dialog(requests, "answer", ["card": .string(card.id), "code": .string(card.code), "text": .string("run")], action: action).get()
         #expect(text == "\(NodeIds.code(action: action)) · run an agent's command in your login shell: “make install” in shop (/Users/u/shop)", "\(text)")
-        var long = CardStore.Card(root: "/Users/u/shop", kind: .shell)
-        long.shell = .init(request: ShellRequest(session: request.session, cwd: "/Users/u/shop", command: String(repeating: "a", count: 150), label: "", createdAt: Date()),
-                           asker: "Claude")
+        var long = CardStore.Card(root: "/Users/u/shop", kind: .plugin)
+        long.plugin = ShellPlugin.card(ShellRequest(session: request.session, cwd: "/Users/u/shop", command: String(repeating: "a", count: 150),
+                                                    label: "", createdAt: Date()), asker: "Claude")
         put(long, requests)
         #expect((try? dialog(requests, "answer", ["card": .string(long.id), "code": .string(long.code), "text": .string("run")], action: action).get()) == nil)
     }
@@ -229,15 +229,17 @@ struct ApprovalJudgmentTests {
 
     // MARK: The second review (2026-11-21)
 
-    /// The dialog reads a shell card's answer exactly as `answerShell` does: "run" with a line break around it is run,
-    /// and shown as run; anything but run or decline is refused, never shown as a decline.
+    /// The dialog reads a shell card's answer exactly as the core does before the plugin acts (`PluginCard.action`): "run"
+    /// with a line break around it is run, and shown as run; anything but run or decline is refused, never shown as a
+    /// decline.
     @Test func aShellAnswerIsReadOnceForTheDialogAndTheRun() throws {
-        #expect(ShellCards.answerWord("run\n") == "run" && ShellCards.answerWord(" Run\t\n") == "run" && ShellCards.answerWord("DECLINE") == "decline")
-        #expect(ShellCards.answerWord("maybe") == nil && ShellCards.answerWord("ru n") == nil && ShellCards.answerWord("") == nil)
+        let shown = ShellPlugin.card(ShellRequest(session: "3f6c2c1e-8a5b-4c1d-9e0f-2b7a6d5c4e3f", cwd: "/Users/u/shop", command: "make install",
+                                                  label: "", createdAt: Date()), asker: "Claude")
+        #expect(shown.action("run\n")?.word == "run" && shown.action(" Run\t\n")?.word == "run" && shown.action("DECLINE")?.word == "decline")
+        #expect(shown.action("maybe") == nil && shown.action("ru n") == nil && shown.action("") == nil)
         let requests = requests(ApprovalVoiceTests.Person(.approved))
-        var card = CardStore.Card(root: "/Users/u/shop", kind: .shell)
-        card.shell = .init(request: ShellRequest(session: "3f6c2c1e-8a5b-4c1d-9e0f-2b7a6d5c4e3f", cwd: "/Users/u/shop", command: "make install",
-                                                 label: "", createdAt: Date()), asker: "Claude")
+        var card = CardStore.Card(root: "/Users/u/shop", kind: .plugin)
+        card.plugin = shown
         put(card, requests)
         let action = UUID().uuidString.lowercased()
         func text(_ answer: String) -> String? {

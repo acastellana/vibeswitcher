@@ -197,3 +197,18 @@ export function findIn(items, query) {
 export function fold(text) {
   return String(text).toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
 }
+
+// Where a chat opens (the Mac's `ChatView.initialScroll`): where you were reading it in this page (`saved`: its top row's
+// key and how far that row was above the view's top), else with "New since you looked" at the top (`markKey`), else at
+// its end. `keys`: the items' row keys in order. Returns { kind: 'saved' | 'marker' | 'end', index, offset }.
+export function openingPlace({ saved = null, markKey = null, keys = [] } = {}) {
+  if (saved) {
+    const index = keys.indexOf(saved.key);
+    if (index >= 0) return { kind: 'saved', index, offset: Math.max(0, saved.offset || 0) };
+  }
+  if (markKey) {
+    const index = keys.indexOf(markKey);
+    if (index >= 0) return { kind: 'marker', index, offset: 0 };
+  }
+  return { kind: 'end', index: keys.length - 1, offset: 0 };
+}

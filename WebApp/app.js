@@ -3,7 +3,6 @@
 // and the keyboard.
 
 import { createStore } from './js/store.js';
-import { createMock } from './js/mock.js';
 import { connectSocket } from './js/socket.js';
 import { validate } from './wire/validators.js';
 import { createUI, arrange, teamOf, boardHref } from './js/ui.js';
@@ -25,8 +24,15 @@ const params = new URLSearchParams(location.search);
 const store = createStore();
 const ui = createUI();
 const mocked = params.has('mock') || params.has('still') || params.has('empty') || params.has('rows');
+// The mock is loaded only for ?mock and its kin: the node's embedded page leaves it out (scripts/webapp-embed.sh), so
+// there it says so; WebApp/serve.sh and a scratch server's folder serve it.
 const feed = mocked
-  ? createMock(store, { rows: Number(params.get('rows')) || 0, still: params.has('still'), empty: params.has('empty') })
+  ? await import('./js/mock.js').then(
+    ({ createMock }) => createMock(store, { rows: Number(params.get('rows')) || 0, still: params.has('still'), empty: params.has('empty') }),
+    (error) => {
+      document.body.textContent = 'The mock (?mock) couldn\u2019t be loaded: the node\u2019s own page leaves it out; WebApp/serve.sh serves it.';
+      throw error;
+    })
   : connectSocket(store, {
     url: `ws://${location.host}/ws`,
     WebSocket,

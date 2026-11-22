@@ -94,6 +94,21 @@ export function leadLine(folder, goal = '') {
   return `vibeswitcher lead ${shellWord(folder)}${said ? ` --goal ${shellWord(said)}` : ''}`;
 }
 
+// The folder a project's name makes (the node's `ProjectCreation.folderName`): trimmed, each run of spaces a hyphen,
+// lowercase ("My App": my-app).
+export function projectFolderName(name) {
+  return String(name || '').trim().split(/\s+/).filter(Boolean).join('-').toLowerCase();
+}
+
+// `vibeswitcher new-project NAME [--in LOCATION] [--goal GOAL]` (the Mac's New Project…): no location, the node's
+// projects folder; each typed thing one word.
+export function newProjectLine(name, location = '', goal = '') {
+  const named = String(name || '').trim();
+  const where = String(location || '').trim();
+  const said = String(goal || '').trim();
+  return `vibeswitcher new-project ${shellWord(named)}${where ? ` --in ${shellWord(where)}` : ''}${said ? ` --goal ${shellWord(said)}` : ''}`;
+}
+
 // The palette's "New … in …" entries for `folders`: each folder's presets as the node lists them (`presetsOf(folder)`,
 // its default first; Claude and Shell until the node answers), but those it can't start there.
 export function newEntries(folders, presetsOf) {

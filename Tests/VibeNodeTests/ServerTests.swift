@@ -38,8 +38,20 @@ struct ServerTests {
         #expect(reply.error?.code == "unknown-kind")
         // The answer, then bye and the close.
         let rest = messages + client.next()
-        #expect(WireClient.bye(rest) != nil, "\(rest.map { String(decoding: $0, as: UTF8.self) })")
+        #expect(WireClient.bye(rest)?.code == "must", "\(rest.map { String(decoding: $0, as: UTF8.self) })")
         #expect(client.closed())
+    }
+
+    /// What isn't a request ends the connection with the web's codes (`NodeWire.unwrap`, one check for both).
+    @Test func aLineThatIsntARequestEndsWithItsCode() async throws {
+        let node = try await ScratchNode(scratch)
+        for (line, code) in [("[1,2]", "not-object"), (#"{"v":1,"kind":"status"}"#, "not-request")] {
+            let client = try WireClient(node)
+            client.write(line)
+            let messages = client.next()
+            #expect(WireClient.bye(messages)?.code == code, "\(line): \(messages.map { String(decoding: $0, as: UTF8.self) })")
+            #expect(client.closed())
+        }
     }
 
     // MARK: The live protocol on the Unix socket (the live plan's I1, LW-D8)
@@ -108,7 +120,7 @@ struct ServerTests {
         let messages = client.request("status", action: nil, v: NodeWire.version + 1)
         let reply = try #require(WireClient.reply(messages))
         #expect(reply.ok == false && reply.error?.code == "version", "\(reply)")
-        #expect(WireClient.bye(messages + client.next()) != nil)
+        #expect(WireClient.bye(messages + client.next())?.code == "version")
         #expect(client.closed())
     }
 
@@ -216,7 +228,7 @@ struct ServerTests {
         #expect(await exited(helper, within: 30))
         let messages = client.next(timeout: 30)
         #expect(WireClient.reply(messages) == nil, "\(messages.map { String(decoding: $0, as: UTF8.self) })")
-        #expect(WireClient.bye(messages)?.reason.contains("another process") == true)
+        #expect(WireClient.bye(messages)?.reason.contains("another process") == true && WireClient.bye(messages)?.code == "auth")
         #expect(client.closed())
         #expect(await eventually(timeout: 30) { node.said.contains("bytes on it came from another process") }, "\(node.said)")
     }

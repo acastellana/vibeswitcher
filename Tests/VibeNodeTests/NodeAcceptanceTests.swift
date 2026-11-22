@@ -372,6 +372,34 @@ struct NodeAcceptanceTests {
         #expect(Git.run(["--git-dir", origin, "rev-parse", "refs/heads/main"], in: repo.path).output == commit, "nothing pushed")
     }
 
+    @Test("A40: the lead fetches its remote and merges into the base what someone else pushed (fetch_remote, merge_remote)")
+    func a40FetchAndMergeRemote() async throws {
+        let node = try await ScratchNode(scratch, holdFirstLook: true)
+        defer { node.stop() }
+        let repo = try await Self.repository(node)
+        let origin = node.root.appendingPathComponent("origin.git").path
+        for arguments in [["init", "-q", "--bare", "-b", "main", origin], ["-C", repo.path, "remote", "add", "origin", origin],
+                          ["-C", repo.path, "push", "-q", "origin", "main"]] {
+            _ = try await scratchGit(repo.path, arguments)
+        }
+        let lead = try await Self.startLead(node, repo, goal: "keep up with the remote")
+        // Someone else's commit on the remote: a clone of their own, pushed.
+        let other = node.root.appendingPathComponent("other").path
+        _ = try await scratchGit(node.root.path, ["clone", "-q", origin, other])
+        _ = try await scratchGit(other, ["-c", "user.name=Other", "-c", "user.email=other@example.invalid", "commit", "-q", "--allow-empty", "-m", "Theirs"])
+        _ = try await scratchGit(other, ["push", "-q", "origin", "main"])
+        let theirs = try await scratchGit(other, ["rev-parse", "HEAD"])
+
+        let fetched = try await ScratchRunTests.reply(lead.tools, try ScratchRunTests.send(lead.tools, "fetch_remote", [:]))
+        #expect(!fetched.contains("Refused") && fetched.contains("1 commit"), "\(fetched)\n\(node.said)")
+        let merged = try await ScratchRunTests.reply(lead.tools, try ScratchRunTests.send(lead.tools, "merge_remote", [:], seconds: 300), timeout: 360)
+        #expect(merged.hasPrefix("Merged origin/main into main"), "\(merged)\n\(node.said)")
+        #expect(try await scratchGit(repo.path, ["rev-parse", "main"]) == theirs, "a fast-forward: the base had nothing of its own")
+        // The lead's own move: its next merge isn't refused for a base moved outside it.
+        let again = try await ScratchRunTests.reply(lead.tools, try ScratchRunTests.send(lead.tools, "merge_remote", [:], seconds: 300), timeout: 360)
+        #expect(!again.contains("moved"), "\(again)")
+    }
+
     // MARK: A17, settings
 
     @Test("A17: settings shows a project's; set records it, the lead is told, and config held holds nothing for it")
@@ -809,6 +837,71 @@ struct NodeAcceptanceTests {
         #expect(!status.output.contains("the journal has no entry for it"), "\(status.output)")
         let kinds = ((try await node.statusJSON())["accepted"] as? [[String: Any]] ?? []).compactMap { $0["kind"] as? String }
         #expect(kinds.contains("approve") && kinds.filter { $0 == "config.accept" }.count == 2, "\(kinds)")
+    }
+
+    /// `vs-shell` in a session of `node` (the tool server's filing mode, as Resources/bin/vs-shell runs it) with `arguments`:
+    /// what it printed and its status, once it ended.
+    static func vsShell(_ node: ScratchNode, _ arguments: String, name: String) async throws -> (session: HostSession, said: String) {
+        let out = node.root.appendingPathComponent("\(name).out")
+        let mcp = builtProducts.appendingPathComponent("vibeswitcher-mcp").path
+        let session = try await node.spawn("env VIBESWITCHER_HOME='\(node.root.path)' '\(mcp)' --shell-request \(arguments) > '\(out.path).part' 2>&1; "
+                                           + "echo \"status $?\" >> '\(out.path).part'; mv '\(out.path).part' '\(out.path)'; exec sleep 600", label: "Asker")
+        try #require(await eventually(timeout: 60) { FileManager.default.fileExists(atPath: out.path) }, "\(node.screen(session.id) ?? "")\n\(node.said)")
+        return (session, try String(contentsOf: out, encoding: .utf8))
+    }
+
+    @Test("A41: vs plugin list shows shell requests on; plugin off shell (its code typed) turns it off, recorded, and vs-shell then files nothing; plugin on shell brings it back")
+    func a41Plugins() async throws {
+        let node = try await ScratchNode(scratch)
+        defer { node.stop() }
+        let listed = try await node.run(["plugin", "list"])
+        #expect(listed.status == 0 && listed.output.contains("shell  Shell requests  on (its default)") && listed.output.contains("adds for agents: vs-shell"),
+                "\(listed.output)\(listed.errors)\n\(node.said)")
+        let off = try await node.runOnTerminal(["plugin", "off", "shell"])
+        #expect(off.status == 0 && off.output.contains("This turns Shell requests off") && off.output.contains("shell is off"), "\(off.output)\(off.errors)")
+        let kinds = ((try await node.statusJSON())["accepted"] as? [[String: Any]] ?? []).compactMap { $0["kind"] as? String }
+        #expect(kinds.contains("plugin.off"), "\(kinds)")
+        let mirror = node.root.appendingPathComponent("plugins.json")
+        try #require(await eventually(timeout: 30) { PluginGate.mirror(at: mirror)?.on == [] }, "\(String(describing: PluginGate.mirror(at: mirror)))")
+        let refused = try await Self.vsShell(node, "run -- echo a40", name: "a40-off")
+        #expect(refused.said.contains("vs-shell: this node doesn't have shell on") && refused.said.contains("status 1"), "\(refused.said)")
+        let asked = node.root.appendingPathComponent("shell-requests/asked")
+        #expect(((try? FileManager.default.contentsOfDirectory(atPath: asked.path)) ?? []).isEmpty, "nothing filed")
+        let status = try await node.run(["status"])
+        #expect(status.output.contains("plugins on: none"), "\(status.output)")
+
+        let on = try await node.runOnTerminal(["plugin", "on", "shell"])
+        #expect(on.status == 0 && on.output.contains("shell is on"), "\(on.output)\(on.errors)")
+        let again = try await node.run(["plugin", "list"])
+        #expect(again.output.contains("shell  Shell requests  on (its default)"), "\(again.output)")
+        #expect(try await node.run(["status"]).output.contains("plugins on: shell"))
+    }
+
+    @Test("A42: an agent's vs-shell request through the shell plugin: its card lists the folder and the command whole, and answer CARD run with the code starts the shell that runs it")
+    func a42ShellThroughThePlugin() async throws {
+        let node = try await ScratchNode(scratch)
+        defer { node.stop() }
+        let filed = try await Self.vsShell(node, "run --label a41 -- echo a41-ran", name: "a41")
+        #expect(filed.said.contains("Filed shell request") && filed.said.contains("status 0"), "\(filed.said)")
+        // The node's look (every 15 s) draws it: the shell plugin's card.
+        let waited = try await node.run(["questions", "--wait", "--json"])
+        let cards = ((try? JSONSerialization.jsonObject(with: Data(waited.output.utf8)) as? [String: Any])?["cards"] as? [[String: Any]]) ?? []
+        let card = cards.first { ($0["plugin"] as? [String: Any])?["plugin"] as? String == "shell" }
+        let id = try #require(card?["id"] as? String, "\(node.said)")
+        #expect(card?["kind"] as? String == "plugin")
+        let shown = try await node.run(["questions"])
+        #expect(shown.output.contains(id) && shown.output.contains("  in the folder: \(node.home.path)") && shown.output.contains("    | echo a41-ran")
+                && shown.output.contains("  named (the agent's words): \u{201C}Shell: a41\u{201D}"), "\(shown.output)")
+        let ran = try await node.runOnTerminal(["answer", id, "run"])
+        #expect(ran.status == 0 && ran.output.contains("This runs the command above (1 line, 12 bytes), exactly as shown")
+                && ran.output.contains("started: a new shell session"), "\(ran.output)\(ran.errors)\n\(node.said)")
+        let sessions = try node.sessions()
+        let shell = try #require(sessions.first { $0.label == "Shell: a41" && $0.isLive }, "\(sessions.map(\.label))")
+        #expect(shell.cwd == node.home.path)
+        #expect(await eventually(timeout: 60) { node.screen(shell.id)?.contains("a41-ran") == true }, "\(node.screen(shell.id) ?? "")")
+        let again = try await node.runOnTerminal(["answer", id, "run"])
+        #expect(again.status != 0, "\(again.output)")
+        #expect(try node.sessions().filter { $0.label == "Shell: a41" }.count == 1)
     }
 
     // MARK: The rows a scratch node can't run

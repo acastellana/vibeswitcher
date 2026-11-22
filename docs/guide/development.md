@@ -90,7 +90,7 @@ keychain code is reachable from a test any other way. The one test of the real k
 Run them before you call a change done; they take seconds:
 
 ```sh
-bash scripts/test.sh --filter 'AccessibilityLint|AgentExportLint|CloseOnExecLint|DebugAidsLint|DocLinksLint|ElapsedGuardLint|ElapsedTimeLint|HomePathLint|KeychainLint|MacOnlyTestsLint|MCPLint|PhoneMainSyncLint|PlatformLint|PreferencesLint|PrivateNamesLint|PrivateWriteLint|SandboxLint|ScriptScratchLint|SecretShapeLint|SecurityDocumentLint|ServerLint|ShebangWriteLint|StdioWriteLint|TemporaryFolderLint|WebAppLint'
+bash scripts/test.sh --filter 'AccessibilityLint|AgentExportLint|ArchitectureDocLint|CLIChangeLint|CloseOnExecLint|CopiedFilesLint|DebugAidsLint|DocLinksLint|ElapsedGuardLint|ElapsedTimeLint|HomePathLint|KeychainLint|MacOnlyTestsLint|MCPLint|PhoneMainSyncLint|PlatformLint|PluginLint|PreferencesLint|PrivateNamesLint|PrivateWriteLint|RequestKindsLint|SandboxLint|ScriptScratchLint|SecretShapeLint|SecurityDocumentLint|ServerLint|ShebangWriteLint|StdioWriteLint|TemporaryFolderLint|WebAppLint'
 bash scripts/test.sh --filter 'LintTests/'   # the same suites, as AGENTS.md runs them: every `…LintTests` type
 ```
 
@@ -98,7 +98,10 @@ bash scripts/test.sh --filter 'LintTests/'   # the same suites, as AGENTS.md run
 | --- | --- |
 | `AccessibilityLint` | An SF Symbol the app shows that's neither named for VoiceOver nor hidden from it. |
 | `AgentExportLint` | A script or test that writes a git tree into the worktree with its agent files (AGENTS.md, `CLAUDE*.md`, `.claude/`, `.mcp.json`). |
+| `ArchitectureDocLint` | docs/guide/v2-architecture.md's kinds table not the one the code makes (`vibeswitcher kinds-doc --write` writes it), the page at 250 lines or more, or the docs' index not linking it. |
+| `CLIChangeLint` | A state change the command line sends outside `NodeClient.change` (a state-changing kind sent as a plain `request`, a read sent through `change`), or a journal entry it writes elsewhere. |
 | `CloseOnExecLint` | A descriptor made in the session host, its launcher, `UnixSocket` or `VibePlatform` that isn't close-on-exec from the call that makes it (a bare `socket(`, `socketpair(`, `accept(` or `pipe(`, or an `open(` naming flags without `O_CLOEXEC`), outside the exemptions the test lists with their reasons; or a `Platform.Spawn` in the host that doesn't name what its child keeps. |
+| `CopiedFilesLint` | A verbatim copy of the Mac app's code in `Sources/VibeNode` (the port map's "Copied from the app": the Statistics files, `UsageWaits`, `WitnessWork`, `TeamReading`) that drifted from its original, other than its listed differences. |
 | `DebugAidsLint` | A notification handler that writes a session's screen where the (unknown) sender says. |
 | `DocLinksLint` | A relative link or `#anchor` in README.md or `docs/**/*.md` that doesn't resolve, an image in `docs/images` no doc shows, or a lint suite missing from the command above. |
 | `ElapsedGuardLint` | An elapsed-time guard in the node's processes on the wall clock (`Date().timeIntervalSince(`, `.timeIntervalSinceNow`, a deadline on `Date()`, `Date()` compared): the wall clock steps; `Platform.Clock.steadyDate()` doesn't. |
@@ -109,8 +112,10 @@ bash scripts/test.sh --filter 'LintTests/'   # the same suites, as AGENTS.md run
 | `MCPLint` | A first statement of the tool server's or the hook's main, before the session sandbox's relay and porter hooks (`DoorRelay.runIfConfined`, `Porter.runIfAsked`), or a hook that finds its agent from its own pid rather than its caller's (`HookCaller`). |
 | `PlatformLint` | A libc or Apple-only import, or an `#if os(`/`canImport(`, in the portable targets outside `VibePlatform` and `VibeCore/MacOnly`; or a file on its pending list (`Tests/VibePlatformTests/PlatformLintPending.txt`) that no longer has one; or two tracked paths (a folder's too) that differ only in case, which are one on the Mac. |
 | `PreferencesLint` | A test that makes a defaults suite in the real `~/Library/Preferences`. |
+| `PluginLint` | A source of the node, the command line or the page, outside a feature plugin's folder (`Sources/VibeNode/Plugins/<Name>/`) and the registry's list, that names `shell` or `wallet` as a card kind, a card's field, an answer word or a view: it asks the registry and draws the generic card. |
 | `PrivateNamesLint` | A mention of the user's other projects (the list is in the test); write a stand-in, `project-b` or `project-c`. |
 | `PrivateWriteLint` | A file under `~/.vibeswitcher` or a project's `.vibeswitcher/` written without `VibePaths.writePrivate` (0600). |
+| `RequestKindsLint` | A request kind's lists out of step: a state-changing user's-voice kind missing from `Requests.recorded`, a carded kind unrecorded, a taken kind with no handler (the `act` switch, the hub, the lead's tool server, a page's drafts) or a handler for a kind not taken. |
 | `SandboxLint` | A namespace or mount call (`unshare`, `fork`, `clone`, `mount`, `pivot_root`, `setns`, the new mount calls) outside the session sandbox's shim (`Sources/CVibePlatform/shim_sandbox.c`); `Platform.Sandbox.enter` called outside a launcher; or the shim's mutation switch (`VIBE_SANDBOX_MUTATION`, `scripts/sandbox-mutation.sh`'s) named by a build. |
 | `ScriptScratchLint` | A script that runs `swift build`, `swift test` or `swift run` with the TMPDIR it was given. |
 | `SecretShapeLint` | Text in the repository shaped like a vendor's credential. |

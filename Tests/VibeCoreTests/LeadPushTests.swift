@@ -45,7 +45,7 @@ struct LeadPushTests {
 
         let asked = lead.call("push_remote", [:])
         #expect(!asked.isError, "\(asked.text)")
-        #expect(asked.text.contains("Waiting for the user's click") && asked.text.contains("2 commits ahead of origin/main"), "\(asked.text)")
+        #expect(asked.text.contains("Waiting for the user's") && asked.text.contains("2 commits ahead of origin/main"), "\(asked.text)")
         #expect(asked.text.contains("Local 1") && asked.text.contains("Local 0"), "\(asked.text)")
         #expect(originMain(scene) == before)
         let request = try #require(try vault.pushRequest(root: scene.root))

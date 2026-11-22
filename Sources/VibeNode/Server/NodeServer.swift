@@ -204,7 +204,7 @@ public final class NodeServer: @unchecked Sendable {
                     evictNoted = true
                     note("the server has \(open.count) connections open: closed pid \(closing.token.pid)'s longest idle one to make room (said once until there is room)")
                 }
-                bye("closed to make room for another connection: this process held the most, and this one was the longest idle", closing)
+                bye("closed to make room for another connection: this process held the most, and this one was the longest idle", code: "busy", closing)
             } else if open.count < Self.maxConnections - Self.reservedForUser {
                 evictNoted = false
             }
@@ -228,7 +228,7 @@ public final class NodeServer: @unchecked Sendable {
 
     /// One write to a connection not kept (whatever of it the new socket takes), and the close.
     private func refuseAtAccept(_ fd: Int32, _ reason: String) {
-        let line = NodeWire.line(NodeWire.Bye(reason: reason, code: nil))
+        let line = NodeWire.line(NodeWire.Bye(reason: reason, code: "busy"))
         _ = line.withUnsafeBytes { Platform.Sockets.send(fd, $0.baseAddress, $0.count) }
         Sys.close(fd)
     }
@@ -305,12 +305,12 @@ public final class NodeServer: @unchecked Sendable {
             }
             guard let sender, sender.sameImage(as: connection.token) else {
                 note("refused the connection of pid \(connection.token.pid): bytes on it came from another process (pid \(sender.map { String($0.pid) } ?? "unknown"))")
-                bye("a request came from another process than the one that connected", connection)
+                bye("a request came from another process than the one that connected", code: "auth", connection)
                 return false
             }
             connection.waiting += connection.lines.append(Data(chunk[0..<count])).map { ($0, sender) }
             if connection.lines.tooLong {
-                bye("a line over \(NodeWire.maxLine) bytes", connection)
+                bye("a line over \(NodeWire.maxLine) bytes", code: "too-long", connection)
                 return false
             }
             return takeWaiting(connection)
@@ -363,20 +363,20 @@ public final class NodeServer: @unchecked Sendable {
     private func take(_ line: Data, from sender: Platform.PeerToken, on connection: Connection) {
         connection.requested = true
         connection.idleSince = MacTime.real.awake()
-        guard NodeWire.isObject(line) else { return bye("not a JSON object", connection) }
-        guard let request = NodeWire.decode(NodeWire.Request.self, line) else {
-            return bye("not a request (v, id and kind are needed)", connection)
-        }
-        guard request.v <= NodeWire.version else {
-            send(NodeWire.line(NodeWire.Reply(re: request.id, error: .init(.version, "this server speaks version \(NodeWire.version)"))), on: connection)
-            return bye("a newer version than this server's", connection)
+        let request: NodeWire.Request
+        switch NodeWire.unwrap(line) {
+        case .request(let unwrapped): request = unwrapped
+        case .refused(let reply, let code, let reason):
+            if let reply { send(NodeWire.line(reply), on: connection) }
+            return bye(reason, code: code, connection)
         }
         guard NodeWire.taken.contains(request.kind) else {
-            send(NodeWire.line(NodeWire.Reply(re: request.id, error: .init(.unknownKind, "this server doesn't take \(request.kind)"))), on: connection)
-            if request.must == true { bye("a request this server must understand and doesn't (\(request.kind))", connection) }
+            let (reply, end) = NodeWire.unknownKind(request)
+            send(NodeWire.line(reply), on: connection)
+            if let end { bye(end.reason, code: end.code, connection) }
             return
         }
-        if ["subscribe", "unsubscribe", "chat.page", "chat.image", "session.usage"].contains(request.kind) {
+        if LiveHub.kinds.contains(request.kind) {
             guard let hub else {
                 return send(NodeWire.line(NodeWire.Reply(re: request.id, error: .init(.unknownKind, "this server has no live hub"))), on: connection)
             }
@@ -392,7 +392,7 @@ public final class NodeServer: @unchecked Sendable {
             guard let self, let connection else { return }
             // Never a line over the limit: the reader would drop it and close (`replyLine`).
             let line = NodeWire.replyLine(reply)
-            guard line.count - 1 <= NodeWire.maxLine else { return self.bye("a reply over \(NodeWire.maxLine) bytes", connection) }
+            guard line.count - 1 <= NodeWire.maxLine else { return self.bye("a reply over \(NodeWire.maxLine) bytes", code: "too-long", connection) }
             self.send(line, on: connection)
         }
     }
@@ -402,7 +402,7 @@ public final class NodeServer: @unchecked Sendable {
 
     // MARK: Writing
 
-    private func bye(_ reason: String, code: String? = nil, _ connection: Connection) {
+    private func bye(_ reason: String, code: String, _ connection: Connection) {
         guard !connection.closing else { return }
         send(NodeWire.line(NodeWire.Bye(reason: reason, code: code)), on: connection)
         connection.closing = true
@@ -475,7 +475,7 @@ public final class NodeServer: @unchecked Sendable {
     /// The hub's events and replies on `connection`'s lines, and how many bytes wait there. On `queue`.
     fileprivate func sendMessage(_ message: Data, on connection: Connection) {
         // A live message past the line's limit would be dropped by the reader: a bye saying so instead.
-        guard message.count <= NodeWire.maxLine else { return bye("a live message of \(message.count) bytes, past the line's limit of \(NodeWire.maxLine)", connection) }
+        guard message.count <= NodeWire.maxLine else { return bye("a live message of \(message.count) bytes, past the line's limit of \(NodeWire.maxLine)", code: "too-long", connection) }
         send(message + Data([UInt8(ascii: "\n")]), on: connection)
     }
 

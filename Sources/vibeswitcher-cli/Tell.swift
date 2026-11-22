@@ -25,15 +25,11 @@ enum TellCommand {
         let action = UUID().uuidString.lowercased()
         let what = "This tells the lead of \(ConfigSeal.inert(folder, limit: 400)), as you (not an answer to a card): "
             + ConfigSeal.inert(text, limit: 400)
-        let outcome = TypedWord.ask(approval: client.approvalRule, code: NodeIds.code(action: action), what: what)
-        guard outcome == .typed else { return Say.refused(TypedWord.refusal(outcome)) }
-        switch client.request("tell", args: ["folder": .string(folder), "text": .string(text)], action: action, timeout: 120) {
+        let said = TypedWord.said(approval: client.approvalRule, action: action, what: what)
+        guard case .success(let typed) = said else { return Say.refused(said.refusal) }
+        switch client.change("tell", args: ["folder": .string(folder), "text": .string(text)], action: action, typed: typed, timeout: 120) {
         case .failure(let failure): return Say.failed(failure)
         case .success(let reply):
-            // Accepted (the voice passed and the server recorded it): the engine's refusal (`refused`) comes after that.
-            if reply.ok || reply.error?.code == NodeWire.Code.refused.rawValue {
-                context.writeJournal(NodeJournal.entry(event: "request", action: action, kind: "tell", epoch: client.hello.epoch))
-            }
             guard reply.ok, let result = reply.result else { return Say.replyError(reply) }
             Say.out("told: the lead (session \(ConfigSeal.inert(result["session"]?.string ?? "?", limit: 80))) gets it at its next step, "
                     + "or once it can take it")

@@ -208,9 +208,12 @@ public enum NodeWire {
         /// The build of the web files this server holds (`/build.json`'s `assets`). Nil, and not written, on the Unix
         /// socket.
         public var assets: String?
+        /// The feature plugins that are on, each `{id, title}` (`PluginRegistry.onValue`): a plugin that is off isn't
+        /// listed, and the page draws nothing for it. Nil, and not written, from a server with no engine.
+        public var plugins: Value?
 
         public init(node: String, epoch: String, server: Server, host: Host, kinds: [String], peer: Peer, rule: String,
-                    auth: Value? = nil, assets: String? = nil) {
+                    auth: Value? = nil, assets: String? = nil, plugins: Value? = nil) {
             v = NodeWire.version
             kind = "hello"
             self.node = node
@@ -222,6 +225,7 @@ public enum NodeWire {
             self.rule = rule
             self.auth = auth
             self.assets = assets
+            self.plugins = plugins
         }
     }
 
@@ -231,7 +235,8 @@ public enum NodeWire {
         public var kind: String
         public var reason: String
         /// Why, as a word a client acts on (the live wire contract's §10): `auth`, `revoked`, `version`, `too-long`,
-        /// `not-object`, `not-request`, `must` or `stopping`. Nil, and not written, from a server before it.
+        /// `not-object`, `not-request`, `must`, `stopping` or `busy` (no room for the connection: its process holds its
+        /// share, the server is full, or it was closed to make room). Nil, and not written, from a server before it.
         public var code: String?
 
         public init(reason: String, code: String? = nil) {
@@ -348,6 +353,8 @@ public enum NodeWire {
         // `vibeswitcher approve` (2026-11-22): the list of what a plain accept settles changes nothing (no typed word);
         // the batch's go-ahead is the user's voice, one typed code, each item recorded as its own action.
         "approve.list": .user, "approve": .user,
+        // The feature plugins (2026-11-22): the list a read, on and off the user's voice.
+        "plugin.list": .anyone, "plugin.on": .user, "plugin.off": .user,
     ]
 
     /// The user's-voice kinds that change nothing (EN-D5: no typed word): `start` to a running node says when it
@@ -387,7 +394,7 @@ public enum NodeWire {
                                "push", "push.decline",
                                "session.reopen", "mail", "prompt-audit", "session.rename", "session.pause",
                                "session.resume", "shells", "session.close-shells", "presets.edit",
-                               "recent", "brief", "update.check", "approve.list", "approve"]
+                               "recent", "brief", "update.check", "approve.list", "approve", "plugin.list", "plugin.on", "plugin.off"]
 
     // MARK: Lines
 
@@ -439,6 +446,36 @@ public enum NodeWire {
     /// Whether a line is a JSON object (not an array, a string, a number or no JSON at all).
     public static func isObject(_ line: Data) -> Bool {
         (try? JSONSerialization.jsonObject(with: line, options: [])) is [String: Any]
+    }
+
+    /// A message read as a request: the one check of its envelope both transports make (the Unix socket's lines and a
+    /// WebSocket's texts), so they refuse the same things with the same `bye` codes.
+    public enum Unwrapped: Equatable, Sendable {
+        case request(Request)
+        /// Not taken: `reply` (when there is one) is sent, then the connection ends with `code` and `reason`.
+        case refused(reply: Reply?, code: String, reason: String)
+    }
+
+    /// `message` (one line or text, without its newline) as a request: not a JSON object is `not-object`; not a request
+    /// (`v`, `id` and `kind` are needed) is `not-request`; a newer `v` is the `version` error, then `version`.
+    public static func unwrap(_ message: Data) -> Unwrapped {
+        guard isObject(message) else { return .refused(reply: nil, code: "not-object", reason: "a message that isn't a JSON object") }
+        guard let request = decode(Request.self, message) else {
+            return .refused(reply: nil, code: "not-request", reason: "a message that isn't a request (v, id and kind are needed)")
+        }
+        guard request.v <= version else {
+            return .refused(reply: Reply(re: request.id, error: .init(.version, "this server speaks version \(version)")),
+                            code: "version", reason: "a newer protocol than this server's")
+        }
+        return .request(request)
+    }
+
+    /// A kind this server doesn't take: its `unknown-kind` reply, and, when the client must have it, the connection's
+    /// end (`must`).
+    public static func unknownKind(_ request: Request) -> (reply: Reply, bye: (code: String, reason: String)?) {
+        let reply = Reply(re: request.id, error: .init(.unknownKind, "this server doesn't take \(request.kind)"))
+        guard request.must == true else { return (reply, nil) }
+        return (reply, ("must", "a request this server must understand and doesn't (\(request.kind.prefix(80)))"))
     }
 
     /// Bytes as they come, cut into lines. A line longer than `maxLine` (with no newline yet past it) is `tooLong`:

@@ -17,6 +17,8 @@ enum StopCommand {
     /// The connection the server's answer was had on, kept for its stop.
     final class Connection {
         var client: NodeClient?
+        /// The token of the code typed for the server's stop (`TypedWord.asked`), which `throughServer` sends under.
+        var typed: Typed?
     }
 
     static func run(_ arguments: [String]) -> Int32 {
@@ -38,12 +40,16 @@ enum StopCommand {
                                       mode: { NodeFolders.mode(runtimeFolder: runtime) }) },
             installedBuild: { NodeFolders.installedBuild(executable: "/proc/self/exe", prefix: prefix) },
             server: { server(context, connection) },
-            typed: { code, what in TypedWord.ask(code: code, what: what) },
+            typed: { code, what in
+                let (outcome, typed) = TypedWord.asked(code: code, what: what)
+                connection.typed = typed
+                return outcome
+            },
             say: { Say.out($0) },
             journal: { context.writeJournal($0) },
             throughServer: { action in
                 guard let client = connection.client else { return .failure(StartRefusal("the node's server went", exitCode: 1)) }
-                return throughServer(context, client, action: action)
+                return throughServer(context, client, action: action, typed: connection.typed)
             },
             fallback: { mode in
                 // The scratch node never gets here (`StopSequence` refuses it first); its command line builds no
@@ -99,14 +105,13 @@ enum StopCommand {
     }
 
     /// The server's stop for `action` (the code typed): its reply, the request's journal entry, and what it did.
-    static func throughServer(_ context: NodeContext, _ client: NodeClient, action: String) -> Result<Void, StartRefusal> {
-        let record = { context.writeJournal(NodeJournal.entry(event: "request", action: action, kind: "stop", epoch: client.hello.epoch)) }
-        switch client.request("stop", action: action, timeout: Requests.stopWait + 30) {
+    static func throughServer(_ context: NodeContext, _ client: NodeClient, action: String, typed: Typed?) -> Result<Void, StartRefusal> {
+        switch client.change("stop", action: action, typed: typed, timeout: Requests.stopWait + 30, journal: .ok) {
         case .failure(.broken(let why)):
             // The host ends the server a moment after it accepts the shutdown: a reply that didn't get out in time
             // leaves the connection closed with none. The node gone is the answer then; anything else is a failure.
-            guard case .failure(.notRunning) = NodeClient.connect(context, timeout: 5) else { return .failure(StartRefusal(why, exitCode: 1)) }
-            record()
+            guard case .failure(.notRunning) = NodeClient.connect(context, timeout: 5), let typed else { return .failure(StartRefusal(why, exitCode: 1)) }
+            client.journal("stop", action: action, typed: typed)
             Say.out("the node stopped (its server ended before it answered)")
             return .success(())
         case .failure(let failure): return .failure(StartRefusal(failure.message, exitCode: failure.exitCode))
@@ -115,7 +120,6 @@ enum StopCommand {
                 let code = reply.error?.code ?? "internal"
                 return .failure(StartRefusal("\(code): \(ConfigSeal.inert(reply.error?.message ?? "no reason", limit: .max))", exitCode: Say.exitCode(replyCode: code)))
             }
-            record()
             Say.out("\(reply.result?["sessionsEnded"]?.int ?? 0) sessions ended; the host accepted to shut down")
             return .success(())
         }

@@ -37,16 +37,12 @@ enum PushCommand {
                                + (approve ? "push" : "decline"))
         }
         let action = UUID().uuidString.lowercased()
-        let outcome = TypedWord.ask(approval: client.approvalRule, code: NodeIds.code(action: action), what: PushText.what(push, root: root, approve: approve))
-        guard outcome == .typed else { return Say.refused(TypedWord.refusal(outcome)) }
+        let said = TypedWord.said(approval: client.approvalRule, action: action, what: PushText.what(push, root: root, approve: approve))
+        guard case .success(let typed) = said else { return Say.refused(said.refusal) }
         let kind = approve ? "push" : "push.decline"
-        switch client.request(kind, args: ["folder": .string(root), "request": .string(id)], action: action, timeout: LeadPush.timeout + 60) {
+        switch client.change(kind, args: ["folder": .string(root), "request": .string(id)], action: action, typed: typed, timeout: LeadPush.timeout + 60) {
         case .failure(let failure): return Say.failed(failure)
         case .success(let reply):
-            // Accepted (the voice passed and the server recorded it): the engine's refusal (`refused`) comes after that.
-            if reply.ok || reply.error?.code == NodeWire.Code.refused.rawValue {
-                context.writeJournal(NodeJournal.entry(event: "request", action: action, kind: kind, epoch: client.hello.epoch))
-            }
             guard reply.ok, let result = reply.result else { return Say.replyError(reply) }
             (result["said"]?.string ?? "settled").split(separator: "\n", omittingEmptySubsequences: false)
                 .forEach { Say.out(ConfigSeal.inert(PushText.scrub(String($0)), limit: 2000)) }

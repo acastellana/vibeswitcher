@@ -161,6 +161,20 @@ struct NodeHealthTests {
         #expect(health.refreshing == nil)
     }
 
+    /// How the server last ended on its own (the host's notes) is in the digest, as the wire has it, and printed.
+    @Test func howTheServerLastEndedIsShown() throws {
+        let health = NodeHealth(file: nil)
+        let ended = HostNotes.ServerEnd(at: Date(timeIntervalSince1970: 1_800_000_000), ran: 3 * 3600 + 20, cause: "killed by signal 11 (SIGSEGV), core dumped")
+        let digest = health.value(serverRestarts: 1, refusedConnections: 0, hostRestartAt: nil, waiting: [], serverEnd: ended)
+        #expect(WireSchema.check(digest, as: "node.health", strict: true) == nil, "\(digest)")
+        #expect(digest["serverEnded"]?["cause"]?.string == ended.cause && digest["serverEnded"]?["ran"]?.int == 3 * 3600 + 20)
+        let lines = NodeHealth.lines(digest)
+        #expect(lines.contains { $0.hasPrefix("  the server last ended on its own at ") && $0.hasSuffix(": killed by signal 11 (SIGSEGV), core dumped, after 3 h") }, "\(lines)")
+        let none = value(health)
+        #expect(none["serverEnded"] == .null && WireSchema.check(none, as: "node.health", strict: true) == nil)
+        #expect(!NodeHealth.lines(none).contains { $0.contains("last ended") })
+    }
+
     @Test func slowRefreshesAndFailingLinesAreKept() throws {
         let health = NodeHealth(file: nil)
         health.refreshed(in: 1)

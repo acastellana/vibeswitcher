@@ -104,12 +104,11 @@ enum SwitchCommand {
                     + "\n  then it runs, unless one of them has begun a turn meanwhile (a change the seal holds under the builds or the unit's folder would still stop it: `vs config held`)")
 
         let action = UUID().uuidString.lowercased()
-        let outcome = TypedWord.ask(approval: client.approvalRule, code: NodeIds.code(action: action), what: what)
-        guard outcome == .typed else { return Say.refused(TypedWord.refusal(outcome)) }
+        let said = TypedWord.said(approval: client.approvalRule, action: action, what: what)
+        guard case .success(let typed) = said else { return Say.refused(said.refusal) }
         let kind = "build.switch"
-        let journal = { _ = context.writeJournal(NodeJournal.entry(event: "request", action: action, kind: kind, epoch: client.hello.epoch)) }
         let handedOver: Bool
-        switch client.request(kind, args: ["commit": .string(target)], action: action, timeout: SwitchRequest.longestWait + 30) {
+        switch client.change(kind, args: ["commit": .string(target)], action: action, typed: typed, timeout: SwitchRequest.longestWait + 30) {
         case .failure(let failure):
             // The review of S8c: the reply may be lost after the host handed over (the server a switch replaces may end
             // first): the host, as a fresh connection sees it, says whether it did.
@@ -118,13 +117,11 @@ enum SwitchCommand {
                 Say.err("vibeswitcher: \(ConfigSeal.inert(refused.text, limit: .max))")
                 return refused.exitCode
             case .success:
-                journal()
+                client.journal(kind, action: action, typed: typed)
                 Say.out("the switch's reply was lost (\(ConfigSeal.inert(failure.message, limit: 400))), but the host runs \(target) now, its pid unchanged: handed over")
                 handedOver = true
             }
         case .success(let reply):
-            // Accepted (the voice passed and the server recorded it): its own refusal (`refused`) comes after that.
-            if reply.ok || reply.error?.code == NodeWire.Code.refused.rawValue { journal() }
             guard reply.ok, let result = reply.result else { return Say.replyError(reply) }
             let parked = (result["parked"]?.array ?? []).compactMap(\.string).map { ConfigSeal.inert($0, limit: 120) }
             if !parked.isEmpty { Say.out("parked first (idle since their last report; their leads were told): " + parked.joined(separator: ", ")) }

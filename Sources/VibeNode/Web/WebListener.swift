@@ -253,11 +253,13 @@ public final class WebListener: @unchecked Sendable {
                 return
             }
             if let admitPeer, !(Platform.TCP.peerAddress(fd).map(admitPeer) ?? false) {
-                Sys.close(fd)
+                // Said before the close: a peer that sees its connection end can count on the note being there (the
+                // CI flake of 2026-11-22: the test read the notes once its read ended, before this line had run).
                 if !peerNoted {
                     peerNoted = true
                     note("the web listener closed a connection from outside the addresses it takes")
                 }
+                Sys.close(fd)
                 continue
             }
             Platform.TCP.configure(fd)
