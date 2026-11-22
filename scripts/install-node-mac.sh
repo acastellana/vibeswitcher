@@ -375,10 +375,11 @@ install_node_mac_main() {
             mac-sign.sh) sign_lib=$blob ;;
         esac
     done
-    # shellcheck source=lib/scratch.sh
-    source <(printf '%s' "$scratch_lib") || fail 1 "can't read $expected's scripts/lib/scratch.sh"
-    # shellcheck source=lib/mac-sign.sh
-    source <(printf '%s' "$sign_lib") || fail 1 "can't read $expected's scripts/lib/mac-sign.sh"
+    # The verified blobs, from memory: evaluated, not sourced, since /bin/bash 3.2's `source <(…)` reads nothing from a
+    # process substitution (the first dry run, 2026-11-22: neither library's functions were defined).
+    eval "$scratch_lib" || fail 1 "can't read $expected's scripts/lib/scratch.sh"
+    declare -F scratch_tmpdir > /dev/null || fail 66 "$expected's scripts/lib/scratch.sh defines no scratch_tmpdir"
+    eval "$sign_lib" || fail 1 "can't read $expected's scripts/lib/mac-sign.sh"
     declare -F mac_sign_hardened > /dev/null || fail 66 "$expected's scripts/lib/mac-sign.sh defines no mac_sign_hardened"
     on_exit "/bin/rm -rf -- '$early'"
     on_exit install_node_mac_unlock
