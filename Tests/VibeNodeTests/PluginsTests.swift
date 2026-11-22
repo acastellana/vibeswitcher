@@ -712,6 +712,31 @@ extension PluginsTests {
     }
 }
 
+extension PluginsTests {
+    /// Turned off while an acting answer's settle is asked of the vault: the plugin doesn't act, its asker hears it
+    /// wasn't done (the review of 6e91f053, M3).
+    @Test func offWhileSettlingActsOnNothing() async throws {
+        let probe = Probe(defaultOn: true)
+        let world = try await CardWorld.make(scratch, plugins: [probe])
+        defer { world.stop() }
+        let (_, request) = try await file(world)
+        await look(world)
+        let card = try #require(card(world, request))
+        let reply = Locked<Result<NodeWire.Value, LeadEngine.CardFailure>?>(nil)
+        // In one turn of the engine's queue: the answer, then off, before the vault's settle comes back.
+        world.queue.async {
+            world.engine.answerPlugin(card, text: "run") { reply.value = $0 }
+            world.engine.keptPlugins(["probe": false])
+        }
+        #expect(await eventually(timeout: 30) { reply.value != nil })
+        guard case .failure(.refused(let why))? = reply.value else { Issue.record("\(String(describing: reply.value))"); return }
+        #expect(why.contains("nothing ran"), "\(why)")
+        #expect(probe.performed.value.isEmpty, "the plugin didn't act")
+        let closed = try #require(world.card(card.id))
+        #expect(closed.closed?.contains("nothing ran") == true, "\(String(describing: closed.closed))")
+    }
+}
+
 extension Result {
     var failure: Failure? { if case .failure(let failure) = self { return failure } else { return nil } }
 }

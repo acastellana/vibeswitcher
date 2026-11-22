@@ -332,6 +332,8 @@ public final class LeadEngine: @unchecked Sendable {
     var pluginSettled: Set<String> = []
     /// Whether the vault said which requests are settled (nothing is drawn until it did).
     var pluginSettledKnown = false
+    /// The acting answers whose settle the vault is still asked for (`PluginKey.name`): nothing has run for them yet.
+    var pluginSettling: Set<String> = []
     /// The plugin page open now (one at a time on a node).
     var pluginPage: PluginPage?
     /// When the vault's record began, as the vault says (a host restart starts it over): what `plugin list` says a
