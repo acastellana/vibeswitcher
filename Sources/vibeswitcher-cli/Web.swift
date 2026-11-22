@@ -40,16 +40,12 @@ enum WebCommand {
                 + "It never answers, holds, starts or stops anything. Under WSL's mirrored networking Windows' processes reach "
                 + "the port too: the token is what keeps them out. `vibeswitcher web --revoke` drops every token."
         let id = UUID().uuidString.lowercased()
-        let outcome = TypedWord.ask(approval: client.approvalRule, code: NodeIds.code(action: id), what: what)
-        guard outcome == .typed else { return Say.refused(TypedWord.refusal(outcome)) }
+        let said = TypedWord.said(approval: client.approvalRule, action: id, what: what)
+        guard case .success(let typed) = said else { return Say.refused(said.refusal) }
         let args: [String: NodeWire.Value] = tailnet ? ["tailnet": .bool(true)] : [:]
-        switch client.request(kind, args: args, action: id, timeout: 30) {
+        switch client.change(kind, args: args, action: id, typed: typed, timeout: 30) {
         case .failure(let failure): return Say.failed(failure)
         case .success(let reply):
-            // Accepted (the voice passed and the server recorded it): its own refusal (`refused`) comes after that.
-            if reply.ok || reply.error?.code == NodeWire.Code.refused.rawValue {
-                context.writeJournal(NodeJournal.entry(event: "request", action: id, kind: kind, epoch: client.hello.epoch))
-            }
             guard reply.ok, let result = reply.result else { return Say.replyError(reply) }
             if revoke {
                 let remote = result["tailnetRevoked"]?.int.map { "; on the tailnet: \($0)" } ?? ""

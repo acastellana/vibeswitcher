@@ -37,15 +37,12 @@ enum CloseShellsCommand {
                 + ConfigSeal.inert(shell["folder"]?.string ?? "?", limit: .max)
         }
         let action = UUID().uuidString.lowercased()
-        let outcome = TypedWord.ask(approval: client.approvalRule, code: NodeIds.code(action: action), what: "This ends \(finished.count) shell\(finished.count == 1 ? "" : "s") "
+        let said = TypedWord.said(approval: client.approvalRule, action: action, what: "This ends \(finished.count) shell\(finished.count == 1 ? "" : "s") "
             + "back at its prompt, with anything it left running:\n" + lines.joined(separator: "\n"))
-        guard outcome == .typed else { return Say.refused(TypedWord.refusal(outcome)) }
-        switch client.request("session.close-shells", args: ["sessions": .array(finished.compactMap { $0["session"] })], action: action) {
+        guard case .success(let typed) = said else { return Say.refused(said.refusal) }
+        switch client.change("session.close-shells", args: ["sessions": .array(finished.compactMap { $0["session"] })], action: action, typed: typed) {
         case .failure(let failure): return Say.failed(failure)
         case .success(let reply):
-            if reply.ok || reply.error?.code == NodeWire.Code.refused.rawValue {
-                context.writeJournal(NodeJournal.entry(event: "request", action: action, kind: "session.close-shells", epoch: client.hello.epoch))
-            }
             guard reply.ok, let result = reply.result else { return Say.replyError(reply) }
             let ended = result["ended"]?.array ?? [], left = result["left"]?.array ?? []
             Say.out("closed: \(ended.count) shell\(ended.count == 1 ? "" : "s")"

@@ -60,16 +60,13 @@ enum ReopenCommand {
             : "This reopens, as you, each in its same conversation (Claude with --resume, Codex with resume, in its folder):\n"
                 + chosen.map { "  " + line($0) }.joined(separator: "\n")
         let action = UUID().uuidString.lowercased()
-        let outcome = TypedWord.ask(approval: client.approvalRule, code: NodeIds.code(action: action), what: what)
-        guard outcome == .typed else { return Say.refused(TypedWord.refusal(outcome)) }
+        let said = TypedWord.said(approval: client.approvalRule, action: action, what: what)
+        guard case .success(let typed) = said else { return Say.refused(said.refusal) }
         let args: [String: NodeWire.Value] = forget ? ["forget": .bool(true)]
             : all ? ["all": .bool(true)] : ["sessions": .array(chosen.compactMap { $0["session"] })]
-        switch client.request("session.reopen", args: args, action: action, timeout: 180) {
+        switch client.change("session.reopen", args: args, action: action, typed: typed, timeout: 180) {
         case .failure(let failure): return Say.failed(failure)
         case .success(let reply):
-            if reply.ok || reply.error?.code == NodeWire.Code.refused.rawValue {
-                context.writeJournal(NodeJournal.entry(event: "request", action: action, kind: "session.reopen", epoch: client.hello.epoch))
-            }
             guard reply.ok, let result = reply.result else { return Say.replyError(reply) }
             if forget {
                 Say.out("put away: the offer to reopen \(result["forgotten"]?.int ?? 0) session(s)")
@@ -152,16 +149,13 @@ enum ResumeCommand {
         case .success(let found): session = found
         }
         let action = UUID().uuidString.lowercased()
-        let outcome = TypedWord.ask(approval: client.approvalRule, code: NodeIds.code(action: action),
+        let said = TypedWord.said(approval: client.approvalRule, action: action,
                                     what: "This starts again, as you, in its same conversation (\(session["agent"]?.string == "codex" ? "Codex with resume" : "Claude with --resume"), in its folder):\n  "
                                         + ReopenCommand.line(session))
-        guard outcome == .typed else { return Say.refused(TypedWord.refusal(outcome)) }
-        switch client.request("session.resume", args: ["session": session["session"] ?? .string(wanted)], action: action, timeout: 180) {
+        guard case .success(let typed) = said else { return Say.refused(said.refusal) }
+        switch client.change("session.resume", args: ["session": session["session"] ?? .string(wanted)], action: action, typed: typed, timeout: 180) {
         case .failure(let failure): return Say.failed(failure)
         case .success(let reply):
-            if reply.ok || reply.error?.code == NodeWire.Code.refused.rawValue {
-                context.writeJournal(NodeJournal.entry(event: "request", action: action, kind: "session.resume", epoch: client.hello.epoch))
-            }
             guard reply.ok, let result = reply.result else { return Say.replyError(reply) }
             for started in result["reopened"]?.array ?? [] {
                 let id = SessionCommand.short(started["session"]?.string)

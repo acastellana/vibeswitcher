@@ -42,15 +42,11 @@ enum HooksCommand {
         let ignored = ["CLAUDE_CONFIG_DIR", "CODEX_HOME"].filter { environment[$0] != nil }
         if !ignored.isEmpty { what += "\n\(ignored.joined(separator: " and ")) \(ignored.count == 1 ? "plays" : "play") no part: the node's own home is written." }
         let id = UUID().uuidString.lowercased()
-        let outcome = TypedWord.ask(approval: client.approvalRule, code: NodeIds.code(action: id), what: what)
-        guard outcome == .typed else { return Say.refused(TypedWord.refusal(outcome)) }
-        switch client.request(kind, args: ["agents": .array(agents.map { .string($0.rawValue) })], action: id, timeout: 120) {
+        let said = TypedWord.said(approval: client.approvalRule, action: id, what: what)
+        guard case .success(let typed) = said else { return Say.refused(said.refusal) }
+        switch client.change(kind, args: ["agents": .array(agents.map { .string($0.rawValue) })], action: id, typed: typed, timeout: 120) {
         case .failure(let failure): return Say.failed(failure)
         case .success(let reply):
-            // Accepted (the voice passed and the server recorded it): its own refusal (`refused`) comes after that.
-            if reply.ok || reply.error?.code == NodeWire.Code.refused.rawValue {
-                context.writeJournal(NodeJournal.entry(event: "request", action: id, kind: kind, epoch: client.hello.epoch))
-            }
             guard reply.ok, let result = reply.result else { return Say.replyError(reply) }
             for program in result["programs"]?.array ?? [] {
                 Say.out("installed \(ConfigSeal.inert(program.string ?? "", limit: 400))")
