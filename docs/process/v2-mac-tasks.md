@@ -268,7 +268,11 @@ or decided. Done on Linux, tested on both systems (`ApprovalJudgmentTests`, `App
    - **A Developer ID team identifier**: check the server against a requirement on a team the user can't sign as.
      Needs a paid signing identity; then the requirement is fixed and no pin is needed.
    Until one is built, the Mac's server check proves only "a hardened binary the user's account could have placed".
-11. **(BLOCKER before approvalMeasured; the review's sixth finding)** The Mac's ancestry is unreadable for a Terminal or
+11. **(BLOCKER before approvalMeasured; the review's sixth finding; built 2026-11-22, `v2-small-rows`, needs a real
+   Mac and a review)** Built: `Platform.Processes.link` falls back to the kernel's record (sysctl `KERN_PROC_PID`, any
+   user's) where `PROC_PIDTBSDINFO` refuses; `PeerFacts.runner` takes a root-owned ancestor with unreadable arguments
+   above a non-root sender as no runner (a runner is the user's code), every other unreadable one still nil (refused).
+   Tests: `ProcessesTests` (launchd's link on the Mac runner), `PeerRunnerTests`. Was: the Mac's ancestry is unreadable for a Terminal or
    ssh user: `proc_pidinfo(PROC_PIDTBSDINFO)` is refused for root's processes (`login`, `sshd-session`), and so is
    `KERN_PROCARGS2`, so a chain through them ends unread and the peer is refused. The fix reads the short record
    (`PROC_PIDT_SHORTBSDINFO`, any user's: parent and start) and `sysctl KERN_PROC_PID` for the rest, each still bound
