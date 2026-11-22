@@ -4331,3 +4331,4 @@ Proposed task 1: Find why dictations end with no text
 - 2026-11-22 12:42 Update: Merged: a lead handover now looks like one continuous lead — **What you asked for:** no more "finished lead, replaced by another". One session, with a signal when a fresh lead took over.
 - 2026-11-22 13:31 Automatically (auto_advance): Held: on battery under your 10 % limit, so nothing starts, audits or merges by itself until AC power returns: no task paused yet, since 13:31.
 - 2026-11-22 13:32 Automatically (auto_advance): Held: on battery under your 10 % limit, so nothing starts, audits or merges by itself until AC power returns: no task paused yet, since 13:32.
+- 2026-11-22 13:42 Automatically (auto_advance): Released: on AC power, after 10 min.
