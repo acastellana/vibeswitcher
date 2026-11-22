@@ -55,6 +55,13 @@ struct RestartResumeTests {
         // Not named by a conversation id, or not the one the record says.
         let unnamed = try write(projects.appendingPathComponent(RecentProjects.claudeSlug(for: root)).appendingPathComponent("notes.jsonl"))
         #expect(refusal(check(unnamed))?.contains("isn't named by a conversation id") == true)
+        // Named as a Codex rollout, among Claude's transcripts for the repository (the security review of b4b85afa): no
+        // conversation id from its name, so not resumable, whatever id its name ends in.
+        let rolloutNamed = try write(projects.appendingPathComponent(RecentProjects.claudeSlug(for: root)).appendingPathComponent("rollout-2026-11-22T08-00-00-\(id).jsonl"))
+        #expect(LeadEngine.conversation(ofTranscript: rolloutNamed) == nil)
+        #expect(LeadEngine.conversation(ofCodexRollout: rolloutNamed, home: home.path) == nil)
+        #expect(refusal(check(rolloutNamed))?.contains("isn't named by a conversation id") == true)
+        #expect(refusal(check(rolloutNamed, conversation: id))?.contains("isn't named by a conversation id") == true)
         #expect(refusal(check(own, conversation: UUID().uuidString))?.contains("isn't the one its transcript holds") == true)
         // Not started under the lead's name (a worker's conversation in the same folder).
         let worker = try write(projects.appendingPathComponent(RecentProjects.claudeSlug(for: root)).appendingPathComponent("\(UUID().uuidString.lowercased()).jsonl"),

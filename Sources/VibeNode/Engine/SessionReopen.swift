@@ -40,7 +40,8 @@ extension LeadEngine {
             .map { entry -> RestartReopen.Entry in
                 guard entry.agentSessionID == nil, let path = transcripts[entry.id] ?? nil else { return entry }
                 var entry = entry
-                entry.agentSessionID = Self.conversation(ofTranscript: path)
+                // Claude's by the transcript's name; the user's own Codex session's by its rollout's, Codex's alone.
+                entry.agentSessionID = entry.agent == .codex ? Self.conversation(ofCodexRollout: path, home: home) : Self.conversation(ofTranscript: path)
                 return entry
             }
         let now = openNow(), liveIDs = Set(live.map(\.id))
