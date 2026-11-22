@@ -317,8 +317,10 @@ export function pluginCard(card) {
     h('div', { class: 'facts' }, h('div', { class: 'facts-head' }, 'Exactly what it asks'), h('dl', null,
       fact('Asked by', f.asker),
       f.facts.map((item) => fact(item.label, item.folder ? h('code', null, item.value) : item.value)),
-      fact(f.body.name, h('pre', { class: 'plugin-body' }, f.body.lines.join('\n')), f.body.note ? `${f.body.size}, ${f.body.note}` : f.body.size),
-      f.context ? fact(f.context.label, f.context.text) : null)),
+      // What it asks, whole, as the agent wrote it: marked as the agent's words.
+      fact(`${f.body.name} (the agent’s words)`, h('pre', { class: 'plugin-body' }, f.body.lines.join('\n')), f.body.note ? `${f.body.size}, ${f.body.note}` : f.body.size))),
+    // The agent's own words beside it, never among the node's facts.
+    f.context ? h('p', { class: 'card-context' }, h('span', { class: 'card-context-label' }, `${f.context.label}: `), f.context.text) : null,
     wait ? h('div', { class: 'card-command' }, h('span', { class: 'card-command-label' }, 'Settle it in a terminal; nothing happens before its code'),
       f.actions.map((action) => copyLine(action.line, action.says)))
       : h('p', { class: 'card-notice' }, f.outcome || f.state),

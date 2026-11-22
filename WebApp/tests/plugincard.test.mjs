@@ -61,7 +61,7 @@ test('a new plugin card is told as its own title, its asker and its first line; 
   const told = changes(summarize(state([])), summarize(state([card()])));
   assert.equal(told.length, 1);
   assert.ok(told[0].title.startsWith('A probe asked for'), told[0].title);
-  assert.equal(told[0].body, 'Worker: fix-login: probe --deep');
+  assert.equal(told[0].body, 'Worker: fix-login, in the agent’s words: “probe --deep”');
   assert.equal(changes(summarize(state([], [])), summarize(state([card()], []))).length, 0, 'off: not told');
 });
 
