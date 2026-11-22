@@ -35,6 +35,11 @@ public final class NodeServer: @unchecked Sendable {
     /// The slots only a peer that may be the user's voice takes (`Requests.mayBeUsersVoice`): the others share
     /// `maxConnections` less these.
     public static let reservedForUser = 8
+    /// The connections one share (`Requests.share`: a session, a cgroup, a process) that isn't the user's may hold, its
+    /// processes together: a peer that forks for more is held to it.
+    public static let maxPerShare = 16
+    /// How long a connection told `bye` may take to be written its last bytes before it is closed outright.
+    public static let closingLife: TimeInterval = 2
     /// The bytes waiting to be written to one connection past which it is closed (its reader doesn't read).
     public static let maxPending = 8 << 20
     /// Reads of one connection (each up to 64 KiB) in a turn of the queue; the source fires again while more waits.
@@ -183,33 +188,34 @@ public final class NodeServer: @unchecked Sendable {
                 continue
             }
             UnixSocket.configure(fd)
-            let open = connections.values.filter { !$0.closing }
-            guard open.filter({ $0.token.pid == token.pid }).count < Self.maxPerPeer else {
-                refuseAtAccept(fd, "this process has \(Self.maxPerPeer) connections open to the server: close one first")
-                if capNoted.insert(token.pid).inserted {
-                    note("pid \(token.pid) has \(Self.maxPerPeer) connections open: its next ones are closed")
-                }
-                continue
-            }
-            capNoted.remove(token.pid)
+            // Every connection that still holds a descriptor counts, one closing too (it is closed within `closingLife`).
+            let open = Array(connections.values)
             let facts = PeerFacts.read(pid: token.pid, token: token, cgroupRoot: cgroupRoot, runnersAbove: runnersAbove)
             let voice = requests.mayBeUsersVoice(facts)
-            if open.count >= (voice ? Self.maxConnections : Self.maxConnections - Self.reservedForUser) {
-                let holders = open.map { Holder(id: ObjectIdentifier($0), pid: $0.token.pid, voice: $0.voice, requested: $0.requested, idleSince: $0.idleSince) }
-                guard let victim = Self.evictee(holders, newcomerVoice: voice), let closing = connections[victim] else {
-                    refuseAtAccept(fd, "the server has \(open.count) connections open: try again later")
-                    continue
-                }
+            let share = requests.share(facts)
+            let holders = open.map {
+                Holder(id: ObjectIdentifier($0), pid: $0.token.pid, share: $0.share, voice: $0.voice, requested: $0.requested,
+                       idleSince: $0.idleSince, kept: $0.subscribed || $0.toolServer)
+            }
+            switch Self.admission(holders, pid: token.pid, share: share, voice: voice) {
+            case .refuse(let why):
+                refuseAtAccept(fd, why)
+                if capNoted.insert(token.pid).inserted { note("pid \(token.pid)'s connection refused: \(why) (said once until it is admitted)") }
+                continue
+            case .evict(let victim):
+                guard let closing = connections[victim] else { continue }
                 if !evictNoted {
                     evictNoted = true
-                    note("the server has \(open.count) connections open: closed pid \(closing.token.pid)'s longest idle one to make room (said once until there is room)")
+                    note("the server has \(open.count) connections open: closed one of pid \(closing.token.pid)'s (its share, \(closing.share), held the most) to make room (said once until there is room)")
                 }
-                bye("closed to make room for another connection: this process held the most, and this one was the longest idle", code: "busy", closing)
-            } else if open.count < Self.maxConnections - Self.reservedForUser {
-                evictNoted = false
+                bye("closed to make room for another connection: this process's share held the most, and this one was the longest idle", code: "busy", closing, hard: true)
+            case .admit:
+                if open.count < Self.maxConnections - Self.reservedForUser { evictNoted = false }
             }
+            capNoted.remove(token.pid)
             let connection = Connection(fd: fd, token: token)
             connection.voice = voice
+            connection.share = share
             connection.idleSince = MacTime.real.awake()
             connections[ObjectIdentifier(connection)] = connection
             let read = DispatchSource.makeReadSource(fileDescriptor: fd, queue: queue)
@@ -233,31 +239,63 @@ public final class NodeServer: @unchecked Sendable {
         Sys.close(fd)
     }
 
-    /// A connection as the eviction weighs it.
+    /// A connection as the caps weigh it.
     struct Holder: Equatable {
         var id: ObjectIdentifier
         var pid: pid_t
+        /// Its share (`Requests.share`).
+        var share: String
         /// Its process may be the user's voice (at its accept).
         var voice: Bool
         /// It sent a request since its hello.
         var requested: Bool
         /// Its accept, or its last request, on the awake clock.
         var idleSince: TimeInterval
+        /// Never closed to make room: it holds a live subscription, or a lead's tool server posts on it.
+        var kept: Bool = false
     }
 
-    /// The connection closed to make room for a newcomer (`newcomerVoice`: one that may be the user's voice): among those
-    /// a newcomer may displace (one that isn't the user's displaces only those that aren't; the user's, those first,
-    /// then any), the process holding the most, and of its connections one with no request since its hello first,
-    /// then the longest idle. nil when there is none it may displace.
-    static func evictee(_ open: [Holder], newcomerVoice: Bool) -> ObjectIdentifier? {
-        let others = open.filter { !$0.voice }
-        let pool = !others.isEmpty ? others : newcomerVoice ? open : []
-        let byPeer = Dictionary(grouping: pool, by: \.pid)
-        let idlest = { (list: [Holder]) in list.min { ($0.requested ? 1 : 0, $0.idleSince) < ($1.requested ? 1 : 0, $1.idleSince) } }
-        let heaviest = byPeer.values.max { one, other in
-            one.count != other.count ? one.count < other.count : (idlest(one)?.idleSince ?? 0) > (idlest(other)?.idleSince ?? 0)
+    /// What a newcomer's connection gets.
+    enum Admission: Equatable {
+        case admit
+        /// Closed at once, saying why.
+        case refuse(String)
+        /// Admitted, this one closed to make room.
+        case evict(ObjectIdentifier)
+    }
+
+    /// A newcomer from `pid`, in `share`, that may be the user's voice (`voice`), among the connections `open` (every
+    /// one that holds a descriptor, closing ones too):
+    /// - refused past its process's `maxPerPeer`, or, when it isn't the user's, past its share's `maxPerShare`;
+    /// - admitted while there is room: `maxConnections`, less `reservedForUser` when it isn't the user's;
+    /// - else, admitted in place of a connection of the share holding the most, only when that share holds more than
+    ///   the newcomer's would with it (never at an equal share), never one kept (`Holder.kept`), and never the user's for
+    ///   another's: of that share's connections, one with no request since its hello first, then the longest idle;
+    /// - else refused.
+    static func admission(_ open: [Holder], pid: pid_t, share: String, voice: Bool) -> Admission {
+        guard open.filter({ $0.pid == pid }).count < maxPerPeer else {
+            return .refuse("this process has \(maxPerPeer) connections open to the server: close one first")
         }
-        return heaviest.flatMap(idlest)?.id
+        let own = open.filter { $0.share == share }.count
+        if !voice, own >= maxPerShare {
+            return .refuse("this process's share (\(share)) has \(maxPerShare) connections open to the server: close one first")
+        }
+        guard open.count >= (voice ? maxConnections : maxConnections - reservedForUser) else { return .admit }
+        let candidates = open.filter { !$0.kept && $0.share != share && (voice || !$0.voice) }
+        let byShare = Dictionary(grouping: candidates, by: \.share)
+        let full = Dictionary(grouping: open, by: \.share).mapValues(\.count)
+        let rank = { (holder: Holder) in (holder.requested ? 1 : 0, holder.idleSince) }
+        let idlest = { (list: [Holder]) in list.min { rank($0) < rank($1) } }
+        // The share holding the most; of equal ones, the one whose idlest connection ranks first.
+        let heaviest = byShare.filter { (full[$0.key] ?? 0) > own + 1 }.max { one, other in
+            let (a, b) = (full[one.key] ?? 0, full[other.key] ?? 0)
+            guard a == b, let first = idlest(one.value), let second = idlest(other.value) else { return a < b }
+            return rank(first) > rank(second)
+        }
+        guard let victim = heaviest.flatMap({ idlest($0.value) }) else {
+            return .refuse("the server has \(open.count) connections open: try again later")
+        }
+        return .evict(victim.id)
     }
 
     /// Whether an accept's failure lasts (no descriptor left in the process or the system, no memory): accepting again
@@ -305,12 +343,12 @@ public final class NodeServer: @unchecked Sendable {
             }
             guard let sender, sender.sameImage(as: connection.token) else {
                 note("refused the connection of pid \(connection.token.pid): bytes on it came from another process (pid \(sender.map { String($0.pid) } ?? "unknown"))")
-                bye("a request came from another process than the one that connected", code: "auth", connection)
+                bye("a request came from another process than the one that connected", code: "auth", connection, hard: true)
                 return false
             }
             connection.waiting += connection.lines.append(Data(chunk[0..<count])).map { ($0, sender) }
             if connection.lines.tooLong {
-                bye("a line over \(NodeWire.maxLine) bytes", code: "too-long", connection)
+                bye("a line over \(NodeWire.maxLine) bytes", code: "too-long", connection, hard: true)
                 return false
             }
             return takeWaiting(connection)
@@ -368,8 +406,10 @@ public final class NodeServer: @unchecked Sendable {
         case .request(let unwrapped): request = unwrapped
         case .refused(let reply, let code, let reason):
             if let reply { send(NodeWire.line(reply), on: connection) }
-            return bye(reason, code: code, connection)
+            return bye(reason, code: code, connection, hard: true)
         }
+        if NodeWire.kinds[request.kind] == .leadToolServer { connection.toolServer = true }
+        if request.kind == "subscribe" { connection.subscribed = true }
         guard NodeWire.taken.contains(request.kind) else {
             let (reply, end) = NodeWire.unknownKind(request)
             send(NodeWire.line(reply), on: connection)
@@ -402,7 +442,10 @@ public final class NodeServer: @unchecked Sendable {
 
     // MARK: Writing
 
-    private func bye(_ reason: String, code: String, _ connection: Connection) {
+    /// The last line, then the close: once what waits is written, within `closingLife` at most. `hard` (an eviction, a
+    /// protocol error): closed at once after the bye's one write, whatever else waited dropped, so a peer can't keep a
+    /// connection, its descriptor and its output by not reading.
+    private func bye(_ reason: String, code: String, _ connection: Connection, hard: Bool = false) {
         guard !connection.closing else { return }
         send(NodeWire.line(NodeWire.Bye(reason: reason, code: code)), on: connection)
         connection.closing = true
@@ -410,7 +453,11 @@ public final class NodeServer: @unchecked Sendable {
         resumeReading(connection)
         connection.reading?.cancel()
         connection.reading = nil
-        if connection.pending.isEmpty { close(connection) }
+        if hard || connection.pending.isEmpty { return close(connection) }
+        queue.asyncAfter(deadline: .now() + Self.closingLife) { [weak self, weak connection] in
+            guard let self, let connection else { return }
+            self.close(connection)
+        }
     }
 
     private func send(_ data: Data, on connection: Connection) {
@@ -496,8 +543,13 @@ public final class NodeServer: @unchecked Sendable {
         var turnAsked = false
         /// What was read of the process at its accept (for the hello and its `anyone` requests).
         var facts: PeerFacts?
-        /// Whether its process may be the user's voice, at its accept (`Requests.mayBeUsersVoice`).
+        /// Whether its process may be the user's voice, at its accept (`Requests.mayBeUsersVoice`); its share
+        /// (`Requests.share`); whether a lead's tool server posts on it, or it subscribed to a live stream (either: never
+        /// closed to make room).
         var voice = false
+        var share = ""
+        var toolServer = false
+        var subscribed = false
         /// Whether it sent a request since its hello, and since when it has been idle (the awake clock).
         var requested = false
         var idleSince: TimeInterval = 0

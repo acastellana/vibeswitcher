@@ -179,10 +179,34 @@ public final class Requests: @unchecked Sendable {
     /// Whether the process `facts` reads may be the user's voice, as a connection's accept judges it (the slots only it
     /// takes, `NodeServer.reservedForUser`): the voice rule's verdict; under the Mac's rule (asked per request) a process
     /// that isn't a session's. Never a judgment of a request: each is judged again as it comes. On `queue`.
+    ///
+    /// Under the Mac's rule only what a session's process can't change counts (its environment's marker is its own to
+    /// set): its user, an ancestry read whole with no live session's program, the host or the server in it, no branch
+    /// code runner above it, and a terminal that isn't a live session's (`Voice.judge`'s own checks of these).
     func mayBeUsersVoice(_ facts: PeerFacts) -> Bool {
-        if rule.mode == .approval { return facts.uid == rule.uid && facts.sessionMarker == false }
-        if case .user = Voice.judge(facts, live: live, rule: rule) { return true }
-        return false
+        guard rule.mode == .approval else {
+            if case .user = Voice.judge(facts, live: live, rule: rule) { return true }
+            return false
+        }
+        let live = self.live
+        guard facts.uid == rule.uid, let ancestry = facts.ancestry, facts.underRunner == false else { return false }
+        guard !ancestry.contains(where: { $0.pid == live.host || $0.pid == live.server || live.programs.contains($0.pid) }) else { return false }
+        switch facts.terminal {
+        case .unreadable: return false
+        case .named(let name): return !live.terminals.contains(name)
+        case .none: return true
+        }
+    }
+
+    /// The share a connection from `facts` counts toward (`NodeServer`'s caps and eviction), by what the process can't
+    /// change: the live session its ancestry runs under; else, under the systemd rule, its cgroup (a scope: a
+    /// terminal's, an app's, the host's service); else its pid alone. A process that forks for more connections stays
+    /// in its session's or cgroup's share. On `queue`.
+    func share(_ facts: PeerFacts) -> String {
+        let live = self.live
+        if let program = facts.ancestry?.first(where: { live.programs.contains($0.pid) }) { return "session \(program.pid)" }
+        if rule.mode == .systemd, let lines = facts.cgroup, let last = lines.last, !last.isEmpty { return "cgroup \(last)" }
+        return "pid \(facts.pid)"
     }
 
     /// The hello a new connection from `peer` gets. On `queue`.

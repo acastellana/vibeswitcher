@@ -137,23 +137,113 @@ struct NodeServerBoundsTests {
         #expect(none.description == "the node's server sent no hello" && other == none)
     }
 
-    /// At the limit the newcomer displaces the heaviest holder's longest-idle connection, one with no request first; a
-    /// newcomer that isn't the user's displaces only connections that aren't either.
-    @Test func theEvictionTakesTheHeaviestHoldersIdlestConnection() {
-        func holder(_ pid: pid_t, voice: Bool = false, requested: Bool = true, idle: TimeInterval) -> NodeServer.Holder {
-            NodeServer.Holder(id: ObjectIdentifier(NSObject()), pid: pid, voice: voice, requested: requested, idleSince: idle)
+    /// The caps as one decision (`NodeServer.admission`), over every connection that holds a descriptor: a process at its
+    /// share, a share that isn't the user's at its own (its processes together), the reserved slots, and eviction only
+    /// from a share holding more than the newcomer's would, never a kept one, never the user's for another's.
+    @Test func theAdmissionHoldsEachShareToItsOwn() {
+        // Each holder's id an object kept for the test's length: one let go at once could give its address to the next.
+        var objects: [NSObject] = []
+        defer { objects.removeAll() }
+        func holder(_ pid: pid_t, _ share: String, voice: Bool = false, requested: Bool = true, idle: TimeInterval = 0, kept: Bool = false) -> NodeServer.Holder {
+            let object = NSObject()
+            objects.append(object)
+            return NodeServer.Holder(id: ObjectIdentifier(object), pid: pid, share: share, voice: voice, requested: requested, idleSince: idle, kept: kept)
         }
-        let quiet = holder(7, requested: false, idle: 50)
-        let busy = [holder(7, idle: 10), holder(7, idle: 20), quiet]
-        let lighter = [holder(8, idle: 1), holder(8, idle: 2)]
-        let user = [holder(9, voice: true, requested: false, idle: 0)]
-        let open = busy + lighter + user
-        #expect(NodeServer.evictee(open, newcomerVoice: false) == quiet.id, "the heaviest holder's, one with no request since its hello first")
-        #expect(NodeServer.evictee(open, newcomerVoice: true) == quiet.id)
-        #expect(NodeServer.evictee(user, newcomerVoice: false) == nil, "the user's connections aren't another's to displace")
-        #expect(NodeServer.evictee(user, newcomerVoice: true) == user[0].id)
-        let ties = [holder(1, idle: 30), holder(2, idle: 5)]
-        #expect(NodeServer.evictee(ties, newcomerVoice: false) == ties[1].id, "of equal holders, the longest idle")
+        // A process at its share is refused, closing connections and all (the server passes every one it holds).
+        let eight = (0..<NodeServer.maxPerPeer).map { _ in holder(7, "pid 7") }
+        guard case .refuse(let why) = NodeServer.admission(eight, pid: 7, share: "pid 7", voice: false) else { Issue.record("admitted past its share"); return }
+        #expect(why.contains("this process has \(NodeServer.maxPerPeer) connections"))
+        // A share's processes together (a peer that forks): held to `maxPerShare` when it isn't the user's.
+        let forked = (0..<NodeServer.maxPerShare).map { holder(pid_t(100 + $0 / 4), "session 99") }
+        guard case .refuse(let share) = NodeServer.admission(forked, pid: 200, share: "session 99", voice: false) else { Issue.record("a forking share went past its own"); return }
+        #expect(share.contains("share (session 99)"))
+        #expect(NodeServer.admission(forked, pid: 200, share: "session 99", voice: true) == .admit, "the user's aren't held to a share")
+
+        // A full server, two shares of 28 each: a newcomer whose share would hold 1 evicts from the larger, the idlest
+        // with no request first; one whose share would equal it evicts nothing.
+        let quiet = holder(1, "cgroup /a", requested: false, idle: 50)
+        var full = (0..<27).map { holder(pid_t(1 + $0 / 8), "cgroup /a", idle: TimeInterval($0)) } + [quiet]
+        full += (0..<28).map { holder(pid_t(10 + $0 / 8), "cgroup /b", idle: TimeInterval($0)) }
+        full += (0..<NodeServer.reservedForUser).map { holder(pid_t(50 + $0), "cgroup /user", voice: true) }
+        #expect(full.count == NodeServer.maxConnections)
+        #expect(NodeServer.admission(full, pid: 90, share: "cgroup /new", voice: false) == .evict(quiet.id))
+        let equal = Array(full.prefix(28)) + (0..<28).map { holder(pid_t(60 + $0 / 8), "cgroup /c") } + Array(full.suffix(NodeServer.reservedForUser))
+        if case .evict = NodeServer.admission(equal, pid: 70, share: "cgroup /c", voice: true) { Issue.record("evicted at an equal share") }
+        // A kept connection (a live subscription, a tool server's) is never the one closed.
+        let kept = full.map { var keep = $0; keep.kept = keep.share == "cgroup /a"; return keep }
+        guard case .evict(let other) = NodeServer.admission(kept, pid: 90, share: "cgroup /new", voice: false) else { Issue.record("refused"); return }
+        #expect(kept.first { $0.id == other }?.share == "cgroup /b")
+        // The user's connections aren't another's to displace; under the reserved slots a newcomer that isn't the user's
+        // finds room only by eviction.
+        let users = (0..<NodeServer.maxConnections).map { holder(pid_t(300 + $0 / 8), "cgroup /user\($0 / 8)", voice: true) }
+        guard case .refuse = NodeServer.admission(users, pid: 900, share: "cgroup /x", voice: false) else { Issue.record("displaced the user's"); return }
+    }
+
+    /// Under the Mac's rule the reserved slots go by what a session's process can't change: a process under a live
+    /// session's program, the host or the server isn't the user's whatever its environment says.
+    @Test func theReservedSlotsUnderTheMacsRuleIgnoreTheSessionMarker() throws {
+        let scratchRoot = scratch.url("approval-root")
+        try FileManager.default.createDirectory(at: scratchRoot, withIntermediateDirectories: true)
+        let queue = DispatchQueue(label: "reserved-slots")
+        let requests = Requests(link: HostLink(dialer: NoHost(), root: scratchRoot, queue: queue), sessions: nil,
+                                rule: VoiceRule(mode: .approval, scopes: [], uid: getuid(), says: VoiceRule.approvalSays),
+                                root: scratchRoot, hostSocket: scratch.url("h.sock").path, commit: "test", hostPID: 4242)
+        func facts(_ ancestry: [pid_t], marker: Bool) -> PeerFacts {
+            PeerFacts(pid: ancestry[0], uid: getuid(), cgroup: nil, ancestry: ancestry.map { .init(pid: $0, startTicks: 1) },
+                      terminal: .named("ttys009"), sessionMarker: marker, underRunner: false)
+        }
+        #expect(queue.sync { requests.mayBeUsersVoice(facts([9_100, 9_000], marker: false)) })
+        #expect(!queue.sync { requests.mayBeUsersVoice(facts([9_100, 4242], marker: false)) }, "under the host, its marker unset")
+        #expect(queue.sync { requests.mayBeUsersVoice(facts([9_100, 9_000], marker: true)) } == queue.sync { requests.mayBeUsersVoice(facts([9_100, 9_000], marker: false)) },
+                "the marker counts for nothing either way")
+        var unread = facts([9_100], marker: false)
+        unread.ancestry = nil
+        #expect(!queue.sync { requests.mayBeUsersVoice(unread) }, "an ancestry that can't be read gets no reserved slot")
+    }
+
+    private struct NoHost: HostDialer {
+        func connect(queue: DispatchQueue, patience: TimeInterval) throws -> HostConnection { throw HostLink.Failure("no host in this test") }
+    }
+
+    /// A connection told `bye` that won't read its output still counts toward its process's share, and is closed within
+    /// `NodeServer.closingLife`, its output dropped: the slot comes back though it never reads.
+    @Test func aClosingConnectionCountsAndIsClosedWithinItsLife() async throws {
+        let node = try await ScratchNode(scratch)
+        defer { node.stop() }
+        let path = node.serverSocket
+        var others: [Raw] = []
+        for _ in 1..<NodeServer.maxPerPeer {
+            let raw = try Raw(path)
+            try #require(Self.isHello(raw.line()))
+            others.append(raw)
+        }
+        let stuck = try Raw(path)
+        try #require(Self.isHello(stuck.line()))
+        let count = 3_000
+        var lines = Data()
+        for index in 0..<count { lines.append(NodeWire.line(NodeWire.Request(id: "d\(index)", kind: "draft"))) }
+        lines.append(NodeWire.line(NodeWire.Request(id: "end", kind: "no.such.kind", must: true)))
+        #expect(await offPool { stuck.sendAll(lines) })
+        // While it holds a descriptor it counts: a ninth is refused; once it is closed (never read), a ninth gets in.
+        let admitted = await offPool { () -> (refused: Int, admitted: Bool) in
+            var refused = 0
+            let deadline = MacTime.real.awake() + 60
+            while MacTime.real.awake() < deadline {
+                guard let raw = try? Raw(path) else { continue }
+                if Self.isHello(raw.line()) { return (refused, true) }
+                refused += 1
+            }
+            return (refused, false)
+        }
+        #expect(admitted.admitted, "\(node.said)")
+        #expect(admitted.refused > 0, "the closing connection was counted while it held its descriptor")
+        let replies = await offPool { () -> Int in
+            var got = 0
+            while let line = stuck.line(timeout: 30) { if NodeWire.decode(NodeWire.Reply.self, line) != nil { got += 1 } }
+            return got
+        }
+        #expect(replies < count, "its output was dropped at the close: \(replies) replies")
+        others.removeAll()
     }
 
     /// A client that sends requests and never reads its replies: once more than `maxPending` bytes wait for it, it is
