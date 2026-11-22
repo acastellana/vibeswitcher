@@ -406,3 +406,6 @@
 - 2026-11-21 19:21 Handed the lead over to a fresh session: the last one had been idle 50 minutes with 322k tokens of context, past handover_idle_min 50 and handover_tokens 150k
 - 2026-11-21 19:21 Automatically (auto_advance): The account's usage is near a limit: the weekly limit (every model): 86% used, resets Nov 26, 12:00. At 80% of a limit VibeSwitcher starts no workers or audits on any model, so the limit doesn't stop one mid-task; sessions already running go on. Tell the user. Nothing on it starts by itself until the reset, then it does; start_worker or audit with override_usage: true starts one anyway.
 - 2026-11-22 11:52 Started a worker on the-node-s-gate
+- 2026-11-22 12:18 Audit of the-node-s-gate at 05db26f0 by 2 finders (contract and acceptance; bugs, regressions and security); the shared run: test command failed
+- 2026-11-22 12:19 Exception on the-node-s-gate by lead of vibeswitcher-v2-lead: edits to Tests/VibeCoreTests/ProcessTableTests.swift, Tests/VibeCoreTests/TestSupport.swift accepted. Reason: A tenth box-only test failure, found by the audit's shared run of 05db26f0: ProcessTableTests.aSnapshotIsWholeAndWithinItsLimit expects more processes in the table than twice the cores (expectWhole, P…
+- 2026-11-22 12:21 Audit of the-node-s-gate: finder 2 of 2 submitted (complete, clean, 2 findings)
