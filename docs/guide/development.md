@@ -90,7 +90,7 @@ keychain code is reachable from a test any other way. The one test of the real k
 Run them before you call a change done; they take seconds:
 
 ```sh
-bash scripts/test.sh --filter 'AccessibilityLint|AgentExportLint|CloseOnExecLint|DebugAidsLint|DocLinksLint|ElapsedTimeLint|HomePathLint|KeychainLint|MacOnlyTestsLint|MCPLint|PhoneMainSyncLint|PlatformLint|PreferencesLint|PrivateNamesLint|PrivateWriteLint|SandboxLint|ScriptScratchLint|SecretShapeLint|SecurityDocumentLint|ServerLint|ShebangWriteLint|TemporaryFolderLint|WebAppLint'
+bash scripts/test.sh --filter 'AccessibilityLint|AgentExportLint|CloseOnExecLint|DebugAidsLint|DocLinksLint|ElapsedTimeLint|HomePathLint|KeychainLint|MacOnlyTestsLint|MCPLint|PhoneMainSyncLint|PlatformLint|PreferencesLint|PrivateNamesLint|PrivateWriteLint|RequestKindsLint|SandboxLint|ScriptScratchLint|SecretShapeLint|SecurityDocumentLint|ServerLint|ShebangWriteLint|TemporaryFolderLint|WebAppLint'
 bash scripts/test.sh --filter 'LintTests/'   # the same suites, as AGENTS.md runs them: every `…LintTests` type
 ```
 
@@ -110,6 +110,7 @@ bash scripts/test.sh --filter 'LintTests/'   # the same suites, as AGENTS.md run
 | `PreferencesLint` | A test that makes a defaults suite in the real `~/Library/Preferences`. |
 | `PrivateNamesLint` | A mention of the user's other projects (the list is in the test); write a stand-in, `project-b` or `project-c`. |
 | `PrivateWriteLint` | A file under `~/.vibeswitcher` or a project's `.vibeswitcher/` written without `VibePaths.writePrivate` (0600). |
+| `RequestKindsLint` | A request kind's lists out of step: a state-changing user's-voice kind missing from `Requests.recorded`, a carded kind unrecorded, a taken kind with no handler (the `act` switch, the hub, the lead's tool server, a page's drafts) or a handler for a kind not taken. |
 | `SandboxLint` | A namespace or mount call (`unshare`, `fork`, `clone`, `mount`, `pivot_root`, `setns`, the new mount calls) outside the session sandbox's shim (`Sources/CVibePlatform/shim_sandbox.c`); `Platform.Sandbox.enter` called outside a launcher; or the shim's mutation switch (`VIBE_SANDBOX_MUTATION`, `scripts/sandbox-mutation.sh`'s) named by a build. |
 | `ScriptScratchLint` | A script that runs `swift build`, `swift test` or `swift run` with the TMPDIR it was given. |
 | `SecretShapeLint` | Text in the repository shaped like a vendor's credential. |
