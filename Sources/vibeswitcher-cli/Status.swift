@@ -139,7 +139,7 @@ enum StatusCommand {
         out += CardText.statusLines(leads: result["leads"]?.array ?? [], cards: result["cards"])
         // What a build switch would wait on now, each with what it does and since when (the rule on switches).
         let holders = (result["switchBlockers"]?.array ?? []).compactMap(\.string).map { inert($0) }
-        if !holders.isEmpty { out.append("a build switch waits now on: " + holders.joined(separator: "; ") + " (`vibeswitcher switch COMMIT --when-idle` queues one)") }
+        if !holders.isEmpty { out.append("a build switch waits now on: " + holders.joined(separator: "; ")) }
         let parks = (result["switchParks"]?.array ?? []).compactMap(\.string).map { inert($0) }
         if !parks.isEmpty { out.append("a build switch would park first (idle since their last report): " + parks.joined(separator: ", ")) }
         // The feature plugins that are on (a server before them says nothing).

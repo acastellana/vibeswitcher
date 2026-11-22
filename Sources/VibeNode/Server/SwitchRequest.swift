@@ -277,7 +277,7 @@ public struct SwitchRequest {
     public static func blockedText(_ blockers: [String]) -> String {
         "no switch of builds while a worker or verifier runs (decision 6, the rule on switches): "
             + blockers.joined(separator: "; ") + "; switch once they have ended (a lead may stay; a worker idle since its last report is "
-            + "parked by the switch), or `vibeswitcher switch COMMIT --when-idle` queues it for the first moment none is working"
+            + "parked by the switch)"
     }
 
     // MARK: The handover

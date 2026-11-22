@@ -20,7 +20,7 @@ enum RequestArguments {
         "base.keep": ["card", "code"],
         "hooks.install": ["agents"],
         "hooks.remove": ["agents"],
-        "build.switch": ["commit", "whenIdle", "cancel"],
+        "build.switch": ["commit"],
         "web.open": ["tailnet"],
         "web.revoke": [],
         "tell": ["folder", "text"],

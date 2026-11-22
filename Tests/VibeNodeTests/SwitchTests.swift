@@ -832,11 +832,9 @@ struct SwitchTests {
         #expect(Self.status(client)?["builds"]?["rollback"]?["commit"]?.string == Self.a)
     }
 
-    /// A switch waits on every worker and verifier the switch can't park (a real one waited hours): its refusal and
-    /// `status` say which, what each does and since when, and offer `--when-idle`. `switch B --when-idle` (its code typed
-    /// once) is queued, `status` says so and by whom it is held, `switch --cancel` drops it; queued again, it runs at the
-    /// first look that finds no worker, and `status` says what became of it and how to finish the unit.
-    @Test(NodeTraits.linuxOnly, .timeLimit(.minutes(10))) func aSwitchWhenIdleIsQueuedUntilNoWorkerIsWorking() async throws {
+    /// A switch waits on every worker and verifier the switch can't park (a real one waited hours): its refusal, `status`'s
+    /// switchBlockers and `vibeswitcher status` name each with what it does and since when.
+    @Test(NodeTraits.linuxOnly, .timeLimit(.minutes(10))) func aSwitchsRefusalAndStatusSayWhoHoldsItAndSinceWhen() async throws {
         let builds = scratch.url("builds")
         let a = try ScratchBuilds.install(commit: Self.a, into: builds)
         try ScratchBuilds.install(commit: Self.b, into: builds)
@@ -846,36 +844,27 @@ struct SwitchTests {
         let worker = try await node.spawn("sleep 600", label: "Worker: task-1")
         let client = try WireClient(node)
         #expect(await eventually { Self.host(client).live == 2 })
-        // Which session holds it, and since when: in the refusal, in `status`'s field and in its text.
         let blockers = (Self.status(client)?["switchBlockers"]?.array ?? []).compactMap(\.string)
         #expect(blockers.count == 1 && blockers[0].hasPrefix("\(worker.tty) (Worker: task-1): ") && blockers[0].contains(" since "), "\(blockers)")
         let refused = try #require(WireClient.reply(client.request("build.switch", args: ["commit": .string(Self.b)])))
         let message = refused.error?.message ?? ""
-        #expect(message.contains("\(worker.tty) (Worker: task-1): ") && message.contains(" since ") && message.contains("--when-idle"), "\(message)")
+        #expect(message.contains("\(worker.tty) (Worker: task-1): ") && message.contains(" since ") && !message.contains(lead.tty), "\(message)")
         let shown = try await node.run(["status"])
         #expect(shown.output.contains("a build switch waits now on: \(worker.tty) (Worker: task-1): "), "\(shown.output)")
-
-        // Queued with its code once; dropped with --cancel.
-        let queued = try await node.runOnTerminal(["switch", Self.b, "--when-idle"])
-        #expect(queued.status == 0 && queued.output.contains("so it is queued") && queued.output.contains("queued: it runs at the first moment no worker"),
-                "\(queued.output)\(queued.errors)\n\(node.said)")
-        #expect(Self.status(client)?["switchQueued"]?["commit"]?.string == Self.b)
-        #expect((Self.status(client)?["notices"]?.array ?? []).contains { $0.string?.contains("is queued since") == true && $0.string?.contains(worker.tty) == true })
-        let dropped = try await node.runOnTerminal(["switch", "--cancel"])
-        #expect(dropped.status == 0 && dropped.output.contains("is dropped"), "\(dropped.output)\(dropped.errors)")
-        #expect(Self.status(client)?["switchQueued"] == .null)
+        let said = try await node.runOnTerminal(["switch", Self.b])
+        #expect(said.status == 77 && said.output.contains("\(worker.tty) (Worker: task-1): ") && said.output.contains(" since "), "\(said.output)")
         #expect(Self.host(client).build == Self.a)
+    }
 
-        // Queued again: the worker ends, and the switch runs by itself; the lead is kept.
-        let again = try await node.runOnTerminal(["switch", Self.b, "--when-idle"])
-        #expect(again.status == 0, "\(again.output)\(again.errors)")
-        _ = try HostCall.request(.kill(id: worker.id), socket: node.socket, appKey: nil, timeout: 15)
-        #expect(await eventually(timeout: SwitchRequest.longestWait) { (try? WireClient(node)).flatMap { Self.status($0)?["switchQueuedOutcome"]?["handedOver"]?.bool } == true },
-                "\(node.said)")
-        let after = try WireClient(node)
-        #expect(Self.host(after).build == Self.b && Self.status(after)?["switchQueued"] == .null)
-        #expect((Self.status(after)?["notices"]?.array ?? []).contains { $0.string?.contains("the queued switch to \(Self.b.prefix(12)) ran at") == true })
-        #expect(try node.sessions().contains { $0.id == lead.id && $0.isLive })
+    /// What a holder is said to be doing: its state since when by the node's scan, else how long it has been live.
+    @Test func aHoldersStateIsSaidWithSinceWhen() {
+        let started = Date(timeIntervalSince1970: 1_800_000_000)
+        let session = StubHost.session(title: "Worker: x", tty: "ttypts4")
+        let working = SwitchRequest.doing(session, status: .working, since: started, now: started.addingTimeInterval(37 * 60))
+        #expect(working.hasPrefix("working since ") && working.hasSuffix(" (37 min)"), "\(working)")
+        #expect(SwitchRequest.doing(session, status: .needsInput, since: started, now: started.addingTimeInterval(30)).hasSuffix("(under a minute)"))
+        #expect(SwitchRequest.doing(session, status: .idle, since: started, now: started.addingTimeInterval(3 * 3600 + 5 * 60)).hasSuffix("(3 h 5 min)"))
+        #expect(SwitchRequest.doing(session, status: nil, since: nil, now: Date()).hasPrefix("live since "))
     }
 
     /// The app's `aNewBuildWhoseProbeTakesTwentySecondsIsHandedOverWithNoFalseFailure`: the host holds the handover
