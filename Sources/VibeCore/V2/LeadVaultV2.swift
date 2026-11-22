@@ -360,6 +360,9 @@ public enum LeadVaultV2 {
                               now: Double = Date().timeIntervalSince1970, on: Bool = isOn) {
         guard on, message.from == .user else { return }
         var record = book ?? Book()
+        // The record begins with its first write, a seal's as a request's (`recordSince`): stamped here too, so a
+        // later request that changes nothing leaves the book as it was (`aWaitingUserSealIsRenewedUntilItIsChecked`).
+        if record.plugin[sinceKey] == nil { record.plugin[sinceKey] = String(now) }
         let contested = record.seals[message.id].map { now - $0 <= sealLife } == true && record.targets[message.id] != target
         record.seals[message.id] = now
         if record.first[message.id] == nil { record.first[message.id] = now }
