@@ -61,6 +61,15 @@ public enum LeadVaultV2 {
         case settledRequests
         /// These plugin requests are settled now (kept `settledKept` at most).
         case settleRequests([String])
+        /// When this record began (its first request since the host's vault began: a host restart starts it over).
+        /// Answered `since`.
+        case recordSince
+        /// The feature plugins' settings the user set (`vibeswitcher set KEY VALUE` on a plugin's key), by key
+        /// (`<plugin>.<name>`): answered `pluginSettings`.
+        case pluginSettings
+        /// The user set a plugin's setting `key` to `value` (nil: back to its default): kept here, where no session's write
+        /// reaches, as on and off are.
+        case setPluginSetting(key: String, value: String?)
     }
 
     public enum Reply: Codable, Equatable, Sendable {
@@ -71,6 +80,8 @@ public enum LeadVaultV2 {
         case refused(String)
         case plugins([String: Bool])
         case settled([String])
+        case since(Double)
+        case pluginSettings([String: String])
     }
 
     /// The record in the vault's state (`LeadVault.Book`'s `v2`).
@@ -94,10 +105,39 @@ public enum LeadVaultV2 {
         /// it sealed it (the security follow-ups' item 19). Only that session's own check, as a lead's, is a taking. None
         /// once a seal under the id was made for another while its earlier one lived (see `sealed`).
         public var targets: [String: String] = [:]
+        /// The feature plugins' record in one field: on and off (`on:<id>`), the settled requests (`settled:<plugin>:<id>`,
+        /// when), the settings (`setting:<plugin>.<name>`). One field, not three: a tenth stored field on this record made
+        /// the host crash (SIGSEGV) on a config look (`config held`), which reads like a stack too near its end on that
+        /// path; see the plugins report of 2026-11-22.
+        public var plugin: [String: String] = [:]
+
         /// Each feature plugin the user turned on or off, by id (`setPlugin`).
-        public var plugins: [String: Bool] = [:]
+        public var plugins: [String: Bool] {
+            get { Self.part(plugin, "on:").mapValues { $0 == "true" } }
+            set { Self.setPart(&plugin, "on:", newValue.mapValues { $0 ? "true" : "false" }) }
+        }
         /// Each plugin request settled, by `<plugin>:<id>`: when (`settleRequests`).
-        public var settledRequests: [String: Double] = [:]
+        public var settledRequests: [String: Double] {
+            get { Self.part(plugin, "settled:").compactMapValues(Double.init) }
+            set { Self.setPart(&plugin, "settled:", newValue.mapValues { String($0) }) }
+        }
+        /// Each feature plugin's setting the user set, by key (`setPluginSetting`).
+        public var pluginSettings: [String: String] {
+            get { Self.part(plugin, "setting:") }
+            set { Self.setPart(&plugin, "setting:", newValue) }
+        }
+
+        /// The names a build before the one field kept them under: read, never written.
+        enum OldKeys: String, CodingKey { case plugins, settledRequests, pluginSettings }
+
+        static func part(_ record: [String: String], _ prefix: String) -> [String: String] {
+            Dictionary(uniqueKeysWithValues: record.filter { $0.key.hasPrefix(prefix) }.map { (String($0.key.dropFirst(prefix.count)), $0.value) })
+        }
+
+        static func setPart(_ record: inout [String: String], _ prefix: String, _ part: [String: String]) {
+            record = record.filter { !$0.key.hasPrefix(prefix) }
+            for (key, value) in part { record[prefix + key] = value }
+        }
 
         public init() {}
 
@@ -111,8 +151,15 @@ public enum LeadVaultV2 {
             first = try container.decodeIfPresent([String: Double].self, forKey: .first) ?? [:]
             spent = try container.decodeIfPresent([String: Double].self, forKey: .spent) ?? [:]
             targets = try container.decodeIfPresent([String: String].self, forKey: .targets) ?? [:]
-            plugins = try container.decodeIfPresent([String: Bool].self, forKey: .plugins) ?? [:]
-            settledRequests = try container.decodeIfPresent([String: Double].self, forKey: .settledRequests) ?? [:]
+            if let one = try container.decodeIfPresent([String: String].self, forKey: .plugin) {
+                plugin = one
+            } else {
+                // A record from a build that kept these as fields of their own (a handover carries it): taken as it was.
+                let old = try decoder.container(keyedBy: OldKeys.self)
+                plugins = try old.decodeIfPresent([String: Bool].self, forKey: .plugins) ?? [:]
+                settledRequests = try old.decodeIfPresent([String: Double].self, forKey: .settledRequests) ?? [:]
+                pluginSettings = try old.decodeIfPresent([String: String].self, forKey: .pluginSettings) ?? [:]
+            }
         }
     }
 
@@ -160,6 +207,7 @@ public enum LeadVaultV2 {
         guard on else { return .refused("This session host keeps no record of the user's actions (the Mac's).") }
         guard caller == .app else { return .refused("Only VibeSwitcher records and reads the user's actions.") }
         var record = book ?? Book()
+        if record.plugin[sinceKey] == nil { record.plugin[sinceKey] = String(now) }
         defer { book = record }
         switch request {
         case .recordUserAction(let action, let kind, let subject, let digest):
@@ -207,6 +255,8 @@ public enum LeadVaultV2 {
             guard pluginID(id) else { return .refused("A plugin's id is a short lower-case word.") }
             record.plugins[id] = on
             return .plugins(record.plugins)
+        case .recordSince:
+            return .since(record.plugin[sinceKey].flatMap(Double.init) ?? now)
         case .settledRequests:
             return .settled(record.settledRequests.keys.sorted())
         case .settleRequests(let keys):
@@ -219,11 +269,27 @@ public enum LeadVaultV2 {
                 record.settledRequests = Dictionary(uniqueKeysWithValues: kept.map { ($0.key, $0.value) })
             }
             return .ok
+        case .pluginSettings:
+            return .pluginSettings(record.pluginSettings)
+        case .setPluginSetting(let key, let value):
+            let parts = key.split(separator: ".", omittingEmptySubsequences: false)
+            guard parts.count == 2, pluginID(String(parts[0])), pluginID(String(parts[1])) else {
+                return .refused("A plugin's setting is named <plugin>.<name>, each a short lower-case word.")
+            }
+            guard (value?.utf8.count ?? 0) <= pluginSettingBytes else { return .refused("A plugin's setting is \(pluginSettingBytes / 1024) KiB at most.") }
+            record.pluginSettings[key] = value
+            return .pluginSettings(record.pluginSettings)
         }
     }
 
+    /// The plugin record's key for when the record began.
+    static let sinceKey = "record:since"
+
     /// How many settled plugin requests the record keeps.
     public static let settledKept = 5_000
+
+    /// The most a plugin's setting holds.
+    public static let pluginSettingBytes = 8 * 1024
 
     /// A feature plugin's id as the record keeps it: 1 to 32 of a-z, 0-9 and -, starting with a letter.
     public static func pluginID(_ id: String) -> Bool {
@@ -385,6 +451,12 @@ public struct LeadVaultV2Client: Sendable {
         return plugins
     }
 
+    /// When this record began: a host restart starts the vault, and it, over.
+    public func recordSince() throws -> Date {
+        guard case .since(let at) = try call(.recordSince) else { throw Refused("The session host answered something else.") }
+        return Date(timeIntervalSince1970: at)
+    }
+
     /// The plugin requests settled (`<plugin>:<id>`).
     public func settledRequests() throws -> [String] {
         guard case .settled(let keys) = try call(.settledRequests) else { throw Refused("The session host answered something else.") }
@@ -395,6 +467,21 @@ public struct LeadVaultV2Client: Sendable {
     public func settleRequests(_ keys: [String]) throws {
         guard !keys.isEmpty else { return }
         _ = try call(.settleRequests(keys))
+    }
+
+    /// The feature plugins' settings the user set, by key (`<plugin>.<name>`).
+    public func pluginSettings() throws -> [String: String] {
+        guard case .pluginSettings(let settings) = try call(.pluginSettings) else { throw Refused("The session host answered something else.") }
+        return settings
+    }
+
+    /// Keeps the user's `value` for a plugin's setting `key` (nil: its default); what is kept now.
+    @discardableResult
+    public func setPluginSetting(_ key: String, to value: String?) throws -> [String: String] {
+        guard case .pluginSettings(let settings) = try call(.setPluginSetting(key: key, value: value)) else {
+            throw Refused("The session host answered something else.")
+        }
+        return settings
     }
 
     /// Keeps that the user turned `id` on or off; what is kept now.

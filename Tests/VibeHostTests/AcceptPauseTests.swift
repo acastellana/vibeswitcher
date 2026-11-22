@@ -49,4 +49,26 @@ struct AcceptPauseTests {
         server.stop(terminateSessions: true)
         #expect(await eventually(timeout: 30) { server.queue.sync { server.acceptsPaused.isEmpty } }, "the pause ended without a trap")
     }
+
+    /// `stop` closes the listener from its accept source's cancel handler, not right after the cancel: in the turn of
+    /// the queue that stops the host the descriptor is still the listener's, and it is closed once the source has gone.
+    @Test func stopClosesTheListenerOnlyOnceItsSourceHasGone() async throws {
+        let host = try TestHost()
+        let server = host.server
+        let listener = server.queue.sync { server.listenFD }
+        var info = stat()
+        try #require(fstat(listener, &info) == 0)
+        let inode = info.st_ino
+        let sameFile = { () -> Bool in
+            var now = stat()
+            return fstat(listener, &now) == 0 && now.st_ino == inode
+        }
+        let openThen = server.queue.sync { () -> Bool in
+            server.stop(terminateSessions: true)
+            return sameFile()
+        }
+        #expect(openThen, "still the listener in the turn that cancelled its source")
+        #expect(await eventually(timeout: 30) { !sameFile() }, "closed once the source has gone")
+    }
 }
+

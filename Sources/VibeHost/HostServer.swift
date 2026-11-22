@@ -289,7 +289,8 @@ public final class HostServer {
             self.stopped = true
             self.log.note("host: stopping, \(self.sessions.values.filter { $0.info.isLive }.count) sessions live\(terminateSessions ? ", ending them" : "")")
             self.resumePausedAccepts()
-            self.acceptSource?.cancel()
+            // The listener closed by its source's cancel handler, once libdispatch has let it go (V2/HostPathWatch.swift).
+            let closedBySource = self.endAcceptSource()
             self.housekeeping?.cancel()
             self.ownerWatch?.cancel()
             self.serverChild?.stop()
@@ -302,7 +303,7 @@ public final class HostServer {
                 session.close()
             }
             self.sessions = [:]
-            if self.listenFD >= 0 { Sys.close(self.listenFD); unlink(self.config.socketPath) }
+            if self.listenFD >= 0 { if !closedBySource { Sys.close(self.listenFD) }; unlink(self.config.socketPath) }
             if self.lockFD >= 0 { Sys.close(self.lockFD) }
             self.listenFD = -1
             self.lockFD = -1

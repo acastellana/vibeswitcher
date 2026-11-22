@@ -93,7 +93,9 @@ public final class ShellPlugin: FeaturePlugin {
     private func draw(_ found: [ShellRequest], answeredOnDisk: Set<String>, desk: PluginDesk) {
         let (live, now, note) = (desk.live, desk.now, desk.note)
         var seen: Set<String> = []
-        for request in found {
+        for read in found {
+            // What was drawn is what is told of: the request as its card showed it.
+            let request = shown[read.id] ?? read
             seen.insert(request.id)
             var answer = answers[request.id]
             if answer == nil {
@@ -143,6 +145,8 @@ public final class ShellPlugin: FeaturePlugin {
         }
         // A request whose files went (removed, or never stamped): its open card closes, and nothing can run it.
         for request in desk.carded where !seen.contains(request) {
+            // Its shell starting: not called gone (the start says what became of it).
+            if answers[request]?.state == .starting { continue }
             desk.forget(request: request, closed: "the request is gone")
             shown[request] = nil
             if answers[request] == nil { answers[request] = ShellAsk.Answer(state: .expired, at: now, told: true) }
@@ -214,7 +218,7 @@ public final class ShellPlugin: FeaturePlugin {
 
     /// The user's answer (`answer CARD run|decline`), after the desk's checks marked the card: the plugin's answer is set
     /// at once (a second answer finds it), then `run` starts its shell once, `decline` declines it.
-    public func perform(_ word: String, on card: CardStore.Card, desk: PluginDesk,
+    public func perform(_ word: String, on card: CardStore.Card, desk: PluginDesk, act: PluginAct,
                         then: @escaping (Result<NodeWire.Value, LeadEngine.CardFailure>) -> Void) {
         guard let id = card.plugin?.request, let request = shown[id] else {
             return then(.failure(.gone("no shell request on card \(card.id)")))
@@ -248,7 +252,7 @@ public final class ShellPlugin: FeaturePlugin {
                     self.answers[id] = ShellAsk.Answer(state: .failed, at: Date(), why: "\(why): nothing ran")
                     return self.lookAgain(desk) { then(.failure(.refused("\(why): nothing ran"))) }
                 }
-                self.start(request, desk: desk, then: then)
+                self.start(request, desk: desk, act: act, then: then)
             }
         }
     }
@@ -260,12 +264,13 @@ public final class ShellPlugin: FeaturePlugin {
 
     /// Starts the request's shell session (the host's spawn), keeps what came of it (the shell the plugin started, by
     /// the host's own answer) and looks again.
-    private func start(_ request: ShellRequest, desk: PluginDesk, then: @escaping (Result<NodeWire.Value, LeadEngine.CardFailure>) -> Void) {
+    private func start(_ request: ShellRequest, desk: PluginDesk, act: PluginAct,
+                       then: @escaping (Result<NodeWire.Value, LeadEngine.CardFailure>) -> Void) {
         var spawn = ShellAsk.spawnRequest(request)
         // A scratch node's hooks and tools keep to its root, as its sessions' do.
         if desk.isScratch { spawn.env["VIBESWITCHER_HOME"] = desk.root.path }
         let note = desk.note
-        desk.spawn(spawn) { [weak self] result in
+        act.spawn(spawn) { [weak self] result in
             let answer: ShellAsk.Answer
             let reply: Result<NodeWire.Value, LeadEngine.CardFailure>
             switch result {
@@ -293,10 +298,9 @@ public final class ShellPlugin: FeaturePlugin {
     /// Tells the asking session what became of its request (the plugin's answer), once it reached it (or the session is
     /// gone).
     private func tell(_ request: ShellRequest, _ answer: ShellAsk.Answer, desk: PluginDesk) {
-        guard let text = ShellAsk.message(request, answer), let session = UUID(uuidString: request.session),
-              telling.insert(request.id).inserted else { return }
+        guard let text = ShellAsk.message(request, answer), telling.insert(request.id).inserted else { return }
         let note = desk.note
-        desk.tell(text, from: "from New Shell", session: session) { [weak self] delivery in
+        desk.tell(text, from: "from New Shell", request: request.id) { [weak self] delivery in
             guard let self else { return }
             self.telling.remove(request.id)
             guard delivery != .notYet else { return }
@@ -312,14 +316,13 @@ public final class ShellPlugin: FeaturePlugin {
     /// the host's answer to the spawn), once, when the host's list shows it, or that the shell went first. A shell the
     /// host doesn't list yet just after it started isn't called gone.
     private func tellEnd(_ request: ShellRequest, _ answer: ShellAsk.Answer, now: Date, desk: PluginDesk) {
-        guard answer.awaitsEnd, answer.told, desk.connected, !tellingEnd.contains(request.id),
-              let asker = UUID(uuidString: request.session) else { return }
+        guard answer.awaitsEnd, answer.told, desk.connected, !tellingEnd.contains(request.id) else { return }
         let session = answer.shell.flatMap(UUID.init(uuidString:)).flatMap(desk.session)
         if session == nil, now.timeIntervalSince1970 - answer.at < Self.startingFor { return }
         guard let text = ShellAsk.ending(request, answer, session: session) else { return }
         tellingEnd.insert(request.id)
         let note = desk.note
-        desk.tell(text, from: "from New Shell", session: asker) { [weak self] delivery in
+        desk.tell(text, from: "from New Shell", request: request.id) { [weak self] delivery in
             guard let self else { return }
             self.tellingEnd.remove(request.id)
             guard delivery != .notYet else { return }

@@ -9,7 +9,7 @@ import Foundation
 ///
 /// The messages, each one `SOCK_SEQPACKET` message on the connector beside its one-byte connection requests:
 ///
-/// - `web listen PLACE ADDRESS PORT`: PLACE `loopback` or `tailnet`. Answered `web ok listen PLACE ADDRESS PORT` with the
+/// - `web listen PLACE ADDRESS PORT`: PLACE `loopback`, `tailnet` or `page` (a plugin's one-request page). Answered `web ok listen PLACE ADDRESS PORT` with the
 ///   listening socket riding on it, or `web no listen PLACE ADDRESS PORT: WHY` with none.
 /// - `web release PLACE`: answered `web ok release PLACE`. The host closes what it holds for PLACE (nothing when it holds
 ///   none). The server sends it only when the user revoked the web (`web --revoke`): a server that starts and finds no
@@ -26,7 +26,9 @@ import Foundation
 /// scratch host takes any (0: the kernel's pick). Never `SO_REUSEPORT`, so no other socket can share the port.
 public enum HostWebListen {
     public enum Place: String, CaseIterable, Codable, Sendable {
-        case loopback, tailnet
+        /// `page`: a plugin's one-request page (`PluginPage`), on loopback, on a port of the kernel's pick, one at a time:
+        /// an origin of its own, never the node page's (the plugins definition's rule 6).
+        case loopback, tailnet, page
     }
 
     /// The node's one web port, on loopback and on the tailnet (`NodeWeb.port`, which a test holds to this).
@@ -80,6 +82,11 @@ public enum HostWebListen {
         case .tailnet:
             // 100.64.0.0/10: the first octet 100, the second's top two bits 01.
             guard octets[0] == 100, octets[1] & 0xC0 == 0x40 else { return "\(address) isn't a tailnet address (100.64.0.0/10)" }
+        case .page:
+            // Its own origin: loopback, never the node page's port (a new one each time, the kernel's pick).
+            guard address == "127.0.0.1" else { return "a plugin's page is on 127.0.0.1 only, not \(address)" }
+            guard port != Self.port else { return "a plugin's page never takes the node page's port \(Self.port)" }
+            return nil
         }
         if usersHost, port != Self.port { return "the user's node listens on port \(Self.port) only, not \(port)" }
         return nil

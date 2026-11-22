@@ -38,6 +38,17 @@ public struct PluginDesk {
     public var queue: DispatchQueue { engine.queue }
     public var work: DispatchQueue { engine.pluginWork }
 
+    /// This plugin's settings as the user set them, by name (none set: its default).
+    public var settings: [String: String] {
+        Dictionary(uniqueKeysWithValues: plugin.info.settings.map { ($0.key, engine.pluginSettings["\(id).\($0.key)"] ?? $0.defaultValue) })
+    }
+
+    /// Where a page for the person's browser gets its listening socket (the session host's, held as the web's).
+    public var bind: WebBind { engine.options.pluginBind ?? .direct }
+
+    /// The engine's clock, or one of the plugins' own on the engine's queue (a test's engine has none).
+    public var clock: NodeClock { engine.clock ?? engine.pluginClock }
+
     /// Where this plugin's command files requests (`PluginInfo.folder` under the root), when it does.
     public var folder: URL? { plugin.info.folder.map { root.appendingPathComponent($0, isDirectory: true) } }
 
@@ -48,23 +59,16 @@ public struct PluginDesk {
 
     /// The live sessions the user opened (`opened`), by lower-case id.
     public var live: [String: HostSession] {
-        Dictionary(engine.link.sessions.filter(Self.opened).map { ($0.id.uuidString.lowercased(), $0) }) { first, _ in first }
+        Dictionary(engine.link.sessions.filter(opened).map { ($0.id.uuidString.lowercased(), $0) }) { first, _ in first }
     }
 
     /// The session the host lists with `id`, live or ended.
     public func session(_ id: UUID) -> HostSession? { engine.link.sessions.first { $0.id == id } }
 
-    /// Whether `session` may ask (rule 1: a live session the user opened): live, and no worker's or verifier's of a team,
-    /// which a lead's tool server starts (`LeadTeams.role`).
-    public static func opened(_ session: HostSession) -> Bool {
-        guard session.isLive else { return false }
-        let role = LeadTeams.role(label: session.label)
-        return role != .worker && role != .verifier
-    }
-
-    /// Starts a session through the host; `then` with it, off the engine's queue.
-    public func spawn(_ request: SpawnRequest, then: @escaping (Result<HostSession, HostLink.Failure>) -> Void) {
-        engine.link.spawn(request, completion: then)
+    /// Whether `session` may ask (rule 1: a live session the user opened): live, and not a team's worker or verifier as
+    /// the vault's roster says (the host's record, not a label anyone can give a session).
+    public func opened(_ session: HostSession) -> Bool {
+        session.isLive && !engine.pluginTeam.contains(session.id.uuidString.lowercased())
     }
 
     /// Looks at the plugins again (one look at a time), then `done`.
@@ -76,8 +80,11 @@ public struct PluginDesk {
         return id.hasPrefix(prefix) ? UUID(uuidString: String(id.dropFirst(prefix.count))) : nil
     }
 
-    /// A session's name as the node lists it.
-    public static func asker(_ session: HostSession) -> String { session.label.isEmpty ? "session \(session.tty)" : session.label }
+    /// A session's name as the node lists it; a Run-card shell's name is an agent's (`Shell: <its --label>`), marked so.
+    public static func asker(_ session: HostSession) -> String {
+        if session.label.isEmpty { return "session \(session.tty)" }
+        return ShellTidy.opened(session) ? "a shell an agent asked for, named by it \u{201C}\(session.label)\u{201D}" : session.label
+    }
 
     // MARK: The one reader (rule 1)
 
@@ -89,13 +96,27 @@ public struct PluginDesk {
     /// ended is never decoded. Read on `work`; `then` on the engine's queue with them, oldest first.
     public func stamped<Ask: StampedAsk>(_ decode: @escaping @Sendable (Data) throws -> Ask, then: @escaping ([Ask]) -> Void) {
         guard let folder else { return then([]) }
-        let opened = Set(live.keys)
+        let live = Set(engine.link.sessions.filter(\.isLive).map { $0.id.uuidString.lowercased() })
+        let drawn = engine.pluginDrawn.filter { $0.key.hasPrefix("\(id):") }
         let (vault, trusted, now, note, id, engine) = (engine.cardVault, engine.pluginTrusted[id] ?? [:], now, note, id, engine)
         work.async {
-            let found = Self.read(folder: folder, decode: decode, trusted: trusted, vault: vault, opened: opened, now: now, plugin: id, note: note)
+            // The team's sessions, from the vault's roster: unknown (it didn't answer), nothing is given this look.
+            let team = (try? vault.roster()).map { Set($0.filter { $0.role != .lead }.map { $0.session.lowercased() }) }
+            let found = team.map { team in
+                Self.read(folder: folder, decode: decode, trusted: trusted, vault: vault, opened: live.subtracting(team), drawn: drawn, now: now,
+                          plugin: id, note: note)
+            }
+            if team == nil { note("\(id) requests: the vault's roster didn't answer, so no session's request is read this time") }
             engine.queue.async {
+                if let team { engine.pluginTeam = team }
+                guard let found else { return then([]) }
                 engine.pluginTrusted[id] = found.trusted
-                then(found.requests)
+                for entry in found.requests {
+                    engine.pluginStamps[PluginKey(plugin: id, request: entry.ask.id).name] = PluginStamp(digest: entry.stamp.digest,
+                                                                                                        session: entry.stamp.session.lowercased(),
+                                                                                                        created: entry.ask.created)
+                }
+                then(found.requests.map(\.ask))
             }
         }
     }
@@ -105,6 +126,10 @@ public struct PluginDesk {
     /// A request file at most (the wallet format's own limit), and its stamp.
     static let requestBytesAtMost = 64 * 1024
     static let stampBytesAtMost = 4 * 1024
+    /// The most requests read a look, and stamps asked of the vault at once (a folder flooded with pairs can't push the
+    /// vault's question past its frame, nor hide the others' requests for long).
+    static let readAtMost = 64
+    static let verifyBatch = 16
 
     /// A regular file's bytes, no link followed, `limit` at most; nil otherwise.
     static func bounded(_ file: URL, limit: Int) -> Data? {
@@ -117,43 +142,76 @@ public struct PluginDesk {
         return data
     }
 
-    /// The reader itself. Blocks: on the plugins' `work`.
+    /// A request the reader gave, with the stamp it came with.
+    struct Read<Ask> {
+        var ask: Ask
+        var stamp: WalletStamp
+    }
+
+    /// The reader itself. `drawn`: the digest each of this plugin's cards was drawn from (`PluginKey.name`): an id whose
+    /// bytes changed since is dropped, said. A pair that can't be a request (no stamp, other bytes, not the host's stamp)
+    /// is removed. Blocks: on the plugins' `work`.
     static func read<Ask: StampedAsk>(folder: URL, decode: (Data) throws -> Ask, trusted given: [String: WalletStamp], vault: LeadVault,
-                                      opened: Set<String>, now: Date, plugin: String,
-                                      note: (String) -> Void) -> (requests: [Ask], trusted: [String: WalletStamp]) {
+                                      opened: Set<String>, drawn: [String: String] = [:], now: Date, plugin: String,
+                                      note: (String) -> Void) -> (requests: [Read<Ask>], trusted: [String: WalletStamp]) {
+        let say = { (text: String) in ConfigSeal.inert(text, limit: 120) }
+        let drop = { (id: String) in
+            for name in ["\(id).json", "\(id).seal"] { unlink(folder.appendingPathComponent(name).path) }
+        }
         let names = ((try? FileManager.default.contentsOfDirectory(atPath: folder.path)) ?? []).sorted()
         var filed: [(id: String, bytes: Data, stamp: WalletStamp)] = []
         for name in names where name.hasSuffix(".json") && !name.hasPrefix(".") {
+            guard filed.count < readAtMost else { note("\(plugin) requests: more than \(readAtMost) in the folder: the rest at a later look"); break }
             let id = String(name.dropLast(5))
-            guard WalletRequestFormat.isID(id) else { note("\(plugin) request not shown: \(name): not a request's name"); continue }
+            guard WalletRequestFormat.isID(id) else {
+                note("\(plugin) request not shown: \(say(name)): not a request's name; removed")
+                unlink(folder.appendingPathComponent(name).path)
+                continue
+            }
             guard let bytes = bounded(folder.appendingPathComponent(name), limit: requestBytesAtMost),
                   let sealed = bounded(folder.appendingPathComponent("\(id).seal"), limit: stampBytesAtMost),
                   let stamp = try? JSONDecoder().decode(WalletStamp.self, from: sealed) else {
-                note("\(plugin) request not shown: \(name): not a regular file of its size with a stamp beside it")
+                note("\(plugin) request not shown: \(id): not a regular file of its size with a stamp beside it; removed")
+                drop(id)
                 continue
             }
-            guard stamp.digest == WalletStamp.digest(bytes) else { note("\(plugin) request not shown: \(name): its stamp is for other bytes"); continue }
+            guard stamp.digest == WalletStamp.digest(bytes) else {
+                note("\(plugin) request not shown: \(id): its stamp is for other bytes; removed")
+                drop(id)
+                continue
+            }
+            if let was = drawn["\(plugin):\(id)"], was != stamp.digest {
+                note("\(plugin) request not shown: \(id): its bytes changed under its id since its card was drawn")
+                continue
+            }
             filed.append((id, bytes, stamp))
         }
         var trusted = given.filter { key, stamp in filed.contains { $0.id == key && $0.stamp == stamp } }
         let unasked = filed.filter { trusted[$0.id] == nil }
-        if !unasked.isEmpty {
+        for start in stride(from: 0, to: unasked.count, by: verifyBatch) {
+            let batch = Array(unasked[start..<min(start + verifyBatch, unasked.count)])
             do {
-                let valid = try vault.verifyWallet(unasked.map(\.stamp))
-                for (entry, ok) in zip(unasked, valid) {
-                    if ok { trusted[entry.id] = entry.stamp } else { note("\(plugin) request not shown: \(entry.id): its stamp isn't the session host's") }
+                let valid = try vault.verifyWallet(batch.map(\.stamp))
+                for (entry, ok) in zip(batch, valid) {
+                    if ok { trusted[entry.id] = entry.stamp } else {
+                        note("\(plugin) request not shown: \(entry.id): its stamp isn't the session host's; removed")
+                        drop(entry.id)
+                    }
                 }
             } catch {
-                note("\(plugin) requests: the stamps weren't checked: \(error)")
+                note("\(plugin) requests: \(batch.count) stamp(s) weren't checked: \(error)")
             }
         }
-        var found: [Ask] = []
+        var found: [Read<Ask>] = []
         for entry in filed where trusted[entry.id] == entry.stamp {
             // Rule 1 before any decoder: a live session the user opened.
-            guard opened.contains(entry.stamp.session.lowercased()) else { continue }
+            guard opened.contains(entry.stamp.session.lowercased()) else {
+                note("\(plugin) request not shown: \(entry.id): its session isn't a live one the user opened")
+                continue
+            }
             let request: Ask
             do { request = try decode(entry.bytes) } catch {
-                note("\(plugin) request not shown: \(entry.id): \(error)")
+                note("\(plugin) request not shown: \(entry.id): \(say("\(error)"))")
                 continue
             }
             guard request.id == entry.id, request.session == entry.stamp.session.lowercased() else {
@@ -164,9 +222,9 @@ public struct PluginDesk {
                 note("\(plugin) request not shown: \(request.id): filed for \(request.created), ahead of this clock")
                 continue
             }
-            found.append(request)
+            found.append(Read(ask: request, stamp: entry.stamp))
         }
-        return (found.sorted { ($0.created, $0.id) < ($1.created, $1.id) }, trusted)
+        return (found.sorted { ($0.ask.created, $0.ask.id) < ($1.ask.created, $1.ask.id) }, trusted)
     }
 
     // MARK: Cards
@@ -184,28 +242,37 @@ public struct PluginDesk {
     @discardableResult
     public func draw(_ shown: PluginCard, root: String, at: Date) -> Result<CardStore.Card, PluginRefusal> {
         guard engine.plugins.isOn(id) else { return .failure(PluginRefusal("\(plugin.info.title) is off")) }
+        guard engine.pluginSettledKnown else { return .failure(PluginRefusal("the vault hasn't said which requests are settled yet")) }
         guard shown.plugin == id else { return .failure(PluginRefusal("a card of another plugin")) }
-        if let why = shown.refusal { return .failure(PluginRefusal(why)) }
-        guard let expires = shown.expiresAt, expires > at, expires.timeIntervalSince(at) <= plugin.info.life + 1 else {
-            return .failure(PluginRefusal("its expiry isn't within \(plugin.info.title)'s declared life (\(Int(plugin.info.life / 60)) minutes)"))
-        }
-        guard let session = Self.hostSession(shown.session), engine.link.sessions.contains(where: { $0.id == session && Self.opened($0) }) else {
-            return .failure(PluginRefusal("its asker isn't a live session the user opened"))
-        }
         let key = PluginKey(plugin: id, request: shown.request)
+        // The asking session, its name and the time filed are the stamped request's, never the plugin's word.
+        guard let stamp = engine.pluginStamps[key.name], let session = UUID(uuidString: stamp.session),
+              let asker = engine.link.sessions.first(where: { $0.id == session }), opened(asker) else {
+            return .failure(PluginRefusal("no stamped request \(shown.request) of a live session the user opened"))
+        }
+        var card = shown
+        card.session = NodeIds.session(host: session)
+        card.asker = Self.asker(asker)
+        if let why = card.refusal { return .failure(PluginRefusal(why)) }
+        guard let expires = card.expiresAt, expires > stamp.created, expires.timeIntervalSince(stamp.created) <= plugin.info.life + 1 else {
+            return .failure(PluginRefusal("its expiry isn't within \(plugin.info.title)'s declared life (\(Int(plugin.info.life / 60)) minutes) of its filing"))
+        }
         guard engine.pluginCards[key] == nil else { return .failure(PluginRefusal("request \(shown.request) has a card already")) }
         guard !engine.pluginSettled.contains(key.name) else { return .failure(PluginRefusal("request \(shown.request) was settled already")) }
-        var card = CardStore.Card(root: root, kind: .plugin, at: at)
-        card.plugin = shown.drawn
-        engine.pluginCards[key] = card.id
-        engine.cards.put(card)
-        return .success(card)
+        var made = CardStore.Card(root: root, kind: .plugin, at: stamp.created)
+        made.plugin = card.drawn
+        engine.pluginCards[key] = made.id
+        engine.pluginDrawn[key.name] = stamp.digest
+        engine.cards.put(made)
+        return .success(made)
     }
 
     /// Changes this plugin's card for `request` (its state, its outcome; `closed` closes it, and settles the request):
     /// nothing when there's none. The request it shows can't change: what was shown is what is answered.
     public func change(request: String, state: String, outcome: String?, closed: String? = nil) {
         guard var card = card(request: request), var shown = card.plugin else { return }
+        // An answered card never waits again: an answer is taken once.
+        if state == PluginCard.waitingState && !shown.isWaiting { return }
         guard shown.state != state || shown.outcome != outcome || (closed != nil && card.isOpen) else { return }
         shown.state = state
         shown.outcome = outcome
@@ -237,8 +304,12 @@ public struct PluginDesk {
 
     // MARK: Telling
 
-    /// Tells `session` `text` as a message from `from` (VibeSwitcher's words: "from New Shell"); `then` with how it went.
-    public func tell(_ text: String, from: String, session: UUID, then: @escaping (SessionDelivery) -> Void) {
+    /// Tells request `request`'s asker `text` as a message from `from` (VibeSwitcher's words: "from New Shell"): the
+    /// session its stamp names, never one a plugin says. `then` with how it went (`.ended` when there's no such request).
+    public func tell(_ text: String, from: String, request: String, then: @escaping (SessionDelivery) -> Void) {
+        guard let stamp = engine.pluginStamps[PluginKey(plugin: id, request: request).name], let session = UUID(uuidString: stamp.session) else {
+            return then(.ended)
+        }
         engine.tell(text, from: .system(from), session: session, then: then)
     }
 
@@ -246,11 +317,39 @@ public struct PluginDesk {
     /// (a withdrawal's words, a started shell that won't be followed): retried at each plugins' look.
     public func tellSurely(_ text: String, session: UUID) { engine.tellSurely(text, session: session, key: "\(id):\(UUID().uuidString)") }
 
+    /// What an asker is told when its card was withdrawn while an answer was acting on it.
+    public func withdrawnWhileAnsweredText(_ card: PluginCard) -> String {
+        "[VibeSwitcher] Your \(card.noun) \(card.request) was being answered when the user turned \(plugin.info.title) off on this node: "
+            + "what the answer started may still run, but you won't hear more of it from VibeSwitcher."
+    }
+
     /// What an asker is told when its card was withdrawn: the user turned the plugin off.
     public func withdrawnText(_ card: PluginCard) -> String {
         "[VibeSwitcher] Your \(card.noun) \(card.request) was withdrawn: the user turned \(plugin.info.title) off on this node, "
             + "so nothing was done and nothing will be. Don't file it again unless the user turns it back on."
     }
+}
+
+/// A request as the reader gave it: its stamp's digest and session, and when it was filed.
+struct PluginStamp: Equatable {
+    var digest: String
+    var session: String
+    var created: Date
+}
+
+/// What a plugin's `perform` may do for the card it answers, and nothing else: start a session (the host's spawn).
+public struct PluginAct {
+    let start: (SpawnRequest, @escaping (Result<HostSession, HostLink.Failure>) -> Void) -> Void
+    let page: (PluginPage.Spec, @escaping (Data) -> Bool, @escaping (Bool) -> Void, @escaping (Result<URL, PluginRefusal>) -> Void) -> Void
+
+    /// Starts a session through the host; `then` with it, off the engine's queue.
+    public func spawn(_ request: SpawnRequest, then: @escaping (Result<HostSession, HostLink.Failure>) -> Void) { start(request, then) }
+
+    /// Serves `spec` once (`PluginPage`): `take` hears each answer's bytes (true: taken), `ended` whether one was taken
+    /// when the page stops; `then` with its address, for the answering terminal only, or why not (one page at a time on
+    /// a node). Callbacks on the engine's queue.
+    public func openPage(_ spec: PluginPage.Spec, take: @escaping (Data) -> Bool, ended: @escaping (Bool) -> Void,
+                         then: @escaping (Result<URL, PluginRefusal>) -> Void) { page(spec, take, ended, then) }
 }
 
 /// A plugin's card, by its request.

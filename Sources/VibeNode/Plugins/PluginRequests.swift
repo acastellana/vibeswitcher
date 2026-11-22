@@ -13,8 +13,9 @@ extension Requests {
             let listed = page ? engine.plugins.on : engine.plugins.plugins
             let values = listed.map { plugin -> NodeWire.Value in
                 guard case .object(var fields) = engine.plugins.value(plugin) else { return .null }
-                // A fresh vault after the host's restart: what the user set is gone, each back at its default.
-                fields["restarted"] = .bool(engine.hostRestart != nil && engine.plugins.kept?[plugin.info.id] == nil)
+                // Nothing set in the vault's record, which began at its host's start (a restart starts it over): since when
+                // it is at its default, from the vault's own word, never a file of the node's.
+                fields["defaultSince"] = engine.plugins.kept?[plugin.info.id] == nil ? engine.pluginRecordSince.map(NodeWire.Value.date) ?? .null : .null
                 return .object(fields)
             }
             reply(.init(re: request.id, result: .object(["plugins": .array(values)])))

@@ -74,12 +74,16 @@ public final class HostWebListeners {
         var said: [String] = []
         let result = lock.withLock { () -> Result<Int32, Refusal> in
             guard !closed else { return .failure(Refusal("the host is stopping")) }
+            // A plugin's page is one request's origin: never a held socket again (a second page on the first's port would
+            // share its origin). The new one is bound before the held one closes, so its port is another.
+            var replaced: Held?
             if let kept = held[place] {
-                if kept.address == address, port == 0 || kept.port == port { return .success(kept.fd) }
-                Sys.close(kept.fd)
+                if place != .page, kept.address == address, port == 0 || kept.port == port { return .success(kept.fd) }
+                if place == .page { replaced = kept } else { Sys.close(kept.fd) }
                 held[place] = nil
                 said.append("web listener \(place.rawValue) \(kept.address):\(kept.port) closed: \(address):\(port) asked for instead")
             }
+            defer { if let replaced { Sys.close(replaced.fd) } }
             switch Platform.TCP.listen(family: .ipv4, address: address, port: port, backlog: Self.backlog) {
             case .failure(let failure):
                 return .failure(Refusal("\(address):\(port) couldn't be bound: \(failure)"))

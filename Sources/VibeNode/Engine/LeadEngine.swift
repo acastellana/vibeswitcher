@@ -60,6 +60,10 @@ public final class LeadEngine: @unchecked Sendable {
         public var summarizeBrief: Summarizer.Generate?
         /// The feature plugins (`PluginRegistry.standard()` by default; a test's own).
         public var plugins: [FeaturePlugin]?
+        /// Where a plugin's page for a person's browser gets its listening socket (the wallet's signing page): the
+        /// server gives the session host's (`WebBind.forServer`, H1's hold); none: bound in this process (`WebBind.direct`,
+        /// a test's).
+        public var pluginBind: WebBind?
 
         public init() {}
     }
@@ -326,10 +330,28 @@ public final class LeadEngine: @unchecked Sendable {
     var pluginNow: () -> Date = Date.init
     /// The plugin requests settled (`PluginKey.name`), as the vault keeps them: never drawn again.
     var pluginSettled: Set<String> = []
+    /// Whether the vault said which requests are settled (nothing is drawn until it did).
+    var pluginSettledKnown = false
+    /// The plugin page open now (one at a time on a node).
+    var pluginPage: PluginPage?
+    /// When the vault's record began, as the vault says (a host restart starts it over): what `plugin list` says a
+    /// plugin is at its default since.
+    var pluginRecordSince: Date?
+    /// Each request the reader last gave, by `PluginKey.name`: the stamp it came with (its digest, its session) and when
+    /// it was filed. What a card is drawn from, and who its tells go to.
+    var pluginStamps: [String: PluginStamp] = [:]
+    /// The digest each card was drawn from, by `PluginKey.name`: a request whose bytes changed under its id is dropped.
+    var pluginDrawn: [String: String] = [:]
+    /// The sessions of a team (a worker's, a verifier's) as the vault's roster said at the last look: not the user's.
+    var pluginTeam: Set<String> = []
     /// What must reach a session from VibeSwitcher even while its plugin is off (a withdrawal's words), by key, until it
     /// did or the session is gone; tried again at each plugins' look.
     var pluginTells: [String: (session: UUID, text: String)] = [:]
     var pluginTelling: Set<String> = []
+    /// The plugins' settings the user set, as the vault last said (`<plugin>.<name>`).
+    public internal(set) var pluginSettings: [String: String] = [:]
+    /// A clock for the plugins' pages when the engine has none (a test's engine), on its queue.
+    lazy var pluginClock = NodeClock(queue: queue)
     let pluginWork = DispatchQueue(label: "vibenode.lead-engine.plugins", qos: .userInitiated)
     // The developer tools notice (`ToolchainLook.swift`), on `queue`: the notices the last look found, when it ran,
     // whether one is under way; how the node's tools are asked (a test's stand-in) and the clock.

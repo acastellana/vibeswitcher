@@ -777,6 +777,37 @@ extension InstallTests {
         #expect(try FileManager.default.contentsOfDirectory(atPath: markers.path).isEmpty, "the checkout's own filter ran")
     }
 
+    /// A "racily clean" change is still found (the CI flake of 2026-11-22, `aFilterInTheCheckoutsOwnConfigNeverRuns`):
+    /// `.swift-version` rewritten in place with a same-size text in the same second its index entry was recorded, so its
+    /// stat matches the entry's to the second. Git takes such an entry for unchanged only while the index file is newer
+    /// than it; the courtesy check's copy of the index keeps the index's own time (`cp -p`), so git still compares the
+    /// bytes. With a plain `cp` the copy was newer, the change passed as clean, and only the later checks (69) stopped it.
+    @Test(NodeTraits.linuxOnly, .timeLimit(.minutes(10))) func aRacilyCleanChangeIsStillFound() async throws {
+        let world = try await world()
+        let version = world.clone.appendingPathComponent(".swift-version")
+        let text = try String(contentsOf: version, encoding: .utf8)
+        let other = String(repeating: "0", count: max(1, text.utf8.count - 1)) + "\n"
+        #expect(other.utf8.count == text.utf8.count)
+        // At the start of a second: the entry's refresh and the change land in it (each takes milliseconds).
+        let start = Date().timeIntervalSince1970
+        try await Task.sleep(nanoseconds: UInt64((start.rounded(.down) + 1 - start) * 1_000_000_000) + 20_000_000)
+        let second = Int(Date().timeIntervalSince1970)
+        // Its stat changed (the same bytes, touched), so the refresh records the entry anew, in this second.
+        try FileManager.default.setAttributes([.modificationDate: Date()], ofItemAtPath: version.path)
+        _ = try await world.git(["update-index", "-q", "--refresh"], in: world.clone)
+        let handle = try FileHandle(forUpdating: version)
+        try handle.write(contentsOf: Data(other.utf8))
+        try handle.close()
+        var info = stat()
+        #expect(stat(version.path, &info) == 0 && Int(info.st_mtim.tv_sec) == second && Int(info.st_ctim.tv_sec) == second,
+                "the change left the entry's second: run again")
+        // The check then runs in a later second, as it did on the loaded runner: a copy of the index made now is newer
+        // than the entry, so only the index's own time keeps git comparing the bytes.
+        while Int(Date().timeIntervalSince1970) == second { try await Task.sleep(nanoseconds: 50_000_000) }
+        let changed = try await world.install(try world.arguments(world.base, products: true))
+        #expect(changed.status == 65 && changed.errors.contains(".swift-version"), "\(changed.status) \(changed.errors)")
+    }
+
     @Test(NodeTraits.linuxOnly, .timeLimit(.minutes(10))) func aBinaryWithARunpathIsRefused() async throws {
         let world = try await world()
         let ran = try await world.install(try world.arguments(world.base, products: true))

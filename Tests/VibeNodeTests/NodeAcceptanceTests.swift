@@ -376,6 +376,9 @@ struct NodeAcceptanceTests {
     func a40FetchAndMergeRemote() async throws {
         let node = try await ScratchNode(scratch, holdFirstLook: true)
         defer { node.stop() }
+        // merge_remote waits for the machine's load to drop below load_threshold before it tests (`waitForLoad`): the
+        // test machine's own load isn't the case's (the CI flake of 2026-11-22: a loaded runner held it past its 300 s).
+        try node.noLoadHold()
         let repo = try await Self.repository(node)
         let origin = node.root.appendingPathComponent("origin.git").path
         for arguments in [["init", "-q", "--bare", "-b", "main", origin], ["-C", repo.path, "remote", "add", "origin", origin],
@@ -855,7 +858,7 @@ struct NodeAcceptanceTests {
         let node = try await ScratchNode(scratch)
         defer { node.stop() }
         let listed = try await node.run(["plugin", "list"])
-        #expect(listed.status == 0 && listed.output.contains("shell  Shell requests  on (its default)") && listed.output.contains("adds for agents: vs-shell"),
+        #expect(listed.status == 0 && listed.output.contains("shell  Shell requests  on (at its default") && listed.output.contains("adds for agents: vs-shell"),
                 "\(listed.output)\(listed.errors)\n\(node.said)")
         let off = try await node.runOnTerminal(["plugin", "off", "shell"])
         #expect(off.status == 0 && off.output.contains("This turns Shell requests off") && off.output.contains("shell is off"), "\(off.output)\(off.errors)")

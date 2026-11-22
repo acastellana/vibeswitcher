@@ -177,6 +177,27 @@ struct NodeServerBoundsTests {
                 "a request still being answered (an engine's wait) isn't quiet")
     }
 
+    /// A command that asks first (`end` looks its session up), then waits at the typed-code prompt past the quiet limit
+    /// (2 s here; 10 minutes on the user's node, the time to read an `approve` batch): its connection closed meanwhile,
+    /// it connects again, once and silently, and the session ends. The code is the action's (`NodeIds.code(action:)`),
+    /// not the connection's.
+    @Test func aCommandThatAskedFirstThenWaitedAtThePromptStillGoesThrough() async throws {
+        let node = try await ScratchNode(scratch, hostArguments: ["--server-arg", ServerArguments.testIdleFlag + "1"])
+        defer { node.stop() }
+        let (session, _) = try await NodeAcceptanceTests.newClaude(node)
+        let short = NodeAcceptanceTests.short(session)
+        let path = node.serverSocket
+        let ended = try await node.runOnTerminal(["end", short]) { code in
+            // Held until a connection that asked once, made now, has been closed for its quiet: the command line's, which
+            // asked before it, has been too.
+            guard let later = try? Raw(path), Self.isHello(later.line()),
+                  later.sendAll(NodeWire.line(NodeWire.Request(id: "q", kind: "no.such.kind"))) else { return code }
+            while let line = later.line(timeout: 30) { if Self.bye(line) != nil { break } }
+            return code
+        }
+        #expect(ended.status == 0 && ended.output.contains("ended: session \(short)"), "\(ended.output)\(ended.errors)\n\(node.said)")
+    }
+
     /// The command line connects before it asks for the typed code, which can take longer than the hello's limit: its
     /// connection closed meanwhile, it connects again, once and silently, and the change goes through.
     @Test func aTypedCodeSlowerThanTheHelloLimitStillGoesThrough() async throws {
@@ -260,14 +281,16 @@ struct NodeServerBoundsTests {
         let node = try await ScratchNode(scratch)
         defer { node.stop() }
         let path = node.serverSocket
+        // This process's share taken, whatever it holds already (the node's start-up probe may still count, its end not
+        // yet read under load); the last one admitted is the one that won't read.
         var others: [Raw] = []
-        for _ in 1..<NodeServer.maxPerPeer {
+        for _ in 0..<NodeServer.maxPerPeer {
             let raw = try Raw(path)
-            try #require(Self.isHello(raw.line()))
+            guard Self.isHello(raw.line()) else { break }
             others.append(raw)
         }
-        let stuck = try Raw(path)
-        try #require(Self.isHello(stuck.line()))
+        let last = others.popLast()
+        let stuck = try #require(last, "no connection admitted")
         let count = 3_000
         var lines = Data()
         for index in 0..<count { lines.append(NodeWire.line(NodeWire.Request(id: "d\(index)", kind: "draft"))) }
@@ -356,13 +379,13 @@ struct NodeServerBoundsTests {
         #expect(answered, "\(node.said)")
     }
 
-    /// The host started with a soft limit of 512 open files (`prlimit --nofile=512:` execs it): it raises its own to
-    /// the hard limit, its server child inherits that, and a session's program gets 512 back, after a handover too.
+    /// The host started with a soft limit of 2048 open files (`prlimit --nofile=2048:` execs it): it raises its own to
+    /// the hard limit, its server child inherits that, and a session's program gets 2048 back, after a handover too.
     @Test(.enabled(if: FileManager.default.isExecutableFile(atPath: prlimit), "util-linux's prlimit starts the host with a lower limit"))
     func theHostRaisesItsDescriptorLimitAndItsSessionsGetTheOldOne() async throws {
         let hard = try #require(Self.descriptorLimits(getpid())?.hard)
-        try #require(hard == "unlimited" || (Int(hard) ?? 0) > 512, "the hard limit is \(hard)")
-        let node = try await ScratchNode(scratch, hostPrefix: [Self.prlimit, "--nofile=512:"])
+        try #require(hard == "unlimited" || (Int(hard) ?? 0) > 2048, "the hard limit is \(hard)")
+        let node = try await ScratchNode(scratch, hostPrefix: [Self.prlimit, "--nofile=2048:"])
         defer { node.stop() }
         let host = try #require(Self.descriptorLimits(node.hostPID))
         #expect(host.soft == host.hard && host.hard == hard, "\(host)")
@@ -371,16 +394,30 @@ struct NodeServerBoundsTests {
         let out = node.root.appendingPathComponent("ulimit.txt").path
         _ = try await node.spawn("ulimit -n > \(out); sleep 60")
         let read = await eventually(timeout: 60) { ((try? String(contentsOfFile: out, encoding: .utf8)) ?? "").hasSuffix("\n") }
-        #expect(read && (try? String(contentsOfFile: out, encoding: .utf8)) == "512\n", "\((try? String(contentsOfFile: out, encoding: .utf8)) ?? "nothing")\n\(node.said)")
+        #expect(read && (try? String(contentsOfFile: out, encoding: .utf8)) == "2048\n", "\((try? String(contentsOfFile: out, encoding: .utf8)) ?? "nothing")\n\(node.said)")
 
-        // Handed over to the same build: the new image starts with the limit raised, and its sessions still get 512.
+        // Handed over to the same build: the new image starts with the limit raised, and its sessions still get 2048.
         try await node.handOver()
         let after = node.root.appendingPathComponent("ulimit-after.txt").path
         _ = try await node.spawn("ulimit -n > \(after); sleep 60")
         let readAfter = await eventually(timeout: 60) { ((try? String(contentsOfFile: after, encoding: .utf8)) ?? "").hasSuffix("\n") }
-        #expect(readAfter && (try? String(contentsOfFile: after, encoding: .utf8)) == "512\n",
+        #expect(readAfter && (try? String(contentsOfFile: after, encoding: .utf8)) == "2048\n",
                 "\((try? String(contentsOfFile: after, encoding: .utf8)) ?? "nothing")\n\(node.said)")
         #expect(Self.descriptorLimits(node.hostPID)?.soft == hard)
+    }
+
+    /// A fresh start's environment is the user manager's, which any process of the user can set: a carried soft limit
+    /// planted there (0, which would leave every session unable to open a file) is refused, said, and the host's own
+    /// soft limit before its raise is what its sessions get.
+    @Test(.enabled(if: FileManager.default.isExecutableFile(atPath: prlimit), "util-linux's prlimit starts the host with a lower limit"))
+    func aCarriedLimitPlantedForAFreshStartIsRefused() async throws {
+        let node = try await ScratchNode(scratch, hostPrefix: ["/usr/bin/env", "VIBESWITCHER_HOST_NOFILE_BEFORE=0", Self.prlimit, "--nofile=2048:"])
+        defer { node.stop() }
+        let out = node.root.appendingPathComponent("ulimit.txt").path
+        _ = try await node.spawn("ulimit -n > \(out); sleep 60")
+        let read = await eventually(timeout: 60) { ((try? String(contentsOfFile: out, encoding: .utf8)) ?? "").hasSuffix("\n") }
+        #expect(read && (try? String(contentsOfFile: out, encoding: .utf8)) == "2048\n", "\((try? String(contentsOfFile: out, encoding: .utf8)) ?? "nothing")\n\(node.said)")
+        #expect(node.said.contains("VIBESWITCHER_HOST_NOFILE_BEFORE not taken: a fresh start takes none"), "\(node.said)")
     }
 
     static let prlimit = "/usr/bin/prlimit"

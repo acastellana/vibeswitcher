@@ -1930,7 +1930,18 @@ against it. Each line says what reduces it now, if anything.
    hands out numbers under 32 bits as well, XFS's `inode64`, a file under them sharing the low bits of a host socket
    file past them passes on the kernel's word); and on a kernel before 4.12 (no `SO_COOKIE`) unix_diag names the
    host's listener by its 32-bit sockfs inode number alone, so once those numbers come round it could answer for
-   another socket. A worker can likewise put a file it
+   another socket. When the host can't check at all (no descriptor for the kernel's answer or the connection: the
+   system's file table full or no memory, ENFILE or ENOMEM; or another thread of the host taking the slot its spare
+   descriptor freed for the check; a full table of its own, EMFILE, no longer stops it, 2026-11-22), the check says
+   it can't, and the watch neither records a file nor unlinks one; two narrow cases still pass then. A file at the
+   path with the device and inode number of the one the host recorded counts as the host's, unchecked: a worker
+   would have to delete the host's socket file and get a new socket file there with that same inode number while the
+   host can't check (the folder watch sees each change, but identity is all it can compare). And a fresh listener
+   the host binds while it can't check is kept, its file recorded as the path names it right after the bind (an
+   `lstat`): a worker swapping its own socket in between the bind and that `lstat` would have it recorded. Both need
+   the host short of descriptors or memory, a race of microseconds or an inode number the file system hands out
+   again, and give no more than the socket at the path already does (above); throwing the host's own listener away
+   when it can't be checked, or leaving the path unexamined, was worse. A worker can likewise put a file it
    holds locked at the host's lock path (renamed over it), or lock a fresh file there before the host does: the host
    can't take that lock, and a second host can start on the path; the host only says so (the journal, and `hostNotes`
    until it clears, which `status` shows), and refuses a handover meanwhile. A rename there during a handover's exec
