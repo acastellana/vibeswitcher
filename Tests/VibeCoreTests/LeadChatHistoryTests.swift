@@ -86,6 +86,22 @@ struct LeadChatHistoryTests {
         #expect(LeadChatHistory.parts(session: UUID().uuidString, root: fixture.root, home: fixture.home).isEmpty)
     }
 
+    /// A lead reopened after a restart carries on B's conversation in a new window session: its chat keeps A's turns
+    /// and the line where B began; a reopen of a lead no handover led to adds nothing.
+    @Test func aReopenedLeadKeepsItsEarlierSessions() throws {
+        let fixture = try Fixture()
+        let first = try fixture.transcript("a", [Fixture.user("a1", "Make the films page", minute: 1)])
+        try fixture.handover(from: Self.a, to: Self.b, transcript: first, minute: 10, reason: "scheduled")
+        let reopened = UUID().uuidString
+        try LeadChatHistory.carry(root: fixture.root, from: Self.b, to: reopened)
+        let parts = LeadChatHistory.parts(session: reopened, root: fixture.root, home: fixture.home)
+        #expect(parts.map { Fixture.texts($0.entries) } == [["Make the films page"]])
+        #expect(parts.map(\.handover.notice) == [LeadRotation.notice(reason: "scheduled", at: Date(timeIntervalSince1970: Fixture.at(10)))])
+        let count = LeadChatHistory.load(root: fixture.root).count
+        try LeadChatHistory.carry(root: fixture.root, from: Self.a, to: UUID().uuidString)
+        #expect(LeadChatHistory.load(root: fixture.root).count == count)
+    }
+
     @Test func theHandoversMachineryIsNotConversation() throws {
         let fixture = try Fixture()
         let marker = LeadRotation.noteMarker + UUID().uuidString

@@ -440,7 +440,8 @@ private struct ChatRows: View, Equatable {
         VStack(alignment: .leading, spacing: 0) {
             ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
                 ChatItemView(item: item, chat: chat, expanded: item.opens ? expanded : [], agent: agent, rowID: rowID,
-                             canSend: canSend, resend: resend, openImage: openImage)
+                             // An earlier lead session's rows are display only: nothing in them is sent again.
+                             canSend: canSend && !chat.isHistory(item.id), resend: resend, openImage: openImage)
                     .equatable()
                     .id(item.id)
                     .accessibilityHidden(unexposed.contains(item.id))

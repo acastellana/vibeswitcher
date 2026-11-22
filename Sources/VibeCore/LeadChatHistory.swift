@@ -77,6 +77,14 @@ public enum LeadChatHistory {
         try VibePaths.writePrivate(try JSONEncoder().encode(Array(entries)), to: URL(fileURLWithPath: path))
     }
 
+    /// A lead reopened after a restart carries on `old`'s conversation in a new window session (`new`): its chat keeps
+    /// `old`'s earlier sessions, the handover into `old` now leading to `new`. Nothing when no handover led to `old`.
+    public static func carry(root: String, from old: String, to new: String) throws {
+        guard old != new, var into = load(root: root).last(where: { $0.to == old && $0.root == root && $0.role == "lead" }) else { return }
+        into.to = new
+        try record(into)
+    }
+
     /// The handovers that led to `session`, oldest first, the newest `maxSessions`: only this project's lead
     /// handovers, each into the session the next one replaced.
     public static func chain(to session: String, root: String, records: [Handover]) -> [Handover] {

@@ -190,7 +190,13 @@ final class ChatModel: ObservableObject {
     /// session's, once the live transcript is loaded from its start (Show Earlier's pages reach it). Display only.
     private(set) var historySource: LeadChatHistory.Source?
     private(set) var history: [LeadChatHistory.Part] = []
-    private var historyItems: [ChatItem] = []
+    private var historyItems: [ChatItem] = [] {
+        didSet { historyIDs = Set(historyItems.map(\.id)) }
+    }
+    private var historyIDs: Set<String> = []
+
+    /// Whether the item is an earlier lead session's: display only, never sent again (no Send Again, no Edit in Composer).
+    func isHistory(_ id: String) -> Bool { historyIDs.contains(id) }
 
     private func updateItems() {
         // After a handover the live session's start prompt is the handover's, not the user's conversation.

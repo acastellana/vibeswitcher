@@ -51,6 +51,8 @@ struct LeadChatHandoverTests {
         #expect(chat.items.map(\.id) == ["o1", "o2.0", "handover:\(newID.uuidString)", "n2.0", "n3"])
         #expect(chat.items.dropFirst(2).first == .handover(id: "handover:\(newID.uuidString)", notice: notice, at: at.timeIntervalSince1970))
         #expect(notice.hasPrefix("Started a fresh lead session at "))
+        // The earlier session's rows are display only: no Send Again or Edit in Composer; the live session's keep them.
+        #expect(chat.isHistory("o1") && chat.isHistory("handover:\(newID.uuidString)") && !chat.isHistory("n3"))
 
         // The old lead's own chat, and a chat with no lead's history: exactly its own turns.
         let plain = ChatModel(home: home)

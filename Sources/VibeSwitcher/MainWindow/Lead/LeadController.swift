@@ -1116,6 +1116,8 @@ final class LeadController: ObservableObject {
             var replacedSession: UUID?
             // The replaced lead and its transcript, for the new lead's chat (`LeadChatHistory`).
             var replacedChat: (session: UUID, transcript: String?)?
+            // A reopened lead: the session whose conversation it carries on, whose earlier sessions its chat keeps.
+            var reopened: String?
             var waiting: [SteerMessage] = []
             // In its prompt: it isn't told it again (see `LeadWitness.PolicyWatch`).
             let policy = WorkingPolicy.load()
@@ -1143,6 +1145,7 @@ final class LeadController: ObservableObject {
                 issued = grant
                 // The role is the new session's from now on: the lead it replaces gets nothing more, and what waited
                 // for it goes to the new one (see `LeadHandover`).
+                if resume != nil { reopened = boardStore.load().leadSession ?? running?.id.uuidString }
                 let handover = try LeadHandover.begin(boardStore, inbox: inbox)
                 waiting = handover.waiting
                 if let replaced = handover.replaced {
@@ -1192,7 +1195,7 @@ final class LeadController: ObservableObject {
                     self.replacing = self.replacing.filter { $0.value != root }
                     self.alert("The lead didn't start.", "\(error)")
                 case .success(let (grant, launch)):
-                    self.spawnLead(root: root, project: project, grant: grant, launch: launch, policy: policy, show: show, replaced: replacedChat)
+                    self.spawnLead(root: root, project: project, grant: grant, launch: launch, policy: policy, show: show, replaced: replacedChat, reopened: reopened)
                 }
             }
         }
@@ -1200,7 +1203,7 @@ final class LeadController: ObservableObject {
 
     /// `replaced`: the lead this one takes the place of, and its transcript: the new lead's chat carries its conversation.
     private func spawnLead(root: String, project: String, grant: String, launch: LeadLaunch.Prepared, policy: String, show: Bool,
-                           replaced: (session: UUID, transcript: String?)? = nil) {
+                           replaced: (session: UUID, transcript: String?)? = nil, reopened: String? = nil) {
         let boardStore = BoardStore(root: root)
         let vault = self.vault
         host.spawn(SpawnRequest(cwd: root, command: launch.command, env: launch.environment, cols: 120, rows: 40, keepShell: false,
@@ -1216,6 +1219,12 @@ final class LeadController: ObservableObject {
                 self?.reads.async { _ in try? boardStore.update { board in LeadHandover.started(session.id.uuidString, on: &board) } }
                 if let replaced { self?.recordHandover(root: root, from: replaced.session, to: session.id, transcript: replaced.transcript,
                                                        reason: LeadChatHistory.startedReason, at: Date()) }
+                if let reopened {
+                    self?.reads.async { _ in
+                        do { try LeadChatHistory.carry(root: root, from: reopened, to: session.id.uuidString) }
+                        catch { Breadcrumbs.shared.note("reopened lead's earlier sessions not carried to its chat: \(error)") }
+                    }
+                }
                 self?.policyWatch?.started(session.id.uuidString, with: policy)
                 // You chose to start the lead here: answer Claude's trust question for this folder.
                 if self?.answersTrust == true { self?.answerTrust(session.id, folder: root) }
