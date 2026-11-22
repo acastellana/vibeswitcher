@@ -248,7 +248,12 @@ export function connectSocket(store, options) {
         if (message.final !== true) return;
         sub.parting = null;
         entries = held.entries;
-        if (held.withheld.length) log(`VibeSwitcher: ${held.withheld.length} ${sub.collection} too large to send, not shown:`, held.withheld.join(', '));
+        // An entry too large for a part, withheld whole (never cut): its stub, when its collection gives one, takes its
+        // place (a card drawn as too large to show here, with the command that shows it); any other is said and left out.
+        const stubs = held.withheld.filter((item) => item.stub && typeof item.stub === 'object');
+        entries = entries.concat(stubs.map((item) => ({ id: item.id, value: item.stub })));
+        const unshown = held.withheld.filter((item) => !stubs.includes(item));
+        if (unshown.length) log(`VibeSwitcher: ${unshown.length} ${sub.collection} too large to send, not shown:`, unshown.map((item) => item.id).join(', '));
       }
       sub.epoch = message.epoch;
       sub.seq = message.seq;

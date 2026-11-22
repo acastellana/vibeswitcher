@@ -389,26 +389,28 @@ public final class LiveHub: WebSocketHandler, @unchecked Sendable {
     private func snapshot(of stream: LiveStream, sub: String, parts: Bool) -> [Data] {
         let (seq, entries) = stream.snapshot()
         let snapshot = NodeWire.Snapshot(sub: sub, collection: stream.collection, epoch: epoch, seq: seq, entries: entries)
-        return parts ? Self.parted(snapshot) : [Self.fitted(snapshot)]
+        return parts ? Self.parted(snapshot, oversized: stream.oversized) : [Self.fitted(snapshot)]
     }
 
     /// `snapshot` as its parts (the architecture review's row 14, bounded by construction): messages of at most
     /// `NodeWire.partBytes` each, whatever the collection holds, so none can pass a line (the Unix socket's 1 MiB) or a
     /// WebSocket message. Each carries the snapshot's `epoch` and `seq`, its `part` (0, 1, ...), and `final` on the
     /// last; the entries go in order, as many to a part as fit. An entry that can't fit a part on its own (past
-    /// `NodeWire.entryBytes`: its collection's own rule didn't keep it under, as a board's does) has its longest texts
-    /// cut until it fits (`cut`: a question of a megabyte, say); one that still can't (its shape alone too large) is
-    /// left out and its id named in a part's `withheld`, after the entries. The rest of the snapshot is sent whole,
-    /// never dropped. One part, `part` 0 and `final`, when it all fits. The hub writes a snapshot's parts in one turn of its queue, so nothing of the subscription
+    /// `NodeWire.entryBytes`: its collection's own rule didn't keep it under, as a board's does) is withheld whole and
+    /// named in a part's `withheld`, after the entries, with its collection's stub (a card's place and the command that
+    /// shows it whole); a collection that holds nothing a person decides on (`oversized` `.cut`: the boards) has its
+    /// longest texts cut instead, until it fits, and withheld only when its shape alone is too large. Text a person
+    /// decides on is never cut. The rest of the snapshot is sent whole, never dropped. One part, `part` 0 and `final`,
+    /// when it all fits. The hub writes a snapshot's parts in one turn of its queue, so nothing of the subscription
     /// comes between them.
-    static func parted(_ snapshot: NodeWire.Snapshot) -> [Data] {
+    static func parted(_ snapshot: NodeWire.Snapshot, oversized: LiveStream.Oversized = .withhold(stub: nil)) -> [Data] {
         // The envelope's bytes at their most: the widest part number, `final` false, and `withheld`'s brackets.
         var head = snapshot
         head.entries = []
         head.part = Int.max
         head.final = false
         let room = NodeWire.partBytes - NodeWire.message(head).count - #","withheld":[]"#.utf8.count
-        var parts: [(entries: [NodeWire.Entry], withheld: [String])] = [([], [])]
+        var parts: [(entries: [NodeWire.Entry], withheld: [NodeWire.Withheld])] = [([], [])]
         var size = 0
         // A place for `bytes` more in the part being filled, or a new part.
         func place(_ bytes: Int) {
@@ -418,22 +420,29 @@ public final class LiveHub: WebSocketHandler, @unchecked Sendable {
             }
             size += bytes
         }
-        var withheld: [String] = []
+        var withheld: [NodeWire.Withheld] = []
         for whole in snapshot.entries {
-            guard let entry = NodeWire.message(whole).count + 1 <= room ? whole : Self.cut(whole, room: room) else {
-                withheld.append(whole.id)
+            let size = NodeWire.message(whole).count + 1
+            var fitting: NodeWire.Entry?
+            if size <= room { fitting = whole } else if case .cut = oversized { fitting = Self.cut(whole, room: room) }
+            guard let entry = fitting else {
+                var stub: NodeWire.Value?
+                if case .withhold(let made) = oversized { stub = made?(whole.value, size) }
+                withheld.append(NodeWire.Withheld(id: whole.id, bytes: size, stub: stub))
                 continue
             }
             let bytes = NodeWire.message(entry).count + 1
             place(bytes)
             parts[parts.count - 1].entries.append(entry)
         }
-        // An id is an entry's, so it is shorter than its entry; one too long to name is only left out.
-        for id in withheld {
-            let bytes = NodeWire.message(NodeWire.Value.string(id)).count + 1
+        // Each named, its stub with it while that fits a part (a stub is a few fields); one whose id alone is too long to
+        // name is only left out.
+        for var item in withheld {
+            if NodeWire.message(item).count + 1 > room { item.stub = nil }
+            let bytes = NodeWire.message(item).count + 1
             guard bytes <= room else { continue }
             place(bytes)
-            parts[parts.count - 1].withheld.append(id)
+            parts[parts.count - 1].withheld.append(item)
         }
         return parts.enumerated().map { index, contents in
             var part = snapshot
@@ -450,6 +459,7 @@ public final class LiveHub: WebSocketHandler, @unchecked Sendable {
 
     /// `entry` with its longest texts cut, one at a time, until it takes at most `room` bytes with its comma: each keeps
     /// its start and ends `… [cut: N bytes]`. Nil when it can't be made to fit by cutting texts longer than `cutFloor`.
+    /// Only for a collection whose `oversized` is `.cut`: nothing in it is text a person decides on.
     static func cut(_ entry: NodeWire.Entry, room: Int) -> NodeWire.Entry? {
         var value = entry.value
         for _ in 0..<256 {

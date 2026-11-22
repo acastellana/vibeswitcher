@@ -122,7 +122,8 @@ public enum WireSchema {
                 field("v", .int), field("kind", .words(["snapshot"])), field("sub", .string), field("collection", collection),
                 optional("key", .string), field("epoch", .string), field("seq", .int), optional("entries", .list(.shape("entry"))),
                 optional("after", Kind.string.orNull), optional("more", .bool), optional("items", .list(.shape("chat.item"))),
-                optional("truncated", .bool), optional("part", .int), optional("final", .bool), optional("withheld", .list(.string))]),
+                optional("truncated", .bool), optional("part", .int), optional("final", .bool), optional("withheld", .list(.shape("withheld")))]),
+            shape("withheld", from: contractLive, [field("id", .string), field("bytes", .int), optional("stub", .any)]),
             shape("entry", from: contractLive, [field("id", .string), field("value", .any)]),
             shape("delta", from: contractLive, [
                 field("v", .int), field("kind", .words(["delta"])), field("sub", .string), field("prev", .int), field("seq", .int),

@@ -279,6 +279,20 @@ test('a snapshot in parts is taken whole when its last part comes, nothing befor
   assert.equal(statusOf(r), 'working');
 });
 
+test('a card too large for a part comes withheld whole: its stub takes its place, nothing of what it asks', async () => {
+  const r = await live();
+  assert.ok(r.store.state.cards.get(CARD).question, 'the whole card first');
+  const part = vector('snapshot.parts-card');
+  r.socket().say({ ...part, sub: 's3', epoch: EPOCH });
+  const card = r.store.state.cards.get(CARD);
+  assert.ok(card, 'the card keeps its place');
+  assert.equal(card.tooLarge.command, 'vibeswitcher questions');
+  assert.equal(card.question, undefined, 'nothing of what it asks, cut or whole');
+  assert.equal(card.project, vector('snapshot.cards').entries[0].value.project);
+  assert.equal(card.open, true);
+  assert.ok(!r.page.warnings.some((w) => w.includes('too large to send')), 'a stub shown is not a warning');
+});
+
 test('a part out of its place takes nothing and asks again', async () => {
   const r = await live();
   const before = [...r.store.state.sessions.keys()];

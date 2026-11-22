@@ -126,6 +126,16 @@ function approvalFacts(approval) {
       (approval.problems || []).map((problem) => fact('Note', problem))));
 }
 
+// A card the node withheld from the page whole, too large for a snapshot's part (`tooLarge`): what it asks is never cut,
+// so it is read whole in a terminal. Its place and title only; nothing of what it asks.
+export function tooLargeCard(card) {
+  const command = card.tooLarge?.command || 'vibeswitcher questions';
+  return h('article', { class: 'card too-large' + (card.open ? '' : ' closed') },
+    h('header', { class: 'card-head' }, h('span', { class: 'priority important' }, card.plugin?.title || (card.kind === 'approval' ? 'A merge to approve' : 'A question'))),
+    h('p', { class: 'card-notice' }, 'This card is too large for the page: read it with ', h('code', null, command), '.'),
+    copyLine(command, 'the command that shows it whole'));
+}
+
 // A lead's question or approval. Returns { el, update(card) }; `el` keeps its text field and its focus across updates.
 export function questionCard(app, first) {
   const el = h('article', { class: 'card', tabindex: -1 });
@@ -142,6 +152,12 @@ export function questionCard(app, first) {
   }
 
   function build() {
+    if (card.tooLarge) {
+      el.replaceChildren(...tooLargeCard(card).childNodes);
+      el.className = 'card too-large' + (card.open ? '' : ' closed');
+      keys = { buttons: [], hold: null };
+      return;
+    }
     const question = card.question;
     const acting = app.store.state.acting.get(card.id) || {};
     const pendingAnswer = acting.kind === 'answer' ? acting.answer : null;
@@ -310,6 +326,7 @@ function pushCard(lead) {
 // A feature plugin's card (js/plugincard.js): who asks, the node's facts, what it asks whole, the agent's own words,
 // and the lines that settle it. Never acts.
 export function pluginCard(card) {
+  if (card.tooLarge) return tooLargeCard(card);
   const f = pluginFacts(card), wait = f.state === 'waiting', fact = (n, ...v) => [h('dt', null, n), h('dd', null, v)];
   return h('article', { class: 'card' + (wait ? '' : ' closed') },
     h('header', { class: 'card-head' }, h('span', { class: `priority ${PRIORITY[f.severity] ? f.severity : 'important'}` }, f.title),

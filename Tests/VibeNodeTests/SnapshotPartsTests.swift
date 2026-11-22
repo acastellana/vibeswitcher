@@ -5,8 +5,9 @@ import VibeCore
 
 /// Snapshots in parts (the architecture review's row 14, bounded by construction): a client that asks (`subscribe`'s
 /// `parts`) gets a snapshot as messages of at most `NodeWire.partBytes` each, `part` 0, 1, ... and `final` on the last,
-/// whatever the collection holds; an entry past a part's room has its longest texts cut, or is withheld and named, and
-/// the rest is sent whole; a delta larger than a part is a snapshot in parts instead. A client that doesn't ask gets one
+/// whatever the collection holds; an entry past a part's room is withheld whole and named (a card with a stub in its
+/// place: what a person decides on is never cut), or, in the boards alone, has its longest texts cut; the rest is sent
+/// whole; a delta larger than a part is a snapshot in parts instead. A client that doesn't ask gets one
 /// message as before (fitted to a line), and a delta past a line is a fitted snapshot for it, never a message the
 /// socket would refuse.
 @Suite(.timeLimit(.minutes(5)))
@@ -17,8 +18,8 @@ struct SnapshotPartsTests {
 
     /// What a client holds after a snapshot's parts: their entries in order and the ids withheld, each part checked
     /// (its place, its envelope, its size, the schema). Nil when they don't make one snapshot.
-    static func assembled(_ parts: [Data], epoch: String = "e", seq: Int = 1) -> (entries: [NodeWire.Entry], withheld: [String])? {
-        var entries: [NodeWire.Entry] = [], withheld: [String] = []
+    static func assembled(_ parts: [Data], epoch: String = "e", seq: Int = 1) -> (entries: [NodeWire.Entry], withheld: [NodeWire.Withheld])? {
+        var entries: [NodeWire.Entry] = [], withheld: [NodeWire.Withheld] = []
         for (index, data) in parts.enumerated() {
             #expect(data.count <= NodeWire.partBytes, "part \(index): \(data.count) bytes")
             guard let part = NodeWire.decode(NodeWire.Snapshot.self, data), part.part == index, part.final == (index == parts.count - 1),
@@ -70,22 +71,76 @@ struct SnapshotPartsTests {
         #expect(try #require(Self.assembled(empty)).entries.isEmpty)
     }
 
-    /// An entry past a part's room: a question of a megabyte is cut, its start kept and the cut marked; an entry whose
-    /// shape alone passes it (a hundred thousand small values) is withheld and named; every other entry is sent.
-    @Test func anEntryPastAPartIsCutOrWithheldAndTheRestSent() throws {
+    /// A plugin card (the shell plugin's) whose body is `bytes` long: past the plugin's own bound (`bodyBytesAtMost`,
+    /// which refuses one that long before it is ever a card), so made here by hand.
+    static func shellCard(bodyBytes: Int, at: Date) -> CardStore.Card {
+        var card = CardStore.Card(root: "/scratch/repo", kind: .plugin, at: at)
+        let run = PluginCard.Action(word: "run", label: "Run", acts: true, short: "runs it", does: "runs it", verb: "run it", marks: "starting")
+        let line = String(repeating: "y", count: 99)
+        let body = (0..<(bodyBytes / 100)).map { "echo \($0) \(line)" }.joined(separator: "\n")
+        card.plugin = PluginCard(plugin: "shell", request: UUID().uuidString, session: "local:0b6c1a52-3f0e-4c58-9a57-2d1c8e4f7a10",
+                                 asker: "Claude · repo", title: "A shell asked for", noun: "shell request", ask: "asks for a shell",
+                                 facts: [.init(name: "folder", label: "in the folder", value: "/scratch/repo", folder: true, decisive: true)],
+                                 body: .init(name: "command", label: "running exactly this", text: body), expiresAt: at, actions: [run])
+        return card
+    }
+
+    /// Text a person decides on is never cut: a shell card whose body is 300 KiB and a question of a megabyte are each
+    /// withheld whole, named with their bytes and a stub in their place (where they belong, the command that shows them,
+    /// nothing of what they ask); every other card is sent as it is; the command line still shows the body whole.
+    @Test func aCardPastAPartIsWithheldWholeNeverCut() throws {
         let at = Date(timeIntervalSince1970: 1_000_000)
-        let huge = SnapshotSizeTests.card(bytes: 1_000_000, closed: false, at: at)
+        let shell = Self.shellCard(bodyBytes: 300 * 1024, at: at)
+        let question = SnapshotSizeTests.card(bytes: 1_000_000, closed: false, at: at)
         let small = SnapshotSizeTests.card(bytes: 100, closed: false, at: at)
-        let shape = NodeWire.Entry(id: "many", value: .array((0..<100_000).map { .int($0) }))
-        let snapshot = NodeWire.Snapshot(sub: "s", collection: "cards", epoch: "e", seq: 1,
-                                         entries: [.init(id: huge.id, value: huge.value), shape, .init(id: small.id, value: small.value)])
+        let snapshot = NodeWire.Snapshot(sub: "s3", collection: "cards", epoch: "e", seq: 1,
+                                         entries: [shell, question, small].map { .init(id: $0.id, value: $0.value) })
+        let parts = LiveHub.parted(snapshot, oversized: .withhold(stub: CardStore.Card.tooLargeStub))
+        let read = try #require(Self.assembled(parts))
+        #expect(read.entries == [.init(id: small.id, value: small.value)], "only the card that fits, as it is")
+        #expect(read.withheld.map(\.id) == [shell.id, question.id])
+        // Nothing cut anywhere: no part holds a cut mark, nor any of the body's or the question's text.
+        for data in parts {
+            let text = String(decoding: data, as: UTF8.self)
+            #expect(!text.contains("[cut: ") && !text.contains("echo 7 ") && !text.contains(String(repeating: "x", count: 200)), "the small card's question is 100 bytes")
+        }
+        let stub = try #require(read.withheld.first?.stub)
+        #expect(stub["id"] == .string(shell.id) && stub["kind"] == .string("plugin") && stub["open"] == .bool(true))
+        #expect(stub["plugin"]?["session"] == shell.value["plugin"]?["session"] && stub["plugin"]?["body"] == nil)
+        #expect(stub["tooLarge"]?["command"] == .string("vibeswitcher questions"))
+        #expect(stub["tooLarge"]?["bytes"] == .int(read.withheld[0].bytes) && read.withheld[0].bytes > NodeWire.partBytes)
+        #expect(read.withheld[1].stub?["question"] == nil, "a question's stub holds nothing it asks")
+        // The command line's card (`vibeswitcher questions`, CardText): every line of the body, whole.
+        let lines = CardText.lines(shell.value)
+        #expect(lines.contains("    | echo 0 \(String(repeating: "y", count: 99))") && lines.contains("    | echo \(300 * 1024 / 100 - 1) \(String(repeating: "y", count: 99))"),
+                "\(lines.prefix(12))")
+        // The plugin's own bound keeps a real card's body far under a part.
+        #expect(PluginCard.bodyBytesAtMost * 2 < NodeWire.entryBytes)
+    }
+
+    /// Withheld by default: a collection that doesn't say it may cut sends an oversized entry nowhere, cut nowhere.
+    @Test func anOversizedEntryIsWithheldUnlessItsCollectionMayCut() throws {
+        let long = NodeWire.Entry(id: "long", value: .object(["prompt": .string(String(repeating: "p", count: 400_000))]))
+        let snapshot = NodeWire.Snapshot(sub: "s1", collection: "sessions", epoch: "e", seq: 1, entries: [long, .init(id: "a", value: .int(1))])
         let read = try #require(Self.assembled(LiveHub.parted(snapshot)))
-        #expect(read.entries.map(\.id) == [huge.id, small.id], "\(read.entries.map(\.id))")
-        #expect(read.withheld == ["many"])
-        #expect(read.entries[1].value == small.value, "an entry that fits is sent as it is")
-        let text = try #require(read.entries[0].value["question"]?["text"]?.string)
+        #expect(read.entries.map(\.id) == ["a"] && read.withheld == [NodeWire.Withheld(id: "long", bytes: NodeWire.message(long).count + 1)])
+    }
+
+    /// The boards, which hold nothing a person decides on: a note of a megabyte is cut, its start kept and the cut
+    /// marked; an entry whose shape alone passes a part (a hundred thousand small values) is withheld and named.
+    @Test func aBoardPastAPartHasItsLongestTextCut() throws {
+        let note = NodeWire.Entry(id: "note", value: .object(["tasks": .array([.object(["blocker": .string(String(repeating: "x", count: 1_000_000)),
+                                                                                        "slug": .string("t")])])]))
+        let shape = NodeWire.Entry(id: "many", value: .array((0..<100_000).map { .int($0) }))
+        let small = NodeWire.Entry(id: "small", value: .object(["tasks": .array([])]))
+        let snapshot = NodeWire.Snapshot(sub: "s4", collection: "boards", epoch: "e", seq: 1, entries: [note, shape, small])
+        let read = try #require(Self.assembled(LiveHub.parted(snapshot, oversized: .cut)))
+        #expect(read.entries.map(\.id) == ["note", "small"], "\(read.entries.map(\.id))")
+        #expect(read.withheld.map(\.id) == ["many"] && read.withheld[0].stub == nil)
+        #expect(read.entries[1] == small, "an entry that fits is sent as it is")
+        let text = try #require(read.entries[0].value["tasks"]?.array?.first?["blocker"]?.string)
         #expect(text.hasPrefix(String(repeating: "x", count: 100_000)) && text.hasSuffix(" bytes]") && text.contains("… [cut: "), "\(text.suffix(40))")
-        #expect(read.entries[0].value["question"]?["options"] == .array([.string("Yes"), .string("No")]), "short fields are never cut")
+        #expect(read.entries[0].value["tasks"]?.array?.first?["slug"] == .string("t"), "short fields are never cut")
     }
 
     /// A board's own rule keeps its value under a part's room, with space for its id: a board is never withheld.
@@ -233,7 +288,7 @@ struct Feed {
     var rows: [String: [String: NodeWire.Value]] = [:]
     var seq: [String: Int] = [:]
     var held: [String: (next: Int, seq: Int, entries: [NodeWire.Entry])] = [:]
-    var withheld: [String] = []
+    var withheld: [NodeWire.Withheld] = []
     var problems: [String] = []
     var biggest = 0
     var parted = false
