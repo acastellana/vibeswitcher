@@ -15,7 +15,7 @@ let usage = """
            vibeswitcher doctor | logs [--lines N] [--sessions]
            vibeswitcher start [--interop-is-on] [--at-login] [--node-version vX.Y.Z]
            vibeswitcher stop
-           vibeswitcher switch COMMIT | rollback
+           vibeswitcher switch COMMIT [--when-idle] | switch --cancel | rollback
            vibeswitcher lead FOLDER [--goal TEXT | --resume] [--take-head] [--replace] [--init]
            vibeswitcher questions [FOLDER] [--all] [--json]
            vibeswitcher board [FOLDER] [--json]

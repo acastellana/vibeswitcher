@@ -113,6 +113,12 @@ public final class Requests: @unchecked Sendable {
     var approveBatches: [ApproveBatch] = []
     /// The waits a `build.switch` runs on (a test's shorter ones).
     public var switchTiming = SwitchRequest.Timing()
+    /// A switch queued with `whenIdle` (`switch COMMIT --when-idle`): its build, when it was asked, and how often it is
+    /// looked at again (a test's shorter). What became of the last one run. On `queue`.
+    var queuedSwitch: (commit: String, at: Date)?
+    var queuedSwitchOutcome: (commit: String, said: String, handedOver: Bool, at: Date)?
+    public var queuedSwitchEvery: TimeInterval = 5
+    private var queuedSwitchLook = 0
     /// The web's gate and tokens (the live plan's I1, `NodeLive`): what `web.open` and `web.revoke` act on; none:
     /// both are refused.
     public var web: WebAccess?
@@ -541,6 +547,14 @@ public final class Requests: @unchecked Sendable {
             notices.append("the server ended stuck \(stuck) times in a row (its engine's queue didn't answer), and the host started it again each time: its log says what it was doing; if it goes on, `vibeswitcher stop`, then `vibeswitcher start`")
         }
         if let notice = updates?.notice { notices.append(notice) }
+        if let queued = queuedSwitch {
+            let holders = switchBlockersNow().blockers
+            notices.append("a switch to \(queued.commit.prefix(12)) is queued since \(NodeWire.dateText(queued.at)) for the first moment no worker or verifier is working"
+                           + (holders.isEmpty ? "" : ": held by " + holders.joined(separator: "; ")) + " (`vibeswitcher switch --cancel` drops it)")
+        } else if let done = queuedSwitchOutcome {
+            notices.append("the queued switch to \(done.commit.prefix(12)) ran at \(NodeWire.dateText(done.at)): \(done.said)"
+                           + (done.handedOver ? "; `vibeswitcher switch \(done.commit)` finishes the unit and `current`, as a switch does" : ""))
+        }
         return notices
     }
 
@@ -593,6 +607,10 @@ public final class Requests: @unchecked Sendable {
             // What refuses a switch now (decision 6), less the workers it would park (`SwitchPark`, by the last look).
             "switchBlockers": .array(switching.blockers.map(NodeWire.Value.string)),
             "switchParks": .array(switching.parks.map(NodeWire.Value.string)),
+            // A switch queued with --when-idle, and what became of the last one run.
+            "switchQueued": queuedSwitch.map { .object(["commit": .string($0.commit), "since": .date($0.at)]) } ?? .null,
+            "switchQueuedOutcome": queuedSwitchOutcome.map { .object(["commit": .string($0.commit), "said": .string($0.said),
+                                                                       "handedOver": .bool($0.handedOver), "at": .date($0.at)]) } ?? .null,
         ]
         // The user's node's tailnet page, for the command line (not in the `node` stream: `NodeStatusStore.value`).
         if let tailnet { fields["webTailnet"] = tailnet.value() }
@@ -746,19 +764,62 @@ public final class Requests: @unchecked Sendable {
     /// The sessions that refuse a switch now (`SwitchRequest.blockers`), less the workers the engine's last look saw only
     /// waiting on their lead, which the switch parks (`parks`). On `queue`.
     func switchBlockersNow() -> (blockers: [String], parks: [String]) {
-        let all = SwitchRequest.blockers(link.sessions)
-        let parks = engine?.switchParkHint(link.sessions).map(\.named) ?? []
-        return (all.filter { !parks.contains($0) }, parks)
+        let hinted = engine?.switchParkHint(link.sessions) ?? []
+        let parked = Set(hinted.map(\.session))
+        let holding = SwitchRequest.holding(link.sessions).filter { !parked.contains($0.id) }
+        return (SwitchRequest.blockers(holding, describe: switchDoing), hinted.map(\.named))
+    }
+
+    /// What a session that holds a switch is doing and since when, by the node's last scan of it.
+    func switchDoing(_ session: HostSession) -> String? {
+        let scanned = sessions?.sessions.first { $0.hostID == session.id }
+        return SwitchRequest.doing(session, status: scanned?.status, since: scanned?.statusSince, now: Date())
     }
 
     private func buildSwitch(_ request: NodeWire.Request, reply: @escaping (NodeWire.Reply) -> Void) {
+        // `switch --cancel`: the queued switch dropped.
+        if request.args?["cancel"]?.bool == true {
+            guard let queued = queuedSwitch else { return reply(.init(re: request.id, error: .init(.refused, "no switch is queued"))) }
+            queuedSwitch = nil
+            note("build.switch: the queued switch to \(queued.commit) dropped")
+            return reply(.init(re: request.id, result: .object(["outcome": .string("dropped"), "commit": .string(queued.commit),
+                                                                "said": .string("the queued switch to \(queued.commit) is dropped")])))
+        }
         guard let commit = request.args?["commit"]?.string else {
             return reply(.init(re: request.id, error: .init(.badArgs, "build.switch needs commit, 40 lowercase hex digits")))
         }
         guard let installRoot else {
             return reply(.init(re: request.id, error: .init(.refused, "this server has no install root to switch builds in")))
         }
-        // A change under the builds folder or the unit's folder nobody accepted refuses the handover (`SwitchRequest`).
+        // `--when-idle`: while a worker or verifier is working (one the switch wouldn't park), it is queued, the user's
+        // voice taken now, once, and run at the first look that finds none (`lookAtQueuedSwitch`). Only an installed
+        // build is queued; the rest of the plan (a held change, the build that runs) is the switch's when it runs.
+        if request.args?["whenIdle"]?.bool == true, NodeUnit.isCommit(commit), !switchBlockersNow().blockers.isEmpty {
+            guard SwitchRequest.installed(in: installRoot).contains(commit) else {
+                return reply(.init(re: request.id, error: .init(.refused, "\(commit) isn't installed in \(installRoot): install it with install-node.sh, then switch")))
+            }
+            let replaced = queuedSwitch.map { " (it replaces the one to \($0.commit))" } ?? ""
+            queuedSwitch = (commit, Date())
+            queuedSwitchOutcome = nil
+            let holders = switchBlockersNow().blockers
+            note("build.switch \(commit) queued until no worker or verifier is working: \(holders.joined(separator: "; "))")
+            lookAtQueuedSwitch(after: queuedSwitchEvery)
+            return reply(.init(re: request.id, result: .object([
+                "outcome": .string("queued"), "commit": .string(commit), "holders": .array(holders.map(NodeWire.Value.string)),
+                "said": .string("queued\(replaced): it runs at the first moment no worker or verifier is working; held now by "
+                                + holders.joined(separator: "; ")),
+            ])))
+        }
+        runSwitch(commit: commit, installRoot: installRoot) { answer in
+            switch answer {
+            case .done(let value): reply(.init(re: request.id, result: value))
+            case .refused(let code, let why): reply(.init(re: request.id, error: .init(code, why)))
+            }
+        }
+    }
+
+    /// `SwitchRequest` to `commit`: the plan, the parking, the handover; `done` with its answer. On `queue`.
+    private func runSwitch(commit: String, installRoot: String, done: @escaping (SwitchRequest.Answer) -> Void) {
         let (home, vault) = (self.home, link.vault)
         let held: @Sendable () -> String? = {
             HeldChange.refusal(SwitchRequest.heldNames, home: home, vault: vault, accept: SwitchRequest.acceptFirst)?.text
@@ -769,12 +830,39 @@ public final class Requests: @unchecked Sendable {
                 engine.parkForSwitch(live, commit: commit) { parked in done(parked.map(\.named)) }
             }
         } }
-        SwitchRequest(link: link, installRoot: installRoot, timing: switchTiming, held: held, park: park, note: note).run(commit: commit) { [weak self] answer in
-            switch answer {
-            case .done(let value): reply(.init(re: request.id, result: value))
-            case .refused(let code, let why): reply(.init(re: request.id, error: .init(code, why)))
-            }
+        SwitchRequest(link: link, installRoot: installRoot, timing: switchTiming, held: held, park: park,
+                      describe: { [weak self] in self?.switchDoing($0) }, note: note).run(commit: commit) { [weak self] answer in
+            done(answer)
             self?.refreshNotes()
+        }
+    }
+
+    /// The queued switch looked at in `seconds`: run once no worker or verifier is working (the idle ones waiting on
+    /// their lead are parked by the switch, as ever); looked at again otherwise. A switch that then finds one working
+    /// after all (it began a turn between the look and the plan) stays queued; any other end is its outcome. On `queue`.
+    func lookAtQueuedSwitch(after seconds: TimeInterval) {
+        queuedSwitchLook += 1
+        let look = queuedSwitchLook
+        queue.asyncAfter(deadline: .now() + seconds) { [weak self] in
+            guard let self, look == self.queuedSwitchLook, let queued = self.queuedSwitch else { return }
+            guard self.switchBlockersNow().blockers.isEmpty, let installRoot = self.installRoot, !self.stopping else {
+                return self.lookAtQueuedSwitch(after: self.queuedSwitchEvery)
+            }
+            self.queuedSwitch = nil
+            self.note("build.switch \(queued.commit): queued since \(NodeWire.dateText(queued.at)), no worker or verifier is working now: it runs")
+            self.runSwitch(commit: queued.commit, installRoot: installRoot) { [weak self] answer in
+                guard let self else { return }
+                switch answer {
+                case .refused(_, let why) where why.hasPrefix("no switch of builds while a worker or verifier runs") && self.queuedSwitch == nil:
+                    self.queuedSwitch = queued
+                    self.lookAtQueuedSwitch(after: self.queuedSwitchEvery)
+                case .refused(_, let why):
+                    self.queuedSwitchOutcome = (queued.commit, "refused: " + why, false, Date())
+                case .done(let value):
+                    self.queuedSwitchOutcome = (queued.commit, value["said"]?.string ?? "switched", value["outcome"]?.string == "handed-over", Date())
+                }
+                if let outcome = self.queuedSwitchOutcome, self.queuedSwitch == nil { self.note("build.switch \(queued.commit) (queued): \(outcome.said)") }
+            }
         }
     }
 

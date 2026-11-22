@@ -109,7 +109,7 @@ taken on the Unix socket.
 | `board.image` | anyone of the uid |  |  |  | `Requests.act` |  |
 | `board.task` | anyone of the uid |  |  |  | `Requests.act` |  |
 | `brief` | the user's terminal, or a page that reads |  |  |  | `Requests.act` |  |
-| `build.switch` | the user's terminal | yes | yes |  | `Requests.act` | `commit` |
+| `build.switch` | the user's terminal | yes | yes |  | `Requests.act` | `cancel`, `commit`, `whenIdle` |
 | `chat.image` | anyone of the uid |  |  |  | the live hub |  |
 | `chat.page` | anyone of the uid |  |  |  | the live hub |  |
 | `config.accept` | the user's terminal | yes | yes | yes | `Requests.act` | `batch`, `card`, `code` |

@@ -24,7 +24,7 @@ extension Requests {
         "answer": ["card", "code", "text", "version"], "hold": ["card", "code"], "config.accept": ["card", "code"],
         "base.accept": ["card", "code"], "base.keep": ["card", "code"],
         "start": [], "stop": [], "lead": ["folder", "goal", "resume", "replace", "takeHead", "initialized"],
-        "hooks.install": ["agents"], "hooks.remove": ["agents"], "build.switch": ["commit"], "approve": ["batch", "code"],
+        "hooks.install": ["agents"], "hooks.remove": ["agents"], "build.switch": ["commit", "whenIdle", "cancel"], "approve": ["batch", "code"],
         "web.open": ["tailnet"], "web.revoke": [], "tell": ["folder", "text"],
         "send": ["session", "text", "images", "now"],
         "session.new": ["folder", "agent", "model", "preset", "digest", "values"],
@@ -135,8 +135,9 @@ extension Requests {
             }
             return .success((Self.approveShown(batch.items), nil))
         case "build.switch":
+            if args["cancel"]?.bool == true { return .success(("drop the queued build switch", nil)) }
             guard let commit = text("commit"), UpdateWatch.isCommit(commit) else { return .failure(.init(why: "build.switch needs a commit: nothing was asked")) }
-            return .success(("switch the node to build \(commit.prefix(12))", nil))
+            return .success(("switch the node to build \(commit.prefix(12))" + (args["whenIdle"]?.bool == true ? " once no worker or verifier is working" : ""), nil))
         case "web.open": return .success(("open the web page to one browser \(args["tailnet"]?.bool == true ? "on your tailnet" : "on this machine")", nil))
         case "web.revoke": return .success(("revoke every web page's access", nil))
         case "push", "push.decline":

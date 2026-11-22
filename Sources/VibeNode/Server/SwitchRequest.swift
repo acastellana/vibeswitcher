@@ -140,13 +140,17 @@ public struct SwitchRequest {
     /// (a server with no engine).
     public typealias Park = (_ live: [HostSession], _ commit: String, _ done: @escaping ([String]) -> Void) -> Void
     let park: Park?
+    /// What a session that holds the switch is doing and since when ("working since 09:14, 37 min"), for the refusal;
+    /// nil: its terminal and label only.
+    let describe: ((HostSession) -> String?)?
     /// How long the sessions parked may take to end before the switch is planned again.
     static let parkedEndLimit: TimeInterval = 15
 
     /// A switch on `link`'s host between the builds of `installRoot`, asked through the link's own dialer; `held` asked
     /// before a handover; `park` asked when only workers and verifiers stand in the way.
     public init(link: HostLink, installRoot: String, timing: Timing = Timing(), held: (@Sendable () -> String?)? = nil,
-                park: Park? = nil, note: @escaping (String) -> Void = { _ in }) {
+                park: Park? = nil, describe: ((HostSession) -> String?)? = nil, note: @escaping (String) -> Void = { _ in }) {
+        self.describe = describe
         self.link = link
         self.installRoot = installRoot
         self.timing = timing
@@ -192,7 +196,7 @@ public struct SwitchRequest {
                 reply(.refused(.refused, "\(commit) isn't installed in \(installRoot): install it with install-node.sh, then switch"))
             case .refusedWhileTeamsWork:
                 guard parked == nil, let park else {
-                    let working = Self.blockers(live)
+                    let working = Self.blockers(live, describe: describe)
                     note("build.switch \(commit) refused: \(working.count) workers or verifiers live")
                     return reply(.refused(.refused, Self.blockedText(working)))
                 }
@@ -243,15 +247,37 @@ public struct SwitchRequest {
     /// The live sessions that refuse a switch by the rule on switches (decision 6): each worker's and verifier's, by
     /// its terminal and label ("ttypts4 (Worker · fix-login)"). `status` lists them (`switchBlockers`), so `vibeswitcher
     /// switch` says before its code is asked whether the switch can run now.
-    public static func blockers(_ live: [HostSession]) -> [String] {
+    public static func blockers(_ live: [HostSession], describe: ((HostSession) -> String?)? = nil) -> [String] {
+        holding(live).map { session in "\(session.tty) (\(ConfigSeal.inert(session.label, limit: 80)))" + (describe?(session).map { ": " + $0 } ?? "") }
+    }
+
+    /// The live sessions the rule on switches holds a switch for: each worker's and verifier's.
+    public static func holding(_ live: [HostSession]) -> [HostSession] {
         live.filter { session in session.isLive && (LeadTeams.role(label: session.label).map { $0 != .lead } ?? false) }
-            .map { "\($0.tty) (\(ConfigSeal.inert($0.label, limit: 80)))" }
+    }
+
+    /// What `session` is doing and since when, as a switch's refusal and `status` say it: its state by the node's last
+    /// scan (`status`, `since`) when it has one, else how long it has been live. `now`: the time it is said at.
+    public static func doing(_ session: HostSession, status: SessionStatus?, since: Date?, now: Date) -> String {
+        func clock(_ date: Date) -> String {
+            let formatter = DateFormatter()
+            formatter.locale = Locale(identifier: "en_US_POSIX")
+            formatter.dateFormat = "HH:mm"
+            return formatter.string(from: date)
+        }
+        func span(_ from: Date) -> String {
+            let minutes = max(0, Int(now.timeIntervalSince(from) / 60))
+            return minutes < 1 ? "under a minute" : minutes < 120 ? "\(minutes) min" : "\(minutes / 60) h \(minutes % 60) min"
+        }
+        guard let status, let since else { return "live since \(clock(session.startedAt)) (\(span(session.startedAt)))" }
+        return "\(status.label.lowercased()) since \(clock(since)) (\(span(since)))"
     }
 
     /// The rule's words for `blockers`, as the server's refusal and the command line say them.
     public static func blockedText(_ blockers: [String]) -> String {
         "no switch of builds while a worker or verifier runs (decision 6, the rule on switches): "
-            + blockers.joined(separator: ", ") + " live; switch once they have ended (a lead may stay)"
+            + blockers.joined(separator: "; ") + "; switch once they have ended (a lead may stay; a worker idle since its last report is "
+            + "parked by the switch), or `vibeswitcher switch COMMIT --when-idle` queues it for the first moment none is working"
     }
 
     // MARK: The handover

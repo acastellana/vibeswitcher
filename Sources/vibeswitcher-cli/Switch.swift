@@ -25,10 +25,14 @@ import VibeNode
 /// 5. The host's start line (ST-D24), read back and shown: from the journal (`NodeJournal.events`), or on a node
 ///    started detached from the host's log (`NodeJournal.hostLogStart`).
 enum SwitchCommand {
-    static let usage = "usage: vibeswitcher switch COMMIT | rollback"
+    static let usage = "usage: vibeswitcher switch COMMIT [--when-idle] | switch --cancel | rollback"
 
     static func run(_ arguments: [String], rollback: Bool) -> Int32 {
         let command = rollback ? "rollback" : "switch"
+        if !rollback, arguments == ["--cancel"] { return cancel() }
+        // `--when-idle`: queued while a worker or verifier is working, run at the first moment none is (the server's).
+        let whenIdle = !rollback && arguments.count == 2 && arguments[1] == "--when-idle"
+        let arguments = whenIdle ? [arguments[0]] : arguments
         guard rollback ? arguments.isEmpty : arguments.count == 1 else { return Say.usage(usage) }
         if !rollback, !NodeUnit.isCommit(arguments[0]) {
             Say.err("vibeswitcher: switch takes a commit: 40 lowercase hex digits")
@@ -91,13 +95,18 @@ enum SwitchCommand {
         let blockers = (status["switchBlockers"]?.array ?? []).compactMap(\.string).map { ConfigSeal.inert($0, limit: 120) }
         // The idle workers the switch parks first (`SwitchPark`): said in the confirmation, never a refusal.
         let parks = (status["switchParks"]?.array ?? []).compactMap(\.string).map { ConfigSeal.inert($0, limit: 120) }
-        if !blockers.isEmpty {
+        if !blockers.isEmpty, !whenIdle {
             return Say.refused("\(command) can't run now: " + SwitchRequest.blockedText(blockers) + ". Nothing was asked or switched.")
         }
+        let queued = whenIdle && !blockers.isEmpty
         let what = (rollback
             ? NodeTexts.rollback(from: from, to: target, line: status["builds"]?["rollback"]?["line"]?.string ?? "", rewrites: rewrites(context))
             : NodeTexts.switch(from: from, to: target, rewrites: rewrites(context)))
-            + (parks.isEmpty
+            + (queued
+                ? "\n  it can't run now, held by " + blockers.joined(separator: "; ") + "\n  so it is queued: the node runs it at the first moment no worker or "
+                    + "verifier is working (idle workers waiting on their lead are parked then, as a switch parks them), on this code alone; "
+                    + "`vibeswitcher switch --cancel` drops it, and `vibeswitcher status` says when it ran"
+                : parks.isEmpty
                 ? "\n  it can run now: no worker or verifier runs (a change the seal holds under the builds or the unit's folder would still stop it: `vs config held`)"
                 : "\n  it parks first the workers that only wait on their lead (idle since their last report; their worktrees and commits stay, "
                     + "start_worker continues there, and their leads are told): " + parks.joined(separator: ", ")
@@ -108,7 +117,9 @@ enum SwitchCommand {
         guard case .success(let typed) = said else { return Say.refused(said.refusal) }
         let kind = "build.switch"
         let handedOver: Bool
-        switch client.change(kind, args: ["commit": .string(target)], action: action, typed: typed, timeout: SwitchRequest.longestWait + 30) {
+        var args: [String: NodeWire.Value] = ["commit": .string(target)]
+        if whenIdle { args["whenIdle"] = .bool(true) }
+        switch client.change(kind, args: args, action: action, typed: typed, timeout: SwitchRequest.longestWait + 30) {
         case .failure(let failure):
             // The review of S8c: the reply may be lost after the host handed over (the server a switch replaces may end
             // first): the host, as a fresh connection sees it, says whether it did.
@@ -126,6 +137,11 @@ enum SwitchCommand {
             let parked = (result["parked"]?.array ?? []).compactMap(\.string).map { ConfigSeal.inert($0, limit: 120) }
             if !parked.isEmpty { Say.out("parked first (idle since their last report; their leads were told): " + parked.joined(separator: ", ")) }
             Say.out(ConfigSeal.inert(result["said"]?.string ?? "switched", limit: 400))
+            if result["outcome"]?.string == "queued" {
+                // The follow-up is the user's once it ran: `switch COMMIT` again finishes the unit and `current`.
+                Say.out("once it has run, `vibeswitcher switch \(target)` finishes the unit and `current` (a switch's follow-up), as `vibeswitcher status` will say")
+                return 0
+            }
             guard result["outcome"]?.string == "handed-over" || result["outcome"]?.string == "already" else {
                 Say.err("vibeswitcher: the server's reply names no outcome: \(ConfigSeal.inert(result["outcome"]?.string ?? "none", limit: 64))")
                 return 1
@@ -138,6 +154,35 @@ enum SwitchCommand {
         }
         Say.out(startLine(context, commit: target, hostPid: hostPid))
         return 0
+    }
+
+    /// `switch --cancel`: the queued switch dropped, in the user's voice.
+    static func cancel() -> Int32 {
+        let context = NodeContext.current()
+        context.sayScratch()
+        let client: NodeClient
+        switch NodeClient.connect(context) {
+        case .failure(let failure): return Say.failed(failure)
+        case .success(let connected): client = connected
+        }
+        let queued: String
+        switch client.request("status") {
+        case .failure(let failure): return Say.failed(failure)
+        case .success(let reply):
+            guard reply.ok, let result = reply.result else { return Say.replyError(reply) }
+            guard let commit = result["switchQueued"]?["commit"]?.string else { return Say.refused("no switch is queued") }
+            queued = ConfigSeal.inert(commit, limit: 64)
+        }
+        let action = UUID().uuidString.lowercased()
+        let said = TypedWord.said(approval: client.approvalRule, action: action, what: "This drops the switch to \(queued) queued for when no worker is working")
+        guard case .success(let typed) = said else { return Say.refused(said.refusal) }
+        switch client.change("build.switch", args: ["cancel": .bool(true)], action: action, typed: typed, timeout: 60) {
+        case .failure(let failure): return Say.failed(failure)
+        case .success(let reply):
+            guard reply.ok, let result = reply.result else { return Say.replyError(reply) }
+            Say.out(ConfigSeal.inert(result["said"]?.string ?? "dropped", limit: 400))
+            return 0
+        }
     }
 
     /// What the follow-up writes on this node (`NodeTexts.SwitchRewrites`), for the confirmation.

@@ -832,6 +832,52 @@ struct SwitchTests {
         #expect(Self.status(client)?["builds"]?["rollback"]?["commit"]?.string == Self.a)
     }
 
+    /// A switch waits on every worker and verifier the switch can't park (a real one waited hours): its refusal and
+    /// `status` say which, what each does and since when, and offer `--when-idle`. `switch B --when-idle` (its code typed
+    /// once) is queued, `status` says so and by whom it is held, `switch --cancel` drops it; queued again, it runs at the
+    /// first look that finds no worker, and `status` says what became of it and how to finish the unit.
+    @Test(NodeTraits.linuxOnly, .timeLimit(.minutes(10))) func aSwitchWhenIdleIsQueuedUntilNoWorkerIsWorking() async throws {
+        let builds = scratch.url("builds")
+        let a = try ScratchBuilds.install(commit: Self.a, into: builds)
+        try ScratchBuilds.install(commit: Self.b, into: builds)
+        let node = try await ScratchNode(scratch, build: a, installRoot: builds)
+        defer { node.stop() }
+        let lead = try await node.spawn("sleep 600", label: "Lead · project")
+        let worker = try await node.spawn("sleep 600", label: "Worker: task-1")
+        let client = try WireClient(node)
+        #expect(await eventually { Self.host(client).live == 2 })
+        // Which session holds it, and since when: in the refusal, in `status`'s field and in its text.
+        let blockers = (Self.status(client)?["switchBlockers"]?.array ?? []).compactMap(\.string)
+        #expect(blockers.count == 1 && blockers[0].hasPrefix("\(worker.tty) (Worker: task-1): ") && blockers[0].contains(" since "), "\(blockers)")
+        let refused = try #require(WireClient.reply(client.request("build.switch", args: ["commit": .string(Self.b)])))
+        let message = refused.error?.message ?? ""
+        #expect(message.contains("\(worker.tty) (Worker: task-1): ") && message.contains(" since ") && message.contains("--when-idle"), "\(message)")
+        let shown = try await node.run(["status"])
+        #expect(shown.output.contains("a build switch waits now on: \(worker.tty) (Worker: task-1): "), "\(shown.output)")
+
+        // Queued with its code once; dropped with --cancel.
+        let queued = try await node.runOnTerminal(["switch", Self.b, "--when-idle"])
+        #expect(queued.status == 0 && queued.output.contains("so it is queued") && queued.output.contains("queued: it runs at the first moment no worker"),
+                "\(queued.output)\(queued.errors)\n\(node.said)")
+        #expect(Self.status(client)?["switchQueued"]?["commit"]?.string == Self.b)
+        #expect((Self.status(client)?["notices"]?.array ?? []).contains { $0.string?.contains("is queued since") == true && $0.string?.contains(worker.tty) == true })
+        let dropped = try await node.runOnTerminal(["switch", "--cancel"])
+        #expect(dropped.status == 0 && dropped.output.contains("is dropped"), "\(dropped.output)\(dropped.errors)")
+        #expect(Self.status(client)?["switchQueued"] == .null)
+        #expect(Self.host(client).build == Self.a)
+
+        // Queued again: the worker ends, and the switch runs by itself; the lead is kept.
+        let again = try await node.runOnTerminal(["switch", Self.b, "--when-idle"])
+        #expect(again.status == 0, "\(again.output)\(again.errors)")
+        _ = try HostCall.request(.kill(id: worker.id), socket: node.socket, appKey: nil, timeout: 15)
+        #expect(await eventually(timeout: SwitchRequest.longestWait) { (try? WireClient(node)).flatMap { Self.status($0)?["switchQueuedOutcome"]?["handedOver"]?.bool } == true },
+                "\(node.said)")
+        let after = try WireClient(node)
+        #expect(Self.host(after).build == Self.b && Self.status(after)?["switchQueued"] == .null)
+        #expect((Self.status(after)?["notices"]?.array ?? []).contains { $0.string?.contains("the queued switch to \(Self.b.prefix(12)) ran at") == true })
+        #expect(try node.sessions().contains { $0.id == lead.id && $0.isLive })
+    }
+
     /// The app's `aNewBuildWhoseProbeTakesTwentySecondsIsHandedOverWithNoFalseFailure`: the host holds the handover
     /// before its probe (`--handover-test-hold`) until the test releases it, once the switch has noted its wait past a
     /// request's 15 s. The outcome is handed over, never failed first; the live lead is kept.
