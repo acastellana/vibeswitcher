@@ -49,6 +49,13 @@ struct UpdateCheckTests {
         // Kept: the record says it, and the timed watch's next look is 6 h away.
         #expect(UpdateWatch.load(watch.file).offer?.commit == newer)
         #expect(queue.sync { watch.due(at: Date().addingTimeInterval(UpdateWatch.interval - 60)) } == false)
+        // The page's Updates section (the feature review of 2026-11-22): the `node` stream carries the look as
+        // `node.update`, which the schema checks strictly.
+        let update = queue.sync { watch.value }
+        #expect(update["commit"]?.string == newer && update["install"]?.string == UpdateWatch.installLine(newer))
+        #expect(WireSchema.check(update, as: "node.update", strict: true) == nil, "\(String(describing: WireSchema.check(update, as: "node.update", strict: true)))")
+        let node = NodeStatusStore.value(status: .object(["update": update]), web: NodeStatusStore.webOff)
+        #expect(node["update"] == update)
     }
 
     @Test func itSaysNoneOrWhyItCouldntLook() {
