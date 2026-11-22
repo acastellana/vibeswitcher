@@ -281,14 +281,16 @@ struct NodeServerBoundsTests {
         let node = try await ScratchNode(scratch)
         defer { node.stop() }
         let path = node.serverSocket
+        // This process's share taken, whatever it holds already (the node's start-up probe may still count, its end not
+        // yet read under load); the last one admitted is the one that won't read.
         var others: [Raw] = []
-        for _ in 1..<NodeServer.maxPerPeer {
+        for _ in 0..<NodeServer.maxPerPeer {
             let raw = try Raw(path)
-            try #require(Self.isHello(raw.line()))
+            guard Self.isHello(raw.line()) else { break }
             others.append(raw)
         }
-        let stuck = try Raw(path)
-        try #require(Self.isHello(stuck.line()))
+        let last = others.popLast()
+        let stuck = try #require(last, "no connection admitted")
         let count = 3_000
         var lines = Data()
         for index in 0..<count { lines.append(NodeWire.line(NodeWire.Request(id: "d\(index)", kind: "draft"))) }

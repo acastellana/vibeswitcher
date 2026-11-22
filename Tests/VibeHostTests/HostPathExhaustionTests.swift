@@ -40,10 +40,13 @@ import Testing
         #expect(HostPathWatch.identity(atPath: host.socket) == own, "the host's own socket not unlinked")
         #expect(server.queue.sync { watch.socketFile } == own)
 
-        // Another socket bound at the path while the checks still can't be made.
-        let foreign = try UnixSocket.listen(path: host.socket)
-        defer { Sys.close(foreign) }
-        let foreignFile = try #require(HostPathWatch.identity(atPath: host.socket))
+        // Another socket put at the path while the checks still can't be made: bound beside it, then renamed over it
+        // in one step (a bind at the path itself would unlink it first, and the host's folder watch races to bind there).
+        let beside = host.socket + "-f"
+        let foreign = try UnixSocket.listen(path: beside)
+        defer { Sys.close(foreign); unlink(beside) }
+        let foreignFile = try #require(HostPathWatch.identity(atPath: beside))
+        try #require(rename(beside, host.socket) == 0, "errno \(errno)")
         server.queue.sync { watch.check(atHousekeeping: true) }
         let recorded = server.queue.sync { watch.socketFile }
         #expect(recorded != foreignFile, "a socket that couldn't be checked is never recorded as the host's")
