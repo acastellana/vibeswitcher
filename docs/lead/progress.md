@@ -4311,3 +4311,4 @@ Proposed task 1: Find why dictations end with no text
 - 2026-11-22 09:10 Started a worker on a-lead-handover-keeps
 - 2026-11-22 09:10 Automatically (auto_advance): Started a worker on a-lead-handover-keeps (A lead handover keeps one lead row: the old session ends by itself).
 - 2026-11-22 09:10 Planned the-lead-s-chat-2: The lead's chat continues across a handover, with a line where the fresh lead started
+- 2026-11-22 09:40 Automatically (auto_advance): Fable held back until Nov 25, 18:00: workers on Opus; audits try eligible Claude models first, then Codex when it has room. Sensitive or Codex-worked tasks merged on Codex get a post-merge Claude re-audit after reset. A worker Fable's refusal halted starts again on Opus in its worktree.
