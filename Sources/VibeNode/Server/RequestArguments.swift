@@ -9,7 +9,8 @@ enum RequestArguments {
     static let taken: [String: Set<String>] = [
         "start": [],
         "stop": [],
-        "lead": ["folder", "goal", "takeHead", "replace", "resume"],
+        // `initialized`: `lead --init` made the repository just now (its hooks baseline is seeded empty).
+        "lead": ["folder", "goal", "takeHead", "replace", "resume", "initialized"],
         // A card's: its id and code (`cardRefusal`); an answer's text and the wording's version it answered.
         "answer": ["card", "code", "text", "version"],
         "hold": ["card", "code"],

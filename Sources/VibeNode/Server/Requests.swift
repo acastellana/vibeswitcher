@@ -705,7 +705,8 @@ public final class Requests: @unchecked Sendable {
         let goal = request.args?["goal"]?.string.flatMap { $0.isEmpty ? nil : $0 }
         guard let engine else { return reply(.init(re: request.id, error: .init(.refused, "this server starts no leads"))) }
         engine.startLead(folder: folder, goal: goal, takeHead: request.args?["takeHead"]?.bool == true,
-                         replace: request.args?["replace"]?.bool == true, resume: request.args?["resume"]?.bool == true) { outcome in
+                         replace: request.args?["replace"]?.bool == true, resume: request.args?["resume"]?.bool == true,
+                         initialized: request.args?["initialized"]?.bool == true) { outcome in
             reply(Self.reply(request.id, folder: folder, outcome))
         }
     }

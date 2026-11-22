@@ -17,6 +17,13 @@ struct NewProjectTests {
         return node
     }
 
+    /// A folder for `LeadInit.git`'s stderr files.
+    private func gitScratch() throws -> URL {
+        let url = scratch.url("git-scratch")
+        try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+        return url
+    }
+
     @Test func aProjectIsMadeWithItsFirstCommitAndAFolderThereIsRefused() async throws {
         let node = try await node()
         defer { node.stop() }
@@ -49,9 +56,9 @@ struct NewProjectTests {
         #expect(try node.sessions().contains { $0.isLive && $0.label == "Lead · acme" && $0.cwd == folder }, "\(node.said)")
     }
 
-    /// `lead FOLDER --init` (the app's offer for a folder a lead can't start in yet): what it would commit shown before
-    /// the code, a secret left out, nothing made when the code isn't typed; typed, git init and the first commit, then
-    /// the lead. An empty repository's own folder gets the first commit alone.
+    /// `lead FOLDER --init` (the app's offer, for a folder in no repository): every committed file named before the code,
+    /// a secret left out and named, nothing made when the code isn't typed; typed, the repository and its first commit,
+    /// then the lead. A folder with a .git (an empty repository) is refused, saying to make that commit yourself.
     @Test func leadInitMakesTheRepositoryAndFirstCommitAfterTheCode() async throws {
         let node = try await node()
         defer { node.stop() }
@@ -63,27 +70,52 @@ struct NewProjectTests {
         try "*.log\n".write(toFile: folder + "/.gitignore", atomically: true, encoding: .utf8)
 
         let declined = try await node.runOnTerminal(["lead", folder, "--init"], answer: { _ in "nope" })
-        #expect(declined.status == 77 && declined.output.contains("First, git init in \(folder), and a first commit of its 2 files")
-                && declined.output.contains("Left out, as they look like secrets: .env"), "\(declined.output)")
+        #expect(declined.status == 77 && declined.output.contains("First, a git repository in \(folder) on branch main, and a first commit of its 2 files")
+                && declined.output.contains("Committed:") && declined.output.contains("  src/a.txt")
+                && declined.output.contains("Left out, as they look like secrets:") && declined.output.contains("  .env"), "\(declined.output)")
         #expect(!FileManager.default.fileExists(atPath: folder + "/.git"), "\(declined.output)")
 
         let ran = try await node.runOnTerminal(["lead", folder, "--init", "--goal", "tidy the notes"])
         #expect(ran.status == 0 && ran.output.contains("made: a git repository with a first commit") && ran.output.contains("the lead started"), "\(ran.output)")
         #expect(Git.run(["ls-files"], in: folder).output.split(separator: "\n").sorted() == [".gitignore", "src/a.txt"])
         #expect(try node.sessions().contains { $0.isLive && $0.label == "Lead · notes" && $0.cwd == folder }, "\(node.said)")
+        // The lead's start took its first look at the hooks: none (no template, no hooks folder installed).
+        let accepted = try FileManager.default.contentsOfDirectory(atPath: node.root.appendingPathComponent("lead/git-hooks").path).compactMap { key -> [String: Any]? in
+            let file = node.root.appendingPathComponent("lead/git-hooks/\(key)/accepted.json")
+            return (try? Data(contentsOf: file)).flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }
+        }
+        #expect(!accepted.isEmpty && accepted.allSatisfy { ($0["files"] as? [Any])?.isEmpty == true && ($0["run"] as? [Any])?.isEmpty == true }, "\(accepted)")
 
         let empty = node.root.appendingPathComponent("projects/empty").path
         try FileManager.default.createDirectory(atPath: empty, withIntermediateDirectories: true)
         try "# e\n".write(toFile: empty + "/README.md", atomically: true, encoding: .utf8)
-        #expect(Git.run(["init", "--quiet"], in: empty).ok)
-        let first = try await node.runOnTerminal(["lead", empty, "--init"])
-        #expect(first.output.contains("First, in \(empty) (a repository with no commits yet), a first commit of its 2 files")
-                && first.output.contains("made: a first commit in \(empty)") && first.status == 0, "\(first.output)")
-        #expect(Git.run(["ls-files"], in: empty).output.split(separator: "\n").sorted() == [".gitignore", "README.md"])
+        #expect(LeadInit.git(["init", "--quiet"], in: empty, home: node.home.path, scratch: try gitScratch()).ok)
+        let refused = try await node.run(["lead", empty, "--init"])
+        #expect(refused.status == 77 && refused.errors.contains("has a .git already") && refused.errors.contains("make the first commit yourself"), "\(refused.errors)")
     }
 
-    /// What the app doesn't offer stays refused, before any code and with nothing made: the home folder, a folder
-    /// inside a repository with no commits (a stray git init above it). Without `--init` the lead's refusal names it.
+    /// The caller's own git variables (`GIT_DIR`, `GIT_WORK_TREE`, `GIT_INDEX_FILE`, `GIT_OBJECT_DIRECTORY`,
+    /// `GIT_CONFIG_PARAMETERS`) change nothing: the repository is the folder's, nothing is written where they point.
+    @Test func leadInitIgnoresTheCallersGitVariables() async throws {
+        let node = try await node()
+        defer { node.stop() }
+        let folder = node.root.appendingPathComponent("projects/vars").path
+        try FileManager.default.createDirectory(atPath: folder, withIntermediateDirectories: true)
+        try "v\n".write(toFile: folder + "/v.txt", atomically: true, encoding: .utf8)
+        let elsewhere = scratch.url("elsewhere")
+        try FileManager.default.createDirectory(at: elsewhere, withIntermediateDirectories: true)
+        let extra = ["GIT_DIR": elsewhere.appendingPathComponent("dir").path, "GIT_WORK_TREE": elsewhere.path,
+                     "GIT_INDEX_FILE": elsewhere.appendingPathComponent("index").path,
+                     "GIT_OBJECT_DIRECTORY": elsewhere.appendingPathComponent("objects").path,
+                     "GIT_CONFIG_PARAMETERS": "'core.hooksPath'='\(elsewhere.path)'"]
+        let ran = try await ScratchNodes.onTerminal(commandLine.path, ["lead", folder, "--init"], environment: node.environment(extra), answer: { $0 })
+        #expect(ran.status == 0 && ran.output.contains("made: a git repository"), "\(ran.output)")
+        #expect(FileManager.default.fileExists(atPath: folder + "/.git/HEAD"))
+        #expect(((try? FileManager.default.contentsOfDirectory(atPath: elsewhere.path)) ?? ["?"]).isEmpty, "nothing where the variables point")
+    }
+
+    /// What the app doesn't offer stays refused, before any code and with nothing made: the home folder, a folder inside
+    /// a repository. Without `--init` the lead's refusal names it for a folder in no repository.
     @Test func leadInitRefusesWhatTheAppDoesntOfferAndTheRefusalNamesIt() async throws {
         let node = try await node()
         defer { node.stop() }
@@ -93,10 +125,10 @@ struct NewProjectTests {
 
         let parent = node.root.appendingPathComponent("projects/stray").path
         try FileManager.default.createDirectory(atPath: parent + "/inner", withIntermediateDirectories: true)
-        #expect(Git.run(["init", "--quiet"], in: parent).ok)
+        #expect(LeadInit.git(["init", "--quiet"], in: parent, home: node.home.path, scratch: try gitScratch()).ok)
         let inner = try await node.run(["lead", parent + "/inner", "--init"])
-        #expect(inner.status == 77 && inner.errors.contains("is in the repository \(parent), which has no commits"), "\(inner.errors)")
-        #expect(!FileManager.default.fileExists(atPath: parent + "/inner/.git") && !Git.run(["rev-parse", "--verify", "HEAD"], in: parent).ok)
+        #expect(inner.status == 77 && inner.errors.contains("is inside the repository \(parent)"), "\(inner.errors)")
+        #expect(!FileManager.default.fileExists(atPath: parent + "/inner/.git"))
 
         let plain = node.root.appendingPathComponent("projects/plain").path
         try FileManager.default.createDirectory(atPath: plain, withIntermediateDirectories: true)

@@ -124,6 +124,8 @@ public struct ApprovalVoice: Sendable {
         case "base.keep": return "keep a base branch where it was"
         case "hooks.install": return "install VibeSwitcher's hooks"
         case "approve": return "accept the batch you listed"
+        case "plugin.on": return "turn a plugin on for this node"
+        case "plugin.off": return "turn a plugin off for this node"
         case "hooks.remove": return "remove VibeSwitcher's hooks"
         case "plugin.on": return "turn a plugin on for you"
         case "plugin.off": return "turn a plugin off for you"
