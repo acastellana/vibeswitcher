@@ -1445,13 +1445,16 @@ final class LeadController: ObservableObject {
         var asking: Bool
         var turnEnded: Bool
 
-        /// From its hooks and transcript (`LeadObserver`); `background`: shells of its own still running.
+        /// From its own hooks and the transcript they name (`LeadObserver`); `background`: shells of its own still
+        /// running. No hook of its own yet: not known. Never a transcript found by folder and name: the replaced lead
+        /// and its successor share both, so it may be the other's (a turn that just ended there isn't this one's).
         static func read(_ observer: LeadObserver, _ session: HostSession, agentPid: Int32?, background: String?) -> TurnReading {
-            let hook = observer.hook(session, agentPid: agentPid)
-            let tail = observer.transcript(session, hook: hook).flatMap { TranscriptTail.read(url: URL(fileURLWithPath: $0)) }
+            guard let hook = observer.hook(session, agentPid: agentPid) else { return TurnReading(activity: .unknown, asking: false, turnEnded: false) }
+            let path = hook.transcriptPath.flatMap { TranscriptReader.checkedURL($0, home: observer.home) != nil ? $0 : nil }
+            let tail = path.flatMap { TranscriptTail.read(url: URL(fileURLWithPath: $0)) }
             return TurnReading(activity: LeadActivity.resolve(hook: hook, transcript: tail, background: background),
-                               asking: hook?.openQuestion != nil,
-                               turnEnded: hook?.lastEvent == "Stop" || tail?.state == .turnOver(apiError: nil))
+                               asking: hook.openQuestion != nil,
+                               turnEnded: hook.lastEvent == "Stop" || tail?.state == .turnOver(apiError: nil))
         }
     }
 
