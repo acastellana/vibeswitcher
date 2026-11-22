@@ -1,7 +1,7 @@
 import Foundation
 import Testing
 import VibeCore
-import VibeNode
+@testable import VibeNode
 
 /// The command line's check of the server it reached (the engine plan's EN-D8, the security architecture document's
 /// S3), run as built.
@@ -347,33 +347,22 @@ struct MacServerCheckTests {
         }
     }
 }
-
-/// Whether the server is dumpable, read patiently (`NodeCheck.patientDumpable`): an answer of "can't be told" is looked at
-/// again while the process is there, up to the patience; a process gone, or one still not told, is nil. The clock is
-/// the test's own.
-struct PatientDumpableTests {
-    final class Clock: @unchecked Sendable {
-        var now: TimeInterval = 0
-    }
-
-    @Test func cantBeToldIsAskedAgainUntilItIsTold() {
-        let clock = Clock()
-        var answers: [Bool?] = [nil, nil, false]
-        let read = { (_: pid_t) -> Bool? in answers.isEmpty ? false : answers.removeFirst() }
-        let told = NodeCheck.patientDumpable(4242, read: read, patience: 2, awake: { clock.now }, sleep: { clock.now += $0 }, alive: { _ in true })
-        #expect(told == false && answers.isEmpty)
-    }
-
-    @Test func neverToldOrGoneIsNil() {
-        let clock = Clock()
+/// The listener's dumpable state read patiently (`NodeCheck.dumpable`, the CI flake of 2026-11-22: one unreadable look on
+/// a loaded runner refused `settings --find`): read again while it can't be told and the process lives, until told or
+/// out of patience; a process that has gone isn't waited for. Both systems: the reads and the clock are the test's.
+struct DumpablePatienceTests {
+    @Test func anUnreadableLookIsReadAgainUntilToldOrOutOfPatience() {
         var reads = 0
-        let never = NodeCheck.patientDumpable(4242, read: { _ in reads += 1; return nil }, patience: 1, pause: 0.25,
-                                              awake: { clock.now }, sleep: { clock.now += $0 }, alive: { _ in true })
-        #expect(never == nil && reads == 5, "\(reads) reads in a second's patience a quarter apart")
+        var clock = Date(timeIntervalSince1970: 0)
+        let told = NodeCheck.dumpable(getpid(), patience: 3, read: { _ in reads += 1; return reads < 3 ? nil : false },
+                                      now: { clock }, wait: { clock.addTimeInterval(0.05) })
+        #expect(told == false && reads == 3)
         reads = 0
-        let gone = NodeCheck.patientDumpable(4242, read: { _ in reads += 1; return nil }, awake: { clock.now }, sleep: { clock.now += $0 },
-                                             alive: { _ in false })
-        #expect(gone == nil && reads == 1, "a process gone isn't asked again")
+        let never = NodeCheck.dumpable(getpid(), patience: 1, read: { _ in reads += 1; return nil }, now: { clock }, wait: { clock.addTimeInterval(0.25) })
+        #expect(never == nil && reads == 5)
+        // A pid no process has: one look, no wait.
+        reads = 0
+        let gone = NodeCheck.dumpable(999_999_999, patience: 3, read: { _ in reads += 1; return nil }, now: { clock }, wait: { Issue.record("waited for a process that's gone") })
+        #expect(gone == nil && reads == 1)
     }
 }
-

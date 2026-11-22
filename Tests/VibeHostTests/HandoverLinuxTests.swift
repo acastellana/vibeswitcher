@@ -587,13 +587,10 @@ struct InstalledBuild {
         host = folder + "/bin/" + BuildInfo.host
         server = folder + "/bin/" + BuildInfo.server
         try FileManager.default.createDirectory(atPath: folder + "/bin", withIntermediateDirectories: true)
+        // Copied and appended to by a child (`installProgram`): a file this process writes can be held open for writing
+        // by another test's child, and then it won't run (ETXTBSY, the flaky list's HandoverLinux entry).
         func copy(_ source: String, to path: String, appending: String) throws {
-            try FileManager.default.copyItem(atPath: source, toPath: path)
-            guard !appending.isEmpty else { return }
-            let handle = try FileHandle(forWritingTo: URL(fileURLWithPath: path))
-            defer { try? handle.close() }
-            try handle.seekToEnd()
-            try handle.write(contentsOf: Data(appending.utf8))
+            try installProgram(source, atPath: path, appending: appending)
         }
         try copy(source, to: host, appending: appending)
         hostHash = try HandoverLinuxTests.sha256(of: host)
@@ -676,7 +673,7 @@ extension HandoverLinuxTests {
         #expect(try Self.refusal(Self.check(root + "/linked/bin/" + BuildInfo.host, installRoot: root))
                 == "\(root)/linked/bin/\(BuildInfo.host) isn't inside the install folder (\(root))")
 
-        try FileManager.default.copyItem(atPath: hostLauncher, toPath: root + "/" + BuildInfo.host)
+        try installProgram(hostLauncher, atPath: root + "/" + BuildInfo.host)
         #expect(try Self.refusal(Self.check(root + "/" + BuildInfo.host, installRoot: root))
                 == "\(root)/\(BuildInfo.host) isn't an installed build's \(BuildInfo.host) (\(root)/<build>/bin/\(BuildInfo.host))")
         #expect(try Self.refusal(Self.check(outside.host, installRoot: dir + "/no-such-folder")) == "the install folder \(dir)/no-such-folder isn't there")
@@ -747,7 +744,7 @@ extension HandoverLinuxTests {
         let installed = try InstalledBuild(in: root, "b", appending: "\n")
         // Another build, the test's own image unchanged, which the record doesn't name.
         let replacement = root + "/replacement"
-        try FileManager.default.copyItem(atPath: hostLauncher, toPath: replacement)
+        try installProgram(hostLauncher, atPath: replacement)
         let hold = root + "/hold"
         let host = try await ScratchHostProcess(arguments: ["--install-root", root, HandoverMemory.holdTestFlag, hold])
         defer { host.stop() }
@@ -778,7 +775,7 @@ extension HandoverLinuxTests {
         // The recorded image set aside, and the test's own image unchanged (which the record doesn't name) in its place.
         let recorded = root + "/recorded"
         #expect(rename(installed.host, recorded) == 0, "errno \(errno)")
-        try FileManager.default.copyItem(atPath: hostLauncher, toPath: installed.host)
+        try installProgram(hostLauncher, atPath: installed.host)
         let loaded = try Self.sha256(of: installed.host)
         let hold = root + "/hold"
         let host = try await ScratchHostProcess(arguments: ["--install-root", root, HandoverMemory.holdCheckTestFlag, hold])

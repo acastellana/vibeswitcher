@@ -18,7 +18,7 @@ import Testing
     /// tool server does and ends on SIGTERM.
     static func toolServerStandIn(in folder: String) throws -> String {
         let path = folder + "/vibeswitcher-mcp"
-        try FileManager.default.copyItem(atPath: "/bin/sleep", toPath: path)
+        try installProgram("/bin/sleep", atPath: path)
         return path
     }
 
