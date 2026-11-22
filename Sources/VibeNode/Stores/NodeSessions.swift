@@ -239,6 +239,35 @@ public final class NodeSessions: @unchecked Sendable {
     /// for 15. A team's are silent, a lead's only while it waits on you (`AlertRules.nudge`), a paused one's too. A wait from before this
     /// store started counts from its start. Every word a session wrote is inert. On `queue`.
     public func reminderNotices() -> [String] {
+        reminders().map { reminder in
+            let subtitle = reminder.subtitle.map { " (\($0))" } ?? ""
+            let body = reminder.body.isEmpty ? "" : ": " + reminder.body
+            return "reminder: \(reminder.title)\(subtitle), on \(ConfigSeal.inert(reminder.terminal, limit: 20))\(body)"
+        }
+    }
+
+    /// One reminder due now (`reminders()`): the session's node id and terminal, which kind (`waiting` on you, or
+    /// `stalled` with no progress), the episode it's about (since when it waits, or its last hook event: one reminder an
+    /// episode, as the app's), when it became due, and the banner's words (inert).
+    public struct Reminder: Equatable, Sendable {
+        public var session: String
+        public var terminal: String
+        public var kind: String
+        public var episode: Date
+        public var dueAt: Date
+        public var title: String
+        public var subtitle: String?
+        public var body: String
+
+        /// As the `node` stream and `status` carry it (the page notifies once an episode).
+        public var value: NodeWire.Value {
+            .object(["session": .string(session), "kind": .string(kind), "since": .date(episode), "dueAt": .date(dueAt), "title": .string(title),
+                     "subtitle": subtitle.map(NodeWire.Value.string) ?? .null, "body": .string(body)])
+        }
+    }
+
+    /// The reminders due now (the same rules as `reminderNotices`), each its session's. On `queue`.
+    public func reminders() -> [Reminder] {
         let at = now()
         return sessions.compactMap { session in
             guard !session.isPaused else { return nil }
@@ -246,9 +275,14 @@ public final class NodeSessions: @unchecked Sendable {
             guard let due = Nudges.due(status: session.status, statusSince: max(session.statusSince, launchedAt), lastSeen: acknowledged[session.tty],
                                        lastActivity: activity, now: at),
                   let alert = AlertRules.nudge(due.nudge, for: session, settings: AlertRules.Settings()) else { return nil }
-            let subtitle = alert.subtitle.map { " (\(ConfigSeal.inert($0, limit: 160)))" } ?? ""
-            let body = alert.body.isEmpty ? "" : ": " + ConfigSeal.inert(alert.body, limit: 200)
-            return "reminder: \(ConfigSeal.inert(alert.title, limit: 160))\(subtitle), on \(ConfigSeal.inert(session.tty, limit: 20))\(body)"
+            let kind: String
+            switch due.nudge {
+            case .stillWaiting: kind = "waiting"
+            case .stalled: kind = "stalled"
+            }
+            return Reminder(session: Self.id(of: session), terminal: session.tty, kind: kind, episode: due.episode, dueAt: due.dueAt,
+                            title: ConfigSeal.inert(alert.title, limit: 160), subtitle: alert.subtitle.map { ConfigSeal.inert($0, limit: 160) },
+                            body: ConfigSeal.inert(alert.body, limit: 200))
         }
     }
 

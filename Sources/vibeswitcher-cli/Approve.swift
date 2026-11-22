@@ -50,19 +50,18 @@ enum ApproveCommand {
         // Directly above the code: one line per item, what it does.
         let recap = items.enumerated().map { "  \($0.offset + 1). " + recapLine($0.element) }.joined(separator: "\n")
         let what = "The batch, in this order (each recorded as its own action; it stops at the first refusal):\n" + recap
-        let outcome = TypedWord.ask(approval: client.approvalRule, code: code, what: what, word: NodeIds.code(action: action))
-        guard outcome == .typed else { return Say.refused(TypedWord.refusal(outcome)) }
+        let said = TypedWord.said(approval: client.approvalRule, action: action, code: code, what: what)
+        guard case .success(let typed) = said else { return Say.refused(said.refusal) }
         let result: NodeWire.Value
-        switch client.request("approve", args: ["batch": .string(batch), "code": .string(code)], action: action, timeout: 600) {
+        switch client.change("approve", args: ["batch": .string(batch), "code": .string(code)], action: action, typed: typed, timeout: 600) {
         case .failure(let failure): return Say.failed(failure)
         case .success(let reply):
-            if reply.ok || reply.error?.code == NodeWire.Code.refused.rawValue { journal(context, action: action, kind: "approve", client: client) }
             guard reply.ok, let given = reply.result else { return Say.replyError(reply) }
             result = given
         }
         // Each item recorded in the vault as its own action: each journaled, so `status` finds them all accounted for.
         for done in result["done"]?.array ?? [] {
-            if let itemAction = done["action"]?.string { journal(context, action: itemAction, kind: done["kind"]?.string ?? "", client: client) }
+            if let itemAction = done["action"]?.string { client.journal(done["kind"]?.string ?? "", action: itemAction, typed: typed) }
             Say.out("done: " + summary(done))
         }
         guard let refused = result["refused"], refused != .null else {
@@ -70,7 +69,7 @@ enum ApproveCommand {
             return 0
         }
         if refused["code"]?.string == NodeWire.Code.refused.rawValue, let itemAction = refused["action"]?.string {
-            journal(context, action: itemAction, kind: refused["kind"]?.string ?? "", client: client)
+            client.journal(refused["kind"]?.string ?? "", action: itemAction, typed: typed)
         }
         Say.err("vibeswitcher: stopped at \(inert(refused["kind"]?.string)) \(inert(refused["subject"]?.string)): \(inert(refused["message"]?.string))")
         let left = result["left"]?.array ?? []
@@ -142,10 +141,6 @@ enum ApproveCommand {
         case "hooks.install": return "hooks installed (\(subject))"
         default: return "\(inert(kind)) \(subject)"
         }
-    }
-
-    static func journal(_ context: NodeContext, action: String, kind: String, client: NodeClient) {
-        context.writeJournal(NodeJournal.entry(event: "request", action: action, kind: kind, epoch: client.hello.epoch))
     }
 
     static func inert(_ text: String?) -> String { ConfigSeal.inert(text ?? "?", limit: 400) }

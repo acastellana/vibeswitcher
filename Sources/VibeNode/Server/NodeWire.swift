@@ -424,6 +424,36 @@ public enum NodeWire {
         (try? JSONSerialization.jsonObject(with: line, options: [])) is [String: Any]
     }
 
+    /// A message read as a request: the one check of its envelope both transports make (the Unix socket's lines and a
+    /// WebSocket's texts), so they refuse the same things with the same `bye` codes.
+    public enum Unwrapped: Equatable, Sendable {
+        case request(Request)
+        /// Not taken: `reply` (when there is one) is sent, then the connection ends with `code` and `reason`.
+        case refused(reply: Reply?, code: String, reason: String)
+    }
+
+    /// `message` (one line or text, without its newline) as a request: not a JSON object is `not-object`; not a request
+    /// (`v`, `id` and `kind` are needed) is `not-request`; a newer `v` is the `version` error, then `version`.
+    public static func unwrap(_ message: Data) -> Unwrapped {
+        guard isObject(message) else { return .refused(reply: nil, code: "not-object", reason: "a message that isn't a JSON object") }
+        guard let request = decode(Request.self, message) else {
+            return .refused(reply: nil, code: "not-request", reason: "a message that isn't a request (v, id and kind are needed)")
+        }
+        guard request.v <= version else {
+            return .refused(reply: Reply(re: request.id, error: .init(.version, "this server speaks version \(version)")),
+                            code: "version", reason: "a newer protocol than this server's")
+        }
+        return .request(request)
+    }
+
+    /// A kind this server doesn't take: its `unknown-kind` reply, and, when the client must have it, the connection's
+    /// end (`must`).
+    public static func unknownKind(_ request: Request) -> (reply: Reply, bye: (code: String, reason: String)?) {
+        let reply = Reply(re: request.id, error: .init(.unknownKind, "this server doesn't take \(request.kind)"))
+        guard request.must == true else { return (reply, nil) }
+        return (reply, ("must", "a request this server must understand and doesn't (\(request.kind.prefix(80)))"))
+    }
+
     /// Bytes as they come, cut into lines. A line longer than `maxLine` (with no newline yet past it) is `tooLong`:
     /// the reader closes the connection.
     public struct Lines: Sendable {

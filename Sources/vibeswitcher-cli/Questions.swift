@@ -126,18 +126,14 @@ enum CardCommand {
         let code = NodeIds.code(card: id)
         let action = UUID().uuidString.lowercased()
         // Under the Mac's rule the dialog carries this request's word (its action id's), not the card's code.
-        let outcome = TypedWord.ask(approval: client.approvalRule, code: code, what: what(card), word: NodeIds.code(action: action))
-        guard outcome == .typed else { return Say.refused(TypedWord.refusal(outcome)) }
+        let said = TypedWord.said(approval: client.approvalRule, action: action, code: code, what: what(card))
+        guard case .success(let typed) = said else { return Say.refused(said.refusal) }
         var args = extra(card)
         args["card"] = .string(id)
         args["code"] = .string(code)
-        switch client.request(kind, args: args, action: action, timeout: 120) {
+        switch client.change(kind, args: args, action: action, typed: typed, timeout: 120) {
         case .failure(let failure): return Say.failed(failure)
         case .success(let reply):
-            // Recorded by the server (the voice and the code passed): an engine's refusal comes after that.
-            if reply.ok || reply.error?.code == NodeWire.Code.refused.rawValue {
-                context.writeJournal(NodeJournal.entry(event: "request", action: action, kind: kind, epoch: client.hello.epoch))
-            }
             guard reply.ok, let result = reply.result else { return Say.replyError(reply) }
             say(result)
             return 0

@@ -85,8 +85,8 @@ enum LeadCommand {
         if asked.replace { what += ", replacing a running lead that lost its role" }
         what += ".\nThe lead runs \(ConfigSeal.inert(program, limit: 400))."
         if let goal = asked.goal { what += "\nIts goal: \(ConfigSeal.inert(goal, limit: 400))" }
-        let outcome = TypedWord.ask(approval: client.approvalRule, code: NodeIds.code(action: action), what: what)
-        guard outcome == .typed else { return Say.refused(TypedWord.refusal(outcome)) }
+        let said = TypedWord.said(approval: client.approvalRule, action: action, what: what)
+        guard case .success(let typed) = said else { return Say.refused(said.refusal) }
         if let firstCommit {
             if let problem = FolderRepository.make(firstCommit) { return Say.refused("the first commit wasn't made, nothing was left: \(problem.message)") }
             Say.out("made: " + (firstCommit.inRepository ? "a first commit" : "a git repository with a first commit")
@@ -95,14 +95,9 @@ enum LeadCommand {
         var args: [String: NodeWire.Value] = ["folder": .string(asked.folder), "takeHead": .bool(asked.takeHead), "replace": .bool(asked.replace)]
         if asked.resume { args["resume"] = .bool(true) }
         if let goal = asked.goal { args["goal"] = .string(goal) }
-        switch client.request("lead", args: args, action: action, timeout: 180) {
+        switch client.change("lead", args: args, action: action, typed: typed, timeout: 180) {
         case .failure(let failure): return Say.failed(failure)
         case .success(let reply):
-            // Accepted (the voice passed and the server recorded it): the engine's refusal (`refused`) comes after that;
-            // the server's own before it (`voice`, `stopping`, `not-yet`) isn't an accepted request.
-            if reply.ok || reply.error?.code == NodeWire.Code.refused.rawValue {
-                context.writeJournal(NodeJournal.entry(event: "request", action: action, kind: "lead", epoch: client.hello.epoch))
-            }
             guard reply.ok, let result = reply.result else { return Say.replyError(reply) }
             let happened = result["happened"]?.string ?? "?"
             let session = ConfigSeal.inert(result["session"]?.string ?? "", limit: 80)
