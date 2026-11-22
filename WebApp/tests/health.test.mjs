@@ -1,7 +1,7 @@
 // The node's health digest on This node (js/health.js, the server's NodeHealth).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { healthFacts } from '../js/health.js';
+import { healthFacts, duration } from '../js/health.js';
 
 const quiet = { since: '2026-11-21T08:00:00.000Z', stalled: null, freezes: [], slowRefreshes: 0, slowestRefresh: null, lastSlowRefresh: null,
   serverRestarts: 0, refusedConnections: null, hostRestartAt: null, waiting: [], errors: [] };
@@ -24,6 +24,16 @@ test('a stall, freezes, waiting sessions and errors need a look, each listed', (
   assert.deepEqual(facts.rows.find(([name]) => name === 'Refused connections'), ['Refused connections', '2']);
   assert.equal(facts.lines.length, 4);
   assert.ok(facts.lines.some((line) => line.text === 'set boost: not changed: disk full'));
+});
+
+test('how the server last ended is a row and a line, without needing you', () => {
+  assert.equal(duration(45), '45 s');
+  assert.equal(duration(3 * 3600 + 5), '3 h');
+  const facts = healthFacts({ ...quiet, serverEnded: { at: '2026-11-21T09:00:00.000Z', ran: 3 * 3600, cause: 'killed by signal 11 (SIGSEGV), core dumped' } });
+  assert.deepEqual(facts.rows.find(([name]) => name === 'Server last ended'), ['Server last ended', 'killed by signal 11 (SIGSEGV), core dumped, after 3 h']);
+  assert.ok(facts.lines.some((line) => line.text.startsWith('The server ended on its own: killed by signal 11')));
+  assert.equal(facts.tone, 'done');
+  assert.equal(healthFacts(quiet).rows.find(([name]) => name === 'Server last ended'), undefined);
 });
 
 test('the causes show the most frequent first', () => {

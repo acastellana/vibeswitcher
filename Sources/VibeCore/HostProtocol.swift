@@ -368,10 +368,13 @@ public struct HostNotes: Codable, Equatable, Sendable {
     /// S5), and that record's `binaries`. Nil: a host started without one (the Mac's), or one that doesn't say.
     public var build: String?
     public var binaries: [String: String]?
+    /// How its server child last ended on its own (`ServerEnd`, in `V2/ServerEnd.swift`). Nil: none since the host
+    /// started, or a host that doesn't say.
+    public var lastServerEnd: ServerEnd?
 
     public init(startedAt: Date, serverRestarts: Int, replacedPaths: [String], refusedAppConnections: Int,
                 lockHeldElsewhere: String? = nil, lockHeldElsewhereCount: Int? = nil, build: String? = nil,
-                binaries: [String: String]? = nil) {
+                binaries: [String: String]? = nil, lastServerEnd: ServerEnd? = nil) {
         self.startedAt = startedAt
         self.serverRestarts = serverRestarts
         self.replacedPaths = replacedPaths
@@ -380,6 +383,7 @@ public struct HostNotes: Codable, Equatable, Sendable {
         self.lockHeldElsewhereCount = lockHeldElsewhereCount
         self.build = build
         self.binaries = binaries
+        self.lastServerEnd = lastServerEnd
     }
 }
 

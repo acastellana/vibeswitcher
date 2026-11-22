@@ -255,6 +255,37 @@ final class ServerChildHost {
         #expect(!host.noted.contains("replaced by a new one under its number"), "\(host.noted)")
     }
 
+    /// The child killed: how it ended is kept (the node's stand-in for the app's crash reports), in words; a wait
+    /// status reads as the host's log says it.
+    @Test(.enabled(if: !Platform.CodeIdentity.isAvailable, "Linux's server child; the Mac's app proves itself by its code"))
+    func howTheChildLastEndedIsKept() async throws {
+        let dir = "\(shortScratchRoot)/vssc-\(UUID().uuidString.prefix(8))"
+        try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(atPath: dir) }
+        let socket = dir + "/h.sock"
+        FileManager.default.createFile(atPath: dir + "/" + ServerChildHelper.actionsName, contents: Data("sleep\n".utf8))
+        var config = HostServer.Config(socketPath: socket, lockPath: dir + "/h.lock", shell: "/bin/sh", launcher: hostLauncher,
+                                       baseEnvironment: ["PATH": "/usr/bin:/bin", "HOME": NSHomeDirectory()], hostBuild: 42)
+        config.idleExit = nil
+        config.logPath = dir + "/host.log"
+        let server = HostServer(config: config)
+        try server.start()
+        defer { server.stop(terminateSessions: true) }
+        let binary = try #require(Bundle.main.executablePath)
+        let child = try #require(ServerChild.start(.init(image: binary, socketPath: socket, arguments: [], environment: config.baseEnvironment),
+                                                   server: server))
+        defer { child.stop() }
+        #expect(await eventually { child.pid != nil })
+        #expect(child.lastEnd == nil)
+        let first = try #require(child.pid)
+        kill(first, SIGKILL)
+        #expect(await eventually { child.lastEnd != nil })
+        let ended = try #require(child.lastEnd)
+        #expect(ended.cause == "killed by signal 9 (SIGKILL)" && ended.ran >= 0 && abs(ended.at.timeIntervalSinceNow) < 120, "\(ended)")
+        #expect(HostNotes.ServerEnd.cause(status: 1 << 8) == "exited with code 1")
+        #expect(HostNotes.ServerEnd.cause(status: 11 | 0x80) == "killed by signal 11 (SIGSEGV), core dumped")
+    }
+
     /// A host that stops (as one told `--exit-with` does when its owner goes, and then waits for its sessions' end)
     /// ends its server child and starts none again: none running, none about to start. The child's token, recorded
     /// at its start, named it while it ran.
@@ -1422,11 +1453,13 @@ final class ServerChildHost {
         let server = HostServer(config: config)
         var state = HostHandover.State(fromBuild: 42, startedAt: Date(timeIntervalSinceNow: -60), lockFD: lockFD, listenFD: listenFD,
                                        secretFD: nil, sessions: [])
-        state.tally = HostHandover.Tally(serverRestarts: 2, replacedPaths: ["/a.sock"], refusedAppConnections: 3)
+        let ended = HostNotes.ServerEnd(at: Date(timeIntervalSince1970: 1_800_000_000), ran: 3600, cause: "killed by signal 11 (SIGSEGV)")
+        state.tally = HostHandover.Tally(serverRestarts: 2, replacedPaths: ["/a.sock"], refusedAppConnections: 3, lastServerEnd: ended)
         _ = try server.start(restoring: state)
         defer { server.stop(terminateSessions: true) }
         let notes = server.queue.sync { server.hostNotes(startedAt: state.startedAt) }
         #expect(notes.serverRestarts == 2 && notes.replacedPaths == ["/a.sock"] && notes.refusedAppConnections == 3)
+        #expect(notes.lastServerEnd == ended, "how the server last ended runs on too")
         #expect(server.queue.sync { server.tallyForHandover } == state.tally)
     }
 
