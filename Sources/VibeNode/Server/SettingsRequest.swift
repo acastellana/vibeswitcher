@@ -15,7 +15,11 @@ import VibeCore
 extension Requests {
     func settings(_ request: NodeWire.Request, reply: @escaping (NodeWire.Reply) -> Void) {
         let files = NodeSettings.Files(root: root)
-        let folder = request.args?["folder"]?.string
+        let folder: String?
+        switch request.typedArgs(WireKinds.Settings.Args.self) {
+        case .failure(let failure): return reply(.init(re: request.id, error: failure))
+        case .success(let typed): folder = typed.folder
+        }
         if let folder, !folder.hasPrefix("/") { return reply(.init(re: request.id, error: .init(.badArgs, "folder is an absolute path"))) }
         let (find, vault, home, queue) = (repositoryOf, link.vault, self.home, self.queue)
         // Read off the queue, answered on it (`Requests` answers on `queue`: the server writes the reply from there). It
@@ -25,13 +29,11 @@ extension Requests {
         // The plugins that are on add their own sections (`PluginSettings.swift`); an off one's are absent.
         let plugins = engine?.pluginSettingsShown ?? []
         (engine?.work ?? DispatchQueue.global(qos: .userInitiated)).async {
-            var result: [String: NodeWire.Value] = [
-                "node": .object(["root": .string(files.root.path), "settings": .array((NodeSettings.node(files: files) + plugins).map(\.wire))]),
-                "project": .null,
-                "leftOut": .array(NodeSettings.leftOut.map { .object(["title": .string($0.title), "why": .string($0.why)]) }),
+            var result = WireKinds.Settings.Result(
+                node: .init(root: files.root.path, settings: (NodeSettings.node(files: files) + plugins).map(\.typed)), project: nil,
+                leftOut: NodeSettings.leftOut.map { .init(title: $0.title, why: $0.why) },
                 // The account's usage, read here (off the engine's queue) as the account watch reads it.
-                "usage": NodeUsage.value(NodeUsage.read(files: files, home: home)),
-            ]
+                usage: NodeUsage.value(NodeUsage.read(files: files, home: home)))
             if let folder {
                 let root = find(folder)
                 let path = NodeSettings.workflowPath(project: root)
@@ -43,10 +45,9 @@ extension Requests {
                 let problem: String? = { if case .failure(let error) = floor { return "\(error)" } else { return nil } }()
                 let shown = NodeSettings.project(root: root, workflow: LeadWorkflow.load(from: path), floor: (try? floor.get()) ?? nil,
                                                  floorProblem: problem, workerModel: Self.workerModel(home: home), files: files)
-                result["project"] = .object(["project": .string(NodeIds.project(root: root)), "root": .string(root),
-                                             "settings": .array(shown.map(\.wire))])
+                result.project = .init(project: NodeIds.project(root: root), root: root, settings: shown.map(\.typed))
             }
-            reply(.init(re: request.id, result: .object(result)))
+            reply(.init(re: request.id, typed: result))
         }
     }
 
@@ -127,7 +128,10 @@ extension Requests {
 extension NodeSettings.Shown {
     /// As the wire carries it (`WireSchema`'s `setting`): every string from the files capped (a session can write
     /// workflow.md), shown as text, never markup.
-    public var wire: NodeWire.Value {
+    public var wire: NodeWire.Value { NodeWire.Value(wire: typed) }
+
+    /// As `settings` gives it (`WireKinds.Settings.Setting`).
+    public var typed: WireKinds.Settings.Setting {
         let limits: String? = {
             switch setting.form {
             case .count: return setting.range.map { "\($0.lowerBound) to \($0.upperBound)" }
@@ -140,12 +144,9 @@ extension NodeSettings.Shown {
             case .folder: return "a full path, or one under ~"
             }
         }()
-        return .object([
-            "key": .string(setting.key), "title": .string(setting.title), "about": .string(setting.about), "section": .string(setting.section),
-            "scope": .string(setting.scope.rawValue), "form": .string(setting.form.rawValue), "home": .string(setting.home.rawValue),
-            "choices": .array(setting.choices.map(NodeWire.Value.string)), "limits": limits.map(NodeWire.Value.string) ?? .null,
-            "value": .string(Requests.capped(self.value)), "default": .string(Requests.capped(defaultValue)), "isDefault": .bool(isDefault),
-            "where": .string(place), "guardRail": .bool(setting.guardRail), "note": note.map(NodeWire.Value.string) ?? .null,
-        ])
+        return .init(key: setting.key, title: setting.title, about: setting.about, section: setting.section, scope: setting.scope.rawValue,
+                     form: setting.form.rawValue, home: setting.home.rawValue, choices: setting.choices, limits: limits,
+                     value: Requests.capped(self.value), default: Requests.capped(defaultValue), isDefault: isDefault, where: place,
+                     guardRail: setting.guardRail, note: note)
     }
 }

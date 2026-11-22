@@ -306,6 +306,35 @@ final class NodeClient {
         return send(kind, args: args, action: nil, timeout: timeout)
     }
 
+    /// How a typed read went (`read`): its result, decoded; the server's refusal; or no answer.
+    enum Read<R> {
+        case success(R, raw: NodeWire.Value)
+        case refused(NodeWire.Reply)
+        case failure(Failure)
+    }
+
+    /// A typed read kind (`WireKind`, the architecture review's row 11): asked with its `args` (none when it takes
+    /// none), its result decoded into its type, the reply's value kept beside it (`raw`, for `--json`, whole as the
+    /// server sent it). How the command line asks a kind in `WireKinds.typed`: `WireKindsLintTests` refuses a
+    /// `request("…")` of one.
+    func read<K: WireKind>(_ kind: K.Type, _ args: K.Args, timeout: TimeInterval = 30) -> Read<K.Result> {
+        let given: [String: NodeWire.Value]?
+        switch NodeWire.Value(wire: args) {
+        case .object(let fields) where !fields.isEmpty: given = fields
+        default: given = K.Args.self == WireNoArgs.self ? nil : [:]
+        }
+        switch request(K.kind, args: given, timeout: timeout) {
+        case .failure(let failure): return .failure(failure)
+        case .success(let reply):
+            guard reply.ok, let result = reply.result else { return .refused(reply) }
+            do {
+                return .success(try result.wire(K.Result.self), raw: result)
+            } catch {
+                return .failure(.broken("the node's server answered \(K.kind) in a form this command line doesn't read: \(error)"))
+            }
+        }
+    }
+
     /// When `change` writes the request's journal entry: once the server accepted it (`accepted`: it answered, or its
     /// engine refused after the vault's record; the server's own refusals before it, `voice`, `stopping`, `not-yet`,
     /// aren't an accepted request), or only once it answered (`ok`).
