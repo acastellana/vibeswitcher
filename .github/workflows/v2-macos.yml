@@ -7,7 +7,7 @@ permissions:
   contents: read
 concurrency:
   group: v2-macos-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 # One job a test target: the whole suite takes over an hour on the runner's 4 cores. Each builds what it tests
 # (scripts/test.sh builds everything first), so a build failure fails all three.
 jobs:
