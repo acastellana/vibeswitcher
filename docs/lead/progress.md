@@ -4395,3 +4395,10 @@ Proposed task 1: Find why dictations end with no text
 - 2026-11-23 14:26 Merged a-test-that-flakes: A test that flakes once in a merge gets its fix task at once; fix tasks may fix or delete, never retry (build 71a026954280)
 - 2026-11-23 14:26 Flaky in a-test-that-flakes's merge: theLeadTheBoardNamesAndEveryOtherSessionAreNeverEnded() failed the first test run and passed its rerun (the failing tests only); merged on the rerun
 - 2026-11-23 14:26 Automatically (auto_advance): Cleaned up a-test-that-flakes (freed 1.8 GB of build output and temporary folders). It stays done.
+- 2026-11-23 14:26 Committed the records at 91ec8ba6 before merging a-merge-whose-tests: the last merge failed on docs/lead/decisions.md, docs/lead/progress.md
+- 2026-11-23 14:26 Planned fix-the-flaky-test-23: Fix the flaky test theLeadTheBoardNamesAndEveryOtherSessionAreNeverEnded() (review audit)
+- 2026-11-23 14:26 Started a worker on fix-the-flaky-test-23
+- 2026-11-23 14:26 Automatically (auto_advance): Started a worker on fix-the-flaky-test-23 (Fix the flaky test theLeadTheBoardNamesAndEveryOtherSessionAreNeverEnded()).
+- 2026-11-23 14:47 Pipeline held: a-merge-whose-tests ready to merge with none landing; cause: the load hold
+- 2026-11-23 14:50 Merged a-merge-whose-tests: A merge whose tests fail by name isn't also counted as a flake "naming no test" (build 71a026954280)
+- 2026-11-23 14:50 Flaky in a-merge-whose-tests's merge: aScreenshotFileIsDecodedAtTheHeightItShows() failed the first test run and passed its rerun (the failing tests only); merged on the rerun
