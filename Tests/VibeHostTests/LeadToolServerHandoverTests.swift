@@ -22,21 +22,35 @@ import Testing
             try handle.close()
         }
 
-        func reply(_ id: Int) -> [String: Any]? {
+        /// The whole message answering `id`: its result, or an error (the keeper's when the server stopped under the
+        /// call, a parse error), as it came.
+        func message(_ id: Int) -> [String: Any]? {
             let text = (try? String(contentsOfFile: "\(folder)/\(name).out", encoding: .utf8)) ?? ""
             for line in text.split(separator: "\n") {
                 guard let object = (try? JSONSerialization.jsonObject(with: Data(line.utf8))) as? [String: Any],
                       (object["id"] as? Int) == id else { continue }
-                return object["result"] as? [String: Any]
+                return object
             }
             return nil
         }
 
-        /// Asks and waits for the answer.
+        func reply(_ id: Int) -> [String: Any]? { message(id)?["result"] as? [String: Any] }
+
+        /// Asks and waits for the answer: a result, or an error, which ends the wait too (and gives nil; `said` tells it).
         func ask(_ id: Int, _ method: String, _ params: [String: Any] = [:]) async throws -> [String: Any]? {
             try send(id, method, params)
-            _ = await eventually { reply(id) != nil }
+            _ = await eventually { message(id) != nil }
             return reply(id)
+        }
+
+        /// For a failure's message: the answer to `id` when it was an error, or that none came, and the server's own
+        /// logs (`~/.vibeswitcher/debug/mcp-*.log` under `home`: its stops, its restarts, the calls that failed).
+        func said(_ id: Int, home: String) -> String {
+            let answer = message(id).map { $0["error"].map { "error \($0)" } ?? "a result" } ?? "no answer"
+            let debug = home + "/.vibeswitcher/debug"
+            let logs = ((try? FileManager.default.contentsOfDirectory(atPath: debug)) ?? []).filter { $0.hasPrefix("mcp-") }.sorted()
+                .map { "\($0): " + ((try? String(contentsOfFile: debug + "/" + $0, encoding: .utf8)) ?? "unread") }
+            return "\(answer); stderr: \(errors); logs: " + (logs.isEmpty ? "none" : logs.joined(separator: " | "))
         }
 
         func tools(_ id: Int) async throws -> [String] {
