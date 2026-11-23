@@ -214,7 +214,7 @@ export function actionsStrip(app = null) {
   function line(text, label, note, kind = null, args = null) {
     const acts = app && kind && text && actsFor(app, kind);
     return [acts ? doButton(app, { label: t('acDoIt'), kind, args: () => args, done: () => { opened = false; el.hidden = true; } }).el : null,
-      text ? copyLine(text, label) : null, note ? h('p', { class: 'confirm-note' }, note) : null];
+      text ? copyLine(text, label) : null, note ? h('p', { class: 'confirm-note' }, note) : null].filter(Boolean);
   }
 
   function body() {
