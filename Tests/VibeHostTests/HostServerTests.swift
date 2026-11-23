@@ -87,7 +87,10 @@ final class TestClient {
     private let lock = NSLock()
     private var events: [HostEventEnvelope] = []
     private var output: [UUID: Data] = [:]
-    private(set) var closed = false
+    private var closedFlag = false
+    /// Whether the host closed the connection: set on `queue` (`onClose`), read from the test's own task, both under `lock`
+    /// (the thread sanitizer's race of 2026-11-23: it was read bare).
+    var closed: Bool { lock.lock(); defer { lock.unlock() }; return closedFlag }
     var connection: HostConnection!
 
     /// Answers the host's challenge with its app key (the app's client; on Linux, through the host's connector);
@@ -104,7 +107,7 @@ final class TestClient {
             connection = try HostConnection(path: socket, queue: queue, appKey: appKey, viaConnector: viaConnector ?? (appKey != nil))
             connection.onEvent = { [weak self] e in self?.with { $0.events.append(e) } }
             connection.onOutput = { [weak self] id, data in self?.with { $0.output[id, default: Data()].append(data) } }
-            connection.onClose = { [weak self] in self?.with { $0.closed = true } }
+            connection.onClose = { [weak self] in self?.with { $0.closedFlag = true } }
         }
     }
 
