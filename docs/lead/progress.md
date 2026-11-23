@@ -4394,3 +4394,4 @@ Proposed task 1: Find why dictations end with no text
 - 2026-11-23 14:07 Automatically (auto_advance): Cleaned up fix-the-dictation-tests (freed 1.8 GB of build output and temporary folders). It stays done.
 - 2026-11-23 14:26 Merged a-test-that-flakes: A test that flakes once in a merge gets its fix task at once; fix tasks may fix or delete, never retry (build 71a026954280)
 - 2026-11-23 14:26 Flaky in a-test-that-flakes's merge: theLeadTheBoardNamesAndEveryOtherSessionAreNeverEnded() failed the first test run and passed its rerun (the failing tests only); merged on the rerun
+- 2026-11-23 14:26 Automatically (auto_advance): Cleaned up a-test-that-flakes (freed 1.8 GB of build output and temporary folders). It stays done.
