@@ -548,7 +548,8 @@ public final class ChatStore: @unchecked Sendable {
         guard let made = Platform.FileWatch(path: feed.follow.url.path) else { return }
         feed.watch = made
         made.deliver(on: queue) { [weak self, weak feed, weak made] change in
-            guard let self, let feed else { return }
+            // A feed dropped, or a watch replaced since (its stop is on this queue, so none comes after it: a guard only).
+            guard let self, let feed, self.feeds[feed.session] === feed, feed.watch === made else { return }
             if change.contains(.gone) {
                 made?.stop()
                 if feed.watch === made { feed.watch = nil }

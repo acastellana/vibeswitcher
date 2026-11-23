@@ -85,7 +85,12 @@ final class HostPathWatch {
     private(set) var retakenLock: Int32 = -1
     /// The last line said about each path while it stays wrong, so a change nearby doesn't say it again.
     private var said: [String: String] = [:]
-    private var folders: [Platform.FolderWatch] = []
+    /// Each path's folder (its socket's and its lock's) and its watch: none while it couldn't be made, or since it told
+    /// its folder gone; asked for again at each housekeeping (`watchFolders`).
+    private var folderPaths: [String] = []
+    private(set) var folders: [String: Platform.FolderWatch] = [:]
+    /// Each folder said once while it can't be watched.
+    private var unwatchedSaid: Set<String> = []
     private var timer: DispatchSourceTimer?
     private var stopped = false
     /// Tests only: run just after each fresh listener is bound, before it is checked. On the host's queue.
@@ -117,17 +122,14 @@ final class HostPathWatch {
         }
         let queue = server.queue
         let folderPaths = Set([config.socketPath, config.lockPath].map { URL(fileURLWithPath: $0).deletingLastPathComponent().path })
-        for path in folderPaths.sorted() {
-            guard let folder = Platform.FolderWatch(path: path) else {
-                say(server, "can't watch \(path) for its paths: checked at each housekeeping only")
-                continue
-            }
-            folder.deliver(on: queue) { [weak watch] _ in watch?.check() }
-            watch.folders.append(folder)
-        }
+        watch.folderPaths = folderPaths.sorted()
+        watch.watchFolders()
         let timer = DispatchSource.makeTimerSource(queue: queue)
         timer.schedule(deadline: .now() + config.housekeepingInterval, repeating: config.housekeepingInterval)
-        timer.setEventHandler { [weak watch] in watch?.check(atHousekeeping: true) }
+        timer.setEventHandler { [weak watch] in
+            watch?.watchFolders()
+            watch?.check(atHousekeeping: true)
+        }
         timer.resume()
         watch.timer = timer
         queue.async { [weak watch] in watch?.check() }
@@ -153,11 +155,34 @@ final class HostPathWatch {
         stopped = true
         if spare >= 0 { Sys.close(spare) }
         spare = -1
-        folders.forEach { $0.stop() }
-        folders = []
+        folders.values.forEach { $0.stop() }
+        folders = [:]
         timer?.cancel()
         timer = nil
         releaseRetakenLock()
+    }
+
+    /// Each folder without a watch watched (at the start and at each housekeeping): one that can't be is said once, and
+    /// checked at each housekeeping meanwhile. A watch that tells its folder gone (removed, renamed, or its end lost to
+    /// an overflow) goes, and is made again here. A change is a check. On the host's queue.
+    func watchFolders() {
+        guard !stopped, let server else { return }
+        for path in folderPaths where folders[path] == nil {
+            guard let folder = Platform.FolderWatch(path: path) else {
+                if unwatchedSaid.insert(path).inserted { Self.say(server, "can't watch \(path) for its paths: checked at each housekeeping, and watched again once it can be") }
+                continue
+            }
+            if unwatchedSaid.remove(path) != nil { Self.say(server, "\(path) is watched again") }
+            folder.deliver(on: server.queue) { [weak self, weak folder] change in
+                guard let self, !self.stopped else { return }
+                if change.contains(.folderGone), let folder {
+                    folder.stop()
+                    if self.folders[path] === folder { self.folders[path] = nil }
+                }
+                self.check()
+            }
+            folders[path] = folder
+        }
     }
 
     /// The spare descriptor's file (`spare`).

@@ -161,6 +161,20 @@ struct NodeHealthTests {
         #expect(health.refreshing == nil)
     }
 
+    /// The file watches the system couldn't give (`Platform.Watches`): counted in the digest, said in `status --health`
+    /// when there are any.
+    @Test func watchesThatCouldntBeMadeAreSaid() {
+        let health = NodeHealth(file: nil)
+        let digest = value(health)
+        #expect(digest["watchesUnmade"]?.int == Platform.Watches.unmade)
+        #expect(WireSchema.check(digest, as: "node.health", strict: true) == nil, "\(digest)")
+        var some = digest.object ?? [:]
+        some["watchesUnmade"] = .int(3)
+        #expect(NodeHealth.lines(.object(some)).contains("  3 watches couldn't be made: changes are seen at the next housekeeping"))
+        some["watchesUnmade"] = .int(0)
+        #expect(!NodeHealth.lines(.object(some)).contains { $0.contains("couldn't be made") })
+    }
+
     /// How the server last ended on its own (the host's notes) is in the digest, as the wire has it, and printed.
     @Test func howTheServerLastEndedIsShown() throws {
         let health = NodeHealth(file: nil)

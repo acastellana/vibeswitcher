@@ -1,6 +1,7 @@
 import Foundation
 import Testing
 @testable import VibeCore
+@testable import VibePlatform
 
 /// auto_advance (see `LeadAdvance`): finished work moves on by itself, through the lead's own tools, with no lead tool
 /// call in between. Fake workers and verifiers report through their own tool servers; the test commands are fakes.
@@ -13,6 +14,24 @@ struct LeadAdvanceTests: LeadTeamFixture {
     init() {
         vault = Self.newVault(in: temp)
         log = temp.url("runs.log").path
+    }
+
+    /// The project's folder couldn't be watched (the system had no watch left): the loop looks every `unwatchedLook`
+    /// meanwhile and asks for the watch again each time; once it has one, a change in the folder is a pass by itself.
+    @Test func aFolderWatchThatCouldntBeMadeIsAskedForAgain() async throws {
+        let (root, _, lead) = try team()
+        let folder = BoardStore(root: root).folder
+        InotifyHub.shared.failNextWatch(of: folder)
+        let advancing = Advancing(lead)
+        defer { advancing.stop() }
+        let advance = try #require(lead.advancing)
+        advance.unwatchedLook = 0.2
+        // A pass's end wakes the loop's wait, which then reads the shorter look.
+        await advancing.settle()
+        #expect(await eventually { advance.isWatching }, "the watch wasn't asked for again")
+        let passes = advancing.passes
+        LeadAdvance.nudge(root: root)
+        #expect(await advancing.until { advancing.passes > passes }, "a change in the watched folder brought no pass")
     }
 
     @Test func automaticFyiStaysInStatusAndProgressWithoutWaking() async throws {
