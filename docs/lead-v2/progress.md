@@ -452,3 +452,4 @@
 - 2026-11-23 12:27 Started a worker on turn-this-incident-into-4
 - 2026-11-23 12:27 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: ~/.claude/shell-snapshots
 - 2026-11-23 12:27 Started a worker on team-sessions-start
+- 2026-11-23 12:47 Automatically (auto_advance): Didn't audit sb5-the-host-confines: Not audited: finder 1 of 2 couldn't start (Problem(text: "sb5-the-host-confines\'s finder not started: ~/.claude/settings.json changed while the team\'s sessions ran, since VibeSwitcher last sealed it. A worker\'s shell, a verifier\'s command or a branch\'s tests can write it (the deny rules hold only the file tools), and the next session would load what was written. New workers, verifiers and merges are held until the user accepts the change in VibeSwitcher (its notice names the files); you can…
