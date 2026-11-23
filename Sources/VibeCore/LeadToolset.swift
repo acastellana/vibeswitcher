@@ -4155,7 +4155,7 @@ public final class LeadToolset: MCPToolset {
                 sendFlakeNotes(plan)
                 let planned = plan.planned
                 ledger = "\(Self.clip(stuck, 200)), the last test it started, is recorded in the flake ledger"
-                    + (planned.first.map { $0.noted ? " (the open task \($0.slug) names it: noted in its context)" : " (it hung or flaked \(LeadBoard.flakeLimit) times: planned \($0.slug) to fix it)" } ?? "")
+                    + (planned.first.map { $0.noted ? " (the open task \($0.slug) names it: noted in its context)" : " (planned \($0.slug) to fix it)" } ?? "")
                     + ". "
                 if !plan.recurred.isEmpty { ledger += tellRecurrences(plan.recurred, slug: slug).trimmingCharacters(in: .whitespaces) + " " }
             }
@@ -4285,11 +4285,11 @@ public final class LeadToolset: MCPToolset {
                 try? store.appendProgress("Flaky in \(slug)'s merge: \(Self.clip(names, 300)) failed the first test run and passed its rerun (\(scope)); merged on the rerun" + selection)
                 for (test, fix, noted) in planned {
                     try? store.appendProgress((noted ? "Noted in \(fix)'s context (an open task naming it; no new task)" : "Planned \(fix)")
-                                              + ": \(test) flaked \(LeadBoard.flakeLimit) times within \(Int(LeadBoard.flakeWindow / 86_400)) days")
+                                              + ": \(test) flaked in \(slug)'s merge")
                 }
                 let due = planned.map { test, fix, noted -> String in
                     let what = noted ? "the open task \(fix) names it, so that's noted in its context and no new task was planned." : "planned \(fix) to fix it."
-                    return "\(test) flaked \(LeadBoard.flakeLimit) times within \(Int(LeadBoard.flakeWindow / 86_400)) days: " + what
+                    return "\(test) flaked: " + what
                 }
                 let what = flaked.plan.continuing ? "the unfinished and never-started suites" : flaked.plan.filtered ? "those tests" : "the whole test command"
                 flakeNote = " (Its first test run failed on \(Self.clip(names, 300)) and the rerun of \(what) passed, so it merged on the rerun: recorded in the flake ledger, which status lists."
@@ -4392,7 +4392,7 @@ public final class LeadToolset: MCPToolset {
         guard !recurred.isEmpty else { return "" }
         let text = recurred.map { test, fix in
             "\(test) flaked again in \(slug)'s merge, though \(fix.fixedBy) merged to fix it (\(fix.commit.prefix(8)), \(LeadBoard.clock(fix.at)))."
-        }.joined(separator: " ") + " The fix didn't hold: reopen the work with add_task (its evidence is in the flake ledger's files), or record_decision why not."
+        }.joined(separator: " ") + " The fix didn't hold: the flake has a task to fix it again (or a note in the open task that names it), its evidence in the flake ledger's files."
         for (test, fix) in recurred {
             try? store.appendProgress("Flaked again: \(test) in \(slug)'s merge, after \(fix.fixedBy) merged to fix it")
         }

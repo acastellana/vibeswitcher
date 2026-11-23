@@ -436,11 +436,11 @@ extension LeadToolset {
                 try? store.appendProgress("Flaky in the batch \(order.joined(separator: ", ")): \(Self.clip(names, 300)) failed the first test run and passed its rerun (\(flaked.plan.filtered ? "the failing tests only" : "the whole test command")); merged on the rerun")
                 for (test, fix, noted) in planned {
                     try? store.appendProgress((noted ? "Noted in \(fix)'s context (an open task naming it; no new task)" : "Planned \(fix)")
-                                              + ": \(test) flaked \(LeadBoard.flakeLimit) times within \(Int(LeadBoard.flakeWindow / 86_400)) days")
+                                              + ": \(test) flaked in \(last)'s merge")
                 }
                 flakeNotes.append("Its first test run failed on \(Self.clip(names, 300)) and the rerun of \(flaked.plan.filtered ? "those tests" : "the whole test command") passed, so \(order.joined(separator: ", ")) merged on the rerun: recorded once in the flake ledger (under \(last)), which status lists."
                                   + (flakeLog.map { " Each flaky test's failing lines, readable by its fixer: \(MergeRerun.evidenceFile(root: root, log: $0))." } ?? "")
-                                  + planned.map { test, fix, noted in " \(test) flaked \(LeadBoard.flakeLimit) times within \(Int(LeadBoard.flakeWindow / 86_400)) days: " + (noted ? "the open task \(fix) names it, so that's noted in its context." : "planned \(fix) to fix it.") }.joined()
+                                  + planned.map { test, fix, noted in " \(test) flaked: " + (noted ? "the open task \(fix) names it, so that's noted in its context." : "planned \(fix) to fix it.") }.joined()
                                   + tellRecurrences(flakePlan.recurred, slug: last))
             }
             if let redOnBase {

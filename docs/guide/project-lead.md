@@ -270,8 +270,10 @@ branch carrying the remote refuse then, until you install from the base (`script
 
 **Flaky tests.** When tests fail, the failing tests run once more (up to 20 named tests, else the whole command), at
 most once per merge, and never after a build error or a `regression_command` failure. If they pass, the merge goes
-ahead and each is recorded as a flake, with its evidence in a file. A test that flakes 3 times within 7 days becomes a
-task to fix it, once.
+ahead and each is recorded as a flake, with its evidence in a file. A named test's first flake becomes a task to fix
+it, pointing at that file; a later flake while that task (or another open task naming the test) is open goes in its
+context instead. The task finds the root cause and fixes it: never a sleep, a retry, a longer timeout, or a skipped test.
+If the cause can't be found within its budget, it deletes the test and writes down why.
 
 **Merge policy** (`merge_policy:` in `workflow.md`), chosen once per project, within the floor above:
 

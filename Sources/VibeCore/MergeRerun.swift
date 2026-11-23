@@ -833,12 +833,12 @@ public enum MergeRerun {
     }
 
     /// The line added to an open task's context that names `test` (`LeadBoard.openTask(naming:)`) once it flaked
-    /// `LeadBoard.flakeLimit` times within `LeadBoard.flakeWindow` (`flakes`, oldest first), in place of a task to fix
-    /// it, with the failing runs' lines.
+    /// again (`flakes`, oldest first: those since the last one noted or planned), in place of a new task to fix it,
+    /// with each flake's evidence file and its failing lines.
     static func flakeNote(test: String, flakes: [LeadFlake], root: String) -> String {
         let merges = flakes.map(\.task)
-        return "Flake ledger: \(test) flaked \(merges.count) times within \(Int(LeadBoard.flakeWindow / 86_400)) days (failed its first run and passed its rerun in the merges of \(merges.joined(separator: ", "))); no task was planned to fix it, as this one names it."
-            + quoted(flakes, root: root)
+        return "Flake ledger: \(test) flaked in the merge\(merges.count == 1 ? "" : "s") of \(merges.joined(separator: ", ")) (failed its first run and passed its rerun); no new task was planned to fix it, as this one names it."
+            + FlakeLedger.evidenceFiles(flakes, root: root) + quoted(flakes, root: root)
     }
 
     /// The task planned for `test`, red on the base: it failed a merge's run, its rerun and the same run on the base,
@@ -856,19 +856,25 @@ public enum MergeRerun {
             context: context)
     }
 
-    /// The task planned once `test` flaked `LeadBoard.flakeLimit` times within `LeadBoard.flakeWindow`: `flakes` (in
-    /// the merges they held up, oldest first), whose failing lines its context quotes from their files under `root`.
+    /// The task planned once `test` flaked (`LeadBoard.flakeLimit` times, once, within `LeadBoard.flakeWindow`):
+    /// `flakes` (in the merges they held up, oldest first), whose evidence files under `root` it names and whose
+    /// failing lines its context quotes. It finds the root cause and fixes it, never hides the flake (a sleep, a retry,
+    /// a longer timeout, a skip): a flaky test that's rerun until it passes teaches agents to rerun rather than fix
+    /// (2026-11-23). If the cause can't be found, the test goes, with the reason written down.
     static func fixContract(test: String, flakes: [LeadFlake], workflow: LeadWorkflow, root: String) -> LeadContract {
         let merges = flakes.map(\.task)
         let tests = workflow.testCommand.map { "`\($0)` passes" } ?? "The project's tests pass"
+        let held = merges.count == 1 ? "a merge's test run" : "\(merges.count) merges' test runs"
         return LeadContract(
-            goal: "\(test) stops flaking: it failed \(merges.count) merges' test runs within \(Int(LeadBoard.flakeWindow / 86_400)) days and passed each one's rerun, so the merges went ahead on the rerun alone.",
-            acceptance: ["Say why it failed (a fixed sleep, a wall-clock window, a race in the test, or a real bug in what it tests), with the evidence from the merges' runs",
-                         "If it's a real bug, fix the code; if it's the test, it waits on the real event it checks (a file, a reply, a semaphore, an injected clock), never a fixed sleep or a wall-clock window",
-                         "It passes repeatedly under load (scripts/test-under-load.sh when the project has it)",
+            goal: "\(test) stops flaking: it failed \(held) and passed the rerun, so the merge went ahead on the rerun alone. Find the root cause and fix it; if it can't be found within the budget, delete the test and write down why.",
+            acceptance: ["Say the root cause (a fixed sleep, a wall-clock window, a race or shared state in the test, or a real bug in what it tests), with the evidence from the flaky runs (the evidence files below)",
+                         "Fix the root cause: if it's a real bug, fix the code; if it's the test, it waits on the real event it checks (a file, a reply, a semaphore, an injected clock). Never add a sleep, a retry or a longer timeout as the fix, and never skip or disable the test",
+                         "If the root cause can't be found within the budget, delete the test instead, and write why (what was tried, what the evidence showed) in the commit message and in the done report",
+                         "Unless it was deleted, it passes repeatedly under load (scripts/test-under-load.sh when the project has it)",
                          tests],
-            boundaries: ["The test and what it checks; nothing else changes unless it's the bug"],
-            context: "Flake ledger (the board's flakes; status lists them): \(test) failed its first run and passed its rerun in the merges of \(merges.joined(separator: ", "))."
-                + quoted(flakes, root: root))
+            boundaries: ["The test and what it checks; nothing else changes unless it's the bug",
+                         "No sleep, retry, longer timeout, skip or disabled test as the fix: the root cause fixed, or the test deleted with the reason"],
+            context: "Flake ledger (\(FlakeLedgerStore.path); status lists it): \(test) failed its first run and passed its rerun in the merge\(merges.count == 1 ? "" : "s") of \(merges.joined(separator: ", "))."
+                + FlakeLedger.evidenceFiles(flakes, root: root) + quoted(flakes, root: root))
     }
 }

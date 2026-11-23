@@ -88,16 +88,17 @@ public struct FlakeLedger: Equatable, Sendable {
         self.reruns = reruns
     }
 
-    /// A test that flaked `flakeLimit` times within `flakeWindow` since a task was last planned for it.
+    /// A named test that flaked (`flakeLimit` times, once, within `flakeWindow`) since a task was last planned for it.
     public typealias Due = (test: String, merges: [String], flakes: [LeadFlake])
     /// A test that flaked again after `fix` merged to fix it, told to the lead once (`LeadFlake.recurred`).
     public typealias Recurrence = (test: String, fix: LeadFlakeFix)
 
     /// Records each of `tests` as having flaked in `task`'s merge (tested at `commit`, the 1-minute `load` when its run
     /// started, its rerun `filtered` or whole), those in `logged` with the `log` that keeps their lines. Returns those
-    /// that flaked `LeadBoard.flakeLimit` times within `LeadBoard.flakeWindow` since a task was last planned for them,
-    /// each with the merges it held up and those flakes (oldest first): the caller plans one task each and marks it
-    /// (`notePlanned`), so a test makes one task, not one per flake. And those that flaked for the first time since a
+    /// that flaked `LeadBoard.flakeLimit` times (once: each named test) within `LeadBoard.flakeWindow` since a task was
+    /// last planned for them, each with the merges it held up and those flakes (oldest first): the caller plans a task
+    /// for each and marks it (`notePlanned`), or, while an open task names it, notes these flakes in that task's
+    /// context instead, so a test makes one task, not one per flake. And those that flaked for the first time since a
     /// fix for them merged (`fixes`): each is marked on its flake (`recurred`), so the lead is told once per fix. A
     /// flake recorded under `MergeRerun.unnamed` names no test, and plans and recurs nothing.
     public mutating func recordFlakes(_ tests: [String], task: String, commit: String, now: Double, logged: Set<String> = [],
@@ -120,6 +121,14 @@ public struct FlakeLedger: Equatable, Sendable {
             if counted.count >= LeadBoard.flakeLimit { due.append((test, counted.map(\.task), counted)) }
         }
         return (due, recurred)
+    }
+
+    /// Where `flakes`' failing lines are kept (`LeadFlake.log`, under .vibeswitcher/flakes/), for the task that fixes
+    /// them (`MergeRerun.fixContract`, `flakeNote`): one sentence, or nothing when none kept any.
+    static func evidenceFiles(_ flakes: [LeadFlake], root: String) -> String {
+        let files = flakes.compactMap { $0.log.map { MergeRerun.evidenceFile(root: root, log: $0) } }
+        guard !files.isEmpty else { return "" }
+        return " Evidence (each flaky run's failing lines, under \((FlakeLedgerStore.path as NSString).deletingLastPathComponent)/): " + files.joined(separator: ", ") + "."
     }
 
     /// Marks `test`'s latest flake as the one `slug` was planned for.
@@ -157,7 +166,7 @@ public struct FlakeLedger: Equatable, Sendable {
             return "\(test) ×\(found.count) (\(found.map(\.task).joined(separator: ", ")))" + (planned.map { " → task \($0)" } ?? "") + again
         }
         return "Flaky tests in the last \(Int(LeadBoard.flakeWindow / 86_400)) days (\(recent.count) flake\(recent.count == 1 ? "" : "s"): each failed a merge's test run, passed its rerun, and the merge went ahead; "
-            + "\(LeadBoard.flakeLimit) of one test become a task to fix it): " + shown.joined(separator: "; ") + (order.count > 8 ? "; …" : "") + "."
+            + "each named test's flake becomes a task to fix it, or a note in the open task that names it): " + shown.joined(separator: "; ") + (order.count > 8 ? "; …" : "") + "."
     }
 
     /// For status: the merges that went to a rerun within `flakeWindow` of `now`, how often a filtered rerun passed

@@ -1575,8 +1575,10 @@ public struct LeadBoard: Codable, Equatable, Sendable {
     /// Past these, the oldest updates and closed questions move to the board's archive (`BoardStore.archive`).
     public static let keptUpdates = 50
     public static let keptClosedQuestions = 50
-    /// A test that flakes `flakeLimit` times within `flakeWindow` becomes a task to fix it, once.
-    public static let flakeLimit = 3
+    /// A named test's first flake becomes a task to fix it (`FlakeLedger.recordFlakes`), and each flake after that a
+    /// note in the open task that names it: at 3, most flaky tests never got a task (8 merges went ahead on a rerun in
+    /// one week, 2026-11-23). `flakeWindow` bounds the earlier flakes a task counts, and what status lists.
+    public static let flakeLimit = 1
     public static let flakeWindow: Double = 7 * 86_400
 
     public init() {}
