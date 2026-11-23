@@ -4360,3 +4360,7 @@ Proposed task 1: Find why dictations end with no text
 - 2026-11-23 12:57 Started a worker on fix-the-dictation-tests
 - 2026-11-23 12:57 Automatically (auto_advance): Started a worker on fix-the-dictation-tests (Fix the dictation tests that flaked in merges this week (escAndTheCross…, escCancels…, eachOpenAIRun…)).
 - 2026-11-23 12:58 Exception on a-test-that-flakes by lead of vibeswitcher: edits to Sources/VibeCore/MergeRerun.swift accepted. Reason: The flake fix task's contract and open-task note are built in MergeRerun.fixContract and MergeRerun.flakeNote; the lead told the worker to change those two functions in place rather than move them. fi…
+- 2026-11-23 13:22 a-merge-whose-tests small task: merged on tests (19 min of work)
+- 2026-11-23 13:22 Sampled a-merge-whose-tests for audit from review none (at cea490d9): draw 5.92 under audit_sample_percent 10 (seed 694604974488917)
+- 2026-11-23 13:22 a-merge-whose-tests small task: back to audit (the audit sample drew it)
+- 2026-11-23 13:22 Planned a-parameterized-test-s: A parameterized test's end line isn't recorded as a second flaky test
