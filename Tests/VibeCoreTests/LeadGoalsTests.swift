@@ -65,6 +65,19 @@ struct LeadGoalsTests: LeadTeamFixture {
         #expect(board().task("pricing-copy")?.goalID == nil)
     }
 
+    @Test func aGoalWhoseTextTheRecordsLintsFailOnIsRefusedAndNothingIsWritten() throws {
+        let root = try repo()
+        let lead = try lead(root, FakeRuntime())
+        lead.recordLints = { .all }
+        let bad = lead.call("add_goal", ["title": "Ship it for \(LeadRecordTextTests.privateName)", "done": "It is live"])
+        #expect(bad.isError && bad.text.contains("nothing recorded"), "\(bad.text)")
+        #expect((BoardStore(root: root).load().goals ?? []).isEmpty)
+        #expect(!lead.call("add_goal", ["title": "Ship it", "done": "It is live"]).isError)
+        let renamed = lead.call("update_goal", ["goal": "ship-it", "done": "\(LeadRecordTextTests.privateName) says so"])
+        #expect(renamed.isError, "\(renamed.text)")
+        #expect(BoardStore(root: root).load().goals?.first?.done == "It is live")
+    }
+
     @Test func atMostEightOpenGoals() throws {
         let root = try repo()
         let lead = try lead(root, FakeRuntime())
