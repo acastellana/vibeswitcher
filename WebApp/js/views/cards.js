@@ -16,6 +16,7 @@ import { pushLines } from '../push.js';
 import { talkButton } from '../dictate.js';
 import { pluginFacts } from '../plugincard.js';
 import { t } from '../i18n.js';
+import { actsFor, refusalWords, doButton, answerArgs, cardArgs } from '../acting.js';
 
 const PRIORITY = { blocking: t('cBlocking'), important: t('cImportant'), whenever: t('cWhenever') };
 
@@ -145,8 +146,9 @@ export function questionCard(app, first) {
   let input = null;
   let keys = { buttons: [], hold: null };
 
-  const choose = (answer) => { if (answer.trim()) app.store.act(card.id, 'answer', { answer: answer.trim() }); };
-  const hold = () => app.store.act(card.id, 'hold');
+  // With the `act` right the click is the answer: the card, the `seen` it was drawn with, the words and the version.
+  const choose = (answer) => { if (answer.trim()) app.store.act(card.id, 'answer', { text: answer.trim(), version: card.question?.version ?? null, seen: card.seen ?? null }); };
+  const hold = () => app.store.act(card.id, 'hold', { seen: card.seen ?? null });
 
   function closedLine(mark, ...text) {
     return h('div', { class: 'card-closed' }, mark, h('div', null, h('p', null, text), h('p', { class: 'card-about' }, card.question.text)));
@@ -161,7 +163,7 @@ export function questionCard(app, first) {
     }
     const question = card.question;
     const acting = app.store.state.acting.get(card.id) || {};
-    const pendingAnswer = acting.kind === 'answer' ? acting.answer : null;
+    const pendingAnswer = acting.kind === 'answer' ? (acting.text ?? acting.answer) : null;
     el.replaceChildren();
     el.className = 'card';
 
@@ -203,12 +205,12 @@ export function questionCard(app, first) {
       el.append(h('p', { class: 'timer held' }, t('cHeld'), h('strong', null, question.proposal), t('ccWaitsAnswer')));
     }
 
-    if (!app.store.can('answer') && app.store.can('draft')) {
+    if (!actsFor(app, 'answer') && app.store.can('draft')) {
       buildDraft(question, counting);
       return;
     }
 
-    if (!app.store.can('answer')) {
+    if (!actsFor(app, 'answer')) {
       el.append(...readOnlyAnswer(card, counting).filter(Boolean));
       if (card.notice) el.append(h('p', { class: 'card-notice' }, card.notice));
       el.append(h('p', { class: 'card-foot' }, counting
@@ -228,7 +230,7 @@ export function questionCard(app, first) {
     input.addEventListener('input', () => { send.disabled = !input.value.trim(); });
     el.append(h('form', { class: 'answer', onsubmit: (event) => { event.preventDefault(); choose(input.value); } }, input, talkButton(input), send));
 
-    if (acting.refused) el.append(h('p', { class: 'card-notice', role: 'alert' }, acting.refused));
+    if (acting.refused) el.append(h('p', { class: 'card-notice', role: 'alert' }, refusalWords({ code: acting.code, message: acting.refused })));
     else if (card.notice) el.append(h('p', { class: 'card-notice' }, card.notice));
 
     el.append(h('p', { class: 'card-foot' }, counting
@@ -283,7 +285,7 @@ export function questionCard(app, first) {
     card = next;
     const acting = app.store.state.acting.get(card.id);
     const drafting = [app.store.draftOf(card.id), app.store.state.draftRefused.get(card.id) || null, app.store.can('draft')];
-    const now = JSON.stringify([card, acting || null, app.store.can('answer'), drafting]);
+    const now = JSON.stringify([card, acting || null, actsFor(app, 'answer'), drafting]);
     if (now === shape) return;
     const focused = el.contains(document.activeElement);
     // The option that had the focus keeps it (a pick never sends it to the text box, nor opens a phone's keyboard).
@@ -297,7 +299,7 @@ export function questionCard(app, first) {
   }
 
   // With the keys too, a page that drafts drafts.
-  const drafts = () => !app.store.can('answer') && app.store.can('draft');
+  const drafts = () => !actsFor(app, 'answer') && app.store.can('draft');
   cardKeys(el, () => ({ ...keys, choose: drafts() ? (answer) => { if (input) input.value = ''; if (answer.trim()) app.store.draft(card.id, answer.trim()); } : choose }));
   update(first);
   return { el, update };
@@ -306,7 +308,7 @@ export function questionCard(app, first) {
 // The stack under a lead's chat: "2 questions for you", then the cards, open ones first.
 // The push the lead asks for, while it's open: what goes where, from git and the vault, and the two lines that settle
 // it in a terminal. Nothing on the page pushes.
-function pushCard(lead) {
+function pushCard(lead, app = null) {
   const said = pushLines(lead.push, lead.root);
   const fact = (name, ...value) => [h('dt', null, name), h('dd', null, value)];
   return h('article', { class: 'card push-card', 'aria-label': t('cPushAsk') },
@@ -320,17 +322,23 @@ function pushCard(lead) {
         fact(t('cTo'), h('code', null, said.url)),
         fact(t('cCommits'), h('ul', { class: 'files' }, said.subjects.map((subject) => h('li', null, h('code', null, subject))),
           said.more ? h('li', null, `and ${plural(said.more, 'more')}`) : null)))),
-    h('div', { class: 'card-command' },
-      h('span', { class: 'card-command-label' }, t('cSettle')),
-      copyLine(said.push, 'the command that pushes it'),
-      copyLine(said.decline, 'the command that declines it')),
-    h('p', { class: 'card-foot' }, t('cPushNote')));
+    app && actsFor(app, 'push') ? h('div', { class: 'card-acts' },
+      doButton(app, { label: t('acPush'), kind: 'push', args: () => ({ folder: lead.root, request: lead.push.id }) }).el,
+      actsFor(app, 'push.decline') ? doButton(app, { label: t('acDecline'), kind: 'push.decline', quiet: true, args: () => ({ folder: lead.root, request: lead.push.id }) }).el : null)
+      : h('div', { class: 'card-command' },
+        h('span', { class: 'card-command-label' }, t('cSettle')),
+        copyLine(said.push, 'the command that pushes it'),
+        copyLine(said.decline, 'the command that declines it')),
+    h('p', { class: 'card-foot' }, app && actsFor(app, 'push') ? t('acPushNote') : t('cPushNote')));
 }
 
 // A feature plugin's card (js/plugincard.js): who asks, the node's facts, what it asks whole, the agent's own words,
 // and the lines that settle it. Never acts.
-export function pluginCard(card) {
+export function pluginCard(card, app = null) {
   if (card.tooLarge) return tooLargeCard(card);
+  // With the `act` right, each answer word is a button (its request the card, its seen and the word); the command the
+  // agent asks for stays shown whole above it.
+  const acting = app && actsFor(app, 'answer');
   const f = pluginFacts(card), wait = f.state === 'waiting', fact = (n, ...v) => [h('dt', null, n), h('dd', null, v)];
   return h('article', { class: 'card' + (wait ? '' : ' closed') },
     h('header', { class: 'card-head' }, h('span', { class: `priority ${PRIORITY[f.severity] ? f.severity : 'important'}` }, f.title),
@@ -342,8 +350,10 @@ export function pluginCard(card) {
       fact(t('ccAgentWords', { name: f.body.name }), h('pre', { class: 'plugin-body' }, f.body.lines.join('\n')), f.body.note ? `${f.body.size}, ${f.body.note}` : f.body.size))),
     // The agent's own words beside it, never among the node's facts.
     f.context ? h('p', { class: 'card-context' }, h('span', { class: 'card-context-label' }, `${f.context.label}: `), f.context.text) : null,
-    wait ? h('div', { class: 'card-command' }, h('span', { class: 'card-command-label' }, t('settleInTerminal')),
-      f.actions.map((action) => copyLine(action.line, action.says)))
+    wait && acting ? h('div', { class: 'card-acts' }, f.actions.map((action) => doButton(app, { label: action.label || action.word, kind: 'answer',
+      args: () => answerArgs(card, action.word), quiet: action.word !== f.actions[0]?.word }).el))
+      : wait ? h('div', { class: 'card-command' }, h('span', { class: 'card-command-label' }, t('settleInTerminal')),
+        f.actions.map((action) => copyLine(action.line, action.says)))
       : h('p', { class: 'card-notice' }, f.outcome || f.state),
     card.notice ? h('p', { class: 'card-notice' }, card.notice) : null);
 }
@@ -370,10 +380,10 @@ export function questionStack(app, project) {
     const lead = app.store.state.leads.get(project);
     const push = lead?.push && lead.root ? lead : null;
     // Drawn again only when the request changed: a newer one replaces it, a settled one leaves.
-    const pushKey = push ? `${push.push.id}:${push.root}` : null;
+    const pushKey = push ? `${push.push.id}:${push.root}:${app.store.acts()}` : null;
     if (pushKey !== shownPush) {
       shownPush = pushKey;
-      pushSlot.replaceChildren(...(push ? [pushCard(push)] : []));
+      pushSlot.replaceChildren(...(push ? [pushCard(push, app)] : []));
     }
     el.hidden = cards.length === 0 && !push;
     setText(count, open.length ? t('questionsForYou', { n: open.length }) + (push ? t('andAPush') : '') : push ? t('pushWaits') : t('cNoQuestions'));

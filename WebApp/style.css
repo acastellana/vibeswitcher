@@ -1184,3 +1184,15 @@ kbd { padding: 1px 6px; border-radius: 5px; box-shadow: inset 0 0 0 1px var(--li
   .sheet { width: 100vw; padding: calc(20px + env(safe-area-inset-top)) 18px 32px; }
   .tdet { margin-left: 0; }
 }
+
+/* Acting from the page: a request's button, what the node said under it, and whether this page acts */
+.act { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 6px 10px; }
+.act-said { color: var(--ink-2); font-size: var(--small); }
+.act-said:empty { display: none; }
+.act-said.refused, .confirm-note.refused { color: var(--needs-you); }
+.button.confirming { background: var(--needs-you); color: var(--on-status); }
+.button.small { padding: 2px 8px; font-size: var(--small); }
+.card-acts { display: flex; flex-wrap: wrap; gap: 8px; }
+.mine.refused { opacity: 0.6; }
+.acts-line { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 10px; color: var(--ink-2); }
+.acts-line.compact { margin-top: 4px; color: var(--working); font-size: var(--small); font-weight: 500; }

@@ -20,6 +20,7 @@ import { leadLines, shownLines, dialCounts, waitingCards, waitingCount, cut, sho
 import { projectHref, routeHref } from '../ui.js';
 import { questionStack, pluginCard, copyLine } from './cards.js';
 import { tellLine, shellWord, leadLine } from '../actions.js';
+import { actsFor, doButton, cardArgs, refusalWords } from '../acting.js';
 
 // The line marks: a diamond for a question (filled while open, an outline once answered), a check for a result, a
 // small dot for a status update.
@@ -94,13 +95,27 @@ export function projectView(app, { sheet }) {
   let lastLevel = null;
   let sheetShown = null;
 
+  // A note for the lead: with the `act` right it is sent (`tell`), and said as sent or refused under it; else drafted,
+  // with the line that sends it from a terminal.
   function note() {
     const route = ui.state.route;
     const text = input.value.trim();
     const lead = store.state.leads.get(route.id);
     if (!text || !lead?.root) return;
-    notes.set(route.id, [...(notes.get(route.id) || []), text]);
+    const entry = { text, state: actsFor(app, 'tell') ? 'sending' : 'draft', why: '' };
+    notes.set(route.id, [...(notes.get(route.id) || []), entry]);
     input.value = '';
+    if (entry.state === 'sending') {
+      input.disabled = true;
+      store.request('tell', { folder: lead.root, text }).then((reply) => {
+        input.disabled = false;
+        entry.state = reply.ok ? 'sent' : 'refused';
+        entry.why = reply.ok ? '' : refusalWords(reply.error);
+        if (!reply.ok) input.value = text;
+        drawn = '';
+        render();
+      });
+    }
     drawn = '';
     render();
     talk.scrollTop = talk.scrollHeight;
@@ -116,17 +131,44 @@ export function projectView(app, { sheet }) {
   }
 
   // A held config change or a base move, as a card: what it holds and the lines that settle it.
+  // What a held config or a base move holds, whole, from the node (never the lead's words): shown before a click acts.
+  function heldFacts(card) {
+    const fact = (name, ...value) => [h('dt', null, name), h('dd', null, value)];
+    if (card.kind === 'config' && card.config) {
+      const items = card.config.items || [];
+      const rails = card.config.guarded || [];
+      return h('div', { class: 'facts' }, h('div', { class: 'facts-head' }, t('cFacts')), h('dl', null,
+        items.map((item) => fact(item.name, [item.change || '', item.files?.length ? h('ul', { class: 'files' }, item.files.map((file) => h('li', null, h('code', null, file)))) : null])),
+        rails.map((rail) => fact(rail.key, h('code', null, rail.value), rail.sinceAccept ? ` (${rail.sinceAccept})` : ''))));
+    }
+    if (card.kind === 'base' && card.base) {
+      const base = card.base;
+      return h('div', { class: 'facts' }, h('div', { class: 'facts-head' }, t('cFacts')), h('dl', null,
+        fact(t('acBranch'), h('code', null, base.branch)),
+        fact(t('acMove'), h('code', null, `${base.from || '?'} → ${base.to}`), base.fromIs && base.fromIs !== 'recorded' ? ` (${base.fromIs})` : ''),
+        base.reason ? fact(t('acWhy'), base.reason) : null,
+        (base.commits || []).length ? fact(t('cCommits'), h('ul', { class: 'files' }, base.commits.map((commit) => h('li', null, h('code', null, [String(commit.sha || '').slice(0, 8), commit.subject || ''].filter(Boolean).join(' ')))))) : null));
+    }
+    return null;
+  }
+
   function otherCard(card) {
-    if (card.kind === 'plugin') return pluginCard(card);
+    if (card.kind === 'plugin') return pluginCard(card, app);
     const root = card.root || '';
     const config = card.kind === 'config';
+    // With the `act` right: accept the held config, or accept or keep the base, from here (the card and its seen).
+    const acts = config ? actsFor(app, 'config.accept') : actsFor(app, 'base.accept');
     return h('article', { class: 'card' },
       h('header', { class: 'card-head' }, h('span', { class: 'priority blocking' }, t('blocking')), h('time', { class: 'asked' }, t('askedAt', { who: t('vibeswitcher'), time: clock(card.at) }))),
       h('h3', { class: 'card-question' }, t(config ? 'heldConfig' : 'baseMove')),
       h('p', { class: 'card-why' }, t(config ? 'heldConfigWhy' : 'baseMoveWhy')),
-      h('div', { class: 'card-command' }, h('span', { class: 'card-command-label' }, t('settleInTerminal')),
+      heldFacts(card),
+      acts ? h('div', { class: 'card-acts' },
+        doButton(app, { label: t(config ? 'acAccept' : 'acAcceptMove'), kind: config ? 'config.accept' : 'base.accept', args: () => cardArgs(card) }).el,
+        !config && actsFor(app, 'base.keep') ? doButton(app, { label: t('acKeepBase'), kind: 'base.keep', quiet: true, args: () => cardArgs(card) }).el : null) : null,
+      h('div', { class: 'card-command' }, h('span', { class: 'card-command-label' }, acts ? t('acSeeFirst') : t('settleInTerminal')),
         config ? copyLine(`vibeswitcher config held ${shellWord(root)}`, 'the command that shows it') : copyLine(`vibeswitcher base show ${shellWord(root)}`, 'the command that shows it'),
-        config ? copyLine('vibeswitcher approve', 'the command that accepts it') : null));
+        config && !acts ? copyLine('vibeswitcher approve', 'the command that accepts it') : null));
   }
 
   function drawLead(route, board, lead) {
@@ -143,7 +185,7 @@ export function projectView(app, { sheet }) {
     stack.update();
     const extra = cards.filter((card) => !['question', 'approval'].includes(card.kind));
     const mine = notes.get(route.id) || [];
-    const key = JSON.stringify([route.id, route.show, lines.map((line) => [line.key, line.answer, line.state]), extra.map((card) => card.id), mine, waiting, lang()]);
+    const key = JSON.stringify([route.id, route.show, lines.map((line) => [line.key, line.answer, line.state]), extra.map((card) => [card.id, card.seen]), mine, waiting, lang(), store.acts()]);
     if (key === drawn) return;
     const atEnd = talk.scrollHeight - talk.scrollTop - talk.clientHeight < 40;
     drawn = key;
@@ -168,8 +210,13 @@ export function projectView(app, { sheet }) {
       children.push(h('h2', { class: 'asked-title' }, push && waiting === 1 ? t('pushWaits') : t('questionsForYou', { n: waiting - push }) + (push ? t('andAPush') : '')));
     }
     children.push(stack.el, ...extra.map(otherCard));
-    for (const text of mine) {
-      children.push(h('div', { class: 'note' }, h('p', { class: 'mine' }, text), copyLine(tellLine(lead.root, text), 'the command that tells the lead'), h('p', { class: 'confirm-note' }, t('tellNote'))));
+    for (const entry of mine) {
+      if (entry.state === 'draft') {
+        children.push(h('div', { class: 'note' }, h('p', { class: 'mine' }, entry.text), copyLine(tellLine(lead.root, entry.text), 'the command that tells the lead'), h('p', { class: 'confirm-note' }, t('tellNote'))));
+      } else {
+        children.push(h('div', { class: 'note' }, h('p', { class: 'mine' + (entry.state === 'refused' ? ' refused' : '') }, entry.text),
+          h('p', { class: 'confirm-note' + (entry.state === 'refused' ? ' refused' : '') }, entry.state === 'sending' ? t('acSending') : entry.state === 'sent' ? t('acToldLead') : entry.why)));
+      }
     }
     col.replaceChildren(...children);
     const changedView = lastProject !== route.id || lastLevel !== route.show;
@@ -385,12 +432,17 @@ export function projectView(app, { sheet }) {
     input.disabled = !lead?.root;
     setClass(el, 'quiet', !live);
     quiet.hidden = live || route.view !== 'lead' || !root;
-    const quietKey = JSON.stringify([root, live, lang()]);
+    const quietKey = JSON.stringify([root, live, lang(), store.acts()]);
     if (!quiet.hidden && quietKey !== quietDrawn) {
       quietDrawn = quietKey;
       setText(quietWords, t('quietWords'));
-      quietLines.replaceChildren(copyLine(`${leadLine(root)} --resume`, 'the command that starts its lead again in its conversation'),
-        copyLine(leadLine(root), 'the command that starts a new lead there'));
+      // With the `act` right, the two starts are buttons (`lead`, back in its conversation or fresh), the lines beside.
+      const acts = actsFor(app, 'lead');
+      quietLines.replaceChildren(...[acts ? h('div', { class: 'card-acts' },
+        doButton(app, { label: t('acResumeLead'), kind: 'lead', args: () => ({ folder: root, resume: true }) }).el,
+        doButton(app, { label: t('acFreshLead'), kind: 'lead', quiet: true, args: () => ({ folder: root }) }).el) : null,
+      copyLine(`${leadLine(root)} --resume`, 'the command that starts its lead again in its conversation'),
+      copyLine(leadLine(root), 'the command that starts a new lead there')].filter(Boolean));
       quietForm.onclick = (event) => { event.preventDefault(); app.startLead?.(root); };
     }
     if (route.view === 'roadmap') { lastProject = null; drawRoadmap(route, board); } else drawLead(route, board, lead);

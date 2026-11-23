@@ -134,7 +134,7 @@ test('an answer shows at once; a refusal takes it back with the reason; the card
   const done = store.act('c1', 'answer', { answer: 'Thursday' });
   assert.deepEqual(store.state.acting.get('c1'), { kind: 'answer', answer: 'Thursday' });
   await done;
-  assert.deepEqual(store.state.acting.get('c1'), { refused: 'Already answered.' });
+  assert.deepEqual(store.state.acting.get('c1'), { refused: 'Already answered.', code: 'refused' });
   store.apply({ v: 1, kind: 'delta', seq: 2, changes: [{ in: 'cards', id: 'c1', value: { id: 'c1', open: false } }] });
   assert.equal(store.state.acting.has('c1'), false);
 });

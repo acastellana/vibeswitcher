@@ -9,6 +9,7 @@ import { h, setText, framed } from '../dom.js';
 import { sessionMark, icon } from '../marks.js';
 import { STATES, stateOf, since, tilde, lastPart, AGENTS } from '../words.js';
 import { t } from '../i18n.js';
+import { actsFor, doButton } from '../acting.js';
 import { sessionHref, projectHref, leadMarks } from '../ui.js';
 import { ownSession } from './left.js';
 import { newSessionForm, newLeadForm, newProjectForm } from './drive.js';
@@ -86,12 +87,13 @@ export function ownSessionsView(app) {
     starting.el.hidden = state.connection === 'unpaired' || state.connection === 'revoked';
     starting.update();
     const endedNow = (state.node?.ended || []).slice(0, ENDED_SHOWN);
-    const key = JSON.stringify([endedNow, state.node?.home]);
+    const key = JSON.stringify([endedNow, state.node?.home, store.acts()]);
     if (key !== endedDrawn) {
       endedDrawn = key;
       ended.hidden = endedNow.length === 0;
       endedList.replaceChildren(...endedNow.map((entry) => h('div', { class: 'ended-row' },
         h('div', { class: 'ended-name' }, h('span', null, entry.name || t('owASession')), h('span', { class: 'ended-folder' }, tilde(entry.folder, state.node?.home))),
+        entry.conversation && actsFor(app, 'session.resume') ? doButton(app, { label: t('acResume'), kind: 'session.resume', quiet: true, args: () => ({ session: entry.session }) }).el : null,
         entry.conversation ? copyLine(resumeLine(entry), t('owTheCommandThatResumesIt')) : h('p', { class: 'confirm-note' }, t('owItsConversationIdWasnT')))));
     }
   }

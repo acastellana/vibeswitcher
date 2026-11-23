@@ -5,8 +5,10 @@ and "Stage 5"). Served by the node itself (embedded in its server, `scripts/weba
 over its WebSocket (`js/socket.js`, the wire contract `docs/superpowers/specs/2026-11-17-v2-live-wire-contract.md`):
 the node's status, the sessions as their status changes, the leads' questions, and a session's conversation as it
 grows. It reads, and drafts: a pick on a card leaves a draft there, told to nobody, and the card shows the line that
-sends it from a terminal (`vibeswitcher answer CARD`, a click to copy), where the card's code is typed. No click here
-is the user's answer. With `?mock` it runs on invented data instead and needs no server.
+sends it from a terminal (`vibeswitcher answer CARD`, a click to copy), where the card's code is typed. Where the
+node lets a page act (`web_acts` on, a page on this machine's loopback: the hello's `auth.rights` holds `act`), a click
+sends the request itself, recorded as the user's, for each kind `hello.kinds` lists (js/acting.js); without it, no
+click here is the user's answer. With `?mock` it runs on invented data instead and needs no server.
 
 ```sh
 bash scripts/sandbox-server.sh run && bash scripts/sandbox-server.sh url   # a scratch node, and the page's address
@@ -56,6 +58,7 @@ Screenshots of each main state, light and dark, wide and at 390 px, are in `shot
 | `js/mock.js` | Stands in for the node with `?mock`: imported only then, and left out of the node's embedded page (`serve.sh` serves it). |
 | `wire/` | The validators and vectors, generated from the node's encoders (`vibeswitcher wire-vectors`): don't edit them. |
 | `js/ui.js` | What this window shows: the route (every address above, `parseRoute`, `projectHref`), a session's pane, the inspector. |
+| `js/acting.js` | Acting from the page: whether this connection acts and for which kinds, a card's request (its `seen`, no code), the settings a page may not set, the node's refusals in words, the button that sends one request, and the line that says the page acts and turns it off. |
 | `js/conversation.js` | The redesign's reads of the board and cards, no page in them: the lead conversation's lines and the dial's counts, a question's head line, a task's five steps and colour, whom a blocked task waits on, the projects and which opens first. |
 | `js/i18n.js`, `js/i18n-es.js` | Every view's own words: the English with the keys and `t(key, values)` (the browser's language chosen once), and the Spanish, a file a language. |
 | `js/words.js` | The vocabulary: state words, durations, a task's words (from `VibeCore`). |

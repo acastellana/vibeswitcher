@@ -729,10 +729,10 @@ export function chatView(app) {
   function drawPluginCards() {
     // The feature plugins' cards of this session (a shell request's among them), of the plugins the node has on.
     const open = pluginCardsOf(store.state.cards.values(), view.session, pluginsOn(store.state));
-    const key = JSON.stringify(open.map((card) => [card.id, card.plugin?.state, card.notice]));
+    const key = JSON.stringify([open.map((card) => [card.id, card.seen, card.plugin?.state, card.notice]), store.acts()]);
     if (key === pluginDrawn) return;
     pluginDrawn = key;
-    pluginSlot.replaceChildren(...open.map(pluginCard));
+    pluginSlot.replaceChildren(...open.map((one) => pluginCard(one, app)));
   }
 
   function placeStack(session) {

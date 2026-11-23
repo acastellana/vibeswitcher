@@ -8,6 +8,7 @@
 //   store.reconcile(name, list)  a live feed's snapshot of one collection, by id (socket.js)
 //   store.change(name, changes)  a live feed's delta of one collection: [{ id, value }], value null for gone
 //   store.can(kind)              whether this connection may send `kind` (`hello.kinds`; the mock may send anything)
+//   store.acts()                 whether it acts for the user (`hello.auth.rights` holds `act`; the mock does)
 //   store.chatSnapshot(id, s)    a chat's snapshot ({ items, after, more }): the newest items, or a tail from `after` on
 //   store.chatOps(id, ops)       a chat delta's ops; 'gap' when they don't fit what it holds (nothing applied)
 //   store.chatPage(id, items, more)  older items, before the first held
@@ -37,6 +38,9 @@ export function createStore() {
     connection: 'connecting',
     // What this connection may send (`hello.kinds`); null: anything (the mock).
     kinds: null,
+    // This connection's rights (`hello.auth.rights`): read, draft, and act once the node lets a page act (`web_acts`);
+    // null: the mock's, which may do anything.
+    rights: null,
     // The feature plugins the node has on (`hello.plugins`: [{ id, title }]); null: a node before plugins (or the mock).
     plugins: null,
     // The collections the feed follows; null: all of them (the mock). The node sends no lead's board yet.
@@ -320,7 +324,7 @@ export function createStore() {
     emit(new Map([['cards', [{ in: 'cards', id: card, acting: true }]]]));
     return request(kind, { card, ...args }).then((reply) => {
       if (!reply.ok) {
-        state.acting.set(card, { refused: reply.error?.message || 'The node refused it.' });
+        state.acting.set(card, { refused: reply.error?.message || 'The node refused it.', code: reply.error?.code || null });
         emit(new Map([['cards', [{ in: 'cards', id: card, acting: true }]]]));
       }
       return reply;
@@ -451,8 +455,11 @@ export function createStore() {
     follows: (collection) => state.follows === null || state.follows.includes(collection),
     // A card's stable key (its first id, across a server restart's new ones).
     cardKey: (id) => state.cardKeys.get(id) || id,
-    setKinds(kinds, plugins = null) {
+    // Whether this page acts for the user (the node's `act` right): its buttons send, else they draft and show the line.
+    acts: () => state.rights === null || state.rights.includes('act'),
+    setKinds(kinds, plugins = null, rights = undefined) {
       state.kinds = kinds;
+      if (rights !== undefined) state.rights = Array.isArray(rights) ? rights : [];
       state.plugins = Array.isArray(plugins) ? plugins : null;
       emit(new Map([['connection', [{ connection: state.connection }]]]));
     },

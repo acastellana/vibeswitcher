@@ -151,7 +151,7 @@ export function connectSocket(store, options) {
     attempts = 0;
     if (message.auth?.token) keep(message.auth.token);
     pair = null;
-    store.setKinds(Array.isArray(message.kinds) ? message.kinds : [], message.plugins);
+    store.setKinds(Array.isArray(message.kinds) ? message.kinds : [], message.plugins, message.auth?.rights || []);
     if (mine && message.assets && message.assets !== mine) {
       reloading = true;
       idle();
@@ -177,7 +177,8 @@ export function connectSocket(store, options) {
       stopped = true;
       reload();
     }
-    // Any other: the close follows, and the page connects again.
+    // Any other (`acts-off` too: the user turned web_acts off, so the page connects again, now without `act`): the
+    // close follows, and the page connects again.
   }
 
   function subscribe(name, sub, { tailFrom = null } = {}) {

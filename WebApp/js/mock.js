@@ -189,7 +189,8 @@ const ago = (seconds) => new Date(now() - seconds * 1000).toISOString();
     restart: null,
     reopen: [],
     ending: [],
-    web: { state: 'listening', port: 8765, tokens: 1, connections: 1 },
+    // Pages acting for the user (`web_acts` on) since an hour ago.
+    web: { state: 'listening', port: 8765, tokens: 1, connections: 1, acts: { on: true, since: ago(3600), pages: 1 } },
     // Your sessions that ended lately (`vibeswitcher resume`).
     ended: [
       { session: id('5c1e7a92'), folder: `${HOME}/projects/example-api`, name: 'example-api', conversation: '7a3f0c21-9b4d-4e8a-a1f2-3c5d7e9b0a14', at: ago(1500), exit: { status: 0, cause: 'exited 0', at: ago(1510) } },
@@ -609,6 +610,8 @@ const ago = (seconds) => new Date(now() - seconds * 1000).toISOString();
   function handle(message) {
     const args = message.args || {};
     if (message.kind === 'answer') {
+      // The node's words (`text`, with the card's `seen`); an older page's `answer`.
+      args.answer = args.text ?? args.answer;
       const card = cards.get(args.card);
       if (!card) return { ok: false, error: { code: 'gone', message: 'That question is no longer on the board. Your answer wasn’t sent.' } };
       if (!card.open) return refused(card.question.state === 'autoDecided'

@@ -12,6 +12,7 @@ import {
   PRESET_VARIABLES, presetProblem, presetLine, presetArgs, leadLine, newProjectLine, projectFolderName,
 } from '../actions.js';
 import { t } from '../i18n.js';
+import { actsFor, doButton } from '../acting.js';
 
 // The command line's words for a session and for what the user typed (js/actions.js, where the page's lines are made).
 export { sessionShort, shellWord };
@@ -25,6 +26,11 @@ export const drivable = (session) => !!session?.hosted && !session.ended;
 export function answersQuestion(prompt, drafted) {
   return !!prompt && !prompt.multiSelect && (prompt.text || []).length > 0 && !!drafted?.text?.trim()
     && !drafted.text.trim().startsWith('/') && !(drafted.images || []).length;
+}
+
+// The `session.pause` arguments for a choice of PAUSES (the command line's flags as the node takes them).
+export function pauseArgs(choice) {
+  return { indefinitely: { for: 'indefinitely' }, hour: { for: 'hours', hours: 1 }, morning: { for: 'morning' }, week: { for: 'hours', hours: 168 }, off: { for: 'off' } }[choice] || { for: 'indefinitely' };
 }
 
 // The message drafted for a session, over its composer: the text as it will be typed, the line that sends it, and
@@ -72,10 +78,16 @@ export function draftBox(app, { edit }) {
       const images = drafted.images || [];
       pictures.hidden = !images.length;
       setText(pictures, images.length ? t('drWithImages', { n: images.length, names: images.map((path) => path.split('/').pop()).join(', ') }) : '');
+      // With the `act` right, Send sends it from here (`send`, as the command line would), and the draft goes.
+      const acts = actsFor(app, 'send');
       const line = `vibeswitcher send ${sessionShort(id)}`;
-      if (line !== drawn) {
-        drawn = line;
-        lineSlot.replaceChildren(copyLine(line, 'the command that sends it'));
+      const key = JSON.stringify([line, acts, drafted.text, drafted.now, images]);
+      if (key !== drawn) {
+        drawn = key;
+        note.hidden = acts;
+        lineSlot.replaceChildren(acts ? doButton(app, { label: drafted.now ? t('acSendNow') : t('acSend'), kind: 'send',
+          args: () => ({ session: id, text: drafted.text, now: !!drafted.now, ...(images.length ? { images } : {}) }), done: () => app.store.sessionDraft(id, null) }).el
+          : copyLine(line, 'the command that sends it'));
       }
     },
   };
@@ -167,7 +179,7 @@ export function promptCard(app) {
 // Shells…), under its header: pick one, and the line that does it shows, a click to copy. A lead and a lead's team
 // aren't ended from here (their lead and `vibeswitcher stop` are). A session that ended has its Resume line, where the
 // node knows its conversation. Returns { el, open(tab), toggle(), update(session, node) → whether it offers anything }.
-export function actionsStrip() {
+export function actionsStrip(app = null) {
   const TABS = [
     { id: 'rename', label: t('drRename') },
     { id: 'pause', label: t('drPause') },
@@ -198,8 +210,11 @@ export function actionsStrip() {
     return ['rename', 'pause', ...(endable(session) ? ['end'] : []), ...(session.hosted && session.cwd ? ['shells'] : [])];
   }
 
-  function line(text, label, note) {
-    return [text ? copyLine(text, label) : null, note ? h('p', { class: 'confirm-note' }, note) : null];
+  // The line that does it, and with the `act` right a button that does it from here (`kind` with `args`).
+  function line(text, label, note, kind = null, args = null) {
+    const acts = app && kind && text && actsFor(app, kind);
+    return [acts ? doButton(app, { label: t('acDoIt'), kind, args: () => args, done: () => { opened = false; el.hidden = true; } }).el : null,
+      text ? copyLine(text, label) : null, note ? h('p', { class: 'confirm-note' }, note) : null];
   }
 
   function body() {
@@ -211,7 +226,7 @@ export function actionsStrip() {
         const text = renameLine(session, typed);
         slot.replaceChildren(...line(text, t('drTheCommandThatRenamesIt'),
           text ? (typed.trim() ? t('drKeptAcrossAResumeThe') : t('drGivesItItsOwnName'))
-            : typed.trim() ? t('drThatSItsNameNow') : t('drTypeAName')));
+            : typed.trim() ? t('drThatSItsNameNow') : t('drTypeAName'), 'session.rename', { session: session.id, ...(typed.trim() ? { name: typed.trim() } : {}) }));
       };
       input.addEventListener('input', () => { typed = input.value; fill(); });
       fill();
@@ -220,28 +235,28 @@ export function actionsStrip() {
     if (tab === 'pause') {
       if (session.paused) {
         return line(pauseLine(session, 'off'), t('drTheCommandThatResumesIts'),
-          t('drPausedGreyedOutNeverReminded'));
+          t('drPausedGreyedOutNeverReminded'), 'session.pause', { session: session.id, for: 'off' });
       }
       const choices = h('div', { class: 'segmented presets', role: 'group', 'aria-label': t('drForHowLong') }, PAUSES.map((one) => h('button', {
         type: 'button', 'aria-pressed': String(one.id === pause), onclick: () => { pause = one.id; draw(true); },
       }, one.label)));
-      return [choices, ...line(pauseLine(session, pause), t('drTheCommandThatPausesIt'), t('drGreyedOutAndNothingReminds'))];
+      return [choices, ...line(pauseLine(session, pause), t('drTheCommandThatPausesIt'), t('drGreyedOutAndNothingReminds'), 'session.pause', { session: session.id, ...pauseArgs(pause) })];
     }
-    if (tab === 'end') return line(endLine(session), t('drTheCommandThatEndsIt'), t('drItsAgentStopsWithEverything'));
+    if (tab === 'end') return line(endLine(session), t('drTheCommandThatEndsIt'), t('drItsAgentStopsWithEverything'), 'session.end', { session: session.id });
     if (tab === 'shells') {
       return line(closeShellsLine(session.cwd), t('drTheCommandThatClosesThe'),
         t('drEndsThisNodeSShells'));
     }
     const ended = endedEntry(node, session.id);
     const resume = resumeLine(ended);
-    return [...line(resume, t('drTheCommandThatResumesIt'), resume ? t('drStartsItAgainInIts') : t('drItsConversationIdWasnT')),
+    return [...line(resume, t('drTheCommandThatResumesIt'), resume ? t('drStartsItAgainInIts') : t('drItsConversationIdWasnT'), 'session.resume', { session: session.id }),
       ended?.conversation ? copyLine(ended.conversation, t('drItsConversationId')) : null];
   }
 
   function draw(force = false) {
     const can = offered();
     if (!can.includes(tab)) tab = can[0] || 'rename';
-    const key = JSON.stringify([session?.id, session?.name, session?.paused, session?.cwd, can, tab, pause, endedEntry(node, session?.id)]);
+    const key = JSON.stringify([session?.id, session?.name, session?.paused, session?.cwd, can, tab, pause, endedEntry(node, session?.id), app?.store.acts()]);
     if (!force && key === drawn) return;
     drawn = key;
     tabs.replaceChildren(...TABS.filter((one) => can.includes(one.id)).map((one) => h('button', {
@@ -295,7 +310,7 @@ export function newLeadForm(app) {
   }
   function draw() {
     const folder = where();
-    lineSlot.replaceChildren(folder ? copyLine(leadLine(folder, goal.value), t('drTheCommandThatStartsThe'))
+    lineSlot.replaceChildren(...(folder && actsFor(app, 'lead') ? [doButton(app, { label: t('acStartLead'), kind: 'lead', args: () => ({ folder: where(), ...(goal.value.trim() ? { goal: goal.value.trim() } : {}) }) }).el] : []), folder ? copyLine(leadLine(folder, goal.value), t('drTheCommandThatStartsThe'))
       : h('p', { class: 'confirm-note' }, t('drGiveAFolderTheLine')));
   }
   path.addEventListener('input', draw);
@@ -408,7 +423,12 @@ export function newSessionForm(app, { folder }) {
       if (!editor.el.hidden) editor.update(presets);
       return;
     }
-    lineSlot.replaceChildren(copyLine(newLine(folder, preset, model.value), 'the command that starts it'));
+    // With the `act` right, Start starts it from here (`session.new`: the folder, a built-in's agent or a preset by
+    // name, the model), the line beside it.
+    const builtIn = { Claude: 'claude', Codex: 'codex', Shell: 'shell' }[preset.name];
+    lineSlot.replaceChildren(...[actsFor(app, 'session.new') ? doButton(app, { label: t('acStart'), kind: 'session.new',
+      args: () => ({ folder, ...(preset.builtIn || builtIn ? { agent: preset.kind || builtIn } : { preset: preset.name }), ...(model.value.trim() ? { model: model.value.trim() } : {}) }) }).el : null,
+    copyLine(newLine(folder, preset, model.value), 'the command that starts it')].filter(Boolean));
     if (!editor.el.hidden) editor.update(presets);
   }
   path.addEventListener('input', () => { draw(); ask(); });

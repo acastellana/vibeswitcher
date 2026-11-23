@@ -10,6 +10,7 @@ import { healthFacts } from '../health.js';
 import { updateFacts } from '../updates.js';
 import { copyLine } from './cards.js';
 import { t } from '../i18n.js';
+import { actsLine, actsFor, doButton } from '../acting.js';
 
 const row = (name, ...value) => h('div', { class: 'fact' }, h('dt', null, name), h('dd', null, value));
 const ago = (iso) => (iso ? h('time', { data: { since: iso }, title: new Date(iso).toLocaleString() }, since(iso)) : 'unknown');
@@ -64,11 +65,43 @@ export function nodeView(app) {
     h('div', { class: 'pane node-pane' }, body));
   let drawn = '';
   const dictation = dictationGroup();
+  // With the `act` right: what one plain accept settles (`approve.list`: the held config, the vouched base moves, the
+  // hooks), each listed whole before the click, and the batch approved as the node listed it (`approve`, each item's
+  // seen in its order); what needs your own decision listed apart, with its command.
+  const approveActs = (() => {
+    const el = h('section', { class: 'node-group', hidden: true });
+    let asked = '';
+    const load = () => store.read('approve.list', {}).then((reply) => {
+      const result = reply.ok ? reply.result : null;
+      const items = result?.items || [];
+      el.hidden = !items.length && !(result?.own || []).length;
+      el.replaceChildren(h('h2', { class: 'section-title' }, t('acApproveTitle')),
+        items.length ? h('ol', { class: 'approve-list' }, items.map((item) => h('li', null, h('b', null, item.subject || item.kind), (item.reasons || []).length ? h('ul', { class: 'lines' }, item.reasons.map((reason) => h('li', null, reason))) : null))) : null,
+        items.length && result.batch ? doButton(app, { label: t('acApproveAll', { n: items.length }), kind: 'approve', args: () => ({ batch: result.batch, seen: items.map((item) => item.seen ?? null) }), done: load }).el : null,
+        (result?.own || []).length ? h('div', null, h('p', { class: 'node-says' }, t('acOwnDecision')), h('ul', { class: 'lines' }, result.own.map((one) => h('li', null, one.text, ' ', h('code', null, one.command))))) : null);
+    });
+    return { el, refresh(key) { if (key !== asked) { asked = key; load(); } } };
+  })();
+  // With the `act` right: every plugin (`plugin.list`) with its switch, and Remove for one added (shell is built in).
+  const pluginActs = (() => {
+    const el = h('div', { class: 'plugin-acts' });
+    let asked = '';
+    const load = () => store.read('plugin.list', {}).then((reply) => {
+      const list = reply.ok ? reply.result.plugins || [] : [];
+      el.replaceChildren(...list.map((plugin) => h('div', { class: 'plugin-act' },
+        h('span', { class: 'plugin-act-name' }, plugin.title || plugin.id, h('small', null, plugin.unavailable || (plugin.on ? t('noOn') : t('noOff')))),
+        doButton(app, { label: plugin.on ? t('acTurnOff') : t('acTurnOn'), kind: plugin.on ? 'plugin.off' : 'plugin.on', quiet: plugin.on, args: () => ({ plugin: plugin.id }), done: load }).el,
+        plugin.id !== 'shell' && store.can('plugin.remove') ? doButton(app, { label: t('acRemove'), kind: 'plugin.remove', quiet: true, confirm: t('acRemoveSure'), args: () => ({ plugin: plugin.id }), done: load }).el : null)));
+    });
+    return { el, refresh(key) { if (key !== asked) { asked = key; load(); } } };
+  })();
 
   function render() {
     if (app.ui.state.route.name !== 'node') return;
     const node = store.state.node;
-    const now = JSON.stringify([node, store.state.connection]);
+    const now = JSON.stringify([node, store.state.connection, store.acts()]);
+    if (node && actsFor(app, 'plugin.on') && store.can('plugin.list')) pluginActs.refresh(JSON.stringify(node.plugins));
+    if (node && actsFor(app, 'approve') && store.can('approve.list')) approveActs.refresh(JSON.stringify(node.cards));
     if (now === drawn) return;
     drawn = now;
     if (!node) {
@@ -86,6 +119,8 @@ export function nodeView(app) {
     body.replaceChildren(...[
       notices.length ? h('section', { class: 'node-group' }, h('h2', { class: 'section-title' }, plural(notices.length, t('noNotice'))),
         h('ul', { class: 'notices' }, notices.map((notice) => h('li', null, icon('warning', 14), h('span', null, notice))))) : null,
+      // Acting from a page (`web_acts`): first, whether this page acts for you and since when, and the switch.
+      node.web?.acts ? group(t('acGroupTitle'), actsLine(app)) : null,
       group(t('noSessionHost'),
         h('dl', { class: 'facts-list' },
           row(t('noState'), h('span', { class: connected ? 'dot tone-done' : 'dot tone-needs-you', 'aria-hidden': 'true' }), connected ? t('noConnected') : host.state),
@@ -108,7 +143,8 @@ export function nodeView(app) {
       Array.isArray(node.plugins) ? group(t('noPlugins'),
         h('dl', { class: 'facts-list' }, node.plugins.length ? node.plugins.map((plugin) => row(plugin.title, h('span', { class: 'dot tone-done', 'aria-hidden': 'true' }), t('noOn')))
           : row(t('noOn'), t('noNone'))),
-        h('p', { class: 'node-says' }, 'vibeswitcher plugin list shows every plugin; plugin on NAME and plugin off NAME, in your terminal, change them.')) : null,
+        actsFor(app, 'plugin.on') && store.can('plugin.list') ? pluginActs.el
+          : h('p', { class: 'node-says' }, 'vibeswitcher plugin list shows every plugin; plugin on NAME and plugin off NAME, in your terminal, change them.')) : null,
       group(t('noServer'),
         h('dl', { class: 'facts-list' },
           row(t('noRunningFor'), ago(server.startedAt)),
@@ -121,6 +157,11 @@ export function nodeView(app) {
           row(t('noState'), node.web.state === 'listening' ? t('noListening', { port: node.web.port }) : node.web.state === 'off' ? t('noOff') : node.web.state),
           row(t('noPagesPaired'), String(node.web.tokens)),
           row(t('noOpenNow'), String(node.web.connections)))) : null,
+      // Acting from a page (`web_acts`): whether pages may, since when, and the switch that turns it off.
+      actsFor(app, 'approve') && store.can('approve.list') ? approveActs.el : null,
+      // With the `act` right: stop the node (every session ends), asked twice.
+      actsFor(app, 'stop') ? group(t('acStopTitle'), h('p', { class: 'node-says' }, t('acStopWords')),
+        doButton(app, { label: t('acStopNode'), kind: 'stop', confirm: t('acStopSure'), args: () => ({}) }).el) : null,
       updatesGroup(node.update),
       group(t('noBuild'),
         h('dl', { class: 'facts-list' },

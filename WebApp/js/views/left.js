@@ -7,7 +7,8 @@ import { h, s, setText, setClass } from '../dom.js';
 import { icon } from '../marks.js';
 import { projectsOf, teamCounts, waitingPlaces, nextPlace } from '../conversation.js';
 import { projectHref, sessionHref } from '../ui.js';
-import { t } from '../i18n.js';
+import { t, lang } from '../i18n.js';
+import { actsLine } from '../acting.js';
 import { boostMarkText } from '../words.js';
 
 // The ring's colours, in the order they go round: one meaning each, as everywhere on the page.
@@ -60,7 +61,9 @@ export function leftColumn(app, { brief }) {
   const summaryCount = h('a', { class: 'summary-count' });
   const summaryRest = h('span', { class: 'summary-rest' });
   const briefButton = h('button', { class: 'summary-brief', type: 'button', onclick: () => brief() }, t('briefMe'));
-  const summary = h('div', { class: 'left-summary' }, h('span', { class: 'summary-words' }, summaryCount, summaryRest), briefButton);
+  const actsSlot = h('div', { class: 'acts-slot' });
+  const summary = h('div', { class: 'left-summary' }, h('span', { class: 'summary-words' }, summaryCount, summaryRest), briefButton, actsSlot);
+  let actsDrawn = '';
   const el = h('nav', { class: 'left', 'aria-label': t('projects') },
     h('div', { class: 'colhead' }, h('a', { class: 'brand', href: '#/' }, 'VibeSwitcher'), h('span', { class: 'grow' }), boost),
     h('div', { class: 'colbody' }, h('h2', { class: 'col-title' }, t('projects')), list, empty, newProject, h('span', { class: 'left-gap' }), ...places.slice(1)),
@@ -128,6 +131,9 @@ export function leftColumn(app, { brief }) {
     setClass(summaryCount, 'asked', needs > 0);
     setText(summaryRest, moving ? ` · ${t('inMotion', { n: moving })}` : '');
     briefButton.hidden = !store.can?.('brief');
+    // Whether this page acts for the user, and since when, with the switch that turns it off.
+    const actsKey = JSON.stringify([state.node?.web?.acts, store.acts(), lang()]);
+    if (actsKey !== actsDrawn) { actsDrawn = actsKey; actsSlot.replaceChildren(...[actsLine(app, { compact: true })].filter(Boolean)); }
     // The places that hold what waits carry the asking colour, so the user sees where it is.
     setClass(own, 'asked', waits.some((place) => place.kind === 'session'));
     setClass(nodeLink, 'asked', waits.some((place) => place.kind === 'node'));

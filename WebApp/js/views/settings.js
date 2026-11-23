@@ -12,6 +12,7 @@ import { usageGroup } from './node.js';
 import { terminalLookSection } from './termlook.js';
 import { settingSections, setLine, draftProblem, shownValue, settingMatches } from '../settings.js';
 import { t } from '../i18n.js';
+import { actsFor, doButton, pageMaySet } from '../acting.js';
 
 // How often the open page reads the settings again (a `set` from a terminal shows by then).
 const REFRESH = 15000;
@@ -19,7 +20,7 @@ const REFRESH = 15000;
 export const settingsHref = (project) => '#/settings' + (project ? '/' + encodeURIComponent(project) : '');
 
 // One setting's row: its title and value, what it does, where it lives; Change opens its field and the drafted line.
-function settingRow(setting, { folder, home, editing, toggle }) {
+function settingRow(setting, { folder, home, editing, toggle, app = null }) {
   const drafted = editing.get(setting.key);
   const value = h('code', { class: 'setting-value', title: setting.value }, shownValue(setting) || t('svEmpty'));
   const marks = [
@@ -38,11 +39,11 @@ function settingRow(setting, { folder, home, editing, toggle }) {
     h('p', { class: 'setting-about' }, setting.about),
     h('p', { class: 'setting-where' }, where.join(' · ')),
     setting.note ? h('p', { class: 'setting-note' }, icon('warning', 12), setting.note) : null,
-    drafted != null ? editor(setting, folder, editing) : null);
+    drafted != null ? editor(setting, folder, editing, app) : null);
 }
 
 // The field for a new value and the line it makes: a click to copy, never sent from here.
-function editor(setting, folder, editing) {
+function editor(setting, folder, editing, app = null) {
   const lineSlot = h('div');
   const problem = h('p', { class: 'card-notice', role: 'alert', hidden: true });
   let control;
@@ -51,7 +52,12 @@ function editor(setting, folder, editing) {
     const why = draftProblem(setting, value);
     problem.hidden = !why;
     if (why) setText(problem, t('svIsWhy', { key: setting.key, why }));
-    lineSlot.replaceChildren(why ? h('span') : copyLine(setLine(setting, value, folder), t('svSetsCommand', { key: setting.key })));
+    // With the `act` right, Set sets it from here (`set`), but for what a page may not set (a floor, the policy,
+    // web_acts on): those stay the terminal's line.
+    const acts = !why && app && actsFor(app, 'set') && pageMaySet(setting.key, value);
+    lineSlot.replaceChildren(...(why ? [h('span')] : [acts ? doButton(app, { label: t('acSet'), kind: 'set',
+      args: () => ({ ...(folder ? { folder } : {}), key: setting.key, value: String(editing.get(setting.key) ?? '') }), done: () => { editing.delete(setting.key); } }).el : null,
+    copyLine(setLine(setting, value, folder), t('svSetsCommand', { key: setting.key }))].filter(Boolean)));
   };
   const take = (value) => { editing.set(setting.key, value); draw(); };
   const name = t('svNewValue', { title: setting.title });
@@ -142,7 +148,7 @@ export function settingsView(app) {
     return h('section', { class: 'node-group' }, h('h2', { class: 'section-title' }, title),
       settingSections(settings).map((section) => h('div', { class: 'setting-section' },
         h('h3', { class: 'setting-section-title' }, section.title),
-        section.settings.map((setting) => settingRow(setting, { folder, home, editing, toggle })))));
+        section.settings.map((setting) => settingRow(setting, { folder, home, editing, toggle, app })))));
   }
 
   function render(typing = false) {

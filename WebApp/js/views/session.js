@@ -39,7 +39,7 @@ export function sessionView(app) {
     title: `${t('seToggleInspector')} (${KEY.mod}${KEY.alt}0)`, onclick: () => ui.toggleInspector(),
   }, icon('inspector', 16));
   // Renaming, pausing, ending a session and the rest of the Mac's row menu: the line that does each, under the header.
-  const acting = actionsStrip();
+  const acting = actionsStrip(app);
   const end = h('button', { class: 'button quiet end-button', type: 'button', title: t('seRenamePauseOrEndThis'), onclick: () => acting.toggle() }, t('seActions'));
   // Back: to the project a team's session works for, else to Your own sessions (on a phone it opens the left column).
   const back = h('a', { class: 'back icon-button', href: '#/sessions', 'aria-label': t('seBack') }, icon('back', 16));
