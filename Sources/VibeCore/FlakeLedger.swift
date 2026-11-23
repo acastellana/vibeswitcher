@@ -100,9 +100,11 @@ public struct FlakeLedger: Equatable, Sendable {
     /// for each and marks it (`notePlanned`), or, while an open task names it, notes these flakes in that task's
     /// context instead, so a test makes one task, not one per flake. And those that flaked for the first time since a
     /// fix for them merged (`fixes`): each is marked on its flake (`recurred`), so the lead is told once per fix. A
-    /// flake recorded under `MergeRerun.unnamed` names no test, and plans and recurs nothing.
+    /// flake recorded under `MergeRerun.unnamed` names no test, and plans and recurs nothing. A hang's test is due at
+    /// `limit` (`LeadBoard.hangLimit`), as it may be innocent.
     public mutating func recordFlakes(_ tests: [String], task: String, commit: String, now: Double, logged: Set<String> = [],
-                                      log: String? = nil, load: Double? = nil, filtered: Bool? = nil) -> (due: [Due], recurred: [Recurrence]) {
+                                      log: String? = nil, load: Double? = nil, filtered: Bool? = nil,
+                                      limit: Int = LeadBoard.flakeLimit) -> (due: [Due], recurred: [Recurrence]) {
         var due: [Due] = []
         var recurred: [Recurrence] = []
         for test in tests {
@@ -118,7 +120,7 @@ public struct FlakeLedger: Equatable, Sendable {
             guard test != MergeRerun.unnamed else { continue }
             let since = flakes.last { $0.test == test && $0.planned != nil }?.at ?? -.infinity
             let counted = flakes.filter { $0.test == test && $0.at > since && now - $0.at <= LeadBoard.flakeWindow }
-            if counted.count >= LeadBoard.flakeLimit { due.append((test, counted.map(\.task), counted)) }
+            if counted.count >= limit { due.append((test, counted.map(\.task), counted)) }
         }
         return (due, recurred)
     }

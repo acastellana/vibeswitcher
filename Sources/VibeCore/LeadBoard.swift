@@ -1579,6 +1579,9 @@ public struct LeadBoard: Codable, Equatable, Sendable {
     /// note in the open task that names it: at 3, most flaky tests never got a task (8 merges went ahead on a rerun in
     /// one week, 2026-11-23). `flakeWindow` bounds the earlier flakes a task counts, and what status lists.
     public static let flakeLimit = 1
+    /// A merge that hung on a test (`StallWatch.Stall.lastTest`, which may be innocent: it was only the last to run)
+    /// goes in the flake ledger too, and makes a task once `hangLimit` such entries of one test fall within `flakeWindow`.
+    public static let hangLimit = 3
     public static let flakeWindow: Double = 7 * 86_400
 
     public init() {}

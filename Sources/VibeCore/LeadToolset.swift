@@ -4150,12 +4150,12 @@ public final class LeadToolset: MCPToolset {
             if let stuck = stall?.lastTest.map(Redaction.secrets(in:)) {
                 let plan = (try? store.update { board in
                     planFlakeFixes(&board, flakes: [stuck], slug: slug, commit: commit, at: Date(), logged: [], log: nil,
-                                   load: begun?.load.first, workflow: workflow)
+                                   load: begun?.load.first, limit: LeadBoard.hangLimit, workflow: workflow)
                 }) ?? FlakePlan()
                 sendFlakeNotes(plan)
                 let planned = plan.planned
                 ledger = "\(Self.clip(stuck, 200)), the last test it started, is recorded in the flake ledger"
-                    + (planned.first.map { $0.noted ? " (the open task \($0.slug) names it: noted in its context)" : " (planned \($0.slug) to fix it)" } ?? "")
+                    + (planned.first.map { $0.noted ? " (the open task \($0.slug) names it: noted in its context)" : " (it hung or flaked \(LeadBoard.hangLimit) times: planned \($0.slug) to fix it)" } ?? "")
                     + ". "
                 if !plan.recurred.isEmpty { ledger += tellRecurrences(plan.recurred, slug: slug).trimmingCharacters(in: .whitespaces) + " " }
             }
@@ -4321,6 +4321,10 @@ public final class LeadToolset: MCPToolset {
     struct FlakePlan {
         var planned: [(test: String, slug: String, noted: Bool)] = []
         var recurred: [FlakeLedger.Recurrence] = []
+
+        /// The fix tasks it planned, each audited for good (`sendFlakeNotes`): its contract lets its worker delete the
+        /// test when the root cause can't be found, which no test run would catch.
+        var audited: [String] { planned.filter { !$0.noted }.map(\.slug) }
     }
 
     /// The flake ledger's file (`FlakeLedgerStore`).
@@ -4331,14 +4335,15 @@ public final class LeadToolset: MCPToolset {
     /// open task names it already: its count goes in that task's context. Called under the board's lock: the board's
     /// own flakes from before the ledger's file move there first (`FlakeLedgerStore.migrate`).
     func planFlakeFixes(_ board: inout LeadBoard, flakes: [String], slug: String, commit: String, at date: Date, logged: Set<String>,
-                        log: String?, load: Double? = nil, filtered: Bool? = nil, workflow: LeadWorkflow) -> FlakePlan {
+                        log: String?, load: Double? = nil, filtered: Bool? = nil, limit: Int = LeadBoard.flakeLimit,
+                        workflow: LeadWorkflow) -> FlakePlan {
         guard !flakes.isEmpty else { return FlakePlan() }
         let ledgerStore = flakeLedger
         do {
             try ledgerStore.migrate(&board, tasks: { store.archived() })
             return try ledgerStore.update { ledger in
                 let (due, recurred) = ledger.recordFlakes(flakes, task: slug, commit: commit, now: date.timeIntervalSince1970, logged: logged,
-                                                          log: log, load: load, filtered: filtered)
+                                                          log: log, load: load, filtered: filtered, limit: limit)
                 var plan = FlakePlan(recurred: recurred)
                 plan.planned = due.map { test, _, counted in
                     if let open = board.openTask(naming: test), let index = board.taskIndex(open.id) {
@@ -4352,6 +4357,8 @@ public final class LeadToolset: MCPToolset {
                     var fix = LeadTask(slug: Slug.make(title, taken: store.takenSlugs(board)), title: title,
                                        contract: MergeRerun.fixContract(test: test, flakes: counted, workflow: workflow, root: root))
                     fix.origin = LeadTask.Origin.flake.rawValue
+                    // Audited, and never dropped by small_task_min (`sendFlakeNotes`): a quick "deleted it" needs a look.
+                    fix.review = .audit
                     board.tasks.append(fix)
                     ledger.notePlanned(fix.slug, for: test)
                     return (test, fix.slug, false)
@@ -4365,9 +4372,15 @@ public final class LeadToolset: MCPToolset {
     }
 
     /// The open tasks `plan` noted a flaky test in (a new version of each one's contract, see `planFlakeFixes`): an
-    /// audit under way on one is sent what changed (`sendContractChange`). Called once the board is written.
+    /// audit under way on one is sent what changed (`sendContractChange`). And the fix tasks it planned are audited for
+    /// good, in the vault (what merge and small_task_min go by): one may delete its test, and a deletion done in
+    /// minutes is just what small_task_min would drop to review none. Called once the board is written.
     func sendFlakeNotes(_ plan: FlakePlan) {
         for slug in Set(plan.planned.filter(\.noted).map(\.slug)) { _ = sendContractChange(slug) }
+        for slug in plan.audited {
+            _ = recordReview(.audit, slug: slug)
+            noteSmallTask(slug, LeadVault.SmallTaskNote(kept: "a flaky test's fix, which may delete the test"))
+        }
     }
 
     /// Moves the board's flakes from before the ledger's file there, once (`FlakeLedgerStore.migrate`).

@@ -244,9 +244,14 @@ struct MergeGateTests: LeadTeamFixture {
         let one = try #require(ledger(root).flakes.last?.log)
         #expect(fix.contract.context.contains(MergeRerun.evidenceFile(root: root, log: one)), "\(fix.contract.context)")
         #expect(fix.contract.context.contains("✘ Test \(test) failed in one's run."), "\(fix.contract.context)")
+        // It may delete the test: audited, in the vault too once the board is written, and never small_task_min's to drop.
+        #expect(fix.review == .audit && first.audited == [fix.slug])
+        lead.sendFlakeNotes(first)
+        #expect(try lead.vault.unaudited(root: root, task: fix.slug).review == .audit)
+        #expect(try lead.vault.smallTaskFacts(root: root, task: fix.slug)?.kept == "a flaky test's fix, which may delete the test")
 
         let second = try flake("two", 2)
-        #expect(second.planned.map(\.slug) == [fix.slug] && second.planned.first?.noted == true, "\(second.planned)")
+        #expect(second.planned.map(\.slug) == [fix.slug] && second.planned.first?.noted == true && second.audited.isEmpty, "\(second.planned)")
         #expect(fixes().count == 1, "\(fixes().map(\.slug))")
         let noted = try #require(fixes().first).contract.context
         let two = try #require(ledger(root).flakes.last?.log)
@@ -1224,7 +1229,7 @@ struct MergeGateTests: LeadTeamFixture {
     /// A merge stopped for making no progress with several tests open can't say which were running: the flake ledger
     /// blames none, and the reply says so. One alone goes in the ledger as before.
     @Test func aStalledMergeWithSeveralTestsOpenBlamesNoneOfThem() async throws {
-        func run(_ lines: String, _ name: String) throws -> (text: String, ledger: FlakeLedger, isError: Bool) {
+        func run(_ lines: String, _ name: String) throws -> (text: String, ledger: FlakeLedger, isError: Bool, tasks: [LeadTask]) {
             let root = try repo()
             try commit(["scripts/test.sh": "#!/bin/bash\n" + lines + "\nexec sleep \(ShellTests.childRuns)\n"], in: root, "a suite that hangs")
             let runtime = FakeRuntime()
@@ -1235,7 +1240,7 @@ struct MergeGateTests: LeadTeamFixture {
             lock.watch = StallWatch(after: 3, every: 0.05, loadLimit: 24, load: { 4.2 })
             lead.testLock = lock
             let merged = lead.call("merge", ["task": "add-b"])
-            return (merged.text, ledger(root), merged.isError)
+            return (merged.text, ledger(root), merged.isError, BoardStore(root: root).load().tasks)
         }
         let queued = try run("echo '◇ Test one() started.'\necho '◇ Test two() started.'\necho '◇ Test three() started.'", "queued")
         #expect(queued.isError && queued.text.contains("3 tests printed their start and never finished"), "\(queued.text)")
@@ -1246,6 +1251,8 @@ struct MergeGateTests: LeadTeamFixture {
         #expect(alone.text.contains("Started and never finished: only().") && !alone.text.contains("printed their start"), "\(alone.text)")
         #expect(!queued.text.contains("6 tests printed their start"), "\(queued.text)")
         #expect(alone.ledger.flakes.map(\.test) == ["only()"], "\(alone.ledger.flakes)")
+        // Its test may be innocent: one hang plans no task (`LeadBoard.hangLimit`), though one flake would.
+        #expect(!alone.tasks.contains { $0.title.hasPrefix("Fix the flaky test") } && !alone.text.contains("planned"), "\(alone.tasks.map(\.slug)) \(alone.text)")
     }
 
     /// What a stopped run was doing: building (its last build line) when no test started after it, testing when one
