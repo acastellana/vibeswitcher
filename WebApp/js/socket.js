@@ -26,7 +26,7 @@
 //
 // Everything it touches is passed in, so tests/socket.test.mjs scripts it with a fake socket and clock.
 
-import { session as sessionValue, leadsBySession } from './wire.js';
+import { session as sessionValue, leadsBySession, replacedBySession } from './wire.js';
 
 const COLLECTIONS = ['node', 'sessions', 'leads', 'cards', 'boards'];
 const RETRY = [100, 200, 400];
@@ -51,6 +51,7 @@ export function connectSocket(store, options) {
   // What the node sent, before the views' shapes: a session's `lead` needs the leads.
   const raw = { sessions: new Map(), leads: new Map() };
   let leadOf = new Map();
+  let replacedOf = new Map();
   let socket = null;
   let authed = false;
   let stopped = false;
@@ -322,7 +323,7 @@ export function connectSocket(store, options) {
       }
     }
     if (collection === 'sessions') {
-      const shaped = (entry) => (entry.value === null ? entry : { id: entry.id, value: sessionValue(entry.value, leadOf) });
+      const shaped = (entry) => (entry.value === null ? entry : { id: entry.id, value: sessionValue(entry.value, leadOf, replacedOf) });
       if (whole) store.reconcile('sessions', entries.map(shaped).map((entry) => entry.value));
       else store.change('sessions', entries.map(shaped));
       transcriptsCame();
@@ -332,10 +333,11 @@ export function connectSocket(store, options) {
     else store.change(collection, entries);
     if (collection === 'leads') {
       // A lead session's `lead` comes from here: the sessions whose lead changed are given again.
-      const next = leadsBySession(raw.leads);
-      const moved = [...raw.sessions.keys()].filter((id) => leadOf.get(id) !== next.get(id));
+      const next = leadsBySession(raw.leads), nextReplaced = replacedBySession(raw.leads);
+      const moved = [...raw.sessions.keys()].filter((id) => leadOf.get(id) !== next.get(id) || replacedOf.get(id) !== nextReplaced.get(id));
       leadOf = next;
-      if (moved.length) store.change('sessions', moved.map((id) => ({ id, value: sessionValue(raw.sessions.get(id), leadOf) })));
+      replacedOf = nextReplaced;
+      if (moved.length) store.change('sessions', moved.map((id) => ({ id, value: sessionValue(raw.sessions.get(id), leadOf, replacedOf) })));
     }
   }
 

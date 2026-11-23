@@ -233,7 +233,8 @@ export function summary(store) {
 // lead's record lists it), `allDone` while its board's all-done mark is unseen (never on a replaced one).
 export function leadMarks(state, session) {
   if (session?.role !== 'lead') return { replaced: false, allDone: false };
-  const replaced = !!state.leads.get(session.lead)?.replaced?.includes(session.id);
+  // A replaced one leads nothing (`lead` null): its project is `replacedFrom` (wire.js).
+  const replaced = !!session.replacedFrom || !!state.leads.get(session.lead)?.replaced?.includes(session.id);
   const done = state.boards.get(session.lead)?.allDone;
   return { replaced, allDone: !replaced && !!done && !done.seen };
 }

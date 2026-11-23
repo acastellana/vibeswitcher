@@ -121,3 +121,23 @@ test('a lead’s row says it was replaced, and shows the all-done check while it
   assert.deepEqual(leadMarks(state(['old'], { id: 'm', seen: false }), lead('old')), { replaced: true, allDone: false });
   assert.deepEqual(leadMarks(state([], null), { id: 'w', role: 'worker', lead: 'p' }), { replaced: false, allDone: false });
 });
+
+test('a lead session its project replaced reads replaced, and leads nothing, as the node sends it', async () => {
+  const { session, leadsBySession, replacedBySession } = await import('../js/wire.js');
+  const { leadMarks } = await import('../js/ui.js');
+  // Five lead sessions of one project, as on the real node on 2026-11-23: the project's lead is `new`, four it replaced.
+  const leads = new Map([['p', { project: 'p', session: 'new', replaced: ['a', 'b', 'c', 'd'] }]]);
+  const leadOf = leadsBySession(leads), replacedOf = replacedBySession(leads);
+  const shaped = (id) => session({ id, role: 'lead', status: 'idle', since: '2026-11-21T10:00:00Z' }, leadOf, replacedOf);
+  const state = { leads, boards: new Map([['p', { project: 'p', allDone: null }]]) };
+  assert.equal(shaped('new').lead, 'p');
+  assert.equal(shaped('new').replacedFrom, null);
+  assert.deepEqual(leadMarks(state, shaped('new')), { replaced: false, allDone: false });
+  for (const id of ['a', 'b', 'c', 'd']) {
+    assert.equal(shaped(id).lead, null, 'no view takes it for the project’s lead');
+    assert.equal(shaped(id).replacedFrom, 'p');
+    assert.deepEqual(leadMarks(state, shaped(id)), { replaced: true, allDone: false });
+  }
+  // A worker is never a replaced lead.
+  assert.equal(session({ id: 'a', role: 'worker' }, leadOf, replacedOf).replacedFrom, null);
+});
