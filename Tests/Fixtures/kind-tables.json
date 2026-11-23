@@ -132,12 +132,8 @@
       "key",
       "value"
     ],
-    "start" : [
-
-    ],
-    "stop" : [
-
-    ],
+    "start" : [],
+    "stop" : [],
     "tell" : [
       "folder",
       "text"
@@ -145,9 +141,7 @@
     "web.open" : [
       "tailnet"
     ],
-    "web.revoke" : [
-
-    ]
+    "web.revoke" : []
   },
   "approvalPhrases" : {
     "answer" : "answer a lead's question for you",
@@ -354,12 +348,8 @@
       "key",
       "value"
     ],
-    "start" : [
-
-    ],
-    "stop" : [
-
-    ],
+    "start" : [],
+    "stop" : [],
     "tell" : [
       "folder",
       "text"
@@ -367,9 +357,7 @@
     "web.open" : [
       "tailnet"
     ],
-    "web.revoke" : [
-
-    ]
+    "web.revoke" : []
   },
   "carded" : [
     "answer",
@@ -504,31 +492,31 @@
   ],
   "retryRules" : {
     "answer" : {
-      "keepsResult" : false,
+      "keepsResult" : true,
       "rerun" : false
     },
     "approve" : {
-      "keepsResult" : false,
+      "keepsResult" : true,
       "rerun" : false
     },
     "base.accept" : {
-      "keepsResult" : false,
+      "keepsResult" : true,
       "rerun" : false
     },
     "base.keep" : {
-      "keepsResult" : false,
+      "keepsResult" : true,
       "rerun" : false
     },
     "build.switch" : {
-      "keepsResult" : false,
+      "keepsResult" : true,
       "rerun" : false
     },
     "config.accept" : {
-      "keepsResult" : false,
+      "keepsResult" : true,
       "rerun" : false
     },
     "hold" : {
-      "keepsResult" : false,
+      "keepsResult" : true,
       "rerun" : false
     },
     "hooks.install" : {
@@ -544,23 +532,23 @@
       "rerun" : false
     },
     "plugin.add" : {
-      "keepsResult" : false,
+      "keepsResult" : true,
       "rerun" : false
     },
     "plugin.off" : {
-      "keepsResult" : false,
+      "keepsResult" : true,
       "rerun" : true
     },
     "plugin.on" : {
-      "keepsResult" : false,
+      "keepsResult" : true,
       "rerun" : true
     },
     "plugin.remove" : {
-      "keepsResult" : false,
+      "keepsResult" : true,
       "rerun" : true
     },
     "presets.edit" : {
-      "keepsResult" : false,
+      "keepsResult" : true,
       "rerun" : false
     },
     "prompt-audit" : {
@@ -568,27 +556,27 @@
       "rerun" : true
     },
     "push" : {
-      "keepsResult" : false,
+      "keepsResult" : true,
       "rerun" : false
     },
     "push.decline" : {
-      "keepsResult" : false,
+      "keepsResult" : true,
       "rerun" : true
     },
     "send" : {
-      "keepsResult" : false,
+      "keepsResult" : true,
       "rerun" : false
     },
     "session.close-shells" : {
-      "keepsResult" : false,
+      "keepsResult" : true,
       "rerun" : true
     },
     "session.end" : {
-      "keepsResult" : false,
+      "keepsResult" : true,
       "rerun" : true
     },
     "session.new" : {
-      "keepsResult" : false,
+      "keepsResult" : true,
       "rerun" : false
     },
     "session.pause" : {
@@ -600,11 +588,11 @@
       "rerun" : true
     },
     "session.reopen" : {
-      "keepsResult" : false,
+      "keepsResult" : true,
       "rerun" : false
     },
     "session.reply" : {
-      "keepsResult" : false,
+      "keepsResult" : true,
       "rerun" : false
     },
     "session.resume" : {
@@ -612,7 +600,7 @@
       "rerun" : true
     },
     "set" : {
-      "keepsResult" : false,
+      "keepsResult" : true,
       "rerun" : true
     },
     "start" : {
@@ -624,7 +612,7 @@
       "rerun" : false
     },
     "tell" : {
-      "keepsResult" : false,
+      "keepsResult" : true,
       "rerun" : false
     },
     "web.open" : {
@@ -632,7 +620,7 @@
       "rerun" : false
     },
     "web.revoke" : {
-      "keepsResult" : false,
+      "keepsResult" : true,
       "rerun" : true
     }
   },
@@ -816,9 +804,7 @@
     "session.draft.clear",
     "session.attach"
   ],
-  "webKindsNone" : [
-
-  ],
+  "webKindsNone" : [],
   "webKindsRead" : [
     "status",
     "questions",

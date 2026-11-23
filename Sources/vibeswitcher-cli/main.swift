@@ -17,7 +17,7 @@ let usage = """
            vibeswitcher stop
            vibeswitcher switch COMMIT | rollback
            vibeswitcher lead FOLDER [--goal TEXT | --resume] [--take-head] [--replace] [--init]
-           vibeswitcher questions [FOLDER] [--all] [--json]
+           vibeswitcher questions [FOLDER] [--all | --wait] [--json]
            vibeswitcher board [FOLDER] [--json]
            vibeswitcher stats [today|week|month] [--json]
            vibeswitcher answer CARD [TEXT] | hold CARD
@@ -32,7 +32,7 @@ let usage = """
            vibeswitcher new-project NAME [--in LOCATION] [--folder NAME] [--goal TEXT] [--no-lead]
            vibeswitcher mail [FOLDER] [--all] [--json] | brief [FOLDER] [--json] | prompt-audit FOLDER snooze|off|on
            vibeswitcher approve [--only config,base,hooks]   (every held config, base move and hooks update, one code)
-           vibeswitcher plugin list [--json] | plugin on NAME | plugin off NAME
+           vibeswitcher plugin list [--json] | plugin on NAME | plugin off NAME | plugin add FOLDER | plugin remove NAME
            vibeswitcher config held [FOLDER] [--diff NAME] [--long] | config accept CARD | config startup
            vibeswitcher base show FOLDER [--from COMMIT] | base accept CARD | base keep CARD
            vibeswitcher settings [FOLDER] [--find WORDS] [--json] | set [FOLDER] KEY VALUE

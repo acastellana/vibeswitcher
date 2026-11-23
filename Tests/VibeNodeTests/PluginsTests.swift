@@ -904,7 +904,7 @@ extension PluginsTests {
                 "\(again)")
         #expect(await eventually(timeout: 30) { probe.pageEnded.value == false && !world.queue.sync { world.engine.pluginRuntime.pageOpen } })
         let third = try #require(await world.answer(card, "run", action: action))
-        #expect(third.error?.message == again.error?.message, "\(third)")
+        #expect(again.ok && third.ok && third.result == again.result, "a repeat of a done answer is a success, told the same: \(third)")
         let shown = try #require(world.card(card.id))
         #expect(!"\(shown)".contains(token), "not on the card")
         #expect(!notes.value.contains { $0.contains(token) }, "not in the log")

@@ -194,8 +194,8 @@ struct AnswerTests {
                 == ["hold", "answer", "config.accept", "base.keep", "base.accept", "lead", "start", "stop"])
     }
 
-    /// The same action id sent twice (the command line's retry): one answer, one message, the second told it was done (an
-    /// answer's result isn't kept: a plugin's may carry its page's address, `RetryRule.keepsResult`).
+    /// The same action id sent twice (the command line's retry): one answer, one message, the second answered as the
+    /// first was (a success: it was done).
     @Test func aRepeatedActionIsDoneOnce() async throws {
         let world = try await CardWorld.make(scratch)
         defer { world.stop() }
@@ -204,7 +204,8 @@ struct AnswerTests {
         let action = UUID().uuidString.lowercased()
         let first = try #require(await world.answer(asked.card, "Yes", action: action))
         let second = try #require(await world.answer(asked.card, "Yes", action: action))
-        #expect(first.ok && !second.ok && second.error?.message.contains("was done") == true, "\(first) \(second)")
+        #expect(first.ok && second.ok, "\(first) \(second)")
+        #expect(second.result == first.result)
         await world.drained()
         #expect(world.held().filter { $0.from == .user }.count == 1, "\(world.held())")
         #expect(world.board().questions.first?.answer == "Yes")

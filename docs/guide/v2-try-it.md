@@ -1,11 +1,12 @@
 # VibeSwitcher 2 on Linux: try it
 
-A walk through everything on v2 as it is today (2026-11-21), for a first real try. Each step says what to run and what
+A walk through everything on v2 as it is today (2026-11-23), for a first real try. Each step says what to run and what
 you should see. If something surprises you, report what you ran, what you expected and what happened.
 
 `vs` is `~/.vibeswitcher/v2/builds/current/bin/vibeswitcher`: an alias you write yourself, never a `vibeswitcher` found
 on PATH. Anything that acts in your name (starting, sending, answering, setting) shows what it will do and asks you to
-type a short code: nothing else on the machine can answer it for you. Reads ask nothing.
+type a short code: nothing else on the machine can answer it for you. Reads ask nothing. If the server restarts while
+it acts, the command asks again and says whether it was done, or that its outcome isn't known; it never does it twice.
 
 ## 1. The node
 
@@ -13,6 +14,8 @@ type a short code: nothing else on the machine can answer it for you. Reads ask 
 vs status        # build, host, sessions, leads, open cards, account usage, boost, notices
 vs doctor        # what the node needs, each missing piece with the exact command for you to run
 vs brief         # what happened lately and what is asked of you, in a few sentences
+vs status --health   # freezes, slow refreshes, restarts, refused connections, watches the system couldn't give
+vs logs --lines 50   # the server's and host's log; --sessions: each session started and how it ended
 ```
 
 `brief` is written by Claude Haiku while AI summaries are on, otherwise from the boards and logs. It says how many
@@ -62,7 +65,7 @@ What to look at:
 - **Board** (Projects → a project → Board): what's asked of you, what runs, a review waiting on a usage limit, the AI
   summary of what each agent is doing, decisions, the batch that cleared the board and its cost.
 - **This node**: host, server, build, account usage, Boost (a bolt beside This node while it's on), **health**,
-  between leads, notifications (per kind: something needs me, a session finishes; a sound), **dictation**.
+  between leads, **plugins**, notifications (per kind: something needs me, a session finishes; a sound), **dictation**.
 - **Settings**: a search box; every setting with the line that sets it; *Terminal Look* (this browser's own).
 - **Statistics** and **Between leads**: ⌘K, then their names.
 - **Dictation**: turn it on in This node. Then hold the mic beside a box and speak; it fills the box only. Chrome sends
@@ -135,7 +138,8 @@ like Claude Code's own update to X". VibeSwitcher can't tell it from a file a se
 
 ## 8. Plugins: the wallet
 
-Optional features are plugins (`vs plugin list`). Shell requests are built in and on. The wallet is an external
+Optional features are plugins: `vs plugin list` shows each, on or off, what it adds and why one can't run;
+`vs plugin off NAME` and `on NAME` take a code. Shell requests are built in and on. The wallet is an external
 plugin in a repository of its own, `vibeswitcher-wallet` (a local repository at `~/projects/vibeswitcher-wallet`; its
 README is the full guide). Build it, add it, turn it on, and name your chains (none is built in):
 

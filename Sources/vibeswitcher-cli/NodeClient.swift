@@ -390,6 +390,12 @@ final class NodeClient {
         if case .failure = answer, unansweredLast {
             context.writeJournal(NodeJournal.entry(event: "unanswered", action: action, kind: kind, epoch: hello.epoch))
         }
+        // A repeat of a done action whose result isn't kept (`Requests.repeatResult`: web.open's link, one too long for
+        // the record): it was done, so a success, said here, as no command's own rendering knows the shape.
+        if case .success(let reply) = answer, reply.ok, reply.result?["repeat"]?.bool == true {
+            for line in reply.result?["say"]?.array ?? [] { Say.out(ConfigSeal.inert(line.string ?? "", limit: .max)) }
+            exit(0)
+        }
         return answer
     }
 
