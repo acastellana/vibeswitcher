@@ -502,8 +502,10 @@ public enum NodeWire {
         /// How much of `pending` holds no newline (looked at already).
         private var scanned = 0
         public private(set) var tooLong = false
+        /// The longest line taken (the wire's `maxLine`; a plugin's protocol, `PluginProcess.lineBytesAtMost`).
+        public let maxLine: Int
 
-        public init() {}
+        public init(maxLine: Int = NodeWire.maxLine) { self.maxLine = maxLine }
 
         /// The whole lines `bytes` completes, in order, each without its newline; none once `tooLong`.
         public mutating func append(_ bytes: Data) -> [Data] {
@@ -513,7 +515,7 @@ public enum NodeWire {
             var lineStart = pending.startIndex
             var from = pending.startIndex + scanned
             while let newline = pending[from...].firstIndex(of: UInt8(ascii: "\n")) {
-                guard newline - lineStart <= NodeWire.maxLine else {
+                guard newline - lineStart <= maxLine else {
                     tooLong = true
                     pending = Data()
                     return lines
@@ -524,7 +526,7 @@ public enum NodeWire {
             }
             if lineStart > pending.startIndex { pending = Data(pending[lineStart...]) }
             scanned = pending.count
-            if pending.count > NodeWire.maxLine {
+            if pending.count > maxLine {
                 tooLong = true
                 pending = Data()
             }

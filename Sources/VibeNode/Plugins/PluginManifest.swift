@@ -70,6 +70,16 @@ public struct PluginManifest: Codable, Equatable, Sendable {
         if let stray = object.keys.sorted().first(where: { !known.contains($0) }) {
             return .failure(PluginRefusal("the manifest has a field this node doesn't read: \(ConfigSeal.inert(stray, limit: 40))"))
         }
+        // The commands' and settings' own fields too: exactly theirs (the fuzz tests of 2026-11-23: a stray key inside
+        // one was read past, the decoder ignoring it).
+        let inner: [(String, Set<String>)] = [("commands", ["name", "about"]), ("settings", ["key", "title", "about", "form", "choices", "defaultValue"])]
+        for (field, fields) in inner {
+            for item in (object[field] as? [Any]) ?? [] {
+                if let stray = (item as? [String: Any])?.keys.sorted().first(where: { !fields.contains($0) }) {
+                    return .failure(PluginRefusal("the manifest's \(field) have a field this node doesn't read: \(ConfigSeal.inert(stray, limit: 40))"))
+                }
+            }
+        }
         let manifest: PluginManifest
         do { manifest = try JSONDecoder().decode(PluginManifest.self, from: data) } catch {
             return .failure(PluginRefusal("the manifest doesn't read: \(ConfigSeal.inert("\(error)", limit: 200))"))
