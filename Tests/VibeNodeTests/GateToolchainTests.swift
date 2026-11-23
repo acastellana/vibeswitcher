@@ -220,7 +220,8 @@ struct GateToolchainTests {
             try FileManager.default.createDirectory(atPath: folder, withIntermediateDirectories: true)
         }
         for program in [swiftly + "/bin/swiftly", swiftly + "/toolchains/6.4.2/usr/bin/swift"] {
-            try "#!/bin/sh\n".write(toFile: program, atomically: true, encoding: .utf8)
+            // Never run: only found, by its mode.
+            try "a stand-in\n".write(toFile: program, atomically: true, encoding: .utf8)
             chmod(program, 0o755)
         }
         try FileManager.default.createSymbolicLink(atPath: swiftly + "/bin/swift", withDestinationPath: "swiftly")
