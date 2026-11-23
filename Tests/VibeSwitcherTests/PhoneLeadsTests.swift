@@ -54,7 +54,7 @@ struct PhoneLeadsTests {
         access.screenLocked = { false }
         access.inputAllowed = true
         // As the app wires it; only the list of leads is the test's (no lead session runs here for the controller to list).
-        PhoneLeads.wire(access, controller: controller, model: WindowModel())
+        PhoneLeads.wire(access, controller: controller, model: WindowModel(defaults: scratch.defaults("phone-leads-window")))
         let shown = Box(LeadBoard())
         access.leads = { [PhoneLeads.Lead(root: root, board: shown.value, summary: "team: 1 working · 1 waits on lead",
                                           rows: TeamRows.rows(shown.value, seen: [:]))] }

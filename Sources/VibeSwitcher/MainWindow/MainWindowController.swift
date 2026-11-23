@@ -191,7 +191,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
         inspectorItem = NSSplitViewItem(inspectorWithViewController: inspectorHost)
         inspectorItem.minimumThickness = 240
         inspectorItem.maximumThickness = 380
-        inspectorItem.isCollapsed = UserDefaults.standard.object(forKey: "inspectorCollapsed") as? Bool ?? false
+        inspectorItem.isCollapsed = model.defaults.object(forKey: "inspectorCollapsed") as? Bool ?? false
         split.splitViewItems = [sidebar, content, inspectorItem]
         // Renamed when the pane limits changed, so widths saved under the old limits don't squeeze the terminal.
         split.splitView.autosaveName = "MainWindowSplit2"
@@ -206,7 +206,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
         window.toolbarStyle = .unified
         if !window.setFrameUsingName("MainWindow") { window.center() }
         window.setFrameAutosaveName("MainWindow")
-        if let layout = FocusLayout.saved { focusTerminal(keeping: layout, animated: false) }
+        if let layout = FocusLayout.saved(in: model.defaults) { focusTerminal(keeping: layout, animated: false) }
 
         chat.runner.session = { [weak self] in self?.model.selectedRow?.hostID }
         chat.runner.refused = { [weak self] reason in self?.chat.sendNotice = reason }
@@ -857,6 +857,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
 
     /// The layout Focus Terminal hides, brought back when it's used again; kept (in the defaults) while focus mode is on,
     /// so it outlives a closed window and a relaunch.
+    /// The window's layout settings are kept in its model's defaults: the app's own; a test's own suite.
     struct FocusLayout: Codable, Equatable {
         var sidebarCollapsed: Bool
         var inspectorCollapsed: Bool
@@ -864,9 +865,11 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
 
         static let key = "focusTerminal"
 
-        static var saved: FocusLayout? {
-            get { UserDefaults.standard.data(forKey: key).flatMap { try? JSONDecoder().decode(FocusLayout.self, from: $0) } }
-            set { UserDefaults.standard.set(newValue.flatMap { try? JSONEncoder().encode($0) }, forKey: key) }
+        static func saved(in defaults: UserDefaults) -> FocusLayout? {
+            defaults.data(forKey: key).flatMap { try? JSONDecoder().decode(FocusLayout.self, from: $0) }
+        }
+        static func save(_ layout: FocusLayout?, in defaults: UserDefaults) {
+            defaults.set(layout.flatMap { try? JSONEncoder().encode($0) }, forKey: key)
         }
     }
 
@@ -879,7 +882,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
         if let layout = focusedFrom {
             Breadcrumbs.shared.note("window: focus terminal off")
             focusedFrom = nil
-            FocusLayout.saved = nil
+            FocusLayout.save(nil, in: model.defaults)
             setLayout(sidebarCollapsed: layout.sidebarCollapsed, inspectorCollapsed: layout.inspectorCollapsed, bars: true)
             model.showsChat = layout.showsChat
         } else {
@@ -891,7 +894,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
 
     private func focusTerminal(keeping layout: FocusLayout, animated: Bool) {
         focusedFrom = layout
-        FocusLayout.saved = layout
+        FocusLayout.save(layout, in: model.defaults)
         model.showsChat = false
         setLayout(sidebarCollapsed: true, inspectorCollapsed: true, bars: false, animated: animated)
     }
@@ -914,7 +917,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
     @objc func toggleInspectorAction(_ sender: Any?) {
         if Motion.isReduced { inspectorItem.isCollapsed.toggle() } else { inspectorItem.animator().isCollapsed.toggle() }
         // The animator proxy already reports the new value.
-        UserDefaults.standard.set(inspectorItem.isCollapsed, forKey: "inspectorCollapsed")
+        model.defaults.set(inspectorItem.isCollapsed, forKey: "inspectorCollapsed")
     }
 
     func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {

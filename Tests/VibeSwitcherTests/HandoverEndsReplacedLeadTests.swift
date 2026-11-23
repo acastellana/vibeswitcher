@@ -110,7 +110,7 @@ struct HandoverEndsReplacedLeadTests {
         #expect(await until { world.controller.replacedLeads[old.id]?.live == new.id })
 
         // The window: the old lead's row selected.
-        let model = WindowModel()
+        let model = WindowModel(defaults: routing.temp.defaults("handover-window"))
         model.update(sessions: [], hosted: world.host.sessions, table: TableRead())
         model.select(hostID: old.id)
         #expect(model.sections.first?.rows.map(\.hostID) == [old.id, mine.id, new.id])

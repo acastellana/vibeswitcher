@@ -10,7 +10,7 @@ import Testing
 @Suite(.serialized)
 struct EndedFoldTests {
     static let now = Date()
-    /// Each test's own defaults, where its models remember their folds: `UserDefaults.standard` is the test binary's
+    /// Each test's own defaults, where its models remember their folds: the standard defaults are the test binary's
     /// domain in the real ~/Library/Preferences, which every test process on this Mac shares (another session's suite
     /// running beside this one flipped `sidebarEndedOpen` under it: 6 runs in 10 under load failed so).
     let temp = Scratch()

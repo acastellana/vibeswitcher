@@ -316,8 +316,7 @@ struct TeamPanelCostTests {
     // MARK: WindowRow copies in SessionHeaderView.body (175306)
 
     @Test func theWindowsRowsAreCopiedOncePerChange() {
-        UserDefaults.standard.removeObject(forKey: "windowGrouping")
-        let model = WindowModel()
+        let model = WindowModel(defaults: temp.defaults("team-panel-cost"))
         let lead = SidebarArrangeTests.hosted("Lead · acme", cwd: "/Users/you/dev/acme")
         let other = SidebarArrangeTests.hosted("Shell", cwd: "/Users/you/dev/tools")
         model.update(sessions: [], hosted: [lead, other], table: TableRead(at: SidebarArrangeTests.now))

@@ -74,9 +74,7 @@ struct MainWindowAccessibilityTests {
     func withWindow(attach: Bool = true, _ body: (Window, _ update: (Int) -> Void, _ rows: [WindowRow]) async throws -> Void) async throws {
         let folder = scratch.url("main-ax")
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-        let saved = UserDefaults.standard.string(forKey: "windowGrouping")
-        defer { UserDefaults.standard.set(saved, forKey: "windowGrouping") }
-        let model = WindowModel()
+        let model = WindowModel(defaults: scratch.defaults("main-ax-defaults"))
         model.grouping = .projects
         var members = Self.members()
         SidebarDiffTests.feed(model, members, at: Self.now)

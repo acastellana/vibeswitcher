@@ -141,7 +141,7 @@ struct ReplacedLeadRoutingTests {
         #expect(replaced.label == "replaced — continue in Lead · \(world.project)")
         #expect(replaced.tty == old.tty)
         #expect(world.controller.replacedLeads[new.id] == nil)
-        let model = WindowModel()
+        let model = WindowModel(defaults: temp.defaults("replaced-window"))
         model.replacedLeads = world.controller.replacedLeads
         let row = WindowRow(content: .hosted(old), project: world.project)
         #expect(model.state(of: row, now: Date()).text == replaced.label)

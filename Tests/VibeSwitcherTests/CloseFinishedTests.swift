@@ -31,7 +31,9 @@ struct CloseFinishedTests {
         /// What the question is answered, after `meanwhile` ran.
         var answer = true
         var meanwhile: () -> Void = {}
-        let model = WindowModel()
+        let model: WindowModel
+        /// `defaults`: where the window's model keeps its settings, a suite of the test's own.
+        init(defaults: UserDefaults) { model = WindowModel(defaults: defaults) }
         private var ttys = 0
 
         func tty() -> String {
@@ -121,7 +123,7 @@ struct CloseFinishedTests {
     /// Finished Run-card shells in two projects and one replaced lead between turns: the confirmation lists exactly
     /// those, grouped by project, shells and leads apart, and confirming ends exactly those.
     @Test func itListsAndEndsTheFinishedShellsOfEveryProjectAndTheIdleReplacedLead() throws {
-        let fixture = Fixture()
+        let fixture = Fixture(defaults: temp.defaults("close-finished"))
         let install = fixture.shell("Install", project: "alpha")
         let backup = fixture.shell("Backup", project: "bravo", state: .error)
         let old = fixture.agent("Lead before", label: "Lead · alpha", project: "alpha", status: .done)
@@ -159,7 +161,7 @@ struct CloseFinishedTests {
 
     /// With only what may never be closed, nothing is listed, the question only says so, and nothing ends.
     @Test func whatMayNeverBeClosedIsNeitherListedNorEnded() {
-        let fixture = Fixture()
+        let fixture = Fixture(defaults: temp.defaults("close-finished"))
         Self.neverClosed(fixture)
         fixture.feed()
         let tidier = fixture.tidier(file: temp.url("used").appendingPathComponent("used.json"))
@@ -174,7 +176,7 @@ struct CloseFinishedTests {
     /// didn't change ends. The window's list (`model`) isn't told of any of it, as while the alert runs modal it
     /// isn't: the look again reads the sources.
     @Test func whatChangedSinceTheQuestionIsSkipped() {
-        let fixture = Fixture()
+        let fixture = Fixture(defaults: temp.defaults("close-finished"))
         let busyAgain = fixture.shell("Install", project: "alpha")
         let runningAgain = fixture.shell("Build", project: "bravo")
         let same = fixture.shell("Backup", project: "bravo", state: .error)
@@ -201,7 +203,7 @@ struct CloseFinishedTests {
     /// A replaced lead that is no longer replaced when the answer comes (the role came back to it, the list no longer
     /// marks it) is skipped, as is one that ended meanwhile.
     @Test func aLeadNoLongerReplacedOrEndedMeanwhileIsSkipped() {
-        let fixture = Fixture()
+        let fixture = Fixture(defaults: temp.defaults("close-finished"))
         let back = fixture.agent("Lead back", label: "Lead · alpha", project: "alpha", status: .idle)
         let gone = fixture.agent("Lead gone", label: "Lead · bravo", project: "bravo", status: .idle)
         fixture.replaced = [back.id, gone.id]
@@ -219,7 +221,7 @@ struct CloseFinishedTests {
 
     /// Cancel ends nothing.
     @Test func cancelEndsNothing() {
-        let fixture = Fixture()
+        let fixture = Fixture(defaults: temp.defaults("close-finished"))
         fixture.shell("Install", project: "alpha")
         fixture.feed()
         let tidier = fixture.tidier(file: temp.url("used").appendingPathComponent("used.json"))
@@ -257,7 +259,7 @@ struct CloseFinishedTests {
     /// The sidebar's foot shows "Close Finished (N)…" only when there's something to close, N the count the
     /// confirmation lists; pressing it asks that question and ends those.
     @Test func theButtonShowsOnlyWithSomethingToCloseAndItsCountIsTheLists() async throws {
-        let fixture = Fixture()
+        let fixture = Fixture(defaults: temp.defaults("close-finished"))
         Self.neverClosed(fixture)
         fixture.feed()
         let tidier = fixture.tidier(file: temp.url("used").appendingPathComponent("used.json"))

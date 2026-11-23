@@ -1,0 +1,15 @@
+# What a test under Tests/ may not use: the standard user defaults. An unbundled test binary's standard defaults are its
+# domain (VibeSwitcherTests) in the real ~/Library/Preferences, through cfprefsd, whatever HOME and CFFIXED_USER_HOME the
+# scratch home sets: every test process on this Mac shares them (other sessions' runs and the merge's included), so one
+# flips another's settings under it. 2026-11-23: EndedFoldTests failed 6 runs in 10 under load so. A test keeps its
+# settings in a suite of its own, `Scratch.defaults(_:)`, and hands it to what it makes (`WindowModel(defaults:)`,
+# `Preferences(defaults:)`, ...). Read by SharedDefaultsLintTests (VibeCoreTests), which flags every line, comments too,
+# so `grep -rnE` with these patterns over Tests finds only the allowed uses below.
+#
+# pattern: an extended regular expression (grep -E and Swift's Regex both read it), matched on each line.
+pattern: UserDefaults\.standard
+pattern: WindowModel\(\)
+#
+# allow: FILE | TEXT | REASON. A use in FILE on a line containing TEXT is allowed, for REASON (required). Only a read
+# of a key the app never writes may be. An entry nothing matches any more fails SharedDefaultsLintTests.
+allow: Tests/VibeSwitcherTests/BriefingButtonTests.swift | #expect(!(UserDefaults.standard.dictionaryRepresentation() | reads only, to check the test's made-up API key went to no defaults at all, the shared ones included; nothing writes that key
