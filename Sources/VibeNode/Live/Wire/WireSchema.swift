@@ -420,7 +420,8 @@ public enum WireSchema {
             shape("board.landing", from: "BoardValue.landing", [
                 field("likely", Kind.date.orNull), field("worst", Kind.date.orNull), field("basis", .words(LeadLanding.Basis.allCases.map(\.rawValue))),
                 field("waitsOn", Kind.string.orNull), field("overdueMin", Kind.int.orNull), field("over", .bool), field("undated", .int)]),
-            shape("board.estimate", from: "BoardValue.task", [field("likelyMin", .int), field("worstMin", .int), field("at", .date),
+            // `at` null: a time outside the sane window on the board (the lead's session writes it), taken as absent.
+            shape("board.estimate", from: "BoardValue.task", [field("likelyMin", .int), field("worstMin", .int), field("at", Kind.date.orNull),
                                                               field("by", .words(["worker", "lead"]))]),
             shape("board.actual", from: "BoardValue.task", [field("total", .int), field("unblocked", .int)]),
             shape("board.goal", from: "BoardValue.goals", [

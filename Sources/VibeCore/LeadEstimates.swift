@@ -20,6 +20,28 @@ public struct LeadEstimate: Codable, Equatable, Sendable {
     public static let mostMinutes = 7 * 24 * 60
 }
 
+/// Times and numbers read from a board, which the lead's session writes (and a task's worktree can sway): a time outside
+/// a sane window is taken as absent, and a number turned into an `Int` saturates, never traps.
+public enum LeadTime {
+    /// 2001-01-01 to 2100-01-01.
+    public static let window: ClosedRange<Double> = 978_307_200...4_102_444_800
+
+    /// `seconds` when it is a finite time inside `window`; nil otherwise.
+    public static func sane(_ seconds: Double?) -> Double? {
+        guard let seconds, seconds.isFinite, window.contains(seconds) else { return nil }
+        return seconds
+    }
+
+    /// `value` rounded, as an `Int` clamped to `range`; nil when it isn't finite.
+    public static func int(_ value: Double, in range: ClosedRange<Int> = 0...10_000_000) -> Int? {
+        guard value.isFinite else { return nil }
+        let rounded = value.rounded()
+        if rounded <= Double(range.lowerBound) { return range.lowerBound }
+        if rounded >= Double(range.upperBound) { return range.upperBound }
+        return Int(rounded)
+    }
+}
+
 /// A status a task took, and when (`BoardStore.update`).
 public struct LeadStateStamp: Codable, Equatable, Sendable {
     public var status: LeadTask.Status
@@ -48,20 +70,23 @@ extension LeadTask {
         states = ((states ?? []) + [LeadStateStamp(status: status, at: at)]).suffix(Self.keptStates)
     }
 
-    /// Minutes it spent blocked between `from` and `to` (its stamps; a blocked spell still open counts to `to`).
+    /// Minutes it spent blocked between `from` and `to` (its stamps, those at a sane time; a blocked spell still open
+    /// counts to `to`). 0 when either end isn't a sane time.
     public func blockedMinutes(from: Double, to: Double) -> Double {
-        let stamps = states ?? []
+        guard let from = LeadTime.sane(from), let to = LeadTime.sane(to), to > from else { return 0 }
+        let stamps = (states ?? []).filter { LeadTime.sane($0.at) != nil }
         var total = 0.0
         for (index, stamp) in stamps.enumerated() where stamp.status == .blocked {
             let end = index + 1 < stamps.count ? stamps[index + 1].at : to
             total += max(0, min(end, to) - max(stamp.at, from))
         }
-        return total / 60
+        return min(total, to - from) / 60
     }
 
-    /// Minutes from its first start to its merge, and those of them it wasn't blocked; nil when not merged or never started.
+    /// Minutes from its first start to its merge, and those of them it wasn't blocked; nil when not merged, never started,
+    /// or either time isn't sane.
     public var actualMinutes: (total: Double, unblocked: Double)? {
-        guard let start = startedAt, let merged = merged?.at, merged > start else { return nil }
+        guard let start = LeadTime.sane(startedAt), let merged = LeadTime.sane(merged?.at), merged > start else { return nil }
         let total = (merged - start) / 60
         return (total, max(0, total - blockedMinutes(from: start, to: merged)))
     }
@@ -87,11 +112,11 @@ public struct LeadScore: Equatable, Sendable {
 
     /// The line `status`, the board and `vibeswitcher board` say.
     public var line: String {
-        guard isEnough, let ratio, let inside = insideWorst else {
+        guard isEnough, let ratio, let inside = insideWorst, ratio.isFinite, inside.isFinite else {
             return "Estimates: fewer than \(Self.enough) estimated merges here (\(estimated)), so the dates are the workers' own, uncorrected."
         }
         let pace = abs(ratio - 1) < 0.05 ? "on time" : ratio > 1 ? String(format: "%.1f× over", ratio) : String(format: "%.1f× under", ratio)
-        return "Estimates here run \(pace) (excluding time blocked); \(Int((inside * 100).rounded()))% land inside the worst case"
+        return "Estimates here run \(pace) (excluding time blocked); \(LeadTime.int(inside * 100, in: 0...100) ?? 0)% land inside the worst case"
             + (clamped ? String(format: "; the dates are corrected by %.1f× at most (the bound)", correction) : ".")
     }
 }
@@ -181,6 +206,8 @@ public enum LeadForecast {
     /// Each task's and goal's landing on `board` at `now`, its queue run on `workers` slots.
     public static func forecast(_ board: LeadBoard, workers: Int, now: Double) -> Result {
         let score = score(board)
+        // A clock or a board time outside the sane window: nothing is placed by it.
+        guard LeadTime.sane(now) != nil else { return Result(score: score, tasks: [:], goals: [:]) }
         let c = score.correction
         var landings: [String: LeadLanding] = [:]
         // The slots' free times, for the likely and the worst schedules.
@@ -188,20 +215,20 @@ public enum LeadForecast {
         for task in board.tasks {
             switch task.status {
             case .done, .folded, .abandoned, .reverted:
-                landings[task.slug] = LeadLanding(likely: task.merged?.at, worst: task.merged?.at, basis: .done)
+                landings[task.slug] = LeadLanding(likely: LeadTime.sane(task.merged?.at), worst: LeadTime.sane(task.merged?.at), basis: .done)
             case .blocked, .failed, .kept:
                 landings[task.slug] = LeadLanding(basis: .blocked, waitsOn: waitsOn(task, board: board))
             case .running, .review:
                 var landing = LeadLanding(basis: .none)
-                if let estimate = task.estimates?.last {
-                    let elapsed = (now - estimate.at) / 60 - task.blockedMinutes(from: estimate.at, to: now)
+                if let estimate = task.estimates?.last, let given = LeadTime.sane(estimate.at), given <= now {
+                    let elapsed = (now - given) / 60 - task.blockedMinutes(from: given, to: now)
                     let likely = Double(estimate.likelyMin) * c - elapsed, worst = Double(estimate.worstMin) * c - elapsed
                     if worst < 0 {
-                        landing = LeadLanding(basis: .overdue, overdueMinutes: Int((-worst).rounded(.up)))
+                        landing = LeadLanding(basis: .overdue, overdueMinutes: LeadTime.int((-worst).rounded(.up), in: 1...10_000_000) ?? 1)
                     } else {
                         landing = LeadLanding(likely: now + max(0, likely) * 60, worst: now + worst * 60, basis: .estimated, over: likely < 0)
                     }
-                } else if let median = score.medianMinutes, let start = task.startedAt {
+                } else if let median = score.medianMinutes, let start = LeadTime.sane(task.startedAt), start <= now {
                     let elapsed = (now - start) / 60 - task.blockedMinutes(from: start, to: now)
                     let likely = max(0, median * c - elapsed)
                     landing = LeadLanding(likely: now + likely * 60, worst: now + max(likely, median * c * 2 - elapsed) * 60, basis: .median)
@@ -214,7 +241,8 @@ public enum LeadForecast {
             }
         }
         // The queue, in board order, each on the slot free first, after what it waits on.
-        let slots = max(1, workers)
+        // As many slots as the project runs, never more than it has tasks (a board's max_workers can say anything).
+        let slots = max(1, min(workers, board.tasks.count, 99))
         while likelySlots.count < slots { likelySlots.append(now); worstSlots.append(now) }
         for task in board.tasks where task.status == .planned {
             var after: [LeadLanding] = []
@@ -290,8 +318,9 @@ public enum LeadForecast {
         }
         switch landing.basis {
         case .estimated, .median, .partial:
-            guard let likely = landing.likely else { return nil }
-            let range = landing.worst.map { " (by \(when($0)))" } ?? ""
+            // A date past the sane window (an estimate of years) isn't said.
+            guard let likely = LeadTime.sane(landing.likely) else { return nil }
+            let range = LeadTime.sane(landing.worst).map { " (by \(when($0)))" } ?? ""
             let note = landing.basis == .median ? ", by this project's median" : landing.over ? ", over its likely estimate" : ""
             return (landing.basis == .partial ? "lands at least ~" : "lands ~") + when(likely) + range + note
                 + (landing.undated > 0 ? "; \(landing.undated) task\(landing.undated == 1 ? "" : "s") with no date" : "")
@@ -308,8 +337,14 @@ extension LeadToolset {
     static func estimateArgument(_ arguments: [String: Any], by: LeadEstimate.By) throws -> LeadEstimate? {
         func minutes(_ key: String) throws -> Int? {
             guard let given = arguments[key], !(given is NSNull) else { return nil }
+            // A number from JSON (an NSNumber) or a Double: whole and in range, or refused; never a trapping conversion.
+            if let number = given as? Double {
+                guard number.isFinite, number == number.rounded(), abs(number) <= Double(LeadEstimate.mostMinutes) * 10, let whole = Int(exactly: number) else {
+                    throw Problem(text: "\(key) is a whole number of minutes up to \(LeadEstimate.mostMinutes), not \(given). Nothing was changed.")
+                }
+                return whole
+            }
             if let number = given as? Int { return number }
-            if let number = given as? Double, number == number.rounded() { return Int(number) }
             if let text = given as? String, let number = Int(text.trimmingCharacters(in: .whitespaces)) { return number }
             throw Problem(text: "\(key) is a whole number of minutes, not \(given). Nothing was changed.")
         }

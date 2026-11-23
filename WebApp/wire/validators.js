@@ -22,7 +22,7 @@ export const shapes = {
   "board.checkpoint": {"fields":[{"name":"text","type":"string"},{"name":"at","type":{"nullable":"date"}}],"from":"BoardValue.task"},
   "board.counts": {"fields":[{"name":"attention","type":"int"},{"name":"running","type":"int"},{"name":"waiting","type":"int"},{"name":"done","type":"int"}],"from":"BoardValue.value"},
   "board.decision": {"fields":[{"name":"id","type":"string"},{"name":"at","type":{"nullable":"date"}},{"name":"text","type":"string"},{"name":"why","type":{"nullable":"string"}},{"name":"summary","type":{"nullable":"string"}}],"from":"BoardValue.decisions"},
-  "board.estimate": {"fields":[{"name":"likelyMin","type":"int"},{"name":"worstMin","type":"int"},{"name":"at","type":"date"},{"name":"by","type":{"words":["worker","lead"]}}],"from":"BoardValue.task"},
+  "board.estimate": {"fields":[{"name":"likelyMin","type":"int"},{"name":"worstMin","type":"int"},{"name":"at","type":{"nullable":"date"}},{"name":"by","type":{"words":["worker","lead"]}}],"from":"BoardValue.task"},
   "board.file": {"fields":[{"name":"name","type":"string"},{"name":"path","type":"string"},{"name":"present","type":"bool"}],"from":"BoardRecords.fields"},
   "board.goal": {"fields":[{"name":"id","type":"string"},{"name":"title","type":"string"},{"name":"done","type":"string"},{"name":"state","type":{"words":["open","done"]}},{"name":"toGo","type":"int"},{"name":"finished","type":"int"},{"name":"forecast","optional":true,"type":{"shape":"board.landing"}}],"from":"BoardValue.goals"},
   "board.image.args": {"fields":[{"name":"project","type":"string"},{"name":"update","type":"string"},{"name":"index","type":"int"},{"name":"offset","optional":true,"type":"int"}],"from":"Requests.boardImage (2026-11-21)"},

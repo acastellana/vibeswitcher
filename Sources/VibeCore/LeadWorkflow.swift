@@ -158,7 +158,7 @@ public struct LeadWorkflow: Equatable, Sendable {
                 workflow.settings[key] = value
                 let present = value.isEmpty ? nil : value
                 switch key {
-                case "max_workers": workflow.maxWorkers = max(1, Int(value) ?? 3)
+                case "max_workers": workflow.maxWorkers = min(99, max(1, Int(value) ?? 3))
                 case "test_command": workflow.testCommand = present
                 case "init_command": workflow.initCommand = present
                 case "regression_command": workflow.regressionCommand = present

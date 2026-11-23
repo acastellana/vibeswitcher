@@ -11,6 +11,57 @@ import Testing
 struct BoardNodeTests {
     private let scratch = Scratch()
 
+    /// The board is the lead's session's writing: one with times of 1e308, -1e308 and negative ones, an estimate of
+    /// Int.max minutes, and a workflow.md asking 10^9 workers is still read and shown (estimates review, 2026-11-23):
+    /// `vibeswitcher board`, its JSON, and the node after them all answer, and nothing traps.
+    @Test func aBoardWithAbsurdNumbersIsShownAndNothingTraps() async throws {
+        let node = try await ScratchNode(scratch, holdFirstLook: true)
+        defer { node.stop() }
+        let repo = node.root.appendingPathComponent("absurd-app")
+        try await scratchRepository(repo)
+        let path = ConfigHoldStore.workflowPath(root: repo.path)
+        try FileManager.default.createDirectory(atPath: (path as NSString).deletingLastPathComponent, withIntermediateDirectories: true)
+        try "---\ntest_command: true\nmerge_policy: ask_all\naudit_finders: 1\nmax_workers: 1000000000\n---\n".write(toFile: path, atomically: true, encoding: .utf8)
+        let head = Git.run(["rev-parse", "main"], in: repo.path).output
+        try await node.acceptConfig(repo)
+        try await node.acceptBase(repo, from: head)
+        let started = try await node.runOnTerminal(["lead", repo.path, "--goal", "Ship it"])
+        try #require(started.status == 0, "the lead didn't start: \(started.output)\n\(node.said)")
+        try BoardStore(root: repo.path).update { board in
+            var tasks: [LeadTask] = []
+            for (index, status) in [LeadTask.Status.running, .review, .planned, .done, .blocked].enumerated() {
+                var task = LeadTask(id: "a\(index)", slug: "absurd-\(index)", title: "Absurd \(index)",
+                                    contract: LeadContract(goal: "g", acceptance: ["a"], boundaries: [], context: ""), status: status)
+                task.startedAt = [1e308, -1e308, -5, 1e308, 0][index]
+                task.add(LeadEstimate(likelyMin: Int.max, worstMin: Int.max, at: [1e308, -1e308, -5, 2e9, 1e308][index], by: .worker))
+                task.states = [LeadStateStamp(status: .blocked, at: -1e308), LeadStateStamp(status: .running, at: 1e308)]
+                if status == .done {
+                    task.merged = LeadMergeRecord(commit: "c", tested: true)
+                    task.merged?.at = -1e308
+                }
+                tasks.append(task)
+            }
+            board.tasks = tasks
+        }
+        var printed: CommandRun?
+        let deadline = MacTime.real.awake() + 60
+        while MacTime.real.awake() < deadline {
+            printed = try await node.run(["board", repo.path])
+            if printed?.output.contains("Absurd 0") == true { break }
+            try await Task.sleep(nanoseconds: 100_000_000)
+        }
+        #expect(printed?.status == 0 && printed?.output.contains("Absurd 4") == true, "\(printed?.output ?? "")\(printed?.errors ?? "")\n\(node.said)")
+        let json = try await node.run(["board", repo.path, "--json"])
+        let value = try #require(NodeWire.decode(NodeWire.Value.self, Data(json.output.utf8)), "\(json.output)\(json.errors)")
+        let board = try #require(value["boards"]?.array?.first)
+        #expect(WireSchema.check(board, as: "board", strict: true) == nil, "\(board)")
+        #expect(board["tasks"]?.array?.count == 5 || board["tasks"]?.array?.count == 4, "\(board)")
+        // The node still answers after reading it.
+        let status = try await node.run(["status"])
+        #expect(status.status == 0, "\(status.output)\(status.errors)\n\(node.said)")
+        #expect(!node.said.contains("Fatal error"), "\(node.said)")
+    }
+
     @Test func aLeadsBoardOnTheCommandLineAndThePage() async throws {
         let node = try await ScratchNode(scratch, holdFirstLook: true, hostArguments: LiveScratch.webArguments)
         defer { node.stop() }

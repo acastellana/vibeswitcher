@@ -462,6 +462,11 @@ struct BoardTests {
         late.startedAt = now - 7200
         late.add(LeadEstimate(likelyMin: 10, worstMin: 20, at: now - 7200, by: .worker))
         board.tasks.append(late)
+        // An estimate whose time is outside the sane window (`LeadTime`): its `at` is null on the wire.
+        var odd = LeadTask(id: "odd", slug: "odd", title: "Odd one", contract: LeadContract(goal: "g", acceptance: [], boundaries: [], context: ""),
+                           status: .planned)
+        odd.add(LeadEstimate(likelyMin: 10, worstMin: 20, at: 1e308, by: .lead))
+        board.tasks.append(odd)
         return board
     }
 

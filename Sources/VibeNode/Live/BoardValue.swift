@@ -131,8 +131,10 @@ public enum BoardValue {
                 .object(["likelyMin": .int(estimate.likelyMin), "worstMin": .int(estimate.worstMin), "at": date(estimate.at), "by": .string(estimate.by.rawValue)])
             } ?? .null,
             "forecast": Self.landing(landing ?? LeadLanding(basis: .none)),
-            "blockedMin": .int(Int(task.blockedMinutes(from: task.startedAt ?? task.createdAt, to: task.merged?.at ?? now.timeIntervalSince1970).rounded())),
-            "actualMin": task.actualMinutes.map { .object(["total": .int(Int($0.total.rounded())), "unblocked": .int(Int($0.unblocked.rounded()))]) } ?? .null,
+            "blockedMin": .int(LeadTime.int(task.blockedMinutes(from: task.startedAt ?? task.createdAt, to: task.merged?.at ?? now.timeIntervalSince1970)) ?? 0),
+            "actualMin": task.actualMinutes.flatMap { minutes in
+                LeadTime.int(minutes.total).map { total in .object(["total": .int(total), "unblocked": .int(LeadTime.int(minutes.unblocked) ?? 0)]) }
+            } ?? .null,
         ]
         fields["checkpoint"] = task.checkpoints?.last.map { .object(["text": .string(line($0.text)), "at": date($0.at)]) } ?? .null
         fields["audit"] = audit(task)
@@ -166,11 +168,11 @@ public enum BoardValue {
     /// worst case and the correction (each in hundredths: 180 is 1.8×, 70 is 70%), whether it was clamped, the median
     /// time to merge, and the line said.
     static func score(_ score: LeadScore) -> NodeWire.Value {
-        func pct(_ value: Double) -> NodeWire.Value { .int(Int((value * 100).rounded())) }
+        func pct(_ value: Double) -> NodeWire.Value { LeadTime.int(value * 100).map { .int($0) } ?? .null }
         return .object(["estimated": .int(score.estimated), "ratioPct": score.ratio.map(pct) ?? .null,
                  "insideWorstPct": score.insideWorst.map(pct) ?? .null, "enough": .bool(score.isEnough),
-                 "correctionPct": pct(score.correction), "clamped": .bool(score.clamped),
-                 "medianMin": score.medianMinutes.map { .int(Int($0.rounded())) } ?? .null, "line": .string(score.line)])
+                 "correctionPct": .int(LeadTime.int(score.correction * 100) ?? 100), "clamped": .bool(score.clamped),
+                 "medianMin": score.medianMinutes.flatMap { LeadTime.int($0) }.map { .int($0) } ?? .null, "line": .string(score.line)])
     }
 
     /// The decisions as a board carries them: at most `LeadEngine.decisionsShown`, each its text and why (inert,

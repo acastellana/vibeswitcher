@@ -69,10 +69,11 @@ struct LeadEstimatesTests: LeadTeamFixture {
         let stamps = BoardStore(root: root).load().task("fix")?.states ?? []
         #expect(stamps.map(\.status) == [.planned, .blocked], "\(stamps)")
         var task = Self.task("t", .running)
-        task.states = [LeadStateStamp(status: .running, at: 0), LeadStateStamp(status: .blocked, at: 600), LeadStateStamp(status: .running, at: 1500),
-                       LeadStateStamp(status: .blocked, at: 3000)]
-        #expect(task.blockedMinutes(from: 0, to: 3600) == 25)
-        #expect(task.blockedMinutes(from: 900, to: 3300) == 15)
+        let t = 1_700_000_000.0
+        task.states = [LeadStateStamp(status: .running, at: t), LeadStateStamp(status: .blocked, at: t + 600), LeadStateStamp(status: .running, at: t + 1500),
+                       LeadStateStamp(status: .blocked, at: t + 3000)]
+        #expect(task.blockedMinutes(from: t, to: t + 3600) == 25)
+        #expect(task.blockedMinutes(from: t + 900, to: t + 3300) == 15)
     }
 
     /// The score: the median of unblocked time over the first likely estimate, the share inside the worst case; fewer
@@ -82,7 +83,8 @@ struct LeadEstimatesTests: LeadTeamFixture {
             var board = LeadBoard()
             for index in 0..<count {
                 var task = Self.task("m\(index)", .done)
-                let start = Double(index) * 100_000
+                // Inside the sane window (`LeadTime.window`): a time outside it is taken as absent.
+                let start = 1_700_000_000 + Double(index) * 100_000
                 task.startedAt = start
                 task.add(LeadEstimate(likelyMin: likely, worstMin: likely * 2, at: start, by: .worker))
                 task.states = [LeadStateStamp(status: .running, at: start), LeadStateStamp(status: .blocked, at: start + 60),
@@ -108,7 +110,7 @@ struct LeadEstimatesTests: LeadTeamFixture {
     /// worst case (no date); queued ones on the workers, after what they wait on; a blocked one says on whom it waits;
     /// a goal lands with its last task, at least then while one has no date.
     @Test func theForecastPlacesEachTaskAndGoal() {
-        let now = 1_000_000.0
+        let now = 1_800_000_000.0
         var board = LeadBoard()
         var running = Self.task("running", .running)
         running.add(LeadEstimate(likelyMin: 30, worstMin: 60, at: now - 600, by: .worker))
@@ -167,6 +169,54 @@ struct LeadEstimatesTests: LeadTeamFixture {
         #expect(lead.call("board", [:]).text.contains("past the worst case: fix"), "a new estimate run past is told again")
     }
 
+    /// Absurd numbers (the board is the lead's session's writing; an argument is anyone's): an estimate argument of
+    /// 1e308, infinity, NaN or a fraction is refused, not converted; a board with infinite, huge and negative times and an
+    /// estimate of Int.max is forecast, said and scored without trapping, and the lead's tools answer on it.
+    @Test func absurdNumbersNeverTrap() throws {
+        for bad: Any in [1e308, Double.infinity, Double.nan, 2.5, NSNumber(value: 1e300), -1e308] {
+            #expect(throws: LeadToolset.Problem.self) { try LeadToolset.estimateArgument(["likely_min": bad, "worst_min": 10], by: .worker) }
+        }
+        #expect(try LeadToolset.estimateArgument(["likely_min": NSNumber(value: 5), "worst_min": 10.0], by: .worker)?.likelyMin == 5)
+        var board = LeadBoard()
+        for (index, status) in [LeadTask.Status.running, .review, .planned, .done, .blocked, .running].enumerated() {
+            var task = Self.task("t\(index)", status)
+            task.startedAt = [Double.infinity, -Double.infinity, Double.nan, 1e308, -5, 1_000_000_000][index]
+            task.add(LeadEstimate(likelyMin: Int.max, worstMin: index == 5 ? Int.min : Int.max, at: [Double.nan, 1e308, -1e308, -5, .infinity, 999_000_000][index], by: .worker))
+            task.states = [LeadStateStamp(status: .blocked, at: -Double.infinity), LeadStateStamp(status: .running, at: .nan)]
+            if status == .done {
+                task.merged = LeadMergeRecord(commit: "c", tested: true)
+                task.merged?.at = .infinity
+            }
+            board.tasks.append(task)
+        }
+        board.goals = [LeadGoal(id: "g", title: "G", done: "d")]
+        board.tasks[0].goalID = "g"
+        for workers in [Int.max, 0, -5, 1_000_000_000] {
+            let result = LeadForecast.forecast(board, workers: workers, now: 1_000_000_000)
+            for landing in result.tasks.values { _ = LeadForecast.text(landing, now: 1_000_000_000) }
+            _ = result.score.line
+        }
+        _ = LeadForecast.forecast(board, workers: 3, now: .infinity)
+        #expect(board.tasks.allSatisfy { $0.blockedMinutes(from: -.infinity, to: .nan) == 0 })
+        #expect(LeadTime.int(.infinity) == nil && LeadTime.int(1e308) == 10_000_000 && LeadTime.int(-1e308) == 0)
+        #expect(LeadWorkflow.parse("---\nmax_workers: 1000000000\n---\n").maxWorkers == 99)
+        // The lead's tools on such a board on disk (JSON holds no infinity or NaN: 1e308 and -1e308 in their place).
+        let root = try repo()
+        let lead = try lead(root, FakeRuntime())
+        func finite(_ value: Double) -> Double { value.isFinite ? value : value.isNaN ? -1e308 : (value > 0 ? 1e308 : -1e308) }
+        let onDisk = board.tasks.map { task -> LeadTask in
+            var task = task
+            task.startedAt = task.startedAt.map(finite)
+            task.estimates = task.estimates?.map { var estimate = $0; estimate.at = finite(estimate.at); return estimate }
+            task.states = task.states?.map { LeadStateStamp(status: $0.status, at: finite($0.at)) }
+            if let at = task.merged?.at { task.merged?.at = finite(at) }
+            return task
+        }
+        _ = try BoardStore(root: root).update { $0.tasks = onDisk; $0.goals = board.goals }
+        #expect(!lead.call("status", [:]).isError)
+        #expect(!lead.call("board", [:]).isError)
+    }
+
     /// A board with estimates and stamps read by a build before them passes over the keys; an old board reads with none.
     @Test func boardFilesReadBothWays() throws {
         var board = LeadBoard()
@@ -184,6 +234,6 @@ struct LeadEstimatesTests: LeadTeamFixture {
         var object = try #require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
         object["tasks"] = (object["tasks"] as? [[String: Any]])?.map { var task = $0; for key in ["estimates", "states", "overdueTold"] { task[key] = nil }; return task }
         let older = try JSONDecoder().decode(LeadBoard.self, from: JSONSerialization.data(withJSONObject: object))
-        #expect(older.tasks.first?.estimates == nil && LeadForecast.forecast(older, workers: 3, now: 10).tasks["t"]?.basis == LeadLanding.Basis.none)
+        #expect(older.tasks.first?.estimates == nil && LeadForecast.forecast(older, workers: 3, now: 1_800_000_000).tasks["t"]?.basis == LeadLanding.Basis.none)
     }
 }
