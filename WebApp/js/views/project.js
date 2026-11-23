@@ -180,8 +180,8 @@ export function projectView(app, { sheet }) {
 
   // The date column: the landing as the node says it, its range under it, and where it comes from on hover and focus
   // (every date an estimate). Empty, it takes no room (the estimates aren't there yet).
-  function whenEl(landing, basis) {
-    const said = landingWords(landing);
+  function whenEl(landing, basis, context = {}) {
+    const said = landingWords(landing, Date.now(), context);
     if (!said.date) return h('span', { class: 'road-when' });
     return h('span', { class: 'road-when' + (said.late ? ' late' : '') + (landing.basis === 'blocked' ? ' nodate' : ''), tabindex: basis ? 0 : null, data: basis ? { basis } : null, 'aria-label': [said.date, said.range, said.note, basis].filter(Boolean).join('. ') },
       h('b', null, said.date), said.range || said.note ? h('small', null, [said.range, said.note].filter(Boolean).join(' · ')) : null);
@@ -220,13 +220,13 @@ export function projectView(app, { sheet }) {
   }
 
   // A task's line: its title and state (its note under them when dated), its five steps or its bar, its date.
-  function taskLine2(task, note, { axis, score, cls }) {
+  function taskLine2(task, note, { axis, score, cls, board = null }) {
     if (!axis) return h('div', { class: cls }, h('span', { class: 'road-title' }, task.title, h('small', null, nodeWords(task.state))), stepBar(task), h('span', { class: 'road-note' }, ...note), h('span', { class: 'road-when' }));
     const start = Date.parse(task.startedAt || '') || null;
     return h('div', { class: cls },
       h('span', { class: 'road-title' }, task.title, h('small', null, [nodeWords(task.state), ...note.map((one) => (typeof one === 'string' ? one : one.textContent))].filter(Boolean).join(' · '))),
       trackEl(axis, { start, landing: task.forecast, tone: taskTone(task), blocked: task.forecast?.basis === 'blocked' || (!task.forecast && taskTone(task) === 'blocked') }),
-      whenEl(task.forecast, basisWords(task.forecast, { estimate: task.estimate, score })));
+      whenEl(task.forecast, basisWords(task.forecast, { estimate: task.estimate, score }), { task, board }));
   }
 
   function taskRow(task, extra = [], dates = {}) {
@@ -270,13 +270,15 @@ export function projectView(app, { sheet }) {
           blocked: row.tasks.some((task) => whereOf(task) === 'blocked'),
         })
         : h('span', { class: 'goal-marks', 'aria-hidden': 'true' }, row.tasks.map((task) => h('i', { class: `goal-mark tone-${taskTone(task)}${whereOf(task) === 'blocked' ? ' blocked' : ''}`, title: task.title })));
-      const head = h('button', { class: 'goal-row' + (row.goal ? '' : ' unsorted') + (row.goal?.state === 'done' ? ' done' : ''), type: 'button', 'aria-expanded': String(open), onclick: () => ui.go(toggled(route, id)) },
-        h('span', { class: 'goal-title' }, h('b', null, row.goal ? row.goal.title : t('roadUnsorted')),
+      // A group, not a button: the title side opens and closes the goal; the track and the date (which takes focus for
+      // where it comes from) do nothing.
+      const head = h('div', { class: 'goal-row' + (row.goal ? '' : ' unsorted') + (row.goal?.state === 'done' ? ' done' : ''), role: 'group', 'aria-label': row.goal ? row.goal.title : t('roadUnsorted') },
+        h('button', { class: 'goal-title', type: 'button', 'aria-expanded': String(open), onclick: () => ui.go(toggled(route, id)) },
+          h('b', null, row.goal ? row.goal.title : t('roadUnsorted'), h('span', { class: 'goal-toggle' }, icon('chevron', 10))),
           h('small', null, [counts.join(', ') || t('roadNoTasks'), row.goal?.done ? `${t('roadDoneMeans')} ${row.goal.done}` : null].filter(Boolean).join(' · '))),
-        marks, axis ? whenEl(row.goal?.forecast, basisWords(row.goal?.forecast, { score, goal: true })) : h('span', { class: 'road-when' }),
-        h('span', { class: 'goal-toggle' }, icon('chevron', 10)));
+        marks, axis ? whenEl(row.goal?.forecast, basisWords(row.goal?.forecast, { score, goal: true }), { board }) : h('span', { class: 'road-when' }));
       if (!open) return [head];
-      const tasks = row.tasks.map((task, index) => taskLine2(task, roadNote(task, board, cards, whereOf(task)), { axis, score, cls: 'goal-task' + (index === row.tasks.length - 1 ? ' last' : '') }));
+      const tasks = row.tasks.map((task, index) => taskLine2(task, roadNote(task, board, cards, whereOf(task)), { axis, score, board, cls: 'goal-task' + (index === row.tasks.length - 1 ? ' last' : '') }));
       return [head, h('div', { class: 'goal-tasks' }, tasks.length ? tasks : [h('p', { class: 'road-note goal-empty' }, t('roadNoTasks'))])];
     };
     const children = [h('p', { class: 'road-intro' }, axis ? [t('roadGoalsDated'), score?.line ? ' ' + score.line : ''].join('') : t('roadGoalsIntro'))];
@@ -303,7 +305,7 @@ export function projectView(app, { sheet }) {
     // With estimates, the time axis; without, what the roadmap drew before them.
     const axis = hasDates(board) ? timeAxis(axisPoints(board)) : null;
     if (board?.goals?.length) { drawGoals(route, board, cards, axis); return; }
-    const dates = { axis, score: board?.score || null };
+    const dates = { axis, score: board?.score || null, board };
     const open = route.open.includes('queue');
     const titles = (slugs) => slugs.map((slug) => board.tasks.find((task) => task.slug === slug)?.title || slug);
     const children = [h('p', { class: 'road-intro' }, axis ? [t('roadDated'), board.score?.line ? ' ' + board.score.line : ''].join('') : t('roadIntro'))];

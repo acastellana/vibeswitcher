@@ -44,7 +44,7 @@ export function rightColumn(app) {
     }
     // Its estimate, by whom, and its forecast (where the date comes from on hover and focus).
     if (task.estimate) parts.push(fact(t('fcEstimateTitle'), estimateWords(task.estimate)));
-    const lands = landingWords(task.forecast);
+    const lands = landingWords(task.forecast, Date.now(), { task, board });
     if (lands.date && task.forecast?.basis !== 'done') {
       const basis = basisWords(task.forecast, { estimate: task.estimate, score: board?.score });
       parts.push(fact(t('fcLandsTitle'), h('span', { class: 'tdet-lands' + (lands.late ? ' late' : ''), title: basis || null }, [lands.date, lands.range, lands.note].filter(Boolean).join(' · ')),

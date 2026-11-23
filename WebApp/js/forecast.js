@@ -26,9 +26,9 @@ export function when(iso, now = Date.now()) {
 
 // A landing in words, as the node says it: "~09:50", "by 10:20", "at least ~09:50", "no date: waits on X", "past its
 // worst case by 25 min", and for a merged task when it merged. { date, range, note, late }; empty for none.
-export function landingWords(landing, now = Date.now()) {
+export function landingWords(landing, now = Date.now(), { task = null, board = null } = {}) {
   if (!landing) return { date: '', range: '', note: '', late: false };
-  if (landing.basis === 'blocked') return { date: t('fcWaits', { who: landing.waitsOn || t('fcNotSaid') }), range: '', note: '', late: false };
+  if (landing.basis === 'blocked') return { date: t('fcWaits', { who: whoWaits(landing, task, board) }), range: '', note: '', late: false };
   if (landing.basis === 'overdue') return { date: t('fcOverdue', { n: landing.overdueMin ?? 0 }), range: '', note: '', late: true };
   if (landing.basis === 'done') return { date: ms(landing.likely) ? t('fcMerged', { when: when(landing.likely, now) }) : '', range: '', note: '', late: false };
   if (!dated(landing)) return { date: '', range: '', note: '', late: false };
@@ -38,6 +38,22 @@ export function landingWords(landing, now = Date.now()) {
     range: ms(landing.worst) ? t('fcBy', { when: when(landing.worst, now) }) : '',
     note: notes.join('; '), late: !!landing.over,
   };
+}
+
+// Whom a task with no date waits on, said as a who (the node's `waitsOn` is one string for several things): a task it
+// comes after (by its slug: its title), the user (a question names the task), the lead (it failed, it was kept back, or
+// the blocker's first line: the question itself stays for the task opened in place), or what the node said.
+export function whoWaits(landing, task = null, board = null) {
+  const said = String(landing?.waitsOn || '').trim();
+  if (!said) return t('fcNotSaid');
+  const after = board?.tasks?.find((one) => one.slug === said);
+  if (after) return `“${after.title}”`;
+  if (/^you\b/.test(said)) return t('fcWhoYou');
+  if (/^(the lead|kept back by the lead)\b/.test(said)) return said.startsWith('kept') ? t('fcWhoKept') : t('fcWhoLeadFailed');
+  if (said === 'something not said') return t('fcNotSaid');
+  const blocker = String(task?.blocker || '').split('\n').find((line) => line.trim())?.trim() || '';
+  if (blocker && (blocker === said || blocker.startsWith(said))) return t('fcWhoLead');
+  return task ? t('fcWhoLead') : said;
 }
 
 // Where a date comes from, for its hover and focus: always marked as an estimate.

@@ -229,7 +229,7 @@ async function run() {
       const rows = [...document.querySelectorAll('.goal-row')].map((row) => row.innerText);
       return rows.some((text) => text.includes(${JSON.stringify(expect.goal)})) && document.querySelector('.goal-row.unsorted') && document.querySelector('.road-band') ? rows.length : null;
     })()`, WAIT);
-    await page.evaluate(`[...document.querySelectorAll('.goal-row')].find((row) => row.innerText.includes(${JSON.stringify(expect.goal)}))?.click()`);
+    await page.evaluate(`[...document.querySelectorAll('.goal-row')].find((row) => row.innerText.includes(${JSON.stringify(expect.goal)}))?.querySelector('button.goal-title')?.click()`);
     const road = goals && await page.until(`(() => {
       const task = [...document.querySelectorAll('.goal-task')].find((el) => el.innerText.includes(${JSON.stringify(expect.board)}));
       return task && new URLSearchParams(location.hash.split('?')[1] || '').get('open') === ${JSON.stringify(expect.goalID)} ? 'goal opened to its task' : null;
@@ -244,10 +244,16 @@ async function run() {
     await page.go(roadmap + '?open=' + encodeURIComponent(expect.goalID));
     const dates = await page.until(`(() => {
       const when = [...document.querySelectorAll('.road-when[data-basis]')].find((el) => /^An estimate/.test(el.dataset.basis));
-      return document.querySelector('.axis-row .axis-tick.now') && document.querySelector('.track-dot') && when ? when.innerText.replace(/\\s+/g, ' ') + ' (' + when.dataset.basis.slice(0, 60) + '…)' : null;
+      // A blocked task says whom it waits on, never its blocker's question; the date takes focus without toggling the goal.
+      const blocked = [...document.querySelectorAll('.road-when.nodate')].map((el) => el.innerText.replace(/\\s+/g, ' '));
+      const goalWhen = document.querySelector('.goal-row .road-when[data-basis]');
+      goalWhen?.focus();
+      const stays = goalWhen && document.activeElement === goalWhen && new URLSearchParams(location.hash.split('?')[1] || '').get('open') === ${JSON.stringify(expect.goalID)};
+      return document.querySelector('.axis-row .axis-tick.now') && document.querySelector('.track-dot') && when && stays && blocked.includes('no date: waits on the lead')
+        ? when.innerText.replace(/\\s+/g, ' ') + ' (' + when.dataset.basis.slice(0, 50) + '…); ' + blocked.join(', ') : null;
     })()`, WAIT);
     await page.shot('roadmap-dates');
-    record('Roadmap dates', dates, dates || 'no axis, bar or estimate-marked date on the roadmap');
+    record('Roadmap dates', dates, dates || 'no axis, bar or estimate-marked date, a blocked task not said as waiting on the lead, or the goal\'s date not focusable apart');
 
     // Task estimate: a task opened in place says its estimate, whose, and when it lands.
     await page.go(expect.projectHref + '?task=' + encodeURIComponent(expect.estimated));

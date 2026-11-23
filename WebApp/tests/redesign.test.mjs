@@ -198,7 +198,11 @@ test('the forecasts: whether a board has a date to draw, each landing said as th
   const over = landingWords(task('upload-retry').forecast, now);
   assert.equal(over.note, 'over its likely estimate');
   assert.equal(over.late, true);
-  assert.equal(landingWords(task('pricing-copy').forecast, now).date, 'no date: waits on Which plan names do we launch with?');
+  assert.equal(landingWords(task('pricing-copy').forecast, now, { task: task('pricing-copy'), board: fresh }).date, 'no date: waits on the lead', 'its blocker’s question stays for the task opened');
+  assert.equal(landingWords({ basis: 'blocked', waitsOn: 'onboarding-steps' }, now, { task: {}, board: fresh }).date, 'no date: waits on “Onboarding: the three first-run steps”');
+  assert.equal(landingWords({ basis: 'blocked', waitsOn: 'you (a question)' }, now, { task: {}, board: fresh }).date, 'no date: waits on you');
+  assert.equal(landingWords({ basis: 'blocked', waitsOn: 'the lead (it failed)' }, now, { task: {}, board: fresh }).date, 'no date: waits on the lead (it failed)');
+  assert.equal(landingWords({ basis: 'blocked', waitsOn: null }, now).date, 'no date: waits on something not said');
   assert.equal(landingWords({ basis: 'overdue', overdueMin: 25 }, now).date, 'past its worst case by 25 min');
   const goal = landingWords(fresh.goals[0].forecast, now);
   assert.match(goal.date, /^at least ~/);

@@ -566,7 +566,7 @@ code, pre, kbd { font-family: var(--mono); }
 .inspect-says { height: calc(1.4em + 1px); padding: 1px 18px 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-2); font-size: var(--small); }
 .inspect-link { color: var(--accent); }
 .inspect-link:hover { text-decoration: underline; }
-.inspect-ports { margin: 0; padding: 0; list-style: none; display: grid; gap: 4px; font-size: var(--small); }
+.inspect-ports { margin: 0; padding: 3px 18px 0; list-style: none; display: grid; gap: 4px; font-size: var(--small); }
 .inspect-port-about { color: var(--ink-3); }
 .inspect-note { padding: 12px 18px 0; color: var(--ink-2); }
 .inspect-notice { display: flex; align-items: flex-start; gap: 8px; padding: 12px 18px 0; color: var(--ink-2); font-size: var(--small); }
@@ -1046,12 +1046,12 @@ kbd { padding: 1px 6px; border-radius: 5px; box-shadow: inset 0 0 0 1px var(--li
 
 /* The roadmap with goals: a row per goal, its tasks opening under it on branch lines. Each row ends in a column for
    its date (`road-when`), empty until the workers' estimates give one. */
-.goal-row { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1.4fr) auto 14px; gap: 16px; align-items: center; width: 100%; margin-top: 6px; padding: 12px 0 12px 24px; border-top: 1px solid var(--line); text-align: left; position: relative; }
+.goal-row { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1.4fr) auto 14px; gap: 16px; align-items: center; width: 100%; margin-top: 6px; padding: 12px 0 12px 24px; border-top: 1px solid var(--line); position: relative; }
 .goal-row::before { content: ""; position: absolute; left: 4px; top: 19px; width: 10px; height: 10px; background: var(--ink); transform: rotate(45deg); }
 .goal-row.unsorted::before { background: none; box-shadow: inset 0 0 0 2px var(--ink-3); }
 .goal-row.done::before { background: var(--ready); }
-.goal-row:hover .goal-title b { text-decoration: underline; text-decoration-color: var(--ink-3); }
-.goal-title { display: grid; gap: 2px; min-width: 0; }
+.goal-title:hover b { text-decoration: underline; text-decoration-color: var(--ink-3); }
+.goal-title { display: grid; gap: 2px; min-width: 0; text-align: left; }
 .goal-title b { font-size: var(--large); font-weight: 650; }
 .goal-title small { color: var(--ink-2); font-size: var(--small); overflow-wrap: anywhere; }
 .goal-row.done .goal-title b { color: var(--ink-2); }
@@ -1061,8 +1061,8 @@ kbd { padding: 1px 6px; border-radius: 5px; box-shadow: inset 0 0 0 1px var(--li
 .goal-mark.tone-queued { background: none; box-shadow: inset 0 0 0 2px currentColor; }
 .road-when:empty { display: none; }
 .road-when { color: var(--ink-2); font-size: var(--small); white-space: nowrap; }
-.goal-toggle { color: var(--ink-3); transition: transform 0.12s; }
-.goal-row[aria-expanded="true"] .goal-toggle { transform: rotate(90deg); }
+.goal-toggle { display: inline-flex; margin-left: 6px; color: var(--ink-3); vertical-align: middle; transition: transform 0.12s; }
+.goal-title[aria-expanded="true"] .goal-toggle { transform: rotate(90deg); }
 .goal-tasks { display: grid; padding-bottom: 6px; }
 .goal-task { position: relative; display: grid; grid-template-columns: minmax(0, 2fr) 62px minmax(0, 1.4fr) auto; gap: 16px; align-items: start; padding: 7px 0 7px 40px; }
 .goal-task::before { content: ""; position: absolute; left: 8px; top: 0; width: 18px; height: 19px; border-left: 2px solid var(--ink-3); border-bottom: 2px solid var(--ink-3); border-bottom-left-radius: 10px; }
@@ -1179,7 +1179,6 @@ kbd { padding: 1px 6px; border-radius: 5px; box-shadow: inset 0 0 0 1px var(--li
   .col.dated .goal-row, .col.dated .goal-task, .col.dated .road-row { grid-template-columns: minmax(0, 1fr) 110px; }
   .col.dated .track { grid-column: 1 / -1; grid-row: 2; }
   .axis-row { grid-template-columns: 0 minmax(0, 1fr) 0 0; gap: 0; padding-left: 0; }
-  .col.dated .goal-toggle { display: none; }
   .road-note { grid-column: 1 / -1; }
   .screen-col { padding: 14px 14px 40px; }
   .sheet { width: 100vw; padding: calc(20px + env(safe-area-inset-top)) 18px 32px; }
