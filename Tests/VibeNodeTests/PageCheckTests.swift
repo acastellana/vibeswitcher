@@ -74,6 +74,24 @@ struct PageCheckTests {
         let made = WireVectors.sampleBoard(now: Date().timeIntervalSince1970, worker: site.session.id)
         try BoardStore(root: repo.path).update { $0.tasks = made.tasks }
 
+        // A second lead session of the project that its board doesn't name: a lead it replaced, still running, as four
+        // were on the real node on 2026-11-23 while a merge held the rotation gate (the engine ends a replaced lead only
+        // under it, exclusively). The gate held here the same way, shared, until the page has looked: the project's
+        // lead keeps its Team tab, and the replaced one's row says replaced and has none.
+        let gate = try #require(FileLock.attempt(LeadRotation.gate(repo.path), shared: true))
+        defer { gate.release() }
+        let former = try await HookedAgent.start(node, folder: repo, label: "Lead · example-app")
+        let formerID = NodeIds.session(host: former.session.id)
+        var leads: [[String: Any]] = []
+        var marked = false
+        let until = MacTime.real.awake() + 60
+        while !marked, MacTime.real.awake() < until {
+            leads = ((try? await node.statusJSON())?["leads"] as? [[String: Any]]) ?? []
+            marked = leads.contains { ($0["replaced"] as? [String])?.contains(formerID) == true && $0["session"] as? String == NodeIds.session(host: lead.id) }
+            if !marked { try await Task.sleep(nanoseconds: 300_000_000) }
+        }
+        try #require(marked, "the second lead session never read as replaced: \(leads)\n\(node.said)")
+
         // A listed session's shell request through the shell plugin (`vs-shell`, filed as its tool server files one): an
         // agent's session (the fake `claude`, hooked) whose first act is the request, so its card shows under its chat.
         let asker = try await Self.askShell(node, command: "echo page-check-ran")
@@ -97,6 +115,7 @@ struct PageCheckTests {
             "leadHref": "#/s/" + NodeIds.session(host: lead.id), "question": "Launch the onboarding page to the testers",
             "shellHref": "#/s/" + NodeIds.session(host: asker.id), "shell": "echo page-check-ran",
             "boardHref": "#/p/" + NodeIds.project(root: repo.path), "board": made.tasks[0].title,
+            "replacedHref": "#/s/" + formerID,
             "plugin": "Shell requests", "setting": "Boost",
         ]
         let expectFile = scratch.url("page-check-expect.json")
@@ -111,7 +130,7 @@ struct PageCheckTests {
                          output: .path(said.path, flags: O_WRONLY | O_TRUNC), limit: 240)
         }
         let table = (try? String(contentsOf: said, encoding: .utf8)) ?? ""
-        for row in ["Session list", "Chat", "Question card", "Shell card", "Board", "This node", "Settings", "Console"] {
+        for row in ["Session list", "Chat", "Question card", "Team tab", "Replaced lead", "Shell card", "Board", "This node", "Settings", "Console"] {
             #expect(table.split(separator: "\n").contains { $0.hasPrefix(row + " ") && $0.contains(" pass ") }, "\(row):\n\(table)")
         }
         #expect(status == 0, "\(table)\n\(node.said)")

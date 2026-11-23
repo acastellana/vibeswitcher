@@ -29,15 +29,17 @@ struct HookedAgent {
     let pid: pid_t
     let folder: URL
 
-    static func start(_ node: ScratchNode, project: String = "project") async throws -> HookedAgent {
-        let folder = node.home.appendingPathComponent(project)
+    /// `folder`: where it works (`project` under the home by default); `label`: its host label ("Lead · NAME" makes it a
+    /// lead session of the project at `folder`, as a lead the project replaced is).
+    static func start(_ node: ScratchNode, project: String = "project", folder at: URL? = nil, label: String = "Test") async throws -> HookedAgent {
+        let folder = at ?? node.home.appendingPathComponent(project)
         let bin = node.root.appendingPathComponent("fake-bin")
         for made in [folder, bin] { try FileManager.default.createDirectory(at: made, withIntermediateDirectories: true) }
         let claude = bin.appendingPathComponent("claude")
         if !FileManager.default.fileExists(atPath: claude.path) {
             try copyClosedOnExec(URL(fileURLWithPath: "/bin/sleep").resolvingSymlinksInPath().path, to: claude.path)
         }
-        let session = try await node.spawn("exec '\(claude.path)' 600", cwd: folder.path, agent: "claude")
+        let session = try await node.spawn("exec '\(claude.path)' 600", cwd: folder.path, label: label, agent: "claude")
         var found: pid_t = 0
         let started = await eventually(timeout: 60) {
             found = Platform.Processes.children(session.childPID).first ?? session.childPID

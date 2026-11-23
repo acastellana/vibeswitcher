@@ -36,6 +36,14 @@ const has = (selector, text) => `(() => {
   return found ? found.innerText.replace(/\\s+/g, ' ').trim().slice(0, 100) : null;
 })()`;
 
+// Clicks the visible view tab `selector` matches whose text is `text`: true once clicked (never a control that acts).
+const clickTab = (selector, text) => `(() => {
+  const el = [...document.querySelectorAll(${JSON.stringify(selector)})].find((e) => e.innerText.trim() === ${JSON.stringify(text)} && e.offsetParent);
+  if (!el) return null;
+  el.click();
+  return true;
+})()`;
+
 async function run() {
   fs.mkdirSync(out, { recursive: true });
   const browser = await launch(chromePath, out);
@@ -68,6 +76,32 @@ async function run() {
     const question = await page.until(has('.chat .card', expect.question), WAIT);
     await page.shot('question-card');
     record('Question card', question, question || `no card with "${expect.question}"`);
+
+    // Team tab: the project's lead's inspector has it, its tasks the board's (opened by the lead's id, never the first
+    // LEAD row: a lead session the project replaced may run beside it).
+    const teamTab = await page.until(clickTab('.inspector .segmented button', 'Team'), WAIT);
+    const team = teamTab && await page.until(has('.inspector .task', expect.board), WAIT);
+    await page.shot('team-tab');
+    record('Team tab', team, team || (teamTab ? `no task "${expect.board}" in the Team tab` : 'no Team tab on the lead'));
+
+    // Replaced lead: a lead session its project replaced says so on its row (its tag grey), and has no Team tab.
+    if (expect.replacedHref) {
+      await page.go(expect.replacedHref);
+      const replaced = await page.until(`(() => {
+        const row = [...document.querySelectorAll('.sidebar .row')].find((r) => decodeURIComponent(r.querySelector('.row-link')?.getAttribute('href') || '') === ${JSON.stringify(expect.replacedHref)});
+        if (!row || !row.querySelector('.lead-tag.replaced') || !/replaced/i.test(row.innerText)) return null;
+        const tab = [...document.querySelectorAll('.inspector .segmented button')].find((b) => b.innerText.trim() === 'Team');
+        return document.querySelector('.inspector') && (!tab || tab.hidden) ? 'marked replaced, no Team tab' : null;
+      })()`, WAIT);
+      await page.shot('replaced-lead');
+      const seen = replaced ? null : await page.evaluate(`(() => {
+        const row = [...document.querySelectorAll('.sidebar .row')].find((r) => decodeURIComponent(r.querySelector('.row-link')?.getAttribute('href') || '') === ${JSON.stringify(expect.replacedHref)});
+        const tab = [...document.querySelectorAll('.inspector .segmented button')].find((b) => b.innerText.trim() === 'Team');
+        return row ? 'its row: ' + row.innerText.replace(/\\s+/g, ' ').slice(0, 120) + (row.querySelector('.lead-tag.replaced') ? ' (tag grey)' : ' (tag not grey)')
+          + (tab && !tab.hidden ? '; a Team tab' : '; no Team tab') : 'no row for it';
+      })()`);
+      record('Replaced lead', replaced, replaced || seen);
+    }
 
     // Shell card: the shell plugin's card under the asking session's chat, its command whole.
     await page.go(expect.shellHref);

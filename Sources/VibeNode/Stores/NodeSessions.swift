@@ -162,7 +162,8 @@ public final class NodeSessions: @unchecked Sendable {
         let hostedNow = Locked<[HostSession]>([])
         scanHosted = hostedNow
         self.scanner = scanner ?? SessionScanner(processes: {
-            ProcessTable.trySnapshot().map { HostedAgents.overlay($0, hosted: hostedNow.get(), scratch: onlyHosted) }
+            // The server's parent is this node's session host: a session under another (a scratch node's) isn't this node's.
+            ProcessTable.trySnapshot().map { HostedAgents.overlay($0, hosted: hostedNow.get(), scratch: onlyHosted, ownHost: getppid()) }
         }, stateDir: { state })
         queue.setSpecific(key: onQueue, value: ObjectIdentifier(self))
     }
