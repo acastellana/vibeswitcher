@@ -98,7 +98,7 @@ final class ScratchNode: @unchecked Sendable {
          path: String = "/usr/bin:/bin", holdFirstLook: Bool = false, serverKnowsFirstLook: Bool = true, testChild: String? = nil,
          socketName: String = "host.sock", sealLife: Int? = nil, owner: pid_t = getpid(), reusing: URL? = nil, waitForServer: Bool = true,
          build: URL? = nil, hostArguments: [String] = [], installRoot: URL? = nil, claudeProgram: String = "claude",
-         hostPrefix: [String] = [], hostBacktrace: Bool = false) async throws {
+         hostPrefix: [String] = [], hostBacktrace: Bool = false, noInotify: Bool = false) async throws {
         root = try reusing ?? scratch.shortFolder("vsn")
         home = root.appendingPathComponent("home", isDirectory: true)
         nodeRoot = build ?? root.appendingPathComponent("build", isDirectory: true)
@@ -149,6 +149,15 @@ final class ScratchNode: @unchecked Sendable {
         if let sealLife { arguments += ["--test-user-seal-life", String(sealLife)] }
         if let installRoot {
             arguments += ["--server-arg", ServerArguments.testInstallRootFlag + installRoot.path, "--install-root", installRoot.path]
+        }
+        // `noInotify`: the host and server make no inotify instance, as when the user has none left (their watches all
+        // unmade). The census (`VIBESWITCHER_TEST_INOTIFY_CENSUS`, a folder, in the tests' environment): each writes a
+        // file named by its pid there when it makes its instance, for a count of a mix's instances.
+        if noInotify || ProcessInfo.processInfo.environment["VIBESWITCHER_TEST_NO_INOTIFY"] == "1" {
+            arguments += ["--test-no-inotify", "--server-arg", ServerArguments.testNoInotifyFlag]
+        }
+        if let census = ProcessInfo.processInfo.environment["VIBESWITCHER_TEST_INOTIFY_CENSUS"], census.hasPrefix("/") {
+            arguments += ["--test-inotify-census", census, "--server-arg", ServerArguments.testInotifyCensusFlag + census]
         }
         arguments += hostArguments
         let executable = nodeRoot.appendingPathComponent("bin/vibeswitcher-host").path

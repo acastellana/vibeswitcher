@@ -73,6 +73,9 @@ public struct ServerArguments: Equatable, Sendable {
     /// A scratch server's idle limits (`NodeServer.Idle`): this many seconds for a connection's first request, twice it
     /// for one that only sits there (30 s and 10 minutes otherwise).
     public var testIdle: Double?
+    /// A scratch server's file watch tests (`Platform.Watches.testNoInstance`, `testCensus`).
+    public var testNoInotify = false
+    public var testInotifyCensus: String?
     /// The test flags a server with `--node` left out, each as given.
     public var refused: [String] = []
 
@@ -91,6 +94,8 @@ public struct ServerArguments: Equatable, Sendable {
     public static let testUpdateAnswersFlag = "--test-update-answers="
     public static let testStallFlag = "--test-stall="
     public static let testIdleFlag = "--test-idle="
+    public static let testNoInotifyFlag = "--test-no-inotify"
+    public static let testInotifyCensusFlag = "--test-inotify-census="
 
     /// What a page may do with a session's terminal (`TerminalRelay.Mode`; nil: no terminal, `term.open` is
     /// `unknown-kind`): on the user's node, watch it; on a scratch server, what its test flag says, read-write first.
@@ -125,6 +130,8 @@ public struct ServerArguments: Equatable, Sendable {
         var updateAnswers: String?
         var stall: Double?
         var idle: Double?
+        var noInotify = false
+        var census: String?
         var tests: [String] = []
         var index = 1
         func value() -> String? {
@@ -197,6 +204,14 @@ public struct ServerArguments: Equatable, Sendable {
             case testWebPairFlag:
                 tests.append(word)
                 webPair = true
+            case testNoInotifyFlag:
+                tests.append(word)
+                noInotify = true
+            case _ where word.hasPrefix(testInotifyCensusFlag):
+                tests.append(word)
+                let path = String(word.dropFirst(testInotifyCensusFlag.count))
+                guard path.hasPrefix("/") else { return .failure(Usage("\(testInotifyCensusFlag) needs an absolute path")) }
+                census = path
             case testWebTerminalFlag:
                 tests.append(word)
                 webTerminal = true
@@ -236,6 +251,8 @@ public struct ServerArguments: Equatable, Sendable {
         parsed.testUpdateAnswers = updateAnswers
         parsed.testStall = stall
         parsed.testIdle = idle
+        parsed.testNoInotify = noInotify
+        parsed.testInotifyCensus = census
         parsed.testCgroupRoot = cgroupRoot
         parsed.testRunnerAbove = runnerAbove
         if node {
@@ -255,6 +272,8 @@ public struct ServerArguments: Equatable, Sendable {
             parsed.testUpdateAnswers = nil
             parsed.testStall = nil
             parsed.testIdle = nil
+            parsed.testNoInotify = false
+            parsed.testInotifyCensus = nil
         }
         return .success(parsed)
     }

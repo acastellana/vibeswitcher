@@ -108,7 +108,7 @@ struct AnswerVoiceTests {
             let hello = try #require(try page.next())
             #expect(hello["kinds"]?.array?.contains(.string("draft")) == true, "\(hello)")
             _ = try page.send("subscribe", ["sub": .string("s3"), "collection": .string("cards")])
-            _ = try #require(try page.until { $0["kind"]?.string == "snapshot" }, "no snapshot: \(node.said)")
+            _ = try #require(try page.until { $0["kind"]?.string == "snapshot" }, "no snapshot (\(page.ended)): \(node.said)")
             return (node, lead, page)
         } catch {
             node.stop()

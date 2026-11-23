@@ -2,6 +2,7 @@ import Foundation
 import Testing
 @testable import VibeCore
 @testable import VibeNode
+@testable import VibePlatform
 
 /// A lead's board on the live wire and the command line (the parity table's gap 4): `BoardValue` reads a board as the
 /// page and `vibeswitcher board` show it (its groups, its states in the Mac's words, a dim line, its facts), every
@@ -323,6 +324,29 @@ struct BoardTests {
         board.tasks.removeLast()
         try world.write(board)
         try await world.waitFor { $0?["tasks"]?.array?.count == 4 }
+    }
+
+    /// A board whose folder's watch couldn't be made (the system had none left) is looked at every `unwatchedEvery`,
+    /// asking for its watch each time: here the look the clock would make, which finds the change and then watches.
+    @Test(NodeTraits.linuxOnly) func aBoardWithoutItsWatchIsLookedAtSoonAndWatchedAgain() async throws {
+        let world = try BoardWorld(scratch)
+        defer { world.stop() }
+        let folder = ((world.root.path as NSString).standardizingPath as NSString).appendingPathComponent(".vibeswitcher")
+        #if os(Linux)
+        InotifyHub.shared.failNextWatch(of: folder)
+        #endif
+        world.start()
+        try await world.waitFor { $0?["tasks"] == .array([]) }
+        #expect(world.queue.sync { world.boards.isWatched(world.project) } == false, "the forced failure didn't happen")
+        try world.write(WireVectors.sampleBoard(now: world.now.timeIntervalSince1970))
+        world.queue.sync { world.boards.lookUnwatched() }
+        try await world.waitFor { $0?["tasks"]?.array?.count == 5 }
+        #expect(world.queue.sync { world.boards.isWatched(world.project) })
+        var board = WireVectors.sampleBoard(now: world.now.timeIntervalSince1970)
+        board.tasks.removeLast()
+        try world.write(board)
+        try await world.waitFor { $0?["tasks"]?.array?.count == 4 }
+        #expect(LiveBoards.unwatchedEvery <= NodeSessions.Timing().scanEvery, "an unwatched board is looked at less often than sessions are scanned")
     }
 
     /// A page that held the stream's `seq` and came back gets one delta, not a snapshot.

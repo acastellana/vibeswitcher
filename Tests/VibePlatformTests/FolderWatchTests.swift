@@ -226,9 +226,10 @@ struct FolderWatchTests {
         try Self.make(folders.watched.appendingPathComponent("first"))
         #expect(heard.wait(timeout: .now() + Self.hangGuard) == .success)
         #if os(Linux)
-        // Closed, so nothing more can come: the file made now is told to nobody.
-        #expect(watch.system.released.wait(timeout: .now() + Self.hangGuard) == .success)
+        // Stopped, so nothing more can come: the file made now, read by the instance, is told to nobody.
+        #expect(watch.system.client.isStopped)
         try Self.make(folders.watched.appendingPathComponent("second"))
+        InotifyHub.shared.flush()
         queue.sync {}
         #expect(calls.value == 1)
         #endif
@@ -333,43 +334,28 @@ struct FolderWatchTests {
         return counts
     }
 
-    /// The inode of the wake pipe a watch holds until it is stopped or reads on a queue (its `wakeRead`, read through
-    /// the watch's mirror: private to it).
-    static func wakePipe(_ watch: Platform.FolderWatch) throws -> UInt64 {
-        let held = Mirror(reflecting: watch.system).children.first { $0.label == "wakeRead" }?.value as? Int32
-        let end = try #require(held, "the watch's wake pipe wasn't found: \(Mirror(reflecting: watch.system).children.map { $0.label ?? "?" })")
-        var status = stat()
-        try #require(fstat(end, &status) == 0, "errno \(errno)")
-        return UInt64(status.st_ino)
-    }
-
-    /// 200 watches made and stopped, each of the ways a watch is used in turn: none leaves a descriptor. Each is
-    /// waited for to have closed what it held (`released`) before the next. Only what is this test's own is counted
-    /// (`owned`), exactly: the inotify descriptors watching its folder, descriptors on the folder, and the wake pipes
-    /// of its watches (none before: the folder is new); the process's other descriptors are the tests' running beside
-    /// this one. A first live watch of two of the ways checks the count sees what a watch holds.
-    @Test func twoHundredWatchesLeaveNoDescriptor() throws {
+    /// 200 watches made and stopped, each of the ways a watch is used in turn: none leaves a kernel watch, and none
+    /// holds a descriptor of its own (they share the process's one inotify instance). Only what is this test's own is
+    /// counted (`owned`): the inotify descriptors with a watch on its folder, and descriptors on the folder. A live watch
+    /// of two of the ways checks the count sees what a watch holds: the instance, once, whatever else it watches.
+    @Test func twoHundredWatchesLeaveNoWatchAndHoldNoDescriptor() throws {
         let folders = try Self.folders()
         defer { try? FileManager.default.removeItem(at: folders.root) }
         let queue = DispatchQueue(label: "folder-watch-tests.cycles")
-        var pipes = Set<UInt64>()
         for cycle in 0..<200 {
             let watch: Platform.FolderWatch
             switch cycle % 4 {
             case 0:
                 // Made and stopped, never read.
                 watch = try #require(Platform.FolderWatch(path: folders.watched.path))
-                pipes.insert(try Self.wakePipe(watch))
             case 1:
                 // A change read, then stopped.
                 watch = try #require(Platform.FolderWatch(path: folders.watched.path))
-                pipes.insert(try Self.wakePipe(watch))
                 try Self.make(folders.watched.appendingPathComponent("cycle-\(cycle)"))
                 #expect(Self.next(watch) == .entries)
             case 2:
                 // Stopped under a wait.
                 watch = try #require(Platform.FolderWatch(path: folders.watched.path))
-                pipes.insert(try Self.wakePipe(watch))
                 let answered = DispatchSemaphore(value: 0)
                 Thread.detachNewThread {
                     _ = watch.wait()
@@ -383,26 +369,289 @@ struct FolderWatchTests {
                 let descriptor = open(folders.watched.path, O_RDONLY)
                 try #require(descriptor >= 0)
                 watch = try #require(Platform.FolderWatch(descriptor: descriptor))
-                pipes.insert(try Self.wakePipe(watch))
                 watch.deliver(on: queue) { _ in }
             }
             if cycle == 0 || cycle == 3 {
-                // Live: its inotify descriptor, and its wake pipe's two ends until it reads on a queue; the handed
-                // descriptor is closed by the watch as it is made. (Only twice: each count lists /proc/self/fd, a
-                // descriptor ProcessesTests' own-list check sees when it reads at that moment.)
-                let live = try Self.owned(watching: folders.watched, pipes: pipes)
-                #expect(live.inotify == 1 && live.folder == 0 && live.pipes == (cycle == 3 ? 0 : 2), "cycle \(cycle): \(live)")
+                // Live: one inotify descriptor watches the folder (the process's instance); the handed descriptor is
+                // closed by the watch as it is made. (Only twice: each count lists /proc/self/fd, a descriptor
+                // ProcessesTests' own-list check sees when it reads at that moment.)
+                let live = try Self.owned(watching: folders.watched)
+                #expect(live.inotify == 1 && live.folder == 0, "cycle \(cycle): \(live)")
             }
             watch.stop()
-            try #require(watch.system.released.wait(timeout: .now() + Self.hangGuard) == .success, "cycle \(cycle) still holds a descriptor")
+            // The last watch of the folder gone: its kernel watch removed with it.
+            try #require(try Self.owned(watching: folders.watched).inotify == 0, "cycle \(cycle) left its kernel watch")
         }
         // A watch that can't be made holds nothing either.
         for _ in 0..<50 { #expect(Platform.FolderWatch(path: folders.root.appendingPathComponent("never-made").path) == nil) }
-        #expect(pipes.count == 200, "\(pipes.count) wake pipes seen")
-        let after = try Self.owned(watching: folders.watched, pipes: pipes)
-        #expect(after.inotify == 0, "\(after.inotify) inotify descriptors on the watched folder left open")
-        #expect(after.folder == 0, "\(after.folder) descriptors on the watched folder left open")
-        #expect(after.pipes == 0, "\(after.pipes) ends of the watches' wake pipes left open")
+        let after = try Self.owned(watching: folders.watched)
+        #expect(after.inotify == 0 && after.folder == 0, "\(after)")
+    }
+
+    /// Several hundred watches, of folders and of files, in this process: one inotify instance holds them all.
+    @Test func severalHundredWatchesUseOneInstance() throws {
+        let folders = try Self.folders()
+        defer { try? FileManager.default.removeItem(at: folders.root) }
+        var watches: [AnyObject] = []
+        defer {
+            for watch in watches {
+                (watch as? Platform.FolderWatch)?.stop()
+                (watch as? Platform.FileWatch)?.stop()
+            }
+        }
+        for index in 0..<300 {
+            let folder = folders.watched.appendingPathComponent("f\(index)", isDirectory: true)
+            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: false)
+            let file = folder.appendingPathComponent("file")
+            try Self.make(file)
+            watches.append(try #require(Platform.FolderWatch(path: folder.path), "watch \(index)"))
+            watches.append(try #require(Platform.FileWatch(path: file.path), "file watch \(index)"))
+        }
+        // Two watches of one folder share its kernel watch.
+        watches.append(try #require(Platform.FolderWatch(path: folders.watched.appendingPathComponent("f0").path)))
+        let descriptors = try Self.descriptors()
+        #expect(descriptors.inotify == 1, "\(descriptors.inotify) inotify instances for \(watches.count) watches")
+        let census = InotifyHub.shared.census
+        #expect(census.watches >= 600 && census.clients >= 601, "\(census)")
+        // And each is heard.
+        try Self.make(folders.watched.appendingPathComponent("f299/new"))
+        let last = try #require(watches[598] as? Platform.FolderWatch)
+        #expect(Self.next(last) == .entries)
+    }
+
+    /// Two clients of one folder's kernel watch, asking for different events: each is told only its own; one stopped,
+    /// the other still hears (the kernel watch goes with the last).
+    @Test func twoClientsOfOnePathEachGetOnlyTheirs() throws {
+        let folders = try Self.folders()
+        defer { try? FileManager.default.removeItem(at: folders.root) }
+        let hub = InotifyHub.shared
+        let made = try #require(hub.watch(folders.watched.path, mask: UInt32(IN_CREATE), folder: true))
+        let removed = try #require(hub.watch(folders.watched.path, mask: UInt32(IN_DELETE), folder: true))
+        defer {
+            made.stop()
+            removed.stop()
+        }
+        #expect(made.wd == removed.wd, "one kernel watch for the folder")
+        let (madeTold, removedTold) = (Box<[UInt32]>([]), Box<[UInt32]>([]))
+        let (madeQueue, removedQueue) = (DispatchQueue(label: "fw.made"), DispatchQueue(label: "fw.removed"))
+        let heard = DispatchSemaphore(value: 0)
+        made.deliver(on: madeQueue) { madeTold.value.append($0); heard.signal() }
+        removed.deliver(on: removedQueue) { removedTold.value.append($0); heard.signal() }
+        let file = folders.watched.appendingPathComponent("file")
+        try Self.make(file)
+        #expect(heard.wait(timeout: .now() + Self.hangGuard) == .success)
+        hub.flush()
+        madeQueue.sync {}
+        removedQueue.sync {}
+        #expect(madeTold.value.count == 1 && madeTold.value[0] & UInt32(IN_CREATE) != 0, "\(madeTold.value)")
+        #expect(removedTold.value.isEmpty, "the delete client was told of a creation: \(removedTold.value)")
+        #expect(unlink(file.path) == 0)
+        #expect(heard.wait(timeout: .now() + Self.hangGuard) == .success)
+        hub.flush()
+        madeQueue.sync {}
+        removedQueue.sync {}
+        #expect(removedTold.value.count == 1 && removedTold.value[0] & UInt32(IN_DELETE) != 0, "\(removedTold.value)")
+        #expect(madeTold.value.count == 1, "the create client was told of a removal: \(madeTold.value)")
+        // The first stopped: the kernel watch stays for the other, which still hears.
+        made.stop()
+        #expect(try Self.owned(watching: folders.watched).inotify == 1)
+        try Self.make(file)
+        #expect(unlink(file.path) == 0)
+        #expect(heard.wait(timeout: .now() + Self.hangGuard) == .success)
+        removed.stop()
+        #expect(try Self.owned(watching: folders.watched).inotify == 0, "the last client gone, its kernel watch stays")
+    }
+
+    /// A watch the system couldn't give is counted, and the first such told once, through the process's own line.
+    @Test func aWatchThatCouldntBeMadeIsCountedAndToldOnce() {
+        let told = Box<[String]>([])
+        let was = Platform.Watches.whenFirstUnmade
+        Platform.Watches.whenFirstUnmade = { line in told.value.append(line) }
+        defer { Platform.Watches.whenFirstUnmade = was }
+        let before = Platform.Watches.unmade
+        Platform.Watches.noteUnmade("/a", "no inotify instance (errno 24)")
+        Platform.Watches.noteUnmade("/b", "no inotify instance (errno 24)")
+        #expect(Platform.Watches.unmade == before + 2)
+        // Told at the process's first only.
+        #expect(told.value.count == (before == 0 ? 1 : 0), "\(told.value)")
+        #expect(told.value.allSatisfy { $0.contains("/a") && $0.contains("next housekeeping") })
+    }
+
+    /// The kernel's queue for the instance overflowing (its reads held while more events come than it keeps): every
+    /// watch is told to look again, one of a folder where nothing happened included.
+    @Test func anOverflowIsToldToEveryWatch() throws {
+        let folders = try Self.folders()
+        defer { try? FileManager.default.removeItem(at: folders.root) }
+        let busy = try #require(Platform.FolderWatch(path: folders.watched.path))
+        let quiet = try #require(Platform.FolderWatch(path: folders.outside.path))
+        defer {
+            busy.stop()
+            quiet.stop()
+        }
+        let queued = Int((try? String(contentsOfFile: "/proc/sys/fs/inotify/max_queued_events", encoding: .utf8))?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? "") ?? 16_384
+        try InotifyHub.shared.holdingReads {
+            // A creation and a removal each: two events a turn, past what the kernel keeps.
+            let file = folders.watched.appendingPathComponent("churn")
+            for _ in 0..<(queued / 2 + 64) {
+                try Self.make(file)
+                guard unlink(file.path) == 0 else { throw Failure(what: "errno \(errno)") }
+            }
+        }
+        #expect(Self.next(quiet) == .entries, "the quiet folder's watch wasn't told of the overflow")
+        #expect(Self.next(busy) == .entries)
+    }
+
+    /// A client that keeps names gets each entry name its own events carry, in order, and only those (another client's
+    /// mask's events give it none); one that doesn't keep names gets none.
+    @Test func aClientThatKeepsNamesGetsItsEventsNames() throws {
+        let folders = try Self.folders()
+        defer { try? FileManager.default.removeItem(at: folders.root) }
+        let hub = InotifyHub.shared
+        let made = try #require(hub.watch(folders.watched.path, mask: UInt32(IN_CREATE) | UInt32(IN_MOVED_TO), folder: true, names: true))
+        let plain = try #require(hub.watch(folders.watched.path, mask: UInt32(IN_DELETE), folder: true))
+        defer {
+            made.stop()
+            plain.stop()
+        }
+        try Self.make(folders.watched.appendingPathComponent("a.tmp"))
+        #expect(rename(folders.watched.appendingPathComponent("a.tmp").path, folders.outside.appendingPathComponent("a").path) == 0)
+        try Self.make(folders.outside.appendingPathComponent("b"))
+        #expect(rename(folders.outside.appendingPathComponent("b").path, folders.watched.appendingPathComponent("b").path) == 0)
+        #expect(unlink(folders.watched.appendingPathComponent("b").path) == 0)
+        #expect(made.takeNames() == ["a.tmp", "b"])
+        #expect(made.takeNames().isEmpty, "taken once")
+        #expect(plain.takeNames().isEmpty)
+    }
+
+    /// An overflow that drops a watch's end (its folder removed and made again while the kernel's queue was full, so its
+    /// IN_DELETE_SELF and IN_IGNORED were never queued): after it, the watch is found gone (its path names another
+    /// inode now) and told `folderGone`, and is out of the table; a watch whose folder is still there is told only to
+    /// look again, and still hears.
+    @Test func anEndAnOverflowDroppedIsFoundAgain() throws {
+        let folders = try Self.folders()
+        defer { try? FileManager.default.removeItem(at: folders.root) }
+        let doomed = folders.root.appendingPathComponent("doomed", isDirectory: true)
+        try FileManager.default.createDirectory(at: doomed, withIntermediateDirectories: false)
+        let gone = try #require(Platform.FolderWatch(path: doomed.path))
+        let kept = try #require(Platform.FolderWatch(path: folders.outside.path))
+        // The churn's folder, watched so its events fill the queue.
+        let busy = try #require(Platform.FolderWatch(path: folders.watched.path))
+        defer {
+            gone.stop()
+            kept.stop()
+            busy.stop()
+        }
+        let queued = Int((try? String(contentsOfFile: "/proc/sys/fs/inotify/max_queued_events", encoding: .utf8))?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? "") ?? 16_384
+        try InotifyHub.shared.holdingReads {
+            let file = folders.watched.appendingPathComponent("churn")
+            for _ in 0..<(queued / 2 + 64) {
+                try Self.make(file)
+                guard unlink(file.path) == 0 else { throw Failure(what: "errno \(errno)") }
+            }
+            // The queue is full: the folder's end isn't queued. Made again at the same path: another inode.
+            guard rmdir(doomed.path) == 0 else { throw Failure(what: "errno \(errno)") }
+            try FileManager.default.createDirectory(at: doomed, withIntermediateDirectories: false)
+        }
+        // Only the overflow came for it, then the look's verdict: gone.
+        #expect(Self.next(gone)?.contains(.folderGone) == true, "the watch on the removed folder wasn't told it went")
+        #expect(Self.next(busy) == .entries)
+        #expect(Self.next(kept) == .entries)
+        #expect(gone.system.client.isStopped == false)
+        #expect(try Self.owned(watching: doomed).inotify == 0, "the new folder at the path got a kernel watch nobody asked for")
+        try Self.make(folders.outside.appendingPathComponent("after"))
+        #expect(Self.next(kept) == .entries, "the live watch stopped hearing")
+    }
+
+    /// `stop()` from another thread while the handler runs returns only once the handler has: after it, nothing of the
+    /// watch's runs. (From inside the handler it returns at once: `aHandlerCanStopItsOwnWatch`.)
+    @Test func stopFromAnotherThreadWaitsForTheRunningHandler() throws {
+        let folders = try Self.folders()
+        defer { try? FileManager.default.removeItem(at: folders.root) }
+        let watch = try #require(Platform.FolderWatch(path: folders.watched.path))
+        let (entered, release, stopped) = (DispatchSemaphore(value: 0), DispatchSemaphore(value: 0), DispatchSemaphore(value: 0))
+        let running = Box(false)
+        watch.deliver(on: DispatchQueue(label: "folder-watch-tests.exact")) { _ in
+            running.value = true
+            entered.signal()
+            release.wait()
+            running.value = false
+        }
+        try Self.make(folders.watched.appendingPathComponent("one"))
+        #expect(entered.wait(timeout: .now() + Self.hangGuard) == .success)
+        Thread.detachNewThread {
+            watch.stop()
+            stopped.signal()
+        }
+        // The one bounded wait that is the assertion: stop hasn't returned while the handler runs.
+        #expect(stopped.wait(timeout: .now() + 0.3) == .timedOut, "stop() returned while its handler ran")
+        release.signal()
+        #expect(stopped.wait(timeout: .now() + Self.hangGuard) == .success)
+        #expect(running.value == false, "stop() returned before the handler did")
+    }
+
+    /// The process's note of a watch that couldn't be made runs out of the hub's lock: a note that asks the hub
+    /// something (here its census) doesn't hang.
+    @Test func theUnmadeNoteRunsOutOfTheHubsLock() throws {
+        let folders = try Self.folders()
+        defer { try? FileManager.default.removeItem(at: folders.root) }
+        let told = Box<[String]>([])
+        let was = Platform.Watches.whenFirstUnmade
+        Platform.Watches.whenFirstUnmade = { line in
+            _ = InotifyHub.shared.census
+            told.value.append(line)
+        }
+        defer { Platform.Watches.whenFirstUnmade = was }
+        Platform.Watches.resetForTests()
+        InotifyHub.shared.failNextWatch(of: folders.watched.path)
+        let done = DispatchSemaphore(value: 0)
+        let made = Box<Bool?>(nil)
+        Thread.detachNewThread {
+            made.value = Platform.FolderWatch(path: folders.watched.path) != nil
+            done.signal()
+        }
+        #expect(done.wait(timeout: .now() + Self.hangGuard) == .success, "the note hung under the hub's lock")
+        #expect(made.value == false)
+        #expect(told.value.count == 1 && told.value.first?.contains(folders.watched.path) == true, "\(told.value)")
+        #expect(Platform.Watches.unmade >= 1)
+        // The next watch of it is made.
+        let watch = try #require(Platform.FolderWatch(path: folders.watched.path))
+        watch.stop()
+    }
+
+    /// A watch stopped while its events are on their way (read and waiting on its queue behind a block, or still in the
+    /// kernel's queue): its handler is never called.
+    @Test func aWatchStoppedWithEventsInFlightIsToldNothing() throws {
+        let folders = try Self.folders()
+        defer { try? FileManager.default.removeItem(at: folders.root) }
+        let calls = Box(0)
+        let queue = DispatchQueue(label: "folder-watch-tests.in-flight")
+        // Told, and its block behind one that waits.
+        let first = try #require(Platform.FolderWatch(path: folders.watched.path))
+        first.deliver(on: queue) { _ in calls.value += 1 }
+        let release = DispatchSemaphore(value: 0)
+        queue.async { release.wait() }
+        try Self.make(folders.watched.appendingPathComponent("one"))
+        InotifyHub.shared.flush()
+        first.stop()
+        release.signal()
+        queue.sync {}
+        // Still in the kernel's queue when it stops.
+        let second = try #require(Platform.FolderWatch(path: folders.watched.path))
+        second.deliver(on: queue) { _ in calls.value += 1 }
+        try InotifyHub.shared.holdingReads {
+            try Self.make(folders.watched.appendingPathComponent("two"))
+            second.stop()
+        }
+        InotifyHub.shared.flush()
+        queue.sync {}
+        #expect(calls.value == 0)
+        // A watch made after both still hears.
+        let third = try #require(Platform.FolderWatch(path: folders.watched.path))
+        defer { third.stop() }
+        try Self.make(folders.watched.appendingPathComponent("three"))
+        #expect(Self.next(third) == .entries)
     }
     #endif
 }

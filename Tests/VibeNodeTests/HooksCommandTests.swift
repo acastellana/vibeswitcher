@@ -2,6 +2,7 @@ import Foundation
 import Testing
 @testable import VibeCore
 import VibeNode
+@testable import VibePlatform
 
 /// `vibeswitcher hooks install|remove` through a scratch node's server (the start plan's S6, ST-D17): the server writes
 /// in its own home (the scratch home), as the app, so the change is sealed; the command line writes nothing and its
@@ -351,7 +352,7 @@ struct HooksCommandTests {
         // review: one made in a folder the install had just made could come and go before the watch was added).
         let folder = bin(node)
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: false, attributes: [.posixPermissions: 0o700])
-        let watch = try NameWatch(folder.deletingLastPathComponent(), sub: folder.lastPathComponent)
+        let watch = try NameWatch(folder)
         // Stopped on every path out, and its thread waited for.
         defer { watch.stop() }
         let ran = try await node.runOnTerminal(["hooks", "install"])
@@ -381,95 +382,39 @@ struct HooksCommandTests {
     }
 }
 
-/// The names made in a folder or renamed into it, from now until `stop()`, the folder being `parent/sub`, which may be
-/// made later: an inotify watch on `parent` adds one on `sub` as `sub` appears there, then lists `sub` once for what
-/// came between. Read on a thread of its own, which polls the watch and a wake pipe (no spinning) and which `stop()`
-/// waits for.
+/// The names made in a folder or renamed into it, from now until `stop()`: a client of the process's inotify instance
+/// that keeps its events' names (`InotifyHub`), so the test makes no instance of its own (the user's 128 are shared by
+/// every scratch node a loaded run starts).
 private final class NameWatch: @unchecked Sendable {
-    private let parent: URL
-    private let sub: String
-    private let inotify: Int32
-    private let wake: [Int32]
     private let lock = NSLock()
-    private var names: Set<String> = []
-    private var subWatch: Int32 = -1
-    private var stopped = false
-    private let finished = DispatchSemaphore(value: 0)
+    #if os(Linux)
+    private let client: InotifyClient
+    #endif
+    private var seen: Set<String>?
 
-    init(_ parent: URL, sub: String) throws {
-        self.parent = parent
-        self.sub = sub
+    init(_ folder: URL) throws {
         #if os(Linux)
-        inotify = inotify_init1(Int32(IN_NONBLOCK) | Int32(IN_CLOEXEC))
-        var ends: [Int32] = [-1, -1]
-        guard inotify >= 0, inotify_add_watch(inotify, parent.path, UInt32(IN_CREATE) | UInt32(IN_MOVED_TO)) >= 0,
-              pipe(&ends) == 0 else {
-            if inotify >= 0 { close(inotify) }
+        guard let client = InotifyHub.shared.watch(folder.path, mask: UInt32(IN_CREATE) | UInt32(IN_MOVED_TO), folder: true, names: true) else {
             throw CancellationError()
         }
-        // Kept from the programs the test starts.
-        for end in ends { _ = fcntl(end, F_SETFD, FD_CLOEXEC) }
-        wake = ends
-        watchSub()
-        let thread = Thread { [self] in serve() }
-        thread.start()
+        self.client = client
         #else
         throw CancellationError()
         #endif
     }
 
-    #if os(Linux)
-    /// The watch on `sub` once it is a folder, and what it holds by then.
-    private func watchSub() {
-        guard subWatch < 0 else { return }
-        let path = parent.appendingPathComponent(sub).path
-        subWatch = inotify_add_watch(inotify, path, UInt32(IN_CREATE) | UInt32(IN_MOVED_TO) | UInt32(IN_ONLYDIR))
-        guard subWatch >= 0 else { return }
-        for name in (try? FileManager.default.contentsOfDirectory(atPath: path)) ?? [] { lock.withLock { _ = names.insert(name) } }
-    }
-
-    private func serve() {
-        defer { finished.signal() }
-        let header = MemoryLayout<inotify_event>.size
-        var buffer = [UInt8](repeating: 0, count: 16_384)
-        while true {
-            var polled = [pollfd(fd: inotify, events: Int16(POLLIN), revents: 0), pollfd(fd: wake[0], events: Int16(POLLIN), revents: 0)]
-            let count = poll(&polled, 2, -1)
-            if count < 0 && errno == EINTR { continue }
-            // Read to the end of the queue, then stop if asked: nothing told before the stop is lost.
-            while true {
-                let got = read(inotify, &buffer, buffer.count)
-                guard got > 0 else { break }
-                var offset = 0
-                while offset + header <= got {
-                    let event = buffer.withUnsafeBytes { $0.loadUnaligned(fromByteOffset: offset, as: inotify_event.self) }
-                    let start = offset + header, end = start + Int(event.len)
-                    let name = String(decoding: buffer[start..<end].prefix { $0 != 0 }, as: UTF8.self)
-                    if event.wd == subWatch {
-                        lock.withLock { _ = names.insert(name) }
-                    } else if name == sub {
-                        watchSub()
-                    }
-                    offset = end
-                }
-            }
-            if count < 0 || polled[1].revents != 0 { return }
-        }
-    }
-    #endif
-
-    /// Ends the watch once and waits for its thread; the names seen in `sub`.
+    /// Ends the watch once; the names seen in the folder (every event the kernel queued by now included).
     @discardableResult func stop() -> Set<String> {
-        let first = lock.withLock { () -> Bool in
-            defer { stopped = true }
-            return !stopped
+        lock.withLock {
+            if let seen { return seen }
+            #if os(Linux)
+            let names = Set(client.takeNames())
+            client.stop()
+            #else
+            let names = Set<String>()
+            #endif
+            seen = names
+            return names
         }
-        if first {
-            var one: UInt8 = 1
-            _ = write(wake[1], &one, 1)
-            finished.wait()
-            for descriptor in [inotify, wake[0], wake[1]] { close(descriptor) }
-        }
-        return lock.withLock { names }
     }
 }

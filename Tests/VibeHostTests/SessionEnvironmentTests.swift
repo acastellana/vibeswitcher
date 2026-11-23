@@ -94,7 +94,10 @@ struct SessionEnvironmentTests {
         #expect(await eventually { FileManager.default.fileExists(atPath: out) }, "\(imaged.log)")
         let lines = ((try? String(contentsOfFile: out, encoding: .utf8)) ?? "").split(separator: "\n").map(String.init)
         let commandFolder = build + "/Resources/bin"
-        #expect(lines.first == "/usr/local/bin:/usr/bin:/bin:\(commandFolder)", "\(lines) \(imaged.log)")
+        // On Linux the node's plugin wrappers' folder comes last of all (`<root>/plugins/bin`, the plugins merge of
+        // 2026-11-23: this case failed on every Linux run after it).
+        let plugins = Platform.CodeIdentity.isAvailable ? "" : ":" + imaged.home + "/.vibeswitcher/plugins/bin"
+        #expect(lines.first == "/usr/local/bin:/usr/bin:/bin:\(commandFolder)" + plugins, "\(lines) \(imaged.log)")
         #expect(lines.dropFirst().first == commandFolder + "/" + TestLock.command, "\(lines)")
     }
 

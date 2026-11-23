@@ -35,7 +35,7 @@ extension LeadEngine {
     /// On `queue`.
     func refreshNow() {
         startPending()
-        if !promptAuditLooked { lookAtPromptAudits() }
+        if !promptAudit.hasLooked { lookAtPromptAudits() }
         // A running lead the vault couldn't be asked about at the server's start is bound again now (E8).
         if rebindAgain { keepRunningLeads() }
         sweepRoles()
@@ -154,12 +154,12 @@ extension LeadEngine {
             rotateIfDue(root: root)
         }
         // A push the lead asked for (push_remote): in `status` while it's open, saying the commands that settle it.
-        for (root, request) in pushAsked where roots.contains(root) {
-            standing[root, default: []].append(Self.pushNotice(request, root: root))
+        for (root, request) in push.open where roots.contains(root) {
+            standing[root, default: []].append(PushWatch.pushNotice(request, root: root))
         }
         if standing != notices { notices = standing }
         noticed = keys
-        lookAtPushes(roots: roots)
+        push.look(roots: roots)
         forgetFinished(finished)
         // A lead that ended, or another agent on its terminal now: its wake-ups and its waiting count go (the app's
         // `ReportsWaiting.keep`).

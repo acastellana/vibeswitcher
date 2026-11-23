@@ -27,7 +27,7 @@ struct AllDoneLookTests {
 
         // First read already clear: nothing.
         world.queue.sync {
-            world.engine.allDoneNow = { now }
+            world.engine.allDone.now = { now }
             world.engine.noteAllDone(previous: [:], loaded: [world.repo: cleared])
         }
 
@@ -44,7 +44,7 @@ struct AllDoneLookTests {
         let notices = world.queue.sync { world.engine.allDoneNotices }
         #expect(notices.count == 1 && notices[0].contains("all done: the lead of repo cleared its board") && notices[0].contains("Done: Write the parser."),
                 "\(notices)")
-        world.queue.sync { world.engine.allDoneNow = { now + LeadEngine.allDoneShown + 1 } }
+        world.queue.sync { world.engine.allDone.now = { now + LeadEngine.allDoneShown + 1 } }
         #expect(world.queue.sync { world.engine.allDoneNotices }.isEmpty)
     }
 
@@ -64,7 +64,7 @@ struct AllDoneLookTests {
         let prompts = Locked<[String]>([])
         let engine = world.engine
         world.queue.sync {
-            engine.allDoneNow = { now }
+            engine.allDone.now = { now }
             engine.batchModel = { prompt in
                 prompts.mutate { $0.append(prompt) }
                 return "The parser and lexer are written\n- The parser reads every statement\n- The lexer splits the words"

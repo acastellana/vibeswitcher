@@ -283,7 +283,7 @@ extension LeadEngine {
     /// here reads noted for `status` (`ClaudePopups.swift`). On `queue`.
     private func behindDialog(_ box: LeadDelivery.Box?, screen: LeadDelivery.Screen?, session id: UUID, deliver: (() -> Void)? = nil) {
         guard case .dialog? = box, let hosted = link.sessions.first(where: { $0.id == id }) else {
-            if box != nil { dialogs[id] = nil }
+            if box != nil { popups.clear(id) }
             return
         }
         lookAt(screen: screen?.text, of: hosted, deliver: deliver)

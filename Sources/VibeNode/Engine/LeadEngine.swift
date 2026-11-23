@@ -151,21 +151,11 @@ public final class LeadEngine: @unchecked Sendable {
     /// The engine's refresh every 3 s on its clock (`refresh`, E7).
     private var refreshTimer: Subscription?
 
-    // The all-done mark (`AllDoneLook.swift`), on `queue`: the marks whose summary is being written, and the clock.
-    var allDoneSummarizing: Set<String> = []
-    var allDoneNow: () -> Date = Date.init
+    /// The all-done mark (`AllDoneLook.swift`): its state its own, on `queue`.
+    let allDone: AllDoneWatch
 
-    // The prompt-audit reminder (`PromptAuditWatch.swift`), on `queue`.
-    /// The projects due a prompt audit, and why, as the last look found them.
-    public internal(set) var promptAuditsDue: [String: PromptAudit.Due] = [:]
-    /// Whether a look is under way, and whether one ran yet (the first runs at the first refresh).
-    var promptAuditLooking = false
-    var promptAuditLooked = false
-    /// The look every 30 minutes on the engine's clock, and the clock a reminder is judged by (a test's later).
-    var promptAuditTimer: Subscription?
-    var promptAuditNow: () -> Date = Date.init
-    /// The record's reads and writes, one at a time, off the engine's queue.
-    let promptAuditBook = DispatchQueue(label: "vibenode.lead-engine.prompt-audit", qos: .utility)
+    /// The prompt-audit reminder (`PromptAuditWatch.swift`): its state its own, on `queue`.
+    let promptAudit: PromptAuditWatch
 
     // Cards, answers and holds (E6), on `queue`.
     /// Every card the user answers: the lead's questions and approvals, held config, base moves.
@@ -214,18 +204,8 @@ public final class LeadEngine: @unchecked Sendable {
     var workingTold: [String: (sessions: Set<String>, at: Date)] = [:]
     /// How often the same working sessions are told the vault again (the app's `LeadController.workingEvery`).
     static let workingEvery: TimeInterval = 30
-    /// Each lead's open push request (push_remote), by root, as the vault last said; the request last noted in the log,
-    /// by root; the roots whose vault look is under way, and whose push the user is settling (`PushAsks.swift`). On
-    /// `queue`.
-    var pushAsked: [String: LeadPush.Request] = [:]
-    var pushNoted: [String: String] = [:]
-    var pushLooking: Set<String> = []
-    var pushSettling: Set<String> = []
-    /// Settles a push request (`LeadPush.settle`: the request's id, the root, push or decline, the vault), off the
-    /// engine's queue. Faked in tests.
-    var pushSettle: @Sendable (String, String, Bool, LeadVault) -> (request: LeadPush.Request?, outcome: LeadPush.Outcome) = { id, root, push, vault in
-        LeadPush.settle(id: id, root: root, push: push, vault: vault)
-    }
+    /// The leads' push requests (`PushAsks.swift`): its state its own, on `queue`.
+    let push: PushWatch
     /// Where those are told, one after another: a later look's never overtakes an earlier one's (`work` is concurrent).
     let workingNotes = DispatchQueue(label: "vibenode.lead-engine.working", qos: .utility)
     /// Names each computation of the witness's as it starts, on the thread that runs it (`WitnessWork`), and "applied"
@@ -295,108 +275,28 @@ public final class LeadEngine: @unchecked Sendable {
     var toolTimes: [String: (bound: Double, tools: Double?)] = [:]
     /// Sessions that never got their tools, asked to end, and when last (asked again a minute on while they run).
     var endingNoTools: [String: Date] = [:]
-    /// The leads refused for the machine's room or load (`LeadWitness.RoomWaits`): each told once there's room, on the
-    /// room watch's 60 s client (`watchRoom`); none until it's started.
-    var roomWaits: LeadWitness.RoomWaits?
+    /// The room watch (`RoomWatch.swift`): its state its own, on `queue`; its 60 s client (`watchRoom`), none until
+    /// it's started.
+    let room: RoomWatch
     var roomTimer: Subscription?
     /// The working policy's watch (`SettingsWatch.swift`): each running lead told it once when it changes. None until
     /// `watchRoom`, so a test's engine tells nothing it didn't ask for.
     var policyWatch: LeadWitness.PolicyWatch?
     /// The health digest (`NodeHealth`): each refresh's time told to it. None in a test's engine unless given.
     public var health: NodeHealth?
-    // The Run-card shell tidier (`ShellTidying.swift`), on `queue`: the shells typed into since their command ended, read
-    // once; a look under way; its 30 s look; the clock. Its file is read and written on `shellWork`.
-    var shellUsed: Set<UUID> = []
-    var shellUsedLoaded = false
-    var shellTidying = false
-    var shellTidyTimer: Subscription?
-    var shellNow: () -> Date = Date.init
-    let shellWork = DispatchQueue(label: "vibenode.lead-engine.shell-tidying", qos: .userInitiated)
-    // Feature plugins (`Plugins/`, `PluginEngine.swift`), on `queue`: the registry and what the vault keeps of on and
-    // off, each plugin request's card, the stamps the host vouched for (per plugin), the looks under way, the vault asked,
-    // the 15 s look, the clock; the folders read on `pluginWork`.
+    /// The Run-card shell tidier (`ShellTidying.swift`): its state its own, on `queue`.
+    let shellTidy: ShellTidyWatch
+    /// The feature plugins' registry (which are on, as the vault keeps it); their runtime is `pluginRuntime`.
     public let plugins: PluginRegistry
-    var pluginCards: [PluginKey: String] = [:]
-    var pluginTrusted: [String: [String: WalletStamp]] = [:]
-    /// Each plugin's look under way, and who waits for its end.
-    var pluginLooking: [String: [() -> Void]] = [:]
-    /// Each plugin's look asked for while one was under way (which may have read its folder before what this one is
-    /// for was filed): one more look, after it, and who waits for that one.
-    var pluginLookAgain: [String: [() -> Void]] = [:]
-    var pluginAsking = false
-    /// Who waits for the vault's answer under way.
-    var pluginAskWaiters: [() -> Void] = []
-    var pluginTimer: Subscription?
-    var pluginNow: () -> Date = Date.init
-    /// The plugin requests settled (`PluginKey.name`), as the vault keeps them: never drawn again.
-    var pluginSettled: Set<String> = []
-    /// Whether the vault said which requests are settled (nothing is drawn until it did).
-    var pluginSettledKnown = false
-    /// The acting answers whose settle the vault is still asked for (`PluginKey.name`): nothing has run for them yet.
-    var pluginSettling: Set<String> = []
-    /// The plugin page open now (one at a time on a node).
-    /// The node's one plugin page, whose plugin and request it serves (`openPluginPage`).
-    var pluginPage: PluginPageSlot?
-    /// A page's address for the answer that opened it (`PluginKey.name`): printed in that answer's reply, then let go.
-    var pluginPageLines: [String: (url: URL, life: TimeInterval)] = [:]
-    /// When the vault's record began, as the vault says (a host restart starts it over): what `plugin list` says a
-    /// plugin is at its default since.
-    var pluginRecordSince: Date?
-    /// Each request the reader last gave, by `PluginKey.name`: the stamp it came with (its digest, its session) and when
-    /// it was filed. What a card is drawn from, and who its tells go to.
-    var pluginStamps: [String: PluginStamp] = [:]
-    /// The digest each card was drawn from, by `PluginKey.name`: a request whose bytes changed under its id is dropped.
-    var pluginDrawn: [String: String] = [:]
-    /// The sessions of a team (a worker's, a verifier's) as the vault's roster said at the last look: not the user's.
-    var pluginTeam: Set<String> = []
-    /// What must reach a session from VibeSwitcher even while its plugin is off (a withdrawal's words), by key, until it
-    /// did or the session is gone; tried again at each plugins' look.
-    var pluginTells: [String: (session: UUID, text: String)] = [:]
-    var pluginTelling: Set<String> = []
-    /// The plugins' settings the user set, as the vault last said (`<plugin>.<name>`).
-    public internal(set) var pluginSettings: [String: String] = [:]
-    /// A clock for the plugins' pages when the engine has none (a test's engine), on its queue.
-    lazy var pluginClock = NodeClock(queue: queue)
-    let pluginWork = DispatchQueue(label: "vibenode.lead-engine.plugins", qos: .userInitiated)
-    // The developer tools notice (`ToolchainLook.swift`), on `queue`: the notices the last look found, when it ran,
-    // whether one is under way; how the node's tools are asked (a test's stand-in) and the clock.
-    public internal(set) var toolchainNotices: [String] = []
-    var toolchainLookedAt: Date?
-    var toolchainLooking = false
-    /// The node's tools as a look asks them (nil: `NodeToolchain.node(home:)` in the engine's home).
-    var toolchainTools: (@Sendable () -> NodeToolchain.Tools)?
-    var toolchainNow: () -> Date = Date.init
-    /// Boost as last written to `boost.json` (`lookAtBoost`), and when; the clock it's judged on.
-    var boostWritten: (state: BoostState, at: Date)?
-    /// Boost as the last look decided it (whether or not a file was written), with its mode: `status`'s `boost`.
-    public internal(set) var boostDecided: (mode: BoostMode, state: BoostState)?
-    var boostNow: () -> Date = Date.init
-    /// The machine's load as the room watch reads it, as the leads' tools judge it (`MacLoad.steady`); faked in tests.
-    var macLoad: () -> Double? = MacLoad.steady
-    /// Each room look's read of the machine's memory (`MacMemory.read`), on the reads queue; faked in tests.
-    var memory: () -> MacMemory? = { MacMemory.read() }
+    /// The feature plugins' runtime (`Plugins/PluginRuntime.swift`): their state and logic its own, on `queue`.
+    let pluginRuntime: PluginRuntime
+    /// The developer tools notice (`ToolchainLook.swift`): its state its own, on `queue`.
+    let toolchain: ToolchainWatch
+    /// Boost (`SettingsWatch.swift`): its state its own, on `queue`.
+    let boost: BoostWatch
 
-    // The lead's rotation and idle handover (main's `26923f7c`, `IdleHandover.swift`), on `queue`.
-    /// The time the rotation judges by (now; a test's later).
-    var handoverNow: () -> Date = Date.init
-    /// When this engine started: a lead's quiet counts from here until the user types into it (`userInput`).
-    let handoverStarted = Date()
-    /// When the user last typed into each session with `vibeswitcher send` (`noteUserInput`, the app's
-    /// `noteLeadInput`): a lead's two-minute quiet counts from it.
-    var userInput: [UUID: Date] = [:]
-    /// Roots whose idle look or handover is under way, and when each may be looked at again after a handover ended.
-    var handingOver: Set<String> = []
-    var handoverRetry: [String: Date] = [:]
-    /// Handovers tried per lead session in its current idle stretch.
-    var handoverAttempts: [UUID: IdleTries] = [:]
-    /// The handover note asked of each root's lead: of which session, when, why, and the marker its reply starts with.
-    var rotationAsked: [String: (session: UUID, at: Date, reason: String, marker: String)] = [:]
-    /// Sends the ask for a note (the text, the root) and says whether it reached the lead; nil: delivered to the lead
-    /// from VibeSwitcher. Set by tests.
-    var rotationRequest: ((String, String, @escaping (Bool) -> Void) -> Void)?
-    /// Each rotation look's or handover's end ("checked", "asked", "cancelled", "retained", "handed over"), on `queue`
-    /// (for tests).
-    var handoverEvent: (String) -> Void = { _ in }
+    /// The lead's rotation and idle handover's bookkeeping (`RotationState`, `IdleHandover.swift`), on `queue`.
+    let rotation = RotationState()
 
     // Restarts (E8), on `queue`.
     /// The start time of the last host that welcomed the engine, as `engine.json` keeps it (seconds since 1970).
@@ -407,16 +307,8 @@ public final class LeadEngine: @unchecked Sendable {
     public internal(set) var hostRestart: EngineState.Restart?
     /// What reopens each project's lead after a host restart, by root (`EngineState.Reopen`, `RestartResume.swift`).
     public internal(set) var reopen: [String: EngineState.Reopen] = [:]
-    /// The user's own sessions live in the host, as last recorded (`EngineState.OpenSessions`, `SessionReopen.swift`).
-    public internal(set) var openSessions: EngineState.OpenSessions?
-    /// The user's own sessions that ended lately, newest first (`EngineState.Ended`, `vibeswitcher resume`).
-    public internal(set) var endedSessions: [EngineState.Ended] = []
-    /// When each recorded session was first seen ended (or gone from the host's list): kept in the record for
-    /// `openGrace`, since a host going down (a reboot) ends its sessions and may say so before it goes.
-    var openEnded: [UUID: Date] = [:]
-    /// How long an ended session stays in the record (a test's shorter), and the clock it's judged by.
-    var openGrace: TimeInterval = 30
-    var openNow: () -> Date = Date.init
+    /// The user's own sessions, live and lately ended (`SessionReopen.swift`): its state its own, on `queue`.
+    let openSessionsWatch: OpenSessionsWatch
     /// Whether this engine took a welcome yet: its first is the server's start, where the running leads are bound again
     /// and told which questions the user no longer sees.
     var welcomedOnce = false
@@ -427,13 +319,8 @@ public final class LeadEngine: @unchecked Sendable {
     var rebindAgain = false
     /// The running leads the vault gives no role, by root, while each runs: `status` says so.
     public internal(set) var roleless: [String: Roleless] = [:]
-    /// Claude Code's popups on team sessions (`ClaudePopups.swift`): the sessions an Esc is going into now, each popup
-    /// declined so far (for tests and the log), and the dialogs nothing here reads, by session, while they stay.
-    var declining: Set<UUID> = []
-    public internal(set) var popupsDeclined: [(session: UUID, popup: ClaudePopup)] = []
-    var dialogs: [UUID: UnknownDialog] = [:]
-    /// The clock an unknown dialog's time is judged by (a test's later).
-    var dialogNow: () -> Date = Date.init
+    /// Claude Code's popups on team sessions (`ClaudePopups.swift`): its state its own, on `queue`.
+    let popups: PopupWatch
 
     /// `root`: the node's root (its policy, limits, sessions' temporary folders; a scratch node's lead gets it as
     /// `VIBESWITCHER_HOME`). `nodeRoot`: the build's folder. `link`: the host. `clock`: the engine's clock.
@@ -448,21 +335,36 @@ public final class LeadEngine: @unchecked Sendable {
         self.options = options
         self.note = note
         plugins = PluginRegistry(options.plugins ?? PluginRegistry.standard())
+        pluginRuntime = PluginRuntime(registry: plugins, cards: cards, link: link, queue: link.queue, root: root, clock: clock,
+                                      bind: options.pluginBind, note: note)
         queue = link.queue
+        toolchain = ToolchainWatch(queue: link.queue, file: root.appendingPathComponent("toolchain.json"), home: options.home ?? VibePaths.home, note: note)
+        openSessionsWatch = OpenSessionsWatch(queue: link.queue)
+        shellTidy = ShellTidyWatch(queue: link.queue, link: link, root: root, clock: clock, note: note)
+        popups = PopupWatch(queue: link.queue, link: link, note: note)
+        push = PushWatch(queue: link.queue, work: work, link: link, note: note)
+        promptAudit = PromptAuditWatch(queue: link.queue, root: root, home: options.home ?? VibePaths.home, clock: clock, note: note)
         reads = BoardReads(handTo: link.queue)
+        allDone = AllDoneWatch(queue: link.queue, reads: reads, runs: summaryRuns, note: note)
+        room = RoomWatch(queue: link.queue, reads: reads, link: link, root: root)
+        boost = BoostWatch(queue: link.queue, reads: reads, files: NodeSettings.Files(root: root), home: options.home ?? VibePaths.home, note: note)
         preflight = NodePreflight(claudeLink: options.claudeLink ?? NodePreflight.claudeLink(root: root), git: options.git)
         let states = root.appendingPathComponent("state", isDirectory: true)
         observer = LeadObserver(home: options.home ?? VibePaths.home, stateFile: { states.appendingPathComponent("\($0).json") })
+        toolchain.leads = self
+        promptAudit.leads = self
+        push.leads = self
+        popups.leads = self
+        pluginRuntime.host = self
+        room.leads = self
         restoreState()
         leads.heldChanged = { [weak self] in self?.saveState() }
         watch = link.changes.subscribe(on: link.queue) { [weak self] _ in self?.sessionsChanged() }
         if options.sweepsRoles { roleSweep = makeRoleSweep() }
         refreshTimer = clock?.every(3) { [weak self] in self?.refresh() }
-        promptAuditTimer = clock?.every(Int(Self.promptAuditEvery)) { [weak self] in self?.queue.async { self?.lookAtPromptAudits() } }
         // Run-card shells (`ShellTidying.swift`): what is typed into told by the link (on its queue, this one), the due
         // ones ended every 30 s.
         link.onTyped = { [weak self] id in self?.shellTyped(id) }
-        shellTidyTimer = clock?.every(Self.shellTidyEvery) { [weak self] in self?.queue.async { self?.tidyShells() } }
         // Each screen the session scan reads: a popup on a team session declined, a dialog nothing reads noted.
         sessions?.sawScreen = { [weak self] session, text in self?.lookAt(screen: text, of: session) }
         batchModel = options.summarizeBatch

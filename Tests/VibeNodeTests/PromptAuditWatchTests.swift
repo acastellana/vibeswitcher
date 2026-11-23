@@ -14,7 +14,7 @@ struct PromptAuditWatchTests {
     private func look(_ world: CardWorld, at now: Date) async {
         let done = Locked(false)
         world.queue.async {
-            world.engine.promptAuditNow = { now }
+            world.engine.promptAudit.now = { now }
             world.engine.lookAtPromptAudits { done.value = true }
         }
         _ = await eventually(timeout: 60) { done.value }

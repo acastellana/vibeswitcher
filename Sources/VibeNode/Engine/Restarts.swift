@@ -36,8 +36,7 @@ extension LeadEngine {
         knownLeads = Set(state.leads ?? [])
         hostRestart = state.restart
         reopen = state.reopen ?? [:]
-        openSessions = state.open
-        endedSessions = state.ended ?? []
+        openSessionsWatch.restore(open: state.open, ended: state.ended ?? [])
     }
 
     /// Everything `engine.json` keeps, as it is now. On `queue`.

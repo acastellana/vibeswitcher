@@ -159,6 +159,8 @@ public final class NodeServer: @unchecked Sendable {
         ticks = clock?.every(housekeeping) { [weak self] in
             guard let self else { return }
             self.checkPath()
+            // A folder watch the system couldn't give is asked for again (meanwhile this look is the watch).
+            if self.watch == nil { self.watchFolder() }
             self.requests.refreshNotes()
         }
         let sweep = DispatchSource.makeTimerSource(queue: queue)
@@ -208,7 +210,17 @@ public final class NodeServer: @unchecked Sendable {
         watch = nil
         watched = now
         if let made = Platform.FolderWatch(path: folder.path) {
-            made.deliver(on: queue) { [weak self] _ in self?.checkPath() }
+            made.deliver(on: queue) { [weak self, weak made] change in
+                guard let self else { return }
+                // The folder gone (removed, renamed, or its end lost to an overflow): no more is told by this watch, so
+                // it goes, and one is made again (here when the path is rebound, else at the next housekeeping).
+                if change.contains(.folderGone) {
+                    made?.stop()
+                    if self.watch === made { self.watch = nil }
+                }
+                self.checkPath()
+                if self.watch == nil { self.watchFolder() }
+            }
             watch = made
         }
     }

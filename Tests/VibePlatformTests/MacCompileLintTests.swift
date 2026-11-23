@@ -8,7 +8,9 @@ import VibePlatform
 /// files but its `+Linux` ones, and every test target the Mac jobs build. A line inside `#if os(Linux)`,
 /// `#if canImport(Glibc)` (or Musl), `#if !os(macOS)`, `#if !canImport(Darwin)`, or the `#else` of a Darwin condition is
 /// Linux's alone and may use them. Text in string literals and comments doesn't count. (`environ` isn't one: Swift's
-/// Darwin module has it, and VibePlatform's `+Darwin` files spawn with it.)
+/// Darwin module has it, and VibePlatform's `+Darwin` files spawn with it.) Nor, in those places, a name `Sources`
+/// declares only on Linux, in a `+Linux` file or a Linux-only block (eb72e42b's three tests named `InotifyHub`): the
+/// list is built from the sources as the test runs.
 struct MacCompileLintTests {
     static let repo = PlatformLintTests.repo
 
@@ -18,8 +20,11 @@ struct MacCompileLintTests {
                           "Tests/VibePlatformTests", "Tests/VibeCoreTests", "Tests/VibeNodeTests", "Tests/VibeHostTests", "Tests/VibeSwitcherTests"]
 
     /// Each spelling, and what to use instead, with simple word boundaries: Unicode's don't break at a "." between
-    /// letters (`st_ctim.tv_sec`). A value optional on one system only (a pthread start's argument) has no spelling to
-    /// look for: bind it per system rather than unwrapping it.
+    /// letters (`st_ctim.tv_sec`). What has no spelling to look for, and so isn't linted:
+    /// - a value optional on one system only (a pthread start's argument): bind it per system rather than unwrap it;
+    /// - an expression whose type the two compilers infer differently (on 2026-11-23 the Mac's took a test helper's
+    ///   `interpreter.map { Array($0.utf8) + [0] } ?? []` as `[Any]?`, and every `v2 macos` job failed to build):
+    ///   annotate collection literals and optional maps, in test helpers too (`let bytes: [UInt8] = …`).
     static let spellings: [(pattern: Regex<AnyRegexOutput>, use: String)] = rules.map { (try! Regex($0.pattern).wordBoundaryKind(.simple), $0.use) }
     static let rules: [(pattern: String, use: String)] = [
         (#"\bSOCK_[A-Z]+\.rawValue\b"#, "Platform.Sockets.stream / .seqpacket (glibc's socket types are an enum)"),
@@ -34,40 +39,50 @@ struct MacCompileLintTests {
         (#"\bmemfd_create\b"#, "Platform.ProcessSelf.sealedCopy"),
     ]
 
-    /// The lines of `text` that use a glibc-only spelling outside a Linux-only block, as "12: …".
-    static func violations(in text: String) -> [String] {
+    /// For each line of `text`: whether the Mac doesn't compile it as code (inside a Linux-only branch), or it is
+    /// no code (a directive, a multi-line string's line).
+    static func linuxOnly(_ text: String) -> [Bool] {
         // Each open `#if`: whether its current branch is Linux's alone.
         var stack: [(condition: String, linux: Bool)] = []
         var inTripleQuote = false
-        var found: [String] = []
-        for (index, raw) in text.components(separatedBy: "\n").enumerated() {
+        var mask: [Bool] = []
+        for raw in text.components(separatedBy: "\n") {
             let trimmed = raw.trimmingCharacters(in: .whitespaces)
-            // A multi-line string: its lines are text.
+            // A multi-line string: its lines are text. The line that opens one is code before its quotes (a `static let`).
             if trimmed.components(separatedBy: "\"\"\"").count % 2 == 0 {
                 inTripleQuote.toggle()
+                mask.append(inTripleQuote ? stack.contains(where: \.linux) : true)
                 continue
             }
-            if inTripleQuote { continue }
+            if inTripleQuote {
+                mask.append(true)
+                continue
+            }
             if trimmed.hasPrefix("#if ") {
                 stack.append((trimmed, Self.isLinuxBranch(String(trimmed.dropFirst(4)))))
-                continue
-            }
-            if trimmed.hasPrefix("#elseif ") {
+            } else if trimmed.hasPrefix("#elseif ") {
                 if !stack.isEmpty { stack[stack.count - 1] = (trimmed, Self.isLinuxBranch(String(trimmed.dropFirst(8)))) }
-                continue
-            }
-            if trimmed.hasPrefix("#else") {
+            } else if trimmed.hasPrefix("#else") {
                 if let top = stack.last { stack[stack.count - 1] = (top.condition, Self.isElseLinux(top.condition)) }
-                continue
-            }
-            if trimmed.hasPrefix("#endif") {
+            } else if trimmed.hasPrefix("#endif") {
                 _ = stack.popLast()
+            } else {
+                mask.append(stack.contains(where: \.linux))
                 continue
             }
-            if stack.contains(where: \.linux) { continue }
+            mask.append(true)
+        }
+        return mask
+    }
+
+    /// The lines of `text` that use a glibc-only spelling outside a Linux-only block, as "12: …".
+    static func violations(in text: String) -> [String] {
+        let lines = text.components(separatedBy: "\n"), mask = linuxOnly(text)
+        var found: [String] = []
+        for (index, raw) in lines.enumerated() where !mask[index] {
             let code = Self.code(of: raw)
             for spelling in spellings where code.contains(spelling.pattern) {
-                found.append("\(index + 1): \(trimmed) — use \(spelling.use)")
+                found.append("\(index + 1): \(raw.trimmingCharacters(in: .whitespaces)) — use \(spelling.use)")
                 break
             }
         }
@@ -105,17 +120,88 @@ struct MacCompileLintTests {
         return result
     }
 
+    // MARK: Names declared on Linux alone
+
+    /// A type (class, struct, enum, protocol, actor, typealias), a function, a static member or a top-level `let`/`var`
+    /// declared on `line` (its code); one private to its file only when `privateToo`.
+    static func declared(on line: String, privateToo: Bool = false) -> [String] {
+        let code = Self.code(of: line)
+        let words = code.split { !($0.isLetter || $0.isNumber || $0 == "_") }
+        guard privateToo || !words.contains("private") && !words.contains("fileprivate") else { return [] }
+        var names = code.matches(of: declaration).compactMap { match in
+            match.output[2].substring.map(String.init).flatMap { Self.keywords.contains($0) ? nil : $0 }
+        }
+        // A top-level `let` or `var` (not indented).
+        if let first = line.first, !first.isWhitespace, let match = code.firstMatch(of: topLevel), let name = match.output[1].substring {
+            names.append(String(name))
+        }
+        return names
+    }
+
+    /// Swift's words: never a name (`for a, protocol in …` is a loop, not a protocol).
+    static let keywords: Set<String> = ["var", "let", "func", "class", "static", "final", "init", "subscript", "override", "in", "where", "async", "throws"]
+    static let declaration = try! Regex(#"\b(class|struct|enum|protocol|actor|typealias|func|static let|static var|class let|class var)\s+([A-Za-z_][A-Za-z0-9_]*)"#)
+        .wordBoundaryKind(.simple)
+    static let topLevel = try! Regex(#"^(?:(?:public|internal|nonisolated|nonisolated\(unsafe\))\s+)*(?:let|var)\s+([A-Za-z_][A-Za-z0-9_]*)"#)
+
+    /// The names `Sources` declares only where the Mac doesn't compile them, across `files` (path, text), each with
+    /// where (its first "path:line"): in a `+Linux` file or a Linux-only block, and nowhere else (a name the Mac's
+    /// side declares too, as `+Darwin` files do, or any `let`, `var` or parameter of that name the Mac compiles, a
+    /// test's included, is no one's alone). A test's own Linux-only shims aren't counted: on the Mac the SDK may
+    /// declare them (`__dispatch_queue_get_label`).
+    static func linuxOnlyNames(_ files: [(path: String, text: String)]) -> [String: String] {
+        var linux: [String: String] = [:], other: Set<String> = []
+        for file in files {
+            let linuxFile = file.path.hasSuffix("+Linux.swift"), mask = linuxOnly(file.text), source = file.path.hasPrefix("Sources/")
+            for (index, line) in file.text.components(separatedBy: "\n").enumerated() {
+                if linuxFile || mask[index] {
+                    guard source else { continue }
+                    for name in declared(on: line) where linux[name] == nil { linux[name] = "\(file.path):\(index + 1)" }
+                } else {
+                    other.formUnion(declared(on: line, privateToo: true))
+                    other.formUnion(Self.code(of: line).matches(of: anyBinding).compactMap { ($0.output[1].substring ?? $0.output[2].substring).map(String.init) })
+                }
+            }
+        }
+        return linux.filter { !other.contains($0.key) }
+    }
+
+    /// Any binding's or parameter's name (`let a`, `var a`, `case let a`, `a:` in a signature or a call, `{ a in`):
+    /// a name the Mac's side uses for its own.
+    static let anyBinding = try! Regex(#"(?:\blet|\bvar|\bcase)\s+([A-Za-z_][A-Za-z0-9_]*)|([A-Za-z_][A-Za-z0-9_]*)\s*:"#).wordBoundaryKind(.simple)
+
+    /// The lines of `text` that name one of `names` where the Mac compiles them, as "12: … — Name (declared at …)".
+    static func uses(of names: [String: String], in text: String) -> [String] {
+        let lines = text.components(separatedBy: "\n"), mask = linuxOnly(text)
+        var found: [String] = []
+        for (index, raw) in lines.enumerated() where !mask[index] {
+            let words = Self.code(of: raw).split { !($0.isLetter || $0.isNumber || $0 == "_") }.map(String.init)
+            if let name = words.first(where: { names[$0] != nil }) {
+                found.append("\(index + 1): \(raw.trimmingCharacters(in: .whitespaces)) — \(name) is Linux's alone (\(names[name]!)): gate the use")
+            }
+        }
+        return found
+    }
+
+    /// Every Swift file under `folders`, as (path, text).
+    static func swiftFiles(_ folders: [String]) -> [(path: String, text: String)] {
+        folders.flatMap { folder in
+            (FileManager.default.subpaths(atPath: repo.appendingPathComponent(folder).path) ?? []).sorted().filter { $0.hasSuffix(".swift") }.compactMap { file in
+                let path = "\(folder)/\(file)"
+                return (try? String(contentsOf: repo.appendingPathComponent(path), encoding: .utf8)).map { (path, $0) }
+            }
+        }
+    }
+
     /// Every file the Mac compiles, with its violations; VibePlatform's `+Linux` files are Linux's.
     static func files() -> [(path: String, violations: [String])] {
+        // Declared on Linux alone: from every source (the Mac app's too, whose declarations are the Mac's) and every
+        // test file the Mac builds (a test's own helper of the same name is the Mac's).
+        let linuxNames = linuxOnlyNames(swiftFiles(["Sources"] + folders.filter { $0.hasPrefix("Tests/") }))
         var found: [(path: String, violations: [String])] = []
-        for folder in folders {
-            for file in (FileManager.default.subpaths(atPath: repo.appendingPathComponent(folder).path) ?? []).sorted() where file.hasSuffix(".swift") {
-                let path = "\(folder)/\(file)"
-                guard !path.hasSuffix("+Linux.swift"), !path.hasSuffix("MacCompileLintTests.swift"),
-                      let text = try? String(contentsOf: repo.appendingPathComponent(path), encoding: .utf8) else { continue }
-                let lines = Self.violations(in: text)
-                if !lines.isEmpty { found.append((path, lines)) }
-            }
+        for file in swiftFiles(folders) where !file.path.hasSuffix("+Linux.swift") && !file.path.hasSuffix("MacCompileLintTests.swift") {
+            let lines = Self.violations(in: file.text) + Self.uses(of: linuxNames, in: file.text)
+            if !lines.isEmpty { found.append((file.path, lines)) }
         }
         return found
     }
@@ -149,5 +235,50 @@ struct MacCompileLintTests {
             """
         let found = Self.violations(in: fixture).map { $0.prefix(while: { $0 != ":" }) }
         #expect(found == ["1", "12", "17"], "\(Self.violations(in: fixture))")
+    }
+
+    /// A name declared only in a `+Linux` file or a Linux-only block is flagged where the Mac compiles a use of it; a
+    /// name the Mac's side declares too, a private one, a use in a Linux block, a string or a comment, isn't.
+    @Test func aNameDeclaredOnLinuxAloneIsFlaggedWhereTheMacCompilesIt() {
+        let linuxFile = """
+            public final class InotifyHub {
+                public static let shared = InotifyHub()
+                public func add(_ path: String) {}
+            }
+            extension Platform.Files {
+                public static func modified(_ path: String) -> Double { 0 }
+                public static func inotifyLimit() -> Int { 128 }
+                private static func helper() {}
+            }
+            enum Small { static var watched = 0 }
+            """
+        let darwinFile = """
+            extension Platform.Files {
+                public static func modified(_ path: String) -> Double { 0 }
+            }
+            """
+        let shared = """
+            enum Watches {
+                #if os(Linux)
+                static func hubbed() -> InotifyHub { .shared }
+                #endif
+            }
+            """
+        let names = Self.linuxOnlyNames([("Sources/VibePlatform/Watches+Linux.swift", linuxFile), ("Sources/VibePlatform/Files+Darwin.swift", darwinFile),
+                                         ("Sources/VibePlatform/Watches.swift", shared)])
+        // A Linux-only type's members are Linux's too (`add`, `shared`); `modified` is the Mac's as well, `helper` private.
+        #expect(Set(names.keys) == ["InotifyHub", "shared", "add", "inotifyLimit", "Small", "watched", "hubbed"], "\(names.keys.sorted())")
+        let test = """
+            let hub = InotifyHub.shared
+            let when = Platform.Files.modified(path)
+            #if os(Linux)
+            let limit = Platform.Files.inotifyLimit()
+            #endif
+            let said = "InotifyHub" // InotifyHub in a comment
+            _ = Watches.hubbed()
+            helper()
+            """
+        let found = Self.uses(of: names, in: test).map { $0.prefix(while: { $0 != ":" }) }
+        #expect(found == ["1", "7"], "\(Self.uses(of: names, in: test))")
     }
 }

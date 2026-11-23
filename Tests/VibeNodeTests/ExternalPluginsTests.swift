@@ -168,6 +168,7 @@ struct ExternalPluginsTests {
         _ = answer.send(WebTestClient.text(#"{"ok":true}"#))
         #expect(answer.message()?.text == "ok")
         #expect(await eventually(timeout: 30) { world.card(card.id)?.plugin?.state == "answered" })
+        #expect(world.card(card.id)?.plugin?.outcome == "The page answered (depth 1)", "page.answer gets the plugin's settings")
     }
 
     /// The page's answer is taken only while its request waits on the page, marked before the plugin hears it: a second
@@ -425,10 +426,10 @@ extension ExternalPluginsTests {
         defer { world.stop() }
         _ = try await added(world)
         let late = try await probeCard(world, "normal")
-        world.queue.sync { world.engine.pluginNow = { late.plugin?.expiresAt?.addingTimeInterval(1) ?? Date() } }
+        world.queue.sync { world.engine.pluginRuntime.now = { late.plugin?.expiresAt?.addingTimeInterval(1) ?? Date() } }
         let declined = try #require(await world.answer(late, "decline"))
         #expect(declined.error?.message.contains("expired") == true, "past its expiry, decline is refused too: \(declined)")
-        world.queue.sync { world.engine.pluginNow = Date.init }
+        world.queue.sync { world.engine.pluginRuntime.now = Date.init }
         let paged = try await probeCard(world, "pagedecline")
         let answered = try #require(await world.answer(paged, "decline"))
         #expect(!answered.ok, "\(answered)")
@@ -535,16 +536,17 @@ extension ExternalPluginsTests {
         let elsewhere = scratch.url("elsewhere")
         try FileManager.default.createDirectory(at: elsewhere, withIntermediateDirectories: true)
         try Data("theirs".utf8).write(to: elsewhere.appendingPathComponent("vs-theirs"))
-        let plugins = world.host.root.appendingPathComponent("plugins")
+        // A root of its own: the world's engine writes its own wrappers under the world's root meanwhile.
+        let linkRoot = scratch.url("link-root")
+        let plugins = linkRoot.appendingPathComponent("plugins")
         try FileManager.default.createDirectory(at: plugins, withIntermediateDirectories: true)
-        try? FileManager.default.removeItem(at: plugins.appendingPathComponent("bin"))
         try FileManager.default.createSymbolicLink(at: plugins.appendingPathComponent("bin"), withDestinationURL: elsewhere)
         let notes = Locked<[String]>([])
-        LeadEngine.writeWrappers(["vs-probe": "probe"], in: plugins.appendingPathComponent("bin"), note: { line in notes.mutate { $0.append(line) } })
+        PluginRuntime.writeWrappers(["vs-probe": "probe"], in: plugins.appendingPathComponent("bin"), note: { line in notes.mutate { $0.append(line) } })
         #expect(FileManager.default.fileExists(atPath: elsewhere.appendingPathComponent("vs-theirs").path), "nothing removed behind the link")
         #expect(!FileManager.default.fileExists(atPath: elsewhere.appendingPathComponent("vs-probe").path), "nothing written through it")
         #expect(notes.value.contains { $0.contains("is a link") }, "\(notes.value)")
-        #expect(PluginFolders.empty(plugins.appendingPathComponent("bin"), root: world.host.root, andItself: true)?.contains("is a link") == true)
+        #expect(PluginFolders.empty(plugins.appendingPathComponent("bin"), root: linkRoot, andItself: true)?.contains("is a link") == true)
         #expect(FileManager.default.fileExists(atPath: elsewhere.appendingPathComponent("vs-theirs").path))
         try FileManager.default.removeItem(at: plugins.appendingPathComponent("bin"))
 

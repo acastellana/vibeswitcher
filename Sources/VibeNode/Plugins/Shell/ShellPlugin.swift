@@ -64,10 +64,11 @@ public final class ShellPlugin: FeaturePlugin {
                     var info = stat()
                     if lstat(folder.appendingPathComponent(".\(request.id).answer").path, &info) == 0 { answered.insert(request.id) }
                 }
-                desk.queue.async {
+                // Back on the engine's queue only while the engine lives (a look can outlive it).
+                desk.later {
                     self?.draw(requests, answeredOnDisk: answered, desk: desk)
                     // Done once what the look wrote (answer files, on the same serial work) is written.
-                    desk.work.async { desk.queue.async(execute: done) }
+                    desk.work.async { desk.later(done) }
                 }
             }
         }
@@ -239,7 +240,7 @@ public final class ShellPlugin: FeaturePlugin {
                 guard let folder else { return nil }
                 do { try ShellAsk.record(answer, for: id, in: folder); return nil } catch { return error }
             }()
-            desk.queue.async {
+            desk.later {
                 guard let self else { return }
                 if decline {
                     note("shell request \(id) declined")
@@ -284,7 +285,7 @@ public final class ShellPlugin: FeaturePlugin {
                 answer = ShellAsk.Answer(state: .failed, at: Date(), why: failure.message)
                 reply = .failure(.refused("the session host didn't start it: \(failure.message)"))
             }
-            desk.queue.async {
+            desk.later {
                 guard let self else { return }
                 self.answers[request.id] = answer
                 self.recordFile(answer, for: request.id, desk: desk)

@@ -33,8 +33,8 @@ struct ShellTidyingTests {
         try #require(await eventually(timeout: 60) { ending(good.id)?.ok == true && ending(typed.id)?.ok == true && ending(failed.id)?.ok == false })
         // Typed into after its command ended: the link tells the engine, which keeps it.
         link.type([HostInput.Write(bytes: Array("echo mine\r".utf8), delay: 0)], into: typed.id)
-        try #require(await eventually(timeout: 30) { engine.queue.sync { engine.shellUsed.contains(typed.id) } })
-        let record = try #require(try? JSONDecoder().decode([UUID].self, from: Data(contentsOf: engine.shellUsedFile)))
+        try #require(await eventually(timeout: 30) { engine.queue.sync { engine.shellTidy.used.contains(typed.id) } })
+        let record = try #require(try? JSONDecoder().decode([UUID].self, from: Data(contentsOf: engine.shellTidy.file)))
         #expect(record == [typed.id])
 
         // Before ten minutes: nothing ends.
@@ -43,7 +43,7 @@ struct ShellTidyingTests {
         try #require(await eventually(timeout: 30) { early.value != nil })
         #expect(early.value == [])
         // Ten minutes on, at their prompts, nothing left running: only the untouched one that went well.
-        engine.queue.sync { engine.shellNow = { Date().addingTimeInterval(ShellTidy.idleFor + 5) } }
+        engine.queue.sync { engine.shellTidy.now = { Date().addingTimeInterval(ShellTidy.idleFor + 5) } }
         let ended = Locked<[UUID]?>(nil)
         engine.queue.async { engine.tidyShells(idle: { _ in true }, leftRunning: { _, _ in false }) { ended.value = $0 } }
         try #require(await eventually(timeout: 30) { ended.value != nil })
@@ -62,10 +62,8 @@ struct ShellTidyingTests {
         }
         // The record survives the server: a fresh read of the file gives it back.
         engine.queue.sync {
-            engine.shellUsedLoaded = false
-            engine.shellUsed = []
-            engine.loadShellUsed()
+            engine.shellTidy.reload()
         }
-        #expect(engine.queue.sync { engine.shellUsed.contains(typed.id) })
+        #expect(engine.queue.sync { engine.shellTidy.used.contains(typed.id) })
     }
 }

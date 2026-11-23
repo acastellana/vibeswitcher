@@ -284,6 +284,25 @@ struct ServerTests {
         #expect(again, "\(node.said)")
     }
 
+    /// The folder moved with no housekeeping to fall back on (an hour off): the watch tells the folder gone, the socket
+    /// is bound in a new folder, and that folder's watch, made again, hears the next replacement by itself.
+    @Test func theServersSocketFolderWatchIsMadeAgainWhenItsFolderGoes() async throws {
+        let node = try await ScratchNode(scratch, housekeeping: 3600)
+        let epoch = try WireClient(node).hello.epoch
+        let folder = node.root.appendingPathComponent("v2")
+        try FileManager.default.moveItem(at: folder, to: node.root.appendingPathComponent("v2-aside"))
+        #expect(await eventually(timeout: 60) { (try? WireClient(node))?.hello.epoch == epoch }, "\(node.said)")
+        let impostor = folder.appendingPathComponent("impostor").path
+        try #require(FileManager.default.createFile(atPath: impostor, contents: Data("not a socket".utf8)))
+        try #require(rename(impostor, node.serverSocket) == 0)
+        let again = await eventually(timeout: 60) {
+            var info = stat()
+            guard lstat(node.serverSocket, &info) == 0, info.st_mode & S_IFMT == S_IFSOCK else { return false }
+            return (try? WireClient(node))?.hello.epoch == epoch
+        }
+        #expect(again, "\(node.said)")
+    }
+
     @Test func aSessionsProcessCannotStopTheNode() async throws {
         let node = try await ScratchNode(scratch)
         let out = node.root.appendingPathComponent("stop.out").path

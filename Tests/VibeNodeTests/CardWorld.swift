@@ -40,24 +40,17 @@ final class CardWorld: @unchecked Sendable {
     /// A world on a new scratch host; its cards built from and answers recorded in `vault` when given (the host's
     /// otherwise).
     static func make(_ scratch: Scratch, vault: ((NodeTestHost) -> LeadVault)? = nil) async throws -> CardWorld {
-        let world = try await DeliveryWorld.make(scratch)
-        guard let vault else { return CardWorld(world: world, engine: world.engine) }
-        var options = LeadEngine.Options()
-        options.answersTrust = false
-        options.home = world.host.home.path
-        options.vault = vault(world.host)
-        return CardWorld(world: world, engine: LeadEngine(root: world.host.root, nodeRoot: nil, link: world.link, clock: nil, options: options))
+        // The world's one engine (see `make(_:plugins:)`).
+        let world = try await DeliveryWorld.make(scratch, vault: vault)
+        return CardWorld(world: world, engine: world.engine)
     }
 
     /// A world whose engine has `plugins` (in place of the registry's list), on the host's vault.
     static func make(_ scratch: Scratch, plugins: [FeaturePlugin], bind: WebBind? = nil, note: @escaping (String) -> Void = { _ in }) async throws -> CardWorld {
-        let world = try await DeliveryWorld.make(scratch)
-        var options = LeadEngine.Options()
-        options.answersTrust = false
-        options.home = world.host.home.path
-        options.plugins = plugins
-        options.pluginBind = bind
-        return CardWorld(world: world, engine: LeadEngine(root: world.host.root, nodeRoot: nil, link: world.link, clock: nil, options: options, note: note))
+        // The world's one engine: a second on the same root and link answered the same welcomes, wrote the same
+        // plugins.json and wrappers, and ran the same external plugins (the load runs' flakes).
+        let world = try await DeliveryWorld.make(scratch, plugins: plugins, pluginBind: bind, note: note)
+        return CardWorld(world: world, engine: world.engine)
     }
 
     /// Stops the world, expecting every answer its server gave came on the requests' queue (`Requests.offQueueReplies`).

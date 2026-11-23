@@ -16,7 +16,7 @@ extension Requests {
         guard let engine else { return reply(refuse(request, .refused, "this server keeps no plugins")) }
         guard let folder = request.args?["folder"]?.string, folder.hasPrefix("/") else { return reply(refuse(request, .badArgs, "plugin.inspect needs folder, an absolute path")) }
         let (builtIn, queue) = (engine.plugins.builtIn, self.queue)
-        engine.pluginWork.async {
+        engine.pluginRuntime.offQueue {
             let inspected = PluginFolder.inspect(folder, builtIn: builtIn)
             queue.async {
                 switch inspected {
@@ -47,7 +47,7 @@ extension Requests {
         guard let folder = request.args?["folder"]?.string, let manifestSHA = request.args?["manifest"]?.string,
               let programSHA = request.args?["program"]?.string else { return reply(refuse(request, .badArgs, "plugin.add needs folder, manifest and program")) }
         let (builtIn, queue, client) = (engine.plugins.builtIn, self.queue, link.vaultV2)
-        engine.pluginWork.async {
+        engine.pluginRuntime.offQueue {
             // Read again: what is recorded is what was shown, or nothing is.
             let inspected = PluginFolder.inspect(folder, builtIn: builtIn)
             guard case .success(let found) = inspected else {
@@ -65,16 +65,13 @@ extension Requests {
                 guard engine.plugins.plugin(found.manifest.id) == nil else {
                     return reply(self.refuse(request, .refused, "a plugin \(found.manifest.id) is in this node's list already"))
                 }
-                engine.pluginWork.async {
-                    let kept = Result { try client.setExternalPlugin(found.manifest.id, record: found.record.json) }
-                    queue.async {
-                        switch kept {
-                        case .failure(let error): reply(self.refuse(request, .refused, "the session host's vault didn't keep it, so nothing was added: \(error)"))
-                        case .success:
-                            self.note("plugin \(found.manifest.id) added from \(found.folder) by the user (off until turned on)")
-                            engine.askPlugins {
-                                reply(.init(re: request.id, result: .object(["plugin": .string(found.manifest.id), "on": .bool(false)])))
-                            }
+                engine.pluginRuntime.vaultWrite({ try client.setExternalPlugin(found.manifest.id, record: found.record.json) }) { kept in
+                    switch kept {
+                    case .failure(let error): reply(self.refuse(request, .refused, "the session host's vault didn't keep it, so nothing was added: \(error)"))
+                    case .success:
+                        self.note("plugin \(found.manifest.id) added from \(found.folder) by the user (off until turned on)")
+                        engine.askPlugins {
+                            reply(.init(re: request.id, result: .object(["plugin": .string(found.manifest.id), "on": .bool(false)])))
                         }
                     }
                 }
@@ -92,23 +89,23 @@ extension Requests {
         let open = engine.cards.list().filter { $0.plugin?.plugin == id }.count
         engine.withdraw(plugin)
         plugin.stop()
-        let (client, queue, root) = (link.vaultV2, self.queue, engine.root)
-        engine.pluginWork.async {
+        let (client, root, note) = (link.vaultV2, engine.root, self.note)
+        engine.pluginRuntime.vaultWrite({ () throws -> Void in
             let kept = Result { try client.setExternalPlugin(id, record: nil) }
             // Its folder (its data) goes with it, and its requests not yet settled: a program added back under its id
             // never sees them (the review of step C, L7). Only the node's own folders, never through a link (L4).
             for folder in ["plugins/\(id)", "plugin-requests/\(id)"] {
                 if let why = PluginFolders.empty(root.appendingPathComponent(folder, isDirectory: true), root: root, andItself: true) {
-                    self.note("plugin \(id) removed: \(why), so it was left as it is")
+                    note("plugin \(id) removed: \(why), so it was left as it is")
                 }
             }
-            queue.async {
-                switch kept {
-                case .failure(let error): reply(self.refuse(request, .refused, "the session host's vault didn't forget it: \(error)"))
-                case .success:
-                    self.note("plugin \(id) removed by the user")
-                    engine.askPlugins { reply(.init(re: request.id, result: .object(["plugin": .string(id), "withdrawn": .int(open)]))) }
-                }
+            _ = try kept.get()
+        }) { kept in
+            switch kept {
+            case .failure(let error): reply(self.refuse(request, .refused, "the session host's vault didn't forget it: \(error)"))
+            case .success:
+                self.note("plugin \(id) removed by the user")
+                engine.askPlugins { reply(.init(re: request.id, result: .object(["plugin": .string(id), "withdrawn": .int(open)]))) }
             }
         }
     }
@@ -167,6 +164,17 @@ extension ExternalPlugin {
 
     /// The plugin's `file`: the payload (base64, 32 KiB at most) and how long it waits, or its refusal; `then` on the
     /// engine's queue.
+    /// A `file` answer: its payload (base64, 32 KiB at most) and life (whole seconds, a number, never `true`), or its
+    /// refusal; anything else doesn't fit.
+    static func filed(_ message: PluginProcess.Message) -> Result<Filed, PluginRefusal> {
+        if let why = message["refuse"] as? String, message.count == 1 { return .failure(PluginRefusal(ConfigSeal.inert(why, limit: 400))) }
+        guard let payload = message["payload"] as? String, let bytes = Data(base64Encoded: payload), bytes.count <= 32 * 1024,
+              let expiresIn = PluginJSON.int(message["expiresIn"]), expiresIn > 0, message.count == 2 else {
+            return .failure(PluginRefusal("its answer didn't fit (payload, expiresIn)"))
+        }
+        return .success(Filed(payload: payload, expiresIn: TimeInterval(expiresIn)))
+    }
+
     func file(words: [String], cwd: String, desk: PluginDesk, then: @escaping (Result<Filed, PluginRefusal>) -> Void) {
         startedProcess(desk) { started in
             guard case .success(let process) = started else {
@@ -179,14 +187,7 @@ extension ExternalPlugin {
                     case .failure(let breach) where breach.busy: then(.failure(PluginRefusal(Self.busy)))
                     case .failure(let breach): then(.failure(PluginRefusal(breach.description)))
                     case .success(let message):
-                        if let why = message["refuse"] as? String, message.count == 1 {
-                            return then(.failure(PluginRefusal(ConfigSeal.inert(why, limit: 400))))
-                        }
-                        guard let payload = message["payload"] as? String, let bytes = Data(base64Encoded: payload), bytes.count <= 32 * 1024,
-                              let expiresIn = message["expiresIn"] as? Int, expiresIn > 0, message.count == 2 else {
-                            return then(.failure(PluginRefusal("its answer didn't fit (payload, expiresIn)")))
-                        }
-                        then(.success(Filed(payload: payload, expiresIn: TimeInterval(expiresIn))))
+                        then(Self.filed(message))
                     }
                 }
             }

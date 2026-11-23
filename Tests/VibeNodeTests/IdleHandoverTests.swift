@@ -55,9 +55,9 @@ struct IdleHandoverTests {
             queue.sync {
                 engine.freeSpace = { _ in nil }
                 engine.spawning = { request in spawns.mutate { $0.append(request) } }
-                engine.handoverNow = { clock.value }
-                engine.handoverEvent = { event in events.mutate { $0.append(event) } }
-                engine.rotationRequest = { text, _, done in asks.mutate { $0.append(text) }; done(true) }
+                engine.rotation.now = { clock.value }
+                engine.rotation.event = { event in events.mutate { $0.append(event) } }
+                engine.rotation.request = { text, _, done in asks.mutate { $0.append(text) }; done(true) }
             }
             link.start()
             _ = await eventually(timeout: 60) { self.queue.sync { self.link.state == .connected } }
@@ -395,7 +395,7 @@ struct IdleHandoverTests {
         world.advance(121)
         #expect(await world.look() == "asked")
         world.queue.sync { world.engine.noteUserInput(session) }
-        #expect(world.queue.sync { world.engine.rotationAsked[world.repo] == nil }, "the user's words come before its note: the ask is dropped")
+        #expect(world.queue.sync { world.engine.rotation.asked[world.repo] == nil }, "the user's words come before its note: the ask is dropped")
         #expect(await world.look() == "quiet")
         #expect(world.spawns.value.isEmpty)
     }

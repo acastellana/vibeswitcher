@@ -7,26 +7,43 @@ import VibeCore
 /// the user's node while the AI summaries may run (`Options.summarizeBatch`, the app's `ClaudeHeadless.allDone`), else
 /// the written fallback. `status` then says it for a day: the project, when, the summary, how many merged and its
 /// receipts summed; the board carries the mark (`BoardValue.allDone`: `vibeswitcher board` and the page's card), and a
-/// page that shows the board marks it seen (`seeAllDone`).
-extension LeadEngine {
+/// page that shows the board marks it seen (`seeAllDone`). Its state is its own, on the engine's queue.
+final class AllDoneWatch {
     /// How long `status` says a board cleared.
-    static let allDoneShown: TimeInterval = 24 * 60 * 60
+    static let shown: TimeInterval = 24 * 60 * 60
+
+    private let queue: DispatchQueue
+    private let reads: BoardReads
+    /// The summaries' prompts, one at a time with the engine's others.
+    private let runs: DispatchQueue
+    private let note: (String) -> Void
+    /// The marks whose summary is being written.
+    private var summarizing: Set<String> = []
+    /// The clock a mark is dated and shown by (a test's).
+    var now: () -> Date = Date.init
+
+    init(queue: DispatchQueue, reads: BoardReads, runs: DispatchQueue, note: @escaping (String) -> Void) {
+        self.queue = queue
+        self.reads = reads
+        self.runs = runs
+        self.note = note
+    }
 
     /// `loaded` against `previous` (the boards as the last refresh read them): each board that cleared is marked, and
     /// each mark with no summary gets the written one, on `reads` (in order with the engine's other board reads and
-    /// writes). A board read for the first time (the engine just started) is no clear. On `queue`.
-    func noteAllDone(previous: [String: LeadBoard], loaded: [String: LeadBoard]) {
-        let now = allDoneNow().timeIntervalSince1970
+    /// writes). A board read for the first time (the engine just started) is no clear. On the engine's queue.
+    func mark(previous: [String: LeadBoard], loaded: [String: LeadBoard], model: Summarizer.Generate?) {
+        EngineWatch.assertOn(queue)
+        let now = now().timeIntervalSince1970
         for (root, board) in loaded {
             let before = previous[root]
             let cleared = BatchSummary.detect(previous: before, current: board, now: now) != nil
-            let unsummarized = (board.allDone ?? []).filter { $0.summary == nil && !allDoneSummarizing.contains($0.id) }
+            let unsummarized = (board.allDone ?? []).filter { $0.summary == nil && !summarizing.contains($0.id) }
             guard cleared || !unsummarized.isEmpty else { continue }
-            unsummarized.forEach { allDoneSummarizing.insert($0.id) }
-            let (project, note, runs, reads) = ((root as NSString).lastPathComponent, self.note, summaryRuns, self.reads)
-            // The model writes the summary when one is given and the AI summaries may run (the app's, with its setting
-            // on); else the written fallback, as before.
-            let model = summariesAllowed ? batchModel : nil
+            unsummarized.forEach { summarizing.insert($0.id) }
+            let (project, note, runs, reads) = ((root as NSString).lastPathComponent, self.note, self.runs, self.reads)
+            // The model writes the summary when one is given (the engine gives it while the AI summaries may run: the
+            // app's, with its setting on); else the written fallback, as before.
             reads.async({ _ in
                 (try? BoardStore(root: root).update { board -> (mark: LeadAllDone?, asks: [(id: String, tasks: [LeadAllDone.Task], input: BatchSummary.Input)]) in
                     let mark = cleared ? BatchSummary.mark(&board, previous: before, now: now) : nil
@@ -55,6 +72,52 @@ extension LeadEngine {
         }
     }
 
+    /// The user saw `root`'s all-done cards (a page showed its board: `seen` with a project, the app's
+    /// `AllDoneWatch.see`): each unseen mark gets its seen time, under the board's lock, on `reads`; nothing written
+    /// when none is unseen. `done` hears whether the board changed, on `queue`.
+    func see(root: String, done: @escaping (Bool) -> Void = { _ in }) {
+        EngineWatch.assertOn(queue)
+        let now = now().timeIntervalSince1970
+        reads.async({ _ in
+            let store = BoardStore(root: root)
+            guard (try? store.read())?.hasUnseenAllDone == true else { return false }
+            return (try? store.update { $0.seeAllDone(at: now) }) ?? false
+        }, then: done)
+    }
+
+    /// What `status` says of each board that cleared in the last day: its newest mark.
+    func notices(boards: [String: LeadBoard]) -> [String] {
+        EngineWatch.assertOn(queue)
+        let now = now().timeIntervalSince1970
+        return boards.sorted { $0.key < $1.key }.compactMap { root, board in
+            guard let mark = board.allDone?.last, now - mark.at < Self.shown else { return nil }
+            let project = ConfigSeal.inert(LeadMail.project(of: root), limit: 80)
+            let summary = mark.summary.map { summary in
+                ConfigSeal.inert(summary.headline, limit: 240) + (summary.bullets.isEmpty ? "" : " " + summary.bullets.map { ConfigSeal.inert($0, limit: 240) }.joined(separator: " "))
+            } ?? "\(mark.tasks.count) task\(mark.tasks.count == 1 ? "" : "s") finished, \(mark.merged) merged."
+            // Its receipts summed, as the app's card says them.
+            let cost = mark.receipts.map { " Cost: " + ConfigSeal.inert($0.text, limit: 300) + " (estimates at the API prices of \($0.pricesAsOf))." } ?? ""
+            return "all done: the lead of \(project) cleared its board at \(NodeWire.dateText(Date(timeIntervalSince1970: mark.at))): \(summary)\(cost)"
+        }
+    }
+}
+
+extension LeadEngine {
+    /// How long `status` says a board cleared.
+    static var allDoneShown: TimeInterval { AllDoneWatch.shown }
+
+    /// The boards as the refresh read them against the last read: each that cleared is marked (`AllDoneWatch.mark`),
+    /// its summary by the model while the AI summaries may run. On `queue`.
+    func noteAllDone(previous: [String: LeadBoard], loaded: [String: LeadBoard]) {
+        allDone.mark(previous: previous, loaded: loaded, model: summariesAllowed ? batchModel : nil)
+    }
+
+    /// The user saw `root`'s all-done cards (`AllDoneWatch.see`). On `queue`.
+    func seeAllDone(root: String, done: @escaping (Bool) -> Void = { _ in }) { allDone.see(root: root, done: done) }
+
+    /// What `status` says of each board that cleared in the last day.
+    var allDoneNotices: [String] { allDone.notices(boards: boards) }
+
     /// The most all-done cards a lead's chat shows (the newest).
     static let chatCardsShown = 20
 
@@ -71,30 +134,4 @@ extension LeadEngine {
         for (id, values) in cards { chatExtras.send(id, values) }
     }
 
-    /// The user saw `root`'s all-done cards (a page showed its board: `seen` with a project, the app's
-    /// `AllDoneWatch.see`): each unseen mark gets its seen time, under the board's lock, on `reads`; nothing written
-    /// when none is unseen. `done` hears whether the board changed, on `queue`.
-    func seeAllDone(root: String, done: @escaping (Bool) -> Void = { _ in }) {
-        let now = allDoneNow().timeIntervalSince1970
-        reads.async({ _ in
-            let store = BoardStore(root: root)
-            guard (try? store.read())?.hasUnseenAllDone == true else { return false }
-            return (try? store.update { $0.seeAllDone(at: now) }) ?? false
-        }, then: done)
-    }
-
-    /// What `status` says of each board that cleared in the last day: its newest mark.
-    var allDoneNotices: [String] {
-        let now = allDoneNow().timeIntervalSince1970
-        return boards.sorted { $0.key < $1.key }.compactMap { root, board in
-            guard let mark = board.allDone?.last, now - mark.at < Self.allDoneShown else { return nil }
-            let project = ConfigSeal.inert(LeadMail.project(of: root), limit: 80)
-            let summary = mark.summary.map { summary in
-                ConfigSeal.inert(summary.headline, limit: 240) + (summary.bullets.isEmpty ? "" : " " + summary.bullets.map { ConfigSeal.inert($0, limit: 240) }.joined(separator: " "))
-            } ?? "\(mark.tasks.count) task\(mark.tasks.count == 1 ? "" : "s") finished, \(mark.merged) merged."
-            // Its receipts summed, as the app's card says them.
-            let cost = mark.receipts.map { " Cost: " + ConfigSeal.inert($0.text, limit: 300) + " (estimates at the API prices of \($0.pricesAsOf))." } ?? ""
-            return "all done: the lead of \(project) cleared its board at \(NodeWire.dateText(Date(timeIntervalSince1970: mark.at))): \(summary)\(cost)"
-        }
-    }
 }

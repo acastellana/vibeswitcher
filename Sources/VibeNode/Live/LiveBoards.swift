@@ -94,6 +94,7 @@ public final class LiveBoards: @unchecked Sendable {
         decisionsWatch = decisions?.subscribe(on: queue) { [weak self] batch in self?.readAgain(roots: Set(batch.map(\.id))) }
         if let clock {
             ticks.append(clock.every(Self.lookEvery) { [weak self] in self?.lookAll() })
+            ticks.append(clock.every(Self.unwatchedEvery) { [weak self] in self?.lookUnwatched() })
         }
     }
 
@@ -117,6 +118,22 @@ public final class LiveBoards: @unchecked Sendable {
         dispatchPrecondition(condition: .onQueue(queue))
         for feed in feeds.values {
             if feed.watch == nil { watch(feed) }
+            read(feed)
+        }
+    }
+
+    /// How often a board whose folder isn't watched (none could be made: no folder yet, or the system had no watch left)
+    /// is looked at: as often as a session's state is scanned, so a board without its watch is as quick as one with.
+    public static let unwatchedEvery = 2
+
+    /// Whether `project`'s board folder is watched now. On `queue`; for the tests.
+    func isWatched(_ project: String) -> Bool { feeds[project]?.watch != nil }
+
+    /// Each board without a watch asked for one again and read. On `queue`.
+    public func lookUnwatched() {
+        dispatchPrecondition(condition: .onQueue(queue))
+        for feed in feeds.values where feed.watch == nil {
+            watch(feed)
             read(feed)
         }
     }

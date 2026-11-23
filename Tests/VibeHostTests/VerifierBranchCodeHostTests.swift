@@ -91,7 +91,7 @@ import Testing
         await #expect(try tools.ask(1, "initialize", ["protocolVersion": "2025-06-18"]) != nil, "stderr: \(tools.errors)")
         let submitted = try await tools.ask(2, "tools/call", ["name": "submit_audit", "arguments": ["completion": "complete", "integrity": "clean",
                                                                                                     "summary": "ran the tests", "tests": "passed"]])
-        #expect(submitted?["isError"] as? Bool == false, "submit_audit: \(submitted ?? [:]) \(tools.errors)")
+        #expect(submitted?["isError"] as? Bool == false, "submit_audit: \(submitted ?? [:]); \(tools.said(2, home: team.home))")
         let verdict = vault(.app).verdict(root: team.root, task: "add-b")
         #expect(verdict?.summary == "ran the tests" && verdict?.session == verifier.id.uuidString, "\(String(describing: verdict))")
     }
