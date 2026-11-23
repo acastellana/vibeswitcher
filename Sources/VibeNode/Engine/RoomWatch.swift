@@ -27,7 +27,7 @@ extension LeadEngine: RoomLeads {
                 }
             }
             // The feature plugins (`Plugins/PluginEngine.swift`): each that is on looks every 15 s.
-            pluginTimer = clock?.every(Self.pluginLookEvery) { [weak self] in self?.queue.async { self?.lookAtPlugins() } }
+            pluginState.timer = clock?.every(Self.pluginLookEvery) { [weak self] in self?.queue.async { self?.lookAtPlugins() } }
         }
     }
 

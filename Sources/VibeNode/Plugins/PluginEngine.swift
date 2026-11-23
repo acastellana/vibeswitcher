@@ -18,16 +18,16 @@ extension LeadEngine {
     func askPlugins(then: (() -> Void)? = nil) {
         // An ask under way read the vault before this was asked (an add or a remove may have just written it): this waits
         // for the next ask, which follows it.
-        guard !pluginAsking else {
-            if let then { pluginAskNextWaiters.append(then) }
-            pluginAskAgain = true
+        guard !pluginState.asking else {
+            if let then { pluginState.askNextWaiters.append(then) }
+            pluginState.askAgain = true
             return
         }
-        if let then { pluginAskWaiters.append(then) }
-        pluginAsking = true
+        if let then { pluginState.askWaiters.append(then) }
+        pluginState.asking = true
         let client = link.vaultV2
-        let writes = pluginWrites
-        pluginWork.async { [weak self] in
+        let writes = pluginState.writes
+        pluginState.work.async { [weak self] in
             let kept = Result { try client.plugins() }
             let settled = Result { try client.settledRequests() }
             let since = try? client.recordSince()
@@ -36,35 +36,35 @@ extension LeadEngine {
             let external = (try? client.externalPlugins()).map { Self.externalPlugins($0, builtIn: builtIn) }
             self?.queue.async {
                 guard let self else { return }
-                self.pluginAsking = false
+                self.pluginState.asking = false
                 // A write queued after this ask's reads (the work queue is serial): its answer predates it, so it isn't
                 // taken (it would turn back what the user just set); the next ask, after the write, answers its waiters.
-                if self.pluginWrites != writes {
-                    self.pluginAskNextWaiters = self.pluginAskWaiters + self.pluginAskNextWaiters
-                    self.pluginAskWaiters = []
-                    self.pluginAskAgain = false
-                    let next = self.pluginAskNextWaiters
-                    self.pluginAskNextWaiters = []
+                if self.pluginState.writes != writes {
+                    self.pluginState.askNextWaiters = self.pluginState.askWaiters + self.pluginState.askNextWaiters
+                    self.pluginState.askWaiters = []
+                    self.pluginState.askAgain = false
+                    let next = self.pluginState.askNextWaiters
+                    self.pluginState.askNextWaiters = []
                     return self.askPlugins { next.forEach { $0() } }
                 }
-                if let since { self.pluginRecordSince = since }
-                if let settings { self.pluginSettings = settings }
+                if let since { self.pluginState.recordSince = since }
+                if let settings { self.pluginState.settings = settings }
                 if let external { self.plugins.takeExternal(external.mapValues(\.record)) { id, _ in external[id] } }
                 // Not known (the vault didn't answer): nothing is drawn until it does.
                 switch settled {
                 case .success(let keys):
-                    self.pluginSettled.formUnion(keys)
-                    self.pluginSettledKnown = true
+                    self.pluginState.settled.formUnion(keys)
+                    self.pluginState.settledKnown = true
                 case .failure(let error):
                     self.note("plugins: the vault didn't say which requests are settled (\(error)); nothing is drawn until it does")
                 }
-                let waiters = self.pluginAskWaiters
-                self.pluginAskWaiters = []
-                if self.pluginAskAgain {
-                    self.pluginAskAgain = false
-                    let next = self.pluginAskNextWaiters
-                    self.pluginAskNextWaiters = []
-                    self.pluginAskWaiters = next
+                let waiters = self.pluginState.askWaiters
+                self.pluginState.askWaiters = []
+                if self.pluginState.askAgain {
+                    self.pluginState.askAgain = false
+                    let next = self.pluginState.askNextWaiters
+                    self.pluginState.askNextWaiters = []
+                    self.pluginState.askWaiters = next
                     defer { self.askPlugins() }
                 }
                 switch kept {
@@ -131,7 +131,7 @@ extension LeadEngine {
         }) { first, _ in first }
         let bin = root.appendingPathComponent("plugins/bin", isDirectory: true)
         let queue = self.queue
-        pluginWork.async {
+        pluginState.work.async {
             do { try VibePaths.writePrivate(data, to: file) } catch { note("plugins: \(file.lastPathComponent) not written: \(error)") }
             Self.writeWrappers(wrappers, in: bin, note: note)
             if let written { queue.async(execute: written) }
@@ -150,8 +150,8 @@ extension LeadEngine {
         if on, let why = plugin.availability() { return then(.failure(.refused("\(plugin.info.title) can't run on this node: \(why)"))) }
         let client = link.vaultV2
         let open = cards.list().filter { $0.plugin?.plugin == id }.count
-        pluginWrites += 1
-        pluginWork.async { [weak self] in
+        pluginState.writes += 1
+        pluginState.work.async { [weak self] in
             let kept = Result { try client.setPlugin(id, on: on) }
             self?.queue.async {
                 guard let self else { return }
@@ -172,9 +172,9 @@ extension LeadEngine {
     /// Each plugin that is on looks at its requests; an off one's folder is emptied unread (what its command filed
     /// anyway, or a file put there). `done` on `queue` once every look is done. On `queue`.
     func lookAtPlugins(done: (() -> Void)? = nil) {
-        guard plugins.known, pluginSettledKnown else {
+        guard plugins.known, pluginState.settledKnown else {
             return askPlugins { [weak self] in
-                guard let self, self.plugins.known, self.pluginSettledKnown else { done?(); return }
+                guard let self, self.plugins.known, self.pluginState.settledKnown else { done?(); return }
                 self.lookAtPlugins(done: done)
             }
         }
@@ -188,16 +188,16 @@ extension LeadEngine {
                 waiting += 1
                 // One look at a time: asked for while one is under way, one more look follows it (the one under way may
                 // have read the folder before what this is for was filed), and this waits for that one.
-                if pluginLooking[id] != nil {
-                    pluginLookAgain[id, default: []].append(finish)
+                if pluginState.looking[id] != nil {
+                    pluginState.lookAgain[id, default: []].append(finish)
                     continue
                 }
-                pluginLooking[id] = [finish]
+                pluginState.looking[id] = [finish]
                 startLook(plugin)
             } else if let relative = plugin.info.folder {
                 waiting += 1
                 let (note, root) = (self.note, self.root)
-                pluginWork.async { [weak self] in
+                pluginState.work.async { [weak self] in
                     let dropped = Self.dropUnread(root: root, relative: relative)
                     if dropped > 0 { note("plugin \(id) is off: \(dropped) file(s) in \(relative) dropped unread") }
                     self?.queue.async { finish() }
@@ -213,10 +213,10 @@ extension LeadEngine {
         plugin.look(desk(plugin)) { [weak self] in
             self?.queue.async {
                 guard let self else { return }
-                let waiters = self.pluginLooking.removeValue(forKey: id) ?? []
-                if let again = self.pluginLookAgain.removeValue(forKey: id) {
+                let waiters = self.pluginState.looking.removeValue(forKey: id) ?? []
+                if let again = self.pluginState.lookAgain.removeValue(forKey: id) {
                     if self.plugins.isOn(id) {
-                        self.pluginLooking[id] = again
+                        self.pluginState.looking[id] = again
                         self.startLook(plugin)
                     } else {
                         again.forEach { $0() }
@@ -230,7 +230,7 @@ extension LeadEngine {
     /// Removes what a plugin's command files in its folder (`relative` under `root`: `<id>.json`, `<id>.seal`,
     /// `.<id>.answer`, regular files and links, never a folder), reading none: how many. Each component of the folder is
     /// opened without following a link (a session could make `shell-requests/asked` a link to a folder of the user's),
-    /// and each name is removed relative to the folder opened, so nothing outside it is touched. Blocks: on `pluginWork`.
+    /// and each name is removed relative to the folder opened, so nothing outside it is touched. Blocks: on `pluginState.work`.
     static func dropUnread(root: URL, relative: String) -> Int {
         var fd = open(root.path, O_RDONLY | O_DIRECTORY | O_CLOEXEC)
         guard fd >= 0 else { return 0 }
@@ -278,7 +278,7 @@ extension LeadEngine {
         // An external plugin's every answer that reaches its program is acting: it chose `acts` itself, so its word for
         // it doesn't skip expiry, the live asker or the settle first (the review of step C, M1).
         let acting = action.acts || plugin is ExternalPlugin
-        if acting, let expires = shown.expiresAt, pluginNow() >= expires {
+        if acting, let expires = shown.expiresAt, pluginState.now() >= expires {
             return then(.failure(.refused("it expired: nothing ran")))
         }
         // The asker still a live session the user opened (it may have ended since the card was drawn).
@@ -308,15 +308,15 @@ extension LeadEngine {
         guard acting else { return plugin.perform(action.word, on: marked, desk: desk, act: act, then: then) }
         // An acting answer: settled in the vault, confirmed, before it acts, so no restart draws it again.
         let client = link.vaultV2
-        pluginSettling.insert(key)
-        pluginWork.async { [weak self] in
+        pluginState.settling.insert(key)
+        pluginState.work.async { [weak self] in
             let kept = Result { try client.settleRequests([key]) }
             self?.queue.async {
                 guard let self else { return }
-                self.pluginSettling.remove(key)
+                self.pluginState.settling.remove(key)
                 switch kept {
                 case .success:
-                    self.pluginSettled.insert(key)
+                    self.pluginState.settled.insert(key)
                     // Turned off (or the card withdrawn) while the vault was asked: nothing runs; the settle stands.
                     guard self.plugins.isOn(shown.plugin), let now = self.cards.cards[marked.id], now.isOpen,
                           now.plugin?.state == action.marks else {
@@ -346,12 +346,12 @@ extension LeadEngine {
     func withdraw(_ plugin: FeaturePlugin, ended: String? = nil) {
         let desk = desk(plugin)
         // Its page goes with it (the review of 6e91f053, M2): the host lets the port go, then the slot is freed.
-        if let slot = pluginPage, slot.plugin == plugin.info.id { slot.page.stop() }
+        if let slot = pluginState.page, slot.plugin == plugin.info.id { slot.page.stop() }
         let title = plugin.info.title
         for var card in cards.list() where card.plugin?.plugin == plugin.info.id {
             guard var shown = card.plugin else { continue }
             // Already being acted on (an answer marked it): what it started may run; say what is true.
-            let underWay = !shown.isWaiting && !pluginSettling.contains(PluginKey(plugin: shown.plugin, request: shown.request).name)
+            let underWay = !shown.isWaiting && !pluginState.settling.contains(PluginKey(plugin: shown.plugin, request: shown.request).name)
             shown.state = PluginCard.withdrawnState
             if let ended {
                 let said = ConfigSeal.inert(ended, limit: 200)
@@ -383,18 +383,18 @@ extension LeadEngine {
     /// Serves a plugin's page once (`PluginPage`), one at a time on the node, for `plugin`'s request `key`: started off
     /// the engine's queue (the host binds its socket); every callback on the engine's queue. The slot is freed only once
     /// the host let the port go, however the page ends (a failed start too: the review of 6e91f053, L6). Its address is
-    /// kept for the answer's reply (`pluginPageLines`), never handed to the plugin (L1). On `queue`.
+    /// kept for the answer's reply (`pluginState.pageLines`), never handed to the plugin (L1). On `queue`.
     func openPluginPage(_ spec: PluginPage.Spec, plugin: String, key: String, take: @escaping (Data, @escaping (Bool) -> Void) -> Void,
                         ended: @escaping (Bool) -> Void, then: @escaping (Result<Void, PluginRefusal>) -> Void) {
-        guard pluginPage == nil else { return then(.failure(PluginRefusal("a plugin's page is open already: answer it, or wait for it to stop"))) }
+        guard pluginState.page == nil else { return then(.failure(PluginRefusal("a plugin's page is open already: answer it, or wait for it to stop"))) }
         let slot = PluginPageSlot(page: PluginPage(spec: spec), plugin: plugin, key: key)
-        pluginPage = slot
-        let (bind, clock, queue, page) = (options.pluginBind ?? .direct, clock ?? pluginClock, self.queue, slot.page)
-        pluginWork.async { [weak self] in
+        pluginState.page = slot
+        let (bind, clock, queue, page) = (options.pluginBind ?? .direct, clock ?? pluginState.clock, self.queue, slot.page)
+        pluginState.work.async { [weak self] in
             let started = Result {
                 try page.start(bind: bind, clock: clock, take: { bytes, answer in queue.async { take(bytes, answer) } }, ended: { taken in
                     queue.async {
-                        if self?.pluginPage === slot { self?.pluginPage = nil }
+                        if self?.pluginState.page === slot { self?.pluginState.page = nil }
                         // A page that never opened ends nothing of the plugin's: its start's failure says so.
                         if slot.opened { ended(taken) } else { slot.endedEarly = true }
                     }
@@ -404,7 +404,7 @@ extension LeadEngine {
                 switch started {
                 case .success(let url) where !slot.endedEarly:
                     slot.opened = true
-                    self?.pluginPageLines[key] = (url, spec.life)
+                    self?.pluginState.pageLines[key] = (url, spec.life)
                     then(.success(()))
                 case .success:
                     then(.failure(PluginRefusal("its page stopped before it opened")))
@@ -417,34 +417,34 @@ extension LeadEngine {
 
     /// The lines that give the answering terminal a page's address, taken once.
     func pluginPageSay(_ key: String) -> [NodeWire.Value]? {
-        guard let line = pluginPageLines.removeValue(forKey: key) else { return nil }
+        guard let line = pluginState.pageLines.removeValue(forKey: key) else { return nil }
         return [.string("Open this page in your browser (it works once, \(max(1, Int(line.life / 60))) minutes at most):"),
                 .string("  " + line.url.absoluteString)]
     }
 
     /// Settles `keys` (`PluginKey.name`): never drawn again, here and in the vault. On `queue`.
     func settlePluginRequests(_ keys: [String]) {
-        let new = keys.filter { pluginSettled.insert($0).inserted }
+        let new = keys.filter { pluginState.settled.insert($0).inserted }
         guard !new.isEmpty else { return }
         let (client, note) = (link.vaultV2, self.note)
-        pluginWork.async {
+        pluginState.work.async {
             do { try client.settleRequests(new) } catch { note("plugins: \(new.count) settled request(s) not kept in the vault: \(error)") }
         }
     }
 
-    /// Tells `session` `text` from VibeSwitcher until it reached it or the session is gone (`pluginTells`). On `queue`.
+    /// Tells `session` `text` from VibeSwitcher until it reached it or the session is gone (`pluginState.tells`). On `queue`.
     func tellSurely(_ text: String, session: UUID, key: String) {
-        pluginTells[key] = (session, text)
+        pluginState.tells[key] = (session, text)
         retryPluginTells()
     }
 
-    /// Each message `pluginTells` holds, tried again (one at a time a message). On `queue`.
+    /// Each message `pluginState.tells` holds, tried again (one at a time a message). On `queue`.
     func retryPluginTells() {
-        for (key, entry) in pluginTells where pluginTelling.insert(key).inserted {
+        for (key, entry) in pluginState.tells where pluginState.telling.insert(key).inserted {
             tell(entry.text, from: .system("from VibeSwitcher"), session: entry.session) { [weak self] delivery in
                 guard let self else { return }
-                self.pluginTelling.remove(key)
-                if delivery != .notYet { self.pluginTells[key] = nil }
+                self.pluginState.telling.remove(key)
+                if delivery != .notYet { self.pluginState.tells[key] = nil }
             }
         }
     }
@@ -452,7 +452,7 @@ extension LeadEngine {
     /// Rule 4, the core's: an open plugin card still waiting past its expiry closes as expired, and is settled (the
     /// plugin tells its asker at its look). On `queue`.
     func expirePluginCards() {
-        let now = pluginNow()
+        let now = pluginState.now()
         for var card in cards.list() where card.kind == .plugin {
             guard var shown = card.plugin, shown.isWaiting, let expires = shown.expiresAt, now >= expires else { continue }
             shown.state = "expired"

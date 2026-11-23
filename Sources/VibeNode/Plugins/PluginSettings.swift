@@ -18,7 +18,7 @@ extension LeadEngine {
     var pluginSettingsShown: [NodeSettings.Shown] {
         plugins.on.flatMap { plugin in
             plugin.info.settings.map { setting in
-                let value = pluginSettings["\(plugin.info.id).\(setting.key)"] ?? setting.defaultValue
+                let value = pluginState.settings["\(plugin.info.id).\(setting.key)"] ?? setting.defaultValue
                 return NodeSettings.Shown(setting: Self.catalogSetting(plugin, setting), value: value, defaultValue: setting.defaultValue,
                                           place: NodeSettings.place(Self.catalogSetting(plugin, setting), files: NodeSettings.Files(root: root), project: nil),
                                           note: nil)
@@ -56,17 +56,17 @@ extension LeadEngine {
     private func keepPluginSetting(_ key: String, plugin: FeaturePlugin, setting: PluginInfo.Setting, value checked: String?,
                                    then: @escaping (Result<(value: String, was: String), CardFailure>) -> Void) {
         let stored = "\(plugin.info.id).\(setting.key)"
-        let was = pluginSettings[stored] ?? setting.defaultValue
+        let was = pluginState.settings[stored] ?? setting.defaultValue
         let client = link.vaultV2
-        pluginWrites += 1
-        pluginWork.async { [weak self] in
+        pluginState.writes += 1
+        pluginState.work.async { [weak self] in
             let kept = Result { try client.setPluginSetting(stored, to: checked) }
             self?.queue.async {
                 guard let self else { return }
                 switch kept {
                 case .failure(let error): then(.failure(.refused("the session host's vault didn't keep it, so nothing changed: \(error)")))
                 case .success(let settings):
-                    self.pluginSettings = settings
+                    self.pluginState.settings = settings
                     self.note("set \(key) (plugin \(plugin.info.id)): changed")
                     then(.success((settings[stored] ?? setting.defaultValue, was)))
                 }

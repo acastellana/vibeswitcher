@@ -16,7 +16,7 @@ extension Requests {
         guard let engine else { return reply(refuse(request, .refused, "this server keeps no plugins")) }
         guard let folder = request.args?["folder"]?.string, folder.hasPrefix("/") else { return reply(refuse(request, .badArgs, "plugin.inspect needs folder, an absolute path")) }
         let (builtIn, queue) = (engine.plugins.builtIn, self.queue)
-        engine.pluginWork.async {
+        engine.pluginState.work.async {
             let inspected = PluginFolder.inspect(folder, builtIn: builtIn)
             queue.async {
                 switch inspected {
@@ -47,7 +47,7 @@ extension Requests {
         guard let folder = request.args?["folder"]?.string, let manifestSHA = request.args?["manifest"]?.string,
               let programSHA = request.args?["program"]?.string else { return reply(refuse(request, .badArgs, "plugin.add needs folder, manifest and program")) }
         let (builtIn, queue, client) = (engine.plugins.builtIn, self.queue, link.vaultV2)
-        engine.pluginWork.async {
+        engine.pluginState.work.async {
             // Read again: what is recorded is what was shown, or nothing is.
             let inspected = PluginFolder.inspect(folder, builtIn: builtIn)
             guard case .success(let found) = inspected else {
@@ -65,8 +65,8 @@ extension Requests {
                 guard engine.plugins.plugin(found.manifest.id) == nil else {
                     return reply(self.refuse(request, .refused, "a plugin \(found.manifest.id) is in this node's list already"))
                 }
-                engine.pluginWrites += 1
-                engine.pluginWork.async {
+                engine.pluginState.writes += 1
+                engine.pluginState.work.async {
                     let kept = Result { try client.setExternalPlugin(found.manifest.id, record: found.record.json) }
                     queue.async {
                         switch kept {
@@ -94,8 +94,8 @@ extension Requests {
         engine.withdraw(plugin)
         plugin.stop()
         let (client, queue, root) = (link.vaultV2, self.queue, engine.root)
-        engine.pluginWrites += 1
-        engine.pluginWork.async {
+        engine.pluginState.writes += 1
+        engine.pluginState.work.async {
             let kept = Result { try client.setExternalPlugin(id, record: nil) }
             // Its folder (its data) goes with it, and its requests not yet settled: a program added back under its id
             // never sees them (the review of step C, L7). Only the node's own folders, never through a link (L4).

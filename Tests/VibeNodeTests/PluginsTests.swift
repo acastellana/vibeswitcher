@@ -328,7 +328,7 @@ struct PluginsTests {
         let (_, request) = try await file(world)
         await look(world)
         let card = try #require(card(world, request))
-        world.queue.sync { world.engine.pluginNow = { request.expiresAt.addingTimeInterval(1) } }
+        world.queue.sync { world.engine.pluginState.now = { request.expiresAt.addingTimeInterval(1) } }
         let late = try #require(await world.answer(card, "run"))
         #expect(late.error?.code == NodeWire.Code.refused.rawValue && late.error?.message.contains("expired") == true, "\(late)")
         #expect(probe.performed.value.isEmpty)
@@ -408,7 +408,7 @@ struct PluginsTests {
         let desk = world.queue.sync { world.engine.desk(probe) }
         world.queue.sync {
             desk.forget(request: request.id, closed: "x")
-            world.engine.pluginSettled.remove("probe:\(request.id)")
+            world.engine.pluginState.settled.remove("probe:\(request.id)")
         }
         let asked = Probe.card(request, asker: PluginDesk.asker(asker))
         var card = asked
@@ -427,7 +427,7 @@ struct PluginsTests {
         let again = try world.queue.sync { try desk.draw(asked, root: world.repo, at: request.created).get() }
         await withCheckedContinuation { done in
             world.queue.async {
-                world.engine.pluginNow = { request.expiresAt.addingTimeInterval(1) }
+                world.engine.pluginState.now = { request.expiresAt.addingTimeInterval(1) }
                 world.engine.expirePluginCards()
                 done.resume()
             }
@@ -435,7 +435,7 @@ struct PluginsTests {
         let expired = try #require(world.card(again.id))
         #expect(!expired.isOpen && expired.plugin?.state == "expired", "\(expired)")
         world.queue.sync { desk.forget(request: request.id, closed: "gone") }
-        world.queue.sync { world.engine.pluginNow = Date.init }
+        world.queue.sync { world.engine.pluginState.now = Date.init }
         #expect(world.queue.sync { desk.draw(asked, root: world.repo, at: request.created) }.failure?.description.contains("settled") == true)
         #expect(await eventually(timeout: 30) { (try? world.world.link.vaultV2.settledRequests())?.contains("probe:\(request.id)") == true })
 
@@ -509,7 +509,7 @@ extension PluginsTests {
         await look(world)
         let card = try #require(card(world, request))
         #expect(card.plugin?.session == NodeIds.session(host: asker.id) && card.plugin?.asker == "Asker")
-        let digest = try #require(world.queue.sync { world.engine.pluginDrawn["probe:\(request.id)"] })
+        let digest = try #require(world.queue.sync { world.engine.pluginState.drawn["probe:\(request.id)"] })
         let folder = world.host.root.appendingPathComponent("probe-requests", isDirectory: true)
         let read = PluginDesk.read(folder: folder, decode: { try ShellRequest.parse($0) }, trusted: [:], vault: world.host.vault,
                                    opened: [asker.id.uuidString.lowercased()], drawn: ["probe:\(request.id)": String(repeating: "f", count: 64)],
@@ -522,7 +522,7 @@ extension PluginsTests {
         var claimed = Probe.card(request, asker: "Someone Else")
         claimed.session = "\(NodeIds.node):\(UUID().uuidString.lowercased())"
         world.queue.sync { desk.forget(request: request.id, closed: "x") }
-        world.queue.sync { world.engine.pluginSettled.remove("probe:\(request.id)") }
+        world.queue.sync { world.engine.pluginState.settled.remove("probe:\(request.id)") }
         let drawn = try world.queue.sync { try desk.draw(claimed, root: world.repo, at: Date().addingTimeInterval(9_999)).get() }
         #expect(drawn.plugin?.session == NodeIds.session(host: asker.id) && drawn.plugin?.asker == "Asker" && drawn.at == request.created)
         // Answered: never back to waiting.
@@ -543,13 +543,13 @@ extension PluginsTests {
         let card = try #require(card(world, request))
         let settledFirst = Locked<Bool?>(nil)
         let key = "probe:\(request.id)"
-        probe.onPerform = { settledFirst.value = world.engine.pluginSettled.contains(key) }
+        probe.onPerform = { settledFirst.value = world.engine.pluginState.settled.contains(key) }
         let ran = try #require(await world.answer(card, "run"))
         #expect(ran.ok && settledFirst.value == true, "\(ran)")
         #expect(try world.world.link.vaultV2.settledRequests().contains(key))
 
         let desk = world.queue.sync { world.engine.desk(probe) }
-        world.queue.sync { world.engine.pluginSettledKnown = false }
+        world.queue.sync { world.engine.pluginState.settledKnown = false }
         var other = Probe.card(request, asker: "Asker")
         other.request = UUID().uuidString.lowercased()
         #expect(world.queue.sync { desk.draw(other, root: world.repo, at: Date()) }.failure?.description.contains("settled") == true)
@@ -677,7 +677,7 @@ extension PluginsTests {
         #expect(await eventually(timeout: 30) { probe.pageEnded.value == true })
         #expect(probe.pageAnswers.value == [Data(#"{"ok":true}"#.utf8)])
         #expect(await eventually(timeout: 30) { (try? WebTestClient(port: port)) == nil }, "the port let go")
-        #expect(world.queue.sync { world.engine.pluginPage } == nil)
+        #expect(world.queue.sync { world.engine.pluginState.page } == nil)
     }
 
     /// A plugin's settings: listed under its own title while it is on, kept in the vault (a file a session writes changes
@@ -696,7 +696,7 @@ extension PluginsTests {
         #expect(shown["section"]?.string == "Probes" && shown["home"]?.string == "plugin" && shown["value"]?.string == "3", "\(shown)")
         #expect(WireSchema.check(shown, as: "setting", strict: true) == nil)
         try Data("x".utf8).write(to: world.host.root.appendingPathComponent("settings.plist"))
-        #expect(world.queue.sync { world.engine.pluginSettings["probe.depth"] } == "3")
+        #expect(world.queue.sync { world.engine.pluginState.settings["probe.depth"] } == "3")
         _ = await turn(world, "probe", on: false)
         let off = try #require(await world.ask("settings", action: nil))
         #expect(!(off.result?["node"]?["settings"]?.array ?? []).contains { $0["key"]?.string == "probe_depth" }, "off: no settings")
@@ -859,7 +859,7 @@ extension PluginsTests {
         _ = try #require(await turn(world, "probe", on: false))
         #expect(await eventually(timeout: 30) { probe.pageEnded.value == false }, "its page ended, untaken")
         #expect(await eventually(timeout: 30) { (try? WebTestClient(port: port)) == nil }, "the port let go")
-        #expect(world.queue.sync { world.engine.pluginPage } == nil)
+        #expect(world.queue.sync { world.engine.pluginState.page } == nil)
     }
 
     /// L6: a page that fails to start frees the node's slot only once the host confirms the release, as a normal end does.
@@ -876,9 +876,9 @@ extension PluginsTests {
         let card = try #require(card(world, request))
         let ran = try #require(await world.answer(card, "run"))
         #expect(!ran.ok, "\(ran)")
-        #expect(world.queue.sync { world.engine.pluginPage } != nil, "the release not confirmed: the slot still taken")
+        #expect(world.queue.sync { world.engine.pluginState.page } != nil, "the release not confirmed: the slot still taken")
         gate.signal()
-        #expect(await eventually(timeout: 30) { released.value && world.queue.sync { world.engine.pluginPage } == nil })
+        #expect(await eventually(timeout: 30) { released.value && world.queue.sync { world.engine.pluginState.page } == nil })
         #expect(probe.pageEnded.value == nil, "a page that never opened ends nothing of the plugin's")
     }
 
@@ -912,7 +912,7 @@ extension PluginsTests {
         let world = try await CardWorld.make(scratch, plugins: [probe])
         defer { world.stop() }
         let (_, request) = try await file(world)
-        world.queue.sync { world.engine.pluginNow = { request.expiresAt.addingTimeInterval(1) } }
+        world.queue.sync { world.engine.pluginState.now = { request.expiresAt.addingTimeInterval(1) } }
         await look(world)
         #expect(card(world, request) == nil)
     }
