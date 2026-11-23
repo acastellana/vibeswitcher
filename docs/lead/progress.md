@@ -4455,3 +4455,5 @@ Proposed task 1: Find why dictations end with no text
 - 2026-11-23 18:06 Automatically (auto_advance): Merged review-rules-carry-a (Review rules carry a trigger and a source; the verifier applies only the rules a diff triggers and says which) into main at 208cd3fd, on its passing audit and the full test run.
 - 2026-11-23 18:06 Automatically (auto_advance): Cleaned up review-rules-carry-a (freed 2.5 GB of build output and temporary folders). It stays done.
 - 2026-11-23 18:07 Update: Retrospective: the verification plan (flaky tests, review rules, bugs past review) — **Landed today (8 merges, from the claude.dev verification article):**
+- 2026-11-23 20:02 Handed the lead over to a fresh session: the last one had been idle 52 minutes with 238k tokens of context, past handover_idle_min 50 and handover_tokens 150k
+- 2026-11-23 20:02 Update: Today: 8 merges from the verification plan; board empty — **Landed (8, all reviewed):** listed one by one in today's "Retrospective: the verification plan" update: the flake policy (a fix task on the first flake), the "naming no test" count fix, parameterize…
