@@ -4402,3 +4402,7 @@ Proposed task 1: Find why dictations end with no text
 - 2026-11-23 14:47 Pipeline held: a-merge-whose-tests ready to merge with none landing; cause: the load hold
 - 2026-11-23 14:50 Merged a-merge-whose-tests: A merge whose tests fail by name isn't also counted as a flake "naming no test" (build 71a026954280)
 - 2026-11-23 14:50 Flaky in a-merge-whose-tests's merge: aScreenshotFileIsDecodedAtTheHeightItShows() failed the first test run and passed its rerun (the failing tests only); merged on the rerun
+- 2026-11-23 14:50 Automatically (auto_advance): Merged a-merge-whose-tests (A merge whose tests fail by name isn't also counted as a flake "naming no test") into main at dec36bba, on its passing audit and the full test run. (Its first test run failed on aScreenshotFileIsDecodedAtTheHeightItShows() and the rerun of those tests passed, so it merged on the rerun: recorded in the flake ledger, which status lists. Each flaky test's failing lines, readable by its fixer: /Users/albert/dev/vibeswitcher/.vibeswitcher/flakes/2026-11-23-a-merge-whose-tests-dec36bba.log.)
+- 2026-11-23 14:50 Automatically (auto_advance): Cleaned up a-merge-whose-tests (freed 1.8 GB of build output and temporary folders). It stays done.
+- 2026-11-23 14:51 Planned fix-the-flaky-test-24: Fix the flaky test aScreenshotFileIsDecodedAtTheHeightItShows() (review audit)
+- 2026-11-23 14:51 Update: Merged: a flaky test now gets its fix task on its first flake, and fixes never paper over it — **What changed** (step 1 of the verification plan you agreed to):
