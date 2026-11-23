@@ -856,6 +856,15 @@ public struct LeadTask: Codable, Equatable, Sendable, Identifiable {
     /// The project's goal it serves (`LeadBoard.goals`, by id; `LeadGoals.swift`). Nil: none, "unsorted" while unfinished.
     /// Not `goal`: the contract's `goal` is what this task itself must make true.
     public var goalID: String?
+    /// Its estimates as given, oldest first: the worker's (`progress`'s likely_min, worst_min) and the lead's
+    /// (add_task, update_task), the first always kept (`LeadEstimates.swift`). Nil: none given.
+    public var estimates: [LeadEstimate]?
+    /// Each status it took, with when (`BoardStore.update` stamps them, the newest `LeadTask.keptStates`): what its time
+    /// blocked is read from.
+    public var states: [LeadStateStamp]?
+    /// The estimate (its `at`) whose worst case the lead was told this task ran past (`LeadForecast.overdueLine`): once a
+    /// task an estimate.
+    public var overdueTold: Double?
     /// When it took its current status (`BoardStore.update` stamps every change).
     public var since: Double?
     /// When its first worker started.
@@ -1874,6 +1883,7 @@ public final class BoardStore: @unchecked Sendable {
             let now = Date().timeIntervalSince1970
             for index in board.tasks.indices where before[board.tasks[index].id] != board.tasks[index].status {
                 board.tasks[index].since = before[board.tasks[index].id] == nil ? board.tasks[index].createdAt : now
+                board.tasks[index].stamp(at: board.tasks[index].since ?? now)
             }
             board.refreshScores(now: now)
             try write(board)

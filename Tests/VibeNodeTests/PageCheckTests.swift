@@ -74,13 +74,28 @@ struct PageCheckTests {
         let question = "Launch the onboarding page to the testers on Thursday, or wait for the copy review?"
         try tools.call("ask_user", ["question": question, "options": ["Thursday", "Wait for the review"]])
         try #require(await eventually(timeout: 120) { tools.calls().count == 1 }, "\(node.said)")
-        let made = WireVectors.sampleBoard(now: Date().timeIntervalSince1970, worker: site.session.id)
+        // The sample board with its two goals (the launch, open, with the first two tasks; the uploads, done), the rest unsorted.
+        let made = WireVectors.goaled(WireVectors.sampleBoard(now: Date().timeIntervalSince1970, worker: site.session.id), now: Date().timeIntervalSince1970)
         // A result the lead posted, its body markdown with a table: the conversation's line and the side sheet's.
         let result = "The pricing page has its new copy"
         try BoardStore(root: repo.path).update {
             $0.tasks = made.tasks
+            $0.goals = made.goals
             $0.updates = [LeadUpdate(id: "page-check-result", title: result, body: "What changed:\n\n| Plan | Price |\n|---|---|\n| Starter | $9 |\n| Team | $29 |")]
         }
+        // A second project, with no goals and no estimates: its roadmap draws the plain form (in motion, blocked, the
+        // queue as a band), no time axis.
+        let docs = node.root.appendingPathComponent("example-docs")
+        try await scratchRepository(docs)
+        try EngineEndToEndTests.workflow(docs)
+        let docsHead = Git.run(["rev-parse", "main"], in: docs.path).output
+        try await node.acceptConfig(docs)
+        try await node.acceptBase(docs, from: docsHead)
+        let docsStarted = try await node.runOnTerminal(["lead", docs.path, "--goal", "Write the setup guide"])
+        try #require(docsStarted.status == 0, "the second lead didn't start: \(docsStarted.output)\n\(node.said)")
+        let plain = WireVectors.sampleBoard(now: Date().timeIntervalSince1970, worker: site.session.id)
+        try BoardStore(root: docs.path).update { $0.tasks = plain.tasks }
+
         // The lead's latest statement (a decision in its records), which a short conversation shows at its top.
         let statement = "Ship the copy first and the pricing table after"
         try BoardStore(root: repo.path).appendDecision(statement, why: "The table waits on the plan names")
@@ -119,6 +134,7 @@ struct PageCheckTests {
         }
         try #require(kinds.isSuperset(of: ["question", "plugin"]), "cards: \(kinds)\n\(node.said)")
 
+        let launch = try #require(made.goals?.first, "the sample board's goals")
         let opened = try LiveScratch.open(node)
         let expect: [String: String] = [
             "session": "example-site", "chatHref": "#/s/" + NodeIds.session(host: site.session.id),
@@ -126,7 +142,9 @@ struct PageCheckTests {
             "projectHref": "#/p/" + NodeIds.project(root: repo.path).addingPercentEncoding(withAllowedCharacters: .alphanumerics)! + "/lead",
             "question": "Launch the onboarding page to the testers", "result": result, "task": made.tasks[0].slug, "statement": statement,
             "shellHref": "#/s/" + NodeIds.session(host: asker.id), "shell": "echo page-check-ran",
-            "board": made.tasks[0].title,
+            "board": made.tasks[0].title, "goal": launch.title, "goalID": launch.id, "estimated": made.tasks[1].slug,
+            "plainHref": "#/p/" + NodeIds.project(root: docs.path).addingPercentEncoding(withAllowedCharacters: .alphanumerics)! + "/roadmap",
+            "plainTask": plain.tasks[1].title,
             "replacedHref": "#/s/" + formerID,
             "plugin": "Shell requests", "setting": "Boost",
         ]
@@ -144,7 +162,7 @@ struct PageCheckTests {
         }
         let table = (try? String(contentsOf: said, encoding: .utf8)) ?? ""
         for row in ["Projects and own sessions", "Chat", "Question card", "Lead conversation", "Latest statement", "What waits elsewhere", "Side sheet", "Team tab",
-                    "Replaced lead", "Shell card", "Roadmap",
+                    "Replaced lead", "Shell card", "Roadmap", "Roadmap dates", "Task estimate", "Estimates in Stats", "Plain roadmap",
                     "Deep links", "This node", "Settings", "Language", "Phone", "Console"] {
             #expect(table.split(separator: "\n").contains { $0.hasPrefix(row + " ") && $0.contains(" pass ") }, "\(row):\n\(table)")
         }

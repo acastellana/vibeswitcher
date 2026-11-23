@@ -68,15 +68,18 @@ public enum BoardValue {
     /// only their AI summaries are taken, for the decisions `records` holds. `records`: the lead's decisions and files
     /// under its root, read with no link followed (`BoardRecords`); the value's `decisions`, `scorecard`, `answered`,
     /// `files` and `recordsDir` are made from them and the board (2026-11-21).
+    /// `workers`: how many the project runs at once (workflow.md's max_workers), what its queue's forecast runs on.
     public static func value(project: String, root: String, board: LeadBoard?, refusal: String? = nil, now: Date,
                              usageWaits: [String: ReviewUsageWait] = [:], summaries: [String: String] = [:],
-                             decisions: [BoardDecision] = [], records: BoardRecords.Read = BoardRecords.Read()) -> NodeWire.Value {
+                             decisions: [BoardDecision] = [], records: BoardRecords.Read = BoardRecords.Read(), workers: Int = 3) -> NodeWire.Value {
         var shown: [(group: Int, position: Int, value: NodeWire.Value)] = []
         var slugs: Set<String> = []
+        // The forecast (`LeadForecast`, VibeCore's: the lead's tools say the same numbers), once a board.
+        let forecast = board.map { LeadForecast.forecast($0, workers: workers, now: now.timeIntervalSince1970) }
         if let board {
             for (position, task) in board.tasks.enumerated() where slugs.insert(task.slug).inserted {
                 guard let (group, value) = Self.task(task, position: position, board: board, now: now, usageWait: usageWaits[task.id],
-                                                              summary: summaries[task.id]) else { continue }
+                                                              summary: summaries[task.id], landing: forecast?.tasks[task.slug]) else { continue }
                 shown.append((group, position, value))
             }
         }
@@ -84,7 +87,8 @@ public enum BoardValue {
         var kept = Array(shown.prefix(mostTasks))
         // The byte budget: the tasks' encoded sizes and the rest of the value's, the last tasks dropped till it fits.
         var extra = BoardRecords.fields(board: board, read: records, now: now, summaries: decisions)
-        extra["goals"] = board.map(goals) ?? .array([])
+        extra["goals"] = board.map { goals($0, landings: forecast?.goals ?? [:]) } ?? .array([])
+        extra["score"] = forecast.map { score($0.score) } ?? .null
         var size = 2_048 + root.utf8.count + project.utf8.count + NodeWire.message(NodeWire.Value.object(extra)).count
             + kept.reduce(0) { $0 + NodeWire.message($1.value).count + 1 }
         while size > mostBytes, let last = kept.popLast() { size -= NodeWire.message(last.value).count + 1 }
@@ -104,7 +108,7 @@ public enum BoardValue {
     /// `summary`: the AI summary's line of what its agent is doing, sent only while the task is at work (running, not
     /// waiting on a limit): what someone has to look at keeps its own line.
     static func task(_ task: LeadTask, position: Int, board: LeadBoard, now: Date, usageWait: ReviewUsageWait? = nil,
-                     summary: String? = nil) -> (Int, NodeWire.Value)? {
+                     summary: String? = nil, landing: LeadLanding? = nil) -> (Int, NodeWire.Value)? {
         let shown = Shown(task, board: board, usageWait: usageWait)
         if shown.group == "done", now.timeIntervalSince1970 - finishedAt(task) > doneFor { return nil }
         var fields: [String: NodeWire.Value] = [
@@ -121,6 +125,16 @@ public enum BoardValue {
             "branch": task.branch.map { .string(text($0, limit: 200)) } ?? .null,
             "after": .array((task.after ?? []).prefix(20).map { .string(text($0, limit: 120)) }),
             "goal": task.goalID.map { .string(text($0, limit: 120)) } ?? .null,
+            // Estimates (the web design's): its newest as given, where it lands, its time blocked and (merged) its time
+            // to merge, whole and without the time blocked.
+            "estimate": task.estimates?.last.map { estimate in
+                .object(["likelyMin": .int(estimate.likelyMin), "worstMin": .int(estimate.worstMin), "at": date(estimate.at), "by": .string(estimate.by.rawValue)])
+            } ?? .null,
+            "forecast": Self.landing(landing ?? LeadLanding(basis: .none)),
+            "blockedMin": .int(LeadTime.int(task.blockedMinutes(from: task.startedAt ?? task.createdAt, to: task.merged?.at ?? now.timeIntervalSince1970)) ?? 0),
+            "actualMin": task.actualMinutes.flatMap { minutes in
+                LeadTime.int(minutes.total).map { total in .object(["total": .int(total), "unblocked": .int(LeadTime.int(minutes.unblocked) ?? 0)]) }
+            } ?? .null,
         ]
         fields["checkpoint"] = task.checkpoints?.last.map { .object(["text": .string(line($0.text)), "at": date($0.at)]) } ?? .null
         fields["audit"] = audit(task)
@@ -132,13 +146,33 @@ public enum BoardValue {
 
     /// The project's goals, in their order, at most `mostGoals`: each its id, title and what done means (inert, capped:
     /// the lead wrote them), open or done, and how many of the board's tasks it has to go and finished.
-    static func goals(_ board: LeadBoard) -> NodeWire.Value {
+    static func goals(_ board: LeadBoard, landings: [String: LeadLanding] = [:]) -> NodeWire.Value {
         .array((board.goals ?? []).prefix(mostGoals).map { goal in
             let mine = board.tasks.filter { $0.goalID == goal.id }
             return .object(["id": .string(text(goal.id, limit: 120)), "title": .string(text(goal.title, limit: titleBytes)),
                             "done": .string(text(goal.done, limit: lineBytes)), "state": .string(goal.state.rawValue),
-                            "toGo": .int(mine.filter(\.unfinished).count), "finished": .int(mine.filter { !$0.unfinished }.count)])
+                            "toGo": .int(mine.filter(\.unfinished).count), "finished": .int(mine.filter { !$0.unfinished }.count),
+                            "forecast": landing(landings[goal.id] ?? LeadLanding(basis: .none))])
         })
+    }
+
+    /// A landing (`LeadLanding`, all estimates): likely and worst dates, its basis, on whom a blocked one waits, how far
+    /// past its worst case an overdue one is, whether it is over its likely estimate, a goal's undated tasks.
+    static func landing(_ landing: LeadLanding) -> NodeWire.Value {
+        .object(["likely": landing.likely.map(date) ?? .null, "worst": landing.worst.map(date) ?? .null, "basis": .string(landing.basis.rawValue),
+                 "waitsOn": landing.waitsOn.map { .string(text($0, limit: titleBytes)) } ?? .null,
+                 "overdueMin": landing.overdueMinutes.map { .int($0) } ?? .null, "over": .bool(landing.over), "undated": .int(landing.undated)])
+    }
+
+    /// The project's estimating score (`LeadScore`): how many merges it is over, the median ratio, the share inside the
+    /// worst case and the correction (each in hundredths: 180 is 1.8×, 70 is 70%), whether it was clamped, the median
+    /// time to merge, and the line said.
+    static func score(_ score: LeadScore) -> NodeWire.Value {
+        func pct(_ value: Double) -> NodeWire.Value { LeadTime.int(value * 100).map { .int($0) } ?? .null }
+        return .object(["estimated": .int(score.estimated), "ratioPct": score.ratio.map(pct) ?? .null,
+                 "insideWorstPct": score.insideWorst.map(pct) ?? .null, "enough": .bool(score.isEnough),
+                 "correctionPct": .int(LeadTime.int(score.correction * 100) ?? 100), "clamped": .bool(score.clamped),
+                 "medianMin": score.medianMinutes.flatMap { LeadTime.int($0) }.map { .int($0) } ?? .null, "line": .string(score.line)])
     }
 
     /// The decisions as a board carries them: at most `LeadEngine.decisionsShown`, each its text and why (inert,

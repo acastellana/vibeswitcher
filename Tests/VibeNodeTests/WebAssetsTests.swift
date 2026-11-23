@@ -323,7 +323,7 @@ struct WebAssetsTests {
         #expect(paths(in: try String(contentsOf: out, encoding: .utf8)) == ["app.js", "index.html", "js/words.js", "style.css"])
     }
 
-    /// The first load's budget (500 ms) wants small files: no file over 256 KiB, and the page under 1 MiB. A vendored
+    /// The first load's budget (500 ms) wants small files: no file over 256 KiB, and the page under 1.5 MiB. A vendored
     /// file (`vendor/`, loaded only with a terminal) may be up to 512 KiB.
     @Test func theEmbeddedFilesStaySmall() {
         let sizes = EmbeddedAssets.files.map { ($0.path, $0.body.count) }

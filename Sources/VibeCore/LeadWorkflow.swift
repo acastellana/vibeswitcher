@@ -158,7 +158,7 @@ public struct LeadWorkflow: Equatable, Sendable {
                 workflow.settings[key] = value
                 let present = value.isEmpty ? nil : value
                 switch key {
-                case "max_workers": workflow.maxWorkers = max(1, Int(value) ?? 3)
+                case "max_workers": workflow.maxWorkers = min(99, max(1, Int(value) ?? 3))
                 case "test_command": workflow.testCommand = present
                 case "init_command": workflow.initCommand = present
                 case "regression_command": workflow.regressionCommand = present
@@ -1345,6 +1345,8 @@ public enum LeadPrompts {
         \(Policy.regressionTest(base: workflow.base))
         \(Policy.workerFindings)
         \(Policy.workerBudget(LeadBudget.minutes(task, default: workflow.taskBudgetMinutes)))
+        Estimates: at your first progress, and whenever it changes, give likely_min and worst_min (minutes to done from \
+        now, worst at least likely): the lead plans by them, and the user sees when work lands.
         Stuck: report blocked with exactly what you need. Don't fake a pass: never weaken or delete tests.
         \(red)\(task.workerAgent == .codex ? "\n" + codexWorker + "\nGit commands a Claude worker's rules refuse, which you hold yourself: \(deniedGit(workflow)).\n" : "")
         \(team.map { $0 + "\n\n" } ?? "")\(WorkerBrief.render(task))

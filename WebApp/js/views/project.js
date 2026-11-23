@@ -15,7 +15,8 @@ import { h, s, setText, setClass, framed } from '../dom.js';
 import { icon } from '../marks.js';
 import { clock, moment, tilde, lastPart, taskLine } from '../words.js';
 import { t, listed, lang, nodeWords } from '../i18n.js';
-import { leadLines, shownLines, dialCounts, waitingCards, waitingCount, cut, shortHashes, dayOf, teamCounts, standing, taskTone, taskStep, waitsOn } from '../conversation.js';
+import { hasDates, dated, timeAxis, axisPoints, landingWords, basisWords } from '../forecast.js';
+import { leadLines, shownLines, dialCounts, waitingCards, waitingCount, cut, shortHashes, dayOf, teamCounts, standing, taskTone, taskStep, waitsOn, goalRows } from '../conversation.js';
 import { projectHref, routeHref } from '../ui.js';
 import { questionStack, pluginCard, copyLine } from './cards.js';
 import { tellLine, shellWord, leadLine } from '../actions.js';
@@ -177,41 +178,157 @@ export function projectView(app, { sheet }) {
     if (changedView || atEnd) requestAnimationFrame(() => { talk.scrollTop = talk.scrollHeight; });
   }
 
-  function taskRow(task, extra = []) {
-    return h('div', { class: 'road-row' },
-      h('span', { class: 'road-title' }, task.title, h('small', null, nodeWords(task.state))),
-      stepBar(task), h('span', { class: 'road-note' }, ...extra));
+  // The date column: the landing as the node says it, its range under it, and where it comes from on hover and focus
+  // (every date an estimate). Empty, it takes no room (the estimates aren't there yet).
+  function whenEl(landing, basis) {
+    const said = landingWords(landing);
+    if (!said.date) return h('span', { class: 'road-when' });
+    return h('span', { class: 'road-when' + (said.late ? ' late' : '') + (landing.basis === 'blocked' ? ' nodate' : ''), tabindex: basis ? 0 : null, data: basis ? { basis } : null, 'aria-label': [said.date, said.range, said.note, basis].filter(Boolean).join('. ') },
+      h('b', null, said.date), said.range || said.note ? h('small', null, [said.range, said.note].filter(Boolean).join(' · ')) : null);
+  }
+
+  // A row's track on the axis: the grid (each tick, each midnight, now), a bar from its start to its likely landing,
+  // the likely–worst range as a band, a dot where it lands, a mark per task landing (a goal's), a diamond at now for
+  // what is blocked, and a bar to now in the late colour for what runs past its worst case.
+  function trackEl(axis, { start = null, landing = null, tone = 'working', marks = [], blocked = false }) {
+    const at = (node, from, to = null) => {
+      node.style.setProperty('left', `${axis.x(from)}%`);
+      if (to !== null) node.style.setProperty('width', `${Math.max(axis.x(to) - axis.x(from), 0.6)}%`);
+      return node;
+    };
+    const parts = [h('i', { class: 'track-base' }), ...axis.ticks.map((tick) => at(h('i', { class: 'track-tick' + (tick.day ? ' day' : '') }), tick.at)), at(h('i', { class: 'track-now' }), axis.now)];
+    const likely = dated(landing) ? Date.parse(landing.likely) : null;
+    const worst = dated(landing) && Date.parse(landing.worst || '') ? Date.parse(landing.worst) : null;
+    if (likely !== null) {
+      if (worst !== null && worst > likely) parts.push(at(h('i', { class: `track-band tone-${tone}` }), likely, worst));
+      const from = start !== null ? Math.max(start, axis.from) : Math.min(axis.now, likely);
+      parts.push(at(h('i', { class: `track-bar tone-${tone}` }), from, likely), at(h('i', { class: `track-dot tone-${tone}` }), likely));
+    } else if (landing?.basis === 'overdue' && start !== null) {
+      parts.push(at(h('i', { class: 'track-bar late' }), Math.max(start, axis.from), axis.now));
+    }
+    for (const mark of marks) parts.push(at(h('i', { class: `track-mark tone-${mark.tone}` + (mark.blocked ? ' blocked' : '') }), mark.at));
+    if (blocked) parts.push(at(h('i', { class: 'track-mark tone-blocked blocked now' }), axis.now));
+    return h('span', { class: 'track', 'aria-hidden': 'true' }, parts);
+  }
+
+  // The axis's labels over the rows: now, the hours, each midnight.
+  function axisHead(axis) {
+    const label = (tick) => { const el = h('span', { class: 'axis-tick' + (tick.day ? ' day' : '') }, tick.label); el.style.setProperty('left', `${axis.x(tick.at)}%`); return el; };
+    const now = h('span', { class: 'axis-tick now' }, t('now'));
+    now.style.setProperty('left', `${axis.x(axis.now)}%`);
+    return h('div', { class: 'axis-row' }, h('span'), h('span', { class: 'axis' }, ...axis.ticks.filter((tick) => Math.abs(axis.x(tick.at) - axis.x(axis.now)) > 4).map(label), now), h('span'), h('span'));
+  }
+
+  // A task's line: its title and state (its note under them when dated), its five steps or its bar, its date.
+  function taskLine2(task, note, { axis, score, cls }) {
+    if (!axis) return h('div', { class: cls }, h('span', { class: 'road-title' }, task.title, h('small', null, nodeWords(task.state))), stepBar(task), h('span', { class: 'road-note' }, ...note), h('span', { class: 'road-when' }));
+    const start = Date.parse(task.startedAt || '') || null;
+    return h('div', { class: cls },
+      h('span', { class: 'road-title' }, task.title, h('small', null, [nodeWords(task.state), ...note.map((one) => (typeof one === 'string' ? one : one.textContent))].filter(Boolean).join(' · '))),
+      trackEl(axis, { start, landing: task.forecast, tone: taskTone(task), blocked: task.forecast?.basis === 'blocked' || (!task.forecast && taskTone(task) === 'blocked') }),
+      whenEl(task.forecast, basisWords(task.forecast, { estimate: task.estimate, score })));
+  }
+
+  function taskRow(task, extra = [], dates = {}) {
+    return taskLine2(task, extra, { ...dates, cls: 'road-row' + (dates.axis ? ' dated' : '') });
+  }
+
+  // Whom a blocked task waits on, in words (you, other tasks, the lead), or nothing when the board doesn't say.
+  function waitsWords(task, board, cards) {
+    const who = waitsOn(task, board, cards);
+    const words = who.who === 'you' ? t('waitsOnYou') : who.who === 'tasks' ? t('waitsOnTasks', { list: listed(who.titles) }) : who.who === 'lead' ? t('waitsOnLead') : '';
+    return h('span', { class: who.who === 'you' ? 'tone-text-asked' : '' }, words);
+  }
+
+  // A task's note on the roadmap: what it does now, whom it waits on, or what it comes after.
+  function roadNote(task, board, cards, where) {
+    if (where === 'blocked') return [waitsWords(task, board, cards)];
+    if (where === 'queued') return task.after?.length ? [t('after', { list: listed(task.after.map((slug) => board.tasks.find((one) => one.slug === slug)?.title || slug)) })] : [];
+    return [cut(shortHashes(nodeWords(taskLine(task))), 120)];
+  }
+
+  // The address with `id` opened or closed among the roadmap's open rows.
+  const toggled = (route, id) => projectHref(route.id, { view: 'roadmap', open: route.open.includes(id) ? route.open.filter((one) => one !== id) : [...route.open, id] });
+
+  // With goals: one row per goal (its tasks' marks and counts; with estimates its bar to its landing, the likely–worst
+  // band, a mark per task landing, and its date), opening in place to its tasks joined to it by branch lines; Unsorted
+  // last of the open ones; the done goals folded at the end.
+  function drawGoals(route, board, cards, axis) {
+    const rows = goalRows(board);
+    const team = standing(board);
+    const score = board.score || null;
+    const whereOf = (task) => (team.motion.includes(task) ? 'motion' : team.blocked.includes(task) ? 'blocked' : team.queued.includes(task) ? 'queued' : 'merged');
+    const goalRow = (row) => {
+      const id = row.goal ? row.goal.id : 'unsorted';
+      const open = route.open.includes(id);
+      const counts = [['motion', 'roadCountMotion'], ['blocked', 'roadCountBlocked'], ['queued', 'roadCountQueued'], ['merged', 'roadCountMerged']]
+        .filter(([where]) => row.counts[where]).map(([where, key]) => t(key, { n: row.counts[where] }));
+      const marks = axis
+        ? trackEl(axis, {
+          start: Math.min(...row.tasks.map((task) => Date.parse(task.startedAt || '') || Infinity)), landing: row.goal?.forecast, tone: 'goal',
+          marks: row.tasks.filter((task) => dated(task.forecast)).map((task) => ({ at: Date.parse(task.forecast.likely), tone: taskTone(task) })),
+          blocked: row.tasks.some((task) => whereOf(task) === 'blocked'),
+        })
+        : h('span', { class: 'goal-marks', 'aria-hidden': 'true' }, row.tasks.map((task) => h('i', { class: `goal-mark tone-${taskTone(task)}${whereOf(task) === 'blocked' ? ' blocked' : ''}`, title: task.title })));
+      const head = h('button', { class: 'goal-row' + (row.goal ? '' : ' unsorted') + (row.goal?.state === 'done' ? ' done' : ''), type: 'button', 'aria-expanded': String(open), onclick: () => ui.go(toggled(route, id)) },
+        h('span', { class: 'goal-title' }, h('b', null, row.goal ? row.goal.title : t('roadUnsorted')),
+          h('small', null, [counts.join(', ') || t('roadNoTasks'), row.goal?.done ? `${t('roadDoneMeans')} ${row.goal.done}` : null].filter(Boolean).join(' · '))),
+        marks, axis ? whenEl(row.goal?.forecast, basisWords(row.goal?.forecast, { score, goal: true })) : h('span', { class: 'road-when' }),
+        h('span', { class: 'goal-toggle' }, icon('chevron', 10)));
+      if (!open) return [head];
+      const tasks = row.tasks.map((task, index) => taskLine2(task, roadNote(task, board, cards, whereOf(task)), { axis, score, cls: 'goal-task' + (index === row.tasks.length - 1 ? ' last' : '') }));
+      return [head, h('div', { class: 'goal-tasks' }, tasks.length ? tasks : [h('p', { class: 'road-note goal-empty' }, t('roadNoTasks'))])];
+    };
+    const children = [h('p', { class: 'road-intro' }, axis ? [t('roadGoalsDated'), score?.line ? ' ' + score.line : ''].join('') : t('roadGoalsIntro'))];
+    if (axis) children.push(axisHead(axis));
+    for (const row of rows.open) children.push(...goalRow(row));
+    if (rows.unsorted) children.push(...goalRow(rows.unsorted));
+    if (rows.done.length) {
+      const open = route.open.includes('done');
+      children.push(h('button', { class: 'road-band', type: 'button', 'aria-expanded': String(open), onclick: () => ui.go(toggled(route, 'done')) },
+        h('span', null, t('roadDoneGoals', { n: rows.done.length })), h('span', { class: 'road-band-toggle' }, open ? t('roadQueueClose') : t('roadQueueOpen'), icon('chevron', 10))));
+      if (open) for (const row of rows.done) children.push(...goalRow(row));
+    }
+    col.replaceChildren(...children);
+    setClass(col, 'dated', !!axis);
+    talk.scrollTop = 0;
   }
 
   function drawRoadmap(route, board) {
     const team = standing(board);
     const cards = [...store.state.cards.values()];
-    const key = JSON.stringify([route, board?.tasks, cards.map((card) => [card.id, card.open]), lang()]);
+    const key = JSON.stringify([route, board?.tasks, board?.goals, board?.score, cards.map((card) => [card.id, card.open]), lang(), Math.floor(Date.now() / 60000)]);
     if (key === drawn) return;
     drawn = key;
+    // With estimates, the time axis; without, what the roadmap drew before them.
+    const axis = hasDates(board) ? timeAxis(axisPoints(board)) : null;
+    if (board?.goals?.length) { drawGoals(route, board, cards, axis); return; }
+    const dates = { axis, score: board?.score || null };
     const open = route.open.includes('queue');
     const titles = (slugs) => slugs.map((slug) => board.tasks.find((task) => task.slug === slug)?.title || slug);
-    const children = [h('p', { class: 'road-intro' }, t('roadIntro'))];
-    if (team.motion.length) children.push(h('h2', { class: 'road-head' }, t('roadMotion')), ...team.motion.map((task) => taskRow(task, [cut(shortHashes(nodeWords(taskLine(task))), 120)])));
-    if (team.blocked.length) {
-      children.push(h('h2', { class: 'road-head' }, t('roadBlocked')), ...team.blocked.map((task) => {
-        const who = waitsOn(task, board, cards);
-        const words = who.who === 'you' ? t('waitsOnYou') : who.who === 'tasks' ? t('waitsOnTasks', { list: listed(who.titles) }) : who.who === 'lead' ? t('waitsOnLead') : '';
-        return taskRow(task, [h('span', { class: who.who === 'you' ? 'tone-text-asked' : '' }, words)]);
-      }));
-    }
+    const children = [h('p', { class: 'road-intro' }, axis ? [t('roadDated'), board.score?.line ? ' ' + board.score.line : ''].join('') : t('roadIntro'))];
+    if (axis) children.push(axisHead(axis));
+    if (team.motion.length) children.push(h('h2', { class: 'road-head' }, t('roadMotion')), ...team.motion.map((task) => taskRow(task, [cut(shortHashes(nodeWords(taskLine(task))), 120)], dates)));
+    if (team.blocked.length) children.push(h('h2', { class: 'road-head' }, t('roadBlocked')), ...team.blocked.map((task) => taskRow(task, [waitsWords(task, board, cards)], dates)));
     if (team.queued.length) {
       // A plain open and close of the row (the address keeps it, so back closes it again).
-      const to = projectHref(route.id, { view: 'roadmap', open: open ? route.open.filter((one) => one !== 'queue') : [...route.open, 'queue'] });
-      const band = h('button', { class: 'road-band', type: 'button', 'aria-expanded': String(open), onclick: () => ui.go(to) },
+      const band = h('button', { class: 'road-band', type: 'button', 'aria-expanded': String(open), onclick: () => ui.go(toggled(route, 'queue')) },
         h('span', { class: 'road-band-bar' }), h('span', null, t('roadQueue', { n: team.queued.length })),
+        axis ? whenEl(lastLanding(team.queued), '') : null,
         h('span', { class: 'road-band-toggle' }, open ? t('roadQueueClose') : t('roadQueueOpen'), icon('chevron', 10)));
       children.push(h('h2', { class: 'road-head' }, t('roadQueued')), band);
-      if (open) children.push(h('div', { class: 'road-queue' }, team.queued.map((task) => taskRow(task, task.after?.length ? [t('after', { list: listed(titles(task.after)) })] : []))));
+      if (open) children.push(h('div', { class: 'road-queue' }, team.queued.map((task) => taskRow(task, task.after?.length ? [t('after', { list: listed(titles(task.after)) })] : [], dates))));
     }
     if (!team.motion.length && !team.blocked.length && !team.queued.length) children.push(h('p', { class: 'empty-line' }, t('roadNothing')));
     col.replaceChildren(...children);
+    setClass(col, 'dated', !!axis);
     talk.scrollTop = 0;
+  }
+
+  // The queue's band says when its last dated task lands ("all by …").
+  function lastLanding(tasks) {
+    const last = tasks.filter((task) => dated(task.forecast)).sort((a, b) => Date.parse(b.forecast.likely) - Date.parse(a.forecast.likely))[0];
+    return last ? { ...last.forecast, basis: tasks.every((task) => dated(task.forecast)) ? last.forecast.basis : 'partial', undated: tasks.filter((task) => !dated(task.forecast)).length } : null;
   }
 
   // The sheet the address names, opened over this project's lines; closing it takes `sheet=` off the address.

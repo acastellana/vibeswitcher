@@ -182,8 +182,10 @@ public final class LiveBoards: @unchecked Sendable {
         let decided = decisions?.values[feed.root] ?? []
         feed.reads.async { [weak self] in
             let loaded = feed.file.load()
+            // The workers its queue's forecast runs on: workflow.md's max_workers.
+            let workers = LeadWorkflow.load(from: (feed.folder as NSString).appendingPathComponent("workflow.md")).maxWorkers
             let value = BoardValue.value(project: feed.project, root: feed.root, board: loaded.board, refusal: loaded.refusal, now: now(),
-                                         usageWaits: waits, summaries: lines, decisions: decided, records: feed.records.load())
+                                         usageWaits: waits, summaries: lines, decisions: decided, records: feed.records.load(), workers: workers)
             self?.queue.async { [weak self] in
                 guard let self else { return }
                 feed.reading = false

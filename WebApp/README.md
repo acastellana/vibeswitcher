@@ -23,7 +23,7 @@ bash scripts/test.sh --web WebApp/tests
 | `/?empty` | A mock node with no sessions. |
 | `/?rows=10000` | One mock session ("Add dark mode…") with a 10,000-row chat: its newest 200 first, the rest paged in as you scroll up. |
 | `/#/p/<project>/lead?show=asks\|all&tab=stats\|files&task=<slug>&sheet=<line>` | A project: you and its lead in the centre (the dial's level, the right column's tab, a task open in place, a line's side sheet). `/#/p/<project>` (the board page's address before) opens it too. |
-| `/#/p/<project>/roadmap?open=queue` | Its roadmap: in motion, blocked, the queue as one band (open). |
+| `/#/p/<project>/roadmap?open=<goal>,unsorted,done` | Its roadmap: a row per goal opening in place to its tasks, Unsorted, the done goals folded (each named in `open` is open); with no goals, in motion, blocked and the queue as one band (`open=queue`). |
 | `/#/sessions`, `/#/s/<session>` | Your own sessions (outside every project's team); a session's chat, terminal and inspector. |
 | `/#/new`, `/#/node` | New project; This node. |
 | `/?lang=es` | The page's words in Spanish whatever the browser says (it follows the browser's language otherwise). |

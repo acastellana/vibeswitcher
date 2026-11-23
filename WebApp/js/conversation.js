@@ -61,7 +61,6 @@ export function leadLines(board) {
 }
 
 // The dial's levels: only what waits on the user, decisions and results (the default), everything.
-export const LEVELS = ['asks', 'decisions', 'all'];
 export function shownLines(lines, level) {
   if (level === 'asks') return [];
   return level === 'all' ? lines : lines.filter((line) => line.kind !== 'update');
@@ -198,4 +197,24 @@ export function nextPlace(places, route) {
   const here = places.findIndex((place) => (place.kind === 'project' && route.name === 'project' && route.id === place.id)
     || (place.kind === 'session' && route.name === 'session' && route.id === place.id) || (place.kind === 'node' && route.name === 'node'));
   return places[(here + 1) % places.length];
+}
+
+// The roadmap with goals (the redesign's "The roadmap view"): one row per open goal in the lead's order, then the
+// tasks with no goal (or one the board doesn't list) as Unsorted, then the done goals. Each row's tasks in motion first,
+// then blocked, queued and merged today. { goal (null: Unsorted), tasks, counts: { motion, blocked, queued, merged } }.
+export function goalRows(board, now = Date.now()) {
+  const goals = board?.goals || [];
+  const team = standing(board, now);
+  const order = [...team.motion, ...team.blocked, ...team.queued, ...team.merged];
+  const where = (task) => (team.motion.includes(task) ? 'motion' : team.blocked.includes(task) ? 'blocked' : team.queued.includes(task) ? 'queued' : 'merged');
+  const known = new Set(goals.map((goal) => goal.id));
+  const row = (goal, tasks) => {
+    const counts = { motion: 0, blocked: 0, queued: 0, merged: 0 };
+    for (const task of tasks) counts[where(task)] += 1;
+    return { goal, tasks, counts };
+  };
+  const open = goals.filter((goal) => goal.state !== 'done').map((goal) => row(goal, order.filter((task) => task.goal === goal.id)));
+  const unsorted = order.filter((task) => !task.goal || !known.has(task.goal));
+  const done = goals.filter((goal) => goal.state === 'done').map((goal) => row(goal, order.filter((task) => task.goal === goal.id)));
+  return { open, unsorted: unsorted.length ? row(null, unsorted) : null, done };
 }
