@@ -284,14 +284,8 @@ public final class LeadEngine: @unchecked Sendable {
     var policyWatch: LeadWitness.PolicyWatch?
     /// The health digest (`NodeHealth`): each refresh's time told to it. None in a test's engine unless given.
     public var health: NodeHealth?
-    // The Run-card shell tidier (`ShellTidying.swift`), on `queue`: the shells typed into since their command ended, read
-    // once; a look under way; its 30 s look; the clock. Its file is read and written on `shellWork`.
-    var shellUsed: Set<UUID> = []
-    var shellUsedLoaded = false
-    var shellTidying = false
-    var shellTidyTimer: Subscription?
-    var shellNow: () -> Date = Date.init
-    let shellWork = DispatchQueue(label: "vibenode.lead-engine.shell-tidying", qos: .userInitiated)
+    /// The Run-card shell tidier (`ShellTidying.swift`): its state its own, on `queue`.
+    let shellTidy: ShellTidyWatch
     // Feature plugins (`Plugins/`, `PluginEngine.swift`), on `queue`: the registry and what the vault keeps of on and
     // off, each plugin request's card, the stamps the host vouched for (per plugin), the looks under way, the vault asked,
     // the 15 s look, the clock; the folders read on `pluginWork`.
@@ -418,6 +412,7 @@ public final class LeadEngine: @unchecked Sendable {
         queue = link.queue
         toolchain = ToolchainWatch(queue: link.queue, file: root.appendingPathComponent("toolchain.json"), home: options.home ?? VibePaths.home, note: note)
         openSessionsWatch = OpenSessionsWatch(queue: link.queue)
+        shellTidy = ShellTidyWatch(queue: link.queue, link: link, root: root, clock: clock, note: note)
         popups = PopupWatch(queue: link.queue, link: link, note: note)
         push = PushWatch(queue: link.queue, work: work, link: link, note: note)
         promptAudit = PromptAuditWatch(queue: link.queue, root: root, home: options.home ?? VibePaths.home, clock: clock, note: note)
@@ -438,7 +433,6 @@ public final class LeadEngine: @unchecked Sendable {
         // Run-card shells (`ShellTidying.swift`): what is typed into told by the link (on its queue, this one), the due
         // ones ended every 30 s.
         link.onTyped = { [weak self] id in self?.shellTyped(id) }
-        shellTidyTimer = clock?.every(Self.shellTidyEvery) { [weak self] in self?.queue.async { self?.tidyShells() } }
         // Each screen the session scan reads: a popup on a team session declined, a dialog nothing reads noted.
         sessions?.sawScreen = { [weak self] session, text in self?.lookAt(screen: text, of: session) }
         batchModel = options.summarizeBatch
