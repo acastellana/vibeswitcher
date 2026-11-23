@@ -39,3 +39,9 @@ jobs:
         run: swift --version
       - name: The host probe, config held on fresh scratch nodes
         run: bash scripts/ci/host-probe.sh 300
+      - name: The parsers fuzzed, long, on a seed of the night
+        if: always()
+        run: |
+          seed=$(date +%s)
+          echo "fuzz seed $seed (VIBESWITCHER_FUZZ_SEED=$seed reruns it)"
+          VIBESWITCHER_FUZZ_ROUNDS=100 VIBESWITCHER_FUZZ_SEED=$seed bash scripts/test.sh --filter 'ParserFuzzTests'
