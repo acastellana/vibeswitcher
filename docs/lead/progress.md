@@ -4464,3 +4464,6 @@ Proposed task 1: Find why dictations end with no text
 - 2026-11-23 23:20 Automatically (auto_advance): Started a worker on fix-the-flaky-test-25 (Fix the flaky test endedRowsFoldAwayAndTheListSkipsThemWhileFolded()).
 - 2026-11-23 23:36 fix-the-flaky-test-25 small task: merged on tests (10 min of work)
 - 2026-11-23 23:37 Planned tests-keep-their: Tests keep their settings in a scratch defaults suite, never UserDefaults.standard; a lint holds it
+- 2026-11-23 23:57 Pipeline held: fix-the-flaky-test-25 ready to merge with none landing; cause: a merge in progress
+- 2026-11-23 23:57 Merged fix-the-flaky-test-25: Fix the flaky test endedRowsFoldAwayAndTheListSkipsThemWhileFolded() (no audit: review none) (build 68a67ba8203f)
+- 2026-11-23 23:57 Automatically (auto_advance): Planned tasks wait to start: the Mac has only 20.2 GB of disk free, under the 22.1 GB a new worker waits for: the load runs' floor (floor_gb=15 in scripts/test-under-load.sh, in GiB: 16.1 GB) plus disk_headroom_gb (6 GB in workflow.md), the room the tasks in flight still need to run their load check. They start by themselves once there's room again; meanwhile merge and cleanup finished tasks (cleanup frees their worktrees). Freeing other space on the disk is the user's call: tell them if it stays this full.
