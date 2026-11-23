@@ -52,12 +52,9 @@ extension Requests {
         if let why = approval.callerRefusal(peer: token, facts: facts, live: live, uid: rule.uid) { return refuse(why) }
         // An action this server answered already: its answer again, no dialog (`voiced` would answer it so after one).
         // Only to a caller that passed the checks above: an action id alone gets nothing.
-        if let action, var again = replies[action] {
-            again.re = request.id
-            return done(again)
-        }
-        // One being done now (its first request's dialog was agreed to): said so, no second dialog for one action.
-        if let action, doing.contains(action) { return done(.init(re: request.id, error: .init(.refused, Self.beingDoneNow(action: action)))) }
+        // One being done now (its first request's dialog was agreed to): said so, no second dialog for one action. Either
+        // only with the first's arguments: with others, that it was recorded so, and nothing of it, no dialog either.
+        if let action, let again = kept(request, action: action) { return done(again) }
         guard NodeWire.changesState(request.kind) else { return done(nil) }
         // What `voiced` would answer after the dialog, answered before it: no dialog for a request that can't go on (and
         // a `not-yet` the command line asks again would ask the person twice).

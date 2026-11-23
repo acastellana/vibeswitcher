@@ -77,9 +77,13 @@ public final class Requests: @unchecked Sendable {
     /// The reply each recorded action (and each page's draft) got, by action id, the newest `repliesKept` (a retry is
     /// answered so).
     var replies: [String: NodeWire.Reply] = [:]
+    /// Each kept reply's request's arguments, digested (`argsDigest`): a retry is answered from memory only when its own
+    /// match.
+    private var replyDigests: [String: String] = [:]
     private var replyOrder: [String] = []
-    /// The recorded actions being done now (recorded, their reply not yet given). On `queue`.
-    var doing: Set<String> = []
+    /// The recorded actions being done now (recorded, their reply not yet given), each with its request's arguments'
+    /// digest. On `queue`.
+    var doing: [String: String] = [:]
     /// A scratch server's test (`--test-stall=`): true once for each `<root>/test-hold-act` made, and that recorded
     /// action is held for good after its record, before its act, as a server that ends in between leaves it.
     var testHoldsAct: (() -> Bool)?
@@ -462,17 +466,17 @@ public final class Requests: @unchecked Sendable {
     /// as the record was (`finishUserAction`), before the answer goes: an answer someone saw is in the record. A host
     /// that doesn't take the outcome (one before it) leaves the record begun, noted. On `queue`.
     private func perform(_ request: NodeWire.Request, action: String, from facts: PeerFacts, reply: @escaping (NodeWire.Reply) -> Void) {
-        doing.insert(action)
+        doing[action] = Self.argsDigest(request)
         act(request, from: facts) { [weak self] answer in
             guard let self else { return reply(answer) }
             self.queue.async {
-                self.keep(answer, for: action)
+                self.keep(answer, for: action, request: request)
                 let (client, kind, outcome) = (self.link.vaultV2, request.kind, Self.outcome(of: answer, kind: request.kind))
                 DispatchQueue.global(qos: .userInitiated).async { [weak self] in
                     let written = Result { try client.finishUserAction(action, kind: kind, outcome: outcome) }
                     self?.queue.async {
                         if case .failure(let why) = written { self?.note("\(kind) (action \(action)): its outcome isn't in the vault's record: \(why)") }
-                        self?.doing.remove(action)
+                        self?.doing[action] = nil
                         if self?.testHoldsReply?() == true {
                             self?.note("a scratch node's test: \(kind) (action \(action)) done and its outcome recorded, its reply held for good")
                             return
@@ -600,16 +604,25 @@ public final class Requests: @unchecked Sendable {
         "action \(action) (\(kind)) began at \(shown(began)) and the server ended before it finished; a later action changed the same thing since, so it isn't done again; `vibeswitcher status` shows what is now"
     }
 
-    /// The answer a retry gets from this server's memory: the reply it kept, or that its first request is being done.
+    /// The answer a retry gets from this server's memory: the reply it kept, or that its first request is being done;
+    /// either only when its arguments are the first's (else that the action was recorded with others, and nothing of it).
     func kept(_ request: NodeWire.Request, action: String) -> NodeWire.Reply? {
+        let digest = Self.argsDigest(request)
         if var kept = replies[action] {
+            guard replyDigests[action] == digest else { return .init(re: request.id, error: .init(.refused, Self.otherArguments(action: action))) }
             kept.re = request.id
             return kept
         }
-        if doing.contains(action) {
+        if let first = doing[action] {
+            guard first == digest else { return .init(re: request.id, error: .init(.refused, Self.otherArguments(action: action))) }
             return .init(re: request.id, error: .init(.refused, Self.beingDoneNow(action: action)))
         }
         return nil
+    }
+
+    /// `request`'s arguments, digested as the vault's record digests them.
+    static func argsDigest(_ request: NodeWire.Request) -> String {
+        LeadVaultV2.digest(String(decoding: NodeWire.line(request.args ?? [:]), as: UTF8.self))
     }
 
     /// What a retry of an action still being done (its first request's act not finished) is told: the command line asks
@@ -667,16 +680,30 @@ public final class Requests: @unchecked Sendable {
         return format.string(from: date)
     }
 
-    func keep(_ reply: NodeWire.Reply, for action: String) {
+    /// `reply` kept for `action`, with `request`'s arguments' digest. A recorded kind whose result isn't kept in the
+    /// vault (`RetryRule.keepsResult`: a link with its pairing code, a page's address with its token, a setting's value)
+    /// isn't kept in memory either: a retry is told it was done, and where a link went, never given it again.
+    func keep(_ reply: NodeWire.Reply, for action: String, request: NodeWire.Request) {
         var reply = reply
-        // A plugin page's address goes to the answer's own terminal once: a retry is told where it went, not given it.
-        if case .object(var fields)? = reply.result, fields["once"]?.bool == true {
-            fields["say"] = .array([.string("Its page's address went to the terminal that answered first: it works once.")])
-            reply.result = .object(fields)
+        if reply.ok, Self.recorded.contains(request.kind), Self.retryRules[request.kind]?.keepsResult != true {
+            let link = request.kind == "web.open" || reply.result?["once"]?.bool == true
+            reply = .init(re: reply.re, error: .init(.refused, Self.doneNotKept(action: action, link: link)))
         }
         replies[action] = reply
+        replyDigests[action] = Self.argsDigest(request)
         replyOrder.append(action)
-        if replyOrder.count > Self.repliesKept { replies[replyOrder.removeFirst()] = nil }
+        if replyOrder.count > Self.repliesKept {
+            let gone = replyOrder.removeFirst()
+            replies[gone] = nil
+            replyDigests[gone] = nil
+        }
+    }
+
+    /// What a retry of a done action whose kind keeps no result is told from memory (the record's path says the same,
+    /// `answer(_:action:outcome:)`): done, not done again; `link`: its link or page's address went to the terminal that asked.
+    static func doneNotKept(action: String, link: Bool) -> String {
+        "action \(action) was done" + (link ? ", and its link went to the terminal that asked first (it isn't given again)" : " (its answer isn't kept)")
+            + ": not done again; `vibeswitcher status` shows what is now"
     }
 
     /// A user's-voice request, recorded in the vault (`done` on `queue` with whether it is the action's first record,

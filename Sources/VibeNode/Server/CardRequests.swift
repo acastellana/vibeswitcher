@@ -196,12 +196,9 @@ extension Requests {
         guard let action = request.action?.lowercased(), UUID(uuidString: action) != nil else {
             return reply(.init(re: request.id, error: .init(.badArgs, "\(request.kind) needs an action id (a UUID)")))
         }
-        if var again = replies[action] {
-            again.re = request.id
-            return reply(again)
-        }
+        if replies[action] != nil, let again = kept(request, action: action) { return reply(again) }
         let done = { [weak self] (answer: NodeWire.Reply) in
-            self?.keep(answer, for: action)
+            self?.keep(answer, for: action, request: request)
             reply(answer)
         }
         guard !stopping else { return reply(.init(re: request.id, error: .init(.stopping, "the node is stopping"))) }
