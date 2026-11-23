@@ -275,9 +275,9 @@ public final class LeadEngine: @unchecked Sendable {
     var toolTimes: [String: (bound: Double, tools: Double?)] = [:]
     /// Sessions that never got their tools, asked to end, and when last (asked again a minute on while they run).
     var endingNoTools: [String: Date] = [:]
-    /// The leads refused for the machine's room or load (`LeadWitness.RoomWaits`): each told once there's room, on the
-    /// room watch's 60 s client (`watchRoom`); none until it's started.
-    var roomWaits: LeadWitness.RoomWaits?
+    /// The room watch (`RoomWatch.swift`): its state its own, on `queue`; its 60 s client (`watchRoom`), none until
+    /// it's started.
+    let room: RoomWatch
     var roomTimer: Subscription?
     /// The working policy's watch (`SettingsWatch.swift`): each running lead told it once when it changes. None until
     /// `watchRoom`, so a test's engine tells nothing it didn't ask for.
@@ -342,10 +342,6 @@ public final class LeadEngine: @unchecked Sendable {
     let toolchain: ToolchainWatch
     /// Boost (`SettingsWatch.swift`): its state its own, on `queue`.
     let boost: BoostWatch
-    /// The machine's load as the room watch reads it, as the leads' tools judge it (`MacLoad.steady`); faked in tests.
-    var macLoad: () -> Double? = MacLoad.steady
-    /// Each room look's read of the machine's memory (`MacMemory.read`), on the reads queue; faked in tests.
-    var memory: () -> MacMemory? = { MacMemory.read() }
 
     // The lead's rotation and idle handover (main's `26923f7c`, `IdleHandover.swift`), on `queue`.
     /// The time the rotation judges by (now; a test's later).
@@ -415,6 +411,7 @@ public final class LeadEngine: @unchecked Sendable {
         promptAudit = PromptAuditWatch(queue: link.queue, root: root, home: options.home ?? VibePaths.home, clock: clock, note: note)
         reads = BoardReads(handTo: link.queue)
         allDone = AllDoneWatch(queue: link.queue, reads: reads, runs: summaryRuns, note: note)
+        room = RoomWatch(queue: link.queue, reads: reads, link: link, root: root)
         boost = BoostWatch(queue: link.queue, reads: reads, files: NodeSettings.Files(root: root), home: options.home ?? VibePaths.home, note: note)
         preflight = NodePreflight(claudeLink: options.claudeLink ?? NodePreflight.claudeLink(root: root), git: options.git)
         let states = root.appendingPathComponent("state", isDirectory: true)
@@ -423,6 +420,7 @@ public final class LeadEngine: @unchecked Sendable {
         promptAudit.leads = self
         push.leads = self
         popups.leads = self
+        room.leads = self
         restoreState()
         leads.heldChanged = { [weak self] in self?.saveState() }
         watch = link.changes.subscribe(on: link.queue) { [weak self] _ in self?.sessionsChanged() }

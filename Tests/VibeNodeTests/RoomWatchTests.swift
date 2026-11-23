@@ -48,7 +48,7 @@ struct RoomWatchTests {
         waits.pendingSleep = { _ in reads.read(onEngine: onEngine()) }
         waits.record(root: root.deletingLastPathComponent().appendingPathComponent("project").path, what: LeadSleepRecovery.retryWait, need: 0,
                      auto: true, now: Date() - LeadWitness.RoomWaits.expiry - 1)
-        queue.sync { engine.macLoad = { 10000 } }
+        queue.sync { engine.room.load = { 10000 } }
         engine.watchRoom(waits)
         for _ in 0..<2 {
             queue.sync {
@@ -70,8 +70,8 @@ struct RoomWatchTests {
         let waits = LeadWitness.RoomWaits(folder: root.appendingPathComponent("room-waits"))
         waits.record(root: project, what: "start_worker(parser)", need: 1)
         queue.sync {
-            engine.macLoad = { 10000 }
-            engine.memory = { nil }
+            engine.room.load = { 10000 }
+            engine.room.memory = { nil }
         }
         engine.watchRoom(waits)
         func held() -> [LeadStore.Held] { queue.sync { engine.leads.held[NodeIds.project(root: project)] ?? [] } }
@@ -84,7 +84,7 @@ struct RoomWatchTests {
         #expect(waits.waits().count == 1)
 
         // Room: one message, as the witness.
-        queue.sync { engine.macLoad = { 0 } }
+        queue.sync { engine.room.load = { 0 } }
         queue.sync { engine.lookAtRoom(limits: MacLimits(maxSessions: 6)) }
         #expect(await eventually(timeout: 60) { !held().isEmpty })
         let told = held()
