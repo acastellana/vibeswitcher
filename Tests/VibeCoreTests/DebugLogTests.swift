@@ -75,6 +75,22 @@ struct BreadcrumbsTests {
         #expect(lines.last?.hasSuffix("event 5") == true)
     }
 
+    /// A watch keeps the lines it takes from the moment it's made, however far the ring rolls past them, and nothing
+    /// once it's let go of.
+    @Test func aWatchKeepsItsLinesPastTheRing() {
+        let crumbs = Breadcrumbs(capacity: 3)
+        crumbs.note("mine 0")
+        var watch: Breadcrumbs.Watch? = crumbs.watch { $0.contains("mine") }
+        weak let gone = watch
+        for index in 1...5 { crumbs.note("mine \(index)"); crumbs.note("theirs \(index)") }
+        #expect(watch?.lines.map { String($0.split(separator: " ", maxSplits: 1)[1]) } == (1...5).map { "mine \($0)" })
+        #expect(crumbs.lines.count == 3)
+        watch = nil
+        crumbs.note("mine 6")
+        #expect(gone == nil)
+        #expect(crumbs.lines.last?.hasSuffix("mine 6") == true)
+    }
+
     @Test func theLogFileStaysSmall() throws {
         let folder = temp.url("log")
         let crumbs = Breadcrumbs(capacity: 10, file: folder.appendingPathComponent("app.log"), maxFileBytes: 2_000)
