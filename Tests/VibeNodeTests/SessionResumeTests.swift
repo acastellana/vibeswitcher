@@ -82,4 +82,22 @@ struct SessionResumeTests {
         let gone = try #require(await world.ask("session.resume", ["session": .string(short)]))
         #expect(gone.error?.code == NodeWire.Code.gone.rawValue, "\(gone)")
     }
+
+    /// `resume`'s list says a session within its grace above the ended ones whenever there is one (A33 on the real node,
+    /// 2026-11-23: with two sessions ended on 2026-11-21 listed, the one just ended went unsaid until it was listed).
+    @Test func theGraceLineShowsAboveTheListWheneverOneIsInItsGrace() {
+        let now = Date(timeIntervalSince1970: 2_000_000_000)
+        let ending: [NodeWire.Value] = [.object(["session": .string("local:a"), "folder": .string("/w/accept-test"), "name": .string("accept-test"),
+                                                 "at": .date(now.addingTimeInterval(-3)), "listedAt": .date(now.addingTimeInterval(27))])]
+        let ended: [NodeWire.Value] = [.object(["session": .string("local:b"), "folder": .string("/w/old"), "at": .string("2026-11-21T09:00:00Z")]),
+                                       .object(["session": .string("local:c"), "folder": .string("/w/older"), "at": .string("2026-11-21T08:00:00Z")])]
+        let line = { (session: NodeWire.Value) in session["folder"]?.string ?? "?" }
+        let both = ResumeText.listing(ended: ended, ending: ending, now: now, line: line)
+        #expect(both.first == "a session ended 3 s ago (accept-test in /w/accept-test); it is listed in 27 s: run `vibeswitcher resume` again then", "\(both)")
+        #expect(both.dropFirst().first == "ended lately, newest first:" && both.contains { $0.hasPrefix("  /w/old ") } && both.contains { $0.hasPrefix("  /w/older ") },
+                "\(both)")
+        #expect(ResumeText.listing(ended: [], ending: ending, now: now, line: line).count == 1)
+        #expect(ResumeText.listing(ended: [], ending: [], now: now, line: line) == ["no session of yours ended lately"])
+        #expect(!ResumeText.listing(ended: ended, ending: [], now: now, line: line).contains { $0.hasPrefix("a session ended") })
+    }
 }

@@ -394,4 +394,24 @@ public enum ResumeText {
             return "a session ended \(ago) s ago (\(name) in \(folder)); it is listed in \(wait) s: run `vibeswitcher resume` again then"
         }
     }
+
+    /// `vibeswitcher resume`'s list: the sessions within their grace first (`endingLines`), whenever there are any, then
+    /// the ended ones, newest first, each its `line` and how to resume it by hand; "none ended" only when neither. On
+    /// 2026-11-23 the grace line showed only while no other session was listed, so a session just ended went unsaid.
+    public static func listing(ended: [NodeWire.Value], ending: [NodeWire.Value], now: Date, line: (NodeWire.Value) -> String) -> [String] {
+        var lines = endingLines(ending, now: now)
+        guard !ended.isEmpty else { return lines.isEmpty ? ["no session of yours ended lately"] : lines }
+        lines.append("ended lately, newest first:")
+        for session in ended {
+            lines.append("  " + line(session) + "  ended \(ConfigSeal.inert(session["at"]?.string ?? "?", limit: 40))")
+            if let conversation = session["conversation"]?.string {
+                // Codex resumes as `codex resume <id>` (the app's `LaunchPlan.resumeCommand`), Claude with --resume.
+                let resume = session["agent"]?.string == "codex" ? "codex resume " : "claude --resume "
+                lines.append("      by hand: cd \(RecentProjects.shellQuote(ConfigSeal.inert(session["folder"]?.string ?? "", limit: .max))) && \(resume)"
+                    + RecentProjects.shellQuote(ConfigSeal.inert(conversation, limit: 40)))
+            }
+        }
+        lines.append("`vibeswitcher resume SESSION` starts one again on the node, in its same conversation")
+        return lines
+    }
 }

@@ -117,22 +117,8 @@ enum ResumeCommand {
         case .success(let status, _): (ended, ending) = (status.ended?.array ?? [], status.ending?.array ?? [])
         }
         guard let wanted = arguments.first else {
-            guard !ended.isEmpty else {
-                // One that ended within the grace isn't listed yet: said, with when it will be.
-                if ending.isEmpty { Say.out("no session of yours ended lately") } else { ResumeText.endingLines(ending, now: Date()).forEach(Say.out) }
-                return 0
-            }
-            Say.out("ended lately, newest first:")
-            for session in ended {
-                Say.out("  " + ReopenCommand.line(session) + "  ended \(ConfigSeal.inert(session["at"]?.string ?? "?", limit: 40))")
-                if let conversation = session["conversation"]?.string {
-                    // Codex resumes as `codex resume <id>` (the app's `LaunchPlan.resumeCommand`), Claude with --resume.
-                    let resume = session["agent"]?.string == "codex" ? "codex resume " : "claude --resume "
-                    Say.out("      by hand: cd \(RecentProjects.shellQuote(ConfigSeal.inert(session["folder"]?.string ?? "", limit: .max))) && \(resume)"
-                        + RecentProjects.shellQuote(ConfigSeal.inert(conversation, limit: 40)))
-                }
-            }
-            Say.out("`vibeswitcher resume SESSION` starts one again on the node, in its same conversation")
+            // One that ended within the grace isn't listed yet: said above the list, with when it will be.
+            ResumeText.listing(ended: ended, ending: ending, now: Date(), line: ReopenCommand.line).forEach(Say.out)
             return 0
         }
         let session: NodeWire.Value
