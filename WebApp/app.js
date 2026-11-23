@@ -59,6 +59,11 @@ const app = {
   order: () => [...store.state.sessions.values()].sort((a, b) => ownSession(b) - ownSession(a)),
   commands,
   // On a phone the left and right columns are drawers over the centre: `which` opens one, null closes both.
+  // A quiet project's "give it a goal": New project's lead form with its folder.
+  startLead(folder) {
+    ui.go('#/new');
+    newProject.lead(folder);
+  },
   drawer(which) {
     root.dataset.drawer = which || '';
   },
