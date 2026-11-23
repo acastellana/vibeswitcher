@@ -427,3 +427,7 @@ Merge health misses its objectives (12% passing only on rerun); the article name
 
 Fix tasks may now delete a test whose root cause isn't found; without a review, one load-induced timeout could end in a deleted test merged unchecked. An audit checks that the cause is real or that the deletion's reason is written down. Cost: one audit per flake fix (about 4–8 a week).
 
+## 2026-11-23 14:02:00 Fix tasks for tests that were red on main too (red-on-base) are audited like flaky-test fixes. a-test-that-flakes:F1, which flags that they now get an audit and the small_task_min hold, is intended, not a defect.
+
+A red-on-base fix changes a failing test just as a flake fix does and can weaken or delete it; the same review keeps that honest. They are rare (0 in the last 7 days), so the cost is negligible.
+

@@ -4375,3 +4375,18 @@ Proposed task 1: Find why dictations end with no text
 - 2026-11-23 13:38 Automatically (auto_advance): Started the audit of fix-the-dictation-tests at 640b9925 (Its review is audit. (audited: it has code that adds locks or threads (Sources/VibeCore/DebugLog.swift: private let lock = NSLock()), as the risk check found.)). Released its worker, idle since its done report, while the audit runs: its Mac slot and memory are free, its worktree and branch stay.
 - 2026-11-23 13:42 Exception on a-test-that-flakes by lead of vibeswitcher: edits to Sources/VibeCore/LeadMergeBatch.swift, docs/guide/project-lead.md, Tests/VibeCoreTests/MergeGateTests.swift accepted. Reason: Follow-on edits of the flake limit change: merge and progress texts that said 'flaked N times within 7 days', the guide's Flaky tests paragraph describing the new rule, and MergeGateTests' assertions …
 - 2026-11-23 13:46 Audit of fix-the-dictation-tests: complete, clean
+- 2026-11-23 13:52 Audit of a-merge-whose-tests: complete, clean, round 1: 1 Pre-existing open
+- 2026-11-23 13:52 Dismissed a-merge-whose-tests:F1: Already planned as its own task: a-parameterized-test-s (starts after a-test-that-flakes and this one).
+- 2026-11-23 13:55 Released a-test-that-flakes's worker (idle since its done report on f24eb500) while its audit runs
+- 2026-11-23 13:55 Automatically (auto_advance): Started the audit of a-test-that-flakes at f24eb500 (Its review is audit). Released its worker, idle since its done report, while the audit runs: its Mac slot and memory are free, its worktree and branch stay.
+- 2026-11-23 13:56 Sampled fix for audit from review none (at 28cddfce): draw 5.16 under audit_sample_percent 10 (seed 1867036554548253)
+- 2026-11-23 13:56 Automatically (auto_advance): Started the audit of fix at 28cddfce (Sampled for audit: draw 5.16 under audit_sample_percent 10 (seed 1867036554548253)).
+- 2026-11-23 13:56 Abandoned fix: Nothing to merge: the root cause was already fixed on main by 5743c865 (2026-11-18 19:12), after both flakes. The worker showed it: 1 of 20 runs fails as reported with that fix taken out, 100/100 pass with it. Its branch has no commits, so a merge would only spend a full test run.
+- 2026-11-23 13:56 Automatically (auto_advance): review-rules-carry-a won't start by itself: it comes after fix, which is abandoned or gone. update_task(review-rules-carry-a, after: …) or start_worker it.
+- 2026-11-23 13:56 Automatically (auto_advance): the-weekly-scorecard won't start by itself: it comes after fix, which is abandoned or gone. update_task(the-weekly-scorecard, after: …) or start_worker it.
+- 2026-11-23 14:01 Audit of a-test-that-flakes: complete, clean, round 1: 1 Important open
+- 2026-11-23 14:01 Started a worker on a-test-that-flakes
+- 2026-11-23 14:01 Automatically (auto_advance): Sent a-test-that-flakes's worker the open Important findings a-test-that-flakes:F1 from its audit at f24eb500 (in a new worker: its last one was released during the audit).
+- 2026-11-23 14:02 Dismissed a-test-that-flakes:F1: Intended: red-on-base fix tasks are audited like flake fixes, per decision 2026-11-23 14:02:00 in docs/lead/decisions.md.
+- 2026-11-23 14:06 Pipeline held: fix-the-dictation-tests ready to merge with none landing; cause: a merge in progress
+- 2026-11-23 14:06 Merged fix-the-dictation-tests: Fix the dictation tests that flaked in merges this week (escAndTheCross…, escCancels…, eachOpenAIRun…) (build 71a026954280)
