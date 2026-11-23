@@ -24,6 +24,8 @@
 heavy_swift() {
     local verb=$1 cores
     shift
+    # Read by swiftpm_options in this shell; not on to SwiftPM and the tests it runs.
+    export -n swiftpm_cache 2> /dev/null
     if [[ ${VS_HEAVY_CORES:-} =~ ^[0-9]+$ ]] && (( 10#$VS_HEAVY_CORES >= 1 )); then
         cores=$(( 10#$VS_HEAVY_CORES ))
         swift "$verb" $(swiftpm_options) -j 2 -Xswiftc "-j$(( (cores + 1) / 2 ))" "$@"
@@ -45,6 +47,28 @@ swiftpm_sandbox() {
 swiftpm_options() {
     echo --build-system native
     swiftpm_sandbox
+    [[ -n ${swiftpm_cache:-} ]] && echo --cache-path "$swiftpm_cache"
+    return 0
+}
+# In a branch run's box (V2/Sandbox/BranchRun.swift) there is no network, and the account's SwiftPM cache is layered
+# under the run's own home, where SwiftPM looks for it by HOME. The scripts then give SwiftPM and the tests a scratch
+# HOME of their own, where it found no cache and a fresh worktree's first build fetched, and failed: "Fetching
+# https://github.com/migueldeicaza/SwiftTerm.git … error: Git command 'git -C /tmp/vs-test.Q8quJp/home/.cache/
+# org.swift.swiftpm/repositories/SwiftTerm-74b92343 config --get remote.origin.url' failed" (every merge's and audit's
+# run on the node, 2026-11-21). Called before the scratch HOME replaces the caller's: there, swiftpm_options names the
+# caller's cache to SwiftPM (`--cache-path`), and to nothing else: the tests' HOME stays the scratch one.
+# Only for a caller in a user namespace that doesn't map uid 0 (a box: /proc/self/uid_map) whose HOME's SwiftPM cache
+# is a mount of its own (/proc/self/mountinfo: the layer the box made there), both the kernel's: a branch run's home
+# given the account's cache. A test.sh a test runs in the box, whose HOME is the outer run's scratch one, takes nothing.
+# Outside such a namespace (the Mac, a developer's own run, a node's unboxed run), nothing changes. A shell
+# variable, not exported: test.sh exports it for the bash vs-heavy runs, and heavy_swift keeps it from SwiftPM and the tests.
+swiftpm_run_cache() {
+    unset swiftpm_cache
+    local cache=$HOME/.cache/org.swift.swiftpm
+    [[ -r /proc/self/uid_map && -r /proc/self/mountinfo && -d $cache && $cache != *[[:space:]\\]* ]] || return 0
+    awk '$1 == 0 { mapped = 1 } END { exit mapped }' /proc/self/uid_map || return 0
+    awk -v cache="$cache" '$5 == cache { mounted = 1 } END { exit !mounted }' /proc/self/mountinfo || return 0
+    swiftpm_cache=$cache
 }
 # Inside Codex's sandbox there's no network either, and a new worktree's first build clones the package's dependencies
 # (SwiftTerm, swift-argument-parser) from GitHub: "Could not resolve host: github.com". There, a checkout whose .build

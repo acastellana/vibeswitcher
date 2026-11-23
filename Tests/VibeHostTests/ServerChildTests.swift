@@ -1110,7 +1110,8 @@ final class ServerChildHost {
     /// (`Platform.Sockets.boundFile`), so the check after the bind finds another file there and binds again: no
     /// housekeeping (an hour here) needed, and a client by the path reaches the host. Needs the kernel's unix_diag
     /// (`CONFIG_UNIX_DIAG`), as the user's host does for this.
-    @Test(.enabled(if: !Platform.CodeIdentity.isAvailable, "the host watches its path on Linux"))
+    @Test(.enabled(if: !Platform.CodeIdentity.isAvailable && !boxRefusesUnixDiag,
+                   "the host watches its path on Linux, by unix_diag, which a branch run's box refuses (`boxRefusesUnixDiag`)"))
     func aSocketRenamedOverThePathIsNotTheHostsAtOnce() async throws {
         let dir = "\(shortScratchRoot)/vssp-\(UUID().uuidString.prefix(8))"
         try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)

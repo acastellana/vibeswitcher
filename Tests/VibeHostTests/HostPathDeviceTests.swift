@@ -119,8 +119,8 @@ enum OverlaySocketHelper {
     /// holds it, not with `st_dev`. Checked against `st_dev`, the host's fresh listener was never its own, the path was
     /// bound again and again, and no client reached the host by its path. Another socket renamed over the path is
     /// still not the host's, and is its own listener's.
-    @Test(.enabled(if: !Platform.CodeIdentity.isAvailable && geteuid() != 0 && OverlaySocketHelper.noOverlay == nil,
-                   "needs an overlay in an unprivileged user namespace, on Linux: \(OverlaySocketHelper.noOverlay ?? "")"))
+    @Test(.enabled(if: !Platform.CodeIdentity.isAvailable && geteuid() != 0 && OverlaySocketHelper.noOverlay == nil && !boxRefusesUnixDiag,
+                   "needs an overlay in an unprivileged user namespace, on Linux, and unix_diag, which a branch run's box refuses (`boxRefusesUnixDiag`): \(OverlaySocketHelper.noOverlay ?? "")"))
     func aSocketOnAFileSystemWhoseStatDeviceIsNotItsOwnIsTheHosts() throws {
         try #require(getenv(OverlaySocketHelper.variable) == nil)
         let dir = try OverlaySocketHelper.folder()

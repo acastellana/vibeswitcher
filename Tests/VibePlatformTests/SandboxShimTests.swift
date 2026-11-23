@@ -72,6 +72,7 @@ enum ShimBox {
                 case .device(let name): lines.append(["device", mount.target, name])
                 case .link(let text): lines.append(["link", mount.target, text])
                 case .file(let contents, let mode): lines.append(["file", mount.target, String(decoding: contents, as: UTF8.self), String(mode)])
+                case .binfmt: lines.append(["binfmt", mount.target])
                 }
             }
             switch plan.network {
@@ -123,6 +124,7 @@ enum ShimBox {
                 case "device": plan.mounts.append(.init(field(0), .device(field(1))))
                 case "link": plan.mounts.append(.init(field(0), .link(to: field(1))))
                 case "file": plan.mounts.append(.init(field(0), .file(contents: Data(field(1).utf8), mode: UInt32(field(2)) ?? 0o644)))
+                case "binfmt": plan.mounts.append(.init(field(0), .binfmt))
                 case "network":
                     switch field(0) {
                     case "shared": plan.network = .shared
@@ -153,19 +155,21 @@ enum ShimBox {
     /// Whether `python3` is there for the probes that need a system call a shell can't make.
     static let python = FileManager.default.isExecutableFile(atPath: "/usr/bin/python3")
 
-    /// The base of every plan: `/usr` and `/etc` read-only with the usual links, the box's own `/proc`, `/dev` and
-    /// `/tmp`, and `folder` read-write, where the program starts.
+    /// The base of every plan: `/usr` and `/etc` read-only with the usual links, the box's own `/proc` (with a
+    /// binfmt_misc of its own where the kernel gives one, as `SandboxPlanner` plans it), `/dev` and `/tmp`, and
+    /// `folder` read-write, where the program starts.
     static func plan(_ folder: String, extra: [Platform.Sandbox.Mount] = [], network: Platform.Sandbox.Network = .none,
                      terminal: Platform.Sandbox.Terminal = .none, door: String? = nil, nesting: Bool = false,
-                     environment: [String] = []) -> Platform.Sandbox.Plan {
+                     environment: [String] = [], binfmt: Bool = Platform.Sandbox.probe().binfmt) -> Platform.Sandbox.Plan {
         var mounts: [Platform.Sandbox.Mount] = [
             .init("/usr", .readOnly(source: "/usr")),
             .init("/etc", .readOnly(source: "/etc")),
             .init("/bin", .link(to: "usr/bin")), .init("/lib", .link(to: "usr/lib")),
             .init("/lib64", .link(to: "usr/lib64")), .init("/sbin", .link(to: "usr/sbin")),
             .init("/proc", .proc),
-            .init("/dev", .empty(mode: 0o755)),
         ]
+        if binfmt { mounts.append(.init("/proc/sys/fs/binfmt_misc", .binfmt)) }
+        mounts.append(.init("/dev", .empty(mode: 0o755)))
         mounts += ["null", "zero", "full", "random", "urandom", "tty"].map { .init("/dev/\($0)", .device($0)) }
         mounts += [.init("/dev/pts", .devpts), .init("/dev/ptmx", .link(to: "pts/ptmx")), .init("/tmp", .empty(mode: 0o1777))]
         if let door { mounts.append(.init((door as NSString).deletingLastPathComponent, .empty(mode: 0o700))) }
@@ -681,7 +685,13 @@ enum ShimBox {
             ("a program that isn't there", base, nil, ["/usr/bin/no-such-program-here"], "exec", ENOENT),
             ("a proxied network with no way out", ShimBox.plan(box.path, network: .proxied(port: 3128)), nil, [], "plan", EINVAL),
             ("a foreground terminal that isn't one", ShimBox.plan(box.path, terminal: .foreground), nil, [], "terminal", ENOTTY),
-        ]
+            ("a binfmt_misc where nothing can be mounted", ShimBox.plan(box.path, extra: [.init("/usr/binfmt", .binfmt)]), nil, [],
+             "mount /usr/binfmt", EROFS),
+        ] + (Platform.Sandbox.probe().binfmt ? [] : [
+            // A kernel that gives a user namespace no binfmt_misc of its own (5.15, by the kernel's history; not
+            // measured here, where it gives one) refuses the mount itself: EPERM, as for sysfs above.
+            ("a binfmt_misc the kernel refuses", ShimBox.plan(box.path, binfmt: true), nil, [], "mount /proc/sys/fs/binfmt_misc", EPERM),
+        ])
         for (what, plan, doorLine, program, step, code) in cases {
             let (ended, errors) = try ShimBox.run(plan, program.isEmpty ? ["/usr/bin/touch", marker] : program, in: box, doorLine: doorLine)
             #expect(ended.exit == 127, "\(what): \(ended) \(errors)")

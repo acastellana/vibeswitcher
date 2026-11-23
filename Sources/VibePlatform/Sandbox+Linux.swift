@@ -14,7 +14,18 @@ extension Platform.Sandbox {
             let landlock = Int(vibe_sandbox_landlock_abi())
             let vsock = vibe_sandbox_vsock_opens() == 1
             let why = refusal()
-            return Facts(userNamespaces: why == nil, overlay: overlay, landlockABI: landlock, vsock: vsock, why: why)
+            return Facts(userNamespaces: why == nil, overlay: overlay, landlockABI: landlock, vsock: vsock,
+                         binfmt: why == nil && ownBinfmt(), why: why)
+        }
+
+        /// util-linux's mount(8), which the binfmt probe mounts with.
+        static let mount = "/usr/bin/mount"
+
+        /// Whether a user namespace gets a binfmt_misc of its own (measured on 6.18; 6.7 in the kernel's history): mount(8)
+        /// mounts one, as the namespace's root, over the /tmp of a mount namespace of unshare(1)'s child's own.
+        private static func ownBinfmt() -> Bool {
+            guard access(mount, X_OK) == 0 else { return false }
+            return run(["unshare", "--user", "--map-root-user", "--mount", mount, "-t", "binfmt_misc", "binfmt_misc", "/tmp"]) == nil
         }
 
         /// Why the kernel refuses this user a box's namespaces; nil when a child made them.
@@ -26,8 +37,12 @@ extension Platform.Sandbox {
                 return "AppArmor refuses unprivileged user namespaces (kernel.apparmor_restrict_unprivileged_userns is \(restricted))"
             }
             guard access(unshare, X_OK) == 0 else { return "no \(unshare) to try the namespaces with" }
-            var child = Platform.Spawn(executable: unshare, arguments: ["unshare", "--user", "--map-current-user", "--mount", "--pid",
-                                                                       "--ipc", "--uts", "--cgroup", "--net", "--fork", "/bin/true"])
+            return run(["unshare", "--user", "--map-current-user", "--mount", "--pid", "--ipc", "--uts", "--cgroup", "--net", "--fork", "/bin/true"])
+        }
+
+        /// unshare(1) run with `arguments`, its output thrown away: nil when it exits 0, else why not.
+        private static func run(_ arguments: [String]) -> String? {
+            var child = Platform.Spawn(executable: unshare, arguments: arguments)
             child.stdin = .path("/dev/null", flags: O_RDONLY)
             child.stdout = .path("/dev/null", flags: O_WRONLY)
             child.stderr = .path("/dev/null", flags: O_WRONLY)
@@ -111,6 +126,8 @@ extension Platform.Sandbox {
                 case .link(let text):
                     made.kind = Int32(VIBE_MOUNT_LINK)
                     made.source = copy(text)
+                case .binfmt:
+                    made.kind = Int32(VIBE_MOUNT_BINFMT)
                 case .file(let contents, let mode):
                     made.kind = Int32(VIBE_MOUNT_FILE)
                     let room = malloc(max(contents.count, 1))!

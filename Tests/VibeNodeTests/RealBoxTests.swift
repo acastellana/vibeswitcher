@@ -77,7 +77,7 @@ enum RealBox {
             case .devpts: lines.append(["devpts", mount.target])
             case .device(let name): lines.append(["device", mount.target, name])
             case .link(let text): lines.append(["link", mount.target, text])
-            case .overlay, .sysfs, .file: preconditionFailure("not a mount RealBox.plan makes")
+            case .overlay, .sysfs, .file, .binfmt: preconditionFailure("not a mount RealBox.plan makes")
             }
         }
         switch plan.network {

@@ -965,6 +965,59 @@ struct TestLockTests {
         #expect(buildApp.contains("Resources/bin/vs-heavy --as scripts/build-app.sh bash -c 'heavy_swift build -c release'"))
     }
 
+    /// In a branch run's box there's no network, and the account's SwiftPM cache is layered under the run's home; test.sh
+    /// and test-under-load.sh then give SwiftPM a scratch HOME, where a fresh worktree's build found no cache and fetched
+    /// ("Fetching https://github.com/migueldeicaza/SwiftTerm.git … error: Git command 'git -C /tmp/vs-test.Q8quJp/home/
+    /// .cache/org.swift.swiftpm/repositories/SwiftTerm-74b92343 …' failed", every merge's and audit's run on the node,
+    /// 2026-11-21). `swiftpm_run_cache`, called before the scratch HOME, has `swiftpm_options` name the caller's cache
+    /// (`--cache-path`) only in a box (the kernel's uid_map) where that cache is a mount of its own (mountinfo: the layer
+    /// the box made under the run's home). A HOME whose cache is a plain folder takes nothing, in a box or outside one:
+    /// a test.sh a test runs (its HOME the outer run's scratch one, which SwiftPM may have given a cache folder), and the
+    /// Mac's and an unboxed run's commands, as before. That the box's own layer is taken is shown by a boxed build of a
+    /// fresh worktree (the merge's gate), which a focused test can't make.
+    @Test func swiftPMIsToldACacheOnlyWhereTheBoxLayeredOne() throws {
+        let home = url("run-home").resolvingSymlinksInPath().path
+        let cache = home + "/.cache/org.swift.swiftpm"
+        let bare = url("bare-home").resolvingSymlinksInPath().path
+        for folder in [cache + "/repositories", bare] { try FileManager.default.createDirectory(atPath: folder, withIntermediateDirectories: true) }
+        func options(home: String) throws -> String {
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: "/bin/bash")
+            process.arguments = ["-c", "source scripts/lib/swift-jobs.sh && swiftpm_run_cache && echo $(swiftpm_options)"]
+            process.currentDirectoryURL = Self.repo
+            var environment = ProcessInfo.processInfo.environment
+            environment["HOME"] = home
+            environment["CODEX_SANDBOX"] = nil
+            environment["swiftpm_cache"] = "/elsewhere"
+            process.environment = environment
+            let pipe = Pipe()
+            process.standardOutput = pipe
+            try process.run()
+            let output = String(decoding: pipe.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+            waitForEnd(process)
+            #expect(process.terminationStatus == 0)
+            return output.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        // A value from outside is never taken: the decision is this run's. A cache that is a folder, not the box's
+        // mount, takes nothing, in a box (where boxOwners is set) or not.
+        #expect(try options(home: bare) == "--build-system native")
+        #expect(try options(home: home) == "--build-system native", "in a box: \(Platform.Tools.boxOwners != nil)")
+        // Both scripts decide before their scratch HOME replaces the caller's; test.sh exports it (only when set) for
+        // vs-heavy's bash, the retry's too, and no longer once the swift run is over; heavy_swift keeps it from SwiftPM's
+        // environment and the tests'.
+        for script in ["scripts/test.sh", "scripts/test-under-load.sh"] {
+            let text = try String(contentsOf: Self.repo.appendingPathComponent(script), encoding: .utf8)
+            let decided = try #require(text.range(of: "\nswiftpm_run_cache\n") ?? text.range(of: "    swiftpm_run_cache\n"))
+            let replaced = try #require(text.range(of: "export HOME=$tool_scratch/home"))
+            #expect(decided.lowerBound < replaced.lowerBound, "\(script)")
+        }
+        let test = try String(contentsOf: Self.repo.appendingPathComponent("scripts/test.sh"), encoding: .utf8)
+        #expect(test.contains("\nswiftpm_run_cache\n[[ -n ${swiftpm_cache:-} ]] && export swiftpm_cache\n"))
+        #expect(test.contains("    status=$?\n    export -n swiftpm_cache 2> /dev/null\n"))
+        let jobs = try String(contentsOf: Self.repo.appendingPathComponent("scripts/lib/swift-jobs.sh"), encoding: .utf8)
+        #expect(jobs.contains("    export -n swiftpm_cache 2> /dev/null\n"))
+    }
+
     /// Inside Codex's sandbox there's no network, and a new worktree's first build clones SwiftTerm from GitHub ("Could
     /// not resolve host: github.com"): `swiftpm_offline_dependencies` (scripts/lib/swift-jobs.sh, which test.sh and
     /// test-under-load.sh run before building) gives a checkout whose .build has no dependencies the main checkout's,

@@ -781,10 +781,17 @@ extension InstallTests {
         let world = try await world()
         let ran = try await world.install(try world.arguments(world.base, products: true))
         #expect(ran.status == 69, "\(ran.status) \(ran.errors)")
+        #expect(world.prefixIsEmpty)
+        // In a branch run's box root is unmapped (`Platform.Tools.boxOwners`, the kernel's `uid_map`): the install
+        // refuses before any product, at the interpreter, which it can't see as root's there. The RUNPATH check is
+        // past that refusal, so it can't be reached in a box.
+        if let box = Platform.Tools.boxOwners {
+            #expect(ran.errors.contains("isn't root's alone") && ran.errors.contains("owner uid \(box.overflow)"), "\(ran.errors)")
+            return
+        }
         // The first product checked, and the entry: the toolchain's library folder.
         #expect(ran.errors.contains("vibeswitcher-host") && ran.errors.contains("RUNPATH"), "\(ran.errors)")
         #expect(ran.errors.contains("/usr/lib/swift/linux"), "\(ran.errors)")
-        #expect(world.prefixIsEmpty)
     }
 
     /// The `NEEDED` set is exactly ST-D12's: a binary that needs less (`/usr/bin/true`: libc alone) or more
@@ -801,6 +808,12 @@ extension InstallTests {
             try Data((InstallTests.swift + "\n").utf8).write(to: products.appendingPathComponent("swift-version"))
             let ran = try await world.install(try world.arguments(world.base) + ["--test-products", products.path])
             #expect(ran.status == 69, "\(program): \(ran.status) \(ran.errors)")
+            // In a branch run's box the install refuses at the interpreter, which it can't see as root's there
+            // (`aBinaryWithARunpathIsRefused`): the NEEDED check is past that refusal.
+            if let box = Platform.Tools.boxOwners {
+                #expect(ran.errors.contains("isn't root's alone") && ran.errors.contains("owner uid \(box.overflow)"), "\(program): \(ran.errors)")
+                continue
+            }
             #expect(ran.errors.contains("vibeswitcher-host") && ran.errors.contains(named), "\(program): \(ran.errors)")
         }
         #expect(world.prefixIsEmpty)
@@ -1233,13 +1246,18 @@ extension InstallTests {
         }
     }
 
-    /// Whether `path` is root's, and every folder from it up to `/` root's and writable by nobody else.
-    static func rootOnly(_ path: String) -> Bool {
+    /// Whether `path` is root's, and every folder from it up to `/` root's and writable by nobody else. In a branch
+    /// run's box (`Platform.Tools.boxOwners`, the kernel's `uid_map`) root's files read as the overflow uid and the
+    /// box's own `/` as the run's, and count so, as `Platform.Tools.trustedGit` counts them there.
+    static func rootOnly(_ path: String, box: Platform.Tools.BoxOwners? = Platform.Tools.boxOwners) -> Bool {
+        func roots(_ owner: uid_t, _ folder: String) -> Bool {
+            owner == 0 || (box.map { owner == $0.overflow || (folder == "/" && owner == $0.own) } ?? false)
+        }
         var info = stat()
-        guard lstat(path, &info) == 0, info.st_uid == 0, info.st_mode & 0o022 == 0 else { return false }
+        guard lstat(path, &info) == 0, roots(info.st_uid, path), info.st_mode & 0o022 == 0 else { return false }
         var folder = (path as NSString).deletingLastPathComponent
         while true {
-            guard lstat(folder, &info) == 0, info.st_uid == 0, info.st_mode & S_IFMT == S_IFDIR, info.st_mode & 0o022 == 0 else { return false }
+            guard lstat(folder, &info) == 0, roots(info.st_uid, folder), info.st_mode & S_IFMT == S_IFDIR, info.st_mode & 0o022 == 0 else { return false }
             if folder == "/" { return true }
             folder = (folder as NSString).deletingLastPathComponent
         }

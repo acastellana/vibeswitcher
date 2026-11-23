@@ -225,6 +225,8 @@ public final class LeadToolset: MCPToolset {
     /// The Mac-wide limits in force (see `MacLimits`): Settings', raised while the app says Boost mode is on
     /// (`MacLimits.current`), read at each call. Faked in tests.
     var macLimits: () -> MacLimits = { MacLimits.current() }
+    /// VIBESWITCHER_HEAVY_SLOTS as this process has it (`TestLock.slotsSet`), read at each call. Faked in tests.
+    var slotsSet: () -> Int? = { TestLock.slotsSet() }
     /// Where a call refused for the Mac's room or load is kept, so the app's witness wakes this lead once there's room.
     var roomWaits = LeadWitness.RoomWaits()
     /// How long a worker's or verifier's start waits for its tool server to ask the session host who it is (its
@@ -314,7 +316,7 @@ public final class LeadToolset: MCPToolset {
     /// VIBESWITCHER_HEAVY_SLOTS), read at each call.
     func heavyLock(_ workflow: LeadWorkflow) -> TestLock? {
         testLock.map { lock in
-            let own = workflow.heavySlots ?? (slotsFromSettings ? TestLock.slotsSet() : lock.slots)
+            let own = workflow.heavySlots ?? (slotsFromSettings ? slotsSet() : lock.slots)
             let limits = macLimits()
             let slots = limits.heavySlotsInForce(own)
             var held = slots == lock.slots ? lock : lock.with(slots: slots)
@@ -341,7 +343,7 @@ public final class LeadToolset: MCPToolset {
     /// "2 (not set: VIBESWITCHER_HEAVY_SLOTS, else Settings' Mac-wide count)", as merge and audits take them; "3 while
     /// boosted (…)" while Boost mode raises it.
     func heavySlotsText(_ workflow: LeadWorkflow) -> String {
-        let count = heavyLock(workflow)?.slots ?? macLimits().heavySlotsInForce(workflow.heavySlots ?? TestLock.slotsSet())
+        let count = heavyLock(workflow)?.slots ?? macLimits().heavySlotsInForce(workflow.heavySlots ?? slotsSet())
         let boosted = macLimits().boost != nil && count != (workflow.heavySlots ?? count) ? " while boosted (\(workflow.heavySlots ?? 0) in workflow.md)" : ""
         return workflow.heavySlots == nil ? "\(count) (not set: VIBESWITCHER_HEAVY_SLOTS, else Settings' Mac-wide count\(macLimits().boost != nil ? ", raised while boosted" : ""))" : "\(count)\(boosted)"
     }

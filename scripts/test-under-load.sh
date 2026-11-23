@@ -400,6 +400,8 @@ if [[ ${#command[@]} -eq 0 ]]; then
     # SwiftPM compiles the manifest too, before target module-cache options apply. Keep its cache writes
     # in a writable scratch home, as test.sh does (a Codex worker cannot write the real ~/.cache).
     mkdir -p "$tool_scratch/home" || exit 1
+    # In a branch run's box, SwiftPM keeps the cache the box gave the caller's HOME (scripts/lib/swift-jobs.sh).
+    swiftpm_run_cache
     export HOME=$tool_scratch/home CFFIXED_USER_HOME=$tool_scratch/home
     echo "building…"
     # On this run's slot's share of the cores, VS_HEAVY_CORES from the vs-heavy it runs under (scripts/lib/swift-jobs.sh),

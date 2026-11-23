@@ -21,7 +21,12 @@ private func passOverThePairIfAsked() {
     ]
     if let (pid, uid) = claims[words[0]] {
         if vibe_send_claiming(socket, "m", 1, pid, uid, getgid()) != 1 {
-            guard errno == EPERM, send(socket, "r", 1, Int32(MSG_NOSIGNAL)) == 1 else { _exit(4) }
+            // In a branch run's box (the kernel's `uid_map`, `Platform.Tools.boxOwners`) only the run's own uid is
+            // mapped: a claim of another is refused there as one the namespace can't name (EINVAL), before the
+            // kernel would weigh it (EPERM). Refused either way, which is what the test reads.
+            let refusal = errno
+            let unmapped = refusal == EINVAL && uid != getuid() && Platform.Tools.boxOwners != nil
+            guard refusal == EPERM || unmapped, send(socket, "r", 1, Int32(MSG_NOSIGNAL)) == 1 else { _exit(4) }
         }
     } else if let count = Int(words[0]) {
         let sent = count == 1 ? Platform.Sockets.sendDescriptor(fd, over: socket)
