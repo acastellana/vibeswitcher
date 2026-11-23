@@ -326,6 +326,12 @@ public final class LeadEngine: @unchecked Sendable {
     var pluginAsking = false
     /// Who waits for the vault's answer under way.
     var pluginAskWaiters: [() -> Void] = []
+    /// Waiters that came while an ask was under way, and whether another ask follows it (`askPlugins`).
+    var pluginAskNextWaiters: [() -> Void] = []
+    var pluginAskAgain = false
+    /// The plugin writes to the vault queued so far (on, off, add, remove, a setting): an ask queued before one of them
+    /// read the vault before it, and its answer is stale (`askPlugins`).
+    var pluginWrites = 0
     var pluginTimer: Subscription?
     var pluginNow: () -> Date = Date.init
     /// The plugin requests settled (`PluginKey.name`), as the vault keeps them: never drawn again.

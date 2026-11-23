@@ -65,6 +65,7 @@ extension Requests {
                 guard engine.plugins.plugin(found.manifest.id) == nil else {
                     return reply(self.refuse(request, .refused, "a plugin \(found.manifest.id) is in this node's list already"))
                 }
+                engine.pluginWrites += 1
                 engine.pluginWork.async {
                     let kept = Result { try client.setExternalPlugin(found.manifest.id, record: found.record.json) }
                     queue.async {
@@ -93,6 +94,7 @@ extension Requests {
         engine.withdraw(plugin)
         plugin.stop()
         let (client, queue, root) = (link.vaultV2, self.queue, engine.root)
+        engine.pluginWrites += 1
         engine.pluginWork.async {
             let kept = Result { try client.setExternalPlugin(id, record: nil) }
             // Its folder (its data) goes with it, and its requests not yet settled: a program added back under its id

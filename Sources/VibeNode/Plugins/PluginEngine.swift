@@ -16,11 +16,17 @@ extension LeadEngine {
     /// Asks the vault which plugins the user set (at each welcome, and at a look while it hasn't said). `then` on `queue`
     /// once it answered or couldn't. On `queue`.
     func askPlugins(then: (() -> Void)? = nil) {
-        // An ask under way: this waits for its answer (a look asked meanwhile mustn't take "not known" for an answer).
+        // An ask under way read the vault before this was asked (an add or a remove may have just written it): this waits
+        // for the next ask, which follows it.
+        guard !pluginAsking else {
+            if let then { pluginAskNextWaiters.append(then) }
+            pluginAskAgain = true
+            return
+        }
         if let then { pluginAskWaiters.append(then) }
-        guard !pluginAsking else { return }
         pluginAsking = true
         let client = link.vaultV2
+        let writes = pluginWrites
         pluginWork.async { [weak self] in
             let kept = Result { try client.plugins() }
             let settled = Result { try client.settledRequests() }
@@ -31,6 +37,16 @@ extension LeadEngine {
             self?.queue.async {
                 guard let self else { return }
                 self.pluginAsking = false
+                // A write queued after this ask's reads (the work queue is serial): its answer predates it, so it isn't
+                // taken (it would turn back what the user just set); the next ask, after the write, answers its waiters.
+                if self.pluginWrites != writes {
+                    self.pluginAskNextWaiters = self.pluginAskWaiters + self.pluginAskNextWaiters
+                    self.pluginAskWaiters = []
+                    self.pluginAskAgain = false
+                    let next = self.pluginAskNextWaiters
+                    self.pluginAskNextWaiters = []
+                    return self.askPlugins { next.forEach { $0() } }
+                }
                 if let since { self.pluginRecordSince = since }
                 if let settings { self.pluginSettings = settings }
                 if let external { self.plugins.takeExternal(external.mapValues(\.record)) { id, _ in external[id] } }
@@ -42,13 +58,22 @@ extension LeadEngine {
                 case .failure(let error):
                     self.note("plugins: the vault didn't say which requests are settled (\(error)); nothing is drawn until it does")
                 }
-                switch kept {
-                case .success(let kept): self.keptPlugins(kept)
-                case .failure(let error): self.note("plugins: the vault didn't say which are on (\(error)); each stays as it was")
-                }
                 let waiters = self.pluginAskWaiters
                 self.pluginAskWaiters = []
-                waiters.forEach { $0() }
+                if self.pluginAskAgain {
+                    self.pluginAskAgain = false
+                    let next = self.pluginAskNextWaiters
+                    self.pluginAskNextWaiters = []
+                    self.pluginAskWaiters = next
+                    defer { self.askPlugins() }
+                }
+                switch kept {
+                // Its waiters hear once the mirror and the wrappers are written: what a reply says is on, a filer finds on.
+                case .success(let kept): self.keptPlugins(kept) { waiters.forEach { $0() } }
+                case .failure(let error):
+                    self.note("plugins: the vault didn't say which are on (\(error)); each stays as it was")
+                    waiters.forEach { $0() }
+                }
             }
         }
     }
@@ -92,7 +117,9 @@ extension LeadEngine {
 
     /// The vault keeps `kept`: the registry takes it; a plugin no longer on withdraws its open cards; the mirror is
     /// written; one newly on looks. On `queue`.
-    func keptPlugins(_ kept: [String: Bool]) {
+    /// `written` hears (on `queue`) once the mirror and the wrappers are on disk: a reply that says a plugin is on is sent
+    /// only then, so a filer started right after it (`vs-ask` reads the mirror) finds it on.
+    func keptPlugins(_ kept: [String: Bool], written: (() -> Void)? = nil) {
         let wasOn = Set(plugins.known ? plugins.onIDs : [])
         plugins.kept = kept
         for plugin in plugins.plugins where wasOn.contains(plugin.info.id) && !plugins.isOn(plugin.info.id) { withdraw(plugin) }
@@ -103,9 +130,11 @@ extension LeadEngine {
             plugin.info.commands.map { ($0.name, plugin.info.id) }
         }) { first, _ in first }
         let bin = root.appendingPathComponent("plugins/bin", isDirectory: true)
+        let queue = self.queue
         pluginWork.async {
             do { try VibePaths.writePrivate(data, to: file) } catch { note("plugins: \(file.lastPathComponent) not written: \(error)") }
             Self.writeWrappers(wrappers, in: bin, note: note)
+            if let written { queue.async(execute: written) }
         }
         if plugins.on.contains(where: { !wasOn.contains($0.info.id) }) { lookAtPlugins() }
     }
@@ -121,6 +150,7 @@ extension LeadEngine {
         if on, let why = plugin.availability() { return then(.failure(.refused("\(plugin.info.title) can't run on this node: \(why)"))) }
         let client = link.vaultV2
         let open = cards.list().filter { $0.plugin?.plugin == id }.count
+        pluginWrites += 1
         pluginWork.async { [weak self] in
             let kept = Result { try client.setPlugin(id, on: on) }
             self?.queue.async {
@@ -130,9 +160,10 @@ extension LeadEngine {
                     then(.failure(.refused("the session host's vault didn't keep it, so nothing changed: \(error)")))
                 case .success(let kept):
                     self.note("plugin \(id) turned \(on ? "on" : "off") by the user")
-                    self.keptPlugins(kept)
-                    then(.success(.object(["plugin": .string(id), "on": .bool(self.plugins.isOn(id)),
-                                           "withdrawn": .int(on ? 0 : open)])))
+                    self.keptPlugins(kept) { [weak self] in
+                        guard let self else { return }
+                        then(.success(.object(["plugin": .string(id), "on": .bool(self.plugins.isOn(id)), "withdrawn": .int(on ? 0 : open)])))
+                    }
                 }
             }
         }

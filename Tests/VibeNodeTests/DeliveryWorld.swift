@@ -26,7 +26,8 @@ final class DeliveryWorld: @unchecked Sendable {
     /// The node's session scan on the link (`scan`), started with the world: the agents its fakes are (E7's witness).
     let sessions: NodeSessions?
 
-    private init(host: NodeTestHost, fake: FakeClaude.Install, repo: String, scan: Bool, sweepsRoles: Bool) {
+    private init(host: NodeTestHost, fake: FakeClaude.Install, repo: String, scan: Bool, sweepsRoles: Bool, plugins: [FeaturePlugin]? = nil,
+                 pluginBind: WebBind? = nil, note: @escaping (String) -> Void = { _ in }, vault: ((NodeTestHost) -> LeadVault)? = nil) {
         self.host = host
         self.fake = fake
         self.repo = repo
@@ -37,7 +38,10 @@ final class DeliveryWorld: @unchecked Sendable {
         options.answersTrust = false
         options.home = host.home.path
         options.sweepsRoles = sweepsRoles
-        engine = LeadEngine(root: host.root, nodeRoot: nil, link: link, clock: nil, sessions: sessions, options: options)
+        options.plugins = plugins
+        options.pluginBind = pluginBind
+        options.vault = vault?(host)
+        engine = LeadEngine(root: host.root, nodeRoot: nil, link: link, clock: nil, sessions: sessions, options: options, note: note)
         let (engine, steps, typed, onStep) = (engine, steps, typed, onStep)
         link.onWelcome = { _, _ in engine.welcomed() }
         queue.sync {
@@ -54,12 +58,17 @@ final class DeliveryWorld: @unchecked Sendable {
     /// A world on a new scratch host, its link welcomed unless `connect` is false.
     /// `scan`: with the node's session scan (`NodeSessions`) on the link, started once it's welcomed. `sweepsRoles`: the
     /// engine ends the finished tasks' role sessions from the host's roster, as the server's does (`RoleSweep`).
-    static func make(_ scratch: Scratch, connect: Bool = true, scan: Bool = false, sweepsRoles: Bool = false) async throws -> DeliveryWorld {
+    /// `plugins`, `pluginBind`, `note`: the world's one engine's (a second engine on the same root and link would answer
+    /// the same welcomes and write the same plugin files).
+    static func make(_ scratch: Scratch, connect: Bool = true, scan: Bool = false, sweepsRoles: Bool = false, plugins: [FeaturePlugin]? = nil,
+                     pluginBind: WebBind? = nil, note: @escaping (String) -> Void = { _ in },
+                     vault: ((NodeTestHost) -> LeadVault)? = nil) async throws -> DeliveryWorld {
         let host = try NodeTestHost(scratch)
         let fake = try FakeClaude.install(in: host.folder.appendingPathComponent("fake", isDirectory: true))
         let repo = host.folder.appendingPathComponent("repo", isDirectory: true)
         try await scratchRepository(repo)
-        let world = DeliveryWorld(host: host, fake: fake, repo: repo.resolvingSymlinksInPath().path, scan: scan, sweepsRoles: sweepsRoles)
+        let world = DeliveryWorld(host: host, fake: fake, repo: repo.resolvingSymlinksInPath().path, scan: scan, sweepsRoles: sweepsRoles,
+                                  plugins: plugins, pluginBind: pluginBind, note: note, vault: vault)
         if connect { await world.connect() }
         if let sessions = world.sessions { world.queue.sync { sessions.start() } }
         return world

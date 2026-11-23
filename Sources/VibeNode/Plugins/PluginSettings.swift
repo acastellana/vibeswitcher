@@ -58,6 +58,7 @@ extension LeadEngine {
         let stored = "\(plugin.info.id).\(setting.key)"
         let was = pluginSettings[stored] ?? setting.defaultValue
         let client = link.vaultV2
+        pluginWrites += 1
         pluginWork.async { [weak self] in
             let kept = Result { try client.setPluginSetting(stored, to: checked) }
             self?.queue.async {

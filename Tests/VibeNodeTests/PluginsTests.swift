@@ -982,6 +982,32 @@ extension PluginsTests {
     }
 }
 
+extension PluginsTests {
+    /// The load runs' flake, a product cause: `plugin on` replied before the mirror (`plugins.json`, which `vs-ask`
+    /// reads) was written, so a request filed right after it was refused "not on". The reply now waits for the mirror:
+    /// at the moment it is sent, the mirror says what it says.
+    @Test func aPluginOnReplyComesOnlyOnceTheMirrorSaysSo() async throws {
+        let world = try await CardWorld.make(scratch, plugins: [Probe(defaultOn: false)])
+        defer { world.stop() }
+        let mirror = world.host.root.appendingPathComponent("plugins.json")
+        for round in 0..<20 {
+            let on = round % 2 == 0
+            let seen = Locked<Bool?>(nil)
+            let request = NodeWire.Request(id: UUID().uuidString, kind: on ? "plugin.on" : "plugin.off", args: ["plugin": .string("probe")],
+                                           action: UUID().uuidString.lowercased())
+            world.queue.async {
+                world.requests.handle(request, from: CardWorld.user) { reply in
+                    // Read here, as the reply goes: what a filer started now would find.
+                    let says = PluginGate.mirror(at: mirror)?.on.contains("probe")
+                    seen.value = reply.ok ? says == on : false
+                }
+            }
+            #expect(await eventually(timeout: 30) { seen.value != nil })
+            #expect(seen.value == true, "round \(round): the reply came before the mirror said \(on ? "on" : "off")")
+        }
+    }
+}
+
 extension Result {
     var failure: Failure? { if case .failure(let failure) = self { return failure } else { return nil } }
 }
