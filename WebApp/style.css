@@ -1070,6 +1070,45 @@ kbd { padding: 1px 6px; border-radius: 5px; box-shadow: inset 0 0 0 1px var(--li
 .goal-empty { padding: 4px 0 8px 40px; }
 .road-band + .goal-row { margin-top: 10px; }
 
+/* The roadmap with estimates: one axis for every row (now, the hours, each midnight), each row's track on it, its
+   date in the last column. Every date is an estimate: where it comes from shows on hover and on focus. */
+.col.dated { --lab: 300px; }
+.col.dated .goal-row, .axis-row { grid-template-columns: var(--lab) minmax(0, 1fr) 150px 14px; }
+.col.dated .goal-task { grid-template-columns: calc(var(--lab) - 16px) minmax(0, 1fr) 150px 14px; align-items: center; padding-left: 40px; }
+.col.dated .road-row { grid-template-columns: calc(var(--lab) + 24px) minmax(0, 1fr) 150px 14px; align-items: center; }
+.col.dated .road-title small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.axis-row { position: sticky; top: -18px; z-index: 1; display: grid; gap: 16px; padding: 4px 0 6px 24px; background: var(--bg); }
+.axis { position: relative; height: 18px; }
+.axis-tick { position: absolute; top: 0; transform: translateX(-50%); color: var(--ink-3); font-size: 11px; white-space: nowrap; }
+.axis-tick.day { color: var(--ink-2); font-weight: 600; }
+.axis-tick.now { color: var(--ink); font-weight: 650; }
+.track { position: relative; display: block; height: 22px; }
+.track > i { position: absolute; display: block; }
+.track-base { left: 0; right: 0; top: 10px; height: 1px; background: var(--line); }
+.track-tick { top: -6px; bottom: -6px; width: 1px; background: var(--line); opacity: 0.55; }
+.track-tick.day { opacity: 1; }
+.track-now { top: -6px; bottom: -6px; width: 1px; background: var(--ink-2); }
+.track-band { top: 4px; height: 14px; border-radius: 99px; background: color-mix(in srgb, currentColor 22%, transparent); }
+.track-bar { top: 9px; height: 3px; border-radius: 3px; background: currentColor; }
+.track-bar.late { color: var(--needs-you); }
+.track-dot { top: 5px; width: 12px; height: 12px; margin-left: -6px; border-radius: 50%; background: var(--bg); box-shadow: inset 0 0 0 3px currentColor; }
+.track-mark { top: 7px; width: 8px; height: 8px; margin-left: -4px; border-radius: 50%; background: currentColor; box-shadow: 0 0 0 2px var(--bg); }
+.track-mark.blocked { border-radius: 1px; transform: rotate(45deg); }
+.track-mark.now { margin-left: 6px; }
+.tone-goal { color: var(--ink); }
+.goal-row .track-dot { width: 15px; height: 15px; margin-left: -7.5px; top: 3.5px; background: currentColor; box-shadow: none; }
+.road-when b { display: block; font-weight: 600; color: var(--ink); white-space: normal; }
+.road-when small { display: block; color: var(--ink-2); white-space: normal; }
+.road-when.late b { color: var(--needs-you); }
+.road-when.nodate b { color: var(--ink-2); font-weight: 400; }
+.road-when[data-basis] { position: relative; cursor: help; outline-offset: 2px; }
+.road-when[data-basis]:hover::after, .road-when[data-basis]:focus-visible::after {
+  content: attr(data-basis); position: absolute; right: 0; top: calc(100% + 4px); z-index: 3; width: 260px; padding: 8px 10px; border-radius: 8px;
+  background: var(--raised); box-shadow: 0 0 0 1px var(--line), 0 8px 24px var(--shadow); color: var(--ink); font-size: var(--small); font-weight: 400; white-space: normal;
+}
+.tdet-basis { display: block; color: var(--ink-3); }
+.tdet-lands.late { color: var(--needs-you); }
+
 /* Your own sessions, New project */
 .screen-body { flex: 1; min-height: 0; overflow-y: auto; }
 .screen-col { max-width: 720px; margin: 0 auto; padding: 18px 24px 48px; }
@@ -1136,6 +1175,10 @@ kbd { padding: 1px 6px; border-radius: 5px; box-shadow: inset 0 0 0 1px var(--li
   .road-row, .goal-task { grid-template-columns: minmax(0, 1fr) 62px; }
   .goal-row { grid-template-columns: minmax(0, 1fr) 14px; }
   .goal-marks { grid-column: 1; grid-row: 2; }
+  .col.dated .goal-row, .col.dated .goal-task, .col.dated .road-row { grid-template-columns: minmax(0, 1fr) 110px; }
+  .col.dated .track { grid-column: 1 / -1; grid-row: 2; }
+  .axis-row { grid-template-columns: 0 minmax(0, 1fr) 0 0; gap: 0; padding-left: 0; }
+  .col.dated .goal-toggle { display: none; }
   .road-note { grid-column: 1 / -1; }
   .screen-col { padding: 14px 14px 40px; }
   .sheet { width: 100vw; padding: calc(20px + env(safe-area-inset-top)) 18px 32px; }

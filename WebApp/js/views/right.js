@@ -14,6 +14,7 @@ import { routeHref, sessionHref, projectHref } from '../ui.js';
 import { settingsHref } from './settings.js';
 import { stepBar } from './project.js';
 import { filesLine } from './records.js';
+import { estimateWords, landingWords, basisWords } from '../forecast.js';
 
 // The session to open for a task: its verifier while it's in review, else its worker.
 const sessionOf = (task) => (task.status === 'review' && task.verifier) || task.worker || null;
@@ -40,6 +41,14 @@ export function rightColumn(app) {
       if (who.who === 'you') parts.push(fact(t('waitsOnYou'), h('a', { class: 'link', href: routeHref(route, { show: 'asks', task: null }) }, cut(who.card.question.text, 120))));
       else if (who.who === 'tasks') parts.push(fact(t('waitsOnTasks', { list: '' }).trim(), listed(who.titles)));
       else if (who.who === 'lead') parts.push(fact(t('waitsOnLead'), ''));
+    }
+    // Its estimate, by whom, and its forecast (where the date comes from on hover and focus).
+    if (task.estimate) parts.push(fact(t('fcEstimateTitle'), estimateWords(task.estimate)));
+    const lands = landingWords(task.forecast);
+    if (lands.date && task.forecast?.basis !== 'done') {
+      const basis = basisWords(task.forecast, { estimate: task.estimate, score: board?.score });
+      parts.push(fact(t('fcLandsTitle'), h('span', { class: 'tdet-lands' + (lands.late ? ' late' : ''), title: basis || null }, [lands.date, lands.range, lands.note].filter(Boolean).join(' · ')),
+        basis ? h('small', { class: 'tdet-basis' }, basis) : null));
     }
     const goal = task.goal ? board?.goals?.find((one) => one.id === task.goal) : null;
     if (goal) parts.push(fact(t('goal'), h('a', { class: 'link', href: projectHref(route.id, { view: 'roadmap', open: [goal.id] }) }, goal.title)));
@@ -72,10 +81,22 @@ export function rightColumn(app) {
     return parts;
   }
 
+  // The estimating score: its line as the node says it, and its three numbers.
+  function scoreParts(score) {
+    if (!score) return [];
+    const tile = (value, label) => h('div', { class: 'tile' }, h('b', null, value), h('span', null, label));
+    return [h('h3', { class: 'col-title' }, t('scoreTitle')),
+      h('div', { class: 'tiles' },
+        tile(score.ratioPct === null || score.ratioPct === undefined ? '—' : `×${(score.ratioPct / 100).toFixed(1)}`, t('scoreRatio')),
+        tile(score.insideWorstPct === null || score.insideWorstPct === undefined ? '—' : `${score.insideWorstPct}%`, t('scoreInside')),
+        tile(`×${((score.correctionPct ?? 100) / 100).toFixed(1)}`, t('scoreCorrection') + (score.clamped ? ' ' + t('scoreClamped') : ''))),
+      h('p', { class: 'col-note' }, score.line)];
+  }
+
   function stats(board) {
     const card = board?.scorecard;
-    if (!card || !card.merged) return [h('p', { class: 'col-note' }, t('scoreNone'))];
-    return [
+    if (!card || !card.merged) return [...scoreParts(board?.score), h('p', { class: 'col-note' }, t('scoreNone'))];
+    return [...scoreParts(board?.score), board?.score ? h('h3', { class: 'col-title' }, t('scorecard')) : null,
       h('div', { class: 'tiles' }, h('div', { class: 'tile' }, h('b', null, String(card.merged)), h('span', null, t('merged', { n: card.merged }).replace(String(card.merged), '').trim())),
         (card.tiles || []).map((tile) => h('div', { class: 'tile', title: tile.help || '' }, h('b', null, tile.value), h('span', null, tile.label), tile.note ? h('small', null, tile.note) : null))),
       card.footnote ? h('p', { class: 'col-note' }, card.footnote) : null,

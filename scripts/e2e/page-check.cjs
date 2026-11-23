@@ -22,6 +22,9 @@
 // - Shell card: the shell plugin's card, under the asking session's chat, with its exact command.
 // - Roadmap: the goals as rows, Unsorted and the done goals folded, a goal opening in place to its task; the board
 //   page's old address opens the lead conversation.
+// - Roadmap dates, Task estimate, Estimates in Stats: the forecasts on a time axis, a task's estimate and landing in
+//   place, the score.
+// - Plain roadmap: a second project with no goals or estimates draws the plain form.
 // - Deep links: an address with the dial, a tab and a task draws exactly that.
 // - This node: its Health (freezes) and its Plugins, the named plugin on.
 // - Settings: the node's settings, a known one among them.
@@ -67,7 +70,7 @@ async function shots(page, origin, folder) {
   const states = [
     ['lead', project], ['lead-everything', project + '?show=all'], ['lead-waiting', project + '?show=asks'], ['task-open', project + '?task=' + encodeURIComponent(expect.task || '')],
     ['stats', project + '?tab=stats'], ['files', project + '?tab=files'], ['roadmap', project.replace(/\/lead$/, '/roadmap')],
-    ['roadmap-open', project.replace(/\/lead$/, '/roadmap') + '?open=' + encodeURIComponent(expect.goalID) + ',unsorted,done'], ['own-sessions', '#/sessions'], ['session', expect.chatHref], ['shell-request', expect.shellHref],
+    ['roadmap-open', project.replace(/\/lead$/, '/roadmap') + '?open=' + encodeURIComponent(expect.goalID) + ',unsorted,done'], ['roadmap-plain', expect.plainHref + '?open=queue'], ['task-estimate', project + '?task=' + encodeURIComponent(expect.estimated)], ['own-sessions', '#/sessions'], ['session', expect.chatHref], ['shell-request', expect.shellHref],
     ['new-project', '#/new'], ['this-node', '#/node'], ['settings', '#/settings'],
   ];
   for (const [width, height, suffix] of [[1440, 900, ''], [390, 844, '-phone']]) {
@@ -235,6 +238,35 @@ async function run() {
     await page.go(expect.projectHref.replace(/\/lead$/, ''));
     const old = road && await page.until(`!document.querySelector('.project-view').hidden && !!document.querySelector('.right .task-row2') && document.querySelector('.switch-link[aria-current]')?.innerText.trim() === 'Lead' ? 'the old address opens the lead conversation' : null`, WAIT);
     record('Roadmap', goals && road && old, !goals ? `no goal row "${expect.goal}" with Unsorted and the done goals' band` : !road ? `the goal didn't open to "${expect.board}"` : (old ? `${goals} rows, ${road}; ${old}` : 'the old #/p/ address didn’t open the lead conversation'));
+
+    // Roadmap dates: the estimates on a time axis: each landing's bar and dot, its date marked as an estimate with
+    // where it comes from.
+    await page.go(roadmap + '?open=' + encodeURIComponent(expect.goalID));
+    const dates = await page.until(`(() => {
+      const when = [...document.querySelectorAll('.road-when[data-basis]')].find((el) => /^An estimate/.test(el.dataset.basis));
+      return document.querySelector('.axis-row .axis-tick.now') && document.querySelector('.track-dot') && when ? when.innerText.replace(/\\s+/g, ' ') + ' (' + when.dataset.basis.slice(0, 60) + '…)' : null;
+    })()`, WAIT);
+    await page.shot('roadmap-dates');
+    record('Roadmap dates', dates, dates || 'no axis, bar or estimate-marked date on the roadmap');
+
+    // Task estimate: a task opened in place says its estimate, whose, and when it lands.
+    await page.go(expect.projectHref + '?task=' + encodeURIComponent(expect.estimated));
+    const estimate = await page.until(`(() => { const t = document.querySelector('.right .tdet')?.innerText || ''; return /Estimate/.test(t) && /the worker/.test(t) && /Lands/.test(t) ? t.replace(/\\s+/g, ' ').slice(0, 120) : null; })()`, WAIT);
+    record('Task estimate', estimate, estimate || 'the task in place says no estimate or landing');
+
+    // Estimates in Stats: the score line and its three numbers.
+    await page.go(expect.projectHref + '?tab=stats');
+    const score = await page.until(`(() => { const t = document.querySelector('.right .right-body')?.innerText || ''; return /Estimates/.test(t) && /Estimates: /.test(t) && document.querySelectorAll('.right .tile').length >= 3 ? t.split('\\n').find((line) => /^Estimates: /.test(line)) : null; })()`, WAIT);
+    record('Estimates in Stats', score, score || 'no score in the Stats tab');
+
+    // Plain roadmap: a project with no goals and no estimates draws the form it had: no axis, the tasks as they move.
+    await page.go(expect.plainHref);
+    const plain = await page.until(`(() => {
+      const row = [...document.querySelectorAll('.road-row')].find((el) => el.innerText.includes(${JSON.stringify(expect.plainTask)}));
+      return row && /keeps no goals/.test(document.querySelector('.road-intro')?.innerText || '') && !document.querySelector('.axis-row, .goal-row') ? 'the plain form, no axis' : null;
+    })()`, WAIT);
+    await page.shot('roadmap-plain');
+    record('Plain roadmap', plain, plain || `no plain roadmap with "${expect.plainTask}"`);
 
     // Deep links: the dial at Everything, the Files tab.
     await page.go(expect.projectHref + '?show=all&tab=files');
