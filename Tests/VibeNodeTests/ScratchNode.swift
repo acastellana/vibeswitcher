@@ -186,9 +186,18 @@ final class ScratchNode: @unchecked Sendable {
         ScratchNodes.started(process.processIdentifier)
         if waitForServer {
             // Its link welcomed (the hello carries the host's start): before, a state change is answered `not-yet`.
-            let up = await eventually(timeout: 120) { [self] in (try? WireClient(self))?.hello.host.startedAt != nil }
+            var last = "no attempt"
+            let up = await eventually(timeout: 120) { [self] in
+                switch WireClient.attempt(self) {
+                case .success(let client): if client.hello.host.startedAt != nil { return true }; last = "a hello with no host start"
+                case .failure(let why): last = why.description
+                }
+                return false
+            }
+            // Before the stop: what was running and how full this user's limits were while it waited.
+            let state = up ? "" : upState(last: last)
             if !up { stop() }
-            try #require(up, "the scratch node's server never answered: \(self.said)")
+            try #require(up, "the scratch node's server never answered: \(state)")
         }
     }
 
@@ -196,6 +205,19 @@ final class ScratchNode: @unchecked Sendable {
 
     /// The host's and its server's stderr and stdout so far.
     var said: String { (try? String(contentsOfFile: output, encoding: .utf8)) ?? "" }
+
+    /// Why the server didn't come up, for the failure's message: the last attempt's failure (the connect's errno, no
+    /// line, a first line that isn't a hello), whether the host and its server run, what they said (their output and
+    /// the host's log), and this user's per-user counts against their limits (processes, terminals, inotify instances)
+    /// and the machine's load.
+    func upState(last: String) -> String {
+        let host = kill(hostPID, 0) == 0 ? "running" : "gone (errno \(errno))"
+        let server = serverPID.map { "pid \($0)" } ?? "none"
+        let log = ((try? String(contentsOfFile: root.appendingPathComponent("host.log").path, encoding: .utf8)) ?? "unread")
+            .split(separator: "\n").suffix(30).joined(separator: "\n")
+        return "last attempt: \(last); host pid \(hostPID) \(host), server \(server), socket \(FileManager.default.fileExists(atPath: serverSocket) ? "there" : "missing"); "
+            + "\(ScratchNodes.limits())\nhost.out:\n\(said.split(separator: "\n").suffix(30).joined(separator: "\n"))\nhost.log:\n\(log)"
+    }
 
     var hostPID: pid_t { process.processIdentifier }
 
@@ -582,6 +604,33 @@ final class WireClient {
 
     deinit { Sys.close(fd) }
 
+    /// Why an attempt failed, for a message.
+    struct Failed: Error, CustomStringConvertible { let description: String }
+
+    /// A client, or why none: the connect's failure (its errno), nothing within `timeout`, or a first line that isn't
+    /// a hello (the server refusing the connection says so in its first line).
+    static func attempt(_ node: ScratchNode, timeout: TimeInterval = 10) -> Result<WireClient, Failed> {
+        let fd: Int32
+        do { fd = try UnixSocket.connect(path: node.serverSocket) } catch { return .failure(Failed(description: "connect: \(error)")) }
+        var lines = NodeWire.Lines(), ready: [Data] = []
+        guard let first = read(fd, &lines, &ready, until: Date().addingTimeInterval(timeout)) else {
+            Sys.close(fd)
+            return .failure(Failed(description: "connected, no line within \(Int(timeout)) s"))
+        }
+        guard let hello = NodeWire.decode(NodeWire.Hello.self, first) else {
+            Sys.close(fd)
+            return .failure(Failed(description: "a first line that isn't a hello: \(String(decoding: first.prefix(300), as: UTF8.self))"))
+        }
+        return .success(WireClient(fd: fd, hello: hello, lines: lines, ready: ready))
+    }
+
+    private init(fd: Int32, hello: NodeWire.Hello, lines: NodeWire.Lines, ready: [Data]) {
+        self.fd = fd
+        self.hello = hello
+        self.lines = lines
+        self.ready = ready
+    }
+
     /// Writes `line` (a newline added) as it is.
     func write(_ line: String) {
         let data = Data((line + "\n").utf8)
@@ -669,6 +718,36 @@ enum ScratchNodes {
     }
 
     static func ended(_ pid: pid_t) { lock.withLock { _ = running.remove(pid) } }
+
+    /// This user's per-user counts against their limits, and the load, for a failure's message: processes (\"Max processes\"),
+    /// terminals (/dev/pts, kernel.pty.nr and .max), inotify instances (each `anon_inode:inotify` descriptor of the
+    /// user's processes, against fs.inotify.max_user_instances), this process's descriptors (\"Max open files\"), scratch
+    /// hosts running from this process. Where /proc has none of it (the Mac): what it has.
+    static func limits() -> String {
+        func read(_ path: String) -> String { ((try? String(contentsOfFile: path, encoding: .utf8)) ?? "?").trimmingCharacters(in: .whitespacesAndNewlines) }
+        var processes = 0, inotify = 0
+        let me = getuid()
+        for entry in (try? FileManager.default.contentsOfDirectory(atPath: "/proc")) ?? [] where Int32(entry) != nil {
+            guard let owner = (try? FileManager.default.attributesOfItem(atPath: "/proc/\(entry)"))?[.ownerAccountID] as? NSNumber,
+                  owner.uint32Value == me else { continue }
+            processes += 1
+            for fd in (try? FileManager.default.contentsOfDirectory(atPath: "/proc/\(entry)/fd")) ?? [] {
+                if (try? FileManager.default.destinationOfSymbolicLink(atPath: "/proc/\(entry)/fd/\(fd)")) == "anon_inode:inotify" { inotify += 1 }
+            }
+        }
+        // The soft limits, as /proc/self/limits gives them (no getrlimit: its resource type differs between the C libraries).
+        func limit(_ name: String) -> String {
+            read("/proc/self/limits").split(separator: "\n").first { $0.hasPrefix(name) }
+                .map { $0.dropFirst(name.count).split(separator: " ").first.map(String.init) ?? "?" } ?? "?"
+        }
+        let own = ((try? FileManager.default.contentsOfDirectory(atPath: "/proc/self/fd")) ?? []).count
+        let hosts = lock.withLock { running.count }
+        let nofile = limit("Max open files")
+        return "processes \(processes) of \(limit("Max processes")), "
+            + "ptys \(read("/proc/sys/kernel/pty/nr")) of \(read("/proc/sys/kernel/pty/max")), "
+            + "inotify instances \(inotify) of \(read("/proc/sys/fs/inotify/max_user_instances")), "
+            + "this process's descriptors \(own) of \(nofile), scratch hosts \(hosts), load \(read("/proc/loadavg"))"
+    }
 
     private static func killAll() { for pid in lock.withLock({ running }) { kill(pid, SIGKILL) } }
 

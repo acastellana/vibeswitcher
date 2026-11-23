@@ -385,6 +385,8 @@ struct HooksCommandTests {
 /// The names made in a folder or renamed into it, from now until `stop()`: a client of the process's inotify instance
 /// that keeps its events' names (`InotifyHub`), so the test makes no instance of its own (the user's 128 are shared by
 /// every scratch node a loaded run starts).
+private struct Unwatched: Error, CustomStringConvertible { let description: String }
+
 private final class NameWatch: @unchecked Sendable {
     private let lock = NSLock()
     #if os(Linux)
@@ -395,7 +397,9 @@ private final class NameWatch: @unchecked Sendable {
     init(_ folder: URL) throws {
         #if os(Linux)
         guard let client = InotifyHub.shared.watch(folder.path, mask: UInt32(IN_CREATE) | UInt32(IN_MOVED_TO), folder: true, names: true) else {
-            throw CancellationError()
+            // Said, not a bare CancellationError (which read as a time limit): the hub's instance or watch unmade, with
+            // this user's counts against their limits (the inotify instances among them).
+            throw Unwatched(description: "the hub made no watch of \(folder.path) (\(Platform.Watches.unmade) unmade in this process); \(ScratchNodes.limits())")
         }
         self.client = client
         #else
