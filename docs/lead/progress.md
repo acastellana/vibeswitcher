@@ -4462,3 +4462,5 @@ Proposed task 1: Find why dictations end with no text
 - 2026-11-23 23:20 Planned fix-the-flaky-test-25: Fix the flaky test endedRowsFoldAwayAndTheListSkipsThemWhileFolded() (review audit)
 - 2026-11-23 23:20 Started a worker on fix-the-flaky-test-25
 - 2026-11-23 23:20 Automatically (auto_advance): Started a worker on fix-the-flaky-test-25 (Fix the flaky test endedRowsFoldAwayAndTheListSkipsThemWhileFolded()).
+- 2026-11-23 23:36 fix-the-flaky-test-25 small task: merged on tests (10 min of work)
+- 2026-11-23 23:37 Planned tests-keep-their: Tests keep their settings in a scratch defaults suite, never UserDefaults.standard; a lint holds it

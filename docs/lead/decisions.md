@@ -435,3 +435,7 @@ A red-on-base fix changes a failing test just as a flake fix does and can weaken
 
 Each is a setback from today's batch: a fix task with nothing to fix, a manual merge after a self-inflicted block, and review rules whose triggers don't yet discriminate.
 
+## 2026-11-23 23:37:08 Tests never use UserDefaults.standard: each test keeps its settings in a Scratch.defaults suite, and a lint enforces it (task tests-keep-their, after fix-the-flaky-test-25).
+
+fix-the-flaky-test-25 showed that an unbundled test binary's UserDefaults.standard lives in the real ~/Library/Preferences through cfprefsd, whatever the scratch HOME says, so every test process on the Mac shares it (6 of 10 EndedFoldTests runs failed under load). 19 more test files still use it, a latent cross-process flake source while merges miss their rerun objective.
+
