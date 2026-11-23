@@ -71,6 +71,10 @@ public enum ConfigHoldStore {
         public var guarded: [Rail]
         /// When the last accept the snapshot knows was, if one is (E8).
         public var lastAccept: Date?
+        /// The held things this card leaves to the home folder's card, which shows them with the same hashes
+        /// (`SharedHome`): not in `items` nor `hashes`. Set by the engine as it draws the card; nil on the home's own
+        /// card and when none is shared.
+        public var sharedHome: SharedHome?
 
         public init(items: [Item] = [], hashes: [String: String] = [:], floor: LeadReviewFloor? = nil, rails: [String: String] = [:],
                     baseBranch: String? = nil, guarded: [Rail] = [], lastAccept: Date? = nil) {
@@ -81,6 +85,23 @@ public enum ConfigHoldStore {
             self.baseBranch = baseBranch
             self.guarded = guarded
             self.lastAccept = lastAccept
+        }
+    }
+
+    /// What a project's held-config card leaves to the home folder's (the Mac-wide seal's things, held in every root's
+    /// record at a fresh vault's first look): the names, each with the same hash on `card` (the home's, `folder`). The
+    /// project's card neither lists nor seals them (a card's accept seals exactly what it shows, all of it on its short
+    /// lines): it says them in one line, and the home's card's accept seals them for every project. On 2026-11-23 after a
+    /// restart the user read four near-identical 100-line cards, about 85 lines of each the home's.
+    public struct SharedHome: Equatable, Sendable {
+        public var names: [String]
+        public var card: String
+        public var folder: String
+
+        public init(names: [String], card: String, folder: String) {
+            self.names = names
+            self.card = card
+            self.folder = folder
         }
     }
 
@@ -169,8 +190,10 @@ public enum ConfigHoldStore {
     /// What an accept did.
     public enum Accepted: Equatable, Sendable {
         /// Sealed what the card showed (the names the vault sealed anew, else the card's), then recorded the floor (the
-        /// floor in force after) and the rails.
-        case sealed(names: [String], floor: LeadReviewFloor?)
+        /// floor in force after) and the rails. `homeWaits`: what the card left to the home's card and is still held
+        /// (`SharedHome`): this folder's first look goes on, and neither rails nor floor are recorded until this folder's
+        /// card is accepted again after the home's.
+        case sealed(names: [String], floor: LeadReviewFloor?, homeWaits: [String] = [])
         /// The config moved past what the card showed: nothing was sealed, it's held again.
         case changedSince(held: [String])
     }
@@ -186,10 +209,15 @@ public enum ConfigHoldStore {
     public static func accept(_ shown: Shown, root: String, vault: LeadVault, snapshotRoot: URL? = nil) -> Result<Accepted, Error> {
         do {
             let check = try vault.checkConfig(root: root, shown: shown.hashes.merging([acceptMark: "1"]) { first, _ in first })
-            guard check.held.isEmpty else { return .success(.changedSince(held: check.held)) }
-            if !shown.rails.isEmpty { try vault.setGuardedSettings(shown.rails, root: root) }
+            // What the card left to the home's (`sharedHome`) may still be held: never "changed since", only waiting.
+            let left = Set(shown.sharedHome?.names ?? [])
+            guard check.held.allSatisfy(left.contains) else { return .success(.changedSince(held: check.held)) }
+            let homeWaits = check.held
             var floor: LeadReviewFloor?
-            if let proposed = shown.floor { floor = try vault.setReviewFloor(proposed, root: root, onlyIfUnset: true) }
+            if homeWaits.isEmpty {
+                if !shown.rails.isEmpty { try vault.setGuardedSettings(shown.rails, root: root) }
+                if let proposed = shown.floor { floor = try vault.setReviewFloor(proposed, root: root, onlyIfUnset: true) }
+            }
             if let snapshotRoot {
                 let recorded = ((try? vault.guardedRecord(root: root)) ?? nil)?.filter { ConfigSeal.isWatchedKey($0.key) } ?? shown.hashes
                 try? AcceptedSnapshot.update(root: snapshotRoot, project: root) { project in
@@ -201,7 +229,7 @@ public enum ConfigHoldStore {
                     project.seal = try? vault.seal(AcceptedSnapshot.sealMessage(project, root: root))
                 }
             }
-            return .success(.sealed(names: check.resealed.isEmpty ? shown.items.map(\.name) : check.resealed, floor: floor))
+            return .success(.sealed(names: check.resealed.isEmpty ? shown.items.map(\.name) : check.resealed, floor: floor, homeWaits: homeWaits))
         } catch {
             return .failure(error)
         }

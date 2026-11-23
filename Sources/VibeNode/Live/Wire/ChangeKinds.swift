@@ -172,6 +172,11 @@ extension WireKinds {
             public var sealed: [String]?
             public var floorRecorded: Bool?
             @WireNull public var card: NodeWire.Value?
+            /// What the card left to the home folder's card (`ConfigHoldStore.SharedHome`) and is still held, that card
+            /// and its folder: this folder's first look goes on until it is accepted, then this folder's card again.
+            public var homeWaits: [String]?
+            public var homeCard: String?
+            public var homeFolder: String?
             public init(sealed: [String], floorRecorded: Bool, card: NodeWire.Value?) {
                 self.sealed = sealed
                 self.floorRecorded = floorRecorded

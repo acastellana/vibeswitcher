@@ -596,8 +596,11 @@ extension LeadEngine {
         let (vault, home, node) = (cardVault, self.home, self.root)
         work.async { [weak self] in
             // The last accept the snapshot knows (E8): each held thing said the same, changed or new since.
-            let held = ConfigHoldStore.held(root: root, vault: vault, home: home, snapshot: AcceptedSnapshot.load(root: node).projects[root])
+            let snapshot = AcceptedSnapshot.load(root: node)
+            let held = ConfigHoldStore.held(root: root, vault: vault, home: home, snapshot: snapshot.projects[root])
                 .map { SessionPresets.withPresetsToAccept($0, vault: vault, home: home, nodeRoot: node) }
+            // The home folder's watched things' names (the Mac-wide seal's): what another root's open card may show too.
+            let homeNames = Set(ConfigSeal.homeWatched(home: home).map(\.name))
             let difference: [String]? = {
                 guard case .success(let shown) = held, let diff else { return nil }
                 // The presets file: what changed in presets since the user's accept, not its text (`SessionPresets.difference`).
@@ -608,7 +611,8 @@ extension LeadEngine {
             self.queue.async {
                 switch held {
                 case .failure(let error): then(.failure(.refused("the vault can't be asked what it holds for \(root): \(error)")))
-                case .success(let shown):
+                case .success(let held):
+                    let shown = self.sharingHome(held, root: root, homeNames: homeNames)
                     let project = NodeIds.project(root: root)
                     let open = self.cards.list(project: project).filter { $0.kind == .configHeld }
                     // Nothing changed since an open card was drawn: that card again, so a `config held` and a `config
@@ -644,6 +648,7 @@ extension LeadEngine {
         let (vault, home, node) = (cardVault, self.home, self.root)
         work.async { [weak self] in
             let snapshot = AcceptedSnapshot.load(root: node)
+            let homeNames = Set(ConfigSeal.homeWatched(home: home).map(\.name))
             let found = roots.sorted().reduce(into: [String: ConfigHoldStore.Shown]()) { found, root in
                 if case .success(let shown) = ConfigHoldStore.held(root: root, vault: vault, home: home, look: false,
                                                                    snapshot: snapshot.projects[root]) { found[root] = shown }
@@ -651,17 +656,45 @@ extension LeadEngine {
             guard let self else { return }
             self.queue.async {
                 self.lookingAtConfig = false
-                for (root, shown) in found.sorted(by: { $0.key < $1.key }) { self.configLooked(shown, root: root) }
+                for (root, shown) in found.sorted(by: { $0.key < $1.key }) { self.configLooked(shown, root: root, homeNames: homeNames) }
             }
         }
     }
 
+    /// `shown` with what another root's open held-config card already lists with the same hashes, of the home folder's
+    /// things (`homeNames`, the Mac-wide seal's: one accept seals them for every root), left to that card
+    /// (`ConfigHoldStore.SharedHome`): neither listed nor sealed by this one, said in one line. The home's own card is
+    /// the one taken when it is open, else the one listing the most of them. A card drawn alone lists everything, as
+    /// before. On `queue`.
+    func sharingHome(_ shown: ConfigHoldStore.Shown, root: String, homeNames: Set<String>) -> ConfigHoldStore.Shown {
+        // The home's own card lists all of its own.
+        let mine = shown.items.filter { homeNames.contains($0.name) }
+        guard root != home, !mine.isEmpty else { return shown }
+        let others = cards.list().filter { $0.kind == .configHeld && $0.root != root && $0.config != nil }
+        let matches = others.map { card -> (card: CardStore.Card, names: [String]) in
+            let listed = Dictionary((card.config?.items ?? []).map { ($0.name, $0.hash) }) { first, _ in first }
+            return (card, mine.filter { listed[$0.name] == $0.hash }.map(\.name))
+        }.filter { !$0.names.isEmpty }
+        guard let best = matches.first(where: { $0.card.root == home }) ?? matches.max(by: { ($0.names.count, $1.card.at) < ($1.names.count, $0.card.at) }) else {
+            return shown
+        }
+        let left = Set(best.names)
+        var marked = shown
+        marked.items.removeAll { left.contains($0.name) }
+        marked.hashes = marked.hashes.filter { !left.contains(ConfigSeal.name(ofKey: $0.key)) }
+        marked.sharedHome = ConfigHoldStore.SharedHome(names: best.names, card: best.card.id, folder: best.card.root)
+        return marked
+    }
+
     /// A look found `shown` held for `root`: a card when something is held that no open held-config card shows with
     /// these hashes. On `queue`.
-    func configLooked(_ shown: ConfigHoldStore.Shown, root: String) {
+    func configLooked(_ held: ConfigHoldStore.Shown, root: String, homeNames: Set<String> = []) {
         let project = NodeIds.project(root: root)
         let open = cards.list(project: project).filter { $0.kind == .configHeld }
-        guard !shown.items.isEmpty, !open.contains(where: { $0.config?.hashes == shown.hashes }) else { return }
+        guard !held.items.isEmpty else { return }
+        // As it would be drawn (what another root's open card lists left to it), compared with the open ones so.
+        let shown = sharingHome(held, root: root, homeNames: homeNames)
+        guard !open.contains(where: { $0.config?.hashes == shown.hashes && $0.config?.sharedHome == shown.sharedHome }) else { return }
         for old in open { cards.change(old.id) { $0.closed = "superseded by a newer card" } }
         var card = CardStore.Card(root: root, kind: .configHeld)
         card.config = shown
@@ -710,14 +743,20 @@ extension LeadEngine {
                             $0.closed = "nothing accepted: it changed since"
                         }
                         then(.failure(.refused(why + " Held now: " + held.map { ConfigSeal.inert($0, limit: 200) }.joined(separator: ", "))))
-                    case .success(.sealed(let names, let floor)):
-                        self.cards.change(id) { $0.closed = "accepted" }
+                    case .success(.sealed(let names, let floor, let homeWaits)):
+                        self.cards.change(id) { $0.closed = homeWaits.isEmpty ? "accepted" : "accepted; the home folder's \(homeWaits.count) still held" }
 
-                        if self.leads.leads[card.project] != nil, !names.isEmpty {
+                        if self.leads.leads[card.project] != nil, !names.isEmpty, homeWaits.isEmpty {
                             self.deliver(built: { "The user accepted the change to \(names.joined(separator: ", ")) at the command line: it's sealed as it is, "
                                 + "and workers, verifiers and merges go ahead again." }, from: .system("the user, at the command line"), root: root, action: nil)
                         }
-                        then(.success(WireKinds.ConfigAccept.Result(sealed: names, floorRecorded: floor != nil, card: self.cards.cards[id]?.value)))
+                        var result = WireKinds.ConfigAccept.Result(sealed: names, floorRecorded: floor != nil, card: self.cards.cards[id]?.value)
+                        if !homeWaits.isEmpty {
+                            result.homeWaits = homeWaits
+                            result.homeCard = shown.sharedHome?.card
+                            result.homeFolder = shown.sharedHome?.folder
+                        }
+                        then(.success(result))
                     }
                 }
             }

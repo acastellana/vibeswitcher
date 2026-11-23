@@ -378,7 +378,8 @@ public enum WireSchema {
             shape("card.config", from: "CardStore.Card.value", [
                 field("items", .list(.shape("card.config.item"))), field("guarded", .list(.shape("card.config.rail"))),
                 field("lastAccept", Kind.date.orNull), field("floor", Kind.shape("card.config.floor").orNull),
-                field("baseBranch", Kind.string.orNull)]),
+                field("baseBranch", Kind.string.orNull), field("sharedHome", Kind.shape("card.config.shared").orNull)]),
+            shape("card.config.shared", from: "CardStore.Card.value", [field("names", strings), field("card", .string), field("folder", .string)]),
             shape("card.config.item", from: "CardStore.Card.value", [
                 field("name", .string), field("changedAt", Kind.date.orNull), field("size", Kind.int.orNull), field("hash", .string),
                 field("change", Kind.string.orNull), field("outside", .bool), field("files", strings),
