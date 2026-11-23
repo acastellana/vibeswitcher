@@ -110,6 +110,53 @@ struct RestartResumeTests {
         #expect(!((after["notices"] as? [String]) ?? []).contains { $0.contains("ended with the host before it") }, "\(after)")
     }
 
+    /// A message waiting for the lead when the user stopped and started the node: the lead `lead --resume` reopens in its
+    /// same conversation takes it (the board's lead and the reopen record name the same session), and the reply says so
+    /// (the real node, 2026-11-23: "the 1 message(s) waiting in its inbox stay there"). A record naming another session
+    /// takes nothing, said as before.
+    @Test func theReopenedLeadTakesWhatWaitedForTheLeadItReopens() async throws {
+        let conversation = UUID().uuidString.lowercased()
+        let (node, repo, firstLead) = try await hostRestarted(conversation: conversation) { node, repo in
+            let board = BoardStore(root: repo.path).load()
+            let tty = try #require(board.leadTTY)
+            try SteerInbox.post(SteerMessage(text: "waited across the restart", from: .lead("worker-parser"), agentPid: try #require(board.leadPid)),
+                                tty: tty, root: node.root)
+        }
+        defer { node.stop() }
+        try await node.acceptConfig(repo)
+        try await node.acceptBase(repo, from: Git.run(["rev-parse", "main"], in: repo.path).output)
+        let reopened = try await node.runOnTerminal(["lead", repo.path, "--resume"])
+        #expect(reopened.status == 0 && reopened.output.contains("took the 1 message(s) waiting for the lead it reopens"), "\(reopened.output)\n\(node.said)")
+        #expect(!reopened.output.contains("stay there"), "\(reopened.output)")
+        let lead = try #require(try node.sessions().first { $0.isLive && $0.label.hasPrefix("Lead · ") }, "\(node.said)")
+        // Delivered to the reopened lead: its fake was typed the message, or holds it in its own inbox.
+        let files = node.fake.files(terminal: lead.tty)
+        let state = { (try? JSONSerialization.jsonObject(with: Data(contentsOf: files.state))) as? [String: Any] ?? [:] }
+        #expect(await eventually(timeout: 60) { (state()["pid"] as? Int).map { $0 != firstLead } == true }, "\(state())")
+        // Held for it (the engine types it once the lead can take it) or in its own inbox already, never left behind.
+        let received = await node.eventuallyStatus { status in
+            let held = ((status["leads"] as? [[String: Any]]) ?? []).contains { ($0["held"] as? Int ?? 0) > 0 }
+            let pending = SteerInbox.pending(tty: lead.tty, root: node.root).contains { $0.text.contains("waited across the restart") }
+            let typed = ((try? String(contentsOf: files.transcript, encoding: .utf8)) ?? "").contains("waited across the restart")
+            return held || pending || typed
+        }
+        #expect(received, "\(node.said)")
+        #expect(SteerInbox.pending(tty: try #require(BoardStore(root: repo.path).load().leadTTY ?? lead.tty), root: node.root)
+                    .allSatisfy { !$0.text.contains("waited across the restart") || $0.agentPid != Int32(firstLead) }, "nothing left for the old lead")
+    }
+
+    /// The reopen record and the board naming different sessions: nothing taken.
+    @Test func aReopenedLeadTakesNothingTheRecordDoesntName() {
+        let session = UUID().uuidString
+        let named = LeadAgent(pid: 42, tty: "ttypts9", session: session)
+        var record = EngineState.Reopen(session: session)
+        #expect(LeadEngine.reopenedLead(named, record: record, resumed: true, hosted: []) == named)
+        #expect(LeadEngine.reopenedLead(named, record: record, resumed: false, hosted: []) == nil, "only a resume")
+        record.session = UUID().uuidString
+        #expect(LeadEngine.reopenedLead(named, record: record, resumed: true, hosted: []) == nil, "another session's record")
+        #expect(LeadEngine.reopenedLead(nil, record: record, resumed: true, hosted: []) == nil)
+    }
+
     /// `engine.json` rewritten while the hosts were down (a worker of the user's uid can): its record names a transcript
     /// outside the agents' folders, under the lead's name and the conversation's. After the accepts `lead --resume` is
     /// refused, saying why, and no lead starts; a fresh `lead` still does. (The other forgeries: `resumable`'s case.)
@@ -179,6 +226,11 @@ struct RestartResumeTests {
         let states = first.root.appendingPathComponent("state")
         try VibePaths.ensurePrivate(states)
         try hook.save(to: states.appendingPathComponent("\(lead.tty).json"))
+        // The lead's agent on the board, as its tool server's first call writes it.
+        try BoardStore(root: repo.path).update { board in
+            board.leadPid = pid
+            board.leadTTY = lead.tty
+        }
         try #require(await eventually(timeout: 90) {
             let record = Self.record(first, repo)
             return record?["conversation"] as? String == conversation && (record?["workers"] as? [Any])?.count == 1

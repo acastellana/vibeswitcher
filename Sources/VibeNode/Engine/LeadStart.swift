@@ -251,6 +251,8 @@ extension LeadEngine {
         }, uniquingKeysWith: { $1 })
         let hosted = link.sessions
         let record = start.resume ? reopen[root] : nil
+        // A record kept for this project: a fresh start that leaves the old lead's messages says how to take them.
+        let reopenable = !start.resume && reopen[root] != nil
         work.async { [weak self] in
             var issued: String?
             var waiting: [SteerMessage] = []
@@ -289,11 +291,21 @@ extension LeadEngine {
                 // root's lead on that terminal (`replacedLead`), else its inbox and its turns stay where they are, said.
                 let named = try boardStore.update { LeadHandover.release(&$0) }
                 let verified = Self.replacedLead(named, root: root, hosted: hosted, bound: bound)
-                waiting = verified.map { LeadHandover.takeWaiting(for: $0, root: nodeRoot) } ?? []
-                if verified == nil, let named, let left = Self.leftWaiting(named, root: nodeRoot) {
+                // The user's own `lead --resume` after a restart they made (stop, start: the fresh vault binds no one,
+                // the host lists no old session): the lead it reopens in its same conversation takes what waited for
+                // the session the board names, when that is the session the node's reopen record names, whose
+                // conversation this start just checked (`resumable`).
+                let reopenedFrom = verified == nil ? Self.reopenedLead(named, record: record, resumed: resumed != nil, hosted: hosted) : nil
+                waiting = (verified ?? reopenedFrom).map { LeadHandover.takeWaiting(for: $0, root: nodeRoot) } ?? []
+                if reopenedFrom != nil, !waiting.isEmpty {
+                    notes.append("took the \(waiting.count) message(s) waiting for the lead it reopens (session "
+                        + "\(ConfigSeal.inert(named?.session ?? "", limit: 40)), its same conversation)")
+                }
+                if verified == nil, reopenedFrom == nil, let named, let left = Self.leftWaiting(named, root: nodeRoot) {
                     notes.append("the board named session \(ConfigSeal.inert(named.session ?? "none", limit: 40)) on "
                         + "\(ConfigSeal.inert(named.tty, limit: 40)) as the lead, which isn't known to be this project's lead (not live here, nor the "
-                        + "ended session the vault binds the role to): the \(left) message(s) waiting in its inbox stay there")
+                        + "ended session the vault binds the role to): the \(left) message(s) waiting in its inbox stay there"
+                        + (reopenable ? " (`vibeswitcher lead \(root) --resume` reopens that lead in its same conversation and takes them)" : ""))
                 }
                 let name = "lead-\(Slug.make(project, taken: []))"
                 var handed: (tty: String, turnsFile: String)?
@@ -356,6 +368,18 @@ extension LeadEngine {
             guard bound?.lowercased() == id.uuidString.lowercased(), !hosted.contains(where: { $0.isLive && $0.tty == session.tty }) else { return nil }
         }
         return LeadAgent(pid: named.pid, tty: session.tty, session: session.id.uuidString)
+    }
+
+    /// The lead a `lead --resume` reopens (`resumed`: its conversation checked out), as the board named it, when the
+    /// node's reopen record (`record`) names that same session: what waited in its inbox is the reopened lead's. Its
+    /// session isn't live (a live one is this project's lead or another's: never taken from), and only the messages for
+    /// its agent (`named.pid`) are taken, each verified by its seal or marked not vouched for (`takeWaiting`). The vault
+    /// can't vouch for the old session after the restart (it binds no one); the user's voice named the project and the
+    /// resume, and the record and the board, each a file of the user's, have to agree.
+    static func reopenedLead(_ named: LeadAgent?, record: EngineState.Reopen?, resumed: Bool, hosted: [HostSession]) -> LeadAgent? {
+        guard resumed, let named, let session = named.session, let record, record.session.lowercased() == session.lowercased(),
+              !hosted.contains(where: { $0.isLive && $0.id.uuidString.lowercased() == session.lowercased() }) else { return nil }
+        return named
     }
 
     /// How many messages wait for the lead the board named in its inbox (`named`'s terminal, for its agent), when the
