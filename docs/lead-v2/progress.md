@@ -429,3 +429,12 @@
 - 2026-11-22 16:07 Automatically (auto_advance): Didn't audit team-sessions-start: Not audited, no verifier started: the lead held team-sessions-start's audit (update_task hold_audit). It starts once an exception is recorded (update_task(team-sessions-start, exception: {scope, reason, evidence})), or with hold_audit: false.
 - 2026-11-23 11:27 You accepted 8 commits on v2 from the command line: 302d38b Lead: decisions and progress; d16f0b0 Lead: decisions and progress; 4350057 Lead: decisions and progress; …
 - 2026-11-23 11:36 Merged the-node-s-gate: The node's gate builds again: the project's sandbox policy and the user's tool installs (swiftly, pip --user, nvm) reach branch runs (build 5c23336a7630)
+- 2026-11-23 11:36 Started a worker on turn-this-incident-into-3
+- 2026-11-23 11:36 Automatically (auto_advance): Started a worker on turn-this-incident-into-3 (The suite proves the gate can build this project: the toolchain that built the tests runs in a branch run's box), its after tasks done (the-node-s-gate).
+- 2026-11-23 11:36 Automatically (auto_advance): Overlap for turn-this-incident-into-3's start (a warning only: nothing was refused or reordered). Tests/VibeCoreTests/TestSupport.swift: tests-that-write-a (blocked: its branch changes it); Tests/VibeHostTests/TestSupport.swift: tests-that-write-a (blocked: its branch changes it); Tests/VibeNodeTests/TestSupport.swift: tests-that-write-a (blocked: its branch changes it).
+- 2026-11-23 11:36 Ended the replaced lead sessions 2BCE84C7, 62FEEC48, 6636D4E8, EEAFCEFC and their tool servers: only the current lead acts
+- 2026-11-23 11:36 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: ~/.claude/shell-snapshots and ~/.vibeswitcher/lead/run
+- 2026-11-23 11:36 Started a worker on sb5-the-host-confines
+- 2026-11-23 11:36 Started a worker on measured-with-a-real
+- 2026-11-23 11:37 Update: Merged: the node's gate builds again, and a box starts no Windows program (the-node-s-gate) — `the-node-s-gate` is in v2 as `e6bfcd3e` (the commit you approved, `7fec90da`, rebased onto v2).
+- 2026-11-23 11:37 Sent turn-this-incident-into-3's worker contract v4 (it had v3)
