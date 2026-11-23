@@ -870,7 +870,8 @@ extension SocketsTests {
     /// what the kernel names, at its new path; another socket renamed over that path is not it, and is its own
     /// listener's. A path naming nothing, a link to the socket's file, a socket bound to no file, and a descriptor that
     /// is no socket, have none. (A file system whose `st_dev` isn't its own: `HostPathDeviceTests`.)
-    @Test(.enabled(if: !Platform.CodeIdentity.isAvailable, "unix_diag is Linux's"))
+    @Test(.enabled(if: !Platform.CodeIdentity.isAvailable && !boxRefusesUnixDiag,
+                   "unix_diag is Linux's, and a branch run's box refuses its netlink family (`boxRefusesUnixDiag`)"))
     func boundFileIsTheFileTheSocketIsBoundTo() throws {
         let folder = try Self.socketFolder()
         defer { try? FileManager.default.removeItem(at: folder) }

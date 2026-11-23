@@ -38,6 +38,7 @@ extension Requests {
         let boards = engine.boards
         let sessions = self.sessions?.sessions ?? []
         let cards = engine.cards.list(project: nil)
+        let waiting = engine.secondAcceptNotices
         let model = engine.summariesAllowed ? engine.briefModel : nil
         let last = engine.briefed[scope]
         engine.work.async {
@@ -50,7 +51,12 @@ extension Requests {
                 ? Briefing.compose(sources, sessions: mine, lastBriefed: last, now: now.timeIntervalSince1970)
                 : Briefing.compose(project: sources[0], sessions: mine, lastBriefed: last, now: now.timeIntervalSince1970)
             if folder != nil { input.project = input.projects.first?.name }
-            let extra = NodeBrief.extra(boards: sources.map { ($0.name, $0.board) }, cards: cards, roots: Set(roots), now: now)
+            var extra = NodeBrief.extra(boards: sources.map { ($0.name, $0.board) }, cards: cards, roots: Set(roots), now: now)
+            // Guard rails and floors that wait for a second accept: said, with the command.
+            for line in waiting {
+                extra.notes.append("Waiting on the user: " + line + ".")
+                extra.sentences.append(line + ".")
+            }
             let text = NodeBrief.write(input, extra: extra, generate: model, now: now.timeIntervalSince1970)
             let asks = input.projects.reduce(0) { $0 + $1.questionCount } + input.waitingCount + extra.otherCards
             queue.async {

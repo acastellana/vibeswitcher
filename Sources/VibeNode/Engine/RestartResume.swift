@@ -37,6 +37,11 @@ extension LeadEngine {
             let root = lead.root
             var record = reopen[root].flatMap { $0.session.lowercased() == session.uuidString.lowercased() ? $0 : nil }
                 ?? EngineState.Reopen(session: session.uuidString)
+            if let hook = hooked[session] {
+                // Its terminal and agent, as this node's scan sees the session the host runs for it.
+                record.tty = hook.tty
+                record.pid = hook.pid
+            }
             if let hook = hooked[session], let path = hook.transcriptPath {
                 record.transcript = path
                 record.conversation = hook.agentSessionID ?? Self.conversation(ofTranscript: path) ?? record.conversation

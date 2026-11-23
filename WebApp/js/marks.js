@@ -98,6 +98,7 @@ const ICONS = {
   settings: 'M2.5 4.5H13.5M2.5 8H13.5M2.5 11.5H13.5M5.5 3V6M10.5 6.5V9.5M7 10V13',
   // A window with its right column: the inspector's toggle (the Mac's sidebar.right).
   inspector: 'M2.5 3.5H13.5V12.5H2.5ZM10 3.5V12.5',
+  menu: 'M2.5 4H13.5M2.5 8H13.5M2.5 12H13.5',
 };
 
 export function icon(name, size = 16) {

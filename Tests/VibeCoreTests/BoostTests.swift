@@ -438,11 +438,13 @@ extension LeadToolsetTests {
     }
 
     /// F6: the lead's merge and audit lock takes the same count as vs-heavy: Settings' Mac-wide one (2 here), raised
-    /// to boost's 3 while boosted; a project's own heavy_slots is its base instead.
+    /// to boost's 3 while boosted; a project's own heavy_slots is its base instead. VIBESWITCHER_HEAVY_SLOTS is the
+    /// test's own (none), never the session's that runs the suite.
     @Test func theLeadsLockTakesSettingsSlotsRaisedByBoost() throws {
         let root = try repo()
         let lead = try lead(root, FakeRuntime())
         lead.slotsFromSettings = true
+        lead.slotsSet = { nil }
         var boosting = false
         lead.macLimits = { MacLimits(maxSessions: 6, heavySlots: 2).boosted(by: boosting ? Self.boost() : nil) }
         #expect(lead.heavyLock(lead.workflow)?.slots == 2)
@@ -456,6 +458,23 @@ extension LeadToolsetTests {
         boosting = false
         try workflow(root, "heavy_slots: 1")
         #expect(lead.heavyLock(lead.workflow)?.slots == 1)
+    }
+
+    /// VIBESWITCHER_HEAVY_SLOTS, where set, is the lock's base before Settings' (as vs-heavy reads it), raised while
+    /// boosted like any base; a project's own heavy_slots comes first.
+    @Test func theLeadsLockTakesTheSlotsVariableBeforeSettings() throws {
+        let root = try repo()
+        let lead = try lead(root, FakeRuntime())
+        lead.slotsFromSettings = true
+        lead.slotsSet = { TestLock.slotsSet([TestLock.slotsVariable: "1"]) }
+        var boosting = false
+        lead.macLimits = { MacLimits(maxSessions: 6, heavySlots: 2).boosted(by: boosting ? Self.boost() : nil) }
+        #expect(lead.heavyLock(lead.workflow)?.slots == 1)
+        boosting = true
+        #expect(lead.heavyLock(lead.workflow)?.slots == 3)
+        boosting = false
+        try workflow(root, "heavy_slots: 4")
+        #expect(lead.heavyLock(lead.workflow)?.slots == 4)
     }
 
     /// The favored project's own start isn't held for anyone, and without boost no project is favored.

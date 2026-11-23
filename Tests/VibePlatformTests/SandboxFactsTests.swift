@@ -167,14 +167,37 @@ import Testing
         chmod(stub.path, 0o755)
         let script = """
             for path in /init /run/WSL /mnt/c; do [ -e "$path" ] && echo "present $path" || echo "absent $path"; done
+            echo "binfmt_misc:" $(ls /proc/sys/fs/binfmt_misc)
             ./stub.exe; echo "stub status $?"
             """
         let (ended, errors) = try ShimBox.shell(script, ShimBox.plan(box.path), in: box)
         #expect(ended.exit == 0, "\(errors)")
         let lines = ShimBox.lines(ended.output)
         #expect(lines.prefix(3) == ["absent /init", "absent /run/WSL", "absent /mnt/c"], "\(ended.output)")
-        // The shell couldn't run it: 126 (not executable as it is) or 127 (its interpreter, /init, isn't there).
-        #expect(lines.last == "stub status 127" || lines.last == "stub status 126", "\(ended.output) \(errors)")
+        // The kernel's interop entries, and whether one carries F (its interpreter, /init, opened when it was
+        // registered, so a box's missing /init doesn't stop it).
+        let entries = (try? FileManager.default.contentsOfDirectory(atPath: "/proc/sys/fs/binfmt_misc"))?.filter { $0.hasPrefix("WSLInterop") } ?? []
+        let held = entries.filter { entry in
+            ShimBox.procText("/proc/sys/fs/binfmt_misc/" + entry).split(separator: "\n").contains { $0.hasPrefix("flags:") && $0.contains("F") }
+        }
+        let kept = Platform.Sandbox.probe().binfmt ? "" : " (this kernel gives a box no binfmt_misc of its own, so the machine's entries are tried; with F: \(held))"
+        // The promise, on every kernel: /init never runs in a box on an MZ file, so nothing reaches the Windows side.
+        // The shell couldn't run it: 126 (not executable as it is) or 127 (no interpreter, or "MZ" run as a script, a
+        // command not found). /init, where it ran, would say so ("WSL (…) ERROR: UtilGetPpid … /proc/1/stat") and end 1.
+        #expect(lines.last == "stub status 127" || lines.last == "stub status 126", "\(ended.output) \(errors)\(kept)")
+        #expect(!(ended.output + errors).contains("WSL ("), "\(ended.output) \(errors)\(kept)")
+        if Platform.Sandbox.probe().binfmt {
+            // The box's own binfmt_misc, with no entry: the machine's go untried.
+            #expect(lines.contains("binfmt_misc: register status"), "\(ended.output)")
+        } else {
+            // The kernel gives a box no binfmt_misc of its own, so the box tries the machine's entries: the facts say
+            // so, and only the order of the entries (5.15's first has no F, and names /init by path), the missing
+            // /run/WSL and the filter's refusal of AF_VSOCK keep the promise above.
+            #expect(lines.contains("binfmt_misc:"), "\(ended.output)")
+            print("SB: this kernel gives a box no binfmt_misc of its own: the machine's interop entries are tried in a box"
+                  + (held.isEmpty ? "" : "; \(held.joined(separator: ", ")) carries F, so /init would start there were it tried first"))
+        }
+        print("SB: interop entries \(entries) (with F: \(held)); a box's own binfmt_misc: \(Platform.Sandbox.probe().binfmt)")
     }
 }
 #endif

@@ -1114,6 +1114,8 @@ public enum LeadPrompts {
         be run or seen, boundaries (which files or areas, what not to touch) and the context a fresh worker needs. \
         \(Policy.leadContracts) \(Policy.leadBugContracts) Workers are refused these git commands, so no brief may need one: \(deniedGit(workflow)).
         \(Policy.leadReview)
+        Goals: keep 3 to 5 for the project (add_goal), in plain words, each with what done means, and give every task \
+        one (goal_id); the user's roadmap is drawn from them.
         Tidy first: when a task's change would be easier after restructuring (moving a tool family out of a large \
         file, extracting a function), plan that restructuring as its own task first, with no behaviour change and \
         tests unchanged and green; the behaviour task runs `after` it.

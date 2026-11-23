@@ -35,6 +35,10 @@ struct NodeFactsTests {
         #expect(StartCheck.refusal(facts: on, interopIsOn: true) == nil)
         #expect(StartCheck.refusal(facts: off, interopIsOn: false) == nil)
         #expect(StartCheck.refusal(facts: NodeFacts.read(Self.readers(binfmt: ["WSLInterop": "garbage"])), interopIsOn: false) != nil)
+        // The start line `stop` and `status` say: the flag while `start` would refuse without it.
+        #expect(StartCheck.startLine(facts: on) == "vibeswitcher start --interop-is-on")
+        #expect(StartCheck.startLine(facts: off) == "vibeswitcher start")
+        #expect(StartCheck.startLine(facts: NodeFacts.read(Self.readers(binfmt: ["WSLInterop": "garbage"]))) == "vibeswitcher start --interop-is-on")
     }
 
     @Test func interopIsOnWhileAnyOfItsEntriesIsEnabled() throws {

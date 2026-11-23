@@ -13,6 +13,12 @@ import Testing
     static let skip = "needs a box and python3: \(ShimBox.unavailable ?? "no /usr/bin/python3")"
     static let can = ShimBox.unavailable == nil && ShimBox.python
 
+    /// Whether this test itself runs in a box (a branch run's: the kernel's `uid_map` says so, `Platform.Tools.boxOwners`).
+    /// Its plain child is then under that box's filter too, so the kernel alone never answers it: what the plain child
+    /// proves (that a refusal is the filter's, not the kernel's) can't be had there, and only the box's own answers
+    /// are asserted. Everything the box shows is still checked.
+    static let inABox = Platform.Tools.boxOwners != nil
+
     /// The numbers of the calls the probes make, for this machine's architecture.
     static let numbers: [String: Int] = {
         #if arch(x86_64)
@@ -88,6 +94,7 @@ import Testing
         #expect(box["packet"] == "EPERM", "\(box)")
         for allowed in ["route netlink", "unix", "inet", "inet6"] { #expect(box[allowed] == "ok", "\(allowed): \(box)") }
         // The plain child shows each refusal is the filter's: the kernel alone lets these open here.
+        guard !Self.inABox else { return }
         for proven in ["alg", "netfilter netlink"] { #expect(plain[proven] == "ok", "\(proven): \(plain)") }
         if Platform.Sandbox.probe().vsock { #expect(plain["vsock"] == "ok", "\(plain)") }
     }
@@ -114,6 +121,7 @@ import Testing
         }
         // Where the kernel alone answers otherwise, the refusal is the filter's. (bpf, the modules, kexec, swap and
         // open_by_handle_at are refused by the kernel too here, for want of a capability: the filter is a second lock.)
+        guard !Self.inABox else { return }
         #expect(plain["keyctl"] == "ok", "\(plain)")
         #expect(plain["add_key"] == "ok", "\(plain)")
         #expect(plain["fd perf_event_open"] == "EFAULT", "\(plain)")
@@ -133,6 +141,7 @@ import Testing
         let (box, plain) = try Self.both(source, "seccomp-io-uring")
         for name in ["fd io_uring_setup", "io_uring_enter", "io_uring_register"] { #expect(box[name] == "EPERM", "\(name): \(box)") }
         // The kernel alone answers otherwise: a ring, where io_uring is on; else its own refusal, never the filter's.
+        guard !Self.inABox else { return }
         #expect(plain["fd io_uring_setup"] == "ok" || plain["fd io_uring_setup"] == "ENOSYS", "\(plain)")
         // io_uring_register's own refusal of fd -1 and opcode 0 is EBADF, or EINVAL where the kernel checks the opcode
         // first (Linux 6.18, WSL's of 2026-11-20): never EPERM.
@@ -148,6 +157,7 @@ import Testing
         let (box, plain) = try Self.both(#"call("fd fanotify_init", "fanotify_init", 0x200, 0)"# + "\n", "seccomp-fanotify")
         #expect(box["fd fanotify_init"] == "EPERM", "\(box)")
         // The kernel alone gives a group (5.13 and later), or has no fanotify at all: never the filter's refusal.
+        guard !Self.inABox else { return }
         #expect(plain["fd fanotify_init"] == "ok" || plain["fd fanotify_init"] == "ENOSYS", "\(plain)")
     }
 
@@ -180,6 +190,7 @@ import Testing
         #expect(box["TIOCSTI"] == "EPERM" && box["TIOCLINUX"] == "EPERM", "\(box)")
         // The kernel alone types it, or refuses it itself where `dev.tty.legacy_tiocsti` is 0 (EIO, Linux 6.2 and later;
         // WSL's 6.18 of 2026-11-20): never the filter's EPERM.
+        guard !Self.inABox else { return }
         #expect(plain["TIOCSTI"] == "ok" || plain["TIOCSTI"] == "EIO", "\(plain)")
     }
 

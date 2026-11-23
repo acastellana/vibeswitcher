@@ -66,11 +66,13 @@ export function summarize(state) {
     if (!card.open) continue;
     // A card that came back under a new id after a server restart keeps its key (store.js `cardKeys`): not told twice.
     const key = 'card:' + (state.cardKeys?.get(card.id) || card.id);
-    const session = leadSession(card.project);
+    // A project's card opens its lead conversation, where it waits; a plugin's, the asking session.
+    const session = card.plugin ? card.plugin.session || null : leadSession(card.project);
+    const place = !card.plugin && card.project && (state.leads.has(card.project) || state.boards?.has(card.project)) ? `#/p/${encodeURIComponent(card.project)}/lead` : null;
     // A plugin's card is told only while the node has its plugin on (`hello.plugins`; null: a node before plugins).
     if (card.plugin && !pluginOn(pluginsOn(state), card.plugin.plugin)) continue;
     const title = card.plugin?.title || CARD_TITLES[card.kind] || 'A card for you';
-    asks.set(key, { title: `${title} · ${lastPart(card.root) || 'a project'}`, body: cardBody(card), href: session ? href(session) : '#/' });
+    asks.set(key, { title: `${title} · ${lastPart(card.root) || 'a project'}`, body: cardBody(card), href: place || (session ? href(session) : '#/') });
   }
   for (const session of state.sessions.values()) {
     const name = session.title || lastPart(session.cwd) || 'A session';
@@ -258,7 +260,8 @@ export function notifications(app, env = {}) {
     if (doc) doc.title = titled(doc.title, summary.asks.size);
   }
 
-  const lookingAt = (note) => doc && doc.visibilityState === 'visible' && doc.hasFocus?.() && ui.state.route.name === 'session' && note.href === href(ui.state.route.id);
+  const lookingAt = (note) => doc && doc.visibilityState === 'visible' && doc.hasFocus?.() && (ui.state.route.name === 'session' ? note.href === href(ui.state.route.id)
+    : ui.state.route.name === 'project' && ui.state.route.view === 'lead' && note.href === `#/p/${encodeURIComponent(ui.state.route.id)}/lead`);
 
   function show(note) {
     if (lookingAt(note)) return;

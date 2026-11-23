@@ -282,7 +282,8 @@ struct LeadToolTripTests: LeadTeamFixture {
         try bigBoard(root, runtime)
         let status = lead.call("status", [:]).text
         #expect(status.contains("memory pressure normal, swap 83.8/93.1 GB, swap-out 49.9 pages/s"), "\(status)")
-        #expect(status.utf8.count < 10_000, "status is \(status.utf8.count) bytes")
+        // 10 000 until goals (2026-11-23) added their one line (`LeadGoals.statusLine`, "Goals: none set (add_goal).").
+        #expect(status.utf8.count < 10_100, "status is \(status.utf8.count) bytes")
         // Each report one line, cut; those about merged or abandoned tasks a count.
         #expect(status.contains("Reports since your last status (100)"))
         #expect(status.contains("earlier ones: board(task) has them"))

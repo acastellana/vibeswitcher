@@ -362,6 +362,7 @@ enum Samples {
                               floor: LeadReviewFloor(), baseBranch: "main",
                               guarded: [.init(key: "test_command", value: "make test", sinceAccept: "same"), .init(key: "merge_policy", value: "auto")],
                               lastAccept: at)
+        config.config?.sharedHome = .init(names: ["~/.claude/settings.json"], card: "local:card:00000000-0000-4000-8000-000000000016", folder: "/home/u")
         var bareConfig = CardStore.Card(id: "local:card:00000000-0000-4000-8000-000000000007", root: root, kind: .configHeld, at: at)
         bareConfig.config = .init()
 

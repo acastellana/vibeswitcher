@@ -295,7 +295,8 @@ extension Requests {
                 guard let self else { return }
                 switch result {
                 case .failure(let failure): reply(self.failed(request, failure))
-                case .success(let card): reply(.init(re: request.id, typed: WireKinds.BaseShow.Result(card: card.value)))
+                case .success(.card(let card)): reply(.init(re: request.id, typed: WireKinds.BaseShow.Result(card: card.value)))
+                case .success(.unmoved(let branch, let head)): reply(.init(re: request.id, typed: WireKinds.BaseShow.Result(branch: branch, unmoved: head)))
                 }
             }
         }
@@ -462,6 +463,9 @@ extension CardStore.Card {
                 .object(["key": .string(rail.key), "value": .string(rail.value), "sinceAccept": text(rail.sinceAccept)])
             })
             c["lastAccept"] = config.lastAccept.map(NodeWire.Value.date) ?? .null
+            c["sharedHome"] = config.sharedHome.map { shared in
+                .object(["names": texts(shared.names), "card": .string(shared.card), "folder": .string(shared.folder)])
+            } ?? .null
             if let floor = config.floor {
                 var f: [String: NodeWire.Value] = [:]
                 f["mergePolicy"] = .string(floor.mergePolicy.rawValue)

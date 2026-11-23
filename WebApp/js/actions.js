@@ -15,6 +15,9 @@ export function shellWord(text) {
   return /^[A-Za-z0-9._\/:@%+=,-]+$/.test(value) ? value : `'${value.replace(/'/g, `'\\''`)}'`;
 }
 
+// `vibeswitcher tell`: a note for a project's lead, in its folder (the lead reads it at its next step).
+export const tellLine = (folder, text) => `vibeswitcher tell ${shellWord(folder)} ${shellWord(String(text).trim())}`;
+
 // The word the command line finds `session` by: its short id for one the node's host runs (a prefix finds only those),
 // else its whole id (`local:pts/9`, a session in a terminal of yours), which it matches exactly.
 export function sessionWord(session) {

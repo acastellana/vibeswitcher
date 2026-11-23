@@ -594,9 +594,23 @@ public enum WireVectors {
         return board
     }
 
-    /// With the AI summary of the running task's worker (`TeamSummaryWatch`).
+    /// `board` with two goals (the web design's "Goals", 2026-11-23): the launch, with its first two tasks; the uploads,
+    /// done, with the third; the rest unsorted.
+    static func goaled(_ board: LeadBoard, now: Double) -> LeadBoard {
+        var board = board
+        var shipped = LeadGoal(id: "uploads", title: "Uploads never lose a file", done: "A failed upload retries once and says so", createdAt: now - 9000)
+        shipped.state = .done
+        shipped.closedAt = now - 100
+        board.goals = [LeadGoal(id: "launch", title: "Launch the paid plans", done: "Pricing and onboarding are live for new sign-ups", createdAt: now - 9000),
+                       shipped]
+        for (index, goal) in [(0, "launch"), (1, "launch"), (2, "uploads")] where index < board.tasks.count { board.tasks[index].goalID = goal }
+        return board
+    }
+
+    /// With the AI summary of the running task's worker (`TeamSummaryWatch`), and the board's goals.
     static var boardValue: NodeWire.Value {
-        BoardValue.value(project: NodeIds.project(root: root), root: root, board: sampleBoard(now: boardNow.timeIntervalSince1970), now: boardNow,
+        BoardValue.value(project: NodeIds.project(root: root), root: root,
+                         board: goaled(sampleBoard(now: boardNow.timeIntervalSince1970), now: boardNow.timeIntervalSince1970), now: boardNow,
                          summaries: ["t-onboarding-steps": "Making the sign-up form check each field as you leave it"],
                          decisions: sampleDecisions(now: boardNow.timeIntervalSince1970),
                          // The same decisions as the records folder holds them (oldest first): the board carries each with its line.
@@ -635,7 +649,7 @@ public enum WireVectors {
     /// The board a minute on: the review passed and the blocked task's question was answered.
     static var boardMoved: NodeWire.Value {
         let now = boardNow.timeIntervalSince1970 + 60
-        var board = sampleBoard(now: boardNow.timeIntervalSince1970)
+        var board = goaled(sampleBoard(now: boardNow.timeIntervalSince1970), now: boardNow.timeIntervalSince1970)
         board.tasks[0].status = .running
         board.tasks[0].blocker = nil
         board.tasks[0].since = now

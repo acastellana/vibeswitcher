@@ -544,8 +544,10 @@ struct RestartTests {
         let card = try #require(ScratchNode.card(shown.output, "base accept"))
         let recorded = try await node.runOnTerminal(["base", "accept", card])
         #expect(recorded.status == 0 && recorded.output.contains("recorded: main at \(now)"), "\(recorded.output)")
+        // Where the vault recorded it now: nothing to accept, and no card drawn.
         let again = try await node.run(["base", "show", repo.path])
-        #expect(again.output.contains("main from \(now) (recorded) to \(now)"), "\(again.output)")
+        #expect(again.status == 0 && again.output.contains("main is at \(now.prefix(8)): it hasn't moved from there"), "\(again.output)")
+        #expect(ScratchNode.card(again.output, "base accept") == nil, "\(again.output)")
     }
 
     /// The snapshot of the last accept turns "everything is new" into what changed: after the restart the held list

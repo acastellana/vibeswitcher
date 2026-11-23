@@ -37,6 +37,21 @@ extension LeadEngine {
         hostRestart = state.restart
         reopen = state.reopen ?? [:]
         openSessionsWatch.restore(open: state.open, ended: state.ended ?? [])
+        countFormerLeadWaits()
+    }
+
+    /// `formerLeadWaits` counted again for the projects a host restart ended a lead of, each from its reopen record's
+    /// terminal and agent pid (the node's own record, never the board), read off the queue. On `queue`.
+    func countFormerLeadWaits() {
+        let records = (hostRestart?.gone ?? []).compactMap { root in reopen[root].flatMap { record in
+            record.tty.flatMap { tty in record.pid.map { (root, tty, $0) } } } }
+        let node = root
+        reads.async({ _ in
+            Dictionary(records.map { root, tty, pid in (root, SteerInbox.pending(tty: tty, root: node).filter { $0.agentPid == pid }.count) },
+                       uniquingKeysWith: { first, _ in first })
+        }) { [weak self] counts in
+            self?.formerLeadWaits = counts.filter { $0.value > 0 }
+        }
     }
 
     /// Everything `engine.json` keeps, as it is now. On `queue`.
@@ -105,6 +120,7 @@ extension LeadEngine {
              + (gone.isEmpty ? "no lead ran under the old one" : "the leads and teams of \(gone.sorted().map { LeadMail.project(of: $0) }.joined(separator: ", ")) ended with it")
              + "; its vault started over")
         saveState()
+        countFormerLeadWaits()
     }
 
     /// A lead started in `root`: a host restart's notice for it is over, and so is a notice of a lead without its role
@@ -114,6 +130,7 @@ extension LeadEngine {
         guard var restart = hostRestart, restart.gone.contains(root) else { return }
         restart.gone.removeAll { $0 == root }
         hostRestart = restart
+        formerLeadWaits[root] = nil
         saveState()
     }
 
@@ -125,6 +142,7 @@ extension LeadEngine {
             "the session host restarted at \(at): the lead and team of \(LeadMail.project(of: root)) (\(root)) ended with the host before it, "
                 + "and its vault started over (" + Self.resetByRestart + "). Run `vibeswitcher config held \(root)`, `config accept CARD`, "
                 + "`base show \(root)` and `base accept CARD`, reading the values, then " + reopenStep(root: root)
+                + (formerLeadWaits[root].map { ". \($0) message(s) wait in the inbox of the lead that ended: `vibeswitcher lead \(root) --resume` takes them" } ?? "")
         } + sessionsNotice(restart, at: at)
     }
 

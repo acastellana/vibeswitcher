@@ -30,6 +30,11 @@ enum ConfigCommand {
                 Say.out(sealed.isEmpty ? "accepted: nothing held" : "accepted \(sealed.count) held change\(sealed.count == 1 ? "" : "s"):")
                 sealed.forEach { Say.out("  " + ConfigSeal.inert($0, limit: 200)) }
                 Say.out(result.floorRecorded == true ? "  the review floor is recorded" : "  no review floor recorded")
+                if let waits = result.homeWaits, !waits.isEmpty {
+                    let folder = ConfigSeal.inert(result.homeFolder ?? "~", limit: 300)
+                    Say.out("  still held: \(waits.count) of your home folder's config: accept \(folder)'s card (`vibeswitcher config held \(folder)`), "
+                        + "then this folder's card again (`vibeswitcher config held FOLDER`): its guard rails and review floor are recorded then")
+                }
             }
         default: return Say.usage(usage)
         }

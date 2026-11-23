@@ -378,7 +378,8 @@ public enum WireSchema {
             shape("card.config", from: "CardStore.Card.value", [
                 field("items", .list(.shape("card.config.item"))), field("guarded", .list(.shape("card.config.rail"))),
                 field("lastAccept", Kind.date.orNull), field("floor", Kind.shape("card.config.floor").orNull),
-                field("baseBranch", Kind.string.orNull)]),
+                field("baseBranch", Kind.string.orNull), field("sharedHome", Kind.shape("card.config.shared").orNull)]),
+            shape("card.config.shared", from: "CardStore.Card.value", [field("names", strings), field("card", .string), field("folder", .string)]),
             shape("card.config.item", from: "CardStore.Card.value", [
                 field("name", .string), field("changedAt", Kind.date.orNull), field("size", Kind.int.orNull), field("hash", .string),
                 field("change", Kind.string.orNull), field("outside", .bool), field("files", strings),
@@ -408,7 +409,12 @@ public enum WireSchema {
                 // The Team tab's records (2026-11-21, `BoardRecords`).
                 field("scorecard", Kind.shape("board.scorecard").orNull), field("answered", .list(.shape("board.question"))),
                 field("files", .list(.shape("board.file"))), field("recordsDir", Kind.string.orNull),
-                field("results", .list(.shape("board.update")))]),
+                field("results", .list(.shape("board.update"))),
+                // The project's goals, in their order (the web design's "Goals", 2026-11-23); none from a lead that keeps none.
+                optional("goals", .list(.shape("board.goal")))]),
+            shape("board.goal", from: "BoardValue.goals", [
+                field("id", .string), field("title", .string), field("done", .string), field("state", .words(LeadGoal.State.allCases.map(\.rawValue))),
+                field("toGo", .int), field("finished", .int)]),
             shape("board.update", from: "BoardRecords.result", [field("id", .string), field("title", .string), field("body", .string),
                                                                field("at", .date), field("images", .int)]),
             // A task's details (`board.task`), a result's screenshot (`board.image`).
@@ -459,7 +465,7 @@ public enum WireSchema {
                 field("since", Kind.date.orNull), field("startedAt", Kind.date.orNull), field("attempts", .int),
                 field("budgetMin", Kind.int.orNull), field("overBudget", .bool), field("branch", Kind.string.orNull), field("after", strings),
                 field("checkpoint", Kind.shape("board.checkpoint").orNull), field("audit", Kind.shape("board.audit").orNull),
-                field("merged", Kind.shape("board.merged").orNull)]),
+                field("merged", Kind.shape("board.merged").orNull), optional("goal", Kind.string.orNull)]),
             shape("board.checkpoint", from: "BoardValue.task", [field("text", .string), field("at", Kind.date.orNull)]),
             shape("board.audit", from: "BoardValue.audit", [field("verdict", Kind.words(["passed", "failed"]).orNull), field("open", .int),
                                                            field("findings", .int), field("rounds", .int)]),

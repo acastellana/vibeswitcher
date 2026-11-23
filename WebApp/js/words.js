@@ -29,14 +29,6 @@ export function counted(state, count) {
   return `${count} ${count === 1 ? word.one : word.many}`;
 }
 
-// The Attention grouping's groups, in order (AttentionGroup): background work counts as working, the rest as idle.
-export const ATTENTION = [
-  { id: 'needs-you', title: 'Needs you', has: (state) => state === 'needs-you' },
-  { id: 'working', title: 'Working', has: (state) => state === 'working' || state === 'background' },
-  { id: 'done', title: 'Done', has: (state) => state === 'done' },
-  { id: 'idle', title: 'Idle', has: (state) => !['needs-you', 'working', 'background', 'done'].includes(state) },
-];
-
 // 45s, 12m, 3h 5m, 2d 4h (Durations.short).
 export function short(seconds) {
   const s = Math.max(0, Math.floor(seconds));
@@ -88,7 +80,6 @@ export const TASKS = {
 };
 // The order tasks are shown in: what's moving first (LeadTask's attention order).
 export const TASK_ORDER = ['running', 'review', 'blocked', 'failed', 'kept', 'planned', 'done', 'reverted', 'folded', 'abandoned'];
-export const FINISHED = new Set(['done', 'reverted', 'folded', 'abandoned', 'kept']);
 
 // A lead's board as the node groups it (BoardValue.groups): what needs someone, what's moving, what waits, what's done.
 // The node sends each task's `group`, `state` and `line`; a board without them (the mock's) is read from its status.
@@ -106,27 +97,6 @@ export function taskTone(task) {
   if (taskGroup(task) === 'attention' && task.status !== 'blocked') return 'needs-you';
   return TASKS[task.status]?.tone || 'idle';
 }
-// When it finished: its merge, else when it took its last status.
-const finishedAt = (task) => Date.parse(task.merged?.at || task.since || '') || 0;
-// A finished task from today (the reader's day): the board's "Done today" shows these, and drops older ones.
-export function doneToday(task, now = Date.now()) {
-  const at = finishedAt(task);
-  return at > 0 && new Date(at).toDateString() === new Date(now).toDateString();
-}
-// The board's tasks by group, in the board's order within each; done ones only from today.
-export function boardGroups(board, now = Date.now()) {
-  const tasks = board?.tasks || [];
-  return TASK_GROUPS.map((group) => ({
-    ...group,
-    tasks: tasks.filter((task) => taskGroup(task) === group.id && (group.id !== 'done' || doneToday(task, now))),
-  }));
-}
-// "1 needs attention · 2 running · 1 waiting · 3 done today".
-export function boardSummary(groups) {
-  const words = { attention: (n) => (n === 1 ? '1 needs attention' : `${n} need attention`), done: (n) => `${n} done today` };
-  return groups.filter((group) => group.tasks.length).map((group) => (words[group.id] || ((n) => `${n} ${group.id}`))(group.tasks.length)).join(' · ');
-}
-
 // The strip's counts: "1 working", "1 in review", "4 done".
 export function taskCount(status, count) {
   const words = { running: 'working', review: 'in review', done: 'done', planned: 'queued' };

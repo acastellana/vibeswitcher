@@ -251,6 +251,9 @@ extension LeadEngine {
         }, uniquingKeysWith: { $1 })
         let hosted = link.sessions
         let record = start.resume ? reopen[root] : nil
+        let records = reopen
+        // A record kept for this project: a fresh start that leaves the old lead's messages says how to take them.
+        let reopenable = !start.resume && reopen[root] != nil
         work.async { [weak self] in
             var issued: String?
             var waiting: [SteerMessage] = []
@@ -289,11 +292,30 @@ extension LeadEngine {
                 // root's lead on that terminal (`replacedLead`), else its inbox and its turns stay where they are, said.
                 let named = try boardStore.update { LeadHandover.release(&$0) }
                 let verified = Self.replacedLead(named, root: root, hosted: hosted, bound: bound)
-                waiting = verified.map { LeadHandover.takeWaiting(for: $0, root: nodeRoot) } ?? []
-                if verified == nil, let named, let left = Self.leftWaiting(named, root: nodeRoot) {
+                // The user's own `lead --resume` after a restart they made (stop, start: the fresh vault binds no one,
+                // the host lists no old session): the lead it reopens in its same conversation takes what waited for
+                // the session the board names, when that is the session the node's reopen record names, whose
+                // conversation this start just checked (`resumable`).
+                let reopenedFrom = verified == nil
+                    ? Self.reopenedLead(named, record: record, resumed: resumed != nil, hosted: hosted, records: records, root: root) : nil
+                if let verified {
+                    waiting = LeadHandover.takeWaiting(for: verified, root: nodeRoot)
+                } else if let reopenedFrom {
+                    let (taken, left) = Self.takeWaiting(for: reopenedFrom, root: nodeRoot)
+                    waiting = taken
+                    if !taken.isEmpty || left > 0 {
+                        notes.append("took the \(taken.count) message(s) waiting for the lead it reopens (session "
+                            + "\(ConfigSeal.inert(reopenedFrom.session ?? "", limit: 40)), its same conversation)"
+                            + (left == 0 ? "" : "; \(left) more stay in its inbox, past the \(Self.reopenTakesMost) messages or \(Self.reopenTakesBytes >> 10) KiB "
+                                + "a reopen takes: \(nodeRoot.appendingPathComponent("steer/\(reopenedFrom.tty).jsonl").path) holds them, one JSON line each, "
+                                + "to read, never to run"))
+                    }
+                }
+                if verified == nil, reopenedFrom == nil, let named, let left = Self.leftWaiting(named, root: nodeRoot) {
                     notes.append("the board named session \(ConfigSeal.inert(named.session ?? "none", limit: 40)) on "
                         + "\(ConfigSeal.inert(named.tty, limit: 40)) as the lead, which isn't known to be this project's lead (not live here, nor the "
-                        + "ended session the vault binds the role to): the \(left) message(s) waiting in its inbox stay there")
+                        + "ended session the vault binds the role to): the \(left) message(s) waiting in its inbox stay there"
+                        + (reopenable ? " (`vibeswitcher lead \(root) --resume` reopens that lead in its same conversation and takes them)" : ""))
                 }
                 let name = "lead-\(Slug.make(project, taken: []))"
                 var handed: (tty: String, turnsFile: String)?
@@ -356,6 +378,47 @@ extension LeadEngine {
             guard bound?.lowercased() == id.uuidString.lowercased(), !hosted.contains(where: { $0.isLive && $0.tty == session.tty }) else { return nil }
         }
         return LeadAgent(pid: named.pid, tty: session.tty, session: session.id.uuidString)
+    }
+
+    /// The lead a `lead --resume` reopens (`resumed`: its conversation checked out), from the node's own reopen record
+    /// (`record`, which `noteReopen` writes from its scan: the session, its terminal and its agent's pid), never from the
+    /// board, which any session can write: what waited in that terminal's inbox for that agent is the reopened lead's.
+    /// Nil, so nothing is taken, unless the board names the same session, terminal and pid; no live hosted session holds
+    /// that terminal; the pid is no live process (it would be another session's now); and no other root's record names
+    /// that terminal. The vault can't vouch for the old session after the restart (it binds no one): the user's voice
+    /// named the project and the resume, and what is taken is checked by its seal or marked not vouched for.
+    static func reopenedLead(_ named: LeadAgent?, record: EngineState.Reopen?, resumed: Bool, hosted: [HostSession],
+                             records: [String: EngineState.Reopen], root: String, alive: (Int32) -> Bool = { kill($0, 0) == 0 || errno == EPERM }) -> LeadAgent? {
+        guard resumed, let named, let record, let tty = record.tty, let pid = record.pid,
+              named.session?.lowercased() == record.session.lowercased(), named.tty == tty, named.pid == pid,
+              !hosted.contains(where: { $0.isLive && $0.tty == tty }), !alive(pid),
+              !records.contains(where: { $0.key != root && $0.value.tty == tty }) else { return nil }
+        return LeadAgent(pid: pid, tty: tty, session: record.session)
+    }
+
+    /// The most messages, and bytes of their text, a reopen takes from the old lead's inbox: the rest stay, said.
+    static let reopenTakesMost = 50
+    static let reopenTakesBytes = 256 << 10
+
+    /// What waited for `lead` in its inbox, taken in order up to `most` messages or `bytes` of text, each verified by its
+    /// seal or marked not vouched for (as `LeadHandover.takeWaiting`); and how many were left.
+    static func takeWaiting(for lead: LeadAgent, root: URL, most: Int = reopenTakesMost, bytes: Int = reopenTakesBytes) -> (taken: [SteerMessage], left: Int) {
+        let pending = SteerInbox.pending(tty: lead.tty, root: root).filter { $0.agentPid == lead.pid }
+        var chosen: [SteerMessage] = []
+        var size = 0
+        for message in pending {
+            let length = message.text.utf8.count
+            guard chosen.count < most, size + length <= bytes else { break }
+            chosen.append(message)
+            size += length
+        }
+        let taken = chosen.compactMap { SteerInbox.withdraw(id: $0.id, tty: lead.tty, root: root) }
+        guard !taken.isEmpty else { return ([], pending.count) }
+        let valid = SteerSeal.for(root).verify(taken).flatMap { $0.count == taken.count ? $0 : nil } ?? taken.map { _ in false }
+        let checked = zip(taken, valid).map { message, valid in
+            valid ? message : SteerInbox.unverified(message, user: "a message for the lead this one reopened, marked as the user's but not vouched for")
+        }
+        return (checked, pending.count - taken.count)
     }
 
     /// How many messages wait for the lead the board named in its inbox (`named`'s terminal, for its agent), when the

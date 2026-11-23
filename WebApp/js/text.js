@@ -1,4 +1,4 @@
-// An agent's text, drawn as nodes: the markdown a reply uses (paragraphs, lists, headings, code, bold) and a diff of
+// An agent's text, drawn as nodes: the markdown a reply uses (paragraphs, lists, headings, code, bold, tables) and a diff of
 // an edit. Text only ever reaches the page as text nodes. A link is shown as its words and its address, never as an
 // anchor: links open only for allow-listed schemes after a confirmation (the design's "The web client"), which
 // arrives with the real client.
@@ -49,6 +49,19 @@ export function markdown(text, options = {}) {
       for (i += 1; i < lines.length && !/^```\s*$/.test(lines[i]); i++) body.push(lines[i]);
       const code = body.join('\n');
       out.append(codeBlock(code, fence[1], options.codeAction ? options.codeAction(code, fence[1]) : null));
+      continue;
+    }
+    // A table: its rows of `|` cells, the first its head, the `|---|` line left out; a wide one scrolls.
+    if (/^\s*\|.*\|\s*$/.test(line)) {
+      flush();
+      list = null;
+      const rows = [];
+      for (; i < lines.length && /^\s*\|.*\|\s*$/.test(lines[i]); i++) {
+        if (!/^\s*\|[\s:|-]+\|\s*$/.test(lines[i])) rows.push(lines[i].trim().slice(1, -1).split('|').map((cell) => cell.trim()));
+      }
+      i -= 1;
+      out.append(h('div', { class: 'table' }, h('table', null, rows.map((cells, index) => h('tr', null,
+        cells.map((cell) => h(index === 0 ? 'th' : 'td', null, inline(cell))))))));
       continue;
     }
     const item = line.match(/^\s*(?:[-*•]|(\d+)[.)])\s+(.*)$/);

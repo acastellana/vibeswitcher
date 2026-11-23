@@ -15,15 +15,16 @@ import { since, until, clock, plural } from '../words.js';
 import { pushLines } from '../push.js';
 import { talkButton } from '../dictate.js';
 import { pluginFacts } from '../plugincard.js';
+import { t } from '../i18n.js';
 
-const PRIORITY = { blocking: 'Blocking', important: 'Important', whenever: 'Whenever' };
+const PRIORITY = { blocking: t('cBlocking'), important: t('cImportant'), whenever: t('cWhenever') };
 
 // The options as buttons, the proposed one marked, and the keys that work across them.
 function optionList(options, { proposed = null, numbered = false, choose }) {
   const buttons = options.map((option, index) => h('button', { class: 'option', type: 'button', onclick: () => choose(option) },
     numbered ? h('span', { class: 'option-key', 'aria-hidden': 'true' }, String(index + 1)) : null,
     h('span', { class: 'option-text' }, option),
-    option === proposed ? h('span', { class: 'option-note' }, 'Proposed') : null));
+    option === proposed ? h('span', { class: 'option-note' }, t('cProposed')) : null));
   buttons.forEach((button, index) => { if (options[index] === proposed) button.classList.add('proposed'); });
   return { el: h('div', { class: 'options' }, buttons), buttons };
 }
@@ -63,36 +64,36 @@ const sample = (option) => (option && /^[^"$`\\!\n]*$/.test(option) ? option : '
 // Where the clipboard is refused, the line is selected instead, for the keyboard's copy.
 export function copyLine(text, label) {
   const code = h('code', { class: 'copy-text' }, text);
-  const word = h('span', { class: 'copy-word' }, 'Copy');
+  const word = h('span', { class: 'copy-word' }, t('cCopy'));
   let timer = null;
   const said = (what, done) => {
     word.textContent = what;
     button.classList.toggle('done', done);
     clearTimeout(timer);
-    timer = setTimeout(() => { word.textContent = 'Copy'; button.classList.remove('done'); }, 1600);
+    timer = setTimeout(() => { word.textContent = t('cCopy'); button.classList.remove('done'); }, 1600);
   };
   const select = () => getSelection()?.selectAllChildren(code);
-  const button = h('button', { class: 'copy-button', type: 'button', title: `Copy: ${text}`, 'aria-label': `Copy ${label}`, onclick: () => {
-    const done = () => said('Copied', true);
+  const button = h('button', { class: 'copy-button', type: 'button', title: `${t('cCopy')}: ${text}`, 'aria-label': `${t('cCopy')} ${label}`, onclick: () => {
+    const done = () => said(t('cCopied'), true);
     const refused = () => { select(); said(KEY_COPY, false); };
     if (navigator.clipboard?.writeText) navigator.clipboard.writeText(text).then(done, refused); else refused();
   } }, icon('copy', 13), word);
   return h('div', { class: 'copy-line' }, h('span', { class: 'copy-prompt', 'aria-hidden': 'true' }, '$'), code, button);
 }
 
-const KEY_COPY = /Mac|iPhone|iPad/.test(globalThis.navigator?.platform || '') ? 'Press ⌘C' : 'Press Ctrl+C';
+const KEY_COPY = /Mac|iPhone|iPad/.test(globalThis.navigator?.platform || '') ? '⌘C' : 'Ctrl+C';
 
 // What a page that drafts shows under the question once a draft is on the card: the answer as it will be sent, the
 // line that sends it, and a way to take it back. `sending` while the node hasn't acked it yet.
 function confirmBox(card, drafted, clear) {
   const short = cardShort(card.id);
-  return h('div', { class: 'confirm' + (drafted.sending ? ' sending' : ''), role: 'group', 'aria-label': 'Confirm your answer in a terminal' },
+  return h('div', { class: 'confirm' + (drafted.sending ? ' sending' : ''), role: 'group', 'aria-label': t('cConfirmLabel') },
     h('div', { class: 'confirm-head' },
-      h('span', { class: 'confirm-label' }, drafted.sending ? 'Saving your answer…' : 'Your answer'),
-      h('button', { class: 'confirm-clear', type: 'button', title: 'Take the draft off the card', onclick: clear }, 'Clear')),
+      h('span', { class: 'confirm-label' }, drafted.sending ? t('cSaving') : t('yourAnswer')),
+      h('button', { class: 'confirm-clear', type: 'button', title: t('cTakeOff'), onclick: clear }, t('clear'))),
     h('p', { class: 'confirm-text' }, drafted.text),
     copyLine(`vibeswitcher answer ${short}`, 'the command that sends it'),
-    h('p', { class: 'confirm-note' }, 'Run it in a terminal: it shows the card and your answer, and asks for the card’s code. Nothing reaches the lead before that.'));
+    h('p', { class: 'confirm-note' }, t('cConfirmNote')));
 }
 
 // A page that may only read (`answer` isn't in what this connection may send: no browser action is the user's voice
@@ -102,9 +103,9 @@ function readOnlyAnswer(card, counting) {
   const options = card.question.options;
   return [
     options.length ? h('ol', { class: 'options read-only' }, options.map((option) => h('li', { class: 'option' },
-      h('span', { class: 'option-text' }, option), option === card.question.proposal ? h('span', { class: 'option-note' }, 'Proposed') : null))) : null,
+      h('span', { class: 'option-text' }, option), option === card.question.proposal ? h('span', { class: 'option-note' }, t('cProposed')) : null))) : null,
     h('div', { class: 'card-command' },
-      h('span', { class: 'card-command-label' }, 'Answer in a terminal'),
+      h('span', { class: 'card-command-label' }, t('cAnswerInTerminal')),
       h('code', null, `vibeswitcher answer ${short} "${sample(options[0])}"`),
       counting ? h('code', null, `vibeswitcher hold ${short}`) : null),
   ];
@@ -115,15 +116,15 @@ function readOnlyAnswer(card, counting) {
 function approvalFacts(approval) {
   const fact = (name, ...value) => [h('dt', null, name), h('dd', null, value)];
   return h('div', { class: 'facts' },
-    h('div', { class: 'facts-head' }, 'From git and the vault'),
+    h('div', { class: 'facts-head' }, t('cFacts')),
     h('dl', null,
-      fact('Commit', h('code', null, approval.commit)),
-      fact('Subject', approval.subject || '(no subject)'),
-      fact('Into', approval.base || 'the base'),
-      fact('Changes', approval.diffstat, h('ul', { class: 'files' }, approval.files.map((file) => h('li', null, h('code', null, file))))),
-      Object.entries(approval.verdicts || {}).map(([task, verdict]) => fact('Verdict', `${task}: ${verdict}`)),
-      approval.sensitive ? fact('Sensitive paths', approval.sensitive.length ? approval.sensitive.join(', ') : 'none touched') : fact('Sensitive paths', 'couldn’t be checked'),
-      (approval.problems || []).map((problem) => fact('Note', problem))));
+      fact(t('cCommit'), h('code', null, approval.commit)),
+      fact(t('cSubject'), approval.subject || '(no subject)'),
+      fact(t('cInto'), approval.base || 'the base'),
+      fact(t('cChanges'), approval.diffstat, h('ul', { class: 'files' }, approval.files.map((file) => h('li', null, h('code', null, file))))),
+      Object.entries(approval.verdicts || {}).map(([task, verdict]) => fact(t('cVerdict'), `${task}: ${verdict}`)),
+      approval.sensitive ? fact(t('cSensitive'), approval.sensitive.length ? approval.sensitive.join(', ') : 'none touched') : fact(t('cSensitive'), 'couldn’t be checked'),
+      (approval.problems || []).map((problem) => fact(t('cNote'), problem))));
 }
 
 // A card the node withheld from the page whole, too large for a snapshot's part (`tooLarge`): what it asks is never cut,
@@ -131,8 +132,8 @@ function approvalFacts(approval) {
 export function tooLargeCard(card) {
   const command = card.tooLarge?.command || 'vibeswitcher questions';
   return h('article', { class: 'card too-large' + (card.open ? '' : ' closed') },
-    h('header', { class: 'card-head' }, h('span', { class: 'priority important' }, card.plugin?.title || (card.kind === 'approval' ? 'A merge to approve' : 'A question'))),
-    h('p', { class: 'card-notice' }, 'This card is too large for the page: read it with ', h('code', null, command), '.'),
+    h('header', { class: 'card-head' }, h('span', { class: 'priority important' }, card.plugin?.title || (card.kind === 'approval' ? t('cMergeToApprove') : t('cAQuestion')))),
+    h('p', { class: 'card-notice' }, t('cTooLarge'), h('code', null, command), '.'),
     copyLine(command, 'the command that shows it whole'));
 }
 
@@ -168,9 +169,9 @@ export function questionCard(app, first) {
     if (pendingAnswer || !card.open) {
       el.classList.add('closed');
       const state = pendingAnswer ? 'answered' : question.state;
-      if (state === 'withdrawn') el.append(closedLine(icon('close', 13), 'Withdrawn: ', question.withdrawReason || 'no reason given'));
-      else if (state === 'autoDecided') el.append(closedLine(icon('check', 13), 'Went ahead with ', h('strong', null, question.answer), ': no answer in 10 min'));
-      else el.append(closedLine(icon('check', 13), 'You answered ', h('strong', null, pendingAnswer || question.answer || '')));
+      if (state === 'withdrawn') el.append(closedLine(icon('close', 13), t('cWithdrawn'), question.withdrawReason || 'no reason given'));
+      else if (state === 'autoDecided') el.append(closedLine(icon('check', 13), t('cWentAhead'), h('strong', null, question.answer), t('cNoAnswerIn')));
+      else el.append(closedLine(icon('check', 13), t('cYouAnswered'), h('strong', null, pendingAnswer || question.answer || '')));
       if (card.notice) el.append(h('p', { class: 'card-notice' }, card.notice));
       keys = { buttons: [], hold: null };
       return;
@@ -180,23 +181,26 @@ export function questionCard(app, first) {
     const counting = !!question.decideBy && !held;
     const rank = PRIORITY[question.priority] ? question.priority : 'important';
     const priority = h('span', { class: 'priority ' + rank }, PRIORITY[rank]);
-    const asked = h('time', { class: 'asked', data: { ago: card.at } }, `asked ${since(card.at)} ago`);
-    el.append(h('header', { class: 'card-head' }, priority, asked));
+    const asked = h('time', { class: 'asked', data: { ago: card.at } }, t('askedAgo', { d: since(card.at) }));
+    // Who asks: the lead, and the task its question is about when it says (its title from the board).
+    const task = question.task ? app.store.state.boards.get(card.project)?.tasks?.find((one) => one.slug === question.task)?.title || question.task : null;
+    const who = h('span', { class: 'card-asker' }, task ? t('askerTask', { task }) : t('askerLead'));
+    el.append(h('header', { class: 'card-head' }, priority, who, asked));
 
     if (card.kind === 'approval' && card.approval) {
       el.append(approvalFacts(card.approval));
-      el.append(h('p', { class: 'said-by' }, 'The lead says'));
+      el.append(h('p', { class: 'said-by' }, t('cLeadSays')));
     }
     el.append(h('h3', { class: 'card-question' }, question.text));
     if (question.whyNow) el.append(h('p', { class: 'card-why' }, question.whyNow));
-    if (question.revisionNote) el.append(h('p', { class: 'card-revised' }, `Updated: ${question.revisionNote}`));
+    if (question.revisionNote) el.append(h('p', { class: 'card-revised' }, `${t('cUpdated')}: ${question.revisionNote}`));
 
     if (counting) {
       el.append(h('div', { class: 'timer' },
-        h('span', { class: 'timer-text' }, 'Going with ', h('strong', null, question.proposal), ' ', h('span', { data: { until: question.decideBy } }, until(question.decideBy))),
-        app.store.can('hold') ? h('button', { class: 'button quiet', type: 'button', title: 'Stop the timer: the lead waits for your answer', onclick: hold }, icon('pause', 12), 'Hold') : null));
+        h('span', { class: 'timer-text' }, t('cGoingWith'), h('strong', null, question.proposal), ' ', h('span', { data: { until: question.decideBy } }, until(question.decideBy))),
+        app.store.can('hold') ? h('button', { class: 'button quiet', type: 'button', title: t('cHoldTitle'), onclick: hold }, icon('pause', 12), t('cHold')) : null));
     } else if (held) {
-      el.append(h('p', { class: 'timer held' }, 'Held: the timer is off. The lead proposed ', h('strong', null, question.proposal), '; it waits for your answer.'));
+      el.append(h('p', { class: 'timer held' }, t('cHeld'), h('strong', null, question.proposal), '; it waits for your answer.'));
     }
 
     if (!app.store.can('answer') && app.store.can('draft')) {
@@ -208,8 +212,8 @@ export function questionCard(app, first) {
       el.append(...readOnlyAnswer(card, counting).filter(Boolean));
       if (card.notice) el.append(h('p', { class: 'card-notice' }, card.notice));
       el.append(h('p', { class: 'card-foot' }, counting
-        ? `If nobody answers, the lead goes ahead with ${question.proposal} at ${clock(question.decideBy)}.`
-        : 'It keeps working while you think; the answer reaches it at its next step.'));
+        ? t('cIfNobody', { x: question.proposal, time: clock(question.decideBy) })
+        : t('cKeepsWorking')));
       keys = { buttons: [], hold: null };
       return;
     }
@@ -218,9 +222,9 @@ export function questionCard(app, first) {
     el.append(list.el);
 
     const draft = input?.value || '';
-    input = h('input', { class: 'answer-input', type: 'text', placeholder: question.options.length ? 'Or answer in your own words' : 'Your answer', 'aria-label': 'Your answer', autocomplete: 'off' });
+    input = h('input', { class: 'answer-input', type: 'text', placeholder: question.options.length ? t('cOwnWords') : t('yourAnswer'), 'aria-label': t('yourAnswer'), autocomplete: 'off' });
     input.value = draft;
-    const send = h('button', { class: 'button', type: 'submit', disabled: !draft.trim() }, 'Answer');
+    const send = h('button', { class: 'button', type: 'submit', disabled: !draft.trim() }, t('cAnswer'));
     input.addEventListener('input', () => { send.disabled = !input.value.trim(); });
     el.append(h('form', { class: 'answer', onsubmit: (event) => { event.preventDefault(); choose(input.value); } }, input, talkButton(input), send));
 
@@ -228,9 +232,9 @@ export function questionCard(app, first) {
     else if (card.notice) el.append(h('p', { class: 'card-notice' }, card.notice));
 
     el.append(h('p', { class: 'card-foot' }, counting
-      ? `Pick another answer or hold it; if you don’t, the lead goes ahead with ${question.proposal} at ${clock(question.decideBy)}.`
-      : 'It keeps working while you think; the answer reaches it at its next step.'),
-      h('p', { class: 'card-keys', 'aria-hidden': 'true' }, `1–${Math.max(question.options.length, 1)} answers · ↑ ↓ and ↩${counting ? ' · H holds' : ''}`));
+      ? t('cPickOrHold', { x: question.proposal, time: clock(question.decideBy) })
+      : t('cKeepsWorking')),
+      h('p', { class: 'card-keys', 'aria-hidden': 'true' }, t('cKeysAnswers', { n: Math.max(question.options.length, 1) }) + (counting ? t('cKeysHold') : '')));
     keys = { buttons: list.buttons, hold: counting ? hold : null };
   }
 
@@ -254,9 +258,9 @@ export function questionCard(app, first) {
 
     const own = drafted && !question.options.includes(drafted.text) ? drafted.text : '';
     const typed = input?.value ?? '';
-    input = h('input', { class: 'answer-input', type: 'text', placeholder: question.options.length ? 'Or answer in your own words' : 'Your answer', 'aria-label': 'Your answer', autocomplete: 'off', maxlength: 4000 });
+    input = h('input', { class: 'answer-input', type: 'text', placeholder: question.options.length ? t('cOwnWords') : t('yourAnswer'), 'aria-label': t('yourAnswer'), autocomplete: 'off', maxlength: 4000 });
     input.value = typed || own;
-    const send = h('button', { class: 'button quiet', type: 'submit', disabled: !input.value.trim() || input.value.trim() === drafted?.text }, 'Draft');
+    const send = h('button', { class: 'button quiet', type: 'submit', disabled: !input.value.trim() || input.value.trim() === drafted?.text }, t('cDraft'));
     input.addEventListener('input', () => { send.disabled = !input.value.trim() || input.value.trim() === app.store.draftOf(card.id)?.text; });
     el.append(h('form', { class: 'answer', onsubmit: (event) => { event.preventDefault(); pick(input.value); } }, input, talkButton(input), send));
 
@@ -265,12 +269,12 @@ export function questionCard(app, first) {
     else if (card.notice) el.append(h('p', { class: 'card-notice' }, card.notice));
 
     if (drafted) el.append(confirmBox(card, drafted, () => app.store.draft(card.id, null)));
-    if (counting) el.append(h('div', { class: 'card-hold' }, h('span', { class: 'card-hold-label' }, 'To stop the timer'), copyLine(`vibeswitcher hold ${cardShort(card.id)}`, 'the command that holds the timer')));
+    if (counting) el.append(h('div', { class: 'card-hold' }, h('span', { class: 'card-hold-label' }, t('cToStop')), copyLine(`vibeswitcher hold ${cardShort(card.id)}`, 'the command that holds the timer')));
 
     el.append(h('p', { class: 'card-foot' }, drafted
-      ? (counting ? `Until you confirm it, the lead goes ahead with ${question.proposal} at ${clock(question.decideBy)}.` : 'Pick another answer to change it; the lead hears nothing until you confirm.')
-      : 'Pick an answer, then confirm it in a terminal.'),
-      h('p', { class: 'card-keys', 'aria-hidden': 'true' }, question.options.length > 1 ? `1–${question.options.length} picks · ↑ ↓ and ↩` : '↑ ↓ and ↩'));
+      ? (counting ? t('cUntilConfirm', { x: question.proposal, time: clock(question.decideBy) }) : t('cPickAnother'))
+      : t('cPickThenConfirm')),
+      h('p', { class: 'card-keys', 'aria-hidden': 'true' }, question.options.length > 1 ? t('cKeysPicks', { n: question.options.length }) : t('cKeysMove')));
     keys = { buttons: list.buttons, hold: null };
   }
 
@@ -305,22 +309,22 @@ export function questionCard(app, first) {
 function pushCard(lead) {
   const said = pushLines(lead.push, lead.root);
   const fact = (name, ...value) => [h('dt', null, name), h('dd', null, value)];
-  return h('article', { class: 'card push-card', 'aria-label': 'The lead asks you to push' },
-    h('header', { class: 'card-head' }, h('span', { class: 'priority important' }, 'Push'),
-      h('time', { class: 'asked', data: { ago: lead.push.askedAt } }, `asked ${since(lead.push.askedAt)} ago`)),
-    h('h3', { class: 'card-question' }, 'The lead asks you to push'),
+  return h('article', { class: 'card push-card', 'aria-label': t('cPushAsk') },
+    h('header', { class: 'card-head' }, h('span', { class: 'priority important' }, t('cPush')), h('span', { class: 'card-asker' }, t('askerLead')),
+      h('time', { class: 'asked', data: { ago: lead.push.askedAt } }, t('askedAgo', { d: since(lead.push.askedAt) }))),
+    h('h3', { class: 'card-question' }, t('cPushAsk')),
     h('div', { class: 'facts' },
-      h('div', { class: 'facts-head' }, 'From git and the vault'),
+      h('div', { class: 'facts-head' }, t('cFacts')),
       h('dl', null,
-        fact('Push', said.what),
-        fact('To', h('code', null, said.url)),
-        fact('Commits', h('ul', { class: 'files' }, said.subjects.map((subject) => h('li', null, h('code', null, subject))),
+        fact(t('cPush'), said.what),
+        fact(t('cTo'), h('code', null, said.url)),
+        fact(t('cCommits'), h('ul', { class: 'files' }, said.subjects.map((subject) => h('li', null, h('code', null, subject))),
           said.more ? h('li', null, `and ${plural(said.more, 'more')}`) : null)))),
     h('div', { class: 'card-command' },
-      h('span', { class: 'card-command-label' }, 'Settle it in a terminal'),
+      h('span', { class: 'card-command-label' }, t('cSettle')),
       copyLine(said.push, 'the command that pushes it'),
       copyLine(said.decline, 'the command that declines it')),
-    h('p', { class: 'card-foot' }, 'Either shows the request and asks for its code. Push pushes that commit itself, as a fast-forward only; nothing is pushed before you type the code.'));
+    h('p', { class: 'card-foot' }, t('cPushNote')));
 }
 
 // A feature plugin's card (js/plugincard.js): who asks, the node's facts, what it asks whole, the agent's own words,
@@ -330,15 +334,15 @@ export function pluginCard(card) {
   const f = pluginFacts(card), wait = f.state === 'waiting', fact = (n, ...v) => [h('dt', null, n), h('dd', null, v)];
   return h('article', { class: 'card' + (wait ? '' : ' closed') },
     h('header', { class: 'card-head' }, h('span', { class: `priority ${PRIORITY[f.severity] ? f.severity : 'important'}` }, f.title),
-      wait && f.expiresAt ? h('time', { class: 'asked', data: { until: f.expiresAt } }, `expires ${until(f.expiresAt)}`) : null),
-    h('div', { class: 'facts' }, h('div', { class: 'facts-head' }, 'Exactly what it asks'), h('dl', null,
-      fact('Asked by', f.asker),
+      wait && f.expiresAt ? h('time', { class: 'asked', data: { until: f.expiresAt } }, t('cExpires', { d: until(f.expiresAt) })) : null),
+    h('div', { class: 'facts' }, h('div', { class: 'facts-head' }, t('cExactly')), h('dl', null,
+      fact(t('cAskedBy'), f.asker),
       f.facts.map((item) => fact(item.label, item.folder ? h('code', null, item.value) : item.value)),
       // What it asks, whole, as the agent wrote it: marked as the agent's words.
       fact(`${f.body.name} (the agent’s words)`, h('pre', { class: 'plugin-body' }, f.body.lines.join('\n')), f.body.note ? `${f.body.size}, ${f.body.note}` : f.body.size))),
     // The agent's own words beside it, never among the node's facts.
     f.context ? h('p', { class: 'card-context' }, h('span', { class: 'card-context-label' }, `${f.context.label}: `), f.context.text) : null,
-    wait ? h('div', { class: 'card-command' }, h('span', { class: 'card-command-label' }, 'Settle it in a terminal; nothing happens before its code'),
+    wait ? h('div', { class: 'card-command' }, h('span', { class: 'card-command-label' }, t('settleInTerminal')),
       f.actions.map((action) => copyLine(action.line, action.says)))
       : h('p', { class: 'card-notice' }, f.outcome || f.state),
     card.notice ? h('p', { class: 'card-notice' }, card.notice) : null);
@@ -346,10 +350,10 @@ export function pluginCard(card) {
 
 export function questionStack(app, project) {
   const count = h('h2', { class: 'stack-title' });
-  const order = h('span', { class: 'stack-note' }, 'Answer in any order');
+  const order = h('span', { class: 'stack-note' }, t('anyOrder'));
   const pushSlot = h('div', { class: 'stack-cards' });
   const list = h('div', { class: 'stack-cards' });
-  const el = h('section', { class: 'stack', 'aria-label': 'Questions for you' }, h('header', { class: 'stack-head' }, count, order), pushSlot, list);
+  const el = h('section', { class: 'stack', 'aria-label': t('cQuestionsForYou') }, h('header', { class: 'stack-head' }, count, order), pushSlot, list);
   let shownPush = null;
   const rows = new Map();
   // Each card's place: keyed by its first id and ordered by when that card was first asked, so a question the node
@@ -372,7 +376,7 @@ export function questionStack(app, project) {
       pushSlot.replaceChildren(...(push ? [pushCard(push)] : []));
     }
     el.hidden = cards.length === 0 && !push;
-    setText(count, open.length ? `${plural(open.length, 'question')}${push ? ' and a push' : ''} for you` : push ? 'A push waits for you' : 'No questions waiting');
+    setText(count, open.length ? t('questionsForYou', { n: open.length }) + (push ? t('andAPush') : '') : push ? t('pushWaits') : t('cNoQuestions'));
     setClass(count, 'blocking', open.some((card) => card.blocking));
     order.hidden = open.length < 2;
     const before = rows.size;

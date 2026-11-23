@@ -108,8 +108,11 @@ extension Requests {
                 guard let root = left.first else { return then() }
                 engine.configHeld(root: root, diff: nil) { result in
                     queue.async {
+                        // A card with something held: its own, or only what it leaves to the home's card, which the batch
+                        // accepts first (the home is the first root), so this one's accept then ends its first look.
                         guard case .success(let held) = result, let card = held.card, let id = card["id"]?.string,
-                              card["config"]?["items"]?.array?.isEmpty == false, let shown = engine.cards.cards[id]?.config else {
+                              card["config"]?["items"]?.array?.isEmpty == false || card["config"]?["sharedHome"] != .null,
+                              let shown = engine.cards.cards[id]?.config else {
                             return configs(Array(left.dropFirst()), then: then)
                         }
                         // Of the card actually drawn: what its accept would record besides its seals (as `accept` would).
@@ -129,7 +132,8 @@ extension Requests {
                 guard let root = left.first else { return then() }
                 engine.baseShow(root: root, from: nil) { result in
                     queue.async {
-                        if case .success(let card) = result, card.isOpen, let shown = card.base {
+                        // A base where the vault recorded it draws no card (`unmoved`): nothing to list.
+                        if case .success(.card(let card)) = result, card.isOpen, let shown = card.base {
                             // Only a move the vault can vouch for: from a recorded (or given) head, to another commit.
                             if [.recorded, .given].contains(shown.fromIs), let from = shown.from, from != shown.to {
                                 items.append(ApproveItem(kind: "base.accept", args: ["card": .string(card.id)], subject: root, card: card.value))

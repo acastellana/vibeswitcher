@@ -54,10 +54,11 @@ struct ProcessTableTests {
     /// What holds at any load: a read that came back is whole, and none waits past its limit (a caller is told nil then).
     @Test func aSnapshotIsWholeAndWithinItsLimit() {
         let times = (0..<8).map { _ -> TimeInterval in
+            let before = Self.inABox ? Self.listed() : nil
             let started = Date()
             let table = ProcessTable.trySnapshot()
             let took = Date().timeIntervalSince(started)
-            if let table { expectWhole(table) }
+            if let table { expectWhole(table, alive: before.map { $0.intersection(Self.runningThroughout()) }) }
             return took
         }
         #expect(times.allSatisfy { $0 < ProcessTable.snapshotLimit + 1 }, "snapshots took \(times)")
@@ -127,10 +128,59 @@ struct ProcessTableTests {
     }
 
     /// A table read is whole: this process, its parent and launchd in it, and more processes than cores twice over.
-    private func expectWhole(_ table: [Int32: ProcInfo]) {
-        let cores = ProcessInfo.processInfo.activeProcessorCount
-        #expect(table.count > 2 * cores, "a table of \(table.count) processes")
+    ///
+    /// In a box (`inABox`) the count is not a machine's: the box is a pid namespace of its own (shim_sandbox.c's
+    /// CLONE_NEWPID), whose table holds only the run's processes (8 to 35 in a branch run's, under 2 × 24 cores). There
+    /// the bound is one that is true of any pid namespace: every process that ran from just before the read to just after
+    /// it (`alive`) is in it.
+    private func expectWhole(_ table: [Int32: ProcInfo], alive: Set<Int32>? = nil) {
+        if let alive {
+            let missing = alive.subtracting(table.keys).sorted()
+            #expect(missing.isEmpty, "a table of \(table.count) processes without \(missing), which ran throughout")
+        } else {
+            let cores = ProcessInfo.processInfo.activeProcessorCount
+            #expect(table.count > 2 * cores, "a table of \(table.count) processes")
+        }
         #expect(table[getpid()] != nil && table[getppid()] != nil && table[1] != nil, "this process, its parent or launchd missing")
+    }
+
+    /// Whether this test runs in a box (a branch run's), from what the kernel says and nothing a process can set: its
+    /// `uid_map` (`Platform.Tools.boxOwners`, as the box-only checks of SandboxSeccompTests and ToolsTests decide). Every
+    /// box is its own pid namespace. Never on the Mac.
+    static let inABox = Platform.Tools.boxOwners != nil
+
+    /// The pids /proc lists now (a box's: its namespace's own).
+    static func listed() -> Set<Int32> {
+        let names = (try? FileManager.default.contentsOfDirectory(atPath: "/proc")) ?? []
+        return Set(names.compactMap { Int32($0) }.filter { $0 > 0 })
+    }
+
+    /// The pids /proc lists now that are neither a zombie nor marked exiting (PF_EXITING, 0x4, in stat's flags): what
+    /// the table counts as running. Both stay once set, so a process listed before a read and found so after it ran all
+    /// through the read (a pid isn't reused within it: a namespace's pids count up).
+    static func runningThroughout() -> Set<Int32> {
+        listed().filter { pid in
+            guard let stat = procText("/proc/\(pid)/stat"), let close = stat.lastIndex(of: ")") else { return false }
+            let fields = stat[stat.index(after: close)...].split(separator: " ")
+            guard fields.count > 6, let state = fields[0].first, let flags = UInt64(fields[6]) else { return false }
+            return !"ZXx".contains(state) && flags & 0x4 == 0
+        }
+    }
+
+    /// A small /proc file read whole with libc (its size reads as 0).
+    private static func procText(_ path: String) -> String? {
+        let fd = open(path, O_RDONLY | O_CLOEXEC)
+        guard fd >= 0 else { return nil }
+        defer { close(fd) }
+        var bytes: [UInt8] = []
+        var buffer = [UInt8](repeating: 0, count: 4096)
+        while true {
+            let count = read(fd, &buffer, buffer.count)
+            if count < 0 { return nil }
+            if count == 0 { break }
+            bytes += buffer[0..<count]
+        }
+        return String(decoding: bytes, as: UTF8.self)
     }
 
     #if canImport(Darwin)
@@ -265,7 +315,10 @@ struct ProcessTableTests {
         let package = Package(name: "Tiny", targets: [.executableTarget(name: "Tiny")])
         """.write(to: package.appendingPathComponent("Package.swift"), atomically: true, encoding: .utf8)
         try "print(\"tiny\")\n".write(to: package.appendingPathComponent("Sources/Tiny/main.swift"), atomically: true, encoding: .utf8)
-        let build = try onATerminal("swift build --package-path '\(package.path)'")
+        // SwiftPM's lock files and temporary folders in the scratch, not the run's TMPDIR: the build is stopped midway.
+        let temporary = scratch.url("tiny-tmp")
+        try FileManager.default.createDirectory(at: temporary, withIntermediateDirectories: true)
+        let build = try onATerminal("TMPDIR='\(temporary.path)' swift build --package-path '\(package.path)'")
         defer { stop(build) }
         try await snapshotsStayWhole(while: build, pause: 0.1, ambient: ambient)
     }

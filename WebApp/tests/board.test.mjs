@@ -1,4 +1,4 @@
-// A lead's board on the page (views/board.js's data, the `boards` collection): the node's own vectors through the feed
+// A lead's board on the page (the `boards` collection, read by the redesigned page's columns): the node's own vectors through the feed
 // into the store, grouped as the board shows them (needs attention, running, waiting, done today), a task that moves
 // moving in place, a node from before the boards still going live, and the words the rows say. Run: node --test WebApp/tests/
 import test from 'node:test';
@@ -9,7 +9,8 @@ import { fileURLToPath } from 'node:url';
 import { createStore } from '../js/store.js';
 import { connectSocket } from '../js/socket.js';
 import { validate } from '../wire/validators.js';
-import { boardGroups, boardSummary, taskGroup, taskState, taskTone, taskLine, decisionLine, allDoneCard, doneToday } from '../js/words.js';
+import { taskGroup, taskState, taskTone, taskLine, decisionLine, allDoneCard } from '../js/words.js';
+import { standing, taskTone as conversationTone } from '../js/conversation.js';
 import { parseRoute, boardHref } from '../js/ui.js';
 
 const vectors = JSON.parse(readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'wire', 'vectors.json'), 'utf8'));
@@ -66,22 +67,21 @@ test('the boards are followed, and a lead’s board is in the store by its proje
   assert.deepEqual(board.tasks.map((task) => task.slug), ['pricing-copy', 'onboarding-steps', 'upload-retry', 'sidebar-pass', 'cache-assets']);
 });
 
-test('the board reads in its groups: needs attention, running, waiting, done today', async () => {
+test('the board reads as the page stands it: blocked, in motion, queued, merged today', async () => {
   const { store } = await page();
-  const groups = boardGroups(store.state.boards.get(PROJECT), NOW);
-  assert.deepEqual(groups.map((group) => [group.title, group.tasks.map((task) => task.slug)]), [
-    ['Needs attention', ['pricing-copy']],
-    ['Running', ['onboarding-steps', 'upload-retry']],
-    ['Waiting', ['sidebar-pass']],
-    ['Done today', ['cache-assets']],
+  const team = standing(store.state.boards.get(PROJECT), NOW);
+  assert.deepEqual(Object.entries(team).map(([where, tasks]) => [where, tasks.map((task) => task.slug)]), [
+    ['motion', ['onboarding-steps', 'upload-retry']],
+    ['blocked', ['pricing-copy']],
+    ['queued', ['sidebar-pass']],
+    ['merged', ['cache-assets']],
   ]);
-  assert.equal(boardSummary(groups), '1 needs attention · 2 running · 1 waiting · 1 done today');
-  const blocked = groups[0].tasks[0];
+  const blocked = team.blocked[0];
   assert.equal(taskState(blocked), 'Blocked');
   assert.match(blocked.blocker, /^Which plan names/);
-  assert.equal(blocked.blocker.split('\n').length, 3, 'the blocker keeps its lines, for the row to fold');
-  assert.equal(taskTone(blocked), 'blocked');
-  assert.equal(groups[1].tasks[0].worker, 'local:8d1f0c2b-6e4a-4b3d-9c7e-5a2f1e0d9b84', 'a running task names its worker’s session');
+  assert.equal(blocked.blocker.split('\n').length, 3, 'the blocker keeps its lines');
+  assert.equal(conversationTone(blocked), 'blocked');
+  assert.equal(team.motion[0].worker, 'local:8d1f0c2b-6e4a-4b3d-9c7e-5a2f1e0d9b84', 'a running task names its worker’s session');
 });
 
 test('a board’s delta moves a task in place: its question answered, it runs; its review passed, it’s ready', async () => {
@@ -90,16 +90,16 @@ test('a board’s delta moves a task in place: its question answered, it runs; i
   say(vector('delta.board-task'));
   const after = store.state.boards.get(PROJECT);
   assert.notEqual(after, before);
-  const groups = boardGroups(after, NOW + 60_000);
-  assert.deepEqual(groups[0].tasks, [], 'nothing needs attention any more');
-  assert.deepEqual(groups[1].tasks.map((task) => [task.slug, taskState(task)]),
-    [['pricing-copy', 'Working'], ['onboarding-steps', 'Rework 1'], ['upload-retry', 'Ready to merge']]);
+  const team = standing(after, NOW + 60_000);
+  assert.deepEqual(team.blocked, [], 'nothing blocked any more');
+  assert.deepEqual(team.motion.map((task) => [task.slug, taskState(task), conversationTone(task)]),
+    [['pricing-copy', 'Working', 'working'], ['onboarding-steps', 'Rework 1', 'working'], ['upload-retry', 'Ready to merge', 'ready']]);
 });
 
-test('a done task from yesterday isn’t "done today"', () => {
+test('a merged task from yesterday isn’t "merged today"', () => {
   const task = { status: 'done', group: 'done', merged: { at: '2026-11-16T09:00:00.000Z' } };
-  assert.equal(doneToday(task, NOW), false);
-  assert.equal(doneToday({ ...task, merged: { at: '2026-11-17T08:00:00.000Z' } }, NOW), true);
+  assert.deepEqual(standing({ tasks: [task] }, NOW).merged, []);
+  assert.equal(standing({ tasks: [{ ...task, merged: { at: '2026-11-17T08:00:00.000Z' } }] }, NOW).merged.length, 1);
 });
 
 test('a node from before the boards: the page goes live without them, and knows it has none', async () => {
@@ -131,9 +131,11 @@ test('a task at work shows its AI summary as its line; without one, its own line
   assert.equal(taskLine(working), working.summary);
 });
 
-test('a board has an address of its own, and any project id survives it', () => {
+test('the board page’s old address is the project’s lead conversation now, and any project id survives it', () => {
   const id = 'local:project:a/b c#d';
-  assert.deepEqual(parseRoute(boardHref(id)), { name: 'board', id });
+  const lead = { name: 'project', id, view: 'lead', show: 'decisions', tab: 'team', task: null, sheet: null };
+  assert.deepEqual(parseRoute(boardHref(id)), lead);
+  assert.deepEqual(parseRoute('#/p/' + encodeURIComponent(id)), lead, 'the address before the redesign');
   assert.deepEqual(parseRoute('#/p/%E0%A4%A'), { name: 'home' }, 'a broken escape is the start page');
 });
 

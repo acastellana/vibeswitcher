@@ -6,10 +6,13 @@ import Testing
 /// The page's DOM code against real server data, in headless Chrome (the architecture review's row 12): a scratch node
 /// made to hold what each main view draws (a hooked agent with a conversation, a lead asking a question with a made-up
 /// board, a session's shell request through the shell plugin), serving WebApp/ as it is, paired with a fresh code
-/// (`web.open`, the scratch form), and scripts/e2e/page-check.cjs must find each view drawn from it with no console
-/// error: the session list, a chat, the question card, the shell card, the board, This node's Health and Plugins, the
-/// settings. It runs in the Linux CI's core job, whose runner has Google Chrome; where there is no Chrome or no node it
-/// is skipped, saying so.
+/// (`web.open`, the scratch form), and scripts/e2e/page-check.cjs must find each view of the redesigned page drawn from
+/// it with no console error: the projects and own sessions, a chat, the question card in the waiting block, the lead
+/// conversation and its side sheet, the Team tab's task in place, the replaced lead, the shell card, the roadmap and the
+/// old address, deep links, This node's Health and Plugins, the settings, Spanish, and a phone's width. With
+/// PAGE_SHOTS=DIR in the environment it leaves the main states' screenshots there (WebApp/shots/ is made that way).
+/// It runs in the Linux CI's core job, whose runner has Google Chrome; where there is no Chrome or no node it is
+/// skipped, saying so.
 @Suite(NodeTraits.linuxOnly, .timeLimit(.minutes(5)),
        .enabled(if: PageCheckBrowser.runs, "no Chrome (google-chrome, or $CHROME) or no node here: the page check runs where both are (the Linux CI)"))
 struct PageCheckTests {
@@ -72,7 +75,15 @@ struct PageCheckTests {
         try tools.call("ask_user", ["question": question, "options": ["Thursday", "Wait for the review"]])
         try #require(await eventually(timeout: 120) { tools.calls().count == 1 }, "\(node.said)")
         let made = WireVectors.sampleBoard(now: Date().timeIntervalSince1970, worker: site.session.id)
-        try BoardStore(root: repo.path).update { $0.tasks = made.tasks }
+        // A result the lead posted, its body markdown with a table: the conversation's line and the side sheet's.
+        let result = "The pricing page has its new copy"
+        try BoardStore(root: repo.path).update {
+            $0.tasks = made.tasks
+            $0.updates = [LeadUpdate(id: "page-check-result", title: result, body: "What changed:\n\n| Plan | Price |\n|---|---|\n| Starter | $9 |\n| Team | $29 |")]
+        }
+        // The lead's latest statement (a decision in its records), which a short conversation shows at its top.
+        let statement = "Ship the copy first and the pricing table after"
+        try BoardStore(root: repo.path).appendDecision(statement, why: "The table waits on the plan names")
 
         // A second lead session of the project that its board doesn't name: a lead it replaced, still running, as four
         // were on the real node on 2026-11-23 while a merge held the rotation gate (the engine ends a replaced lead only
@@ -112,9 +123,10 @@ struct PageCheckTests {
         let expect: [String: String] = [
             "session": "example-site", "chatHref": "#/s/" + NodeIds.session(host: site.session.id),
             "chat": "The headline never wraps",
-            "leadHref": "#/s/" + NodeIds.session(host: lead.id), "question": "Launch the onboarding page to the testers",
+            "projectHref": "#/p/" + NodeIds.project(root: repo.path).addingPercentEncoding(withAllowedCharacters: .alphanumerics)! + "/lead",
+            "question": "Launch the onboarding page to the testers", "result": result, "task": made.tasks[0].slug, "statement": statement,
             "shellHref": "#/s/" + NodeIds.session(host: asker.id), "shell": "echo page-check-ran",
-            "boardHref": "#/p/" + NodeIds.project(root: repo.path), "board": made.tasks[0].title,
+            "board": made.tasks[0].title,
             "replacedHref": "#/s/" + formerID,
             "plugin": "Shell requests", "setting": "Boost",
         ]
@@ -126,11 +138,14 @@ struct PageCheckTests {
         let script = ServerLintTests.repo.appendingPathComponent("scripts/e2e/page-check.cjs").path
         let status = try await offPool {
             try runToEnd("/usr/bin/env", ["node", script, opened.url, expectFile.path, out.path, chrome],
-                         environment: ["PATH": ProcessInfo.processInfo.environment["PATH"] ?? "/usr/bin:/bin", "HOME": node.home.path],
+                         environment: ["PATH": ProcessInfo.processInfo.environment["PATH"] ?? "/usr/bin:/bin", "HOME": node.home.path]
+                            .merging(ProcessInfo.processInfo.environment["PAGE_SHOTS"].map { ["PAGE_SHOTS": $0] } ?? [:]) { $1 },
                          output: .path(said.path, flags: O_WRONLY | O_TRUNC), limit: 240)
         }
         let table = (try? String(contentsOf: said, encoding: .utf8)) ?? ""
-        for row in ["Session list", "Chat", "Question card", "Team tab", "Replaced lead", "Shell card", "Board", "This node", "Settings", "Console"] {
+        for row in ["Projects and own sessions", "Chat", "Question card", "Lead conversation", "Latest statement", "What waits elsewhere", "Side sheet", "Team tab",
+                    "Replaced lead", "Shell card", "Roadmap",
+                    "Deep links", "This node", "Settings", "Language", "Phone", "Console"] {
             #expect(table.split(separator: "\n").contains { $0.hasPrefix(row + " ") && $0.contains(" pass ") }, "\(row):\n\(table)")
         }
         #expect(status == 0, "\(table)\n\(node.said)")
