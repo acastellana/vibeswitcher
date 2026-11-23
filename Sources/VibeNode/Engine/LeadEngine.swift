@@ -387,16 +387,8 @@ public final class LeadEngine: @unchecked Sendable {
     public internal(set) var hostRestart: EngineState.Restart?
     /// What reopens each project's lead after a host restart, by root (`EngineState.Reopen`, `RestartResume.swift`).
     public internal(set) var reopen: [String: EngineState.Reopen] = [:]
-    /// The user's own sessions live in the host, as last recorded (`EngineState.OpenSessions`, `SessionReopen.swift`).
-    public internal(set) var openSessions: EngineState.OpenSessions?
-    /// The user's own sessions that ended lately, newest first (`EngineState.Ended`, `vibeswitcher resume`).
-    public internal(set) var endedSessions: [EngineState.Ended] = []
-    /// When each recorded session was first seen ended (or gone from the host's list): kept in the record for
-    /// `openGrace`, since a host going down (a reboot) ends its sessions and may say so before it goes.
-    var openEnded: [UUID: Date] = [:]
-    /// How long an ended session stays in the record (a test's shorter), and the clock it's judged by.
-    var openGrace: TimeInterval = 30
-    var openNow: () -> Date = Date.init
+    /// The user's own sessions, live and lately ended (`SessionReopen.swift`): its state its own, on `queue`.
+    let openSessionsWatch: OpenSessionsWatch
     /// Whether this engine took a welcome yet: its first is the server's start, where the running leads are bound again
     /// and told which questions the user no longer sees.
     var welcomedOnce = false
@@ -425,6 +417,7 @@ public final class LeadEngine: @unchecked Sendable {
         plugins = PluginRegistry(options.plugins ?? PluginRegistry.standard())
         queue = link.queue
         toolchain = ToolchainWatch(queue: link.queue, file: root.appendingPathComponent("toolchain.json"), home: options.home ?? VibePaths.home, note: note)
+        openSessionsWatch = OpenSessionsWatch(queue: link.queue)
         popups = PopupWatch(queue: link.queue, link: link, note: note)
         push = PushWatch(queue: link.queue, work: work, link: link, note: note)
         promptAudit = PromptAuditWatch(queue: link.queue, root: root, home: options.home ?? VibePaths.home, clock: clock, note: note)

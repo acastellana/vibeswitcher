@@ -31,7 +31,7 @@ struct SessionResumeTests {
         // the millisecond, rounded, so a time a fraction of a millisecond past one came back that much later and the
         // "listed in" words, rounded up, read 27 s (the CI flake of 2026-11-22).
         let endedAt = Date(timeIntervalSince1970: Date().timeIntervalSince1970.rounded(.down))
-        world.queue.sync { world.engine.openNow = { endedAt } }
+        world.queue.sync { world.engine.openSessionsWatch.now = { endedAt } }
         world.queue.sync { world.world.link.kill(id) }
         try #require(await eventually(timeout: 60) { !live() })
         // Within the grace: not listed yet, but `status`'s `ending` says it ended and when it will be listed, and
@@ -46,8 +46,8 @@ struct SessionResumeTests {
                 "\(said)")
         #expect(world.requests.queue.sync { world.requests.statusValue()["ending"]?.array?.count } == 1)
         world.queue.sync {
-            world.engine.openNow = Date.init
-            world.engine.openGrace = 0
+            world.engine.openSessionsWatch.now = Date.init
+            world.engine.openSessionsWatch.grace = 0
             world.engine.noteOpenSessions()
         }
         #expect(world.queue.sync { world.engine.endingValue.array?.isEmpty } == true, "listed now, no longer ending")

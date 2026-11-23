@@ -26,47 +26,15 @@ import VibeCore
 extension LeadEngine {
     /// The user's own sessions the host runs, recorded in `engine.json` when they changed (their window sizes aside),
     /// while the host that runs them is the one `lastHostStart` names (a new host's empty list before `restartLook`
-    /// saw it is no change). One that ended stays recorded for `openGrace` first: a host going down (a reboot) ends
-    /// every session and may say so before it goes, and those are the ones to offer back. On `queue`.
+    /// saw it is no change). One that ended stays recorded for the watch's grace first: a host going down (a reboot)
+    /// ends every session and may say so before it goes, and those are the ones to offer back. On `queue`.
     func noteOpenSessions() {
         guard link.state == .connected, let started = link.hostStartedAt?.timeIntervalSince1970,
               let last = lastHostStart, abs(last - started) <= 0.001 else { return }
         let replaced = Set(leads.leads.values.flatMap(\.replaced.keys))
-        let hooked = sessions?.sessions ?? []
-        let transcripts = Dictionary(hooked.compactMap { session in session.hostID.map { ($0, session.transcriptPath) } }, uniquingKeysWith: { $1 })
-        let previous = openSessions.flatMap { abs($0.hostStartedAt - started) <= 0.001 ? $0.entries : nil } ?? []
-        let live = RestartReopen.entries(hosted: link.sessions, sessions: hooked, previous: previous, replacedLeads: replaced)
-            .filter { $0.role == .user && ($0.agent == .claude || $0.agent == .codex) }
-            .map { entry -> RestartReopen.Entry in
-                guard entry.agentSessionID == nil, let path = transcripts[entry.id] ?? nil else { return entry }
-                var entry = entry
-                // Claude's by the transcript's name; the user's own Codex session's by its rollout's, Codex's alone.
-                entry.agentSessionID = entry.agent == .codex ? Self.conversation(ofCodexRollout: path, home: home) : Self.conversation(ofTranscript: path)
-                return entry
-            }
-        let now = openNow(), liveIDs = Set(live.map(\.id))
-        for id in liveIDs { openEnded[id] = nil }
-        let ended = previous.filter { entry in
-            guard !liveIDs.contains(entry.id) else { return false }
-            let since = openEnded[entry.id] ?? now
-            openEnded[entry.id] = since
-            return now.timeIntervalSince(since) < openGrace
+        if openSessionsWatch.record(started: started, hosted: link.sessions, hooked: sessions?.sessions ?? [], replaced: replaced, home: home) {
+            saveState()
         }
-        let recorded = Set(ended.map(\.id))
-        openEnded = openEnded.filter { recorded.contains($0.key) }
-        // Ended for good (past the grace): offered to `vibeswitcher resume` from now on.
-        let gone = previous.filter { !liveIDs.contains($0.id) && !recorded.contains($0.id) }
-        if !gone.isEmpty {
-            let exits = Dictionary(link.sessions.compactMap { session in session.exit.map { (session.id, $0) } }, uniquingKeysWith: { $1 })
-            noteEnded(gone, at: now, exits: exits)
-        }
-        let entries = previous.compactMap { entry in live.first { $0.id == entry.id } ?? (recorded.contains(entry.id) ? entry : nil) }
-            + live.filter { entry in !previous.contains { $0.id == entry.id } }
-        if let open = openSessions, abs(open.hostStartedAt - started) <= 0.001,
-           open.entries.map(RestartReopen.withoutSize) == entries.map(RestartReopen.withoutSize) { return }
-        if openSessions == nil, entries.isEmpty { return }
-        openSessions = EngineState.OpenSessions(hostStartedAt: started, entries: entries)
-        saveState()
     }
 
     /// What a host restart that ended the host started at `before` offers back: the sessions an earlier restart offered
@@ -255,23 +223,127 @@ extension LeadEngine {
 
     // MARK: Ended sessions (`vibeswitcher resume`)
 
+    /// `status`'s `ended` and `ending` (`OpenSessionsWatch`).
+    var endedValue: NodeWire.Value { openSessionsWatch.endedValue }
+    var endingValue: NodeWire.Value { openSessionsWatch.endingValue }
+
+    /// The ended session `id` names (its host id), out of the list for a resume. On `queue`.
+    func takeEnded(_ id: UUID) -> RestartReopen.Entry? {
+        guard let entry = openSessionsWatch.takeEnded(id) else { return nil }
+        saveState()
+        return entry
+    }
+
+    /// Entries taken for a resume that didn't start, back in the list (first). On `queue`.
+    func endedAgain(_ entries: [RestartReopen.Entry]) {
+        guard !entries.isEmpty else { return }
+        openSessionsWatch.endedAgain(entries)
+        saveState()
+    }
+
+    /// The user's own sessions live in the host, as last recorded, and those that ended lately (`OpenSessionsWatch`).
+    public internal(set) var openSessions: EngineState.OpenSessions? {
+        get { openSessionsWatch.open }
+        set { openSessionsWatch.open = newValue }
+    }
+    public internal(set) var endedSessions: [EngineState.Ended] {
+        get { openSessionsWatch.ended }
+        set { openSessionsWatch.ended = newValue }
+    }
+}
+
+/// The user's own sessions as the engine records them (`SessionReopen.swift`'s header): the record of those the host
+/// runs, those that ended lately (`vibeswitcher resume`), when each recorded one was first seen ended. Its state is its
+/// own, on the engine's queue; `engine.json` is the engine's to write (each change that needs it says so).
+final class OpenSessionsWatch {
     /// How many ended sessions are kept.
     static let endedKept = 20
 
+    private let queue: DispatchQueue
+    private var recorded: EngineState.OpenSessions?
+    private var endedList: [EngineState.Ended] = []
+    /// When each recorded session was first seen ended (or gone from the host's list): kept in the record for `grace`.
+    private var endedSince: [UUID: Date] = [:]
+    /// How long an ended session stays in the record (a test's shorter), and the clock it's judged by.
+    var grace: TimeInterval = 30
+    var now: () -> Date = Date.init
+
+    init(queue: DispatchQueue) { self.queue = queue }
+
+    /// What `engine.json` kept, taken back as the engine starts (its init, before anything runs on its queue).
+    func restore(open: EngineState.OpenSessions?, ended: [EngineState.Ended]) {
+        recorded = open
+        endedList = ended
+    }
+
+    /// The record of the sessions the host runs. On the engine's queue.
+    var open: EngineState.OpenSessions? {
+        get { EngineWatch.assertOn(queue); return recorded }
+        set { EngineWatch.assertOn(queue); recorded = newValue }
+    }
+
+    /// The sessions that ended lately, newest first. On the engine's queue.
+    var ended: [EngineState.Ended] {
+        get { EngineWatch.assertOn(queue); return endedList }
+        set { EngineWatch.assertOn(queue); endedList = newValue }
+    }
+
+    /// The user's own sessions `hosted` (the host's list, under the host started at `started`) and `hooked` (what their
+    /// hooks said), recorded: an ended one kept for `grace`, then listed as ended. True when the record changed and
+    /// `engine.json` is to be written. On the engine's queue.
+    func record(started: Double, hosted: [HostSession], hooked: [Session], replaced: Set<UUID>, home: String) -> Bool {
+        EngineWatch.assertOn(queue)
+        let transcripts = Dictionary(hooked.compactMap { session in session.hostID.map { ($0, session.transcriptPath) } }, uniquingKeysWith: { $1 })
+        let previous = recorded.flatMap { abs($0.hostStartedAt - started) <= 0.001 ? $0.entries : nil } ?? []
+        let live = RestartReopen.entries(hosted: hosted, sessions: hooked, previous: previous, replacedLeads: replaced)
+            .filter { $0.role == .user && ($0.agent == .claude || $0.agent == .codex) }
+            .map { entry -> RestartReopen.Entry in
+                guard entry.agentSessionID == nil, let path = transcripts[entry.id] ?? nil else { return entry }
+                var entry = entry
+                // Claude's by the transcript's name; the user's own Codex session's by its rollout's, Codex's alone.
+                entry.agentSessionID = entry.agent == .codex ? LeadEngine.conversation(ofCodexRollout: path, home: home)
+                    : LeadEngine.conversation(ofTranscript: path)
+                return entry
+            }
+        let now = now(), liveIDs = Set(live.map(\.id))
+        for id in liveIDs { endedSince[id] = nil }
+        let ended = previous.filter { entry in
+            guard !liveIDs.contains(entry.id) else { return false }
+            let since = endedSince[entry.id] ?? now
+            endedSince[entry.id] = since
+            return now.timeIntervalSince(since) < grace
+        }
+        let kept = Set(ended.map(\.id))
+        endedSince = endedSince.filter { kept.contains($0.key) }
+        // Ended for good (past the grace): offered to `vibeswitcher resume` from now on.
+        let gone = previous.filter { !liveIDs.contains($0.id) && !kept.contains($0.id) }
+        if !gone.isEmpty {
+            let exits = Dictionary(hosted.compactMap { session in session.exit.map { (session.id, $0) } }, uniquingKeysWith: { $1 })
+            noteEnded(gone, at: now, exits: exits)
+        }
+        let entries = previous.compactMap { entry in live.first { $0.id == entry.id } ?? (kept.contains(entry.id) ? entry : nil) }
+            + live.filter { entry in !previous.contains { $0.id == entry.id } }
+        if let open = recorded, abs(open.hostStartedAt - started) <= 0.001,
+           open.entries.map(RestartReopen.withoutSize) == entries.map(RestartReopen.withoutSize) { return false }
+        if recorded == nil, entries.isEmpty { return false }
+        recorded = EngineState.OpenSessions(hostStartedAt: started, entries: entries)
+        return true
+    }
+
     /// `entries` ended at `at`: first in the ended list, an entry once (by its host id, and by its conversation), the
-    /// newest `endedKept` kept, each with how it ended where the host still says (`exits`, by host id). The caller
-    /// saves. On `queue`.
+    /// newest `endedKept` kept, each with how it ended where the host still says (`exits`, by host id). The caller saves.
+    /// On the engine's queue.
     func noteEnded(_ entries: [RestartReopen.Entry], at: Date, exits: [UUID: HostSession.Exit] = [:]) {
         let fresh = entries.map { EngineState.Ended(entry: $0, at: at.timeIntervalSince1970, exit: exits[$0.id]) }
         let ids = Set(entries.map(\.id)), conversations = Set(entries.compactMap(\.agentSessionID))
-        let kept = endedSessions.filter { !ids.contains($0.entry.id) && !($0.entry.agentSessionID.map(conversations.contains) ?? false) }
-        endedSessions = Array((fresh + kept).prefix(Self.endedKept))
+        let kept = endedList.filter { !ids.contains($0.entry.id) && !($0.entry.agentSessionID.map(conversations.contains) ?? false) }
+        endedList = Array((fresh + kept).prefix(Self.endedKept))
     }
 
     /// `status`'s `ended`: each ended session, its id, folder, name, conversation (null: unknown, so it can't be resumed),
     /// when it ended, and how (`exit`: its status, the host's words for it and when; null where the host didn't say).
     var endedValue: NodeWire.Value {
-        .array(endedSessions.map { ended in
+        .array(endedList.map { ended in
             .object(["session": .string(NodeIds.session(host: ended.entry.id)), "folder": .string(ended.entry.folder),
                      "name": .string(ended.entry.name), "conversation": ended.entry.agentSessionID.map(NodeWire.Value.string) ?? .null,
                      "agent": .string(ended.entry.agent.rawValue),
@@ -282,31 +354,30 @@ extension LeadEngine {
         })
     }
 
-    /// The user's own sessions that ended within `openGrace`, not listed for `resume` yet (`status`'s `ending`): each
+    /// The user's own sessions that ended within `grace`, not listed for `resume` yet (`status`'s `ending`): each
     /// with its session, folder and name, when it ended, and when it will be listed (`vibeswitcher resume` says so
-    /// rather than "none ended"). On `queue`.
+    /// rather than "none ended"). On the engine's queue.
     var endingValue: NodeWire.Value {
-        let entries = openSessions?.entries ?? []
-        return .array(openEnded.sorted { $0.value > $1.value }.compactMap { id, since in
+        let entries = recorded?.entries ?? []
+        return .array(endedSince.sorted { $0.value > $1.value }.compactMap { id, since in
             guard let entry = entries.first(where: { $0.id == id }) else { return nil }
             return .object(["session": .string(NodeIds.session(host: id)), "folder": .string(entry.folder), "name": .string(entry.name),
-                            "at": .date(since), "listedAt": .date(since.addingTimeInterval(openGrace))])
+                            "at": .date(since), "listedAt": .date(since.addingTimeInterval(grace))])
         })
     }
 
-    /// The ended session `id` names (its host id), out of the list for a resume. On `queue`.
+    /// The ended session `id` names (its host id), out of the list for a resume. On the engine's queue.
     func takeEnded(_ id: UUID) -> RestartReopen.Entry? {
-        guard let found = endedSessions.first(where: { $0.entry.id == id }) else { return nil }
-        endedSessions.removeAll { $0.entry.id == id }
-        saveState()
+        EngineWatch.assertOn(queue)
+        guard let found = endedList.first(where: { $0.entry.id == id }) else { return nil }
+        endedList.removeAll { $0.entry.id == id }
         return found.entry
     }
 
-    /// Entries taken for a resume that didn't start, back in the list (first). On `queue`.
+    /// Entries taken for a resume that didn't start, back in the list (first). On the engine's queue.
     func endedAgain(_ entries: [RestartReopen.Entry]) {
-        guard !entries.isEmpty else { return }
-        noteEnded(entries, at: openNow())
-        saveState()
+        EngineWatch.assertOn(queue)
+        noteEnded(entries, at: now())
     }
 }
 
