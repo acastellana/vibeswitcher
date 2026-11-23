@@ -542,3 +542,28 @@
 - 2026-11-23 15:06 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: /run/user/1000/systemd/transient
 - 2026-11-23 15:07 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: /run/user/1000/systemd/transient
 - 2026-11-23 15:07 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: /run/user/1000/systemd/transient
+- 2026-11-23 15:17 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: ~/.claude/shell-snapshots
+- 2026-11-23 15:17 Audit of team-sessions-start at 81c94cec by 2 finders (contract and acceptance; bugs, regressions and security); the shared run: the test command passed
+- 2026-11-23 15:17 Released team-sessions-start's worker (idle since its done report on 81c94cec) while its audit runs
+- 2026-11-23 15:17 Automatically (auto_advance): Started the audit of team-sessions-start at 81c94cec (Its review is audit). Released its worker, idle since its done report, while the audit runs: its Mac slot and memory are free, its worktree and branch stay.
+- 2026-11-23 15:17 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: ~/.claude/shell-snapshots
+- 2026-11-23 15:17 Started a worker on turn-this-incident-into-3
+- 2026-11-23 15:17 Automatically (auto_advance): Started a worker on turn-this-incident-into-3 (The suite proves the gate can build this project: the toolchain that built the tests runs in a branch run's box), its after tasks done (the-node-s-gate).
+- 2026-11-23 15:17 Automatically (auto_advance): Overlap for turn-this-incident-into-3's start (a warning only: nothing was refused or reordered). Tests/VibeCoreTests/TestSupport.swift: tests-that-write-a (blocked: its branch changes it); Tests/VibeHostTests/TestSupport.swift: tests-that-write-a (blocked: its branch changes it); Tests/VibeNodeTests/TestSupport.swift: tests-that-write-a (blocked: its branch changes it).
+- 2026-11-23 15:17 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: ~/.claude/shell-snapshots and ~/.vibeswitcher/lead/run
+- 2026-11-23 15:17 Started a worker on sandbox-env-hygiene-no
+- 2026-11-23 15:17 Automatically (auto_advance): Started a worker on sandbox-env-hygiene-no (sandbox_env hygiene: no credentials in it, no refused value echoed, every path judged, more shell names refused), its after tasks done (the-node-s-gate).
+- 2026-11-23 15:17 Automatically (auto_advance): Overlap for sandbox-env-hygiene-no's start (a warning only: nothing was refused or reordered). Sources/VibeCore/V2/Sandbox/SandboxPolicy.swift: branch-runs-get-the (planned: its boundaries name it), windows-access-is-a (planned: its boundaries name it).
+- 2026-11-23 15:17 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: ~/.claude/shell-snapshots and ~/.vibeswitcher/lead/run
+- 2026-11-23 15:17 Audit of turn-this-incident-into-4 at 909bccc1 by 2 finders (contract and acceptance; bugs, regressions and security); the shared run: the test command passed
+- 2026-11-23 15:17 Started a worker on the-config-card-says
+- 2026-11-23 15:17 Automatically (auto_advance): Started a worker on the-config-card-says (The config card says what sandbox_nesting: on exposes), its after tasks done (the-node-s-gate).
+- 2026-11-23 15:20 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: ~/.claude/shell-snapshots and ~/.vibeswitcher/lead/run
+- 2026-11-23 15:21 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: ~/.claude/shell-snapshots
+- 2026-11-23 15:21 Audit of team-sessions-start at 81c94cec by 2 finders (contract and acceptance; bugs, regressions and security); the shared run: the test command passed
+- 2026-11-23 15:21 Audit of sb5-the-host-confines at 20d3e815 by 2 finders (contract and acceptance; bugs, regressions and security); the shared run: test command failed
+- 2026-11-23 15:21 Automatically (auto_advance): Started the audit of sb5-the-host-confines at 20d3e815 (Its review is audit).
+- 2026-11-23 15:21 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: ~/.claude/shell-snapshots
+- 2026-11-23 15:21 Started a worker on hookscommandtests-hooks
+- 2026-11-23 15:21 Automatically (auto_advance): Started a worker on hookscommandtests-hooks (HooksCommandTests: `hooks install` takes minutes in a full run and is killed at its 120 s limit).
+- 2026-11-23 15:21 Automatically (auto_advance): Overlap for hookscommandtests-hooks's start (a warning only: nothing was refused or reordered). Tests/VibeNodeTests/HooksCommandTests.swift: tests-that-write-a (planned, set to start after this one: its branch changes it); Tests/VibeNodeTests/ScratchNode.swift: tests-that-write-a (planned, set to start after this one: its branch changes it).
