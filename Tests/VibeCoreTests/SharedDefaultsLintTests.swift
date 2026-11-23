@@ -74,7 +74,7 @@ struct SharedDefaultsLintTests {
         let root = temp.url("shared-defaults-lint")
         let folder = root.appendingPathComponent("Tests/VibeSwitcherTests")
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-        let standard = "UserDefaults" + ".standard", bare = "WindowModel" + "()"
+        let standard = "UserDefaults" + ".standard", bare = "WindowModel" + "()", suite = "UserDefaults" + "(suiteName:"
         let example = """
             import Foundation
             let model = WindowModel(defaults: temp.defaults("x"))
@@ -82,7 +82,7 @@ struct SharedDefaultsLintTests {
             let other = \(bare)
             // \(standard) named in a comment
             let grouping = \(standard).string(forKey: "windowGrouping"), again = \(bare)
-            let fine = UserDefaults(suiteName: path)
+            let fine = \(suite) path)
             """
         try example.write(to: folder.appendingPathComponent("ExampleTests.swift"), atomically: true, encoding: .utf8)
         #expect(try Self.uses(under: root).flagged == [3, 4, 5, 6].map { "Tests/VibeSwitcherTests/ExampleTests.swift:\($0)" })
