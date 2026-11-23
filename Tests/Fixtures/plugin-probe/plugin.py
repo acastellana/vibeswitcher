@@ -1,4 +1,4 @@
-#!/usr/bin/python3
+#!/usr/bin/python3 -I
 # The node's test plugin (docs/superpowers/specs/2026-11-22-v2-feature-plugins.md, "External plugins"): protocol v1 on
 # stdin and stdout, one JSON object a line. A request's first word chooses how it behaves, hostile ones included:
 # normal, page, nohash, controls (a card with an escape), wrong-id, out-of-order, oversize (a 300 KiB line), hang

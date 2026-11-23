@@ -593,7 +593,7 @@ extension ExternalPluginsTests {
         #expect(PluginProgram.refusal(Data("#!/usr/bin/env python3\n".utf8))?.contains("env") == true)
         let mine = scratch.url("python3")
         try writeClosedOnExec("#!/bin/sh\n", to: mine)
-        #expect(PluginProgram.refusal(Data("#!\(mine.path)\n".utf8))?.contains("isn't root's alone") == true)
+        #expect(PluginProgram.refusal(Data("#!\(mine.path)\n".utf8))?.contains("isn't one this node runs") == true)
         #expect(PluginProgram.refusal(Data("echo hi\n".utf8)) != nil, "neither ELF nor #!")
         #expect(PluginProgram.refusal(try Data(contentsOf: URL(fileURLWithPath: "/usr/bin/true"))) == nil, "a system program")
         let writable = scratch.url("libs")
@@ -610,14 +610,47 @@ extension ExternalPluginsTests {
         #expect(why.description.contains("env"), "\(why)")
     }
 
-    /// N2: a `#!` line passes only flags this node knows for its interpreter, never a path or a file.
-    @Test func aShebangPassesOnlyKnownFlags() {
-        #expect(PluginProgram.refusal(Data("#!/usr/bin/python3 -I -S\n".utf8)) == nil)
-        #expect(PluginProgram.refusal(Data("#!/usr/bin/python3 /home/u/x.py\n".utf8))?.contains("/home/u/x.py") == true)
-        #expect(PluginProgram.refusal(Data("#!/usr/bin/python3 -c\n".utf8)) != nil, "-c runs its next argument")
-        #expect(PluginProgram.refusal(Data("#!/bin/sh -e\n".utf8)) != nil, "sh takes none")
-        #expect(PluginProgram.refusal(Data("#!/bin/sh\n".utf8)) == nil)
-        #expect(PluginProgram.refusal(Data("#!/bin/sh\tx.sh\n".utf8)) != nil, "a tab separates too")
+    /// N2 and the kernel's reading: a `#!` line is read as the kernel reads it (256 bytes, everything after the
+    /// interpreter one argument), the interpreter from the node's list, at most one listed flag token; anything else is
+    /// refused.
+    @Test func aShebangIsReadAsTheKernelReadsIt() throws {
+        let accepted = ["#!/usr/bin/python3 -I\n", "#!/usr/bin/python3 -IS\n", "#!/usr/bin/python3\n", "#!/bin/sh\n"]
+        for line in accepted { #expect(PluginProgram.refusal(Data(line.utf8)) == nil, "\(line)") }
+        let probe = try Data(contentsOf: URL(fileURLWithPath: Self.probe).appendingPathComponent("plugin.py"))
+        #expect(PluginProgram.refusal(probe) == nil, "the probe, #!/usr/bin/python3 -I")
+        let refused: [(String, String)] = [
+            ("#!/usr/bin/python3 -I" + String(repeating: " -I", count: 100) + "\n", "a line past 256 bytes"),
+            ("#!/usr/bin/python3 " + String(repeating: "x", count: 280) + "\n", "its newline past 256 bytes"),
+            ("#!/usr/bin/python3 -I -S\n", "two tokens"),
+            ("#!/usr/bin/python3 /home/u/x.py\n", "a path argument"),
+            ("#!/usr/bin/python3 -c\n", "a flag not listed"),
+            ("#!/usr/bin/perl\n", "an interpreter not on the list"),
+            ("#!/usr/bin/env python3\n", "env"),
+            ("#!/usr/bin/python3 -I\r\n", "a CRLF line"),
+            ("#!/usr/bin/python3\t-I\n", "a tab"),
+            ("#!/usr/bin/python3 \n", "a trailing space"),
+            ("#! /usr/bin/python3\n", "a space before the interpreter"),
+            ("#!/bin/sh -e\n", "a shell takes none"),
+            ("#!/usr/bin/python3", "no newline at all"),
+        ]
+        for (line, what) in refused { #expect(PluginProgram.refusal(Data(line.utf8)) != nil, "\(what) is refused") }
+    }
+
+    /// The program's environment is built from nothing: exactly these keys, never an LD_ variable or GLIBC_TUNABLES.
+    @Test func theProgramsEnvironmentIsExactlyItsOwn() {
+        let keys = { (data: URL?) in Set(PluginProcess.environment(data: data).map { String($0.split(separator: "=", maxSplits: 1)[0]) }) }
+        #expect(keys(nil) == ["PATH", "HOME", "LANG", "PYTHONNOUSERSITE", "PYTHONSAFEPATH", "PYTHONDONTWRITEBYTECODE"])
+        #expect(keys(URL(fileURLWithPath: "/x")) == keys(nil).union(["VIBESWITCHER_PLUGIN_DATA"]))
+        #expect(!keys(nil).contains { $0.hasPrefix("LD_") || $0 == "GLIBC_TUNABLES" })
+    }
+
+    /// The dynamic tags ld.so also loads files by, which the check doesn't follow: each refuses the program.
+    @Test func anELFNamingAnAuditOrFilterLibraryIsRefused() {
+        for (tag, name) in [(UInt64(0x6ffffefc), "DT_AUDIT"), (0x6ffffefb, "DT_DEPAUDIT"), (0x7fffffff, "DT_FILTER"), (0x7ffffffd, "DT_AUXILIARY"),
+                            (0x6ffffefa, "DT_CONFIG")] {
+            let refusal = PluginProgram.refusal(Self.elf(interpreter: "/lib64/ld-linux-x86-64.so.2", runpath: "/usr/lib", extra: [(tag, 0)]))
+            #expect(refusal?.contains(name) == true, "\(name): \(String(describing: refusal))")
+        }
     }
 
     /// N4: a program over 64 MiB is refused at add without being copied; a program whose size changed since its add
@@ -669,7 +702,7 @@ extension ExternalPluginsTests {
     }
 
     /// A minimal 64-bit ELF: a PT_LOAD over the file, a PT_INTERP, and a PT_DYNAMIC with a string table and RUNPATH.
-    static func elf(interpreter: String, runpath: String?) -> Data {
+    static func elf(interpreter: String, runpath: String?, extra: [(UInt64, UInt64)] = []) -> Data {
         var strings: [UInt8] = [0]
         let runpathAt = strings.count
         if let runpath { strings += Array(runpath.utf8) + [0] }
@@ -680,6 +713,7 @@ extension ExternalPluginsTests {
         let dynamicAt = stringsAt + strings.count
         var dynamic: [(UInt64, UInt64)] = [(5, UInt64(stringsAt))]
         if runpath != nil { dynamic.append((29, UInt64(runpathAt))) }
+        dynamic += extra
         dynamic.append((0, 0))
         let total = dynamicAt + dynamic.count * 16
         var bytes = [UInt8](repeating: 0, count: total)

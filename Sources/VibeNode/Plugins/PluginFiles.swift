@@ -82,26 +82,66 @@ enum PluginProgram {
     static func refusal(_ bytes: Data) -> String? {
         if bytes.starts(with: [0x7F, 0x45, 0x4C, 0x46]) { return elfRefusal(bytes) }
         guard bytes.starts(with: Array("#!".utf8)) else { return "its program is neither an ELF program nor a #! script" }
-        let first = bytes.prefix(256).split(separator: UInt8(ascii: "\n"), maxSplits: 1, omittingEmptySubsequences: false).first ?? Data()
-        let line = String(decoding: first.dropFirst(2), as: UTF8.self).trimmingCharacters(in: .whitespaces)
-        let words = line.split(whereSeparator: { $0 == " " || $0 == "\t" }).map(String.init)
-        guard let interpreter = words.first, !interpreter.isEmpty else { return "its #! line names no interpreter" }
+        return shebangRefusal(bytes)
+    }
+
+    /// The interpreters a script plugin may name, by their absolute paths (each must also be root's: `trusted`).
+    static let interpreters: Set<String> = ["/bin/sh", "/usr/bin/sh", "/bin/bash", "/usr/bin/bash", "/bin/dash", "/usr/bin/dash", "/usr/bin/python3"]
+
+    /// The `#!` line as the kernel reads it (the automated review of bd001923): the first 256 bytes at most, the
+    /// interpreter up to the first space, everything after it ONE argument; the program then runs as
+    /// `interpreter [that argument] /proc/self/fd/N`. Checked stricter than the kernel: the line ends with a newline within
+    /// its first 255 bytes; no tab, carriage return, double or trailing space; the interpreter one of `interpreters` (or
+    /// /usr/bin/python3.N), root's all the way; at most one argument, exactly one of the tokens this node lists for it.
+    static func shebangRefusal(_ bytes: Data) -> String? {
+        let head = [UInt8](bytes.prefix(256))
+        guard let newline = head.firstIndex(of: UInt8(ascii: "\n")), newline < 255 else {
+            return "its #! line doesn't end within its first 255 bytes (the kernel reads 256)"
+        }
+        let line = Array(head[2..<newline])
+        guard !line.contains(UInt8(ascii: "\t")), !line.contains(UInt8(ascii: "\r")), line.last != UInt8(ascii: " "),
+              line.first == UInt8(ascii: "/"), !String(decoding: line, as: UTF8.self).contains("  ") else {
+            return "its #! line is the interpreter's path and at most one flag, with single spaces: no tab, carriage return or trailing space"
+        }
+        let words = String(decoding: line, as: UTF8.self).split(separator: " ", maxSplits: 1).map(String.init)
+        let interpreter = words[0]
         let name = (interpreter as NSString).lastPathComponent
-        if name == "env" { return "its #! interpreter is env, which looks it up on PATH: name it by its path" }
+        guard interpreters.contains(interpreter) || isPython3N(interpreter) else {
+            return "its #! interpreter \(ConfigSeal.inert(interpreter, limit: 120)) isn't one this node runs (\(interpreters.sorted().joined(separator: ", ")), /usr/bin/python3.N)"
+        }
         if let why = trusted(interpreter) { return "its #! interpreter: \(why)" }
-        // Its arguments: only flags this node knows for that interpreter, never a path or a file to run (the review of
-        // bd001923, N2: `#!/usr/bin/python3 /home/u/x.py` would run a file the SHA-256 doesn't cover).
-        let allowed = Self.interpreterFlags(name)
-        if let stray = words.dropFirst().first(where: { !allowed.contains($0) }) {
-            return "its #! line passes \(ConfigSeal.inert(stray, limit: 80)) to \(name): only \(allowed.isEmpty ? "no arguments" : allowed.sorted().joined(separator: " ")) may follow it"
+        guard words.count == 2 else { return nil }
+        let argument = words[1]
+        guard interpreterTokens(name).contains(argument) else {
+            let allowed = interpreterTokens(name)
+            return "its #! line passes \(ConfigSeal.inert(argument, limit: 80)) to \(name): " + (allowed.isEmpty ? "it takes no argument" : "only one of \(allowed.sorted().joined(separator: " ")) may follow it, as one token")
         }
         return nil
     }
 
-    /// The flags a `#!` line may pass to an interpreter by its name; none for any other.
-    static func interpreterFlags(_ name: String) -> Set<String> {
-        if name == "python3" || (name.hasPrefix("python3.") && name.dropFirst(8).allSatisfy(\.isNumber)) { return ["-I", "-S", "-s", "-E", "-B", "-u"] }
-        return []
+    static func isPython3N(_ path: String) -> Bool {
+        guard path.hasPrefix("/usr/bin/python3.") else { return false }
+        let minor = path.dropFirst("/usr/bin/python3.".count)
+        return !minor.isEmpty && minor.count <= 3 && minor.allSatisfy(\.isNumber)
+    }
+
+    /// The one argument a `#!` line may pass to an interpreter, as a single token: python3's `-I` (isolated) alone or
+    /// followed by any of S, s, B, u, E, each at most once; none to a shell.
+    static func interpreterTokens(_ name: String) -> Set<String> {
+        guard name == "python3" || name.hasPrefix("python3.") else { return [] }
+        var tokens: Set<String> = ["-I"]
+        let letters = Array("SsBuE")
+        func extend(_ prefix: String, _ left: [Character]) {
+            for (index, letter) in left.enumerated() {
+                let token = prefix + String(letter)
+                tokens.insert(token)
+                var rest = left
+                rest.remove(at: index)
+                extend(token, rest)
+            }
+        }
+        extend("-I", letters)
+        return tokens
     }
 
     /// The most a program's file may hold (the review of bd001923, N4); its manifest's is `PluginManifest.bytesAtMost`.
@@ -217,6 +257,14 @@ enum PluginProgram {
             entries.append((tag, value))
             at += 16
         }
+        // Tags ld.so also loads files by (audit libraries, filters, a config file): not followed here, so refused.
+        let unfollowed: [UInt64: String] = [0x6ffffefc: "DT_AUDIT", 0x6ffffefb: "DT_DEPAUDIT", 0x7fffffff: "DT_FILTER",
+                                            0x7ffffffd: "DT_AUXILIARY", 0x6ffffefa: "DT_CONFIG"]
+        if let tag = entries.first(where: { unfollowed[$0.tag] != nil }) {
+            return "its ELF program names a library the check doesn't follow (\(unfollowed[tag.tag]!))"
+        }
+        // A library by a bare name (DT_NEEDED without a slash) is found through the search paths checked here and the
+        // system's default ones (root's: ld.so.cache, /lib, /usr/lib): the program's environment has no LD_LIBRARY_PATH.
         let named = entries.filter { [1, 15, 29].contains($0.tag) }
         guard !named.isEmpty else { return nil }
         // The string table is an address: the loaded segment holding it gives its place in the file.
