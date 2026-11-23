@@ -340,11 +340,8 @@ public final class LeadEngine: @unchecked Sendable {
     let pluginWork = DispatchQueue(label: "vibenode.lead-engine.plugins", qos: .userInitiated)
     /// The developer tools notice (`ToolchainLook.swift`): its state its own, on `queue`.
     let toolchain: ToolchainWatch
-    /// Boost as last written to `boost.json` (`lookAtBoost`), and when; the clock it's judged on.
-    var boostWritten: (state: BoostState, at: Date)?
-    /// Boost as the last look decided it (whether or not a file was written), with its mode: `status`'s `boost`.
-    public internal(set) var boostDecided: (mode: BoostMode, state: BoostState)?
-    var boostNow: () -> Date = Date.init
+    /// Boost (`SettingsWatch.swift`): its state its own, on `queue`.
+    let boost: BoostWatch
     /// The machine's load as the room watch reads it, as the leads' tools judge it (`MacLoad.steady`); faked in tests.
     var macLoad: () -> Double? = MacLoad.steady
     /// Each room look's read of the machine's memory (`MacMemory.read`), on the reads queue; faked in tests.
@@ -418,6 +415,7 @@ public final class LeadEngine: @unchecked Sendable {
         promptAudit = PromptAuditWatch(queue: link.queue, root: root, home: options.home ?? VibePaths.home, clock: clock, note: note)
         reads = BoardReads(handTo: link.queue)
         allDone = AllDoneWatch(queue: link.queue, reads: reads, runs: summaryRuns, note: note)
+        boost = BoostWatch(queue: link.queue, reads: reads, files: NodeSettings.Files(root: root), home: options.home ?? VibePaths.home, note: note)
         preflight = NodePreflight(claudeLink: options.claudeLink ?? NodePreflight.claudeLink(root: root), git: options.git)
         let states = root.appendingPathComponent("state", isDirectory: true)
         observer = LeadObserver(home: options.home ?? VibePaths.home, stateFile: { states.appendingPathComponent("\($0).json") })
