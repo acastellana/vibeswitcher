@@ -2,7 +2,7 @@
 
 Three independent reviewers read branch v2 without each other's conclusions, each through one lens: structure;
 runtime behaviour; interfaces, trust boundaries and verification. Each verified its claims in the code. This is their
-combined result, ranked, with what is done about each. The Mac app (`Sources/VibeSwitcher`) was out of scope.
+combined result, ranked, with what is done about each; the status section says where each stands on 2026-11-23. The Mac app (`Sources/VibeSwitcher`) was out of scope.
 
 ## Verdict
 
@@ -54,6 +54,32 @@ Size: S under a day, M a few days, L more. "Both" marks a finding two reviewers 
 | 17 | Files copied from the Mac app are kept in step by hand; two `FakeClaude` copies drift; five `TestSupport` copies. | The fakes model the product's core dependency. | S, M | Now: a lint that diffs each verbatim copy against its original. Later: one test-support target. |
 | 18 | Thread confinement is by comment; no sanitizer run. No race was found. | The "under load" flakes are the kind this hides. | S–M | A nightly thread-sanitizer run of the node's tests. |
 | 19 | Smaller: disk reads on the engine queue in `status`; handover cost scales with total scrollback (about 160 MB for 20 busy sessions); the hand-rolled HTTP and WebSocket parsers have no fuzz tests; 13 `--test-*` flags ship in the release server (refused at runtime on the user's node); "Mac" names on Linux code. | | S each, one M | In the batches above where they fit. |
+
+## Status (2026-11-23)
+
+Read from v2 at d777dbcc, the code and its commits. Done: built as planned, the commits named. Partly: what remains.
+
+| # | Status | What was done | What remains |
+|---|---|---|---|
+| 1 | Partly | The completeness test: `RequestKindsLint` holds the kinds' lists to one another, one envelope check for both transports (0b90da7c). Each recorded kind states its retry rule (`Requests.retryRules`, held to `recorded` by the lint, c314c455). Typed kinds (row 11). | The one `KindSpec` table and the `Principal` resolved once per connection: under way in another lane, nothing on v2 yet. |
+| 2 | Done | `Platform.Stdio` writes with raw write(2) and ignores failures; `StdioWriteLint` (44a87f0c). A detached host's `host.log` rotated at its start and capped at 2 MB with one older copy, only the log the start names (44a87f0c, 7a181cc3). | |
+| 3 | Done | An engine queue unanswered for 120 s awake ends the server and the host starts it again with the sessions kept; a stall past 10 s saved to health.json; the `reads` lane watched (06542a31). | |
+| 4 | Done | 64 connections, 8 a process, 16 a share, 8 kept for the user; 8 MiB pending; per-turn read caps; idle limits (ae518126, 8d887ea3, 72755858); the command line reconnects once when the server closed an idle connection before a request went (27047df4). The plan cell says the residual. | |
+| 5 | Done | `NodeClient.change` takes a token only the typed-word prompt makes, sends only the word the prompt showed and writes the journal itself; `CLIChangeLint` (9226f739). | |
+| 6 | Done | Elapsed-time guards on the steady clock (`Platform.Clock.steadyDate`); `ElapsedGuardLint` (c4283a25). | |
+| 7 | Partly | A run on v2 is no longer cancelled by the next push (58edf6a6); 63411f50 was green on all three gating workflows. | The lints and `scripts/ci/check-workflows.sh` before a push, and batched pushes, are the lead's practice: no hook enforces them. |
+| 8 | Partly | Twelve watches and states moved out of `LeadEngine`, each a type that owns its state on the engine's queue (the EngineWatch pattern): ToolchainWatch, PromptAuditWatch, PushWatch, PopupWatch, AllDoneWatch, OpenSessionsWatch (ecd99bec to 327858fa), ShellTidyWatch, BoostWatch, RoomWatch, RotationState (bf6ba433 to 3da46bbf), PluginRuntime (26869351, b0995270). `LeadEngine`'s stored properties: 176 to 114. | Left on purpose: the cards and answers core, which every feature reads; the vault link; RestartResume; `Requests` (27 stored properties), whose tables the typed-kinds and `KindSpec` lanes edit. RotationState holds state only: the rotation's logic is still the engine's. |
+| 9 | Done | The registry, the desk and the card as data (66a17c42, 27c9bbf0 and step 1); shell requests moved onto it (2f4bd3a7, eb1d6e41); external plugins: a separate program speaking protocol v1, added by hash, its own page and checks (795347c2, 1145e844, c2ef685f, d504386c, b995c0df), fuzzed (10229911). The wallet is the first external plugin, in its own repository. | By the plan, the core's own cards (question, approval, config, base) stay the core's, shell is the one built-in plugin, and the Mac app keeps its own wiring until milestone 5. |
+| 10 | Done | A retry whose reply isn't kept is told the truth (90e3fb33). The vault's record keeps the action's outcome and a retry answers from it (1b175c70, c314c455). The command line sends a lost request again only to the same host (978f1b03, 63411f50). A lost one-time link or page address is cancelled on the retry and the user told what to do (d777dbcc). | |
+| 11 | Partly | Unknown arguments refused on state changes, the build mismatch said, the previous build's vectors frozen (fb28aec8). Typed arguments and results for every kind the command line sends: the reads (b2376be2, 8690d449) and 31 state changes (f84a3630). | The snapshot's entities (sessions, cards, leads, node) are still hand-built dictionaries, and the page reads them by key. |
+| 12 | Done | The mock out of the embedded page: 944,477 bytes of the 1 MiB budget, from 1,010,907 (48fc986f). Headless Chrome against a scratch node's real page in the Linux job (`PageCheckTests`, 082b569c). | |
+| 13 | Done | A tail window of each chat in memory (600 items or 24 MB of lines), older pages read from the file, an append sent as a change at the tail (970d487d). | |
+| 14 | Done | Closed cards pruned by encoded bytes (8d5a2461). Snapshots in parts of at most 256 KiB, the page reconciling on the last part (23ab05e5); a card too large withheld whole with a stub (a74a8b0b). | |
+| 15 | Done | `docs/guide/v2-architecture.md`, its kinds table generated, `ArchitectureDocLint` (ecd29231); brought up to date on 2026-11-23. | |
+| 16 | Not started | | A base folder and a folder-dependency lint. |
+| 17 | Partly | `CopiedFilesLint` holds each verbatim copy to its original (aaf81688). | One test-support target, which ends the `TestSupport` and `FakeClaude` copies: under way in another lane. |
+| 18 | Done | `scripts/test.sh --tsan` and the nightly v2-tsan workflow (07aacd4f, f6feaec0). Its races, found and fixed: the host's owner watch (2114568c), `TestClient.closed` (fa641fbc), `DrivenTime` (6618a640); failures seen only under the sanitizer filed (e9423345). | |
+| 19 | Partly | `status` reads no disk on the engine's queue (215c46e2). Handover against scrollback: 20 sessions 1.95 s to 1.68 s, the new image 555 MB to 388 MB (033e42dc). Fuzz tests: the HTTP head, WebSocket frames and the wire (7d0b91c1); external plugins (10229911). Beyond the row: one inotify instance a process, and a watch the system can't give counted and said (39aea707, e28d0d72). | 17 `--test-*` flags ship in the release server (13 at the review), each refused by a server started with `--node`; "Mac" names on Linux code. |
 
 ## Order of work
 
