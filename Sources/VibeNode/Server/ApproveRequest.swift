@@ -129,7 +129,8 @@ extension Requests {
                 guard let root = left.first else { return then() }
                 engine.baseShow(root: root, from: nil) { result in
                     queue.async {
-                        if case .success(let card) = result, card.isOpen, let shown = card.base {
+                        // A base where the vault recorded it draws no card (`unmoved`): nothing to list.
+                        if case .success(.card(let card)) = result, card.isOpen, let shown = card.base {
                             // Only a move the vault can vouch for: from a recorded (or given) head, to another commit.
                             if [.recorded, .given].contains(shown.fromIs), let from = shown.from, from != shown.to {
                                 items.append(ApproveItem(kind: "base.accept", args: ["card": .string(card.id)], subject: root, card: card.value))

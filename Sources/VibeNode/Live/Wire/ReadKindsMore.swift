@@ -199,7 +199,8 @@ extension WireKinds {
         }
     }
 
-    /// `base show FOLDER [--from COMMIT]`: the base move's card (an entity).
+    /// `base show FOLDER [--from COMMIT]`: the base move's card (an entity); none, and `unmoved` the head, when the base
+    /// is where the vault recorded it: nothing to accept.
     public enum BaseShow: WireKind {
         public static let kind = "base.show"
 
@@ -214,7 +215,13 @@ extension WireKinds {
 
         public struct Result: Codable, Sendable {
             public var card: NodeWire.Value?
+            public var branch: String?
+            public var unmoved: String?
             public init(card: NodeWire.Value) { self.card = card }
+            public init(branch: String, unmoved head: String) {
+                self.branch = branch
+                self.unmoved = head
+            }
         }
     }
 }

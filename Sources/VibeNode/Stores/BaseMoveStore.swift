@@ -59,6 +59,11 @@ public final class BaseMoveStore: @unchecked Sendable {
             self.move = move
         }
 
+        /// Nothing to accept: the base is at the head the vault recorded. Never a card: on 2026-11-23 each `approve`
+        /// drew one such card per project ("from 2ccf4f6d… (recorded) to 2ccf4f6d…"), each superseding the last, and
+        /// left it open. (A commit given that is the tip still makes one: its accept records the head, as a first one.)
+        public var unmoved: Bool { fromIs == .recorded && from == to }
+
         init(_ move: LeadVault.BaseMove) {
             self.init(branch: move.branch, from: move.from, fromIs: .recorded, to: move.to,
                       commits: move.commits.map { Commit(sha: $0.sha, subject: $0.subject) }, reason: move.reason, move: move)

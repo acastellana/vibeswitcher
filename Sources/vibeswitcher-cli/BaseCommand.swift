@@ -57,6 +57,10 @@ enum BaseCommand {
         case .failure(let failure): return Say.failed(failure)
         case .refused(let reply): return Say.replyError(reply)
         case .success(let result, _):
+            if let head = result.unmoved {
+                Say.out("\(ConfigSeal.inert(result.branch ?? "the base", limit: 80)) is at \(head.prefix(8)): it hasn't moved from there, so there's nothing to accept.")
+                return 0
+            }
             guard let card = result.card else { return Say.failed(.broken("the node's server answered base.show with no card")) }
             CardText.lines(card).forEach(Say.out)
             Say.out("accept it with: vibeswitcher base accept \(ConfigSeal.inert(card["id"]?.string ?? "", limit: 80))")

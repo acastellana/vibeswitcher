@@ -67,6 +67,64 @@ struct ApproveTests {
         return try #require(reply.result, "\(reply)")
     }
 
+    private func baseCards(_ world: CardWorld) -> [CardStore.Card] {
+        world.queue.sync { world.engine.cards.list(project: NodeIds.project(root: world.repo), all: true).filter { $0.kind == .baseMove } }
+    }
+
+    /// A base at the head the vault recorded draws no card, however often `approve` or `base show` asks; a move shown
+    /// again is its open card, not another (on 2026-11-23 the real node's every `approve` drew a "from 2ccf4f6d… to
+    /// 2ccf4f6d…" card per project, each superseding the last, and left it open).
+    @Test func aBaseAtItsRecordedHeadNeverDrawsACardAndAMoveShownAgainIsItsCard() async throws {
+        let world = try await CardWorld.make(scratch)
+        defer { world.stop() }
+        world.queue.sync { world.requests.home = world.host.home.path }
+        try await project(world, world.repo)
+        // The lead's own records commit, the head recorded where it went (as the lead's commits are credited).
+        let vault = world.host.vault
+        let repo = world.repo
+        try "decisions\n".write(toFile: repo + "/decisions.md", atomically: true, encoding: .utf8)
+        try await scratchGit(repo, ["add", "decisions.md"])
+        try await scratchGit(repo, ["commit", "-q", "-m", "Lead: decisions and progress"])
+        let tip = Git.run(["rev-parse", "main"], in: repo).output
+        try await offPool { try vault.setHead(tip, root: repo, branch: "main") }
+
+        // An open card from before (an older build's) closes once a show finds the base where it was recorded.
+        world.queue.sync {
+            var stale = CardStore.Card(root: repo, kind: .baseMove)
+            stale.base = BaseMoveStore.Shown(branch: "main", from: tip, fromIs: .recorded, to: tip, commits: [])
+            world.engine.cards.put(stale)
+        }
+        for _ in 0..<3 {
+            let listed = try #require(await world.ask("approve.list", ["only": .array([.string("base")])], action: nil))
+            #expect(listed.result?["items"]?.array?.isEmpty == true, "\(listed)")
+        }
+        let shown = try #require(await world.ask("base.show", ["folder": .string(repo)], action: nil))
+        #expect(shown.result?["card"] == nil && shown.result?["unmoved"]?.string == tip, "\(shown)")
+        // None open, and none drawn by the lists or the show: the one put above, closed (and the look's, if it saw the
+        // commit before the head was recorded, closed with it).
+        let said = baseCards(world).map { "\($0.closed ?? "open") \($0.base?.from ?? "") \($0.base?.to ?? "")" }
+        #expect(baseCards(world).filter(\.isOpen).isEmpty, "\(said)")
+        #expect(baseCards(world).allSatisfy { $0.closed == "the base is where the vault recorded it" }, "\(said)")
+        #expect(baseCards(world).filter { $0.base?.move == nil }.count == 1, "\(said)")
+        let before = Set(baseCards(world).map(\.id))
+
+        // A real move: listed once with its card; listed again, the same card, no other drawn.
+        try "more\n".write(toFile: repo + "/more.txt", atomically: true, encoding: .utf8)
+        try await scratchGit(repo, ["add", "more.txt"])
+        try await scratchGit(repo, ["commit", "-q", "-m", "the user's commit"])
+        var ids: [String] = []
+        for _ in 0..<3 {
+            let listed = try #require(await world.ask("approve.list", ["only": .array([.string("base")])], action: nil))
+            let items = listed.result?["items"]?.array ?? []
+            #expect(items.count == 1 && items.first?["kind"]?.string == "base.accept", "\(listed)")
+            ids += items.compactMap { $0["card"]?["id"]?.string }
+        }
+        #expect(Set(ids).count == 1, "\(ids)")
+        // One card for the move (the look's or the list's), open, whichever drew it.
+        let drawn = baseCards(world).filter { !before.contains($0.id) }
+        #expect(drawn.count == 1 && drawn.first?.isOpen == true && drawn.first?.id == ids.first, "\(drawn.map { "\($0.id) \($0.closed ?? "open")" }) \(ids)")
+    }
+
     @Test func oneCodeDoesTheListedBatchEachItemItsOwnAction() async throws {
         let world = try await world()
         defer { world.stop() }

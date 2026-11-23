@@ -295,7 +295,8 @@ extension Requests {
                 guard let self else { return }
                 switch result {
                 case .failure(let failure): reply(self.failed(request, failure))
-                case .success(let card): reply(.init(re: request.id, typed: WireKinds.BaseShow.Result(card: card.value)))
+                case .success(.card(let card)): reply(.init(re: request.id, typed: WireKinds.BaseShow.Result(card: card.value)))
+                case .success(.unmoved(let branch, let head)): reply(.init(re: request.id, typed: WireKinds.BaseShow.Result(branch: branch, unmoved: head)))
                 }
             }
         }
