@@ -86,6 +86,30 @@ struct LeadEscapedBugsTests: LeadTeamFixture {
         #expect(LeadEscapedBugs.review(of: later, resolve: resolve, tasks: tasks) == .outside)
     }
 
+    /// A team true merge (merge commit with trailers) brings a side branch's commits through its second parent: a bug
+    /// one of them introduced counts under that merge's review, and a commit on the base before it stays outside.
+    @Test func aCommitATrueMergeBroughtThroughItsSecondParentCountsUnderThatMerge() throws {
+        let root = try repo()
+        let fork = Git.run(["rev-parse", "HEAD"], in: root).output
+        Git.run(["checkout", "-q", "-b", "side"], in: root)
+        let side = try commit(root, "s.txt", "Upstream change, no trailers")
+        try commit(root, "t.txt", "Another upstream change")
+        Git.run(["checkout", "-q", "main"], in: root)
+        // The base moves on before the merge: the user's own commit, then a team merge with no part in the side branch.
+        let own = try commit(root, "u.txt", "The user's own change")
+        let squashed = try commit(root, "v.txt", "Add v\n\nVS-Task: add-v\nVS-Review: none")
+        let merging = Git.run(["merge", "-q", "--no-ff", "side", "-m", "Merge side\n\nVS-Task: merge-side\nVS-Review: audit (pass at 1234567890ab)"], in: root)
+        #expect(merging.ok, "\(merging.output)")
+        let merge = Git.run(["rev-parse", "HEAD"], in: root).output
+        // On the base's first-parent line, the side commit is under the merge but not under its first parent.
+        #expect(!Git.run(["merge-base", "--is-ancestor", side, merge + "^1"], in: root).ok)
+        let tasks = [merged("add-v", commit: squashed, onto: own, audited: false), merged("merge-side", commit: merge)]
+        let resolve = { (commit: String) in LeadEscapedBugs.merge(of: commit, root: root, base: "main", tasks: tasks) }
+        #expect(LeadEscapedBugs.review(of: side, resolve: resolve, tasks: tasks) == .audit)
+        #expect(LeadEscapedBugs.review(of: own, resolve: resolve, tasks: tasks) == .outside)
+        #expect(LeadEscapedBugs.review(of: fork, resolve: resolve, tasks: tasks) == .outside)
+    }
+
     @Test func theScorecardLineSaysThisWeeksAndTheWeekBeforesCountsAndReverts() {
         let now = Date().timeIntervalSince1970
         let merges: [String: LeadEscapedBugs.Merge] = ["aaaaaaa1": .init(task: "a", review: "audit (pass at 1)"),

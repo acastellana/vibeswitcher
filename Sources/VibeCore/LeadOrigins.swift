@@ -169,8 +169,15 @@ extension LeadEscapedBugs {
         let format = "--format=%H%x1f%P%x1f%(trailers:key=VS-Task,valueonly,separator=%x20)%x1f%(trailers:key=VS-Review,valueonly,separator=%x20)%x1e"
         let own = Git.run(["log", "-1", format, hash], in: root)
         if let mine = parse(own.output).first, mine.task != nil { return Merge(task: mine.task, review: mine.review) }
-        let after = Git.run(["log", "--ancestry-path", "--first-parent", "--reverse", format, "\(hash)..refs/heads/\(base)"], in: root)
-        guard after.ok, let next = parse(after.output).first(where: { $0.task != nil }) else { return Merge(task: nil, review: nil) }
+        // The base's first-parent line after it, kept to the commits that have it. (`--ancestry-path --first-parent`
+        // together walks nothing when a true merge brought it through a later parent, so they run apart.)
+        let line = Git.run(["log", "--first-parent", "--reverse", format, "\(hash)..refs/heads/\(base)"], in: root)
+        let under = Git.run(["rev-list", "--ancestry-path", "\(hash)..refs/heads/\(base)"], in: root)
+        guard line.ok, under.ok else { return Merge(task: nil, review: nil) }
+        let having = Set(under.output.split(separator: "\n").map(String.init))
+        guard let next = parse(line.output).first(where: { $0.task != nil && having.contains($0.commit) }) else {
+            return Merge(task: nil, review: nil)
+        }
         let merge = Merge(task: next.task, review: next.review)
         // A true merge that brought it through a parent past its first.
         if next.parents.count > 1, !Git.run(["merge-base", "--is-ancestor", hash, next.parents[0]], in: root).ok { return merge }
