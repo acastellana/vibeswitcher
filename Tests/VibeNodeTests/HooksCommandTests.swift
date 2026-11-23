@@ -386,6 +386,13 @@ struct HooksCommandTests {
 /// came between. Read on a thread of its own, which polls the watch and a wake pipe (no spinning) and which `stop()`
 /// waits for.
 private final class NameWatch: @unchecked Sendable {
+    /// Why the watch couldn't be set up: the call and its errno.
+    struct Unwatched: Error, CustomStringConvertible {
+        var what: String
+        var code: Int32
+        var description: String { "\(what) failed: errno \(code)" }
+    }
+
     private let parent: URL
     private let sub: String
     private let inotify: Int32
@@ -402,10 +409,16 @@ private final class NameWatch: @unchecked Sendable {
         #if os(Linux)
         inotify = inotify_init1(Int32(IN_NONBLOCK) | Int32(IN_CLOEXEC))
         var ends: [Int32] = [-1, -1]
-        guard inotify >= 0, inotify_add_watch(inotify, parent.path, UInt32(IN_CREATE) | UInt32(IN_MOVED_TO)) >= 0,
-              pipe(&ends) == 0 else {
-            if inotify >= 0 { close(inotify) }
-            throw CancellationError()
+        guard inotify >= 0 else { throw Unwatched(what: "inotify_init1", code: errno) }
+        guard inotify_add_watch(inotify, parent.path, UInt32(IN_CREATE) | UInt32(IN_MOVED_TO)) >= 0 else {
+            let code = errno
+            close(inotify)
+            throw Unwatched(what: "inotify_add_watch", code: code)
+        }
+        guard pipe(&ends) == 0 else {
+            let code = errno
+            close(inotify)
+            throw Unwatched(what: "pipe", code: code)
         }
         // Kept from the programs the test starts.
         for end in ends { _ = fcntl(end, F_SETFD, FD_CLOEXEC) }
