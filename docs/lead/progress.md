@@ -4447,3 +4447,7 @@ Proposed task 1: Find why dictations end with no text
 - 2026-11-23 17:05 Merged the-weekly-scorecard: The weekly scorecard counts bugs that got past review, by how the merge that brought them was reviewed (build 71a026954280)
 - 2026-11-23 17:05 Automatically (auto_advance): Merged the-weekly-scorecard (The weekly scorecard counts bugs that got past review, by how the merge that brought them was reviewed) into main at e5290087, on its passing audit and the full test run.
 - 2026-11-23 17:05 Automatically (auto_advance): Cleaned up the-weekly-scorecard (freed 2.5 GB of build output and temporary folders). It stays done.
+- 2026-11-23 17:19 Automatically (auto_advance): Started the audit of review-rules-carry-a at 6dcf526f (Its review is audit).
+- 2026-11-23 17:19 Released review-rules-carry-a's worker (idle since its done report on 6dcf526f) while its audit runs
+- 2026-11-23 17:19 Automatically (auto_advance): Released review-rules-carry-a's worker, idle since its done report on 6dcf526f, while its audit runs (ended pid 36601 (Worker: Review rules carry a trigger and a source; the verifier applies only the rules a diff triggers and says which)): its Mac slot and memory are free. Its worktree and branch stay; findings the verdict sends back go to a fresh worker there, and a clean verdict merges with none.
+- 2026-11-23 17:21 Audit of review-rules-carry-a: complete, clean, round 1: 2 Nit open
