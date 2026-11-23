@@ -379,29 +379,44 @@ import Testing
         }
     }
 
-    /// A megabyte of one-byte lines at once is read in time (the fuzz run's first find, 2026-11-22: taking each line
-    /// moved all that followed it, half a million moves of a megabyte; kept as its regression case).
-    @Test func manyShortLinesAtOnceAreReadInTime() {
-        let lines = Data(Array(repeating: Array("a\n".utf8), count: 512 * 1_024).joined())
-        var reader = NodeWire.Lines()
-        let started = ProcessInfo.processInfo.systemUptime
-        let read = reader.append(lines)
-        let took = ProcessInfo.processInfo.systemUptime - started
-        #expect(read.count == 512 * 1_024 && read.allSatisfy { $0 == Data("a".utf8) })
-        #expect(took < 5, "\(took) s for half a million lines")
+    /// The cost of `work`, the least of three runs (a busy machine's pauses only lengthen one).
+    static func cost(_ work: () -> Void) -> TimeInterval {
+        (0..<3).map { _ in
+            let start = ProcessInfo.processInfo.systemUptime
+            work()
+            return ProcessInfo.processInfo.systemUptime - start
+        }.min() ?? 0
     }
 
-    /// A long line dripped a byte at a time is read in time (the fuzz run's second find, 2026-11-22: each append looked
-    /// for a newline in everything held, a megabyte line half a trillion looks; kept as its regression case).
+    /// How a reader's cost grows from `n` to `4n` of the same input: about 4 when linear, about 16 when quadratic. A
+    /// baseline from the same test, never a bare number of seconds (ElapsedTimeLint: a busy machine slows both alike).
+    static func growth(_ n: Int, _ work: (Int) -> Void) -> Double {
+        let small = cost { work(n) }, large = cost { work(4 * n) }
+        return large / max(small, 1e-6)
+    }
+
+    /// Many one-byte lines at once are read in linear time (the fuzz run's first find, 2026-11-22: taking each line
+    /// moved all that followed it, half a million moves of a megabyte; kept as its regression case).
+    @Test func manyShortLinesAtOnceAreReadInTime() {
+        let ratio = Self.growth(128 * 1_024) { count in
+            var reader = NodeWire.Lines()
+            let read = reader.append(Data(Array(repeating: Array("a\n".utf8), count: count).joined()))
+            precondition(read.count == count && read.allSatisfy { $0 == Data("a".utf8) })
+        }
+        #expect(ratio < 9, "4 times the lines cost \(ratio) times as much: linear is about 4, the quadratic reader 16")
+    }
+
+    /// A long line dripped a byte at a time is read in linear time (the fuzz run's second find, 2026-11-22: each append
+    /// looked for a newline in everything held, a megabyte line half a trillion looks; kept as its regression case).
     @Test func aLineDrippedAByteAtATimeIsReadInTime() {
-        var reader = NodeWire.Lines()
-        let started = ProcessInfo.processInfo.systemUptime
-        var read: [Data] = []
-        for _ in 0..<(256 * 1_024) { read += reader.append(Data([0x61])) }
-        read += reader.append(Data([0x0A]))
-        let took = ProcessInfo.processInfo.systemUptime - started
-        #expect(read == [Data(repeating: 0x61, count: 256 * 1_024)] && !reader.tooLong)
-        #expect(took < 5, "\(took) s for a 256 KB line a byte at a time")
+        let ratio = Self.growth(64 * 1_024) { length in
+            var reader = NodeWire.Lines()
+            var read: [Data] = []
+            for _ in 0..<length { read += reader.append(Data([0x61])) }
+            read += reader.append(Data([0x0A]))
+            precondition(read == [Data(repeating: 0x61, count: length)] && !reader.tooLong)
+        }
+        #expect(ratio < 9, "a line 4 times as long cost \(ratio) times as much: linear is about 4, the quadratic reader 16")
     }
 
     /// Requests encoded and unwrapped: the same request back. Mutated or random lines: a refusal with its code, never a

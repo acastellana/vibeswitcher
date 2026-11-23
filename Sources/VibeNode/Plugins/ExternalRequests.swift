@@ -169,6 +169,17 @@ extension ExternalPlugin {
 
     /// The plugin's `file`: the payload (base64, 32 KiB at most) and how long it waits, or its refusal; `then` on the
     /// engine's queue.
+    /// A `file` answer: its payload (base64, 32 KiB at most) and life (whole seconds, a number, never `true`), or its
+    /// refusal; anything else doesn't fit.
+    static func filed(_ message: PluginProcess.Message) -> Result<Filed, PluginRefusal> {
+        if let why = message["refuse"] as? String, message.count == 1 { return .failure(PluginRefusal(ConfigSeal.inert(why, limit: 400))) }
+        guard let payload = message["payload"] as? String, let bytes = Data(base64Encoded: payload), bytes.count <= 32 * 1024,
+              let expiresIn = PluginJSON.int(message["expiresIn"]), expiresIn > 0, message.count == 2 else {
+            return .failure(PluginRefusal("its answer didn't fit (payload, expiresIn)"))
+        }
+        return .success(Filed(payload: payload, expiresIn: TimeInterval(expiresIn)))
+    }
+
     func file(words: [String], cwd: String, desk: PluginDesk, then: @escaping (Result<Filed, PluginRefusal>) -> Void) {
         startedProcess(desk) { started in
             guard case .success(let process) = started else {
@@ -181,14 +192,7 @@ extension ExternalPlugin {
                     case .failure(let breach) where breach.busy: then(.failure(PluginRefusal(Self.busy)))
                     case .failure(let breach): then(.failure(PluginRefusal(breach.description)))
                     case .success(let message):
-                        if let why = message["refuse"] as? String, message.count == 1 {
-                            return then(.failure(PluginRefusal(ConfigSeal.inert(why, limit: 400))))
-                        }
-                        guard let payload = message["payload"] as? String, let bytes = Data(base64Encoded: payload), bytes.count <= 32 * 1024,
-                              let expiresIn = message["expiresIn"] as? Int, expiresIn > 0, message.count == 2 else {
-                            return then(.failure(PluginRefusal("its answer didn't fit (payload, expiresIn)")))
-                        }
-                        then(.success(Filed(payload: payload, expiresIn: TimeInterval(expiresIn))))
+                        then(Self.filed(message))
                     }
                 }
             }
