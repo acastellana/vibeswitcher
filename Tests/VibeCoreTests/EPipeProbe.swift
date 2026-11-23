@@ -385,7 +385,7 @@ enum EPipeProbe {
         /// After a failed call: when it failed with EPIPE on a descriptor that raises SIGPIPE, records the writer.
         /// errno as the call left it.
         @inline(never)
-        static func noted(_ call: String, _ fd: Int32, _ flags: Int32, _ result: Int) -> Int {
+        static func noted(_ call: String, _ fd: Int32, _ flags: Int32, _ result: Int, snapshots before: Int) -> Int {
             guard result < 0 else { return result }
             let saved = errno
             defer { errno = saved }
@@ -399,18 +399,40 @@ enum EPipeProbe {
             let head = "EPIPE probe: \(call)(fd \(fd), \(kind(fd))) failed with EPIPE and raised SIGPIPE (no F_SETNOSIGPIPE, "
                 + "SO_NOSIGPIPE or MSG_NOSIGNAL), thread \(pthread_mach_thread_np(pthread_self())), \(test). The writer:"
             dump("=== " + head + "\n" + pcs.map(symbol).map { "  " + $0 }.joined(separator: "\n") + "\n")
-            guard first else { return result }
-            Issue.record(Comment(rawValue: ([head] + stack(pcs, limit: frameLines - 1).map { "  " + $0 }).joined(separator: "\n")))
+            if first { Issue.record(Comment(rawValue: ([head] + stack(pcs, limit: frameLines - 1).map { "  " + $0 }).joined(separator: "\n"))) }
+            // The writer stays in here until the handler has taken its snapshot (1 s at most), so the snapshot finds it:
+            // the kernel raises a write's SIGPIPE on the process, and any thread not blocking it may take it (the Mac
+            // runs, 2026-11-22/23: the main thread, in its run loop, took it, and by the time its handler ran the
+            // writer had left the write and this hook, so "no thread was in a write"). A snapshot taken before this
+            // (the handler ran at once) already found the writer here or in the call.
+            if handlerIsTheProbes {
+                let deadline = Date().addingTimeInterval(1)
+                while Snapshot.total == before, Date() < deadline { usleep(1_000) }
+            }
             return result
         }
 
-        static let write: Write = { fd, buffer, count in noted("write", fd, 0, realWrite!(fd, buffer, count)) }
-        static let writev: Writev = { fd, vectors, count in noted("writev", fd, 0, realWritev!(fd, vectors, count)) }
-        static let send: Send = { fd, buffer, count, flags in noted("send", fd, flags, realSend!(fd, buffer, count, flags)) }
-        static let sendto: Sendto = { fd, buffer, count, flags, to, length in
-            noted("sendto", fd, flags, realSendto!(fd, buffer, count, flags, to, length))
+        // Each takes the snapshots' count before its call: one the call's SIGPIPE adds is told from one before it.
+        static let write: Write = { fd, buffer, count in
+            let before = Snapshot.total
+            return noted("write", fd, 0, realWrite!(fd, buffer, count), snapshots: before)
         }
-        static let sendmsg: Sendmsg = { fd, message, flags in noted("sendmsg", fd, flags, realSendmsg!(fd, message, flags)) }
+        static let writev: Writev = { fd, vectors, count in
+            let before = Snapshot.total
+            return noted("writev", fd, 0, realWritev!(fd, vectors, count), snapshots: before)
+        }
+        static let send: Send = { fd, buffer, count, flags in
+            let before = Snapshot.total
+            return noted("send", fd, flags, realSend!(fd, buffer, count, flags), snapshots: before)
+        }
+        static let sendto: Sendto = { fd, buffer, count, flags, to, length in
+            let before = Snapshot.total
+            return noted("sendto", fd, flags, realSendto!(fd, buffer, count, flags, to, length), snapshots: before)
+        }
+        static let sendmsg: Sendmsg = { fd, message, flags in
+            let before = Snapshot.total
+            return noted("sendmsg", fd, flags, realSendmsg!(fd, message, flags), snapshots: before)
+        }
 
         static func install() {
             let everywhere = UnsafeMutableRawPointer(bitPattern: -2) // RTLD_DEFAULT

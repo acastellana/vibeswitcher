@@ -543,7 +543,8 @@ re-run, and fixed on main.
   (`5625a3f4`) passed it. The handler ran on the main thread, in its run loop (`mach_msg2_trap`): the signal for the
   writer's EPIPE was delivered to another thread, and by the time the handler took its snapshot the writer had moved
   on. Nothing signal-related changed between the last pass (`1c1c6f37`) and it. A race in which thread takes the
-  signal: the probe's own (main's), left to main.
+  signal: the probe's own (main's). Seen again at `cf861df6` (run 45101782742), 2 of 3 runs; fixed in the probe on
+  `v2` (2026-11-23, the port map's `EPipeProbe.swift` row): the writer waits in the hook until the snapshot is taken.
 - **`ComposerDeliveryTests/pastedImagesAndTheirTextArriveOnce` (app)**: a pasted image goes to the fake unbracketed,
   as its path. Seen twice in about 21 `v2 macos` app jobs, in different cases: run 43451992452 (`1fc49ad7`, "an image
   alone, the Send button": the input was the quoted `.png` path, `0 image(s)`, where `[Image #1] | 1 image(s)` was
