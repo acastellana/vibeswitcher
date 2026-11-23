@@ -76,6 +76,9 @@ public struct ServerArguments: Equatable, Sendable {
     /// A scratch server's file watch tests (`Platform.Watches.testNoInstance`, `testCensus`).
     public var testNoInotify = false
     public var testInotifyCensus: String?
+    /// A scratch server that lists the sessions its host didn't start, as the user's node does (`NodeSessions`'
+    /// `onlyHosted` off): a test of what the user's node lists beside another node.
+    public var testListsUnhosted = false
     /// The test flags a server with `--node` left out, each as given.
     public var refused: [String] = []
 
@@ -96,6 +99,7 @@ public struct ServerArguments: Equatable, Sendable {
     public static let testIdleFlag = "--test-idle="
     public static let testNoInotifyFlag = "--test-no-inotify"
     public static let testInotifyCensusFlag = "--test-inotify-census="
+    public static let testListsUnhostedFlag = "--test-lists-unhosted"
 
     /// What a page may do with a session's terminal (`TerminalRelay.Mode`; nil: no terminal, `term.open` is
     /// `unknown-kind`): on the user's node, watch it; on a scratch server, what its test flag says, read-write first.
@@ -131,6 +135,7 @@ public struct ServerArguments: Equatable, Sendable {
         var stall: Double?
         var idle: Double?
         var noInotify = false
+        var listsUnhosted = false
         var census: String?
         var tests: [String] = []
         var index = 1
@@ -207,6 +212,9 @@ public struct ServerArguments: Equatable, Sendable {
             case testNoInotifyFlag:
                 tests.append(word)
                 noInotify = true
+            case testListsUnhostedFlag:
+                tests.append(word)
+                listsUnhosted = true
             case _ where word.hasPrefix(testInotifyCensusFlag):
                 tests.append(word)
                 let path = String(word.dropFirst(testInotifyCensusFlag.count))
@@ -253,6 +261,7 @@ public struct ServerArguments: Equatable, Sendable {
         parsed.testIdle = idle
         parsed.testNoInotify = noInotify
         parsed.testInotifyCensus = census
+        parsed.testListsUnhosted = listsUnhosted
         parsed.testCgroupRoot = cgroupRoot
         parsed.testRunnerAbove = runnerAbove
         if node {
@@ -274,6 +283,7 @@ public struct ServerArguments: Equatable, Sendable {
             parsed.testIdle = nil
             parsed.testNoInotify = false
             parsed.testInotifyCensus = nil
+            parsed.testListsUnhosted = false
         }
         return .success(parsed)
     }

@@ -97,18 +97,26 @@ async function run() {
     const shellText = shell || '';
     record('Shell card', !shell ? 'skip' : shellText.includes('vibeswitcher answer') ? 'pass' : 'fail', shell ? shellText.replace(/\s+/g, ' ') : 'no shell request waits');
 
-    // A lead's Team tab: its tasks and results.
-    const lead = await page.evaluate(`[...document.querySelectorAll('.sidebar .row')].find((row) => /lead/i.test(row.innerText))?.querySelector('.row-link')?.getAttribute('href') || null`);
-    if (lead) {
-      await page.go(lead);
-      await page.until(`!!document.querySelector('.inspector')`, 5000);
-      const team = await page.evaluate(clickTab('.inspector .segmented button', 'Team'));
-      await pause(1200);
-      const seen = await page.evaluate(`({ tasks: document.querySelectorAll('.inspector .task').length, results: !!document.querySelector('.inspector .results, .inspector [data-section="results"]') || /Results/.test(document.querySelector('.inspector')?.innerText || '') })`);
-      await page.shot('team-tab');
-      record('Team tab', team ? 'pass' : 'fail', team ? `${seen.tasks} tasks${seen.results ? ', results shown' : ''}` : 'no Team tab on the lead');
+    // Each project's current lead's Team tab: its tasks and results. The lead by its id, as `vibeswitcher status` named it
+    // (REAL_PAGE_LEADS, from real-page-check.sh): never the sidebar's first LEAD row, which may be a lead session its
+    // project replaced (still running until the engine ends it), whose Team tab has no board.
+    const leads = (process.env.REAL_PAGE_LEADS || '').split(',').filter(Boolean);
+    if (leads.length) {
+      const said = [];
+      let all = true;
+      for (const [index, id] of leads.entries()) {
+        await page.go('#/s/' + encodeURIComponent(id));
+        const shown = await page.until(`!!document.querySelector('.inspector')`, 5000);
+        const team = shown && await page.evaluate(clickTab('.inspector .segmented button', 'Team'));
+        await pause(1200);
+        const seen = await page.evaluate(`({ tasks: document.querySelectorAll('.inspector .task').length, results: !!document.querySelector('.inspector .results, .inspector [data-section="results"]') || /Results/.test(document.querySelector('.inspector')?.innerText || '') })`);
+        await page.shot(index === 0 ? 'team-tab' : `team-tab-${index + 1}`);
+        all = all && !!team;
+        said.push(`${id.slice(0, 14)}: ` + (team ? `${seen.tasks} tasks${seen.results ? ', results shown' : ''}` : shown ? 'no Team tab' : 'not listed'));
+      }
+      record('Team tab', all ? 'pass' : 'fail', said.join('; '));
     } else {
-      record('Team tab', 'skip', 'no lead runs');
+      record('Team tab', 'skip', 'no lead runs (vibeswitcher status names none)');
     }
 
     // A3: a project's board.

@@ -93,9 +93,11 @@ public enum ServerStart {
             say("the session host is gone (\(why)): exiting")
             exit(0)
         }
-        // A scratch node (a root other than the account's) lists only the sessions its host started.
+        // A scratch node (a root other than the account's) lists only the sessions its host started (but one a test asks
+        // to list the others too, as the user's node does).
         let sessions = NodeSessions(root: root, home: VibePaths.home, queue: queue, link: link, clock: clock,
-                                    onlyHosted: !NodeFolders.isUsersRoot(root, accountHome: VibePaths.accountHome), note: say)
+                                    onlyHosted: !NodeFolders.isUsersRoot(root, accountHome: VibePaths.accountHome) && !parsed.testListsUnhosted,
+                                    note: say)
         sessions.marks = SessionMarks(root: root)
         let rule = VoiceRule.at(start: Platform.Processes.cgroup(getpid()), testScopes: parsed.testUserScopes, usersNode: parsed.node)
         say("voice rule: \(rule.says)")

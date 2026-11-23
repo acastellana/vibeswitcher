@@ -13,7 +13,10 @@
 //   time; that's no moment to count from, so the row shows no duration for it.
 // - lead: the project a lead session leads. A worker's or a verifier's lead isn't on the wire yet: null, so it shows
 //   as a session of its own rather than under a team it can't be placed in.
-export function session(value, leadOf) {
+// - replacedFrom: the project whose lead this session was until another of its sessions replaced it (the lead's
+//   `replaced`; `replacedOf`), while it still runs: the engine ends it once no merge or audit holds the rotation gate.
+//   Its row says so (`leadMarks`); it leads nothing (`lead` stays null), so no view takes it for the project's lead.
+export function session(value, leadOf, replacedOf = new Map()) {
   return {
     ...value,
     status: value.shownStatus || value.status,
@@ -21,6 +24,7 @@ export function session(value, leadOf) {
     title: value.name || value.task || null,
     detail: value.activity || value.detail || null,
     lead: value.role === 'lead' ? leadOf.get(value.id) || null : null,
+    replacedFrom: value.role === 'lead' && !leadOf.get(value.id) ? replacedOf.get(value.id) || null : null,
     paused: Boolean(value.pausedUntil),
   };
 }
@@ -29,6 +33,13 @@ export function session(value, leadOf) {
 export function leadsBySession(leads) {
   const map = new Map();
   for (const lead of leads.values()) if (lead.session) map.set(lead.session, lead.project);
+  return map;
+}
+
+// Which project each replaced lead session was the lead of: { session id → project id } (the leads' `replaced`).
+export function replacedBySession(leads) {
+  const map = new Map();
+  for (const lead of leads.values()) for (const id of lead.replaced || []) if (id !== lead.session) map.set(id, lead.project);
   return map;
 }
 
