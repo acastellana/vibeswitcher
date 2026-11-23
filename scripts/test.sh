@@ -284,7 +284,13 @@ export VIBESWITCHER_PREFERENCE_LEDGER=$tool_scratch/preference-suites
 # (scripts/lib/swift-jobs.sh), and so are the tests (`slot_width` above). The bash it runs drops the team session's
 # variables first; vs-heavy and its supervisor keep them.
 swift_tests() {
-    Resources/bin/vs-heavy --as scripts/test.sh bash -c 'clean_test_environment; slot_width; heavy_swift build ${VS_SWIFT_BUILD_OPTIONS:-} || { : > "$VS_BUILD_FAILED_MARK"; exit 1; }; heavy_swift test ${VS_SWIFT_BUILD_OPTIONS:-} "$@"' scripts/test.sh "$@"
+    Resources/bin/vs-heavy --as scripts/test.sh bash -c 'clean_test_environment; slot_width; heavy_swift build || { : > "$VS_BUILD_FAILED_MARK"; exit 1; }; heavy_swift test "$@"' scripts/test.sh "$@"
+}
+
+# --tsan's: `swift_tests` with the thread sanitizer, built in .build/tsan (`heavy_swift` adds VS_SWIFT_EXTRA_OPTIONS to
+# both the build and the tests; the default run's line above stays as PreferencesCheckTests and TestScriptWebTests read it).
+swift_tests_sanitized() {
+    VS_SWIFT_EXTRA_OPTIONS="--sanitize=thread --scratch-path .build/tsan" swift_tests "$@"
 }
 
 # --tsan's reports: none, 0; else each report's race and its first frames in the repository's code, and 1.
@@ -462,7 +468,6 @@ if [[ -n $web_only ]]; then
     status=$?
 else
     if [[ -n $tsan ]]; then
-        export VS_SWIFT_BUILD_OPTIONS="--sanitize=thread --scratch-path .build/tsan"
         export VS_TSAN_REPORTS=${VS_TSAN_REPORTS:-$PWD/.build/tsan-reports}
         rm -rf "$VS_TSAN_REPORTS" && mkdir -p "$VS_TSAN_REPORTS" || exit 1
         # Each process, the scratch hosts and servers too, writes its own file; a race doesn't end it.
@@ -489,6 +494,8 @@ else
     # Both on the width vs-heavy gives the run, VS_HEAVY_CORES (scripts/lib/swift-jobs.sh), and so are the tests.
     if [[ -n $retry_failed ]]; then
         swift_tests_retrying_failed "$@"
+    elif [[ -n $tsan ]]; then
+        swift_tests_sanitized "$@"
     else
         swift_tests "$@"
     fi

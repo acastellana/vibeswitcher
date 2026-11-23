@@ -14,7 +14,7 @@
 # width of its own (--num-workers is XCTest's, with --parallel), and scripts/test.sh gives it one
 # (SWT_EXPERIMENTAL_MAXIMUM_PARALLELIZATION_WIDTH); they use far less than the build.
 # It calls `swift` as the caller has it: module-cache.sh's function when that's in use. Exported, for the bash vs-heavy
-# runs.
+# runs. VS_SWIFT_EXTRA_OPTIONS (unset but in `scripts/test.sh --tsan`): SwiftPM options for the build and the tests alike.
 #
 # Inside Codex's sandbox (a Codex session's commands run under its seatbelt, which sets CODEX_SANDBOX, e.g. "seatbelt")
 # it passes --disable-sandbox too (`swiftpm_sandbox`): SwiftPM compiles and runs the package's manifest and plugins under
@@ -26,9 +26,9 @@ heavy_swift() {
     shift
     if [[ ${VS_HEAVY_CORES:-} =~ ^[0-9]+$ ]] && (( 10#$VS_HEAVY_CORES >= 1 )); then
         cores=$(( 10#$VS_HEAVY_CORES ))
-        swift "$verb" $(swiftpm_options) -j 2 -Xswiftc "-j$(( (cores + 1) / 2 ))" "$@"
+        swift "$verb" $(swiftpm_options) ${VS_SWIFT_EXTRA_OPTIONS:-} -j 2 -Xswiftc "-j$(( (cores + 1) / 2 ))" "$@"
     else
-        swift "$verb" $(swiftpm_options) "$@"
+        swift "$verb" $(swiftpm_options) ${VS_SWIFT_EXTRA_OPTIONS:-} "$@"
     fi
 }
 # "--disable-sandbox" inside Codex's sandbox (CODEX_SANDBOX set), else nothing: for a SwiftPM command run outside
