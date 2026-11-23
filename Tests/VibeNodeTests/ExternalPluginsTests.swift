@@ -535,7 +535,7 @@ extension ExternalPluginsTests {
         #expect(FileManager.default.fileExists(atPath: elsewhere.appendingPathComponent("vs-theirs").path), "nothing removed behind the link")
         #expect(!FileManager.default.fileExists(atPath: elsewhere.appendingPathComponent("vs-probe").path), "nothing written through it")
         #expect(notes.value.contains { $0.contains("is a link") }, "\(notes.value)")
-        #expect(PluginFolders.empty(plugins.appendingPathComponent("bin"), andItself: true)?.contains("is a link") == true)
+        #expect(PluginFolders.empty(plugins.appendingPathComponent("bin"), root: world.host.root, andItself: true)?.contains("is a link") == true)
         #expect(FileManager.default.fileExists(atPath: elsewhere.appendingPathComponent("vs-theirs").path))
         try FileManager.default.removeItem(at: plugins.appendingPathComponent("bin"))
 
@@ -580,7 +580,9 @@ extension ExternalPluginsTests {
         let card = try await probeCard(world, "env")
         let body = card.plugin?.body.text ?? ""
         #expect(body.contains("HOME=/nonexistent") && body.contains("PYTHONNOUSERSITE=1") && body.contains("PYTHONSAFEPATH=1")
-                && body.contains("PYTHONDONTWRITEBYTECODE=1") && body.contains("VIBESWITCHER_PLUGIN_DATA=-") && body.contains("cwd=/"), "\(body)")
+                && body.contains("PYTHONDONTWRITEBYTECODE=1") && body.contains("VIBESWITCHER_PLUGIN_DATA=-") && body.contains("cwd=/ "), "\(body)")
+        // Python itself, in the program: no user site enabled, none on its path.
+        #expect(body.contains("usersite=False") && body.contains("userpath=no"), "\(body)")
         #expect(!FileManager.default.fileExists(atPath: marker.path), "the planted .pth didn't run")
     }
 
@@ -606,6 +608,64 @@ extension ExternalPluginsTests {
         try writeClosedOnExec(program.replacingOccurrences(of: "#!/usr/bin/python3", with: "#!/usr/bin/env python3"), to: folder.appendingPathComponent("plugin.py"))
         guard case .failure(let why) = PluginFolder.inspect(folder.path, builtIn: []) else { Issue.record("added"); return }
         #expect(why.description.contains("env"), "\(why)")
+    }
+
+    /// N2: a `#!` line passes only flags this node knows for its interpreter, never a path or a file.
+    @Test func aShebangPassesOnlyKnownFlags() {
+        #expect(PluginProgram.refusal(Data("#!/usr/bin/python3 -I -S\n".utf8)) == nil)
+        #expect(PluginProgram.refusal(Data("#!/usr/bin/python3 /home/u/x.py\n".utf8))?.contains("/home/u/x.py") == true)
+        #expect(PluginProgram.refusal(Data("#!/usr/bin/python3 -c\n".utf8)) != nil, "-c runs its next argument")
+        #expect(PluginProgram.refusal(Data("#!/bin/sh -e\n".utf8)) != nil, "sh takes none")
+        #expect(PluginProgram.refusal(Data("#!/bin/sh\n".utf8)) == nil)
+        #expect(PluginProgram.refusal(Data("#!/bin/sh\tx.sh\n".utf8)) != nil, "a tab separates too")
+    }
+
+    /// N4: a program over 64 MiB is refused at add without being copied; a program whose size changed since its add
+    /// isn't started (held), checked before its copy.
+    @Test func aProgramIsBoundedAndItsSizeRecorded() async throws {
+        let big = scratch.url("big")
+        try FileManager.default.createDirectory(at: big, withIntermediateDirectories: true)
+        let source = URL(fileURLWithPath: Self.probe)
+        try writeClosedOnExec(String(contentsOf: source.appendingPathComponent(PluginManifest.fileName), encoding: .utf8),
+                              to: big.appendingPathComponent(PluginManifest.fileName), mode: 0o644)
+        try writeClosedOnExec("#!/usr/bin/python3\n", to: big.appendingPathComponent("plugin.py"))
+        let handle = try FileHandle(forWritingTo: big.appendingPathComponent("plugin.py"))
+        try handle.truncate(atOffset: UInt64(PluginProgram.programBytesAtMost + 1))
+        try handle.close()
+        guard case .failure(let why) = PluginFolder.inspect(big.path, builtIn: []) else { Issue.record("a huge program inspected"); return }
+        #expect(why.description.contains("over 64 MiB"), "\(why)")
+
+        let world = try await CardWorld.make(scratch, plugins: [ShellPlugin()])
+        defer { world.stop() }
+        let folder = try copy("probe-size")
+        let inspected = try await added(world, folder: folder.path)
+        #expect(try world.world.link.vaultV2.externalPlugins()["probe"]?.contains("\"size\":") == true, "\(inspected)")
+        // Grown by a byte (same name, other size): not started; held, saying why.
+        let program = try String(contentsOf: folder.appendingPathComponent("plugin.py"), encoding: .utf8)
+        try writeClosedOnExec(program + "#", to: folder.appendingPathComponent("plugin.py"))
+        _ = try await ask(world, ["normal"])
+        for _ in 0..<3 { await look(world) }
+        #expect(await eventually(timeout: 30) { self.probe(world)?.held?.contains("its size") == true }, "\(String(describing: self.probe(world)?.held))")
+    }
+
+    /// N6: a node root reached through a link is resolved once; a link below it is still refused.
+    @Test func theNodesRootMayBeALinkButNothingBelowIt() throws {
+        let real = scratch.url("real-root")
+        try FileManager.default.createDirectory(at: real, withIntermediateDirectories: true)
+        let linked = scratch.url("linked-root")
+        try FileManager.default.createSymbolicLink(at: linked, withDestinationURL: real)
+        guard case .success(let made) = PluginFolders.own(linked.appendingPathComponent("plugins/bin"), root: linked) else {
+            Issue.record("refused under a linked root"); return
+        }
+        #expect(made.path.hasPrefix(real.resolvingSymlinksInPath().path) && FileManager.default.fileExists(atPath: real.appendingPathComponent("plugins/bin").path))
+        let elsewhere = scratch.url("elsewhere-root")
+        try FileManager.default.createDirectory(at: elsewhere, withIntermediateDirectories: true)
+        try FileManager.default.createSymbolicLink(at: real.appendingPathComponent("plugin-requests"), withDestinationURL: elsewhere)
+        guard case .failure(let why) = PluginFolders.own(linked.appendingPathComponent("plugin-requests/probe"), root: linked) else {
+            Issue.record("a link below the root followed"); return
+        }
+        #expect(why.description.contains("is a link"))
+        #expect(PluginFolders.empty(linked.appendingPathComponent("plugin-requests"), root: linked, andItself: true)?.contains("is a link") == true)
     }
 
     /// A minimal 64-bit ELF: a PT_LOAD over the file, a PT_INTERP, and a PT_DYNAMIC with a string table and RUNPATH.

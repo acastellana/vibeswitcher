@@ -79,7 +79,10 @@ for line in sys.stdin:
             body = "probe \x1b[2J hidden"
         if mode == "env":
             keys = ["HOME", "PYTHONNOUSERSITE", "PYTHONSAFEPATH", "PYTHONDONTWRITEBYTECODE", "VIBESWITCHER_PLUGIN_DATA"]
-            body = " ".join("%s=%s" % (k, os.environ.get(k, "-")) for k in keys) + " cwd=" + os.getcwd()
+            import site
+            user = site.getusersitepackages()
+            body = (" ".join("%s=%s" % (k, os.environ.get(k, "-")) for k in keys) + " cwd=" + os.getcwd()
+                    + " usersite=%s userpath=%s" % (site.ENABLE_USER_SITE, "yes" if any(p.startswith(user) for p in sys.path) else "no"))
         actions = ACTIONS
         if mode == "waitmarks":
             actions = [dict(ACTIONS[0], marks="waiting"), ACTIONS[1]]

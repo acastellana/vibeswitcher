@@ -137,6 +137,8 @@ public struct PluginRecord: Codable, Equatable, Sendable {
     public var folder: String
     public var manifest: String
     public var program: String
+    /// The program's size at its add: compared before it is copied at a start (the review of bd001923, N4).
+    public var size: Int
 
     var json: String {
         let encoder = JSONEncoder()
@@ -177,15 +179,15 @@ struct PluginFolder: Equatable {
         guard program.hasPrefix(folder + "/"), stat(program, &info) == 0, info.st_mode & S_IFMT == S_IFREG, info.st_mode & 0o100 != 0 else {
             return .failure(PluginRefusal("its program is an executable regular file inside its folder"))
         }
-        switch Platform.ProcessSelf.sealedCopy(of: program, name: "plugin-inspect") {
-        case .failure(let error): return .failure(PluginRefusal("its program couldn't be read (errno \(error.code))"))
+        switch PluginProgram.sealed(program, expected: nil, name: "plugin-inspect") {
+        case .failure(let why): return .failure(why)
         case .success(let copy):
             defer { Sys.close(copy.fd) }
             let (digest, refused) = copy.withBytes { (BuildInfo.sha256(of: Data($0)), PluginProgram.refusal(Data($0))) }
             // What it loads before its own code is root's (the review of step C, H1): checked here and at every start.
             if let refused { return .failure(PluginRefusal(refused)) }
             return .success(PluginFolder(folder: folder, manifest: manifest, manifestBytes: bytes, program: program,
-                                         record: PluginRecord(folder: folder, manifest: BuildInfo.sha256(of: bytes), program: digest)))
+                                         record: PluginRecord(folder: folder, manifest: BuildInfo.sha256(of: bytes), program: digest, size: copy.size)))
         }
     }
 }

@@ -127,8 +127,9 @@ final class ExternalPlugin: FeaturePlugin {
         }
         let path = (record.folder as NSString).appendingPathComponent(manifest.program)
         let copy: Platform.ProcessSelf.SealedCopy
-        switch Platform.ProcessSelf.sealedCopy(of: path, name: "plugin-\(manifest.id)") {
-        case .failure(let error): return .failure(PluginRefusal("its program couldn't be read (errno \(error.code))"))
+        // Its size compared before it is copied, within the cap (N4).
+        switch PluginProgram.sealed(path, expected: record.size, name: "plugin-\(manifest.id)") {
+        case .failure(let why): return .failure(why)
         case .success(let made): copy = made
         }
         guard copy.withBytes({ BuildInfo.sha256(of: Data($0)) }) == record.program else {

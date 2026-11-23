@@ -16,26 +16,47 @@ enum PluginFolders {
         return nil
     }
 
-    /// `url` (under `root`) made, private to you, each folder from `root` down checked first (`refusal`); or why not.
-    static func own(_ url: URL, root: URL) -> Result<URL, PluginRefusal> {
-        let top = root.standardizedFileURL.path, path = url.standardizedFileURL.path
-        guard path.hasPrefix(top + "/") else { return .failure(PluginRefusal("\(path) isn't under the node's root")) }
-        var walked = URL(fileURLWithPath: top)
-        if let why = refusal(walked) { return .failure(PluginRefusal(why)) }
-        for part in path.dropFirst(top.count + 1).split(separator: "/") {
+    /// `url` under `root`, with `root` resolved once (the node's root may itself be reached through a link: the
+    /// review of bd001923, N6) and every folder below it checked (`refusal`): the path to use, or why not.
+    static func checked(_ url: URL, root: URL) -> Result<URL, PluginRefusal> {
+        let given = root.standardizedFileURL.path, path = url.standardizedFileURL.path
+        guard path.hasPrefix(given + "/") else { return .failure(PluginRefusal("\(path) isn't under the node's root")) }
+        guard let real = realpath(given, nil) else { return .failure(PluginRefusal("the node's root \(given) isn't there")) }
+        var walked = URL(fileURLWithPath: String(cString: real))
+        free(real)
+        for part in path.dropFirst(given.count + 1).split(separator: "/") {
             walked.appendPathComponent(String(part))
             if let why = refusal(walked) { return .failure(PluginRefusal(why)) }
         }
-        do { try VibePaths.ensurePrivate(url) } catch { return .failure(PluginRefusal("\(path) couldn't be made: \(error)")) }
+        return .success(walked)
+    }
+
+    /// `url` (under `root`) made, private to you, each folder below the resolved root checked first; or why not.
+    static func own(_ url: URL, root: URL) -> Result<URL, PluginRefusal> {
+        let target: URL
+        switch checked(url, root: root) {
+        case .failure(let why): return .failure(why)
+        case .success(let resolved): target = resolved
+        }
+        do { try VibePaths.ensurePrivate(target) } catch { return .failure(PluginRefusal("\(target.path) couldn't be made: \(error)")) }
         // Made or not by us: checked again now that it is there.
-        if let why = refusal(url) { return .failure(PluginRefusal(why)) }
-        return .success(url)
+        if let why = refusal(target) { return .failure(PluginRefusal(why)) }
+        return .success(target)
     }
 
     /// Everything in the node's own folder `url` removed, links themselves never followed; with `andItself`, the folder
     /// too. Nothing when it isn't the node's own (`refusal`). Returns why not, or nil.
     @discardableResult
-    static func empty(_ url: URL, andItself: Bool = false) -> String? {
+    static func empty(_ url: URL, root: URL, andItself: Bool = false) -> String? {
+        switch checked(url, root: root) {
+        case .failure(let why): return why.description
+        case .success(let resolved): return emptied(resolved, andItself: andItself)
+        }
+    }
+
+    /// `url`, checked already, emptied: links never followed.
+    @discardableResult
+    private static func emptied(_ url: URL, andItself: Bool) -> String? {
         var info = stat()
         guard lstat(url.path, &info) == 0 else { return nil }
         if let why = refusal(url) { return why }
@@ -43,7 +64,7 @@ enum PluginFolders {
             let entry = url.appendingPathComponent(name)
             var item = stat()
             guard lstat(entry.path, &item) == 0 else { continue }
-            if item.st_mode & S_IFMT == S_IFDIR { empty(entry, andItself: true) } else { unlink(entry.path) }
+            if item.st_mode & S_IFMT == S_IFDIR { emptied(entry, andItself: true) } else { unlink(entry.path) }
         }
         if andItself { rmdir(url.path) }
         return nil
@@ -63,11 +84,51 @@ enum PluginProgram {
         guard bytes.starts(with: Array("#!".utf8)) else { return "its program is neither an ELF program nor a #! script" }
         let first = bytes.prefix(256).split(separator: UInt8(ascii: "\n"), maxSplits: 1, omittingEmptySubsequences: false).first ?? Data()
         let line = String(decoding: first.dropFirst(2), as: UTF8.self).trimmingCharacters(in: .whitespaces)
-        guard let interpreter = line.split(separator: " ").first.map(String.init), !interpreter.isEmpty else {
-            return "its #! line names no interpreter"
+        let words = line.split(whereSeparator: { $0 == " " || $0 == "\t" }).map(String.init)
+        guard let interpreter = words.first, !interpreter.isEmpty else { return "its #! line names no interpreter" }
+        let name = (interpreter as NSString).lastPathComponent
+        if name == "env" { return "its #! interpreter is env, which looks it up on PATH: name it by its path" }
+        if let why = trusted(interpreter) { return "its #! interpreter: \(why)" }
+        // Its arguments: only flags this node knows for that interpreter, never a path or a file to run (the review of
+        // bd001923, N2: `#!/usr/bin/python3 /home/u/x.py` would run a file the SHA-256 doesn't cover).
+        let allowed = Self.interpreterFlags(name)
+        if let stray = words.dropFirst().first(where: { !allowed.contains($0) }) {
+            return "its #! line passes \(ConfigSeal.inert(stray, limit: 80)) to \(name): only \(allowed.isEmpty ? "no arguments" : allowed.sorted().joined(separator: " ")) may follow it"
         }
-        if (interpreter as NSString).lastPathComponent == "env" { return "its #! interpreter is env, which looks it up on PATH: name it by its path" }
-        return trusted(interpreter).map { "its #! interpreter: \($0)" }
+        return nil
+    }
+
+    /// The flags a `#!` line may pass to an interpreter by its name; none for any other.
+    static func interpreterFlags(_ name: String) -> Set<String> {
+        if name == "python3" || (name.hasPrefix("python3.") && name.dropFirst(8).allSatisfy(\.isNumber)) { return ["-I", "-S", "-s", "-E", "-B", "-u"] }
+        return []
+    }
+
+    /// The most a program's file may hold (the review of bd001923, N4); its manifest's is `PluginManifest.bytesAtMost`.
+    static let programBytesAtMost = 64 << 20
+
+    /// The program at `path` read into a sealed copy, within `programBytesAtMost`, of the size recorded at its add when
+    /// `expected` names one (compared before the copy is made, and again after); or why not.
+    static func sealed(_ path: String, expected: Int?, name: String) -> Result<Platform.ProcessSelf.SealedCopy, PluginRefusal> {
+        let fd = open(path, O_RDONLY | O_CLOEXEC | O_NONBLOCK)
+        guard fd >= 0 else { return .failure(PluginRefusal("its program couldn't be opened (errno \(errno))")) }
+        defer { Sys.close(fd) }
+        var info = stat()
+        guard fstat(fd, &info) == 0, info.st_mode & S_IFMT == S_IFREG else { return .failure(PluginRefusal("its program isn't a regular file")) }
+        let size = Int(info.st_size)
+        guard size <= programBytesAtMost else { return .failure(PluginRefusal("its program is over \(programBytesAtMost >> 20) MiB")) }
+        if let expected, size != expected {
+            return .failure(PluginRefusal("its program changed since you added it (its size): `vibeswitcher plugin add` it again"))
+        }
+        switch Platform.ProcessSelf.sealedCopy(of: fd, name: name) {
+        case .failure(let error): return .failure(PluginRefusal("its program couldn't be read (errno \(error.code))"))
+        case .success(let copy):
+            guard copy.size == size else {
+                Sys.close(copy.fd)
+                return .failure(PluginRefusal("its program changed while it was read"))
+            }
+            return .success(copy)
+        }
     }
 
     /// Why `path` isn't root's all the way (nil: it is): absolute, no `$ORIGIN`, every folder and the file itself (and

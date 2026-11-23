@@ -165,7 +165,13 @@ named by a path isn't an absolute path that is root's all the way (every folder 
 writable by a group or others), or that names `$ORIGIN`; a script whose `#!` interpreter isn't such a path, `env`
 included; and anything that is neither. The check reads at most the program's first 64 MiB, its fields as untrusted
 (every offset and size checked against what is read, 256 program headers, 4096 dynamic entries, 4 KiB a string):
-anything out of range refuses the program, never stops the server.
+anything out of range refuses the program, never stops the server. A `#!` line may pass only flags this node knows for
+its interpreter (python3: `-I`, `-S`, `-s`, `-E`, `-B`, `-u`; any other, sh, bash and dash included: none), never a
+path or a file. The program is 64 MiB at most and the manifest 64 KiB; the program's size is recorded at the add and
+compared before it is copied at a start. Limits of the check, accepted: it finds the dynamic section by its file
+offset (a second one is refused), where the loader maps it by address (a program built to differ between the two can show the
+check one search path and the loader another); and the next server's sweep kills whatever sits in a `vs-plugin-*`
+cgroup under its own, which matters once sessions are boxed in cgroups of their own.
 
 **Its end reaches what it started.** The program is started from a thread that lives as long as the server, through
 setpriv with the parent-death signal (KILL), so the server's end ends it. Where the server's cgroup is writable (the

@@ -98,7 +98,7 @@ extension Requests {
             // Its folder (its data) goes with it, and its requests not yet settled: a program added back under its id
             // never sees them (the review of step C, L7). Only the node's own folders, never through a link (L4).
             for folder in ["plugins/\(id)", "plugin-requests/\(id)"] {
-                if let why = PluginFolders.empty(root.appendingPathComponent(folder, isDirectory: true), andItself: true) {
+                if let why = PluginFolders.empty(root.appendingPathComponent(folder, isDirectory: true), root: root, andItself: true) {
                     self.note("plugin \(id) removed: \(why), so it was left as it is")
                 }
             }
