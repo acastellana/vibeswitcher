@@ -18,7 +18,7 @@ import { t, listed, lang } from '../i18n.js';
 import { leadLines, shownLines, dialCounts, waitingCards, waitingCount, cut, shortHashes, dayOf, teamCounts, standing, taskTone, taskStep, waitsOn } from '../conversation.js';
 import { projectHref, routeHref } from '../ui.js';
 import { questionStack, pluginCard, copyLine } from './cards.js';
-import { tellLine, shellWord } from '../actions.js';
+import { tellLine, shellWord, leadLine } from '../actions.js';
 
 // The line marks: a diamond for a question (filled while open, an outline once answered), a check for a result, a
 // small dot for a status update.
@@ -70,8 +70,15 @@ export function projectView(app, { sheet }) {
   const toWho = h('span', { class: 'to' });
   const input = h('input', { class: 'say', type: 'text', placeholder: t('messageLead'), 'aria-label': t('messageLead'), autocomplete: 'off', maxlength: 4000 });
   const composer = h('form', { class: 'composer-lead', onsubmit: (event) => { event.preventDefault(); note(); } }, toWho, input);
+  // A project whose lead isn't running: how to start it again, plainly (the line, and New project's lead form).
+  const quietWords = h('p', { class: 'quiet-words' });
+  const quietLines = h('div', { class: 'quiet-lines' });
+  const quietForm = h('a', { class: 'link', href: '#/new' }, t('quietForm'));
+  const quiet = h('section', { class: 'quiet-block', hidden: true, 'aria-label': t('quietProject') },
+    h('h2', { class: 'quiet-title' }, t('quietProject')), quietWords, quietLines, h('p', { class: 'confirm-note' }, t('quietNote'), ' ', quietForm));
+  let quietDrawn = '';
   const gone = h('div', { class: 'empty-state', hidden: true }, h('h2', null, t('goneProject')), h('p', null, t('goneProjectSub')));
-  const el = h('section', { class: 'centre project-view', 'aria-label': t('lead') }, head, strip, talk, composer, gone);
+  const el = h('section', { class: 'centre project-view', 'aria-label': t('lead') }, head, strip, quiet, talk, composer, gone);
 
   // The waiting block's cards, one stack a project (it keeps what was typed in a card across updates).
   const stacks = new Map();
@@ -249,6 +256,15 @@ export function projectView(app, { sheet }) {
     setText(toWho, lead?.root ? t('toLead', { p: lastPart(root) }) : t('noLeadToTell'));
     input.disabled = !lead?.root;
     setClass(el, 'quiet', !live);
+    quiet.hidden = live || route.view !== 'lead' || !root;
+    const quietKey = JSON.stringify([root, live, lang()]);
+    if (!quiet.hidden && quietKey !== quietDrawn) {
+      quietDrawn = quietKey;
+      setText(quietWords, t('quietWords'));
+      quietLines.replaceChildren(copyLine(`${leadLine(root)} --resume`, 'the command that starts its lead again in its conversation'),
+        copyLine(leadLine(root), 'the command that starts a new lead there'));
+      quietForm.onclick = (event) => { event.preventDefault(); app.startLead?.(root); };
+    }
     if (route.view === 'roadmap') { lastProject = null; drawRoadmap(route, board); } else drawLead(route, board, lead);
     drawSheet(route, board);
   }
