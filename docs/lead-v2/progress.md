@@ -623,3 +623,11 @@
 - 2026-11-23 18:15 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: /run/user/1000/systemd/transient
 - 2026-11-23 18:38 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: /run/user/1000/systemd/transient
 - 2026-11-23 18:38 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: /run/user/1000/systemd/transient
+- 2026-11-23 18:39 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: /run/user/1000/systemd/transient
+- 2026-11-23 18:39 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: /run/user/1000/systemd/transient
+- 2026-11-23 18:40 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: /run/user/1000/systemd/transient
+- 2026-11-23 18:40 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: /run/user/1000/systemd/transient
+- 2026-11-23 18:43 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: /run/user/1000/systemd/transient
+- 2026-11-23 18:43 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: /run/user/1000/systemd/transient
+- 2026-11-23 18:44 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: /run/user/1000/systemd/transient
+- 2026-11-23 18:44 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: /run/user/1000/systemd/transient
