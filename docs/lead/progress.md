@@ -4430,3 +4430,8 @@ Proposed task 1: Find why dictations end with no text
 - 2026-11-23 15:45 Automatically (auto_advance): Started the audit of fix-the-flaky-test-24 at d96aa697 (Its review is audit). Released its worker, idle since its done report, while the audit runs: its Mac slot and memory are free, its worktree and branch stay.
 - 2026-11-23 15:51 Audit of fix-the-flaky-test-24: complete, clean
 - 2026-11-23 15:51 Audit of a-parameterized-test-s: complete, clean, round 1: 1 Nit open
+- 2026-11-23 15:54 Audit of the-weekly-scorecard: incomplete, clean, round 1: 1 Important open, 2 Nit open
+- 2026-11-23 15:54 Started a worker on the-weekly-scorecard
+- 2026-11-23 15:54 Automatically (auto_advance): Sent the-weekly-scorecard's worker the open Important findings the-weekly-scorecard:F1 from its audit at 326971a2 (in a new worker: its last one was released during the audit).
+- 2026-11-23 16:33 Merged a-parameterized-test-s: A parameterized test's end line isn't recorded as a second flaky test (in a batch: a-parameterized-test-s, fix-the-flaky-test-24 landed on one test run) (build 71a026954280)
+- 2026-11-23 16:33 Merged fix-the-flaky-test-24: Fix the flaky test aScreenshotFileIsDecodedAtTheHeightItShows() (in a batch: a-parameterized-test-s, fix-the-flaky-test-24 landed on one test run) (build 71a026954280)
