@@ -44,4 +44,4 @@ jobs:
         run: |
           seed=$(date +%s)
           echo "fuzz seed $seed (VIBESWITCHER_FUZZ_SEED=$seed reruns it)"
-          VIBESWITCHER_FUZZ_ROUNDS=100 VIBESWITCHER_FUZZ_SEED=$seed bash scripts/test.sh --filter 'ParserFuzzTests'
+          VIBESWITCHER_FUZZ_ROUNDS=100 VIBESWITCHER_FUZZ_SEED=$seed bash scripts/test.sh --filter 'ParserFuzzTests|PluginFuzzTests'
