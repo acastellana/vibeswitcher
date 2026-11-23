@@ -639,6 +639,58 @@ extension ExternalPluginsTests {
         return Data(bytes)
     }
 
+    /// A hostile ELF never traps the check (the automated review of bd001923): crafted header fields (offsets past the
+    /// end or at UInt64.max, huge counts, a string table below its segment, a string with no end), the file cut at every
+    /// length, and random bytes changed: each is refused with a reason, or (random changes) answered, and this process
+    /// lives on.
+    @Test func aHostileELFIsRefusedNeverATrap() {
+        let base = Self.elf(interpreter: "/lib64/ld-linux-x86-64.so.2", runpath: "/usr/lib")
+        #expect(PluginProgram.refusal(base) == nil)
+        func with(_ changes: [(at: Int, value: UInt64, width: Int)]) -> Data {
+            var bytes = [UInt8](base)
+            for change in changes { for i in 0..<change.width { bytes[change.at + i] = UInt8((change.value >> (8 * UInt64(i))) & 0xFF) } }
+            return Data(bytes)
+        }
+        let header = 64, ph = { (index: Int, field: Int) in 64 + index * 56 + field }
+        let crafted: [(String, Data)] = [
+            ("phoff at UInt64.max", with([(0x20, .max, 8)])),
+            ("phoff past the end", with([(0x20, UInt64(base.count), 8)])),
+            ("e_phnum huge", with([(0x38, 0xFFFF, 2)])),
+            ("e_phentsize huge", with([(0x36, 0xFFFF, 2)])),
+            ("e_phentsize too small", with([(0x36, 8, 2)])),
+            ("interpreter offset at UInt64.max", with([(ph(1, 8), .max, 8)])),
+            ("interpreter size past the end", with([(ph(1, 32), UInt64(base.count), 8)])),
+            ("dynamic offset at UInt64.max", with([(ph(2, 8), .max, 8)])),
+            ("dynamic size at UInt64.max", with([(ph(2, 32), .max, 8)])),
+            ("string table below its segment", with([(ph(0, 16), 0x10000, 8)])),
+            ("segment offset at UInt64.max", with([(ph(0, 8), .max, 8)])),
+        ]
+        // The RUNPATH entry's value (the second dynamic entry's) at UInt64.max, and an interpreter string with no end.
+        let dynamicAt = base.count - 3 * 16
+        var noEnd = [UInt8](base)
+        let interpAt = header + 3 * 56
+        if let nul = noEnd[interpAt...].firstIndex(of: 0) { noEnd[nul] = 0x41 }
+        for i in interpAt..<base.count where noEnd[i] == 0 { noEnd[i] = 0x41 }
+        let more: [(String, Data)] = [
+            ("runpath at UInt64.max", with([(dynamicAt + 16 + 8, .max, 8)])),
+            ("string table at UInt64.max", with([(dynamicAt + 8, .max, 8)])),
+            ("no terminator anywhere", Data(noEnd)),
+        ]
+        for (what, bytes) in crafted + more {
+            #expect(PluginProgram.refusal(bytes) != nil, "\(what) is refused")
+        }
+        for length in 0..<base.count {
+            #expect(PluginProgram.refusal(base.prefix(length)) != nil, "cut at \(length) is refused")
+        }
+        var generator = SystemRandomNumberGenerator()
+        for _ in 0..<3000 {
+            var bytes = [UInt8](base)
+            for _ in 0..<Int.random(in: 1...8, using: &generator) { bytes[Int.random(in: 0..<bytes.count, using: &generator)] = UInt8.random(in: 0...255, using: &generator) }
+            _ = PluginProgram.refusal(Data(bytes))
+        }
+        #expect(PluginProgram.elfBytesRead == 64 << 20)
+    }
+
     static func output(_ path: String, _ arguments: [String]) throws -> String {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: path)

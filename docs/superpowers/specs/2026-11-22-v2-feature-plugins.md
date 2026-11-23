@@ -163,7 +163,9 @@ which any session of the person's can write: it reads what is there as untrusted
 start the core refuses, with the reason shown, an ELF program whose interpreter, RUNPATH or RPATH entry, or library
 named by a path isn't an absolute path that is root's all the way (every folder and the file owned by root, not
 writable by a group or others), or that names `$ORIGIN`; a script whose `#!` interpreter isn't such a path, `env`
-included; and anything that is neither.
+included; and anything that is neither. The check reads at most the program's first 64 MiB, its fields as untrusted
+(every offset and size checked against what is read, 256 program headers, 4096 dynamic entries, 4 KiB a string):
+anything out of range refuses the program, never stops the server.
 
 **Its end reaches what it started.** The program is started from a thread that lives as long as the server, through
 setpriv with the parent-death signal (KILL), so the server's end ends it. Where the server's cgroup is writable (the

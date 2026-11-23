@@ -93,50 +93,81 @@ enum PluginProgram {
         return nil
     }
 
-    /// An ELF program's loader, search paths and named libraries, each `trusted`; 64-bit little-endian only.
+    /// The most of an ELF program the check reads: its headers, loader path, dynamic section and strings must lie in
+    /// its first 64 MiB, or it is refused (a program is read whole into its sealed copy; only this much is parsed).
+    static let elfBytesRead = 64 << 20
+    static let programHeadersAtMost = 256
+    static let dynamicEntriesAtMost = 4096
+    static let stringBytesAtMost = 4096
+
+    /// An ELF program's loader, search paths and named libraries, each `trusted`; 64-bit little-endian only. Every field
+    /// is untrusted: read as UInt64, checked against the bytes read before any conversion, never added or multiplied
+    /// unchecked; anything out of range refuses the program (the automated review of bd001923: never a trap).
     static func elfRefusal(_ bytes: Data) -> String? {
-        let data = [UInt8](bytes)
-        func u16(_ at: Int) -> Int? { at + 2 <= data.count ? Int(data[at]) | Int(data[at + 1]) << 8 : nil }
-        func u32(_ at: Int) -> Int? { at + 4 <= data.count ? (0..<4).reduce(0) { $0 | Int(data[at + $1]) << (8 * $1) } : nil }
-        func u64(_ at: Int) -> UInt64? { at + 8 <= data.count ? (0..<8).reduce(UInt64(0)) { $0 | UInt64(data[at + $1]) << (8 * UInt64($1)) } : nil }
-        func string(_ at: Int) -> String? {
-            guard at >= 0, at < data.count, let end = data[at...].firstIndex(of: 0) else { return nil }
-            return String(decoding: data[at..<end], as: UTF8.self)
+        let data = [UInt8](bytes.prefix(elfBytesRead))
+        let count = UInt64(data.count)
+        let unread = "its ELF headers don't read (out of range or past what is read of it, \(elfBytesRead >> 20) MiB)"
+        /// `at` + `width` within the bytes read: the start as an Int, or nil.
+        func within(_ at: UInt64, _ width: UInt64) -> Int? {
+            let (end, over) = at.addingReportingOverflow(width)
+            guard !over, end <= count else { return nil }
+            return Int(exactly: at)
+        }
+        func field(_ at: UInt64, _ width: Int) -> UInt64? {
+            guard let start = within(at, UInt64(width)) else { return nil }
+            return (0..<width).reduce(UInt64(0)) { $0 | UInt64(data[start + $1]) << (8 * UInt64($1)) }
+        }
+        func string(_ at: UInt64) -> String? {
+            guard let start = within(at, 1) else { return nil }
+            let end = min(data.count, start + stringBytesAtMost)
+            guard let nul = data[start..<end].firstIndex(of: 0) else { return nil }
+            return String(decoding: data[start..<nul], as: UTF8.self)
         }
         guard data.count >= 64, data[4] == 2, data[5] == 1 else { return "its program is an ELF this node doesn't read (only 64-bit little-endian)" }
-        guard let phoff = u64(0x20).map(Int.init), let size = u16(0x36), let count = u16(0x38), size >= 56, count <= 256 else {
-            return "its ELF program headers don't read"
-        }
+        guard let phoff = field(0x20, 8), let size = field(0x36, 2), let number = field(0x38, 2) else { return unread }
+        guard size >= 56, number <= UInt64(programHeadersAtMost) else { return "its ELF program headers are more or other than this node reads" }
         var loads: [(vaddr: UInt64, offset: UInt64, size: UInt64)] = []
-        var dynamic: (offset: Int, size: Int)?
-        for index in 0..<count {
-            let at = phoff + index * size
-            guard let type = u32(at), let offset = u64(at + 8), let vaddr = u64(at + 16), let filesz = u64(at + 32) else {
-                return "its ELF program headers don't read"
-            }
+        var dynamic: (offset: UInt64, size: UInt64)?
+        for index in 0..<number {
+            let (step, over1) = index.multipliedReportingOverflow(by: size)
+            let (at, over2) = phoff.addingReportingOverflow(step)
+            guard !over1, !over2, within(at, 56) != nil, let type = field(at, 4), let offset = field(at + 8, 8), let vaddr = field(at + 16, 8),
+                  let filesz = field(at + 32, 8) else { return unread }
             switch type {
             case 1: loads.append((vaddr, offset, filesz))
-            case 2: dynamic = (Int(offset), Int(filesz))
+            case 2:
+                guard dynamic == nil else { return "its ELF program has two dynamic sections" }
+                dynamic = (offset, filesz)
             case 3:
-                guard let interpreter = string(Int(offset)) else { return "its ELF interpreter doesn't read" }
+                guard within(offset, filesz) != nil, let interpreter = string(offset) else { return "its ELF interpreter doesn't read" }
                 if let why = trusted(interpreter) { return "its ELF interpreter: \(why)" }
             default: break
             }
         }
         guard let dynamic else { return nil }
+        guard within(dynamic.offset, dynamic.size) != nil else { return unread }
         var entries: [(tag: UInt64, value: UInt64)] = []
         var at = dynamic.offset
-        while at + 16 <= min(data.count, dynamic.offset + dynamic.size), let tag = u64(at), let value = u64(at + 8), tag != 0 {
+        let end = dynamic.offset + dynamic.size
+        while at + 16 <= end {
+            guard entries.count < dynamicEntriesAtMost else { return "its ELF dynamic section has over \(dynamicEntriesAtMost) entries" }
+            guard let tag = field(at, 8), let value = field(at + 8, 8) else { return unread }
+            if tag == 0 { break }
             entries.append((tag, value))
             at += 16
         }
+        let named = entries.filter { [1, 15, 29].contains($0.tag) }
+        guard !named.isEmpty else { return nil }
+        // The string table is an address: the loaded segment holding it gives its place in the file.
         guard let table = entries.first(where: { $0.tag == 5 })?.value,
-              let load = loads.first(where: { table >= $0.vaddr && table < $0.vaddr + $0.size }) else {
-            return entries.contains { [1, 15, 29].contains($0.tag) } ? "its ELF string table doesn't read" : nil
+              let load = loads.first(where: { table >= $0.vaddr && table - $0.vaddr < $0.size }) else {
+            return "its ELF string table doesn't read"
         }
-        let base = Int(table - load.vaddr + load.offset)
-        for entry in entries where [1, 15, 29].contains(entry.tag) {
-            guard let text = string(base + Int(entry.value)) else { return "its ELF dynamic section doesn't read" }
+        let (base, over) = (table - load.vaddr).addingReportingOverflow(load.offset)
+        guard !over, within(base, 1) != nil else { return "its ELF string table doesn't read" }
+        for entry in named {
+            let (place, over) = base.addingReportingOverflow(entry.value)
+            guard !over, let text = string(place) else { return "its ELF dynamic section doesn't read" }
             if entry.tag == 1 {
                 // A library by name is found in root's folders; by a path, that path must be root's.
                 if text.contains("/"), let why = trusted(text) { return "a library it names: \(why)" }
