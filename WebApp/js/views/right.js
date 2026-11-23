@@ -10,7 +10,7 @@ import { h, setText } from '../dom.js';
 import { clock, moment, tilde, lastPart, taskLine } from '../words.js';
 import { t, listed, lang, nodeWords } from '../i18n.js';
 import { standing, waitsOn, cut, shortHashes } from '../conversation.js';
-import { routeHref, sessionHref } from '../ui.js';
+import { routeHref, sessionHref, projectHref } from '../ui.js';
 import { settingsHref } from './settings.js';
 import { stepBar } from './project.js';
 import { filesLine } from './records.js';
@@ -41,6 +41,8 @@ export function rightColumn(app) {
       else if (who.who === 'tasks') parts.push(fact(t('waitsOnTasks', { list: '' }).trim(), listed(who.titles)));
       else if (who.who === 'lead') parts.push(fact(t('waitsOnLead'), ''));
     }
+    const goal = task.goal ? board?.goals?.find((one) => one.id === task.goal) : null;
+    if (goal) parts.push(fact(t('goal'), h('a', { class: 'link', href: projectHref(route.id, { view: 'roadmap', open: [goal.id] }) }, goal.title)));
     parts.push(fact(t('since'), task.startedAt ? `${moment(task.startedAt)} · ${t('attempt', { n: task.attempts || 1 })}` : t('notStarted')));
     const target = sessionOf(task);
     parts.push(target && store.state.sessions.has(target)

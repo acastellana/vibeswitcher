@@ -8,7 +8,7 @@ import { readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { leadLines, shownLines, dialCounts, questionHead, cut, shortHashes, firstSentence, taskStep, taskTone, teamCounts, standing, waitsOn,
-  waitingCards, projectsOf, firstProject, lineKey, waitingPlaces, nextPlace } from '../js/conversation.js';
+  waitingCards, projectsOf, firstProject, lineKey, waitingPlaces, nextPlace, goalRows } from '../js/conversation.js';
 import { parseRoute, projectHref, routeHref, sessionHref, boardHref } from '../js/ui.js';
 import { t, TABLES, pickLanguage, setLanguage, listed } from '../js/i18n.js';
 import { tellLine } from '../js/actions.js';
@@ -167,4 +167,17 @@ test('what waits, place by place, and the next place from the one shown: project
   assert.deepEqual(nextPlace(places, { name: 'session', id: 'o1' }), places[2]);
   assert.deepEqual(nextPlace(places, { name: 'settings' }), places[0], 'from elsewhere: the first');
   assert.equal(nextPlace([], { name: 'home' }), null);
+});
+
+test('the roadmap with goals: a row per open goal in the lead’s order, Unsorted after, the done goals last, each with its tasks’ counts', () => {
+  const now = Date.parse('2026-11-17T09:30:00.000Z');
+  const fresh = structuredClone(vectors.board[1].result.boards[0]);
+  const rows = goalRows(fresh, now);
+  assert.deepEqual(rows.open.map((row) => [row.goal.id, row.tasks.map((task) => task.slug), row.counts]),
+    [['launch', ['onboarding-steps', 'pricing-copy'], { motion: 1, blocked: 1, queued: 0, merged: 0 }]], 'in motion first, then blocked');
+  assert.deepEqual(rows.unsorted.tasks.map((task) => task.slug), ['sidebar-pass', 'cache-assets']);
+  assert.deepEqual(rows.done.map((row) => [row.goal.id, row.tasks.map((task) => task.slug)]), [['uploads', ['upload-retry']]]);
+  fresh.tasks[0].goal = 'gone';
+  assert.ok(goalRows(fresh, now).unsorted.tasks.some((task) => task.slug === fresh.tasks[0].slug), 'a goal the board doesn’t list: Unsorted');
+  assert.deepEqual(goalRows({ tasks: [] }, now), { open: [], unsorted: null, done: [] });
 });

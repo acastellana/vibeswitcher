@@ -96,7 +96,7 @@ async function run() {
     let shell = null;
     for (const href of sessions.slice(0, 20)) {
       await page.go(href);
-      shell = await page.until(`(() => { const c = document.querySelector('.shell-command, .plugin-body'); return c ? c.closest('article').innerText.slice(0, 160) : null; })()`, 1200);
+      shell = await page.until(`(() => { const c = document.querySelector('.plugin-body'); return c ? c.closest('article').innerText.slice(0, 160) : null; })()`, 1200);
       if (shell) { await page.shot('shell-card'); break; }
     }
     const shellText = shell || '';
