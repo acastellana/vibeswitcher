@@ -73,7 +73,9 @@ enum StopCommand {
                 }
             })
         switch StopSequence(steps: steps).run() {
-        case .success: return 0
+        case .success:
+            Say.out("start again with: \(StartCheck.startLine(facts: context.facts()))")
+            return 0
         case .failure(let refused) where refused.exitCode == 77: return Say.refused(refused.text)
         case .failure(let refused):
             Say.err("vibeswitcher: \(ConfigSeal.inert(refused.text, limit: .max))")

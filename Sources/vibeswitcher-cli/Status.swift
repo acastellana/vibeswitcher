@@ -106,6 +106,7 @@ enum StatusCommand {
             var report = raw.object ?? [:]
             report["format"] = .int(format)
             report["facts"] = .array((facts.lines + modeLines).map(NodeWire.Value.string))
+            report["startLine"] = .string(StartCheck.startLine(facts: facts))
             report["journal"] = .array(journal.map(NodeWire.Value.string))
             let data = NodeWire.printable(NodeWire.line(NodeWire.Value.object(report)))
             Platform.Stdio.output(data)
@@ -121,6 +122,7 @@ enum StatusCommand {
                    + ", build \(notes?.build.map { inert($0) } ?? "unknown")")
         for path in notes?.replacedPaths ?? [] { out.append("the host took back its path \(inert(path))") }
         out += facts.lines + modeLines
+        out.append("after a stop, start it with: \(StartCheck.startLine(facts: facts))")
         out.append("voice rule: \(inert(result.rule?.says))")
         if let line = webLine(result.web) { out.append(line) }
         if let line = tailnetLine(result.webTailnet) { out.append(line) }
