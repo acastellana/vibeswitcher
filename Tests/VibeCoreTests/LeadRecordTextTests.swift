@@ -69,7 +69,14 @@ struct LeadRecordTextTests: LeadTeamFixture {
         let root = try repo()
         let lead = try lead(root, FakeRuntime())
         #expect(!lead.call("add_task", ["title": "Add b", "goal": "b exists", "acceptance": ["b.txt exists"]]).isError)
+        #expect(!lead.call("add_goal", ["title": "Ship it", "done": "It ships"]).isError)
         let calls: [(String, (String) -> [String: Any])] = [
+            // A project's goals go on the board and into progress.md (`LeadGoals`).
+            ("add_goal", { ["title": "Ship \($0)", "done": "d"] }),
+            ("add_goal", { ["title": "Ship", "done": "when \($0) works"] }),
+            ("update_goal", { ["goal": "ship-it", "title": "Ship \($0)"] }),
+            ("update_goal", { ["goal": "ship-it", "done": "when \($0) works"] }),
+            ("order_goals", { ["goals": ["ship-it", $0]] }),
             ("record_decision", { ["decision": "Keep \($0)", "why": "w"] }),
             ("dismiss_finding", { ["task": "add-b", "finding": "F1", "reason": "it was \($0)'s"] }),
             ("record_incident", { ["what": "Broke in \($0)", "evidence": "the log"] }),
