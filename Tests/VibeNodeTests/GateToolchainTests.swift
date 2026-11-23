@@ -164,14 +164,29 @@ final class GatePlace: @unchecked Sendable {
         return (ran.stopped == nil, output)
     }
 
-    /// Whether `output` says it ran in a branch run's box: the box's own hostname (`version` and the other commands here
-    /// say theirs as `hostname=`).
-    static func boxed(_ output: String) -> Bool {
-        output.split(separator: "\n").contains { $0.trimmingCharacters(in: .whitespaces) == "hostname=" + SandboxPlanner.hostname }
+    /// What a command here says last: its hostname and its pid namespace, which tell whether it ran in a box (`boxed`).
+    static let whereItRan = "echo \"hostname=$(cat /proc/sys/kernel/hostname 2>/dev/null)\"; echo \"pidns=$(readlink /proc/self/ns/pid 2>/dev/null)\""
+
+    /// This process's pid namespace, as `whereItRan` says a run's ("" where there is no /proc).
+    static let ownNamespace = (try? FileManager.default.destinationOfSymbolicLink(atPath: "/proc/self/ns/pid")) ?? ""
+
+    /// The value of `name=` in `output`'s lines; nil when no line says it.
+    static func said(_ name: String, in output: String) -> String? {
+        output.split(separator: "\n").lazy.map { $0.trimmingCharacters(in: .whitespaces) }.first { $0.hasPrefix(name + "=") }
+            .map { String($0.dropFirst(name.count + 1)) }
     }
 
-    /// The command that asks the compiler for its version, then says which box it ran in.
-    static let version = "swift --version; status=$?; echo \"hostname=$(cat /proc/sys/kernel/hostname 2>/dev/null)\"; exit $status"
+    /// Whether `output` (a run that said `whereItRan`) ran in a box of its own: the box's hostname, and a pid namespace other
+    /// than this process's (this test may itself run in a branch run's box, whose hostname is the same).
+    static func boxed(_ output: String) -> Bool {
+        said("hostname", in: output) == SandboxPlanner.hostname && (said("pidns", in: output).map { !$0.isEmpty && $0 != ownNamespace } ?? false)
+    }
+
+    /// Whether `output` (a run that said `whereItRan`) ran in this process's own pid namespace: no box of its own.
+    static func unboxed(_ output: String) -> Bool { said("pidns", in: output) == ownNamespace }
+
+    /// The command that asks the compiler for its version, then says where it ran.
+    static let version = "swift --version; status=$?; \(whereItRan); exit $status"
 }
 
 struct GateToolchainTests {
@@ -230,7 +245,7 @@ struct GateToolchainTests {
         let place = try GatePlace(scratch)
         let project = try place.project("unboxed")
         let run = await place.run("unboxed", GatePlace.version, in: project, policy: try ProjectToolchain().accepted(), boxed: false)
-        #expect(!GatePlace.boxed(run.output), "\(run.output)")
+        #expect(GatePlace.unboxed(run.output), "it ran in a box of its own: \(run.output)")
         #expect(run.passed && run.output.contains("Swift version"), "\(run.output)")
     }
 }
@@ -275,7 +290,10 @@ struct GateToolchainBoxTests {
         let fetched = packageFolder.appendingPathComponent(".build/repositories").path
         let cache = place.account + "/.cache/org.swift.swiftpm"
         try FileManager.default.createDirectory(atPath: cache, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
-        let linked = Shell.run(executable: "/bin/sh", args: ["-c", "cp -al \"$0\" \"$1\" || cp -R \"$0\" \"$1\"", fetched, cache + "/repositories"],
+        // Linked where it can be; copied where it can't (another mount: inside a branch run's box, its worktree and its
+        // TMPDIR are), after taking away what a link that failed part way made.
+        let linked = Shell.run(executable: "/bin/sh", args: ["-c", "cp -al \"$0\" \"$1\" 2>/dev/null || { rm -rf \"$1\" && cp -R \"$0\" \"$1\"; }",
+                                                             fetched, cache + "/repositories"],
                                in: place.base, timeout: 120)
         try #require(linked.ok, "this checkout's build left no packages to stand for the account's cache: \(linked.output) \(linked.error)")
         let policy = try ProjectToolchain().accepted()
@@ -290,7 +308,7 @@ struct GateToolchainBoxTests {
                 mkdir -p "$HOME/test-home" && export HOME="$HOME/test-home"
                 swift package resolve $(swiftpm_options)
                 status=$?
-                echo "hostname=$(cat /proc/sys/kernel/hostname)"
+                \(GatePlace.whereItRan)
                 exit $status
                 """
             return "bash -c " + FakeClaude.quoted(script)
