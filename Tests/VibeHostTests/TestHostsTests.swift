@@ -210,11 +210,14 @@ import Testing
         await pause(4)
         #expect(host.isRunning)
         client.close()
-        let gone = Date()
+        // Timed to the host's decision (its log line), on the steady clock: not to `isRunning`, which turns only once
+        // Foundation has reaped the host (late under load), nor on the wall clock (this Linux machine's steps by
+        // seconds). The decision: the hangup seen, then 2 s idle, judged at a tick every 0.67 s.
+        let gone = Platform.Clock.steadyDate()
+        let idled = "host: idle 2 s with no session and no app, exiting"
+        try #require(await eventually(timeout: 10) { ((try? String(contentsOfFile: log, encoding: .utf8)) ?? "").contains(idled) })
+        #expect(Platform.Clock.steadyDate().timeIntervalSince(gone) < 6)
         try #require(await eventually(timeout: 10) { !host.isRunning })
-        #expect(Date().timeIntervalSince(gone) < 6)
         #expect(host.terminationReason == .exit && host.terminationStatus == 0)
-        let lines = (try? String(contentsOfFile: log, encoding: .utf8)) ?? ""
-        #expect(lines.contains("host: idle 2 s with no session and no app, exiting"))
     }
 }

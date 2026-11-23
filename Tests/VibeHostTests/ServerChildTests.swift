@@ -409,10 +409,11 @@ final class ServerChildHost {
         #expect(host.server.queue.sync { host.server.serverChild == nil })
         // Reaped by the host (not left a zombie of this process, which `kill` would still find).
         #expect(kill(child, 0) != 0 && errno == ESRCH, "the carried child \(child) outlived its stopped host")
-        // Its connector closed: the other end reads its end.
+        // Its connector closed: the other end reads its end. Waited for: the host closes it in its read source's cancel
+        // handler, which runs after the stop's turn (a poll that didn't wait failed 1 run in 5 under load).
         var byte: UInt8 = 0
         var waiting = pollfd(fd: othersEnd, events: Int16(POLLIN), revents: 0)
-        #expect(poll(&waiting, 1, 0) == 1 && read(othersEnd, &byte, 1) == 0, "the carried connector is still open")
+        #expect(poll(&waiting, 1, Int32(hangGuard * 1000)) == 1 && read(othersEnd, &byte, 1) == 0, "the carried connector is still open")
 
         let (late, lateOthersEnd) = try #require(Platform.Sockets.pair(type: Platform.Sockets.seqpacket))
         defer {
