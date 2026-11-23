@@ -595,3 +595,8 @@
 - 2026-11-23 15:41 Automatically (auto_advance): Cleaned up turn-this-incident-into-3; ended pid 2545338 (Worker: The suite proves the gate can build this project: the toolchain that built the tests runs in a branch run's box) (freed 1.9 GB of build output and temporary folders). It stays done.
 - 2026-11-23 15:49 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: ~/.claude/shell-snapshots
 - 2026-11-23 15:49 Merged hookscommandtests-hooks: HooksCommandTests: `hooks install` takes minutes in a full run and is killed at its 120 s limit (no audit: review none) (build 63411f509118)
+- 2026-11-23 15:49 Automatically (auto_advance): Merged hookscommandtests-hooks (HooksCommandTests: `hooks install` takes minutes in a full run and is killed at its 120 s limit) into v2 at 40fd2803, review none: on its worker's done report on 8fbabd7e and the full test run.
+- 2026-11-23 15:49 Automatically (auto_advance): Cleaned up hookscommandtests-hooks; ended pid 2890586 (Worker: HooksCommandTests: `hooks install` takes minutes in a full run and is killed at its 120 s limit) (freed 1.9 GB of build output and temporary folders). It stays done.
+- 2026-11-23 15:51 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: ~/.claude/shell-snapshots
+- 2026-11-23 15:51 Started a worker on tests-that-write-a
+- 2026-11-23 15:51 Automatically (auto_advance): Started a worker on tests-that-write-a (Tests that write a program and run it no longer fail with "Text file busy"), its after tasks done (hookscommandtests-hooks).
