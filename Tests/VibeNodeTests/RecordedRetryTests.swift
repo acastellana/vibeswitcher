@@ -144,6 +144,44 @@ struct RecordedRetryTests {
         #expect(other.result == nil)
     }
 
+    /// A web.open whose reply was lost (asked again by its action id): its pairing code, still untaken, is dropped (no page
+    /// can pair with it), and the user told to run `vibeswitcher web` again; one taken already is said so, with `--revoke`.
+    @Test func aLostLinkIsCancelledAndANewOneAskedFor() async throws {
+        let world = try await CardWorld.make(scratch)
+        defer { world.stop() }
+        let access = WebAccess(tokens: WebTokens(root: scratch.url("web-root")))
+        world.queue.sync { world.requests.web = access }
+        func opened(_ code: String) -> (NodeWire.Request, String) {
+            let action = UUID().uuidString.lowercased()
+            let request = NodeWire.Request(id: "open", kind: "web.open", args: [:], action: action)
+            let reply = NodeWire.Reply(re: "open", result: .object(["url": .string(WebAccess.url(port: 1, code: code)), "expiresIn": .int(120)]))
+            world.queue.sync { world.requests.keep(reply, for: action, request: request) }
+            return (request, action)
+        }
+        let lost = access.openCode(now: Date())
+        let (request, action) = opened(lost)
+        let again = world.queue.sync { world.requests.kept(request, action: action) }
+        #expect(again?.error?.message.contains("that link is cancelled now, unused") == true && again?.error?.message.contains("run `vibeswitcher web` again") == true,
+                "\(String(describing: again))")
+        #expect(access.admit(["pair": .string(lost)]) == nil, "the lost code still pairs")
+        #expect(world.queue.sync { world.requests.kept(request, action: action)?.error?.message } == again?.error?.message, "said the same again")
+        // One taken before the retry: not cancelled (it was used), said so.
+        let used = access.openCode(now: Date())
+        let (usedRequest, usedAction) = opened(used)
+        #expect(access.admit(["pair": .string(used)]) != nil)
+        let told = world.queue.sync { world.requests.kept(usedRequest, action: usedAction) }
+        #expect(told?.error?.message.contains("was taken or ran out") == true && told?.error?.message.contains("--revoke") == true, "\(String(describing: told))")
+    }
+
+    /// After a server's end, the record answers: a web.open's link and an answer's page ended with that server.
+    @Test func aDoneLinkOrPageAfterAServersEndSaysWhatToDo() {
+        let done = LeadVaultV2.UserAction.Outcome(done: true, note: nil, at: 1_800_000_000)
+        let web = Requests.answer(.init(id: "w", kind: "web.open"), action: "a", outcome: done)
+        #expect(web.error?.message.contains("run `vibeswitcher web` again") == true, "\(web)")
+        let answer = Requests.answer(.init(id: "p", kind: "answer"), action: "b", outcome: done)
+        #expect(answer.error?.message.contains("ask the agent to file the request again") == true, "\(answer)")
+    }
+
     /// web.open's reply (its pairing link) isn't kept in memory past its answer: a retry by action id is told it was done
     /// and that its link went to the terminal that asked, never given the link; a kind whose result is kept keeps it.
     @Test func aLinkIsNotKeptInMemory() async throws {
@@ -157,7 +195,7 @@ struct RecordedRetryTests {
             return world.requests.kept(NodeWire.Request(id: "again", kind: "web.open", args: [:], action: action), action: action)
         }
         #expect(kept.map { !"\($0)".contains("SECRET-CODE") } == true, "\(String(describing: kept))")
-        #expect(kept?.error?.message.contains("its link went to the terminal that asked first") == true, "\(String(describing: kept))")
+        #expect(kept?.error?.message.contains("run `vibeswitcher web` again") == true, "\(String(describing: kept))")
         #expect(world.queue.sync { world.requests.replies[action].map { !"\($0)".contains("SECRET-CODE") } } == true)
         let audit = UUID().uuidString.lowercased()
         let audited = NodeWire.Request(id: "a", kind: "prompt-audit", args: [:], action: audit)

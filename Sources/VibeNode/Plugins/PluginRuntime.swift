@@ -645,6 +645,20 @@ final class PluginRuntime {
         }
     }
 
+    /// The page open for card `id`'s request, stopped now, unanswered: its address went in a reply that was lost (the
+    /// command line asked again by its action id, `Requests.kept`), so nobody can answer it; it ends as its life's end
+    /// would (the plugin's `ended`: the card closes, its asker is told), and the node's one page slot is freed. True when
+    /// it was open. Once-only stands: nothing is performed again. On `queue`.
+    func stopPage(card id: String) -> Bool {
+        EngineWatch.assertOn(queue)
+        guard let shown = cards.cards[id]?.plugin, let slot = page, slot.opened,
+              slot.key == PluginKey(plugin: shown.plugin, request: shown.request).name else { return false }
+        pageLines[slot.key] = nil
+        note("plugin \(shown.plugin): card \(id)'s page stopped unanswered: its address was lost with its reply")
+        slot.page.stop(taken: false)
+        return true
+    }
+
     /// The lines that give the answering terminal a page's address, taken once.
     func pageSay(_ key: String) -> [NodeWire.Value]? {
         guard let line = pageLines.removeValue(forKey: key) else { return nil }

@@ -235,7 +235,13 @@ Everything in "What stays the core's" holds, and the core does more of the work 
   The page is served once: that one load gets a second secret (an HttpOnly, SameSite=Strict cookie) the answer
   needs, so a process that learns the address later can't answer; one answer socket at a time, one answer in flight;
   a refused upgrade costs the person no try, an answer over the size does. The address is printed by the core in the
-  answering terminal's reply only (a retry of the same action is told where it went, not given it); only an acting
+  answering terminal's reply only (a retry of the same action is told where it went, not given it). A retry by action
+  id means that reply was lost on its way (the command line asks again only when it got none), so the address never
+  reached anyone: the core stops the page at once, unanswered, as its life's end would (the card closes, the agent is
+  told it got no answer and to ask before asking again), frees the page slot, and tells the user the page is gone and
+  to ask the agent to file the request again. The card is never put back to waiting: one acting answer per request,
+  and a second `perform` would break once-only. A retry after a server's end is answered from the vault's record, and
+  says the page ended with that server. Only an acting
   answer opens a page; a plugin turned off or removed takes its page with it; the node's one page slot is freed only
   once the host has let the port go, a failed start included.
   Its limits, accepted: after a server death the host holds the page's port until the next page or a release; any

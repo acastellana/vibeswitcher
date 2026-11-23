@@ -118,6 +118,19 @@ public final class WebAccess: WebGate, @unchecked Sendable {
         return code
     }
 
+    /// The code in `url` (its `#pair=`) dropped while it is still alive and untaken: true when it was (no page can pair
+    /// with it now), false when it was taken already, or ran out. A `web.open` whose reply was lost (`Requests.kept`).
+    public func dropCode(inURL url: String) -> Bool {
+        guard let range = url.range(of: "#pair=") else { return false }
+        let digest = WebTokens.digest(String(url[range.upperBound...]))
+        let at = now()
+        return lock.withLock {
+            let before = codes.count
+            codes.removeAll { $0.expiresAt > at && WebTokens.same($0.digest, digest) }
+            return codes.count < before
+        }
+    }
+
     /// `web.open`: the listener bound (`listen`), then a code made, and the address to print. Refused, with no code
     /// made, when the port can't be had or the tokens' file is a newer build's.
     public func open() -> Result<Opened, WebTokens.Refusal> {

@@ -883,7 +883,9 @@ extension PluginsTests {
     }
 
     /// L1: the page's address is the core's to print, in the answering terminal's reply: not to the plugin, on the card,
-    /// in the log, or in the reply a retry of the same action gets.
+    /// in the log, or in the reply a retry of the same action gets. A retry means that reply was lost, so the page is
+    /// stopped then, unanswered (its plugin hears it ended untaken), the page slot freed, and the user told to have the
+    /// agent file again; a second retry is told the same, and nothing is performed again.
     @Test func aPagesAddressGoesOnlyToTheAnsweringTerminal() async throws {
         let notes = Locked<[String]>([])
         let probe = Probe(defaultOn: true)
@@ -898,7 +900,11 @@ extension PluginsTests {
         let address = try #require(Self.pageAddress(ran), "\(ran)")
         let token = try #require(URL(string: address)?.pathComponents.dropFirst().first)
         let again = try #require(await world.answer(card, "run", action: action))
-        #expect(Self.pageAddress(again) == nil && "\(again)".contains("went to the terminal that asked first"), "\(again)")
+        #expect(Self.pageAddress(again) == nil && "\(again)".contains("the page is stopped now, unanswered") && "\(again)".contains("ask the agent to file it again"),
+                "\(again)")
+        #expect(await eventually(timeout: 30) { probe.pageEnded.value == false && !world.queue.sync { world.engine.pluginRuntime.pageOpen } })
+        let third = try #require(await world.answer(card, "run", action: action))
+        #expect(third.error?.message == again.error?.message, "\(third)")
         let shown = try #require(world.card(card.id))
         #expect(!"\(shown)".contains(token), "not on the card")
         #expect(!notes.value.contains { $0.contains(token) }, "not in the log")

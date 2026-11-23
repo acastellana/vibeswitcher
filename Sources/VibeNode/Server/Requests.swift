@@ -80,6 +80,10 @@ public final class Requests: @unchecked Sendable {
     /// Each kept reply's request's arguments, digested (`argsDigest`): a retry is answered from memory only when its own
     /// match.
     private var replyDigests: [String: String] = [:]
+    /// What a kept reply gave that a lost reply leaves behind, by action id (`lostWith`): a `web.open`'s link, an
+    /// answer's plugin page (its card). Resolved at the first retry from memory.
+    private var leftBehind: [String: LeftBehind] = [:]
+    enum LeftBehind { case link(String, tailnet: Bool), page(card: String) }
     private var replyOrder: [String] = []
     /// The recorded actions being done now (recorded, their reply not yet given), each with its request's arguments'
     /// digest. On `queue`.
@@ -610,6 +614,10 @@ public final class Requests: @unchecked Sendable {
         let digest = Self.argsDigest(request)
         if var kept = replies[action] {
             guard replyDigests[action] == digest else { return .init(re: request.id, error: .init(.refused, Self.otherArguments(action: action))) }
+            if let left = leftBehind.removeValue(forKey: action) {
+                kept = .init(re: kept.re, error: .init(.refused, lostWith(left, action: action)))
+                replies[action] = kept
+            }
             kept.re = request.id
             return kept
         }
@@ -639,11 +647,21 @@ public final class Requests: @unchecked Sendable {
             if let note = outcome.note, let result = try? JSONDecoder().decode(NodeWire.Value.self, from: Data(note.utf8)) {
                 return .init(re: request.id, result: result)
             }
-            return .init(re: request.id, error: .init(.refused, "action \(action) was done at \(when) (its answer isn't kept): not done again; `vibeswitcher status` shows what is now"))
+            return .init(re: request.id, error: .init(.refused, "action \(action) was done at \(when) (its answer isn't kept): not done again; " + afterRestart(request.kind)))
         }
         let code = outcome.code.flatMap(NodeWire.Code.init(rawValue:)) ?? .refused
         let again = code == .gone ? "what it named is gone, so a new attempt can't do it" : "nothing was done, and running the command again is a new attempt"
         return .init(re: request.id, error: .init(code, "action \(action) failed at \(when): \(ConfigSeal.inert(outcome.note ?? "no reason given", limit: .max)). Not done again: \(again)"))
+    }
+
+    /// What to do about a done action whose answer went with a server that ended (the retry is answered from the vault's
+    /// record): a link or a plugin's page lived in that server's memory and ended with it.
+    static func afterRestart(_ kind: String) -> String {
+        switch kind {
+        case "web.open": return "its link ended with the server that made it: run `vibeswitcher web` again for a new one"
+        case "answer": return "a plugin page it opened ended with its server, unanswered: ask the agent to file the request again"
+        default: return "`vibeswitcher status` shows what is now"
+        }
     }
 
     /// What a retry of a recorded action whose reply isn't kept, and whose record says nothing more, is told.
@@ -687,6 +705,11 @@ public final class Requests: @unchecked Sendable {
         var reply = reply
         if reply.ok, Self.recorded.contains(request.kind), Self.retryRules[request.kind]?.keepsResult != true {
             let link = request.kind == "web.open" || reply.result?["once"]?.bool == true
+            if request.kind == "web.open", let url = reply.result?["url"]?.string {
+                leftBehind[action] = .link(url, tailnet: request.args?["tailnet"]?.bool == true)
+            } else if reply.result?["once"]?.bool == true, let card = request.args?["card"]?.string {
+                leftBehind[action] = .page(card: card)
+            }
             reply = .init(re: reply.re, error: .init(.refused, Self.doneNotKept(action: action, link: link)))
         }
         replies[action] = reply
@@ -696,6 +719,34 @@ public final class Requests: @unchecked Sendable {
             let gone = replyOrder.removeFirst()
             replies[gone] = nil
             replyDigests[gone] = nil
+            leftBehind[gone] = nil
+        }
+    }
+
+    /// A retry of a done action asked from memory means its reply didn't reach the command line: what that reply gave is
+    /// made true for it. A `web.open`'s pairing code is dropped while untaken (a new `vibeswitcher web` makes another);
+    /// a plugin page opened by an answer is stopped unanswered (`PluginRuntime.stopPage`), its request closed, and the
+    /// agent asked to file again. Each said, with what to do. On `queue`.
+    func lostWith(_ left: LeftBehind, action: String) -> String {
+        switch left {
+        case .link(_, tailnet: true):
+            return "action \(action) was done, but its link didn't reach you (its reply was lost): it isn't given again, and it pairs once and runs out "
+                + "within \(Int(WebAccess.codeLife / 60)) minutes; run `vibeswitcher web --tailnet` again for a new one"
+        case .link(let url, tailnet: false):
+            if web?.dropCode(inURL: url) == true {
+                note("web.open (action \(action)): its reply was lost, so its pairing code is dropped, unused")
+                return "action \(action) was done, but its link didn't reach you (its reply was lost): that link is cancelled now, unused; "
+                    + "run `vibeswitcher web` again for a new one"
+            }
+            return "action \(action) was done, and its link was taken or ran out (a link pairs once, within \(Int(WebAccess.codeLife / 60)) minutes): "
+                + "run `vibeswitcher web` again for a new one; `vibeswitcher web --revoke` ends every page if one you don't know paired"
+        case .page(let card):
+            if engine?.pluginRuntime.stopPage(card: card) == true {
+                return "action \(action) was done: its plugin page opened, but its address didn't reach you (its reply was lost), and it is gone for good; "
+                    + "the page is stopped now, unanswered, and its request closed: ask the agent to file it again"
+            }
+            return "action \(action) was done: its plugin page's address went to the terminal that answered first and isn't given again; the page has "
+                + "ended, and card \(card) says how (`vibeswitcher questions`)"
         }
     }
 
