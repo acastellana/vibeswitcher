@@ -71,6 +71,16 @@ struct ExternalPluginsTests {
         _ = await eventually(timeout: 60) { done.value }
     }
 
+    /// Looked at until `done` holds (or `timeout` passes), waiting on it between looks: a look already under way (a
+    /// program starting) may answer before the request is asked about.
+    private func lookUntil(_ world: CardWorld, timeout: TimeInterval = 30, _ done: @escaping () -> Bool) async {
+        let until = MacTime.real.awake() + timeout
+        while !done(), MacTime.real.awake() < until {
+            await look(world)
+            _ = await eventually(timeout: 0.5) { done() }
+        }
+    }
+
     private func cards(_ world: CardWorld) -> [CardStore.Card] {
         world.queue.sync { world.engine.cards.cards.values.filter { $0.plugin?.plugin == "probe" }.sorted { $0.at < $1.at } }
     }
@@ -116,7 +126,7 @@ struct ExternalPluginsTests {
 
         let filed = try await ask(world, ["normal", "deep"])
         #expect(filed.output.status == 0 && filed.output.output.contains("Filed Probe request"), "\(filed.output)")
-        await look(world)
+        await lookUntil(world) { !self.cards(world).isEmpty }
         let card = try #require(cards(world).first)
         #expect(WireSchema.check(card.value, as: "card", strict: true) == nil, "\(card.value)")
         let lines = CardText.lines(card.value)
@@ -141,7 +151,7 @@ struct ExternalPluginsTests {
         defer { world.stop() }
         _ = try await added(world)
         _ = try await ask(world, ["page"])
-        await look(world)
+        await lookUntil(world) { !self.cards(world).isEmpty }
         let card = try #require(cards(world).first)
         let opened = try #require(await world.answer(card, "run"))
         let address = try #require(opened.result?["say"]?.array?.last?.string?.trimmingCharacters(in: .whitespaces), "\(opened)")
@@ -167,7 +177,7 @@ struct ExternalPluginsTests {
         defer { world.stop() }
         _ = try await added(world)
         _ = try await ask(world, ["page"])
-        await look(world)
+        await lookUntil(world) { !self.cards(world).isEmpty }
         let card = try #require(cards(world).first)
         let plugin = try #require(probe(world))
         let take = Locked<((Data, @escaping (Bool) -> Void) -> Void)?>(nil)
@@ -214,10 +224,10 @@ struct ExternalPluginsTests {
         for mode in ["wrong-id", "out-of-order", "oversize"] {
             _ = try await ask(world, ["normal"])
             // A look that began as it was turned on may have read the folder before: look until its card is up.
-            for _ in 0..<5 where !cards(world).contains(where: \.isOpen) { await look(world) }
+            await lookUntil(world) { self.cards(world).contains(where: \.isOpen) }
             #expect(cards(world).contains { $0.isOpen }, "\(mode): a card open before: \(notes.value.suffix(8))")
             _ = try await ask(world, [mode])
-            await look(world)
+            await lookUntil(world) { self.probe(world)?.ended != nil }
             #expect(await eventually(timeout: 30) { self.probe(world)?.ended != nil }, "\(mode): its program ended: \(notes.value.suffix(12))")
             #expect(cards(world).allSatisfy { !$0.isOpen }, "\(mode): its open cards withdrawn")
             let listed = try #require(await world.ask("plugin.list", action: nil))
@@ -227,7 +237,7 @@ struct ExternalPluginsTests {
             #expect(probe(world)?.ended == nil)
         }
         _ = try await ask(world, ["hang"])
-        await look(world)
+        await lookUntil(world, timeout: 60) { self.probe(world)?.ended != nil }
         #expect(await eventually(timeout: 60) { self.probe(world)?.ended?.contains("didn't answer") == true }, "a hang ends it after 10 s")
     }
 
@@ -240,10 +250,10 @@ struct ExternalPluginsTests {
         defer { world.stop() }
         _ = try await added(world)
         _ = try await ask(world, ["normal"])
-        for _ in 0..<5 where !cards(world).contains(where: \.isOpen) { await look(world) }
+        await lookUntil(world) { self.cards(world).contains(where: \.isOpen) }
         let open = try #require(cards(world).first { $0.isOpen }, "\(notes.value.suffix(8))")
         _ = try await ask(world, ["wrong-id"])
-        await look(world)
+        await lookUntil(world) { self.probe(world)?.ended != nil }
         #expect(await eventually(timeout: 30) { self.probe(world)?.ended != nil })
         let withdrawn = try #require(world.card(open.id))
         #expect(withdrawn.closed?.contains("program ended") == true, "\(String(describing: withdrawn.closed))")
@@ -266,7 +276,7 @@ struct ExternalPluginsTests {
         #expect(probe(world)?.ended == nil)
         let filed = try await ask(world, ["normal"])
         #expect(filed.output.status == 0, "\(filed.output)")
-        for _ in 0..<5 where !cards(world).contains(where: \.isOpen) { await look(world) }
+        await lookUntil(world) { self.cards(world).contains(where: \.isOpen) }
         #expect(cards(world).contains { $0.isOpen }, "on again: it starts afresh")
     }
 
@@ -343,7 +353,7 @@ struct ExternalPluginsTests {
         let first = try copy("probe-first")
         _ = try await added(world, folder: first.path)
         _ = try await ask(world, ["normal"])
-        for _ in 0..<5 where !cards(world).contains(where: \.isOpen) { await look(world) }
+        await lookUntil(world) { self.cards(world).contains(where: \.isOpen) }
         let set = try #require(await world.ask("set", ["key": .string("probe_depth"), "value": .string("3")]))
         try #require(set.ok, "\(set)")
         let vault = world.world.link.vaultV2
@@ -375,7 +385,7 @@ struct ExternalPluginsTests {
         _ = try await added(world, folder: folder.path)
         _ = try await ask(world, ["normal"])
         // A look that began as it was turned on may have read the folder before: look until its card is up (its program runs).
-        for _ in 0..<5 where !cards(world).contains(where: \.isOpen) { await look(world) }
+        await lookUntil(world) { self.cards(world).contains(where: \.isOpen) }
         let set = try #require(await world.ask("set", ["key": .string("probe_depth"), "value": .string("3")]))
         #expect(set.ok, "\(set)")
         let refused = try #require(await world.ask("set", ["key": .string("probe_depth"), "value": .string("99")]))
@@ -386,7 +396,7 @@ struct ExternalPluginsTests {
         _ = await world.ask("plugin.off", ["plugin": .string("probe")])
         _ = await world.ask("plugin.on", ["plugin": .string("probe")])
         _ = try await ask(world, ["normal"])
-        await look(world)
+        await lookUntil(world) { self.probe(world)?.held != nil }
         #expect(await eventually(timeout: 30) { self.probe(world)?.held?.contains("changed since you added it") == true })
     }
 }
@@ -397,7 +407,7 @@ extension ExternalPluginsTests {
     /// A card of the probe's for `mode`, its program running: filed, then looked at until it is up.
     private func probeCard(_ world: CardWorld, _ mode: String) async throws -> CardStore.Card {
         let before = Set(cards(world).map(\.id))
-        _ = try await ask(world, [mode])
+        let filed = try await ask(world, [mode])
         let fresh = { self.cards(world).first { $0.isOpen && !before.contains($0.id) } }
         // Looked at until its card is up: a look already under way (its program starting) may answer before it is.
         let until = MacTime.real.awake() + 30
@@ -405,7 +415,7 @@ extension ExternalPluginsTests {
             await look(world)
             _ = await eventually(timeout: 0.5) { fresh() != nil }
         }
-        return try #require(fresh(), "a \(mode) card")
+        return try #require(fresh(), "a \(mode) card: filed \(filed.output.status) \(filed.output.error.prefix(300)); program \(String(describing: probe(world)?.ended))")
     }
 
     /// M1: an external plugin's every answer is acting (its expiry holds for decline too), and a page for a word that
@@ -453,8 +463,7 @@ extension ExternalPluginsTests {
         let card = try await probeCard(world, "normal")
         #expect(card.plugin?.facts.contains { $0.label == "the probe plugin says, depth" } == true, "\(String(describing: card.plugin?.facts))")
         _ = try await ask(world, ["waitmarks"])
-        await look(world)
-        await look(world)
+        await lookUntil(world) { self.probe(world)?.ended != nil }
         #expect(await eventually(timeout: 30) { self.probe(world)?.ended?.contains("can't mark its card waiting") == true },
                 "\(String(describing: self.probe(world)?.ended))")
         #expect(cards(world).allSatisfy { !$0.isOpen || $0.id == card.id } || cards(world).allSatisfy { !$0.isOpen }, "not drawn")
@@ -540,9 +549,10 @@ extension ExternalPluginsTests {
         try FileManager.default.removeItem(at: plugins.appendingPathComponent("bin"))
 
         _ = try await added(world)
-        _ = try await ask(world, ["normal"])
+        let filed = try await ask(world, ["normal"])
         let requests = world.host.root.appendingPathComponent("plugin-requests/probe")
-        #expect(!((try? FileManager.default.contentsOfDirectory(atPath: requests.path)) ?? []).isEmpty, "a request filed")
+        #expect(!((try? FileManager.default.contentsOfDirectory(atPath: requests.path)) ?? []).isEmpty,
+                "a request filed: \(filed.output.status) \(filed.output.error.prefix(300))")
         let removed = try #require(await world.ask("plugin.remove", ["plugin": .string("probe")]))
         try #require(removed.ok, "\(removed)")
         #expect(await eventually(timeout: 30) { !FileManager.default.fileExists(atPath: requests.path) }, "its requests gone with it")
@@ -677,7 +687,7 @@ extension ExternalPluginsTests {
         let program = try String(contentsOf: folder.appendingPathComponent("plugin.py"), encoding: .utf8)
         try writeClosedOnExec(program + "#", to: folder.appendingPathComponent("plugin.py"))
         _ = try await ask(world, ["normal"])
-        for _ in 0..<3 { await look(world) }
+        await lookUntil(world) { self.probe(world)?.held != nil }
         #expect(await eventually(timeout: 30) { self.probe(world)?.held?.contains("its size") == true }, "\(String(describing: self.probe(world)?.held))")
     }
 
@@ -803,10 +813,15 @@ extension ExternalPluginsTests {
         let world = try await CardWorld.make(scratch, plugins: [ShellPlugin()])
         defer { world.stop() }
         _ = try await added(world)
-        _ = try await ask(world, ["deep"])
-        await look(world)
-        #expect(await eventually(timeout: 30) { self.probe(world)?.ended?.contains("nested over") == true },
-                "\(String(describing: self.probe(world)?.ended))")
+        let filed = try await ask(world, ["deep"])
+        // Looked at until its program has answered the card call: a look under way may answer before it is asked.
+        let until = MacTime.real.awake() + 60
+        while self.probe(world)?.ended == nil, MacTime.real.awake() < until {
+            await look(world)
+            _ = await eventually(timeout: 0.5) { self.probe(world)?.ended != nil }
+        }
+        #expect(self.probe(world)?.ended?.contains("nested over") == true,
+                "\(String(describing: self.probe(world)?.ended)); filed \(filed.output.status) \(filed.output.error.prefix(300))")
     }
 
     /// The program gets the parent-death signal through setpriv, tied to the spawner's thread: when that thread ends (as

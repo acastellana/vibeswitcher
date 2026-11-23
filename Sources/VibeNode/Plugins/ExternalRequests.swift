@@ -169,7 +169,10 @@ extension ExternalPlugin {
     /// engine's queue.
     func file(words: [String], cwd: String, desk: PluginDesk, then: @escaping (Result<Filed, PluginRefusal>) -> Void) {
         startedProcess(desk) { started in
-            guard case .success(let process) = started else { return then(.failure(PluginRefusal("its program isn't running"))) }
+            guard case .success(let process) = started else {
+                if case .failure(let why) = started { return then(.failure(PluginRefusal("its program isn't running (\(why))"))) }
+                return
+            }
             process.call("file", ["words": words, "cwd": cwd], atMost: Self.fileCallsAtMost) { answer in
                 desk.later {
                     switch answer {
