@@ -121,7 +121,7 @@ public final class LiveHub: WebSocketHandler, @unchecked Sendable {
 
     /// The kinds `handle` takes on any server: the Unix socket hands these, and only these, to the hub. A server with
     /// terminals takes `NodeLive.terminalKinds` here too (a page's only).
-    public static let kinds: Set<String> = ["subscribe", "unsubscribe", "chat.page", "chat.image", "session.usage"]
+    public static let kinds: Set<String> = Set(KindSpec.all.filter { $0.servedBy == .hub }.map(\.name))
 
     /// Takes `request` when it is the hub's (`subscribe`, `unsubscribe`): writes its reply on `transport`, then, for a
     /// subscription, its first event, and returns true. False, writing nothing, for any other kind: the caller answers

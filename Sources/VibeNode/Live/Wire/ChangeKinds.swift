@@ -9,12 +9,7 @@ import Foundation
 extension WireKinds {
     /// The state-changing kinds typed: `WireKindsLintTests` holds the command line to sending them through their types,
     /// and `RequestArguments` takes their keys from them.
-    public static let changes: [any WireChangeKind.Type] = [
-        Start.self, Stop.self, Lead.self, Answer.self, Hold.self, ConfigAccept.self, BaseAccept.self, BaseKeep.self, HooksInstall.self,
-        HooksRemove.self, BuildSwitch.self, WebOpen.self, WebRevoke.self, Tell.self, Send.self, SessionNew.self, SessionEnd.self,
-        SessionReply.self, SessionRename.self, SessionPause.self, SessionResume.self, SessionReopen.self, CloseShells.self, SetSetting.self,
-        Push.self, PushDecline.self, PromptAudit.self, PresetsEdit.self, Approve.self, PluginOn.self, PluginOff.self,
-    ]
+    public static let changes: [any WireChangeKind.Type] = KindSpec.all.compactMap { $0.typed as? any WireChangeKind.Type }
 
     // MARK: The node
 

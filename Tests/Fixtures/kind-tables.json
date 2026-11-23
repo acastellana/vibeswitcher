@@ -1,0 +1,844 @@
+{
+  "approvalArguments" : {
+    "answer" : [
+      "card",
+      "code",
+      "text",
+      "version"
+    ],
+    "approve" : [
+      "batch",
+      "code"
+    ],
+    "base.accept" : [
+      "card",
+      "code"
+    ],
+    "base.keep" : [
+      "card",
+      "code"
+    ],
+    "build.switch" : [
+      "commit"
+    ],
+    "config.accept" : [
+      "card",
+      "code"
+    ],
+    "hold" : [
+      "card",
+      "code"
+    ],
+    "hooks.install" : [
+      "agents"
+    ],
+    "hooks.remove" : [
+      "agents"
+    ],
+    "lead" : [
+      "folder",
+      "goal",
+      "initialized",
+      "replace",
+      "resume",
+      "takeHead"
+    ],
+    "plugin.add" : [
+      "folder",
+      "manifest",
+      "program"
+    ],
+    "plugin.off" : [
+      "plugin"
+    ],
+    "plugin.on" : [
+      "plugin"
+    ],
+    "plugin.remove" : [
+      "plugin"
+    ],
+    "presets.edit" : [
+      "args",
+      "default",
+      "digest",
+      "env",
+      "folder",
+      "keepShell",
+      "kind",
+      "name",
+      "op",
+      "rename",
+      "unset"
+    ],
+    "prompt-audit" : [
+      "do",
+      "folder"
+    ],
+    "push" : [
+      "folder",
+      "request"
+    ],
+    "push.decline" : [
+      "folder",
+      "request"
+    ],
+    "send" : [
+      "images",
+      "now",
+      "session",
+      "text"
+    ],
+    "session.close-shells" : [
+      "folder",
+      "sessions"
+    ],
+    "session.end" : [
+      "session"
+    ],
+    "session.new" : [
+      "agent",
+      "digest",
+      "folder",
+      "model",
+      "preset",
+      "values"
+    ],
+    "session.pause" : [
+      "for",
+      "hours",
+      "session"
+    ],
+    "session.rename" : [
+      "name",
+      "session"
+    ],
+    "session.reopen" : [
+      "all",
+      "forget",
+      "sessions"
+    ],
+    "session.reply" : [
+      "choice",
+      "options",
+      "question",
+      "session",
+      "text"
+    ],
+    "session.resume" : [
+      "session"
+    ],
+    "set" : [
+      "folder",
+      "key",
+      "value"
+    ],
+    "start" : [
+
+    ],
+    "stop" : [
+
+    ],
+    "tell" : [
+      "folder",
+      "text"
+    ],
+    "web.open" : [
+      "tailnet"
+    ],
+    "web.revoke" : [
+
+    ]
+  },
+  "approvalPhrases" : {
+    "answer" : "answer a lead's question for you",
+    "approve" : "accept the batch you listed",
+    "approve.list" : "do approve.list for you",
+    "base.accept" : "accept a moved base branch",
+    "base.keep" : "keep a base branch where it was",
+    "base.show" : "do base.show for you",
+    "board" : "do board for you",
+    "board.image" : "do board.image for you",
+    "board.task" : "do board.task for you",
+    "brief" : "do brief for you",
+    "build.switch" : "switch your node to another build",
+    "chat.image" : "do chat.image for you",
+    "chat.page" : "do chat.page for you",
+    "config.accept" : "accept a change to a watched file",
+    "config.held" : "do config.held for you",
+    "draft" : "do draft for you",
+    "draft.clear" : "do draft.clear for you",
+    "hold" : "hold a lead's question for you",
+    "hooks.install" : "install VibeSwitcher's hooks",
+    "hooks.remove" : "remove VibeSwitcher's hooks",
+    "lead" : "start a project's lead for you",
+    "mail" : "do mail for you",
+    "no.such.kind" : "do no.such.kind for you",
+    "plugin.add" : "add a program as a plugin of this node",
+    "plugin.file" : "do plugin.file for you",
+    "plugin.inspect" : "read a plugin's folder",
+    "plugin.list" : "do plugin.list for you",
+    "plugin.off" : "turn a plugin off for this node",
+    "plugin.on" : "turn a plugin on for this node",
+    "plugin.remove" : "remove a plugin from this node",
+    "presets.edit" : "edit your launch presets",
+    "prompt-audit" : "change a project's prompt-audit reminder",
+    "push" : "push a lead's branch for you",
+    "push.decline" : "decline a lead's push",
+    "question.post" : "do question.post for you",
+    "question.revise" : "do question.revise for you",
+    "question.withdraw" : "do question.withdraw for you",
+    "questions" : "do questions for you",
+    "recent" : "do recent for you",
+    "seen" : "do seen for you",
+    "send" : "type into a session for you",
+    "session.attach" : "do session.attach for you",
+    "session.close-shells" : "close finished shells",
+    "session.complete" : "do session.complete for you",
+    "session.draft" : "do session.draft for you",
+    "session.draft.clear" : "do session.draft.clear for you",
+    "session.end" : "end a session",
+    "session.new" : "start a session for you",
+    "session.pause" : "pause a session's reminders",
+    "session.ports" : "do session.ports for you",
+    "session.presets" : "do session.presets for you",
+    "session.rename" : "rename a session",
+    "session.reopen" : "reopen your sessions after a restart",
+    "session.reply" : "answer a session's question for you",
+    "session.resume" : "resume an ended session",
+    "session.usage" : "do session.usage for you",
+    "set" : "change a VibeSwitcher setting",
+    "settings" : "do settings for you",
+    "shells" : "do shells for you",
+    "start" : "start your VibeSwitcher node",
+    "stats" : "do stats for you",
+    "status" : "do status for you",
+    "stop" : "stop your VibeSwitcher node",
+    "subscribe" : "do subscribe for you",
+    "tell" : "tell a lead something for you",
+    "term.close" : "do term.close for you",
+    "term.open" : "do term.open for you",
+    "unsubscribe" : "do unsubscribe for you",
+    "update.check" : "do update.check for you",
+    "web.open" : "open the web page to a device",
+    "web.revoke" : "revoke a device's web access"
+  },
+  "arguments" : {
+    "answer" : [
+      "card",
+      "code",
+      "text",
+      "version"
+    ],
+    "approve" : [
+      "batch",
+      "code"
+    ],
+    "base.accept" : [
+      "card",
+      "code"
+    ],
+    "base.keep" : [
+      "card",
+      "code"
+    ],
+    "build.switch" : [
+      "commit"
+    ],
+    "config.accept" : [
+      "batch",
+      "card",
+      "code"
+    ],
+    "hold" : [
+      "card",
+      "code"
+    ],
+    "hooks.install" : [
+      "agents"
+    ],
+    "hooks.remove" : [
+      "agents"
+    ],
+    "lead" : [
+      "folder",
+      "goal",
+      "initialized",
+      "replace",
+      "resume",
+      "takeHead"
+    ],
+    "plugin.add" : [
+      "folder",
+      "manifest",
+      "program"
+    ],
+    "plugin.off" : [
+      "plugin"
+    ],
+    "plugin.on" : [
+      "plugin"
+    ],
+    "plugin.remove" : [
+      "plugin"
+    ],
+    "presets.edit" : [
+      "args",
+      "default",
+      "digest",
+      "env",
+      "folder",
+      "keepShell",
+      "kind",
+      "name",
+      "op",
+      "rename",
+      "unset"
+    ],
+    "prompt-audit" : [
+      "do",
+      "folder"
+    ],
+    "push" : [
+      "folder",
+      "request"
+    ],
+    "push.decline" : [
+      "folder",
+      "request"
+    ],
+    "send" : [
+      "images",
+      "now",
+      "session",
+      "text"
+    ],
+    "session.close-shells" : [
+      "sessions"
+    ],
+    "session.end" : [
+      "session"
+    ],
+    "session.new" : [
+      "agent",
+      "digest",
+      "folder",
+      "model",
+      "preset"
+    ],
+    "session.pause" : [
+      "for",
+      "hours",
+      "session"
+    ],
+    "session.rename" : [
+      "name",
+      "session"
+    ],
+    "session.reopen" : [
+      "all",
+      "forget",
+      "sessions"
+    ],
+    "session.reply" : [
+      "choice",
+      "options",
+      "question",
+      "session",
+      "text"
+    ],
+    "session.resume" : [
+      "session"
+    ],
+    "set" : [
+      "folder",
+      "key",
+      "value"
+    ],
+    "start" : [
+
+    ],
+    "stop" : [
+
+    ],
+    "tell" : [
+      "folder",
+      "text"
+    ],
+    "web.open" : [
+      "tailnet"
+    ],
+    "web.revoke" : [
+
+    ]
+  },
+  "carded" : [
+    "answer",
+    "base.accept",
+    "base.keep",
+    "config.accept",
+    "hold"
+  ],
+  "changesNothing" : [
+    "approve.list",
+    "base.show",
+    "config.held",
+    "plugin.inspect",
+    "shells",
+    "start",
+    "update.check"
+  ],
+  "changesState" : {
+    "answer" : true,
+    "approve" : true,
+    "approve.list" : false,
+    "base.accept" : true,
+    "base.keep" : true,
+    "base.show" : false,
+    "board" : false,
+    "board.image" : false,
+    "board.task" : false,
+    "brief" : false,
+    "build.switch" : true,
+    "chat.image" : false,
+    "chat.page" : false,
+    "config.accept" : true,
+    "config.held" : false,
+    "draft" : true,
+    "draft.clear" : true,
+    "hold" : true,
+    "hooks.install" : true,
+    "hooks.remove" : true,
+    "lead" : true,
+    "mail" : false,
+    "no.such.kind" : true,
+    "plugin.add" : true,
+    "plugin.file" : false,
+    "plugin.inspect" : false,
+    "plugin.list" : false,
+    "plugin.off" : true,
+    "plugin.on" : true,
+    "plugin.remove" : true,
+    "presets.edit" : true,
+    "prompt-audit" : true,
+    "push" : true,
+    "push.decline" : true,
+    "question.post" : false,
+    "question.revise" : false,
+    "question.withdraw" : false,
+    "questions" : false,
+    "recent" : false,
+    "seen" : false,
+    "send" : true,
+    "session.attach" : true,
+    "session.close-shells" : true,
+    "session.complete" : false,
+    "session.draft" : true,
+    "session.draft.clear" : true,
+    "session.end" : true,
+    "session.new" : true,
+    "session.pause" : true,
+    "session.ports" : false,
+    "session.presets" : false,
+    "session.rename" : true,
+    "session.reopen" : true,
+    "session.reply" : true,
+    "session.resume" : true,
+    "session.usage" : false,
+    "set" : true,
+    "settings" : false,
+    "shells" : false,
+    "start" : false,
+    "stats" : false,
+    "status" : false,
+    "stop" : true,
+    "subscribe" : false,
+    "tell" : true,
+    "term.close" : true,
+    "term.open" : true,
+    "unsubscribe" : false,
+    "update.check" : false,
+    "web.open" : true,
+    "web.revoke" : true
+  },
+  "hub" : [
+    "chat.image",
+    "chat.page",
+    "session.usage",
+    "subscribe",
+    "unsubscribe"
+  ],
+  "recorded" : [
+    "answer",
+    "approve",
+    "base.accept",
+    "base.keep",
+    "build.switch",
+    "config.accept",
+    "hold",
+    "hooks.install",
+    "hooks.remove",
+    "lead",
+    "plugin.add",
+    "plugin.off",
+    "plugin.on",
+    "plugin.remove",
+    "presets.edit",
+    "prompt-audit",
+    "push",
+    "push.decline",
+    "send",
+    "session.close-shells",
+    "session.end",
+    "session.new",
+    "session.pause",
+    "session.rename",
+    "session.reopen",
+    "session.reply",
+    "session.resume",
+    "set",
+    "start",
+    "stop",
+    "tell",
+    "web.open",
+    "web.revoke"
+  ],
+  "retryRules" : {
+    "answer" : {
+      "keepsResult" : false,
+      "rerun" : false
+    },
+    "approve" : {
+      "keepsResult" : false,
+      "rerun" : false
+    },
+    "base.accept" : {
+      "keepsResult" : false,
+      "rerun" : false
+    },
+    "base.keep" : {
+      "keepsResult" : false,
+      "rerun" : false
+    },
+    "build.switch" : {
+      "keepsResult" : false,
+      "rerun" : false
+    },
+    "config.accept" : {
+      "keepsResult" : false,
+      "rerun" : false
+    },
+    "hold" : {
+      "keepsResult" : false,
+      "rerun" : false
+    },
+    "hooks.install" : {
+      "keepsResult" : true,
+      "rerun" : true
+    },
+    "hooks.remove" : {
+      "keepsResult" : true,
+      "rerun" : true
+    },
+    "lead" : {
+      "keepsResult" : true,
+      "rerun" : false
+    },
+    "plugin.add" : {
+      "keepsResult" : false,
+      "rerun" : false
+    },
+    "plugin.off" : {
+      "keepsResult" : false,
+      "rerun" : true
+    },
+    "plugin.on" : {
+      "keepsResult" : false,
+      "rerun" : true
+    },
+    "plugin.remove" : {
+      "keepsResult" : false,
+      "rerun" : true
+    },
+    "presets.edit" : {
+      "keepsResult" : false,
+      "rerun" : false
+    },
+    "prompt-audit" : {
+      "keepsResult" : true,
+      "rerun" : true
+    },
+    "push" : {
+      "keepsResult" : false,
+      "rerun" : false
+    },
+    "push.decline" : {
+      "keepsResult" : false,
+      "rerun" : true
+    },
+    "send" : {
+      "keepsResult" : false,
+      "rerun" : false
+    },
+    "session.close-shells" : {
+      "keepsResult" : false,
+      "rerun" : true
+    },
+    "session.end" : {
+      "keepsResult" : false,
+      "rerun" : true
+    },
+    "session.new" : {
+      "keepsResult" : false,
+      "rerun" : false
+    },
+    "session.pause" : {
+      "keepsResult" : true,
+      "rerun" : true
+    },
+    "session.rename" : {
+      "keepsResult" : true,
+      "rerun" : true
+    },
+    "session.reopen" : {
+      "keepsResult" : false,
+      "rerun" : false
+    },
+    "session.reply" : {
+      "keepsResult" : false,
+      "rerun" : false
+    },
+    "session.resume" : {
+      "keepsResult" : true,
+      "rerun" : true
+    },
+    "set" : {
+      "keepsResult" : false,
+      "rerun" : true
+    },
+    "start" : {
+      "keepsResult" : true,
+      "rerun" : true
+    },
+    "stop" : {
+      "keepsResult" : true,
+      "rerun" : false
+    },
+    "tell" : {
+      "keepsResult" : false,
+      "rerun" : false
+    },
+    "web.open" : {
+      "keepsResult" : false,
+      "rerun" : false
+    },
+    "web.revoke" : {
+      "keepsResult" : false,
+      "rerun" : true
+    }
+  },
+  "taken" : [
+    "status",
+    "start",
+    "stop",
+    "lead",
+    "questions",
+    "draft",
+    "draft.clear",
+    "answer",
+    "hold",
+    "config.held",
+    "config.accept",
+    "base.show",
+    "base.accept",
+    "base.keep",
+    "question.post",
+    "question.revise",
+    "question.withdraw",
+    "hooks.install",
+    "hooks.remove",
+    "build.switch",
+    "subscribe",
+    "unsubscribe",
+    "web.open",
+    "web.revoke",
+    "chat.page",
+    "tell",
+    "board",
+    "seen",
+    "send",
+    "session.new",
+    "session.end",
+    "session.reply",
+    "session.draft",
+    "session.draft.clear",
+    "session.presets",
+    "session.complete",
+    "session.attach",
+    "session.usage",
+    "chat.image",
+    "stats",
+    "session.ports",
+    "board.task",
+    "board.image",
+    "settings",
+    "set",
+    "push",
+    "push.decline",
+    "session.reopen",
+    "mail",
+    "prompt-audit",
+    "session.rename",
+    "session.pause",
+    "session.resume",
+    "shells",
+    "session.close-shells",
+    "presets.edit",
+    "recent",
+    "brief",
+    "update.check",
+    "approve.list",
+    "approve",
+    "plugin.list",
+    "plugin.on",
+    "plugin.off",
+    "plugin.inspect",
+    "plugin.add",
+    "plugin.remove",
+    "plugin.file"
+  ],
+  "terminal" : [
+    "term.open",
+    "term.close"
+  ],
+  "voices" : {
+    "answer" : "user",
+    "approve" : "user",
+    "approve.list" : "user",
+    "base.accept" : "user",
+    "base.keep" : "user",
+    "base.show" : "user",
+    "board" : "anyone",
+    "board.image" : "anyone",
+    "board.task" : "anyone",
+    "brief" : "webRead",
+    "build.switch" : "user",
+    "chat.image" : "anyone",
+    "chat.page" : "anyone",
+    "config.accept" : "user",
+    "config.held" : "user",
+    "draft" : "webDraft",
+    "draft.clear" : "webDraft",
+    "hold" : "user",
+    "hooks.install" : "user",
+    "hooks.remove" : "user",
+    "lead" : "user",
+    "mail" : "webRead",
+    "plugin.add" : "user",
+    "plugin.file" : "anyone",
+    "plugin.inspect" : "user",
+    "plugin.list" : "anyone",
+    "plugin.off" : "user",
+    "plugin.on" : "user",
+    "plugin.remove" : "user",
+    "presets.edit" : "user",
+    "prompt-audit" : "user",
+    "push" : "user",
+    "push.decline" : "user",
+    "question.post" : "leadToolServer",
+    "question.revise" : "leadToolServer",
+    "question.withdraw" : "leadToolServer",
+    "questions" : "anyone",
+    "recent" : "webRead",
+    "seen" : "anyone",
+    "send" : "user",
+    "session.attach" : "webDraft",
+    "session.close-shells" : "user",
+    "session.complete" : "anyone",
+    "session.draft" : "webDraft",
+    "session.draft.clear" : "webDraft",
+    "session.end" : "user",
+    "session.new" : "user",
+    "session.pause" : "user",
+    "session.ports" : "anyone",
+    "session.presets" : "anyone",
+    "session.rename" : "user",
+    "session.reopen" : "user",
+    "session.reply" : "user",
+    "session.resume" : "user",
+    "session.usage" : "anyone",
+    "set" : "user",
+    "settings" : "anyone",
+    "shells" : "user",
+    "start" : "user",
+    "stats" : "anyone",
+    "status" : "anyone",
+    "stop" : "user",
+    "subscribe" : "anyone",
+    "tell" : "user",
+    "term.close" : "webTerminal",
+    "term.open" : "webTerminal",
+    "unsubscribe" : "anyone",
+    "update.check" : "user",
+    "web.open" : "user",
+    "web.revoke" : "user"
+  },
+  "webKindsBoth" : [
+    "status",
+    "questions",
+    "draft",
+    "draft.clear",
+    "subscribe",
+    "unsubscribe",
+    "chat.page",
+    "board",
+    "seen",
+    "session.draft",
+    "session.draft.clear",
+    "session.presets",
+    "session.complete",
+    "session.attach",
+    "session.usage",
+    "chat.image",
+    "stats",
+    "session.ports",
+    "board.task",
+    "board.image",
+    "settings",
+    "mail",
+    "recent",
+    "brief",
+    "plugin.list"
+  ],
+  "webKindsDraft" : [
+    "draft",
+    "draft.clear",
+    "session.draft",
+    "session.draft.clear",
+    "session.attach"
+  ],
+  "webKindsNone" : [
+
+  ],
+  "webKindsRead" : [
+    "status",
+    "questions",
+    "subscribe",
+    "unsubscribe",
+    "chat.page",
+    "board",
+    "seen",
+    "session.presets",
+    "session.complete",
+    "session.usage",
+    "chat.image",
+    "stats",
+    "session.ports",
+    "board.task",
+    "board.image",
+    "settings",
+    "mail",
+    "recent",
+    "brief",
+    "plugin.list"
+  ]
+}

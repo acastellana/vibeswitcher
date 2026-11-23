@@ -143,7 +143,7 @@ public final class NodeLive: @unchecked Sendable {
     }
 
     /// What a server that opens terminals adds to a page's `hello.kinds`.
-    public static let terminalKinds = ["term.open", "term.close"]
+    public static let terminalKinds: [String] = KindSpec.all.filter { $0.servedBy == .terminalRelay }.map(\.name)
 
     /// A web connection as `Requests` sees it: no process, no terminal, no cgroup. It is never the user's voice (the
     /// screen refuses those kinds before; this is the second lock), and nobody's tool server.

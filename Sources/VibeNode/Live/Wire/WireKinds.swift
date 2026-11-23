@@ -29,10 +29,9 @@ public protocol WireKind {
 public enum WireKinds {
     /// The kinds the command line asks that aren't typed yet, left out on purpose: the external plugins' (the plugins
     /// lane's, to follow the pattern). `WireKindsLintTests` allows reading or sending these by name, and no other.
-    public static let leftOut: Swift.Set<String> = ["plugin.inspect", "plugin.add", "plugin.remove", "plugin.file"]
+    public static let leftOut: Swift.Set<String> = Swift.Set(KindSpec.all.filter { if case .notYet = $0.wire { return true } else { return false } }.map(\.name))
 
-    public static let typed: [String] = [Status.kind, Questions.kind, Board.kind, ConfigHeld.kind, Settings.kind, PluginList.kind, ApproveList.kind,
-                                         Brief.kind, UpdateCheck.kind, Mail.kind, Presets.kind, Shells.kind, Stats.kind, BaseShow.kind]
+    public static let typed: [String] = KindSpec.all.compactMap { spec in spec.typed.flatMap { $0 is any WireChangeKind.Type ? nil : spec.name } }
 }
 
 /// A kind that takes no arguments: asked with none (`args` absent, as before).

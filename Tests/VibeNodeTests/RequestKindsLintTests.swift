@@ -2,10 +2,11 @@ import Foundation
 import Testing
 @testable import VibeNode
 
-/// One path for authority (the architecture review's row 1, 2026-11-22): a request kind is still declared in several
-/// lists (`NodeWire.kinds`, `changesNothing`, `taken`, `Requests.recorded`, `carded`, the `act` switch, the hub's), and
-/// `recorded` and `carded` are opt-in, so a state-changing kind left out of `recorded` would act without the vault's
-/// record. These checks hold the lists to one another until one table replaces them.
+/// One path for authority (the architecture review's row 1): who may send a kind, whether it changes state, which
+/// server takes it and what serves it are one table now (`KindSpec`), whose views can't disagree, and KindSpecTests holds
+/// them to what the server ran on before. What a type can't guarantee is checked here: `recorded` and `carded` (still
+/// lists of their own until the state-changing kinds' part of the table), and that each kind's handler exists (the
+/// `act` switch, the hub's) and nothing else is handled.
 @Suite struct RequestKindsLintTests {
     static let repo = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
 
@@ -41,11 +42,6 @@ import Testing
         #expect(Requests.carded.isSubset(of: Self.kinds(.user)))
     }
 
-    /// `changesNothing` names user's-voice kinds only (one of another voice there would mean nothing).
-    @Test func changesNothingIsUsersVoiceKindsOnly() {
-        #expect(NodeWire.changesNothing.isSubset(of: Self.kinds(.user)), "\(NodeWire.changesNothing.subtracting(Self.kinds(.user)).sorted())")
-    }
-
     /// Every kind the server takes has its handler, and every handler's kind is taken: the `act` switch's, the hub's,
     /// the lead's tool server's (`questionPost`) and a page's drafts (`draft`, never `act`).
     @Test func everyTakenKindHasAHandlerAndTheReverse() throws {
@@ -53,7 +49,6 @@ import Testing
         #expect(act.count > 40, "the act switch wasn't found: \(act.sorted())")
         let handled = act.union(LiveHub.kinds).union(Self.kinds(.leadToolServer)).union(Self.kinds(.webDraft))
         let taken = Set(NodeWire.taken)
-        #expect(taken.count == NodeWire.taken.count, "taken names a kind twice")
         #expect(taken == handled, "taken with no handler: \(taken.subtracting(handled).sorted()); handled, not taken: \(handled.subtracting(taken).sorted())")
         #expect(act.isDisjoint(with: LiveHub.kinds), "\(act.intersection(LiveHub.kinds).sorted()) is both the hub's and act's")
         #expect(act.isDisjoint(with: Self.kinds(.webDraft)), "a draft reaches act: \(act.intersection(Self.kinds(.webDraft)).sorted())")
@@ -62,8 +57,8 @@ import Testing
         let webRead = try Self.cases(of: "func webRead(_ request: NodeWire.Request", in: "Sources/VibeNode/Server/MailRequest.swift")
         #expect(webRead == Self.kinds(.webRead), "\(webRead.symmetricDifference(Self.kinds(.webRead)).sorted())")
         #expect(webRead.isSubset(of: act))
-        // The terminal's kinds: a page's on a server with terminals, never the socket's (`taken`).
-        #expect(Set(NodeLive.terminalKinds) == Self.kinds(.webTerminal) && taken.isDisjoint(with: NodeLive.terminalKinds))
+        // The terminal's kinds are the terminal relay's (a page's terminal), and only theirs.
+        #expect(Set(NodeLive.terminalKinds) == Self.kinds(.webTerminal))
     }
 
     /// The hub takes exactly `LiveHub.kinds` (the list the Unix socket hands it), and on a server with no terminals

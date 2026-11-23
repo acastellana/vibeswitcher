@@ -303,85 +303,20 @@ public enum NodeWire {
         case webTerminal
     }
 
-    /// Every kind the protocol names, with the voice it needs. This server takes only `taken` (E1's); the others are
-    /// answered `unknown-kind` until the task that adds each.
-    public static let kinds: [String: Voice] = [
-        "status": .anyone, "questions": .anyone, "board": .anyone, "start": .user, "stop": .user, "lead": .user, "answer": .user, "hold": .user,
-        "config.held": .user, "config.accept": .user, "base.show": .user, "base.accept": .user, "base.keep": .user,
-        "hooks.install": .user, "hooks.remove": .user, "build.switch": .user, "tell": .user,
-        "question.post": .leadToolServer, "question.revise": .leadToolServer, "question.withdraw": .leadToolServer,
-        // The live protocol's (the live wire contract), taken from the integration task that wires each (I1 to I4).
-        "subscribe": .anyone, "unsubscribe": .anyone, "chat.page": .anyone,
-        // A finished session seen (the parity gaps of 2026-11-19): it changes nothing but the seen mark, so no voice.
-        "seen": .anyone,
-        "draft": .webDraft, "draft.clear": .webDraft,
-        "web.open": .user, "web.revoke": .user,
-        "term.open": .webTerminal, "term.close": .webTerminal,
-        // Driving an ordinary session (the parity table's gaps 1, 3 and 6, 2026-11-20): the user's voice, and a page's draft.
-        "send": .user, "session.new": .user, "session.end": .user, "session.reply": .user, "session.reopen": .user,
-        // Between leads (the stability lane, 2026-11-20): a read, but the projects' private record of their leads'
-        // messages, so never a session's: the user's, with no typed word, and since 2026-11-21 a page's token that reads
-        // (the page's Between leads view, read-only: the leads' messages reach the page's chats already).
-        "mail": .webRead,
-        // The prompt-audit reminder's snooze, off and on (the stability lane, 2026-11-20).
-        "prompt-audit": .user,
-        // A session renamed or paused (the stability lane, 2026-11-20).
-        "session.rename": .user, "session.pause": .user, "session.resume": .user,
-        // Close Finished Shells (the stability lane, 2026-11-20): the list a read of the user's (no code), the closing
-        // the user's voice.
-        "shells": .user, "session.close-shells": .user,
-        // A launch preset added, changed or removed (the page-actions lane, 2026-11-20).
-        "presets.edit": .user,
-        "session.draft": .webDraft, "session.draft.clear": .webDraft,
-        // The composer and launch presets (2026-11-20): what a session's `/` and `@` offer, and the presets, are reads.
-        "session.presets": .anyone, "session.complete": .anyone, "session.attach": .webDraft,
-        // A session's tokens and cost, read from its transcript (the inspector, 2026-11-21).
-        "session.usage": .anyone,
-        // An image a session's chat shows, its bytes in parts (the chat's images, 2026-11-21): a read.
-        "chat.image": .anyone,
-        // The Statistics window's figures (2026-11-21): a read.
-        "stats": .anyone,
-        // A board task's details as its row opens, a result's screenshot (the Team tab, 2026-11-21): reads.
-        "board.task": .anyone, "board.image": .anyone,
-        // A session's dev servers, the ports its processes listen on (the dev pages row, 2026-11-21): a read.
-        "session.ports": .anyone,
-        // The node's settings (the parity table's gap 9, 2026-11-20): read by anyone of the uid (a page too), set in the
-        // user's voice.
-        "settings": .anyone, "set": .user,
-        // The start page's recent projects (2026-11-21): a read of the folders Claude Code and Codex know, the user's
-        // other projects among them, so never a session's: the user's or a page's that reads (`webRead`, as `mail`).
-        "recent": .webRead,
-        // Brief me (2026-11-21): a read of the user's own, which may ask the summaries' model, so never a session's.
-        "brief": .webRead,
-        // Settling the lead's push request (the parity table's push row, 2026-11-20): the user's voice.
-        "push": .user, "push.decline": .user,
-        // Check for Updates now (`status --check-updates`, 2026-11-21): it asks GitHub and keeps the answer in the update
-        // watch's own record, changing nothing else; the user's, with no typed word, never a session's or a page's.
-        "update.check": .user,
-        // `vibeswitcher approve` (2026-11-22): the list of what a plain accept settles changes nothing (no typed word);
-        // the batch's go-ahead is the user's voice, one typed code, each item recorded as its own action.
-        "approve.list": .user, "approve": .user,
-        // The feature plugins (2026-11-22): the list a read, on and off the user's voice.
-        "plugin.list": .anyone, "plugin.on": .user, "plugin.off": .user,
-        // External plugins (2026-11-22): what an add shows a read of the user's; add and remove the user's voice; an
-        // agent's vs-ask files through its tool server (the host stamps it there), never a page.
-        "plugin.inspect": .user, "plugin.add": .user, "plugin.remove": .user, "plugin.file": .anyone,
-    ]
+    /// Every kind the protocol names, with the voice it needs: a view of `KindSpec.all` (who may send each, and why, is
+    /// said there).
+    public static let kinds: [String: Voice] = Dictionary(uniqueKeysWithValues: KindSpec.all.map { ($0.name, $0.sender) })
 
     /// The user's-voice kinds that change nothing (EN-D5: no typed word): `start` to a running node says when it
     /// started; `config.held` and `base.show` make the card the next request takes; `shells` lists the node's shells for
     /// Close Finished Shells; `update.check` asks GitHub now and keeps only its answer. (`mail`, a read of the user's or a page's, is `webRead`: it changes nothing either.)
-    public static let changesNothing: Set<String> = ["start", "config.held", "base.show", "shells", "update.check", "approve.list", "plugin.inspect"]
+    public static let changesNothing: Set<String> = Set(KindSpec.all.filter { $0.sender == .user && $0.effect != .change }.map(\.name))
 
     /// Whether `kind` changes state: every user's-voice kind but `changesNothing`'s, a kind added later included, and
     /// every web client's kind (a draft, a terminal). A kind missing from `kinds` needs the user's voice, as
     /// `Requests.handle` reads it, so it changes state too.
     public static func changesState(_ kind: String) -> Bool {
-        switch kinds[kind] ?? .user {
-        case .user: return !changesNothing.contains(kind)
-        case .webDraft, .webTerminal: return true
-        case .anyone, .leadToolServer, .webRead: return false
-        }
+        KindSpec.spec(kind)?.changesState ?? true
     }
 
     /// The kinds this build's server takes (E1's; `lead` from E4; the cards and the lead's questions from E6; the hooks
@@ -392,21 +327,7 @@ public enum NodeWire {
     /// from driving sessions, 2026-11-20; `settings` and `set` from the settings, 2026-11-20; `push` and `push.decline`
     /// from the push row, 2026-11-20; `session.presets`, `session.complete` and `session.attach` from the composer's lane,
     /// 2026-11-20): every kind `kinds` names but the live protocol's later ones (the terminal from I4).
-    public static let taken = ["status", "start", "stop", "lead", "questions", "draft", "draft.clear", "answer", "hold", "config.held", "config.accept",
-                               "base.show", "base.accept", "base.keep", "question.post", "question.revise", "question.withdraw",
-                               "hooks.install", "hooks.remove", "build.switch", "subscribe", "unsubscribe", "web.open", "web.revoke",
-                               "chat.page",
-                               "tell",
-                               "board", "seen",
-                               "send", "session.new", "session.end", "session.reply", "session.draft", "session.draft.clear",
-                               "session.presets", "session.complete", "session.attach", "session.usage", "chat.image", "stats", "session.ports", "board.task", "board.image",
-
-                               "settings", "set",
-                               "push", "push.decline",
-                               "session.reopen", "mail", "prompt-audit", "session.rename", "session.pause",
-                               "session.resume", "shells", "session.close-shells", "presets.edit",
-                               "recent", "brief", "update.check", "approve.list", "approve", "plugin.list", "plugin.on", "plugin.off",
-                               "plugin.inspect", "plugin.add", "plugin.remove", "plugin.file"]
+    public static let taken: [String] = KindSpec.all.filter { $0.servedBy != .terminalRelay }.map(\.name)
 
     // MARK: Lines
 
