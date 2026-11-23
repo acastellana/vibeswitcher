@@ -4,19 +4,24 @@
 // fixed time, so a loaded machine is only slower.
 //
 // What is looked for comes from the test, which made the node's state (EXPECT, a JSON file):
-//   { session, chatHref, chat, projectHref, question, result, shellHref, shell, board, replacedHref, plugin, setting }
+//   { session, chatHref, chat, projectHref, question, result, statement, task, shellHref, shell, board, goal, goalID, replacedHref, plugin,
+//     setting }
 // The page is the redesigned one (docs/superpowers/specs/2026-11-23-v2-web-ui-design.md): three columns, a project's
 // lead conversation in the centre, its team on the right, the session view under Your own sessions.
 // - Projects and own sessions: the left lists the project; Your own sessions lists the named session.
 // - Chat: the session's conversation shows a line of its transcript (the session view, at its old address).
-// - Question card: the lead's open question, in the project's waiting block, under "1 question for you".
+// - Question card: the lead's open question, in the project's waiting block, under "1 question for you", saying
+//   the lead asks.
 // - Lead conversation: the lead's result as a line, and the header saying what needs you.
+// - Latest statement: the lead's latest decision at the top of a short conversation.
+// - What waits elsewhere: the summary's count a link to the next place that waits, that place marked.
 // - Side sheet: the result's line opens its whole text, its markdown table drawn as a table.
-// - Team tab: the right column's Team tab shows a task by its title, and it opens in place.
+// - Team tab: the right column's Team tab shows a task by its title, and it opens in place naming its goal.
 // - Replaced lead: a lead session its project replaced is marked so in Your own sessions, and its inspector has no
 //   Team tab.
 // - Shell card: the shell plugin's card, under the asking session's chat, with its exact command.
-// - Roadmap: the project's roadmap shows the task, and the board page's old address opens the lead conversation.
+// - Roadmap: the goals as rows, Unsorted and the done goals folded, a goal opening in place to its task; the board
+//   page's old address opens the lead conversation.
 // - Deep links: an address with the dial, a tab and a task draws exactly that.
 // - This node: its Health (freezes) and its Plugins, the named plugin on.
 // - Settings: the node's settings, a known one among them.
@@ -62,7 +67,7 @@ async function shots(page, origin, folder) {
   const states = [
     ['lead', project], ['lead-everything', project + '?show=all'], ['lead-waiting', project + '?show=asks'], ['task-open', project + '?task=' + encodeURIComponent(expect.task || '')],
     ['stats', project + '?tab=stats'], ['files', project + '?tab=files'], ['roadmap', project.replace(/\/lead$/, '/roadmap')],
-    ['roadmap-queue', project.replace(/\/lead$/, '/roadmap') + '?open=queue'], ['own-sessions', '#/sessions'], ['session', expect.chatHref], ['shell-request', expect.shellHref],
+    ['roadmap-open', project.replace(/\/lead$/, '/roadmap') + '?open=' + encodeURIComponent(expect.goalID) + ',unsorted,done'], ['own-sessions', '#/sessions'], ['session', expect.chatHref], ['shell-request', expect.shellHref],
     ['new-project', '#/new'], ['this-node', '#/node'], ['settings', '#/settings'],
   ];
   for (const [width, height, suffix] of [[1440, 900, ''], [390, 844, '-phone']]) {
@@ -70,7 +75,7 @@ async function shots(page, origin, folder) {
       await page.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: width < 600 });
       await page.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: theme }] });
       for (const [name, hash] of states) {
-        if (suffix && ['stats', 'files', 'lead-waiting', 'roadmap-queue', 'new-project', 'settings'].includes(name)) continue;
+        if (suffix && ['stats', 'files', 'lead-waiting', 'new-project', 'settings'].includes(name)) continue;
         await page.go(hash);
         await pause(900);
         const { data } = await page.send('Page.captureScreenshot', { format: 'png' });
@@ -88,7 +93,18 @@ async function shots(page, origin, folder) {
         await page.evaluate(`document.querySelector('.project-view .phone-only')?.click()`);
         await pause(500);
         fs.writeFileSync(path.join(folder, `drawer${suffix}-${theme}.png`), Buffer.from((await page.send('Page.captureScreenshot', { format: 'png' })).data, 'base64'));
+        await page.evaluate(`document.querySelector('.drawer-scrim')?.click()`);
       }
+    }
+  }
+  // The page in Spanish (?lang=es), its roadmap too.
+  await page.send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 900, deviceScaleFactor: 1, mobile: false });
+  for (const theme of ['light', 'dark']) {
+    await page.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: theme }] });
+    for (const [name, hash] of [['lead', project], ['roadmap', project.replace(/\/lead$/, '/roadmap')]]) {
+      await page.send('Page.navigate', { url: `${origin}/?lang=es${hash}` });
+      await pause(1500);
+      fs.writeFileSync(path.join(folder, `${name}-spanish-${theme}.png`), Buffer.from((await page.send('Page.captureScreenshot', { format: 'png' })).data, 'base64'));
     }
   }
   await page.send('Emulation.setEmulatedMedia', { features: [] });
@@ -131,7 +147,7 @@ async function run() {
     const question = await page.until(`(() => {
       const card = [...document.querySelectorAll('.project-view .card')].find((el) => el.offsetParent && el.innerText.includes(${JSON.stringify(expect.question)}));
       const title = document.querySelector('.project-view .asked-title')?.innerText || '';
-      return card && /question/i.test(title) ? title + ': ' + card.innerText.replace(/\\s+/g, ' ').slice(0, 80) : null;
+      return card && /question/i.test(title) && /the lead/.test(card.querySelector('.card-asker')?.innerText || '') ? title + ': ' + card.innerText.replace(/\\s+/g, ' ').slice(0, 80) : null;
     })()`, WAIT);
     await page.shot('question-card');
     record('Question card', question, question || `no card with "${expect.question}" under the waiting block's title`);
@@ -144,6 +160,19 @@ async function run() {
       return line && big && /needs? you/.test(big.innerText) && big.classList.contains('asked') ? big.innerText + ' · ' + line.innerText.replace(/\\s+/g, ' ') : null;
     })()`, WAIT);
     record('Lead conversation', talk, talk || `no result line "${expect.result}", or the header doesn't say what needs you`);
+
+    // Latest statement: the conversation is short (one line), so the lead's latest decision shows at its top.
+    const statement = await page.until(`(() => { const said = document.querySelector('.project-view .latest-said'); return said && said.innerText.includes(${JSON.stringify(expect.statement)}) ? said.innerText.replace(/\\s+/g, ' ') : null; })()`, WAIT);
+    record('Latest statement', statement, statement || `no "${expect.statement}" above a short conversation`);
+
+    // What waits elsewhere: the header counts this project's; the summary's count links to the next place that waits,
+    // and Your own sessions (where the replaced lead needs you) carries the asking colour.
+    const elsewhere = await page.until(`(() => {
+      const count = document.querySelector('.summary-count');
+      const own = document.querySelector('.place.asked');
+      return count && /^#\\/s\\//.test(count.getAttribute('href') || '') && own && own.dataset.place === 'ownSessions' ? count.innerText + ' → ' + decodeURIComponent(count.getAttribute('href')).slice(0, 24) + '; Your own sessions marked' : null;
+    })()`, WAIT);
+    record('What waits elsewhere', elsewhere, elsewhere || 'the summary’s count doesn’t lead to the session that waits, or Your own sessions isn’t marked');
 
     // Side sheet: the result's whole text, its table a table.
     const opened = talk && await page.evaluate(`(() => { const line = [...document.querySelectorAll('.project-view .line.kind-result')].find((el) => el.innerText.includes(${JSON.stringify(expect.result)})); line?.click(); return !!line; })()`);
@@ -163,9 +192,9 @@ async function run() {
       row.click();
       return true;
     })()`, WAIT);
-    const team = teamRow && await page.until(`(() => { const open = document.querySelector('.right .task-row2.open + .tdet'); return open && /[?&]task=/.test(location.hash) ? open.innerText.replace(/\\s+/g, ' ').slice(0, 80) : null; })()`, WAIT);
+    const team = teamRow && await page.until(`(() => { const open = document.querySelector('.right .task-row2.open + .tdet'); return open && /[?&]task=/.test(location.hash) && open.innerText.includes(${JSON.stringify(expect.goal)}) ? open.innerText.replace(/\\s+/g, ' ').slice(0, 80) : null; })()`, WAIT);
     await page.shot('team-tab');
-    record('Team tab', team, team || (teamRow ? 'the task didn’t open in place' : `no task "${expect.board}" in the Team tab`));
+    record('Team tab', team, team || (teamRow ? `the task didn’t open in place naming its goal "${expect.goal}"` : `no task "${expect.board}" in the Team tab`));
 
     // Replaced lead: marked so in Your own sessions, and no Team tab in its inspector.
     if (expect.replacedHref) {
@@ -189,13 +218,23 @@ async function run() {
     await page.shot('shell-card');
     record('Shell card', shell, shell || `no card with "${expect.shell}"`);
 
-    // Roadmap: the task on the project's roadmap; the board page's old address is the lead conversation.
-    await page.go(expect.projectHref.replace(/\/lead$/, '/roadmap'));
-    const road = await page.until(has('.road-row', expect.board), WAIT);
+    // Roadmap: the goals as rows (Unsorted after them, the done ones folded), a goal opening in place to its tasks;
+    // the board page's old address is the lead conversation.
+    const roadmap = expect.projectHref.replace(/\/lead$/, '/roadmap');
+    await page.go(roadmap);
+    const goals = await page.until(`(() => {
+      const rows = [...document.querySelectorAll('.goal-row')].map((row) => row.innerText);
+      return rows.some((text) => text.includes(${JSON.stringify(expect.goal)})) && document.querySelector('.goal-row.unsorted') && document.querySelector('.road-band') ? rows.length : null;
+    })()`, WAIT);
+    await page.evaluate(`[...document.querySelectorAll('.goal-row')].find((row) => row.innerText.includes(${JSON.stringify(expect.goal)}))?.click()`);
+    const road = goals && await page.until(`(() => {
+      const task = [...document.querySelectorAll('.goal-task')].find((el) => el.innerText.includes(${JSON.stringify(expect.board)}));
+      return task && new URLSearchParams(location.hash.split('?')[1] || '').get('open') === ${JSON.stringify(expect.goalID)} ? 'goal opened to its task' : null;
+    })()`, WAIT);
     await page.shot('roadmap');
     await page.go(expect.projectHref.replace(/\/lead$/, ''));
     const old = road && await page.until(`!document.querySelector('.project-view').hidden && !!document.querySelector('.right .task-row2') && document.querySelector('.switch-link[aria-current]')?.innerText.trim() === 'Lead' ? 'the old address opens the lead conversation' : null`, WAIT);
-    record('Roadmap', road && old, road ? (old || 'the old #/p/ address didn’t open the lead conversation') : `no "${expect.board}" on the roadmap`);
+    record('Roadmap', goals && road && old, !goals ? `no goal row "${expect.goal}" with Unsorted and the done goals' band` : !road ? `the goal didn't open to "${expect.board}"` : (old ? `${goals} rows, ${road}; ${old}` : 'the old #/p/ address didn’t open the lead conversation'));
 
     // Deep links: the dial at Everything, the Files tab.
     await page.go(expect.projectHref + '?show=all&tab=files');

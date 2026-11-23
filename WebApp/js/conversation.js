@@ -61,7 +61,6 @@ export function leadLines(board) {
 }
 
 // The dial's levels: only what waits on the user, decisions and results (the default), everything.
-export const LEVELS = ['asks', 'decisions', 'all'];
 export function shownLines(lines, level) {
   if (level === 'asks') return [];
   return level === 'all' ? lines : lines.filter((line) => line.kind !== 'update');
@@ -167,4 +166,55 @@ export function dayOf(iso, now = Date.now(), locale = undefined) {
   if (at.toDateString() === today.toDateString()) return 'today';
   if (at.toDateString() === new Date(now - 86400000).toDateString()) return 'yesterday';
   return at.toLocaleDateString(locale, { weekday: 'long', day: 'numeric', month: 'short' });
+}
+
+// Everything that waits on the user, place by place in the left column's order: each project with something waiting,
+// each of the user's own sessions that needs them, and the node's cards no listed project holds (a held config of the
+// home folder: This node). { kind: 'project' | 'session' | 'node', id, count }. `own`: whether a session is the user's own.
+export function waitingPlaces(state, own) {
+  const projects = projectsOf(state);
+  const listed = new Set(projects.map((one) => one.project));
+  const places = projects.filter((one) => one.waiting).map((one) => ({ kind: 'project', id: one.project, count: one.waiting }));
+  const sessionPlace = (id, count) => {
+    const found = places.find((place) => place.kind === 'session' && place.id === id);
+    if (found) found.count += count; else places.push({ kind: 'session', id, count });
+  };
+  for (const session of state.sessions.values()) if (own(session) && session.status === 'needs-you') sessionPlace(session.id, 1);
+  let elsewhere = 0;
+  for (const card of state.cards.values()) {
+    if (!card.open || listed.has(card.project)) continue;
+    // A plugin's request waits under its asker's chat; one whose asker isn't listed, on This node.
+    const asker = card.kind === 'plugin' ? [...state.sessions.keys()].find((id) => id.toLowerCase() === String(card.plugin?.session || '').toLowerCase()) : null;
+    if (asker) sessionPlace(asker, state.sessions.get(asker).status === 'needs-you' ? 0 : 1); else elsewhere += 1;
+  }
+  if (elsewhere) places.push({ kind: 'node', id: null, count: elsewhere });
+  return places;
+}
+
+// The place to go next from `route`: the first after the one shown, round again; the first when none is shown.
+export function nextPlace(places, route) {
+  if (!places.length) return null;
+  const here = places.findIndex((place) => (place.kind === 'project' && route.name === 'project' && route.id === place.id)
+    || (place.kind === 'session' && route.name === 'session' && route.id === place.id) || (place.kind === 'node' && route.name === 'node'));
+  return places[(here + 1) % places.length];
+}
+
+// The roadmap with goals (the redesign's "The roadmap view"): one row per open goal in the lead's order, then the
+// tasks with no goal (or one the board doesn't list) as Unsorted, then the done goals. Each row's tasks in motion first,
+// then blocked, queued and merged today. { goal (null: Unsorted), tasks, counts: { motion, blocked, queued, merged } }.
+export function goalRows(board, now = Date.now()) {
+  const goals = board?.goals || [];
+  const team = standing(board, now);
+  const order = [...team.motion, ...team.blocked, ...team.queued, ...team.merged];
+  const where = (task) => (team.motion.includes(task) ? 'motion' : team.blocked.includes(task) ? 'blocked' : team.queued.includes(task) ? 'queued' : 'merged');
+  const known = new Set(goals.map((goal) => goal.id));
+  const row = (goal, tasks) => {
+    const counts = { motion: 0, blocked: 0, queued: 0, merged: 0 };
+    for (const task of tasks) counts[where(task)] += 1;
+    return { goal, tasks, counts };
+  };
+  const open = goals.filter((goal) => goal.state !== 'done').map((goal) => row(goal, order.filter((task) => task.goal === goal.id)));
+  const unsorted = order.filter((task) => !task.goal || !known.has(task.goal));
+  const done = goals.filter((goal) => goal.state === 'done').map((goal) => row(goal, order.filter((task) => task.goal === goal.id)));
+  return { open, unsorted: unsorted.length ? row(null, unsorted) : null, done };
 }

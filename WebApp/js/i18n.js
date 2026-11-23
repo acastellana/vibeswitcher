@@ -22,6 +22,7 @@ const EN = {
   thingsNeedYou: { one: '1 thing needs you', other: '{n} things need you' },
   nothingNeedsYou: 'Nothing needs you',
   briefMe: 'Brief me',
+  nextWaiting: 'Go to the next thing that waits on you',
   briefTitle: 'What happened, and what’s asked of you',
   briefing: 'Briefing…',
   briefFailed: 'The node couldn’t write a briefing.',
@@ -36,10 +37,10 @@ const EN = {
   team: 'Team',
   working: '{n} working',
   review: '{n} in review',
-  ready: '{n} ready to merge',
-  blocked: '{n} blocked',
+  ready: { one: '{n} ready to merge', other: '{n} ready to merge' },
+  blocked: { one: '{n} blocked', other: '{n} blocked' },
   queued: '{n} queued',
-  merged: '{n} merged',
+  merged: { one: '{n} merged', other: '{n} merged' },
   noTasks: 'No tasks yet',
   emptyTalk: 'Nothing has passed between you and the lead yet.',
   emptyAsks: 'Nothing is waiting on you.',
@@ -75,7 +76,7 @@ const EN = {
   inMotionTitle: 'In motion, {n}',
   blockedTitle: 'Blocked, {n}',
   queuedLine: '{n} queued',
-  mergedLine: '{n} merged today',
+  mergedLine: { one: '{n} merged today', other: '{n} merged today' },
   nothingMoving: 'Nothing is moving.',
   steps: 'queued, working, audit, ready to merge, merged',
   latestNote: 'Latest note, {time}',
@@ -105,6 +106,17 @@ const EN = {
   roadMotion: 'In motion',
   roadBlocked: 'Blocked',
   roadQueued: 'Queued',
+  roadGoalsIntro: 'The lead’s goals, each with its tasks. Dates come once workers estimate their tasks.',
+  roadUnsorted: 'Unsorted',
+  roadNoTasks: 'no tasks yet',
+  roadDoneMeans: 'done means:',
+  roadDoneGoals: { one: '1 goal done', other: '{n} goals done' },
+  roadCountMotion: '{n} in motion',
+  roadCountBlocked: { one: '{n} blocked', other: '{n} blocked' },
+  roadCountQueued: '{n} queued',
+  roadCountMerged: { one: '{n} merged today', other: '{n} merged today' },
+  roadMerged: 'merged',
+  goal: 'Goal',
   roadQueue: { one: '1 more task queued', other: '{n} more tasks queued' },
   roadQueueOpen: 'Show them',
   roadQueueClose: 'Hide them',
@@ -132,6 +144,8 @@ const EN = {
   goneProject: 'This project isn’t on the node',
   goneProjectSub: 'Its lead ended, or the link is from another node.',
   // The cards (views/cards.js).
+  askerLead: 'the lead',
+  askerTask: 'the lead, about “{task}”',
   cKeysAnswers: '1–{n} answers · ↑ ↓ and ↩',
   cKeysPicks: '1–{n} picks · ↑ ↓ and ↩',
   cKeysMove: '↑ ↓ and ↩',
@@ -208,6 +222,7 @@ const ES = {
   thingsNeedYou: { one: '1 cosa te necesita', other: '{n} cosas te necesitan' },
   nothingNeedsYou: 'Nada te necesita',
   briefMe: 'Resúmeme',
+  nextWaiting: 'Ir a lo siguiente que te espera',
   briefTitle: 'Qué ha pasado y qué se te pide',
   briefing: 'Resumiendo…',
   briefFailed: 'El nodo no pudo escribir el resumen.',
@@ -222,10 +237,10 @@ const ES = {
   team: 'Equipo',
   working: '{n} trabajando',
   review: '{n} en revisión',
-  ready: '{n} listas para fusionar',
-  blocked: '{n} bloqueadas',
+  ready: { one: '{n} lista para fusionar', other: '{n} listas para fusionar' },
+  blocked: { one: '{n} bloqueada', other: '{n} bloqueadas' },
   queued: '{n} en cola',
-  merged: '{n} fusionadas',
+  merged: { one: '{n} fusionada', other: '{n} fusionadas' },
   noTasks: 'Aún no hay tareas',
   emptyTalk: 'Aún no ha pasado nada entre tú y el líder.',
   emptyAsks: 'Nada te está esperando.',
@@ -261,7 +276,7 @@ const ES = {
   inMotionTitle: 'En marcha, {n}',
   blockedTitle: 'Bloqueadas, {n}',
   queuedLine: '{n} en cola',
-  mergedLine: '{n} fusionadas hoy',
+  mergedLine: { one: '{n} fusionada hoy', other: '{n} fusionadas hoy' },
   nothingMoving: 'Nada está en marcha.',
   steps: 'en cola, trabajando, auditoría, lista para fusionar, fusionada',
   latestNote: 'Última nota, {time}',
@@ -291,6 +306,17 @@ const ES = {
   roadMotion: 'En marcha',
   roadBlocked: 'Bloqueadas',
   roadQueued: 'En cola',
+  roadGoalsIntro: 'Los objetivos del líder, cada uno con sus tareas. Las fechas llegarán cuando los trabajadores estimen sus tareas.',
+  roadUnsorted: 'Sin objetivo',
+  roadNoTasks: 'aún sin tareas',
+  roadDoneMeans: 'hecho significa:',
+  roadDoneGoals: { one: '1 objetivo cumplido', other: '{n} objetivos cumplidos' },
+  roadCountMotion: '{n} en marcha',
+  roadCountBlocked: { one: '{n} bloqueada', other: '{n} bloqueadas' },
+  roadCountQueued: '{n} en cola',
+  roadCountMerged: { one: '{n} fusionada hoy', other: '{n} fusionadas hoy' },
+  roadMerged: 'fusionada',
+  goal: 'Objetivo',
   roadQueue: { one: '1 tarea más en cola', other: '{n} tareas más en cola' },
   roadQueueOpen: 'Mostrarlas',
   roadQueueClose: 'Ocultarlas',
@@ -318,6 +344,8 @@ const ES = {
   goneProject: 'Este proyecto no está en el nodo',
   goneProjectSub: 'Su líder terminó, o el enlace es de otro nodo.',
   // The cards (views/cards.js).
+  askerLead: 'el líder',
+  askerTask: 'el líder, sobre «{task}»',
   cKeysAnswers: '1–{n} responden · ↑ ↓ y ↩',
   cKeysPicks: '1–{n} eligen · ↑ ↓ y ↩',
   cKeysMove: '↑ ↓ y ↩',
@@ -400,6 +428,25 @@ export function t(key, values = {}) {
   let word = TABLES[language][key] ?? EN[key] ?? key;
   if (typeof word === 'object') word = values.n === 1 ? word.one : word.other;
   return word.replace(/\{(\w+)\}/g, (all, name) => (values[name] ?? all));
+}
+
+// The node's own words for a task (BoardValue: its state in the Mac's Team words, and the few fixed lines under it),
+// in the page's language; anything else (a lead's or a worker's words) as it came.
+const NODE_WORDS = {
+  es: {
+    Working: 'Trabajando', 'In review': 'En revisión', Blocked: 'Bloqueada', Queued: 'En cola', 'Ready to merge': 'Lista para fusionar',
+    'Needs audit': 'Necesita auditoría', Merged: 'Fusionada', Failed: 'Fallida', Kept: 'Guardada', Folded: 'Integrada', Abandoned: 'Abandonada',
+    Reverted: 'Revertida', Reconsider: 'Replantear', Stalled: 'Atascada', 'Waiting for the audit': 'Esperando la auditoría',
+    'Checking the work': 'Revisando el trabajo', 'Waits on lead': 'Espera al líder', 'It failed; the lead decides what next.': 'Falló; el líder decide qué sigue.',
+    'The worker asked the lead something.': 'El trabajador le preguntó algo al líder.',
+  },
+};
+export function nodeWords(text) {
+  const table = NODE_WORDS[language];
+  if (!table || !text) return text || '';
+  if (table[text]) return table[text];
+  const rework = /^Rework (\d+)$/.exec(text);
+  return rework ? `Corrección ${rework[1]}` : text;
 }
 
 // "a, b and c" / "a, b y c".

@@ -74,13 +74,18 @@ struct PageCheckTests {
         let question = "Launch the onboarding page to the testers on Thursday, or wait for the copy review?"
         try tools.call("ask_user", ["question": question, "options": ["Thursday", "Wait for the review"]])
         try #require(await eventually(timeout: 120) { tools.calls().count == 1 }, "\(node.said)")
-        let made = WireVectors.sampleBoard(now: Date().timeIntervalSince1970, worker: site.session.id)
+        // The sample board with its two goals (the launch, open, with the first two tasks; the uploads, done), the rest unsorted.
+        let made = WireVectors.goaled(WireVectors.sampleBoard(now: Date().timeIntervalSince1970, worker: site.session.id), now: Date().timeIntervalSince1970)
         // A result the lead posted, its body markdown with a table: the conversation's line and the side sheet's.
         let result = "The pricing page has its new copy"
         try BoardStore(root: repo.path).update {
             $0.tasks = made.tasks
+            $0.goals = made.goals
             $0.updates = [LeadUpdate(id: "page-check-result", title: result, body: "What changed:\n\n| Plan | Price |\n|---|---|\n| Starter | $9 |\n| Team | $29 |")]
         }
+        // The lead's latest statement (a decision in its records), which a short conversation shows at its top.
+        let statement = "Ship the copy first and the pricing table after"
+        try BoardStore(root: repo.path).appendDecision(statement, why: "The table waits on the plan names")
 
         // A second lead session of the project that its board doesn't name: a lead it replaced, still running, as four
         // were on the real node on 2026-11-23 while a merge held the rotation gate (the engine ends a replaced lead only
@@ -116,14 +121,15 @@ struct PageCheckTests {
         }
         try #require(kinds.isSuperset(of: ["question", "plugin"]), "cards: \(kinds)\n\(node.said)")
 
+        let launch = try #require(made.goals?.first, "the sample board's goals")
         let opened = try LiveScratch.open(node)
         let expect: [String: String] = [
             "session": "example-site", "chatHref": "#/s/" + NodeIds.session(host: site.session.id),
             "chat": "The headline never wraps",
             "projectHref": "#/p/" + NodeIds.project(root: repo.path).addingPercentEncoding(withAllowedCharacters: .alphanumerics)! + "/lead",
-            "question": "Launch the onboarding page to the testers", "result": result, "task": made.tasks[0].slug,
+            "question": "Launch the onboarding page to the testers", "result": result, "task": made.tasks[0].slug, "statement": statement,
             "shellHref": "#/s/" + NodeIds.session(host: asker.id), "shell": "echo page-check-ran",
-            "board": made.tasks[0].title,
+            "board": made.tasks[0].title, "goal": launch.title, "goalID": launch.id,
             "replacedHref": "#/s/" + formerID,
             "plugin": "Shell requests", "setting": "Boost",
         ]
@@ -140,7 +146,8 @@ struct PageCheckTests {
                          output: .path(said.path, flags: O_WRONLY | O_TRUNC), limit: 240)
         }
         let table = (try? String(contentsOf: said, encoding: .utf8)) ?? ""
-        for row in ["Projects and own sessions", "Chat", "Question card", "Lead conversation", "Side sheet", "Team tab", "Replaced lead", "Shell card", "Roadmap",
+        for row in ["Projects and own sessions", "Chat", "Question card", "Lead conversation", "Latest statement", "What waits elsewhere", "Side sheet", "Team tab",
+                    "Replaced lead", "Shell card", "Roadmap",
                     "Deep links", "This node", "Settings", "Language", "Phone", "Console"] {
             #expect(table.split(separator: "\n").contains { $0.hasPrefix(row + " ") && $0.contains(" pass ") }, "\(row):\n\(table)")
         }

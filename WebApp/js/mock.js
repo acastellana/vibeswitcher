@@ -105,14 +105,20 @@ export function createMock(store, options = {}) {
   const boards = new Map(options.empty ? [] : [[SITE_PROJECT, {
     project: SITE_PROJECT, root: SITE, baseBranch: 'landing-base', more: 0, unreadable: null, allDone: null,
     counts: { attention: 1, running: 2, waiting: 1, done: 2 },
+    // The lead's goals (the node's `goals`), each task's `goal`.
+    goals: [
+      { id: 'landing', title: 'The new landing page is live', done: 'The hero, copy and footer are on main and on the site', state: 'open', toGo: 2, finished: 1 },
+      { id: 'reliable', title: 'Uploads and sessions never lose work', done: 'Uploads retry and ended sessions leave nothing behind', state: 'open', toGo: 2, finished: 0 },
+      { id: 'speed', title: 'Pages load fast', done: 'Static assets are cached', state: 'done', toGo: 0, finished: 1 },
+    ],
     tasks: [
-      task('sync-landing-base', 'Sync landing-base with main', 'running', { since: ago(252), worker: W_SYNC, checkpoints: [{ text: 'Rebased onto main; resolving the hero’s conflicts', at: ago(70) }],
+      task('sync-landing-base', 'Sync landing-base with main', 'running', { goal: 'landing', since: ago(252), worker: W_SYNC, checkpoints: [{ text: 'Rebased onto main; resolving the hero’s conflicts', at: ago(70) }],
         summary: 'Fixing the landing page’s clashes with the latest main' }),
-      task('cleanup-ended-folders', 'Clean up ended sessions’ folders', 'review', { since: ago(118), worker: W_CLEAN, verifier: V_CLEAN, checkpoints: [{ text: 'Raised to audit: it has code that deletes files', at: ago(118) }] }),
-      task('flaky-upload-test', 'Fix the flaky upload test', 'blocked', { since: ago(1080), after: ['sync-landing-base'] }),
+      task('cleanup-ended-folders', 'Clean up ended sessions’ folders', 'review', { goal: 'reliable', since: ago(118), worker: W_CLEAN, verifier: V_CLEAN, checkpoints: [{ text: 'Raised to audit: it has code that deletes files', at: ago(118) }] }),
+      task('flaky-upload-test', 'Fix the flaky upload test', 'blocked', { goal: 'reliable', since: ago(1080), after: ['sync-landing-base'] }),
       task('sidebar-consistency', 'UI consistency pass over the sidebar', 'planned', { since: ago(1500) }),
-      task('cache-static-assets', 'Cache the static assets', 'done', { since: ago(2400), merged: { commit: '8a3f1e2', at: ago(2400), tested: true } }),
-      task('footer-links', 'Fix the footer links', 'done', { since: ago(3900), merged: { commit: 'c41d7b9', at: ago(3900), tested: true } }),
+      task('cache-static-assets', 'Cache the static assets', 'done', { goal: 'speed', since: ago(2400), merged: { commit: '8a3f1e2', at: ago(2400), tested: true } }),
+      task('footer-links', 'Fix the footer links', 'done', { goal: 'landing', since: ago(3900), merged: { commit: 'c41d7b9', at: ago(3900), tested: true } }),
     ],
     // The Team tab's records (the node's `BoardRecords`).
     scorecard: { merged: 2, reverts: 0, mergedWithoutTests: 0, footnote: 'Over 2 merged tasks.', receipts: 'This batch: 2 tasks, 1.4 h of worker time, 3.1M tokens, est. $4.80; most expensive: Cache the static assets (est. $3.10).',
