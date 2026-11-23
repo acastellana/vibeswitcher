@@ -4452,3 +4452,6 @@ Proposed task 1: Find why dictations end with no text
 - 2026-11-23 17:19 Automatically (auto_advance): Released review-rules-carry-a's worker, idle since its done report on 6dcf526f, while its audit runs (ended pid 36601 (Worker: Review rules carry a trigger and a source; the verifier applies only the rules a diff triggers and says which)): its Mac slot and memory are free. Its worktree and branch stay; findings the verdict sends back go to a fresh worker there, and a clean verdict merges with none.
 - 2026-11-23 17:21 Audit of review-rules-carry-a: complete, clean, round 1: 2 Nit open
 - 2026-11-23 18:06 Merged review-rules-carry-a: Review rules carry a trigger and a source; the verifier applies only the rules a diff triggers and says which (build 71a026954280)
+- 2026-11-23 18:06 Automatically (auto_advance): Merged review-rules-carry-a (Review rules carry a trigger and a source; the verifier applies only the rules a diff triggers and says which) into main at 208cd3fd, on its passing audit and the full test run.
+- 2026-11-23 18:06 Automatically (auto_advance): Cleaned up review-rules-carry-a (freed 2.5 GB of build output and temporary folders). It stays done.
+- 2026-11-23 18:07 Update: Retrospective: the verification plan (flaky tests, review rules, bugs past review) — **Landed today (8 merges, from the claude.dev verification article):**

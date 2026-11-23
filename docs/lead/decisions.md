@@ -431,3 +431,7 @@ Fix tasks may now delete a test whose root cause isn't found; without a review, 
 
 A red-on-base fix changes a failing test just as a flake fix does and can weaken or delete it; the same review keeps that honest. They are rare (0 in the last 7 days), so the cost is negligible.
 
+## 2026-11-23 18:07:09 From the 2026-11-23 retrospective (verification plan): (1) Before filing a flaky-test fix task by hand, the lead checks `git log --since=<flake time> main -- <the test's file and the code it exercises>` for a fix that landed after the flake; if one did, no task (task fix found 5743c865 had already fixed it, after a worker's 0.3 h). (2) To settle an Important finding as intended, the lead dismisses it and leaves the worker running for auto_advance to merge, never stop_worker first: stopping it set the task blocked, so auto_advance didn't merge it and the lead had to merge by hand. (3) At the next decisions archive (after Fable's reset, Nov 25), the lead also reads status's review-rules line: R13's trigger matched every eval case and drew 3 false alarms, R2 matched none; narrow or prune from the 30-day counts, not from one eval run.
+
+Each is a setback from today's batch: a fix task with nothing to fix, a manual merge after a self-inflicted block, and review rules whose triggers don't yet discriminate.
+
