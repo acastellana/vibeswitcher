@@ -98,12 +98,11 @@ struct ApproveTests {
         for index in items.indices {
             #expect(accepted.contains { $0.kind == "config.accept" && $0.action == Requests.itemAction(action, index) }, "\(accepted)")
         }
-        // Taken once: a new action finds no batch; the same action is told it was done (a batch's result isn't kept,
-        // `RetryRule.keepsResult`), nothing done twice.
+        // Taken once: a new action finds no batch; the same action is answered as before, nothing done twice.
         let again = try #require(await world.ask("approve", ["batch": .string(batch), "code": .string(code)]))
         #expect(again.error?.code == NodeWire.Code.gone.rawValue, "\(again)")
         let replayed = try #require(await world.ask("approve", ["batch": .string(batch), "code": .string(code)], action: action))
-        #expect(!replayed.ok && replayed.error?.message.contains("was done") == true, "\(replayed)")
+        #expect(replayed.ok && replayed.result?["done"]?.array?.count == items.count, "\(replayed)")
         #expect(world.queue.sync { world.requests.accepted }.filter { $0.kind == "config.accept" }.count == items.count)
         // Nothing held any more: nothing to list.
         let after = try await list(world)

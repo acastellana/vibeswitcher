@@ -22,7 +22,8 @@ import Testing
         let ruled = Set(Requests.retryRules.keys)
         #expect(ruled == Requests.recorded, "no retry rule: \(Requests.recorded.subtracting(ruled).sorted()); a rule for no recorded kind: \(ruled.subtracting(Requests.recorded).sorted())")
         // Those whose result carries a secret (web.open's pairing link, a plugin page's address with its token) keep none.
-        for kind in ["web.open", "answer", "approve", "set"] { #expect(Requests.retryRules[kind]?.keepsResult == false, "\(kind) keeps its result") }
+        // Only web.open's result is a secret (its link); a page's address in an answer's is replaced (`withoutSecret`).
+        for (kind, rule) in Requests.retryRules { #expect(rule.keepsResult == (kind != "web.open"), "\(kind): \(rule)") }
         // Never done again: stopping the node, a card's act (its card is gone after a restart), anything that types or starts.
         for kind in ["stop", "answer", "hold", "config.accept", "base.accept", "base.keep", "send", "tell", "session.reply", "session.new", "lead", "approve"] {
             #expect(Requests.retryRules[kind]?.rerun == false, "\(kind) is done again")

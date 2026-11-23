@@ -492,19 +492,38 @@ public final class Requests: @unchecked Sendable {
         }
     }
 
-    /// What the record keeps of `answer`: failed with why; done with its result only when `kind`'s rule says its result
-    /// holds no secret (`retryRules`), else done and no more.
+    /// What the record keeps of `answer`: failed with why; done with its result, without what is secret
+    /// (`withoutSecret`), when `kind`'s rule keeps it (`retryRules`), else done and no more.
     static func outcome(of answer: NodeWire.Reply, kind: String) -> LeadVaultV2.UserAction.Outcome {
         guard answer.ok else { return .init(done: false, note: answer.error?.message ?? "no reason given", code: answer.error?.code) }
         guard retryRules[kind]?.keepsResult == true else { return .init(done: true, note: nil) }
-        return .init(done: true, note: answer.result.map { String(decoding: NodeWire.line($0).dropLast(), as: UTF8.self) })
+        return .init(done: true, note: withoutSecret(answer.result).map { String(decoding: NodeWire.line($0).dropLast(), as: UTF8.self) })
+    }
+
+    /// A result as a repeat is given it: a plugin page's address (an answer whose reply is `once`) replaced by where it
+    /// went. Every other result a kind keeps holds no secret.
+    static func withoutSecret(_ result: NodeWire.Value?) -> NodeWire.Value? {
+        guard case .object(var fields)? = result, fields["once"]?.bool == true else { return result }
+        fields["say"] = .array([.string(pageWent)])
+        return .object(fields)
+    }
+
+    static let pageWent = "Its page's address went to the terminal that answered first: it works once, and isn't given again."
+
+    /// The result a repeat of a done action is given when its own isn't kept (web.open's link; one too long for the
+    /// record): a success, `repeat` set, with what to say (the command line prints it and exits 0, `NodeClient.change`).
+    static func repeatResult(_ lines: [String]) -> NodeWire.Value {
+        .object(["repeat": .bool(true), "say": .array(lines.map(NodeWire.Value.string))])
     }
 
     /// What a retry of a recorded kind may be given and done, stated for every recorded kind (RequestKindsLint holds its
     /// keys to `recorded`; a kind with none keeps no result and isn't done again).
     struct RetryRule: Equatable, Sendable {
-        /// Its result holds no secret, so the vault's record keeps it and a retry is given it. Not so (a link with its
-        /// pairing code, a page's address with its token, a setting's value, a card's text): the record says done, no more.
+        /// Its result holds no secret, so the vault's record keeps it and a retry is given it (a success either way: a
+        /// repeat of a done action is ok). Every kind but web.open: its result is its link, a pairing code, so it isn't
+        /// kept (a retry is told it was done, and gets no link). A plugin page's address in an answer's result is replaced
+        /// by where it went (`withoutSecret`); a setting's value, a card's text, a batch's items are the user's own, given
+        /// back only to the same action id with the same arguments.
         var keepsResult: Bool
         /// A second act leaves things as one does (it sets a state or ends what it names), so a retry of one begun with
         /// no outcome (its server ended in between) does it again, when nothing later was recorded on the same subject.
@@ -517,23 +536,23 @@ public final class Requests: @unchecked Sendable {
 
     static let retryRules: [String: RetryRule] = [
         "start": .init(keepsResult: true, rerun: true), "stop": .init(keepsResult: true, rerun: false),
-        "lead": .init(keepsResult: true, rerun: false), "answer": .init(keepsResult: false, rerun: false),
-        "hold": .init(keepsResult: false, rerun: false), "config.accept": .init(keepsResult: false, rerun: false),
-        "base.accept": .init(keepsResult: false, rerun: false), "base.keep": .init(keepsResult: false, rerun: false),
+        "lead": .init(keepsResult: true, rerun: false), "answer": .init(keepsResult: true, rerun: false),
+        "hold": .init(keepsResult: true, rerun: false), "config.accept": .init(keepsResult: true, rerun: false),
+        "base.accept": .init(keepsResult: true, rerun: false), "base.keep": .init(keepsResult: true, rerun: false),
         "hooks.install": .init(keepsResult: true, rerun: true), "hooks.remove": .init(keepsResult: true, rerun: true),
-        "build.switch": .init(keepsResult: false, rerun: false), "web.open": .init(keepsResult: false, rerun: false),
-        "web.revoke": .init(keepsResult: false, rerun: true), "tell": .init(keepsResult: false, rerun: false),
-        "send": .init(keepsResult: false, rerun: false), "session.new": .init(keepsResult: false, rerun: false),
-        "session.end": .init(keepsResult: false, rerun: true), "session.reply": .init(keepsResult: false, rerun: false),
-        "set": .init(keepsResult: false, rerun: true), "push": .init(keepsResult: false, rerun: false),
-        "push.decline": .init(keepsResult: false, rerun: true), "session.reopen": .init(keepsResult: false, rerun: false),
+        "build.switch": .init(keepsResult: true, rerun: false), "web.open": .init(keepsResult: false, rerun: false),
+        "web.revoke": .init(keepsResult: true, rerun: true), "tell": .init(keepsResult: true, rerun: false),
+        "send": .init(keepsResult: true, rerun: false), "session.new": .init(keepsResult: true, rerun: false),
+        "session.end": .init(keepsResult: true, rerun: true), "session.reply": .init(keepsResult: true, rerun: false),
+        "set": .init(keepsResult: true, rerun: true), "push": .init(keepsResult: true, rerun: false),
+        "push.decline": .init(keepsResult: true, rerun: true), "session.reopen": .init(keepsResult: true, rerun: false),
         "prompt-audit": .init(keepsResult: true, rerun: true), "session.rename": .init(keepsResult: true, rerun: true),
         "session.pause": .init(keepsResult: true, rerun: true), "session.resume": .init(keepsResult: true, rerun: true),
-        "session.close-shells": .init(keepsResult: false, rerun: true), "presets.edit": .init(keepsResult: false, rerun: false),
-        "approve": .init(keepsResult: false, rerun: false), "plugin.on": .init(keepsResult: false, rerun: true),
-        "plugin.off": .init(keepsResult: false, rerun: true),
+        "session.close-shells": .init(keepsResult: true, rerun: true), "presets.edit": .init(keepsResult: true, rerun: false),
+        "approve": .init(keepsResult: true, rerun: false), "plugin.on": .init(keepsResult: true, rerun: true),
+        "plugin.off": .init(keepsResult: true, rerun: true),
         // An add begun with no outcome isn't added again (the person adds it again, seeing its SHA-256s); a remove is.
-        "plugin.add": .init(keepsResult: false, rerun: false), "plugin.remove": .init(keepsResult: false, rerun: true),
+        "plugin.add": .init(keepsResult: true, rerun: false), "plugin.remove": .init(keepsResult: true, rerun: true),
     ]
 
     /// The kinds a retry begun with no outcome does again (`RetryRule.rerun`).
@@ -615,7 +634,7 @@ public final class Requests: @unchecked Sendable {
         if var kept = replies[action] {
             guard replyDigests[action] == digest else { return .init(re: request.id, error: .init(.refused, Self.otherArguments(action: action))) }
             if let left = leftBehind.removeValue(forKey: action) {
-                kept = .init(re: kept.re, error: .init(.refused, lostWith(left, action: action)))
+                kept = Self.resolved(kept, saying: lostWith(left, action: action))
                 replies[action] = kept
             }
             kept.re = request.id
@@ -647,7 +666,7 @@ public final class Requests: @unchecked Sendable {
             if let note = outcome.note, let result = try? JSONDecoder().decode(NodeWire.Value.self, from: Data(note.utf8)) {
                 return .init(re: request.id, result: result)
             }
-            return .init(re: request.id, error: .init(.refused, "action \(action) was done at \(when) (its answer isn't kept): not done again; " + afterRestart(request.kind)))
+            return .init(re: request.id, result: repeatResult(["action \(action) was done at \(when) (its answer isn't kept): not done again; " + afterRestart(request.kind)]))
         }
         let code = outcome.code.flatMap(NodeWire.Code.init(rawValue:)) ?? .refused
         let again = code == .gone ? "what it named is gone, so a new attempt can't do it" : "nothing was done, and running the command again is a new attempt"
@@ -703,14 +722,17 @@ public final class Requests: @unchecked Sendable {
     /// isn't kept in memory either: a retry is told it was done, and where a link went, never given it again.
     func keep(_ reply: NodeWire.Reply, for action: String, request: NodeWire.Request) {
         var reply = reply
-        if reply.ok, Self.recorded.contains(request.kind), Self.retryRules[request.kind]?.keepsResult != true {
-            let link = request.kind == "web.open" || reply.result?["once"]?.bool == true
+        if reply.ok, Self.recorded.contains(request.kind) {
             if request.kind == "web.open", let url = reply.result?["url"]?.string {
                 leftBehind[action] = .link(url, tailnet: request.args?["tailnet"]?.bool == true)
             } else if reply.result?["once"]?.bool == true, let card = request.args?["card"]?.string {
                 leftBehind[action] = .page(card: card)
             }
-            reply = .init(re: reply.re, error: .init(.refused, Self.doneNotKept(action: action, link: link)))
+            if Self.retryRules[request.kind]?.keepsResult != true {
+                reply.result = Self.repeatResult([Self.doneNotKept(action: action, link: request.kind == "web.open")])
+            } else {
+                reply.result = Self.withoutSecret(reply.result)
+            }
         }
         replies[action] = reply
         replyDigests[action] = Self.argsDigest(request)
@@ -755,6 +777,19 @@ public final class Requests: @unchecked Sendable {
     static func doneNotKept(action: String, link: Bool) -> String {
         "action \(action) was done" + (link ? ", and its link went to the terminal that asked first (it isn't given again)" : " (its answer isn't kept)")
             + ": not done again; `vibeswitcher status` shows what is now"
+    }
+
+    /// A kept success with what a lost reply left behind said instead (`lostWith`): a page's answer keeps its fields with
+    /// that said; a link is a `repeat` saying it.
+    static func resolved(_ kept: NodeWire.Reply, saying text: String) -> NodeWire.Reply {
+        var kept = kept
+        if case .object(var fields)? = kept.result, fields["repeat"] == nil {
+            fields["say"] = .array([.string(text)])
+            kept.result = .object(fields)
+        } else {
+            kept.result = repeatResult([text])
+        }
+        return kept
     }
 
     /// A user's-voice request, recorded in the vault (`done` on `queue` with whether it is the action's first record,

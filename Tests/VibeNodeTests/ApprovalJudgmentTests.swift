@@ -89,7 +89,7 @@ struct ApprovalJudgmentTests {
             requests.keep(.init(re: "first", result: .object(["key": .string("lead_mail")])), for: action, request: firstRequest)
         }
         let after = await judge(requests, "set", args, action: action)
-        #expect(after.refused?.error?.message.contains("was done") == true, "set keeps no result: \(String(describing: after.refused))")
+        #expect(after.refused?.ok == true && after.refused?.result?["key"]?.string == "lead_mail", "\(String(describing: after.refused))")
         let otherAfter = await judge(requests, "set", ["key": .string("lead_mail"), "value": .string("on")], action: action)
         #expect(otherAfter.refused?.error?.message == Requests.otherArguments(action: action))
         #expect(person.asked.count == 1, "\(person.asked)")
@@ -176,7 +176,7 @@ struct ApprovalJudgmentTests {
     }
 
     /// An action the server answered already is answered as it was kept, with no dialog: a kind whose result is kept,
-    /// its result; one whose result isn't (`session.end`), that it was done.
+    /// its result, for `session.rename` and `session.end` alike (a repeat of a done action is a success).
     @Test func aReplayedActionIsAnsweredWithoutAsking() async {
         let person = ApprovalVoiceTests.Person(.approved)
         let requests = requests(person)
@@ -190,7 +190,7 @@ struct ApprovalJudgmentTests {
         let end = NodeWire.Request(id: "old", kind: "session.end", args: ["session": .string("local:abcd")], action: ended)
         requests.queue.sync { requests.keep(.init(re: "old", result: .object(["said": .string("done before")])), for: ended, request: end) }
         let endReplay = await judge(requests, "session.end", ["session": .string("local:abcd")], action: ended)
-        #expect(endReplay.refused?.error?.message.contains("was done") == true, "\(String(describing: endReplay.refused))")
+        #expect(endReplay.refused?.ok == true && endReplay.refused?.result?["said"]?.string == "done before", "\(String(describing: endReplay.refused))")
         #expect(person.asked.isEmpty)
     }
 

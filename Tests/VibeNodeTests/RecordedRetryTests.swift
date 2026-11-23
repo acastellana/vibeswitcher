@@ -112,7 +112,7 @@ struct RecordedRetryTests {
         #expect(after.pid == before.pid && after.startedAt == before.startedAt, "\(before) → \(after)")
         let set = try await running.value
         let said = set.output + set.errors
-        #expect(said.contains("was done at") && !said.contains("isn't known"), "\(said)\n\(node.said)")
+        #expect(set.status == 0 && said.contains("→ 7") && !said.contains("isn't known"), "\(said)\n\(node.said)")
         #expect(node.said.contains("answered from its record (done)"), "\(node.said)")
     }
 
@@ -161,25 +161,25 @@ struct RecordedRetryTests {
         let lost = access.openCode(now: Date())
         let (request, action) = opened(lost)
         let again = world.queue.sync { world.requests.kept(request, action: action) }
-        #expect(again?.error?.message.contains("that link is cancelled now, unused") == true && again?.error?.message.contains("run `vibeswitcher web` again") == true,
+        #expect(again?.ok == true && Self.said(again).contains("that link is cancelled now, unused") && Self.said(again).contains("run `vibeswitcher web` again"),
                 "\(String(describing: again))")
         #expect(access.admit(["pair": .string(lost)]) == nil, "the lost code still pairs")
-        #expect(world.queue.sync { world.requests.kept(request, action: action)?.error?.message } == again?.error?.message, "said the same again")
+        #expect(world.queue.sync { world.requests.kept(request, action: action)?.result } == again?.result, "said the same again")
         // One taken before the retry: not cancelled (it was used), said so.
         let used = access.openCode(now: Date())
         let (usedRequest, usedAction) = opened(used)
         #expect(access.admit(["pair": .string(used)]) != nil)
         let told = world.queue.sync { world.requests.kept(usedRequest, action: usedAction) }
-        #expect(told?.error?.message.contains("was taken or ran out") == true && told?.error?.message.contains("--revoke") == true, "\(String(describing: told))")
+        #expect(told?.ok == true && Self.said(told).contains("was taken or ran out") && Self.said(told).contains("--revoke"), "\(String(describing: told))")
     }
 
     /// After a server's end, the record answers: a web.open's link and an answer's page ended with that server.
     @Test func aDoneLinkOrPageAfterAServersEndSaysWhatToDo() {
         let done = LeadVaultV2.UserAction.Outcome(done: true, note: nil, at: 1_800_000_000)
         let web = Requests.answer(.init(id: "w", kind: "web.open"), action: "a", outcome: done)
-        #expect(web.error?.message.contains("run `vibeswitcher web` again") == true, "\(web)")
+        #expect(web.ok && Self.said(web).contains("run `vibeswitcher web` again"), "\(web)")
         let answer = Requests.answer(.init(id: "p", kind: "answer"), action: "b", outcome: done)
-        #expect(answer.error?.message.contains("ask the agent to file the request again") == true, "\(answer)")
+        #expect(answer.ok && Self.said(answer).contains("ask the agent to file the request again"), "\(answer)")
     }
 
     /// web.open's reply (its pairing link) isn't kept in memory past its answer: a retry by action id is told it was done
@@ -195,7 +195,7 @@ struct RecordedRetryTests {
             return world.requests.kept(NodeWire.Request(id: "again", kind: "web.open", args: [:], action: action), action: action)
         }
         #expect(kept.map { !"\($0)".contains("SECRET-CODE") } == true, "\(String(describing: kept))")
-        #expect(kept?.error?.message.contains("run `vibeswitcher web` again") == true, "\(String(describing: kept))")
+        #expect(kept?.ok == true && Self.said(kept).contains("run `vibeswitcher web` again"), "\(String(describing: kept))")
         #expect(world.queue.sync { world.requests.replies[action].map { !"\($0)".contains("SECRET-CODE") } } == true)
         let audit = UUID().uuidString.lowercased()
         let audited = NodeWire.Request(id: "a", kind: "prompt-audit", args: [:], action: audit)
@@ -257,9 +257,9 @@ struct RecordedRetryTests {
         let first = try await Self.voiced(node, request)
         #expect(first?.ok == true, "\(String(describing: first))\n\(node.said)")
         try await Self.killServer(node)
-        // `set` keeps no result (a value can be a secret): the retry is told it was done, and given nothing of it.
+        // A repeat of a done action is a success: the result the record kept, the first's.
         let again = try #require(try await Self.voiced(node, request), "\(node.said)")
-        #expect(!again.ok && again.result == nil && again.error?.message.contains("was done at") == true, "\(again)")
+        #expect(again.ok && again.result == first?.result, "\(again)")
         #expect(node.said.contains("answered from its record (done)"), "\(node.said)")
         // The same action id with other arguments: nothing of the record.
         var other = request
@@ -269,15 +269,23 @@ struct RecordedRetryTests {
         #expect(!forged.ok && forged.error?.message == Requests.otherArguments(action: action), "\(forged)")
     }
 
-    /// What the record keeps of a reply: a result only for a kind whose rule says it holds no secret.
-    @Test func aResultIsRecordedOnlyForAKindWhoseRuleKeepsIt() {
+    /// What the record keeps of a reply: web.open's link never; a plugin page's address in an answer's result replaced;
+    /// any other result whole. A done repeat of web.open is a success that gives no link.
+    @Test func aResultIsRecordedWithoutItsSecret() {
         let link = NodeWire.Reply(re: "r", result: .object(["url": .string("http://127.0.0.1:1/#pair=SECRET")]))
         #expect(Requests.outcome(of: link, kind: "web.open").note == nil)
-        #expect(Requests.outcome(of: link, kind: "answer").note == nil)
         #expect(Requests.outcome(of: link, kind: "no-such-kind").note == nil, "a kind with no rule keeps none")
         #expect(Requests.outcome(of: link, kind: "prompt-audit").note?.contains("SECRET") == true)
+        let page = NodeWire.Reply(re: "p", result: .object(["state": .string("page"), "once": .bool(true), "say": .array([.string("http://127.0.0.1:2/SECRET-PAGE")])]))
+        let kept = Requests.outcome(of: page, kind: "answer").note ?? ""
+        #expect(!kept.contains("SECRET-PAGE") && kept.contains("went to the terminal that answered first"), "\(kept)")
         let done = Requests.answer(.init(id: "x", kind: "web.open"), action: "a", outcome: Requests.outcome(of: link, kind: "web.open"))
-        #expect(!done.ok && done.error?.message.contains("SECRET") == false && done.error?.message.contains("was done at") == true, "\(done)")
+        #expect(done.ok && !"\(done)".contains("SECRET") && Self.said(done).contains("was done at"), "\(done)")
+    }
+
+    /// The lines a reply says (a `repeat`'s `say`).
+    static func said(_ reply: NodeWire.Reply?) -> String {
+        (reply?.result?["say"]?.array ?? []).compactMap(\.string).joined(separator: "\n")
     }
 
     /// Failed: the retry on the next server is told the failure, under its code, and that a new attempt is allowed.
@@ -337,9 +345,9 @@ struct RecordedRetryTests {
         #expect(!sendAgain.ok && message.contains("began at") && message.contains("isn't known") && message.contains("the session's screen shows"),
                 "\(sendAgain)")
         // Done again once, so its outcome is recorded now: a third ask, on the server after one more kill, is answered
-        // from the record (done, `set` keeping no result), not done again.
+        // from the record with its result, not done again.
         let third = try #require(try await Self.voiced(node, set), "\(node.said)")
-        #expect(!third.ok && third.error?.message.contains("was done at") == true, "\(third)")
+        #expect(third.ok && third.result == setAgain.result, "\(third)")
     }
 
     /// Kills the node's server and waits until the host's next one answers its socket.
