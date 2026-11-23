@@ -24,4 +24,10 @@ chrome=${REAL_PAGE_CHROME:-/opt/google/chrome/chrome}
 [[ -x $chrome ]] || { echo "real-page-check.sh: no Chrome at $chrome (REAL_PAGE_CHROME names another)" >&2; exit 69; }
 command -v node >/dev/null || { echo "real-page-check.sh: node isn't on PATH" >&2; exit 69; }
 mkdir -p "$out"
+# The Team tab's row opens each project's current lead by its id, as `vibeswitcher status` names it on its leads lines
+# ("  local:project:… ROOT  session local:UUID: …"): a project can have lead sessions it replaced still running for a
+# moment (the engine ends them once no merge or audit holds the rotation gate), and the sidebar's first LEAD row may be one.
+vs=${VS:-$HOME/.vibeswitcher/v2/builds/current/bin/vibeswitcher}
+leads=$("$vs" status 2>/dev/null | sed -n 's/^  local:project:[^ ]*  .*  session \(local:[0-9a-fA-F-]*\):.*/\1/p' | paste -sd, -) || leads=
+export REAL_PAGE_LEADS=$leads
 exec node scripts/e2e/real-page.cjs "$url" "$out" "$chrome"
