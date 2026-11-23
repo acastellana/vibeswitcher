@@ -119,9 +119,11 @@ public enum HostedAgents {
 
     /// `table` with each hosted terminal's agent as the host recorded it: a hosted session's agent process is that agent
     /// (whatever its name), every other process on a hosted terminal is none. Every other terminal's processes are as
-    /// the table read them on the user's node; on a scratch node (`scratch`) none is an agent: it lists no session it
-    /// didn't start. Not `enabled`: `table` as it is.
-    public static func overlay(_ table: [Int32: ProcInfo], hosted: [HostSession], scratch: Bool, reader: Reader? = nil,
+    /// the table read them on the user's node, but for one under another session host than this node's (`ownHost`, the
+    /// server's parent): a scratch node's or a test's host, whose sessions are that node's (2026-11-23: the real node's
+    /// page listed other agents' test sessions, "repo unknown", from their scratch hosts); on a scratch node (`scratch`)
+    /// none is an agent: it lists no session it didn't start. Not `enabled`: `table` as it is.
+    public static func overlay(_ table: [Int32: ProcInfo], hosted: [HostSession], scratch: Bool, ownHost: Int32? = nil, reader: Reader? = nil,
                                enabled: Bool = enabled) -> [Int32: ProcInfo] {
         guard enabled else { return table }
         let reader = reader ?? .table(table, arguments: [:]).with(arguments: { ProcessTable.commandLine(pid: $0) })
@@ -133,7 +135,7 @@ public enum HostedAgents {
             let agent: Agent?
             if let tty = process.tty, live[tty] != nil {
                 agent = agents[tty].flatMap { $0.0 == pid ? $0.1 : nil }
-            } else if scratch {
+            } else if scratch || underOtherHost(pid, in: table, ownHost: ownHost) {
                 agent = nil
             } else {
                 continue
@@ -144,6 +146,25 @@ public enum HostedAgents {
         }
         return result
     }
+}
+
+extension HostedAgents {
+    /// Whether `pid` runs under a session host other than `ownHost`: its nearest ancestor that is a session host (a
+    /// process named `vibeswitcher-host`, as the kernel keeps the name: 15 characters) isn't this node's. A process under
+    /// no host (the user's own terminal) or under this node's isn't. The parents as `table` read them, at most 64 deep.
+    static func underOtherHost(_ pid: Int32, in table: [Int32: ProcInfo], ownHost: Int32?) -> Bool {
+        var at = table[pid]?.ppid ?? 0
+        var steps = 0
+        while at > 1, steps < 64, let process = table[at] {
+            if isSessionHost(process) { return process.pid != ownHost }
+            at = process.ppid
+            steps += 1
+        }
+        return false
+    }
+
+    /// A session host's process, by its name (`vibeswitcher-host`, cut to the kernel's 15 characters).
+    static func isSessionHost(_ process: ProcInfo) -> Bool { process.comm == "vibeswitcher-host" || process.comm == "vibeswitcher-ho" }
 }
 
 extension HostedAgents.Reader {

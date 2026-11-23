@@ -98,7 +98,7 @@ final class ScratchNode: @unchecked Sendable {
          path: String = "/usr/bin:/bin", holdFirstLook: Bool = false, serverKnowsFirstLook: Bool = true, testChild: String? = nil,
          socketName: String = "host.sock", sealLife: Int? = nil, owner: pid_t = getpid(), reusing: URL? = nil, waitForServer: Bool = true,
          build: URL? = nil, hostArguments: [String] = [], installRoot: URL? = nil, claudeProgram: String = "claude",
-         hostPrefix: [String] = [], hostBacktrace: Bool = false, noInotify: Bool = false) async throws {
+         hostPrefix: [String] = [], hostBacktrace: Bool = false, noInotify: Bool = false, listsUnhosted: Bool = false) async throws {
         root = try reusing ?? scratch.shortFolder("vsn")
         home = root.appendingPathComponent("home", isDirectory: true)
         nodeRoot = build ?? root.appendingPathComponent("build", isDirectory: true)
@@ -159,6 +159,8 @@ final class ScratchNode: @unchecked Sendable {
         if let census = ProcessInfo.processInfo.environment["VIBESWITCHER_TEST_INOTIFY_CENSUS"], census.hasPrefix("/") {
             arguments += ["--test-inotify-census", census, "--server-arg", ServerArguments.testInotifyCensusFlag + census]
         }
+        // `listsUnhosted`: the server lists the sessions its host didn't start too, as the user's node does.
+        if listsUnhosted { arguments += ["--server-arg", ServerArguments.testListsUnhostedFlag] }
         arguments += hostArguments
         let executable = nodeRoot.appendingPathComponent("bin/vibeswitcher-host").path
         // The test process as the host's app too (stage 2's `TestHosts.connectAsApp`): one end of a pair as the host's

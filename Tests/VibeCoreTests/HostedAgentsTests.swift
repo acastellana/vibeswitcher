@@ -116,4 +116,31 @@ struct HostedAgentsTests {
                                   arguments: { _ in [] }).scan(now: Self.start.addingTimeInterval(60))
         #expect(scan.map(\.tty) == ["ttypts1"] && scan.map(\.pid) == [100], "\(scan)")
     }
+
+    /// A session under another session host than this node's (a scratch node's: an agent's test, its fake `claude` on
+    /// a terminal that host started) isn't the user's node's to list; the user's own terminal's is, and so is this
+    /// node's hosted one. By ancestry: the nearest host above it.
+    @Test func aSessionUnderAnotherSessionHostIsntListed() {
+        var table = World().table
+        table[20] = Self.process(20, ppid: 1, tty: nil, comm: "vibeswitcher-ho")
+        table[400] = Self.process(400, ppid: 20, tty: "ttypts4", comm: "bash")
+        table[401] = Self.process(401, ppid: 400, tty: "ttypts4", comm: "claude", agent: .claude, at: 2)
+        // The user's terminal: under a terminal emulator and a shell, no host.
+        table[30] = Self.process(30, ppid: 1, tty: nil, comm: "tmux: server")
+        table[31] = Self.process(31, ppid: 30, tty: "ttypts5", comm: "bash")
+        table[310] = Self.process(310, ppid: 31, tty: "ttypts5", comm: "claude", agent: .claude, at: 3)
+        let world = World()
+        let node = HostedAgents.overlay(table, hosted: world.hosted, scratch: false, ownHost: 10, reader: .table(table, arguments: [100: ["/opt/runner"]]), enabled: true)
+        #expect(node[401]?.agent == nil, "the scratch host's session")
+        #expect(node[310]?.agent == .claude && node[300]?.agent == .claude, "the user's own terminals")
+        #expect(node[100]?.agent == .claude, "this node's hosted lead")
+        // Its own host isn't another: with no host of its own known, every host is another's (the hosted terminals keep
+        // the record's answer).
+        #expect(HostedAgents.underOtherHost(401, in: table, ownHost: 10) && !HostedAgents.underOtherHost(310, in: table, ownHost: 10))
+        #expect(!HostedAgents.underOtherHost(101, in: table, ownHost: 10) && HostedAgents.underOtherHost(101, in: table, ownHost: nil))
+        // A loop in a table read mid-change ends.
+        table[50] = Self.process(50, ppid: 51, tty: "ttypts6", comm: "claude", agent: .claude)
+        table[51] = Self.process(51, ppid: 50, tty: "ttypts6", comm: "bash")
+        #expect(!HostedAgents.underOtherHost(50, in: table, ownHost: 10))
+    }
 }
