@@ -2,11 +2,12 @@ import Foundation
 import Testing
 @testable import VibeNode
 
-/// One path for authority (the architecture review's row 1): who may send a kind, whether it changes state, which
-/// server takes it and what serves it are one table now (`KindSpec`), whose views can't disagree, and KindSpecTests holds
-/// them to what the server ran on before. What a type can't guarantee is checked here: `recorded` and `carded` (still
-/// lists of their own until the state-changing kinds' part of the table), and that each kind's handler exists (the
-/// `act` switch, the hub's) and nothing else is handled.
+/// One path for authority (the architecture review's row 1): every kind is one entry of `KindSpec`, whose views (who may
+/// send it, whether it changes state, which server takes it, what serves it, whether it is recorded and carded, its
+/// retry, its arguments, its dialog) can't disagree, and KindSpecTests holds them to what the server ran on before. What
+/// a type can't guarantee is checked here: that the right kinds are recorded and carded, the retry rules' policy, a
+/// recorded kind typed by a type that takes keys, and that each kind's handler exists (the `act` switch, the hub's) and
+/// nothing else is handled.
 @Suite struct RequestKindsLintTests {
     static let repo = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
 
@@ -19,9 +20,6 @@ import Testing
         #expect(Requests.recorded == expected,
                 "missing from recorded: \(expected.subtracting(Requests.recorded).sorted()); not the user's state change: \(Requests.recorded.subtracting(expected).sorted())")
         for kind in Requests.recorded { #expect(NodeWire.taken.contains(kind), "\(kind) is recorded but not taken") }
-        // Each recorded kind states what its retry is given and whether it is done again (the review of 1b175c70).
-        let ruled = Set(Requests.retryRules.keys)
-        #expect(ruled == Requests.recorded, "no retry rule: \(Requests.recorded.subtracting(ruled).sorted()); a rule for no recorded kind: \(ruled.subtracting(Requests.recorded).sorted())")
         // Those whose result carries a secret (web.open's pairing link, a plugin page's address with its token) keep none.
         for kind in ["web.open", "answer", "approve", "set"] { #expect(Requests.retryRules[kind]?.keepsResult == false, "\(kind) keeps its result") }
         // Never done again: stopping the node, a card's act (its card is gone after a restart), anything that types or starts.
@@ -30,16 +28,21 @@ import Testing
         }
     }
 
-    /// Every recorded kind says which arguments it takes (`RequestArguments`): one it doesn't is refused, not ignored.
-    @Test func everyRecordedKindListsItsArguments() {
-        #expect(Set(RequestArguments.taken.keys) == Requests.recorded,
-                "\(Set(RequestArguments.taken.keys).symmetricDifference(Requests.recorded).sorted())")
+    /// A recorded kind's keys come from its type when it is typed: one whose type isn't a state change's (its keys would
+    /// be none) can't be so declared.
+    @Test func aRecordedKindTypedByItsArgumentsHasAStateChangesType() {
+        for spec in KindSpec.all {
+            guard case .ofType = spec.recorded?.arguments else { continue }
+            #expect(spec.typed is any WireChangeKind.Type, "\(spec.name) takes its type's keys but has no state change's type")
+        }
     }
 
-    /// A kind on a card (its code checked) is recorded too: a card's answer never acts unrecorded.
-    @Test func everyCardedKindIsRecorded() {
-        #expect(Requests.carded.isSubset(of: Requests.recorded), "\(Requests.carded.subtracting(Requests.recorded).sorted())")
+    /// A kind on a card (its code checked) is the user's voice, and an item of `approve`'s batch is a carded accept or
+    /// the hooks' install: nothing a batch's one code shouldn't cover.
+    @Test func cardedAndBatchKindsAreTheUsers() {
         #expect(Requests.carded.isSubset(of: Self.kinds(.user)))
+        let batch = Set(KindSpec.all.filter { $0.recorded?.batch == true }.map(\.name))
+        #expect(batch == ["config.accept", "base.accept", "hooks.install"], "\(batch.sorted())")
     }
 
     /// Every kind the server takes has its handler, and every handler's kind is taken: the `act` switch's, the hub's,

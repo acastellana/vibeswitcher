@@ -216,6 +216,10 @@ extension Requests {
                 return reply(.init(re: request.id, typed: WireKinds.Approve.Result(done: done, refused: nil, left: [])))
             }
             let item = batch.items[at]
+            // Only a kind the table lets a batch hold (`KindSpec`'s `batch`): this server made the batch, so another is a bug.
+            guard KindSpec.spec(item.kind)?.recorded?.batch == true else {
+                return reply(.init(re: request.id, error: .init(.internal, "\(item.kind) can't be an item of a batch: nothing more was done")))
+            }
             var args = item.args
             // The batch's code stood for the card's: the card's own, checked against the card as `config accept` checks it.
             if let card = item.args["card"]?.string, let held = engine?.cards.resolve(card) { args["code"] = .string(held.code) }

@@ -154,7 +154,9 @@ struct WireKindsLintTests {
         let typed = Swift.Set(WireKinds.typed + WireKinds.changes.map { $0.kind })
         #expect(typed.isDisjoint(with: WireKinds.leftOut))
         #expect(Requests.recorded.subtracting(typed).isSubset(of: WireKinds.leftOut), "\(Requests.recorded.subtracting(typed).subtracting(WireKinds.leftOut))")
-        #expect(Swift.Set(RequestArguments.untyped.keys).isSubset(of: WireKinds.leftOut))
+        // A recorded kind whose keys its entry lists (not its type's) is one left out.
+        let listed = KindSpec.all.filter { if case .keys = $0.recorded?.arguments { return true } else { return false } }.map(\.name)
+        #expect(Swift.Set(listed).isSubset(of: WireKinds.leftOut), "\(listed)")
     }
 
     /// A typed state change's keys are its arguments' (`WireArgs.keys`): `RequestArguments` refuses any other, naming it.

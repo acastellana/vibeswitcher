@@ -111,44 +111,8 @@ public struct ApprovalVoice: Sendable {
         "\(action(kind)): \(ConfigSeal.inert(card.trimmingCharacters(in: .whitespacesAndNewlines), limit: cardLimit))"
     }
 
-    /// What a state change of `kind` does, as a phrase that follows "is trying to ".
+    /// What a state change of `kind` does, as a phrase that follows "is trying to " (`KindSpec.phrase`).
     public static func action(_ kind: String) -> String {
-        switch kind {
-        case "answer": return "answer a lead's question for you"
-        case "hold": return "hold a lead's question for you"
-        case "lead": return "start a project's lead for you"
-        case "stop": return "stop your VibeSwitcher node"
-        case "tell": return "tell a lead something for you"
-        case "config.accept": return "accept a change to a watched file"
-        case "base.accept": return "accept a moved base branch"
-        case "base.keep": return "keep a base branch where it was"
-        case "hooks.install": return "install VibeSwitcher's hooks"
-        case "approve": return "accept the batch you listed"
-        case "plugin.on": return "turn a plugin on for this node"
-        case "plugin.off": return "turn a plugin off for this node"
-        case "plugin.add": return "add a program as a plugin of this node"
-        case "plugin.remove": return "remove a plugin from this node"
-        case "plugin.inspect": return "read a plugin's folder"
-        case "hooks.remove": return "remove VibeSwitcher's hooks"
-        case "build.switch": return "switch your node to another build"
-        case "web.open": return "open the web page to a device"
-        case "web.revoke": return "revoke a device's web access"
-        case "send": return "type into a session for you"
-        case "session.new": return "start a session for you"
-        case "session.end": return "end a session"
-        case "session.reply": return "answer a session's question for you"
-        case "set": return "change a VibeSwitcher setting"
-        case "push": return "push a lead's branch for you"
-        case "push.decline": return "decline a lead's push"
-        case "session.reopen": return "reopen your sessions after a restart"
-        case "session.resume": return "resume an ended session"
-        case "session.rename": return "rename a session"
-        case "session.pause": return "pause a session's reminders"
-        case "session.close-shells": return "close finished shells"
-        case "prompt-audit": return "change a project's prompt-audit reminder"
-        case "presets.edit": return "edit your launch presets"
-        case "start": return "start your VibeSwitcher node"
-        default: return "do \(ConfigSeal.inert(kind, limit: 40)) for you"
-        }
+        KindSpec.spec(kind)?.phrase ?? "do \(ConfigSeal.inert(kind, limit: 40)) for you"
     }
 }

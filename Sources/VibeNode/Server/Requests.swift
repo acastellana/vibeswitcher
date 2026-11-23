@@ -287,15 +287,11 @@ public final class Requests: @unchecked Sendable {
         }
     }
 
-    /// The kinds recorded in the vault before they are acted on (EN-D11): every state-changing user's-voice request.
-    public static let recorded: Set<String> = ["start", "stop", "lead", "answer", "hold", "config.accept", "base.accept", "base.keep",
-                                               "hooks.install", "hooks.remove", "build.switch", "web.open", "web.revoke", "tell",
-                                               "send", "session.new", "session.end", "session.reply",
-                                               "set", "push", "push.decline", "session.reopen", "prompt-audit",
-                                               "session.rename", "session.pause", "session.resume", "session.close-shells", "presets.edit",
-                                               "approve", "plugin.on", "plugin.off", "plugin.add", "plugin.remove"]
+    /// The kinds recorded in the vault before they are acted on (EN-D11): every state-changing user's-voice request
+    /// (`KindSpec`'s `recorded`).
+    public static let recorded: Set<String> = Set(KindSpec.all.filter { $0.recorded != nil }.map(\.name))
     /// The kinds on a card: the card's code (EN-D5), typed by the user, is checked here.
-    public static let carded: Set<String> = ["answer", "hold", "config.accept", "base.accept", "base.keep"]
+    public static let carded: Set<String> = Set(KindSpec.all.filter { $0.recorded?.carded == true }.map(\.name))
     /// How many replies to recorded actions are kept, so a repeated action (a retry) gets the reply it got.
     static let repliesKept = 200
 
@@ -515,26 +511,9 @@ public final class Requests: @unchecked Sendable {
         var rerun: Bool
     }
 
-    static let retryRules: [String: RetryRule] = [
-        "start": .init(keepsResult: true, rerun: true), "stop": .init(keepsResult: true, rerun: false),
-        "lead": .init(keepsResult: true, rerun: false), "answer": .init(keepsResult: false, rerun: false),
-        "hold": .init(keepsResult: false, rerun: false), "config.accept": .init(keepsResult: false, rerun: false),
-        "base.accept": .init(keepsResult: false, rerun: false), "base.keep": .init(keepsResult: false, rerun: false),
-        "hooks.install": .init(keepsResult: true, rerun: true), "hooks.remove": .init(keepsResult: true, rerun: true),
-        "build.switch": .init(keepsResult: false, rerun: false), "web.open": .init(keepsResult: false, rerun: false),
-        "web.revoke": .init(keepsResult: false, rerun: true), "tell": .init(keepsResult: false, rerun: false),
-        "send": .init(keepsResult: false, rerun: false), "session.new": .init(keepsResult: false, rerun: false),
-        "session.end": .init(keepsResult: false, rerun: true), "session.reply": .init(keepsResult: false, rerun: false),
-        "set": .init(keepsResult: false, rerun: true), "push": .init(keepsResult: false, rerun: false),
-        "push.decline": .init(keepsResult: false, rerun: true), "session.reopen": .init(keepsResult: false, rerun: false),
-        "prompt-audit": .init(keepsResult: true, rerun: true), "session.rename": .init(keepsResult: true, rerun: true),
-        "session.pause": .init(keepsResult: true, rerun: true), "session.resume": .init(keepsResult: true, rerun: true),
-        "session.close-shells": .init(keepsResult: false, rerun: true), "presets.edit": .init(keepsResult: false, rerun: false),
-        "approve": .init(keepsResult: false, rerun: false), "plugin.on": .init(keepsResult: false, rerun: true),
-        "plugin.off": .init(keepsResult: false, rerun: true),
-        // An add begun with no outcome isn't added again (the person adds it again, seeing its SHA-256s); a remove is.
-        "plugin.add": .init(keepsResult: false, rerun: false), "plugin.remove": .init(keepsResult: false, rerun: true),
-    ]
+    static let retryRules: [String: RetryRule] = Dictionary(uniqueKeysWithValues: KindSpec.all.compactMap { spec in
+        spec.recorded.map { (spec.name, RetryRule(keepsResult: $0.keepsResult, rerun: $0.rerun)) }
+    })
 
     /// The kinds a retry begun with no outcome does again (`RetryRule.rerun`).
     public static var rerunnable: Set<String> { Set(retryRules.filter(\.value.rerun).keys) }

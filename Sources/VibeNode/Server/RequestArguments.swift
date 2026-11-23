@@ -6,17 +6,9 @@ import Foundation
 /// switch) had an option it gave silently dropped: a `lead --goal` an older server didn't read would start the lead
 /// with no goal. A key given as `null` is a key given. RequestKindsLint holds the table's kinds to `recorded`'s.
 enum RequestArguments {
-    /// Each recorded kind's keys: a typed kind's from its arguments' coding keys (`WireKinds.changes`, ChangeKinds.swift),
-    /// so the table and the type can't drift; a kind not typed yet, from `untyped`.
-    static let taken: [String: Set<String>] = untyped.merging(Dictionary(uniqueKeysWithValues: WireKinds.changes.map { ($0.kind, keys(of: $0)) })) { $1 }
-
-    /// The recorded kinds not typed yet, and the keys each takes: the external plugins' (the plugins lane's, to follow
-    /// the pattern; `WireKindsLintTests` holds the command line to sending every other kind through its type).
-    static let untyped: [String: Set<String>] = [
-        "plugin.add": ["folder", "manifest", "program"], "plugin.remove": ["plugin"],
-    ]
-
-    private static func keys<K: WireChangeKind>(of _: K.Type) -> Set<String> { K.Args.keys }
+    /// Each recorded kind's keys (`KindSpec.arguments`): a typed kind's from its arguments' coding keys, so the table and
+    /// the type can't drift; a kind not typed yet, as its entry lists them.
+    static let taken: [String: Set<String>] = Dictionary(uniqueKeysWithValues: KindSpec.all.compactMap { spec in spec.arguments.map { (spec.name, $0) } })
 
     /// `request`'s arguments read as its typed kind's (`WireKinds.changes`): `bad-args` naming the field when one is of
     /// the wrong form, before the vault records anything; nil when they are of their forms, or the kind isn't typed.

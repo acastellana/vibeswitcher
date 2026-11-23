@@ -19,23 +19,10 @@ extension Requests {
     /// The dialog's text budget after the action phrase (`ApprovalVoice.reason` cuts at `ApprovalVoice.cardLimit`).
     static let approvalBudget = ApprovalVoice.cardLimit
 
-    /// Each state-changing kind's arguments: what it takes (anything else refuses it).
-    static let approvalArguments: [String: Set<String>] = [
-        "answer": ["card", "code", "text", "version"], "hold": ["card", "code"], "config.accept": ["card", "code"],
-        "base.accept": ["card", "code"], "base.keep": ["card", "code"],
-        "start": [], "stop": [], "lead": ["folder", "goal", "resume", "replace", "takeHead", "initialized"],
-        "hooks.install": ["agents"], "hooks.remove": ["agents"], "build.switch": ["commit"], "approve": ["batch", "code"],
-        "web.open": ["tailnet"], "web.revoke": [], "tell": ["folder", "text"],
-        "send": ["session", "text", "images", "now"],
-        "session.new": ["folder", "agent", "model", "preset", "digest", "values"],
-        "session.end": ["session"], "session.reply": ["session", "choice", "text", "question", "options"],
-        "set": ["key", "value", "folder"], "push": ["folder", "request"], "push.decline": ["folder", "request"],
-        "session.reopen": ["all", "forget", "sessions"], "prompt-audit": ["folder", "do"],
-        "session.rename": ["session", "name"], "session.pause": ["session", "for", "hours"], "session.resume": ["session"],
-        "session.close-shells": ["folder", "sessions"], "plugin.on": ["plugin"], "plugin.off": ["plugin"],
-        "plugin.add": ["folder", "manifest", "program"], "plugin.remove": ["plugin"],
-        "presets.edit": ["op", "name", "kind", "args", "env", "unset", "keepShell", "default", "rename", "digest", "folder"],
-    ]
+    /// Each state-changing kind's arguments as its dialog takes them (`KindSpec.dialogArguments`): anything else refuses it.
+    static let approvalArguments: [String: Set<String>] = Dictionary(uniqueKeysWithValues: KindSpec.all.compactMap { spec in
+        spec.dialogArguments.map { (spec.name, $0) }
+    })
 
     /// Why a dialog can't be shown for a request.
     struct ApprovalTextRefusal: Error, Equatable {
