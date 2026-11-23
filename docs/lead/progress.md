@@ -4443,3 +4443,5 @@ Proposed task 1: Find why dictations end with no text
 - 2026-11-23 16:41 Released the-weekly-scorecard's worker (idle since its done report on e8b6fed4) while its audit runs
 - 2026-11-23 16:41 Automatically (auto_advance): Released the-weekly-scorecard's worker, idle since its done report on e8b6fed4, while its audit runs (ended pid 81524 (Worker: The weekly scorecard counts bugs that got past review, by how the merge that brought them was reviewed)): its Mac slot and memory are free. Its worktree and branch stay; findings the verdict sends back go to a fresh worker there, and a clean verdict merges with none.
 - 2026-11-23 16:44 Audit of the-weekly-scorecard: complete, clean, round 2: 1 Important closed, 2 Nit open
+- 2026-11-23 17:04 Pipeline held: the-weekly-scorecard ready to merge with none landing; cause: every test slot held
+- 2026-11-23 17:05 Merged the-weekly-scorecard: The weekly scorecard counts bugs that got past review, by how the merge that brought them was reviewed (build 71a026954280)
