@@ -35,11 +35,14 @@ public struct PluginDesk {
         (root, note, queue, work) = (engine.root, engine.note, engine.queue, engine.pluginWork)
     }
 
-    /// Runs `body` on the engine's queue while the engine lives; nothing once it has gone.
+    /// Runs `body` on the engine's queue while the engine lives, holding it for the body's length; nothing once it has
+    /// gone. The only way back to the engine's queue for anything that ran elsewhere (a plugin's work, a program's
+    /// answer, the host's spawn): the desk holds the engine unowned, so a block reaching it after the engine went would
+    /// trap.
     public func later(_ body: @escaping () -> Void) {
         queue.async { [weak alive] in
-            guard alive != nil else { return }
-            body()
+            guard let held = alive else { return }
+            withExtendedLifetime(held) { body() }
         }
     }
 
@@ -109,7 +112,8 @@ public struct PluginDesk {
         guard let folder else { return then([]) }
         let live = Set(engine.link.sessions.filter(\.isLive).map { $0.id.uuidString.lowercased() })
         let drawn = engine.pluginDrawn.filter { $0.key.hasPrefix("\(id):") }
-        let (vault, trusted, now, note, id, engine) = (engine.cardVault, engine.pluginTrusted[id] ?? [:], now, note, id, engine)
+        let (vault, trusted, now, note, id) = (engine.cardVault, engine.pluginTrusted[id] ?? [:], now, note, id)
+        let desk = self
         work.async {
             // The team's sessions, from the vault's roster: unknown (it didn't answer), nothing is given this look.
             let team = (try? vault.roster()).map { Set($0.filter { $0.role != .lead }.map { $0.session.lowercased() }) }
@@ -118,7 +122,9 @@ public struct PluginDesk {
                           plugin: id, note: note)
             }
             if team == nil { note("\(id) requests: the vault's roster didn't answer, so no session's request is read this time") }
-            engine.queue.async {
+            // Back through `later`: the engine isn't held across the read, and a read it outlived gives nothing.
+            desk.later {
+                let engine = desk.engine
                 if let team { engine.pluginTeam = team }
                 guard let found else { return then([]) }
                 engine.pluginTrusted[id] = found.trusted

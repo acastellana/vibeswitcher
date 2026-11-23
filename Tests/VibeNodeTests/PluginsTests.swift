@@ -945,6 +945,43 @@ extension PluginsTests {
     }
 }
 
+extension PluginsTests {
+    /// An engine let go while its plugins' looks are in flight (on the plugins' work queue, a vault read, a hop back):
+    /// nothing reaches it after it has gone, so nothing traps (the load runs' "unowned reference … already destroyed" at
+    /// PluginDesk.live from ShellPlugin.look). Many times, at varied moments.
+    @Test func anEngineLetGoWithLooksInFlightNeverTraps() async throws {
+        let world = try await DeliveryWorld.make(scratch)
+        defer { world.stop() }
+        var options = LeadEngine.Options()
+        options.answersTrust = false
+        options.home = world.host.home.path
+        options.plugins = [ShellPlugin(), Probe(defaultOn: true)]
+        var gone: [() -> Bool] = []
+        for round in 0..<40 {
+            var engine: LeadEngine? = LeadEngine(root: world.host.root, nodeRoot: nil, link: world.link, clock: nil, options: options)
+            let started = Locked(false)
+            weak var held = engine
+            world.queue.async {
+                engine?.askPlugins {
+                    for _ in 0..<4 { engine?.lookAtPlugins {} }
+                    // Let go in the turn that started the looks (most rounds), or a moment later: their work is in flight.
+                    if round % 3 != 0 { engine = nil }
+                    started.value = true
+                }
+            }
+            _ = await eventually(timeout: 10) { started.value }
+            if round % 3 == 0 {
+                _ = await eventually(timeout: Double(round % 7) * 0.001) { false }
+                world.queue.sync { engine = nil }
+            }
+            gone.append { held == nil }
+        }
+        #expect(await eventually(timeout: 30) { gone.allSatisfy { $0() } }, "every engine let go")
+        // Whatever was in flight has run (or been dropped) by now, without trapping.
+        _ = await eventually(timeout: 2) { false }
+    }
+}
+
 extension Result {
     var failure: Failure? { if case .failure(let failure) = self { return failure } else { return nil } }
 }
