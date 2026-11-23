@@ -27,16 +27,56 @@ public enum ClaudePopup: String, Equatable, Sendable, CaseIterable {
     static let decline = HostInput.Write(bytes: [27], delay: 0)
 }
 
-extension LeadEngine {
+/// What the popup watch needs of the engine: a look again once a popup was declined (what waited behind it goes).
+protocol PopupLeads: AnyObject {
+    /// A popup was declined and has had time to close. On the engine's queue.
+    func popupClosed()
+}
+
+/// Claude Code's popups on team sessions, and the dialogs nothing here reads (`ClaudePopup`): its state its own, on the
+/// engine's queue.
+final class PopupWatch {
     /// How long a dialog nothing here reads must stay on a team session's screen before `status` says so (a read taken
     /// mid-redraw isn't one).
     static let unknownDialogAfter: TimeInterval = 4
 
+    private let queue: DispatchQueue
+    private let link: HostLink
+    private let note: (String) -> Void
+    /// Who looks again after a decline: the engine, held weakly.
+    weak var leads: PopupLeads?
+    /// The sessions an Esc is going into now, each popup declined so far (for tests and the log), and the dialogs
+    /// nothing here reads, by session, while they stay.
+    private var declining: Set<UUID> = []
+    private var declinedSoFar: [(session: UUID, popup: ClaudePopup)] = []
+    private var dialogs: [UUID: UnknownDialog] = [:]
+    /// The clock an unknown dialog's time is judged by (a test's later).
+    var now: () -> Date = Date.init
+
+    init(queue: DispatchQueue, link: HostLink, note: @escaping (String) -> Void) {
+        self.queue = queue
+        self.link = link
+        self.note = note
+    }
+
+    /// Each popup declined so far. On the engine's queue.
+    var declined: [(session: UUID, popup: ClaudePopup)] {
+        EngineWatch.assertOn(queue)
+        return declinedSoFar
+    }
+
+    /// What was noted of `id`'s screen is gone (its box is open again). On the engine's queue.
+    func clear(_ id: UUID) {
+        EngineWatch.assertOn(queue)
+        dialogs[id] = nil
+    }
+
     /// A screen of a hosted session read just now (by the session scan, or by delivery before it types), with the
     /// session's role: a known popup on a team session is declined; a dialog nothing reads is noted for `status` while
     /// it stays; anything else clears what was noted. `deliver`: what to look at again once a popup is declined (the
-    /// delivery that read it). On `queue`.
-    func lookAt(screen: String?, of session: HostSession, deliver: (() -> Void)? = nil) {
+    /// delivery that read it). On the engine's queue.
+    func look(at screen: String?, of session: HostSession, deliver: (() -> Void)? = nil) {
+        EngineWatch.assertOn(queue)
         let id = session.id
         guard let screen, let role = LeadTeams.role(label: session.label) else {
             dialogs[id] = nil
@@ -51,7 +91,7 @@ extension LeadEngine {
             dialogs[id] = nil
             return
         }
-        let now = dialogNow()
+        let now = now()
         if let seen = dialogs[id], seen.shown == shown {
             if !seen.told, now.timeIntervalSince(seen.since) >= Self.unknownDialogAfter {
                 dialogs[id]?.told = true
@@ -63,7 +103,7 @@ extension LeadEngine {
     }
 
     /// Esc into `session` while `popup` still shows (the gate reads the screen again right before the key), once at a
-    /// time per session; then `then`, so what waited behind it goes. On `queue`.
+    /// time per session; then `then`, so what waited behind it goes. On the engine's queue.
     private func decline(_ popup: ClaudePopup, on session: HostSession, role: LeadLaunch.Role, then: (() -> Void)?) {
         let id = session.id
         guard declining.insert(id).inserted else { return }
@@ -74,23 +114,24 @@ extension LeadEngine {
             queue.async {
                 guard let self else { return }
                 self.declining.remove(id)
-                self.popupsDeclined.append((id, popup))
+                self.declinedSoFar.append((id, popup))
                 self.note("declined Claude Code's popup “\(popup.rawValue)” with Esc on session \(id.uuidString.prefix(8)) "
                           + "(\(role.rawValue)): \(typed ? "Esc typed" : "not typed: it closed meanwhile, or the host didn't take it")")
                 // What waited behind it, looked at again once the popup has had time to close.
                 queue.asyncAfter(deadline: .now() + 0.3) { [weak self] in
                     then?()
-                    self?.look()
+                    self?.leads?.popupClosed()
                 }
             }
         })
     }
 
     /// What `status` says of each team session a dialog nothing here reads has blocked for `unknownDialogAfter`, while
-    /// the session lives. On `queue`.
-    var unknownDialogNotices: [String] {
+    /// the session lives. On the engine's queue.
+    var notices: [String] {
+        EngineWatch.assertOn(queue)
         let live = Set(link.sessions.filter(\.isLive).map(\.id))
-        let now = dialogNow()
+        let now = now()
         return dialogs.filter { live.contains($0.key) && now.timeIntervalSince($0.value.since) >= Self.unknownDialogAfter }
             .sorted { $0.key.uuidString < $1.key.uuidString }
             .map { id, dialog in
@@ -108,4 +149,19 @@ extension LeadEngine {
         var label: String
         var told = false
     }
+}
+
+extension LeadEngine: PopupLeads {
+    static var unknownDialogAfter: TimeInterval { PopupWatch.unknownDialogAfter }
+
+    /// Each popup declined so far (`PopupWatch`).
+    public var popupsDeclined: [(session: UUID, popup: ClaudePopup)] { popups.declined }
+
+    /// What `status` says of the dialogs nothing here reads.
+    var unknownDialogNotices: [String] { popups.notices }
+
+    /// A screen of a hosted session read just now (`PopupWatch.look`). On `queue`.
+    func lookAt(screen: String?, of session: HostSession, deliver: (() -> Void)? = nil) { popups.look(at: screen, of: session, deliver: deliver) }
+
+    func popupClosed() { look() }
 }

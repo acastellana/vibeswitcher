@@ -408,13 +408,8 @@ public final class LeadEngine: @unchecked Sendable {
     var rebindAgain = false
     /// The running leads the vault gives no role, by root, while each runs: `status` says so.
     public internal(set) var roleless: [String: Roleless] = [:]
-    /// Claude Code's popups on team sessions (`ClaudePopups.swift`): the sessions an Esc is going into now, each popup
-    /// declined so far (for tests and the log), and the dialogs nothing here reads, by session, while they stay.
-    var declining: Set<UUID> = []
-    public internal(set) var popupsDeclined: [(session: UUID, popup: ClaudePopup)] = []
-    var dialogs: [UUID: UnknownDialog] = [:]
-    /// The clock an unknown dialog's time is judged by (a test's later).
-    var dialogNow: () -> Date = Date.init
+    /// Claude Code's popups on team sessions (`ClaudePopups.swift`): its state its own, on `queue`.
+    let popups: PopupWatch
 
     /// `root`: the node's root (its policy, limits, sessions' temporary folders; a scratch node's lead gets it as
     /// `VIBESWITCHER_HOME`). `nodeRoot`: the build's folder. `link`: the host. `clock`: the engine's clock.
@@ -431,6 +426,7 @@ public final class LeadEngine: @unchecked Sendable {
         plugins = PluginRegistry(options.plugins ?? PluginRegistry.standard())
         queue = link.queue
         toolchain = ToolchainWatch(queue: link.queue, file: root.appendingPathComponent("toolchain.json"), home: options.home ?? VibePaths.home, note: note)
+        popups = PopupWatch(queue: link.queue, link: link, note: note)
         push = PushWatch(queue: link.queue, work: work, link: link, note: note)
         promptAudit = PromptAuditWatch(queue: link.queue, root: root, home: options.home ?? VibePaths.home, clock: clock, note: note)
         reads = BoardReads(handTo: link.queue)
@@ -440,6 +436,7 @@ public final class LeadEngine: @unchecked Sendable {
         toolchain.leads = self
         promptAudit.leads = self
         push.leads = self
+        popups.leads = self
         restoreState()
         leads.heldChanged = { [weak self] in self?.saveState() }
         watch = link.changes.subscribe(on: link.queue) { [weak self] _ in self?.sessionsChanged() }

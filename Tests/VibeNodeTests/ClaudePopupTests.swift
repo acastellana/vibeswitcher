@@ -107,7 +107,7 @@ struct ClaudePopupTests {
         defer { world.stop() }
         let lead = try await world.lead()
         let later = Locked<TimeInterval>(0)
-        world.queue.sync { world.engine.dialogNow = { Date().addingTimeInterval(later.value) } }
+        world.queue.sync { world.engine.popups.now = { Date().addingTimeInterval(later.value) } }
         lead.tell(["op": "dialog", "lines": [" Something new from Claude Code", "", " Press any key to go on"]])
         try await lead.screenShows { $0.contains("Something new from Claude Code") }
         try world.post("The worker on parser says it's done.", from: .system("witness"), to: lead)
