@@ -613,3 +613,8 @@
 - 2026-11-23 16:54 Automatically (auto_advance): Didn't audit tests-that-write-a: Not audited: finder 1 of 2 couldn't start (Problem(text: "tests-that-write-a\'s finder not started: ~/.claude/plugins: context7@claude-plugins-official changed while the team\'s sessions ran, since VibeSwitcher last sealed it. A worker\'s shell, a verifier\'s command or a branch\'s tests can write it (the deny rules hold only the file tools), and the next session would load what was written. New workers, verifiers and merges are held until the user accepts the change in VibeSwitcher (its notice …
 - 2026-11-23 16:58 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: /run/user/1000/systemd/transient
 - 2026-11-23 16:58 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: /run/user/1000/systemd/transient
+- 2026-11-23 17:53 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: /run/user/1000/systemd/transient
+- 2026-11-23 17:53 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: /run/user/1000/systemd/transient
+- 2026-11-23 17:54 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: /run/user/1000/systemd/transient
+- 2026-11-23 17:54 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: /run/user/1000/systemd/transient
+- 2026-11-23 17:55 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: /run/user/1000/systemd/transient
