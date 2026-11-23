@@ -4416,3 +4416,5 @@ Proposed task 1: Find why dictations end with no text
 - 2026-11-23 15:05 Automatically (auto_advance): Started a worker on fix-the-flaky-test-24 (Fix the flaky test aScreenshotFileIsDecodedAtTheHeightItShows()).
 - 2026-11-23 15:05 Released fix-the-flaky-test-23's worker (idle since its done report on 9c21fd6f) while its audit runs
 - 2026-11-23 15:05 Automatically (auto_advance): Started the audit of fix-the-flaky-test-23 at 9c21fd6f (Its review is audit). Released its worker, idle since its done report, while the audit runs: its Mac slot and memory are free, its worktree and branch stay.
+- 2026-11-23 15:21 Audit of fix-the-flaky-test-23: complete, clean, round 1: 1 Pre-existing open
+- 2026-11-23 15:21 Dismissed fix-the-flaky-test-23:F1: Not material: the gap is one hop to main, and it needs the board to switch back to the old lead within it. After a handover the board only names the new lead; nothing switches it back. Revisit if a lead is ever ended while the board names it.
