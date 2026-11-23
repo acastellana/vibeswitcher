@@ -57,6 +57,8 @@ public enum BoardValue {
     public static let mostBytes = 240 << 10
     /// The groups, in the order shown.
     public static let groups = ["attention", "running", "waiting", "done"]
+    /// The most goals a board's value carries (a lead keeps 3 to 5, at most `LeadBoard.mostOpenGoals` open).
+    public static let mostGoals = 50
 
     /// `board`'s value for `project` (at `root`) at `now`; `refusal` instead when the board couldn't be read (it is too
     /// large, or isn't a board this build knows): the value then says so and has no tasks.
@@ -81,7 +83,8 @@ public enum BoardValue {
         shown.sort { ($0.group, $0.position) < ($1.group, $1.position) }
         var kept = Array(shown.prefix(mostTasks))
         // The byte budget: the tasks' encoded sizes and the rest of the value's, the last tasks dropped till it fits.
-        let extra = BoardRecords.fields(board: board, read: records, now: now, summaries: decisions)
+        var extra = BoardRecords.fields(board: board, read: records, now: now, summaries: decisions)
+        extra["goals"] = board.map(goals) ?? .array([])
         var size = 2_048 + root.utf8.count + project.utf8.count + NodeWire.message(NodeWire.Value.object(extra)).count
             + kept.reduce(0) { $0 + NodeWire.message($1.value).count + 1 }
         while size > mostBytes, let last = kept.popLast() { size -= NodeWire.message(last.value).count + 1 }
@@ -117,6 +120,7 @@ public enum BoardValue {
             "budgetMin": task.budgetMin.flatMap { $0 > 0 ? .int($0) : nil } ?? .null, "overBudget": .bool(task.overBudget != nil),
             "branch": task.branch.map { .string(text($0, limit: 200)) } ?? .null,
             "after": .array((task.after ?? []).prefix(20).map { .string(text($0, limit: 120)) }),
+            "goal": task.goalID.map { .string(text($0, limit: 120)) } ?? .null,
         ]
         fields["checkpoint"] = task.checkpoints?.last.map { .object(["text": .string(line($0.text)), "at": date($0.at)]) } ?? .null
         fields["audit"] = audit(task)
@@ -124,6 +128,17 @@ public enum BoardValue {
             .object(["commit": .string(text(merged.commit, limit: 40)), "at": date(merged.at), "tested": .bool(merged.tested)])
         } ?? .null
         return (groups.firstIndex(of: shown.group) ?? groups.count, .object(fields))
+    }
+
+    /// The project's goals, in their order, at most `mostGoals`: each its id, title and what done means (inert, capped:
+    /// the lead wrote them), open or done, and how many of the board's tasks it has to go and finished.
+    static func goals(_ board: LeadBoard) -> NodeWire.Value {
+        .array((board.goals ?? []).prefix(mostGoals).map { goal in
+            let mine = board.tasks.filter { $0.goalID == goal.id }
+            return .object(["id": .string(text(goal.id, limit: 120)), "title": .string(text(goal.title, limit: titleBytes)),
+                            "done": .string(text(goal.done, limit: lineBytes)), "state": .string(goal.state.rawValue),
+                            "toGo": .int(mine.filter(\.unfinished).count), "finished": .int(mine.filter { !$0.unfinished }.count)])
+        })
     }
 
     /// The decisions as a board carries them: at most `LeadEngine.decisionsShown`, each its text and why (inert,

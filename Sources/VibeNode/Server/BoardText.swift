@@ -32,12 +32,38 @@ public enum BoardText {
             return finished.map { $0 >= today } ?? false
         }
         var counts: [String] = []
+        let goals = board["goals"]?.array ?? []
+        if goals.isEmpty {
+            for group in BoardValue.groups {
+                let shown = tasks.filter { $0["group"]?.string == group }
+                guard !shown.isEmpty else { continue }
+                lines.append(headings[group] ?? group)
+                lines += shown.map { line($0, now: now) }
+            }
+        } else {
+            // The goals as headings over their tasks (the open ones in their order, then the done), each task in its
+            // group's order; then those with no goal.
+            let ordered = goals.filter { $0["state"]?.string != "done" } + goals.filter { $0["state"]?.string == "done" }
+            let ranked = BoardValue.groups.flatMap { group in tasks.filter { $0["group"]?.string == group } }
+            var placed = Set<String>()
+            for goal in ordered {
+                guard let id = goal["id"]?.string else { continue }
+                let mine = ranked.filter { $0["goal"]?.string == id }
+                let toGo = goal["toGo"]?.int ?? 0, finished = goal["finished"]?.int ?? 0
+                lines.append("Goal: \(inert(goal["title"]?.string, limit: 140))" + (goal["state"]?.string == "done" ? " (done)" : " (\(toGo) to go of \(toGo + finished))")
+                             + " — done means: \(inert(goal["done"]?.string, limit: 200))")
+                lines += mine.map { line($0, now: now) }
+                placed.formUnion(mine.compactMap { $0["id"]?.string })
+            }
+            let rest = ranked.filter { !placed.contains($0["id"]?.string ?? "") }
+            if !rest.isEmpty {
+                lines.append("Unsorted (no goal)")
+                lines += rest.map { line($0, now: now) }
+            }
+        }
         for group in BoardValue.groups {
             let shown = tasks.filter { $0["group"]?.string == group }
-            guard !shown.isEmpty else { continue }
-            lines.append(headings[group] ?? group)
-            lines += shown.map { line($0, now: now) }
-            counts.append(count(group, shown.count))
+            if !shown.isEmpty { counts.append(count(group, shown.count)) }
         }
         if tasks.isEmpty { lines.append("  nothing on the board yet") }
         let more = board["more"]?.int ?? 0
