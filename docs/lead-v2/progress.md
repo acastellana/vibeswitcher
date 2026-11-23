@@ -439,3 +439,5 @@
 - 2026-11-23 11:37 Update: Merged: the node's gate builds again, and a box starts no Windows program (the-node-s-gate) — `the-node-s-gate` is in v2 as `e6bfcd3e` (the commit you approved, `7fec90da`, rebased onto v2).
 - 2026-11-23 11:37 Sent turn-this-incident-into-3's worker contract v4 (it had v3)
 - 2026-11-23 11:50 Exception on sb5-the-host-confines by lead of vibeswitcher-v2-lead: edits to scripts/test-under-load.sh accepted. Reason: One line, `export TZ=UTC`, as scripts/test.sh:437 has it: without it WireVectorsTests (v2's own test, in this branch's done-gate filter) fails 3 of 3 under the load script because the usage limits' 'r…
+- 2026-11-23 12:01 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: ~/.claude/shell-snapshots
+- 2026-11-23 12:01 Started a worker on measured-with-a-real
