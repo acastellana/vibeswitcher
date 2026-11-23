@@ -206,4 +206,11 @@ public enum StartCheck {
             ? "WSL interop is on: any process can run Windows programs and `wsl.exe -u root`, and every lock this node has is void (S11 item 1). Turn it off (decision 2), or pass --interop-is-on to start anyway."
             : "whether WSL interop is on can't be told; pass --interop-is-on to start anyway"
     }
+
+    /// The start line this machine's node needs (`stop` and `status` say it): `--interop-is-on` while `start` would
+    /// refuse without it. On 2026-11-23 the user was given the bare `vibeswitcher start` after a stop, and the node
+    /// stayed down until its refusal was read.
+    public static func startLine(facts: NodeFacts) -> String {
+        "vibeswitcher start" + (refusal(facts: facts, interopIsOn: false) == nil ? "" : " --interop-is-on")
+    }
 }
