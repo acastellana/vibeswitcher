@@ -4406,3 +4406,13 @@ Proposed task 1: Find why dictations end with no text
 - 2026-11-23 14:50 Automatically (auto_advance): Cleaned up a-merge-whose-tests (freed 1.8 GB of build output and temporary folders). It stays done.
 - 2026-11-23 14:51 Planned fix-the-flaky-test-24: Fix the flaky test aScreenshotFileIsDecodedAtTheHeightItShows() (review audit)
 - 2026-11-23 14:51 Update: Merged: a flaky test now gets its fix task on its first flake, and fixes never paper over it — **What changed** (step 1 of the verification plan you agreed to):
+- 2026-11-23 15:05 Started a worker on review-rules-carry-a
+- 2026-11-23 15:05 Automatically (auto_advance): Started a worker on review-rules-carry-a (Review rules carry a trigger and a source; the verifier applies only the rules a diff triggers and says which), its after tasks done (a-test-that-flakes, a-merge-whose-tests, fix-the-dictation-tests).
+- 2026-11-23 15:05 Started a worker on the-weekly-scorecard
+- 2026-11-23 15:05 Automatically (auto_advance): Started a worker on the-weekly-scorecard (The weekly scorecard counts bugs that got past review, by how the merge that brought them was reviewed), its after tasks done (a-test-that-flakes, a-merge-whose-tests, fix-the-dictation-tests).
+- 2026-11-23 15:05 Started a worker on a-parameterized-test-s
+- 2026-11-23 15:05 Automatically (auto_advance): Started a worker on a-parameterized-test-s (A parameterized test's end line isn't recorded as a second flaky test), its after tasks done (a-test-that-flakes, a-merge-whose-tests).
+- 2026-11-23 15:05 Started a worker on fix-the-flaky-test-24
+- 2026-11-23 15:05 Automatically (auto_advance): Started a worker on fix-the-flaky-test-24 (Fix the flaky test aScreenshotFileIsDecodedAtTheHeightItShows()).
+- 2026-11-23 15:05 Released fix-the-flaky-test-23's worker (idle since its done report on 9c21fd6f) while its audit runs
+- 2026-11-23 15:05 Automatically (auto_advance): Started the audit of fix-the-flaky-test-23 at 9c21fd6f (Its review is audit). Released its worker, idle since its done report, while the audit runs: its Mac slot and memory are free, its worktree and branch stay.
