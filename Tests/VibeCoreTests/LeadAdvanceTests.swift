@@ -16,6 +16,7 @@ struct LeadAdvanceTests: LeadTeamFixture {
         log = temp.url("runs.log").path
     }
 
+    #if os(Linux)
     /// The project's folder couldn't be watched (the system had no watch left): the loop looks every `unwatchedLook`
     /// meanwhile and asks for the watch again each time; once it has one, a change in the folder is a pass by itself.
     @Test func aFolderWatchThatCouldntBeMadeIsAskedForAgain() async throws {
@@ -33,6 +34,7 @@ struct LeadAdvanceTests: LeadTeamFixture {
         LeadAdvance.nudge(root: root)
         #expect(await advancing.until { advancing.passes > passes }, "a change in the watched folder brought no pass")
     }
+    #endif
 
     @Test func automaticFyiStaysInStatusAndProgressWithoutWaking() async throws {
         let (root, runtime, lead) = try team()

@@ -515,6 +515,7 @@ struct NodeSessionsTests {
         #expect(clock.wakes == 1)
     }
 
+    #if os(Linux)
     /// The state folder's watch couldn't be made (the system had none left): said once, the scans go on, and the watch is
     /// asked for again at a scan `watchRetry` on; from then a hook write is seen with no scan asked.
     @Test func aStateFolderWatchThatCouldntBeMadeIsAskedForAgain() async throws {
@@ -546,6 +547,7 @@ struct NodeSessionsTests {
         #expect(await eventually { session(nodes, "ttypts971")?.status == .needsInput })
         #expect(on(nodes) { nodes.scansApplied } > scans)
     }
+    #endif
 
     /// A session starting or ending on the host scans at once (`HostLink.changes`), with no clock and no refresh: the
     /// agent the scan has on its terminal is joined to it, and no longer once it ended.

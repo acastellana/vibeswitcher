@@ -4,6 +4,7 @@ import Testing
 @testable import VibeHost
 @testable import VibePlatform
 
+#if os(Linux)
 /// The host's path watch watches its paths' folder; one that couldn't be watched (the system had no watch left) is
 /// checked at each housekeeping meanwhile, said once, and asked for again at each housekeeping (the hub review's F4).
 @Suite struct HostPathWatchFolderTests {
@@ -29,3 +30,4 @@ import Testing
         _ = try TestClient(host)
     }
 }
+#endif
