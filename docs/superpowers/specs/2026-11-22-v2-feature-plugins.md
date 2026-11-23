@@ -199,7 +199,7 @@ fit its shape ends the program, withdraws its open cards and says why in `plugin
 | `file` | an agent's command words and working folder | the request's `payload` (bytes, base64) and its expiry, or `refuse` with why (told to the agent at once) |
 | `card` | a verified request: its id, payload, the plugin's settings | a card of data (below), or `refuse` |
 | `perform` | the request, the action word, after the user's voice | an `outcome`; or `page` (the page to serve once) |
-| `page.answer` | what the page sent back | an `outcome`, or `refuse` (a garbled answer) |
+| `page.answer` | what the page sent back, the request, the plugin's settings | an `outcome`, or `refuse` (a garbled answer) |
 | `settings.check` | a key and a value | ok, or `refuse` |
 | `withdrawn` | a request id | ok |
 

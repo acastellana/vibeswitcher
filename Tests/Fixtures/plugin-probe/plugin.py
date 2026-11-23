@@ -111,7 +111,8 @@ for line in sys.stdin:
             say({"id": rid, "outcome": {"state": "declined", "person": "Declined", "agent": "The user declined your probe."}})
     elif call == "page.answer":
         if ask["answer"] == '{"ok":true}':
-            say({"id": rid, "outcome": {"state": "answered", "person": "The page answered", "agent": "Your probe's page was answered."}})
+            depth = ask.get("settings", {}).get("depth", "none")
+            say({"id": rid, "outcome": {"state": "answered", "person": "The page answered (depth %s)" % depth, "agent": "Your probe's page was answered."}})
         else:
             say({"id": rid, "refuse": "not an answer"})
     elif call == "settings.check":

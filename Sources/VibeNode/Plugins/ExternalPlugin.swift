@@ -409,7 +409,9 @@ final class ExternalPlugin: FeaturePlugin {
                 if self.answers[id] == "taking" { self.answers[id] = "answering" }
                 answer(false)
             }
-            process.call("page.answer", ["request": id, "payload": ask.payload, "answer": String(decoding: bytes, as: UTF8.self)]) { reply in
+            // Its settings too, as `card` and `perform` get them (the wallet names the chain in what it says).
+            process.call("page.answer", ["request": id, "payload": ask.payload, "answer": String(decoding: bytes, as: UTF8.self),
+                                         "settings": desk.settings]) { reply in
                 desk.later {
                     guard case .success(let message) = reply else { return refused() }
                     if message["refuse"] is String, message.count == 1 { return refused() }
