@@ -441,3 +441,14 @@
 - 2026-11-23 11:50 Exception on sb5-the-host-confines by lead of vibeswitcher-v2-lead: edits to scripts/test-under-load.sh accepted. Reason: One line, `export TZ=UTC`, as scripts/test.sh:437 has it: without it WireVectorsTests (v2's own test, in this branch's done-gate filter) fails 3 of 3 under the load script because the usage limits' 'r…
 - 2026-11-23 12:01 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: ~/.claude/shell-snapshots
 - 2026-11-23 12:01 Started a worker on measured-with-a-real
+- 2026-11-23 12:11 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: ~/.claude/shell-snapshots
+- 2026-11-23 12:11 Started a worker on turn-this-incident-into-4
+- 2026-11-23 12:12 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: ~/.claude/shell-snapshots
+- 2026-11-23 12:12 Started a worker on team-sessions-start
+- 2026-11-23 12:23 Automatically (auto_advance): Didn't audit sb5-the-host-confines: The audit of sb5-the-host-confines was cancelled during its build and test run; no finder started.
+- 2026-11-23 12:23 Automatically (auto_advance): Didn't merge turn-this-incident-into-3: The merge of turn-this-incident-into-3 was cancelled; nothing was merged, and turn-this-incident-into-3 stays as it was.
+- 2026-11-23 12:26 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: ~/.claude/shell-snapshots
+- 2026-11-23 12:26 Started a worker on measured-with-a-real
+- 2026-11-23 12:27 Started a worker on turn-this-incident-into-4
+- 2026-11-23 12:27 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: ~/.claude/shell-snapshots
+- 2026-11-23 12:27 Started a worker on team-sessions-start
