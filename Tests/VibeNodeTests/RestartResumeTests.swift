@@ -123,10 +123,17 @@ struct RestartResumeTests {
                                 tty: tty, root: node.root)
         }
         defer { node.stop() }
+        // `status` says it waits, with the command that takes it.
+        let said = await node.eventuallyStatus { status in
+            ((status["notices"] as? [String]) ?? []).contains { $0.contains("1 message(s) wait in the inbox of the lead that ended: `vibeswitcher lead \(repo.path) --resume` takes them") }
+        }
+        let notices = (try? await node.statusJSON())?["notices"] as? [String] ?? []
+        #expect(said, "\(notices)")
         try await node.acceptConfig(repo)
         try await node.acceptBase(repo, from: Git.run(["rev-parse", "main"], in: repo.path).output)
         let reopened = try await node.runOnTerminal(["lead", repo.path, "--resume"])
         #expect(reopened.status == 0 && reopened.output.contains("took the 1 message(s) waiting for the lead it reopens"), "\(reopened.output)\n\(node.said)")
+        #expect(await node.eventuallyStatus { !(($0["notices"] as? [String]) ?? []).contains { $0.contains("wait in the inbox of the lead that ended") } })
         #expect(!reopened.output.contains("stay there"), "\(reopened.output)")
         let lead = try #require(try node.sessions().first { $0.isLive && $0.label.hasPrefix("Lead · ") }, "\(node.said)")
         // Delivered to the reopened lead: its fake was typed the message, or holds it in its own inbox.
@@ -145,16 +152,61 @@ struct RestartResumeTests {
                     .allSatisfy { !$0.text.contains("waited across the restart") || $0.agentPid != Int32(firstLead) }, "nothing left for the old lead")
     }
 
-    /// The reopen record and the board naming different sessions: nothing taken.
-    @Test func aReopenedLeadTakesNothingTheRecordDoesntName() {
+    /// The inbox a reopen takes is the node's record's (session, terminal, agent pid), and the board has to name all
+    /// three: a board naming the right session with another terminal or pid takes nothing; nor does a terminal a live
+    /// hosted session holds, a pid alive now, a terminal another root's record names, or a record older than the binding.
+    @Test func aReopenTakesOnlyTheInboxTheNodesRecordNamesAndTheBoardAgrees() {
         let session = UUID().uuidString
         let named = LeadAgent(pid: 42, tty: "ttypts9", session: session)
         var record = EngineState.Reopen(session: session)
-        #expect(LeadEngine.reopenedLead(named, record: record, resumed: true, hosted: []) == named)
-        #expect(LeadEngine.reopenedLead(named, record: record, resumed: false, hosted: []) == nil, "only a resume")
-        record.session = UUID().uuidString
-        #expect(LeadEngine.reopenedLead(named, record: record, resumed: true, hosted: []) == nil, "another session's record")
-        #expect(LeadEngine.reopenedLead(nil, record: record, resumed: true, hosted: []) == nil)
+        record.tty = "ttypts9"
+        record.pid = 42
+        let dead = { (_: Int32) in false }
+        func reopened(_ board: LeadAgent?, _ record: EngineState.Reopen?, resumed: Bool = true, hosted: [HostSession] = [],
+                      records: [String: EngineState.Reopen] = [:], alive: @escaping (Int32) -> Bool = dead) -> LeadAgent? {
+            LeadEngine.reopenedLead(board, record: record, resumed: resumed, hosted: hosted, records: records, root: "/r", alive: alive)
+        }
+        #expect(reopened(named, record) == LeadAgent(pid: 42, tty: "ttypts9", session: session))
+        #expect(reopened(named, record, resumed: false) == nil, "only a resume")
+        #expect(reopened(LeadAgent(pid: 42, tty: "ttypts3", session: session), record) == nil, "the board names another terminal")
+        #expect(reopened(LeadAgent(pid: 77, tty: "ttypts9", session: session), record) == nil, "the board names another pid")
+        #expect(reopened(LeadAgent(pid: 42, tty: "ttypts9", session: UUID().uuidString), record) == nil, "the board names another session")
+        #expect(reopened(nil, record) == nil)
+        var bare = record
+        bare.tty = nil
+        bare.pid = nil
+        #expect(reopened(named, bare) == nil, "a record without the terminal and pid (an older one)")
+        let live = HostSession(id: UUID(), tty: "ttypts9", childPID: 100, cwd: "/other", command: nil, label: "Test", agent: nil, title: "",
+                               startedAt: Date(), cols: 80, rows: 24, exit: nil)
+        #expect(reopened(named, record, hosted: [live]) == nil, "a live hosted session holds the terminal")
+        #expect(reopened(named, record, alive: { $0 == 42 }) == nil, "the pid is a live process now")
+        var other = EngineState.Reopen(session: UUID().uuidString)
+        other.tty = "ttypts9"
+        #expect(reopened(named, record, records: ["/r": record, "/other": other]) == nil, "another root's record names the terminal")
+        #expect(reopened(named, record, records: ["/r": record]) != nil, "its own record doesn't count against it")
+    }
+
+    /// A planted flood: a reopen takes at most 50 messages or 256 KiB of text, in order, and says how many stay.
+    @Test func aReopenTakesAtMostItsCapAndSaysWhatStays() throws {
+        let root = scratch.url("node")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let lead = LeadAgent(pid: 42, tty: "ttypts9", session: UUID().uuidString)
+        let unsealed = SteerSeal(seal: { _ in "" }, verify: { _ in nil })
+        for index in 0..<80 {
+            try SteerInbox.post(SteerMessage(text: "message \(index)", from: .lead("worker"), agentPid: 42), tty: lead.tty, root: root, sealer: unsealed)
+        }
+        // Another agent's on the same terminal: never taken.
+        try SteerInbox.post(SteerMessage(text: "not the lead's", from: .lead("worker"), agentPid: 7), tty: lead.tty, root: root, sealer: unsealed)
+        let (taken, left) = LeadEngine.takeWaiting(for: lead, root: root)
+        #expect(taken.count == LeadEngine.reopenTakesMost && left == 30, "\(taken.count) \(left)")
+        #expect(taken.first?.text.contains("message 0") == true && taken.last?.text.contains("message 49") == true)
+        // By bytes: big ones stop at 256 KiB.
+        let big = String(repeating: "x", count: 100 << 10)
+        let other = LeadAgent(pid: 43, tty: "ttypts8", session: UUID().uuidString)
+        for _ in 0..<4 { try SteerInbox.post(SteerMessage(text: big, from: .lead("worker"), agentPid: 43), tty: other.tty, root: root, sealer: unsealed) }
+        let (bigTaken, bigLeft) = LeadEngine.takeWaiting(for: other, root: root)
+        #expect(bigTaken.count == 2 && bigLeft == 2, "\(bigTaken.count) \(bigLeft)")
+        #expect(SteerInbox.pending(tty: lead.tty, root: root).contains { $0.agentPid == 7 })
     }
 
     /// `engine.json` rewritten while the hosts were down (a worker of the user's uid can): its record names a transcript

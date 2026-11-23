@@ -194,6 +194,10 @@ public final class LeadEngine: @unchecked Sendable {
     /// `homeWaits`): what still waited, and whether the home's accept since told its lead to go ahead. Their workflow.md
     /// guard rails and review floor wait for the root's card's next accept (`secondAcceptNotices` says so). On `queue`.
     var secondAccepts: [String: (waits: [String], told: Bool)] = [:]
+    /// How many messages wait in the inbox of each project's lead that a host restart ended (its reopen record's terminal
+    /// and agent), counted off the queue (`countFormerLeadWaits`): `status`'s restart notice says them and the
+    /// `--resume` that takes them. On `queue`.
+    var formerLeadWaits: [String: Int] = [:]
     /// The standing notices' keys, so each is logged once while it stands.
     var noticed: Set<String> = []
     /// How long the machine has slept since this engine started, noted at each witness look (`MacSleepLog`).

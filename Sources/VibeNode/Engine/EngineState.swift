@@ -120,6 +120,10 @@ public struct EngineState: Codable, Equatable, Sendable {
         public var model: String?
         public var advisor: String?
         public var workers: [Worker]
+        /// Its terminal and its agent's pid, as the node's own scan saw the session (`noteReopen`): where what waited
+        /// for it is, for the lead a `--resume` reopens (`LeadEngine.reopenedLead`). Absent from an older record.
+        public var tty: String?
+        public var pid: Int32?
 
         public init(session: String, conversation: String? = nil, transcript: String? = nil, model: String? = nil, advisor: String? = nil,
                     workers: [Worker] = []) {
