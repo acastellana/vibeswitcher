@@ -16,6 +16,21 @@ later, never to skip it.
 | `SettingsRequestTests.theCommandLineSetsAndReadsASetting` (`set`, at load ~110 on 4 cores) | local, `taskset -c 0-3` under load | once in 20: `set` refused, "not recorded in the host's vault, so not done: the session host didn't answer its connector": the host's vault call timed out at a load far past CI's; no fix (the reply-queue crash is fixed and gone from these runs) | 2026-11-22 |
 | The session host on `config held <home>` (a scratch node, held first look; the plugins lane's "tenth field on `LeadVaultV2.Book`" crash) | local, twice in a row on 2026-11-22 (~19:45), each the first run after the worktree switched from `272d568a` back to its branch | the host died with SIGILL (wait status 4: a Swift runtime trap on a dispatch worker; no symbols, the host is non-dumpable). Not stack depth (the look uses ~130 KB of 8 MB, `VaultStackTests`) and not the field count (ten fields pass every acceptance case on clean builds; 96 probe runs, 0 deaths). Gone after the host was rebuilt; reading: stale build state after a tree switch, unconfirmed. The host-probe nightly (`v2-host-probe.yml`, `scripts/ci/host-probe.sh`) looks for it, with a symbolized trace | 2026-11-22 |
 
+## Under the thread sanitizer
+
+Failing only in `scripts/test.sh --tsan` (the nightly `v2-tsan` workflow), passing in ordinary runs, each with no race
+report of its own. A sanitized child whose environment its test replaced doesn't get `TSAN_OPTIONS`: a race there
+shows only as that child exiting 66 (how `HostServer.watch(owner:)`'s was found, `2114568c`), so each is read for that
+before it is called the sanitizer's slowness. First seen in the first local run, 2026-11-23.
+
+| Test | How it fails under the sanitizer | Reading so far |
+| --- | --- | --- |
+| `SessionEnvironmentTests.theCommandFolderNeverComesBeforeRootsFolders` (host) | the session's PATH isn't the expected `/usr/local/bin:/usr/bin:/bin:<command folder>` | not read yet |
+| `SessionSandboxTests.aConfinedSessionHoldsItsIdentityWhileItsKeeperLeadsItsTerminal` (host) | `SessionBox.numbers(box.program)` isn't `[program, 2]` | not read yet; the sanitizer's runtime adds threads and mappings to a sanitized program |
+| `HandoverLinuxTests.aHandoverImageIsNotDumpableFromItsExec` (host) | the reads of the new image weren't all refused EACCES | not read yet; the sanitizer's runtime reads /proc/self at its start |
+| `ServerChildTests.aSocketRenamedOverThePathIsNotTheHostsAtOnce` (host) | the host's socket was gone ("isn't running") before the rename was noted | not read yet: a host that died (exit 66 from a race, or slowness) to be told apart |
+| `SandboxFactsTests.aWindowsStubDoesntStartWithoutInit` (platform) | the stub's status was 1, WSL's interop answering inside the box | WSL's binfmt interop, not a race; this machine only |
+
 ## Fixed
 
 Taken off the list above (or never on it) once their cause was found and fixed; each fix ran 20 times under load
