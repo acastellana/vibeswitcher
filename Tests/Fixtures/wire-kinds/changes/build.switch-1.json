@@ -1,0 +1,1 @@
+{"ok":true,"re":"1824044-2","result":{"afterTheWait":false,"commit":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","from":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","outcome":"handed-over","parked":["ttypts16 (Worker: Write the parser)"],"pid":1821175,"said":"handed over (pid 1821175, build bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb)"},"v":1}

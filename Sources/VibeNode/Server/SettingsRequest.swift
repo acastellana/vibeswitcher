@@ -62,9 +62,8 @@ extension Requests {
                 case .failure(.badArgs(let why)): refuse(.badArgs, why)
                 case .failure(.gone(let why)), .failure(.refused(let why)): refuse(.refused, why)
                 case .success(let applied):
-                    reply(.init(re: request.id, result: .object(["key": .string(asked), "value": .string(Self.capped(applied.value)),
-                                                                 "was": .string(Self.capped(applied.was)), "scope": .string("node"),
-                                                                 "project": .null, "told": .null])))
+                    reply(.init(re: request.id, typed: WireKinds.SetSetting.Result(key: asked, value: Self.capped(applied.value), was: Self.capped(applied.was),
+                                                                                scope: "node", project: nil, told: nil)))
                 }
             }
         }
@@ -101,16 +100,12 @@ extension Requests {
                     refuse(.refused, ConfigSeal.inert("\(error)", limit: 2_000))
                 case .success(let applied):
                     note("set \(key)" + (root.map { " in \(LeadMail.project(of: $0))" } ?? "") + ": changed")
-                    var result: [String: NodeWire.Value] = ["key": .string(key), "value": .string(Self.capped(applied.value)),
-                                                            "was": .string(Self.capped(applied.was)), "scope": .string(setting.scope.rawValue),
-                                                            "project": root.map { .string(NodeIds.project(root: $0)) } ?? .null]
-                    guard let engine else {
-                        result["told"] = .null
-                        return reply(.init(re: request.id, result: .object(result)))
-                    }
+                    var result = WireKinds.SetSetting.Result(key: key, value: Self.capped(applied.value), was: Self.capped(applied.was),
+                                                             scope: setting.scope.rawValue, project: root.map { NodeIds.project(root: $0) }, told: nil)
+                    guard let engine else { return reply(.init(re: request.id, typed: result)) }
                     engine.settingChanged(key, root: root, told: applied.told) { told in
-                        result["told"] = told ? .string(setting.scope == .node ? "leads" : "lead") : .null
-                        reply(.init(re: request.id, result: .object(result)))
+                        result.told = told ? (setting.scope == .node ? "leads" : "lead") : nil
+                        reply(.init(re: request.id, typed: result))
                     }
                 }
             }

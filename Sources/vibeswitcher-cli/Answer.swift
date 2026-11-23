@@ -19,7 +19,7 @@ enum AnswerCommand {
         guard arguments.count == 2, !arguments[1].trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return Say.usage(usage) }
         let text = arguments[1]
         let word = text.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        return CardCommand.act("answer", card: arguments[0], refuse: { card in
+        return CardCommand.act(WireKinds.Answer.self, card: arguments[0], refuse: { card in
             // A feature plugin's card: one of its words, nothing else.
             if let plugin = card["plugin"], plugin != .null {
                 let words = (plugin["actions"]?.array ?? []).compactMap { $0["word"]?.string }
@@ -27,10 +27,10 @@ enum AnswerCommand {
                 return Say.usage("usage: vibeswitcher answer CARD \(words.map { ConfigSeal.inert($0, limit: 20) }.joined(separator: "|"))  (a \(ConfigSeal.inert(plugin["noun"]?.string ?? "plugin", limit: 40))'s card)")
             }
             return nil
-        }, args: { card in
+        }, args: { card, id, code in
             // Bound to the wording shown: a revision after it is said to the lead with the answer.
             let plugin = card["plugin"].map { $0 != .null } ?? false
-            return ["text": .string(plugin ? word : text), "version": card["question"]?["version"] ?? .null]
+            return .init(card: id, code: code, text: plugin ? word : text, version: card["question"]?["version"]?.int)
         }, what: { card in
             let id = ConfigSeal.inert(card["id"]?.string ?? "", limit: 80)
             // A plugin's word: what it does, whole, as its card says it.
@@ -49,13 +49,13 @@ enum AnswerCommand {
     }
 
     private static func takeDraft(_ wanted: String) -> Int32 {
-        CardCommand.act("answer", card: wanted, refuse: { card in
+        CardCommand.act(WireKinds.Answer.self, card: wanted, refuse: { card in
             guard draft(of: card) == nil else { return nil }
             let id = ConfigSeal.inert(card["id"]?.string ?? wanted, limit: 80)
             return Say.usage("\(usage)\ncard \(id) has no draft: pick an answer on its web page, or give TEXT")
-        }, args: { card in
+        }, args: { card, id, code in
             let taken = draft(of: card)
-            return ["text": .string(taken?.text ?? ""), "version": taken?.version ?? .null]
+            return .init(card: id, code: code, text: taken?.text ?? "", version: taken?.version.int)
         }, what: { card in
             // Whole: this is what the lead will be told as the user's.
             "This answers card \(ConfigSeal.inert(card["id"]?.string ?? "", limit: 80)) with the answer drafted on its web page: "
@@ -63,20 +63,20 @@ enum AnswerCommand {
         }, say: said)
     }
 
-    private static func said(_ result: NodeWire.Value) {
-        let outcome = result["outcome"]?.string ?? "?"
+    private static func said(_ result: WireKinds.Answer.Result) {
+        let outcome = result.outcome ?? "?"
         switch outcome {
         case "answered": Say.out("answered: the lead is told")
         case "started":
-            Say.out("started: a new shell session on \(ConfigSeal.inert(result["terminal"]?.string ?? "?", limit: 80)) "
-                    + "(\(ConfigSeal.inert(result["session"]?.string ?? "?", limit: 120))); the asking session is told")
+            Say.out("started: a new shell session on \(ConfigSeal.inert(result.terminal ?? "?", limit: 80)) "
+                    + "(\(ConfigSeal.inert(result.session ?? "?", limit: 120))); the asking session is told")
         case "declined": Say.out("declined: nothing ran; the asking session is told")
         // A plugin's own words for what its answer did (a page to open, and until when).
-        case _ where result["say"]?.array != nil: break
+        case _ where result.say != nil: break
         default: Say.out("not taken as an answer: \(ConfigSeal.inert(outcome, limit: 80))")
         }
-        for line in result["say"]?.array?.compactMap(\.string) ?? [] { Say.out(ConfigSeal.inert(line, limit: 2_000)) }
-        if let notice = result["notice"]?.string { Say.out("  " + ConfigSeal.inert(notice, limit: .max)) }
+        for line in result.say ?? [] { Say.out(ConfigSeal.inert(line, limit: 2_000)) }
+        if let notice = result.notice { Say.out("  " + ConfigSeal.inert(notice, limit: .max)) }
     }
 }
 
@@ -85,7 +85,7 @@ enum HoldCommand {
 
     static func run(_ arguments: [String]) -> Int32 {
         guard arguments.count == 1 else { return Say.usage(usage) }
-        return CardCommand.act("hold", card: arguments[0], what: { card in
+        return CardCommand.act(WireKinds.Hold.self, card: arguments[0], args: { _, id, code in .init(card: id, code: code) }, what: { card in
             "This holds card \(ConfigSeal.inert(card["id"]?.string ?? "", limit: 80))'s timer: the lead is told not to go ahead and to wait for your answer."
         }) { _ in Say.out("held: the lead waits for your answer") }
     }

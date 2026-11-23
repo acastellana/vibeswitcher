@@ -90,7 +90,7 @@ keychain code is reachable from a test any other way. The one test of the real k
 Run them before you call a change done; they take seconds:
 
 ```sh
-bash scripts/test.sh --filter 'AccessibilityLint|AgentExportLint|ArchitectureDocLint|CLIChangeLint|CloseOnExecLint|CopiedFilesLint|DebugAidsLint|DocLinksLint|ElapsedGuardLint|ElapsedTimeLint|HomePathLint|KeychainLint|MacOnlyTestsLint|MCPLint|PhoneMainSyncLint|PlatformLint|PluginLint|PreferencesLint|PrivateNamesLint|PrivateWriteLint|RequestKindsLint|SandboxLint|ScriptScratchLint|SecretShapeLint|SecurityDocumentLint|ServerLint|ShebangWriteLint|StdioWriteLint|TemporaryFolderLint|WebAppLint'
+bash scripts/test.sh --filter 'AccessibilityLint|AgentExportLint|ArchitectureDocLint|CLIChangeLint|CloseOnExecLint|CopiedFilesLint|DebugAidsLint|DocLinksLint|ElapsedGuardLint|ElapsedTimeLint|HomePathLint|KeychainLint|MacCompileLint|MacOnlyTestsLint|MCPLint|PhoneMainSyncLint|PlatformLint|PluginLint|PreferencesLint|PrivateNamesLint|PrivateWriteLint|RequestKindsLint|SandboxLint|ScriptScratchLint|SecretShapeLint|SecurityDocumentLint|ServerLint|ShebangWriteLint|StdioWriteLint|TemporaryFolderLint|WebAppLint'
 bash scripts/test.sh --filter 'LintTests/'   # the same suites, as AGENTS.md runs them: every `…LintTests` type
 ```
 
@@ -108,6 +108,7 @@ bash scripts/test.sh --filter 'LintTests/'   # the same suites, as AGENTS.md run
 | `ElapsedTimeLint` | A correctness test judging an elapsed time against a bare number (`took < 0.05`, `Date().timeIntervalSince(x) < 5`): it judges the order of events, a baseline from the same test, or it's a `.perf` bench; the short allow list is in `ElapsedTimeLintTests.swift`. |
 | `HomePathLint` | A path under the home folder worked out once per process. |
 | `KeychainLint` | A test that can reach the real keychain. |
+| `MacCompileLint` | A glibc-only spelling (`SOCK_*.rawValue`, `st_mtim`, `pipe2(`, `prctl(`, `SOCK_CLOEXEC`, …) in a file the Mac's CI compiles, outside a Linux-only `#if` block or a `+Linux` file: nobody can build for the Mac locally. |
 | `MacOnlyTestsLint` | A file of `Tests/VibeCoreTests` or `Tests/VibeHostTests` wrapped whole in `#if canImport(Darwin)` that its target's `MacOnlyTests.txt` doesn't list with its reason; a file listed there that is gone or has no such wrap; or a tenth of a target's files listed, besides those its plan counts apart. |
 | `MCPLint` | A first statement of the tool server's or the hook's main, before the session sandbox's relay and porter hooks (`DoorRelay.runIfConfined`, `Porter.runIfAsked`), or a hook that finds its agent from its own pid rather than its caller's (`HookCaller`). |
 | `PlatformLint` | A libc or Apple-only import, or an `#if os(`/`canImport(`, in the portable targets outside `VibePlatform` and `VibeCore/MacOnly`; or a file on its pending list (`Tests/VibePlatformTests/PlatformLintPending.txt`) that no longer has one; or two tracked paths (a folder's too) that differ only in case, which are one on the Mac. |

@@ -46,7 +46,7 @@ extension Requests {
             let kept = try marks.rename(SessionMarks.keys(of: session), to: name)
             note("session.rename: session \(NodeSessions.id(of: session)) \(kept == nil ? "back to its own name" : "renamed")")
             sessions?.refresh()
-            reply(.init(re: request.id, result: .object(["session": .string(NodeSessions.id(of: session)), "name": kept.map(NodeWire.Value.string) ?? .null])))
+            reply(.init(re: request.id, typed: WireKinds.SessionRename.Result(session: NodeSessions.id(of: session), name: kept)))
         } catch {
             reply(.init(re: request.id, error: .init(.internal, "the name wasn't kept: \(error)")))
         }
@@ -77,8 +77,7 @@ extension Requests {
             try marks.pause(SessionMarks.keys(of: session), until: until)
             note("session.pause: session \(NodeSessions.id(of: session)) \(until == nil ? "resumed" : "paused")")
             sessions?.refresh()
-            reply(.init(re: request.id, result: .object(["session": .string(NodeSessions.id(of: session)),
-                                                         "until": until.map(NodeWire.Value.date) ?? .null])))
+            reply(.init(re: request.id, typed: WireKinds.SessionPause.Result(session: NodeSessions.id(of: session), until: until.map(NodeWire.dateText))))
         } catch {
             reply(.init(re: request.id, error: .init(.internal, "the pause wasn't kept: \(error)")))
         }

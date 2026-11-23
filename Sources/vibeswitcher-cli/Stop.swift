@@ -105,7 +105,7 @@ enum StopCommand {
 
     /// The server's stop for `action` (the code typed): its reply, the request's journal entry, and what it did.
     static func throughServer(_ context: NodeContext, _ client: NodeClient, action: String, typed: Typed?) -> Result<Void, StartRefusal> {
-        switch client.change("stop", action: action, typed: typed, timeout: Requests.stopWait + 30, journal: .ok) {
+        switch client.change(WireKinds.Stop.self, WireNoArgs(), action: action, typed: typed, timeout: Requests.stopWait + 30, journal: .ok) {
         case .failure(.broken(let why)):
             // The host ends the server a moment after it accepts the shutdown: a reply that didn't get out in time
             // leaves the connection closed with none. The node gone is the answer then; anything else is a failure.
@@ -114,12 +114,11 @@ enum StopCommand {
             Say.out("the node stopped (its server ended before it answered)")
             return .success(())
         case .failure(let failure): return .failure(StartRefusal(failure.message, exitCode: failure.exitCode))
-        case .success(let reply):
-            guard reply.ok else {
-                let code = reply.error?.code ?? "internal"
-                return .failure(StartRefusal("\(code): \(ConfigSeal.inert(reply.error?.message ?? "no reason", limit: .max))", exitCode: Say.exitCode(replyCode: code)))
-            }
-            Say.out("\(reply.result?["sessionsEnded"]?.int ?? 0) sessions ended; the host accepted to shut down")
+        case .refused(let reply):
+            let code = reply.error?.code ?? "internal"
+            return .failure(StartRefusal("\(code): \(ConfigSeal.inert(reply.error?.message ?? "no reason", limit: .max))", exitCode: Say.exitCode(replyCode: code)))
+        case .success(let result, _):
+            Say.out("\(result.sessionsEnded ?? 0) sessions ended; the host accepted to shut down")
             return .success(())
         }
     }

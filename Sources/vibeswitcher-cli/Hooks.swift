@@ -44,14 +44,19 @@ enum HooksCommand {
         let id = UUID().uuidString.lowercased()
         let said = TypedWord.said(approval: client.approvalRule, action: id, what: what)
         guard case .success(let typed) = said else { return Say.refused(said.refusal) }
-        switch client.change(kind, args: ["agents": .array(agents.map { .string($0.rawValue) })], action: id, typed: typed, timeout: 120) {
+        let args = WireKinds.AgentsArgs(agents: agents.map(\.rawValue))
+        // Install's result names the programs copied too; remove's only the configs.
+        let sent: NodeClient.Read<(programs: [String], configs: [String])> = kind == "hooks.install"
+            ? client.change(WireKinds.HooksInstall.self, args, action: id, typed: typed, timeout: 120).map { ($0.programs ?? [], $0.configs ?? []) }
+            : client.change(WireKinds.HooksRemove.self, args, action: id, typed: typed, timeout: 120).map { ([], $0.configs ?? []) }
+        switch sent {
         case .failure(let failure): return Say.failed(failure)
-        case .success(let reply):
-            guard reply.ok, let result = reply.result else { return Say.replyError(reply) }
-            for program in result["programs"]?.array ?? [] {
-                Say.out("installed \(ConfigSeal.inert(program.string ?? "", limit: 400))")
+        case .refused(let reply): return Say.replyError(reply)
+        case .success(let result, _):
+            for program in result.programs {
+                Say.out("installed \(ConfigSeal.inert(program, limit: 400))")
             }
-            let configs = (result["configs"]?.array ?? []).map { ConfigSeal.inert($0.string ?? "", limit: 400) }
+            let configs = result.configs.map { ConfigSeal.inert($0, limit: 400) }
             for (agent, config) in zip(agents, configs) {
                 Say.out(kind == "hooks.install" ? "\(agent.displayName): hooks installed in \(config)" : "\(agent.displayName): hooks removed from \(config)")
                 if kind == "hooks.install", agent == .codex {

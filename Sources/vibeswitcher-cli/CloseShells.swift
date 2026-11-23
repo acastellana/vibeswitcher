@@ -39,11 +39,11 @@ enum CloseShellsCommand {
         let said = TypedWord.said(approval: client.approvalRule, action: action, what: "This ends \(finished.count) shell\(finished.count == 1 ? "" : "s") "
             + "back at its prompt, with anything it left running:\n" + lines.joined(separator: "\n"))
         guard case .success(let typed) = said else { return Say.refused(said.refusal) }
-        switch client.change("session.close-shells", args: ["sessions": .array(finished.compactMap { $0.session.map(NodeWire.Value.string) })], action: action, typed: typed) {
+        switch client.change(WireKinds.CloseShells.self, .init(sessions: finished.compactMap(\.session)), action: action, typed: typed) {
         case .failure(let failure): return Say.failed(failure)
-        case .success(let reply):
-            guard reply.ok, let result = reply.result else { return Say.replyError(reply) }
-            let ended = result["ended"]?.array ?? [], left = result["left"]?.array ?? []
+        case .refused(let reply): return Say.replyError(reply)
+        case .success(let result, _):
+            let ended = result.ended ?? [], left = result.left ?? []
             Say.out("closed: \(ended.count) shell\(ended.count == 1 ? "" : "s")"
                 + (left.isEmpty ? "" : "; \(left.count) left open (busy again, or gone)"))
             return 0

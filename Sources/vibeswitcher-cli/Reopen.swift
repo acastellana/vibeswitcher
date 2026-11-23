@@ -61,25 +61,25 @@ enum ReopenCommand {
         let action = UUID().uuidString.lowercased()
         let said = TypedWord.said(approval: client.approvalRule, action: action, what: what)
         guard case .success(let typed) = said else { return Say.refused(said.refusal) }
-        let args: [String: NodeWire.Value] = forget ? ["forget": .bool(true)]
-            : all ? ["all": .bool(true)] : ["sessions": .array(chosen.compactMap { $0["session"] })]
-        switch client.change("session.reopen", args: args, action: action, typed: typed, timeout: 180) {
+        let args = forget ? WireKinds.SessionReopen.Args(forget: true)
+            : all ? WireKinds.SessionReopen.Args(all: true) : WireKinds.SessionReopen.Args(sessions: chosen.compactMap { $0["session"]?.string })
+        switch client.change(WireKinds.SessionReopen.self, args, action: action, typed: typed, timeout: 180) {
         case .failure(let failure): return Say.failed(failure)
-        case .success(let reply):
-            guard reply.ok, let result = reply.result else { return Say.replyError(reply) }
+        case .refused(let reply): return Say.replyError(reply)
+        case .success(let result, _):
             if forget {
-                Say.out("put away: the offer to reopen \(result["forgotten"]?.int ?? 0) session(s)")
+                Say.out("put away: the offer to reopen \(result.forgotten ?? 0) session(s)")
                 return 0
             }
-            for started in result["reopened"]?.array ?? [] {
-                let id = SessionCommand.short(started["session"]?.string)
-                Say.out("reopened: \(ConfigSeal.inert(started["folder"]?.string ?? "?", limit: .max)) in session \(id) on "
-                    + "\(ConfigSeal.inert(started["terminal"]?.string ?? "?", limit: 20)), conversation "
-                    + "\(ConfigSeal.inert(started["conversation"]?.string ?? "?", limit: 40)) (`vibeswitcher send \(id) TEXT` types into it)")
+            for started in result.reopened ?? [] {
+                let id = SessionCommand.short(started.session)
+                Say.out("reopened: \(ConfigSeal.inert(started.folder ?? "?", limit: .max)) in session \(id) on "
+                    + "\(ConfigSeal.inert(started.terminal ?? "?", limit: 20)), conversation "
+                    + "\(ConfigSeal.inert(started.conversation ?? "?", limit: 40)) (`vibeswitcher send \(id) TEXT` types into it)")
             }
-            let refused = result["refused"]?.array ?? []
+            let refused = result.refused ?? []
             for failed in refused {
-                Say.err("not reopened: \(ConfigSeal.inert(failed["why"]?.string ?? "?", limit: .max)) (still offered)")
+                Say.err("not reopened: \(ConfigSeal.inert(failed.why ?? "?", limit: .max)) (still offered)")
             }
             return refused.isEmpty ? 0 : 77
         }
@@ -150,14 +150,14 @@ enum ResumeCommand {
                                     what: "This starts again, as you, in its same conversation (\(session["agent"]?.string == "codex" ? "Codex with resume" : "Claude with --resume"), in its folder):\n  "
                                         + ReopenCommand.line(session))
         guard case .success(let typed) = said else { return Say.refused(said.refusal) }
-        switch client.change("session.resume", args: ["session": session["session"] ?? .string(wanted)], action: action, typed: typed, timeout: 180) {
+        switch client.change(WireKinds.SessionResume.self, .init(session: session["session"]?.string ?? wanted), action: action, typed: typed, timeout: 180) {
         case .failure(let failure): return Say.failed(failure)
-        case .success(let reply):
-            guard reply.ok, let result = reply.result else { return Say.replyError(reply) }
-            for started in result["reopened"]?.array ?? [] {
-                let id = SessionCommand.short(started["session"]?.string)
-                Say.out("resumed: \(ConfigSeal.inert(started["folder"]?.string ?? "?", limit: .max)) in session \(id) on "
-                    + "\(ConfigSeal.inert(started["terminal"]?.string ?? "?", limit: 20)) (`vibeswitcher send \(id) TEXT` types into it)")
+        case .refused(let reply): return Say.replyError(reply)
+        case .success(let result, _):
+            for started in result.reopened ?? [] {
+                let id = SessionCommand.short(started.session)
+                Say.out("resumed: \(ConfigSeal.inert(started.folder ?? "?", limit: .max)) in session \(id) on "
+                    + "\(ConfigSeal.inert(started.terminal ?? "?", limit: 20)) (`vibeswitcher send \(id) TEXT` types into it)")
             }
             return 0
         }

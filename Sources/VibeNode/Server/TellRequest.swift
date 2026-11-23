@@ -21,7 +21,7 @@ extension Requests {
             queue.async {
                 engine.tellLead(text, root: root, action: action) { result in
                     switch result {
-                    case .success(let value): reply(.init(re: request.id, result: value))
+                    case .success(let told): reply(.init(re: request.id, typed: told))
                     case .failure(.refused(let why)), .failure(.gone(let why)), .failure(.badArgs(let why)):
                         reply(.init(re: request.id, error: .init(.refused, why)))
                     }

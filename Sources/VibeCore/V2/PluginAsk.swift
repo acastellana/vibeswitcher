@@ -75,7 +75,7 @@ public enum PluginAsk {
     public static func askServer(_ args: [String: Any]) -> Result<[String: Any], Refusal> {
         let path = VibePaths.root.appendingPathComponent("v2/server.sock").path
         guard var address = Platform.Sockets.unixAddress(path) else { return .failure(Refusal("VibeSwitcher's server socket isn't there")) }
-        let fd = socket(AF_UNIX, Int32(SOCK_STREAM.rawValue), 0)
+        let fd = socket(AF_UNIX, Platform.Sockets.stream, 0)
         guard fd >= 0 else { return .failure(Refusal("no socket (errno \(errno))")) }
         defer { Sys.close(fd) }
         var timeout = timeval(tv_sec: 30, tv_usec: 0)

@@ -104,9 +104,9 @@ enum SwitchCommand {
         let action = UUID().uuidString.lowercased()
         let said = TypedWord.said(approval: client.approvalRule, action: action, what: what)
         guard case .success(let typed) = said else { return Say.refused(said.refusal) }
-        let kind = "build.switch"
+        let kind = WireKinds.BuildSwitch.kind
         let handedOver: Bool
-        switch client.change(kind, args: ["commit": .string(target)], action: action, typed: typed, timeout: SwitchRequest.longestWait + 30) {
+        switch client.change(WireKinds.BuildSwitch.self, .init(commit: target), action: action, typed: typed, timeout: SwitchRequest.longestWait + 30) {
         case .failure(let failure):
             // The review of S8c: the reply may be lost after the host handed over (the server a switch replaces may end
             // first): the host, as a fresh connection sees it, says whether it did.
@@ -119,16 +119,16 @@ enum SwitchCommand {
                 Say.out("the switch's reply was lost (\(ConfigSeal.inert(failure.message, limit: 400))), but the host runs \(target) now, its pid unchanged: handed over")
                 handedOver = true
             }
-        case .success(let reply):
-            guard reply.ok, let result = reply.result else { return Say.replyError(reply) }
-            let parked = (result["parked"]?.array ?? []).compactMap(\.string).map { ConfigSeal.inert($0, limit: 120) }
+        case .refused(let reply): return Say.replyError(reply)
+        case .success(let result, _):
+            let parked = (result.parked ?? []).map { ConfigSeal.inert($0, limit: 120) }
             if !parked.isEmpty { Say.out("parked first (idle since their last report; their leads were told): " + parked.joined(separator: ", ")) }
-            Say.out(ConfigSeal.inert(result["said"]?.string ?? "switched", limit: 400))
-            guard result["outcome"]?.string == "handed-over" || result["outcome"]?.string == "already" else {
-                Say.err("vibeswitcher: the server's reply names no outcome: \(ConfigSeal.inert(result["outcome"]?.string ?? "none", limit: 64))")
+            Say.out(ConfigSeal.inert(result.said ?? "switched", limit: 400))
+            guard result.outcome == "handed-over" || result.outcome == "already" else {
+                Say.err("vibeswitcher: the server's reply names no outcome: \(ConfigSeal.inert(result.outcome ?? "none", limit: 64))")
                 return 1
             }
-            handedOver = result["outcome"]?.string == "handed-over"
+            handedOver = result.outcome == "handed-over"
         }
         if let refused = followUp(context, prefix: prefix, accountHome: home, commit: target, handedOver: handedOver, hostPid: hostPid) {
             Say.err("vibeswitcher: \(ConfigSeal.inert(refused.text, limit: .max))")

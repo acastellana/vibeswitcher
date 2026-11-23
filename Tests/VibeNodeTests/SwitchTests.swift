@@ -582,7 +582,7 @@ struct SwitchTests {
     /// The text of a handed-over answer's `said`, or of a refusal.
     private static func said(_ answer: SwitchRequest.Answer?) -> String? {
         switch answer {
-        case .done(let value)?: return value["said"]?.string
+        case .done(let result)?: return result.said
         case .refused(_, let why)?: return why
         case nil: return nil
         }
@@ -592,8 +592,8 @@ struct SwitchTests {
         let world = try await StubWorld(scratch, onHandover: .reExec(build: Self.b))
         let answer = await Self.answer(world.run())
         guard case .done(let value)? = answer else { Issue.record("\(String(describing: answer))"); return }
-        #expect(value["outcome"]?.string == "handed-over" && value["commit"]?.string == Self.b && value["pid"]?.int == 31589, "\(value)")
-        #expect(value["from"]?.string == Self.a && value["afterTheWait"]?.bool == false, "\(value)")
+        #expect(value.outcome == "handed-over" && value.commit == Self.b && value.pid == 31589, "\(value)")
+        #expect(value.from == Self.a && value.afterTheWait == false, "\(value)")
         #expect(world.handover == ["build.switch: handed over (pid 31589, build \(Self.b))"], "\(world.notes.value)")
         // The app's `client.sessions.count == 1`: the session is kept across the handover.
         #expect(world.live == 1)
@@ -723,7 +723,7 @@ struct SwitchTests {
         #expect(answer.value == nil && world.handover.isEmpty, "\(world.notes.value)")
         #expect(await eventually { world.stub.cue() })
         guard case .done(let value)? = await Self.answer(answer) else { Issue.record("\(world.notes.value)"); return }
-        #expect(value["said"]?.string == "handed over after the wait (pid 31589, build \(Self.b))" && value["afterTheWait"]?.bool == true, "\(value)")
+        #expect(value.said == "handed over after the wait (pid 31589, build \(Self.b))" && value.afterTheWait == true, "\(value)")
         #expect(world.waiting == ["build.switch: waiting for the new build's probe, 1 s",
                                   "build.switch: no answer in 2 s; the connection stays open 60 s more"], "\(world.notes.value)")
         #expect(world.live == 1)

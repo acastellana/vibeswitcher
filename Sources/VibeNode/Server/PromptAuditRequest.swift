@@ -21,10 +21,9 @@ extension Requests {
             queue.async {
                 engine.changePromptAudit(root: root, change) { project in
                     note("prompt-audit: \(change.rawValue) for \(LeadMail.project(of: root))")
-                    reply(.init(re: request.id, result: .object([
-                        "project": .string(LeadMail.project(of: root)), "root": .string(root), "do": .string(change.rawValue),
-                        "until": project.snoozedUntil.map { .date(Date(timeIntervalSince1970: $0)) } ?? .null,
-                    ])))
+                    reply(.init(re: request.id, typed: WireKinds.PromptAudit.Result(
+                        project: LeadMail.project(of: root), root: root, do: change.rawValue,
+                        until: project.snoozedUntil.map { NodeWire.dateText(Date(timeIntervalSince1970: $0)) })))
                 }
             }
         }

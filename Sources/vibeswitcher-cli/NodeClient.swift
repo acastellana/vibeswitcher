@@ -311,6 +311,15 @@ final class NodeClient {
         case success(R, raw: NodeWire.Value)
         case refused(NodeWire.Reply)
         case failure(Failure)
+
+        /// The result made into another.
+        func map<T>(_ make: (R) -> T) -> Read<T> {
+            switch self {
+            case .success(let result, let raw): return .success(make(result), raw: raw)
+            case .refused(let reply): return .refused(reply)
+            case .failure(let failure): return .failure(failure)
+            }
+        }
     }
 
     /// A typed read kind (`WireKind`, the architecture review's row 11): asked with its `args` (none when it takes
@@ -318,12 +327,27 @@ final class NodeClient {
     /// server sent it). How the command line asks a kind in `WireKinds.typed`: `WireKindsLintTests` refuses a
     /// `request("…")` of one.
     func read<K: WireKind>(_ kind: K.Type, _ args: K.Args, timeout: TimeInterval = 30) -> Read<K.Result> {
-        let given: [String: NodeWire.Value]?
+        Self.decoded(K.self, request(K.kind, args: Self.given(K.self, args), timeout: timeout))
+    }
+
+    /// A typed state-changing kind (`WireChangeKind`), sent as `change` sends one (the typed word's token, the journal
+    /// entry as `when` says, the same refusals): its result decoded into its type. How the command line sends a kind in
+    /// `WireKinds.changes`: `WireKindsLintTests` refuses a `change("…")` of one.
+    func change<K: WireChangeKind>(_ kind: K.Type, _ args: K.Args, action: String, typed: Typed?, timeout: TimeInterval = 30,
+                                   journal when: JournalWhen = .accepted) -> Read<K.Result> {
+        Self.decoded(K.self, change(K.kind, args: Self.given(K.self, args), action: action, typed: typed, timeout: timeout, journal: when))
+    }
+
+    /// `args` as a request's: none for a kind that takes none, else its fields (those set).
+    private static func given<K: WireKind>(_: K.Type, _ args: K.Args) -> [String: NodeWire.Value]? {
         switch NodeWire.Value(wire: args) {
-        case .object(let fields) where !fields.isEmpty: given = fields
-        default: given = K.Args.self == WireNoArgs.self ? nil : [:]
+        case .object(let fields) where !fields.isEmpty: return fields
+        default: return K.Args.self == WireNoArgs.self ? nil : [:]
         }
-        switch request(K.kind, args: given, timeout: timeout) {
+    }
+
+    private static func decoded<K: WireKind>(_: K.Type, _ sent: Result<NodeWire.Reply, Failure>) -> Read<K.Result> {
+        switch sent {
         case .failure(let failure): return .failure(failure)
         case .success(let reply):
             guard reply.ok, let result = reply.result else { return .refused(reply) }

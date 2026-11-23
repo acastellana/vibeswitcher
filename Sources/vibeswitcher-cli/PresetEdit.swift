@@ -113,10 +113,10 @@ enum PresetEditCommand {
         let held = "\nThe presets file then waits for your accept (`vibeswitcher config held`, then `config accept CARD`): none of its presets starts before that."
         guard parsed.op != "add" else {
             let what = "This adds preset \(shownName) \(place)" + (parsed.changes.isEmpty ? " (Claude, plain `claude`)" : ": " + parsed.changes.joined(separator: "; ")) + "." + held
-            return SessionCommand.act("presets.edit", args: { _ in parsed.args }, what: { _ in what }, say: said)
+            return SessionCommand.act(WireKinds.PresetsEdit.self, args: { _ in typed(parsed.args) }, what: { _ in what }, say: said)
         }
         // An edit or a remove: the preset as the node lists it now, shown, and bound to what was shown by its digest.
-        return SessionCommand.act("presets.edit", fetch: { client in
+        return SessionCommand.act(WireKinds.PresetsEdit.self, fetch: { client in
             switch client.read(WireKinds.Presets.self, .init(folder: parsed.folder, values: true)) {
             case .failure(let failure): return .failure(failure)
             case .refused(let reply): return .failure(.broken(reply.error.map { "\($0.code): \($0.message)" } ?? "the server listed no presets"))
@@ -136,17 +136,22 @@ enum PresetEditCommand {
             var args = parsed.args
             args["name"] = preset["name"] ?? .string(parsed.name)
             args["digest"] = preset["digest"] ?? .null
-            return args
+            return typed(args)
         }, what: { preset in
             parsed.op == "remove" ? "This removes preset " + PresetsCommand.describe(preset) + " \(place)." + held
                 : "This changes preset " + PresetsCommand.describe(preset) + " \(place): " + parsed.changes.joined(separator: "; ") + "." + held
         }, say: said)
     }
 
-    static func said(_ result: NodeWire.Value) {
-        let name = ConfigSeal.inert(result["name"]?.string ?? "?", limit: 80)
-        let folder = result["folder"]?.string.map { ConfigSeal.inert($0, limit: 200) }
-        let done = ["add": "added", "edit": "changed", "remove": "removed"][result["op"]?.string ?? ""] ?? "changed"
+    /// The parsed arguments as the kind's (`WireKinds.PresetsEdit.Args`): every key the parse makes is one of its.
+    static func typed(_ args: [String: NodeWire.Value]) -> WireKinds.PresetsEdit.Args {
+        (try? NodeWire.Value.object(args).wire(WireKinds.PresetsEdit.Args.self)) ?? .init(op: args["op"]?.string, name: args["name"]?.string)
+    }
+
+    static func said(_ result: WireKinds.PresetsEdit.Result) {
+        let name = ConfigSeal.inert(result.name ?? "?", limit: 80)
+        let folder = result.folder.map { ConfigSeal.inert($0, limit: 200) }
+        let done = ["add": "added", "edit": "changed", "remove": "removed"][result.op ?? ""] ?? "changed"
         Say.out("\(done): preset \(name) \(folder.map { "for \($0)" } ?? "for every folder")")
         Say.out("held: the presets file waits for your accept: `vibeswitcher config held\(folder.map { " " + $0 } ?? "")`, then `vibeswitcher config accept CARD`")
     }

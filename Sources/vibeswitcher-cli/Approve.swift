@@ -51,29 +51,28 @@ enum ApproveCommand {
         let what = "The batch, in this order (each recorded as its own action; it stops at the first refusal):\n" + recap
         let said = TypedWord.said(approval: client.approvalRule, action: action, code: code, what: what)
         guard case .success(let typed) = said else { return Say.refused(said.refusal) }
-        let result: NodeWire.Value
-        switch client.change("approve", args: ["batch": .string(batch), "code": .string(code)], action: action, typed: typed, timeout: 600) {
+        let result: WireKinds.Approve.Result
+        switch client.change(WireKinds.Approve.self, .init(batch: batch, code: code), action: action, typed: typed, timeout: 600) {
         case .failure(let failure): return Say.failed(failure)
-        case .success(let reply):
-            guard reply.ok, let given = reply.result else { return Say.replyError(reply) }
-            result = given
+        case .refused(let reply): return Say.replyError(reply)
+        case .success(let given, _): result = given
         }
         // Each item recorded in the vault as its own action: each journaled, so `status` finds them all accounted for.
-        for done in result["done"]?.array ?? [] {
-            if let itemAction = done["action"]?.string { client.journal(done["kind"]?.string ?? "", action: itemAction, typed: typed) }
+        for done in result.done ?? [] {
+            if let itemAction = done.action { client.journal(done.kind ?? "", action: itemAction, typed: typed) }
             Say.out("done: " + summary(done))
         }
-        guard let refused = result["refused"], refused != .null else {
+        guard let refused = result.refused else {
             Say.out("all \(items.count) done")
             return 0
         }
-        if refused["code"]?.string == NodeWire.Code.refused.rawValue, let itemAction = refused["action"]?.string {
-            client.journal(refused["kind"]?.string ?? "", action: itemAction, typed: typed)
+        if refused.code == NodeWire.Code.refused.rawValue, let itemAction = refused.action {
+            client.journal(refused.kind ?? "", action: itemAction, typed: typed)
         }
-        Say.err("vibeswitcher: stopped at \(inert(refused["kind"]?.string)) \(inert(refused["subject"]?.string)): \(inert(refused["message"]?.string))")
-        let left = result["left"]?.array ?? []
+        Say.err("vibeswitcher: stopped at \(inert(refused.kind)) \(inert(refused.subject)): \(inert(refused.message))")
+        let left = result.left ?? []
         if !left.isEmpty {
-            Say.err("not done: " + left.map { "\(inert($0["kind"]?.string)) \(inert($0["subject"]?.string))" }.joined(separator: "; ")
+            Say.err("not done: " + left.map { "\(inert($0.kind)) \(inert($0.subject))" }.joined(separator: "; ")
                     + " (run `vibeswitcher approve` again once that is settled)")
         }
         return 77
@@ -135,12 +134,12 @@ enum ApproveCommand {
         }
     }
 
-    static func summary(_ done: NodeWire.Value) -> String {
-        let kind = done["kind"]?.string ?? ""
-        let subject = inert(done["subject"]?.string)
+    static func summary(_ done: WireKinds.Approve.Done) -> String {
+        let kind = done.kind ?? ""
+        let subject = inert(done.subject)
         switch kind {
         case "config.accept":
-            let sealed = done["result"]?["sealed"]?.array?.count ?? 0
+            let sealed = (try? done.result?.wire(WireKinds.ConfigAccept.Result.self))?.sealed?.count ?? 0
             return "config accepted, \(subject)" + (sealed > 0 ? " (\(sealed) path\(sealed == 1 ? "" : "s") sealed)" : "")
         case "base.accept": return "base accepted, \(subject)"
         case "hooks.install": return "hooks installed (\(subject))"

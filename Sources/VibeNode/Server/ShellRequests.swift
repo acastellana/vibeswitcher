@@ -64,10 +64,8 @@ extension Requests {
                     waiting.answered = true
                     waiting.watch = nil
                     let gone = ending.filter { id in !link.sessions.contains { $0.id == id && $0.isLive } }
-                    reply(.init(re: request.id, result: .object([
-                        "ended": .array(gone.sorted { $0.uuidString < $1.uuidString }.map { .string(NodeIds.session(host: $0)) }),
-                        "left": .array(left.map(NodeWire.Value.string)),
-                    ])))
+                    reply(.init(re: request.id, typed: WireKinds.CloseShells.Result(
+                        ended: gone.sorted { $0.uuidString < $1.uuidString }.map { NodeIds.session(host: $0) }, left: left)))
                 }
                 let allGone = { ending.allSatisfy { id in !link.sessions.contains { $0.id == id && $0.isLive } } }
                 waiting.watch = link.changes.subscribe(on: queue) { _ in if allGone() { finish() } }

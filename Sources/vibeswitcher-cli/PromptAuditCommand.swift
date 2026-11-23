@@ -17,10 +17,10 @@ enum PromptAuditCommand {
         case "off": what = "This stops the prompt-audit reminders for the project in \(ConfigSeal.inert(folder, limit: 200))."
         default: what = "This turns the prompt-audit reminders for the project in \(ConfigSeal.inert(folder, limit: 200)) back on."
         }
-        return SessionCommand.act("prompt-audit", args: { _ in ["folder": .string(folder), "do": .string(arguments[1])] }, what: { _ in what }) { result in
-            let project = ConfigSeal.inert(result["project"]?.string ?? "?", limit: 80)
-            switch result["do"]?.string {
-            case "snooze": Say.out("snoozed: no prompt-audit reminder for \(project) until \(ConfigSeal.inert(result["until"]?.string ?? "?", limit: 40))")
+        return SessionCommand.act(WireKinds.PromptAudit.self, args: { _ in .init(folder: folder, do: arguments[1]) }, what: { _ in what }) { result in
+            let project = ConfigSeal.inert(result.project ?? "?", limit: 80)
+            switch result.do {
+            case "snooze": Say.out("snoozed: no prompt-audit reminder for \(project) until \(ConfigSeal.inert(result.until ?? "?", limit: 40))")
             case "off": Say.out("off: no more prompt-audit reminders for \(project) (`vibeswitcher prompt-audit FOLDER on` brings them back)")
             default: Say.out("on: prompt-audit reminders for \(project) again")
             }

@@ -31,7 +31,7 @@ enum PresetEdit {
     /// The edit's outcome: the file's new bytes, and what the reply says.
     struct Done {
         var data: Data
-        var result: [String: NodeWire.Value]
+        var result: WireKinds.PresetsEdit.Result
     }
 
     /// The longest name a preset takes.
@@ -152,7 +152,7 @@ enum PresetEdit {
                 // A folder's default that was it is no folder's default any more.
                 for (key, value) in defaults where (value as? String).flatMap(UUID.init(uuidString:)) == current.id { defaults[key] = nil }
                 return finish(&file, list: list, projects: &projects, project: project, defaults: defaults,
-                              result: ["op": .string("remove"), "name": .string(current.name), "folder": project.map(NodeWire.Value.string) ?? .null])
+                              result: .init(op: "remove", name: current.name, folder: project, env: nil, held: false))
             }
             if let rename = asked.rename, rename != current.name {
                 if let why = nameRefusal(rename) { return refuse(why) }
@@ -187,14 +187,12 @@ enum PresetEdit {
         entry["keepShell"] = preset.keepShell
         if let at { list[at] = entry } else { list.append(entry) }
         if asked.makeDefault, let project { defaults[project] = preset.id.uuidString }
-        return finish(&file, list: list, projects: &projects, project: project, defaults: defaults, result: [
-            "op": .string(asked.op), "name": .string(preset.name), "folder": project.map(NodeWire.Value.string) ?? .null,
-            "env": .array(preset.env.keys.sorted().map(NodeWire.Value.string)),
-        ])
+        return finish(&file, list: list, projects: &projects, project: project, defaults: defaults,
+                      result: .init(op: asked.op, name: preset.name, folder: project, env: preset.env.keys.sorted(), held: false))
     }
 
     private static func finish(_ file: inout [String: Any], list: [Any], projects: inout [String: Any], project: String?, defaults: [String: Any],
-                               result: [String: NodeWire.Value]) -> Result<Done, SessionPresets.Refusal> {
+                               result: WireKinds.PresetsEdit.Result) -> Result<Done, SessionPresets.Refusal> {
         if let project {
             projects[project] = list
             file["byProject"] = projects
@@ -311,11 +309,12 @@ extension Requests {
             case .success(let value): done = value
             }
             if let refusal = PresetEdit.write(done.data, root: nodeRoot, was: was) { return refuse(refusal.message) }
-            var result = done.result
-            result["held"] = .bool(true)
+            var held = done.result
+            held.held = true
+            let result = held
             queue.async {
                 note("presets.edit: a preset \(asked.op == "add" ? "added" : asked.op == "edit" ? "changed" : "removed")")
-                reply(.init(re: request.id, result: .object(result)))
+                reply(.init(re: request.id, typed: result))
             }
         }
     }

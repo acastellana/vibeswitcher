@@ -249,11 +249,15 @@ public final class HostServer {
         if let owner = config.owner { watch(owner: owner) }
     }
 
-    /// See `Config.owner`.
+    /// See `Config.owner`. Set up on `queue`, where `ownerGone` reads `ownerWatch`: stored from the starting thread
+    /// while a watch of an owner already gone reported on `queue`, it was a data race (the thread sanitizer's of
+    /// 2026-11-23: a sanitized host whose owner was gone exited 66, `TestHostsTests.aHostWhoseOwnerIsAlreadyGoneExits`).
     private func watch(owner: pid_t) {
-        ownerWatch = Platform.ProcessExit.watch(owner, queue: queue) { [weak self] in self?.ownerGone(owner) }
-        // Gone before the watch began: no exit comes.
-        queue.async { if Sys.kill(owner, 0) != 0, errno == ESRCH { self.ownerGone(owner) } }
+        queue.async { [self] in
+            ownerWatch = Platform.ProcessExit.watch(owner, queue: queue) { [weak self] in self?.ownerGone(owner) }
+            // Gone before the watch began: no exit comes.
+            if Sys.kill(owner, 0) != 0, errno == ESRCH { ownerGone(owner) }
+        }
     }
 
     private func ownerGone(_ owner: pid_t) {

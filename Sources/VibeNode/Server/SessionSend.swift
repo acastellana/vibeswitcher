@@ -100,14 +100,13 @@ extension Requests {
             if let draft = drafts.values[id], draft.text.trimmingCharacters(in: .whitespacesAndNewlines) == text, draft.images == images {
                 drafts.send(id, nil)
             }
-            var result: [String: NodeWire.Value] = ["session": .string(id), "terminal": .string(session.tty), "working": .bool(working),
-                                                    "characters": .int(message.count), "queued": .bool(queued != nil)]
-            if let queued { result["waits"] = .string(queued) }
-            if let opened { result["opened"] = .string(opened) }
-            if now { result["steered"] = .bool(steered) }
-            if let answered { result["answered"] = .string(answered) }
-            if let agent = HostedAgents.agent(of: session) { result["agent"] = .string(agent.rawValue) }
-            reply(.init(re: request.id, result: .object(result)))
+            var result = WireKinds.Send.Result(session: id, terminal: session.tty, working: working, characters: message.count, queued: queued != nil)
+            result.waits = queued
+            result.opened = opened
+            if now { result.steered = steered }
+            result.answered = answered
+            result.agent = HostedAgents.agent(of: session)?.rawValue
+            reply(.init(re: request.id, typed: result))
         }
         // Off the engine's queue: the agent's process is read from /proc, the images from the disk.
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in

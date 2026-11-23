@@ -27,11 +27,11 @@ enum TellCommand {
             + ConfigSeal.inert(text, limit: 400)
         let said = TypedWord.said(approval: client.approvalRule, action: action, what: what)
         guard case .success(let typed) = said else { return Say.refused(said.refusal) }
-        switch client.change("tell", args: ["folder": .string(folder), "text": .string(text)], action: action, typed: typed, timeout: 120) {
+        switch client.change(WireKinds.Tell.self, .init(folder: folder, text: text), action: action, typed: typed, timeout: 120) {
         case .failure(let failure): return Say.failed(failure)
-        case .success(let reply):
-            guard reply.ok, let result = reply.result else { return Say.replyError(reply) }
-            Say.out("told: the lead (session \(ConfigSeal.inert(result["session"]?.string ?? "?", limit: 80))) gets it at its next step, "
+        case .refused(let reply): return Say.replyError(reply)
+        case .success(let result, _):
+            Say.out("told: the lead (session \(ConfigSeal.inert(result.session ?? "?", limit: 80))) gets it at its next step, "
                     + "or once it can take it")
             return 0
         }

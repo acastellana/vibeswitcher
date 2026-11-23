@@ -31,7 +31,10 @@ extension Requests {
         }
         engine.setPlugin(id, on: request.kind == "plugin.on") { result in
             switch result {
-            case .success(let value): reply(.init(re: request.id, result: value))
+            case .success(let value):
+                // As `WireKinds.PluginSetResult` (the registry's value, read into it).
+                reply(.init(re: request.id, typed: WireKinds.PluginSetResult(plugin: value["plugin"]?.string ?? id, on: value["on"]?.bool ?? false,
+                                                                              withdrawn: value["withdrawn"]?.int ?? 0)))
             case .failure(.gone(let why)): reply(.init(re: request.id, error: .init(.gone, why)))
             case .failure(.refused(let why)): reply(.init(re: request.id, error: .init(.refused, why)))
             case .failure(.badArgs(let why)): reply(.init(re: request.id, error: .init(.badArgs, why)))

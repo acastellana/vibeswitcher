@@ -13,10 +13,50 @@ enum SessionCommand {
     /// voice passed and the server recorded it), a refusal of the server's (`refused`) comes after that, and is
     /// journaled too.
     /// `fetch`, without `lookup`: what the command shows, asked of the server some other way (a preset).
+    static func act<K: WireChangeKind>(_ kind: K.Type, lookup: String? = nil, fetch: ((NodeClient) -> Result<NodeWire.Value, NodeClient.Failure>)? = nil,
+                                       refuse: (NodeWire.Value) -> Int32? = { _ in nil },
+                                       args: (NodeWire.Value) -> K.Args, what: (NodeWire.Value) -> String, timeout: TimeInterval = 120,
+                                       say: (K.Result) -> Void) -> Int32 {
+        let context = NodeContext.current()
+        context.sayScratch()
+        let client: NodeClient
+        switch NodeClient.connect(context) {
+        case .failure(let failure): return Say.failed(failure)
+        case .success(let connected): client = connected
+        }
+        var session = NodeWire.Value.null
+        if let lookup {
+            switch find(lookup, client: client) {
+            case .failure(let failure): return Say.failed(failure)
+            case .success(let found): session = found
+            }
+            if let status = refuse(session) { return status }
+        } else if let fetch {
+            switch fetch(client) {
+            case .failure(let failure): return Say.failed(failure)
+            case .success(let found): session = found
+            }
+            if let status = refuse(session) { return status }
+        }
+        let action = UUID().uuidString.lowercased()
+        let said = TypedWord.said(approval: client.approvalRule, action: action, what: what(session))
+        guard case .success(let typed) = said else { return Say.refused(said.refusal) }
+        switch client.change(K.self, args(session), action: action, typed: typed, timeout: timeout) {
+        case .failure(let failure): return Say.failed(failure)
+        case .refused(let reply): return Say.replyError(reply)
+        case .success(let result, _):
+            say(result)
+            return 0
+        }
+    }
+
+    /// `act` for a kind not typed yet (`WireKinds.leftOut`: the external plugins' add and remove, the plugins lane's to
+    /// type): its arguments and result as values. `WireKindsLintTests` allows it for those kinds alone.
     static func act(_ kind: String, lookup: String? = nil, fetch: ((NodeClient) -> Result<NodeWire.Value, NodeClient.Failure>)? = nil,
                     refuse: (NodeWire.Value) -> Int32? = { _ in nil },
                     args: (NodeWire.Value) -> [String: NodeWire.Value], what: (NodeWire.Value) -> String, timeout: TimeInterval = 120,
                     say: (NodeWire.Value) -> Void) -> Int32 {
+        precondition(WireKinds.leftOut.contains(kind), "\(kind) is typed: SessionCommand.act(WireKinds.…)")
         let context = NodeContext.current()
         context.sayScratch()
         let client: NodeClient
@@ -111,7 +151,7 @@ enum SendCommand {
         // The session found first (its id, its terminal name, or a prefix only one has), so what is shown names it. One
         // `status` doesn't list yet (its scan runs every 2 s, a session just started) goes to the server as given, which
         // finds it in its host's list, as before; a name two sessions answer to is refused.
-        return SessionCommand.act("send", fetch: { client in
+        return SessionCommand.act(WireKinds.Send.self, fetch: { client in
             switch client.read(WireKinds.Status.self, WireNoArgs()) {
             case .failure(let failure): return .failure(failure)
             case .refused(let reply): return .failure(.broken(reply.error.map { "\($0.code): \($0.message)" } ?? "the server listed no sessions"))
@@ -124,10 +164,7 @@ enum SendCommand {
                 }
             }
         }, args: { found in
-            var args: [String: NodeWire.Value] = ["session": found["id"] ?? .string(session), "text": .string(typed)]
-            if !images.isEmpty { args["images"] = .array(images.map(NodeWire.Value.string)) }
-            if now { args["now"] = .bool(true) }
-            return args
+            .init(session: found["id"]?.string ?? session, text: typed, images: images.isEmpty ? nil : images, now: now ? true : nil)
         }, what: { found in
             // "session <short>" first, as before the lookup (SteerNowTests), then what the node lists of it.
             let named = "session \(SessionCommand.short(found["id"]?.string ?? session))"
@@ -156,15 +193,14 @@ enum SendCommand {
 
     /// `now`: `--now` given, or the page left the draft to go now.
     private static func takeDraft(_ wanted: String, now: Bool) -> Int32 {
-        SessionCommand.act("send", lookup: wanted, refuse: { session in
+        SessionCommand.act(WireKinds.Send.self, lookup: wanted, refuse: { session in
             guard draft(of: session) == nil else { return nil }
             return Say.usage("\(usage)\n\(SessionCommand.describe(session)) has no draft: write it on its web page, or give TEXT")
         }, args: { session in
             let drafted = draft(of: session)
-            var args: [String: NodeWire.Value] = ["session": session["id"] ?? .string(wanted), "text": .string(drafted?.text ?? "")]
-            if let images = drafted?.images, !images.isEmpty { args["images"] = .array(images.map(NodeWire.Value.string)) }
-            if now || drafted?.now == true { args["now"] = .bool(true) }
-            return args
+            let images = drafted?.images ?? []
+            return .init(session: session["id"]?.string ?? wanted, text: drafted?.text ?? "", images: images.isEmpty ? nil : images,
+                         now: now || drafted?.now == true ? true : nil)
         }, what: { session in
             // Whole: this is what the agent will take as the user's.
             let drafted = draft(of: session)
@@ -175,36 +211,36 @@ enum SendCommand {
         }, say: said)
     }
 
-    static func said(_ result: NodeWire.Value) {
-        let short = SessionCommand.short(result["session"]?.string)
-        let characters = result["characters"]?.int ?? 0
-        if result["queued"]?.bool == true {
-            Say.out("queued: \(ConfigSeal.inert(result["waits"]?.string ?? "a question is open on its screen", limit: 200)); the node types your "
+    static func said(_ result: WireKinds.Send.Result) {
+        let short = SessionCommand.short(result.session)
+        let characters = result.characters ?? 0
+        if result.queued == true {
+            Say.out("queued: \(ConfigSeal.inert(result.waits ?? "a question is open on its screen", limit: 200)); the node types your "
                 + "message into session \(short) once that closes (`vibeswitcher reply \(short) CHOICE` answers a question). "
                 + "It is kept across a restart of the node's server or a switch, while the session lives")
             return
         }
-        if let answered = result["answered"]?.string {
+        if let answered = result.answered {
             Say.out("answered: your words went in as the answer to the question open in session \(short) "
                 + "(its option “\(ConfigSeal.inert(answered, limit: 80))”, the one that takes typed words), as the app's composer sends them")
             return
         }
-        if result["steered"]?.bool == true {
+        if result.steered == true {
             Say.out("steered: \(characters) characters into session \(short)'s steer inbox; its agent gets them at its next step, without stopping "
                 + "(typed in if its turn ends first)")
             return
         }
-        if result["steered"]?.bool == false {
-            Say.out(result["agent"]?.string == "codex"
+        if result.steered == false {
+            Say.out(result.agent == "codex"
                 ? "sent: \(characters) characters typed into session \(short); Codex takes what is typed during its turn as a steer"
                 : "sent: \(characters) characters typed into session \(short); its agent wasn't working by its hooks, so it takes them now as its prompt")
         } else {
-            Say.out(result["working"]?.bool == true
+            Say.out(result.working == true
                 ? "sent: \(characters) characters typed into session \(short); it was working, so it takes them after its turn "
                     + "(`--now` steers it mid-turn)"
                 : "sent: \(characters) characters typed into session \(short)")
         }
-        if let opened = result["opened"]?.string {
+        if let opened = result.opened {
             Say.out("\(ConfigSeal.inert(opened, limit: 200)) now: choose in the session's terminal, or close it there (Esc); "
                 + "what you send meanwhile waits for it")
         }
@@ -244,17 +280,16 @@ enum NewCommand {
         let withModel = model.map { " (model \(ConfigSeal.inert($0, limit: 64)))" } ?? ""
         if let preset { return start(preset: preset, in: path, model: model, withModel: withModel) }
         let chosen = agent ?? "claude"
-        var args: [String: NodeWire.Value] = ["folder": .string(path), "agent": .string(chosen)]
-        if let model { args["model"] = .string(model) }
+        let args = WireKinds.SessionNew.Args(folder: path, agent: chosen, model: model)
         let what = chosen == "shell" ? "a shell" : (chosen == "codex" ? "Codex" : "Claude") + withModel
-        return SessionCommand.act("session.new", args: { _ in args }, what: { _ in
+        return SessionCommand.act(WireKinds.SessionNew.self, args: { _ in args }, what: { _ in
             "This starts \(what) in a new session in \(ConfigSeal.inert(path, limit: 200)), as you."
         }, say: started)
     }
 
     /// The preset `name` for `path`, as the server lists it, shown whole (its variables by name) and started.
     private static func start(preset name: String, in path: String, model: String?, withModel: String) -> Int32 {
-        SessionCommand.act("session.new", fetch: { client in
+        SessionCommand.act(WireKinds.SessionNew.self, fetch: { client in
             switch client.read(WireKinds.Presets.self, .init(folder: path, values: true)) {
             case .failure(let failure): return .failure(failure)
             case .refused(let reply): return .failure(.broken(reply.error.map { "\($0.code): \($0.message)" } ?? "the server listed no presets"))
@@ -271,17 +306,15 @@ enum NewCommand {
             if model != nil, preset["kind"]?.string == "shell" { return Say.usage(usage + "\n(preset \(ConfigSeal.inert(name, limit: 80)) starts a shell: no model)") }
             return nil
         }, args: { preset in
-            var args: [String: NodeWire.Value] = ["folder": .string(path), "preset": preset["name"] ?? .string(name), "digest": preset["digest"] ?? .null]
-            if let model { args["model"] = .string(model) }
-            return args
+            .init(folder: path, preset: preset["name"]?.string ?? name, digest: preset["digest"]?.string, model: model)
         }, what: { preset in
             "This starts preset " + PresetsCommand.describe(preset) + withModel + " in a new session in \(ConfigSeal.inert(path, limit: 200)), as you."
         }, say: started)
     }
 
-    static func started(_ result: NodeWire.Value) {
-        let short = SessionCommand.short(result["session"]?.string)
-        Say.out("started: session \(short) on \(ConfigSeal.inert(result["terminal"]?.string ?? "?", limit: 20)) "
+    static func started(_ result: WireKinds.SessionNew.Result) {
+        let short = SessionCommand.short(result.session)
+        Say.out("started: session \(short) on \(ConfigSeal.inert(result.terminal ?? "?", limit: 20)) "
             + "(`vibeswitcher send \(short) TEXT` types into it; `vibeswitcher end \(short)` ends it)")
     }
 }
@@ -347,13 +380,13 @@ enum EndCommand {
 
     static func run(_ arguments: [String]) -> Int32 {
         guard arguments.count == 1, !arguments[0].isEmpty, !arguments[0].hasPrefix("--") else { return Say.usage(usage) }
-        return SessionCommand.act("session.end", lookup: arguments[0], args: { session in
-            ["session": session["id"] ?? .string(arguments[0])]
+        return SessionCommand.act(WireKinds.SessionEnd.self, lookup: arguments[0], args: { session in
+            .init(session: session["id"]?.string ?? arguments[0])
         }, what: { session in
             "This ends \(SessionCommand.describe(session)): its agent stops, with everything running in its terminal."
         }) { result in
-            let short = SessionCommand.short(result["session"]?.string)
-            Say.out(result["ended"]?.bool == false
+            let short = SessionCommand.short(result.session)
+            Say.out(result.ended == false
                 ? "asked to end: session \(short) still ran a while later; `vibeswitcher status` shows when it's gone"
                 : "ended: session \(short)")
         }
@@ -371,7 +404,7 @@ enum ReplyCommand {
             return Say.usage(usage)
         }
         let text = arguments.count == 3 ? arguments[2] : nil
-        return SessionCommand.act("session.reply", lookup: arguments[0], refuse: { session in
+        return SessionCommand.act(WireKinds.SessionReply.self, lookup: arguments[0], refuse: { session in
             guard let prompt = session["prompt"], prompt != .null else {
                 return Say.refused("\(SessionCommand.describe(session)) asks nothing now (no question is open on its screen)")
             }
@@ -380,11 +413,8 @@ enum ReplyCommand {
             return nil
         }, args: { session in
             // Bound to what was shown: the server types nothing while another question, or other options, are open.
-            var args: [String: NodeWire.Value] = ["session": session["id"] ?? .string(arguments[0]), "choice": .int(choice),
-                                                  "question": session["prompt"]?["question"] ?? .null,
-                                                  "options": session["prompt"]?["options"] ?? .null]
-            if let text { args["text"] = .string(text) }
-            return args
+            .init(session: session["id"]?.string ?? arguments[0], choice: choice, text: text, question: session["prompt"]?["question"]?.string,
+                  options: session["prompt"]?["options"]?.array?.compactMap(\.string))
         }, what: { session in
             let prompt = session["prompt"] ?? .null
             let options = (prompt["options"]?.array ?? []).enumerated().map { index, option in
@@ -394,8 +424,8 @@ enum ReplyCommand {
                 + options.joined(separator: "\n") + "\nThis answers it with option \(choice)"
                 + (text.map { ", typing: " + ConfigSeal.inert($0, limit: 400) } ?? "") + ", as you."
         }) { result in
-            Say.out("answered: option \(result["choice"]?.int ?? choice) (\(ConfigSeal.inert(result["option"]?.string ?? "", limit: 80))) "
-                + "typed into session \(SessionCommand.short(result["session"]?.string))")
+            Say.out("answered: option \(result.choice ?? choice) (\(ConfigSeal.inert(result.option ?? "", limit: 80))) "
+                + "typed into session \(SessionCommand.short(result.session))")
         }
     }
 }

@@ -14,7 +14,7 @@ extension Requests {
         case .failure(let refusal):
             reply(.init(re: request.id, error: .init(.refused, "the web isn't open: \(refusal.description)")))
         case .success(let opened):
-            reply(.init(re: request.id, result: .object(["url": .string(opened.url), "expiresIn": .int(opened.expiresIn)])))
+            reply(.init(re: request.id, typed: WireKinds.WebOpen.Result(url: opened.url, expiresIn: opened.expiresIn)))
         }
     }
 
@@ -31,7 +31,7 @@ extension Requests {
             case .failure(let refusal):
                 reply(.init(re: request.id, error: .init(.refused, "the tailnet page isn't open: \(refusal.description)")))
             case .success(let opened):
-                reply(.init(re: request.id, result: .object(["url": .string(opened.url), "expiresIn": .int(opened.expiresIn), "tailnet": .bool(true)])))
+                reply(.init(re: request.id, typed: WireKinds.WebOpen.Result(url: opened.url, expiresIn: opened.expiresIn, tailnet: true)))
             }
         }
     }
@@ -52,7 +52,7 @@ extension Requests {
         case .failure(let refusal):
             reply(.init(re: request.id, error: .init(.refused, "the web tokens weren't dropped: \(refusal.description)")))
         case .success(let dropped):
-            reply(.init(re: request.id, result: .object(["revoked": .int(dropped), "tailnetRevoked": .int(remote)])))
+            reply(.init(re: request.id, typed: WireKinds.WebRevoke.Result(revoked: dropped, tailnetRevoked: remote)))
         }
     }
 }
