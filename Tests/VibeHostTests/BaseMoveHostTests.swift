@@ -26,29 +26,44 @@ extension LeadVaultHostTests {
     }
 
     /// A shell for a session: once `<name>.go` exists it sends `<name>.requests` to the host over `nc -U`, as a
-    /// session's hooks do, and keeps running.
+    /// session's hooks do, then on the same connection `<name>.later` once `<name>.later.go` exists (unless
+    /// `<name>.stop` comes first), and keeps running.
     func hooksShell(_ host: TestHost, _ name: String) throws -> String {
-        let base = folder.appendingPathComponent(name)
-        let script = base.appendingPathExtension("sh").path
+        let base = folder.appendingPathComponent(name).path
+        let script = base + ".sh"
+        let socket = (ncHangsUpFlags + ["-U"]).joined(separator: " ") + " '\(host.socket)'"
         try """
-        while [ ! -f '\(base.path).go' ]; do sleep 0.05; done
-        \(nc(host, base.appendingPathExtension("requests"), base.appendingPathExtension("answers"), until: base.appendingPathExtension("stop")))
+        while [ ! -f '\(base).go' ]; do sleep 0.05; done
+        (cat '\(base).requests'
+         while [ ! -f '\(base).later.go' ] && [ ! -f '\(base).stop' ]; do sleep 0.05; done
+         if [ -f '\(base).later.go' ]; then cat '\(base).later'; fi
+         while [ ! -f '\(base).stop' ]; do sleep 0.05; done) | /usr/bin/nc \(socket) > '\(base).answers'
         sleep 30
         """.write(toFile: script, atomically: true, encoding: .utf8)
         return "sh '\(script)'"
     }
 
-    /// The session's hooks say it ran `git commit` on main, from `before` to `after`: sent, and answered.
-    func hooksSay(_ name: String, root: String, before: String, after: String) async throws -> [Int: HostEvent] {
-        let base = folder.appendingPathComponent(name)
-        try frames([.vault(.ranGit(root: root, step: LeadVault.GitStep(phase: .before, call: "t", verb: "commit", branch: "main", head: before))),
-                    .vault(.ranGit(root: root, step: LeadVault.GitStep(phase: .after, call: "t", verb: "commit", branch: "main", head: after)))])
-            .write(to: base.appendingPathExtension("requests"))
-        FileManager.default.createFile(atPath: base.path + ".go", contents: nil)
-        let answers = base.appendingPathExtension("answers")
-        #expect(await eventually { answered(answers, 2...3) }, "\(name)")
-        FileManager.default.createFile(atPath: base.path + ".stop", contents: nil)
-        return try replies(Data(contentsOf: answers))
+    /// Frames for the host after `frames`' first `sent` requests: numbered on from `sent + 2`, no hello.
+    func frames(_ requests: [HostRequest], after sent: Int) throws -> Data {
+        var data = Data()
+        for (index, request) in requests.enumerated() {
+            data.append(HostFrame.encode(.control, try HostCoding.encode(HostRequestEnvelope(seq: sent + index + 2, request: request))))
+        }
+        return data
+    }
+
+    /// The session's hooks say it ran `git commit` on main from `before`, and `make` makes the commit in between, as
+    /// git runs between its hooks: the before step sent and answered, then the commit, then the after step to its
+    /// head. The commit before the before step was a race: the vault takes a reflog entry as a command's only from
+    /// 2 s before the host saw the command start (`judge`'s slack), and on a busy Mac the shell's poll and nc's start
+    /// could take longer (the move's reason then "no command … accounts for", not the session's).
+    func hooksSay(_ name: String, root: String, before: String, commit make: @escaping () throws -> String) async throws -> (replies: [Int: HostEvent], made: String) {
+        var made = ""
+        let got = try await sessionSends(name, [step(.before, root, before)], then: {
+            made = try make()
+            return [step(.after, root, made)]
+        }, expecting: 2...3)
+        return (got, made)
     }
 
     func move(_ book: LeadVault.Book, _ root: String) -> LeadVault.BaseMove? {
@@ -56,13 +71,21 @@ extension LeadVaultHostTests {
         return nil
     }
 
-    /// The session's shell sends `requests` to the host (as anything running in it could), once; the replies to
-    /// `seqs` are waited for, or (nil) `until` holds.
-    func sessionSends(_ name: String, _ requests: [HostRequest], expecting seqs: ClosedRange<Int>?, until: () -> Bool = { true }) async throws -> [Int: HostEvent] {
+    /// The session's shell sends `requests` to the host (as anything running in it could), once; with `later`, once
+    /// those are answered, what `later` makes, on the same connection; the replies to `seqs` are waited for, or (nil)
+    /// `until` holds.
+    func sessionSends(_ name: String, _ requests: [HostRequest], then later: (() throws -> [HostRequest])? = nil,
+                      expecting seqs: ClosedRange<Int>?, until: () -> Bool = { true }) async throws -> [Int: HostEvent] {
         let base = folder.appendingPathComponent(name)
         try frames(requests).write(to: base.appendingPathExtension("requests"))
         FileManager.default.createFile(atPath: base.path + ".go", contents: nil)
         let answers = base.appendingPathExtension("answers")
+        if let later {
+            // The last of them answered (an input sent with `reply: false` gets none; the host answers in order).
+            #expect(await eventually { answered(answers, (requests.count + 1)...(requests.count + 1)) }, "\(name)")
+            try frames(try later(), after: requests.count).write(to: base.appendingPathExtension("later"))
+            FileManager.default.createFile(atPath: base.path + ".later.go", contents: nil)
+        }
         if let seqs { #expect(await eventually { answered(answers, seqs) }, "\(name)") }
         let held = await eventually(until)
         #expect(held, "\(name)")
@@ -102,9 +125,11 @@ extension LeadVaultHostTests {
         // Yours: you type into it (the app), and it types into itself (its own terminal). Its commit is taken.
         let mine = try await app.spawn(try hooksShell(host, "mine"))
         app.send(.input(id: mine.id, bytes: Data("commit it\r".utf8), reply: false))
-        var made = try commit("b.txt", in: root)
-        var got = try await sessionSends("mine", [.input(id: mine.id, bytes: Data("\r".utf8), reply: false), step(.before, root, left), step(.after, root, made)],
-                                   expecting: 3...4)
+        var made = ""
+        var got = try await sessionSends("mine", [.input(id: mine.id, bytes: Data("\r".utf8), reply: false), step(.before, root, left)], then: {
+            made = try commit("b.txt", in: root)
+            return [step(.after, root, made)]
+        }, expecting: 3...4)
         #expect(got[3] == .vault(.ok) && got[4] == .vault(.ok), "\(got)")
         #expect(move(book, root)?.accepted == true)
         #expect(book.answer(.head(root: root, branch: "main"), from: .app) == .head(made))
@@ -117,9 +142,10 @@ extension LeadVaultHostTests {
         guard case .error? = rejected[2] else { Issue.record("A worker typed into your session"); return }
         // The user's own later keys and git operation remain the user's.
         app.send(.input(id: idle.id, bytes: Data("\r".utf8), reply: false))
-        made = try commit("c.txt", in: root)
-        got = try await sessionSends("idle", [.input(id: idle.id, bytes: Data("\r".utf8), reply: false), step(.before, root, left), step(.after, root, made)],
-                               expecting: 3...4)
+        got = try await sessionSends("idle", [.input(id: idle.id, bytes: Data("\r".utf8), reply: false), step(.before, root, left)], then: {
+            made = try commit("c.txt", in: root)
+            return [step(.after, root, made)]
+        }, expecting: 3...4)
         #expect(got[3] == .vault(.ok) && got[4] == .vault(.ok), "\(got)")
         let asked = try #require(move(book, root))
         #expect(asked.accepted, "\(asked)")
@@ -155,8 +181,7 @@ extension LeadVaultHostTests {
             Issue.record("The scratch parent could not spawn its child"); return
         }
         FileManager.default.createFile(atPath: childStop.path, contents: nil)
-        var made = try commit("b.txt", in: root)
-        var got = try await hooksSay("stranger", root: root, before: left, after: made)
+        var (got, made) = try await hooksSay("stranger", root: root, before: left) { try commit("b.txt", in: root) }
         #expect(got[2] == .vault(.ok) && got[3] == .vault(.ok), "\(got)")
         #expect(move(book, root)?.accepted == false)
         #expect(move(book, root)?.reason?.contains(String(stranger.id.uuidString.prefix(8))) == true)
@@ -170,8 +195,7 @@ extension LeadVaultHostTests {
             Issue.record("no worker grant"); return
         }
         #expect(book.answer(.bind(grant: workerGrant, root: root, session: worker.id.uuidString), from: .session(lead.id.uuidString)) == .ok)
-        made = try commit("c.txt", in: root)
-        got = try await hooksSay("worker", root: root, before: left, after: made)
+        (got, made) = try await hooksSay("worker", root: root, before: left) { try commit("c.txt", in: root) }
         #expect(got[2] == .vault(.ok), "\(got)")
         #expect(move(book, root)?.accepted == false)
         #expect(book.answer(.setHead(root: root, branch: "main", commit: made), from: .app) == .ok)
@@ -179,8 +203,7 @@ extension LeadVaultHostTests {
 
         // A session the app opened, holding no role: yours. The move is taken, named after the session, and logged.
         let yours = try await app.spawn(try hooksShell(host, "yours"))
-        made = try commit("d.txt", in: root)
-        got = try await hooksSay("yours", root: root, before: left, after: made)
+        (got, made) = try await hooksSay("yours", root: root, before: left) { try commit("d.txt", in: root) }
         #expect(got[2] == .vault(.ok), "\(got)")
         // Through the host, as the app asks (the reply carries the session's name in the window).
         let seq = app.send(.vault(.acceptMove(root: root, branch: "main")))
@@ -199,8 +222,7 @@ extension LeadVaultHostTests {
         #expect(await eventually { other.reply(to: refusedInput) != nil })
         guard case .error? = other.reply(to: refusedInput) else { Issue.record("Unknown input was accepted"); return }
         left = made
-        made = try commit("e.txt", in: root)
-        got = try await hooksSay("typed", root: root, before: left, after: made)
+        (got, made) = try await hooksSay("typed", root: root, before: left) { try commit("e.txt", in: root) }
         #expect(got[2] == .vault(.ok), "\(got)")
         #expect(move(book, root)?.accepted == true)
         #expect(book.answer(.head(root: root, branch: "main"), from: .app) == .head(made))
