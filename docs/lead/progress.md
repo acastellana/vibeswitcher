@@ -4365,3 +4365,5 @@ Proposed task 1: Find why dictations end with no text
 - 2026-11-23 13:22 a-merge-whose-tests small task: back to audit (the audit sample drew it)
 - 2026-11-23 13:22 Planned a-parameterized-test-s: A parameterized test's end line isn't recorded as a second flaky test
 - 2026-11-23 13:25 Exception on a-test-that-flakes by lead of vibeswitcher: edits to Sources/VibeCore/LeadToolset.swift, Sources/VibeCore/LeadRisk.swift, Sources/VibeCore/LeadAdvance.swift accepted. Reason: Ledger-planned flake fix tasks become review audit (LeadToolset.planFlakeFixes), and a fix that deletes a test can't slip to review none through small_task_min: the worker closes that either in the ri…
+- 2026-11-23 13:33 Raised fix-the-dictation-tests to audit (the risk check, at 640b9925): it has code that adds locks or threads (Sources/VibeCore/DebugLog.swift: private let lock = NSLock())
+- 2026-11-23 13:33 Automatically (auto_advance): fix-the-dictation-tests is audited, not merged: it has code that adds locks or threads (Sources/VibeCore/DebugLog.swift: private let lock = NSLock()) (the risk check raised it from review none). Its audit starts once the Mac has room.
