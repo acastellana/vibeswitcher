@@ -92,9 +92,11 @@ var config = HostServer.Config(
     // On Linux its own sealed copy (no launcher copy made); on the Mac a private copy, as always.
     launcher: images.own?.path ?? (startRefusal == nil ? ensureLauncher() : executable),
     // With vs-heavy on PATH (Mac-wide one-at-a-time heavy work, for every project's sessions); on Linux last (V2/HostImages.swift).
-    baseEnvironment: HostImages.sessionEnvironment(environment.filter { inherited.contains($0.key) }
+    // Then, on a Linux node, the folder of its external plugins' wrappers (`vs-wallet` while that plugin is on), last too.
+    baseEnvironment: HostImages.sessionEnvironment(HostImages.sessionEnvironment(environment.filter { inherited.contains($0.key) }
                                                      .merging(Platform.Tools.sessionEnvironmentFixed) { $1 },
                                                  adding: folders.commandFolder),
+                                                 adding: Platform.CodeIdentity.isAvailable ? nil : VibePaths.root.appendingPathComponent("plugins/bin").path),
     hostBuild: build)
 config.idleExit = value(after: "--idle-exit").flatMap(TimeInterval.init) ?? 600
 // A bench's host: it ends, sessions and all, with the bench (see `HostServer.Config.owner`). Kept through a handover.

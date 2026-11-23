@@ -133,6 +133,25 @@ The seal holds every team until you accept what changed. When Claude Code has up
 like Claude Code's own update to X". VibeSwitcher can't tell it from a file a session put there, so it asks you.
 `DISABLE_AUTOUPDATER=1` in Claude Code's settings stops those holds.
 
+## 8. Plugins: the wallet
+
+Optional features are plugins (`vs plugin list`). Shell requests are built in and on. The wallet is an external
+plugin in a repository of its own, `vibeswitcher-wallet` (a local repository at `~/projects/vibeswitcher-wallet`; its
+README is the full guide). Build it, add it, turn it on, and name your chains (none is built in):
+
+```sh
+cd ~/projects/vibeswitcher-wallet && bash scripts/build.sh
+vs plugin add ~/projects/vibeswitcher-wallet     # check the program's SHA-256 against the build's, type the code
+vs plugin on wallet
+vs set wallet_chains "42424242, GenLayer, https://scan.chain.genlayer.com, GEN, https://rpc.chain.genlayer.com; 4221, GenLayer Testnet, https://scan.testnet-chain.genlayer.com, GEN, https://rpc.testnet-chain.genlayer.com"
+```
+
+An agent then asks with `vs-wallet request --from 0x… --chain 4221 --to 0x… --amount … --reason "…"`. Its card shows the
+chain and the decoded call as the wallet plugin's words, and the transaction whole. `vs answer CARD sign` prints a
+one-time page address in your terminal (nothing opens a browser): open it in the browser that has your wallet, and
+confirm or reject in the wallet's popup. `vs answer CARD decline` declines. A rebuild changes the program's SHA-256, so
+the node holds the plugin until you `vs plugin remove wallet` and add it again.
+
 ## Known limits, honestly
 
 - **Sessions aren't sandboxed yet.** The sandbox is built, but nothing launches a session in a box (its last slice is
@@ -141,8 +160,8 @@ like Claude Code's own update to X". VibeSwitcher can't tell it from a file a se
 - **A page can't act for you.** Typing into a terminal, one-click answers and replies from the phone wait on the web
   listener moving into the host (H1). They also wait on two of your decisions: which sessions a page may type into,
   and what right a page needs (`docs/process/v2-h1-plan.md`).
-- **Phone push** and **wallet requests** wait on your decisions (`docs/process/v2-push-decision.md`; the parity
-  table's wallet row).
+- **Phone push** waits on your decision (`docs/process/v2-push-decision.md`). **Wallet requests** are the external
+  wallet plugin (section 8): signed in your browser wallet only; the Mac's Wallet Manager path isn't on Linux.
 - **Codex** needs its link (above). Codex *workers* stay off until Codex's sandbox is measured.
 - **Briefings** are in English and spoken by the browser's own voice (no ElevenLabs on the node).
 - Windows interop is on, so the security document's S11 list applies (`vs start` prints it once).

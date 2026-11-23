@@ -26,11 +26,14 @@ extension LeadEngine {
             let settled = Result { try client.settledRequests() }
             let since = try? client.recordSince()
             let settings = try? client.pluginSettings()
+            let builtIn = self?.plugins.builtIn ?? []
+            let external = (try? client.externalPlugins()).map { Self.externalPlugins($0, builtIn: builtIn) }
             self?.queue.async {
                 guard let self else { return }
                 self.pluginAsking = false
                 if let since { self.pluginRecordSince = since }
                 if let settings { self.pluginSettings = settings }
+                if let external { self.plugins.takeExternal(external.mapValues(\.record)) { id, _ in external[id] } }
                 // Not known (the vault didn't answer): nothing is drawn until it does.
                 switch settled {
                 case .success(let keys):
@@ -50,6 +53,43 @@ extension LeadEngine {
         }
     }
 
+    /// `wrappers` (command name: plugin id) as the scripts in `bin`, and nothing else there. Blocks.
+    static func writeWrappers(_ wrappers: [String: String], in bin: URL, note: (String) -> Void) {
+        // The node's own folder, never through a link: else nothing is written or removed (the review of step C, L4).
+        let root = bin.deletingLastPathComponent().deletingLastPathComponent()
+        if case .failure(let why) = PluginFolders.own(bin, root: root) { return note("plugins: no wrappers written: \(why)") }
+        for name in (try? FileManager.default.contentsOfDirectory(atPath: bin.path)) ?? [] where wrappers[name] == nil {
+            unlink(bin.appendingPathComponent(name).path)
+        }
+        for (name, id) in wrappers {
+            let script = "#!/bin/sh\n# The node's wrapper for its external plugin \(id): `vibeswitcher plugin list`.\nexec vs-ask \(id) -- \"$@\"\n"
+            let file = bin.appendingPathComponent(name)
+            do {
+                try VibePaths.writePrivate(Data(script.utf8), to: file)
+                chmod(file.path, 0o700)
+            } catch { note("plugins: the wrapper \(name) not written: \(error)") }
+        }
+    }
+
+    /// The external plugins the vault's records name, each built from its folder's manifest as it is now: one whose
+    /// manifest no longer reads, or reads another hash, is held (it runs nothing until added again). Reads the disk.
+    static func externalPlugins(_ records: [String: String], builtIn: Set<String>) -> [String: ExternalPlugin] {
+        var made: [String: ExternalPlugin] = [:]
+        for (id, text) in records {
+            guard let record = PluginRecord.read(text) else { continue }
+            let bytes = PluginDesk.bounded(URL(fileURLWithPath: record.folder).appendingPathComponent(PluginManifest.fileName), limit: PluginManifest.bytesAtMost)
+            if let bytes, BuildInfo.sha256(of: bytes) == record.manifest, case .success(let manifest) = PluginManifest.read(bytes, builtIn: builtIn), manifest.id == id {
+                made[id] = ExternalPlugin(manifest: manifest, record: record)
+            } else {
+                let held = PluginManifest(protocol: 1, id: id, version: "?", title: id, summary: "an external plugin whose folder changed", program: "?",
+                                          commands: nil, settings: nil, brief: nil, life: nil, lifeWhy: nil, page: nil, defaultOn: nil)
+                made[id] = ExternalPlugin(manifest: held, record: record,
+                                          held: "its manifest changed since you added it, or isn't there: `vibeswitcher plugin add \(record.folder)` again")
+            }
+        }
+        return made
+    }
+
     /// The vault keeps `kept`: the registry takes it; a plugin no longer on withdraws its open cards; the mirror is
     /// written; one newly on looks. On `queue`.
     func keptPlugins(_ kept: [String: Bool]) {
@@ -58,8 +98,14 @@ extension LeadEngine {
         for plugin in plugins.plugins where wasOn.contains(plugin.info.id) && !plugins.isOn(plugin.info.id) { withdraw(plugin) }
         let (data, file) = (plugins.mirror, root.appendingPathComponent("plugins.json"))
         let note = self.note
+        // The external plugins' wrappers (`vs-<name> …` is `vs-ask <id> -- …`), only while each is on.
+        let wrappers = Dictionary(plugins.on.compactMap { $0 as? ExternalPlugin }.flatMap { plugin in
+            plugin.info.commands.map { ($0.name, plugin.info.id) }
+        }) { first, _ in first }
+        let bin = root.appendingPathComponent("plugins/bin", isDirectory: true)
         pluginWork.async {
             do { try VibePaths.writePrivate(data, to: file) } catch { note("plugins: \(file.lastPathComponent) not written: \(error)") }
+            Self.writeWrappers(wrappers, in: bin, note: note)
         }
         if plugins.on.contains(where: { !wasOn.contains($0.info.id) }) { lookAtPlugins() }
     }
@@ -70,6 +116,8 @@ extension LeadEngine {
         guard let plugin = plugins.plugin(id) else {
             return then(.failure(.gone("no plugin \(ConfigSeal.inert(id, limit: 40)) in this build: `vibeswitcher plugin list` lists them")))
         }
+        // An external plugin whose program ended starts afresh when the user turns it on again.
+        if on, let external = plugin as? ExternalPlugin, external.held == nil { external.ended = nil }
         if on, let why = plugin.availability() { return then(.failure(.refused("\(plugin.info.title) can't run on this node: \(why)"))) }
         let client = link.vaultV2
         let open = cards.list().filter { $0.plugin?.plugin == id }.count
@@ -196,22 +244,38 @@ extension LeadEngine {
         guard card.isOpen, shown.isWaiting else {
             return then(.failure(.refused("card \(card.id) is answered already: \(card.closed ?? shown.state)")))
         }
-        if action.acts, let expires = shown.expiresAt, pluginNow() >= expires {
+        // An external plugin's every answer that reaches its program is acting: it chose `acts` itself, so its word for
+        // it doesn't skip expiry, the live asker or the settle first (the review of step C, M1).
+        let acting = action.acts || plugin is ExternalPlugin
+        if acting, let expires = shown.expiresAt, pluginNow() >= expires {
             return then(.failure(.refused("it expired: nothing ran")))
         }
         // The asker still a live session the user opened (it may have ended since the card was drawn).
         let desk = desk(plugin)
-        guard action.acts == false || PluginDesk.hostSession(shown.session).flatMap({ id in link.sessions.first { $0.id == id } }).map(desk.opened) == true else {
+        guard !acting || PluginDesk.hostSession(shown.session).flatMap({ id in link.sessions.first { $0.id == id } }).map(desk.opened) == true else {
             return then(.failure(.refused("its asking session isn't live any more: nothing ran")))
         }
         var marked = card
         marked.plugin?.state = action.marks
         cards.put(marked)
-        let act = PluginAct(start: { [link] request, done in link.spawn(request, completion: done) },
-                            page: { [weak self] spec, take, ended, then in self?.openPluginPage(spec, take: take, ended: ended, then: then) })
-        guard action.acts else { return plugin.perform(action.word, on: marked, desk: desk, act: act, then: then) }
-        // An acting answer: settled in the vault, confirmed, before it acts, so no restart draws it again.
         let key = PluginKey(plugin: shown.plugin, request: shown.request).name
+        let acts = action.acts
+        let act = PluginAct(start: { [link] request, done in link.spawn(request, completion: done) },
+                            page: { [weak self] spec, take, ended, opened in
+                                guard acts else { return opened(.failure(PluginRefusal("only an acting answer opens a page"))) }
+                                self?.openPluginPage(spec, plugin: shown.plugin, key: key, take: take, ended: ended, then: opened)
+                            })
+        // The page's address, the core's to print: in this answer's reply only (the review of 6e91f053, L1).
+        let given = then
+        let then: (Result<NodeWire.Value, CardFailure>) -> Void = { [weak self] result in
+            let say = self?.pluginPageSay(key)
+            guard case .success(.object(var fields)) = result, let say else { return given(result) }
+            fields["say"] = .array(say + (fields["say"]?.array ?? []))
+            fields["once"] = .bool(true)
+            given(.success(.object(fields)))
+        }
+        guard acting else { return plugin.perform(action.word, on: marked, desk: desk, act: act, then: then) }
+        // An acting answer: settled in the vault, confirmed, before it acts, so no restart draws it again.
         let client = link.vaultV2
         pluginSettling.insert(key)
         pluginWork.async { [weak self] in
@@ -248,48 +312,83 @@ extension LeadEngine {
     /// `plugin` was turned off: each open card of its closes as withdrawn and is settled, its asker is told (until it
     /// heard, the plugin off or not), and the plugin keeps that nothing more comes of it; whoever waits on something it
     /// started is told nothing more will be said. On `queue`.
-    func withdraw(_ plugin: FeaturePlugin) {
+    func withdraw(_ plugin: FeaturePlugin, ended: String? = nil) {
         let desk = desk(plugin)
+        // Its page goes with it (the review of 6e91f053, M2): the host lets the port go, then the slot is freed.
+        if let slot = pluginPage, slot.plugin == plugin.info.id { slot.page.stop() }
+        let title = plugin.info.title
         for var card in cards.list() where card.plugin?.plugin == plugin.info.id {
             guard var shown = card.plugin else { continue }
             // Already being acted on (an answer marked it): what it started may run; say what is true.
             let underWay = !shown.isWaiting && !pluginSettling.contains(PluginKey(plugin: shown.plugin, request: shown.request).name)
             shown.state = PluginCard.withdrawnState
-            shown.outcome = "Withdrawn: you turned \(plugin.info.title) off" + (underWay ? " while it was being answered" : "")
+            if let ended {
+                let said = ConfigSeal.inert(ended, limit: 200)
+                shown.outcome = "Withdrawn: its program ended (\(said))"
+                card.closed = "withdrawn: \(title)'s program ended (\(said))" + (underWay ? "; what the answer started may still run" : "; nothing ran")
+            } else {
+                shown.outcome = "Withdrawn: you turned \(title) off" + (underWay ? " while it was being answered" : "")
+                card.closed = underWay ? "withdrawn: \(title) was turned off while it was being answered; what that started may still run"
+                    : "withdrawn: \(title) was turned off on this node; nothing ran"
+            }
             card.plugin = shown
-            card.closed = underWay ? "withdrawn: \(plugin.info.title) was turned off while it was being answered; what that started may still run"
-                : "withdrawn: \(plugin.info.title) was turned off on this node; nothing ran"
             cards.put(card)
             desk.settle(shown.request)
-            note("plugin \(plugin.info.id) off: card \(card.id) withdrawn")
-            let said = plugin.withdrawn(shown, desk: desk) ?? (underWay ? desk.withdrawnWhileAnsweredText(shown) : nil)
-            if let session = PluginDesk.hostSession(shown.session) { desk.tellSurely(said ?? desk.withdrawnText(shown), session: session) }
+            note("plugin \(plugin.info.id) \(ended == nil ? "off" : "ended"): card \(card.id) withdrawn")
+            // The plugin keeps that nothing more comes of it (its words count only when it was turned off).
+            let own = plugin.withdrawn(shown, desk: desk)
+            if let session = PluginDesk.hostSession(shown.session) {
+                if let ended {
+                    desk.tellSurely(desk.endedText(shown, why: ConfigSeal.inert(ended, limit: 200)), session: session)
+                } else {
+                    desk.tellSurely(own ?? (underWay ? desk.withdrawnWhileAnsweredText(shown) : desk.withdrawnText(shown)), session: session)
+                }
+            }
         }
+        guard ended == nil else { return }
         for (session, text) in plugin.turnedOff(desk) { desk.tellSurely(text, session: session) }
     }
 
-    /// Serves a plugin's page once (`PluginPage`), one at a time on the node: started off the engine's queue (the host
-    /// binds its socket); every callback on the engine's queue. On `queue`.
-    func openPluginPage(_ spec: PluginPage.Spec, take: @escaping (Data) -> Bool, ended: @escaping (Bool) -> Void,
-                        then: @escaping (Result<URL, PluginRefusal>) -> Void) {
+    /// Serves a plugin's page once (`PluginPage`), one at a time on the node, for `plugin`'s request `key`: started off
+    /// the engine's queue (the host binds its socket); every callback on the engine's queue. The slot is freed only once
+    /// the host let the port go, however the page ends (a failed start too: the review of 6e91f053, L6). Its address is
+    /// kept for the answer's reply (`pluginPageLines`), never handed to the plugin (L1). On `queue`.
+    func openPluginPage(_ spec: PluginPage.Spec, plugin: String, key: String, take: @escaping (Data, @escaping (Bool) -> Void) -> Void,
+                        ended: @escaping (Bool) -> Void, then: @escaping (Result<Void, PluginRefusal>) -> Void) {
         guard pluginPage == nil else { return then(.failure(PluginRefusal("a plugin's page is open already: answer it, or wait for it to stop"))) }
-        let page = PluginPage(spec: spec)
-        pluginPage = page
-        let (bind, clock, queue) = (options.pluginBind ?? .direct, clock ?? pluginClock, self.queue)
+        let slot = PluginPageSlot(page: PluginPage(spec: spec), plugin: plugin, key: key)
+        pluginPage = slot
+        let (bind, clock, queue, page) = (options.pluginBind ?? .direct, clock ?? pluginClock, self.queue, slot.page)
         pluginWork.async { [weak self] in
             let started = Result {
-                try page.start(bind: bind, clock: clock, take: { bytes in queue.sync { take(bytes) } }, ended: { taken in
+                try page.start(bind: bind, clock: clock, take: { bytes, answer in queue.async { take(bytes, answer) } }, ended: { taken in
                     queue.async {
-                        if self?.pluginPage === page { self?.pluginPage = nil }
-                        ended(taken)
+                        if self?.pluginPage === slot { self?.pluginPage = nil }
+                        // A page that never opened ends nothing of the plugin's: its start's failure says so.
+                        if slot.opened { ended(taken) } else { slot.endedEarly = true }
                     }
                 })
             }
             queue.async {
-                if case .failure = started, self?.pluginPage === page { self?.pluginPage = nil }
-                then(started.mapError { $0 as? PluginRefusal ?? PluginRefusal("\($0)") })
+                switch started {
+                case .success(let url) where !slot.endedEarly:
+                    slot.opened = true
+                    self?.pluginPageLines[key] = (url, spec.life)
+                    then(.success(()))
+                case .success:
+                    then(.failure(PluginRefusal("its page stopped before it opened")))
+                case .failure(let error):
+                    then(.failure(error as? PluginRefusal ?? PluginRefusal("\(error)")))
+                }
             }
         }
+    }
+
+    /// The lines that give the answering terminal a page's address, taken once.
+    func pluginPageSay(_ key: String) -> [NodeWire.Value]? {
+        guard let line = pluginPageLines.removeValue(forKey: key) else { return nil }
+        return [.string("Open this page in your browser (it works once, \(max(1, Int(line.life / 60))) minutes at most):"),
+                .string("  " + line.url.absoluteString)]
     }
 
     /// Settles `keys` (`PluginKey.name`): never drawn again, here and in the vault. On `queue`.
@@ -353,5 +452,19 @@ extension LeadEngine {
                 + (shown.expiresAt.map { "; it expires at \(NodeWire.dateText($0))" } ?? "")
         }
         return waiting + plugins.on.flatMap { $0.notices(desk($0)) }
+    }
+}
+
+/// The node's one plugin page: the page, the plugin and request it serves, whether it opened. On the engine's queue.
+final class PluginPageSlot {
+    let page: PluginPage
+    let plugin: String
+    let key: String
+    var opened = false
+    var endedEarly = false
+    init(page: PluginPage, plugin: String, key: String) {
+        self.page = page
+        self.plugin = plugin
+        self.key = key
     }
 }

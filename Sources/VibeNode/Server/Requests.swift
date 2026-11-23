@@ -282,7 +282,7 @@ public final class Requests: @unchecked Sendable {
                                                "send", "session.new", "session.end", "session.reply",
                                                "set", "push", "push.decline", "session.reopen", "prompt-audit",
                                                "session.rename", "session.pause", "session.resume", "session.close-shells", "presets.edit",
-                                               "approve", "plugin.on", "plugin.off"]
+                                               "approve", "plugin.on", "plugin.off", "plugin.add", "plugin.remove"]
     /// The kinds on a card: the card's code (EN-D5), typed by the user, is checked here.
     public static let carded: Set<String> = ["answer", "hold", "config.accept", "base.accept", "base.keep"]
     /// How many replies to recorded actions are kept, so a repeated action (a retry) gets the reply it got.
@@ -408,6 +408,10 @@ public final class Requests: @unchecked Sendable {
         case "approve": approve(request, from: facts, reply: reply)
         case "plugin.list": pluginList(request, page: facts.pid == NodeLive.webPeer.pid, reply: reply)
         case "plugin.on", "plugin.off": pluginSet(request, reply: reply)
+        case "plugin.inspect": pluginInspect(request, reply: reply)
+        case "plugin.add": pluginAdd(request, reply: reply)
+        case "plugin.remove": pluginRemove(request, reply: reply)
+        case "plugin.file": pluginFile(request, from: facts, reply: reply)
         case "session.ports": sessionPorts(request, reply: reply)
         case "set": set(request, reply: reply)
         case "answer": answer(request, reply: reply)
@@ -509,6 +513,8 @@ public final class Requests: @unchecked Sendable {
         "session.close-shells": .init(keepsResult: false, rerun: true), "presets.edit": .init(keepsResult: false, rerun: false),
         "approve": .init(keepsResult: false, rerun: false), "plugin.on": .init(keepsResult: false, rerun: true),
         "plugin.off": .init(keepsResult: false, rerun: true),
+        // An add begun with no outcome isn't added again (the person adds it again, seeing its SHA-256s); a remove is.
+        "plugin.add": .init(keepsResult: false, rerun: false), "plugin.remove": .init(keepsResult: false, rerun: true),
     ]
 
     /// The kinds a retry begun with no outcome does again (`RetryRule.rerun`).
@@ -645,6 +651,12 @@ public final class Requests: @unchecked Sendable {
     }
 
     func keep(_ reply: NodeWire.Reply, for action: String) {
+        var reply = reply
+        // A plugin page's address goes to the answer's own terminal once: a retry is told where it went, not given it.
+        if case .object(var fields)? = reply.result, fields["once"]?.bool == true {
+            fields["say"] = .array([.string("Its page's address went to the terminal that answered first: it works once.")])
+            reply.result = .object(fields)
+        }
         replies[action] = reply
         replyOrder.append(action)
         if replyOrder.count > Self.repliesKept { replies[replyOrder.removeFirst()] = nil }

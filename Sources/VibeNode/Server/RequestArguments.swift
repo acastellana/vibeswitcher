@@ -10,8 +10,11 @@ enum RequestArguments {
     /// so the table and the type can't drift; a kind not typed yet, from `untyped`.
     static let taken: [String: Set<String>] = untyped.merging(Dictionary(uniqueKeysWithValues: WireKinds.changes.map { ($0.kind, keys(of: $0)) })) { $1 }
 
-    /// The recorded kinds not typed yet, and the keys each takes.
-    static let untyped: [String: Set<String>] = [:]
+    /// The recorded kinds not typed yet, and the keys each takes: the external plugins' (the plugins lane's, to follow
+    /// the pattern; `WireKindsLintTests` holds the command line to sending every other kind through its type).
+    static let untyped: [String: Set<String>] = [
+        "plugin.add": ["folder", "manifest", "program"], "plugin.remove": ["plugin"],
+    ]
 
     private static func keys<K: WireChangeKind>(of _: K.Type) -> Set<String> { K.Args.keys }
 

@@ -15,7 +15,10 @@ public final class PluginRegistry {
     /// The plugins this build has, in the order `plugin list` shows them.
     public static func standard() -> [FeaturePlugin] { [ShellPlugin()] }
 
-    public let plugins: [FeaturePlugin]
+    /// The built-in plugins, then the external ones the user added (as the vault records them).
+    public private(set) var plugins: [FeaturePlugin]
+    /// The built-ins' ids: no external plugin takes one.
+    public let builtIn: Set<String>
     /// What the user set, by id, as the vault last said; nil until it answered.
     public internal(set) var kept: [String: Bool]?
 
@@ -28,6 +31,19 @@ public final class PluginRegistry {
         let folders = plugins.compactMap(\.info.folder)
         precondition(Set(folders).count == folders.count, "a plugin folder twice")
         self.plugins = plugins
+        builtIn = Set(plugins.map(\.info.id))
+    }
+
+    /// The external plugins added, as `records` (from the vault) say now: one added since joins, one removed leaves
+    /// (its program stopped). `make` builds one from its record.
+    func takeExternal(_ records: [String: PluginRecord], make: (String, PluginRecord) -> ExternalPlugin?) {
+        for plugin in plugins.compactMap({ $0 as? ExternalPlugin }) where records[plugin.info.id] != plugin.record {
+            plugin.stop()
+            plugins.removeAll { $0 === plugin }
+        }
+        for (id, record) in records.sorted(by: { $0.key < $1.key }) where plugin(id) == nil && !builtIn.contains(id) {
+            if let made = make(id, record) { plugins.append(made) }
+        }
     }
 
     public func plugin(_ id: String) -> FeaturePlugin? { plugins.first { $0.info.id == id } }

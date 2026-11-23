@@ -27,6 +27,10 @@ public protocol WireKind {
 
 /// The kinds typed so far, by name (`WireKindsLintTests` holds the command line to reading them through their types).
 public enum WireKinds {
+    /// The kinds the command line asks that aren't typed yet, left out on purpose: the external plugins' (the plugins
+    /// lane's, to follow the pattern). `WireKindsLintTests` allows reading or sending these by name, and no other.
+    public static let leftOut: Swift.Set<String> = ["plugin.inspect", "plugin.add", "plugin.remove", "plugin.file"]
+
     public static let typed: [String] = [Status.kind, Questions.kind, Board.kind, ConfigHeld.kind, Settings.kind, PluginList.kind, ApproveList.kind,
                                          Brief.kind, UpdateCheck.kind, Mail.kind, Presets.kind, Shells.kind, Stats.kind, BaseShow.kind]
 }

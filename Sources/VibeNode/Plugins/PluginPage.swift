@@ -5,11 +5,17 @@ import VibeCore
 /// the page as data (`Spec`: its HTML, the hashes of its scripts and styles for the content security policy, how long it
 /// may live, 15 minutes at most); the core serves it once on an origin of its own, 127.0.0.1 on a port the session host
 /// binds and holds (`HostWebListen.Place.page`, as H1 holds the web's), under its own one-time token
-/// (`http://127.0.0.1:<port>/<token>/`); checks Host, Origin, path and token; takes one answer of bounded size over a
-/// WebSocket at `/<token>/answer` with the page's own Host and Origin, and hands its bytes to the plugin (which says
-/// whether it takes them, or refuses a garbled one: the page may send again, a few times). Then, or at the end of its
+/// (`http://127.0.0.1:<port>/<token>/`); checks Host, Origin, path and token. The page is served once (a second load
+/// is 410), and that one load is given a second secret, an HttpOnly SameSite=Strict cookie, that the answer needs: a
+/// process that learned the address after the load can't answer. It takes one answer of bounded size over a WebSocket
+/// at `/<token>/answer` with the page's own Host and Origin and the cookie (one such socket at a time, one answer in
+/// flight), and hands its bytes to the plugin (which says whether it takes them, or refuses a garbled one: the page may
+/// send again, a few times; a refused upgrade costs no try, an answer over the size does). Then, or at the end of its
 /// life, it stops and the host lets the port go. One page at a time on a node. The token goes only to the answering
-/// terminal: never on a card, the wire or the log.
+/// terminal: never on a card, the wire, the log or to the plugin.
+///
+/// Its limits (accepted, the review of 6e91f053's L4 and L5): after a server death the host holds the page's port until
+/// the next page or a release; any local process can fill the page's connection slots until it stops.
 public final class PluginPage: @unchecked Sendable {
     /// The page as a plugin gives it: data.
     public struct Spec: Codable, Equatable, Sendable {
@@ -62,8 +68,12 @@ public final class PluginPage: @unchecked Sendable {
     private var bound: UInt16 = 0
     private var done = false
     private var tries = 0
-    /// Hands an answer's bytes to the plugin, which says whether it took it (on the page's queue).
-    private var take: ((Data) -> Bool)?
+    /// The one load's second secret (nil until the page was loaded), the answer socket open, an answer with the plugin.
+    private var loaded: String?
+    private var socketOpen = false
+    private var inFlight = false
+    /// Hands an answer's bytes to the plugin, which says (later) whether it took it.
+    private var take: ((Data, @escaping (Bool) -> Void) -> Void)?
     private var ended: ((Bool) -> Void)?
 
     init(spec: Spec, token: String = Base64URL.encode(WebPush.randomBytes(32))) {
@@ -77,12 +87,29 @@ public final class PluginPage: @unchecked Sendable {
     /// Listens (the socket from `bind`) and serves; `take` hears each answer (true: taken, the page stops); `ended` once,
     /// with whether an answer was taken, when it stops (taken, its life over, too many garbled answers, or `stop`).
     /// Throws when the page is refused or can't listen.
-    func start(bind: WebBind, clock: NodeClock, take: @escaping (Data) -> Bool, ended: @escaping (Bool) -> Void) throws -> URL {
-        if let why = spec.refusal { throw PluginRefusal(why) }
-        let listener = WebListener(queue: queue, clock: clock, policy: { [weak self] host, origin, path, _ in
+    func start(bind: WebBind, clock: NodeClock, take: @escaping (Data, @escaping (Bool) -> Void) -> Void, ended: @escaping (Bool) -> Void) throws -> URL {
+        lock.withLock {
+            self.take = take
+            self.ended = ended
+        }
+        if let why = spec.refusal {
+            stop(taken: false)
+            throw PluginRefusal(why)
+        }
+        var limits = WebLimits()
+        // An answer over the size is closed by the listener (1009), and counts as a try (below).
+        limits.maxMessageBytes = Self.answerBytesAtMost
+        limits.maxConnections = 16
+        let listener = WebListener(queue: queue, clock: clock, limits: limits, policy: { [weak self] host, origin, path, headers in
             guard let self else { return false }
-            let place = self.lock.withLock { "127.0.0.1:\(self.bound)" }
-            return host == place && origin == "http://" + place && RemoteAuth.constantTimeEquals(path, "/\(self.token)/answer")
+            return self.lock.withLock {
+                let place = "127.0.0.1:\(self.bound)"
+                guard !self.done, !self.socketOpen, self.tries < Self.triesAtMost, let secret = self.loaded,
+                      host == place, origin == "http://" + place, RemoteAuth.constantTimeEquals(path, "/\(self.token)/answer"),
+                      let given = Self.cookie(headers["cookie"]), RemoteAuth.constantTimeEquals(given, secret) else { return false }
+                self.socketOpen = true
+                return true
+            }
         })
         listener.bindWith = { [weak self] _, address, port, backlog in
             let made = bind.listen(.page, address, port, backlog)
@@ -98,32 +125,72 @@ public final class PluginPage: @unchecked Sendable {
             return over ? .plain(410) : nil
         }
         let page = Data(spec.html.utf8), csp = spec.csp
+        let token = self.token
         listener.onRequest = { [weak self] request in
-            guard let self, RemoteAuth.constantTimeEquals(request.path, "/\(self.token)/") else { return .plain(404) }
-            return WebResponse(status: 200, headers: Self.headers(contentType: "text/html; charset=utf-8", csp: csp), body: page)
+            guard let self, RemoteAuth.constantTimeEquals(request.path, "/\(token)/") else { return .plain(404) }
+            // Served once: the one load gets the answer's secret.
+            let secret: String? = self.lock.withLock {
+                guard self.loaded == nil, !self.done else { return nil }
+                let made = Base64URL.encode(WebPush.randomBytes(32))
+                self.loaded = made
+                return made
+            }
+            guard let secret else { return .plain(410) }
+            let cookie = "\(Self.cookieName)=\(secret); Path=/\(token)/; HttpOnly; SameSite=Strict"
+            return WebResponse(status: 200, headers: Self.headers(contentType: "text/html; charset=utf-8", csp: csp) + [("Set-Cookie", cookie)], body: page)
         }
         listener.onSocket = { [weak self] socket in
+            socket.onClose = { code, _ in
+                guard let self else { return }
+                let over: Bool = self.lock.withLock {
+                    self.socketOpen = false
+                    if code == WebSocketClose.tooBig { self.tries += 1 }
+                    return self.tries >= Self.triesAtMost && !self.inFlight
+                }
+                if over { self.stop(taken: false) }
+            }
             socket.onText = { text in
                 guard let self else { return socket.close() }
                 let bytes = Data(text.utf8)
-                let taker: ((Data) -> Bool)? = self.lock.withLock {
-                    guard !self.done, bytes.count <= Self.answerBytesAtMost else { return nil }
+                enum Turn { case take((Data, @escaping (Bool) -> Void) -> Void), busy, over }
+                // One answer in flight; marked before the taker is called, cleared when the plugin refused it.
+                let turn: Turn = self.lock.withLock {
+                    guard !self.done, self.tries < Self.triesAtMost else { return .over }
+                    guard !self.inFlight else { return .busy }
+                    guard bytes.count <= Self.answerBytesAtMost, let take = self.take else { self.tries += 1; return .over }
                     self.tries += 1
-                    return self.take
+                    self.inFlight = true
+                    return .take(take)
                 }
-                let taken = taker?(bytes) ?? false
-                _ = socket.send(text: taken ? "ok" : "refused")
-                socket.close()
-                let over = self.lock.withLock { self.tries >= Self.triesAtMost }
-                if taken || over { self.stop(taken: taken) }
+                switch turn {
+                case .busy: _ = socket.send(text: "busy")
+                case .over:
+                    _ = socket.send(text: "refused")
+                    if self.lock.withLock({ self.tries >= Self.triesAtMost }) { socket.close(); self.stop(taken: false) }
+                case .take(let taker):
+                    taker(bytes) { taken in
+                        self.queue.async {
+                            let over: Bool = self.lock.withLock {
+                                self.inFlight = false
+                                return self.tries >= Self.triesAtMost
+                            }
+                            _ = socket.send(text: taken ? "ok" : "refused")
+                            if taken || over {
+                                socket.close()
+                                self.stop(taken: taken)
+                            }
+                        }
+                    }
+                }
             }
         }
-        lock.withLock {
-            self.take = take
-            self.ended = ended
+        let stopped: Bool = lock.withLock {
+            guard !done else { return true }
             self.listener = listener
             self.bind = bind
+            return false
         }
+        guard !stopped else { throw PluginRefusal("the page was stopped before it opened") }
         do {
             try listener.start()
         } catch {
@@ -152,6 +219,17 @@ public final class PluginPage: @unchecked Sendable {
             bind?.release(.page)
             ended?(taken)
         }
+    }
+
+    static let cookieName = "vs-page"
+
+    /// The page's secret from a Cookie header, when it has exactly one.
+    static func cookie(_ header: String?) -> String? {
+        let found = (header ?? "").split(separator: ";").compactMap { pair -> String? in
+            let parts = pair.split(separator: "=", maxSplits: 1).map { $0.trimmingCharacters(in: .whitespaces) }
+            return parts.count == 2 && parts[0] == cookieName ? parts[1] : nil
+        }
+        return found.count == 1 ? found[0] : nil
     }
 
     /// Every answer's headers: the page's own policy, no framing, sniffing, referrer or cache.

@@ -77,13 +77,13 @@ struct PluginsTests {
             guard let request = card.plugin?.request else { return then(.failure(.gone("no request"))) }
             if let page = pageSpec, word == "run" {
                 // A page for the answer: the core serves it; the plugin hears the bytes.
-                return act.openPage(page, take: { [weak self] bytes in
+                return act.openPage(page, take: { [weak self] bytes, answer in
                     let taken = bytes == Data(#"{"ok":true}"#.utf8)
                     if taken { self?.pageAnswers.mutate { $0.append(bytes) } }
-                    return taken
+                    answer(taken)
                 }, ended: { [weak self] taken in self?.pageEnded.value = taken }) { opened in
                     switch opened {
-                    case .success(let url): then(.success(.object(["outcome": .string("page"), "say": .array([.string(url.absoluteString)])])))
+                    case .success: then(.success(.object(["outcome": .string("page")])))
                     case .failure(let why): then(.failure(.refused(why.description)))
                     }
                 }
@@ -616,6 +616,18 @@ extension PluginsTests {
 // MARK: What the core keeps of the wallet: the page, the settings
 
 extension PluginsTests {
+    /// The page's address in an answer's reply (the core's line, never the plugin's).
+    static func pageAddress(_ reply: NodeWire.Reply) -> String? {
+        reply.result?["say"]?.array?.compactMap(\.string).first { $0.contains("http://") }?.trimmingCharacters(in: .whitespaces)
+    }
+
+    /// The Cookie header that gives back the secret a page's one load set.
+    static func cookie(_ response: String) -> String? {
+        guard let line = response.split(separator: "\r\n").first(where: { $0.lowercased().hasPrefix("set-cookie: ") }) else { return nil }
+        let pair = line.dropFirst("set-cookie: ".count).split(separator: ";").first.map(String.init) ?? ""
+        return pair.isEmpty ? nil : "Cookie: " + pair
+    }
+
     static let pageHTML = "<!doctype html><title>probe</title><script>window.x=1</script>"
     static var pageSpec: PluginPage.Spec {
         PluginPage.Spec(html: pageHTML, scripts: [PluginPage.hash("window.x=1")], styles: [], life: 60)
@@ -639,7 +651,7 @@ extension PluginsTests {
         await look(world)
         let card = try #require(card(world, request))
         let ran = try #require(await world.answer(card, "run"))
-        let address = try #require(ran.result?["say"]?.array?.first?.string, "\(ran)")
+        let address = try #require(Self.pageAddress(ran), "\(ran)")
         let url = try #require(URL(string: address))
         let port = try #require(url.port.map(UInt16.init))
         let place = "127.0.0.1:\(port)", path = String(address.dropFirst("http://\(place)".count))
@@ -649,18 +661,17 @@ extension PluginsTests {
             _ = client.send("GET \(path) HTTP/1.1\r\nHost: \(host)\r\n\r\n")
             return client.response().map { $0.head + "\n\n" + $0.body }
         }
-        let page = try #require(try get(place, path))
-        #expect(page.hasPrefix("HTTP/1.1 200") && page.contains("script-src 'sha256-") && page.contains(Self.pageHTML), "\(page)")
         #expect(try get("localhost:\(port)", path)?.hasPrefix("HTTP/1.1 421") == true)
         #expect(try get(place, "/nottoken/")?.hasPrefix("HTTP/1.1 404") == true)
+        let page = try #require(try get(place, path))
+        #expect(page.hasPrefix("HTTP/1.1 200") && page.contains("script-src 'sha256-") && page.contains(Self.pageHTML), "\(page)")
+        let cookie = try #require(Self.cookie(page), "\(page)")
         let foreign = try WebTestClient(port: port)
-        #expect(foreign.upgrade(path: path + "answer", host: place, origin: "http://evil.example")?.hasPrefix("HTTP/1.1 403") == true)
-        let garbled = try WebTestClient(port: port)
-        try #require(garbled.upgrade(path: path + "answer", host: place, origin: "http://" + place)?.hasPrefix("HTTP/1.1 101") == true)
-        _ = garbled.send(WebTestClient.text("garbage"))
-        #expect(garbled.message()?.text == "refused")
+        #expect(foreign.upgrade(path: path + "answer", host: place, origin: "http://evil.example", extra: [cookie])?.hasPrefix("HTTP/1.1 403") == true)
         let answer = try WebTestClient(port: port)
-        try #require(answer.upgrade(path: path + "answer", host: place, origin: "http://" + place)?.hasPrefix("HTTP/1.1 101") == true)
+        try #require(answer.upgrade(path: path + "answer", host: place, origin: "http://" + place, extra: [cookie])?.hasPrefix("HTTP/1.1 101") == true)
+        _ = answer.send(WebTestClient.text("garbage"))
+        #expect(answer.message()?.text == "refused")
         _ = answer.send(WebTestClient.text(#"{"ok":true}"#))
         #expect(answer.message()?.text == "ok")
         #expect(await eventually(timeout: 30) { probe.pageEnded.value == true })
@@ -704,7 +715,7 @@ extension PluginsTests {
         let page = PluginPage(spec: Self.pageSpec)
         let ended = Locked<Bool?>(nil)
         let clock = NodeClock(queue: DispatchQueue(label: "test.page-clock"))
-        _ = try await offPool { try page.start(bind: bind, clock: clock, take: { _ in true }, ended: { ended.value = $0 }) }
+        _ = try await offPool { try page.start(bind: bind, clock: clock, take: { _, answer in answer(true) }, ended: { ended.value = $0 }) }
         page.stop()
         #expect(await eventually(timeout: 2) { ended.value != nil } == false, "the release not yet confirmed: not ended")
         gate.signal()
@@ -734,6 +745,176 @@ extension PluginsTests {
         #expect(probe.performed.value.isEmpty, "the plugin didn't act")
         let closed = try #require(world.card(card.id))
         #expect(closed.closed?.contains("nothing ran") == true, "\(String(describing: closed.closed))")
+    }
+}
+
+// MARK: The review of 6e91f053: the page, before any plugin serves one
+
+extension PluginsTests {
+    /// A page started on its own, its place and path, and a GET of it.
+    private struct LonePage {
+        let page: PluginPage
+        let port: UInt16
+        let place: String
+        let path: String
+        let heard: Locked<[Data]>
+        let held: Locked<[(Bool) -> Void]>
+        let ended: Locked<Bool?>
+
+        static func start() async throws -> LonePage {
+            let page = PluginPage(spec: PluginsTests.pageSpec)
+            let clock = NodeClock(queue: DispatchQueue(label: "test.page-clock"))
+            let heard = Locked<[Data]>([]), held = Locked<[(Bool) -> Void]>([]), ended = Locked<Bool?>(nil)
+            let url = try await offPool {
+                try page.start(bind: .direct, clock: clock, take: { bytes, answer in
+                    heard.mutate { $0.append(bytes) }
+                    held.mutate { $0.append(answer) }
+                }, ended: { ended.value = $0 })
+            }
+            let port = try #require(url.port.map(UInt16.init))
+            return LonePage(page: page, port: port, place: "127.0.0.1:\(port)", path: url.path.hasSuffix("/") ? url.path : url.path + "/",
+                            heard: heard, held: held, ended: ended)
+        }
+
+        init(page: PluginPage, port: UInt16, place: String, path: String, heard: Locked<[Data]>, held: Locked<[(Bool) -> Void]>, ended: Locked<Bool?>) {
+            (self.page, self.port, self.place, self.path) = (page, port, place, path)
+            (self.heard, self.held, self.ended) = (heard, held, ended)
+        }
+
+        func get() throws -> String? {
+            let client = try WebTestClient(port: port)
+            _ = client.send("GET \(path) HTTP/1.1\r\nHost: \(place)\r\n\r\n")
+            return client.response().map { $0.head + "\n\n" + $0.body }
+        }
+
+        func socket(_ extra: [String]) throws -> (WebTestClient, String?) {
+            let client = try WebTestClient(port: port)
+            return (client, client.upgrade(path: path + "answer", host: place, origin: "http://" + place, extra: extra))
+        }
+    }
+
+    /// M1: the page is served once, and only that load can answer (its HttpOnly SameSite=Strict cookie); a refused
+    /// upgrade costs no try; one answer socket at a time; one answer in flight.
+    @Test func onlyThePagesOneLoadCanAnswerItOnceAtATime() async throws {
+        let lone = try await LonePage.start()
+        defer { lone.page.stop() }
+        #expect(try lone.socket([]).1?.hasPrefix("HTTP/1.1 403") == true, "no load yet: no answer")
+        let loaded = try #require(try lone.get())
+        #expect(loaded.hasPrefix("HTTP/1.1 200") && loaded.lowercased().contains("httponly") && loaded.contains("SameSite=Strict"), "\(loaded)")
+        let cookie = try #require(Self.cookie(loaded))
+        #expect(try lone.get()?.hasPrefix("HTTP/1.1 410") == true, "served once")
+        // More refused upgrades than the page's tries: none of them is one.
+        for _ in 0...PluginPage.triesAtMost {
+            #expect(try lone.socket([]).1?.hasPrefix("HTTP/1.1 403") == true)
+            #expect(try lone.socket(["Cookie: vs-page=not-it"]).1?.hasPrefix("HTTP/1.1 403") == true)
+        }
+        let (socket, head) = try lone.socket([cookie])
+        try #require(head?.hasPrefix("HTTP/1.1 101") == true, "\(String(describing: head))")
+        #expect(try lone.socket([cookie]).1?.hasPrefix("HTTP/1.1 403") == true, "one answer socket at a time")
+        _ = socket.send(WebTestClient.text("first"))
+        #expect(await eventually(timeout: 30) { lone.held.value.count == 1 })
+        _ = socket.send(WebTestClient.text("second"))
+        #expect(socket.message()?.text == "busy", "one answer in flight")
+        #expect(lone.heard.value == [Data("first".utf8)])
+        lone.held.value[0](false)
+        #expect(socket.message()?.text == "refused")
+        _ = socket.send(WebTestClient.text("third"))
+        #expect(await eventually(timeout: 30) { lone.held.value.count == 2 })
+        lone.held.value[1](true)
+        #expect(socket.message()?.text == "ok")
+        #expect(await eventually(timeout: 30) { lone.ended.value == true })
+    }
+
+    /// L3: an answer over the page's size is closed by the listener (1009) and counts as a try: enough of them end the page.
+    @Test func anOversizedAnswerCountsAsATry() async throws {
+        let lone = try await LonePage.start()
+        defer { lone.page.stop() }
+        let loaded = try #require(try lone.get())
+        let cookie = try #require(Self.cookie(loaded))
+        let big = String(repeating: "x", count: PluginPage.answerBytesAtMost + 1)
+        for _ in 0..<PluginPage.triesAtMost {
+            guard lone.ended.value == nil else { break }
+            let (socket, head) = try lone.socket([cookie])
+            try #require(head?.hasPrefix("HTTP/1.1 101") == true, "\(String(describing: head))")
+            _ = socket.send(WebTestClient.text(big))
+            let closing = socket.message()
+            #expect(closing?.opcode == 0x8 && closing.map { Array($0.payload.prefix(2)) } == [0x03, 0xF1], "closed 1009: \(String(describing: closing))")
+            #expect(await eventually(timeout: 30) { socket.ended() })
+        }
+        #expect(await eventually(timeout: 30) { lone.ended.value == false }, "too many tries: the page stopped")
+        #expect(lone.heard.value.isEmpty, "no oversized answer reached the plugin")
+    }
+
+    /// M2: a plugin turned off takes its open page with it: the port let go, the slot freed.
+    @Test func turningAPluginOffStopsItsPage() async throws {
+        let probe = Probe(defaultOn: true)
+        probe.pageSpec = Self.pageSpec
+        let world = try await CardWorld.make(scratch, plugins: [probe])
+        defer { world.stop() }
+        let (_, request) = try await file(world)
+        await look(world)
+        let card = try #require(card(world, request))
+        let ran = try #require(await world.answer(card, "run"))
+        let port = try #require(Self.pageAddress(ran).flatMap(URL.init(string:))?.port.map(UInt16.init), "\(ran)")
+        _ = try #require(await turn(world, "probe", on: false))
+        #expect(await eventually(timeout: 30) { probe.pageEnded.value == false }, "its page ended, untaken")
+        #expect(await eventually(timeout: 30) { (try? WebTestClient(port: port)) == nil }, "the port let go")
+        #expect(world.queue.sync { world.engine.pluginPage } == nil)
+    }
+
+    /// L6: a page that fails to start frees the node's slot only once the host confirms the release, as a normal end does.
+    @Test func aFailedPageStartWaitsForTheRelease() async throws {
+        let gate = DispatchSemaphore(value: 0)
+        let released = Locked(false)
+        let bind = WebBind(listen: { _, _, _, _ in .failure(.host("refused by the test")) }, release: { _ in gate.wait(); released.value = true })
+        let probe = Probe(defaultOn: true)
+        probe.pageSpec = Self.pageSpec
+        let world = try await CardWorld.make(scratch, plugins: [probe], bind: bind)
+        defer { world.stop() }
+        let (_, request) = try await file(world)
+        await look(world)
+        let card = try #require(card(world, request))
+        let ran = try #require(await world.answer(card, "run"))
+        #expect(!ran.ok, "\(ran)")
+        #expect(world.queue.sync { world.engine.pluginPage } != nil, "the release not confirmed: the slot still taken")
+        gate.signal()
+        #expect(await eventually(timeout: 30) { released.value && world.queue.sync { world.engine.pluginPage } == nil })
+        #expect(probe.pageEnded.value == nil, "a page that never opened ends nothing of the plugin's")
+    }
+
+    /// L1: the page's address is the core's to print, in the answering terminal's reply: not to the plugin, on the card,
+    /// in the log, or in the reply a retry of the same action gets.
+    @Test func aPagesAddressGoesOnlyToTheAnsweringTerminal() async throws {
+        let notes = Locked<[String]>([])
+        let probe = Probe(defaultOn: true)
+        probe.pageSpec = Self.pageSpec
+        let world = try await CardWorld.make(scratch, plugins: [probe], note: { line in notes.mutate { $0.append(line) } })
+        defer { world.stop() }
+        let (_, request) = try await file(world)
+        await look(world)
+        let card = try #require(card(world, request))
+        let action = UUID().uuidString.lowercased()
+        let ran = try #require(await world.answer(card, "run", action: action))
+        let address = try #require(Self.pageAddress(ran), "\(ran)")
+        let token = try #require(URL(string: address)?.pathComponents.dropFirst().first)
+        let again = try #require(await world.answer(card, "run", action: action))
+        #expect(Self.pageAddress(again) == nil && "\(again)".contains("went to the terminal that answered first"), "\(again)")
+        let shown = try #require(world.card(card.id))
+        #expect(!"\(shown)".contains(token), "not on the card")
+        #expect(!notes.value.contains { $0.contains(token) }, "not in the log")
+        let board = try #require(await world.ask("board", action: nil))
+        #expect(!"\(board)".contains(token), "not on the wire's board")
+    }
+
+    /// L2: a request already past its expiry when the plugin looks is never drawn.
+    @Test func anExpiredRequestIsNeverDrawn() async throws {
+        let probe = Probe(defaultOn: true)
+        let world = try await CardWorld.make(scratch, plugins: [probe])
+        defer { world.stop() }
+        let (_, request) = try await file(world)
+        world.queue.sync { world.engine.pluginNow = { request.expiresAt.addingTimeInterval(1) } }
+        await look(world)
+        #expect(card(world, request) == nil)
     }
 }
 

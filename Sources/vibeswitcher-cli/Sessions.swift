@@ -50,6 +50,46 @@ enum SessionCommand {
         }
     }
 
+    /// `act` for a kind not typed yet (`WireKinds.leftOut`: the external plugins' add and remove, the plugins lane's to
+    /// type): its arguments and result as values. `WireKindsLintTests` allows it for those kinds alone.
+    static func act(_ kind: String, lookup: String? = nil, fetch: ((NodeClient) -> Result<NodeWire.Value, NodeClient.Failure>)? = nil,
+                    refuse: (NodeWire.Value) -> Int32? = { _ in nil },
+                    args: (NodeWire.Value) -> [String: NodeWire.Value], what: (NodeWire.Value) -> String, timeout: TimeInterval = 120,
+                    say: (NodeWire.Value) -> Void) -> Int32 {
+        precondition(WireKinds.leftOut.contains(kind), "\(kind) is typed: SessionCommand.act(WireKinds.…)")
+        let context = NodeContext.current()
+        context.sayScratch()
+        let client: NodeClient
+        switch NodeClient.connect(context) {
+        case .failure(let failure): return Say.failed(failure)
+        case .success(let connected): client = connected
+        }
+        var session = NodeWire.Value.null
+        if let lookup {
+            switch find(lookup, client: client) {
+            case .failure(let failure): return Say.failed(failure)
+            case .success(let found): session = found
+            }
+            if let status = refuse(session) { return status }
+        } else if let fetch {
+            switch fetch(client) {
+            case .failure(let failure): return Say.failed(failure)
+            case .success(let found): session = found
+            }
+            if let status = refuse(session) { return status }
+        }
+        let action = UUID().uuidString.lowercased()
+        let said = TypedWord.said(approval: client.approvalRule, action: action, what: what(session))
+        guard case .success(let typed) = said else { return Say.refused(said.refusal) }
+        switch client.change(kind, args: args(session), action: action, typed: typed, timeout: timeout) {
+        case .failure(let failure): return Say.failed(failure)
+        case .success(let reply):
+            guard reply.ok, let result = reply.result else { return Say.replyError(reply) }
+            say(result)
+            return 0
+        }
+    }
+
     /// The session `wanted` names among those `status` lists (`SessionLookup.match`): its id, the terminal name
     /// `status` prints (`ttypts4`), or a prefix of its host id only one has; a name two answer to is refused, naming them.
     static func find(_ wanted: String, client: NodeClient) -> Result<NodeWire.Value, NodeClient.Failure> {

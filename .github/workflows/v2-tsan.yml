@@ -1,0 +1,147 @@
+name: v2 tsan
+# Nightly, gating nothing (the architecture review's row 18): the node's, the host's and the platform's tests built
+# with the thread sanitizer (scripts/test.sh --tsan), each race a report kept with the run. GitHub runs a schedule
+# from the default branch's copy of this file, so it starts nightly once v2 is merged there; by hand meanwhile.
+# What it finds is fixed, or listed in docs/process/v2-flaky-tests.md.
+on:
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: v2-tsan-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  node:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 95
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Check the workflows
+        run: bash scripts/ci/check-workflows.sh
+      - name: Swift, the version in .swift-version
+        run: |
+          wanted=$(cat .swift-version)
+          if swift --version 2>&1 | grep -q "Swift version $wanted "; then
+            echo "the image's Swift is $wanted"
+            exit 0
+          fi
+          sudo apt-get update
+          sudo apt-get install -y gnupg2 libcurl4-openssl-dev libsqlite3-dev libxml2-dev libz3-dev
+          cd "$RUNNER_TEMP"
+          curl -fsSLO https://download.swift.org/swiftly/linux/swiftly-1.2.0-x86_64.tar.gz
+          echo "0b26b568811404374c7d7f07276b6aad4145db5d1893a45f307de6a94ca8d9c3  swiftly-1.2.0-x86_64.tar.gz" | sha256sum -c -
+          tar zxf swiftly-1.2.0-x86_64.tar.gz
+          ./swiftly init --assume-yes --quiet-shell-followup --skip-install
+          . "$HOME/.local/share/swiftly/env.sh"
+          swiftly install --use --assume-yes "$wanted"
+          echo "$HOME/.local/share/swiftly/bin" >> "$GITHUB_PATH"
+      - name: Versions
+        run: |
+          swift --version
+          node --version
+      - name: Tests under the thread sanitizer
+        run: bash scripts/test.sh --tsan --filter 'VibeNodeTests' 2>&1 | tee test.log
+        env:
+          # Under the job's own limit: a hang is named by vs-heavy's stop, with the reports so far.
+          VIBESWITCHER_HEAVY_TIMEOUT: 85m
+      - name: Keep the log and the reports
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: tsan-node
+          path: |
+            test.log
+            .build/tsan-reports/
+          retention-days: 14
+  host:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 95
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Check the workflows
+        run: bash scripts/ci/check-workflows.sh
+      - name: Swift, the version in .swift-version
+        run: |
+          wanted=$(cat .swift-version)
+          if swift --version 2>&1 | grep -q "Swift version $wanted "; then
+            echo "the image's Swift is $wanted"
+            exit 0
+          fi
+          sudo apt-get update
+          sudo apt-get install -y gnupg2 libcurl4-openssl-dev libsqlite3-dev libxml2-dev libz3-dev
+          cd "$RUNNER_TEMP"
+          curl -fsSLO https://download.swift.org/swiftly/linux/swiftly-1.2.0-x86_64.tar.gz
+          echo "0b26b568811404374c7d7f07276b6aad4145db5d1893a45f307de6a94ca8d9c3  swiftly-1.2.0-x86_64.tar.gz" | sha256sum -c -
+          tar zxf swiftly-1.2.0-x86_64.tar.gz
+          ./swiftly init --assume-yes --quiet-shell-followup --skip-install
+          . "$HOME/.local/share/swiftly/env.sh"
+          swiftly install --use --assume-yes "$wanted"
+          echo "$HOME/.local/share/swiftly/bin" >> "$GITHUB_PATH"
+      - name: Versions
+        run: |
+          swift --version
+          node --version
+      - name: Tests under the thread sanitizer
+        run: bash scripts/test.sh --tsan --filter 'VibeHostTests' 2>&1 | tee test.log
+        env:
+          # Under the job's own limit: a hang is named by vs-heavy's stop, with the reports so far.
+          VIBESWITCHER_HEAVY_TIMEOUT: 85m
+      - name: Keep the log and the reports
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: tsan-host
+          path: |
+            test.log
+            .build/tsan-reports/
+          retention-days: 14
+  platform:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 95
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Check the workflows
+        run: bash scripts/ci/check-workflows.sh
+      - name: Swift, the version in .swift-version
+        run: |
+          wanted=$(cat .swift-version)
+          if swift --version 2>&1 | grep -q "Swift version $wanted "; then
+            echo "the image's Swift is $wanted"
+            exit 0
+          fi
+          sudo apt-get update
+          sudo apt-get install -y gnupg2 libcurl4-openssl-dev libsqlite3-dev libxml2-dev libz3-dev
+          cd "$RUNNER_TEMP"
+          curl -fsSLO https://download.swift.org/swiftly/linux/swiftly-1.2.0-x86_64.tar.gz
+          echo "0b26b568811404374c7d7f07276b6aad4145db5d1893a45f307de6a94ca8d9c3  swiftly-1.2.0-x86_64.tar.gz" | sha256sum -c -
+          tar zxf swiftly-1.2.0-x86_64.tar.gz
+          ./swiftly init --assume-yes --quiet-shell-followup --skip-install
+          . "$HOME/.local/share/swiftly/env.sh"
+          swiftly install --use --assume-yes "$wanted"
+          echo "$HOME/.local/share/swiftly/bin" >> "$GITHUB_PATH"
+      - name: Versions
+        run: |
+          swift --version
+          node --version
+      - name: Tests under the thread sanitizer
+        run: bash scripts/test.sh --tsan --filter 'VibePlatformTests' 2>&1 | tee test.log
+        env:
+          # Under the job's own limit: a hang is named by vs-heavy's stop, with the reports so far.
+          VIBESWITCHER_HEAVY_TIMEOUT: 85m
+      - name: Keep the log and the reports
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: tsan-platform
+          path: |
+            test.log
+            .build/tsan-reports/
+          retention-days: 14

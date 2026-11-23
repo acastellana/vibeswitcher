@@ -1,0 +1,10 @@
+#!/bin/bash
+# vs-ask PLUGIN -- WORDS…: asks one of the node's external plugins (vibeswitcher plugin list) for something the user
+# decides on its card. VibeSwitcher puts it on PATH in every session it starts (beside vs-shell). It runs the tool
+# server binary in its filing mode (`PluginAsk` in VibeCore): the node's server has the plugin make the request from
+# these words, and the session host stamps it for the session this process runs in.
+here="$(cd "$(dirname "$0")" && pwd)"
+mcp="$here/../../MacOS/vibeswitcher-mcp"
+# A Linux node's install: <prefix>/<commit>/Resources/bin, beside the build's <prefix>/<commit>/bin.
+[[ -x $mcp ]] || mcp="$here/../../bin/vibeswitcher-mcp"
+exec "$mcp" --ask "$@"

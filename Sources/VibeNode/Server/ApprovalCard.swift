@@ -33,6 +33,7 @@ extension Requests {
         "session.reopen": ["all", "forget", "sessions"], "prompt-audit": ["folder", "do"],
         "session.rename": ["session", "name"], "session.pause": ["session", "for", "hours"], "session.resume": ["session"],
         "session.close-shells": ["folder", "sessions"], "plugin.on": ["plugin"], "plugin.off": ["plugin"],
+        "plugin.add": ["folder", "manifest", "program"], "plugin.remove": ["plugin"],
         "presets.edit": ["op", "name", "kind", "args", "env", "unset", "keepShell", "default", "rename", "digest", "folder"],
     ]
 
@@ -157,6 +158,12 @@ extension Requests {
             let on = kind == "plugin.on"
             return .success(("turn \(ConfigSeal.inert(plugin.info.title, limit: 80)) (\(ConfigSeal.inert(id, limit: 40))) \(on ? "on" : "off") for this node",
                              on ? ConfigSeal.inert(plugin.info.summary, limit: 200) : "its open cards close as withdrawn, their askers told"))
+        case "plugin.add":
+            guard let folder = text("folder"), let program = text("program") else { return .failure(.init(why: "plugin.add needs its folder: nothing was asked")) }
+            return .success(("add the program in \(Self.place(folder)) as a plugin, SHA-256 \(program.prefix(16))…", "it starts off; `plugin on` runs it"))
+        case "plugin.remove":
+            guard let id = text("plugin") else { return .failure(.init(why: "plugin.remove names no plugin: nothing was asked")) }
+            return .success(("remove the plugin \(ConfigSeal.inert(id, limit: 40)) from this node", "its open cards close as withdrawn"))
         case "prompt-audit":
             guard let folder = text("folder"), let what = text("do"), ["snooze", "off", "on"].contains(what) else {
                 return .failure(.init(why: "prompt-audit needs a folder and snooze, off or on: nothing was asked"))

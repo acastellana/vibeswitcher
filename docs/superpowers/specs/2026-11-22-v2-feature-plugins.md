@@ -137,7 +137,7 @@ one-request page).
 
 ```
 vibeswitcher plugin add FOLDER      # the user's voice: shows the manifest, the program's path and SHA-256, what it asks for
-vibeswitcher plugin remove ID       # the user's voice: its cards withdrawn, its record gone
+vibeswitcher plugin remove ID       # the user's voice: its cards withdrawn, its record, data and unsettled requests gone
 vibeswitcher plugin on ID | off ID
 ```
 
@@ -148,12 +148,44 @@ until the person adds it again. A plugin whose id is a built-in's is refused.
 
 ### The process
 
-The server starts an on plugin's program as a child: no terminal, its own process group, a clean environment (PATH
-of root-owned folders, HOME, LANG, and nothing of the node's or the agents'), its working folder a private one under
-the node's root, standard input and output as the protocol's two pipes, standard error to the node's log (inert,
-capped). It is ended when the plugin goes off, on `stop`, and when it breaks the protocol. It runs in a box when
-the sandbox gives the node one for programs of this kind (the sandbox plan's later slice); until then it runs as
-the person, which is what installing a program means.
+The server starts an on plugin's program as a child: no terminal, its own session and process group, standard input
+and output as the protocol's two pipes, standard error to the node's log (inert, capped). It is ended when the plugin
+goes off, on `stop`, and when it breaks the protocol. It runs in a box when the sandbox gives the node one for
+programs of this kind (the sandbox plan's later slice); until then it runs as the person, which is what installing a
+program means.
+
+**One self-contained program.** The SHA-256 the user saw covers the program's bytes, so nothing else it reads at start
+may be writable by anyone but root (the review of step C, H1). It is run from a sealed copy and cannot see its folder.
+Its environment is PATH (root's folders), `HOME=/nonexistent`, LANG, and `PYTHONNOUSERSITE=1`, `PYTHONSAFEPATH=1`,
+`PYTHONDONTWRITEBYTECODE=1`, and nothing else of any runtime's; it works in `/`. A plugin that keeps data says
+`data: true` in its manifest and gets `VIBESWITCHER_PLUGIN_DATA`, a private folder of its own under the node's root,
+which any session of the person's can write: it reads what is there as untrusted input. At `plugin add` and at every
+start the core refuses, with the reason shown, an ELF program whose interpreter, RUNPATH or RPATH entry, or library
+named by a path isn't an absolute path that is root's all the way (every folder and the file owned by root, not
+writable by a group or others), or that names `$ORIGIN`; a script whose `#!` interpreter isn't such a path, `env`
+included; and anything that is neither. The check reads at most the program's first 64 MiB, its fields as untrusted
+(every offset and size checked against what is read, 256 program headers, 4096 dynamic entries, 4 KiB a string):
+anything out of range refuses the program, never stops the server. A script is checked as the kernel reads its `#!` line
+(its first 256 bytes; everything after the interpreter one argument) and runs as `interpreter [one flag token]
+/proc/self/fd/N`: the line ends with a newline within its first 255 bytes, holds no tab, carriage return, double or
+trailing space; the interpreter is one of /bin/sh, /usr/bin/sh, /bin/bash, /usr/bin/bash, /bin/dash, /usr/bin/dash,
+/usr/bin/python3 and /usr/bin/python3.N, root's all the way; at most one argument, as one token: python3's `-I` alone or
+followed by any of S, s, B, u, E (each once); a shell takes none. An ELF program whose dynamic section names an audit
+library, a filter or a loader config (DT_AUDIT, DT_DEPAUDIT, DT_FILTER, DT_AUXILIARY, DT_CONFIG) is refused: the check
+doesn't follow them. A library named by a bare name is found through the RUNPATH and RPATH checked here and the
+system's default paths (root's); the program's environment is built from nothing (no LD_ variable, no GLIBC_TUNABLES). The program is 64 MiB at most and the manifest 64 KiB; the program's size is recorded at the add and
+compared before it is copied at a start. Limits of the check, accepted: it finds the dynamic section by its file
+offset (a second one is refused), where the loader maps it by address (a program built to differ between the two can show the
+check one search path and the loader another); and the next server's sweep kills whatever sits in a `vs-plugin-*`
+cgroup under its own, which matters once sessions are boxed in cgroups of their own.
+
+**Its end reaches what it started.** The program is started from a thread that lives as long as the server, through
+setpriv with the parent-death signal (KILL), so the server's end ends it. Where the server's cgroup is writable (the
+node's systemd unit, under the user's manager) it gets a cgroup of its own, entered before it runs, which its end
+empties whatever sessions it made, and which the next server empties if this one died. The limits: without that
+cgroup, a child of the program that starts a session of its own escapes the group's kill and doesn't inherit the
+parent-death signal; a server that ends in the instant between the spawn and setpriv's setting the signal leaves the
+program running; and on a system without setpriv only the group is ended.
 
 ### The protocol
 
@@ -179,10 +211,20 @@ Everything in "What stays the core's" holds, and the core does more of the work 
 
 - **Filing.** One command of the core's files for any plugin: `vs-ask ID -- WORDS` (through the node's tool server).
   The core asks the plugin's `file` for the payload, and the **session host stamps it**; the plugin never writes a
-  request. A plugin's own command names (`vs-wallet`) are thin wrappers the node generates beside its own commands
+  request. Only a session the user opened files, and only from inside it (the host's list of live sessions names the
+  caller's process tree); whichever check fails, the refusal is the same words. At most 4 filing calls wait on a
+  program; the rest are told it is busy. A protocol line nested over 32 deep is a breach, found before it is parsed.
+  A plugin's own command names (`vs-wallet`) are thin wrappers the node generates beside its own commands
   while the plugin is on.
 - **The card's facts are split.** The asking session and its folder are the host's, drawn by the core. What the
-  plugin says (the chain, the decoded call) is shown as the plugin's, named ("the wallet plugin says"). The body,
+  plugin says (the chain, the decoded call) is shown as the plugin's, named in the core's words by its id ("the wallet
+  plugin says"), never by the title it chose (a title naming VibeSwitcher, the node or the session host is refused).
+  What the agent is told is one line under the core's prefix (`[the wallet plugin, through VibeSwitcher]`), never
+  starting with "[". Every answer of an external plugin that reaches its program is acting (expiry, a live asker, the
+  settle first), whatever its card says, and a page for a word that doesn't act is a breach. A plugin's command is
+  never one the node ships (`vs-ask`, `vs-shell`, `vs-heavy`); the Linux install doesn't ship the Mac app's
+  `vs-wallet` filer, so the wallet plugin's own is the one a session finds. The node's folders for its plugins are
+  never followed through a link. The body,
   the context's marking, inert text, whole-or-refused, expiry and once-only are the core's checks on the plugin's
   data, exactly as for a built-in plugin.
 - **The page is the core's.** A plugin that asks for `page` gives the page as data: its HTML, the scripts' and
@@ -190,6 +232,15 @@ Everything in "What stays the core's" holds, and the core does more of the work 
   once on an origin of its own (a loopback port the session host holds), with its own one-time token in the address,
   printed only in the answering terminal; checks Host, Origin and token; takes one answer of bounded size; and hands
   it to `page.answer`. The plugin never listens on a port and never sees the token.
+  The page is served once: that one load gets a second secret (an HttpOnly, SameSite=Strict cookie) the answer
+  needs, so a process that learns the address later can't answer; one answer socket at a time, one answer in flight;
+  a refused upgrade costs the person no try, an answer over the size does. The address is printed by the core in the
+  answering terminal's reply only (a retry of the same action is told where it went, not given it); only an acting
+  answer opens a page; a plugin turned off or removed takes its page with it; the node's one page slot is freed only
+  once the host has let the port go, a failed start included.
+  Its limits, accepted: after a server death the host holds the page's port until the next page or a release; any
+  local process can fill the page's connection slots (16) while it lives, which keeps the person from answering
+  until it ends (a denial among the person's own processes, which can already end the server).
 - **Settings** are kept in the vault and set by the user's voice; the plugin only checks a value.
 - **Nothing else.** A plugin has no way to ask the core to act: it can't start a session, type into one, read the
   vault or other sessions, answer a card, or reach the node's socket (its program is refused there as any other

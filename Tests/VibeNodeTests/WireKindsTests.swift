@@ -134,14 +134,27 @@ struct WireKindsLintTests {
                     found.append("\(place): \(kind) by string key; ask it with client.read or send it with client.change(WireKinds.…)")
                 }
                 guard file != "NodeClient.swift", !line.trimmingCharacters(in: .whitespaces).hasPrefix("//") else { continue }
-                if line.contains("client.request(") { found.append("\(place): a read not through its type (client.read(WireKinds.…))") }
-                // `K.self`: the generic helpers' (`CardCommand.act`, `SessionCommand.act`), over a `WireChangeKind`.
-                if line.contains("client.change("), !line.contains("client.change(WireKinds."), !line.contains("client.change(K.self") {
+                // A kind left out on purpose (`WireKinds.leftOut`) may be asked or sent by name; nothing else is.
+                let leftOut = WireKinds.leftOut.contains { line.contains("\"\($0)\"") }
+                if line.contains("client.request("), !leftOut { found.append("\(place): a read not through its type (client.read(WireKinds.…))") }
+                // `K.self`: the generic helpers' (`CardCommand.act`, `SessionCommand.act`), over a `WireChangeKind`; `kind`: the
+                // one for the kinds left out (`SessionCommand.act`'s by name, which refuses any other).
+                if line.contains("client.change("), !line.contains("client.change(WireKinds."), !line.contains("client.change(K.self"),
+                   !(file == "Sessions.swift" && line.contains("client.change(kind,")), !leftOut {
                     found.append("\(place): a state change not through its type (client.change(WireKinds.…))")
                 }
+                if line.contains("act(\""), !leftOut { found.append("\(place): act by name for a kind that isn't left out (WireKinds.leftOut)") }
             }
         }
         #expect(found.isEmpty, "\(found.joined(separator: "\n"))")
+    }
+
+    /// The kinds left out are none of the typed ones, and every recorded kind is typed or left out.
+    @Test func everyKindIsTypedOrLeftOut() {
+        let typed = Swift.Set(WireKinds.typed + WireKinds.changes.map { $0.kind })
+        #expect(typed.isDisjoint(with: WireKinds.leftOut))
+        #expect(Requests.recorded.subtracting(typed).isSubset(of: WireKinds.leftOut), "\(Requests.recorded.subtracting(typed).subtracting(WireKinds.leftOut))")
+        #expect(Swift.Set(RequestArguments.untyped.keys).isSubset(of: WireKinds.leftOut))
     }
 
     /// A typed state change's keys are its arguments' (`WireArgs.keys`): `RequestArguments` refuses any other, naming it.

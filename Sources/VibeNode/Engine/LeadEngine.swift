@@ -335,7 +335,10 @@ public final class LeadEngine: @unchecked Sendable {
     /// The acting answers whose settle the vault is still asked for (`PluginKey.name`): nothing has run for them yet.
     var pluginSettling: Set<String> = []
     /// The plugin page open now (one at a time on a node).
-    var pluginPage: PluginPage?
+    /// The node's one plugin page, whose plugin and request it serves (`openPluginPage`).
+    var pluginPage: PluginPageSlot?
+    /// A page's address for the answer that opened it (`PluginKey.name`): printed in that answer's reply, then let go.
+    var pluginPageLines: [String: (url: URL, life: TimeInterval)] = [:]
     /// When the vault's record began, as the vault says (a host restart starts it over): what `plugin list` says a
     /// plugin is at its default since.
     var pluginRecordSince: Date?

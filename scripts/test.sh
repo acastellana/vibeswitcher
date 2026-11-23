@@ -47,6 +47,10 @@
 #   "flaky (passed on retry): Module.Suite/name()" (`swift_tests_retrying_failed`, below; TestScriptRetryTests).
 #   For a merge's and an audit's full run, where one load-sensitive test failing would fail every merge.
 # scripts/test.sh --perf [swift test options]: only the benches (no web tests), on a scratch home as above.
+# scripts/test.sh --tsan [swift test options]: the Swift tests (no web tests) built with the thread sanitizer, in their
+#   own build folder (.build/tsan, so the usual build stays), on a scratch home as above. Every process of the run, the
+#   scratch hosts and servers the tests start too, writes each race it sees to $VS_TSAN_REPORTS (default .build/tsan-reports)
+#   as tsan.<pid>; the run fails when there is one, naming each report's first frames (the nightly v2-tsan workflow).
 # scripts/test.sh --width: only the width Swift Testing would get here (`slot_width`, below; TestScriptWidthTests).
 # scripts/test.sh --leftovers MARK: only the check, for the processes whose environment or arguments hold MARK
 #   (LeftoverCheckTests); exit 1 when it ended any.
@@ -245,6 +249,11 @@ if [[ ${1:-} == --preferences ]]; then
     shift 2
     [[ ${1:-} == -- ]] && shift
 fi
+tsan=""
+if [[ ${1:-} == --tsan ]]; then
+    shift
+    tsan=1
+fi
 perf=""
 if [[ ${1:-} == --perf ]]; then
     shift
@@ -275,7 +284,22 @@ export VIBESWITCHER_PREFERENCE_LEDGER=$tool_scratch/preference-suites
 # (scripts/lib/swift-jobs.sh), and so are the tests (`slot_width` above). The bash it runs drops the team session's
 # variables first; vs-heavy and its supervisor keep them.
 swift_tests() {
-    Resources/bin/vs-heavy --as scripts/test.sh bash -c 'clean_test_environment; slot_width; heavy_swift build || { : > "$VS_BUILD_FAILED_MARK"; exit 1; }; heavy_swift test "$@"' scripts/test.sh "$@"
+    Resources/bin/vs-heavy --as scripts/test.sh bash -c 'clean_test_environment; slot_width; heavy_swift build ${VS_SWIFT_BUILD_OPTIONS:-} || { : > "$VS_BUILD_FAILED_MARK"; exit 1; }; heavy_swift test ${VS_SWIFT_BUILD_OPTIONS:-} "$@"' scripts/test.sh "$@"
+}
+
+# --tsan's reports: none, 0; else each report's race and its first frames in the repository's code, and 1.
+tsan_summary() {
+    local reports=("$VS_TSAN_REPORTS"/tsan.*)
+    if [[ ! -e ${reports[0]} ]]; then
+        echo "thread sanitizer: no race reported"
+        return 0
+    fi
+    echo "thread sanitizer: ${#reports[@]} report file(s) in $VS_TSAN_REPORTS:"
+    for report in "${reports[@]}"; do
+        echo "--- $(basename "$report") (the process of $(grep -m1 -oE 'pid=[0-9]+' "$report" || echo '?'))"
+        grep -E '^WARNING: ThreadSanitizer|^SUMMARY: ThreadSanitizer|^  (Write|Read|Previous write|Previous read|Atomic)' "$report" | head -20
+    done
+    return 1
 }
 
 # The most failed tests --retry-failed retries: more is a broken change, not a flake.
@@ -437,6 +461,14 @@ if [[ -n $web_only ]]; then
     run_web_tests "$web_only"
     status=$?
 else
+    if [[ -n $tsan ]]; then
+        export VS_SWIFT_BUILD_OPTIONS="--sanitize=thread --scratch-path .build/tsan"
+        export VS_TSAN_REPORTS=${VS_TSAN_REPORTS:-$PWD/.build/tsan-reports}
+        rm -rf "$VS_TSAN_REPORTS" && mkdir -p "$VS_TSAN_REPORTS" || exit 1
+        # Each process, the scratch hosts and servers too, writes its own file; a race doesn't end it.
+        export TSAN_OPTIONS="log_path=$VS_TSAN_REPORTS/tsan halt_on_error=0 second_deadlock_stack=1 ${TSAN_OPTIONS:-}"
+        echo "thread sanitizer run: built in .build/tsan; reports in $VS_TSAN_REPORTS"
+    fi
     if [[ -n $perf ]]; then
         echo "perf run: the benches alone; the Mac's 1-minute load is $(load_one_minute) on $(cpu_count) cores"
         export VIBESWITCHER_PERF=1
@@ -462,8 +494,10 @@ else
     fi
     status=$?
     check_preferences "$preferences_before" "$defaults_before" || status=1
-    # Even when the build or a test failed: they don't need the build, and their result is worth having. Not in --perf.
-    if [[ -z $perf ]]; then
+    [[ -z $tsan ]] || tsan_summary || status=1
+    # Even when the build or a test failed: they don't need the build, and their result is worth having. Not in --perf
+    # or --tsan.
+    if [[ -z $perf && -z $tsan ]]; then
         run_web_tests Tests/Web || status=1
         # The node's web client (WebApp/: its store, its socket feed against the wire's vectors, its no-markup lint).
         run_web_tests WebApp/tests || status=1

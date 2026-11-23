@@ -372,6 +372,12 @@ and its [attack review](reviews/v2-security-review-2026-11-13.md), fixed on Linu
 Work `v2` leaves undone because it is shared with main (a change to the Mac's behaviour), or because only a Mac runs
 it. Each is done once the Mac work begins.
 
+- **`HostServer.watch(owner:)`'s data race, main's too**: main stores `ownerWatch` from the thread that starts the host
+  while the watch of an owner already gone reports on the host's `queue`, where `ownerGone` reads it (the thread
+  sanitizer's first run on Linux, 2026-11-23: a sanitized host whose owner was gone exited 66). Fixed on `v2` by making
+  and storing the watch on `queue` (the port map's non-seam row for `HostServer.swift` `watch(owner:)`); main takes the
+  same few lines at the next merge, and a Mac run of `TestHostsTests.aHostWhoseOwnerIsAlreadyGoneExits` under
+  `swift test --sanitize=thread` checks it.
 - **`TeamRowsTests.anAuditHeldBeforeItsVerifierStartsShowsTheResetInsteadOfWorkerProgress` (app), skipped on the
   runner** (`scripts/ci/macos-runner-skips.txt`): it pins main's Fable for a sensitive audit, and v2's
   `security_audit_model` defaults to mythos ([the port map's](v2-port-map.md) row for `securityAuditModel`), so the

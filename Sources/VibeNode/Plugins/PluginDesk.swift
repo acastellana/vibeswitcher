@@ -18,25 +18,36 @@ public protocol StampedAsk: Sendable {
 /// folder's (`PluginLintTests`). Everything on the engine's queue unless it says otherwise.
 public struct PluginDesk {
     private unowned let engine: LeadEngine
+    /// The engine again, held weakly: what a plugin's program answers late (after the engine went, a test's) is dropped.
+    private weak var alive: LeadEngine?
     public let plugin: FeaturePlugin
+    /// The node's root, the log and the queues: the desk's own, so a late callback reaching them touches no engine.
+    public let root: URL
+    public let note: (String) -> Void
+    /// The engine's queue, and the plugins' own for reading files (one step at a time).
+    public let queue: DispatchQueue
+    public let work: DispatchQueue
 
     init(engine: LeadEngine, plugin: FeaturePlugin) {
         self.engine = engine
+        self.alive = engine
         self.plugin = plugin
+        (root, note, queue, work) = (engine.root, engine.note, engine.queue, engine.pluginWork)
+    }
+
+    /// Runs `body` on the engine's queue while the engine lives; nothing once it has gone.
+    public func later(_ body: @escaping () -> Void) {
+        queue.async { [weak alive] in
+            guard alive != nil else { return }
+            body()
+        }
     }
 
     var id: String { plugin.info.id }
-
-    /// The node's root.
-    public var root: URL { engine.root }
-    public var note: (String) -> Void { engine.note }
     /// The plugins' clock (a test's own).
     public var now: Date { engine.pluginNow() }
     /// A scratch node's (a test's): what its sessions get keeps to its root.
     public var isScratch: Bool { engine.isScratch }
-    /// The engine's queue, and the plugins' own for reading files (one step at a time).
-    public var queue: DispatchQueue { engine.queue }
-    public var work: DispatchQueue { engine.pluginWork }
 
     /// This plugin's settings as the user set them, by name (none set: its default).
     public var settings: [String: String] {
@@ -257,6 +268,8 @@ public struct PluginDesk {
         guard let expires = card.expiresAt, expires > stamp.created, expires.timeIntervalSince(stamp.created) <= plugin.info.life + 1 else {
             return .failure(PluginRefusal("its expiry isn't within \(plugin.info.title)'s declared life (\(Int(plugin.info.life / 60)) minutes) of its filing"))
         }
+        // Expired already: never drawn (the review of 6e91f053, L2).
+        guard expires > now else { return .failure(PluginRefusal("request \(shown.request) expired before it was drawn")) }
         guard engine.pluginCards[key] == nil else { return .failure(PluginRefusal("request \(shown.request) has a card already")) }
         guard !engine.pluginSettled.contains(key.name) else { return .failure(PluginRefusal("request \(shown.request) was settled already")) }
         var made = CardStore.Card(root: root, kind: .plugin, at: stamp.created)
@@ -295,6 +308,13 @@ public struct PluginDesk {
         }
     }
 
+    /// Whether `request` was settled (here or by a server before this one): it won't be drawn, so it isn't asked about.
+    public func isSettled(_ request: String) -> Bool { engine.pluginSettled.contains(PluginKey(plugin: id, request: request).name) }
+
+    /// Withdraws every open card of this plugin, telling their askers (its program broke the protocol, say).
+    /// Every open card of this plugin's withdrawn, its askers told: `ended`, its program ended (why), else turned off.
+    public func withdrawAll(ended: String? = nil) { engine.withdraw(plugin, ended: ended) }
+
     /// `request` is settled (it got no card, or its card closed): never drawn again, this server's or the next's
     /// (kept in the vault).
     public func settle(_ request: String) { engine.settlePluginRequests([PluginKey(plugin: id, request: request).name]) }
@@ -323,6 +343,12 @@ public struct PluginDesk {
             + "what the answer started may still run, but you won't hear more of it from VibeSwitcher."
     }
 
+    /// What an asker is told when its card was withdrawn because the plugin's program ended (`why`).
+    public func endedText(_ card: PluginCard, why: String) -> String {
+        "[VibeSwitcher] Your \(card.noun) \(card.request) was withdrawn: \(plugin.info.title)'s program ended (\(why)), "
+            + "so nothing more will be done for it. Don't file it again unless the user turns \(plugin.info.title) off and on."
+    }
+
     /// What an asker is told when its card was withdrawn: the user turned the plugin off.
     public func withdrawnText(_ card: PluginCard) -> String {
         "[VibeSwitcher] Your \(card.noun) \(card.request) was withdrawn: the user turned \(plugin.info.title) off on this node, "
@@ -340,16 +366,17 @@ struct PluginStamp: Equatable {
 /// What a plugin's `perform` may do for the card it answers, and nothing else: start a session (the host's spawn).
 public struct PluginAct {
     let start: (SpawnRequest, @escaping (Result<HostSession, HostLink.Failure>) -> Void) -> Void
-    let page: (PluginPage.Spec, @escaping (Data) -> Bool, @escaping (Bool) -> Void, @escaping (Result<URL, PluginRefusal>) -> Void) -> Void
+    let page: (PluginPage.Spec, @escaping (Data, @escaping (Bool) -> Void) -> Void, @escaping (Bool) -> Void, @escaping (Result<Void, PluginRefusal>) -> Void) -> Void
 
     /// Starts a session through the host; `then` with it, off the engine's queue.
     public func spawn(_ request: SpawnRequest, then: @escaping (Result<HostSession, HostLink.Failure>) -> Void) { start(request, then) }
 
     /// Serves `spec` once (`PluginPage`): `take` hears each answer's bytes (true: taken), `ended` whether one was taken
-    /// when the page stops; `then` with its address, for the answering terminal only, or why not (one page at a time on
-    /// a node). Callbacks on the engine's queue.
-    public func openPage(_ spec: PluginPage.Spec, take: @escaping (Data) -> Bool, ended: @escaping (Bool) -> Void,
-                         then: @escaping (Result<URL, PluginRefusal>) -> Void) { page(spec, take, ended, then) }
+    /// when the page stops; `then` with whether it opened, or why not (one page at a time on a node; only an acting
+    /// answer opens one). The plugin never sees the page's address: the core prints it in the answering terminal's
+    /// reply itself (the review of 6e91f053, L1). Callbacks on the engine's queue.
+    public func openPage(_ spec: PluginPage.Spec, take: @escaping (Data, @escaping (Bool) -> Void) -> Void, ended: @escaping (Bool) -> Void,
+                         then: @escaping (Result<Void, PluginRefusal>) -> Void) { page(spec, take, ended, then) }
 }
 
 /// A plugin's card, by its request.
