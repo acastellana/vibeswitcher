@@ -74,6 +74,7 @@ test('a card’s request carries the card, the seen the page drew it with and it
   assert.deepEqual(cardArgs(card), { card: 'local:card:c1', seen: 'v3:1a2b' });
   assert.deepEqual(answerArgs(card, 'Thursday'), { card: 'local:card:c1', seen: 'v3:1a2b', text: 'Thursday', version: 2 });
   assert.deepEqual(cardArgs({ id: 'x' }, { extra: 1 }), { card: 'x', seen: null, extra: 1 });
+  assert.deepEqual(answerArgs({ id: 'p', seen: 's1', plugin: { plugin: 'shell' } }, 'run'), { card: 'p', seen: 's1', text: 'run' }, 'a plugin’s card: its word, no version');
 
   const { store, socket } = await page({ rights: ['read', 'draft', 'act'], kinds: ACTING });
   store.apply({ v: 1, kind: 'snapshot', epoch: 'e', seq: 0, state: { node: null, sessions: [], leads: [], cards: [{ id: card.id, open: true, seen: card.seen, question: card.question }], boards: [] } });

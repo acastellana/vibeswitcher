@@ -23,7 +23,8 @@ export function refusalWords(error) {
 export const cardArgs = (card, args = {}) => ({ card: card.id, seen: card.seen ?? null, ...args });
 
 // An answer to a question or an approval: its words and the version answered.
-export const answerArgs = (card, text) => cardArgs(card, { text, version: card.question?.version ?? null });
+// A question's version answered; a plugin's card (a shell request's) has none, so none is sent.
+export const answerArgs = (card, text) => cardArgs(card, { text, ...(card.question?.version != null ? { version: card.question.version } : {}) });
 
 // A setting a page may not set even when it acts: web_acts on (only off), a floor, the policy. The node refuses them
 // (`voice`); the page shows their terminal line instead of a button.

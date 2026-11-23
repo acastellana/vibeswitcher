@@ -147,7 +147,7 @@ export function questionCard(app, first) {
   let keys = { buttons: [], hold: null };
 
   // With the `act` right the click is the answer: the card, the `seen` it was drawn with, the words and the version.
-  const choose = (answer) => { if (answer.trim()) app.store.act(card.id, 'answer', { text: answer.trim(), version: card.question?.version ?? null, seen: card.seen ?? null }); };
+  const choose = (answer) => { if (answer.trim()) app.store.act(card.id, 'answer', { text: answer.trim(), ...(card.question?.version != null ? { version: card.question.version } : {}), seen: card.seen ?? null }); };
   const hold = () => app.store.act(card.id, 'hold', { seen: card.seen ?? null });
 
   function closedLine(mark, ...text) {
