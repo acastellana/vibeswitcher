@@ -288,6 +288,42 @@ struct NodeAcceptanceTests {
         #expect(asked.status == 0 && asked.output.contains("Name it subtract or minus?"), "\(asked.output)\(asked.errors)\n\(node.said)")
     }
 
+    @Test("A12b: the lead's goals head its tasks on the board, and a task with none is called unsorted")
+    func a12bGoalsHeadTheBoard() async throws {
+        let node = try await ScratchNode(scratch, holdFirstLook: true)
+        defer { node.stop() }
+        let repo = try await Self.repository(node)
+        let lead = try await Self.startLead(node, repo, goal: "add a subtract function with a test")
+        let before = lead.tools.calls().count
+        // One at a time, each answered before the next (the goal is there before a task names it).
+        let calls: [(String, [String: Any])] = [
+            ("add_goal", ["title": "Basic arithmetic", "done": "Add and subtract work with tests"]),
+            ("add_task", ["title": "Add subtract", "goal": "Add subtract.", "acceptance": ["it builds"], "auto_advance": false, "goal_id": "basic-arithmetic"]),
+            ("add_task", ["title": "Write the readme", "goal": "A readme.", "acceptance": ["it reads well"], "auto_advance": false]),
+        ]
+        for (index, (name, arguments)) in calls.enumerated() {
+            try lead.tools.call(name, arguments)
+            try #require(await eventually(timeout: 120) { lead.tools.calls().count == before + index + 1 }, "\(lead.tools.calls())")
+        }
+        // The last add's reply carries the reminder: one open task has no goal.
+        #expect(lead.tools.text(of: lead.tools.calls()[before + 2]).contains("Goals: 1 open task has no goal (write-the-readme)"), "\(lead.tools.calls())")
+        let shown = await Self.polled(timeout: 60) { (try? await node.run(["board", repo.path]))?.output.contains("Write the readme") == true }
+        let board = try await node.run(["board", repo.path])
+        #expect(shown, "\(board.output)\(board.errors)")
+        let text = board.output
+        let heading = try #require(text.range(of: "Goal: Basic arithmetic (1 to go of 1) — done means: Add and subtract work with tests"), "\(text)")
+        let task = try #require(text.range(of: "Add subtract"), "\(text)")
+        let unsorted = try #require(text.range(of: "Unsorted (no goal)"), "\(text)")
+        let readme = try #require(text.range(of: "Write the readme"), "\(text)")
+        #expect(heading.lowerBound < task.lowerBound && task.lowerBound < unsorted.lowerBound && unsorted.lowerBound < readme.lowerBound, "\(text)")
+        let json = try await node.run(["board", repo.path, "--json"])
+        let value = try #require(NodeWire.decode(NodeWire.Value.self, Data(json.output.utf8)), "\(json.output)")
+        let first = try #require(value["boards"]?.array?.first)
+        #expect(first["goals"]?.array?.first?["id"]?.string == "basic-arithmetic" && first["goals"]?.array?.first?["toGo"]?.int == 1, "\(first)")
+        #expect(first["tasks"]?.array?.first { $0["slug"]?.string == "add-subtract" }?["goal"]?.string == "basic-arithmetic", "\(first)")
+        #expect(WireSchema.check(first, as: "board", strict: true) == nil, "\(first)")
+    }
+
     @Test("A13: answer and tell reach the lead, which takes them as the user's")
     func a13AnswerAndTell() async throws {
         let node = try await ScratchNode(scratch, holdFirstLook: true)

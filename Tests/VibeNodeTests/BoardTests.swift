@@ -99,7 +99,15 @@ struct BoardTests {
                                              worker: LeadTokens(output: 10_000, sessions: 1, models: ["claude-opus-5-5"], cost: 0.25), verifier: nil)
         let questioned = BoardValue.value(project: "p", root: "/r", board: asked, now: WireVectors.boardNow)
         let nothingMerged = BoardValue.value(project: "p", root: "/r", board: LeadBoard(), now: WireVectors.boardNow)
-        for value in [WireVectors.boardValue, WireVectors.boardMoved, unreadable, older, questioned, nothingMerged] {
+        // A server before goals: no `goals`, no task's `goal`.
+        var beforeGoals = WireVectors.boardValue.object ?? [:]
+        beforeGoals["goals"] = nil
+        beforeGoals["tasks"] = .array((beforeGoals["tasks"]?.array ?? []).map { task in
+            var fields = task.object ?? [:]
+            fields["goal"] = nil
+            return .object(fields)
+        })
+        for value in [WireVectors.boardValue, WireVectors.boardMoved, unreadable, older, questioned, nothingMerged, .object(beforeGoals)] {
             #expect(WireSchema.check(value, as: "board", strict: true) { field, state in seen.insert("\(field) \(state)") } == nil)
         }
         let missed = WireSchema.coverage(of: ["board"]).subtracting(seen).sorted()
@@ -234,6 +242,23 @@ struct BoardTests {
         // One character of 5 000 marks is one Character, and still a few bytes.
         let one = BoardValue.text("e" + String(repeating: "\u{0300}", count: 5_000), limit: 10_000)
         #expect(one.utf8.count < 20, "\(one.utf8.count)")
+    }
+
+    /// The goals on the value: each its id, title, what done means, state and its tasks to go and finished, in order;
+    /// each task its goal. Fifty long goals still fit the byte budget (titles and lines capped, at most `mostGoals`).
+    @Test func theGoalsAreOnTheValueAndItStaysInItsBudget() throws {
+        let value = WireVectors.boardValue
+        let goals = try #require(value["goals"]?.array)
+        #expect(goals.map { $0["id"]?.string } == ["launch", "uploads"])
+        #expect(goals.first?["toGo"]?.int == 2 && goals.first?["finished"]?.int == 0 && goals.last?["state"]?.string == "done", "\(goals)")
+        #expect(value["tasks"]?.array?.first { $0["slug"]?.string == "upload-retry" }?["goal"]?.string == "uploads")
+        #expect(WireSchema.check(value, as: "board", strict: true) == nil)
+        var board = WireVectors.sampleBoard(now: WireVectors.boardNow.timeIntervalSince1970)
+        board.goals = (0..<80).map { LeadGoal(id: "goal-\($0)", title: String(repeating: "目", count: 2_000), done: String(repeating: "済", count: 2_000)) }
+        let big = BoardValue.value(project: "p", root: "/r", board: board, now: WireVectors.boardNow)
+        #expect(big["goals"]?.array?.count == BoardValue.mostGoals)
+        #expect(NodeWire.message(big).count <= BoardValue.mostBytes)
+        #expect((big["goals"]?.array?.first?["title"]?.string?.utf8.count ?? .max) <= BoardValue.titleBytes + 3)
     }
 
     /// A board whose tasks would take more than `mostBytes` encoded (150 tasks, each near its caps): the last ones go
@@ -415,15 +440,15 @@ struct BoardTests {
             "  - The hero image is the new photo, sized for phones",
             "  - Every footer link opens its page",
             "  Cost: 2 tasks, 1.5 h of worker time, 12M tokens, est. $6.40; most expensive: Swap the hero image (est. $4.10) (estimates at the API prices of 2026-11-01)",
-            "Needs attention",
+            // The goals as headings over their tasks (the open first), then the tasks with none (the vectors' board has two).
+            "Goal: Launch the paid plans (2 to go of 2) — done means: Pricing and onboarding are live for new sign-ups",
             "  Blocked 18m  Rewrite the pricing page's copy — Which plan names do we launch with?",
-            "Running",
             // The running task's AI summary, in its line's place (the vectors' board carries one).
             "  Rework 1 4m  Onboarding: the three first-run steps — Making the sign-up form check each field as you leave it",
+            "Goal: Uploads never lose a file (done) — done means: A failed upload retries once and says so",
             "  In review 1m  Retry a failed upload once — Waiting for the audit",
-            "Waiting",
+            "Unsorted (no goal)",
             "  Queued 25m  UI consistency pass over the sidebar — Waits on Onboarding: the three first-run steps",
-            "Done today",
             "  Merged  Cache the static assets — merged 8a3f1e2c, tests passed",
             "1 needs attention · 2 running · 1 waiting · 1 done today",
             // The lead's latest decisions: the long one by its AI summary.
@@ -431,6 +456,17 @@ struct BoardTests {
             "  Decided: run the two small tasks side by side (5m ago)",
             "  Decided: keep the sidebar pass for after onboarding (30m ago)",
         ] + BoardText.records(WireVectors.boardValue, now: WireVectors.boardNow, calendar: utc), "\(lines.joined(separator: "\n"))")
+        // A board with no goals (a lead that keeps none): its tasks grouped by state, as before goals.
+        var noGoals = WireVectors.boardValue.object ?? [:]
+        noGoals["goals"] = .array([])
+        let grouped = BoardText.lines(.object(noGoals), now: WireVectors.boardNow, calendar: utc, home: "/home/u")
+        let byState = ["Needs attention", "  Blocked 18m  Rewrite the pricing page's copy — Which plan names do we launch with?", "Running",
+                       "  Rework 1 4m  Onboarding: the three first-run steps — Making the sign-up form check each field as you leave it",
+                       "  In review 1m  Retry a failed upload once — Waiting for the audit", "Waiting",
+                       "  Queued 25m  UI consistency pass over the sidebar — Waits on Onboarding: the three first-run steps", "Done today",
+                       "  Merged  Cache the static assets — merged 8a3f1e2c, tests passed"]
+        #expect(grouped.firstIndex(of: byState[0]).map { Array(grouped[$0..<($0 + byState.count)]) } == byState, "\(grouped.joined(separator: "\n"))")
+        #expect(!grouped.contains { $0.hasPrefix("Goal:") || $0.hasPrefix("Unsorted") })
         // The Team tab's other records under them (2026-11-21).
         let records = BoardText.records(WireVectors.boardValue, now: WireVectors.boardNow, calendar: utc)
         #expect(records.first == "Scorecard", "\(records)")
