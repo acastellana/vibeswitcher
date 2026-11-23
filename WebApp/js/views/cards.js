@@ -182,7 +182,10 @@ export function questionCard(app, first) {
     const rank = PRIORITY[question.priority] ? question.priority : 'important';
     const priority = h('span', { class: 'priority ' + rank }, PRIORITY[rank]);
     const asked = h('time', { class: 'asked', data: { ago: card.at } }, t('askedAgo', { d: since(card.at) }));
-    el.append(h('header', { class: 'card-head' }, priority, asked));
+    // Who asks: the lead, and the task its question is about when it says (its title from the board).
+    const task = question.task ? app.store.state.boards.get(card.project)?.tasks?.find((one) => one.slug === question.task)?.title || question.task : null;
+    const who = h('span', { class: 'card-asker' }, task ? t('askerTask', { task }) : t('askerLead'));
+    el.append(h('header', { class: 'card-head' }, priority, who, asked));
 
     if (card.kind === 'approval' && card.approval) {
       el.append(approvalFacts(card.approval));
@@ -307,7 +310,7 @@ function pushCard(lead) {
   const said = pushLines(lead.push, lead.root);
   const fact = (name, ...value) => [h('dt', null, name), h('dd', null, value)];
   return h('article', { class: 'card push-card', 'aria-label': t('cPushAsk') },
-    h('header', { class: 'card-head' }, h('span', { class: 'priority important' }, t('cPush')),
+    h('header', { class: 'card-head' }, h('span', { class: 'priority important' }, t('cPush')), h('span', { class: 'card-asker' }, t('askerLead')),
       h('time', { class: 'asked', data: { ago: lead.push.askedAt } }, t('askedAgo', { d: since(lead.push.askedAt) }))),
     h('h3', { class: 'card-question' }, t('cPushAsk')),
     h('div', { class: 'facts' },

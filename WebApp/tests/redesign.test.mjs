@@ -8,7 +8,7 @@ import { readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { leadLines, shownLines, dialCounts, questionHead, cut, shortHashes, firstSentence, taskStep, taskTone, teamCounts, standing, waitsOn,
-  waitingCards, projectsOf, firstProject, lineKey } from '../js/conversation.js';
+  waitingCards, projectsOf, firstProject, lineKey, waitingPlaces, nextPlace } from '../js/conversation.js';
 import { parseRoute, projectHref, routeHref, sessionHref, boardHref } from '../js/ui.js';
 import { t, TABLES, pickLanguage, setLanguage, listed } from '../js/i18n.js';
 import { tellLine } from '../js/actions.js';
@@ -146,4 +146,25 @@ test('the page’s words: the browser’s language when the table has it, counte
 test('a note for the lead is the tell line, quoted as the shell needs', () => {
   assert.equal(tellLine('/home/u/site', 'Use the new parser'), "vibeswitcher tell /home/u/site 'Use the new parser'");
   assert.equal(tellLine('/home/u/my site', "it's done"), "vibeswitcher tell '/home/u/my site' 'it'\\''s done'");
+});
+
+test('what waits, place by place, and the next place from the one shown: projects, your own sessions, This node', () => {
+  const state = {
+    leads: new Map([['p1', { project: 'p1', root: '/home/u/site', session: 's1' }], ['p2', { project: 'p2', root: '/home/u/api', session: 's2' }]]),
+    boards: new Map(),
+    cards: new Map([['c1', { id: 'c1', kind: 'question', project: 'p1', open: true, at: '2026-11-17T09:00:00.000Z' }],
+      ['c2', { id: 'c2', kind: 'config', project: 'home', open: true, at: '2026-11-17T09:00:00.000Z' }],
+      ['c3', { id: 'c3', kind: 'plugin', project: null, open: true, at: '2026-11-17T09:00:00.000Z', plugin: { session: 'O2' } }],
+      ['c4', { id: 'c4', kind: 'plugin', project: null, open: true, at: '2026-11-17T09:00:00.000Z', plugin: { session: 'O1' } }]]),
+    sessions: new Map([['s1', { id: 's1', role: 'lead' }], ['s2', { id: 's2', role: 'lead' }], ['o1', { id: 'o1', role: null, status: 'needs-you' }], ['o2', { id: 'o2', role: null, status: 'working' }]]),
+  };
+  const own = (session) => !session.role;
+  const places = waitingPlaces(state, own);
+  assert.deepEqual(places, [{ kind: 'project', id: 'p1', count: 1 }, { kind: 'session', id: 'o1', count: 1 }, { kind: 'session', id: 'o2', count: 1 }, { kind: 'node', id: null, count: 1 }],
+    'a plugin’s request waits under its asker’s chat, counted once there (a session that needs you already counts it)');
+  assert.deepEqual(nextPlace(places, { name: 'project', id: 'p1' }), places[1], 'from the project shown: the next place');
+  assert.deepEqual(nextPlace(places, { name: 'node' }), places[0], 'round again');
+  assert.deepEqual(nextPlace(places, { name: 'session', id: 'o1' }), places[2]);
+  assert.deepEqual(nextPlace(places, { name: 'settings' }), places[0], 'from elsewhere: the first');
+  assert.equal(nextPlace([], { name: 'home' }), null);
 });

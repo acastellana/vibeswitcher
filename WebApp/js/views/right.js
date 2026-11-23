@@ -8,7 +8,7 @@
 
 import { h, setText } from '../dom.js';
 import { clock, moment, tilde, lastPart, taskLine } from '../words.js';
-import { t, listed, lang } from '../i18n.js';
+import { t, listed, lang, nodeWords } from '../i18n.js';
 import { standing, waitsOn, cut, shortHashes } from '../conversation.js';
 import { routeHref, sessionHref } from '../ui.js';
 import { settingsHref } from './settings.js';
@@ -32,7 +32,7 @@ export function rightColumn(app) {
     const fact = (label, ...value) => h('div', { class: 'tdet-fact' }, h('small', null, label), h('span', null, ...value));
     const note = task.checkpoint || task.checkpoints?.[task.checkpoints.length - 1];
     if (note?.text) parts.push(fact(t('latestNote', { time: clock(note.at) }), cut(shortHashes(note.text), 400)));
-    else if (taskLine(task)) parts.push(fact(t('now'), cut(shortHashes(taskLine(task)), 400)));
+    else if (taskLine(task)) parts.push(fact(t('now'), cut(shortHashes(nodeWords(taskLine(task))), 400)));
     if (task.audit) parts.push(fact(t('audit'), t('auditWords', { r: task.audit.rounds ?? 0, verdict: task.audit.verdict || '…', f: task.audit.findings ?? 0, o: task.audit.open ?? 0 })));
     if (task.blocker) parts.push(fact(t('blockedBecause'), cut(shortHashes(task.blocker), 400)));
     if (task.group === 'attention' || task.status === 'blocked') {
@@ -52,7 +52,7 @@ export function rightColumn(app) {
   function taskRow(task, board, route) {
     const open = route.task === task.slug;
     const row = h('a', { class: 'task-row2' + (open ? ' open' : ''), href: routeHref(route, { task: open ? null : task.slug, sheet: null }), 'aria-expanded': String(open) },
-      stepBar(task), h('span', { class: 'task-words' }, h('span', { class: 'task-name' }, task.title), h('span', { class: `task-state tone-text-${task.status === 'blocked' || task.group === 'attention' ? 'blocked' : ''}` }, task.state || '')));
+      stepBar(task), h('span', { class: 'task-words' }, h('span', { class: 'task-name' }, task.title), h('span', { class: `task-state tone-text-${task.status === 'blocked' || task.group === 'attention' ? 'blocked' : ''}` }, nodeWords(task.state))));
     return open ? [row, taskDetails(task, board, route)] : [row];
   }
 
@@ -74,7 +74,7 @@ export function rightColumn(app) {
     const card = board?.scorecard;
     if (!card || !card.merged) return [h('p', { class: 'col-note' }, t('scoreNone'))];
     return [
-      h('div', { class: 'tiles' }, h('div', { class: 'tile' }, h('b', null, String(card.merged)), h('span', null, t('merged', { n: '' }).trim())),
+      h('div', { class: 'tiles' }, h('div', { class: 'tile' }, h('b', null, String(card.merged)), h('span', null, t('merged', { n: card.merged }).replace(String(card.merged), '').trim())),
         (card.tiles || []).map((tile) => h('div', { class: 'tile', title: tile.help || '' }, h('b', null, tile.value), h('span', null, tile.label), tile.note ? h('small', null, tile.note) : null))),
       card.footnote ? h('p', { class: 'col-note' }, card.footnote) : null,
       card.receipts ? h('p', { class: 'col-note' }, card.receipts) : null,

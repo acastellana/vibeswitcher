@@ -61,8 +61,8 @@ async function run() {
     record('A3 pair', connected ? 'pass' : 'fail', connected ? `paired, ${projects.length} projects and ${sessions.length} of your own sessions listed` : 'no token or still offline after 20 s');
     if (!connected) return;
 
-    // Brief me: a read, from the left column's summary line; its text in the side sheet.
-    const asked = await page.evaluate(`(() => { const b = document.querySelector('.left-summary'); if (!b || b.disabled) return false; b.click(); return true; })()`);
+    // Brief me: a read, from the left column's summary; its text in the side sheet.
+    const asked = await page.evaluate(`(() => { const b = document.querySelector('.summary-brief'); if (!b || b.hidden) return false; b.click(); return true; })()`);
     const brief = asked ? await page.until(`(() => { const s = document.querySelector('.sheet:not([hidden]) .sheet-body'); const t = s?.innerText.trim() || ''; return t && !/^Briefing|^Resumiendo/.test(t) ? t.slice(0, 80) : null; })()`, 60000) : null;
     await page.shot('brief');
     record('Brief me', !asked ? 'skip' : brief ? 'pass' : 'fail', !asked ? 'the node writes no briefing for this page' : brief || 'no brief in 60 s');

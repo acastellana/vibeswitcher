@@ -4,13 +4,16 @@
 // fixed time, so a loaded machine is only slower.
 //
 // What is looked for comes from the test, which made the node's state (EXPECT, a JSON file):
-//   { session, chatHref, chat, projectHref, question, result, shellHref, shell, board, replacedHref, plugin, setting }
+//   { session, chatHref, chat, projectHref, question, result, statement, task, shellHref, shell, board, replacedHref, plugin, setting }
 // The page is the redesigned one (docs/superpowers/specs/2026-11-23-v2-web-ui-design.md): three columns, a project's
 // lead conversation in the centre, its team on the right, the session view under Your own sessions.
 // - Projects and own sessions: the left lists the project; Your own sessions lists the named session.
 // - Chat: the session's conversation shows a line of its transcript (the session view, at its old address).
-// - Question card: the lead's open question, in the project's waiting block, under "1 question for you".
+// - Question card: the lead's open question, in the project's waiting block, under "1 question for you", saying
+//   the lead asks.
 // - Lead conversation: the lead's result as a line, and the header saying what needs you.
+// - Latest statement: the lead's latest decision at the top of a short conversation.
+// - What waits elsewhere: the summary's count a link to the next place that waits, that place marked.
 // - Side sheet: the result's line opens its whole text, its markdown table drawn as a table.
 // - Team tab: the right column's Team tab shows a task by its title, and it opens in place.
 // - Replaced lead: a lead session its project replaced is marked so in Your own sessions, and its inspector has no
@@ -88,7 +91,18 @@ async function shots(page, origin, folder) {
         await page.evaluate(`document.querySelector('.project-view .phone-only')?.click()`);
         await pause(500);
         fs.writeFileSync(path.join(folder, `drawer${suffix}-${theme}.png`), Buffer.from((await page.send('Page.captureScreenshot', { format: 'png' })).data, 'base64'));
+        await page.evaluate(`document.querySelector('.drawer-scrim')?.click()`);
       }
+    }
+  }
+  // The page in Spanish (?lang=es), its roadmap too.
+  await page.send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 900, deviceScaleFactor: 1, mobile: false });
+  for (const theme of ['light', 'dark']) {
+    await page.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: theme }] });
+    for (const [name, hash] of [['lead', project], ['roadmap', project.replace(/\/lead$/, '/roadmap')]]) {
+      await page.send('Page.navigate', { url: `${origin}/?lang=es${hash}` });
+      await pause(1500);
+      fs.writeFileSync(path.join(folder, `${name}-spanish-${theme}.png`), Buffer.from((await page.send('Page.captureScreenshot', { format: 'png' })).data, 'base64'));
     }
   }
   await page.send('Emulation.setEmulatedMedia', { features: [] });
@@ -131,7 +145,7 @@ async function run() {
     const question = await page.until(`(() => {
       const card = [...document.querySelectorAll('.project-view .card')].find((el) => el.offsetParent && el.innerText.includes(${JSON.stringify(expect.question)}));
       const title = document.querySelector('.project-view .asked-title')?.innerText || '';
-      return card && /question/i.test(title) ? title + ': ' + card.innerText.replace(/\\s+/g, ' ').slice(0, 80) : null;
+      return card && /question/i.test(title) && /the lead/.test(card.querySelector('.card-asker')?.innerText || '') ? title + ': ' + card.innerText.replace(/\\s+/g, ' ').slice(0, 80) : null;
     })()`, WAIT);
     await page.shot('question-card');
     record('Question card', question, question || `no card with "${expect.question}" under the waiting block's title`);
@@ -144,6 +158,19 @@ async function run() {
       return line && big && /needs? you/.test(big.innerText) && big.classList.contains('asked') ? big.innerText + ' · ' + line.innerText.replace(/\\s+/g, ' ') : null;
     })()`, WAIT);
     record('Lead conversation', talk, talk || `no result line "${expect.result}", or the header doesn't say what needs you`);
+
+    // Latest statement: the conversation is short (one line), so the lead's latest decision shows at its top.
+    const statement = await page.until(`(() => { const said = document.querySelector('.project-view .latest-said'); return said && said.innerText.includes(${JSON.stringify(expect.statement)}) ? said.innerText.replace(/\\s+/g, ' ') : null; })()`, WAIT);
+    record('Latest statement', statement, statement || `no "${expect.statement}" above a short conversation`);
+
+    // What waits elsewhere: the header counts this project's; the summary's count links to the next place that waits,
+    // and Your own sessions (where the replaced lead needs you) carries the asking colour.
+    const elsewhere = await page.until(`(() => {
+      const count = document.querySelector('.summary-count');
+      const own = document.querySelector('.place.asked');
+      return count && /^#\\/s\\//.test(count.getAttribute('href') || '') && own && own.dataset.place === 'ownSessions' ? count.innerText + ' → ' + decodeURIComponent(count.getAttribute('href')).slice(0, 24) + '; Your own sessions marked' : null;
+    })()`, WAIT);
+    record('What waits elsewhere', elsewhere, elsewhere || 'the summary’s count doesn’t lead to the session that waits, or Your own sessions isn’t marked');
 
     // Side sheet: the result's whole text, its table a table.
     const opened = talk && await page.evaluate(`(() => { const line = [...document.querySelectorAll('.project-view .line.kind-result')].find((el) => el.innerText.includes(${JSON.stringify(expect.result)})); line?.click(); return !!line; })()`);
