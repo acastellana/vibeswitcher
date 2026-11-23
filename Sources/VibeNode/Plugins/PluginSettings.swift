@@ -40,7 +40,7 @@ extension LeadEngine {
     func setPluginSetting(_ key: String, given: String, then: @escaping (Result<(value: String, was: String), CardFailure>) -> Void) {
         guard let (plugin, setting) = pluginSetting(key) else { return then(.failure(.gone("no setting \(key) of a plugin that is on"))) }
         let reset = NodeSettings.resetWords.contains(given.trimmingCharacters(in: .whitespacesAndNewlines).lowercased())
-        plugin.check(setting: setting.key, value: reset ? nil : given) { [weak self] checked in
+        plugin.check(setting: setting.key, value: reset ? nil : given, desk: desk(plugin)) { [weak self] checked in
             self?.queue.async { self?.checkedPluginSetting(checked, key: key, plugin: plugin, setting: setting, then: then) }
         }
     }

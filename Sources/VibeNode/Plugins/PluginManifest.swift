@@ -36,6 +36,16 @@ public struct PluginManifest: Codable, Equatable, Sendable {
     public var page: Bool?
     /// Ignored: an added plugin starts off.
     public var defaultOn: Bool?
+    /// Whether it keeps data: a private folder of its own, named by VIBESWITCHER_PLUGIN_DATA, which it reads as
+    /// untrusted input (the review of step C, H1). Without it the program has no writable place at all.
+    public var data: Bool?
+
+    /// The commands the node puts on sessions' PATH itself (`Resources/bin` as the Linux install ships it: the Mac app's
+    /// `vs-wallet` filer isn't shipped there, so the wallet plugin's own `vs-wallet` is the one found). A plugin's command
+    /// can't be one (the review of step C, L3); `PluginLintTests` holds this to the folder.
+    public static let nodeCommands: Set<String> = ["vs-ask", "vs-heavy", "vs-shell"]
+    /// What `Resources/bin` holds that the Linux install leaves out.
+    public static let macOnlyCommands: Set<String> = ["vs-wallet"]
 
     public static let fileName = "vibeswitcher-plugin.json"
     public static let bytesAtMost = 64 * 1024
@@ -56,7 +66,7 @@ public struct PluginManifest: Codable, Equatable, Sendable {
             return .failure(PluginRefusal("the manifest isn't a JSON object"))
         }
         let known: Set<String> = ["protocol", "id", "version", "title", "summary", "program", "commands", "settings", "brief", "life", "lifeWhy",
-                                  "page", "defaultOn"]
+                                  "page", "defaultOn", "data"]
         if let stray = object.keys.sorted().first(where: { !known.contains($0) }) {
             return .failure(PluginRefusal("the manifest has a field this node doesn't read: \(ConfigSeal.inert(stray, limit: 40))"))
         }
@@ -67,6 +77,15 @@ public struct PluginManifest: Codable, Equatable, Sendable {
         return manifest.refusal(builtIn: builtIn).map { .failure(PluginRefusal($0)) } ?? .success(manifest)
     }
 
+    /// The node's own name a title holds (VibeSwitcher, the node, the session host), or nil.
+    static func coreName(in title: String) -> String? {
+        let words = title.lowercased().split { !$0.isLetter && !$0.isNumber }.map(String.init)
+        if words.contains(where: { $0.contains("vibeswitcher") || $0 == "vs" }) { return "VibeSwitcher" }
+        if words.contains("node") { return "the node" }
+        if words.contains("host") { return "the session host" }
+        return nil
+    }
+
     /// Why this manifest isn't taken (nil: it is).
     func refusal(builtIn: Set<String>) -> String? {
         guard self.protocol == 1 else { return "protocol \(self.protocol): this node speaks 1" }
@@ -75,12 +94,14 @@ public struct PluginManifest: Codable, Equatable, Sendable {
         guard Self.plain(version, limit: 40), Self.plain(title, limit: 60), Self.plain(summary, limit: 300) else {
             return "version, title and summary are plain text (40, 60 and 300 characters at most)"
         }
+        // A title is the plugin's; the node's own names are the core's (the review of step C, L2).
+        if let named = Self.coreName(in: title) { return "title: \(named) is the node's own name" }
         let parts = program.split(separator: "/", omittingEmptySubsequences: false)
         guard !program.hasPrefix("/"), !parts.isEmpty, parts.allSatisfy({ !$0.isEmpty && $0 != "." && $0 != ".." }), program.count <= 200 else {
             return "program: a path inside the plugin's folder"
         }
         for command in commands ?? [] {
-            guard !["vs-ask", "vs-shell", "vs-heavy"].contains(command.name) else { return "commands: \(command.name) is the node's own" }
+            guard !Self.nodeCommands.contains(command.name) else { return "commands: \(command.name) is the node's own" }
             guard command.name.hasPrefix("vs-"), command.name.count <= 32, LeadVaultV2.pluginID(String(command.name.dropFirst(3))),
                   Self.plain(command.about, limit: 300) else { return "commands: each a vs-<word> with a plain line about it" }
         }
@@ -160,7 +181,9 @@ struct PluginFolder: Equatable {
         case .failure(let error): return .failure(PluginRefusal("its program couldn't be read (errno \(error.code))"))
         case .success(let copy):
             defer { Sys.close(copy.fd) }
-            let digest = copy.withBytes { BuildInfo.sha256(of: Data($0)) }
+            let (digest, refused) = copy.withBytes { (BuildInfo.sha256(of: Data($0)), PluginProgram.refusal(Data($0))) }
+            // What it loads before its own code is root's (the review of step C, H1): checked here and at every start.
+            if let refused { return .failure(PluginRefusal(refused)) }
             return .success(PluginFolder(folder: folder, manifest: manifest, manifestBytes: bytes, program: program,
                                          record: PluginRecord(folder: folder, manifest: BuildInfo.sha256(of: bytes), program: digest)))
         }

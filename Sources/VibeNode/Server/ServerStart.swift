@@ -182,6 +182,8 @@ public enum ServerStart {
             requests.restoreHeldSends()
             engine.welcomed()
         }
+        // External plugins' cgroups a server before this one left, emptied (`PluginCgroup`).
+        PluginCgroup.sweep()
         link.start()
         sessions.start()
         queue.sync { live.start() }

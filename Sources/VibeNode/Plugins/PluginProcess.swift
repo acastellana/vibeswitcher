@@ -20,7 +20,12 @@ final class PluginProcess: @unchecked Sendable {
 
     struct Breach: Error, CustomStringConvertible {
         var description: String
+        /// Not a breach: refused because too many calls wait (`call`'s `atMost`); the program runs on.
+        var busy = false
     }
+
+    /// The most a protocol line nests (arrays and objects): a deeper one is a breach, found before it is parsed.
+    static let nestingAtMost = 32
 
     static let lineBytesAtMost = 256 * 1024
     static let callTimeout: TimeInterval = 10
@@ -29,7 +34,7 @@ final class PluginProcess: @unchecked Sendable {
     let id: String
     private let queue: DispatchQueue
     private let note: (String) -> Void
-    private var pid: pid_t = 0
+    private(set) var pid: pid_t = 0
     private var input: Int32 = -1
     private var output: Int32 = -1
     private var errors: Int32 = -1
@@ -45,16 +50,36 @@ final class PluginProcess: @unchecked Sendable {
     private(set) var ended: String?
     /// Told once, on the process's queue, when it breached or ended (not when stopped).
     var onEnd: ((String) -> Void)?
+    /// Starts the child: on a thread that lives as long as the server, which its parent-death signal is tied to.
+    private let spawner: PluginSpawner
+    /// Its own cgroup, when the server's can hold one (`PluginCgroup`): killed whole however it forked or left its session.
+    private var cgroup: PluginCgroup?
+    /// How it was confined, for `plugin list`'s readers and the log: "cgroup", "parent-death signal" or "process group".
+    private(set) var confinement = ""
 
-    init(id: String, note: @escaping (String) -> Void) {
+    init(id: String, note: @escaping (String) -> Void, spawner: PluginSpawner = .shared) {
         self.id = id
         self.note = note
+        self.spawner = spawner
         queue = DispatchQueue(label: "vibenode.plugin.\(id)")
         writes = DispatchQueue(label: "vibenode.plugin.\(id).writes")
     }
 
-    /// Starts `copy` (its sealed copy) in `work`. Blocks briefly.
-    func start(copy: Platform.ProcessSelf.SealedCopy, work: URL) -> Result<Void, PluginRefusal> {
+    /// The program's environment (the review of step C, H1): no writable place it reads at start (HOME names nothing,
+    /// the working folder is `/`), Python told not to read a user's site or the script's folder or write bytecode, and
+    /// nothing else of any runtime's; with `data`, its private folder's path, which it reads as untrusted input.
+    static func environment(data: URL?) -> [String] {
+        ["PATH=/usr/bin:/bin", "HOME=/nonexistent", "LANG=C.UTF-8", "PYTHONNOUSERSITE=1", "PYTHONSAFEPATH=1", "PYTHONDONTWRITEBYTECODE=1"]
+            + (data.map { ["VIBESWITCHER_PLUGIN_DATA=\($0.path)"] } ?? [])
+    }
+
+    /// Starts `copy` (its sealed copy), working in `/`, with `data` its private folder when it keeps data. Blocks briefly.
+    /// Its group is its own (its own session); it gets the parent-death signal (KILL) through setpriv, tied to the
+    /// spawner's thread, so the server's end ends it; and, when the server's cgroup can hold one, a cgroup of its own,
+    /// which `kill` empties whole. The limit without a cgroup: a child of the program that starts a session of its
+    /// own escapes the group's kill and doesn't inherit the parent-death signal; and a server that ends in the instant
+    /// between the spawn and setpriv's setting the signal leaves the program running.
+    func start(copy: Platform.ProcessSelf.SealedCopy, data: URL?) -> Result<Void, PluginRefusal> {
         var toChild: [Int32] = [-1, -1], fromChild: [Int32] = [-1, -1], errChild: [Int32] = [-1, -1], cancel: [Int32] = [-1, -1]
         // Close-on-exec from their making: the spawn gives the child its ends as its standard ones.
         guard Sys.pipeClosedOnExec(&toChild) == 0, Sys.pipeClosedOnExec(&fromChild) == 0, Sys.pipeClosedOnExec(&errChild) == 0,
@@ -64,23 +89,28 @@ final class PluginProcess: @unchecked Sendable {
         }
         // A write to a program that has gone is an error for the write, not the server's end.
         signal(SIGPIPE, SIG_IGN)
-        var spawn = Platform.Spawn(executable: copy.path, arguments: [copy.path])
-        spawn.environment = ["PATH=/usr/bin:/bin", "HOME=\(work.path)", "LANG=C.UTF-8"]
-        spawn.directory = work.path
+        let cgroup = PluginCgroup.make(id: id)
+        let (executable, arguments, confinement) = Self.launch(copy: copy.path, cgroup: cgroup)
+        var spawn = Platform.Spawn(executable: executable, arguments: arguments)
+        spawn.environment = Self.environment(data: data)
+        spawn.directory = "/"
         spawn.stdin = .descriptor(toChild[0])
         spawn.stdout = .descriptor(fromChild[1])
         spawn.stderr = .descriptor(errChild[1])
         spawn.keep = [copy.fd]
         spawn.group = .ownSession
-        let started = spawn.start()
+        let started = spawner.run { spawn.start() }
         for fd in [toChild[0], fromChild[1], errChild[1]] { Sys.close(fd) }
         switch started {
         case .failure(let error):
             for fd in [toChild[1], fromChild[0], errChild[0]] + cancel { Sys.close(fd) }
+            cgroup?.remove()
             return .failure(PluginRefusal("its program didn't start (errno \(error.code))"))
         case .success(let child):
             _ = fcntl(toChild[1], F_SETFL, fcntl(toChild[1], F_GETFL) | O_NONBLOCK)
             queue.sync {
+                self.cgroup = cgroup
+                self.confinement = confinement
                 pid = child
                 input = toChild[1]
                 output = fromChild[0]
@@ -97,11 +127,30 @@ final class PluginProcess: @unchecked Sendable {
         }
     }
 
+    /// The program as the spawn starts it: through `sh` that moves itself into `cgroup` first (when there is one), then
+    /// setpriv for the parent-death signal (when the system has it, root's), then the sealed copy; and how that confines it.
+    static func launch(copy: String, cgroup: PluginCgroup?, setpriv: String? = PluginSpawner.setpriv) -> (String, [String], String) {
+        var words = [copy]
+        var confinement = "its process group"
+        if let setpriv {
+            words = [setpriv, "--pdeathsig", "KILL", "--"] + words
+            confinement = "its process group and the parent-death signal"
+        }
+        if let cgroup {
+            words = ["/bin/sh", "-c", #"echo $$ > "$0" || exit 125; exec "$@""#, cgroup.procs] + words
+            confinement = "a cgroup of its own"
+        }
+        return (words[0], words, confinement)
+    }
+
     /// Asks `call` with `fields` (`id` and `call` are the node's); `then` on the process's queue with the answer, its
-    /// `id` taken off, or the breach.
-    func call(_ call: String, _ fields: Message = [:], then: @escaping (Result<Message, Breach>) -> Void) {
+    /// `id` taken off, or the breach. With `atMost`, refused as busy (not a breach) when that many calls wait already.
+    func call(_ call: String, _ fields: Message = [:], atMost: Int? = nil, then: @escaping (Result<Message, Breach>) -> Void) {
         queue.async { [self] in
             if let ended { return then(.failure(Breach(description: ended))) }
+            if let atMost, waiting.count + (inFlight == nil ? 0 : 1) >= atMost {
+                return then(.failure(Breach(description: "busy: \(atMost) of its calls wait already", busy: true)))
+            }
             let id = nextID
             nextID += 1
             var message = fields
@@ -158,6 +207,8 @@ final class PluginProcess: @unchecked Sendable {
     /// A line from the program: its answer to the call in flight, or a breach.
     private func heard(_ line: Data) {
         guard ended == nil else { return }
+        // Bounded before it is parsed: a deep line would be the parser's recursion, in the server.
+        guard Self.nesting(line) <= Self.nestingAtMost else { return breach("a line nested over \(Self.nestingAtMost) deep") }
         guard let message = try? JSONSerialization.jsonObject(with: line) as? Message else { return breach("it wrote a line that isn't a JSON object") }
         guard let flight = inFlight, let id = message["id"] as? Int, id == flight.id else {
             return breach("it answered no question, or out of order")
@@ -168,6 +219,26 @@ final class PluginProcess: @unchecked Sendable {
         answer["id"] = nil
         flight.then(.success(answer))
         sendNext()
+    }
+
+    /// How deep `line` nests arrays and objects, outside its strings (counted on its bytes, before any parse).
+    static func nesting(_ line: Data) -> Int {
+        var depth = 0, deepest = 0, inString = false, escaped = false
+        for byte in line {
+            if inString {
+                if escaped { escaped = false } else if byte == UInt8(ascii: "\\") { escaped = true } else if byte == UInt8(ascii: "\"") { inString = false }
+                continue
+            }
+            switch byte {
+            case UInt8(ascii: "\""): inString = true
+            case UInt8(ascii: "["), UInt8(ascii: "{"):
+                depth += 1
+                deepest = max(deepest, depth)
+            case UInt8(ascii: "]"), UInt8(ascii: "}"): depth -= 1
+            default: break
+            }
+        }
+        return deepest
     }
 
     /// Reads `fd` on a thread of its own, which owns it and closes it when it ends (its end of file, an error, a breach,
@@ -243,7 +314,8 @@ final class PluginProcess: @unchecked Sendable {
     /// Its whole group ended (TERM, then KILL a second on), its readers and writer told to let their descriptors go (the
     /// cancel pipe), reaped without waiting on anyone else's child, for a few seconds at most. On `queue`.
     private func kill() {
-        let (pid, input, cancel, note, id) = (self.pid, self.input, self.cancel[1], self.note, self.id)
+        let (pid, input, cancel, note, id, cgroup) = (self.pid, self.input, self.cancel[1], self.note, self.id, self.cgroup)
+        self.cgroup = nil
         (self.input, self.output, self.errors, self.cancel[1]) = (-1, -1, -1, -1)
         guard pid > 0 else { return }
         Darwin_or_Glibc_kill(-pid, SIGTERM)
@@ -262,9 +334,12 @@ final class PluginProcess: @unchecked Sendable {
             while waitpid(pid, &status, WNOHANG) == 0 {
                 let now = MacTime.real.awake()
                 if !killed, now > killAt { Darwin_or_Glibc_kill(-pid, SIGKILL); killed = true }
-                if now > giveUpAt { return note("plugin \(id): its program (pid \(pid)) wasn't reaped 6 s after it was ended") }
+                if now > giveUpAt { break }
                 usleep(20_000)
             }
+            // Whatever it started, in a session of its own or not: its cgroup emptied.
+            cgroup?.killAll()
+            if waitpid(pid, &status, WNOHANG) == 0 { note("plugin \(id): its program (pid \(pid)) wasn't reaped 6 s after it was ended") }
         }
     }
 }
@@ -272,3 +347,110 @@ final class PluginProcess: @unchecked Sendable {
 private func Darwin_or_Glibc_write(_ fd: Int32, _ buffer: UnsafeRawPointer, _ count: Int) -> Int { write(fd, buffer, count) }
 private func Darwin_or_Glibc_read(_ fd: Int32, _ buffer: UnsafeMutableRawPointer, _ count: Int) -> Int { read(fd, buffer, count) }
 private func Darwin_or_Glibc_kill(_ pid: pid_t, _ signal: Int32) { _ = Foundation.kill(pid, signal) }
+
+/// A thread that lives as long as the server and starts plugins' programs: a child's parent-death signal is tied to the
+/// thread that started it (prctl(2)), so starting from a dispatch queue's worker, which ends when idle, would end the
+/// program at random. A test makes its own and ends it, as the server's end would.
+final class PluginSpawner: @unchecked Sendable {
+    static let shared = PluginSpawner()
+    /// setpriv, when the system has it in root's folders (util-linux): it sets the parent-death signal, then execs.
+    static let setpriv: String? = ["/usr/bin/setpriv", "/bin/setpriv"].first { path in
+        var info = stat()
+        return stat(path, &info) == 0 && info.st_uid == 0 && info.st_mode & 0o022 == 0 && access(path, X_OK) == 0
+    }
+
+    private let condition = NSCondition()
+    private var jobs: [() -> Void] = []
+    private var ending = false
+
+    init() {
+        let thread = Thread { [condition] in
+            while true {
+                condition.lock()
+                while self.jobs.isEmpty && !self.ending { condition.wait() }
+                if self.jobs.isEmpty && self.ending { condition.unlock(); return }
+                let job = self.jobs.removeFirst()
+                condition.unlock()
+                job()
+            }
+        }
+        thread.name = "plugin-spawner"
+        thread.start()
+    }
+
+    /// Runs `work` on the spawner's thread and waits for it.
+    func run<T>(_ work: @escaping () -> T) -> T {
+        let done = DispatchSemaphore(value: 0)
+        var result: T?
+        condition.lock()
+        jobs.append {
+            result = work()
+            done.signal()
+        }
+        condition.signal()
+        condition.unlock()
+        done.wait()
+        return result!
+    }
+
+    /// Ends its thread once what it was given ran (a test's stand-in for the server's end).
+    func end() {
+        condition.lock()
+        ending = true
+        condition.signal()
+        condition.unlock()
+    }
+}
+
+/// A plugin program's own cgroup (cgroup v2), made under the server's when the server may write there (the node's
+/// systemd unit's, under the user's manager): every process the program starts stays in it, whatever session it
+/// makes, and `killAll` ends them all. Nil where the server's cgroup isn't writable (no systemd, a root-owned one).
+final class PluginCgroup: @unchecked Sendable {
+    let folder: String
+    var procs: String { folder + "/cgroup.procs" }
+
+    init(folder: String) { self.folder = folder }
+
+    /// A new cgroup for plugin `id` beside the server's processes, or nil. `own`: the server's cgroup line (tests).
+    static func make(id: String, own: String? = try? String(contentsOfFile: "/proc/self/cgroup", encoding: .utf8)) -> PluginCgroup? {
+        guard let line = own?.split(separator: "\n").first(where: { $0.hasPrefix("0::/") }) else { return nil }
+        let path = String(line.dropFirst(3))
+        guard path != "/", !path.contains(".."), !path.contains("/vs-plugin-") else { return nil }
+        let parent = "/sys/fs/cgroup" + path
+        guard access(parent, W_OK) == 0, access(parent + "/cgroup.procs", W_OK) == 0 else { return nil }
+        let folder = parent + "/vs-plugin-\(id)-\(UUID().uuidString.prefix(8).lowercased())"
+        guard mkdir(folder, 0o755) == 0 else { return nil }
+        return PluginCgroup(folder: folder)
+    }
+
+    /// Every process in it killed (cgroup.kill, else each listed), waited for briefly, the cgroup removed.
+    func killAll() {
+        if let kill = FileHandle(forWritingAtPath: folder + "/cgroup.kill") {
+            try? kill.write(contentsOf: Data("1".utf8))
+            try? kill.close()
+        } else {
+            let listed = (try? String(contentsOfFile: procs, encoding: .utf8)) ?? ""
+            for pid in listed.split(separator: "\n").compactMap({ pid_t($0) }) { Darwin_or_Glibc_kill(pid, SIGKILL) }
+        }
+        let until = MacTime.real.awake() + 2
+        while MacTime.real.awake() < until, ((try? String(contentsOfFile: procs, encoding: .utf8)) ?? "").isEmpty == false { usleep(20_000) }
+        remove()
+    }
+
+    /// Removes it (empty; else the kernel refuses, and it is left).
+    func remove() { _ = rmdir(folder) }
+
+    /// What a server before this one left (it died with programs in their cgroups, which its parent-death signal
+    /// doesn't reach when they left their session): each `vs-plugin-*` cgroup under the server's emptied and removed.
+    /// Once, as the server starts.
+    static func sweep(own: String? = try? String(contentsOfFile: "/proc/self/cgroup", encoding: .utf8)) {
+        guard let line = own?.split(separator: "\n").first(where: { $0.hasPrefix("0::/") }) else { return }
+        let path = String(line.dropFirst(3))
+        guard path != "/", !path.contains("..") else { return }
+        let parent = "/sys/fs/cgroup" + path
+        guard access(parent, W_OK) == 0 else { return }
+        for name in (try? FileManager.default.contentsOfDirectory(atPath: parent)) ?? [] where name.hasPrefix("vs-plugin-") {
+            PluginCgroup(folder: parent + "/" + name).killAll()
+        }
+    }
+}

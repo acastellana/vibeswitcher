@@ -575,6 +575,9 @@ install_node_main() {
     /bin/mkdir -m 755 -- "$partial/Resources" "$partial/Resources/bin" "$partial/Resources/lib" \
         || fail 1 "can't make $partial/Resources"
     for file in "$src"/Resources/bin/vs-*; do
+        # The Mac app's wallet filer isn't shipped on Linux: there the wallet is an external plugin, whose own vs-wallet
+        # (the node's wrapper in <root>/plugins/bin) must be the one a session finds (the review of step C, L3).
+        [[ ${file##*/} == vs-wallet ]] && continue
         [[ -f $file && ! -L $file ]] || fail 1 "$commit's ${file#"$src/"} isn't a regular file"
         /bin/cp -- "$file" "$partial/Resources/bin/" && /bin/chmod 0755 -- "$partial/Resources/bin/${file##*/}" \
             || fail 1 "can't copy ${file#"$src/"} into $partial"

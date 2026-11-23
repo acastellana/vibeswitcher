@@ -18,25 +18,36 @@ public protocol StampedAsk: Sendable {
 /// folder's (`PluginLintTests`). Everything on the engine's queue unless it says otherwise.
 public struct PluginDesk {
     private unowned let engine: LeadEngine
+    /// The engine again, held weakly: what a plugin's program answers late (after the engine went, a test's) is dropped.
+    private weak var alive: LeadEngine?
     public let plugin: FeaturePlugin
+    /// The node's root, the log and the queues: the desk's own, so a late callback reaching them touches no engine.
+    public let root: URL
+    public let note: (String) -> Void
+    /// The engine's queue, and the plugins' own for reading files (one step at a time).
+    public let queue: DispatchQueue
+    public let work: DispatchQueue
 
     init(engine: LeadEngine, plugin: FeaturePlugin) {
         self.engine = engine
+        self.alive = engine
         self.plugin = plugin
+        (root, note, queue, work) = (engine.root, engine.note, engine.queue, engine.pluginWork)
+    }
+
+    /// Runs `body` on the engine's queue while the engine lives; nothing once it has gone.
+    public func later(_ body: @escaping () -> Void) {
+        queue.async { [weak alive] in
+            guard alive != nil else { return }
+            body()
+        }
     }
 
     var id: String { plugin.info.id }
-
-    /// The node's root.
-    public var root: URL { engine.root }
-    public var note: (String) -> Void { engine.note }
     /// The plugins' clock (a test's own).
     public var now: Date { engine.pluginNow() }
     /// A scratch node's (a test's): what its sessions get keeps to its root.
     public var isScratch: Bool { engine.isScratch }
-    /// The engine's queue, and the plugins' own for reading files (one step at a time).
-    public var queue: DispatchQueue { engine.queue }
-    public var work: DispatchQueue { engine.pluginWork }
 
     /// This plugin's settings as the user set them, by name (none set: its default).
     public var settings: [String: String] {

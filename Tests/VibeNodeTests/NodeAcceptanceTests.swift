@@ -931,7 +931,7 @@ struct NodeAcceptanceTests {
         let cards = ((try? JSONSerialization.jsonObject(with: Data(waited.output.utf8)) as? [String: Any])?["cards"] as? [[String: Any]]) ?? []
         let id = try #require(cards.first { ($0["plugin"] as? [String: Any])?["plugin"] as? String == "probe" }?["id"] as? String, "\(waited.output)")
         let shown = try await node.run(["questions"])
-        #expect(shown.output.contains("  Probe says, depth: 1") && shown.output.contains("    | normal a43"), "\(shown.output)")
+        #expect(shown.output.contains("  the probe plugin says, depth: 1") && shown.output.contains("    | normal a43"), "\(shown.output)")
         let ran = try await node.runOnTerminal(["answer", id, "run"])
         #expect(ran.status == 0 && ran.output.contains("This runs the probe") && ran.output.contains("Ran the probe"), "\(ran.output)\(ran.errors)\n\(node.said)")
 

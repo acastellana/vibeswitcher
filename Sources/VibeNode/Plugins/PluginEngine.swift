@@ -55,8 +55,9 @@ extension LeadEngine {
 
     /// `wrappers` (command name: plugin id) as the scripts in `bin`, and nothing else there. Blocks.
     static func writeWrappers(_ wrappers: [String: String], in bin: URL, note: (String) -> Void) {
-        try? VibePaths.ensurePrivate(bin.deletingLastPathComponent())
-        try? VibePaths.ensurePrivate(bin)
+        // The node's own folder, never through a link: else nothing is written or removed (the review of step C, L4).
+        let root = bin.deletingLastPathComponent().deletingLastPathComponent()
+        if case .failure(let why) = PluginFolders.own(bin, root: root) { return note("plugins: no wrappers written: \(why)") }
         for name in (try? FileManager.default.contentsOfDirectory(atPath: bin.path)) ?? [] where wrappers[name] == nil {
             unlink(bin.appendingPathComponent(name).path)
         }
@@ -243,12 +244,15 @@ extension LeadEngine {
         guard card.isOpen, shown.isWaiting else {
             return then(.failure(.refused("card \(card.id) is answered already: \(card.closed ?? shown.state)")))
         }
-        if action.acts, let expires = shown.expiresAt, pluginNow() >= expires {
+        // An external plugin's every answer that reaches its program is acting: it chose `acts` itself, so its word for
+        // it doesn't skip expiry, the live asker or the settle first (the review of step C, M1).
+        let acting = action.acts || plugin is ExternalPlugin
+        if acting, let expires = shown.expiresAt, pluginNow() >= expires {
             return then(.failure(.refused("it expired: nothing ran")))
         }
         // The asker still a live session the user opened (it may have ended since the card was drawn).
         let desk = desk(plugin)
-        guard action.acts == false || PluginDesk.hostSession(shown.session).flatMap({ id in link.sessions.first { $0.id == id } }).map(desk.opened) == true else {
+        guard !acting || PluginDesk.hostSession(shown.session).flatMap({ id in link.sessions.first { $0.id == id } }).map(desk.opened) == true else {
             return then(.failure(.refused("its asking session isn't live any more: nothing ran")))
         }
         var marked = card
@@ -270,7 +274,7 @@ extension LeadEngine {
             fields["once"] = .bool(true)
             given(.success(.object(fields)))
         }
-        guard action.acts else { return plugin.perform(action.word, on: marked, desk: desk, act: act, then: then) }
+        guard acting else { return plugin.perform(action.word, on: marked, desk: desk, act: act, then: then) }
         // An acting answer: settled in the vault, confirmed, before it acts, so no restart draws it again.
         let client = link.vaultV2
         pluginSettling.insert(key)

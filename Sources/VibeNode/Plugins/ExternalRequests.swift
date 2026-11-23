@@ -54,6 +54,10 @@ extension Requests {
                 if case .failure(let why) = inspected { queue.async { reply(self.refuse(request, .refused, why.description)) } }
                 return
             }
+            // The folder shown, as inspect resolved it: the same path, not one that resolves there now (L1).
+            guard found.folder == folder else {
+                return queue.async { reply(self.refuse(request, .refused, "the folder isn't the one shown (\(ConfigSeal.inert(found.folder, limit: 200))): nothing was added")) }
+            }
             guard found.record.manifest == manifestSHA, found.record.program == programSHA else {
                 return queue.async { reply(self.refuse(request, .refused, "the folder changed since it was shown (its manifest's or program's SHA-256 isn't the one you saw): nothing was added")) }
             }
@@ -91,8 +95,13 @@ extension Requests {
         let (client, queue, root) = (link.vaultV2, self.queue, engine.root)
         engine.pluginWork.async {
             let kept = Result { try client.setExternalPlugin(id, record: nil) }
-            // Its copy's working folder goes with it.
-            try? FileManager.default.removeItem(at: root.appendingPathComponent("plugins/\(id)", isDirectory: true))
+            // Its folder (its data) goes with it, and its requests not yet settled: a program added back under its id
+            // never sees them (the review of step C, L7). Only the node's own folders, never through a link (L4).
+            for folder in ["plugins/\(id)", "plugin-requests/\(id)"] {
+                if let why = PluginFolders.empty(root.appendingPathComponent(folder, isDirectory: true), andItself: true) {
+                    self.note("plugin \(id) removed: \(why), so it was left as it is")
+                }
+            }
             queue.async {
                 switch kept {
                 case .failure(let error): reply(self.refuse(request, .refused, "the session host's vault didn't forget it: \(error)"))
@@ -119,11 +128,18 @@ extension Requests {
             return reply(refuse(request, .refused, "this node doesn't have \(id) on: nothing was filed"))
         }
         let desk = engine.desk(plugin)
-        guard desk.live[session.lowercased()] != nil else {
-            return reply(refuse(request, .refused, "only a live session the user opened files a request"))
+        // The caller must run in that session, a live one the user opened, as the host lists it; whichever fails, the
+        // same words, so nothing is learnt of which sessions are live (the review of step C, M3).
+        let refusal = "only a live session the user opened files a request, from inside it"
+        let pids = Set((facts.ancestry ?? []).map(\.pid))
+        guard let caller = link.sessions.first(where: { $0.isLive && pids.contains($0.childPID) }),
+              caller.id.uuidString.lowercased() == session.lowercased(), desk.opened(caller) else {
+            return reply(refuse(request, .refused, refusal))
         }
         plugin.file(words: words, cwd: cwd, desk: desk) { made in
             switch made {
+            case .failure(let why) where why.description.hasPrefix(ExternalPlugin.busy):
+                reply(self.refuse(request, .refused, "\(plugin.info.title) is busy: \(ExternalPlugin.fileCallsAtMost) requests wait already; try again"))
             case .failure(let why): reply(self.refuse(request, .refused, "\(plugin.info.title) refused it: \(why)"))
             case .success(let filed):
                 let now = Date()
@@ -140,6 +156,10 @@ extension Requests {
 }
 
 extension ExternalPlugin {
+    /// Filing calls waiting on a program, at most (the review of step C, M3): the rest are refused as busy.
+    static let fileCallsAtMost = 4
+    static let busy = "busy"
+
     struct Filed {
         var payload: String
         var expiresIn: TimeInterval
@@ -150,9 +170,10 @@ extension ExternalPlugin {
     func file(words: [String], cwd: String, desk: PluginDesk, then: @escaping (Result<Filed, PluginRefusal>) -> Void) {
         startedProcess(desk) { started in
             guard case .success(let process) = started else { return then(.failure(PluginRefusal("its program isn't running"))) }
-            process.call("file", ["words": words, "cwd": cwd]) { answer in
-                desk.queue.async {
+            process.call("file", ["words": words, "cwd": cwd], atMost: Self.fileCallsAtMost) { answer in
+                desk.later {
                     switch answer {
+                    case .failure(let breach) where breach.busy: then(.failure(PluginRefusal(Self.busy)))
                     case .failure(let breach): then(.failure(PluginRefusal(breach.description)))
                     case .success(let message):
                         if let why = message["refuse"] as? String, message.count == 1 {

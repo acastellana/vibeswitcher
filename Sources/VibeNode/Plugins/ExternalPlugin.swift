@@ -83,16 +83,16 @@ final class ExternalPlugin: FeaturePlugin {
         let settings = desk.settings
         desk.work.async { [weak self] in
             let started = Self.start(record: record, manifest: manifest, root: root, note: note)
-            desk.queue.async {
+            desk.later {
                 guard let self else { return }
                 switch started {
                 case .failure(let why):
                     if why.description.contains("changed since") { self.held = why.description }
                     self.finishStarting(.failure(why))
                 case .success(let process):
-                    process.onEnd = { [weak self] why in desk.queue.async { self?.breached(why, desk: desk) } }
+                    process.onEnd = { [weak self] why in desk.later { self?.breached(why, desk: desk) } }
                     process.call("hello", ["protocol": 1, "settings": settings]) { answer in
-                        desk.queue.async {
+                        desk.later {
                             switch answer {
                             case .success(let hello) where hello["plugin"] as? String == id && hello["version"] as? String == manifest.version
                                 && hello.count == 2:
@@ -135,13 +135,23 @@ final class ExternalPlugin: FeaturePlugin {
             Sys.close(copy.fd)
             return .failure(PluginRefusal("its program changed since you added it: `vibeswitcher plugin add \(record.folder)` again"))
         }
-        let work = root.appendingPathComponent("plugins/\(manifest.id)/work", isDirectory: true)
-        do { try VibePaths.ensurePrivate(work.deletingLastPathComponent()); try VibePaths.ensurePrivate(work) } catch {
+        // What it loads before its own code, checked again at every start (the review of step C, H1).
+        if let refused = copy.withBytes({ PluginProgram.refusal(Data($0)) }) {
             Sys.close(copy.fd)
-            return .failure(PluginRefusal("its working folder couldn't be made: \(error)"))
+            return .failure(PluginRefusal(refused))
+        }
+        // No writable place it reads at start; its data folder only when its manifest asks for one (`data: true`).
+        var data: URL?
+        if manifest.data == true {
+            switch PluginFolders.own(root.appendingPathComponent("plugins/\(manifest.id)/data", isDirectory: true), root: root) {
+            case .failure(let why):
+                Sys.close(copy.fd)
+                return .failure(PluginRefusal("its data folder: \(why)"))
+            case .success(let folder): data = folder
+            }
         }
         let process = PluginProcess(id: manifest.id, note: note)
-        let started = process.start(copy: copy, work: work)
+        let started = process.start(copy: copy, data: data)
         Sys.close(copy.fd)
         return started.map { process }
     }
@@ -183,7 +193,7 @@ final class ExternalPlugin: FeaturePlugin {
                 for ask in fresh {
                     self.asking.insert(ask.id)
                     process.call("card", ["request": ask.id, "payload": ask.payload, "settings": desk.settings]) { answer in
-                        desk.queue.async {
+                        desk.later {
                             self.asking.remove(ask.id)
                             self.drawCard(ask, answer, desk: desk)
                             left -= 1
@@ -236,8 +246,13 @@ final class ExternalPlugin: FeaturePlugin {
         }
     }
 
+    /// How the core names what an external plugin says, in its own words (the review of step C, L2): never the plugin's
+    /// title, which it chose.
+    static func says(_ id: String) -> String { "the \(id) plugin says" }
+
     /// The card the plugin's `card` describes, its shape checked: plain fields, the plugin's facts named as its own, the
     /// asking session's folder the host's (drawn by the core), the expiry the core's.
+
     static func card(_ object: [String: Any], ask: PluginAskEnvelope, manifest: PluginManifest, folder: String?) -> Result<PluginCard, PluginRefusal> {
         let known: Set<String> = ["title", "noun", "ask", "facts", "body", "context", "severity", "actions", "waiting"]
         guard object.keys.allSatisfy(known.contains) else { return .failure(PluginRefusal("a card field this node doesn't read")) }
@@ -255,7 +270,7 @@ final class ExternalPlugin: FeaturePlugin {
         for fact in (object["facts"] as? [[String: Any]]) ?? [] {
             guard fact.keys.allSatisfy(["label", "value", "decisive"].contains), let label = text(fact["label"], 60), let value = fact["value"] as? String,
                   value.count <= 2000 else { return .failure(PluginRefusal("a fact is a plain label and a value")) }
-            facts.append(.init(name: "fact", label: "\(manifest.title) says, \(label)", value: value, decisive: fact["decisive"] as? Bool == true))
+            facts.append(.init(name: "fact", label: "\(Self.says(manifest.id)), \(label)", value: value, decisive: fact["decisive"] as? Bool == true))
         }
         guard facts.count <= 13, object["facts"] == nil || object["facts"] is [[String: Any]] else { return .failure(PluginRefusal("12 facts at most")) }
         var context: PluginCard.Context?
@@ -272,6 +287,8 @@ final class ExternalPlugin: FeaturePlugin {
                   let verb = text(action["verb"], 120), let marks = action["marks"] as? String, LeadVaultV2.pluginID(marks) else {
                 return .failure(PluginRefusal("an action is a word, a label, acts, short, does, verb and marks"))
             }
+            // An answered card never waits again (the review of step C, L6).
+            guard marks != PluginCard.waitingState else { return .failure(PluginRefusal("an action can't mark its card waiting")) }
             made.append(.init(word: word, label: label, acts: acts, short: short, does: does, verb: verb, marks: marks))
         }
         let severity = (object["severity"] as? String).flatMap(PluginCard.Severity.init(rawValue:)) ?? .important
@@ -297,7 +314,7 @@ final class ExternalPlugin: FeaturePlugin {
                 return then(.failure(.refused("\(self.info.title)'s program isn't running: nothing was done")))
             }
             process.call("perform", ["request": id, "payload": ask.payload, "word": word, "settings": desk.settings]) { answer in
-                desk.queue.async {
+                desk.later {
                     switch answer {
                     case .failure(let breach): then(.failure(.refused("\(self.info.title)'s program: \(breach.description); nothing more was done")))
                     case .success(let message):
@@ -307,6 +324,10 @@ final class ExternalPlugin: FeaturePlugin {
                                 return then(.failure(.refused("\(self.info.title)'s answer didn't fit: nothing more was done")))
                             }
                             then(.success(.object(["outcome": .string(applied.state), "notice": .null, "say": .array([.string(applied.person)])])))
+                        } else if message["page"] != nil, message.count == 1, card.plugin?.action(word)?.acts != true {
+                            // A page for a word that doesn't act: a breach (the review of step C, M1).
+                            self.misshapen("a page answers only an acting word", desk: desk)
+                            then(.failure(.refused("\(self.info.title)'s answer didn't fit: nothing more was done")))
                         } else if let page = message["page"] as? [String: Any], message.count == 1, self.manifest.page == true {
                             self.openPage(page, request: id, ask: ask, process: process, desk: desk, act: act, then: then)
                         } else {
@@ -345,7 +366,7 @@ final class ExternalPlugin: FeaturePlugin {
                 answer(false)
             }
             process.call("page.answer", ["request": id, "payload": ask.payload, "answer": String(decoding: bytes, as: UTF8.self)]) { reply in
-                desk.queue.async {
+                desk.later {
                     guard case .success(let message) = reply else { return refused() }
                     if message["refuse"] is String, message.count == 1 { return refused() }
                     guard let outcome = message["outcome"] as? [String: Any], message.count == 1, self.apply(outcome, request: id, desk: desk) != nil else {
@@ -378,10 +399,12 @@ final class ExternalPlugin: FeaturePlugin {
     private func apply(_ outcome: [String: Any], request id: String, desk: PluginDesk) -> (state: String, person: String)? {
         guard outcome.keys.allSatisfy(["state", "person", "agent"].contains), let state = outcome["state"] as? String, LeadVaultV2.pluginID(state),
               state != PluginCard.waitingState, let person = outcome["person"] as? String, PluginManifest.plain(person, limit: 300),
-              let agent = outcome["agent"] as? String, PluginManifest.plain(agent, limit: 1000, lines: true) else { return nil }
+              let agent = outcome["agent"] as? String, PluginManifest.plain(agent, limit: 1000),
+              !agent.trimmingCharacters(in: .whitespaces).hasPrefix("[") else { return nil }
         answers[id] = state
         desk.change(request: id, state: state, outcome: person, closed: person)
-        desk.tell("[\(info.title), through VibeSwitcher] Your request \(id): \(agent)", from: "from \(info.title)", request: id) { _ in }
+        // One line; the core's prefix is its only bracketed part (the review of step C, M2).
+        desk.tell("[the \(info.id) plugin, through VibeSwitcher] Your request \(id): \(agent)", from: "from the \(info.id) plugin", request: id) { _ in }
         return (state, person)
     }
 
@@ -389,9 +412,19 @@ final class ExternalPlugin: FeaturePlugin {
 
     func check(setting name: String, value: String?) -> Result<String?, PluginRefusal> { .failure(PluginRefusal("asked of its program")) }
 
-    func check(setting name: String, value: String?, then: @escaping (Result<String?, PluginRefusal>) -> Void) {
+    func check(setting name: String, value: String?, desk: PluginDesk, then: @escaping (Result<String?, PluginRefusal>) -> Void) {
         guard let value else { return then(.success(nil)) }
-        guard let process, process.ended == nil else { return then(.failure(PluginRefusal("its program isn't running"))) }
+        // Started for it when it isn't running (the review of step C, L5); refused while held or ended.
+        ensureStarted(desk) { started in
+            guard case .success(let process) = started else {
+                if case .failure(let why) = started { then(.failure(why)) }
+                return
+            }
+            self.checked(name, value, on: process, then: then)
+        }
+    }
+
+    private func checked(_ name: String, _ value: String, on process: PluginProcess, then: @escaping (Result<String?, PluginRefusal>) -> Void) {
         process.call("settings.check", ["key": name, "value": value]) { answer in
             switch answer {
             case .success(let message) where message["ok"] as? Bool == true && message.count == 1: then(.success(value))
@@ -414,6 +447,9 @@ final class ExternalPlugin: FeaturePlugin {
         process = nil
         return []
     }
+
+    /// Gone (removed from the registry and let go): its program ends with it.
+    deinit { process?.stop() }
 
     /// Removed or the server stopping: its program ends.
     func stop() {

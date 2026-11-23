@@ -47,7 +47,8 @@ enum PluginCommand {
                 return .success(found)
             }
         }, args: { found in
-            ["folder": .string(folder), "manifest": found["manifestSHA"] ?? .null, "program": found["programSHA"] ?? .null]
+            // The folder as the server resolved it, which it requires again (the review of step C, L1).
+            ["folder": found["folder"] ?? .null, "manifest": found["manifestSHA"] ?? .null, "program": found["programSHA"] ?? .null]
         }, what: { found in
             let say = { (key: String) in ConfigSeal.inert(found[key]?.string ?? "?", limit: 300) }
             let commands = (found["commands"]?.array ?? []).compactMap(\.string).map { ConfigSeal.inert($0, limit: 40) }

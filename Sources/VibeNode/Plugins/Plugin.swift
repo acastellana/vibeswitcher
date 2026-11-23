@@ -40,7 +40,7 @@ public protocol FeaturePlugin: AnyObject {
     /// for its default, or why it isn't taken. `value` is the value given ("default": nil).
     func check(setting name: String, value: String?) -> Result<String?, PluginRefusal>
     /// `check`, answered later (an external plugin answers over its pipe). On the engine's queue; `then` there too.
-    func check(setting name: String, value: String?, then: @escaping (Result<String?, PluginRefusal>) -> Void)
+    func check(setting name: String, value: String?, desk: PluginDesk, then: @escaping (Result<String?, PluginRefusal>) -> Void)
 }
 
 extension FeaturePlugin {
@@ -48,7 +48,7 @@ extension FeaturePlugin {
     public func notices(_ desk: PluginDesk) -> [String] { [] }
     public func turnedOff(_ desk: PluginDesk) -> [(session: UUID, text: String)] { [] }
     public func check(setting name: String, value: String?) -> Result<String?, PluginRefusal> { .success(value) }
-    public func check(setting name: String, value: String?, then: @escaping (Result<String?, PluginRefusal>) -> Void) {
+    public func check(setting name: String, value: String?, desk: PluginDesk, then: @escaping (Result<String?, PluginRefusal>) -> Void) {
         then(check(setting: name, value: value))
     }
 }
