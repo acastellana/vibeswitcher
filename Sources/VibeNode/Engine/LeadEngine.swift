@@ -151,9 +151,8 @@ public final class LeadEngine: @unchecked Sendable {
     /// The engine's refresh every 3 s on its clock (`refresh`, E7).
     private var refreshTimer: Subscription?
 
-    // The all-done mark (`AllDoneLook.swift`), on `queue`: the marks whose summary is being written, and the clock.
-    var allDoneSummarizing: Set<String> = []
-    var allDoneNow: () -> Date = Date.init
+    /// The all-done mark (`AllDoneLook.swift`): its state its own, on `queue`.
+    let allDone: AllDoneWatch
 
     /// The prompt-audit reminder (`PromptAuditWatch.swift`): its state its own, on `queue`.
     let promptAudit: PromptAuditWatch
@@ -430,6 +429,7 @@ public final class LeadEngine: @unchecked Sendable {
         push = PushWatch(queue: link.queue, work: work, link: link, note: note)
         promptAudit = PromptAuditWatch(queue: link.queue, root: root, home: options.home ?? VibePaths.home, clock: clock, note: note)
         reads = BoardReads(handTo: link.queue)
+        allDone = AllDoneWatch(queue: link.queue, reads: reads, runs: summaryRuns, note: note)
         preflight = NodePreflight(claudeLink: options.claudeLink ?? NodePreflight.claudeLink(root: root), git: options.git)
         let states = root.appendingPathComponent("state", isDirectory: true)
         observer = LeadObserver(home: options.home ?? VibePaths.home, stateFile: { states.appendingPathComponent("\($0).json") })
