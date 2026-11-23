@@ -732,7 +732,19 @@ public final class LeadToolset: MCPToolset {
                                          "review": Self.reviewProperty, "audit_reason": Self.auditReasonProperty, "after": Self.afterProperty, "auto_advance": Self.autoAdvanceProperty,
                                          "budget_min": Self.budgetProperty, "model": Self.modelProperty, "agent": Self.agentProperty, "done_check": Self.doneCheckProperty,
                                          "advisor": Self.advisorProperty, "effort": Self.effortProperty,
-                                         "origin": Self.originProperty, "team": Self.teamProperty]),
+                                         "origin": Self.originProperty, "team": Self.teamProperty, "goal_id": Self.goalIDProperty]),
+                MCPToolInfo(name: "add_goal", description: "Add a goal for the project: one of the 3 to 5 the roadmap is drawn from, in plain words, with what done means. Every task belongs to one (goal_id on add_task and update_task). At most \(LeadBoard.mostOpenGoals) open at once.",
+                            properties: ["title": P(type: "string", description: "The goal, in plain words, one line"),
+                                         "done": P(type: "string", description: "What done means for it, one line")],
+                            required: ["title", "done"]),
+                MCPToolInfo(name: "update_goal", description: "Change a goal: rename it, say again what done means, close it (state done) or open it again.",
+                            properties: ["goal": P(type: "string", description: "The goal's id, as status and board show it"),
+                                         "title": P(type: "string", description: "New title"), "done": P(type: "string", description: "New line on what done means"),
+                                         "state": P(type: "string", description: "open or done", options: LeadGoal.State.allCases.map(\.rawValue))],
+                            required: ["goal"]),
+                MCPToolInfo(name: "order_goals", description: "Put the open goals in the order the roadmap shows them: every open goal's id once.",
+                            properties: ["goals": P(type: "array", description: "The open goals' ids, in order", items: "string")],
+                            required: ["goals"]),
                 MCPToolInfo(name: "dismiss_finding", description: "Close one of a task's open audit findings with a reason (it isn't a problem, it's out of scope, the user accepted it): it no longer holds the merge back, and no verifier raises it again. An Important finding's reason must cite something that can be checked, or it's refused: a file and line (path/File.swift:123), a decision's timestamp as decisions.md has it (2026-11-07 20:08:15), or the question id of the user's answer (its full id, or question 1A2B3C4D). If the only evidence is your memory, record_decision first and cite it, or ask_user. A Nit or Pre-existing finding takes any reason.",
                             properties: ["task": task, "id": P(type: "string", description: "The finding's id (F2), or <task>:<id>"),
                                          "reason": P(type: "string", description: "Why, in one line (it's kept with the finding); for an Important finding, with its citation")],
@@ -749,6 +761,7 @@ public final class LeadToolset: MCPToolset {
                                          "review": Self.reviewProperty, "audit_reason": Self.auditReasonProperty, "after": Self.afterProperty, "auto_advance": Self.autoAdvanceProperty,
                                          "budget_min": Self.budgetProperty, "model": Self.modelProperty, "agent": Self.agentProperty, "done_check": Self.doneCheckProperty,
                                          "advisor": Self.advisorProperty, "effort": Self.effortProperty, "team": Self.teamProperty,
+                                         "goal_id": Self.goalIDProperty,
                                          "reroll": P(type: "boolean", description: "Re-roll it after audit rounds that didn't land: its worker and verifier stop, its branch is kept as archive/<slug>-<n>, its worktree goes, and a fresh worker starts from the base on a new agent/<slug>, its context given a summary of the findings and the worker's answers so far. Contract changes in the same call apply first; not with status"),
                                          "exception": P(type: "object", description: "A deviation from the contract you accept, recorded as your sealed note, an object of scope (files or a glob, as in .gitignore, from the repository's root; a string or a list), reason and evidence, each required. An audit's verifier sees the exceptions recorded before that audit started, in your notes; one recorded later isn't presented as covering an audit under way, and the result says so. It decides nothing about review: no floor, sensitive path or audit goes by it"),
                                          "accept_verdict": P(type: "boolean", description: "With exception: settle the task's verdict on its head, when it's suspect with no Important finding and its only concern is an edit outside the boundaries: the task goes on to merge with no new audit, and the record shows the verdict and who accepted what. The exception's scope must cover every file the verdict names, and it covers only those; a sensitive path isn't accepted this way (audit again, with the exception recorded). Refused for any other verdict, which is handled as ever"),
@@ -879,6 +892,13 @@ public final class LeadToolset: MCPToolset {
     }
 
     public func call(_ name: String, _ arguments: [String: Any]) -> MCPToolResult {
+        let result = callTool(name, arguments)
+        // The lead's next step after a task was left without a goal, or with none set on a busy project (`LeadGoals`).
+        guard role == .lead, !result.isError, let notice = goalsNotice(after: name) else { return result }
+        return MCPToolResult(text: result.text + "\n\n" + notice, isError: result.isError)
+    }
+
+    private func callTool(_ name: String, _ arguments: [String: Any]) -> MCPToolResult {
         guard let role else { return fail(refusal ?? "This tool server has no role.") }
         guard tools.contains(where: { $0.name == name }) else { return fail("No tool \(name) for the \(role.rawValue).") }
         do {
@@ -903,6 +923,9 @@ public final class LeadToolset: MCPToolset {
             case "add_task": return try addTask(arguments)
             case "dismiss_finding": return try dismissFinding(arguments)
             case "update_task": return try updateTask(arguments)
+            case "add_goal": return try addGoal(arguments)
+            case "update_goal": return try updateGoal(arguments)
+            case "order_goals": return try orderGoals(arguments)
             case "start_worker": return withGitNotice(try startWorker(try taskSlug(arguments), recover: arguments["recover"] as? Bool ?? false,
                                                                       overrideUsage: arguments["override_usage"] as? Bool ?? false))
             case "stop_worker": return try stopWorker(try taskSlug(arguments))
@@ -1219,7 +1242,9 @@ public final class LeadToolset: MCPToolset {
         let taskOrigin = try Self.originArgument(arguments) ?? (origin != nil ? .audit : nil)
         let parts = try Self.teamArgument(arguments)
         let task = try store.update { board -> LeadTask in
+            let goalID = try goalArgument(arguments, on: board)
             var task = LeadTask(slug: Slug.make(title, taken: store.takenSlugs(board)), title: title, contract: contract)
+            task.goalID = goalID ?? nil
             task.review = review
             task.auditReason = auditReason
             task.origin = taskOrigin?.rawValue
@@ -1262,7 +1287,8 @@ public final class LeadToolset: MCPToolset {
             + (task.hard ? " It's marked hard (advisor fable): its Claude worker consults Fable, at effort \(task.effort ?? LeadLaunch.hardEffort)"
                 + (agent == .auto ? ", and auto prefers Claude while Claude's usage allows." : ".")
                 : (advisor.map { " Its worker's advisor: \($0)." } ?? "") + (effort.map { " Its worker's effort: \($0)." } ?? ""))
-        return MCPToolResult(text: "Added task \(task.slug) (\(title)), review \(task.reviewLevel.rawValue).\(runsOn)\(closed)\(recorded) " + startHint(task))
+        let goalNote = task.goalID.map { " Its goal: \($0)." } ?? ""
+        return MCPToolResult(text: "Added task \(task.slug) (\(title)), review \(task.reviewLevel.rawValue).\(goalNote)\(runsOn)\(closed)\(recorded) " + startHint(task))
     }
 
     /// The review level passed as `review`; nil when none was passed. Anything but none or audit is refused.
@@ -1515,7 +1541,8 @@ public final class LeadToolset: MCPToolset {
         + "by its id: fixed, open (still), or dismissed with a reason. id: leave it out for a new finding. Empty or left out: you found nothing."
 
     static let updateKeys: Set<String> = ["task", "title", "goal", "acceptance", "boundaries", "context", "append_context", "status", "reason", "into", "review", "audit_reason", "reroll",
-                                          "after", "auto_advance", "budget_min", "model", "agent", "advisor", "effort", "done_check", "exception", "accept_verdict", "hold_audit", "team"]
+                                          "after", "auto_advance", "budget_min", "model", "agent", "advisor", "effort", "done_check", "exception", "accept_verdict", "hold_audit", "team",
+                                          "goal_id"]
 
     private func updateTask(_ arguments: [String: Any]) throws -> MCPToolResult {
         let slug = try taskSlug(arguments)
@@ -1523,6 +1550,18 @@ public final class LeadToolset: MCPToolset {
         let unknown = Set(arguments.keys).subtracting(Self.updateKeys)
         guard unknown.isEmpty else {
             throw Problem(text: "update_task doesn't take \(unknown.sorted().joined(separator: ", ")); it takes \(Self.updateKeys.sorted().joined(separator: ", ")). Nothing was changed.")
+        }
+        // A task's goal: set (or cleared) first, on its own; alone, that is the whole call.
+        var goalNote = ""
+        if arguments["goal_id"] != nil {
+            let goal = try store.update { board -> String? in
+                guard let at = board.taskIndex(slug) else { throw Problem(text: "No task \(slug) on the board. Nothing was changed.") }
+                let goal = try goalArgument(arguments, on: board) ?? nil
+                board.tasks[at].goalID = goal
+                return goal
+            }
+            goalNote = goal.map { "\(slug)'s goal: \($0)." } ?? "\(slug) has no goal now."
+            if Set(arguments.keys).subtracting(["task", "goal_id"]).isEmpty { return MCPToolResult(text: goalNote) }
         }
         var status: LeadTask.Status?
         let reason = (arguments["reason"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
@@ -6780,6 +6819,7 @@ public final class LeadToolset: MCPToolset {
         if let red = board.mainRed { lines.append(red.text(base: workflow.base).replacingOccurrences(of: "\n", with: " ")) }
         if let line = archiveNudgeOnce() { lines.append(line) }
         if let line = progressNudgeOnce() { lines.append(line) }
+        lines.append(Self.clip(LeadGoals.unsortedLine(board) ?? LeadGoals.statusLine(board), 600))
         if let listing {
             do {
                 let mac = try macLoad(listing, load: runtime.steadyLoad())
@@ -7459,12 +7499,13 @@ public final class LeadToolset: MCPToolset {
         if scorecard.merged > 0 { lines.append(scorecard.line) }
         if let receipts = LeadReceiptTotals.line(board) { lines.append(receipts) }
         if board.tasks.contains(where: { !LeadTeams.isFinished($0) }) { lines.append(Self.reviewLegend) }
-        lines += board.tasks.map { task in
+        // Under the goals, in their order, then the unsorted (`LeadGoals.grouped`); as before with none.
+        lines += LeadGoals.grouped(board, lines: board.tasks.map { task in
             let ended = sessions.flatMap { Self.endedMember(task, $0) }
             // A running task whose worker ended reads so, not running.
             let state = ended.map { $0.hasPrefix("worker") ? "worker ended" : "verifier ended" } ?? (task.isAbandoned ? "abandoned" : task.status.rawValue)
-            return Self.clip("- \(task.slug) [\(state)] " + String(taskLine(task, sessions, mixed: Self.mixedAgents(board)).dropFirst(task.slug.count + 4)), 200)
-        }
+            return (task, Self.clip("- \(task.slug) [\(state)] " + String(taskLine(task, sessions, mixed: Self.mixedAgents(board)).dropFirst(task.slug.count + 4)), 200))
+        })
         let open = board.openQuestions
         if !open.isEmpty {
             lines.append("\nOpen questions (\(open.count); questions has them in full):")
