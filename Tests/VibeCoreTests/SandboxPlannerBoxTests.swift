@@ -29,6 +29,7 @@ enum PlannedBox {
             case .device(let name): lines.append(["device", mount.target, name])
             case .link(let text): lines.append(["link", mount.target, text])
             case .file(let contents, let mode): lines.append(["file", mount.target, String(decoding: contents, as: UTF8.self), String(mode)])
+            case .binfmt: lines.append(["binfmt", mount.target])
             }
         }
         switch plan.network {

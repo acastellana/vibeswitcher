@@ -171,6 +171,26 @@ struct SandboxPlannerTests {
         #expect(plan.directory == world.worktree && plan.terminal == .foreground && plan.door == SandboxPlanner.door)
     }
 
+    /// Every role's box hides the machine's binfmt_misc entries (WSL's interop among them) behind an empty one of its
+    /// own, over its own /proc's, where the kernel gives a user namespace one; where it can't, the plan has none.
+    @Test func aBoxHasABinfmtMiscOfItsOwnWhereTheKernelGivesOne() throws {
+        let world = try world()
+        for role in [SandboxRole.lead, .worker, .verifier, .branchRun] {
+            for kernel in [true, false] {
+                var inputs = world.inputs(role)
+                inputs.binfmt = kernel
+                #expect(SandboxPlanner.hidesInterpreters(inputs) == kernel)
+                let mounts = try plan(inputs).mounts
+                let own = mounts.firstIndex { $0.target == SandboxPlanner.interpreters }
+                #expect((own != nil) == kernel, "\(role)")
+                if let own {
+                    #expect(mounts[own].kind == .binfmt, "\(role)")
+                    #expect(mounts.firstIndex { $0.target == "/proc" && $0.kind == .proc }.map { $0 < own } == true, "\(role): after /proc")
+                }
+            }
+        }
+    }
+
     @Test func theBasesRefTheConfigTheHooksAndTheTagsAreReadOnlyToAWorker() throws {
         let world = try world()
         let plan = try plan(world.inputs(.worker))

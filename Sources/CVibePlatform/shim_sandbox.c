@@ -462,6 +462,15 @@ static int apply_mount(const struct vibe_sandbox_mount *mount, int root, int old
         result = mount_new("sysfs", NULL, (unsigned int)VIBE_MOUNT_ATTR_RDONLY | (unsigned int)VIBE_MOUNT_ATTR_NOSUID | (unsigned int)VIBE_MOUNT_ATTR_NODEV | (unsigned int)VIBE_MOUNT_ATTR_NOEXEC, point);
         break;
     }
+    case VIBE_MOUNT_BINFMT: {
+        // A binfmt_misc instance of the box's user namespace (where the kernel gives one: 6.18 here), with no entry: the kernel tries a
+        // program's entries in the nearest user namespace that has an instance, so the machine's (WSL's interop among
+        // them) are never tried inside. Read-only: nothing registers one.
+        point = mount_point(folder, name, 0);
+        if (point < 0) break;
+        result = mount_new("binfmt_misc", NULL, (unsigned int)VIBE_MOUNT_ATTR_RDONLY | (unsigned int)VIBE_MOUNT_ATTR_NOSUID | (unsigned int)VIBE_MOUNT_ATTR_NODEV | (unsigned int)VIBE_MOUNT_ATTR_NOEXEC, point);
+        break;
+    }
     case VIBE_MOUNT_DEVICE: {
         // A bare name of the machine's /dev, a character device: never a path.
         const char *device = mount->source;

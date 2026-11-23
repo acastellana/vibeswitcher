@@ -23,6 +23,7 @@ enum {
     VIBE_MOUNT_DEVICE = 8,     // the device node /dev/`source` (a bare name), bound
     VIBE_MOUNT_LINK = 9,       // a symbolic link whose text is `source`
     VIBE_MOUNT_FILE = 10,      // a file of `contents` (`length` bytes) and `mode`, in the root's own tmpfs
+    VIBE_MOUNT_BINFMT = 11,    // a binfmt_misc of the box's user namespace, empty and read-only: the machine's entries go untried
 };
 
 struct vibe_sandbox_mount {
