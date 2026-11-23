@@ -265,7 +265,7 @@ import Testing
         let dynamic = entries.flatMap { u($0.0, 8) + u($0.1, 8) } + u(0, 16)
         let stringsAt = dynamicAt + dynamic.count
         let interpAt = stringsAt + strings.count
-        let interp = interpreter.map { Array($0.utf8) + [0] } ?? []
+        let interp: [UInt8] = interpreter.map { Array($0.utf8) + [0] } ?? []
         let total = interpAt + interp.count
         var out = [0x7F, 0x45, 0x4C, 0x46, 2, 1, 1, 0] + [UInt8](repeating: 0, count: 8)
         out += u(2, 2) + u(0x3E, 2) + u(1, 4) + u(0, 8) + u(64, 8) + u(0, 8) + u(0, 4) + u(64, 2) + u(56, 2) + u(UInt64(headers), 2) + u(0, 2) + u(0, 2) + u(0, 2)
