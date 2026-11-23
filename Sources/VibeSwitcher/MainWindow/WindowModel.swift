@@ -15,7 +15,7 @@ final class WindowModel: ObservableObject {
         didSet {
             guard selectedID != oldValue else { return }
             selectedKept = nil
-            UserDefaults.standard.set(selectedID, forKey: Self.selectionKey)
+            defaults.set(selectedID, forKey: Self.selectionKey)
             // An ended session chosen from Home, the palette or a filter shows in the sidebar: its fold opens.
             if !endedOpen, let selectedID, foldsAway(selectedID) { endedOpen = true }
         }
@@ -23,7 +23,7 @@ final class WindowModel: ObservableObject {
     @Published var grouping: WindowGrouping {
         didSet {
             if grouping != oldValue { arrange() }
-            UserDefaults.standard.set(grouping.rawValue, forKey: Self.groupingKey)
+            defaults.set(grouping.rawValue, forKey: Self.groupingKey)
         }
     }
     /// The sidebar's filter text.
@@ -56,15 +56,15 @@ final class WindowModel: ObservableObject {
     private(set) var agentSessions: [UUID: (agent: Agent, sessionID: String, transcript: String?)] = [:]
     /// The middle pane shows the conversation (Chat) rather than the terminal, where there is one.
     @Published var showsChat: Bool {
-        didSet { UserDefaults.standard.set(showsChat, forKey: Self.showsChatKey) }
+        didSet { defaults.set(showsChat, forKey: Self.showsChatKey) }
     }
     private static let showsChatKey = "middleShowsChat"
     /// The sidebar's "Ended (n)" fold is open, and Home's; each remembered on this Mac, folded at first.
     @Published var endedOpen: Bool {
-        didSet { UserDefaults.standard.set(endedOpen, forKey: Self.endedOpenKey) }
+        didSet { defaults.set(endedOpen, forKey: Self.endedOpenKey) }
     }
     @Published var homeEndedOpen: Bool {
-        didSet { UserDefaults.standard.set(homeEndedOpen, forKey: Self.homeEndedOpenKey) }
+        didSet { defaults.set(homeEndedOpen, forKey: Self.homeEndedOpenKey) }
     }
     static let endedOpenKey = "sidebarEndedOpen"
     static let homeEndedOpenKey = "homeEndedOpen"
@@ -75,12 +75,17 @@ final class WindowModel: ObservableObject {
     private static let selectionKey = "windowSelection"
     private static let groupingKey = "windowGrouping"
 
-    init() {
-        selectedID = UserDefaults.standard.string(forKey: Self.selectionKey)
-        grouping = UserDefaults.standard.string(forKey: Self.groupingKey).flatMap(WindowGrouping.init(rawValue:)) ?? .attention
-        showsChat = UserDefaults.standard.object(forKey: Self.showsChatKey) as? Bool ?? true
-        endedOpen = UserDefaults.standard.bool(forKey: Self.endedOpenKey)
-        homeEndedOpen = UserDefaults.standard.bool(forKey: Self.homeEndedOpenKey)
+    /// Where the selection, grouping, middle pane and folds are remembered: the app's own defaults; a test's own suite
+    /// (`Scratch.defaults`), since an unbundled test binary's `.standard` is shared by every test process on the Mac.
+    let defaults: UserDefaults
+
+    init(defaults: UserDefaults = .standard) {
+        self.defaults = defaults
+        selectedID = defaults.string(forKey: Self.selectionKey)
+        grouping = defaults.string(forKey: Self.groupingKey).flatMap(WindowGrouping.init(rawValue:)) ?? .attention
+        showsChat = defaults.object(forKey: Self.showsChatKey) as? Bool ?? true
+        endedOpen = defaults.bool(forKey: Self.endedOpenKey)
+        homeEndedOpen = defaults.bool(forKey: Self.homeEndedOpenKey)
     }
 
     /// Every row, whatever the grouping and filter. Made once for each change of the sections: the header, the
