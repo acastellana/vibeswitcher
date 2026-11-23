@@ -1512,10 +1512,12 @@ final class LeadController: ObservableObject {
         let (vault, reading, replacements, seen) = (vault, turnReading, replacements, turnEnded)
         reads.async({ files in
             looks.map { look -> (look: Look, ends: Bool, newTurnEnded: Bool) in
-                let named = files.names.board(look.root).leadSession
-                let holder = vault.current(.lead, root: look.root, task: nil)?.session
+                // The agents' state first (hooks and transcripts: slow on a busy disk), whom the board and the vault
+                // name last: a board that names the old lead again while its state was read keeps it.
                 let newReading = seen.contains(look.new.id) ? nil : reading(look.new, look.newPid, nil)
                 let oldReading = reading(look.old, look.oldPid, look.background)
+                let named = files.names.board(look.root).leadSession
+                let holder = vault.current(.lead, root: look.root, task: nil)?.session
                 let ends = Self.endsReplaced(old: look.old.id, new: look.new.id, named: named, holder: holder, oldReading: oldReading,
                                              newReading: newReading, newTurnEnded: seen.contains(look.new.id))
                 return (look, ends, newReading?.turnEnded == true)

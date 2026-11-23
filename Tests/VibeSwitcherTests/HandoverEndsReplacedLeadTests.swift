@@ -217,7 +217,10 @@ struct HandoverEndsReplacedLeadTests {
         try FileManager.default.createDirectory(atPath: otherRoot, withIntermediateDirectories: true)
         let others = [try await spawn("Lead · other", in: otherRoot, world), try await spawn("Worker: Films page", in: world.root, world),
                       try await spawn("Verifier: Films page", in: world.root, world), try await spawn("Shell", in: world.root, world, agent: nil)]
-        for session in [old, new] + others { readings[session.id] = Self.idle }
+        // The old lead mid-turn until the board names it again: between turns while the board named the new one, it
+        // would end, rightly, at any look (the 3 s refresh's too) before the board below is written.
+        for session in [new] + others { readings[session.id] = Self.idle }
+        readings[old.id] = Self.working
         #expect(await until { world.controller.replacedLeads[old.id]?.live == new.id })
 
         // The board names the old lead again: it holds the role and is never ended; the new one, replaced by it now,
@@ -231,6 +234,8 @@ struct HandoverEndsReplacedLeadTests {
             world.controller.refresh()
             return world.controller.replacedLeads[new.id]?.live == old.id && world.controller.replacedLeads[old.id] == nil
         })
+        // Its turn over: every session between turns, and the board naming it keeps it.
+        readings[old.id] = Self.idle
         #expect(await twoLooks(world, looks))
         #expect(await twoLooks(world, looks))
         #expect(looks.ended.isEmpty && live(old.id, world) && live(new.id, world))
@@ -248,6 +253,59 @@ struct HandoverEndsReplacedLeadTests {
         #expect(await twoLooks(world, looks))
         #expect(looks.ended == [old.id])
         #expect(live(new.id, world) && others.allSatisfy { live($0.id, world) })
+    }
+
+    /// The board names the old lead again while a look reads its agent's state (hooks and transcripts, slow on a busy
+    /// disk): the look goes by whom the board names after that, and keeps it. Read before, the board named the new
+    /// lead and the lead the board names now was ended.
+    @Test func aBoardThatNamesTheOldLeadWhileItsStateIsReadKeepsIt() async throws {
+        let world = try routing.world()
+        defer { world.stop() }
+        let readings = Readings()
+        let looks = watch(world, readings)
+        let old = try await routing.oldLead(in: world)
+        let new = try await replace(world, old: old)
+        readings[new.id] = Self.idle
+        #expect(await until { world.controller.replacedLeads[old.id]?.live == new.id })
+        // From now on, the first read of the old lead's state names it on the board meanwhile (as its tool server
+        // would), then finds it between turns.
+        let renamed = Readings()
+        let root = world.root
+        world.controller.turnReading = { session, _, _ in
+            if session.id == old.id, renamed[old.id] == nil {
+                try? BoardStore(root: root).update { board in
+                    board.leadSession = old.id.uuidString
+                    board.leadPid = old.childPID
+                    board.leadTTY = old.tty
+                }
+                renamed[old.id] = Self.idle
+            }
+            return session.id == old.id ? Self.idle : readings[session.id] ?? Reading(activity: .unknown, asking: false, turnEnded: false)
+        }
+        #expect(await until {
+            world.controller.refresh()
+            return renamed[old.id] != nil
+        })
+        #expect(await twoLooks(world, looks))
+        #expect(await twoLooks(world, looks))
+        #expect(looks.ended.isEmpty && live(old.id, world) && live(new.id, world))
+        #expect(await until {
+            world.controller.refresh()
+            return world.controller.replacedLeads[new.id]?.live == old.id && world.controller.replacedLeads[old.id] == nil
+        })
+        #expect(looks.ended.isEmpty && live(old.id, world))
+
+        // Named the new one again: the old one, between turns, ends.
+        try BoardStore(root: world.root).update { board in
+            board.leadSession = new.id.uuidString
+            board.leadPid = new.childPID
+            board.leadTTY = new.tty
+        }
+        #expect(await until {
+            world.controller.refresh()
+            return !live(old.id, world)
+        })
+        #expect(looks.ended == [old.id] && live(new.id, world))
     }
 
     /// What the decision takes: only all of it ends a replaced lead.
