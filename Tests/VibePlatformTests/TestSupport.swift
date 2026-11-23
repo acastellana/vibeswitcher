@@ -1,5 +1,6 @@
 import Foundation
 import Testing
+import VibePlatform
 
 /// Set when `refuseTheAccountRoot` has run (`TestHomeGuardTests` checks it did).
 var homeGuardRan = false
@@ -113,3 +114,22 @@ private let refuseTheAccountRoot: @convention(c) () -> Void = { guardTheHome() }
 @_used @_section("__DATA,__mod_init_func")
 private let refuseTheAccountRoot: @convention(c) () -> Void = { guardTheHome() }
 #endif
+
+/// Whether this test runs in a box whose filter refuses the kernel's socket diagnostics (`NETLINK_SOCK_DIAG`, which
+/// unix_diag answers through): both the kernel's facts, this process's `uid_map` (`Platform.Tools.boxOwners`) and the
+/// socket's own refusal (EPERM), never a variable. A branch run's box lets only route netlink through, so there the
+/// kernel can't be asked which file a socket is bound to; outside a box a kernel without unix_diag still fails the
+/// tests that need it.
+let boxRefusesUnixDiag: Bool = {
+    #if os(Linux)
+    guard Platform.Tools.boxOwners != nil else { return false }
+    let fd = socket(AF_NETLINK, Int32(SOCK_RAW.rawValue) | Int32(SOCK_CLOEXEC.rawValue), 4)  // NETLINK_SOCK_DIAG
+    if fd >= 0 {
+        close(fd)
+        return false
+    }
+    return errno == EPERM
+    #else
+    return false
+    #endif
+}()

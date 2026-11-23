@@ -38,6 +38,9 @@ public struct SandboxInputs: Equatable, Sendable {
     public var agentLogin: Bool
     /// The user's git name and email for the box's generated `~/.gitconfig`; nil: no file.
     public var gitIdentity: GitIdentity?
+    /// Whether the kernel gives the box a binfmt_misc of its own (`Platform.Sandbox.Facts.binfmt`): see
+    /// `SandboxPlanner.hidesInterpreters`.
+    public var binfmt: Bool
 
     public struct GitIdentity: Equatable, Sendable {
         public var name: String
@@ -52,7 +55,8 @@ public struct SandboxInputs: Equatable, Sendable {
     public init(role: SandboxRole, home: String, accountHome: String, uid: uid_t, gid: gid_t, root: String, worktree: String?,
                 temporary: String, build: String, pathFolders: [String], agentProgram: String?, box: String,
                 policy: SandboxPolicy = .standard, network: Platform.Sandbox.Network, slots: String?, environment: [String] = [],
-                agentConfig: Data? = nil, agentLogin: Bool = true, gitIdentity: GitIdentity? = nil) {
+                agentConfig: Data? = nil, agentLogin: Bool = true, gitIdentity: GitIdentity? = nil,
+                binfmt: Bool = Platform.Sandbox.probe().binfmt) {
         self.role = role
         self.home = home
         self.accountHome = accountHome
@@ -72,6 +76,7 @@ public struct SandboxInputs: Equatable, Sendable {
         self.agentConfig = agentConfig
         self.agentLogin = agentLogin
         self.gitIdentity = gitIdentity
+        self.binfmt = binfmt
     }
 }
 
@@ -106,6 +111,18 @@ public enum SandboxPlanner {
 
     /// The machine's folders every box shows read-only, where they exist.
     static let system = ["/usr", "/etc", "/opt"]
+
+    /// Where a box's own binfmt_misc is, inside (where the machine shows its own).
+    public static let interpreters = "/proc/sys/fs/binfmt_misc"
+
+    /// Whether `inputs`' box hides the machine's binfmt_misc entries behind an empty one of its own (`interpreters`):
+    /// WSL's interop entry among them, which starts a Windows program through `/init`. With the entry's F flag the
+    /// kernel opened `/init` when the entry was registered, so the box's missing `/init` doesn't stop it (kernel 6.18,
+    /// measured 2026-11-20: `/init` ran inside a box on a two-byte `MZ` file). Only where the kernel gives a user
+    /// namespace one (`SandboxInputs.binfmt`, from the probe); elsewhere the box tries the machine's entries, and only
+    /// the missing `/run/WSL` and the filter's refusal of `AF_VSOCK` stand between a program and the Windows side. The
+    /// one place a box would keep the machine's entries, for a session the user gave Windows.
+    public static func hidesInterpreters(_ inputs: SandboxInputs) -> Bool { inputs.binfmt }
 
     public static func plan(_ inputs: SandboxInputs, exists: (String) -> Bool = { FileManager.default.fileExists(atPath: $0) },
                             gitRoots: (String) -> Result<GitRoots.Roots, SandboxRefusal> = GitRoots.read,
@@ -154,6 +171,7 @@ public enum SandboxPlanner {
         for folder in system where exists(folder) { readOnly(folder) }
         for link in ["bin", "lib", "lib64", "sbin"] { mounts.append(.init("/" + link, .link(to: "usr/" + link))) }
         mounts.append(.init("/proc", .proc))
+        if hidesInterpreters(inputs) { mounts.append(.init(interpreters, .binfmt)) }
         mounts.append(.init("/dev", .empty(mode: 0o755)))
         mounts += ["null", "zero", "full", "random", "urandom", "tty"].map { .init("/dev/" + $0, .device($0)) }
         mounts += [.init("/dev/pts", .devpts), .init("/dev/ptmx", .link(to: "pts/ptmx")), .init("/dev/shm", .empty(mode: 0o1777)),

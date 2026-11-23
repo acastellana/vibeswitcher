@@ -458,6 +458,10 @@ if [[ -n $preferences_only ]]; then
     exit
 fi
 
+# In a branch run's box, SwiftPM keeps the cache the box gave the caller's HOME (scripts/lib/swift-jobs.sh): exported
+# (only there) for the bash vs-heavy runs, the retry's too, whose heavy_swift keeps it from SwiftPM and the tests.
+swiftpm_run_cache
+[[ -n ${swiftpm_cache:-} ]] && export swiftpm_cache
 export HOME=$tool_scratch/home CFFIXED_USER_HOME=$tool_scratch/home VIBESWITCHER_HOME=$tool_scratch/home/.vibeswitcher
 # The suites run in UTC, as on CI: a time a test checks (the wire vectors' usage resets) reads the same everywhere.
 export TZ=UTC
@@ -500,6 +504,7 @@ else
         swift_tests "$@"
     fi
     status=$?
+    export -n swiftpm_cache 2> /dev/null
     check_preferences "$preferences_before" "$defaults_before" || status=1
     [[ -z $tsan ]] || tsan_summary || status=1
     # Even when the build or a test failed: they don't need the build, and their result is worth having. Not in --perf

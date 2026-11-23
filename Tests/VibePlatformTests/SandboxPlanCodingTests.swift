@@ -17,6 +17,7 @@ struct SandboxPlanCodingTests {
             .init("/dev/null", .device("null")),
             .init("/bin", .link(to: "usr/bin")),
             .init("/home/u/.gitconfig", .file(contents: Data("[gc]\n\tauto = 0\n".utf8), mode: 0o444)),
+            .init("/proc/sys/fs/binfmt_misc", .binfmt),
         ],
         network: .proxied(port: 3128), hostname: "box", directory: "/work",
         environment: ["PATH=/usr/bin:/bin", "HOME=/home/u"], door: "/run/vibeswitcher/door", terminal: .foreground, nesting: true)

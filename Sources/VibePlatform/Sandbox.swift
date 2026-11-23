@@ -26,14 +26,21 @@ extension Platform {
             public var landlockABI: Int
             /// Whether an `AF_VSOCK` socket opens here (Hyper-V sockets: the filter refuses them in a box).
             public var vsock: Bool
+            /// Whether a user namespace gets a binfmt_misc of its own here (measured on 6.18; 6.7 in the kernel's history), so a box can hide the
+            /// machine's entries behind an empty one (`Mount.Kind.binfmt`). Where it can't, a box tries the machine's:
+            /// WSL's interop entry among them, whose interpreter (`/init`) the kernel holds open when it carries the F
+            /// flag, so the box's missing `/init` doesn't stop it; only the missing `/run/WSL` and the filter's refusal of
+            /// `AF_VSOCK` then keep a Windows program from the Windows side.
+            public var binfmt: Bool
             /// Why no box can be built here; nil when one can.
             public var why: String?
 
-            public init(userNamespaces: Bool, overlay: Bool, landlockABI: Int, vsock: Bool, why: String?) {
+            public init(userNamespaces: Bool, overlay: Bool, landlockABI: Int, vsock: Bool, binfmt: Bool = false, why: String?) {
                 self.userNamespaces = userNamespaces
                 self.overlay = overlay
                 self.landlockABI = landlockABI
                 self.vsock = vsock
+                self.binfmt = binfmt
                 self.why = why
             }
         }
@@ -67,6 +74,9 @@ extension Platform {
                 case link(to: String)
                 /// A file of `contents` and `mode`, in the root's own memory (read-only once the box is built).
                 case file(contents: Data, mode: UInt32)
+                /// A binfmt_misc of the box's own, empty and read-only: the kernel tries a program's entries in the
+                /// nearest user namespace that has one, so the machine's go untried inside. Only where `Facts.binfmt`.
+                case binfmt
             }
 
             public var target: String

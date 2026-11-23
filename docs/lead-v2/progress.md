@@ -405,3 +405,50 @@
 - 2026-11-21 18:31 Kept the-node-s-gate unmerged: Waits on the user: approval of fe043af2a944ffdf13b968eba8305390fe9c98fc (question BC07914D, sensitive paths) and a fix for v2's own failing test SteerNowTests.theCommandLineSteersAWorkingSession (question A5D36154), without which the merge's test run fails. The lead sets it back and merges (accept_stale_verdict: the context gained only a state note after the audit) once both are answered.
 - 2026-11-21 19:21 Handed the lead over to a fresh session: the last one had been idle 50 minutes with 322k tokens of context, past handover_idle_min 50 and handover_tokens 150k
 - 2026-11-21 19:21 Automatically (auto_advance): The account's usage is near a limit: the weekly limit (every model): 86% used, resets Nov 26, 12:00. At 80% of a limit VibeSwitcher starts no workers or audits on any model, so the limit doesn't stop one mid-task; sessions already running go on. Tell the user. Nothing on it starts by itself until the reset, then it does; start_worker or audit with override_usage: true starts one anyway.
+- 2026-11-22 11:52 Started a worker on the-node-s-gate
+- 2026-11-22 12:18 Audit of the-node-s-gate at 05db26f0 by 2 finders (contract and acceptance; bugs, regressions and security); the shared run: test command failed
+- 2026-11-22 12:19 Exception on the-node-s-gate by lead of vibeswitcher-v2-lead: edits to Tests/VibeCoreTests/ProcessTableTests.swift, Tests/VibeCoreTests/TestSupport.swift accepted. Reason: A tenth box-only test failure, found by the audit's shared run of 05db26f0: ProcessTableTests.aSnapshotIsWholeAndWithinItsLimit expects more processes in the table than twice the cores (expectWhole, P…
+- 2026-11-22 12:21 Audit of the-node-s-gate: finder 2 of 2 submitted (complete, clean, 2 findings)
+- 2026-11-22 12:25 Audit of the-node-s-gate: incomplete, clean, round 3: 1 Important closed, 5 Nit (2 open, 2 unconfirmed), 2 Pre-existing unconfirmed (2 finders voted: 0 new findings confirmed, 0 unconfirmed)
+- 2026-11-22 12:45 Audit of the-node-s-gate at 7fec90da by 2 finders (contract and acceptance; bugs, regressions and security); the shared run: the test command passed
+- 2026-11-22 12:47 Audit of the-node-s-gate: finder 2 of 2 submitted (complete, clean, 2 findings)
+- 2026-11-22 12:47 Audit of the-node-s-gate: complete, clean, round 4: 1 Important closed, 5 Nit (2 open, 2 unconfirmed), 2 Pre-existing unconfirmed (2 finders voted: 0 new findings confirmed, 0 unconfirmed)
+- 2026-11-22 13:07 Pipeline held: the-node-s-gate ready to merge with none landing; cause: nothing VibeSwitcher sees
+- 2026-11-22 13:07 Pipeline held: the-node-s-gate ready to merge with none landing; cause: the gate not installed
+- 2026-11-22 13:07 Pipeline held: the-node-s-gate ready to merge with none landing; cause: nothing VibeSwitcher sees
+- 2026-11-22 13:07 Pipeline held: the-node-s-gate ready to merge with none landing; cause: the gate not installed
+- 2026-11-22 13:37 Pipeline held: the-node-s-gate ready to merge with none landing; cause: nothing VibeSwitcher sees
+- 2026-11-22 13:37 Pipeline held: the-node-s-gate ready to merge with none landing; cause: nothing VibeSwitcher sees
+- 2026-11-22 13:37 Pipeline held: the-node-s-gate ready to merge with none landing; cause: the gate not installed
+- 2026-11-22 13:37 Pipeline held: the-node-s-gate ready to merge with none landing; cause: the gate not installed
+- 2026-11-22 13:37 Kept the-node-s-gate unmerged: Waits on the user's approval of 7fec90da94192226c060bed641f9e8eb6debb3d2 (question 5AF85424, sensitive paths); its audit passed there (round 4). Kept only to stop the half-hourly "merges are held" notices: on the approval the lead sets it back to planned and merges.
+- 2026-11-22 14:28 Handed the lead over to a fresh session: the last one had been idle 50 minutes with 194k tokens of context, past handover_idle_min 50 and handover_tokens 150k
+- 2026-11-22 14:28 Automatically (auto_advance): The account's usage is near a limit: the weekly limit (every model): 92% used, resets Nov 26, 12:00. At 80% of a limit VibeSwitcher starts no workers or audits on any model, so the limit doesn't stop one mid-task; sessions already running go on. Tell the user. Nothing on it starts by itself until the reset, then it does; start_worker or audit with override_usage: true starts one anyway.
+- 2026-11-22 16:07 You accepted 142 commits on v2 from the command line: cad0c1b Merge remote-tracking branch 'lead/v2' into v2; 3a530e9 Merge branch 'v2-small-rows' into v2; a94b2ab v2 tests: HostConnectorTests' lock-wait bound named (ElapsedTimeLint on the Mac); …
+- 2026-11-22 16:07 Planned accepting-a-base-move: Accepting a base move doesn't ask again for the lead's own records commits made while the card was open (review audit, for security)
+- 2026-11-22 16:07 Automatically (auto_advance): Didn't audit team-sessions-start: Not audited, no verifier started: the lead held team-sessions-start's audit (update_task hold_audit). It starts once an exception is recorded (update_task(team-sessions-start, exception: {scope, reason, evidence})), or with hold_audit: false.
+- 2026-11-23 11:27 You accepted 8 commits on v2 from the command line: 302d38b Lead: decisions and progress; d16f0b0 Lead: decisions and progress; 4350057 Lead: decisions and progress; …
+- 2026-11-23 11:36 Merged the-node-s-gate: The node's gate builds again: the project's sandbox policy and the user's tool installs (swiftly, pip --user, nvm) reach branch runs (build 5c23336a7630)
+- 2026-11-23 11:36 Started a worker on turn-this-incident-into-3
+- 2026-11-23 11:36 Automatically (auto_advance): Started a worker on turn-this-incident-into-3 (The suite proves the gate can build this project: the toolchain that built the tests runs in a branch run's box), its after tasks done (the-node-s-gate).
+- 2026-11-23 11:36 Automatically (auto_advance): Overlap for turn-this-incident-into-3's start (a warning only: nothing was refused or reordered). Tests/VibeCoreTests/TestSupport.swift: tests-that-write-a (blocked: its branch changes it); Tests/VibeHostTests/TestSupport.swift: tests-that-write-a (blocked: its branch changes it); Tests/VibeNodeTests/TestSupport.swift: tests-that-write-a (blocked: its branch changes it).
+- 2026-11-23 11:36 Ended the replaced lead sessions 2BCE84C7, 62FEEC48, 6636D4E8, EEAFCEFC and their tool servers: only the current lead acts
+- 2026-11-23 11:36 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: ~/.claude/shell-snapshots and ~/.vibeswitcher/lead/run
+- 2026-11-23 11:36 Started a worker on sb5-the-host-confines
+- 2026-11-23 11:36 Started a worker on measured-with-a-real
+- 2026-11-23 11:37 Update: Merged: the node's gate builds again, and a box starts no Windows program (the-node-s-gate) — `the-node-s-gate` is in v2 as `e6bfcd3e` (the commit you approved, `7fec90da`, rebased onto v2).
+- 2026-11-23 11:37 Sent turn-this-incident-into-3's worker contract v4 (it had v3)
+- 2026-11-23 11:50 Exception on sb5-the-host-confines by lead of vibeswitcher-v2-lead: edits to scripts/test-under-load.sh accepted. Reason: One line, `export TZ=UTC`, as scripts/test.sh:437 has it: without it WireVectorsTests (v2's own test, in this branch's done-gate filter) fails 3 of 3 under the load script because the usage limits' 'r…
+- 2026-11-23 12:01 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: ~/.claude/shell-snapshots
+- 2026-11-23 12:01 Started a worker on measured-with-a-real
+- 2026-11-23 12:11 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: ~/.claude/shell-snapshots
+- 2026-11-23 12:11 Started a worker on turn-this-incident-into-4
+- 2026-11-23 12:12 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: ~/.claude/shell-snapshots
+- 2026-11-23 12:12 Started a worker on team-sessions-start
+- 2026-11-23 12:23 Automatically (auto_advance): Didn't audit sb5-the-host-confines: The audit of sb5-the-host-confines was cancelled during its build and test run; no finder started.
+- 2026-11-23 12:23 Automatically (auto_advance): Didn't merge turn-this-incident-into-3: The merge of turn-this-incident-into-3 was cancelled; nothing was merged, and turn-this-incident-into-3 stays as it was.
+- 2026-11-23 12:26 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: ~/.claude/shell-snapshots
+- 2026-11-23 12:26 Started a worker on measured-with-a-real
+- 2026-11-23 12:27 Started a worker on turn-this-incident-into-4
+- 2026-11-23 12:27 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: ~/.claude/shell-snapshots
+- 2026-11-23 12:27 Started a worker on team-sessions-start
