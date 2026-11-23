@@ -154,7 +154,9 @@ struct ApproveTests {
         let homeNames = Set((homeCard.config?.items ?? []).map(\.name))
         #expect(Set(names).isSubset(of: homeNames), "\(names) \(homeNames)")
         let short = CardText.lines(card, long: false)
-        #expect(short.contains { $0.contains("and \(names.count) of your home folder's config, the same as card \(homeID)") }, "\(short)")
+        // The folder, never the other card's id (it may be superseded or accepted since).
+        #expect(short.contains { $0.contains("and \(names.count) of your home folder's config, the same as \(home)'s card shows it") }, "\(short)")
+        #expect(!short.contains { $0.contains(homeID) }, "\(short)")
         #expect(!short.contains { $0.hasPrefix("    ~/.claude/settings.json") }, "\(short)")
         // Asked again: the same cards (nothing redrawn); the home's own card leaves nothing to another.
         let again = try #require(await world.ask("config.held", ["folder": .string(world.repo)], action: nil))
@@ -167,9 +169,21 @@ struct ApproveTests {
         #expect(first.ok && first.result?["homeWaits"]?.array?.compactMap(\.string).contains("~/.claude/settings.json") == true
                 && first.result?["homeCard"]?.string == homeID && first.result?["floorRecorded"]?.bool == false, "\(first)")
         #expect(world.card(id)?.closed?.hasPrefix("accepted; the home folder's") == true, "\(String(describing: world.card(id)?.closed))")
+        // Said in `status` while its rails and floor wait, with the one command.
+        let notices = { world.requests.queue.sync { world.requests.statusValue()["notices"]?.array?.compactMap(\.string) ?? [] } }
+        #expect(notices().contains { $0.contains("guard rails and review floor aren't recorded yet") && $0.contains("vibeswitcher config held \(world.repo)") },
+                "\(notices())")
+        // And in the brief (the template's words: no model in a test).
+        let brief = try #require(await world.ask("brief", [:], action: nil))
+        #expect(brief.result?["text"]?.string?.contains("guard rails and review floor aren't recorded yet") == true, "\(brief)")
         // The home's, then the project's again: nothing of the home's left on it, and its accept records the floor.
+        let heldBefore = world.held().count
         let homeAccepted = try #require(await world.ask("config.accept", ["card": .string(homeID), "code": .string(NodeIds.code(card: homeID))]))
         #expect(homeAccepted.ok, "\(homeAccepted)")
+        // The project's lead is told to go ahead (its home's config sealed), and the notice says to accept its card again.
+        #expect(await eventually(timeout: 30) { world.held().count > heldBefore && world.held().last?.text.contains("(your home folder's)") == true },
+                "\(world.held().map(\.text))")
+        #expect(notices().contains { $0.contains("that one is accepted now, so accept this folder's again") }, "\(notices())")
         let after = try #require(await world.ask("config.held", ["folder": .string(world.repo)], action: nil))
         let afterCard = try #require(after.result?["card"], "\(after)")
         #expect(afterCard["config"]?["sharedHome"] == .null && afterCard["config"]?["items"]?.array?.contains { $0["name"]?.string == "~/.claude/settings.json" } != true,
@@ -177,6 +191,7 @@ struct ApproveTests {
         let afterID = try #require(afterCard["id"]?.string)
         let last = try #require(await world.ask("config.accept", ["card": .string(afterID), "code": .string(NodeIds.code(card: afterID))]))
         #expect(last.ok && last.result?["homeWaits"] == nil, "\(last)")
+        #expect(!notices().contains { $0.contains("guard rails and review floor aren't recorded yet") }, "\(notices())")
     }
 
     @Test func oneCodeDoesTheListedBatchEachItemItsOwnAction() async throws {
@@ -191,7 +206,7 @@ struct ApproveTests {
         let shown = items.map { item in CardText.lines(item["card"] ?? .null).joined(separator: "\n") }
         // The home's lists it; a project's says it in its line of what it shares with the home's card.
         // The home's lists it; a project's says it in its line of what it leaves to the home's card.
-        #expect(shown.allSatisfy { $0.contains("~/.claude/settings.json") || $0.contains("of your home folder's config, the same as card") }, "\(shown)")
+        #expect(shown.allSatisfy { $0.contains("~/.claude/settings.json") || $0.contains("of your home folder's config, the same as") }, "\(shown)")
         let batch = try #require(listed["batch"]?.string)
         let code = try #require(listed["code"]?.string)
         #expect(code == NodeIds.code(card: batch))

@@ -190,6 +190,10 @@ public final class LeadEngine: @unchecked Sendable {
     /// What the last refresh's notices say for `status`, by root, while they stand: a base move that refused a merge of
     /// the running lead's waits on the user (`AlertRules.baseMoved`).
     public internal(set) var notices: [String: [String]] = [:]
+    /// The roots whose card was accepted before the card it left the home folder's things to (`ConfigHoldStore`'s
+    /// `homeWaits`): what still waited, and whether the home's accept since told its lead to go ahead. Their workflow.md
+    /// guard rails and review floor wait for the root's card's next accept (`secondAcceptNotices` says so). On `queue`.
+    var secondAccepts: [String: (waits: [String], told: Bool)] = [:]
     /// The standing notices' keys, so each is logged once while it stands.
     var noticed: Set<String> = []
     /// How long the machine has slept since this engine started, noted at each witness look (`MacSleepLog`).

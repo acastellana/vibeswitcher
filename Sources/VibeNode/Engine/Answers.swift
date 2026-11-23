@@ -745,6 +745,20 @@ extension LeadEngine {
                         then(.failure(.refused(why + " Held now: " + held.map { ConfigSeal.inert($0, limit: 200) }.joined(separator: ", "))))
                     case .success(.sealed(let names, let floor, let homeWaits)):
                         self.cards.change(id) { $0.closed = homeWaits.isEmpty ? "accepted" : "accepted; the home folder's \(homeWaits.count) still held" }
+                        // A root left waiting on the home's card: noted until its card is accepted with nothing waiting.
+                        if homeWaits.isEmpty { self.secondAccepts[root] = nil } else { self.secondAccepts[root] = (homeWaits, false) }
+                        // What this accept sealed that another root's card left waiting: that root's lead goes ahead (its
+                        // rails and floor still wait for its own card's next accept, as `status` says).
+                        let sealed = Set(names)
+                        for (other, entry) in self.secondAccepts.sorted(by: { $0.key < $1.key })
+                        where other != root && !entry.told && !sealed.isDisjoint(with: entry.waits) {
+                            self.secondAccepts[other]?.told = true
+                            guard self.leads.leads[NodeIds.project(root: other)] != nil else { continue }
+                            let cleared = entry.waits.filter(sealed.contains)
+                            self.deliver(built: { "The user accepted the change to \(cleared.joined(separator: ", ")) at the command line (your home folder's): "
+                                + "it's sealed as it is, and workers, verifiers and merges go ahead again." },
+                                         from: .system("the user, at the command line"), root: other, action: nil)
+                        }
 
                         if self.leads.leads[card.project] != nil, !names.isEmpty, homeWaits.isEmpty {
                             self.deliver(built: { "The user accepted the change to \(names.joined(separator: ", ")) at the command line: it's sealed as it is, "
@@ -760,6 +774,16 @@ extension LeadEngine {
                     }
                 }
             }
+        }
+    }
+
+    /// `status`'s and the brief's words for each root whose guard rails and review floor wait for its card's next
+    /// accept (`secondAccepts`), with the one command. On `queue`.
+    var secondAcceptNotices: [String] {
+        secondAccepts.sorted { $0.key < $1.key }.map { root, entry in
+            "\(LeadMail.project(of: root)): workflow.md's guard rails and review floor aren't recorded yet: its card was accepted before your home "
+                + "folder's; " + (entry.told ? "that one is accepted now, so accept this folder's again" : "once that one is accepted, accept this folder's again")
+                + ": vibeswitcher config held \(root)"
         }
     }
 

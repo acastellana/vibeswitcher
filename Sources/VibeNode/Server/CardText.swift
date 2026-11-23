@@ -104,10 +104,11 @@ public enum CardText {
             lines.append(items.isEmpty && shared.isEmpty ? "  nothing held: accepting records what workflow.md proposes and ends a fresh vault's first look"
                          : items.isEmpty ? "  held (no worker, verifier or merge until accepted), none of it this folder's own:"
                          : "  held (no worker, verifier or merge until accepted):")
-            if !shared.isEmpty, let card = config["sharedHome"]?["card"]?.string {
+            // The folder, never the other card's id: that card may be superseded or accepted since this one was drawn.
+            if !shared.isEmpty {
                 let folder = config["sharedHome"]?["folder"]?.string ?? "~"
-                lines.append("    and \(shared.count) of your home folder's config, the same as card \(inert(card)) for \(inert(folder)) shows it: that card's accept "
-                    + "seals them for every project, this one's doesn't (`vibeswitcher config held \(inert(folder))` lists them)")
+                lines.append("    and \(shared.count) of your home folder's config, the same as \(inert(folder))'s card shows it: that folder's accept "
+                    + "seals them for every project, this one's doesn't (`vibeswitcher config held \(inert(folder))` shows its card)")
             }
             for item in items {
                 var line = "    " + inert(item["name"]?.string)

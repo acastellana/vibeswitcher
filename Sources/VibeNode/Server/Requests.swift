@@ -849,6 +849,7 @@ public final class Requests: @unchecked Sendable {
         var notices = stopping ? ["the node is stopping"] : []
         notices += engine?.leads.leads.values.sorted { $0.root < $1.root }.compactMap(\.notice) ?? []
         notices += engine?.notices.sorted { $0.key < $1.key }.flatMap(\.value) ?? []
+        notices += engine?.secondAcceptNotices ?? []
         notices += (engine?.restartNotices ?? []) + (engine?.rolelessNotices ?? [])
         notices += engine?.promptAuditNotices ?? []
         notices += engine?.unknownDialogNotices ?? []
