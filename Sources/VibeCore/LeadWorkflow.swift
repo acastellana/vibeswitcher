@@ -951,11 +951,14 @@ public enum LeadPrompts {
 
         /// A bug task starts from a red run on the symptom its contract quotes (misread symptoms cost three freeze or hang
         /// misdiagnoses, and 25% of flaky fixes flaked again: docs/process/reviews/mattpocock-skills.md, idea 1). A bug
-        /// the sandbox can't reproduce ends up blocked: that's intended.
+        /// the sandbox can't reproduce ends up blocked: that's intended. Its done report names the commit that brought the
+        /// bug (`introduced_by`), for the weekly scorecard's bugs that got past review (`LeadEscapedBugs`).
         public static let bugTasks = "Bug tasks: before changing code, run one command that goes red on the symptom the "
             + "contract quotes. A flake: record its failure rate over N runs under load (the Load tests rule above), and "
             + "show that rate over N runs after the fix. With no such command, report blocked with what was tried. If no "
-            + "test can reach the real bug path, say so in your report instead of adding a shallow test."
+            + "test can reach the real bug path, say so in your report instead of adding a shallow test. In the done report, put in "
+            + "`introduced_by` the commit that introduced the bug (git blame or git log on the lines you fixed), or \"unknown\" when you "
+            + "can't find it."
 
         /// A fix's regression test shown to fail without the fix (2026-10-25: finished-work-lands' two tests for its F1
         /// fix never reached the race F1 described, so they'd have passed on the old code too). The fix comes out by a

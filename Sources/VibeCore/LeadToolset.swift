@@ -695,7 +695,8 @@ public final class LeadToolset: MCPToolset {
                             properties: ["status": P(type: "string", description: "done, blocked, or over_budget", options: ["done", "blocked", Self.overBudgetStatus]),
                                          "summary": P(type: "string", description: "What changed and how you checked it, or what blocks you; for over_budget: what works (with evidence), what's missing, and your proposal (finish in N more minutes, cut scope, or another approach)"),
                                          "evidence": P(type: "array", description: Self.evidenceShape, items: "object"),
-                                         "blind_check": P(type: "string", description: Self.blindCheckShape)],
+                                         "blind_check": P(type: "string", description: Self.blindCheckShape),
+                                         "introduced_by": P(type: "string", description: Self.introducedByShape)],
                             required: ["status", "summary"]),
                 MCPToolInfo(name: "ask_lead", description: "Ask the project lead something without stopping your work; the answer arrives as a message.",
                             properties: ["question": P(type: "string", description: "The question")], required: ["question"]),
@@ -1532,6 +1533,9 @@ public final class LeadToolset: MCPToolset {
         + "screenshots, optional. A task with no acceptance checks needs one entry, for its goal. Not needed with blocked."
     static let blindCheckShape = "With done: what your blind check (a fresh subagent given only the contract and the diff) found, "
         + "and for each item what you did: fixed (in which commit) or why not. \"Nothing blocking\" when it found nothing."
+
+    static let introducedByShape = "With done on a bug fix: the commit that introduced the bug (its hash, from git blame or git log "
+        + "on the lines you fixed), or \"unknown\" when you can't find it. Optional; the weekly scorecard counts bugs that got past review by it."
 
     static let findingsShape = "Each problem you found, one object each: {id, severity, file, line, evidence, failure_scenario, status, reason}. "
         + "severity: Important only for a concrete problem that blocks the merge (an acceptance check that fails, a bug, a weakened test), "
@@ -6331,6 +6335,8 @@ public final class LeadToolset: MCPToolset {
                 board.tasks[index].evidence = nil
             }
             if done { board.tasks[index].report = summary }
+            // Kept from an earlier done when this one doesn't say it (a done again after findings, say).
+            if done, let introduced = evidence?.introducedBy { board.tasks[index].introducedBy = introduced }
             // A done on a new commit: an audit started next waited from now (`LeadWaits`).
             if done, standing == nil { board.tasks[index].noteWaits { $0.reportedDone(at: Date().timeIntervalSince1970) } }
             board.tasks[index].auditNeeded = needed
@@ -6835,7 +6841,7 @@ public final class LeadToolset: MCPToolset {
             throw Problem(text: "Not reported: say in `blind_check` what your blind check found and what you did about each item. "
                 + "Run it first if you haven't: " + LeadPrompts.Policy.blindCheck(base: base))
         }
-        let evidence = LeadDoneEvidence(checks: checks, blindCheck: blind)
+        let evidence = LeadDoneEvidence(checks: checks, blindCheck: blind, introducedBy: LeadDoneEvidence.introducedBy(arguments["introduced_by"]))
         let uncovered = evidence.uncovered(acceptance)
         guard uncovered.isEmpty else {
             let named = uncovered.map { "\($0.number) (\(clip($0.text, 120)))" }.joined(separator: "; ")
@@ -7197,6 +7203,12 @@ public final class LeadToolset: MCPToolset {
         // The scorecard's cost line: the batch's receipts summed, and its most expensive task.
         if let receipts = LeadReceiptTotals.line(all) { lines.append("\n" + receipts) }
         if let origins = LeadOrigins.statusLine(all.tasks, now: Date().timeIntervalSince1970) { lines.append("\n" + origins) }
+        // The scorecard's bugs that got past review, by the review of the merge that brought each (`LeadEscapedBugs`).
+        if let escaped = LeadEscapedBugs.statusLine(all.tasks, now: Date().timeIntervalSince1970, resolve: { [root, base = workflow.base] in
+            LeadEscapedBugs.merge(of: $0, root: root, base: base, tasks: all.tasks)
+        }) {
+            lines.append("\n" + Self.clip(escaped, 600))
+        }
         // The scorecard's small_task_min line: how the rule went this week, to judge it on numbers.
         if let small = LeadSmallTask.statusLine(all.tasks, now: Date().timeIntervalSince1970) { lines.append("\n" + Self.clip(small, 600)) }
         if !ended.isEmpty {

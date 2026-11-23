@@ -975,6 +975,10 @@ public struct LeadTask: Codable, Equatable, Sendable, Identifiable {
     /// count of bugs the user found against those the system found; nil: not said (tasks from before it was kept).
     /// Kept as text so a board with a value this build doesn't know still decodes (`originKind` reads it).
     public var origin: String?
+    /// The commit that introduced the bug it fixes, as its worker's last done report said (`introduced_by`: a hash, or
+    /// "unknown" when it couldn't find one); nil: not said (a task that isn't a bug fix, a worker from before it was
+    /// asked). The weekly scorecard counts bugs that got past review by it (`LeadEscapedBugs`).
+    public var introducedBy: String?
 
     /// Where a task's work came from (see `origin`). user_report: the user reported it; incident, log_watcher, flake
     /// and audit: the system found it (an incident record, the log watcher, the flake ledger, an audit's finding);
