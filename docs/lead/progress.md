@@ -4390,3 +4390,5 @@ Proposed task 1: Find why dictations end with no text
 - 2026-11-23 14:02 Dismissed a-test-that-flakes:F1: Intended: red-on-base fix tasks are audited like flake fixes, per decision 2026-11-23 14:02:00 in docs/lead/decisions.md.
 - 2026-11-23 14:06 Pipeline held: fix-the-dictation-tests ready to merge with none landing; cause: a merge in progress
 - 2026-11-23 14:06 Merged fix-the-dictation-tests: Fix the dictation tests that flaked in merges this week (escAndTheCross…, escCancels…, eachOpenAIRun…) (build 71a026954280)
+- 2026-11-23 14:06 Automatically (auto_advance): Merged fix-the-dictation-tests (Fix the dictation tests that flaked in merges this week (escAndTheCross…, escCancels…, eachOpenAIRun…)) into main at 027df9e2, on its passing audit and the full test run.
+- 2026-11-23 14:07 Automatically (auto_advance): Cleaned up fix-the-dictation-tests (freed 1.8 GB of build output and temporary folders). It stays done.
