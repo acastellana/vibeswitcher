@@ -130,7 +130,7 @@ struct ConfigHoldStoreTests {
         let again = try ConfigHoldStore.held(root: team.root, vault: team.app, home: team.home).get()
         #expect(again.items.map(\.name) == ["~/.claude/skills"])
         #expect(again.hashes == shown.hashes)
-        guard case .sealed(let names, _) = try ConfigHoldStore.accept(again, root: team.root, vault: team.app).get() else {
+        guard case .sealed(let names, _, _) = try ConfigHoldStore.accept(again, root: team.root, vault: team.app).get() else {
             Issue.record("the card drawn didn't seal")
             return
         }
@@ -255,7 +255,7 @@ struct ConfigHoldStoreTests {
         #expect(ConfigSeal.held(in: try team.app.guardedRecord(root: team.root)) == ["~/.claude/skills"])
 
         let drawn = try ConfigHoldStore.held(root: team.root, vault: team.app, home: team.home, look: false).get()
-        guard case .sealed(let names, _) = try ConfigHoldStore.accept(drawn, root: team.root, vault: team.app).get() else {
+        guard case .sealed(let names, _, _) = try ConfigHoldStore.accept(drawn, root: team.root, vault: team.app).get() else {
             Issue.record("the card drawn again didn't seal")
             return
         }

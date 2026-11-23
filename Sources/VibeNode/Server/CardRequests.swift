@@ -463,6 +463,9 @@ extension CardStore.Card {
                 .object(["key": .string(rail.key), "value": .string(rail.value), "sinceAccept": text(rail.sinceAccept)])
             })
             c["lastAccept"] = config.lastAccept.map(NodeWire.Value.date) ?? .null
+            c["sharedHome"] = config.sharedHome.map { shared in
+                .object(["names": texts(shared.names), "card": .string(shared.card), "folder": .string(shared.folder)])
+            } ?? .null
             if let floor = config.floor {
                 var f: [String: NodeWire.Value] = [:]
                 f["mergePolicy"] = .string(floor.mergePolicy.rawValue)

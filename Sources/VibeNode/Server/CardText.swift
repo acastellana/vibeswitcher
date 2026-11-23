@@ -99,8 +99,16 @@ public enum CardText {
             // The words the short lines carry as marks, by mark, said once after them.
             var legend: [String: String] = [:]
             let items = config["items"]?.array ?? []
-            lines.append(items.isEmpty ? "  nothing held: accepting records what workflow.md proposes and ends a fresh vault's first look"
-                                       : "  held (no worker, verifier or merge until accepted):")
+            // What the card leaves to the home folder's card (`sharedHome`: not among its items): one line.
+            let shared = config["sharedHome"]?["names"]?.array?.compactMap(\.string) ?? []
+            lines.append(items.isEmpty && shared.isEmpty ? "  nothing held: accepting records what workflow.md proposes and ends a fresh vault's first look"
+                         : items.isEmpty ? "  held (no worker, verifier or merge until accepted), none of it this folder's own:"
+                         : "  held (no worker, verifier or merge until accepted):")
+            if !shared.isEmpty, let card = config["sharedHome"]?["card"]?.string {
+                let folder = config["sharedHome"]?["folder"]?.string ?? "~"
+                lines.append("    and \(shared.count) of your home folder's config, the same as card \(inert(card)) for \(inert(folder)) shows it: that card's accept "
+                    + "seals them for every project, this one's doesn't (`vibeswitcher config held \(inert(folder))` lists them)")
+            }
             for item in items {
                 var line = "    " + inert(item["name"]?.string)
                 if let at = item["changedAt"]?.string { line += ", changed " + inert(at) }

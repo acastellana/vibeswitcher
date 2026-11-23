@@ -108,8 +108,11 @@ extension Requests {
                 guard let root = left.first else { return then() }
                 engine.configHeld(root: root, diff: nil) { result in
                     queue.async {
+                        // A card with something held: its own, or only what it leaves to the home's card, which the batch
+                        // accepts first (the home is the first root), so this one's accept then ends its first look.
                         guard case .success(let held) = result, let card = held.card, let id = card["id"]?.string,
-                              card["config"]?["items"]?.array?.isEmpty == false, let shown = engine.cards.cards[id]?.config else {
+                              card["config"]?["items"]?.array?.isEmpty == false || card["config"]?["sharedHome"] != .null,
+                              let shown = engine.cards.cards[id]?.config else {
                             return configs(Array(left.dropFirst()), then: then)
                         }
                         // Of the card actually drawn: what its accept would record besides its seals (as `accept` would).

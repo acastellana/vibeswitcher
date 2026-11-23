@@ -125,6 +125,60 @@ struct ApproveTests {
         #expect(drawn.count == 1 && drawn.first?.isOpen == true && drawn.first?.id == ids.first, "\(drawn.map { "\($0.id) \($0.closed ?? "open")" }) \(ids)")
     }
 
+    /// A project's card leaves what another root's open card (the home folder's here) lists with the same hashes, of the
+    /// home's things, to that card: one line, neither listed nor sealed by the project's (after a restart the user read
+    /// four near-identical cards, 85 of each's lines the home's). Accepted first, the project's says the home's still
+    /// waits and records no floor; once the home's is accepted, the project's next card ends its first look. A card
+    /// drawn alone lists everything.
+    @Test func aProjectsCardLeavesWhatTheHomesCardShowsToItInOneLine() async throws {
+        let world = try await world()
+        defer { world.stop() }
+        let home = world.host.home.path
+        // The home's card first (as `approve` draws it).
+        let homeFirst = try #require(await world.ask("config.held", ["folder": .string(home)], action: nil))
+        #expect(homeFirst.result?["card"]?["config"]?["sharedHome"] == .null, "\(homeFirst)")
+        let held = try #require(await world.ask("config.held", ["folder": .string(world.repo)], action: nil))
+        let card = try #require(held.result?["card"], "\(held)")
+        let shared = card["config"]?["sharedHome"]
+        let names = shared?["names"]?.array?.compactMap(\.string) ?? []
+        #expect(names.contains("~/.claude/settings.json"), "\(card)")
+        #expect(WireSchema.check(card, as: "card") == nil, "\(WireSchema.check(card, as: "card") ?? "")")
+        let id = try #require(card["id"]?.string)
+        let projectCard = try #require(world.card(id))
+        #expect(!(projectCard.config?.items ?? []).contains { names.contains($0.name) }, "not listed")
+        #expect(!(projectCard.config?.hashes.keys.map(ConfigSeal.name(ofKey:)) ?? []).contains { names.contains($0) }, "not sealed")
+        let homeID = try #require(shared?["card"]?.string)
+        #expect(homeID == homeFirst.result?["card"]?["id"]?.string)
+        let homeCard = try #require(world.card(homeID))
+        #expect(homeCard.isOpen && homeCard.root == home && homeCard.kind == .configHeld)
+        let homeNames = Set((homeCard.config?.items ?? []).map(\.name))
+        #expect(Set(names).isSubset(of: homeNames), "\(names) \(homeNames)")
+        let short = CardText.lines(card, long: false)
+        #expect(short.contains { $0.contains("and \(names.count) of your home folder's config, the same as card \(homeID)") }, "\(short)")
+        #expect(!short.contains { $0.hasPrefix("    ~/.claude/settings.json") }, "\(short)")
+        // Asked again: the same cards (nothing redrawn); the home's own card leaves nothing to another.
+        let again = try #require(await world.ask("config.held", ["folder": .string(world.repo)], action: nil))
+        #expect(again.result?["card"]?["id"]?.string == id && again.result?["card"]?["config"]?["sharedHome"]?["card"]?.string == homeID, "\(again)")
+        let homeHeld = try #require(await world.ask("config.held", ["folder": .string(home)], action: nil))
+        #expect(homeHeld.result?["card"]?["id"]?.string == homeID && homeHeld.result?["card"]?["config"]?["sharedHome"] == .null, "\(homeHeld)")
+
+        // The project's first: its own sealed, the home's still held, said; no floor recorded.
+        let first = try #require(await world.ask("config.accept", ["card": .string(id), "code": .string(NodeIds.code(card: id))]))
+        #expect(first.ok && first.result?["homeWaits"]?.array?.compactMap(\.string).contains("~/.claude/settings.json") == true
+                && first.result?["homeCard"]?.string == homeID && first.result?["floorRecorded"]?.bool == false, "\(first)")
+        #expect(world.card(id)?.closed?.hasPrefix("accepted; the home folder's") == true, "\(String(describing: world.card(id)?.closed))")
+        // The home's, then the project's again: nothing of the home's left on it, and its accept records the floor.
+        let homeAccepted = try #require(await world.ask("config.accept", ["card": .string(homeID), "code": .string(NodeIds.code(card: homeID))]))
+        #expect(homeAccepted.ok, "\(homeAccepted)")
+        let after = try #require(await world.ask("config.held", ["folder": .string(world.repo)], action: nil))
+        let afterCard = try #require(after.result?["card"], "\(after)")
+        #expect(afterCard["config"]?["sharedHome"] == .null && afterCard["config"]?["items"]?.array?.contains { $0["name"]?.string == "~/.claude/settings.json" } != true,
+                "\(afterCard)")
+        let afterID = try #require(afterCard["id"]?.string)
+        let last = try #require(await world.ask("config.accept", ["card": .string(afterID), "code": .string(NodeIds.code(card: afterID))]))
+        #expect(last.ok && last.result?["homeWaits"] == nil, "\(last)")
+    }
+
     @Test func oneCodeDoesTheListedBatchEachItemItsOwnAction() async throws {
         let world = try await world()
         defer { world.stop() }
@@ -135,7 +189,9 @@ struct ApproveTests {
         #expect(subjects.contains(world.repo), "\(listed)")
         // Each item with its card, as `config held` shows it.
         let shown = items.map { item in CardText.lines(item["card"] ?? .null).joined(separator: "\n") }
-        #expect(shown.allSatisfy { $0.contains("~/.claude/settings.json") }, "\(shown)")
+        // The home's lists it; a project's says it in its line of what it shares with the home's card.
+        // The home's lists it; a project's says it in its line of what it leaves to the home's card.
+        #expect(shown.allSatisfy { $0.contains("~/.claude/settings.json") || $0.contains("of your home folder's config, the same as card") }, "\(shown)")
         let batch = try #require(listed["batch"]?.string)
         let code = try #require(listed["code"]?.string)
         #expect(code == NodeIds.code(card: batch))
