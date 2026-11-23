@@ -213,6 +213,31 @@ struct NodeServerBoundsTests {
         #expect(set.status == 0 && set.output.contains("set node_max_sessions: \(MacLimits.defaultMaxSessions) → 7"), "\(set.output)\(set.errors)\n\(node.said)")
     }
 
+    /// The server closes the command line's connection after its check that the connection is open and before its
+    /// request is written (injected: the command line waits there for the close, `VIBESWITCHER_TEST_CLOSE_BEFORE_SEND`):
+    /// the request wasn't taken, so it is sent again on a fresh connection and goes through, and nothing says its outcome
+    /// isn't known.
+    @Test func aServerThatClosesBetweenTheCheckAndTheSendIsAskedAgain() async throws {
+        let node = try await ScratchNode(scratch, hostArguments: ["--server-arg", ServerArguments.testIdleFlag + "1"])
+        defer { node.stop() }
+        let set = try await ScratchNodes.onTerminal(commandLine.path, ["set", "node_max_sessions", "7"],
+                                                    environment: node.environment(["VIBESWITCHER_TEST_CLOSE_BEFORE_SEND": "1"]), answer: { $0 })
+        let said = set.output + set.errors
+        #expect(set.status == 0 && said.contains("set node_max_sessions: \(MacLimits.defaultMaxSessions) → 7"), "\(said)\n\(node.said)")
+        #expect(!said.contains("isn't known") && !said.contains("closed the connection"), "\(said)")
+    }
+
+    /// The idle byes say the server took no request on their connection (`NodeServer.tookNoRequest`); no other bye does.
+    @Test func theIdleByesSayNoRequestWasTaken() {
+        let idle = NodeServer.Idle(hello: 1, quiet: 120)
+        let hello = try? #require(NodeServer.idleReason(accepted: 0, lastRequest: nil, subscribed: false, now: 2, idle: idle))
+        let quiet = try? #require(NodeServer.idleReason(accepted: 0, lastRequest: 1, subscribed: false, now: 200, idle: idle))
+        for reason in [hello, quiet].compactMap({ $0 }) { #expect(NodeServer.tookNoRequest(NodeWire.Bye(reason: reason, code: "busy")), "\(reason)") }
+        for reason in ["the node is stopping", "a line over 1 bytes", "no room for this connection"] {
+            #expect(!NodeServer.tookNoRequest(NodeWire.Bye(reason: reason, code: "busy")), "\(reason)")
+        }
+    }
+
     /// On a scratch node whose limits are 1 s and 2 s (`--test-idle=1`): a connection that never asks is told why and
     /// closed; one that asked once, then sat, is too; a subscriber older than both still answers.
     @Test func connectionsThatOnlySitThereAreClosed() async throws {

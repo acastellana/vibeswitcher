@@ -39,10 +39,10 @@ struct RecordedRetryTests {
         #expect(await world.actions().filter { $0.action == action }.count == 1, "recorded once")
     }
 
-    /// The command line's side: a state change whose server goes before it answers (killed here while the code is
-    /// typed) says so, names its action id and that its outcome isn't known, and writes that to the journal.
+    /// The command line's side: its server killed while the code is typed (before the request is written): the request
+    /// wasn't taken, so it goes to the host's next server, and is done there, once; nothing says its outcome isn't known.
     @Test(NodeTraits.linuxOnly)
-    func aStateChangeWhoseServerWentSaysItsActionAndThatItsOutcomeIsntKnown() async throws {
+    func aStateChangeWhoseServerWentBeforeItWasSentGoesToTheNextServer() async throws {
         let node = try await ScratchNode(scratch)
         defer { node.stop() }
         let server = try #require(node.serverPID)
@@ -51,12 +51,27 @@ struct RecordedRetryTests {
             return code
         }
         let said = set.output + set.errors
-        #expect(set.status != 0, "\(said)")
-        #expect(said.contains("whether it was carried out isn't known") && said.contains("Action "), "\(said)\n\(node.said)")
-        let action = try said.firstMatch(of: Regex("Action ([0-9a-f-]{36})"))?.output[1].substring.map(String.init)
-        let entries = (try? String(contentsOf: node.testFolder.appendingPathComponent("journal.jsonl"), encoding: .utf8)) ?? ""
-        #expect(action.map { id in entries.split(separator: "\n").contains { $0.contains("unanswered") && $0.contains(id) } } == true,
-                "\(String(describing: action))\n\(entries)")
+        #expect(set.status == 0 && said.contains("→ 7"), "\(said)\n\(node.said)")
+        #expect(!said.contains("isn't known"), "\(said)")
+    }
+
+    /// Its server killed after the request was sent and recorded, before the act (held there): the command line sends it
+    /// again on a fresh connection with the same action id; the next server finds it begun with no outcome, and `set`
+    /// leaves things as one does, so it is done there; the user sees that one outcome.
+    @Test(NodeTraits.linuxOnly)
+    func aStateChangeLostAfterItWasSentIsAskedAgainWithItsActionID() async throws {
+        let node = try await ScratchNode(scratch, hostArguments: ["--server-arg", ServerArguments.testStallFlag + "600"])
+        defer { node.stop() }
+        let hold = node.root.appendingPathComponent("test-hold-act").path
+        _ = FileManager.default.createFile(atPath: hold, contents: nil)
+        let running = Task { try await node.runOnTerminal(["set", "node_max_sessions", "7"]) }
+        #expect(await eventually(timeout: 120) { node.said.contains("set (action ") && node.said.contains("recorded, and held for good") }, "\(node.said)")
+        try await Self.killServer(node)
+        let set = try await running.value
+        let said = set.output + set.errors
+        #expect(set.status == 0 && said.contains("→ 7"), "\(said)\n\(node.said)")
+        #expect(!said.contains("isn't known"), "\(said)")
+        #expect(node.said.contains("with no outcome recorded: done again"), "\(node.said)")
     }
 
     /// The record's side: an outcome kept on its action's record once (the first stands); the record read by this build

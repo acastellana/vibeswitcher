@@ -596,9 +596,15 @@ public final class Requests: @unchecked Sendable {
             return kept
         }
         if doing.contains(action) {
-            return .init(re: request.id, error: .init(.refused, "action \(action) is being done now, from its first request: not done again; that request's answer says how it went"))
+            return .init(re: request.id, error: .init(.refused, Self.beingDoneNow(action: action)))
         }
         return nil
+    }
+
+    /// What a retry of an action still being done (its first request's act not finished) is told: the command line asks
+    /// again until it is finished (`NodeClient.send`).
+    public static func beingDoneNow(action: String) -> String {
+        "action \(action) is being done now, from its first request: not done again; that request's answer says how it went"
     }
 
     /// A retry's answer from a recorded outcome: done, the result recorded (or that it was done, when its answer was too

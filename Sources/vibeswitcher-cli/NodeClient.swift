@@ -227,22 +227,27 @@ final class NodeClient {
             let count = Sys.read(fd, &chunk, chunk.count)
             if count < 0, errno == EINTR { continue }
             if count < 0, errno == EAGAIN { break }
-            if count <= 0 { return replace() }
+            if count <= 0 { return _ = replace() }
             ready += lines.append(Data(chunk[0..<count]))
-            if ready.contains(where: { NodeWire.decode(NodeWire.Bye.self, $0)?.kind == "bye" }) { return replace() }
+            if ready.contains(where: { NodeWire.decode(NodeWire.Bye.self, $0)?.kind == "bye" }) { return _ = replace() }
         }
     }
 
-    /// This connection's descriptor, hello and lines taken from a new one to the same server.
-    private func replace() {
-        guard case .success(let fresh) = NodeClient.connect(context) else { return }
+    /// This connection's descriptor, hello and lines taken from a new one to the same server; whether one was made. Its
+    /// hello read last, so the request that follows goes at once (the server's limit for a connection's first request
+    /// counts from its hello: nothing of this command line's own, the build's warning included, comes between).
+    @discardableResult
+    private func replace() -> Bool {
+        guard case .success(let fresh) = NodeClient.connect(context, warn: false) else { return false }
         Sys.close(fd)
         (fd, hello, lines, ready) = (fresh.fd, fresh.hello, fresh.lines, fresh.ready)
         fresh.fd = -1
+        return true
     }
 
-    /// Connects to `context`'s server, checks it, and reads its hello.
-    static func connect(_ context: NodeContext, timeout: TimeInterval = 15) -> Result<NodeClient, Failure> {
+    /// Connects to `context`'s server, checks it, and reads its hello. `warn`: say, once, when the server runs another
+    /// build (a reconnect leaves it out: its request goes right after the hello).
+    static func connect(_ context: NodeContext, timeout: TimeInterval = 15, warn: Bool = true) -> Result<NodeClient, Failure> {
         if let unbuilt = context.usersNodeRefusal { return .failure(.notRunning(unbuilt)) }
         let fd: Int32
         do {
@@ -266,7 +271,7 @@ final class NodeClient {
             Sys.close(fd)
             return .failure(.broken(ConfigSeal.inert(why.description, limit: 500)))
         }
-        warnOfBuild(server: hello.server.commit)
+        if warn { warnOfBuild(server: hello.server.commit) }
         return .success(NodeClient(fd: fd, hello: hello, context: context, lines: lines, ready: ready))
     }
 
@@ -395,20 +400,107 @@ final class NodeClient {
         context.writeJournal(NodeJournal.entry(event: "request", action: action, kind: kind, epoch: hello.epoch))
     }
 
-    /// Sends one request and waits for its reply. Answered `not-yet`, it is asked again, a quarter second apart, for up
-    /// to `notYetPatience`; then the last answer is the reply.
+    /// Sends one request and waits for its reply, the user seeing one outcome:
+    /// - answered `not-yet`, it is asked again, a quarter second apart, for up to `notYetPatience`;
+    /// - the connection ended with the server saying it took no request on it (its idle `bye`,
+    ///   `NodeServer.tookNoRequest`), or before the request could be written: it wasn't received, so it is sent again on a
+    ///   fresh connection, up to `notTakenTries` times; past them, said so (nothing was done), never "isn't known";
+    /// - the connection ended after it was sent, with no reply: sent once more on a fresh connection, with the same action
+    ///   id, when that is safe (`resendable`: a kind the vault records by its action id, or one that changes nothing).
+    ///   The server's vault then answers: not recorded, it is done now, once, and its reply is the reply; recorded and
+    ///   finished, its recorded outcome (the result, or that it was done at T, or the failure); recorded and still being
+    ///   done (the same server), asked again until it is finished; recorded and begun on a server that ended, done again
+    ///   when its kind allows, else that it began and its outcome isn't known (`Requests.retry`). Any other kind, or a
+    ///   second loss, or no reply in `timeout`: its outcome isn't known (`unanswered`).
     private func send(_ kind: String, args: [String: NodeWire.Value]?, action: String?, timeout: TimeInterval) -> Result<NodeWire.Reply, Failure> {
         reconnectIfClosed()
+        testCloseBeforeSend()
         let patience = Platform.Clock.steadyDate().addingTimeInterval(Self.notYetPatience)
         let timeout = approvalRule && NodeWire.changesState(kind) ? max(timeout, Self.approvalPatience) : timeout
+        let deadline = Platform.Clock.steadyDate().addingTimeInterval(timeout)
+        var notTaken = 0
+        var resent = false
         while true {
-            let answer = ask(kind, args: args, action: action, timeout: timeout)
-            guard case .success(let reply) = answer, reply.error?.code == NodeWire.Code.notYet.rawValue, Platform.Clock.steadyDate() < patience else { return answer }
+            switch ask(kind, args: args, action: action, timeout: timeout) {
+            case .reply(let reply):
+                if reply.error?.code == NodeWire.Code.notYet.rawValue, Platform.Clock.steadyDate() < patience {
+                    usleep(250_000)
+                    continue
+                }
+                // Sent again after a loss and found under way (its first request's server still doing it): asked again.
+                if resent, let action, reply.error?.message == Requests.beingDoneNow(action: action), Platform.Clock.steadyDate() < deadline {
+                    usleep(250_000)
+                    continue
+                }
+                return .success(reply)
+            case .notTaken(let why):
+                notTaken += 1
+                guard notTaken <= Self.notTakenTries, reconnect() else { return .failure(.broken(Self.notTakenSaid(why, kind: kind))) }
+            case .lost(let why):
+                guard !resent, Self.resendable(kind, action: action), reconnect() else { return unanswered(kind, action, why) }
+                resent = true
+            case .timedOut(let why):
+                return unanswered(kind, action, why)
+            case .failed(let failure):
+                return .failure(failure)
+            }
+        }
+    }
+
+    /// How many times a request the server said it didn't take is sent again.
+    static let notTakenTries = 3
+    /// How long a fresh connection is tried for, a quarter second apart: a server the host restarts (it ended) answers
+    /// again within a few seconds.
+    static let reconnectPatience: TimeInterval = 15
+
+    /// A fresh connection in this one's place, tried for up to `reconnectPatience`; whether one was made.
+    private func reconnect() -> Bool {
+        let until = Platform.Clock.steadyDate().addingTimeInterval(Self.reconnectPatience)
+        while true {
+            if replace() { return true }
+            guard Platform.Clock.steadyDate() < until else { return false }
             usleep(250_000)
         }
     }
 
-    private func ask(_ kind: String, args: [String: NodeWire.Value]?, action: String?, timeout: TimeInterval) -> Result<NodeWire.Reply, Failure> {
+    /// Whether a request whose connection ended after it was sent may be sent again on a fresh one: the vault records its
+    /// kind by its action id, so a second ask is answered from the record and never does it twice; or it changes nothing.
+    static func resendable(_ kind: String, action: String?) -> Bool {
+        if Requests.recorded.contains(kind) { return action != nil }
+        return !NodeWire.changesState(kind)
+    }
+
+    /// What is said of a request the server didn't take, `notTakenTries` times over: nothing was done.
+    static func notTakenSaid(_ why: String, kind: String) -> String {
+        "\(why): the node's server didn't take \(kind) (it closed the connection before reading it), so nothing was done; run the command again"
+    }
+
+    /// How a request went on one connection.
+    private enum Asked {
+        case reply(NodeWire.Reply)
+        /// The server didn't take it: its bye says it took no request, or it couldn't be written.
+        case notTaken(String)
+        /// Sent, and the connection ended (its end, or another bye) before the reply.
+        case lost(String)
+        case timedOut(String)
+        case failed(Failure)
+    }
+
+    /// A scratch node's test (`VIBESWITCHER_TEST_CLOSE_BEFORE_SEND=1`): once, after the check that the connection is
+    /// open and before the request is written, waits (up to 10 s) for the server to close it, as a server whose limit
+    /// runs out just then does. Never on the user's node.
+    private func testCloseBeforeSend() {
+        guard context.isScratch, !Self.closedBeforeSend, ProcessInfo.processInfo.environment["VIBESWITCHER_TEST_CLOSE_BEFORE_SEND"] == "1" else { return }
+        Self.closedBeforeSend = true
+        let until = Platform.Clock.steadyDate().addingTimeInterval(10)
+        while Platform.Clock.steadyDate() < until {
+            var watched = pollfd(fd: fd, events: Int16(POLLIN), revents: 0)
+            if poll(&watched, 1, 100) > 0, watched.revents & Int16(POLLHUP) != 0 { return }
+        }
+    }
+    private static var closedBeforeSend = false
+
+    private func ask(_ kind: String, args: [String: NodeWire.Value]?, action: String?, timeout: TimeInterval) -> Asked {
         counter += 1
         let id = "\(getpid())-\(counter)"
         let line = NodeWire.line(NodeWire.Request(id: id, kind: kind, args: args, action: action))
@@ -422,22 +514,24 @@ final class NodeClient {
             }
             return true
         }
-        guard sent else { return unanswered(kind, action, "the node's server closed the connection") }
+        // Not written whole: the server had closed the connection, and never read the request.
+        guard sent else { return .notTaken("the node's server closed the connection") }
         let deadline = Platform.Clock.steadyDate().addingTimeInterval(timeout)
         while let next = Self.read(fd, &lines, &ready, until: deadline) {
             guard let envelope = NodeWire.decode(NodeWire.Envelope.self, next) else { continue }
             if envelope.kind == "bye" {
-                let reason = NodeWire.decode(NodeWire.Bye.self, next)?.reason ?? "no reason"
-                return unanswered(kind, action, "the node's server closed the connection: \(ConfigSeal.inert(reason, limit: .max))")
+                let bye = NodeWire.decode(NodeWire.Bye.self, next)
+                let why = "the node's server closed the connection: \(ConfigSeal.inert(bye?.reason ?? "no reason", limit: .max))"
+                return bye.map(NodeServer.tookNoRequest) == true ? .notTaken(why) : .lost(why)
             }
-            if envelope.re == id, let reply = NodeWire.decode(NodeWire.Reply.self, next) { return .success(reply) }
+            if envelope.re == id, let reply = NodeWire.decode(NodeWire.Reply.self, next) { return .reply(reply) }
         }
         // An older server's reply past the line's limit (today's says so in a reply of its own: `NodeWire.replyLine`).
-        if lines.tooLong { return .failure(.broken("the node's server answered \(kind) with a line past the limit of \(NodeWire.maxLine) bytes: ask for less")) }
+        if lines.tooLong { return .failed(.broken("the node's server answered \(kind) with a line past the limit of \(NodeWire.maxLine) bytes: ask for less")) }
         if Platform.Clock.steadyDate() < deadline {
-            return unanswered(kind, action, "the node's server closed the connection before answering \(kind) (it may have restarted)")
+            return .lost("the node's server closed the connection before answering \(kind) (it may have restarted)")
         }
-        return unanswered(kind, action, "the node's server didn't answer \(kind) in \(Int(timeout)) s")
+        return .timedOut("the node's server didn't answer \(kind) in \(Int(timeout)) s")
     }
 
     /// No reply came to `kind`: `why`, and for a state change with an action id that id and that its outcome isn't

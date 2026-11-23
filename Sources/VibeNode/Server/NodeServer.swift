@@ -80,10 +80,22 @@ public final class NodeServer: @unchecked Sendable {
                            now: TimeInterval, idle: Idle) -> String? {
         guard !answering else { return nil }
         guard let last = lastRequest else {
-            return now - accepted >= idle.hello ? "no request since the hello (\(Int(idle.hello)) s)" : nil
+            return now - accepted >= idle.hello ? "\(noRequestSinceHello) (\(Int(idle.hello)) s)" : nil
         }
         guard !subscribed else { return nil }
-        return now - last >= idle.quiet ? "no request and no subscription for \(Int(idle.quiet / 60)) minutes" : nil
+        return now - last >= idle.quiet ? "\(noRequestQuiet) for \(Int(idle.quiet / 60)) minutes" : nil
+    }
+
+    /// How the idle byes begin (`idleReason`).
+    public static let noRequestSinceHello = "no request since the hello"
+    public static let noRequestQuiet = "no request and no subscription"
+
+    /// Whether `bye` says the server took no request on its connection since its last answer: an idle bye. It is decided
+    /// on the server's queue only while no request is being answered and none was taken since (a request taken first
+    /// would have made the connection not idle), and a closing connection is read no more: a request written as it came
+    /// was never taken, so the command line sends it again (`NodeClient.send`).
+    public static func tookNoRequest(_ bye: NodeWire.Bye) -> Bool {
+        bye.reason.hasPrefix(noRequestSinceHello) || bye.reason.hasPrefix(noRequestQuiet)
     }
     /// The bytes waiting to be written to one connection past which it is closed (its reader doesn't read).
     public static let maxPending = 8 << 20
