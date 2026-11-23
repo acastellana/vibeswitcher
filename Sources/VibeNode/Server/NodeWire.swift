@@ -488,8 +488,15 @@ public enum NodeWire {
 
     /// Bytes as they come, cut into lines. A line longer than `maxLine` (with no newline yet past it) is `tooLong`:
     /// the reader closes the connection.
+    ///
+    /// Linear in the bytes, however they come (the fuzz tests of 2026-11-22, `ParserFuzzTests`): each byte is looked at
+    /// for a newline once (`scanned`), not again at every append (a line dripped a byte at a time was quadratic: a
+    /// megabyte of it, half a trillion looks), and the lines a chunk completes are cut from it once, at the end (taking
+    /// each one moved all that followed it: a megabyte of one-byte lines, half a million moves of a megabyte).
     public struct Lines: Sendable {
         private var pending = Data()
+        /// How much of `pending` holds no newline (looked at already).
+        private var scanned = 0
         public private(set) var tooLong = false
 
         public init() {}
@@ -499,16 +506,24 @@ public enum NodeWire {
             guard !tooLong else { return [] }
             pending.append(bytes)
             var lines: [Data] = []
-            while let newline = pending.firstIndex(of: UInt8(ascii: "\n")) {
-                let line = pending[pending.startIndex..<newline]
-                guard line.count <= NodeWire.maxLine else {
+            var lineStart = pending.startIndex
+            var from = pending.startIndex + scanned
+            while let newline = pending[from...].firstIndex(of: UInt8(ascii: "\n")) {
+                guard newline - lineStart <= NodeWire.maxLine else {
                     tooLong = true
+                    pending = Data()
                     return lines
                 }
-                lines.append(Data(line))
-                pending.removeSubrange(pending.startIndex...newline)
+                lines.append(Data(pending[lineStart..<newline]))
+                lineStart = newline + 1
+                from = lineStart
             }
-            if pending.count > NodeWire.maxLine { tooLong = true }
+            if lineStart > pending.startIndex { pending = Data(pending[lineStart...]) }
+            scanned = pending.count
+            if pending.count > NodeWire.maxLine {
+                tooLong = true
+                pending = Data()
+            }
             return lines
         }
     }
