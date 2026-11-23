@@ -4459,3 +4459,6 @@ Proposed task 1: Find why dictations end with no text
 - 2026-11-23 20:02 Update: Today: 8 merges from the verification plan; board empty — **Landed (8, all reviewed):** listed one by one in today's "Retrospective: the verification plan" update: the flake policy (a fix task on the first flake), the "naming no test" count fix, parameterize…
 - 2026-11-23 21:51 Automatically (auto_advance): Held: on battery under your 10 % limit, so nothing starts, audits or merges by itself until AC power returns: no task paused yet, since 21:51.
 - 2026-11-23 21:52 Automatically (auto_advance): Released: on AC power, after 0 min.
+- 2026-11-23 23:20 Planned fix-the-flaky-test-25: Fix the flaky test endedRowsFoldAwayAndTheListSkipsThemWhileFolded() (review audit)
+- 2026-11-23 23:20 Started a worker on fix-the-flaky-test-25
+- 2026-11-23 23:20 Automatically (auto_advance): Started a worker on fix-the-flaky-test-25 (Fix the flaky test endedRowsFoldAwayAndTheListSkipsThemWhileFolded()).
