@@ -898,7 +898,7 @@ extension PluginsTests {
         let address = try #require(Self.pageAddress(ran), "\(ran)")
         let token = try #require(URL(string: address)?.pathComponents.dropFirst().first)
         let again = try #require(await world.answer(card, "run", action: action))
-        #expect(Self.pageAddress(again) == nil && "\(again)".contains("went to the terminal that answered first"), "\(again)")
+        #expect(Self.pageAddress(again) == nil && "\(again)".contains("went to the terminal that asked first"), "\(again)")
         let shown = try #require(world.card(card.id))
         #expect(!"\(shown)".contains(token), "not on the card")
         #expect(!notes.value.contains { $0.contains(token) }, "not in the log")

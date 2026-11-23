@@ -66,9 +66,9 @@ struct SettingsRequestTests {
         #expect(WireSchema.check(reply.result ?? .null, as: "set.result", strict: true) == nil)
         #expect(MacLimits.load(from: files(world).limits).maxSessions == 7)
         #expect(await world.actions().filter { $0.action == action }.map(\.kind) == ["set"])
-        // The same action again is answered as before.
+        // The same action again with another value: recorded with other arguments, nothing done.
         let again = try #require(await set(world, "node_max_sessions", "9", action: action))
-        #expect(again.ok && MacLimits.load(from: files(world).limits).maxSessions == 7, "\(again)")
+        #expect(!again.ok && again.error?.message == Requests.otherArguments(action: action) && MacLimits.load(from: files(world).limits).maxSessions == 7, "\(again)")
         // The app's name for it (mac_max_sessions) is taken as the node's, and answered under the node's name.
         let byAlias = try #require(await set(world, "mac_max_sessions", "8"))
         #expect(byAlias.ok && byAlias.result?["key"] == .string("node_max_sessions") && MacLimits.load(from: files(world).limits).maxSessions == 8, "\(byAlias)")

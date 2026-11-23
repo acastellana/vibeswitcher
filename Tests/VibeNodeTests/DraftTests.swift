@@ -106,7 +106,8 @@ struct DraftTests {
     }
 
     /// The same action id again (a page retrying after its socket dropped) is answered as the first was, and not done
-    /// again: a draft sent again with other words changes nothing.
+    /// again; sent again with other words, it is told the action was recorded with other arguments, given nothing of the
+    /// first, and changes nothing.
     @Test func aRepeatedActionIsAnsweredAsBefore() async throws {
         let rig = try await Rig.make(scratch)
         defer { rig.stop() }
@@ -114,9 +115,10 @@ struct DraftTests {
         let first = try await rig.draft("Yes, merge it", action: action)
         #expect(first["ok"]?.bool == true, "\(first)")
         let at = try #require(rig.now?.draft?.at)
+        let same = try await rig.draft("Yes, merge it", action: action)
+        #expect(same["result"] == first["result"] && same["ok"] == first["ok"] && same["re"] != first["re"], "\(first) then \(same)")
         let again = try await rig.draft("Wait for the audit", action: action)
-        #expect(again["result"] == first["result"] && again["ok"] == first["ok"], "\(first) then \(again)")
-        #expect(again["re"] != first["re"])
+        #expect(again["ok"]?.bool == false && again["error"]?["message"]?.string == Requests.otherArguments(action: action), "\(again)")
         #expect(rig.now?.draft?.text == "Yes, merge it" && rig.now?.draft?.at == at)
     }
 

@@ -121,10 +121,49 @@ struct RecordedRetryTests {
         let world = try await CardWorld.make(scratch)
         defer { world.stop() }
         let action = UUID().uuidString.lowercased()
-        world.queue.sync { _ = world.requests.doing.insert(action) }
+        let first = NodeWire.Request(id: "first", kind: "approve", args: ["batch": .string("b-gone")], action: action)
+        world.queue.sync { world.requests.doing[action] = Requests.argsDigest(first) }
         let again = try #require(await world.ask("approve", ["batch": .string("b-gone")], action: action))
         #expect(again.error?.message == Requests.beingDoneNow(action: action), "\(again)")
-        world.queue.sync { _ = world.requests.doing.remove(action) }
+        world.queue.sync { world.requests.doing[action] = nil }
+    }
+
+    /// The same action id with other arguments, on the same server: its kept reply isn't given (nor "being done"), as
+    /// the vault's path says (`otherArguments`); with the first's arguments it is.
+    @Test func aRetryWithOtherArgumentsIsGivenNothingFromMemory() async throws {
+        let world = try await CardWorld.make(scratch)
+        defer { world.stop() }
+        let action = UUID().uuidString.lowercased()
+        let snooze: [String: NodeWire.Value] = ["folder": .string(world.repo), "do": .string("snooze")]
+        let first = try #require(await world.ask("prompt-audit", snooze, action: action))
+        #expect(first.ok, "\(first)")
+        let same = try #require(await world.ask("prompt-audit", snooze, action: action))
+        #expect(same.ok && same.result == first.result, "\(same)")
+        let other = try #require(await world.ask("prompt-audit", ["folder": .string(world.repo), "do": .string("off")], action: action))
+        #expect(!other.ok && other.error?.message == Requests.otherArguments(action: action), "\(other)")
+        #expect(other.result == nil)
+    }
+
+    /// web.open's reply (its pairing link) isn't kept in memory past its answer: a retry by action id is told it was done
+    /// and that its link went to the terminal that asked, never given the link; a kind whose result is kept keeps it.
+    @Test func aLinkIsNotKeptInMemory() async throws {
+        let world = try await CardWorld.make(scratch)
+        defer { world.stop() }
+        let action = UUID().uuidString.lowercased()
+        let open = NodeWire.Request(id: "open", kind: "web.open", args: [:], action: action)
+        let given = NodeWire.Reply(re: "open", result: .object(["url": .string("http://127.0.0.1:1/#pair=SECRET-CODE")]))
+        let kept = world.queue.sync { () -> NodeWire.Reply? in
+            world.requests.keep(given, for: action, request: open)
+            return world.requests.kept(NodeWire.Request(id: "again", kind: "web.open", args: [:], action: action), action: action)
+        }
+        #expect(kept.map { !"\($0)".contains("SECRET-CODE") } == true, "\(String(describing: kept))")
+        #expect(kept?.error?.message.contains("its link went to the terminal that asked first") == true, "\(String(describing: kept))")
+        #expect(world.queue.sync { world.requests.replies[action].map { !"\($0)".contains("SECRET-CODE") } } == true)
+        let audit = UUID().uuidString.lowercased()
+        let audited = NodeWire.Request(id: "a", kind: "prompt-audit", args: [:], action: audit)
+        let result = NodeWire.Reply(re: "a", result: .object(["do": .string("snooze")]))
+        world.queue.sync { world.requests.keep(result, for: audit, request: audited) }
+        #expect(world.queue.sync { world.requests.kept(audited, action: audit)?.result } == result.result)
     }
 
     static func isZombie(_ pid: pid_t) -> Bool {
