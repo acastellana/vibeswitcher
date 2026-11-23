@@ -17,9 +17,10 @@ public protocol StampedAsk: Sendable {
 /// telling an asker, the clock. Nothing else of the engine: no card store, no host link, no files of its own beyond its
 /// folder's (`PluginLintTests`). Everything on the engine's queue unless it says otherwise.
 public struct PluginDesk {
-    private unowned let engine: LeadEngine
-    /// The engine again, held weakly: what a plugin's program answers late (after the engine went, a test's) is dropped.
-    private weak var alive: LeadEngine?
+    private unowned let runtime: PluginRuntime
+    /// The runtime again, held weakly: what a plugin's program answers late (after the engine and its runtime went, a
+    /// test's) is dropped.
+    private weak var alive: PluginRuntime?
     public let plugin: FeaturePlugin
     /// The node's root, the log and the queues: the desk's own, so a late callback reaching them touches no engine.
     public let root: URL
@@ -28,16 +29,16 @@ public struct PluginDesk {
     public let queue: DispatchQueue
     public let work: DispatchQueue
 
-    init(engine: LeadEngine, plugin: FeaturePlugin) {
-        self.engine = engine
-        self.alive = engine
+    init(runtime: PluginRuntime, plugin: FeaturePlugin) {
+        self.runtime = runtime
+        self.alive = runtime
         self.plugin = plugin
-        (root, note, queue, work) = (engine.root, engine.note, engine.queue, engine.pluginState.work)
+        (root, note, queue, work) = (runtime.root, runtime.note, runtime.queue, runtime.work)
     }
 
     /// Runs `body` on the engine's queue while the engine lives, holding it for the body's length; nothing once it has
     /// gone. The only way back to the engine's queue for anything that ran elsewhere (a plugin's work, a program's
-    /// answer, the host's spawn): the desk holds the engine unowned, so a block reaching it after the engine went would
+    /// answer, the host's spawn): the desk holds the runtime unowned, so a block reaching it after the runtime went would
     /// trap.
     public func later(_ body: @escaping () -> Void) {
         queue.async { [weak alive] in
@@ -48,20 +49,20 @@ public struct PluginDesk {
 
     var id: String { plugin.info.id }
     /// The plugins' clock (a test's own).
-    public var now: Date { engine.pluginState.now() }
+    public var now: Date { runtime.now() }
     /// A scratch node's (a test's): what its sessions get keeps to its root.
-    public var isScratch: Bool { engine.isScratch }
+    public var isScratch: Bool { runtime.isScratch }
 
     /// This plugin's settings as the user set them, by name (none set: its default).
     public var settings: [String: String] {
-        Dictionary(uniqueKeysWithValues: plugin.info.settings.map { ($0.key, engine.pluginState.settings["\(id).\($0.key)"] ?? $0.defaultValue) })
+        Dictionary(uniqueKeysWithValues: plugin.info.settings.map { ($0.key, runtime.setting(id, $0.key) ?? $0.defaultValue) })
     }
 
     /// Where a page for the person's browser gets its listening socket (the session host's, held as the web's).
-    public var bind: WebBind { engine.options.pluginBind ?? .direct }
+    public var bind: WebBind { runtime.webBind }
 
     /// The engine's clock, or one of the plugins' own on the engine's queue (a test's engine has none).
-    public var clock: NodeClock { engine.clock ?? engine.pluginState.clock }
+    public var clock: NodeClock { runtime.pagesClock }
 
     /// Where this plugin's command files requests (`PluginInfo.folder` under the root), when it does.
     public var folder: URL? { plugin.info.folder.map { root.appendingPathComponent($0, isDirectory: true) } }
@@ -69,24 +70,24 @@ public struct PluginDesk {
     // MARK: Sessions
 
     /// Whether the host's list is known (its welcome came, and the link holds).
-    public var connected: Bool { engine.link.state == .connected }
+    public var connected: Bool { runtime.connected }
 
     /// The live sessions the user opened (`opened`), by lower-case id.
     public var live: [String: HostSession] {
-        Dictionary(engine.link.sessions.filter(opened).map { ($0.id.uuidString.lowercased(), $0) }) { first, _ in first }
+        Dictionary(runtime.sessions.filter(opened).map { ($0.id.uuidString.lowercased(), $0) }) { first, _ in first }
     }
 
     /// The session the host lists with `id`, live or ended.
-    public func session(_ id: UUID) -> HostSession? { engine.link.sessions.first { $0.id == id } }
+    public func session(_ id: UUID) -> HostSession? { runtime.sessions.first { $0.id == id } }
 
     /// Whether `session` may ask (rule 1: a live session the user opened): live, and not a team's worker or verifier as
     /// the vault's roster says (the host's record, not a label anyone can give a session).
     public func opened(_ session: HostSession) -> Bool {
-        session.isLive && !engine.pluginState.team.contains(session.id.uuidString.lowercased())
+        session.isLive && !runtime.isTeam(session.id.uuidString.lowercased())
     }
 
     /// Looks at the plugins again (one look at a time), then `done`.
-    public func lookAgain(done: @escaping () -> Void) { engine.lookAtPlugins(done: done) }
+    public func lookAgain(done: @escaping () -> Void) { runtime.look(done: done) }
 
     /// The host's id of a session the node names `local:<uuid>` (`NodeIds.session(host:)`); nil for any other.
     public static func hostSession(_ id: String) -> UUID? {
@@ -109,10 +110,10 @@ public struct PluginDesk {
     /// name and its session the stamp's, filed no more than `aheadAtMost` past the clock. A request from a session that
     /// ended is never decoded. Read on `work`; `then` on the engine's queue with them, oldest first.
     public func stamped<Ask: StampedAsk>(_ decode: @escaping @Sendable (Data) throws -> Ask, then: @escaping ([Ask]) -> Void) {
-        guard let folder else { return then([]) }
-        let live = Set(engine.link.sessions.filter(\.isLive).map { $0.id.uuidString.lowercased() })
-        let drawn = engine.pluginState.drawn.filter { $0.key.hasPrefix("\(id):") }
-        let (vault, trusted, now, note, id) = (engine.cardVault, engine.pluginState.trusted[id] ?? [:], now, note, id)
+        guard let folder, let vault = runtime.vault else { return then([]) }
+        let live = Set(runtime.sessions.filter(\.isLive).map { $0.id.uuidString.lowercased() })
+        let (trusted, drawn) = runtime.readState(id)
+        let (now, note, id) = (now, note, id)
         let desk = self
         work.async {
             // The team's sessions, from the vault's roster: unknown (it didn't answer), nothing is given this look.
@@ -122,17 +123,16 @@ public struct PluginDesk {
                           plugin: id, note: note)
             }
             if team == nil { note("\(id) requests: the vault's roster didn't answer, so no session's request is read this time") }
-            // Back through `later`: the engine isn't held across the read, and a read it outlived gives nothing.
+            // Back through `later`: the runtime isn't held across the read, and a read it outlived gives nothing.
             desk.later {
-                let engine = desk.engine
-                if let team { engine.pluginState.team = team }
-                guard let found else { return then([]) }
-                engine.pluginState.trusted[id] = found.trusted
-                for entry in found.requests {
-                    engine.pluginState.stamps[PluginKey(plugin: id, request: entry.ask.id).name] = PluginStamp(digest: entry.stamp.digest,
-                                                                                                        session: entry.stamp.session.lowercased(),
-                                                                                                        created: entry.ask.created)
+                guard let found else {
+                    if let team { desk.runtime.read(id, team: team, trusted: desk.runtime.readState(id).trusted, stamps: []) }
+                    return then([])
                 }
+                desk.runtime.read(id, team: team, trusted: found.trusted, stamps: found.requests.map { entry in
+                    (PluginKey(plugin: id, request: entry.ask.id).name,
+                     PluginStamp(digest: entry.stamp.digest, session: entry.stamp.session.lowercased(), created: entry.ask.created))
+                })
                 then(found.requests.map(\.ask))
             }
         }
@@ -248,7 +248,7 @@ public struct PluginDesk {
 
     /// This plugin's card for request `request`, when one was drawn.
     public func card(request: String) -> CardStore.Card? {
-        engine.pluginState.cards[PluginKey(plugin: id, request: request)].flatMap { engine.cards.cards[$0] }
+        runtime.card(PluginKey(plugin: id, request: request))
     }
 
     /// Draws `shown` as a new open card in `root` (the folder it's about), filed `at`. Refused, with why, when the plugin
@@ -258,13 +258,13 @@ public struct PluginDesk {
     /// withdrawn, expired: never drawn again). Its context is cut (`PluginCard.drawn`).
     @discardableResult
     public func draw(_ shown: PluginCard, root: String, at: Date) -> Result<CardStore.Card, PluginRefusal> {
-        guard engine.plugins.isOn(id) else { return .failure(PluginRefusal("\(plugin.info.title) is off")) }
-        guard engine.pluginState.settledKnown else { return .failure(PluginRefusal("the vault hasn't said which requests are settled yet")) }
+        guard runtime.registry.isOn(id) else { return .failure(PluginRefusal("\(plugin.info.title) is off")) }
+        guard runtime.knowsSettled else { return .failure(PluginRefusal("the vault hasn't said which requests are settled yet")) }
         guard shown.plugin == id else { return .failure(PluginRefusal("a card of another plugin")) }
         let key = PluginKey(plugin: id, request: shown.request)
         // The asking session, its name and the time filed are the stamped request's, never the plugin's word.
-        guard let stamp = engine.pluginState.stamps[key.name], let session = UUID(uuidString: stamp.session),
-              let asker = engine.link.sessions.first(where: { $0.id == session }), opened(asker) else {
+        guard let stamp = runtime.stamp(key.name), let session = UUID(uuidString: stamp.session),
+              let asker = runtime.sessions.first(where: { $0.id == session }), opened(asker) else {
             return .failure(PluginRefusal("no stamped request \(shown.request) of a live session the user opened"))
         }
         var card = shown
@@ -276,13 +276,11 @@ public struct PluginDesk {
         }
         // Expired already: never drawn (the review of 6e91f053, L2).
         guard expires > now else { return .failure(PluginRefusal("request \(shown.request) expired before it was drawn")) }
-        guard engine.pluginState.cards[key] == nil else { return .failure(PluginRefusal("request \(shown.request) has a card already")) }
-        guard !engine.pluginState.settled.contains(key.name) else { return .failure(PluginRefusal("request \(shown.request) was settled already")) }
+        guard !runtime.hasCard(key) else { return .failure(PluginRefusal("request \(shown.request) has a card already")) }
+        guard !runtime.isSettled(key.name) else { return .failure(PluginRefusal("request \(shown.request) was settled already")) }
         var made = CardStore.Card(root: root, kind: .plugin, at: stamp.created)
         made.plugin = card.drawn
-        engine.pluginState.cards[key] = made.id
-        engine.pluginState.drawn[key.name] = stamp.digest
-        engine.cards.put(made)
+        runtime.drew(made, key: key, digest: stamp.digest)
         return .success(made)
     }
 
@@ -300,48 +298,44 @@ public struct PluginDesk {
             card.closed = closed
             settle(request)
         }
-        engine.cards.put(card)
+        runtime.put(card)
     }
 
     /// Forgets the card of `request` (its request is gone): an open one closes, saying `closed`; the request is settled.
     public func forget(request: String, closed: String) {
         let key = PluginKey(plugin: id, request: request)
         settle(request)
-        guard let cardID = engine.pluginState.cards.removeValue(forKey: key) else { return }
-        if var card = engine.cards.cards[cardID], card.isOpen {
-            card.closed = closed
-            engine.cards.put(card)
-        }
+        runtime.forget(key, closed: closed)
     }
 
     /// Whether `request` was settled (here or by a server before this one): it won't be drawn, so it isn't asked about.
-    public func isSettled(_ request: String) -> Bool { engine.pluginState.settled.contains(PluginKey(plugin: id, request: request).name) }
+    public func isSettled(_ request: String) -> Bool { runtime.isSettled(PluginKey(plugin: id, request: request).name) }
 
     /// Withdraws every open card of this plugin, telling their askers (its program broke the protocol, say).
     /// Every open card of this plugin's withdrawn, its askers told: `ended`, its program ended (why), else turned off.
-    public func withdrawAll(ended: String? = nil) { engine.withdraw(plugin, ended: ended) }
+    public func withdrawAll(ended: String? = nil) { runtime.withdraw(plugin, ended: ended) }
 
     /// `request` is settled (it got no card, or its card closed): never drawn again, this server's or the next's
     /// (kept in the vault).
-    public func settle(_ request: String) { engine.settlePluginRequests([PluginKey(plugin: id, request: request).name]) }
+    public func settle(_ request: String) { runtime.settle([PluginKey(plugin: id, request: request).name]) }
 
     /// The requests this plugin has cards for.
-    public var carded: [String] { engine.pluginState.cards.keys.filter { $0.plugin == id }.map(\.request) }
+    public var carded: [String] { runtime.carded(id) }
 
     // MARK: Telling
 
     /// Tells request `request`'s asker `text` as a message from `from` (VibeSwitcher's words: "from New Shell"): the
     /// session its stamp names, never one a plugin says. `then` with how it went (`.ended` when there's no such request).
     public func tell(_ text: String, from: String, request: String, then: @escaping (SessionDelivery) -> Void) {
-        guard let stamp = engine.pluginState.stamps[PluginKey(plugin: id, request: request).name], let session = UUID(uuidString: stamp.session) else {
+        guard let stamp = runtime.stamp(PluginKey(plugin: id, request: request).name), let session = UUID(uuidString: stamp.session) else {
             return then(.ended)
         }
-        engine.tell(text, from: .system(from), session: session, then: then)
+        runtime.tell(text, from: .system(from), session: session, then: then)
     }
 
     /// Tells `session` `text` from VibeSwitcher until it reached it or the session is gone, even while the plugin is off
     /// (a withdrawal's words, a started shell that won't be followed): retried at each plugins' look.
-    public func tellSurely(_ text: String, session: UUID) { engine.tellSurely(text, session: session, key: "\(id):\(UUID().uuidString)") }
+    public func tellSurely(_ text: String, session: UUID) { runtime.tellSurely(text, session: session, key: "\(id):\(UUID().uuidString)") }
 
     /// What an asker is told when its card was withdrawn while an answer was acting on it.
     public func withdrawnWhileAnsweredText(_ card: PluginCard) -> String {

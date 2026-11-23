@@ -35,7 +35,7 @@ struct ShellCardsTests {
     private func look(_ world: CardWorld, at now: Date? = nil) async {
         let done = Locked(false)
         world.queue.async {
-            if let now { world.engine.pluginState.now = { now } }
+            if let now { world.engine.pluginRuntime.now = { now } }
             world.engine.lookAtPlugins { done.value = true }
         }
         _ = await eventually(timeout: 60) { done.value }

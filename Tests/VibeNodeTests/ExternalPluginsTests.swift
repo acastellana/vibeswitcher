@@ -426,10 +426,10 @@ extension ExternalPluginsTests {
         defer { world.stop() }
         _ = try await added(world)
         let late = try await probeCard(world, "normal")
-        world.queue.sync { world.engine.pluginState.now = { late.plugin?.expiresAt?.addingTimeInterval(1) ?? Date() } }
+        world.queue.sync { world.engine.pluginRuntime.now = { late.plugin?.expiresAt?.addingTimeInterval(1) ?? Date() } }
         let declined = try #require(await world.answer(late, "decline"))
         #expect(declined.error?.message.contains("expired") == true, "past its expiry, decline is refused too: \(declined)")
-        world.queue.sync { world.engine.pluginState.now = Date.init }
+        world.queue.sync { world.engine.pluginRuntime.now = Date.init }
         let paged = try await probeCard(world, "pagedecline")
         let answered = try #require(await world.answer(paged, "decline"))
         #expect(!answered.ok, "\(answered)")
@@ -542,7 +542,7 @@ extension ExternalPluginsTests {
         try FileManager.default.createDirectory(at: plugins, withIntermediateDirectories: true)
         try FileManager.default.createSymbolicLink(at: plugins.appendingPathComponent("bin"), withDestinationURL: elsewhere)
         let notes = Locked<[String]>([])
-        LeadEngine.writeWrappers(["vs-probe": "probe"], in: plugins.appendingPathComponent("bin"), note: { line in notes.mutate { $0.append(line) } })
+        PluginRuntime.writeWrappers(["vs-probe": "probe"], in: plugins.appendingPathComponent("bin"), note: { line in notes.mutate { $0.append(line) } })
         #expect(FileManager.default.fileExists(atPath: elsewhere.appendingPathComponent("vs-theirs").path), "nothing removed behind the link")
         #expect(!FileManager.default.fileExists(atPath: elsewhere.appendingPathComponent("vs-probe").path), "nothing written through it")
         #expect(notes.value.contains { $0.contains("is a link") }, "\(notes.value)")

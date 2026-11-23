@@ -15,7 +15,7 @@ extension Requests {
                 guard case .object(var fields) = engine.plugins.value(plugin) else { return .null }
                 // Nothing set in the vault's record, which began at its host's start (a restart starts it over): since when
                 // it is at its default, from the vault's own word, never a file of the node's.
-                fields["defaultSince"] = engine.plugins.kept?[plugin.info.id] == nil ? engine.pluginState.recordSince.map(NodeWire.Value.date) ?? .null : .null
+                fields["defaultSince"] = engine.plugins.kept?[plugin.info.id] == nil ? engine.pluginRuntime.recordSince.map(NodeWire.Value.date) ?? .null : .null
                 return .object(fields)
             }
             reply(.init(re: request.id, typed: WireKinds.PluginList.Result(plugins: values)))

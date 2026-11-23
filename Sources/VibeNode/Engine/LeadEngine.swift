@@ -286,12 +286,10 @@ public final class LeadEngine: @unchecked Sendable {
     public var health: NodeHealth?
     /// The Run-card shell tidier (`ShellTidying.swift`): its state its own, on `queue`.
     let shellTidy: ShellTidyWatch
-    // Feature plugins (`Plugins/`, `PluginEngine.swift`), on `queue`: the registry and what the vault keeps of on and
-    // off, each plugin request's card, the stamps the host vouched for (per plugin), the looks under way, the vault asked,
-    // the 15 s look, the clock; the folders read on `pluginState.work`.
+    /// The feature plugins' registry (which are on, as the vault keeps it); their runtime is `pluginRuntime`.
     public let plugins: PluginRegistry
-    /// The plugin runtime's bookkeeping (`PluginState`, `Plugins/PluginState.swift`), on `queue`.
-    let pluginState: PluginState
+    /// The feature plugins' runtime (`Plugins/PluginRuntime.swift`): their state and logic its own, on `queue`.
+    let pluginRuntime: PluginRuntime
     /// The developer tools notice (`ToolchainLook.swift`): its state its own, on `queue`.
     let toolchain: ToolchainWatch
     /// Boost (`SettingsWatch.swift`): its state its own, on `queue`.
@@ -337,7 +335,8 @@ public final class LeadEngine: @unchecked Sendable {
         self.options = options
         self.note = note
         plugins = PluginRegistry(options.plugins ?? PluginRegistry.standard())
-        pluginState = PluginState(queue: link.queue)
+        pluginRuntime = PluginRuntime(registry: plugins, cards: cards, link: link, queue: link.queue, root: root, clock: clock,
+                                      bind: options.pluginBind, note: note)
         queue = link.queue
         toolchain = ToolchainWatch(queue: link.queue, file: root.appendingPathComponent("toolchain.json"), home: options.home ?? VibePaths.home, note: note)
         openSessionsWatch = OpenSessionsWatch(queue: link.queue)
@@ -356,6 +355,7 @@ public final class LeadEngine: @unchecked Sendable {
         promptAudit.leads = self
         push.leads = self
         popups.leads = self
+        pluginRuntime.host = self
         room.leads = self
         restoreState()
         leads.heldChanged = { [weak self] in self?.saveState() }
