@@ -4457,3 +4457,5 @@ Proposed task 1: Find why dictations end with no text
 - 2026-11-23 18:07 Update: Retrospective: the verification plan (flaky tests, review rules, bugs past review) — **Landed today (8 merges, from the claude.dev verification article):**
 - 2026-11-23 20:02 Handed the lead over to a fresh session: the last one had been idle 52 minutes with 238k tokens of context, past handover_idle_min 50 and handover_tokens 150k
 - 2026-11-23 20:02 Update: Today: 8 merges from the verification plan; board empty — **Landed (8, all reviewed):** listed one by one in today's "Retrospective: the verification plan" update: the flake policy (a fix task on the first flake), the "naming no test" count fix, parameterize…
+- 2026-11-23 21:51 Automatically (auto_advance): Held: on battery under your 10 % limit, so nothing starts, audits or merges by itself until AC power returns: no task paused yet, since 21:51.
+- 2026-11-23 21:52 Automatically (auto_advance): Released: on AC power, after 0 min.
