@@ -7,7 +7,7 @@ import Testing
 /// a scratch node's page: the scratch form's `web.open` gives the pairing URL the user's `vibeswitcher web` would, a
 /// hooked fake agent is its listed session, its terminal watched as the user's node watches one, and the script's table must say pass for what a scratch node shows (A3's
 /// pairing, chat, inspector, settings and console, statistics, health, between leads, A10, A19, A23), skip for what it
-/// doesn't hold (no lead, no ports, no shell card), and fail for nothing. Only where Chrome and node are (not the CI).
+/// doesn't hold (no project, so no lead conversation, side sheet or roadmap; no ports, no shell card), and fail for nothing. Only where Chrome and node are (not the CI).
 @Suite(NodeTraits.linuxOnly, .timeLimit(.minutes(5)),
        .enabled(if: FileManager.default.isExecutableFile(atPath: "/opt/google/chrome/chrome")
                 && (try? runToEnd("/usr/bin/env", ["node", "--version"], output: .path("/dev/null", flags: O_WRONLY), limit: 30)) == 0,
@@ -36,7 +36,7 @@ struct RealPageCheckTests {
         for row in ["A3 pair", "A3 chat", "A3 inspector", "A3 settings", "A3 console", "Health", "Stats", "Mail", "A10 terminal", "A19 notifications", "A23 page token"] {
             #expect(outcome(row) == "pass", "\(row): \(table)")
         }
-        for row in ["Team tab", "Dev servers", "Shell card"] { #expect(outcome(row) == "skip", "\(row): \(table)") }
+        for row in ["Team tab", "Side sheet", "A3 roadmap", "Dev servers", "Shell card"] { #expect(outcome(row) == "skip", "\(row): \(table)") }
         #expect(status == 0 && !table.contains(" fail "), "\(table)\n\(node.said)")
         // Its screenshots and report, and no Chrome profile left behind.
         let files = (try? FileManager.default.contentsOfDirectory(atPath: out.path)) ?? []

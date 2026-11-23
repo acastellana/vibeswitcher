@@ -1,8 +1,8 @@
-// What this window shows, as opposed to what the node knows (store.js): the route, the list's grouping and filter,
-// which pane a session shows, which teams are unfolded, the inspector. The route lives in the address
-// (#/s/<session id>, #/p/<project id>, #/node, #/settings[/<project id>], #/stats[/<range>], #/mail), so the browser's back button works and a session can be linked to.
+// What this window shows, as opposed to what the node knows (store.js): the route, which pane a session shows, the
+// inspector. The route lives in the address
+// (parseRoute below), so the browser's back button works and anything on screen can be linked to.
 
-import { ATTENTION, stateOf, lastPart, taskCount } from './words.js';
+import { lastPart } from './words.js';
 
 function remembered(key, fallback) {
   try { return localStorage.getItem(key) ?? fallback; } catch { return fallback; }
@@ -11,31 +11,72 @@ function remember(key, value) {
   try { localStorage.setItem(key, value); } catch { /* private window: the choice lasts for this page */ }
 }
 
+// The address says what is on screen (the redesign's "Deep links"), and back and forward walk it:
+//   #/p/<project>/lead?show=asks|all&tab=stats|files&task=<slug>&sheet=<line>   a project's lead conversation
+//   #/p/<project>/roadmap?open=<band>,…                                          its roadmap
+//   #/sessions, #/s/<session>, #/node, #/settings[/<project>], #/stats[/<range>], #/mail, #/new
+// The old addresses still work: #/p/<project> (the board page) is its lead conversation, #/s/<session> a session.
+const decode = (text) => { try { return decodeURIComponent(text); } catch { return null; } };
+const SHOWS = ['asks', 'all'];
+const TABS_RIGHT = ['stats', 'files'];
+
 export function parseRoute(hash) {
-  const session = hash.match(/^#\/s\/(.+)$/);
+  const at = hash.indexOf('?');
+  const path = at < 0 ? hash : hash.slice(0, at);
+  const query = new URLSearchParams(at < 0 ? '' : hash.slice(at + 1));
+  const session = path.match(/^#\/s\/(.+)$/);
   if (session) {
-    try { return { name: 'session', id: decodeURIComponent(session[1]) }; } catch { return { name: 'home' }; }
+    const id = decode(session[1]);
+    return id === null ? { name: 'home' } : { name: 'session', id };
   }
-  const board = hash.match(/^#\/p\/(.+)$/);
-  if (board) {
-    try { return { name: 'board', id: decodeURIComponent(board[1]) }; } catch { return { name: 'home' }; }
+  const project = path.match(/^#\/p\/([^/]+)(?:\/(lead|roadmap))?\/?$/);
+  if (project) {
+    const id = decode(project[1]);
+    if (id === null) return { name: 'home' };
+    if (project[2] === 'roadmap') return { name: 'project', id, view: 'roadmap', open: (query.get('open') || '').split(',').filter(Boolean) };
+    return {
+      name: 'project', id, view: 'lead',
+      show: SHOWS.includes(query.get('show')) ? query.get('show') : 'decisions',
+      tab: TABS_RIGHT.includes(query.get('tab')) ? query.get('tab') : 'team',
+      task: query.get('task') || null,
+      sheet: query.get('sheet') || null,
+    };
   }
   // Settings: the node's, and a project's with its id (views/settings.js).
-  const settings = hash.match(/^#\/settings(?:\/(.+))?$/);
-  if (settings) {
-    try { return { name: 'settings', id: settings[1] ? decodeURIComponent(settings[1]) : null }; } catch { return { name: 'settings', id: null }; }
-  }
+  const settings = path.match(/^#\/settings(?:\/(.+))?$/);
+  if (settings) return { name: 'settings', id: settings[1] ? decode(settings[1]) : null };
   // Statistics, for a range (views/stats.js).
-  const stats = hash.match(/^#\/stats(?:\/([a-z]+))?$/);
+  const stats = path.match(/^#\/stats(?:\/([a-z]+))?$/);
   if (stats) return { name: 'stats', id: stats[1] || null };
-  // Between leads (views/mail.js).
-  if (hash === '#/mail') return { name: 'mail' };
-  return hash === '#/node' ? { name: 'node' } : { name: 'home' };
+  const named = { '#/mail': 'mail', '#/node': 'node', '#/sessions': 'sessions', '#/new': 'new' }[path];
+  return named ? { name: named } : { name: 'home' };
 }
 
 export const sessionHref = (id) => '#/s/' + encodeURIComponent(id);
-// A project's board: its lead's tasks (views/board.js).
-export const boardHref = (project) => '#/p/' + encodeURIComponent(project);
+
+// A project's address: its lead conversation (with the dial, the right column's tab, the task open and the sheet
+// open, each only when not the default), or its roadmap with its bands open.
+export function projectHref(project, { view = 'lead', show = 'decisions', tab = 'team', task = null, sheet = null, open = [] } = {}) {
+  const query = new URLSearchParams();
+  if (view === 'roadmap') {
+    if (open.length) query.set('open', open.join(','));
+  } else {
+    if (SHOWS.includes(show)) query.set('show', show);
+    if (TABS_RIGHT.includes(tab)) query.set('tab', tab);
+    if (task) query.set('task', task);
+    if (sheet) query.set('sheet', sheet);
+  }
+  const said = query.toString().replaceAll('%2C', ',');
+  return `#/p/${encodeURIComponent(project)}/${view === 'roadmap' ? 'roadmap' : 'lead'}${said ? '?' + said : ''}`;
+}
+// The board page's address before the redesign: the project's lead conversation now.
+export const boardHref = (project) => projectHref(project);
+
+// The route `route` with some of its parts changed, as an address.
+export function routeHref(route, changes) {
+  const next = { ...route, ...changes };
+  return projectHref(next.id, next);
+}
 
 // The inspector is a column beside the chat from this width up; under it the chat would get cramped, so it is a sheet
 // over the chat, opened when asked and closed again by itself.
@@ -59,12 +100,8 @@ export function teamOf(store, session) {
 export function createUI() {
   const state = {
     route: parseRoute(location.hash),
-    grouping: remembered('vs.grouping', 'attention') === 'projects' ? 'projects' : 'attention',
-    filter: '',
     // By session id: chat (the default), terminal or team.
     panes: new Map(),
-    // The leads whose team is unfolded in the list.
-    teams: new Set(),
     palette: false,
     // The inspector: `open` is the column's (remembered in this browser), `sheet` the sheet's (never remembered: it
     // covers the chat), `tab` the one remembered (Team, Overview or Activity).
@@ -95,17 +132,6 @@ export function createUI() {
     subscribe(fn) { listeners.add(fn); return () => listeners.delete(fn); },
     go(hash) { if (location.hash !== hash) location.hash = hash; },
     select(id) { this.go(sessionHref(id)); },
-    setGrouping(grouping) {
-      if (state.grouping === grouping) return;
-      state.grouping = grouping;
-      remember('vs.grouping', grouping);
-      changed('list');
-    },
-    setFilter(filter) { state.filter = filter; changed('list'); },
-    toggleTeam(id) {
-      if (!state.teams.delete(id)) state.teams.add(id);
-      changed('list');
-    },
     pane(id) { return state.panes.get(id) || 'chat'; },
     setPane(id, pane) {
       if (this.pane(id) === pane) return;
@@ -144,90 +170,6 @@ export function createUI() {
 }
 
 export const projectOf = (session) => lastPart(session.cwd) || 'No folder';
-
-// A lead's team in a few words, from its board: "team: 1 working · 1 in review · 1 blocked · 1 queued".
-export function teamSummary(board) {
-  if (!board) return null;
-  const parts = ['running', 'review', 'blocked', 'failed', 'planned']
-    .map((status) => [status, board.tasks.filter((task) => task.status === status).length])
-    .filter(([, count]) => count > 0)
-    .map(([status, count]) => taskCount(status, count));
-  return 'team: ' + (parts.length ? parts.join(' · ') : 'none running');
-}
-
-// The list as it's shown: sections of rows, a lead's workers and verifiers folded under it (the Mac's sidebar).
-// Attention: Needs you (longest waiting first), Working, Done (latest first), Idle. Projects: by folder, in the
-// node's order. Returns { sections: [{ id, title, rows: [{ session, nested, team }] }], order: [session] }, `order`
-// being the rows from top to bottom, which is what ⌘1–9 counts.
-export function arrange(store, ui) {
-  const all = [...store.sessions.values()];
-  const leadOf = new Map();
-  for (const session of all) if (session.role === 'lead' && session.lead) leadOf.set(session.lead, session);
-  const teams = new Map();
-  const top = [];
-  for (const session of all) {
-    const lead = session.role !== 'lead' && session.lead ? leadOf.get(session.lead) : null;
-    if (lead) {
-      if (!teams.has(lead.id)) teams.set(lead.id, []);
-      teams.get(lead.id).push(session);
-    } else top.push(session);
-  }
-  const needle = ui.filter.trim().toLowerCase();
-  const matches = (session) => !needle || `${session.title || ''} ${projectOf(session)} ${session.detail || ''}`.toLowerCase().includes(needle);
-  const shown = top.filter((session) => matches(session) || (teams.get(session.id) || []).some(matches));
-
-  let groups;
-  if (ui.grouping === 'projects') {
-    const byProject = new Map();
-    for (const session of shown) {
-      const project = projectOf(session);
-      if (!byProject.has(project)) byProject.set(project, []);
-      byProject.get(project).push(session);
-    }
-    groups = [...byProject].map(([project, rows]) => ({ id: 'project:' + project, title: project, rows }));
-  } else {
-    const time = (session) => Date.parse(session.since) || 0;
-    groups = ATTENTION.map((group) => {
-      const rows = shown.filter((session) => group.has(stateOf(session)));
-      if (group.id === 'needs-you') rows.sort((a, b) => time(a) - time(b));
-      if (group.id === 'done') rows.sort((a, b) => time(b) - time(a));
-      return { id: group.id, title: group.title, rows };
-    }).filter((group) => group.rows.length);
-  }
-
-  const order = [];
-  const sections = groups.map((group) => ({
-    id: group.id,
-    title: group.title,
-    rows: group.rows.flatMap((session) => {
-      const team = teams.get(session.id) || [];
-      const open = ui.teams.has(session.id) || (needle && team.some(matches));
-      const rows = [{ session, nested: false, team, open }];
-      if (open) for (const member of team) rows.push({ session: member, nested: true, team: [], open: false });
-      for (const row of rows) order.push(row.session);
-      return rows;
-    }),
-  }));
-  return { sections, order, total: all.length };
-}
-
-// "2 need you · 3 working": the list's foot (WindowGroups.summary), counting the rows the list shows at its top
-// level: a lead's workers and verifiers are in its own team line. Empty when nothing needs you and nothing works.
-export function summary(store) {
-  const leads = new Set([...store.sessions.values()].filter((session) => session.role === 'lead').map((session) => session.lead));
-  let needs = 0;
-  let working = 0;
-  for (const session of store.sessions.values()) {
-    if (session.role !== 'lead' && leads.has(session.lead)) continue;
-    const state = stateOf(session);
-    if (state === 'needs-you') needs++;
-    else if (state === 'working' || state === 'background') working++;
-  }
-  const parts = [];
-  if (needs) parts.push(needs === 1 ? '1 needs you' : `${needs} need you`);
-  if (working) parts.push(`${working} working`);
-  return parts.join(' · ');
-}
 
 // A lead's row marks (the Mac's `WindowRowView`): `replaced` when another session of its project replaced it (the
 // lead's record lists it), `allDone` while its board's all-done mark is unseen (never on a replaced one).

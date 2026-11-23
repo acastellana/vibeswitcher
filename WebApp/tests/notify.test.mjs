@@ -37,7 +37,7 @@ test('what needs you: open cards and prompts waiting; not a worker, a verifier, 
     ],
   }));
   assert.deepEqual([...now.asks.keys()], ['card:c1', 'card:c3', 'prompt:s1:2026-11-20T09:00:00.000Z']);
-  assert.deepEqual(now.asks.get('card:c1'), { title: 'A question for you · app', body: 'Ship it?', href: '#/s/lead-1' });
+  assert.deepEqual(now.asks.get('card:c1'), { title: 'A question for you · app', body: 'Ship it?', href: '#/p/p1/lead' });
   assert.equal(now.asks.get('card:c3').body, 'Add dark mode');
   assert.deepEqual(now.asks.get('prompt:s1:2026-11-20T09:00:00.000Z'), { title: 'Fix the build needs you', body: 'Run: npm publish', href: '#/s/s1' });
 });

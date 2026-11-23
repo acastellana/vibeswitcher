@@ -5,7 +5,7 @@
 import { h, setText, setClass, framed, motionOK } from '../dom.js';
 import { agentMark, statusMark, setMark, icon } from '../marks.js';
 import { STATES, ROLES, stateOf, since, tilde, KEY, AGENTS, clock } from '../words.js';
-import { projectOf } from '../ui.js';
+import { projectOf, projectHref } from '../ui.js';
 import { chatView } from './chat.js';
 import { teamStrip } from './lead.js';
 import { inspector } from './inspector.js';
@@ -40,8 +40,10 @@ export function sessionView(app) {
   // Renaming, pausing, ending a session and the rest of the Mac's row menu: the line that does each, under the header.
   const acting = actionsStrip();
   const end = h('button', { class: 'button quiet end-button', type: 'button', title: 'Rename, pause or end this session…', onclick: () => acting.toggle() }, 'Actions…');
+  // Back: to the project a team's session works for, else to Your own sessions (on a phone it opens the left column).
+  const back = h('a', { class: 'back icon-button', href: '#/sessions', 'aria-label': 'Back' }, icon('back', 16));
   const head = h('header', { class: 'head' },
-    h('a', { class: 'back icon-button', href: '#/', 'aria-label': 'Sessions' }, icon('back', 16)),
+    back,
     markSlot,
     h('div', { class: 'head-text' }, h('div', { class: 'head-line' }, title, state), place),
     end,
@@ -142,6 +144,7 @@ export function sessionView(app) {
     stateTime.hidden = !session.since;
     setText(place, [ROLES[session.role], tilde(session.cwd, store.state.node?.home) || 'No folder', AGENTS[session.agent], session.hosted ? null : `in another terminal (${session.terminal})`].filter(Boolean).join('  ·  '));
 
+    back.setAttribute('href', session.lead ? projectHref(session.lead) : '#/sessions');
     const isLead = session.role === 'lead';
     // A lead's Team strip only where the feed follows boards: the node doesn't send them yet.
     const hasBoard = isLead && store.follows('boards');

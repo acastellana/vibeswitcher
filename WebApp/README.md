@@ -22,10 +22,15 @@ bash scripts/test.sh --web WebApp/tests
 | `/?still` | The mock's snapshot with nothing happening after it (for screenshots). |
 | `/?empty` | A mock node with no sessions. |
 | `/?rows=10000` | One mock session ("Add dark mode…") with a 10,000-row chat: its newest 200 first, the rest paged in as you scroll up. |
+| `/#/p/<project>/lead?show=asks\|all&tab=stats\|files&task=<slug>&sheet=<line>` | A project: you and its lead in the centre (the dial's level, the right column's tab, a task open in place, a line's side sheet). `/#/p/<project>` (the board page's address before) opens it too. |
+| `/#/p/<project>/roadmap?open=queue` | Its roadmap: in motion, blocked, the queue as one band (open). |
+| `/#/sessions`, `/#/s/<session>` | Your own sessions (outside every project's team); a session's chat, terminal and inspector. |
+| `/#/new`, `/#/node` | New project; This node. |
+| `/?lang=es` | The page's words in Spanish whatever the browser says (it follows the browser's language otherwise). |
 | `/#/settings`, `/#/settings/<project id>` | Settings: the node's and a project's, each change drafted as the `vibeswitcher set` line to run in a terminal (`js/views/settings.js`). |
 | `/?theme=dark`, `/?theme=light` | The other look, whatever the system says. |
 
-Screenshots of each screen, light and dark, desktop and phone, are in `shots/`.
+Screenshots of each main state, light and dark, wide and at 390 px, are in `shots/`, made from `PageCheckTests`' scratch node: `PAGE_SHOTS=$PWD/WebApp/shots bash scripts/test.sh --filter PageCheckTests`.
 
 ## Rules
 
@@ -50,7 +55,9 @@ Screenshots of each screen, light and dark, desktop and phone, are in `shots/`.
 | `js/wire.js` | The node's values in the shapes the views read, inventing nothing (a field the node doesn't send stays empty). |
 | `js/mock.js` | Stands in for the node with `?mock`: imported only then, and left out of the node's embedded page (`serve.sh` serves it). |
 | `wire/` | The validators and vectors, generated from the node's encoders (`vibeswitcher wire-vectors`): don't edit them. |
-| `js/ui.js` | What this window shows: the route (`#/s/<id>`, `#/node`), grouping, filter, panes, the inspector; the list's arrangement. |
+| `js/ui.js` | What this window shows: the route (every address above, `parseRoute`, `projectHref`), a session's pane, the inspector. |
+| `js/conversation.js` | The redesign's reads of the board and cards, no page in them: the lead conversation's lines and the dial's counts, a question's head line, a task's five steps and colour, whom a blocked task waits on, the projects and which opens first. |
+| `js/i18n.js` | The page's own words in English and Spanish (`t(key, values)`), the browser's language chosen once. |
 | `js/words.js` | The vocabulary: state words, durations, a task's words (from `VibeCore`). |
 | `js/dom.js`, `js/marks.js`, `js/text.js` | Building nodes; status marks, agent badges, icons; markdown and diffs as nodes. |
 | `js/terminal.js` | A session's terminal over the socket (the contract's §9): the binary frames, and the stream's life (open, the replay drawn whole, live, resync, reconnect, close). |
@@ -61,21 +68,18 @@ Screenshots of each screen, light and dark, desktop and phone, are in `shots/`.
 | `js/settings.js` | The settings' parts with no page in them: grouped by section, a change's `vibeswitcher set` line quoted as the shell needs, what a draft is checked against. |
 | `js/push.js` | The push a lead asks for (the lead's `push`), in words: what goes where, its commits, and the two lines that settle it in a terminal; the card heads the lead's question stack. Nothing on the page pushes. |
 | `js/activity.js` | The inspector's Activity, made from a chat's items: files changed with their line counts, commands run. |
-| `js/views/` | `sidebar`, `session` (header and panes), `terminal` (the session's screen in xterm.js, where the node opens one), `chat`, `cards`, `inspector` (Team, Overview, Activity), `lead` (strip and the Team tab's tasks), `records` (under the tasks, on the Team tab and the board page: the scorecard, decisions, answered and withdrawn questions, files), `results` (the Team tab's Results with their screenshots, `board.image`, and a task's details as its row opens, `board.task`), `termlook` (Settings › Terminal, this browser's: the terminal's look, `js/termlook.js`), `board`, `stats` (Statistics, `#/stats`: the node's `stats`, the Mac's window's words), `node`, `settings`, `start`, `palette`. |
+| `js/views/` | The redesign's columns: `left` (the projects with their rings and lines, the places, the summary that opens Brief me), `project` (the centre: the header, Lead and Roadmap, the dial, the team strip, the conversation, the waiting block, the note for the lead, the roadmap), `right` (Team, Stats, Files; a task in place), `sheet` (the side sheet), `own` (Your own sessions, New project). Then `session` (header and panes), `terminal` (the session's screen in xterm.js, where the node opens one), `chat`, `cards`, `inspector` (Team, Overview, Activity), `lead` (strip and the Team tab's tasks), `records` (under the tasks, on the Team tab and the board page: the scorecard, decisions, answered and withdrawn questions, files), `results` (the Team tab's Results with their screenshots, `board.image`, and a task's details as its row opens, `board.task`), `termlook` (Settings › Terminal, this browser's: the terminal's look, `js/termlook.js`), `stats` (Statistics, `#/stats`: the node's `stats`, the Mac's window's words), `node`, `settings`, `palette`. |
 
 ## Keys
 
 | Key | Does |
 | --- | --- |
 | ⌘K / Ctrl+K | Go to a session or run a command |
-| ⌘J / Ctrl+J, ⌥J / Alt+J | Next session needing you |
-| ⌥1–9 / Alt+1–9 (⌘1–9 where the browser gives it up) | Go to the nth session in the list |
-| ⌥↓ ⌥↑ / Alt+↓ Alt+↑ | Next, previous session |
-| ⌥F / Alt+F | Filter the list |
+| ⌘J / Ctrl+J, ⌥J / Alt+J | Next project with something waiting on you |
+| Esc | Closes the side sheet, a drawer, the inspector where it is a sheet |
 | ⌥⌘1 2 / Ctrl+Alt+1 2 | Terminal, Chat |
 | ⌥⌘0 / Ctrl+Alt+0, ⌥0 / Alt+0 | Toggle Inspector (the Mac's View › Toggle Inspector) |
 | ⌥⌘3 / Ctrl+Alt+3 | The inspector's Team tab, for a lead or a session of its team |
-| Esc | Closes the inspector where it is a sheet |
 | ↑ in an empty message box | Into the last open card |
 | In a card: 1–9, ↑ ↓, ↩, H | Answer with that option; move; answer with the focused one; hold the timer |
 

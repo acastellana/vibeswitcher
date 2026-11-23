@@ -5,21 +5,25 @@
 import { createStore } from './js/store.js';
 import { connectSocket } from './js/socket.js';
 import { validate } from './wire/validators.js';
-import { createUI, arrange, teamOf, boardHref } from './js/ui.js';
+import { createUI, teamOf, projectHref } from './js/ui.js';
 import { h, setText } from './js/dom.js';
-import { since, until, stateOf, lastPart, tilde, KEY, MAC } from './js/words.js';
-import { sidebar } from './js/views/sidebar.js';
+import { since, until, lastPart, tilde, KEY, MAC } from './js/words.js';
+import { t } from './js/i18n.js';
+import { projectsOf, firstProject } from './js/conversation.js';
+import { leftColumn, ownSession } from './js/views/left.js';
+import { projectView } from './js/views/project.js';
+import { rightColumn } from './js/views/right.js';
+import { sideSheet } from './js/views/sheet.js';
+import { ownSessionsView, newProjectView } from './js/views/own.js';
 import { sessionView } from './js/views/session.js';
 import { nodeView } from './js/views/node.js';
-import { boardView } from './js/views/board.js';
 import { settingsView, settingsHref } from './js/views/settings.js';
 import { statsView, statsHref } from './js/views/stats.js';
 import { mailView, mailHref } from './js/views/mail.js';
-import { startView } from './js/views/start.js';
 import { palette } from './js/views/palette.js';
 import { notifications } from './js/notify.js';
 import { recentFolders, newEntries, endable, leadFolders } from './js/actions.js';
-
+import { briefFoot, speech, speak } from './js/brief.js';
 const params = new URLSearchParams(location.search);
 const store = createStore();
 const ui = createUI();
@@ -51,53 +55,125 @@ const app = {
   ui,
   // The feed itself, for what goes past the store: a session's terminal (binary frames).
   feed,
-  // The sessions from top to bottom, as the list shows them.
-  order: () => list.order(),
+  // The sessions the palette lists: your own first, then the leads', workers' and verifiers'.
+  order: () => [...store.state.sessions.values()].sort((a, b) => ownSession(b) - ownSession(a)),
   commands,
+  // On a phone the left and right columns are drawers over the centre: `which` opens one, null closes both.
+  drawer(which) {
+    root.dataset.drawer = which || '';
+  },
 };
 // The browser's notifications when something needs you, and the title bar's count (js/notify.js).
 app.notifications = notifications(app);
 
-const list = sidebar(app);
+// Brief me (the Mac's Briefing), from the left column's summary: what happened and what's asked of you, as the node
+// writes it, in the side sheet; read aloud by the browser's own speech where it has one.
+const voice = speech();
+function brief() {
+  if (!store.can?.('brief')) return;
+  sheet.open({ title: t('briefTitle'), text: t('briefing') });
+  store.request('brief', {}).then((reply) => {
+    if (!sheet.shown()) return;
+    const result = reply.ok ? reply.result : null;
+    let speaking = false;
+    const speakButton = h('button', { class: 'button quiet', type: 'button', onclick: () => {
+      if (speaking) { voice.synth.cancel(); return; }
+      speaking = true;
+      speakButton.textContent = t('stopSpeaking');
+      speak(voice, result.text, result.language || 'en', () => { speaking = false; speakButton.textContent = t('speak'); });
+    } }, t('speak'));
+    sheet.open({ title: t('briefTitle'), text: result ? result.text : (reply.error?.message || t('briefFailed')),
+      more: result ? [h('p', { class: 'brief-foot' }, [briefFoot(result), result.notice || ''].filter(Boolean).join(' ')), voice ? speakButton : null].filter(Boolean) : [] },
+    () => { if (speaking) voice.synth.cancel(); });
+  });
+}
+
+const sheet = sideSheet();
+const left = leftColumn(app, { brief });
+const project = projectView(app, { sheet });
+const right = rightColumn(app);
 const session = sessionView(app);
+const own = ownSessionsView(app);
+const newProject = newProjectView(app);
 const node = nodeView(app);
-const board = boardView(app);
 const settings = settingsView(app);
 const stats = statsView(app);
 const mail = mailView(app);
-const start = startView(app);
 const offline = h('div', { class: 'offline', role: 'status', hidden: true }, 'Reconnecting to the node…');
 // The node doesn't know this page, or dropped it: said once, quietly, with the one thing that fixes it. The rows it
 // had stay readable underneath.
 const unpaired = h('div', { class: 'offline signed-out', role: 'status', hidden: true });
-const main = h('main', { class: 'main' }, start.el, session.el, node.el, board.el, settings.el, stats.el, mail.el);
+// What the centre says before there is anything to show: connecting, or not paired.
+const waitingWords = h('h1', { class: 'big' });
+const waitingSub = h('p');
+const waiting = h('section', { class: 'centre screen status-screen', hidden: true }, h('div', { class: 'empty-state' }, waitingWords, waitingSub));
+const centre = h('main', { class: 'centre-wrap' }, project.el, own.el, newProject.el, session.el, node.el, settings.el, stats.el, mail.el, waiting);
 const root = document.getElementById('app');
 const commandPalette = palette(app);
-root.replaceChildren(list.el, main, commandPalette.el, offline, unpaired, app.notifications.offer);
+const scrim = h('div', { class: 'drawer-scrim', onclick: () => app.drawer(null) });
+root.replaceChildren(left.el, centre, right.el, scrim, sheet.scrim, sheet.el, commandPalette.el, offline, unpaired, app.notifications.offer);
+
+// `#/` opens the project with the most waiting on you, else the most active one, else Your own sessions; it takes
+// the address's place (no history entry), so back doesn't land on it again.
+function settleHome() {
+  if (ui.state.route.name !== 'home') return false;
+  const connection = store.state.connection;
+  if (connection === 'connecting' || connection === 'unpaired' || connection === 'revoked') return false;
+  const first = firstProject(projectsOf(store.state));
+  location.replace(location.pathname + location.search + (first ? projectHref(first) : '#/sessions'));
+  return true;
+}
+
+// A phone or a narrow window: the left and right columns are drawers (style.css).
+const narrow = typeof matchMedia === 'function' ? matchMedia('(max-width: 900px)') : { matches: false };
 
 function route() {
-  const name = ui.state.route.name;
+  if (settleHome()) return;
+  const r = ui.state.route;
+  const name = r.name;
   root.dataset.route = name;
-  start.el.hidden = name !== 'home';
-  session.el.hidden = name !== 'session';
-  node.el.hidden = name !== 'node';
-  board.el.hidden = name !== 'board';
-  settings.el.hidden = name !== 'settings';
-  stats.el.hidden = name !== 'stats';
-  mail.el.hidden = name !== 'mail';
-  if (name === 'board') return; // the board names itself (views/board.js)
-  const shown = store.state.sessions.get(ui.state.route.id);
-  document.title = name === 'session' && shown ? `${shown.title || 'Session'} · VibeSwitcher` : name === 'node' ? 'This node · VibeSwitcher' : name === 'settings' ? 'Settings · VibeSwitcher' : name === 'stats' ? 'Statistics · VibeSwitcher' : name === 'mail' ? 'Between leads · VibeSwitcher' : 'VibeSwitcher';
+  const connection = store.state.connection;
+  const blank = name === 'home';
+  const shown = { project: project.el, sessions: own.el, new: newProject.el, session: session.el, node: node.el, settings: settings.el, stats: stats.el, mail: mail.el };
+  for (const [key, el] of Object.entries(shown)) el.hidden = key !== name;
+  waiting.hidden = !blank;
+  if (blank) {
+    const off = connection === 'unpaired' || connection === 'revoked';
+    setText(waitingWords, off ? t('unpaired') : t('connecting'));
+    setText(waitingSub, off ? t('unpairedSub') : '');
+  }
+  // The right column: a project's lead conversation's; a session's inspector takes its place in the session view.
+  const known = name === 'project' && (store.state.leads.has(r.id) || store.state.boards.has(r.id));
+  root.classList.toggle('with-right', known && r.view === 'lead');
+  // On a phone a task opens where it is drawn: in the right column, a drawer there.
+  app.drawer(narrow.matches && known && r.view === 'lead' && r.task ? 'right' : null);
+  // The side sheet belongs to the screen it opened on: a project's line stays open only while the address names it.
+  if (!(name === 'project' && r.sheet)) sheet.close();
+  left.render();
+  if (name === 'project') { project.render(); right.render(); }
+  if (name === 'sessions') own.render();
+  if (name === 'new') newProject.render();
+  const lead = name === 'project' ? store.state.leads.get(r.id) || store.state.boards.get(r.id) : null;
+  const one = store.state.sessions.get(r.id);
+  document.title = name === 'project' && lead ? `${lastPart(lead.root) || t('lead')} · VibeSwitcher` : name === 'session' && one ? `${one.title || 'Session'} · VibeSwitcher`
+    : name === 'node' ? `${t('thisNode')} · VibeSwitcher` : name === 'settings' ? `${t('settings')} · VibeSwitcher` : name === 'stats' ? `${t('stats')} · VibeSwitcher`
+      : name === 'mail' ? `${t('mail')} · VibeSwitcher` : name === 'sessions' ? `${t('ownSessions')} · VibeSwitcher` : name === 'new' ? `${t('newProject')} · VibeSwitcher` : 'VibeSwitcher';
+  app.notifications.refresh?.();
 }
 ui.subscribe((what) => { if (what === 'route') route(); });
-store.subscribe('sessions', route);
+for (const topic of ['sessions', 'leads', 'boards', 'cards', 'connection', 'node']) store.subscribe(topic, () => { if (ui.state.route.name === 'home' || (ui.state.route.name === 'project' && !root.classList.contains('with-right') && ui.state.route.view === 'lead')) route(); else left.render(); });
+store.subscribe('sessions', () => { if (ui.state.route.name === 'session') route(); });
 route();
+
+// On a phone, a screen's back arrow opens the left column, where every place is.
+root.addEventListener('click', (event) => {
+  if (narrow.matches && event.target.closest?.('.head .back')) { event.preventDefault(); app.drawer('left'); }
+});
 
 // Said only while it's true: nothing marks a working connection.
 store.subscribe('connection', () => {
   const connection = store.state.connection;
   offline.hidden = connection !== 'reconnecting';
-  // With no rows the start page says it already; the mark is for rows that stay readable but won't change.
   unpaired.hidden = (connection !== 'unpaired' && connection !== 'revoked') || store.state.sessions.size === 0;
   if (!unpaired.hidden) {
     unpaired.replaceChildren(connection === 'revoked' ? 'This page’s access was revoked. ' : 'This page isn’t paired with the node. ',
@@ -107,18 +183,12 @@ store.subscribe('connection', () => {
 
 // ---- Commands (the palette's, and the keys') ----
 
+// ⌘J: the next project with something waiting on you, after the one shown.
 function nextNeedingYou() {
-  const order = arrange(store.state, { ...ui.state, filter: '', teams: new Set(store.state.sessions.keys()) }).order.filter((entry) => stateOf(entry) === 'needs-you');
-  if (!order.length) return;
-  const at = order.findIndex((entry) => entry.id === ui.state.route.id);
-  ui.select(order[(at + 1) % order.length].id);
-}
-
-function step(by) {
-  const order = list.order();
-  if (!order.length) return;
-  const at = order.findIndex((entry) => entry.id === ui.state.route.id);
-  ui.select(order[at < 0 ? 0 : (at + by + order.length) % order.length].id);
+  const waiting = projectsOf(store.state).filter((one) => one.waiting > 0);
+  if (!waiting.length) return;
+  const at = waiting.findIndex((one) => ui.state.route.name === 'project' && one.project === ui.state.route.id);
+  ui.go(projectHref(waiting[(at + 1) % waiting.length].project));
 }
 
 // The palette's "New … in …" (the Mac's palette): each recent folder's presets as the node lists them, asked once a
@@ -147,7 +217,7 @@ function newCommands() {
     title: `New ${preset.name} in ${lastPart(folder) || folder}`,
     about: `${tilde(folder, home)} · the line that starts it`,
     icon: 'plus',
-    run: () => { ui.go('#/'); start.choose(folder, preset.name); },
+    run: () => { ui.go('#/sessions'); own.choose(folder, preset.name); },
   }));
 }
 
@@ -160,7 +230,7 @@ function leadCommands(selected) {
     title: `Start Project Lead in ${lastPart(folder) || folder}`,
     about: `${tilde(folder, home)} · a lead that runs workers, has their work verified, and merges`,
     icon: 'team',
-    run: () => { ui.go('#/'); start.lead(folder); },
+    run: () => { ui.go('#/new'); newProject.lead(folder); },
   }));
 }
 
@@ -181,13 +251,16 @@ function commands() {
   const selected = ui.state.route.name === 'session' ? store.state.sessions.get(ui.state.route.id) : null;
   const pane = (id, title, key) => ({ title, keys: `${KEY.mod}${KEY.alt}${key}`, icon: id, run: () => ui.setPane(selected.id, id) });
   return [
-    { title: 'Next Session Needing You', keys: `${KEY.mod}J`, icon: 'question', run: nextNeedingYou },
+    { title: 'Next Project Needing You', keys: `${KEY.mod}J`, icon: 'question', run: nextNeedingYou },
     ...(selected ? [pane('chat', 'Chat', '2'), pane('terminal', 'Terminal', '1')] : []),
     // The inspector's, for a session: the Mac's View › Toggle Inspector, and its Team tab for a lead or its team.
     ...(selected && teamOf(store.state, selected) ? [{ title: 'Team', about: 'The team’s tasks, in the inspector', keys: `${KEY.mod}${KEY.alt}3`, icon: 'team', run: () => ui.showInspector('team') }] : []),
     ...(selected ? [{ title: 'Toggle Inspector', about: 'Team, Overview and Activity', keys: `${KEY.mod}${KEY.alt}0`, icon: 'inspector', run: () => ui.toggleInspector() }] : []),
     // Each lead's board: its team's tasks, grouped (views/board.js).
-    ...[...store.state.boards.values()].map((board) => ({ title: `Board: ${lastPart(board.root) || 'a project'}`, about: 'Its lead’s tasks, as they move', icon: 'team', run: () => ui.go(boardHref(board.project)) })),
+    ...projectsOf(store.state).flatMap((one) => [
+      { title: `Lead: ${one.name}`, about: 'You and its lead', icon: 'chat', run: () => ui.go(projectHref(one.project)) },
+      { title: `Roadmap: ${one.name}`, about: 'Its tasks as they move', icon: 'team', run: () => ui.go(projectHref(one.project, { view: 'roadmap' })) },
+    ]),
     ...sessionCommands(selected),
     // The chat's own (the Mac's Find, Copy as Markdown and Export Chat): of what the page holds of it.
     ...(selected && store.can('chat.page') ? [
@@ -195,7 +268,8 @@ function commands() {
       { title: 'Copy Chat as Markdown', about: 'The conversation, to the clipboard', icon: 'copy', run: () => session.chat('copyMarkdown') },
       { title: 'Export Chat…', about: 'The conversation as a Markdown file', icon: 'file', run: () => session.chat('exportChat') },
     ] : []),
-    { title: 'Start Page', icon: 'home', run: () => ui.go('#/') },
+    { title: t('ownSessions'), about: 'Sessions outside a project', icon: 'chat', run: () => ui.go('#/sessions') },
+    { title: t('newProject'), about: 'Make a project, or start a lead in a folder', icon: 'plus', run: () => ui.go('#/new') },
     { title: 'This Node', about: 'Host, server, build and notices', icon: 'node', run: () => ui.go('#/node') },
     // The node's settings, and each lead's project's (views/settings.js).
     { title: 'Settings', about: 'Limits, Boost, the working policy', icon: 'settings', run: () => ui.go(settingsHref(null)) },
@@ -207,9 +281,6 @@ function commands() {
     { title: 'Between leads', about: 'The leads’ messages to each other', icon: 'chat', run: () => ui.go(mailHref) },
     ...[...store.state.leads.values()].filter((lead) => lead.root).map((lead) => ({ title: `Settings: ${lastPart(lead.root)}`, about: 'Its models, max_workers and review floor', icon: 'settings', run: () => ui.go(settingsHref(lead.project)) })),
     { title: app.notifications.enabled() ? 'Turn Notifications Off' : 'Turn Notifications On', about: 'When something needs you, while this page is open', icon: 'question', run: () => app.notifications.turn(!app.notifications.enabled()) },
-    { title: 'Group by Attention', icon: 'filter', run: () => ui.setGrouping('attention') },
-    { title: 'Group by Project', icon: 'filter', run: () => ui.setGrouping('projects') },
-    { title: 'Filter Sessions', keys: `${KEY.alt}F`, icon: 'search', run: () => list.focusFilter() },
     ...leadCommands(selected),
     ...newCommands(),
     // The mock's own: what a server restart looks like from here.
@@ -218,8 +289,8 @@ function commands() {
 }
 
 // ---- Keys ----
-// The Mac app's where a browser lets a page have them. ⌘1–9 belongs to the browser's tabs (it reaches the page only
-// in an installed window), so ⌥1–9 does the same everywhere. ⌥⌘0 is the inspector's, as on the Mac.
+// The Mac app's where a browser lets a page have them: ⌘K the palette, ⌘J the next project waiting on you, and in a
+// session ⌥⌘0 the inspector and ⌥⌘1 2 3 Terminal, Chat and Team, as on the Mac.
 
 addEventListener('keydown', (event) => {
   // In a session's terminal the keyboard is the program's: Ctrl+K, Ctrl+J, Alt+F and the rest are its keys. A Mac's ⌘
@@ -243,18 +314,11 @@ addEventListener('keydown', (event) => {
     event.preventDefault();
     if (digit < 3) ui.setPane(ui.state.route.id, digit === 1 ? 'terminal' : 'chat');
     else if (teamOf(store.state, store.state.sessions.get(ui.state.route.id))) ui.showInspector('team');
-  } else if ((mod || event.altKey) && !(mod && event.altKey) && !event.shiftKey && digit) {
-    const target = list.order()[digit - 1];
-    if (target) { event.preventDefault(); ui.select(target.id); }
   } else if ((mod || event.altKey) && !event.shiftKey && event.code === 'KeyJ') {
     event.preventDefault();
     nextNeedingYou();
-  } else if (event.altKey && !mod && (event.key === 'ArrowDown' || event.key === 'ArrowUp')) {
-    event.preventDefault();
-    step(event.key === 'ArrowDown' ? 1 : -1);
-  } else if (event.altKey && !mod && event.code === 'KeyF') {
-    event.preventDefault();
-    list.focusFilter();
+  } else if (event.key === 'Escape' && root.dataset.drawer) {
+    app.drawer(null);
   }
 });
 
@@ -266,7 +330,7 @@ function tick() {
   if (document.hidden) return;
   const now = Date.now();
   for (const el of document.querySelectorAll('[data-since]')) setText(el, since(el.dataset.since, now));
-  for (const el of document.querySelectorAll('[data-ago]')) setText(el, `asked ${since(el.dataset.ago, now)} ago`);
+  for (const el of document.querySelectorAll('[data-ago]')) setText(el, t('askedAgo', { d: since(el.dataset.ago, now) }));
   for (const el of document.querySelectorAll('[data-until]')) setText(el, until(el.dataset.until, now));
 }
 setInterval(tick, 1000);

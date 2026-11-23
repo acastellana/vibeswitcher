@@ -1,8 +1,11 @@
 // The real node's page, checked read-only in headless Chrome (scripts/e2e/real-page-check.sh runs it): pair with the URL
 // `vibeswitcher web` printed, look at each acceptance row's view, screenshot it, and say pass, fail or skip for each.
 //
+// The page is the redesigned one (docs/superpowers/specs/2026-11-23-v2-web-ui-design.md): projects on the left, a
+// project's lead conversation in the centre and its team on the right, the session view under Your own sessions.
+//
 // Read-only by construction: it navigates between the page's routes and switches the inspector's and a session's
-// view tabs; the one button it presses is Brief me (a read). It never presses an option, Send, a draft, Hold, Stop or
+// view tabs; it opens a line's side sheet; the one button it presses is Brief me (a read). It never presses an option, Send, a draft, Hold, Stop or
 // any other control that acts; it types into nothing (A10 is checked by the page's state alone: the hard rule is that
 // nothing types into a real session). A23 sends `answer` and `send` on a WebSocket of its own with the page's token,
 // naming a card and a session that don't exist, and expects both refused by voice before any handler.
@@ -48,22 +51,24 @@ async function run() {
     // A19: notifications granted to the page's origin, as the user's click would.
     const granted = await protocol.send('Browser.grantPermissions', { origin, permissions: ['notifications'] }).then(() => true, () => false);
 
-    // A3: paired and connected, the sessions listed.
+    // A3: paired and connected, the projects and your own sessions listed.
     await page.send('Page.navigate', { url });
-    const connected = await page.until(`!!document.querySelector('.sidebar') && !document.querySelector('.offline:not([hidden])') && !!sessionStorage.getItem('vibeswitcher.token')`, 20000);
-    const listed = await page.evaluate(`document.querySelectorAll('.sidebar .row-link').length`);
+    const connected = await page.until(`!!document.querySelector('.left') && !document.querySelector('.offline:not([hidden])') && !!sessionStorage.getItem('vibeswitcher.token')`, 20000);
     await page.shot('a3-start');
-    record('A3 pair', connected ? 'pass' : 'fail', connected ? `paired, ${listed} sessions listed` : 'no token or still offline after 20 s');
+    const projects = connected ? await page.evaluate(`[...document.querySelectorAll('.left .project')].map((a) => a.getAttribute('href'))`) : [];
+    await page.go('#/sessions');
+    const sessions = connected ? await page.evaluate(`[...document.querySelectorAll('.own-row')].map((a) => a.getAttribute('href'))`) : [];
+    record('A3 pair', connected ? 'pass' : 'fail', connected ? `paired, ${projects.length} projects and ${sessions.length} of your own sessions listed` : 'no token or still offline after 20 s');
     if (!connected) return;
 
-    // Brief me: a read; its text shown.
-    const asked = await page.evaluate(clickTab('.confirm-clear', 'Brief me'));
-    const brief = asked ? await page.until(`(() => { const p = document.querySelector('.brief-text'); return p && !p.hidden && p.innerText.trim().length > 0 ? p.innerText.trim().slice(0, 80) : null; })()`, 60000) : null;
+    // Brief me: a read, from the left column's summary line; its text in the side sheet.
+    const asked = await page.evaluate(`(() => { const b = document.querySelector('.left-summary'); if (!b || b.disabled) return false; b.click(); return true; })()`);
+    const brief = asked ? await page.until(`(() => { const s = document.querySelector('.sheet:not([hidden]) .sheet-body'); const t = s?.innerText.trim() || ''; return t && !/^Briefing|^Resumiendo/.test(t) ? t.slice(0, 80) : null; })()`, 60000) : null;
     await page.shot('brief');
-    record('Brief me', !asked ? 'skip' : brief ? 'pass' : 'fail', !asked ? 'no Brief me on the start page' : brief || 'no brief in 60 s');
+    record('Brief me', !asked ? 'skip' : brief ? 'pass' : 'fail', !asked ? 'the node writes no briefing for this page' : brief || 'no brief in 60 s');
+    await page.evaluate(`document.querySelector('.sheet-close')?.click()`);
 
-    // A3: a session's chat and the inspector's tabs; dev servers when its row shows.
-    const sessions = await page.evaluate(`[...document.querySelectorAll('.sidebar .row-link')].map((a) => a.getAttribute('href'))`);
+    // A3: one of your own sessions' chat and the inspector's tabs; dev servers when its row shows.
     if (sessions.length) {
       await page.go(sessions[0]);
       const chat = await page.until(`!!document.querySelector('.chat-column')`, 10000);
@@ -77,7 +82,7 @@ async function run() {
       }
       record('A3 inspector', tabs.length ? 'pass' : 'fail', tabs.join(', ') || 'no tabs');
     } else {
-      record('A3 chat', 'skip', 'no session listed');
+      record('A3 chat', 'skip', 'none of your own sessions listed');
     }
     let ports = null;
     for (const href of sessions.slice(0, 12)) {
@@ -91,43 +96,45 @@ async function run() {
     let shell = null;
     for (const href of sessions.slice(0, 20)) {
       await page.go(href);
-      shell = await page.until(`(() => { const c = document.querySelector('.shell-command'); return c ? c.closest('article').innerText.slice(0, 120) : null; })()`, 1200);
+      shell = await page.until(`(() => { const c = document.querySelector('.shell-command, .plugin-body'); return c ? c.closest('article').innerText.slice(0, 160) : null; })()`, 1200);
       if (shell) { await page.shot('shell-card'); break; }
     }
     const shellText = shell || '';
     record('Shell card', !shell ? 'skip' : shellText.includes('vibeswitcher answer') ? 'pass' : 'fail', shell ? shellText.replace(/\s+/g, ' ') : 'no shell request waits');
 
-    // Each project's current lead's Team tab: its tasks and results. The lead by its id, as `vibeswitcher status` named it
-    // (REAL_PAGE_LEADS, from real-page-check.sh): never the sidebar's first LEAD row, which may be a lead session its
-    // project replaced (still running until the engine ends it), whose Team tab has no board.
-    const leads = (process.env.REAL_PAGE_LEADS || '').split(',').filter(Boolean);
-    if (leads.length) {
+    // Each project's lead conversation and its Team tab: the header, the lines, the tasks.
+    if (projects.length) {
       const said = [];
       let all = true;
-      for (const [index, id] of leads.entries()) {
-        await page.go('#/s/' + encodeURIComponent(id));
-        const shown = await page.until(`!!document.querySelector('.inspector')`, 5000);
-        const team = shown && await page.evaluate(clickTab('.inspector .segmented button', 'Team'));
-        await pause(1200);
-        const seen = await page.evaluate(`({ tasks: document.querySelectorAll('.inspector .task').length, results: !!document.querySelector('.inspector .results, .inspector [data-section="results"]') || /Results/.test(document.querySelector('.inspector')?.innerText || '') })`);
+      for (const [index, href] of projects.entries()) {
+        await page.go(href);
+        const seen = await page.until(`(() => {
+          const big = document.querySelector('.project-view .big');
+          const right = document.querySelector('.right');
+          if (!big || !right || !right.offsetParent) return null;
+          return { big: big.innerText, lines: document.querySelectorAll('.project-view .line').length, tasks: document.querySelectorAll('.right .task-row2').length,
+            waiting: document.querySelectorAll('.project-view .card:not(.closed)').length };
+        })()`, 8000);
         await page.shot(index === 0 ? 'team-tab' : `team-tab-${index + 1}`);
-        all = all && !!team;
-        said.push(`${id.slice(0, 14)}: ` + (team ? `${seen.tasks} tasks${seen.results ? ', results shown' : ''}` : shown ? 'no Team tab' : 'not listed'));
+        all = all && !!seen;
+        said.push(`${decodeURIComponent(href).split('/')[2]?.slice(-8)}: ` + (seen ? `${seen.big}, ${seen.lines} lines, ${seen.waiting} cards waiting, ${seen.tasks} tasks` : 'not drawn'));
       }
       record('Team tab', all ? 'pass' : 'fail', said.join('; '));
+      // A line's whole text in the side sheet.
+      await page.go(projects[0] + '?show=all');
+      const line = await page.until(`(() => { const l = document.querySelector('.project-view .line'); if (!l) return null; l.click(); return true; })()`, 3000);
+      const sheet = line && await page.until(`(() => { const s = document.querySelector('.sheet:not([hidden])'); return s ? s.querySelector('.sheet-title').innerText.slice(0, 80) : null; })()`, 5000);
+      await page.shot('side-sheet');
+      record('Side sheet', !line ? 'skip' : sheet ? 'pass' : 'fail', !line ? 'no line in the first project’s conversation' : sheet || 'the line opened no sheet');
+      // The roadmap, without goals.
+      await page.go(projects[0].replace(/\/lead$/, '/roadmap'));
+      const road = await page.until(`!!document.querySelector('.road-intro')`, 8000);
+      await page.shot('a3-roadmap');
+      record('A3 roadmap', road ? 'pass' : 'fail', projects[0].replace(/\/lead$/, '/roadmap'));
     } else {
-      record('Team tab', 'skip', 'no lead runs (vibeswitcher status names none)');
-    }
-
-    // A3: a project's board.
-    const boards = await page.evaluate(`[...new Set([...document.querySelectorAll('a[href^="#/p/"]')].map((a) => a.getAttribute('href')))]`);
-    if (boards.length) {
-      await page.go(boards[0]);
-      const board = await page.until(`!!document.querySelector('.board-group')`, 8000);
-      await page.shot('a3-board');
-      record('A3 board', board ? 'pass' : 'fail', boards[0]);
-    } else {
-      record('A3 board', 'skip', 'no project board linked');
+      record('Team tab', 'skip', 'no project listed');
+      record('Side sheet', 'skip', 'no project listed');
+      record('A3 roadmap', 'skip', 'no project listed');
     }
 
     // A3 settings; this node with its health; statistics; between leads.
