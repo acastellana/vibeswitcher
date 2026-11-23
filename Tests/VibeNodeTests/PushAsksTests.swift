@@ -199,7 +199,7 @@ struct PushAsksTests {
         #expect(!words.contains(secret) && words.contains("https://example.invalid/r.git"), "\(words)")
         // git's own words carry the URL whole: the outcome is shown without it, everywhere.
         world.queue.sync {
-            world.engine.pushSettle = { id, root, _, vault in
+            world.engine.push.settler = { id, root, _, vault in
                 (try? vault.settlePush(id: id, root: root), .failed("fatal: unable to access '\(url)/': The requested URL returned error: 403"))
             }
         }

@@ -205,18 +205,8 @@ public final class LeadEngine: @unchecked Sendable {
     var workingTold: [String: (sessions: Set<String>, at: Date)] = [:]
     /// How often the same working sessions are told the vault again (the app's `LeadController.workingEvery`).
     static let workingEvery: TimeInterval = 30
-    /// Each lead's open push request (push_remote), by root, as the vault last said; the request last noted in the log,
-    /// by root; the roots whose vault look is under way, and whose push the user is settling (`PushAsks.swift`). On
-    /// `queue`.
-    var pushAsked: [String: LeadPush.Request] = [:]
-    var pushNoted: [String: String] = [:]
-    var pushLooking: Set<String> = []
-    var pushSettling: Set<String> = []
-    /// Settles a push request (`LeadPush.settle`: the request's id, the root, push or decline, the vault), off the
-    /// engine's queue. Faked in tests.
-    var pushSettle: @Sendable (String, String, Bool, LeadVault) -> (request: LeadPush.Request?, outcome: LeadPush.Outcome) = { id, root, push, vault in
-        LeadPush.settle(id: id, root: root, push: push, vault: vault)
-    }
+    /// The leads' push requests (`PushAsks.swift`): its state its own, on `queue`.
+    let push: PushWatch
     /// Where those are told, one after another: a later look's never overtakes an earlier one's (`work` is concurrent).
     let workingNotes = DispatchQueue(label: "vibenode.lead-engine.working", qos: .utility)
     /// Names each computation of the witness's as it starts, on the thread that runs it (`WitnessWork`), and "applied"
@@ -441,6 +431,7 @@ public final class LeadEngine: @unchecked Sendable {
         plugins = PluginRegistry(options.plugins ?? PluginRegistry.standard())
         queue = link.queue
         toolchain = ToolchainWatch(queue: link.queue, file: root.appendingPathComponent("toolchain.json"), home: options.home ?? VibePaths.home, note: note)
+        push = PushWatch(queue: link.queue, work: work, link: link, note: note)
         promptAudit = PromptAuditWatch(queue: link.queue, root: root, home: options.home ?? VibePaths.home, clock: clock, note: note)
         reads = BoardReads(handTo: link.queue)
         preflight = NodePreflight(claudeLink: options.claudeLink ?? NodePreflight.claudeLink(root: root), git: options.git)
@@ -448,6 +439,7 @@ public final class LeadEngine: @unchecked Sendable {
         observer = LeadObserver(home: options.home ?? VibePaths.home, stateFile: { states.appendingPathComponent("\($0).json") })
         toolchain.leads = self
         promptAudit.leads = self
+        push.leads = self
         restoreState()
         leads.heldChanged = { [weak self] in self?.saveState() }
         watch = link.changes.subscribe(on: link.queue) { [weak self] _ in self?.sessionsChanged() }
