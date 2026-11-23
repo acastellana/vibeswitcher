@@ -230,7 +230,7 @@ public enum MergeRerun {
     /// A parameterized test's end names its cases ("✘ Test f(hook:) with 2 test cases failed after …"), so `TestFailures`
     /// names it both ways: the filter is its function's (on 2026-11-16 the case count's name sent a rerun whole).
     static func pattern(_ test: String) -> String? {
-        let test = test.replacingOccurrences(of: #"\) with \d+ test cases?$"#, with: ")", options: .regularExpression)
+        let test = function(test)
         guard !test.hasPrefix("\""), !test.isEmpty else { return nil }
         if test.hasSuffix(")") { return "/" + NSRegularExpression.escapedPattern(for: test) + "(/|$)" }
         let parts = test.split(separator: ".")
@@ -249,8 +249,7 @@ public enum MergeRerun {
         var missing = plan.tests.filter { test in
             // Its function's own passing line, or its cases' ("✔ Test f(hook:) with 2 test cases passed after"); a
             // known issue's mark ("━ Test f() passed after 1.0 seconds with 1 known issue.") passed too.
-            let function = test.replacingOccurrences(of: #"\) with \d+ test cases?$"#, with: ")", options: .regularExpression)
-            let passed = #"^\S{1,2} Test "# + NSRegularExpression.escapedPattern(for: function) + #"( with \d+ test cases?)? passed after "#
+            let passed = #"^\S{1,2} Test "# + NSRegularExpression.escapedPattern(for: function(test)) + #"( with \d+ test cases?)? passed after "#
             return !lines.contains { line in
                 line.range(of: passed, options: .regularExpression) != nil
                     || (line.hasPrefix("Test Case '") && line.contains(test.replacingOccurrences(of: ".", with: " ") + "]' passed"))
@@ -477,9 +476,18 @@ public enum MergeRerun {
     /// and `unnamed` for a crash or a stop (`finished`), or a failure naming no test. Never the tests a crash left unfinished: they
     /// were only running beside it. On 2026-10-30 one crash logged every test then running, 200 and more, and with two
     /// misread earlier runs that was a third flake for six tests that had never failed (fix-the-flaky-test-7..12).
+    /// A parameterized test is one flake, under its function: its issue lines name the function and its end line
+    /// its cases ("✘ Test f(hook:) with 2 test cases failed after …"), and on 2026-11-16 the ledger recorded both.
     public static func flakes(in output: String) -> [String] {
         let failures = TestFailures(output: output)
-        return failures.tests + (failures.tests.isEmpty || !finished(output) ? [unnamed] : [])
+        var tests: [String] = []
+        for test in failures.tests.map(function) where !tests.contains(test) { tests.append(test) }
+        return tests + (tests.isEmpty || !finished(output) ? [unnamed] : [])
+    }
+
+    /// A Swift Testing test's function as `TestFailures` may name it: "f(hook:) with 2 test cases" is "f(hook:)".
+    static func function(_ test: String) -> String {
+        test.replacingOccurrences(of: #"\) with \d+ test cases?$"#, with: ")", options: .regularExpression)
     }
 
     // MARK: Evidence
@@ -522,7 +530,9 @@ public enum MergeRerun {
         }
         var evidence: [String: [String]] = [:]
         for test in tests {
-            guard let lines = found[test], !lines.isEmpty else { continue }
+            // A parameterized test's function keeps its end line too, which names its cases (`flakes`).
+            let lines = found[test, default: []] + found.filter { $0.key != test && function($0.key) == test }.sorted { $0.key < $1.key }.flatMap(\.value)
+            guard !lines.isEmpty else { continue }
             evidence[test] = capped(lines)
         }
         return evidence

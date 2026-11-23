@@ -87,6 +87,42 @@ struct MergeRerunUnnamedFlakeTests {
         #expect(MergeRerun.flakes(in: several) == [Self.failing])
     }
 
+    static let parameterized = "aFailedReadFallsBackOnTheParsersLines(hook:)"
+
+    /// The whole run above with a parameterized test failing too, its lines as after-a-mac-restart's merge of
+    /// 2026-11-16 printed them (its flake log): the issue line names the function, the end line its cases.
+    static let parameterizedRun = wholeRun.replacingOccurrences(of: "✘ Suite EndedFoldTests failed after", with: """
+        ◇ Test aFailedReadFallsBackOnTheParsersLines(hook:) started.
+        ✘ Test aFailedReadFallsBackOnTheParsersLines(hook:) recorded an issue with 1 argument hook → "stall" at LongHistoryTests.swift:134:9: Expectation failed: Self.consecutive(numbers)
+        ↳
+        ↳ Self.consecutive(numbers) → false
+        ↳   Self → LongHistoryTests
+        ↳   numbers → [nil]
+        ✘ Test aFailedReadFallsBackOnTheParsersLines(hook:) with 2 test cases failed after 40.782 seconds with 1 issue.
+        ✘ Suite EndedFoldTests failed after
+        """)
+
+    /// On 2026-11-16 the flake ledger named it twice, by its function and by "… with 2 test cases": now that a flake
+    /// plans a fix task, that was two tasks for one test. Recorded once, under its function, with both its lines; the
+    /// rerun plan still names both, and filters for its function.
+    @Test func aParameterizedTestIsRecordedOnceUnderItsFunction() {
+        #expect(MergeRerun.finished(Self.parameterizedRun))
+        let flakes = MergeRerun.flakes(in: Self.parameterizedRun)
+        #expect(flakes == [Self.failing, Self.parameterized])
+        let lines = MergeRerun.evidence(in: Self.parameterizedRun, tests: flakes)[Self.parameterized] ?? []
+        #expect(lines.first?.hasPrefix("✘ Test \(Self.parameterized) recorded an issue with 1 argument") == true, "\(lines)")
+        #expect(lines.last == "✘ Test \(Self.parameterized) with 2 test cases failed after 40.782 seconds with 1 issue.", "\(lines)")
+        #expect(lines.count == 6, "\(lines)")
+
+        var workflow = LeadWorkflow()
+        workflow.testCommand = "bash scripts/test.sh"
+        let plan = MergeRerun.plan(after: Self.parameterizedRun, workflow: workflow)
+        #expect(plan?.tests == [Self.failing, Self.parameterized, Self.parameterized + " with 2 test cases"])
+        #expect(plan?.filtered == true)
+        #expect(plan?.command.contains(#"|/aFailedReadFallsBackOnTheParsersLines\(hook:\)(/|$)|/aFailedReadFallsBackOnTheParsersLines\(hook:\)(/|$)'"#) == true,
+                "\(plan?.command ?? "")")
+    }
+
     /// Still unnamed beside it: a crash, a stop, and a failure naming no test.
     @Test func aCrashAStopOrAFailureNamingNoTestStillRecordsTheUnnamedFlake() {
         let lines = Self.wholeRun.components(separatedBy: "\n")
