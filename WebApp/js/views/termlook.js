@@ -5,8 +5,9 @@
 import { h } from '../dom.js';
 import { THEMES, CURSORS, BELLS, ANSI_NAMES, FONT_SIZES, SCROLLBACK, look, saveLook, resetLook, onLook, paletteOf } from '../termlook.js';
 import { KEY } from '../words.js';
+import { t } from '../i18n.js';
 
-const COLOUR_NAMES = { foreground: 'Text', background: 'Background', cursor: 'Cursor', selection: 'Selection' };
+const COLOUR_NAMES = { foreground: t('tlText'), background: t('tlBackground'), cursor: t('tlCursor'), selection: t('tlSelection') };
 
 function row(label, control, note = null) {
   if (control.matches?.('input, select')) control.setAttribute('aria-label', label);
@@ -21,8 +22,8 @@ function select(options, value, onchange) {
 export function terminalLookSection() {
   const body = h('div', { class: 'look-body' });
   const el = h('section', { class: 'node-group look' },
-    h('h2', { class: 'section-title' }, 'Terminal · this browser'),
-    h('p', { class: 'settings-intro' }, 'How a session’s terminal looks on this page. Kept in this browser only: each person viewing the node picks their own.'),
+    h('h2', { class: 'section-title' }, t('tlTerminalThisBrowser')),
+    h('p', { class: 'settings-intro' }, t('tlHowASessionSTerminal')),
     body);
 
   function draw(current) {
@@ -30,7 +31,7 @@ export function terminalLookSection() {
     if (body.contains(document.activeElement) && document.activeElement.matches('input[type="text"], input[type="number"]')) return;
     const dark = globalThis.matchMedia?.('(prefers-color-scheme: dark)')?.matches;
     const palette = paletteOf(current, document.documentElement.dataset.theme === 'dark' || (document.documentElement.dataset.theme !== 'light' && dark));
-    const fontInput = h('input', { class: 'look-input', type: 'text', value: current.fontName, placeholder: 'The page’s monospace', maxlength: 64, spellcheck: 'false',
+    const fontInput = h('input', { class: 'look-input', type: 'text', value: current.fontName, placeholder: t('tlThePageSMonospace'), maxlength: 64, spellcheck: 'false',
       onchange: (event) => saveLook({ fontName: event.target.value }) });
     const sizeInput = h('input', { class: 'look-input narrow', type: 'number', min: FONT_SIZES.min, max: FONT_SIZES.max, step: 0.5, value: current.fontSize,
       onchange: (event) => saveLook({ fontSize: Number(event.target.value) }) });
@@ -48,19 +49,19 @@ export function terminalLookSection() {
     }));
     ansi.forEach((input, index) => { input.title = ANSI_NAMES[index]; input.setAttribute('aria-label', `ANSI ${ANSI_NAMES[index]}`); });
     body.replaceChildren(
-      row('Theme', select(THEMES, current.theme, (theme) => saveLook(theme === 'custom' && current.theme !== 'custom'
+      row(t('tlTheme'), select(THEMES, current.theme, (theme) => saveLook(theme === 'custom' && current.theme !== 'custom'
         ? { theme, custom: { ...palette, ansi: [...palette.ansi] } } : { theme }))),
-      row('Font', fontInput, 'A font installed on this computer; the page’s monospace when it has none.'),
-      row('Size', sizeInput, `${FONT_SIZES.min} to ${FONT_SIZES.max}`),
-      row('Cursor', h('span', { class: 'look-pair' }, select(CURSORS, current.cursorShape, (cursorShape) => saveLook({ cursorShape })),
-        h('label', { class: 'look-check' }, check(current.cursorBlink, 'cursorBlink'), 'Blink'))),
-      row('Scrollback', scrollInput, 'lines'),
-      row(KEY.mod === '⌘' ? 'Option as Meta' : 'Alt as Meta', check(current.optionAsMeta, 'optionAsMeta'), 'On a Mac: ⌥ sends Meta, as the Mac’s terminal'),
-      row('Bell', select(BELLS, current.bell, (bell) => saveLook({ bell }))),
-      h('div', { class: 'look-row' }, h('span', { class: 'look-label' }, 'Colours'),
+      row(t('tlFont'), fontInput, t('tlAFontInstalledOnThis')),
+      row(t('tlSize'), sizeInput, t('tlRange', { min: FONT_SIZES.min, max: FONT_SIZES.max })),
+      row(t('tlCursor'), h('span', { class: 'look-pair' }, select(CURSORS, current.cursorShape, (cursorShape) => saveLook({ cursorShape })),
+        h('label', { class: 'look-check' }, check(current.cursorBlink, 'cursorBlink'), t('tlBlink')))),
+      row(t('tlScrollback'), scrollInput, 'lines'),
+      row(KEY.mod === '⌘' ? t('tlOptionAsMeta') : t('tlAltAsMeta'), check(current.optionAsMeta, 'optionAsMeta'), t('tlOnAMacSendsMeta')),
+      row(t('tlBell'), select(BELLS, current.bell, (bell) => saveLook({ bell }))),
+      h('div', { class: 'look-row' }, h('span', { class: 'look-label' }, t('tlColours')),
         h('div', { class: 'look-colours' }, h('div', { class: 'look-named' }, named), h('div', { class: 'look-ansi' }, ansi),
-          custom ? null : h('span', { class: 'look-note' }, 'Pick Custom to change them.'))),
-      h('div', { class: 'look-row' }, h('span', { class: 'look-label' }), h('button', { class: 'button quiet', type: 'button', onclick: () => resetLook() }, 'Reset to Defaults')),
+          custom ? null : h('span', { class: 'look-note' }, t('tlPickCustomToChangeThem')))),
+      h('div', { class: 'look-row' }, h('span', { class: 'look-label' }), h('button', { class: 'button quiet', type: 'button', onclick: () => resetLook() }, t('tlResetToDefaults'))),
     );
   }
 

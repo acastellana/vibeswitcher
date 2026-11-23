@@ -22,6 +22,7 @@
 
 import { h } from './dom.js';
 import { pluginOn, pluginsOn } from './plugincard.js';
+import { t } from './i18n.js';
 
 const PREF = 'vibeswitcher.notifications';
 const SOUND = 'vibeswitcher.sound';
@@ -39,15 +40,15 @@ export function firstLine(text, limit = 120) {
   return chars.length > limit ? chars.slice(0, limit - 1).join('') + '…' : clean;
 }
 
-const CARD_TITLES = { question: 'A question for you', approval: 'An approval for you', config: 'Agents’ config held', base: 'The base moved' };
+const CARD_TITLES = { question: t('ntAQuestionForYou'), approval: t('ntAnApprovalForYou'), config: t('ntAgentsConfigHeld'), base: t('ntTheBaseMoved') };
 
 function cardBody(card) {
-  if (card.tooLarge) return 'A card too large for the page: read it with ' + (card.tooLarge.command || 'vibeswitcher questions');
+  if (card.tooLarge) return t('ntACardTooLargeFor') + (card.tooLarge.command || 'vibeswitcher questions');
   if (card.question) return firstLine(card.question.text || card.question.short);
-  if (card.approval) return firstLine(card.approval.subject || `Merge ${String(card.approval.commit || '').slice(0, 8)}`);
+  if (card.approval) return firstLine(card.approval.subject || t('ntMerge', { commit: String(card.approval.commit || '').slice(0, 8) }));
   if (card.config) return firstLine((card.config.items || []).map((item) => item.name).join(', '));
   // A feature plugin's: who asks, and the first line of what it asks.
-  if (card.plugin) return firstLine(`${card.plugin.asker}, in the agent’s words: “${(card.plugin.body?.lines || [])[0] || ''}”`);
+  if (card.plugin) return firstLine(t('ntPluginBody', { asker: card.plugin.asker, first: (card.plugin.body?.lines || [])[0] || '' }));
   return '';
 }
 
@@ -71,17 +72,17 @@ export function summarize(state) {
     const place = !card.plugin && card.project && (state.leads.has(card.project) || state.boards?.has(card.project)) ? `#/p/${encodeURIComponent(card.project)}/lead` : null;
     // A plugin's card is told only while the node has its plugin on (`hello.plugins`; null: a node before plugins).
     if (card.plugin && !pluginOn(pluginsOn(state), card.plugin.plugin)) continue;
-    const title = card.plugin?.title || CARD_TITLES[card.kind] || 'A card for you';
-    asks.set(key, { title: `${title} · ${lastPart(card.root) || 'a project'}`, body: cardBody(card), href: place || (session ? href(session) : '#/') });
+    const title = card.plugin?.title || CARD_TITLES[card.kind] || t('ntACardForYou');
+    asks.set(key, { title: `${title} · ${lastPart(card.root) || t('ntAProject')}`, body: cardBody(card), href: place || (session ? href(session) : '#/') });
   }
   for (const session of state.sessions.values()) {
-    const name = session.title || lastPart(session.cwd) || 'A session';
+    const name = session.title || lastPart(session.cwd) || t('ntASession');
     if (session.role === 'lead') leads.set(session.id, { title: name, working: working(session), ended: Boolean(session.ended) });
     else if (!session.role) own.set(session.id, { title: name, working: working(session), ended: Boolean(session.ended), paused: Boolean(session.paused) });
     if (session.status !== 'needs-you' || session.paused || session.ended) continue;
     if (session.role === 'worker' || session.role === 'verifier') continue;
     if (session.role === 'lead' && session.leadAsks) continue;
-    asks.set(`prompt:${session.id}:${session.since || ''}`, { title: `${name} needs you`, body: firstLine(session.detail || session.activity || 'It’s waiting for you.'), href: href(session.id) });
+    asks.set(`prompt:${session.id}:${session.since || ''}`, { title: t('ntNeedsYou', { name }), body: firstLine(session.detail || session.activity || t('ntItSWaitingForYou')), href: href(session.id) });
   }
   // The node's reminders due now (`reminders`): one key a wait or a stall (its episode), so each is told once.
   const reminders = new Map();
@@ -106,19 +107,19 @@ export function changes(before, after) {
   for (const [key, reminder] of after.reminders || []) if (!(before.reminders || new Map()).has(key)) told.push({ key, ...reminder });
   // A freeze kept since the last look (never one from before this page looked: `before.freeze` null).
   if (before.freeze != null && after.freeze && after.freeze !== before.freeze) {
-    told.push({ key: `freeze:${after.freeze}`, title: 'The node froze', body: `Its engine didn’t answer for ${after.freezeSeconds} s. This node shows its health.`, href: '#/node' });
+    told.push({ key: `freeze:${after.freeze}`, title: t('ntTheNodeFroze'), body: t('ntFrozeBody', { n: after.freezeSeconds }), href: '#/node' });
   }
   for (const [id, lead] of before.leads) {
     const now = after.leads.get(id);
     if (!lead.working || (now && now.working && !now.ended)) continue;
-    told.push({ key: `stopped:${id}`, title: `${(now || lead).title} stopped`, body: now && !now.ended ? 'The lead finished its turn.' : 'The lead’s session ended.', href: now ? href(id) : '#/' });
+    told.push({ key: `stopped:${id}`, title: t('ntStopped', { name: (now || lead).title }), body: now && !now.ended ? t('ntTheLeadFinishedItsTurn') : t('ntTheLeadSSessionEnded'), href: now ? href(id) : '#/' });
   }
   // One of your own sessions finished its work (the Mac's "Notify when a session finishes": never a worker's or a
   // verifier's, nor one you paused): it was working and now isn't, or it ended.
   for (const [id, session] of before.own || []) {
     const now = (after.own || new Map()).get(id);
     if (!session.working || session.paused || (now && now.working && !now.ended)) continue;
-    told.push({ key: `finished:${id}`, title: `${(now || session).title} finished`, body: now && !now.ended ? 'It finished its work.' : 'Its session ended.', href: now ? href(id) : '#/' });
+    told.push({ key: `finished:${id}`, title: t('ntFinished', { name: (now || session).title }), body: now && !now.ended ? t('ntItFinishedItsWork') : t('ntItsSessionEnded'), href: now ? href(id) : '#/' });
   }
   return told;
 }
@@ -184,10 +185,10 @@ export function notifications(app, env = {}) {
 
   // The offer, once: shown the first time something needs you while the browser hasn't been asked and you haven't
   // answered; either answer is kept.
-  const offerText = h('span', null, 'Get a notification when something needs you?');
+  const offerText = h('span', null, t('ntGetANotificationWhenSomething'));
   const offer = h('div', { class: 'offline offer', role: 'status', hidden: true }, offerText,
-    h('button', { class: 'offer-yes', type: 'button', onclick: () => turn(true) }, 'Turn on'),
-    h('button', { class: 'offer-no', type: 'button', onclick: () => turn(false) }, 'Not now'));
+    h('button', { class: 'offer-yes', type: 'button', onclick: () => turn(true) }, t('ntTurnOn')),
+    h('button', { class: 'offer-no', type: 'button', onclick: () => turn(false) }, t('ntNotNow')));
 
   // The toggle on This node.
   const box = h('input', { type: 'checkbox', class: 'notify-toggle', onchange: () => turn(box.checked) });
@@ -200,12 +201,12 @@ export function notifications(app, env = {}) {
     done: h('input', { type: 'checkbox', class: 'notify-kind', onchange: () => choose('done', kindBoxes.done.checked) }),
     reminders: h('input', { type: 'checkbox', class: 'notify-kind', onchange: () => choose('reminders', kindBoxes.reminders.checked) }),
   };
-  const el = h('section', { class: 'node-group notify' }, h('h2', { class: 'section-title' }, 'Notifications'),
-    h('label', { class: 'notify-line' }, box, ' Tell me when something happens, while this page is open'), said,
-    h('label', { class: 'notify-line notify-sub' }, kindBoxes.needs, ' When a session or a lead needs me (a question, an approval, a prompt waiting)'),
-    h('label', { class: 'notify-line notify-sub' }, kindBoxes.done, ' When a lead stops or a session of mine finishes'),
-    h('label', { class: 'notify-line notify-sub' }, kindBoxes.reminders, ' Remind me about waiting or stuck sessions (waiting on me 10 minutes, no progress for 15)'),
-    h('label', { class: 'notify-line' }, ring, ' Play a sound when something needs me'));
+  const el = h('section', { class: 'node-group notify' }, h('h2', { class: 'section-title' }, t('ntNotifications')),
+    h('label', { class: 'notify-line' }, box, t('ntTellMeWhenSomethingHappens')), said,
+    h('label', { class: 'notify-line notify-sub' }, kindBoxes.needs, t('ntWhenASessionOrA')),
+    h('label', { class: 'notify-line notify-sub' }, kindBoxes.done, t('ntWhenALeadStopsOr')),
+    h('label', { class: 'notify-line notify-sub' }, kindBoxes.reminders, t('ntRemindMeAboutWaitingOr')),
+    h('label', { class: 'notify-line' }, ring, t('ntPlayASoundWhenSomething')));
 
   const choices = () => ({ needs: stored(storage, KINDS.needs) !== 'off', done: stored(storage, KINDS.done) !== 'off',
     reminders: stored(storage, KINDS.reminders) !== 'off' });
@@ -219,8 +220,8 @@ export function notifications(app, env = {}) {
   function draw() {
     box.checked = enabled();
     box.disabled = !supported || Note.permission === 'denied';
-    said.textContent = !supported ? 'This browser has no notifications.'
-      : Note.permission === 'denied' ? 'Blocked in this browser’s settings for this page.' : '';
+    said.textContent = !supported ? t('ntThisBrowserHasNoNotifications')
+      : Note.permission === 'denied' ? t('ntBlockedInThisBrowserS') : '';
     const chosen = choices();
     for (const kind of Object.keys(kindBoxes)) {
       kindBoxes[kind].checked = chosen[kind];

@@ -4,6 +4,7 @@
 // are the parts with no page in them, so the tests can read them.
 
 import { shellWord } from './views/drive.js';
+import { t } from './i18n.js';
 
 // `settings` rows grouped as the page shows them: by section, in the node's order.
 export function settingSections(settings) {
@@ -31,14 +32,14 @@ export function draftProblem(setting, value) {
   const text = String(value ?? '');
   if (text.trim().toLowerCase() === 'default') return null;
   switch (setting.form) {
-    case 'flag': return ['on', 'off'].includes(text) ? null : 'on or off';
-    case 'choice': return setting.choices.includes(text) ? null : `one of ${setting.choices.join(', ')}`;
-    case 'count': return /^\d+$/.test(text.trim()) ? null : `a whole number${setting.limits ? ` (${setting.limits})` : ''}`;
-    case 'number': return Number(text) > 0 ? null : `a number${setting.limits ? ` (${setting.limits})` : ''}`;
-    case 'model': return /^[A-Za-z0-9.\-_[\]:]{1,100}$/.test(text.trim()) ? null : 'one word, a model’s name as claude --model takes it';
-    case 'paths': return text.includes('\n') ? 'one line' : null;
-    case 'text': return text.trim() ? null : 'some text (or default)';
-    case 'folder': return /^(\/|~$|~\/)/.test(text.trim()) && !text.includes('\n') ? null : 'a full path, or one under ~';
+    case 'flag': return ['on', 'off'].includes(text) ? null : t('slOnOff');
+    case 'choice': return setting.choices.includes(text) ? null : t('slOneOf', { list: setting.choices.join(', ') });
+    case 'count': return /^\d+$/.test(text.trim()) ? null : t('slWhole') + (setting.limits ? ` (${setting.limits})` : '');
+    case 'number': return Number(text) > 0 ? null : t('slNumber') + (setting.limits ? ` (${setting.limits})` : '');
+    case 'model': return /^[A-Za-z0-9.\-_[\]:]{1,100}$/.test(text.trim()) ? null : t('slOneWordAModelS');
+    case 'paths': return text.includes('\n') ? t('slOneLine') : null;
+    case 'text': return text.trim() ? null : t('slSomeTextOrDefault');
+    case 'folder': return /^(\/|~$|~\/)/.test(text.trim()) && !text.includes('\n') ? null : t('slAFullPathOrOne');
     default: return null;
   }
 }
@@ -48,7 +49,7 @@ export function shownValue(setting) {
   const value = setting.value ?? '';
   if (setting.form !== 'text') return value;
   const lines = value.split('\n');
-  return lines.length > 1 ? `${lines[0]} (and ${lines.length - 1} more line${lines.length === 2 ? '' : 's'})` : value;
+  return lines.length > 1 ? lines[0] + t('slMoreLines', { n: lines.length - 1 }) : value;
 }
 
 // The account's usage as the page shows it (the node's `usage`, `NodeUsage.value`): one line per limit still holding
@@ -57,15 +58,15 @@ export function shownValue(setting) {
 export function usageFacts(usage, when = (iso) => new Date(iso).toLocaleString()) {
   if (!usage) return null;
   const limits = (usage.limits || []).map((limit) => ({
-    title: limit.label.charAt(0).toUpperCase() + limit.label.slice(1) + (limit.model ? '' : ' (every model)'),
-    value: (limit.reached ? 'reached' : `${limit.usedPercent}% used`) + (limit.resetsAt ? `, resets ${when(limit.resetsAt)}` : ''),
+    title: limit.label.charAt(0).toUpperCase() + limit.label.slice(1) + (limit.model ? '' : t('slEveryModel')),
+    value: (limit.reached ? t('slReached') : t('slUsed', { n: limit.usedPercent })) + (limit.resetsAt ? t('slResets', { when: when(limit.resetsAt) }) : ''),
     holds: !!limit.holds,
     percent: limit.reached ? 100 : Math.max(0, Math.min(100, limit.usedPercent)),
   }));
   const notes = [];
-  if (usage.ignored) notes.push('Ignore usage limits is on: only a limit Claude refused a request at holds work back.');
-  else notes.push(`At ${usage.threshold}% of a limit, leads start no workers or audits on the models it holds back.`);
-  if (usage.fableHeldBack) notes.push(`Fable held back until ${when(usage.fableHeldBack)}: workers on Opus, audits on another model under the review floor.`);
+  if (usage.ignored) notes.push(t('slIgnoreUsageLimitsIsOn'));
+  else notes.push(t('slThreshold', { n: usage.threshold }));
+  if (usage.fableHeldBack) notes.push(t('slFable', { when: when(usage.fableHeldBack) }));
   return { account: usage.account || null, limits, notes };
 }
 

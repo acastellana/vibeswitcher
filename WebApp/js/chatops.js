@@ -5,6 +5,7 @@
 // { items: [], index: Map(id → position) }.
 
 import { plural } from './words.js';
+import { t } from './i18n.js';
 
 // `ops` applied to `chat` in order, or nothing at all when one of them doesn't fit what the chat holds: a `text` op
 // whose `at` isn't the item's text length now (in UTF-16 code units, JavaScript's own), or a `text` or `set` op for an
@@ -113,10 +114,10 @@ export function summaryOf(tools) {
   const edits = count('edit') + count('write');
   const reads = count('read');
   const others = tools.length - commands - edits - reads;
-  if (commands) parts.push(`ran ${plural(commands, 'command')}`);
-  if (edits) parts.push(`edited ${plural(edits, 'file')}`);
-  if (reads) parts.push(`read ${plural(reads, 'file')}`);
-  if (others) parts.push(`used ${plural(others, 'tool')}`);
+  if (commands) parts.push(t('coRan', { n: commands }));
+  if (edits) parts.push(t('coEdited', { n: edits }));
+  if (reads) parts.push(t('coRead', { n: reads }));
+  if (others) parts.push(t('coUsed', { n: others }));
   const text = parts.join(' · ');
   return text.charAt(0).toUpperCase() + text.slice(1);
 }
@@ -134,7 +135,7 @@ export function sinceSummary(items) {
   const tools = items.filter((item) => item.type === 'tools').flatMap((item) => item.tools || []);
   const replies = items.filter((item) => item.type === 'reply').length;
   const parts = tools.length ? [summaryOf(tools)] : [];
-  if (replies) parts.push(replies === 1 ? '1 reply' : `${replies} replies`);
+  if (replies) parts.push(t('coReplies', { n: replies }));
   const text = parts.join(' · ');
   return text.charAt(0).toUpperCase() + text.slice(1);
 }

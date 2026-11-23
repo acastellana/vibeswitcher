@@ -4,6 +4,7 @@
 // the request and asks for its code where the user's own hands type it.
 
 import { plural } from './words.js';
+import { t } from './i18n.js';
 
 // `text` as one shell word, as drive.js writes it: as it is when it needs no quoting, else in single quotes.
 const word = (text) => {
@@ -19,7 +20,7 @@ export function pushLines(push, root) {
   if (!push || !root) return null;
   const subjects = push.subjects || [];
   return {
-    what: `${push.branch} at ${push.short}, ${plural(push.ahead, 'commit')} ahead of ${push.target}`,
+    what: t('puWhat', { branch: push.branch, short: push.short, n: push.ahead, target: push.target }),
     url: shownURL(push.url),
     subjects,
     more: Math.max(0, push.ahead - subjects.length),

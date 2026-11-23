@@ -11,6 +11,7 @@ import { copyLine } from './cards.js';
 import { usageGroup } from './node.js';
 import { terminalLookSection } from './termlook.js';
 import { settingSections, setLine, draftProblem, shownValue, settingMatches } from '../settings.js';
+import { t } from '../i18n.js';
 
 // How often the open page reads the settings again (a `set` from a terminal shows by then).
 const REFRESH = 15000;
@@ -20,16 +21,16 @@ export const settingsHref = (project) => '#/settings' + (project ? '/' + encodeU
 // One setting's row: its title and value, what it does, where it lives; Change opens its field and the drafted line.
 function settingRow(setting, { folder, home, editing, toggle }) {
   const drafted = editing.get(setting.key);
-  const value = h('code', { class: 'setting-value', title: setting.value }, shownValue(setting) || '(empty)');
+  const value = h('code', { class: 'setting-value', title: setting.value }, shownValue(setting) || t('svEmpty'));
   const marks = [
-    setting.isDefault ? h('span', { class: 'setting-mark' }, 'default') : h('span', { class: 'setting-mark changed', title: `Default: ${setting.default}` }, 'changed'),
-    setting.guardRail ? h('span', { class: 'setting-mark rail', title: 'A change here is recorded in the host’s vault as yours, so the lead’s checks take it' }, 'guard rail') : null,
+    setting.isDefault ? h('span', { class: 'setting-mark' }, t('svMarkDefault')) : h('span', { class: 'setting-mark changed', title: t('svDefaultIs', { x: setting.default }) }, t('svMarkChanged')),
+    setting.guardRail ? h('span', { class: 'setting-mark rail', title: t('svAChangeHereIsRecorded') }, t('svMarkRail')) : null,
   ];
   const change = h('button', { class: 'confirm-clear', type: 'button', 'aria-expanded': String(drafted != null), onclick: () => toggle(setting) },
-    drafted != null ? 'Close' : 'Change');
+    drafted != null ? t('svClose') : t('svChange'));
   // The machine-wide limits' file keeps the Mac's name (mac-limits.json, which the leads' tools read): this node's.
-  const where = [setting.home === 'floor' ? setting.where : (setting.home === 'limits' ? 'this node’s limits, ' : '') + tilde(setting.where, home)];
-  if (!setting.isDefault) where.push(`default ${setting.form === 'text' ? 'the five rules' : setting.default}`);
+  const where = [setting.home === 'floor' ? setting.where : (setting.home === 'limits' ? t('svThisNodeSLimits') : '') + tilde(setting.where, home)];
+  if (!setting.isDefault) where.push(t('svDefaultWhere', { x: setting.form === 'text' ? t('svFiveRules') : setting.default }));
   if (setting.limits) where.push(setting.limits);
   return h('div', { class: 'setting', data: { key: setting.key } },
     h('div', { class: 'setting-head' },
@@ -49,11 +50,11 @@ function editor(setting, folder, editing) {
     const value = editing.get(setting.key) ?? '';
     const why = draftProblem(setting, value);
     problem.hidden = !why;
-    if (why) setText(problem, `${setting.key} is ${why}.`);
-    lineSlot.replaceChildren(why ? h('span') : copyLine(setLine(setting, value, folder), `the command that sets ${setting.key}`));
+    if (why) setText(problem, t('svIsWhy', { key: setting.key, why }));
+    lineSlot.replaceChildren(why ? h('span') : copyLine(setLine(setting, value, folder), t('svSetsCommand', { key: setting.key })));
   };
   const take = (value) => { editing.set(setting.key, value); draw(); };
-  const name = `New value for ${setting.title}`;
+  const name = t('svNewValue', { title: setting.title });
   switch (setting.form) {
     case 'flag':
     case 'choice': {
@@ -71,32 +72,32 @@ function editor(setting, folder, editing) {
         spellcheck: 'false', autocomplete: 'off', oninput: (event) => take(event.target.value) });
       control.value = editing.get(setting.key) ?? '';
   }
-  const reset = h('button', { class: 'confirm-clear', type: 'button', title: 'Draft the line that puts it back to its default', onclick: () => {
+  const reset = h('button', { class: 'confirm-clear', type: 'button', title: t('svDraftTheLineThatPuts'), onclick: () => {
     if (control.tagName !== 'SELECT') control.value = 'default';
     take('default');
-  } }, 'Default');
+  } }, t('svDefault'));
   draw();
-  return h('div', { class: 'confirm setting-editor', role: 'group', 'aria-label': `Change ${setting.title} from a terminal` },
+  return h('div', { class: 'confirm setting-editor', role: 'group', 'aria-label': t('svChangeFrom', { title: setting.title }) },
     h('div', { class: 'setting-controls' }, control, reset), problem, lineSlot,
     h('p', { class: 'confirm-note' }, setting.scope === 'project'
-      ? 'Run it in a terminal: it shows the change and asks for a code. The project’s running lead is told.'
-      : 'Run it in a terminal: it shows the change and asks for a code. Every project’s leads read it at their next step.'));
+      ? t('svRunItInATerminal')
+      : t('svRunItInATerminal2')));
 }
 
 export function settingsView(app) {
   const { store, ui } = app;
-  const picker = h('select', { class: 'setting-picker', 'aria-label': 'Whose settings', onchange: (event) => ui.go(settingsHref(event.target.value)) });
+  const picker = h('select', { class: 'setting-picker', 'aria-label': t('svWhoseSettings'), onchange: (event) => ui.go(settingsHref(event.target.value)) });
   // The app's search: the settings whose words hold every word typed.
   let query = '';
-  const search = h('input', { class: 'setting-search', type: 'search', placeholder: 'Search settings', 'aria-label': 'Search settings',
+  const search = h('input', { class: 'setting-search', type: 'search', placeholder: t('svSearchSettings'), 'aria-label': t('svSearchSettings'),
     spellcheck: 'false', autocomplete: 'off', oninput: (event) => { query = event.target.value; drawn = ''; render(true); } });
   const body = h('div', { class: 'node-column settings-column' });
   // This browser's own: the terminal's look (views/termlook.js), drawn apart from the node's settings.
   const terminalLook = terminalLookSection();
-  const el = h('section', { class: 'node settings', 'aria-label': 'Settings' },
+  const el = h('section', { class: 'node settings', 'aria-label': t('svSettings') },
     h('header', { class: 'head' },
-      h('a', { class: 'back icon-button', href: '#/node', 'aria-label': 'This node' }, icon('back', 16)),
-      h('div', { class: 'head-text' }, h('div', { class: 'head-line' }, h('h1', { class: 'head-title' }, 'Settings'), picker))),
+      h('a', { class: 'back icon-button', href: '#/node', 'aria-label': t('svThisNode') }, icon('back', 16)),
+      h('div', { class: 'head-text' }, h('div', { class: 'head-line' }, h('h1', { class: 'head-title' }, t('svSettings')), picker))),
     h('div', { class: 'pane node-pane' }, search, body, h('div', { class: 'node-column settings-column' }, terminalLook.el)));
   // Per key: the value being drafted (its field open). Kept while the page reads the settings again.
   const editing = new Map();
@@ -121,8 +122,8 @@ export function settingsView(app) {
       if (mine !== asking) return;
       if (reply.ok) { result = reply.result; failed = null; } else {
         failed = reply.error?.code === 'unknown-kind'
-          ? 'This node has no settings yet: its build is older than this page. `vibeswitcher switch` to a newer one.'
-          : reply.error?.message || 'The node couldn’t read its settings.';
+          ? t('svThisNodeHasNoSettings')
+          : reply.error?.message || t('svTheNodeCouldnTRead');
       }
       render();
     });
@@ -153,7 +154,7 @@ export function settingsView(app) {
     const key = JSON.stringify([id, choices.map((lead) => [lead.project, lead.root])]);
     if (picker.dataset.drawn !== key) {
       picker.dataset.drawn = key;
-      picker.replaceChildren(h('option', { value: '' }, 'This node'),
+      picker.replaceChildren(h('option', { value: '' }, t('svThisNode')),
         ...choices.map((lead) => h('option', { value: lead.project, selected: lead.project === id }, lastPart(lead.root))));
       picker.value = id && choices.some((lead) => lead.project === id) ? id : '';
       picker.hidden = choices.length === 0;
@@ -173,15 +174,15 @@ export function settingsView(app) {
       return;
     }
     const projectPart = result.project
-      ? group(`Project ${lastPart(result.project.root)}`, result.project.settings, result.project.root, home) : null;
+      ? group(t('svProject', { name: lastPart(result.project.root) }), result.project.settings, result.project.root, home) : null;
     body.replaceChildren(...[
-      h('p', { class: 'settings-intro' }, 'What the leads and their teams work under. Change drafts the line that sets it; run it in a terminal.'),
+      h('p', { class: 'settings-intro' }, t('svWhatTheLeadsAndTheir')),
       projectPart,
-      group('This node · every project', result.node.settings, null, home),
+      group(t('svThisNodeEveryProject'), result.node.settings, null, home),
       query && ![...(result.project?.settings || []), ...result.node.settings].some((setting) => settingMatches(setting, query))
-        ? h('p', { class: 'node-says' }, `No setting matches “${query}”.`) : null,
+        ? h('p', { class: 'node-says' }, t('svNoMatch', { query })) : null,
       query ? null : usageGroup(result.usage),
-      !query && result.leftOut?.length ? h('section', { class: 'node-group' }, h('h2', { class: 'section-title' }, 'Not on a node'),
+      !query && result.leftOut?.length ? h('section', { class: 'node-group' }, h('h2', { class: 'section-title' }, t('svNotOnANode')),
         h('ul', { class: 'lines' }, result.leftOut.map((item) => h('li', null, `${item.title}: ${item.why}`)))) : null,
     ].filter(Boolean));
   }

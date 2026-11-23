@@ -16,6 +16,8 @@
 //   `hello` the same session is opened again (a new stream, the whole replay).
 // - Leaving: `term.close` as the pane is left or another session shown. A session that ended has no stream left on
 //   the node (the sessions stream says it ended; no frame does), so nothing is sent for it.
+import { t } from './i18n.js';
+
 
 export const FRAME = { bytes: 1, replayed: 2, resize: 3, resync: 4, size: 5 };
 // What the node takes (TerminalRelay.cols and rows).
@@ -142,7 +144,7 @@ export function createTerminal({ feed, can, log = (...args) => console.warn(...a
       if (code === 'not-yet') return set('reconnecting');   // opened again after the next hello
       if (code === 'gone') return set('gone', reply.error.message || null);
       log('VibeSwitcher: the node refused a terminal:', reply?.error?.message);
-      set('failed', reply?.error?.message || 'The node didn’t open the terminal.');
+      set('failed', reply?.error?.message || t('tmTheNodeDidnTOpen'));
     });
   }
 

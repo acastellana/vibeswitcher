@@ -34,8 +34,8 @@ export function ownSessionsView(app) {
   };
   const starting = newSessionForm(app, { folder });
   const endedList = h('div', { class: 'ended-list' });
-  const ended = h('section', { class: 'ended', hidden: true }, h('h2', { class: 'new-title' }, 'Ended lately'), endedList,
-    h('p', { class: 'confirm-note' }, 'Run the line in a terminal on this node: it asks for a code, then starts it again in its same conversation.'));
+  const ended = h('section', { class: 'ended', hidden: true }, h('h2', { class: 'new-title' }, t('owEndedLately')), endedList,
+    h('p', { class: 'confirm-note' }, t('owRunTheLineInA')));
   const el = h('section', { class: 'centre screen own', 'aria-label': t('ownSessions') },
     screenHead(app, t('ownSessions'), t('ownSub')),
     h('div', { class: 'screen-body' }, h('div', { class: 'screen-col' }, list, none, starting.el, ended)));
@@ -48,22 +48,22 @@ export function ownSessionsView(app) {
     const where = h('span', { class: 'own-where' });
     const state = h('span', { class: 'own-state' });
     const time = h('time');
-    const tag = h('span', { class: 'lead-tag replaced', hidden: true }, 'replaced');
+    const tag = h('span', { class: 'lead-tag replaced', hidden: true }, t('owReplaced'));
     const el = h('a', { class: 'own-row row', href: sessionHref(session.id) }, mark.el, h('span', { class: 'own-words' }, h('span', { class: 'own-line' }, title, tag), where), h('span', { class: 'own-when' }, state, time));
     return {
       el,
       update(next) {
         const word = stateOf(next);
         mark.update(word, next.agent);
-        setText(title, next.title || lastPart(next.cwd) || 'A session');
-        setText(where, [tilde(next.cwd, store.state.node?.home) || 'No folder', AGENTS[next.agent], next.hosted ? null : `in another terminal (${next.terminal})`].filter(Boolean).join(' · '));
+        setText(title, next.title || lastPart(next.cwd) || t('owASession'));
+        setText(where, [tilde(next.cwd, store.state.node?.home) || t('owNoFolder'), AGENTS[next.agent], next.hosted ? null : t('owOtherTerminal', { terminal: next.terminal })].filter(Boolean).join(' · '));
         setText(state, STATES[word].label);
         state.className = `own-state tone-text-${word}`;
         if (next.since) time.dataset.since = next.since; else delete time.dataset.since;
         setText(time, since(next.since));
         const marks = leadMarks(store.state, next);
         tag.hidden = !marks.replaced;
-        el.title = marks.replaced ? 'A lead session its project replaced: it ends once no merge or audit holds it' : '';
+        el.title = marks.replaced ? t('owALeadSessionItsProject') : '';
       },
     };
   }
@@ -91,8 +91,8 @@ export function ownSessionsView(app) {
       endedDrawn = key;
       ended.hidden = endedNow.length === 0;
       endedList.replaceChildren(...endedNow.map((entry) => h('div', { class: 'ended-row' },
-        h('div', { class: 'ended-name' }, h('span', null, entry.name || 'A session'), h('span', { class: 'ended-folder' }, tilde(entry.folder, state.node?.home))),
-        entry.conversation ? copyLine(resumeLine(entry), 'the command that resumes it') : h('p', { class: 'confirm-note' }, 'Its conversation id wasn’t known: it can’t be resumed.'))));
+        h('div', { class: 'ended-name' }, h('span', null, entry.name || t('owASession')), h('span', { class: 'ended-folder' }, tilde(entry.folder, state.node?.home))),
+        entry.conversation ? copyLine(resumeLine(entry), t('owTheCommandThatResumesIt')) : h('p', { class: 'confirm-note' }, t('owItsConversationIdWasnT')))));
     }
   }
 
@@ -106,8 +106,8 @@ export function newProjectView(app) {
   const project = newProjectForm(app);
   const leading = newLeadForm(app);
   const recentList = h('div', { class: 'ended-list' });
-  const recent = h('section', { class: 'ended recent', hidden: true }, h('h2', { class: 'new-title' }, 'Recent folders'), recentList,
-    h('p', { class: 'confirm-note' }, 'Run a line in a terminal on this node: it asks for a code, then starts it.'));
+  const recent = h('section', { class: 'ended recent', hidden: true }, h('h2', { class: 'new-title' }, t('owRecentFolders')), recentList,
+    h('p', { class: 'confirm-note' }, t('owRunALineInA')));
   const el = h('section', { class: 'centre screen new', 'aria-label': t('newProject') },
     screenHead(app, t('newProject')), h('div', { class: 'screen-body' }, h('div', { class: 'screen-col' }, project.el, leading.el, recent)));
   let known = null;
@@ -129,8 +129,8 @@ export function newProjectView(app) {
       const lines = projectLines(one);
       return h('div', { class: 'ended-row' },
         h('div', { class: 'ended-name' }, h('span', null, lastPart(one.folder) || one.folder), h('span', { class: 'ended-folder' }, tilde(one.folder, state.node?.home))),
-        copyLine(lines.session, `the command that starts a session in ${lastPart(one.folder)}`),
-        lines.lead ? copyLine(lines.lead, 'the command that starts its project lead') : h('a', { class: 'link', href: projectHref(one.lead) }, 'Its lead runs: open it'));
+        copyLine(lines.session, t('owStartsIn', { name: lastPart(one.folder) })),
+        lines.lead ? copyLine(lines.lead, t('owTheCommandThatStartsIts')) : h('a', { class: 'link', href: projectHref(one.lead) }, t('owItsLeadRunsOpenIt')));
     }));
   }
 

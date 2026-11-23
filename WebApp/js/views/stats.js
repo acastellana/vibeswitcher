@@ -7,9 +7,10 @@
 
 import { h, setText, framed } from '../dom.js';
 import { icon } from '../marks.js';
+import { t } from '../i18n.js';
 
 const REFRESH = 60_000;
-export const RANGES = [{ id: 'today', label: 'Today' }, { id: 'week', label: '7 days' }, { id: 'month', label: '30 days' }];
+export const RANGES = [{ id: 'today', label: t('stToday') }, { id: 'week', label: t('st7Days') }, { id: 'month', label: t('st30Days') }];
 export const statsHref = (range) => '#/stats' + (range && range !== 'week' ? '/' + range : '');
 
 // The range a route asks for: one of RANGES, 7 days otherwise.
@@ -33,10 +34,10 @@ function sized(className, property, value, title = '') {
 function figureView(figure) {
   const parts = [h('div', { class: 'stat-figure-head' }, h('span', { class: 'stat-label' }, figure.label), h('span', { class: 'stat-value' }, figure.value))];
   if (figure.meter) {
-    const bar = h('div', { class: 'stat-meter' + (figure.meter.reached ? ' reached' : ''), role: 'img', 'aria-label': `${figure.value} used` },
+    const bar = h('div', { class: 'stat-meter' + (figure.meter.reached ? ' reached' : ''), role: 'img', 'aria-label': t('stUsedValue', { x: figure.value }) },
       sized('stat-meter-fill', 'width', percent(figure.meter.used)));
     if (figure.meter.elapsed !== null && figure.meter.elapsed !== undefined) {
-      bar.append(sized('stat-meter-pace', 'left', percent(figure.meter.elapsed), 'How much of its window has gone'));
+      bar.append(sized('stat-meter-pace', 'left', percent(figure.meter.elapsed), t('stHowMuchOfItsWindow')));
     }
     parts.push(bar);
   }
@@ -63,13 +64,13 @@ function table(columns, rows, { help = [], first = '' } = {}) {
 // The whole page for one `stats` result.
 export function statsBody(result) {
   const parts = [];
-  parts.push(h('section', { class: 'node-group' }, h('h2', { class: 'section-title' }, 'This node'),
+  parts.push(h('section', { class: 'node-group' }, h('h2', { class: 'section-title' }, t('stThisNode')),
     h('div', { class: 'stat-figures' }, (result.mac || []).map(figureView))));
   const rows = (result.projects || []).map((row) => ({ name: row.name, note: row.note, cells: row.cells }));
   if (result.total) rows.push({ name: result.total.name, note: result.total.note, cells: result.total.cells, className: 'total' });
-  parts.push(h('section', { class: 'node-group' }, h('h2', { class: 'section-title' }, 'Projects'),
-    rows.length ? table(result.columns || [], rows, { first: 'Project' })
-      : h('p', { class: 'stat-empty' }, 'No project with a lead’s board on this node yet.')));
+  parts.push(h('section', { class: 'node-group' }, h('h2', { class: 'section-title' }, t('stProjects')),
+    rows.length ? table(result.columns || [], rows, { first: t('stProject') })
+      : h('p', { class: 'stat-empty' }, t('stNoProjectWithALead'))));
   const quality = result.quality;
   if (quality) {
     for (const section of quality.sections || []) {
@@ -77,18 +78,18 @@ export function statsBody(result) {
         h('div', { class: 'stat-figures' }, (section.figures || []).map(figureView))));
     }
     if ((quality.breakdown || []).length) {
-      parts.push(h('section', { class: 'node-group' }, h('h2', { class: 'section-title' }, 'By who did the work'),
+      parts.push(h('section', { class: 'node-group' }, h('h2', { class: 'section-title' }, t('stByWhoDidTheWork')),
         table(quality.columns || [], quality.breakdown.map((row) => ({ name: row.name, cells: row.cells, className: row.model ? 'model' : '' })),
           { help: quality.columnHelp || [] }),
         quality.modelsNote ? h('p', { class: 'stat-empty' }, quality.modelsNote) : null));
     }
     if ((quality.trend || []).length) {
-      parts.push(h('section', { class: 'node-group' }, h('h2', { class: 'section-title' }, 'The last 8 weeks'),
-        h('div', { class: 'stat-weeks' }, quality.trend.map((week) => h('div', { class: 'stat-week', title: `Week of ${week.label}: ${week.merged} merged, first-audit pass rate ${week.passRate}, cost per merged task ${week.cost}` },
+      parts.push(h('section', { class: 'node-group' }, h('h2', { class: 'section-title' }, t('stTheLast8Weeks')),
+        h('div', { class: 'stat-weeks' }, quality.trend.map((week) => h('div', { class: 'stat-week', title: t('stWeek', { label: week.label, merged: week.merged, rate: week.passRate, cost: week.cost }) },
           h('div', { class: 'stat-week-bars' },
             sized('stat-week-bar pass', 'height', percent(week.passBar ?? 0)),
             sized('stat-week-bar cost', 'height', percent(week.costBar ?? 0))),
-          h('span', { class: 'stat-week-label' }, week.label), h('span', { class: 'stat-note' }, `${week.merged} merged`)))),
+          h('span', { class: 'stat-week-label' }, week.label), h('span', { class: 'stat-note' }, t('stMergedCount', { n: week.merged }))))),
         h('p', { class: 'stat-legend' }, h('span', { class: 'swatch pass' }), 'first-audit pass rate', h('span', { class: 'swatch cost' }), 'cost per merged task')));
     }
     const compared = quality.compared;
@@ -105,14 +106,14 @@ export function statsBody(result) {
 
 export function statsView(app) {
   const { store, ui } = app;
-  const picker = h('div', { class: 'segmented', role: 'group', 'aria-label': 'Range' },
+  const picker = h('div', { class: 'segmented', role: 'group', 'aria-label': t('stRange') },
     RANGES.map((range) => h('button', { type: 'button', 'data-range': range.id, onclick: () => ui.go(statsHref(range.id)) }, range.label)));
   const span = h('span', { class: 'head-state' });
   const body = h('div', { class: 'node-column stats-column' });
-  const el = h('section', { class: 'node stats', 'aria-label': 'Statistics' },
+  const el = h('section', { class: 'node stats', 'aria-label': t('stStatistics') },
     h('header', { class: 'head' },
-      h('a', { class: 'back icon-button', href: '#/node', 'aria-label': 'This node' }, icon('back', 16)),
-      h('div', { class: 'head-text' }, h('div', { class: 'head-line' }, h('h1', { class: 'head-title' }, 'Statistics'), span)), picker),
+      h('a', { class: 'back icon-button', href: '#/node', 'aria-label': t('stThisNode') }, icon('back', 16)),
+      h('div', { class: 'head-text' }, h('div', { class: 'head-line' }, h('h1', { class: 'head-title' }, t('stStatistics')), span)), picker),
     h('div', { class: 'pane node-pane' }, body));
   let results = new Map();
   let failed = null;
@@ -128,8 +129,8 @@ export function statsView(app) {
       if (mine !== asking) return;
       if (reply.ok) { results.set(wanted, reply.result); failed = null; } else {
         failed = reply.error?.code === 'unknown-kind'
-          ? 'This node has no statistics yet: its build is older than this page. `vibeswitcher switch` to a newer one.'
-          : reply.error?.message || 'The node couldn’t work out its statistics.';
+          ? t('stThisNodeHasNoStatistics')
+          : reply.error?.message || t('stTheNodeCouldnTWork');
       }
       render();
     });

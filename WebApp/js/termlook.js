@@ -6,6 +6,8 @@
 // Everything read back is checked before it reaches xterm.js, whose stylesheet is made from its options: a font's name
 // is letters, digits, spaces, dots, dashes and underscores only, a colour is #rrggbb, a number is kept in its range,
 // and anything else is the default. Nothing the program in the session prints changes any of it.
+import { t } from './i18n.js';
+
 
 const KEY = 'vs.terminal';
 const changed = new Set();
@@ -24,11 +26,11 @@ export const PALETTES = {
 };
 
 export const THEMES = [
-  { id: 'system', label: 'Match System' }, { id: 'light', label: 'Light' }, { id: 'dark', label: 'Dark' },
-  { id: 'solarizedLight', label: 'Solarized Light' }, { id: 'solarizedDark', label: 'Solarized Dark' }, { id: 'custom', label: 'Custom' },
+  { id: 'system', label: t('tkMatchSystem') }, { id: 'light', label: t('tkLight') }, { id: 'dark', label: t('tkDark') },
+  { id: 'solarizedLight', label: t('tkSolarizedLight') }, { id: 'solarizedDark', label: t('tkSolarizedDark') }, { id: 'custom', label: t('tkCustom') },
 ];
-export const CURSORS = [{ id: 'block', label: 'Block' }, { id: 'underline', label: 'Underline' }, { id: 'bar', label: 'Bar' }];
-export const BELLS = [{ id: 'none', label: 'None' }, { id: 'visual', label: 'Flash' }, { id: 'sound', label: 'Sound' }];
+export const CURSORS = [{ id: 'block', label: t('tkBlock') }, { id: 'underline', label: t('tkUnderline') }, { id: 'bar', label: t('tkBar') }];
+export const BELLS = [{ id: 'none', label: t('tkNone') }, { id: 'visual', label: t('tkFlash') }, { id: 'sound', label: t('tkSound') }];
 export const ANSI_NAMES = ['black', 'red', 'green', 'yellow', 'blue', 'magenta', 'cyan', 'white',
   'brightBlack', 'brightRed', 'brightGreen', 'brightYellow', 'brightBlue', 'brightMagenta', 'brightCyan', 'brightWhite'];
 export const FONT_SIZES = { min: 8, max: 36 };

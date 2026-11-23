@@ -864,7 +864,8 @@ kbd { padding: 1px 6px; border-radius: 5px; box-shadow: inset 0 0 0 1px var(--li
 .node-image-line { min-width: 0; overflow-x: auto; }
 .node-image-head { display: flex; align-items: center; gap: 6px; }
 .node-image-path { flex: 1; }
-.setting-search { width: 100%; box-sizing: border-box; margin: 0 0 12px; padding: 6px 10px; }
+.setting-search { display: block; width: calc(100% - 48px); max-width: 632px; margin: 20px auto 0; padding: 7px 12px; border: 0; border-radius: 8px; background: var(--raised); box-shadow: inset 0 0 0 1px var(--line); color: var(--ink); }
+.setting-search:focus-visible { outline: none; box-shadow: inset 0 0 0 2px var(--accent); }
 .records-result { padding: 6px 0; }
 .records-result-head { display: flex; justify-content: space-between; gap: 8px; font-weight: 600; }
 .boost-mark { color: #e8890c; }

@@ -13,10 +13,11 @@ import { terminalView } from './terminal.js';
 import { actionsStrip } from './drive.js';
 import { copyLine } from './cards.js';
 import { endedEntry, resumeLine } from '../actions.js';
+import { t } from '../i18n.js';
 
 const PANES = [
-  { id: 'terminal', label: 'Terminal', key: '1' },
-  { id: 'chat', label: 'Chat', key: '2' },
+  { id: 'terminal', label: t('seTerminal'), key: '1' },
+  { id: 'chat', label: t('seChat'), key: '2' },
 ];
 
 export function sessionView(app) {
@@ -34,20 +35,20 @@ export function sessionView(app) {
   }, pane.label));
   // Quiet, at the header's end, where it stays whether the inspector is open or not.
   const toggle = h('button', {
-    class: 'icon-button inspect-toggle', type: 'button', 'aria-label': 'Inspector', 'aria-controls': 'inspector', 'aria-expanded': 'false',
-    title: `Toggle Inspector (${KEY.mod}${KEY.alt}0)`, onclick: () => ui.toggleInspector(),
+    class: 'icon-button inspect-toggle', type: 'button', 'aria-label': t('seInspector'), 'aria-controls': 'inspector', 'aria-expanded': 'false',
+    title: `${t('seToggleInspector')} (${KEY.mod}${KEY.alt}0)`, onclick: () => ui.toggleInspector(),
   }, icon('inspector', 16));
   // Renaming, pausing, ending a session and the rest of the Mac's row menu: the line that does each, under the header.
   const acting = actionsStrip();
-  const end = h('button', { class: 'button quiet end-button', type: 'button', title: 'Rename, pause or end this session…', onclick: () => acting.toggle() }, 'Actions…');
+  const end = h('button', { class: 'button quiet end-button', type: 'button', title: t('seRenamePauseOrEndThis'), onclick: () => acting.toggle() }, t('seActions'));
   // Back: to the project a team's session works for, else to Your own sessions (on a phone it opens the left column).
-  const back = h('a', { class: 'back icon-button', href: '#/sessions', 'aria-label': 'Back' }, icon('back', 16));
+  const back = h('a', { class: 'back icon-button', href: '#/sessions', 'aria-label': t('seBack') }, icon('back', 16));
   const head = h('header', { class: 'head' },
     back,
     markSlot,
     h('div', { class: 'head-text' }, h('div', { class: 'head-line' }, title, state), place),
     end,
-    h('div', { class: 'segmented', role: 'group', 'aria-label': 'Show' }, tabs),
+    h('div', { class: 'segmented', role: 'group', 'aria-label': t('seShow') }, tabs),
     toggle);
 
   const strip = teamStrip(app);
@@ -56,12 +57,12 @@ export function sessionView(app) {
   const term = terminalView(app);
   const terminal = term.el;
   // A session that ended lately (the node's `ended`) says so, with the line that resumes it where its conversation is known.
-  const goneWhy = h('p', null, 'It ended, or its link is from another node.');
+  const goneWhy = h('p', null, t('seItEndedOrItsLink'));
   const goneResume = h('div', { class: 'gone-resume', hidden: true });
   // How it ended, as the host recorded it (the Mac's inspector's Exit): "exited 0 at 10:42", "killed by SIGTERM at 10:42".
   const goneExit = h('p', { class: 'gone-exit', hidden: true });
   const gone = h('div', { class: 'pane', hidden: true },
-    h('div', { class: 'placeholder' }, h('h2', null, 'This session isn’t here any more'), goneWhy, goneExit, goneResume, h('a', { class: 'button quiet', href: '#/' }, 'Start Page')));
+    h('div', { class: 'placeholder' }, h('h2', null, t('seThisSessionIsnTHere')), goneWhy, goneExit, goneResume, h('a', { class: 'button quiet', href: '#/' }, t('seStartPage'))));
   let goneDrawn = '';
   function drawGone(id) {
     const entry = endedEntry(store.state.node, id);
@@ -69,10 +70,10 @@ export function sessionView(app) {
     if (key === goneDrawn) return;
     goneDrawn = key;
     const line = resumeLine(entry);
-    setText(goneWhy, !entry ? 'It ended, or its link is from another node.'
-      : line ? 'It ended. This starts it again in its same conversation, from a terminal on this node:' : 'It ended, and its conversation id wasn’t known: it can’t be resumed.');
+    setText(goneWhy, !entry ? t('seItEndedOrItsLink')
+      : line ? t('seItEndedThisStartsIt') : t('seItEndedAndItsConversation'));
     goneExit.hidden = !entry?.exit;
-    setText(goneExit, entry?.exit ? `Exit: ${entry.exit.cause} at ${clock(entry.exit.at)}` : '');
+    setText(goneExit, entry?.exit ? t('seExit', { cause: entry.exit.cause, time: clock(entry.exit.at) }) : '');
     goneResume.hidden = !line;
     goneResume.replaceChildren(...(line ? [copyLine(line, 'the command that resumes it')] : []));
   }
@@ -80,7 +81,7 @@ export function sessionView(app) {
   // The session's own column, and the inspector over its right edge: open as a column, the session's column gives
   // it the room (style.css), so the inspector itself never moves anything.
   const body = h('div', { class: 'session-body' }, h('div', { class: 'session-main' }, strip.el, chat.el, terminal), inspect.scrim, inspect.el);
-  const el = h('section', { class: 'session', 'aria-label': 'Session' }, head, acting.el, body, gone, loading);
+  const el = h('section', { class: 'session', 'aria-label': t('seSession') }, head, acting.el, body, gone, loading);
 
   let shownAgent = null;
   let shownPane = null;
@@ -142,7 +143,7 @@ export function sessionView(app) {
     if (session.since) stateTime.dataset.since = session.since; else delete stateTime.dataset.since;
     setText(stateTime, since(session.since));
     stateTime.hidden = !session.since;
-    setText(place, [ROLES[session.role], tilde(session.cwd, store.state.node?.home) || 'No folder', AGENTS[session.agent], session.hosted ? null : `in another terminal (${session.terminal})`].filter(Boolean).join('  ·  '));
+    setText(place, [ROLES[session.role], tilde(session.cwd, store.state.node?.home) || t('seNoFolder'), AGENTS[session.agent], session.hosted ? null : t('seOtherTerminal', { terminal: session.terminal })].filter(Boolean).join('  ·  '));
 
     back.setAttribute('href', session.lead ? projectHref(session.lead) : '#/sessions');
     const isLead = session.role === 'lead';

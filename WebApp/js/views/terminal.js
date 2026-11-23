@@ -25,6 +25,7 @@ import { icon } from '../marks.js';
 import { createTerminal, clampSize } from '../terminal.js';
 import { takeXtermStyles } from '../xtermstyle.js';
 import { look as terminalLook, onLook, xtermOptions } from '../termlook.js';
+import { t } from '../i18n.js';
 
 const darkQuery = globalThis.matchMedia?.('(prefers-color-scheme: dark)');
 // How far apart two bells are at the most often (a program ringing in a loop rings this often).
@@ -57,12 +58,12 @@ export function terminalView(app) {
   const screen = h('div', { class: 'terminal-screen' });
   const note = h('p', { class: 'terminal-note', role: 'status' });
   const watching = h('p', { class: 'terminal-watching', hidden: true },
-    icon('eye', 13), h('span', null, 'Watching. To type into this session, run '), h('code', null, 'vibeswitcher send'),
-    h('span', null, ' in a terminal.'));
+    icon('eye', 13), h('span', null, t('teWatchingToTypeIntoThis')), h('code', null, 'vibeswitcher send'),
+    h('span', null, t('teInATerminal')));
   const says = h('p');
-  const showChat = h('button', { class: 'button quiet', type: 'button', onclick: () => ui.setPane(ui.state.route.id, 'chat') }, 'Show Chat');
-  const retry = h('button', { class: 'button quiet', type: 'button', hidden: true, onclick: () => { const session = shown; control.hide(); show(session); } }, 'Try Again');
-  const heading = h('h2', null, 'Terminal');
+  const showChat = h('button', { class: 'button quiet', type: 'button', onclick: () => ui.setPane(ui.state.route.id, 'chat') }, t('teShowChat'));
+  const retry = h('button', { class: 'button quiet', type: 'button', hidden: true, onclick: () => { const session = shown; control.hide(); show(session); } }, t('teTryAgain'));
+  const heading = h('h2', null, t('teTerminal'));
   const placeholder = h('div', { class: 'placeholder' }, icon('terminal', 22), heading, says, showChat, retry);
   const el = h('div', { class: 'pane terminal-pane' }, screen, note, watching, placeholder);
 
@@ -171,16 +172,16 @@ export function terminalView(app) {
     const unavailable = phase === 'unavailable' || (!control.available() && !term);
     let words = null;
     if (unavailable || elsewhere) {
-      setText(heading, 'Terminal');
+      setText(heading, t('teTerminal'));
       words = elsewhere
-        ? `This session runs in another terminal (${session.terminal || 'not the host'}): its screen is there.`
-        : chatFollowed ? 'The live terminal comes to this page in a later build. Until then, the session’s conversation is in Chat.'
-          : 'The live terminal comes to this page in a later build.';
+        ? t('teOtherTerminal', { terminal: session.terminal || t('teNotHost') })
+        : chatFollowed ? t('teTheLiveTerminalComesTo')
+          : t('teTheLiveTerminalComesTo2');
     } else if (phase === 'gone') {
-      setText(heading, 'No terminal for this session');
-      words = control.state.message || 'The node’s host doesn’t run this session.';
+      setText(heading, t('teNoTerminalForThisSession'));
+      words = control.state.message || t('teTheNodeSHostDoesn');
     } else if (phase === 'failed') {
-      setText(heading, 'The terminal didn’t open');
+      setText(heading, t('teTheTerminalDidnTOpen'));
       words = control.state.message;
     }
     const drawn = control.drawn(shown);
@@ -190,9 +191,9 @@ export function terminalView(app) {
     retry.hidden = phase !== 'failed';
     // The screen stays up while it is this session's, even stale (a reconnect, a resync): the note says so.
     screen.hidden = words !== null || !drawn;
-    const noting = words === null && (ended ? 'This session ended.'
-      : !drawn ? 'Opening the terminal…'
-        : phase === 'reconnecting' ? 'Reconnecting…' : null);
+    const noting = words === null && (ended ? t('teThisSessionEnded')
+      : !drawn ? t('teOpeningTheTerminal')
+        : phase === 'reconnecting' ? t('teReconnecting') : null);
     note.hidden = !noting;
     if (noting) setText(note, noting);
     el.classList.toggle('is-stale', words === null && drawn && (phase === 'reconnecting' || ended));

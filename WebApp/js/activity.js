@@ -6,6 +6,7 @@
 
 import { diffLines } from './text.js';
 import { tilde } from './words.js';
+import { t } from './i18n.js';
 
 // The newest rows kept (ActivityFeed.read's limit).
 export const LIMIT = 80;
@@ -53,7 +54,7 @@ function flat(items) {
 
 // The rows for a chat's `items`:
 //
-//   { key, kind: 'file', path, folder, name, verb: 'Edited' | 'Written', edits, added, removed, replaced }
+//   { key, kind: 'file', path, folder, name, verb: t('acEdited') | t('acWritten'), edits, added, removed, replaced }
 //   { key, kind: 'command', title, line, took, failed, running }
 //
 // A file changed several times in one turn (from one prompt to the next) is one row, where it was first changed, with
@@ -80,7 +81,7 @@ export function ledger(items, { cwd = null, home = null, counts = new Map() } = 
       if (!row) {
         const path = relative(detail.path, cwd, home);
         const cut = path.lastIndexOf('/') + 1;
-        row = { key: `file|${turn}|${detail.path}`, kind: 'file', path, folder: path.slice(0, cut), name: path.slice(cut), verb: 'Written', edits: 0, added: 0, removed: 0, replaced: false };
+        row = { key: `file|${turn}|${detail.path}`, kind: 'file', path, folder: path.slice(0, cut), name: path.slice(cut), verb: t('acWritten'), edits: 0, added: 0, removed: 0, replaced: false };
         files.set(detail.path, row);
         rows.push(row);
       }
@@ -88,7 +89,7 @@ export function ledger(items, { cwd = null, home = null, counts = new Map() } = 
       row.added += added;
       row.removed += removed;
       if (detail.type === 'edit') {
-        row.verb = 'Edited';
+        row.verb = t('acEdited');
         row.replaced = true;
       }
     } else if (detail.type === 'command') {
@@ -110,7 +111,7 @@ export function ledger(items, { cwd = null, home = null, counts = new Map() } = 
 
 // "Edited, 3 times": what a file's row says under its path (ActivityRow.lines).
 export function fileWords(row) {
-  return row.verb + (row.edits > 1 ? `, ${row.edits} times` : '');
+  return row.verb + (row.edits > 1 ? t('acTimes', { n: row.edits }) : '');
 }
 
 // ---- The Overview's tokens and cost (`session.usage`, the Mac's ActivityFeed turns) ----
@@ -119,13 +120,13 @@ export function fileWords(row) {
 export function usageWords(result) {
   const tokens = result?.tokens;
   if (!tokens) return null;
-  const cached = tokens.cached > 0 ? ` (${tokenCount(tokens.cached)} cached)` : '';
-  return `${tokenCount(tokens.input)} in${cached} · ${tokenCount(tokens.output)} out`;
+  const cached = tokens.cached > 0 ? t('acCached', { n: tokenCount(tokens.cached) }) : '';
+  return t('acInOut', { i: tokenCount(tokens.input), cached, o: tokenCount(tokens.output) });
 }
 // "$1.23", "at least $1.23" where some turns carried no cost; null when none did.
 export function costWords(result) {
   if (typeof result?.cost !== 'number') return null;
-  return `${result.costPartial ? 'at least ' : ''}$${result.cost.toFixed(2)}`;
+  return (result.costPartial ? t('acAtLeast') : '') + `$${result.cost.toFixed(2)}`;
 }
 // 950, 1.2K, 12K, 1.2M.
 export function tokenCount(n) {

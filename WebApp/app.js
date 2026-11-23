@@ -104,7 +104,7 @@ const node = nodeView(app);
 const settings = settingsView(app);
 const stats = statsView(app);
 const mail = mailView(app);
-const offline = h('div', { class: 'offline', role: 'status', hidden: true }, 'Reconnecting to the node…');
+const offline = h('div', { class: 'offline', role: 'status', hidden: true }, t('apReconnectingToTheNode'));
 // The node doesn't know this page, or dropped it: said once, quietly, with the one thing that fixes it. The rows it
 // had stay readable underneath.
 const unpaired = h('div', { class: 'offline signed-out', role: 'status', hidden: true });
@@ -160,7 +160,7 @@ function route() {
   if (name === 'new') newProject.render();
   const lead = name === 'project' ? store.state.leads.get(r.id) || store.state.boards.get(r.id) : null;
   const one = store.state.sessions.get(r.id);
-  document.title = name === 'project' && lead ? `${lastPart(lead.root) || t('lead')} · VibeSwitcher` : name === 'session' && one ? `${one.title || 'Session'} · VibeSwitcher`
+  document.title = name === 'project' && lead ? `${lastPart(lead.root) || t('lead')} · VibeSwitcher` : name === 'session' && one ? `${one.title || t('apSession')} · VibeSwitcher`
     : name === 'node' ? `${t('thisNode')} · VibeSwitcher` : name === 'settings' ? `${t('settings')} · VibeSwitcher` : name === 'stats' ? `${t('stats')} · VibeSwitcher`
       : name === 'mail' ? `${t('mail')} · VibeSwitcher` : name === 'sessions' ? `${t('ownSessions')} · VibeSwitcher` : name === 'new' ? `${t('newProject')} · VibeSwitcher` : 'VibeSwitcher';
   app.notifications.refresh?.();
@@ -181,8 +181,8 @@ store.subscribe('connection', () => {
   offline.hidden = connection !== 'reconnecting';
   unpaired.hidden = (connection !== 'unpaired' && connection !== 'revoked') || store.state.sessions.size === 0;
   if (!unpaired.hidden) {
-    unpaired.replaceChildren(connection === 'revoked' ? 'This page’s access was revoked. ' : 'This page isn’t paired with the node. ',
-      'Run ', h('code', null, 'vibeswitcher web'), ' in a terminal and open the address it prints.');
+    unpaired.replaceChildren(connection === 'revoked' ? t('apThisPageSAccessWas') : t('apThisPageIsnTPaired'),
+      t('apRun'), h('code', null, 'vibeswitcher web'), t('apInATerminalAndOpen'));
   }
 });
 
@@ -219,8 +219,8 @@ function newCommands() {
   const home = store.state.node?.home;
   const folders = recentFolders(store.state.sessions.values(), store.state.node?.ended);
   return newEntries(folders, presetsOf).map(({ folder, preset }) => ({
-    title: `New ${preset.name} in ${lastPart(folder) || folder}`,
-    about: `${tilde(folder, home)} · the line that starts it`,
+    title: t('apNewIn', { preset: preset.name, folder: lastPart(folder) || folder }),
+    about: `${tilde(folder, home)} · ${t('apLineStarts')}`,
     icon: 'plus',
     run: () => { ui.go('#/sessions'); own.choose(folder, preset.name); },
   }));
@@ -232,8 +232,8 @@ function leadCommands(selected) {
   if (store.state.connection === 'unpaired' || store.state.connection === 'revoked') return [];
   const home = store.state.node?.home;
   return leadFolders(selected, store.state.sessions.values(), store.state.node?.ended).map((folder) => ({
-    title: `Start Project Lead in ${lastPart(folder) || folder}`,
-    about: `${tilde(folder, home)} · a lead that runs workers, has their work verified, and merges`,
+    title: t('apStartLeadIn', { folder: lastPart(folder) || folder }),
+    about: `${tilde(folder, home)} · ${t('apLeadAbout')}`,
     icon: 'team',
     run: () => { ui.go('#/new'); newProject.lead(folder); },
   }));
@@ -244,11 +244,11 @@ function sessionCommands(selected) {
   if (!selected || selected.ended) return [];
   const act = (tab) => () => session.act(tab);
   return [
-    { title: 'Rename Session…', about: 'Your name for it, kept across a resume', icon: 'pencil', run: act('rename') },
-    selected.paused ? { title: 'Resume Notifications', about: 'It’s reminded and notified of again', icon: 'pause', run: act('pause') }
-      : { title: 'Pause Session…', about: 'Greyed out, never reminded or notified of', icon: 'pause', run: act('pause') },
-    ...(endable(selected) ? [{ title: 'End Session…', about: 'Its agent stops, with everything in its terminal', icon: 'close', run: act('end') }] : []),
-    ...(selected.hosted && selected.cwd ? [{ title: 'Close Finished Shells…', about: `In ${lastPart(selected.cwd)}: the shells back at their prompt`, icon: 'terminal', run: act('shells') }] : []),
+    { title: t('apRenameSession'), about: t('apYourNameForItKept'), icon: 'pencil', run: act('rename') },
+    selected.paused ? { title: t('apResumeNotifications'), about: t('apItSRemindedAndNotified'), icon: 'pause', run: act('pause') }
+      : { title: t('apPauseSession'), about: t('apGreyedOutNeverRemindedOr'), icon: 'pause', run: act('pause') },
+    ...(endable(selected) ? [{ title: t('apEndSession'), about: t('apItsAgentStopsWithEverything'), icon: 'close', run: act('end') }] : []),
+    ...(selected.hosted && selected.cwd ? [{ title: t('apCloseFinishedShells'), about: t('apShellsIn', { folder: lastPart(selected.cwd) }), icon: 'terminal', run: act('shells') }] : []),
   ];
 }
 
@@ -256,40 +256,40 @@ function commands() {
   const selected = ui.state.route.name === 'session' ? store.state.sessions.get(ui.state.route.id) : null;
   const pane = (id, title, key) => ({ title, keys: `${KEY.mod}${KEY.alt}${key}`, icon: id, run: () => ui.setPane(selected.id, id) });
   return [
-    { title: 'Next Project Needing You', keys: `${KEY.mod}J`, icon: 'question', run: nextNeedingYou },
-    ...(selected ? [pane('chat', 'Chat', '2'), pane('terminal', 'Terminal', '1')] : []),
+    { title: t('apNextProjectNeedingYou'), keys: `${KEY.mod}J`, icon: 'question', run: nextNeedingYou },
+    ...(selected ? [pane('chat', t('apChat'), '2'), pane('terminal', t('apTerminal'), '1')] : []),
     // The inspector's, for a session: the Mac's View › Toggle Inspector, and its Team tab for a lead or its team.
-    ...(selected && teamOf(store.state, selected) ? [{ title: 'Team', about: 'The team’s tasks, in the inspector', keys: `${KEY.mod}${KEY.alt}3`, icon: 'team', run: () => ui.showInspector('team') }] : []),
-    ...(selected ? [{ title: 'Toggle Inspector', about: 'Team, Overview and Activity', keys: `${KEY.mod}${KEY.alt}0`, icon: 'inspector', run: () => ui.toggleInspector() }] : []),
+    ...(selected && teamOf(store.state, selected) ? [{ title: t('apTeam'), about: t('apTheTeamSTasksIn'), keys: `${KEY.mod}${KEY.alt}3`, icon: 'team', run: () => ui.showInspector('team') }] : []),
+    ...(selected ? [{ title: t('apToggleInspector'), about: t('apTeamOverviewAndActivity'), keys: `${KEY.mod}${KEY.alt}0`, icon: 'inspector', run: () => ui.toggleInspector() }] : []),
     // Each lead's board: its team's tasks, grouped (views/board.js).
     ...projectsOf(store.state).flatMap((one) => [
-      { title: `Lead: ${one.name}`, about: 'You and its lead', icon: 'chat', run: () => ui.go(projectHref(one.project)) },
-      { title: `Roadmap: ${one.name}`, about: 'Its tasks as they move', icon: 'team', run: () => ui.go(projectHref(one.project, { view: 'roadmap' })) },
+      { title: t('apLeadOf', { name: one.name }), about: t('apYouAndItsLead'), icon: 'chat', run: () => ui.go(projectHref(one.project)) },
+      { title: t('apRoadmapOf', { name: one.name }), about: t('apItsTasksAsTheyMove'), icon: 'team', run: () => ui.go(projectHref(one.project, { view: 'roadmap' })) },
     ]),
     ...sessionCommands(selected),
     // The chat's own (the Mac's Find, Copy as Markdown and Export Chat): of what the page holds of it.
     ...(selected && store.can('chat.page') ? [
-      { title: 'Find in Chat', about: 'Every message of it this page holds', keys: `${KEY.mod}F`, icon: 'search', run: () => session.chat('find') },
-      { title: 'Copy Chat as Markdown', about: 'The conversation, to the clipboard', icon: 'copy', run: () => session.chat('copyMarkdown') },
-      { title: 'Export Chat…', about: 'The conversation as a Markdown file', icon: 'file', run: () => session.chat('exportChat') },
+      { title: t('apFindInChat'), about: t('apEveryMessageOfItThis'), keys: `${KEY.mod}F`, icon: 'search', run: () => session.chat('find') },
+      { title: t('apCopyChatAsMarkdown'), about: t('apTheConversationToTheClipboard'), icon: 'copy', run: () => session.chat('copyMarkdown') },
+      { title: t('apExportChat'), about: t('apTheConversationAsAMarkdown'), icon: 'file', run: () => session.chat('exportChat') },
     ] : []),
-    { title: t('ownSessions'), about: 'Sessions outside a project', icon: 'chat', run: () => ui.go('#/sessions') },
-    { title: t('newProject'), about: 'Make a project, or start a lead in a folder', icon: 'plus', run: () => ui.go('#/new') },
-    { title: 'This Node', about: 'Host, server, build and notices', icon: 'node', run: () => ui.go('#/node') },
+    { title: t('ownSessions'), about: t('apSessionsOutsideAProject'), icon: 'chat', run: () => ui.go('#/sessions') },
+    { title: t('newProject'), about: t('apMakeAProjectOrStart'), icon: 'plus', run: () => ui.go('#/new') },
+    { title: t('apThisNode'), about: t('apHostServerBuildAndNotices'), icon: 'node', run: () => ui.go('#/node') },
     // The node's settings, and each lead's project's (views/settings.js).
-    { title: 'Settings', about: 'Limits, Boost, the working policy', icon: 'settings', run: () => ui.go(settingsHref(null)) },
+    { title: t('apSettings'), about: t('apLimitsBoostTheWorkingPolicy'), icon: 'settings', run: () => ui.go(settingsHref(null)) },
     // This browser's terminal look (Settings › Terminal, views/termlook.js): the Mac's Appearance.
-    { title: 'Terminal Look', about: 'Theme, font, size, cursor and colours, in this browser', icon: 'terminal', run: () => ui.go(settingsHref(null)) },
+    { title: t('apTerminalLook'), about: t('apThemeFontSizeCursorAnd'), icon: 'terminal', run: () => ui.go(settingsHref(null)) },
     // The Mac's Statistics window (views/stats.js).
-    ...(store.can('stats') ? [{ title: 'Statistics', about: 'Load, usage, merges, quality and cost, by project', icon: 'node', run: () => ui.go(statsHref('week')) }] : []),
+    ...(store.can('stats') ? [{ title: t('apStatistics'), about: t('apLoadUsageMergesQualityAnd'), icon: 'node', run: () => ui.go(statsHref('week')) }] : []),
     // What the projects' leads told each other (views/mail.js).
-    { title: 'Between leads', about: 'The leads’ messages to each other', icon: 'chat', run: () => ui.go(mailHref) },
-    ...[...store.state.leads.values()].filter((lead) => lead.root).map((lead) => ({ title: `Settings: ${lastPart(lead.root)}`, about: 'Its models, max_workers and review floor', icon: 'settings', run: () => ui.go(settingsHref(lead.project)) })),
-    { title: app.notifications.enabled() ? 'Turn Notifications Off' : 'Turn Notifications On', about: 'When something needs you, while this page is open', icon: 'question', run: () => app.notifications.turn(!app.notifications.enabled()) },
+    { title: t('apBetweenLeads'), about: t('apTheLeadsMessagesToEach'), icon: 'chat', run: () => ui.go(mailHref) },
+    ...[...store.state.leads.values()].filter((lead) => lead.root).map((lead) => ({ title: t('apSettingsOf', { name: lastPart(lead.root) }), about: t('apItsModelsMaxWorkersAnd'), icon: 'settings', run: () => ui.go(settingsHref(lead.project)) })),
+    { title: app.notifications.enabled() ? t('apTurnNotificationsOff') : t('apTurnNotificationsOn'), about: t('apWhenSomethingNeedsYouWhile'), icon: 'question', run: () => app.notifications.turn(!app.notifications.enabled()) },
     ...leadCommands(selected),
     ...newCommands(),
     // The mock's own: what a server restart looks like from here.
-    ...(feed.restart ? [{ title: 'Restart the Mock Server', about: 'Shows the reconnect: nothing is lost, nothing reloads', icon: 'node', run: () => feed.restart() }] : []),
+    ...(feed.restart ? [{ title: t('apRestartTheMockServer'), about: t('apShowsTheReconnectNothingIs'), icon: 'node', run: () => feed.restart() }] : []),
   ];
 }
 

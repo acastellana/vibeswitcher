@@ -6,6 +6,7 @@ import { icon } from '../marks.js';
 import { taskDetails } from './results.js';
 import { TASKS, TASK_ORDER, TASK_GROUPS, taskCount, taskGroup, taskState, taskTone, since, clock } from '../words.js';
 import { sessionHref, boardHref } from '../ui.js';
+import { t } from '../i18n.js';
 
 // The node's groups first (needs attention, running, waiting, done), then the board's order; the mock's boards by status.
 const groupRank = (task) => TASK_GROUPS.findIndex((group) => group.id === taskGroup(task));
@@ -17,9 +18,9 @@ const sessionOf = (task) => (task.status === 'review' && task.verifier) || task.
 
 export function teamStrip(app) {
   const counts = h('span', { class: 'strip-counts' });
-  const teamButton = h('button', { class: 'strip-team', type: 'button', title: 'Show the team in the inspector', onclick: () => app.ui.showInspector('team') }, icon('team', 14), 'Team');
-  const boardLink = h('a', { class: 'strip-board', title: 'The lead’s board, on a page of its own' }, 'Board');
-  const el = h('section', { class: 'strip', 'aria-label': 'Team' }, teamButton, counts, boardLink);
+  const teamButton = h('button', { class: 'strip-team', type: 'button', title: t('leShowTheTeamInThe'), onclick: () => app.ui.showInspector('team') }, icon('team', 14), t('leTeam'));
+  const boardLink = h('a', { class: 'strip-board', title: t('leTheLeadSBoardOn') }, t('leBoard'));
+  const el = h('section', { class: 'strip', 'aria-label': t('leTeam') }, teamButton, counts, boardLink);
   let drawn = '';
 
   return {
@@ -32,7 +33,7 @@ export function teamStrip(app) {
       const now = JSON.stringify(said);
       if (now === drawn) return;
       drawn = now;
-      counts.replaceChildren(...(said.length ? said.map(([status, count]) => h('span', { class: 'strip-count' }, dot(status), taskCount(status, count))) : ['No tasks yet']));
+      counts.replaceChildren(...(said.length ? said.map(([status, count]) => h('span', { class: 'strip-count' }, dot(status), taskCount(status, count))) : [t('leNoTasksYet')]));
     },
   };
 }
@@ -43,13 +44,13 @@ function dimLine(task, board) {
   if (task.line !== undefined) return task.line || '';
   if (task.status === 'blocked' && task.after?.length) {
     const titles = task.after.map((slug) => board.tasks.find((other) => other.slug === slug)?.title || slug);
-    return 'Waits on ' + titles.join(', ');
+    return t('leWaitsOn') + titles.join(', ');
   }
   if (task.blocker) return task.blocker;
   const last = task.checkpoints?.[task.checkpoints.length - 1];
   if (last) return last.text;
-  if (task.status === 'review') return 'Checking the work';
-  if (task.merged) return `Merged ${task.merged.commit} at ${clock(task.merged.at)}${task.merged.tested ? ', tests passed' : ', no tests ran'}`;
+  if (task.status === 'review') return t('leCheckingTheWork');
+  if (task.merged) return t(task.merged.tested ? 'leMergedTested' : 'leMergedUntested', { commit: task.merged.commit, time: clock(task.merged.at) });
   return '';
 }
 
@@ -59,8 +60,8 @@ export function teamTasks(app) {
   const list = h('ul', { class: 'tasks' });
   const finishedList = h('ul', { class: 'tasks', hidden: true });
   const fold = h('button', { class: 'fold', type: 'button', 'aria-expanded': 'false' }, h('span', { class: 'fold-text' }), icon('chevron', 10));
-  const empty = h('p', { class: 'inspect-note', hidden: true }, 'Nothing on the board yet. Tell the lead what to build.');
-  const el = h('section', { class: 'inspect-group' }, h('h2', { class: 'group-head' }, 'Tasks'), empty, list, fold, finishedList);
+  const empty = h('p', { class: 'inspect-note', hidden: true }, t('leNothingOnTheBoardYet'));
+  const el = h('section', { class: 'inspect-group' }, h('h2', { class: 'group-head' }, t('leTasks')), empty, list, fold, finishedList);
   const rows = new Map();
   const finishedRows = new Map();
   let open = false;
