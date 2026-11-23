@@ -66,3 +66,51 @@ struct KindSpecTests {
         #expect(WireKinds.leftOut == ["plugin.inspect", "plugin.add", "plugin.remove", "plugin.file"])
     }
 }
+
+/// One decision of where a request goes, for both transports (`Principal.route`), resolved from the peer once: a page's
+/// refusals and `hello.kinds` are as before (KindSpecTests' frozen lists), and every kind routes as the per-transport
+/// checks it replaced did.
+struct PrincipalTests {
+    static let anyFacts = PeerFacts(pid: 1, uid: nil, cgroup: nil, ancestry: nil, terminal: .none, sessionMarker: nil, underRunner: nil)
+
+    /// On the socket: an `anyone` kind is read (or the hub's), a user's-voice kind and a private record's read are
+    /// the user's voice, the tool server's post its own, a draft refused, a terminal's not taken, and nothing else taken.
+    @Test func aProcessRoutesEachKindByItsSender() {
+        let process = Principal.process(Self.anyFacts)
+        for spec in KindSpec.all {
+            let route = process.route(spec.name)
+            switch spec.sender {
+            case .anyone: #expect(route == (LiveHub.kinds.contains(spec.name) ? .hub : .read), "\(spec.name)")
+            case .user, .webRead: #expect(route == .usersVoice, "\(spec.name)")
+            case .leadToolServer: #expect(route == .toolPost, "\(spec.name)")
+            case .webDraft: if case .refused(.voice, _) = route {} else { Issue.record("\(spec.name): \(route)") }
+            case .webTerminal: #expect(route == .unknown, "\(spec.name)")
+            }
+            #expect((route != .unknown) == NodeWire.taken.contains(spec.name), "\(spec.name): \(route)")
+        }
+        #expect(process.route("no.such.kind") == .unknown)
+    }
+
+    /// A page: never the user's voice or the tool server's, each right what it admits, a terminal's only on a server
+    /// that opens them and with `read`, `plugin.file` never.
+    @Test func aPageRoutesEachKindByItsRights() {
+        for rights: LiveRights in [[], .read, .draft, [.read, .draft]] {
+            for terminals in [false, true] {
+                let page = Principal.page(rights, terminals: terminals)
+                for spec in KindSpec.all {
+                    let route = page.route(spec.name)
+                    #expect(route != .usersVoice && route != .toolPost, "\(spec.name)")
+                    switch route {
+                    case .read, .hub, .privateRead: #expect(rights.contains(.read) && spec.name != "plugin.file", "\(spec.name)")
+                    case .draft: #expect(rights.contains(.draft) && spec.sender == .webDraft, "\(spec.name)")
+                    case .terminal: #expect(terminals && rights.contains(.read) && spec.sender == .webTerminal, "\(spec.name)")
+                    case .unknown: #expect(spec.sender == .webTerminal && !terminals, "\(spec.name)")
+                    case .refused, .usersVoice, .toolPost: break
+                    }
+                }
+                let terminal = terminals && rights.contains(.read) ? NodeLive.terminalKinds : []
+                #expect(page.kinds == WebAccess.kinds(for: rights) + terminal)
+            }
+        }
+    }
+}

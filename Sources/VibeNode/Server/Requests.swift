@@ -324,20 +324,20 @@ public final class Requests: @unchecked Sendable {
             if DispatchQueue.getSpecific(key: Self.onQueue) != true { self?.noteOffQueue(request.kind) }
             given(answer)
         }
-        let needs = NodeWire.kinds[request.kind] ?? .user
-        if needs == .leadToolServer { return questionPost(request, from: facts, reply: reply) }
+        let route = Principal.process(facts).route(request.kind)
+        if route == .toolPost { return questionPost(request, from: facts, reply: reply) }
         // A draft comes from a web page (`NodeLive` hands those to `draft` itself): from here it is no one's to leave.
-        if needs == .webDraft {
+        if case .refused(let code, let why) = route {
             refusalNote(facts.pid, "refused \(request.kind) from pid \(facts.pid): a draft comes from a web page")
-            return reply(.init(re: request.id, error: .init(.voice, "a draft comes from a web page; in a terminal, `vibeswitcher answer CARD TEXT` answers and `vibeswitcher send SESSION TEXT` sends")))
+            return reply(.init(re: request.id, error: .init(code, why)))
         }
         if request.kind == "web.open", openWebForAnyone, request.args?["tailnet"] == nil {
             note("web.open from pid \(facts.pid), in a scratch server's form (--test-web-pair): no voice asked")
             return act(request, from: facts, reply: reply)
         }
-        // A private record's read (`webRead`) on the socket is the user's alone, as a user's-voice read (no typed word);
-        // a page's comes through `webRead(_:reply:)`.
-        if needs == .user || needs == .webRead {
+        // The user's voice (a private record's read on the socket among them; a page's comes through
+        // `webRead(_:reply:)`), and, as always, a kind this server doesn't know (`act` refuses it once judged).
+        if route == .usersVoice || (route == .unknown && KindSpec.spec(request.kind) == nil) {
             // The Mac's rule: the caller checks, then Touch ID for a state change, off `queue` (`approvalVoice`).
             if rule.mode == .approval { return approvalVoice(request, from: facts, token: token, reply: reply) }
             if case .notUser(let why) = Voice.judge(facts, live: live, rule: rule) {

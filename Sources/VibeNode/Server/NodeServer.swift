@@ -304,7 +304,7 @@ public final class NodeServer: @unchecked Sendable {
             connection.sources += 1
             connection.reading = read
             read.resume()
-            connection.facts = facts
+            connection.principal = .process(facts)
             send(NodeWire.line(requests.hello(peer: facts, token: token)), on: connection)
         }
     }
@@ -451,13 +451,15 @@ public final class NodeServer: @unchecked Sendable {
             if let reply { send(NodeWire.line(reply), on: connection) }
             return bye(reason, code: code, connection, hard: true)
         }
-        guard NodeWire.taken.contains(request.kind) else {
+        // Set at the accept, before any read (`accept`).
+        let route = connection.principal?.route(request.kind) ?? .unknown
+        if route == .unknown {
             let (reply, end) = NodeWire.unknownKind(request)
             send(NodeWire.line(reply), on: connection)
             if let end { bye(end.reason, code: end.code, connection) }
             return
         }
-        if LiveHub.kinds.contains(request.kind) {
+        if route == .hub {
             guard let hub else {
                 return send(NodeWire.line(NodeWire.Reply(re: request.id, error: .init(.unknownKind, "this server has no live hub"))), on: connection)
             }
@@ -466,7 +468,7 @@ public final class NodeServer: @unchecked Sendable {
         }
         // A kind any process may ask takes what was read of its sender at the accept (the same process: every read's
         // sender is checked against it); every other kind judges the sender as it is now.
-        let atAccept = NodeWire.kinds[request.kind] == .anyone ? connection.facts : nil
+        let atAccept: PeerFacts? = if route == .read, case .process(let facts)? = connection.principal { facts } else { nil }
         let facts = atAccept ?? PeerFacts.read(pid: sender.pid, token: sender, cgroupRoot: cgroupRoot, runnersAbove: runnersAbove)
         // `Requests` answers on `queue`.
         connection.answering += 1
@@ -595,8 +597,9 @@ public final class NodeServer: @unchecked Sendable {
         var taken = 0
         var readStopped = false
         var turnAsked = false
-        /// What was read of the process at its accept (for the hello and its `anyone` requests).
-        var facts: PeerFacts?
+        /// What the peer is, resolved at its accept: the process as read then (`Principal.process`), whose `anyone`
+        /// requests are taken as it; where each of its requests goes.
+        var principal: Principal?
         /// Whether its process may be the user's voice, at its accept (`Requests.mayBeUsersVoice`), and its share
         /// (`Requests.share`).
         var voice = false

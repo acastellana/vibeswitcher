@@ -121,18 +121,18 @@ public final class NodeLive: @unchecked Sendable {
         hub.others = { [weak requests] request, transport, rights in
             guard let requests else { return }
             let answer = { (reply: NodeWire.Reply) in transport.send(NodeWire.message(reply)) }
-            // A draft is a page's alone: its token's right judged again here (the screen judged it first), never `handle`.
-            if NodeWire.kinds[request.kind] == .webDraft {
-                guard rights.contains(.draft) else { return answer(.init(re: request.id, error: .init(.voice, "this page's token doesn't draft"))) }
-                return requests.draft(request, reply: answer)
+            // Its route judged again here (the screen judged it first): the hub hands on neither its own kinds nor a
+            // terminal's, so whether this server opens terminals doesn't matter.
+            switch Principal.page(rights, terminals: false).route(request.kind) {
+            // A draft is a page's alone, never `handle`'s.
+            case .draft: requests.draft(request, reply: answer)
+            // A private record's read (Between leads): never `handle`'s user's-voice path, which a page never passes.
+            case .privateRead: requests.webRead(request, reply: answer)
+            case .read: requests.handle(request, from: NodeLive.webPeer, reply: answer)
+            case .refused(let code, let why): answer(.init(re: request.id, error: .init(code, why)))
+            case .unknown, .hub, .terminal, .usersVoice, .toolPost:
+                answer(.init(re: request.id, error: .init(.unknownKind, "this server doesn't take \(ConfigSeal.inert(request.kind, limit: 80)) from a page")))
             }
-            // A private record's read (Between leads): the screen judged its token's `read` right; never `handle`'s
-            // user's-voice path, which a page never passes.
-            if NodeWire.kinds[request.kind] == .webRead {
-                guard rights.contains(.read) else { return answer(.init(re: request.id, error: .init(.voice, "this page's token doesn't read"))) }
-                return requests.webRead(request, reply: answer)
-            }
-            requests.handle(request, from: NodeLive.webPeer, reply: answer)
         }
         let hub = hub
         requests.liveSeq = { [weak hub] in hub?.seq(of: $0) ?? 0 }
