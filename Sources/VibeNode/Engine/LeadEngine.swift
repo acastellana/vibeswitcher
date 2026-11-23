@@ -155,17 +155,8 @@ public final class LeadEngine: @unchecked Sendable {
     var allDoneSummarizing: Set<String> = []
     var allDoneNow: () -> Date = Date.init
 
-    // The prompt-audit reminder (`PromptAuditWatch.swift`), on `queue`.
-    /// The projects due a prompt audit, and why, as the last look found them.
-    public internal(set) var promptAuditsDue: [String: PromptAudit.Due] = [:]
-    /// Whether a look is under way, and whether one ran yet (the first runs at the first refresh).
-    var promptAuditLooking = false
-    var promptAuditLooked = false
-    /// The look every 30 minutes on the engine's clock, and the clock a reminder is judged by (a test's later).
-    var promptAuditTimer: Subscription?
-    var promptAuditNow: () -> Date = Date.init
-    /// The record's reads and writes, one at a time, off the engine's queue.
-    let promptAuditBook = DispatchQueue(label: "vibenode.lead-engine.prompt-audit", qos: .utility)
+    /// The prompt-audit reminder (`PromptAuditWatch.swift`): its state its own, on `queue`.
+    let promptAudit: PromptAuditWatch
 
     // Cards, answers and holds (E6), on `queue`.
     /// Every card the user answers: the lead's questions and approvals, held config, base moves.
@@ -364,14 +355,8 @@ public final class LeadEngine: @unchecked Sendable {
     /// A clock for the plugins' pages when the engine has none (a test's engine), on its queue.
     lazy var pluginClock = NodeClock(queue: queue)
     let pluginWork = DispatchQueue(label: "vibenode.lead-engine.plugins", qos: .userInitiated)
-    // The developer tools notice (`ToolchainLook.swift`), on `queue`: the notices the last look found, when it ran,
-    // whether one is under way; how the node's tools are asked (a test's stand-in) and the clock.
-    public internal(set) var toolchainNotices: [String] = []
-    var toolchainLookedAt: Date?
-    var toolchainLooking = false
-    /// The node's tools as a look asks them (nil: `NodeToolchain.node(home:)` in the engine's home).
-    var toolchainTools: (@Sendable () -> NodeToolchain.Tools)?
-    var toolchainNow: () -> Date = Date.init
+    /// The developer tools notice (`ToolchainLook.swift`): its state its own, on `queue`.
+    let toolchain: ToolchainWatch
     /// Boost as last written to `boost.json` (`lookAtBoost`), and when; the clock it's judged on.
     var boostWritten: (state: BoostState, at: Date)?
     /// Boost as the last look decided it (whether or not a file was written), with its mode: `status`'s `boost`.
@@ -455,16 +440,19 @@ public final class LeadEngine: @unchecked Sendable {
         self.note = note
         plugins = PluginRegistry(options.plugins ?? PluginRegistry.standard())
         queue = link.queue
+        toolchain = ToolchainWatch(queue: link.queue, file: root.appendingPathComponent("toolchain.json"), home: options.home ?? VibePaths.home, note: note)
+        promptAudit = PromptAuditWatch(queue: link.queue, root: root, home: options.home ?? VibePaths.home, clock: clock, note: note)
         reads = BoardReads(handTo: link.queue)
         preflight = NodePreflight(claudeLink: options.claudeLink ?? NodePreflight.claudeLink(root: root), git: options.git)
         let states = root.appendingPathComponent("state", isDirectory: true)
         observer = LeadObserver(home: options.home ?? VibePaths.home, stateFile: { states.appendingPathComponent("\($0).json") })
+        toolchain.leads = self
+        promptAudit.leads = self
         restoreState()
         leads.heldChanged = { [weak self] in self?.saveState() }
         watch = link.changes.subscribe(on: link.queue) { [weak self] _ in self?.sessionsChanged() }
         if options.sweepsRoles { roleSweep = makeRoleSweep() }
         refreshTimer = clock?.every(3) { [weak self] in self?.refresh() }
-        promptAuditTimer = clock?.every(Int(Self.promptAuditEvery)) { [weak self] in self?.queue.async { self?.lookAtPromptAudits() } }
         // Run-card shells (`ShellTidying.swift`): what is typed into told by the link (on its queue, this one), the due
         // ones ended every 30 s.
         link.onTyped = { [weak self] id in self?.shellTyped(id) }
