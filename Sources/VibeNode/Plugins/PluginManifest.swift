@@ -54,7 +54,7 @@ public struct PluginManifest: Codable, Equatable, Sendable {
 
     /// Plain text a person reads: no control or format character, at most `limit` characters.
     static func plain(_ text: String, limit: Int, lines: Bool = false) -> Bool {
-        !text.isEmpty && text.count <= limit && !text.unicodeScalars.contains { scalar in
+        !text.isEmpty && text.count <= limit && !PluginText.stackedMarks(text) && !text.unicodeScalars.contains { scalar in
             (PluginText.control(scalar) && !(lines && scalar == "\n")) || scalar.properties.generalCategory == .format || PluginText.blank(scalar)
         }
     }

@@ -325,6 +325,13 @@ public struct PluginCard: Codable, Equatable, Sendable {
     public var refusal: String? {
         var named: [(String, String)] = facts.map { ($0.name, $0.value) } + [(body.name, body.text)]
         if let context { named.append((context.name, context.text)) }
+        // Every text the card shows: none stacks more than two combining marks on a character (W3).
+        let shown = [title, noun, ask, body.label, body.note ?? "", waiting ?? "", context?.label ?? ""] + facts.flatMap { [$0.label, $0.value] }
+            + actions.flatMap { [$0.label, $0.short, $0.does, $0.verb] } + [body.text, context?.text ?? ""]
+        if shown.contains(where: PluginText.stackedMarks) {
+            return "a text on it stacks more than \(PluginText.combiningMarksAtMost) combining marks on a character, which can draw over the "
+                + "lines around it: it wasn't shown, and nothing ran"
+        }
         for (name, text) in named {
             if let scalar = text.unicodeScalars.first(where: PluginText.blank) {
                 return "its \(name) holds a character that draws as blank or nothing (U+\(String(format: "%04X", scalar.value))), "
@@ -366,6 +373,24 @@ public enum PluginText {
         let properties = scalar.properties
         return properties.isWhitespace || properties.isDefaultIgnorableCodePoint || properties.isVariationSelector
             || [0x115F, 0x1160, 0x3164, 0xFFA0, 0x2800].contains(scalar.value)
+    }
+
+    /// The most combining marks (Unicode Mn, Mc, Me) text may stack on one character (the wallet format's rule, now the
+    /// core's for every plugin's text: the review of 9c2641c, W3): more can draw over the lines around it.
+    public static let combiningMarksAtMost = 2
+
+    /// Whether `text` stacks more than `combiningMarksAtMost` combining marks on one character (or starts with more).
+    public static func stackedMarks(_ text: String) -> Bool {
+        var run = 0
+        for scalar in text.unicodeScalars {
+            switch scalar.properties.generalCategory {
+            case .nonspacingMark, .spacingMark, .enclosingMark:
+                run += 1
+                if run > combiningMarksAtMost { return true }
+            default: run = 0
+            }
+        }
+        return false
     }
 
     /// Whether `scalar` is a control character (C0, DEL, C1).

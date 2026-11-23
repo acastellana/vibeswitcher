@@ -918,6 +918,33 @@ extension PluginsTests {
     }
 }
 
+extension PluginsTests {
+    /// W3 (the review of 9c2641c): no text a plugin's card shows, or an external plugin's manifest, card field or outcome
+    /// line holds, stacks more than two combining marks on a character.
+    @Test func noCardTextStacksMoreThanTwoCombiningMarks() {
+        let request = ShellRequest(session: UUID().uuidString, cwd: "/home/u/shop", command: "make", label: "", createdAt: Date())
+        let base = Probe.card(request, asker: "a session")
+        #expect(base.refusal == nil)
+        let two = "e\u{0301}\u{0302}", three = "e\u{0301}\u{0302}\u{0303}"
+        var fine = base
+        fine.body = .init(name: "command", label: "probing exactly this", text: "make " + two)
+        #expect(fine.refusal == nil, "two marks on a character are fine")
+        for place in ["body", "context", "fact", "title", "action"] {
+            var card = base
+            switch place {
+            case "body": card.body = .init(name: "command", label: "probing exactly this", text: "make " + three)
+            case "context": card.context = .init(name: "label", label: "named", text: three)
+            case "fact": card.facts[0].value = "/home/" + three
+            case "title": card.title = "A probe " + three
+            default: card.actions[0].does = "runs " + three
+            }
+            #expect(card.refusal?.contains("combining marks") == true, "\(place)")
+        }
+        #expect(PluginManifest.plain(two, limit: 40) && !PluginManifest.plain(three, limit: 40), "an external plugin's plain text, its outcome lines too")
+        #expect(PluginText.stackedMarks("\u{0301}\u{0302}\u{0303}x"), "marks with no character under them")
+    }
+}
+
 extension Result {
     var failure: Failure? { if case .failure(let failure) = self { return failure } else { return nil } }
 }
