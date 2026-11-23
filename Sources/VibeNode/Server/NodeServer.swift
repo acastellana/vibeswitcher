@@ -159,6 +159,8 @@ public final class NodeServer: @unchecked Sendable {
         ticks = clock?.every(housekeeping) { [weak self] in
             guard let self else { return }
             self.checkPath()
+            // A folder watch the system couldn't give is asked for again (meanwhile this look is the watch).
+            if self.watch == nil { self.watchFolder() }
             self.requests.refreshNotes()
         }
         let sweep = DispatchSource.makeTimerSource(queue: queue)

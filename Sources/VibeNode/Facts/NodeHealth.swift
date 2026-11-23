@@ -309,6 +309,8 @@ public final class NodeHealth: @unchecked Sendable {
             "serverEnded": serverEnd.map { .object(["at": .date($0.at), "ran": .int(Int($0.ran.rounded())),
                                                     "cause": .string(ConfigSeal.inert($0.cause, limit: 120))]) } ?? .null,
             "waiting": .array(waiting.map(NodeWire.Value.string)),
+            // The server's file watches the system couldn't give (`Platform.Watches`): their owners look at housekeeping.
+            "watchesUnmade": .int(Platform.Watches.unmade),
             "errors": .array(problems.reversed().map { .object(["at": .date($0.at), "line": .string(ConfigSeal.inert($0.line, limit: 300))]) }),
             "causes": .array(ranked.map { .object(["kind": .string(ConfigSeal.inert($0.key, limit: 80)), "count": .int($0.value.count),
                                                     "last": .date($0.value.last)]) }),
@@ -337,6 +339,9 @@ public final class NodeHealth: @unchecked Sendable {
         if let at = health["hostRestartAt"]?.string { out.append("  the host last restarted at \(inert(at))") }
         if let ended = health["serverEnded"], ended["at"] != nil {
             out.append("  the server last ended on its own at \(inert(ended["at"]?.string)): \(inert(ended["cause"]?.string)), after \(Self.duration(ended["ran"]?.int ?? 0))")
+        }
+        if let unmade = health["watchesUnmade"]?.int, unmade > 0 {
+            out.append("  \(unmade) watch\(unmade == 1 ? "" : "es") couldn't be made: changes are seen at the next housekeeping")
         }
         let waiting = health["waiting"]?.array ?? []
         out.append(waiting.isEmpty ? "  sessions left waiting or stuck: none" : "  sessions left waiting or stuck:")
