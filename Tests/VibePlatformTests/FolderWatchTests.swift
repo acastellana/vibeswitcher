@@ -502,6 +502,102 @@ struct FolderWatchTests {
         #expect(Self.next(busy) == .entries)
     }
 
+    /// An overflow that drops a watch's end (its folder removed and made again while the kernel's queue was full, so its
+    /// IN_DELETE_SELF and IN_IGNORED were never queued): after it, the watch is found gone (its path names another
+    /// inode now) and told `folderGone`, and is out of the table; a watch whose folder is still there is told only to
+    /// look again, and still hears.
+    @Test func anEndAnOverflowDroppedIsFoundAgain() throws {
+        let folders = try Self.folders()
+        defer { try? FileManager.default.removeItem(at: folders.root) }
+        let doomed = folders.root.appendingPathComponent("doomed", isDirectory: true)
+        try FileManager.default.createDirectory(at: doomed, withIntermediateDirectories: false)
+        let gone = try #require(Platform.FolderWatch(path: doomed.path))
+        let kept = try #require(Platform.FolderWatch(path: folders.outside.path))
+        // The churn's folder, watched so its events fill the queue.
+        let busy = try #require(Platform.FolderWatch(path: folders.watched.path))
+        defer {
+            gone.stop()
+            kept.stop()
+            busy.stop()
+        }
+        let queued = Int((try? String(contentsOfFile: "/proc/sys/fs/inotify/max_queued_events", encoding: .utf8))?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? "") ?? 16_384
+        try InotifyHub.shared.holdingReads {
+            let file = folders.watched.appendingPathComponent("churn")
+            for _ in 0..<(queued / 2 + 64) {
+                try Self.make(file)
+                guard unlink(file.path) == 0 else { throw Failure(what: "errno \(errno)") }
+            }
+            // The queue is full: the folder's end isn't queued. Made again at the same path: another inode.
+            guard rmdir(doomed.path) == 0 else { throw Failure(what: "errno \(errno)") }
+            try FileManager.default.createDirectory(at: doomed, withIntermediateDirectories: false)
+        }
+        // Only the overflow came for it, then the look's verdict: gone.
+        #expect(Self.next(gone)?.contains(.folderGone) == true, "the watch on the removed folder wasn't told it went")
+        #expect(Self.next(busy) == .entries)
+        #expect(Self.next(kept) == .entries)
+        #expect(gone.system.client.isStopped == false)
+        #expect(try Self.owned(watching: doomed).inotify == 0, "the new folder at the path got a kernel watch nobody asked for")
+        try Self.make(folders.outside.appendingPathComponent("after"))
+        #expect(Self.next(kept) == .entries, "the live watch stopped hearing")
+    }
+
+    /// `stop()` from another thread while the handler runs returns only once the handler has: after it, nothing of the
+    /// watch's runs. (From inside the handler it returns at once: `aHandlerCanStopItsOwnWatch`.)
+    @Test func stopFromAnotherThreadWaitsForTheRunningHandler() throws {
+        let folders = try Self.folders()
+        defer { try? FileManager.default.removeItem(at: folders.root) }
+        let watch = try #require(Platform.FolderWatch(path: folders.watched.path))
+        let (entered, release, stopped) = (DispatchSemaphore(value: 0), DispatchSemaphore(value: 0), DispatchSemaphore(value: 0))
+        let running = Box(false)
+        watch.deliver(on: DispatchQueue(label: "folder-watch-tests.exact")) { _ in
+            running.value = true
+            entered.signal()
+            release.wait()
+            running.value = false
+        }
+        try Self.make(folders.watched.appendingPathComponent("one"))
+        #expect(entered.wait(timeout: .now() + Self.hangGuard) == .success)
+        Thread.detachNewThread {
+            watch.stop()
+            stopped.signal()
+        }
+        // The one bounded wait that is the assertion: stop hasn't returned while the handler runs.
+        #expect(stopped.wait(timeout: .now() + 0.3) == .timedOut, "stop() returned while its handler ran")
+        release.signal()
+        #expect(stopped.wait(timeout: .now() + Self.hangGuard) == .success)
+        #expect(running.value == false, "stop() returned before the handler did")
+    }
+
+    /// The process's note of a watch that couldn't be made runs out of the hub's lock: a note that asks the hub
+    /// something (here its census) doesn't hang.
+    @Test func theUnmadeNoteRunsOutOfTheHubsLock() throws {
+        let folders = try Self.folders()
+        defer { try? FileManager.default.removeItem(at: folders.root) }
+        let told = Box<[String]>([])
+        let was = Platform.Watches.whenFirstUnmade
+        Platform.Watches.whenFirstUnmade = { line in
+            _ = InotifyHub.shared.census
+            told.value.append(line)
+        }
+        defer { Platform.Watches.whenFirstUnmade = was }
+        Platform.Watches.resetForTests()
+        InotifyHub.shared.failNextWatch(of: folders.watched.path)
+        let done = DispatchSemaphore(value: 0)
+        let made = Box<Bool?>(nil)
+        Thread.detachNewThread {
+            made.value = Platform.FolderWatch(path: folders.watched.path) != nil
+            done.signal()
+        }
+        #expect(done.wait(timeout: .now() + Self.hangGuard) == .success, "the note hung under the hub's lock")
+        #expect(made.value == false)
+        #expect(told.value.count == 1 && told.value.first?.contains(folders.watched.path) == true, "\(told.value)")
+        #expect(Platform.Watches.unmade >= 1)
+        // The next watch of it is made.
+        let watch = try #require(Platform.FolderWatch(path: folders.watched.path))
+        watch.stop()
+    }
+
     /// A watch stopped while its events are on their way (read and waiting on its queue behind a block, or still in the
     /// kernel's queue): its handler is never called.
     @Test func aWatchStoppedWithEventsInFlightIsToldNothing() throws {

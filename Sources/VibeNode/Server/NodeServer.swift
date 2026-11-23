@@ -210,7 +210,17 @@ public final class NodeServer: @unchecked Sendable {
         watch = nil
         watched = now
         if let made = Platform.FolderWatch(path: folder.path) {
-            made.deliver(on: queue) { [weak self] _ in self?.checkPath() }
+            made.deliver(on: queue) { [weak self, weak made] change in
+                guard let self else { return }
+                // The folder gone (removed, renamed, or its end lost to an overflow): no more is told by this watch, so
+                // it goes, and one is made again (here when the path is rebound, else at the next housekeeping).
+                if change.contains(.folderGone) {
+                    made?.stop()
+                    if self.watch === made { self.watch = nil }
+                }
+                self.checkPath()
+                if self.watch == nil { self.watchFolder() }
+            }
             watch = made
         }
     }

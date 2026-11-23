@@ -25,16 +25,19 @@ extension Platform.FolderWatch {
         /// reference to it goes), and the watch itself needs none.
         convenience init?(descriptor: Int32) {
             defer { if descriptor >= 0 { close(descriptor) } }
-            self.init(watching: "/proc/self/fd/\(descriptor)")
+            let proc = "/proc/self/fd/\(descriptor)"
+            self.init(watching: proc, named: try? FileManager.default.destinationOfSymbolicLink(atPath: proc))
         }
 
-        private init?(watching path: String) {
+        /// `named`: the folder's own path, which the hub adds again after an overflow (a descriptor's /proc name won't
+        /// name it then).
+        private init?(watching path: String, named: String? = nil) {
             // 9p (a Windows drive under WSL): the kernel takes the watch and tells only of what this system's own
             // processes change there, never of what the other side does. Refused rather than half heard.
             var kind: UInt = 0
             guard vibe_filesystem_type(path, &kind) == 0, kind != UInt(VIBE_9P_MAGIC) else { return nil }
             // IN_ONLYDIR: a file's watch would never tell of anything asked for here.
-            guard let client = InotifyHub.shared.watch(path, mask: Self.entryEvents | Self.folderEvents, folder: true) else { return nil }
+            guard let client = InotifyHub.shared.watch(path, mask: Self.entryEvents | Self.folderEvents, folder: true, named: named) else { return nil }
             self.client = client
         }
 

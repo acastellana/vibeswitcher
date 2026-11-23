@@ -23,6 +23,9 @@ extension Platform {
             set { lock.withLock { told = newValue } }
         }
 
+        /// The count back to none, so the next is the process's first again. For the tests.
+        static func resetForTests() { lock.withLock { count = 0 } }
+
         /// A watch of `path` couldn't be made: `why`, the system's answer.
         static func noteUnmade(_ path: String, _ why: String) {
             let (first, tell) = lock.withLock { () -> (Bool, (@Sendable (String) -> Void)?) in

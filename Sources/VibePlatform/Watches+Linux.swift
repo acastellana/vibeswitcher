@@ -35,10 +35,14 @@ import Foundation
 ///    pooled thread is busy, as a waiting watch did with its own instance), and by a client's `flush()` just before it
 ///    takes its events, so whatever the kernel queued before the client looks is in what it takes, as one change.
 ///    Reads are one at a time (`readLock`), and a read's events are told in the order read.
-/// 7. Nothing of a client's is called with `lock` or `readLock` held: a client is told by its condition's signal
-///    (`wait`) or by a block put on its own queue (`deliver`), at most one outstanding, which takes every event told
-///    until it runs. A client stopped is out of the table at once, and a block already on its queue finds it stopped and
-///    calls nothing; a handler already running may finish.
+/// 7. Nothing of a client's is called with `lock` or `readLock` held (the count's note, `Platform.Watches`, included):
+///    a client is told by its condition's signal (`wait`) or by a block put on its own queue (`deliver`), at most one
+///    outstanding, which takes every event told until it runs. `stop()` is exact: the handler is called only after
+///    `stopped` is checked under the client's condition, and a stop from another thread waits for a handler running;
+///    once it returns nothing of the client's runs again, and it is out of the table.
+/// 8. An overflow can drop a watch's end. After one, every client's watch is added again by its path (`lookAgain`):
+///    one whose path no longer names the inode it watched is told it is gone and taken out of the table, so an owner
+///    that makes its watch again on a gone one (all do) isn't left on a dead wd.
 final class InotifyHub: @unchecked Sendable {
     static let shared = InotifyHub()
 
@@ -49,14 +53,18 @@ final class InotifyHub: @unchecked Sendable {
     private let readLock = NSLock()
 
     /// A client of the kernel's watch of `path` for `mask`'s events (with IN_ONLYDIR when `folder`): nil when the path
-    /// can't be watched, or the instance or the watch can't be made (then counted, `Platform.Watches`).
-    func watch(_ path: String, mask: UInt32, folder: Bool) -> InotifyClient? {
+    /// can't be watched, or the instance or the watch can't be made (then counted, `Platform.Watches`, once out of the
+    /// lock: the process's note is its own code). `named`: the path to look at again after an overflow (8), when `path`
+    /// won't name it then (a descriptor's /proc name).
+    func watch(_ path: String, mask: UInt32, folder: Bool, named: String? = nil) -> InotifyClient? {
+        var unmade: String?
+        defer { if let unmade { Platform.Watches.noteUnmade(path, unmade) } }
         lock.lock()
         defer { lock.unlock() }
         if instance < 0 {
             let made = inotify_init1(Int32(IN_NONBLOCK) | Int32(IN_CLOEXEC))
             guard made >= 0 else {
-                Platform.Watches.noteUnmade(path, "no inotify instance (errno \(errno)), fs.inotify.max_user_instances")
+                unmade = "no inotify instance (errno \(errno)), fs.inotify.max_user_instances"
                 return nil
             }
             instance = made
@@ -64,15 +72,54 @@ final class InotifyHub: @unchecked Sendable {
             thread.name = "vibeswitcher.inotify"
             thread.start()
         }
-        let wd = inotify_add_watch(instance, path, mask | UInt32(IN_MASK_ADD) | (folder ? UInt32(IN_ONLYDIR) : 0))
+        let forced = failing.remove(path) != nil
+        let wd = forced ? -1 : inotify_add_watch(instance, path, Self.adding(mask, folder: folder))
         guard wd >= 0 else {
-            let code = errno
-            if code == ENOSPC || code == ENOMEM { Platform.Watches.noteUnmade(path, "no inotify watch left (errno \(code)), fs.inotify.max_user_watches") }
+            let code = forced ? ENOSPC : errno
+            if code == ENOSPC || code == ENOMEM { unmade = "no inotify watch left (errno \(code)), fs.inotify.max_user_watches" }
             return nil
         }
-        let client = InotifyClient(hub: self, wd: wd, mask: mask)
+        let client = InotifyClient(hub: self, wd: wd, mask: mask, path: named ?? path, folder: folder)
         clients[wd, default: []].append(client)
         return client
+    }
+
+    /// Under `lock`: the paths whose next watch fails as for want of a kernel watch (ENOSPC), once each. For the tests
+    /// (by path, so a test running beside one never meets its failure).
+    private var failing: Set<String> = []
+    func failNextWatch(of path: String) { lock.withLock { _ = failing.insert(path) } }
+
+    /// The flags a client's kernel watch is added with.
+    static func adding(_ mask: UInt32, folder: Bool) -> UInt32 { mask | UInt32(IN_MASK_ADD) | (folder ? UInt32(IN_ONLYDIR) : 0) }
+
+    /// After an overflow, which may have dropped a watch's end (its IN_IGNORED, IN_DELETE_SELF): each client's watch
+    /// added again by its path (IN_MASK_ADD changes nothing of a live one). The same wd: alive. Another, or none (the
+    /// path names nothing, or another inode): what it watched is gone, so it is told so (IN_IGNORED) and taken out of
+    /// the table, its old kernel watch removed with its last client (EINVAL when the kernel ended it already); a kernel
+    /// watch made only by this look (no client has its wd) is removed again. Under `lock`.
+    private func lookAgain() -> [(InotifyClient, UInt32)] {
+        var gone: [(InotifyClient, UInt32)] = []
+        var madeHere = Set<Int32>()
+        for (wd, list) in clients {
+            var kept: [InotifyClient] = []
+            for client in list {
+                let again = inotify_add_watch(instance, client.path, Self.adding(client.mask, folder: client.folder))
+                if again == wd {
+                    kept.append(client)
+                    continue
+                }
+                if again >= 0 && clients[again] == nil { madeHere.insert(again) }
+                gone.append((client, UInt32(IN_IGNORED)))
+            }
+            if kept.isEmpty {
+                clients[wd] = nil
+                _ = inotify_rm_watch(instance, wd)
+            } else if kept.count != list.count {
+                clients[wd] = kept
+            }
+        }
+        for wd in madeHere where clients[wd] == nil { _ = inotify_rm_watch(instance, wd) }
+        return gone
     }
 
     /// `client` out of the table; its kernel watch removed when it was the last of it. Its own `stop` calls this.
@@ -150,6 +197,7 @@ final class InotifyHub: @unchecked Sendable {
                 var told: [(InotifyClient, UInt32)] = []
                 if overflow {
                     for list in clients.values { for client in list { told.append((client, UInt32(IN_Q_OVERFLOW))) } }
+                    told += lookAgain()
                 }
                 for wd in order {
                     let mask = masks[wd] ?? 0
@@ -171,6 +219,9 @@ final class InotifyClient: @unchecked Sendable {
 
     let wd: Int32
     let mask: UInt32
+    /// The path its watch is added by again after an overflow (`InotifyHub.lookAgain`), and whether it is a folder's.
+    let path: String
+    let folder: Bool
     private weak var hub: InotifyHub?
     private let condition = NSCondition()
     // Under `condition`.
@@ -181,11 +232,15 @@ final class InotifyClient: @unchecked Sendable {
     private var handler: (@Sendable (UInt32) -> Void)?
     /// A block is on `queue` that will take `pending`.
     private var scheduled = false
+    /// The thread running the handler now, while it runs: `stop()` from another waits for it to return.
+    private var calling: pthread_t?
 
-    init(hub: InotifyHub, wd: Int32, mask: UInt32) {
+    init(hub: InotifyHub, wd: Int32, mask: UInt32, path: String, folder: Bool) {
         self.hub = hub
         self.wd = wd
         self.mask = mask
+        self.path = path
+        self.folder = folder
     }
 
     /// The hub read `events` for this client's watch (or an overflow). Never calls the client's code.
@@ -210,9 +265,15 @@ final class InotifyClient: @unchecked Sendable {
         scheduled = false
         let events = pending
         pending = 0
-        let handler = stopped ? nil : self.handler
+        // Checked under the condition right before the call: no handler starts once `stop()` has set `stopped`.
+        guard !stopped, events != 0, let handler else { return condition.unlock() }
+        calling = pthread_self()
         condition.unlock()
-        if events != 0 { handler?(events) }
+        handler(events)
+        condition.lock()
+        calling = nil
+        condition.broadcast()
+        condition.unlock()
     }
 
     /// Whether a thread is inside `wait()` now. For the tests.
@@ -256,8 +317,10 @@ final class InotifyClient: @unchecked Sendable {
         }
     }
 
-    /// No more events, and out of the hub's table (its kernel watch removed when it was the last of it). Any thread, a
-    /// handler's own included; again is nothing.
+    /// No more events, and out of the hub's table (its kernel watch removed when it was the last of it). Exact: once it
+    /// returns no handler starts, and one running on another thread has returned (it waits for it), so a handler must
+    /// not wait on a thread that stops its watch; from inside the handler it returns at once. Any thread; again is
+    /// nothing.
     func stop() {
         condition.lock()
         guard !stopped else { return condition.unlock() }
@@ -265,6 +328,7 @@ final class InotifyClient: @unchecked Sendable {
         handler = nil
         pending = 0
         condition.broadcast()
+        while let calling, pthread_equal(calling, pthread_self()) == 0 { condition.wait() }
         condition.unlock()
         hub?.remove(self)
     }
