@@ -4445,3 +4445,5 @@ Proposed task 1: Find why dictations end with no text
 - 2026-11-23 16:44 Audit of the-weekly-scorecard: complete, clean, round 2: 1 Important closed, 2 Nit open
 - 2026-11-23 17:04 Pipeline held: the-weekly-scorecard ready to merge with none landing; cause: every test slot held
 - 2026-11-23 17:05 Merged the-weekly-scorecard: The weekly scorecard counts bugs that got past review, by how the merge that brought them was reviewed (build 71a026954280)
+- 2026-11-23 17:05 Automatically (auto_advance): Merged the-weekly-scorecard (The weekly scorecard counts bugs that got past review, by how the merge that brought them was reviewed) into main at e5290087, on its passing audit and the full test run.
+- 2026-11-23 17:05 Automatically (auto_advance): Cleaned up the-weekly-scorecard (freed 2.5 GB of build output and temporary folders). It stays done.
