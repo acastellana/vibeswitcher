@@ -149,6 +149,8 @@ public enum ServerStart {
             testBlocks(root: root, engine: queue, reads: engine.reads.queue)
             let hold = root.appendingPathComponent("test-hold-act").path
             requests.testHoldsAct = { unlink(hold) == 0 }
+            let holdReply = root.appendingPathComponent("test-hold-reply").path
+            requests.testHoldsReply = { unlink(holdReply) == 0 }
         }
         requests.nodeRoot = parsed.nodeRoot
         // Where `build.switch` finds the builds: the account's own install folder on the node, a test's on a scratch node.

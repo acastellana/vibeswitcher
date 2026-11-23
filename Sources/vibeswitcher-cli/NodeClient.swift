@@ -404,10 +404,16 @@ final class NodeClient {
     /// - answered `not-yet`, it is asked again, a quarter second apart, for up to `notYetPatience`;
     /// - the connection ended with the server saying it took no request on it (its idle `bye`,
     ///   `NodeServer.tookNoRequest`), or before the request could be written: it wasn't received, so it is sent again on a
-    ///   fresh connection, up to `notTakenTries` times; past them, said so (nothing was done), never "isn't known";
+    ///   fresh connection, up to `notTakenTries` times, whatever host that one's server has; past them, said so (nothing
+    ///   was done), never "isn't known". Safe even when part of the request's line reached the old server: a server
+    ///   takes whole lines only, and a line it had whole would have been written whole (`sent`), so the server that
+    ///   closed never took it;
     /// - the connection ended after it was sent, with no reply: sent once more on a fresh connection, with the same action
-    ///   id, when that is safe (`resendable`: a kind the vault records by its action id, or one that changes nothing).
-    ///   The server's vault then answers: not recorded, it is done now, once, and its reply is the reply; recorded and
+    ///   id, when that is safe (`resendable`: a kind the vault records by its action id, or one that changes nothing),
+    ///   and, for a recorded kind, only when the fresh connection's hello names the same session host as the first's
+    ///   (`sameHost`: its start and pid, both kept across a build switch's handover, which carries the vault): on Linux
+    ///   the vault lives in the host's memory, so a host that restarted has no record of it, and the action would be
+    ///   done twice; then it isn't sent again, and its outcome isn't known. The server's vault then answers: not recorded, it is done now, once, and its reply is the reply; recorded and
     ///   finished, its recorded outcome (the result, or that it was done at T, or the failure); recorded and still being
     ///   done (the same server), asked again until it is finished; recorded and begun on a server that ended, done again
     ///   when its kind allows, else that it began and its outcome isn't known (`Requests.retry`). Any other kind, or a
@@ -420,6 +426,9 @@ final class NodeClient {
         let deadline = Platform.Clock.steadyDate().addingTimeInterval(timeout)
         var notTaken = 0
         var resent = false
+        var polls = 0
+        // The host its request first went to (the connection's hello names it): a lost request is sent again only there.
+        var host = hello.host
         while true {
             switch ask(kind, args: args, action: action, timeout: timeout) {
             case .reply(let reply):
@@ -428,16 +437,23 @@ final class NodeClient {
                     continue
                 }
                 // Sent again after a loss and found under way (its first request's server still doing it): asked again.
+                // Backing off to 1 s: each ask is a request the server judges.
                 if resent, let action, reply.error?.message == Requests.beingDoneNow(action: action), Platform.Clock.steadyDate() < deadline {
-                    usleep(250_000)
+                    polls += 1
+                    usleep(useconds_t(min(1_000_000, 250_000 << min(polls - 1, 2))))
                     continue
                 }
                 return .success(reply)
             case .notTaken(let why):
                 notTaken += 1
                 guard notTaken <= Self.notTakenTries, reconnect() else { return .failure(.broken(Self.notTakenSaid(why, kind: kind))) }
+                // Nothing was taken: whichever host this one's server has is the request's now.
+                host = hello.host
             case .lost(let why):
                 guard !resent, Self.resendable(kind, action: action), reconnect() else { return unanswered(kind, action, why) }
+                if Requests.recorded.contains(kind), !Self.sameHost(host, hello.host) {
+                    return unanswered(kind, action, why + "; the node's session host restarted since, and its record of actions with it, so it isn't sent again")
+                }
                 resent = true
             case .timedOut(let why):
                 return unanswered(kind, action, why)
@@ -445,6 +461,13 @@ final class NodeClient {
                 return .failure(failure)
             }
         }
+    }
+
+    /// Whether two hellos name the same session host: its start and its pid, both known and equal (a build switch's
+    /// handover keeps both, and carries the vault).
+    static func sameHost(_ first: NodeWire.Hello.Host, _ now: NodeWire.Hello.Host) -> Bool {
+        guard let started = first.startedAt, let pid = first.pid else { return false }
+        return now.startedAt == started && now.pid == pid
     }
 
     /// How many times a request the server said it didn't take is sent again.

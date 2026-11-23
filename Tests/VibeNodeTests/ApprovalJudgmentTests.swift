@@ -66,6 +66,29 @@ struct ApprovalJudgmentTests {
         #expect(person.asked == ["change a VibeSwitcher setting: \(NodeIds.code(action: action)) · set lead_mail to “off”; for the whole node"], "\(person.asked)")
     }
 
+    /// An action being done now, asked again (the command line's poll after a lost reply): said so with no second
+    /// dialog; once done, its kept answer, still with none. One action, one dialog.
+    @Test func anActionBeingDoneIsNeverAskedForTwice() async {
+        let person = ApprovalVoiceTests.Person(.approved)
+        let requests = requests(person)
+        let action = UUID().uuidString.lowercased()
+        let args: [String: NodeWire.Value] = ["key": .string("lead_mail"), "value": .string("off")]
+        let first = await judge(requests, "set", args, action: action)
+        #expect(first.done && first.refused == nil && person.asked.count == 1)
+        requests.queue.sync { _ = requests.doing.insert(action) }
+        for _ in 0..<4 {
+            let poll = await judge(requests, "set", args, action: action)
+            #expect(poll.refused?.error?.message == Requests.beingDoneNow(action: action), "\(String(describing: poll.refused))")
+        }
+        requests.queue.sync {
+            _ = requests.doing.remove(action)
+            requests.keep(.init(re: "first", result: .object(["key": .string("lead_mail")])), for: action)
+        }
+        let after = await judge(requests, "set", args, action: action)
+        #expect(after.refused?.ok == true, "\(String(describing: after.refused))")
+        #expect(person.asked.count == 1, "\(person.asked)")
+    }
+
     @Test func declinedUnavailableOrNotTheCommandLineIsRefused() async {
         for answer: Platform.Approval.Outcome in [.declined("cancelled at the Mac"), .unavailable("over ssh")] {
             let refused = await judge(requests(ApprovalVoiceTests.Person(answer)), "session.end", ["session": .string("local:abcd")]).refused

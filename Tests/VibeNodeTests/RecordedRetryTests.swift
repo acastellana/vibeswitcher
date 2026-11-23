@@ -74,6 +74,63 @@ struct RecordedRetryTests {
         #expect(node.said.contains("with no outcome recorded: done again"), "\(node.said)")
     }
 
+    /// Its session host killed after the act and its outcome were recorded, before the reply (held there), and a new host
+    /// started on the same root inside the command line's reconnect window: the vault went with the old host, so the
+    /// request isn't sent to the new one (it would be done again); the user is told its outcome isn't known.
+    @Test(NodeTraits.linuxOnly)
+    func aStateChangeLostWithItsHostIsNotSentToTheNextHost() async throws {
+        let node = try await ScratchNode(scratch, hostArguments: ["--server-arg", ServerArguments.testStallFlag + "600"])
+        defer { node.stop() }
+        _ = FileManager.default.createFile(atPath: node.root.appendingPathComponent("test-hold-reply").path, contents: nil)
+        let running = Task { try await node.runOnTerminal(["set", "node_max_sessions", "7"]) }
+        #expect(await eventually(timeout: 120) { node.said.contains("its reply held for good") }, "\(node.said)")
+        let action = try #require(node.said.firstMatch(of: Regex("set \\(action ([0-9a-f-]{36})\\) done"))?.output[1].substring.map(String.init))
+        let host = node.hostPID
+        kill(host, SIGKILL)
+        #expect(await eventually(timeout: 60) { kill(host, 0) != 0 || Self.isZombie(host) })
+        let next = try await ScratchNode(scratch, reusing: node.root, hostArguments: ["--server-arg", ServerArguments.testStallFlag + "600"])
+        defer { next.stop() }
+        let set = try await running.value
+        let said = set.output + set.errors
+        #expect(set.status != 0 && said.contains("isn't known") && said.contains("session host restarted"), "\(said)\n\(next.said)")
+        #expect(!next.said.contains(action), "the new host's server took the action again:\n\(next.said)")
+    }
+
+    /// The same, across a handover of the host (a build switch's): the host keeps its start and pid and carries the vault,
+    /// so the request is sent again with its action id and answered from the carried record: done, not done again.
+    @Test(NodeTraits.linuxOnly)
+    func aStateChangeLostAcrossAHandoverIsAnsweredFromTheCarriedRecord() async throws {
+        let node = try await ScratchNode(scratch, hostArguments: ["--server-arg", ServerArguments.testStallFlag + "600"])
+        defer { node.stop() }
+        let before = try WireClient(node).hello.host
+        _ = FileManager.default.createFile(atPath: node.root.appendingPathComponent("test-hold-reply").path, contents: nil)
+        let running = Task { try await node.runOnTerminal(["set", "node_max_sessions", "7"]) }
+        #expect(await eventually(timeout: 120) { node.said.contains("its reply held for good") }, "\(node.said)")
+        try await node.handOver()
+        try await Self.killServer(node)
+        let after = try WireClient(node).hello.host
+        #expect(after.pid == before.pid && after.startedAt == before.startedAt, "\(before) → \(after)")
+        let set = try await running.value
+        let said = set.output + set.errors
+        #expect(said.contains("was done at") && !said.contains("isn't known"), "\(said)\n\(node.said)")
+        #expect(node.said.contains("answered from its record (done)"), "\(node.said)")
+    }
+
+    /// A resent `approve` while the first is still being done is told so, not that its batch is gone (taken by the first).
+    @Test func aResentApproveWhileTheFirstRunsIsToldItIsBeingDone() async throws {
+        let world = try await CardWorld.make(scratch)
+        defer { world.stop() }
+        let action = UUID().uuidString.lowercased()
+        world.queue.sync { _ = world.requests.doing.insert(action) }
+        let again = try #require(await world.ask("approve", ["batch": .string("b-gone")], action: action))
+        #expect(again.error?.message == Requests.beingDoneNow(action: action), "\(again)")
+        world.queue.sync { _ = world.requests.doing.remove(action) }
+    }
+
+    static func isZombie(_ pid: pid_t) -> Bool {
+        ((try? String(contentsOfFile: "/proc/\(pid)/stat", encoding: .utf8)) ?? "").split(separator: ")").last?.trimmingCharacters(in: .whitespaces).hasPrefix("Z") == true
+    }
+
     /// The record's side: an outcome kept on its action's record once (the first stands); the record read by this build
     /// from a build before outcomes (begun), and by such a build from this one (the outcome passed over, the rest kept),
     /// as a handover from an older host and back carries it.

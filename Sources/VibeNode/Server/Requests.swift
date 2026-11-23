@@ -79,10 +79,13 @@ public final class Requests: @unchecked Sendable {
     var replies: [String: NodeWire.Reply] = [:]
     private var replyOrder: [String] = []
     /// The recorded actions being done now (recorded, their reply not yet given). On `queue`.
-    private var doing: Set<String> = []
+    var doing: Set<String> = []
     /// A scratch server's test (`--test-stall=`): true once for each `<root>/test-hold-act` made, and that recorded
     /// action is held for good after its record, before its act, as a server that ends in between leaves it.
     var testHoldsAct: (() -> Bool)?
+    /// The same for `<root>/test-hold-reply`: that action is done and its outcome recorded, and its reply held for good,
+    /// as a server (or host) that ends just then leaves it.
+    var testHoldsReply: (() -> Bool)?
     /// Each request as it is acted on, after the voice, the code and the vault's record (for tests). On `queue`.
     public var acting: (NodeWire.Request) -> Void = { _ in }
     /// The build's folder (`ServerArguments.nodeRoot`): where `hooks.install` reads the programs it installs; none:
@@ -359,6 +362,10 @@ public final class Requests: @unchecked Sendable {
             return reply(.init(re: request.id, error: .init(.badArgs, "\(request.kind) needs an action id (a UUID)")))
         }
         if let refusal = RequestArguments.refusal(request) ?? RequestArguments.formRefusal(request) { return reply(refusal) }
+        // An action this server answered already, or is doing now: answered so at once, before its card's code, its batch
+        // and the vault's record are asked again (a command line asking again after a lost reply, `NodeClient.send`, polls
+        // while it is done: no record call a poll, and `approve`'s batch, taken by the first, isn't "gone").
+        if records, let action = request.action?.lowercased(), let known = kept(request, action: action) { return reply(known) }
         guard !stopping else { return reply(.init(re: request.id, error: .init(.stopping, "the node is stopping"))) }
         // Before the host's welcome (and while the link reconnects) its session list isn't known: a state change
         // judged on it could be wrong (a `stop` would find nothing live). The command line asks again.
@@ -466,6 +473,10 @@ public final class Requests: @unchecked Sendable {
                     self?.queue.async {
                         if case .failure(let why) = written { self?.note("\(kind) (action \(action)): its outcome isn't in the vault's record: \(why)") }
                         self?.doing.remove(action)
+                        if self?.testHoldsReply?() == true {
+                            self?.note("a scratch node's test: \(kind) (action \(action)) done and its outcome recorded, its reply held for good")
+                            return
+                        }
                         reply(answer)
                     }
                 }
@@ -590,7 +601,7 @@ public final class Requests: @unchecked Sendable {
     }
 
     /// The answer a retry gets from this server's memory: the reply it kept, or that its first request is being done.
-    private func kept(_ request: NodeWire.Request, action: String) -> NodeWire.Reply? {
+    func kept(_ request: NodeWire.Request, action: String) -> NodeWire.Reply? {
         if var kept = replies[action] {
             kept.re = request.id
             return kept

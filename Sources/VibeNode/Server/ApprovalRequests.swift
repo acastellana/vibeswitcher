@@ -56,6 +56,8 @@ extension Requests {
             again.re = request.id
             return done(again)
         }
+        // One being done now (its first request's dialog was agreed to): said so, no second dialog for one action.
+        if let action, doing.contains(action) { return done(.init(re: request.id, error: .init(.refused, Self.beingDoneNow(action: action)))) }
         guard NodeWire.changesState(request.kind) else { return done(nil) }
         // What `voiced` would answer after the dialog, answered before it: no dialog for a request that can't go on (and
         // a `not-yet` the command line asks again would ask the person twice).
