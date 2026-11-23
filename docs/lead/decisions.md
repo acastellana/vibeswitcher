@@ -423,3 +423,7 @@ The user dislikes seeing one lead finished and replaced by another, and asked fo
 
 Merge health misses its objectives (12% passing only on rerun); the article names retrying flaky tests and unscoped, unpruned review rules as the failure modes we have, and an escape count is the missing measure of our review.
 
+## 2026-11-23 13:25:47 Ledger-planned flaky-test fix tasks are review audit, and one that deletes a test can't drop to review none through small_task_min (built in a-test-that-flakes).
+
+Fix tasks may now delete a test whose root cause isn't found; without a review, one load-induced timeout could end in a deleted test merged unchecked. An audit checks that the cause is real or that the deletion's reason is written down. Cost: one audit per flake fix (about 4–8 a week).
+

@@ -4364,3 +4364,4 @@ Proposed task 1: Find why dictations end with no text
 - 2026-11-23 13:22 Sampled a-merge-whose-tests for audit from review none (at cea490d9): draw 5.92 under audit_sample_percent 10 (seed 694604974488917)
 - 2026-11-23 13:22 a-merge-whose-tests small task: back to audit (the audit sample drew it)
 - 2026-11-23 13:22 Planned a-parameterized-test-s: A parameterized test's end line isn't recorded as a second flaky test
+- 2026-11-23 13:25 Exception on a-test-that-flakes by lead of vibeswitcher: edits to Sources/VibeCore/LeadToolset.swift, Sources/VibeCore/LeadRisk.swift, Sources/VibeCore/LeadAdvance.swift accepted. Reason: Ledger-planned flake fix tasks become review audit (LeadToolset.planFlakeFixes), and a fix that deletes a test can't slip to review none through small_task_min: the worker closes that either in the ri…
