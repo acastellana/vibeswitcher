@@ -52,24 +52,30 @@ says so and names the link.
 vs web                  # prints an address with #pair=…: open it within two minutes, in a browser here
 ```
 
-What to look at:
+What to look at (the page was redesigned around the lead on 2026-11-23; it opens on the project that most waits on
+you):
 
-- **Start page**: what needs you; *Brief me* (with *Speak*, read aloud by the browser); recent projects and sessions
-  that ended, each with the line that starts or resumes it.
-- **A session**: its live chat (images, tool calls folded, a long message's TL;DR, the lead's all-done card), its
-  terminal (watching only), the composer and answer boxes. These leave a **draft** and show the one line to run in a
-  terminal: a page never acts for you.
-- **Inspector** (⌘⌥0): Overview (branch, pid, command, tokens and cost, the **dev servers** the session listens on),
-  Activity, and for a lead's team the **Team** tab: tasks and each task's details, decisions, scorecard, answered
-  questions, **results**, between leads, files.
-- **Board** (Projects → a project → Board): what's asked of you, what runs, a review waiting on a usage limit, the AI
-  summary of what each agent is doing, decisions, the batch that cleared the board and its cost.
-- **This node**: host, server, build, account usage, Boost (a bolt beside This node while it's on), **health**,
-  between leads, **plugins**, notifications (per kind: something needs me, a session finishes; a sound), **dictation**.
+- **Left**: your projects, each with a ring of its tasks and one line (`2 need you`, `4 in motion`, `quiet`); New
+  project; Your own sessions, This node, Settings. The line at the bottom says what needs you; click it for *Brief
+  me* (with *Speak*).
+- **Centre, Lead**: only what passes between you and the lead: its questions with your answers, its results, and
+  with the dial at *Everything* its decisions. Click a line for its whole text in a side sheet. What waits on you is
+  at the bottom: pick an option or write your own words; that leaves a **draft** and shows the one line to run in a
+  terminal (a page never acts for you yet). The box under it drafts a note for the lead as a `vs tell` line.
+- **Centre, Roadmap**: the tasks in motion, the blocked ones and whom they wait on, the queue as one band. No dates
+  yet: they come with the workers' estimates.
+- **Right**: *Team* (each task with five steps; click one to open it in place, with a link to its worker's chat),
+  *Stats* (the scorecard), *Files* (the lead's files and the project's place).
+- **Your own sessions**: the sessions outside any project, each opening the session view: its live chat, its
+  terminal (watching only), the composer, and the inspector (Overview with the **dev servers**, Activity). Starting
+  a session and the ones that ended lately are there too.
+- **This node**: host, server, build, account usage, Boost (a bolt by the name while it's on), **health**, plugins,
+  notifications, **dictation**. Statistics and Between leads are linked from it and from ⌘K.
 - **Settings**: a search box; every setting with the line that sets it; *Terminal Look* (this browser's own).
-- **Statistics** and **Between leads**: ⌘K, then their names.
 - **Dictation**: turn it on in This node. Then hold the mic beside a box and speak; it fills the box only. Chrome sends
   your voice to Google to recognise it. Firefox has no speech recognition, so the mic isn't there.
+- The page's own words follow your browser's language (English or Spanish); the address says what is on screen, so a
+  link opens the same view and back and forward walk it.
 
 `vs web --revoke` closes every page.
 
