@@ -18,8 +18,11 @@ struct MacCompileLintTests {
                           "Tests/VibePlatformTests", "Tests/VibeCoreTests", "Tests/VibeNodeTests", "Tests/VibeHostTests", "Tests/VibeSwitcherTests"]
 
     /// Each spelling, and what to use instead, with simple word boundaries: Unicode's don't break at a "." between
-    /// letters (`st_ctim.tv_sec`). A value optional on one system only (a pthread start's argument) has no spelling to
-    /// look for: bind it per system rather than unwrapping it.
+    /// letters (`st_ctim.tv_sec`). What has no spelling to look for, and so isn't linted:
+    /// - a value optional on one system only (a pthread start's argument): bind it per system rather than unwrap it;
+    /// - an expression whose type the two compilers infer differently (on 2026-11-23 the Mac's took a test helper's
+    ///   `interpreter.map { Array($0.utf8) + [0] } ?? []` as `[Any]?`, and every `v2 macos` job failed to build):
+    ///   annotate collection literals and optional maps, in test helpers too (`let bytes: [UInt8] = …`).
     static let spellings: [(pattern: Regex<AnyRegexOutput>, use: String)] = rules.map { (try! Regex($0.pattern).wordBoundaryKind(.simple), $0.use) }
     static let rules: [(pattern: String, use: String)] = [
         (#"\bSOCK_[A-Z]+\.rawValue\b"#, "Platform.Sockets.stream / .seqpacket (glibc's socket types are an enum)"),
