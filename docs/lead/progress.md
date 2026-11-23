@@ -4343,3 +4343,9 @@ Proposed task 1: Find why dictations end with no text
 - 2026-11-23 01:25 Automatically (auto_advance): Released: on AC power, after 1 h 19 min.
 - 2026-11-23 05:54 Automatically (auto_advance): Held: on battery under your 10 % limit, so nothing starts, audits or merges by itself until AC power returns: no task paused yet, since 05:54.
 - 2026-11-23 07:09 Automatically (auto_advance): Released: on AC power, after 1 h 15 min.
+- 2026-11-23 12:30 Planned a-test-that-flakes: A test that flakes once in a merge gets its fix task at once; fix tasks may fix or delete, never retry (review audit)
+- 2026-11-23 12:30 Planned a-merge-whose-tests: A merge whose tests fail by name isn't also counted as a flake "naming no test" (review audit)
+- 2026-11-23 12:31 Planned fix-the-dictation-tests: Fix the dictation tests that flaked in merges this week (escAndTheCross…, escCancels…, eachOpenAIRun…)
+- 2026-11-23 12:31 Planned fix: Fix claudeCodeStoppingTheStatusLineStopsYourCommandToo(), which flaked twice in merges
+- 2026-11-23 12:31 Planned review-rules-carry-a: Review rules carry a trigger and a source; the verifier applies only the rules a diff triggers and says which (review audit)
+- 2026-11-23 12:31 Planned the-weekly-scorecard: The weekly scorecard counts bugs that got past review, by how the merge that brought them was reviewed (review audit)
