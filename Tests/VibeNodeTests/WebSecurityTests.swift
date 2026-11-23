@@ -463,6 +463,15 @@ final class RawClient {
         guard done else { throw Failure("write: \(errno)") }
     }
 
+    /// A pong for a ping's `payload` (a control frame, masked, its payload 125 bytes at most).
+    func sendPong(_ payload: Data) throws {
+        let bytes = Array(payload.prefix(125))
+        let mask = (0..<4).map { _ in UInt8.random(in: 0...255) }
+        let frame: [UInt8] = [0x8A, 0x80 | UInt8(bytes.count)] + mask + bytes.enumerated().map { $0.element ^ mask[$0.offset % 4] }
+        let done = Data(frame).withUnsafeBytes { Self.writeAll(fd, $0) }
+        guard done else { throw Failure("write: \(errno)") }
+    }
+
     func readHead() throws -> (status: Int, text: String) {
         let end = Data("\r\n\r\n".utf8)
         let deadline = Date().addingTimeInterval(Self.wait)

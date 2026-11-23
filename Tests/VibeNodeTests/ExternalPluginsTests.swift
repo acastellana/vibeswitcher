@@ -168,6 +168,7 @@ struct ExternalPluginsTests {
         _ = answer.send(WebTestClient.text(#"{"ok":true}"#))
         #expect(answer.message()?.text == "ok")
         #expect(await eventually(timeout: 30) { world.card(card.id)?.plugin?.state == "answered" })
+        #expect(world.card(card.id)?.plugin?.outcome == "The page answered (depth 1)", "page.answer gets the plugin's settings")
     }
 
     /// The page's answer is taken only while its request waits on the page, marked before the plugin hears it: a second
