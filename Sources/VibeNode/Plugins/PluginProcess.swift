@@ -207,18 +207,32 @@ final class PluginProcess: @unchecked Sendable {
     /// A line from the program: its answer to the call in flight, or a breach.
     private func heard(_ line: Data) {
         guard ended == nil else { return }
-        // Bounded before it is parsed: a deep line would be the parser's recursion, in the server.
-        guard Self.nesting(line) <= Self.nestingAtMost else { return breach("a line nested over \(Self.nestingAtMost) deep") }
-        guard let message = try? JSONSerialization.jsonObject(with: line) as? Message else { return breach("it wrote a line that isn't a JSON object") }
-        guard let flight = inFlight, let id = message["id"] as? Int, id == flight.id else {
-            return breach("it answered no question, or out of order")
+        switch Self.answer(line, expecting: inFlight?.id) {
+        case .failure(let why): return breach(why.description)
+        case .success(let answer):
+            guard let flight = inFlight else { return breach("it answered no question, or out of order") }
+            flight.timer.cancel()
+            inFlight = nil
+            flight.then(.success(answer))
+            sendNext()
         }
-        flight.timer.cancel()
-        inFlight = nil
+    }
+
+    /// A line as the answer to call `expecting` (nil: none in flight): the object without its `id`, or the breach. Its
+    /// nesting bounded before it is parsed (a deep line would be the parser's recursion, in the server).
+    static func answer(_ line: Data, expecting: Int?) -> Result<Message, Breach> {
+        guard nesting(line) <= nestingAtMost else { return .failure(Breach(description: "a line nested over \(nestingAtMost) deep")) }
+        guard let message = try? JSONSerialization.jsonObject(with: line) as? Message else {
+            return .failure(Breach(description: "it wrote a line that isn't a JSON object"))
+        }
+        // A number, never `true` (Foundation reads a JSON true as 1 too).
+        guard let expecting, let number = message["id"] as? NSNumber, !Platform.isBoolean(number), number.intValue == expecting,
+              number.doubleValue == Double(expecting) else {
+            return .failure(Breach(description: "it answered no question, or out of order"))
+        }
         var answer = message
         answer["id"] = nil
-        flight.then(.success(answer))
-        sendNext()
+        return .success(answer)
     }
 
     /// How deep `line` nests arrays and objects, outside its strings (counted on its bytes, before any parse).
@@ -251,7 +265,9 @@ final class PluginProcess: @unchecked Sendable {
                 Sys.close(fd)
                 users.leave()
             }
-            var buffer = Data()
+            // The wire's reader, linear however the bytes come (the fuzz tests of 2026-11-23: this loop rescanned what it
+            // held at each read and copied what followed each line it took, the two patterns `NodeWire.Lines` had).
+            var reader = NodeWire.Lines(maxLine: Self.lineBytesAtMost)
             var logged = 0
             var chunk = [UInt8](repeating: 0, count: 64 * 1024)
             while true {
@@ -261,15 +277,8 @@ final class PluginProcess: @unchecked Sendable {
                 guard count > 0 else { break }
                 guard let self else { return }
                 if lines {
-                    buffer.append(contentsOf: chunk[0..<count])
-                    while let end = buffer.firstIndex(of: UInt8(ascii: "\n")) {
-                        let line = buffer[buffer.startIndex..<end]
-                        buffer = Data(buffer[(end + 1)...])
-                        if line.count > Self.lineBytesAtMost { self.queue.async { self.breach("a line over 256 KiB") }; return }
-                        let copy = Data(line)
-                        self.queue.async { self.heard(copy) }
-                    }
-                    if buffer.count > Self.lineBytesAtMost { self.queue.async { self.breach("a line over 256 KiB") }; return }
+                    for line in reader.append(Data(chunk[0..<count])) { self.queue.async { self.heard(line) } }
+                    if reader.tooLong { self.queue.async { self.breach("a line over 256 KiB") }; return }
                 } else if logged < Self.stderrKept {
                     let text = String(decoding: chunk[0..<min(count, Self.stderrKept - logged)], as: UTF8.self)
                     logged += count

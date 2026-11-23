@@ -34,6 +34,20 @@ struct PluginAskEnvelope: Codable, Equatable, StampedAsk {
     }
 }
 
+/// A plugin's JSON values read strictly (the fuzz tests of 2026-11-23): Foundation reads a JSON `true` as the number 1
+/// and `1` as `true`, so `as? Bool` and `as? Int` take either; these take only their own type.
+enum PluginJSON {
+    static func bool(_ value: Any?) -> Bool? {
+        guard let number = value as? NSNumber, Platform.isBoolean(number) else { return nil }
+        return number.boolValue
+    }
+
+    static func int(_ value: Any?) -> Int? {
+        guard let number = value as? NSNumber, !Platform.isBoolean(number), let int = Int(exactly: number.doubleValue) else { return nil }
+        return int
+    }
+}
+
 /// An external plugin (the definition's "External plugins"): a program in a folder the user added, run as a child
 /// (`PluginProcess`) from a sealed copy checked against the vault's record, speaking protocol v1. Everything it answers
 /// is data the core checks: a card's shape and the core's checks on it (`PluginDesk.draw`), its facts shown as its own
@@ -94,8 +108,7 @@ final class ExternalPlugin: FeaturePlugin {
                     process.call("hello", ["protocol": 1, "settings": settings]) { answer in
                         desk.later {
                             switch answer {
-                            case .success(let hello) where hello["plugin"] as? String == id && hello["version"] as? String == manifest.version
-                                && hello.count == 2:
+                            case .success(let hello) where Self.helloFits(hello, id: id, version: manifest.version):
                                 self.process = process
                                 self.finishStarting(.success(process))
                             case .success:
@@ -110,6 +123,36 @@ final class ExternalPlugin: FeaturePlugin {
                 }
             }
         }
+    }
+
+    /// A `hello` that is exactly its manifest's id and version.
+    static func helloFits(_ hello: PluginProcess.Message, id: String, version: String) -> Bool {
+        hello.count == 2 && hello["plugin"] as? String == id && hello["version"] as? String == version
+    }
+
+    /// An outcome's words, checked: a state word (not `waiting`), a plain line for the person, one for the asking agent
+    /// that doesn't open with a bracket (the core's prefix is its only bracketed part). Nil when it doesn't fit.
+    static func outcome(_ outcome: [String: Any]) -> (state: String, person: String, agent: String)? {
+        guard outcome.keys.allSatisfy(["state", "person", "agent"].contains), let state = outcome["state"] as? String, LeadVaultV2.pluginID(state),
+              state != PluginCard.waitingState, let person = outcome["person"] as? String, PluginManifest.plain(person, limit: 300),
+              let agent = outcome["agent"] as? String, PluginManifest.plain(agent, limit: 1000),
+              !agent.trimmingCharacters(in: .whitespaces).hasPrefix("[") else { return nil }
+        return (state, person, agent)
+    }
+
+    /// A page as a plugin gives it: html, the scripts' and styles' hashes, and its life in whole seconds. Nil when it
+    /// doesn't fit (what the page then refuses is `PluginPage.Spec.refusal`).
+    static func pageSpec(_ given: [String: Any]) -> PluginPage.Spec? {
+        guard given.keys.allSatisfy(["html", "scripts", "styles", "life"].contains), let html = given["html"] as? String,
+              let scripts = given["scripts"] as? [String], let styles = given["styles"] as? [String], let life = PluginJSON.int(given["life"]) else { return nil }
+        return PluginPage.Spec(html: html, scripts: scripts, styles: styles, life: TimeInterval(life))
+    }
+
+    /// A `settings.check` answer: taken (`{ok: true}`), refused with its words (`{refuse}`), or nil when it doesn't fit.
+    static func settingsAnswer(_ message: PluginProcess.Message) -> Result<Void, PluginRefusal>? {
+        if message.count == 1, PluginJSON.bool(message["ok"]) == true { return .success(()) }
+        if message.count == 1, let refuse = message["refuse"] as? String { return .failure(PluginRefusal(ConfigSeal.inert(refuse, limit: 200))) }
+        return nil
     }
 
     private func finishStarting(_ result: Result<PluginProcess, PluginRefusal>) {
@@ -271,7 +314,9 @@ final class ExternalPlugin: FeaturePlugin {
         for fact in (object["facts"] as? [[String: Any]]) ?? [] {
             guard fact.keys.allSatisfy(["label", "value", "decisive"].contains), let label = text(fact["label"], 60), let value = fact["value"] as? String,
                   value.count <= 2000 else { return .failure(PluginRefusal("a fact is a plain label and a value")) }
-            facts.append(.init(name: "fact", label: "\(Self.says(manifest.id)), \(label)", value: value, decisive: fact["decisive"] as? Bool == true))
+            // `decisive` a boolean when given (the fuzz tests: a 1 read as true).
+            if fact["decisive"] != nil, PluginJSON.bool(fact["decisive"]) == nil { return .failure(PluginRefusal("a fact's decisive is true or false")) }
+            facts.append(.init(name: "fact", label: "\(Self.says(manifest.id)), \(label)", value: value, decisive: PluginJSON.bool(fact["decisive"]) == true))
         }
         guard facts.count <= 13, object["facts"] == nil || object["facts"] is [[String: Any]] else { return .failure(PluginRefusal("12 facts at most")) }
         var context: PluginCard.Context?
@@ -284,7 +329,7 @@ final class ExternalPlugin: FeaturePlugin {
         for action in actions {
             guard action.keys.allSatisfy(["word", "label", "acts", "short", "does", "verb", "marks"].contains),
                   let word = action["word"] as? String, LeadVaultV2.pluginID(word), let label = text(action["label"], 30),
-                  let acts = action["acts"] as? Bool, let short = text(action["short"], 80), let does = text(action["does"], 400),
+                  let acts = PluginJSON.bool(action["acts"]), let short = text(action["short"], 80), let does = text(action["does"], 400),
                   let verb = text(action["verb"], 120), let marks = action["marks"] as? String, LeadVaultV2.pluginID(marks) else {
                 return .failure(PluginRefusal("an action is a word, a label, acts, short, does, verb and marks"))
             }
@@ -344,12 +389,10 @@ final class ExternalPlugin: FeaturePlugin {
     /// The plugin's page, served once by the core: its answer handed to `page.answer`.
     private func openPage(_ given: [String: Any], request id: String, ask: PluginAskEnvelope, process: PluginProcess, desk: PluginDesk, act: PluginAct,
                           then: @escaping (Result<NodeWire.Value, LeadEngine.CardFailure>) -> Void) {
-        guard given.keys.allSatisfy(["html", "scripts", "styles", "life"].contains), let html = given["html"] as? String,
-              let scripts = given["scripts"] as? [String], let styles = given["styles"] as? [String], let life = given["life"] as? Int else {
+        guard let spec = Self.pageSpec(given) else {
             misshapen("a page is html, scripts, styles and life", desk: desk)
             return then(.failure(.refused("\(info.title)'s page didn't fit: nothing was opened")))
         }
-        let spec = PluginPage.Spec(html: html, scripts: scripts, styles: styles, life: TimeInterval(life))
         if let why = spec.refusal {
             answers[id] = nil
             desk.change(request: id, state: "failed", outcome: "Its page wasn't served: \(why)", closed: "its page wasn't served: \(why)")
@@ -398,10 +441,7 @@ final class ExternalPlugin: FeaturePlugin {
     /// An outcome's words, checked: a state word, a line for the person (the card's), one for the asking agent (told from
     /// the plugin, through VibeSwitcher). The card settles. Nil when it doesn't fit.
     private func apply(_ outcome: [String: Any], request id: String, desk: PluginDesk) -> (state: String, person: String)? {
-        guard outcome.keys.allSatisfy(["state", "person", "agent"].contains), let state = outcome["state"] as? String, LeadVaultV2.pluginID(state),
-              state != PluginCard.waitingState, let person = outcome["person"] as? String, PluginManifest.plain(person, limit: 300),
-              let agent = outcome["agent"] as? String, PluginManifest.plain(agent, limit: 1000),
-              !agent.trimmingCharacters(in: .whitespaces).hasPrefix("[") else { return nil }
+        guard let (state, person, agent) = Self.outcome(outcome) else { return nil }
         answers[id] = state
         desk.change(request: id, state: state, outcome: person, closed: person)
         // One line; the core's prefix is its only bracketed part (the review of step C, M2).
@@ -428,10 +468,12 @@ final class ExternalPlugin: FeaturePlugin {
     private func checked(_ name: String, _ value: String, on process: PluginProcess, then: @escaping (Result<String?, PluginRefusal>) -> Void) {
         process.call("settings.check", ["key": name, "value": value]) { answer in
             switch answer {
-            case .success(let message) where message["ok"] as? Bool == true && message.count == 1: then(.success(value))
-            case .success(let message) where message["refuse"] is String && message.count == 1:
-                then(.failure(PluginRefusal(ConfigSeal.inert(message["refuse"] as? String ?? "", limit: 200))))
-            case .success: then(.failure(PluginRefusal("its answer didn't fit")))
+            case .success(let message):
+                switch Self.settingsAnswer(message) {
+                case .success?: then(.success(value))
+                case .failure(let why)?: then(.failure(why))
+                case nil: then(.failure(PluginRefusal("its answer didn't fit")))
+                }
             case .failure(let breach): then(.failure(PluginRefusal(breach.description)))
             }
         }

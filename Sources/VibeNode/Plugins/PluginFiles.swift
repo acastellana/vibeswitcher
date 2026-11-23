@@ -200,6 +200,10 @@ enum PluginProgram {
     static let programHeadersAtMost = 256
     static let dynamicEntriesAtMost = 4096
     static let stringBytesAtMost = 4096
+    /// The most distinct paths (libraries by path, search folders) one program's check walks: each is a walk of the file
+    /// system, and a dynamic section of 4,096 search paths of 2,048 folders each asked 8 million of them (19 s, the fuzz
+    /// tests of 2026-11-23). A program past it isn't run.
+    static let pathsCheckedAtMost = 64
 
     /// An ELF program's loader, search paths and named libraries, each `trusted`; 64-bit little-endian only. Every field
     /// is untrusted: read as UInt64, checked against the bytes read before any conversion, never added or multiplied
@@ -274,18 +278,26 @@ enum PluginProgram {
         }
         let (base, over) = (table - load.vaddr).addingReportingOverflow(load.offset)
         guard !over, within(base, 1) != nil else { return "its ELF string table doesn't read" }
+        // Each distinct path walked once, and only so many of them.
+        var checked: Set<String> = []
+        func trustedOnce(_ path: String) -> String? {
+            if checked.contains(path) { return nil }
+            guard checked.count < pathsCheckedAtMost else { return "it names over \(pathsCheckedAtMost) libraries and search folders by path" }
+            checked.insert(path)
+            return trusted(path)
+        }
         for entry in named {
             let (place, over) = base.addingReportingOverflow(entry.value)
             guard !over, let text = string(place) else { return "its ELF dynamic section doesn't read" }
             if entry.tag == 1 {
                 // A library by name is found in root's folders; by a path, that path must be root's.
-                if text.contains("/"), let why = trusted(text) { return "a library it names: \(why)" }
+                if text.contains("/"), let why = trustedOnce(text) { return "a library it names: \(why)" }
                 continue
             }
             if text.contains("$ORIGIN") || text.contains("${ORIGIN}") { return "its ELF search path names $ORIGIN (its own folder)" }
             for folder in text.split(separator: ":", omittingEmptySubsequences: false).map(String.init) {
                 guard !folder.isEmpty else { return "its ELF search path has an empty entry (the working folder)" }
-                if let why = trusted(folder) { return "its ELF search path: \(why)" }
+                if let why = trustedOnce(folder) { return "its ELF search path: \(why)" }
             }
         }
         return nil
