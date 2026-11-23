@@ -569,6 +569,9 @@ public final class NodeSessions: @unchecked Sendable {
 
     // MARK: The state folder
 
+    /// Whether the state folder is watched now. On `queue`; for the tests.
+    var watchedStateFolder: Bool { watch != nil }
+
     /// Hook writes land as renames in the state folder: a scan for them at once (coalesced), not at the clock's next.
     /// The folder is made (0700) when it isn't there. One that can't be watched (a 9p file system, no inotify instance
     /// left) is scanned on the clock alone, said once, and tried again at a scan `Timing.watchRetry` on; one removed is

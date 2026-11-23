@@ -9,8 +9,9 @@ extension Platform {
     /// a queue. Changes that come close together are told as one. `stop()` ends either, from any thread, and so does
     /// letting go of the watch.
     ///
-    /// The Mac's is a kqueue for `wait()` and a dispatch source for `deliver` (FolderWatch+Darwin.swift); Linux's is
-    /// inotify for both (FolderWatch+Linux.swift). What differs:
+    /// The Mac's is a kqueue for `wait()` and a dispatch source for `deliver` (FolderWatch+Darwin.swift); Linux's is a
+    /// watch on the process's one inotify instance for both (FolderWatch+Linux.swift, `InotifyHub`): a process holds one
+    /// instance however many watches it makes. What differs:
     /// - `folderGone` for a folder that was removed comes at once on the Mac. On Linux it comes when the last
     ///   descriptor open on the folder is closed (some process's working directory counts): while one is, the
     ///   kernel keeps the folder and says nothing. A rename is told at once on both.
@@ -36,7 +37,7 @@ extension Platform {
         let system: System
 
         /// Watches the folder at `path` from now on; nil when it can't be watched (it isn't there, it isn't a
-        /// folder, its file system doesn't tell, no descriptor is left).
+        /// folder, its file system doesn't tell, the system has no watch left: that last counted, `Platform.Watches`).
         public init?(path: String) {
             guard let system = System(path: path) else { return nil }
             self.system = system

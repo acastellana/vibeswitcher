@@ -35,7 +35,7 @@ extension LeadEngine {
     /// On `queue`.
     func refreshNow() {
         startPending()
-        if !promptAuditLooked { lookAtPromptAudits() }
+        if !promptAudit.hasLooked { lookAtPromptAudits() }
         // A running lead the vault couldn't be asked about at the server's start is bound again now (E8).
         if rebindAgain { keepRunningLeads() }
         sweepRoles()
