@@ -1345,6 +1345,8 @@ public enum LeadPrompts {
         \(Policy.regressionTest(base: workflow.base))
         \(Policy.workerFindings)
         \(Policy.workerBudget(LeadBudget.minutes(task, default: workflow.taskBudgetMinutes)))
+        Estimates: at your first progress, and whenever it changes, give likely_min and worst_min (minutes to done from \
+        now, worst at least likely): the lead plans by them, and the user sees when work lands.
         Stuck: report blocked with exactly what you need. Don't fake a pass: never weaken or delete tests.
         \(red)\(task.workerAgent == .codex ? "\n" + codexWorker + "\nGit commands a Claude worker's rules refuse, which you hold yourself: \(deniedGit(workflow)).\n" : "")
         \(team.map { $0 + "\n\n" } ?? "")\(WorkerBrief.render(task))

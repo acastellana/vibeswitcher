@@ -324,6 +324,30 @@ struct NodeAcceptanceTests {
         #expect(WireSchema.check(first, as: "board", strict: true) == nil, "\(first)")
     }
 
+    @Test("A12c: a task's estimate gives it a landing on the board, the same in its text and JSON")
+    func a12cEstimatesLand() async throws {
+        let node = try await ScratchNode(scratch, holdFirstLook: true)
+        defer { node.stop() }
+        let repo = try await Self.repository(node)
+        let lead = try await Self.startLead(node, repo, goal: "add a subtract function with a test")
+        let before = lead.tools.calls().count
+        try lead.tools.call("add_task", ["title": "Add subtract", "goal": "Add subtract.", "acceptance": ["it builds"], "auto_advance": false,
+                                         "likely_min": 30, "worst_min": 60])
+        try #require(await eventually(timeout: 120) { lead.tools.calls().count == before + 1 }, "\(lead.tools.calls())")
+        let shown = await Self.polled(timeout: 60) { (try? await node.run(["board", repo.path]))?.output.contains("Add subtract") == true }
+        let board = try await node.run(["board", repo.path])
+        #expect(shown && board.output.contains("Add subtract") && board.output.contains("· lands ~"), "\(board.output)\(board.errors)")
+        #expect(board.output.contains("Estimates: fewer than 5 estimated merges here (0)"), "\(board.output)")
+        let json = try await node.run(["board", repo.path, "--json"])
+        let value = try #require(NodeWire.decode(NodeWire.Value.self, Data(json.output.utf8)), "\(json.output)")
+        let first = try #require(value["boards"]?.array?.first)
+        let task = try #require(first["tasks"]?.array?.first { $0["slug"]?.string == "add-subtract" }, "\(first)")
+        #expect(task["estimate"]?["likelyMin"]?.int == 30 && task["estimate"]?["by"]?.string == "lead", "\(task)")
+        #expect(task["forecast"]?["basis"]?.string == "estimated" && task["forecast"]?["likely"]?.string != nil, "\(task)")
+        #expect(first["score"]?["enough"]?.bool == false && first["score"]?["correctionPct"]?.int == 100, "\(first)")
+        #expect(WireSchema.check(first, as: "board", strict: true) == nil, "\(first)")
+    }
+
     @Test("A13: answer and tell reach the lead, which takes them as the user's")
     func a13AnswerAndTell() async throws {
         let node = try await ScratchNode(scratch, holdFirstLook: true)

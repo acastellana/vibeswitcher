@@ -701,7 +701,8 @@ public final class LeadToolset: MCPToolset {
                 MCPToolInfo(name: "ask_lead", description: "Ask the project lead something without stopping your work; the answer arrives as a message.",
                             properties: ["question": P(type: "string", description: "The question")], required: ["question"]),
                 MCPToolInfo(name: "progress", description: "Note a milestone in one line (a part working, checks passing, what's next). It shows on your task's lane in the lead's Team view; it doesn't message the lead. Call it at each milestone.",
-                            properties: ["text": P(type: "string", description: "One line: what's done or under way")], required: ["text"]),
+                            properties: ["text": P(type: "string", description: "One line: what's done or under way"),
+                                         "likely_min": Self.likelyProperty, "worst_min": Self.worstProperty], required: ["text"]),
                 MCPToolInfo(name: "answer_findings", description: "Answer your task's open audit findings by id: fixed (commit the fix first) or disagree, with a reason. The lead sees the answers, and the re-audit judges them: it checks each fix, and closes a finding whose disagreement it accepts.",
                             properties: ["answers": P(type: "array", description: Self.answersShape, items: "object")], required: ["answers"]),
             ])
@@ -732,7 +733,8 @@ public final class LeadToolset: MCPToolset {
                                          "review": Self.reviewProperty, "audit_reason": Self.auditReasonProperty, "after": Self.afterProperty, "auto_advance": Self.autoAdvanceProperty,
                                          "budget_min": Self.budgetProperty, "model": Self.modelProperty, "agent": Self.agentProperty, "done_check": Self.doneCheckProperty,
                                          "advisor": Self.advisorProperty, "effort": Self.effortProperty,
-                                         "origin": Self.originProperty, "team": Self.teamProperty, "goal_id": Self.goalIDProperty]),
+                                         "origin": Self.originProperty, "team": Self.teamProperty, "goal_id": Self.goalIDProperty,
+                                         "likely_min": Self.likelyProperty, "worst_min": Self.worstProperty]),
                 MCPToolInfo(name: "add_goal", description: "Add a goal for the project: one of the 3 to 5 the roadmap is drawn from, in plain words, with what done means. Every task belongs to one (goal_id on add_task and update_task). At most \(LeadBoard.mostOpenGoals) open at once.",
                             properties: ["title": P(type: "string", description: "The goal, in plain words, one line"),
                                          "done": P(type: "string", description: "What done means for it, one line")],
@@ -761,7 +763,7 @@ public final class LeadToolset: MCPToolset {
                                          "review": Self.reviewProperty, "audit_reason": Self.auditReasonProperty, "after": Self.afterProperty, "auto_advance": Self.autoAdvanceProperty,
                                          "budget_min": Self.budgetProperty, "model": Self.modelProperty, "agent": Self.agentProperty, "done_check": Self.doneCheckProperty,
                                          "advisor": Self.advisorProperty, "effort": Self.effortProperty, "team": Self.teamProperty,
-                                         "goal_id": Self.goalIDProperty,
+                                         "goal_id": Self.goalIDProperty, "likely_min": Self.likelyProperty, "worst_min": Self.worstProperty,
                                          "reroll": P(type: "boolean", description: "Re-roll it after audit rounds that didn't land: its worker and verifier stop, its branch is kept as archive/<slug>-<n>, its worktree goes, and a fresh worker starts from the base on a new agent/<slug>, its context given a summary of the findings and the worker's answers so far. Contract changes in the same call apply first; not with status"),
                                          "exception": P(type: "object", description: "A deviation from the contract you accept, recorded as your sealed note, an object of scope (files or a glob, as in .gitignore, from the repository's root; a string or a list), reason and evidence, each required. An audit's verifier sees the exceptions recorded before that audit started, in your notes; one recorded later isn't presented as covering an audit under way, and the result says so. It decides nothing about review: no floor, sensitive path or audit goes by it"),
                                          "accept_verdict": P(type: "boolean", description: "With exception: settle the task's verdict on its head, when it's suspect with no Important finding and its only concern is an edit outside the boundaries: the task goes on to merge with no new audit, and the record shows the verdict and who accepted what. The exception's scope must cover every file the verdict names, and it covers only those; a sensitive path isn't accepted this way (audit again, with the exception recorded). Refused for any other verdict, which is handled as ever"),
@@ -894,8 +896,11 @@ public final class LeadToolset: MCPToolset {
     public func call(_ name: String, _ arguments: [String: Any]) -> MCPToolResult {
         let result = callTool(name, arguments)
         // The lead's next step after a task was left without a goal, or with none set on a busy project (`LeadGoals`).
-        guard role == .lead, !result.isError, let notice = goalsNotice(after: name) else { return result }
-        return MCPToolResult(text: result.text + "\n\n" + notice, isError: result.isError)
+        // And a task at work past its worst case (`LeadForecast.overdueLine`), once a task an estimate.
+        guard role == .lead, !result.isError else { return result }
+        let notices = [goalsNotice(after: name), overdueNotice()].compactMap { $0 }
+        guard !notices.isEmpty else { return result }
+        return MCPToolResult(text: result.text + "\n\n" + notices.joined(separator: "\n"), isError: result.isError)
     }
 
     private func callTool(_ name: String, _ arguments: [String: Any]) -> MCPToolResult {
@@ -1245,6 +1250,7 @@ public final class LeadToolset: MCPToolset {
             let goalID = try goalArgument(arguments, on: board)
             var task = LeadTask(slug: Slug.make(title, taken: store.takenSlugs(board)), title: title, contract: contract)
             task.goalID = goalID ?? nil
+            if let estimate = try Self.estimateArgument(arguments, by: .lead) { task.add(estimate) }
             task.review = review
             task.auditReason = auditReason
             task.origin = taskOrigin?.rawValue
@@ -1542,7 +1548,7 @@ public final class LeadToolset: MCPToolset {
 
     static let updateKeys: Set<String> = ["task", "title", "goal", "acceptance", "boundaries", "context", "append_context", "status", "reason", "into", "review", "audit_reason", "reroll",
                                           "after", "auto_advance", "budget_min", "model", "agent", "advisor", "effort", "done_check", "exception", "accept_verdict", "hold_audit", "team",
-                                          "goal_id"]
+                                          "goal_id", "likely_min", "worst_min"]
 
     private func updateTask(_ arguments: [String: Any]) throws -> MCPToolResult {
         let slug = try taskSlug(arguments)
@@ -1562,6 +1568,17 @@ public final class LeadToolset: MCPToolset {
             }
             goalNote = goal.map { "\(slug)'s goal: \($0)." } ?? "\(slug) has no goal now."
             if Set(arguments.keys).subtracting(["task", "goal_id"]).isEmpty { return MCPToolResult(text: goalNote) }
+        }
+        // The lead's estimate (sets or corrects the worker's), the same way.
+        if let estimate = try Self.estimateArgument(arguments, by: .lead) {
+            try store.update { board in
+                guard let at = board.taskIndex(slug) else { throw Problem(text: "No task \(slug) on the board. Nothing was changed.") }
+                board.tasks[at].add(estimate)
+            }
+            let said = "\(slug)'s estimate (yours): \(estimate.likelyMin) min likely, \(estimate.worstMin) at worst, from now."
+            if Set(arguments.keys).subtracting(["task", "goal_id", "likely_min", "worst_min"]).isEmpty {
+                return MCPToolResult(text: [goalNote, said].filter { !$0.isEmpty }.joined(separator: " "))
+            }
         }
         var status: LeadTask.Status?
         let reason = (arguments["reason"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
@@ -6301,11 +6318,20 @@ public final class LeadToolset: MCPToolset {
         // One line (several are joined), short enough for the lane; the board keeps the latest ones.
         let line = (memberSeat().map { "\($0.member.name): " } ?? "") + text.split(whereSeparator: \.isNewline).joined(separator: " ")
         let checkpoint = LeadCheckpoint(text: line.count > 300 ? String(line.prefix(300)) + "…" : line)
-        try store.update { board in
-            guard let index = board.taskIndex(slug) else { return }
+        let estimate = try Self.estimateArgument(arguments, by: .worker)
+        let hadOne = try store.update { board -> Bool in
+            guard let index = board.taskIndex(slug) else { return true }
             board.tasks[index].checkpoints = ((board.tasks[index].checkpoints ?? []) + [checkpoint]).suffix(LeadTask.keptCheckpoints)
+            let had = board.tasks[index].estimates?.isEmpty == false
+            if let estimate { board.tasks[index].add(estimate) }
+            return had
         }
-        return MCPToolResult(text: "Noted on your task's lane. Keep going.")
+        // The lead plans by the worker's estimate: asked for while the task has none.
+        if estimate == nil, !hadOne {
+            return MCPToolResult(text: "Noted on your task's lane. Give your estimate with your next progress: likely_min and worst_min, minutes to done from now (the lead plans by them). Keep going.")
+        }
+        return MCPToolResult(text: estimate.map { "Noted on your task's lane, with your estimate (\($0.likelyMin) min likely, \($0.worstMin) at worst). Keep going." }
+                             ?? "Noted on your task's lane. Keep going.")
     }
 
     /// answer_findings' answers, as its schema tells the worker.
@@ -6820,6 +6846,8 @@ public final class LeadToolset: MCPToolset {
         if let line = archiveNudgeOnce() { lines.append(line) }
         if let line = progressNudgeOnce() { lines.append(line) }
         lines.append(Self.clip(LeadGoals.unsortedLine(board) ?? LeadGoals.statusLine(board), 600))
+        // How this project's estimates run, once any task has one.
+        if board.tasks.contains(where: { $0.estimates?.isEmpty == false }) { lines.append(Self.clip(LeadForecast.score(board).line, 400)) }
         if let listing {
             do {
                 let mac = try macLoad(listing, load: runtime.steadyLoad())

@@ -604,6 +604,13 @@ public enum WireVectors {
         board.goals = [LeadGoal(id: "launch", title: "Launch the paid plans", done: "Pricing and onboarding are live for new sign-ups", createdAt: now - 9000),
                        shipped]
         for (index, goal) in [(0, "launch"), (1, "launch"), (2, "uploads")] where index < board.tasks.count { board.tasks[index].goalID = goal }
+        // Estimates (the web design's "Estimates"): the worker at work said 30 minutes (60 at worst) ten minutes ago; the
+        // one in review is past its likely estimate; the lead estimated the queued one, which comes after the first.
+        if board.tasks.count > 3 {
+            board.tasks[1].add(LeadEstimate(likelyMin: 30, worstMin: 60, at: now - 600, by: .worker))
+            board.tasks[2].add(LeadEstimate(likelyMin: 20, worstMin: 40, at: now - 1500, by: .worker))
+            board.tasks[3].add(LeadEstimate(likelyMin: 45, worstMin: 90, at: now - 3000, by: .lead))
+        }
         return board
     }
 

@@ -411,10 +411,21 @@ public enum WireSchema {
                 field("files", .list(.shape("board.file"))), field("recordsDir", Kind.string.orNull),
                 field("results", .list(.shape("board.update"))),
                 // The project's goals, in their order (the web design's "Goals", 2026-11-23); none from a lead that keeps none.
-                optional("goals", .list(.shape("board.goal")))]),
+                optional("goals", .list(.shape("board.goal"))),
+                // The project's estimating score (the web design's "Estimates", 2026-11-23).
+                optional("score", Kind.shape("board.score").orNull)]),
+            shape("board.score", from: "BoardValue.score", [
+                field("estimated", .int), field("ratioPct", Kind.int.orNull), field("insideWorstPct", Kind.int.orNull), field("enough", .bool),
+                field("correctionPct", .int), field("clamped", .bool), field("medianMin", Kind.int.orNull), field("line", .string)]),
+            shape("board.landing", from: "BoardValue.landing", [
+                field("likely", Kind.date.orNull), field("worst", Kind.date.orNull), field("basis", .words(LeadLanding.Basis.allCases.map(\.rawValue))),
+                field("waitsOn", Kind.string.orNull), field("overdueMin", Kind.int.orNull), field("over", .bool), field("undated", .int)]),
+            shape("board.estimate", from: "BoardValue.task", [field("likelyMin", .int), field("worstMin", .int), field("at", .date),
+                                                              field("by", .words(["worker", "lead"]))]),
+            shape("board.actual", from: "BoardValue.task", [field("total", .int), field("unblocked", .int)]),
             shape("board.goal", from: "BoardValue.goals", [
                 field("id", .string), field("title", .string), field("done", .string), field("state", .words(LeadGoal.State.allCases.map(\.rawValue))),
-                field("toGo", .int), field("finished", .int)]),
+                field("toGo", .int), field("finished", .int), optional("forecast", .shape("board.landing"))]),
             shape("board.update", from: "BoardRecords.result", [field("id", .string), field("title", .string), field("body", .string),
                                                                field("at", .date), field("images", .int)]),
             // A task's details (`board.task`), a result's screenshot (`board.image`).
@@ -465,7 +476,9 @@ public enum WireSchema {
                 field("since", Kind.date.orNull), field("startedAt", Kind.date.orNull), field("attempts", .int),
                 field("budgetMin", Kind.int.orNull), field("overBudget", .bool), field("branch", Kind.string.orNull), field("after", strings),
                 field("checkpoint", Kind.shape("board.checkpoint").orNull), field("audit", Kind.shape("board.audit").orNull),
-                field("merged", Kind.shape("board.merged").orNull), optional("goal", Kind.string.orNull)]),
+                field("merged", Kind.shape("board.merged").orNull), optional("goal", Kind.string.orNull),
+                optional("estimate", Kind.shape("board.estimate").orNull), optional("forecast", .shape("board.landing")),
+                optional("blockedMin", .int), optional("actualMin", Kind.shape("board.actual").orNull)]),
             shape("board.checkpoint", from: "BoardValue.task", [field("text", .string), field("at", Kind.date.orNull)]),
             shape("board.audit", from: "BoardValue.audit", [field("verdict", Kind.words(["passed", "failed"]).orNull), field("open", .int),
                                                            field("findings", .int), field("rounds", .int)]),

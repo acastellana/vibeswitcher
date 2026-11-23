@@ -107,7 +107,22 @@ struct BoardTests {
             fields["goal"] = nil
             return .object(fields)
         })
-        for value in [WireVectors.boardValue, WireVectors.boardMoved, unreadable, older, questioned, nothingMerged, .object(beforeGoals)] {
+        // A server before estimates: goals without a forecast, tasks without theirs, no score.
+        var beforeEstimates = WireVectors.boardValue.object ?? [:]
+        beforeEstimates["score"] = nil
+        beforeEstimates["goals"] = .array((beforeEstimates["goals"]?.array ?? []).map { goal in
+            var fields = goal.object ?? [:]
+            fields["forecast"] = nil
+            return .object(fields)
+        })
+        beforeEstimates["tasks"] = .array((beforeEstimates["tasks"]?.array ?? []).map { task in
+            var fields = task.object ?? [:]
+            for key in ["estimate", "forecast", "blockedMin", "actualMin"] { fields[key] = nil }
+            return .object(fields)
+        })
+        let scored = BoardValue.value(project: "p", root: "/r", board: Self.scoredBoard(now: WireVectors.boardNow.timeIntervalSince1970), now: WireVectors.boardNow)
+        for value in [WireVectors.boardValue, WireVectors.boardMoved, unreadable, older, questioned, nothingMerged, .object(beforeGoals),
+                      .object(beforeEstimates), scored] {
             #expect(WireSchema.check(value, as: "board", strict: true) { field, state in seen.insert("\(field) \(state)") } == nil)
         }
         let missed = WireSchema.coverage(of: ["board"]).subtracting(seen).sorted()
@@ -426,6 +441,30 @@ struct BoardTests {
         #expect(WireSchema.check(value, as: "board") == nil)
     }
 
+    /// Six merged tasks estimated at 10 minutes (60 at worst) that took 20 at work (one of them 30, ten blocked), and one
+    /// at work past its worst case: a score with enough merges, 2× over, and an overdue landing.
+    static func scoredBoard(now: Double) -> LeadBoard {
+        var board = LeadBoard()
+        for index in 0..<6 {
+            var task = LeadTask(id: "m\(index)", slug: "merged-\(index)", title: "Merged \(index)",
+                                contract: LeadContract(goal: "g", acceptance: [], boundaries: [], context: ""), status: .done)
+            let start = now - 86_000 + Double(index) * 3600
+            task.startedAt = start
+            task.add(LeadEstimate(likelyMin: 10, worstMin: 60, at: start, by: .worker))
+            task.states = index == 0 ? [LeadStateStamp(status: .running, at: start), LeadStateStamp(status: .blocked, at: start + 600),
+                                        LeadStateStamp(status: .running, at: start + 1200)] : [LeadStateStamp(status: .running, at: start)]
+            task.merged = LeadMergeRecord(commit: "c\(index)", tested: true)
+            task.merged?.at = start + (index == 0 ? 1800 : 1200)
+            board.tasks.append(task)
+        }
+        var late = LeadTask(id: "late", slug: "late", title: "Late one", contract: LeadContract(goal: "g", acceptance: [], boundaries: [], context: ""),
+                            status: .running)
+        late.startedAt = now - 7200
+        late.add(LeadEstimate(likelyMin: 10, worstMin: 20, at: now - 7200, by: .worker))
+        board.tasks.append(late)
+        return board
+    }
+
     // MARK: The command line's text
 
     @Test func theCommandLinePrintsOneShortLineATask() {
@@ -441,16 +480,19 @@ struct BoardTests {
             "  - Every footer link opens its page",
             "  Cost: 2 tasks, 1.5 h of worker time, 12M tokens, est. $6.40; most expensive: Swap the hero image (est. $4.10) (estimates at the API prices of 2026-11-01)",
             // The goals as headings over their tasks (the open first), then the tasks with none (the vectors' board has two).
-            "Goal: Launch the paid plans (2 to go of 2) — done means: Pricing and onboarding are live for new sign-ups",
+            // Each with where it lands (estimates: the vectors' board has three, at 09:30), a goal by its last task.
+            "Goal: Launch the paid plans (2 to go of 2) — done means: Pricing and onboarding are live for new sign-ups · lands at least ~09:50 (by 10:20); 1 task with no date",
             "  Blocked 18m  Rewrite the pricing page's copy — Which plan names do we launch with?",
             // The running task's AI summary, in its line's place (the vectors' board carries one).
-            "  Rework 1 4m  Onboarding: the three first-run steps — Making the sign-up form check each field as you leave it",
-            "Goal: Uploads never lose a file (done) — done means: A failed upload retries once and says so",
-            "  In review 1m  Retry a failed upload once — Waiting for the audit",
+            "  Rework 1 4m  Onboarding: the three first-run steps — Making the sign-up form check each field as you leave it · lands ~09:50 (by 10:20)",
+            "Goal: Uploads never lose a file (done) — done means: A failed upload retries once and says so · lands ~09:30 (by 09:45)",
+            "  In review 1m  Retry a failed upload once — Waiting for the audit · lands ~09:30 (by 09:45), over its likely estimate",
             "Unsorted (no goal)",
-            "  Queued 25m  UI consistency pass over the sidebar — Waits on Onboarding: the three first-run steps",
+            // The queued one, after the task it waits on (20 minutes on), by the lead's 45 (90 at worst).
+            "  Queued 25m  UI consistency pass over the sidebar — Waits on Onboarding: the three first-run steps · lands ~10:35 (by 11:50)",
             "  Merged  Cache the static assets — merged 8a3f1e2c, tests passed",
             "1 needs attention · 2 running · 1 waiting · 1 done today",
+            "Estimates: fewer than 5 estimated merges here (0), so the dates are the workers' own, uncorrected.",
             // The lead's latest decisions: the long one by its AI summary.
             "Decisions",
             "  Decided: run the two small tasks side by side (5m ago)",
@@ -461,9 +503,9 @@ struct BoardTests {
         noGoals["goals"] = .array([])
         let grouped = BoardText.lines(.object(noGoals), now: WireVectors.boardNow, calendar: utc, home: "/home/u")
         let byState = ["Needs attention", "  Blocked 18m  Rewrite the pricing page's copy — Which plan names do we launch with?", "Running",
-                       "  Rework 1 4m  Onboarding: the three first-run steps — Making the sign-up form check each field as you leave it",
-                       "  In review 1m  Retry a failed upload once — Waiting for the audit", "Waiting",
-                       "  Queued 25m  UI consistency pass over the sidebar — Waits on Onboarding: the three first-run steps", "Done today",
+                       "  Rework 1 4m  Onboarding: the three first-run steps — Making the sign-up form check each field as you leave it · lands ~09:50 (by 10:20)",
+                       "  In review 1m  Retry a failed upload once — Waiting for the audit · lands ~09:30 (by 09:45), over its likely estimate", "Waiting",
+                       "  Queued 25m  UI consistency pass over the sidebar — Waits on Onboarding: the three first-run steps · lands ~10:35 (by 11:50)", "Done today",
                        "  Merged  Cache the static assets — merged 8a3f1e2c, tests passed"]
         #expect(grouped.firstIndex(of: byState[0]).map { Array(grouped[$0..<($0 + byState.count)]) } == byState, "\(grouped.joined(separator: "\n"))")
         #expect(!grouped.contains { $0.hasPrefix("Goal:") || $0.hasPrefix("Unsorted") })

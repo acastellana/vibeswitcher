@@ -38,7 +38,7 @@ public enum BoardText {
                 let shown = tasks.filter { $0["group"]?.string == group }
                 guard !shown.isEmpty else { continue }
                 lines.append(headings[group] ?? group)
-                lines += shown.map { line($0, now: now) }
+                lines += shown.map { line($0, now: now, calendar: calendar) }
             }
         } else {
             // The goals as headings over their tasks (the open ones in their order, then the done), each task in its
@@ -51,14 +51,15 @@ public enum BoardText {
                 let mine = ranked.filter { $0["goal"]?.string == id }
                 let toGo = goal["toGo"]?.int ?? 0, finished = goal["finished"]?.int ?? 0
                 lines.append("Goal: \(inert(goal["title"]?.string, limit: 140))" + (goal["state"]?.string == "done" ? " (done)" : " (\(toGo) to go of \(toGo + finished))")
-                             + " — done means: \(inert(goal["done"]?.string, limit: 200))")
-                lines += mine.map { line($0, now: now) }
+                             + " — done means: \(inert(goal["done"]?.string, limit: 200))"
+                             + (landing(goal["forecast"], now: now, calendar: calendar).map { " · " + $0 } ?? ""))
+                lines += mine.map { line($0, now: now, calendar: calendar) }
                 placed.formUnion(mine.compactMap { $0["id"]?.string })
             }
             let rest = ranked.filter { !placed.contains($0["id"]?.string ?? "") }
             if !rest.isEmpty {
                 lines.append("Unsorted (no goal)")
-                lines += rest.map { line($0, now: now) }
+                lines += rest.map { line($0, now: now, calendar: calendar) }
             }
         }
         for group in BoardValue.groups {
@@ -68,6 +69,8 @@ public enum BoardText {
         if tasks.isEmpty { lines.append("  nothing on the board yet") }
         let more = board["more"]?.int ?? 0
         lines.append((counts.isEmpty ? "no tasks" : counts.joined(separator: " · ")) + (more > 0 ? " · \(more) more not shown" : ""))
+        // How this project's estimates run (every date above is an estimate), once a task has one.
+        if tasks.contains(where: { $0["estimate"]?.object != nil }), let score = board["score"]?["line"]?.string { lines.append(inert(score, limit: 300)) }
         // The lead's latest decisions: a long one by its AI summary when one came (the app's `DecisionFeed.line`).
         let decisions = board["decisions"]?.array ?? []
         if !decisions.isEmpty {
@@ -176,7 +179,18 @@ public enum BoardText {
     static let decisionsShown = 5
 
     /// "  Blocked 18m  Fix the flaky upload test — Waits on Sync landing-base with main".
-    static func line(_ task: NodeWire.Value, now: Date) -> String {
+    /// A landing on the wire (`BoardValue.landing`) as `LeadForecast.text` says it, when it has a date or is overdue
+    /// (a blocked task's dim line says what it waits on already).
+    static func landing(_ value: NodeWire.Value?, now: Date, calendar: Calendar) -> String? {
+        guard let value, let basis = value["basis"]?.string.flatMap(LeadLanding.Basis.init(rawValue:)),
+              [.estimated, .median, .partial, .overdue].contains(basis) else { return nil }
+        let landing = LeadLanding(likely: value["likely"]?.string.flatMap(NodeWire.date)?.timeIntervalSince1970,
+                                  worst: value["worst"]?.string.flatMap(NodeWire.date)?.timeIntervalSince1970, basis: basis,
+                                  overdueMinutes: value["overdueMin"]?.int, over: value["over"]?.bool ?? false, undated: value["undated"]?.int ?? 0)
+        return LeadForecast.text(landing, now: now.timeIntervalSince1970, calendar: calendar).map { inert($0, limit: 160) }
+    }
+
+    static func line(_ task: NodeWire.Value, now: Date, calendar: Calendar = .current) -> String {
         var state = inert(task["state"]?.string, limit: 40)
         if task["group"]?.string != "done", let since = task["since"]?.string.flatMap(NodeWire.date) {
             state += " " + Durations.short(now.timeIntervalSince(since))
@@ -190,6 +204,7 @@ public enum BoardText {
             dim = task["summary"]?.string ?? task["line"]?.string
         }
         if let dim, !dim.isEmpty { text += " — " + inert(dim, limit: dimLimit) }
+        if let lands = landing(task["forecast"], now: now, calendar: calendar) { text += " · " + lands }
         return text
     }
 
