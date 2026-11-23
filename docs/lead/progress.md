@@ -4392,3 +4392,5 @@ Proposed task 1: Find why dictations end with no text
 - 2026-11-23 14:06 Merged fix-the-dictation-tests: Fix the dictation tests that flaked in merges this week (escAndTheCross…, escCancels…, eachOpenAIRun…) (build 71a026954280)
 - 2026-11-23 14:06 Automatically (auto_advance): Merged fix-the-dictation-tests (Fix the dictation tests that flaked in merges this week (escAndTheCross…, escCancels…, eachOpenAIRun…)) into main at 027df9e2, on its passing audit and the full test run.
 - 2026-11-23 14:07 Automatically (auto_advance): Cleaned up fix-the-dictation-tests (freed 1.8 GB of build output and temporary folders). It stays done.
+- 2026-11-23 14:26 Merged a-test-that-flakes: A test that flakes once in a merge gets its fix task at once; fix tasks may fix or delete, never retry (build 71a026954280)
+- 2026-11-23 14:26 Flaky in a-test-that-flakes's merge: theLeadTheBoardNamesAndEveryOtherSessionAreNeverEnded() failed the first test run and passed its rerun (the failing tests only); merged on the rerun
