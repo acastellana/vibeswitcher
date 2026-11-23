@@ -106,24 +106,34 @@ struct NodeClockTests {
 }
 
 /// A clock's time, driven by the test: `now` is what the test set, and the one wake the clock arms fires when the test
-/// moves time past it (`run(until:)`).
+/// moves time past it (`run(until:)`). Under a lock: the test moves it on its own task while the code under test reads
+/// `now` and arms its wake on the clock's queue (the thread sanitizer's race of 2026-11-23, `ChatStoreTests`).
 final class DrivenTime: @unchecked Sendable {
-    private(set) var now: TimeInterval = 100
+    private let lock = NSLock()
+    private var nowValue: TimeInterval = 100
+    private var armedValue: (at: TimeInterval, fire: () -> Void)?
+    private var woke: [Int] = []
     private let start: TimeInterval = 100
+
+    var now: TimeInterval { lock.withLock { nowValue } }
     /// The wake the clock armed: when, by `now`, and what it calls. Nil: none armed.
-    private(set) var armed: (at: TimeInterval, fire: () -> Void)?
+    var armed: (at: TimeInterval, fire: () -> Void)? { lock.withLock { armedValue } }
     /// The seconds (from the start) at which the clock woke.
-    private(set) var wokeAt: [Int] = []
+    var wokeAt: [Int] { lock.withLock { woke } }
 
     /// The whole seconds since the start.
     var second: Int { Int((now - start).rounded()) }
 
     func clock() -> NodeClock {
         NodeClock(queue: DispatchQueue(label: "driven-clock"), now: { [unowned self] in now }) { [unowned self] seconds, fire in
-            let at = now + seconds
-            armed = (at, fire)
+            let at = lock.withLock { () -> TimeInterval in
+                let at = nowValue + seconds
+                armedValue = (at, fire)
+                return at
+            }
             return { [weak self] in
-                if self?.armed?.at == at { self?.armed = nil }
+                guard let self else { return }
+                lock.withLock { if self.armedValue?.at == at { self.armedValue = nil } }
             }
         }
     }
@@ -134,19 +144,24 @@ final class DrivenTime: @unchecked Sendable {
     /// Moves time on to `seconds` after the start without firing anything: the clock's queue is busy meanwhile, so a
     /// wake due on the way runs late, at the next `run(until:)`.
     func hold(until seconds: TimeInterval) {
-        now = start + seconds
+        lock.withLock { nowValue = start + seconds }
     }
 
     /// Moves time on to `seconds` after the start, firing each wake the clock arms on the way, at the time it was armed
     /// for (or now, for one that was due while time was held).
     func run(until seconds: TimeInterval) {
         let end = start + seconds
-        while let wake = armed, wake.at <= end {
-            now = max(now, wake.at)
-            armed = nil
-            wokeAt.append(second)
-            wake.fire()
+        while true {
+            let due = lock.withLock { () -> (() -> Void)? in
+                guard let wake = armedValue, wake.at <= end else { return nil }
+                nowValue = max(nowValue, wake.at)
+                armedValue = nil
+                woke.append(Int((nowValue - start).rounded()))
+                return wake.fire
+            }
+            guard let due else { break }
+            due()
         }
-        now = end
+        lock.withLock { nowValue = end }
     }
 }
