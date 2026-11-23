@@ -87,10 +87,28 @@ final class LivePage {
         return id
     }
 
+    /// Why the last `next()` gave nil: nothing within the client's wait, or a frame that isn't JSON (a close, with its
+    /// code). For a failure's message.
+    private(set) var ended = ""
+
     /// The next frame, checked; nil when the connection ended or nothing came within the client's wait.
     func next() throws -> NodeWire.Value? {
-        guard let frame = try client.nextFrame() else { return nil }
-        guard let json = frame.json else { return nil }
+        let asked = Date()
+        var got = try client.nextFrame()
+        // The listener's keepalive (a ping every `pingSeconds` while the page is open, answered as a browser does): never
+        // the end of anything. Under load it came before a subscription's snapshot (the CI flake of 2026-11-23).
+        while let frame = got, frame.opcode == 0x9 || frame.opcode == 0xA {
+            if frame.opcode == 0x9 { try client.sendPong(frame.payload) }
+            got = try client.nextFrame()
+        }
+        guard let frame = got else {
+            ended = "nothing came in \(Int(Date().timeIntervalSince(asked))) s"
+            return nil
+        }
+        guard let json = frame.json else {
+            ended = "a frame that isn't JSON: \(frame)"
+            return nil
+        }
         if let failure = WireSchema.check(json, as: "frame") { unsound.append("\(failure): \(frame)") }
         return json
     }
@@ -102,6 +120,7 @@ final class LivePage {
             seen.append(frame)
             if holds(frame) { return seen }
         }
+        ended += "; before it, \(seen.count) frames: " + seen.prefix(5).map { "\($0["kind"]?.string ?? "?") re \($0["re"]?.string ?? "-")" }.joined(separator: ", ")
         return nil
     }
 }
