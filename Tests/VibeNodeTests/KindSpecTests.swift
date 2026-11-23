@@ -59,6 +59,26 @@ struct KindSpecTests {
         for (kind, phrase) in phrases { #expect(ApprovalVoice.action(kind) == phrase, "\(kind)") }
     }
 
+    /// Who may send a kind and what it does are two fields, so a row could join them badly: one anyone or a page may
+    /// read that changes state, a page's draft or terminal that doesn't, a user's read that slips in unasked. Each
+    /// sender holds its effect here, and the user's reads are a frozen list (`start` the one recorded: the user's
+    /// recorded start of a node, which changes nothing on a running one).
+    @Test func eachSendersEffectIsItsOwn() {
+        for spec in KindSpec.all {
+            switch spec.sender {
+            case .anyone, .webRead: #expect(spec.effect == .read, "\(spec.name): \(spec.sender) may send it, so it changes nothing")
+            case .webDraft, .webTerminal: #expect(spec.effect == .change, "\(spec.name)")
+            case .leadToolServer: #expect(spec.effect == .toolPost, "\(spec.name)")
+            case .user: break
+            }
+        }
+        let usersReads = KindSpec.all.filter { $0.sender == .user && $0.effect != .change }
+        #expect(usersReads.map(\.name).sorted() == ["approve.list", "base.show", "config.held", "plugin.inspect", "shells", "start", "update.check"],
+                "a user's-voice read added or gone: \(usersReads.map(\.name).sorted())")
+        for spec in usersReads { #expect(spec.effect == .read && (spec.recorded == nil) == (spec.name != "start"), "\(spec.name)") }
+        for spec in KindSpec.all where spec.effect == .toolPost { #expect(spec.sender == .leadToolServer, "\(spec.name)") }
+    }
+
     /// The typed kinds the command line asks and sends are the table's.
     @Test func theTypedListsAreTheTables() {
         #expect(Set(WireKinds.typed) == Set(KindSpec.all.compactMap { spec in spec.typed.flatMap { $0 is any WireChangeKind.Type ? nil : spec.name } }))
