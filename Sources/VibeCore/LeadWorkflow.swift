@@ -1786,13 +1786,24 @@ public enum LeadPrompts {
 
     /// The verifier's section of the owner's REVIEW.md, as the base branch has it (`LeadRisk.reviewGuide`); "" without
     /// one.
+    /// With rule ids in it (`LeadReviewRules.ids`), how to apply them: only those the diff triggers, listed in
+    /// submit_audit's `rules`.
     static func guideSection(_ guide: String?, base: String) -> String {
         guard let guide, !guide.isEmpty else { return "" }
+        let ids = LeadReviewRules.ids(in: guide)
         return guideHeading + "\n"
             + "The project owner's word on what matters in this code, what to ignore and what counts as a Nit, from \(base) "
             + "(the branch's own copy doesn't count). Weigh findings and the report format by it; the rules above still hold:\n"
-            + guide + "\n\n"
+            + guide + "\n"
+            + (ids.isEmpty ? "" : rulesRule)
+            + "\n"
     }
+
+    /// How a verifier uses REVIEW.md's rule ids, triggers and sources.
+    static let rulesRule = "\nApply only the rules whose Trigger this diff matches (`git diff --stat` and the diff tell): a rule whose "
+        + "trigger is any diff always applies, and a rule the diff doesn't trigger is skipped, not checked. A rule's Source is "
+        + "where it came from, for context, not something to check. In submit_audit, give rules: the ids of the rules you "
+        + "applied, and give each finding that comes from one of them its rule (its id).\n"
 
     static let securityHeading = "## Security checklist"
 

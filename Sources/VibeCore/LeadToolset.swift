@@ -715,7 +715,8 @@ public final class LeadToolset: MCPToolset {
                                                         options: LeadVault.TestRun.allCases.map(\.rawValue)),
                                              "findings": P(type: "array", description: Self.findingsShape, items: "object"),
                                              "contract_version": P(type: "integer", description: "The version of the task's contract you judged: your brief's, or the newest the lead sent you while you audited"),
-                                             "outside_boundaries": P(type: "array", description: "Only with integrity suspect, when your sole integrity concern is edits outside the contract's boundaries that no lead's note accepts: those files, each its path from the repository's root, and nothing else. Leave it out for any other concern: then the verdict is handled as usual", items: "string")],
+                                             "outside_boundaries": P(type: "array", description: "Only with integrity suspect, when your sole integrity concern is edits outside the contract's boundaries that no lead's note accepts: those files, each its path from the repository's root, and nothing else. Leave it out for any other concern: then the verdict is handled as usual", items: "string"),
+                                             "rules": P(type: "array", description: Self.rulesShape, items: "string")],
                                 required: ["completion", "integrity", "summary"])]
         case .lead?:
             return [
@@ -1543,7 +1544,12 @@ public final class LeadToolset: MCPToolset {
         + "recorded as a Nit. Nit: everything else (worth fixing, never blocks). Pre-existing: already wrong before this branch; never fails "
         + "the task. file and line: where it is (path from the repository's root). "
         + "evidence: what you ran and what it gave, or what the code at file:line does. status: open; in a re-audit, each open finding you were given "
-        + "by its id: fixed, open (still), or dismissed with a reason. id: leave it out for a new finding. Empty or left out: you found nothing."
+        + "by its id: fixed, open (still), or dismissed with a reason. id: leave it out for a new finding. rule: the id of the REVIEW.md rule it "
+        + "comes from (R3), when one does. Empty or left out: you found nothing."
+
+    /// submit_audit's `rules`, as its schema tells the verifier.
+    static let rulesShape = "The ids of the REVIEW.md rules you applied (R1, R4): those whose trigger this diff matches, and those with "
+        + "no narrower trigger. Leave it out when the project has no REVIEW.md or its rules have no ids"
 
     static let updateKeys: Set<String> = ["task", "title", "goal", "acceptance", "boundaries", "context", "append_context", "status", "reason", "into", "review", "audit_reason", "reroll",
                                           "after", "auto_advance", "budget_min", "model", "agent", "advisor", "effort", "done_check", "exception", "accept_verdict", "hold_audit", "team"]
@@ -6600,6 +6606,7 @@ public final class LeadToolset: MCPToolset {
         let stated = try Self.contractVersionArgument(arguments["contract_version"])
         let outside = try Self.outsideBoundariesArgument(arguments["outside_boundaries"], integrity: integrity)
         let (reports, demoted) = try Self.parsedFindings(arguments["findings"])
+        let rules = try Self.rulesArgument(arguments["rules"])
         let demotedText = demoted.isEmpty ? "" : " Recorded as Nit\(demoted.count == 1 ? "" : "s"), having no failure_scenario: \(demoted.joined(separator: ", ")) (Important needs one)."
         // Checked here first against what a re-audit covers (the vault has no git; see reauditScope), then by the vault.
         let earlier = vault.audits(root: root, task: slug) ?? LeadAuditLedger()
@@ -6615,7 +6622,7 @@ public final class LeadToolset: MCPToolset {
                 } else {
                     changed = earlier.commit.flatMap { reauditFiles(since: $0, head: audited) }
                 }
-                try trial.record(reports, commit: audited, passes: completion == .complete && integrity == .clean, changed: changed)
+                try trial.record(reports, commit: audited, passes: completion == .complete && integrity == .clean, changed: changed, rules: rules)
             } catch { throw Problem(text: "Not recorded: \(error) Nothing was recorded; call submit_audit again.") }
         }
         // Before the vault has its verdict: the merge gate and auto_advance read the version judged from here until
@@ -6632,7 +6639,7 @@ public final class LeadToolset: MCPToolset {
             board.tasks[index].auditBrief = brief
         }
         let submission: LeadVault.Submission
-        do { submission = try vault.submit(root: root, completion: completion, integrity: integrity, summary: summary, findings: reports, tests: tests, outsideBoundaries: outside) } catch {
+        do { submission = try vault.submit(root: root, completion: completion, integrity: integrity, summary: summary, findings: reports, tests: tests, outsideBoundaries: outside, rules: rules) } catch {
             throw Problem(text: "\(error)")
         }
         let finder = member.finder?.index
@@ -6752,6 +6759,38 @@ public final class LeadToolset: MCPToolset {
         return files
     }
 
+    /// submit_audit's `rules`: the REVIEW.md rule ids the verifier applied, upper-cased, each once, in rule order; nil
+    /// when it gave none (a verifier from before it was asked, or a project whose REVIEW.md has no ids). A list, that
+    /// list as JSON text, or ids in one text ("R1, R4"). Refused when one isn't an id.
+    static func rulesArgument(_ value: Any?) throws -> [String]? {
+        guard let value, !(value is NSNull) else { return nil }
+        var said: [Any]
+        if let text = value as? String {
+            let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+            if let list = (try? JSONSerialization.jsonObject(with: Data(trimmed.utf8))) as? [Any] {
+                said = list
+            } else {
+                said = trimmed.split(whereSeparator: { ", \n\t;".contains($0) }).map(String.init)
+            }
+        } else if let list = value as? [Any] {
+            said = list
+        } else {
+            throw Problem(text: "rules is a list of REVIEW.md rule ids (R1, R4). Nothing was recorded; call submit_audit again.")
+        }
+        // An empty entry, or one saying none, lists nothing.
+        said = said.filter { item in
+            guard let text = (item as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) else { return true }
+            return !text.isEmpty && !LeadReviewRules.none.contains(text.lowercased())
+        }
+        let ids = try said.map { item -> String in
+            guard let text = item as? String, let id = LeadReviewRules.id(text) else {
+                throw Problem(text: "rules is a list of REVIEW.md rule ids (R1, R4), not \(item). Nothing was recorded; call submit_audit again.")
+            }
+            return id
+        }
+        return ids.isEmpty ? nil : LeadReviewRules.sorted(ids)
+    }
+
     /// submit_audit's findings as the verifier passed them (a list of objects, or that list as JSON text).
     static func findingReports(_ value: Any?) throws -> [LeadFinding.Report] { try parsedFindings(value).reports }
 
@@ -6795,9 +6834,11 @@ public final class LeadToolset: MCPToolset {
             let reason = word("reason")
             guard status != .dismissed || !reason.isEmpty else { throw Problem(text: "\(which) (\(word("file")):\(line)): a dismissed finding needs its reason.") }
             let scenario = word("failure_scenario")
+            // The rule it comes from: kept when it reads as an id, else left out (it never refuses a finding).
+            let rule = LeadReviewRules.id(word("rule"))
             return LeadFinding.Report(id: word("id").isEmpty ? nil : word("id"), severity: severity, file: word("file"), line: line,
                                       evidence: word("evidence"), status: status, reason: reason.isEmpty ? nil : reason,
-                                      failureScenario: scenario.isEmpty ? nil : scenario)
+                                      failureScenario: scenario.isEmpty ? nil : scenario, rule: rule)
         }
     }
 
@@ -7211,6 +7252,9 @@ public final class LeadToolset: MCPToolset {
         }
         // The scorecard's small_task_min line: how the rule went this week, to judge it on numbers.
         if let small = LeadSmallTask.statusLine(all.tasks, now: Date().timeIntervalSince1970) { lines.append("\n" + Self.clip(small, 600)) }
+        // The scorecard's review rules line: each REVIEW.md rule's audits over 30 days, to prune by in a retrospective.
+        if let rules = LeadReviewRules.statusLine(all.tasks, known: LeadReviewRules.ids(in: LeadRisk.reviewGuide(root: root, base: workflow.base)),
+                                                  now: Date().timeIntervalSince1970) { lines.append("\n" + Self.clip(rules, 900)) }
         if !ended.isEmpty {
             lines.append("\nworker ended (\(ended.count)), not running:")
             lines += ended.prefix(Self.statusTasks).map { task, who in
@@ -7922,9 +7966,13 @@ public enum LeadAuditVote {
         public var tests: LeadVault.TestRun?
         /// The files outside the boundaries that are its only integrity concern, when it named them.
         public var outsideBoundaries: [String]?
+        /// The REVIEW.md rule ids it applied, when it listed them.
+        public var rules: [String]? = nil
 
         public init(finder: Int, focus: String, completion: LeadEvidence.Completion, integrity: LeadEvidence.Integrity,
-                    summary: String, findings: [LeadFinding.Report], tests: LeadVault.TestRun? = nil, outsideBoundaries: [String]? = nil) {
+                    summary: String, findings: [LeadFinding.Report], tests: LeadVault.TestRun? = nil, outsideBoundaries: [String]? = nil,
+                    rules: [String]? = nil) {
+            self.rules = rules
             self.finder = finder
             self.focus = focus
             self.completion = completion
@@ -7982,6 +8030,8 @@ public enum LeadAuditVote {
         /// The files outside the boundaries that are the vote's only integrity concern: every finder that wasn't
         /// clean said suspect and named its files. Nil else: any other concern, and the verdict is handled as ever.
         public var outsideBoundaries: [String]? = nil
+        /// The REVIEW.md rules any finder applied (nil: none listed them).
+        public var rules: [String]? = nil
 
         public var passes: Bool { completion == .complete && integrity == .clean }
     }
@@ -8004,6 +8054,8 @@ public enum LeadAuditVote {
             var finders: [Int]
             var evidence: String
             var index: Int
+            /// The REVIEW.md rule the first finder naming one gave.
+            var rule: String?
             /// Others raised at its very place with another severity (the ledger keeps one finding per place).
             var also: [String] = []
         }
@@ -8022,9 +8074,10 @@ public enum LeadAuditVote {
                 if let at = groups.firstIndex(where: { $0.file == report.file && $0.severity == report.severity
                     && abs($0.line - report.line) <= lineTolerance && !$0.finders.contains(ballot.finder) }) {
                     groups[at].finders.append(ballot.finder)
+                    if groups[at].rule == nil { groups[at].rule = report.rule }
                 } else {
                     groups.append(Group(file: report.file, severity: report.severity, line: report.line, finders: [ballot.finder],
-                                        evidence: report.evidence, index: groups.count))
+                                        evidence: report.evidence, index: groups.count, rule: report.rule))
                 }
             }
         }
@@ -8082,12 +8135,13 @@ public enum LeadAuditVote {
         // In the order the finders raised them.
         reports += confirmed.sorted { $0.index < $1.index }.map { group in
             LeadFinding.Report(severity: group.severity, file: group.file, line: group.line,
-                               evidence: group.evidence + " [\(group.finders.count) of \(size) finders]" + group.also.map { "; \($0)" }.joined())
+                               evidence: group.evidence + " [\(group.finders.count) of \(size) finders]" + group.also.map { "; \($0)" }.joined(),
+                               rule: group.rule)
         }
         let doubted = unconfirmed.sorted { $0.index < $1.index }.map { group in
             LeadFinding.Report(severity: group.severity, file: group.file, line: group.line,
                                evidence: group.evidence + group.also.map { "; \($0)" }.joined(), status: .unconfirmed,
-                               reason: "\(group.finders.count) of \(size) finders saw it: \(who(group.finders))")
+                               reason: "\(group.finders.count) of \(size) finders saw it: \(who(group.finders))", rule: group.rule)
         }
 
         let completion = verdict(ballots.map(\.completion), size: size, worse: [.complete, .incomplete, .blocked])
@@ -8099,8 +8153,9 @@ public enum LeadAuditVote {
             .joined(separator: "\n") + "\n" + outcome.text + "."
         let said = ballots.compactMap(\.tests)
         let tests: LeadVault.TestRun? = said.contains(.failed) ? .failed : said.contains(.passed) ? .passed : said.first
+        let listed = ballots.compactMap(\.rules)
         return Result(reports: reports, unconfirmed: doubted, completion: completion, integrity: integrity, summary: summary, outcome: outcome, tests: tests,
-                      outsideBoundaries: onlyOutsideBoundaries(ballots))
+                      outsideBoundaries: onlyOutsideBoundaries(ballots), rules: listed.isEmpty ? nil : LeadReviewRules.sorted(listed.joined()))
     }
 
     /// The files of `ballots`' only integrity concern (see `Result.outsideBoundaries`).

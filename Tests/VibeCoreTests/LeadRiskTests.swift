@@ -205,7 +205,8 @@ struct LeadRiskTests {
     }
 
     @Test func aGuideIsCutToItsLimitOnACharacter() {
-        let long = String(repeating: "é", count: 3_000)
+        // Two bytes a character: twice the limit.
+        let long = String(repeating: "é", count: LeadRisk.guideLimit)
         let cut = LeadRisk.clip(long, bytes: LeadRisk.guideLimit)
         #expect(cut.utf8.count <= LeadRisk.guideLimit && cut.hasSuffix("…"))
         #expect(LeadRisk.clip("short", bytes: 2_048) == "short")

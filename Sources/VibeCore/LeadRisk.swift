@@ -310,8 +310,8 @@ public enum LeadRisk {
 
     /// The owner's review guide at the repository's root.
     public static let guideFile = "REVIEW.md"
-    /// The most of it a prompt takes.
-    public static let guideLimit = 2_048
+    /// The most of it a prompt takes: room for its rules with their ids, triggers and sources (`LeadReviewRules`).
+    public static let guideLimit = 8_192
 
     /// REVIEW.md as the base branch has it (`git show <base>:REVIEW.md`), at most `guideLimit` bytes; nil when the base
     /// has none. Never the branch under review's: a worker can't weaken its own audit by editing it.

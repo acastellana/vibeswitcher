@@ -405,9 +405,11 @@ public struct LeadFinding: Codable, Equatable, Sendable, Identifiable {
         public var reason: String?
         /// An Important finding's failure: these inputs or this state give this wrong result or crash.
         public var failureScenario: String?
+        /// The REVIEW.md rule it comes from, by id ("R3"; nil: none, or a verifier from before it was asked).
+        public var rule: String? = nil
 
         public init(id: String? = nil, severity: Severity, file: String, line: Int, evidence: String, status: Status = .open, reason: String? = nil,
-                    failureScenario: String? = nil) {
+                    failureScenario: String? = nil, rule: String? = nil) {
             self.id = id
             self.severity = severity
             self.file = file
@@ -416,6 +418,7 @@ public struct LeadFinding: Codable, Equatable, Sendable, Identifiable {
             self.status = status
             self.reason = reason
             self.failureScenario = failureScenario
+            self.rule = rule
         }
     }
 
@@ -438,6 +441,8 @@ public struct LeadFinding: Codable, Equatable, Sendable, Identifiable {
     /// What goes wrong because of it (an Important finding's: one without it is recorded as a Nit; optional: findings
     /// from before it was asked have none).
     public var failureScenario: String?
+    /// The REVIEW.md rule it came from, by id (nil: none, or raised before verifiers were asked).
+    public var rule: String? = nil
 
     public var isOpen: Bool { status == .open }
     /// Open, or unconfirmed: a later round may still say something about it.
@@ -532,6 +537,9 @@ public struct LeadAuditLedger: Codable, Equatable, Sendable {
     public var vote: LeadAuditVote.Outcome?
     /// Agent of the last audit, from its verifier grant.
     public var agent: Agent?
+    /// Each audit's REVIEW.md rules: the ids it applied and those that produced a new finding (`LeadReviewRules`;
+    /// optional: audits whose verifier listed none, older ones among them, add nothing).
+    public var ruleUses: [LeadRuleUse]?
 
     /// Failed rounds after which the task is re-rolled (or re-planned), not sent back for a third: fixes past the
     /// second attempt rarely land, and a fresh start from what the rounds learned does better.
@@ -587,8 +595,11 @@ public struct LeadAuditLedger: Codable, Equatable, Sendable {
     /// another severity there doesn't hold the place. `unconfirmed`: new findings an audit's vote keeps without a
     /// majority (see `LeadAuditVote`), added as unconfirmed (one where a finding of its severity already is, is left
     /// out: the vote checked each finder's findings against the ledger); `vote`: how the vote went.
+    /// `rules`: the REVIEW.md rule ids the audit applied, as its verdict listed them (nil: it listed none, and no
+    /// `LeadRuleUse` is kept); with them, the rules its new findings name, at `at`.
     public mutating func record(_ reports: [LeadFinding.Report], unconfirmed: [LeadFinding.Report] = [], vote: LeadAuditVote.Outcome? = nil,
-                                commit: String, passes: Bool, changed: Set<String>? = nil) throws {
+                                commit: String, passes: Bool, changed: Set<String>? = nil, rules: [String]? = nil,
+                                at: Double = Date().timeIntervalSince1970) throws {
         var next = self
         let round = rounds + 1
         var seen: Set<String> = []
@@ -653,20 +664,25 @@ public struct LeadAuditLedger: Codable, Equatable, Sendable {
                 }
                 seen.insert(id)
                 next.findings.append(LeadFinding(id: id, severity: report.severity, file: report.file, line: report.line, evidence: report.evidence,
-                                                 status: .open, reason: nil, raised: round, failureScenario: report.failureScenario))
+                                                 status: .open, reason: nil, raised: round, failureScenario: report.failureScenario, rule: report.rule))
             }
         }
         for report in unconfirmed where !next.findings.contains(where: { $0.file == report.file && $0.line == report.line && $0.severity == report.severity }) {
             var number = next.findings.count + 1
             while next.finding("F\(number)") != nil { number += 1 }
             next.findings.append(LeadFinding(id: "F\(number)", severity: report.severity, file: report.file, line: report.line, evidence: report.evidence,
-                                             status: .unconfirmed, reason: report.reason, raised: round, failureScenario: report.failureScenario))
+                                             status: .unconfirmed, reason: report.reason, raised: round, failureScenario: report.failureScenario, rule: report.rule))
         }
         if isReaudit {
             let skipped = toRecheck.filter { !seen.contains($0.id) }
             guard skipped.isEmpty else {
                 throw Refusal("Say for each open finding whether it's fixed or still open: \(skipped.map(\.label).joined(separator: ", ")) \(skipped.count == 1 ? "isn't" : "aren't") in findings.")
             }
+        }
+        if let rules {
+            // New this round: open or unconfirmed (an earlier round's finding has an earlier `raised`).
+            let found = next.findings.filter { $0.raised == round }
+            next.ruleUses = (ruleUses ?? []) + [LeadRuleUse(round: round, at: at, applied: rules, found: found.compactMap(\.rule))]
         }
         next.rounds = round
         next.commit = commit
