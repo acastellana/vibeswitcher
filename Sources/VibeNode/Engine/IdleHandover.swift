@@ -63,22 +63,22 @@ extension LeadEngine {
     func rotateIfDue(root: String) {
         let project = NodeIds.project(root: root)
         guard let id = leads.leads[project]?.session, let session = link.sessions.first(where: { $0.id == id && $0.isLive }) else {
-            if !handingOver.contains(root) { rotationAsked[root] = nil }
+            if !rotation.handingOver.contains(root) { rotation.asked[root] = nil }
             return
         }
-        let now = handoverNow()
-        if !handingOver.contains(root), let asked = rotationAsked[root] {
-            if asked.session != session.id { rotationAsked[root] = nil }
+        let now = rotation.now()
+        if !rotation.handingOver.contains(root), let asked = rotation.asked[root] {
+            if asked.session != session.id { rotation.asked[root] = nil }
             // The note's minute is up: the running lead stays, and the next look is 5 minutes on.
             else if now.timeIntervalSince(asked.at) > 60 { return cancelAsk(root, now: now) }
         }
-        guard !stopping, starting[root] == nil, !handingOver.contains(root), now >= (handoverRetry[root] ?? .distantPast),
+        guard !stopping, starting[root] == nil, !rotation.handingOver.contains(root), now >= (rotation.retry[root] ?? .distantPast),
               leads.held[project]?.isEmpty != false, !sendingHeld.contains(root), !posting.contains(root) else { return }
         // The user's last `send` into the lead, else the engine's start.
-        let lastInput = max(handoverStarted, userInput[session.id] ?? .distantPast)
-        guard now.timeIntervalSince(lastInput) >= 120 else { return handoverEvent("quiet") }
-        handingOver.insert(root)
-        let (observer, inbox, vault, tries, asked) = (observer, self.root, link.vault, handoverAttempts[session.id], rotationAsked[root])
+        let lastInput = max(rotation.started, rotation.userInput[session.id] ?? .distantPast)
+        guard now.timeIntervalSince(lastInput) >= 120 else { return rotation.event("quiet") }
+        rotation.handingOver.insert(root)
+        let (observer, inbox, vault, tries, asked) = (observer, self.root, link.vault, rotation.attempts[session.id], rotation.asked[root])
         let context = LeadContextStore(root: self.root, home: home)
         reads.async({ _ -> IdleReading? in
             let store = BoardStore(root: root), board = store.load()
@@ -114,18 +114,18 @@ extension LeadEngine {
         }) { [weak self] reading in
             guard let self else { reading?.gate.release(); return }
             guard let reading else {
-                self.handingOver.remove(root)
+                self.rotation.handingOver.remove(root)
                 if let asked, now.timeIntervalSince(asked.at) >= 60 { return self.cancelAsk(root, now: now) }
-                return self.handoverEvent("checked")
+                return self.rotation.event("checked")
             }
             guard !self.stopping, self.starting[root] == nil, self.leads.held[project]?.isEmpty != false,
-                  asked == nil || self.rotationAsked[root]?.marker == asked?.marker else {
-                reading.gate.release(); self.handingOver.remove(root); self.handoverEvent("checked"); return
+                  asked == nil || self.rotation.asked[root]?.marker == asked?.marker else {
+                reading.gate.release(); self.rotation.handingOver.remove(root); self.rotation.event("checked"); return
             }
             if asked == nil, reading.idle {
                 let last = reading.tail?.lastResponse ?? now
-                if var kept = self.handoverAttempts[session.id], kept.holds(last) { kept.count += 1; self.handoverAttempts[session.id] = kept }
-                else { self.handoverAttempts[session.id] = IdleTries(since: last, count: 1) }
+                if var kept = self.rotation.attempts[session.id], kept.holds(last) { kept.count += 1; self.rotation.attempts[session.id] = kept }
+                else { self.rotation.attempts[session.id] = IdleTries(since: last, count: 1) }
             }
             if asked == nil, reading.cold {
                 return self.handOver(root: root, old: session, reading: reading, note: LeadRotation.coldNote(reading.tail, now: now),
@@ -133,7 +133,7 @@ extension LeadEngine {
             }
             guard let asked, asked.session == session.id else {
                 reading.gate.release()
-                self.handingOver.remove(root)
+                self.rotation.handingOver.remove(root)
                 self.ask(root: root, session: session.id, reason: reading.reason, idle: reading.idle, now: now)
                 return
             }
@@ -146,11 +146,11 @@ extension LeadEngine {
             }.first
             guard let note, !note.isEmpty else {
                 reading.gate.release()
-                self.handingOver.remove(root)
+                self.rotation.handingOver.remove(root)
                 if now.timeIntervalSince(asked.at) >= 60 { return self.cancelAsk(root, now: now) }
-                return self.handoverEvent("checked")
+                return self.rotation.event("checked")
             }
-            self.rotationAsked[root] = nil
+            self.rotation.asked[root] = nil
             self.handOver(root: root, old: session, reading: reading, note: note, reason: asked.reason)
         }
     }
@@ -159,28 +159,28 @@ extension LeadEngine {
     /// VibeSwitcher; a message that doesn't reach its inbox cancels the ask. On `queue`.
     private func ask(root: String, session: UUID, reason: String, idle: Bool, now: Date) {
         let marker = "VIBESWITCHER_HANDOVER_" + UUID().uuidString
-        rotationAsked[root] = (session, now, reason, marker)
+        rotation.asked[root] = (session, now, reason, marker)
         // The reply to this ask doesn't start a new idle stretch.
-        if idle { handoverAttempts[session]?.ownUntil = now.addingTimeInterval(120) }
+        if idle { rotation.attempts[session]?.ownUntil = now.addingTimeInterval(120) }
         let message = LeadRotation.request + " Start your reply with this line:\n" + marker + "\nThen write the handover note."
         let done: (Bool) -> Void = { [weak self] sent in
-            guard let self, !sent, self.rotationAsked[root]?.marker == marker else { return }
-            self.cancelAsk(root, now: self.handoverNow())
+            guard let self, !sent, self.rotation.asked[root]?.marker == marker else { return }
+            self.cancelAsk(root, now: self.rotation.now())
         }
         note("lead: \(LeadMail.project(of: root)): asked the lead for its handover note (\(reason))")
-        if let rotationRequest { rotationRequest(message, root, done) }
+        if let request = rotation.request { request(message, root, done) }
         else { deliver(built: { message }, from: .system("scheduled rotation"), root: root, action: nil, then: done) }
-        handoverEvent("asked")
+        rotation.event("asked")
     }
 
     /// The ask for `root`'s note is over without a note: the lead stays, and the next look is 5 minutes on. On `queue`.
     private func cancelAsk(_ root: String, now: Date) {
-        rotationAsked[root] = nil
-        handoverRetry[root] = now.addingTimeInterval(300)
-        handoverEvent("cancelled")
+        rotation.asked[root] = nil
+        rotation.retry[root] = now.addingTimeInterval(300)
+        rotation.event("cancelled")
     }
 
-    /// Spawns the fresh lead, then moves the board and the role to it. On `queue`; `handingOver` holds `root` until done.
+    /// Spawns the fresh lead, then moves the board and the role to it. On `queue`; `rotation.handingOver` holds `root` until done.
     private func handOver(root: String, old: HostSession, reading: IdleReading, note handoverNote: String, reason: String) {
         let project = (root as NSString).lastPathComponent
         let vault = link.vault
@@ -191,7 +191,7 @@ extension LeadEngine {
             self.note("lead: the rotation of \(LeadMail.project(of: root))'s lead didn't go on: \(why)")
             self.cancelHandover(root)
             gate.release()
-            self.handoverEvent("cancelled")
+            self.rotation.event("cancelled")
         }
         guard let server = toolServer else { return giveUp("the server has no --node-root, so the lead's tool server isn't known") }
         work.async { [weak self] in
@@ -290,14 +290,14 @@ extension LeadEngine {
                 if endFresh { self.link.kill(fresh.id) }
                 self.note("lead: the rotation of \(LeadMail.project(of: root))'s lead was cancelled: the lead changed meanwhile"
                     + (endFresh ? "" : "; the fresh session was kept, see the board's reports"))
-                self.handoverEvent(endFresh ? "cancelled" : "retained")
+                self.rotation.event(endFresh ? "cancelled" : "retained")
                 return
             }
             for message in waiting { self.leads.hold(.init(text: message.text, from: message.from), root: root) }
             self.withdrewFromInbox(waiting.map(\.id))
             self.leads.replacing(old.id, root: root)
             self.holders[root] = fresh.id
-            let notice = LeadRotation.notice(reason: reason, at: self.handoverNow())
+            let notice = LeadRotation.notice(reason: reason, at: self.rotation.now())
             self.leads.lead(root: root) {
                 $0.bound = fresh.id.uuidString
                 $0.named = fresh.id.uuidString
@@ -307,14 +307,14 @@ extension LeadEngine {
             self.leads.update(sessions: self.link.sessions, holders: self.holders)
             self.note("lead: \(LeadMail.project(of: root)): \(notice)")
             if self.options.answersTrust { self.answerTrust(fresh.id, folder: root) }
-            self.handoverEvent("handed over")
+            self.rotation.event("handed over")
         }
     }
 
     /// The handover of `root` is over, done or not: the next look waits 5 minutes. On `queue`.
     private func cancelHandover(_ root: String) {
-        handingOver.remove(root)
-        handoverRetry[root] = handoverNow().addingTimeInterval(300)
+        rotation.handingOver.remove(root)
+        rotation.retry[root] = rotation.now().addingTimeInterval(300)
     }
 
     private struct HandoverChanged: Error, CustomStringConvertible {
@@ -327,9 +327,36 @@ extension LeadEngine {
     /// now and a note asked of it is dropped (the app's `noteLeadInput`). What was typed is never a voucher for a base
     /// move (`BaseMoveStore`'s doc says why): only the time is kept.
     func noteUserInput(_ session: HostSession) {
-        let now = handoverNow()
-        userInput = userInput.filter { now.timeIntervalSince($0.value) < 86_400 }
-        userInput[session.id] = now
-        rotationAsked = rotationAsked.filter { $0.value.session != session.id }
+        let now = rotation.now()
+        rotation.userInput = rotation.userInput.filter { now.timeIntervalSince($0.value) < 86_400 }
+        rotation.userInput[session.id] = now
+        rotation.asked = rotation.asked.filter { $0.value.session != session.id }
     }
+}
+
+/// The lead's rotation and idle handover's bookkeeping, out of the engine (the architecture review's row 8, batch 2): the
+/// clock, the engine's start, the user's last input per session, the roots under way and when each may be looked at
+/// again, the tries per idle stretch, the notes asked for, and the hooks tests catch the ask and each look's end by. On
+/// the engine's queue; the logic is still the engine's (this file's extension, which reaches it as `rotation`).
+final class RotationState {
+    /// The time the rotation judges by (now; a test's later).
+    var now: () -> Date = Date.init
+    /// When this engine started: a lead's quiet counts from here until the user types into it (`userInput`).
+    let started = Date()
+    /// When the user last typed into each session with `vibeswitcher send` (`noteUserInput`, the app's
+    /// `noteLeadInput`): a lead's two-minute quiet counts from it.
+    var userInput: [UUID: Date] = [:]
+    /// Roots whose idle look or handover is under way, and when each may be looked at again after a handover ended.
+    var handingOver: Set<String> = []
+    var retry: [String: Date] = [:]
+    /// Handovers tried per lead session in its current idle stretch.
+    var attempts: [UUID: LeadEngine.IdleTries] = [:]
+    /// The handover note asked of each root's lead: of which session, when, why, and the marker its reply starts with.
+    var asked: [String: (session: UUID, at: Date, reason: String, marker: String)] = [:]
+    /// Sends the ask for a note (the text, the root) and says whether it reached the lead; nil: delivered to the lead
+    /// from VibeSwitcher. Set by tests.
+    var request: ((String, String, @escaping (Bool) -> Void) -> Void)?
+    /// Each rotation look's or handover's end ("checked", "asked", "cancelled", "retained", "handed over"), on `queue`
+    /// (for tests).
+    var event: (String) -> Void = { _ in }
 }

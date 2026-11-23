@@ -66,7 +66,7 @@ struct SendTests {
         try await taskBranch(world.repo, task: "mine")
         #expect(try #require(await send(world, short, "! git merge -q --ff-only agent/mine")).ok)
         // Typed in (a `!` line is Claude Code's shell mode, not a prompt: the fake's transcript doesn't have it).
-        #expect(await eventually(timeout: 30) { world.queue.sync { world.engine.userInput[harness.session.id] != nil } })
+        #expect(await eventually(timeout: 30) { world.queue.sync { world.engine.rotation.userInput[harness.session.id] != nil } })
         #expect(Git.run(["merge", "-q", "--ff-only", "agent/mine"], in: world.repo).ok)
         func baseCard() -> CardStore.Card? {
             world.queue.sync { world.engine.cards.list(project: world.project).first { $0.kind == .baseMove && $0.closed == nil } }

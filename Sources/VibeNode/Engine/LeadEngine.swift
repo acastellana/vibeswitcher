@@ -297,27 +297,8 @@ public final class LeadEngine: @unchecked Sendable {
     /// Boost (`SettingsWatch.swift`): its state its own, on `queue`.
     let boost: BoostWatch
 
-    // The lead's rotation and idle handover (main's `26923f7c`, `IdleHandover.swift`), on `queue`.
-    /// The time the rotation judges by (now; a test's later).
-    var handoverNow: () -> Date = Date.init
-    /// When this engine started: a lead's quiet counts from here until the user types into it (`userInput`).
-    let handoverStarted = Date()
-    /// When the user last typed into each session with `vibeswitcher send` (`noteUserInput`, the app's
-    /// `noteLeadInput`): a lead's two-minute quiet counts from it.
-    var userInput: [UUID: Date] = [:]
-    /// Roots whose idle look or handover is under way, and when each may be looked at again after a handover ended.
-    var handingOver: Set<String> = []
-    var handoverRetry: [String: Date] = [:]
-    /// Handovers tried per lead session in its current idle stretch.
-    var handoverAttempts: [UUID: IdleTries] = [:]
-    /// The handover note asked of each root's lead: of which session, when, why, and the marker its reply starts with.
-    var rotationAsked: [String: (session: UUID, at: Date, reason: String, marker: String)] = [:]
-    /// Sends the ask for a note (the text, the root) and says whether it reached the lead; nil: delivered to the lead
-    /// from VibeSwitcher. Set by tests.
-    var rotationRequest: ((String, String, @escaping (Bool) -> Void) -> Void)?
-    /// Each rotation look's or handover's end ("checked", "asked", "cancelled", "retained", "handed over"), on `queue`
-    /// (for tests).
-    var handoverEvent: (String) -> Void = { _ in }
+    /// The lead's rotation and idle handover's bookkeeping (`RotationState`, `IdleHandover.swift`), on `queue`.
+    let rotation = RotationState()
 
     // Restarts (E8), on `queue`.
     /// The start time of the last host that welcomed the engine, as `engine.json` keeps it (seconds since 1970).
