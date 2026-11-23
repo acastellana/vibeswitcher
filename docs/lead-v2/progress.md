@@ -606,3 +606,7 @@
 - 2026-11-23 16:29 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: /run/user/1000/systemd/transient
 - 2026-11-23 16:39 Automatically (auto_advance): Didn't audit sandbox-env-hygiene-no: Not audited: finder 1 of 2 couldn't start (Problem(text: "sandbox-env-hygiene-no\'s finder not started: ~/.claude/plugins: context7@claude-plugins-official changed while the team\'s sessions ran, since VibeSwitcher last sealed it. A worker\'s shell, a verifier\'s command or a branch\'s tests can write it (the deny rules hold only the file tools), and the next session would load what was written. New workers, verifiers and merges are held until the user accepts the change in VibeSwitcher (its not…
 - 2026-11-23 16:43 Pipeline held: turn-this-incident-into-4, team-sessions-start, measured-with-a-real ready to merge with none landing; cause: every test slot held
+- 2026-11-23 16:44 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: /run/user/1000/systemd/transient
+- 2026-11-23 16:44 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: /run/user/1000/systemd/transient
+- 2026-11-23 16:45 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: /run/user/1000/systemd/transient
+- 2026-11-23 16:45 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: /run/user/1000/systemd/transient
