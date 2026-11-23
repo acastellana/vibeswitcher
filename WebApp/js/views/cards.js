@@ -119,7 +119,7 @@ function approvalFacts(approval) {
     h('div', { class: 'facts-head' }, t('cFacts')),
     h('dl', null,
       fact(t('cCommit'), h('code', null, approval.commit)),
-      fact(t('cSubject'), approval.subject || '(no subject)'),
+      fact(t('cSubject'), approval.subject || t('ccNoSubject')),
       fact(t('cInto'), approval.base || 'the base'),
       fact(t('cChanges'), approval.diffstat, h('ul', { class: 'files' }, approval.files.map((file) => h('li', null, h('code', null, file))))),
       Object.entries(approval.verdicts || {}).map(([task, verdict]) => fact(t('cVerdict'), `${task}: ${verdict}`)),
@@ -200,7 +200,7 @@ export function questionCard(app, first) {
         h('span', { class: 'timer-text' }, t('cGoingWith'), h('strong', null, question.proposal), ' ', h('span', { data: { until: question.decideBy } }, until(question.decideBy))),
         app.store.can('hold') ? h('button', { class: 'button quiet', type: 'button', title: t('cHoldTitle'), onclick: hold }, icon('pause', 12), t('cHold')) : null));
     } else if (held) {
-      el.append(h('p', { class: 'timer held' }, t('cHeld'), h('strong', null, question.proposal), '; it waits for your answer.'));
+      el.append(h('p', { class: 'timer held' }, t('cHeld'), h('strong', null, question.proposal), t('ccWaitsAnswer')));
     }
 
     if (!app.store.can('answer') && app.store.can('draft')) {
@@ -339,7 +339,7 @@ export function pluginCard(card) {
       fact(t('cAskedBy'), f.asker),
       f.facts.map((item) => fact(item.label, item.folder ? h('code', null, item.value) : item.value)),
       // What it asks, whole, as the agent wrote it: marked as the agent's words.
-      fact(`${f.body.name} (the agent’s words)`, h('pre', { class: 'plugin-body' }, f.body.lines.join('\n')), f.body.note ? `${f.body.size}, ${f.body.note}` : f.body.size))),
+      fact(t('ccAgentWords', { name: f.body.name }), h('pre', { class: 'plugin-body' }, f.body.lines.join('\n')), f.body.note ? `${f.body.size}, ${f.body.note}` : f.body.size))),
     // The agent's own words beside it, never among the node's facts.
     f.context ? h('p', { class: 'card-context' }, h('span', { class: 'card-context-label' }, `${f.context.label}: `), f.context.text) : null,
     wait ? h('div', { class: 'card-command' }, h('span', { class: 'card-command-label' }, t('settleInTerminal')),
@@ -407,7 +407,7 @@ export function askCard(app, session, item, local, asked, redraw) {
   const answer = item.answer || local?.answer;
   if (answer) {
     return h('div', { class: 'card closed ask' }, h('div', { class: 'card-closed' }, icon('check', 13),
-      h('div', null, h('p', null, 'You answered ', h('strong', null, answer)), h('p', { class: 'card-about' }, item.text.split('\n')[0]))));
+      h('div', null, h('p', null, t('cYouAnswered'), h('strong', null, answer)), h('p', { class: 'card-about' }, item.text.split('\n')[0]))));
   }
   const el = h('article', { class: 'card ask', tabindex: -1 });
   // Shown as answered at once; back to the question, saying why, if the node refuses.
@@ -416,18 +416,18 @@ export function askCard(app, session, item, local, asked, redraw) {
     redraw();
     app.store.request('ask.answer', { session, item: item.id, answer: option }).then((reply) => {
       if (reply.ok) return;
-      asked.set(item.id, { refused: reply.error?.message || 'The node refused it.' });
+      asked.set(item.id, { refused: reply.error?.message || t('ccTheNodeRefusedIt') });
       redraw();
     });
   };
   const list = optionList(item.options, { numbered: true, choose });
   el.append(
-    h('header', { class: 'card-head' }, h('span', { class: 'priority blocking' }, `${agent} is asking`)),
+    h('header', { class: 'card-head' }, h('span', { class: 'priority blocking' }, t('ccIsAsking', { agent }))),
     h('h3', { class: 'card-question' }, item.title),
     h('pre', { class: 'ask-text' }, item.text),
     list.el);
   if (local?.refused) el.append(h('p', { class: 'card-notice', role: 'alert' }, local.refused));
-  el.append(h('p', { class: 'card-keys', 'aria-hidden': 'true' }, `1–${item.options.length} answers · ↑ ↓ and ↩`));
+  el.append(h('p', { class: 'card-keys', 'aria-hidden': 'true' }, t('cKeysAnswers', { n: item.options.length })));
   cardKeys(el, () => ({ buttons: list.buttons, choose, hold: null }));
   return el;
 }

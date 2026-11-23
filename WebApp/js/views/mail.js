@@ -6,6 +6,7 @@ import { icon } from '../marks.js';
 import { since, plural, tilde, lastPart } from '../words.js';
 import { mailLine, mailCommand } from '../mail.js';
 import { copyLine } from './cards.js';
+import { t } from '../i18n.js';
 
 // How often the open page reads the record again.
 const REFRESH = 15000;
@@ -15,10 +16,10 @@ export const mailHref = '#/mail';
 export function mailView(app) {
   const { store, ui } = app;
   const body = h('div', { class: 'node-column' });
-  const el = h('section', { class: 'node mail', 'aria-label': 'Between leads' },
+  const el = h('section', { class: 'node mail', 'aria-label': t('mvBetweenLeads') },
     h('header', { class: 'head' },
-      h('a', { class: 'back icon-button', href: '#/node', 'aria-label': 'This node' }, icon('back', 16)),
-      h('div', { class: 'head-text' }, h('div', { class: 'head-line' }, h('h1', { class: 'head-title' }, 'Between leads')))),
+      h('a', { class: 'back icon-button', href: '#/node', 'aria-label': t('mvThisNode') }, icon('back', 16)),
+      h('div', { class: 'head-text' }, h('div', { class: 'head-line' }, h('h1', { class: 'head-title' }, t('mvBetweenLeads'))))),
     h('div', { class: 'pane node-pane' }, body));
   let result = null;
   let failed = null;
@@ -32,8 +33,8 @@ export function mailView(app) {
       if (mine !== asking) return;
       if (reply.ok) { result = reply.result; failed = null; } else {
         failed = reply.error?.code === 'unknown-kind' || reply.error?.code === 'voice'
-          ? 'This node doesn’t show the record between leads to a page yet: `vibeswitcher mail` in a terminal does.'
-          : reply.error?.message || 'The node couldn’t read the record between leads.';
+          ? t('mvThisNodeDoesnTShow')
+          : reply.error?.message || t('mvTheNodeCouldnTRead');
       }
       render();
     });
@@ -42,7 +43,7 @@ export function mailView(app) {
   function project(entry, home) {
     const messages = entry.messages || [];
     return h('section', { class: 'node-group' },
-      h('h2', { class: 'section-title' }, `${lastPart(entry.root) || entry.project} · ${plural(entry.total, 'message')}`),
+      h('h2', { class: 'section-title' }, `${lastPart(entry.root) || entry.project} · ${t('mvMessages', { n: entry.total })}`),
       messages.length ? h('ul', { class: 'mail-list' }, messages.map((message) => {
         const line = mailLine(message);
         return h('li', { class: line.sent ? 'mail-message' : 'mail-message refused' },
@@ -50,9 +51,9 @@ export function mailView(app) {
             h('time', { data: { since: message.at }, title: new Date(message.at).toLocaleString() }, since(message.at))),
           h('p', { class: 'mail-text' }, line.text),
           line.why ? h('p', { class: 'setting-note' }, icon('warning', 12), line.why) : null);
-      })) : h('p', { class: 'node-says' }, 'No message sent or received with tell_lead.'),
-      messages.length < entry.total ? h('div', null, h('p', { class: 'node-says' }, `The newest ${messages.length} shown. Every one, in a terminal:`),
-        copyLine(mailCommand(tilde(entry.root, home)), 'the command that lists every message')) : null);
+      })) : h('p', { class: 'node-says' }, t('mvNoMessageSentOrReceived')),
+      messages.length < entry.total ? h('div', null, h('p', { class: 'node-says' }, t('mvNewestShown', { n: messages.length })),
+        copyLine(mailCommand(tilde(entry.root, home)), t('mvTheCommandThatListsEvery'))) : null);
   }
 
   function render() {
@@ -65,7 +66,7 @@ export function mailView(app) {
     const home = store.state.node?.home;
     const projects = result.projects || [];
     body.replaceChildren(...(projects.length ? projects.map((entry) => project(entry, home))
-      : [h('p', { class: 'node-says' }, 'No project’s lead runs on this node.')]));
+      : [h('p', { class: 'node-says' }, t('mvNoProjectSLeadRuns'))]));
   }
 
   const schedule = framed(render);

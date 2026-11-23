@@ -2,17 +2,19 @@
 // Sources/VibeCore/Models.swift), the attention groups (WindowGroups.swift), durations (Durations, BackgroundJobs.swift)
 // and a board task's words (LeadTask.Status, LeadViews.swift). Colours are the same names in style.css.
 
+import { t } from './i18n.js';
+
 // The node writes a status in kebab case (`Requests.statusWord`): needs-you, working, background, done, idle, unknown.
 // A session can also be paused or ended, which aren't statuses of its agent.
 export const STATES = {
-  'needs-you': { label: 'Needs you', mark: 'alert', one: 'needs you', many: 'need you' },
-  working: { label: 'Working', mark: 'spinner', one: 'working', many: 'working' },
-  background: { label: 'Background', mark: 'half', one: 'in background', many: 'in background' },
-  done: { label: 'Done', mark: 'check', one: 'done', many: 'done' },
-  idle: { label: 'Idle', mark: 'dot', one: 'idle', many: 'idle' },
-  paused: { label: 'Paused', mark: 'paused', one: 'paused', many: 'paused' },
-  ended: { label: 'Ended', mark: 'outline', one: 'ended', many: 'ended' },
-  unknown: { label: 'Unknown', mark: 'outline', one: 'unknown', many: 'unknown' },
+  'needs-you': { label: t('wNeedsYou'), mark: 'alert', one: t('wNeedsYouOne'), many: t('wNeedYouMany') },
+  working: { label: t('wWorking'), mark: 'spinner', one: t('wWorkingOne'), many: t('wWorkingOne') },
+  background: { label: t('wBackground'), mark: 'half', one: t('wBackgroundOne'), many: t('wBackgroundOne') },
+  done: { label: t('wDone'), mark: 'check', one: t('wDoneOne'), many: t('wDoneOne') },
+  idle: { label: t('wIdle'), mark: 'dot', one: t('wIdleOne'), many: t('wIdleOne') },
+  paused: { label: t('wPaused'), mark: 'paused', one: t('wPausedOne'), many: t('wPausedOne') },
+  ended: { label: t('wEnded'), mark: 'outline', one: t('wEndedOne'), many: t('wEndedOne') },
+  unknown: { label: t('wUnknown'), mark: 'outline', one: t('wUnknownOne'), many: t('wUnknownOne') },
 };
 
 // The word a session's row shows: paused and ended first, else its status. A lead with an open question for you
@@ -61,22 +63,22 @@ export function moment(iso, now = Date.now()) {
 // "in 8 min", "in 45 s", "now": how long a question's timer has left (the Mac's question card).
 export function until(iso, now = Date.now()) {
   const left = Math.ceil((Date.parse(iso) - now) / 1000);
-  if (!(left > 0)) return 'now';
-  return left < 60 ? `in ${left} s` : `in ${Math.round(left / 60)} min`;
+  if (!(left > 0)) return t('wNow');
+  return left < 60 ? t('wInSeconds', { n: left }) : t('wInMinutes', { n: Math.round(left / 60) });
 }
 
 // A board task's status: its word, and the colour its dot takes (LeadTask.Status and LeadViews.swift's table).
 export const TASKS = {
-  running: { label: 'Working', tone: 'working' },
-  review: { label: 'In review', tone: 'background' },
-  blocked: { label: 'Blocked', tone: 'blocked' },
-  failed: { label: 'Failed', tone: 'needs-you' },
-  kept: { label: 'Kept', tone: 'kept' },
-  planned: { label: 'Queued', tone: 'idle' },
-  done: { label: 'Merged', tone: 'done' },
-  reverted: { label: 'Reverted', tone: 'needs-you' },
-  folded: { label: 'Folded', tone: 'done' },
-  abandoned: { label: 'Abandoned', tone: 'idle' },
+  running: { label: t('wWorking'), tone: 'working' },
+  review: { label: t('wInReview'), tone: 'background' },
+  blocked: { label: t('wBlocked'), tone: 'blocked' },
+  failed: { label: t('wFailed'), tone: 'needs-you' },
+  kept: { label: t('wKept'), tone: 'kept' },
+  planned: { label: t('wQueued'), tone: 'idle' },
+  done: { label: t('wMerged'), tone: 'done' },
+  reverted: { label: t('wReverted'), tone: 'needs-you' },
+  folded: { label: t('wFolded'), tone: 'done' },
+  abandoned: { label: t('wAbandoned'), tone: 'idle' },
 };
 // The order tasks are shown in: what's moving first (LeadTask's attention order).
 export const TASK_ORDER = ['running', 'review', 'blocked', 'failed', 'kept', 'planned', 'done', 'reverted', 'folded', 'abandoned'];
@@ -84,10 +86,10 @@ export const TASK_ORDER = ['running', 'review', 'blocked', 'failed', 'kept', 'pl
 // A lead's board as the node groups it (BoardValue.groups): what needs someone, what's moving, what waits, what's done.
 // The node sends each task's `group`, `state` and `line`; a board without them (the mock's) is read from its status.
 export const TASK_GROUPS = [
-  { id: 'attention', title: 'Needs attention' },
-  { id: 'running', title: 'Running' },
-  { id: 'waiting', title: 'Waiting' },
-  { id: 'done', title: 'Done today' },
+  { id: 'attention', title: t('wNeedsAttention') },
+  { id: 'running', title: t('wRunning') },
+  { id: 'waiting', title: t('wWaiting') },
+  { id: 'done', title: t('wDoneToday') },
 ];
 const GROUP_OF = { blocked: 'attention', failed: 'attention', running: 'running', review: 'running', planned: 'waiting', kept: 'waiting' };
 export const taskGroup = (task) => task.group || GROUP_OF[task.status] || 'done';
@@ -99,8 +101,8 @@ export function taskTone(task) {
 }
 // The strip's counts: "1 working", "1 in review", "4 done".
 export function taskCount(status, count) {
-  const words = { running: 'working', review: 'in review', done: 'done', planned: 'queued' };
-  return `${count} ${words[status] || TASKS[status].label.toLowerCase()}`;
+  const words = { running: 'wCountWorking', review: 'wCountReview', done: 'wCountDone', planned: 'wCountQueued' };
+  return words[status] ? t(words[status], { n: count }) : `${count} ${TASKS[status].label.toLowerCase()}`;
 }
 
 export function plural(count, one, many = one + 's') {
@@ -119,7 +121,7 @@ export function lastPart(path) {
 }
 
 export const AGENTS = { claude: 'Claude', codex: 'Codex', shell: 'Shell' };
-export const ROLES = { lead: 'Lead', worker: 'Worker', verifier: 'Verifier' };
+export const ROLES = { lead: t('wLead'), worker: t('wWorker'), verifier: t('wVerifier') };
 
 // ⌘ on a Mac, Ctrl elsewhere; ⌥ on a Mac, Alt elsewhere.
 export const MAC = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform || '');
@@ -140,10 +142,10 @@ export function decisionLine(decision) {
   const text = decision.summary || decision.text || '';
   const first = text.split(' ')[0] || '';
   const keep = !text || text[0] !== text[0].toUpperCase() || /[A-Z]/.test(first.slice(1));
-  return 'Decided: ' + (keep ? text : text[0].toLowerCase() + text.slice(1));
+  return t('wDecided') + (keep ? text : text[0].toLowerCase() + text.slice(1));
 }
 
-const OUTCOME_WORDS = { merged: 'merged', folded: 'folded into another task', abandoned: 'set aside', reverted: 'reverted' };
+const OUTCOME_WORDS = { merged: t('wOutMerged'), folded: t('wOutFolded'), abandoned: t('wOutAbandoned'), reverted: t('wOutReverted') };
 
 // A board's all-done card (the board's `allDone`, the app's `AllDoneCard`): its summary, what it cost, "5 tasks · 4
 // merged", and each task with how it ended. Null for none.
@@ -153,9 +155,9 @@ export function allDoneCard(mark) {
   return {
     headline: mark.summary?.headline || null,
     bullets: mark.summary?.bullets || [],
-    cost: mark.receipts ? `Cost: ${mark.receipts}.` : null,
-    costNote: mark.pricesAsOf ? `Each task's working time and tokens, read from its sessions' transcripts; costs are estimates at the API prices of ${mark.pricesAsOf}.` : null,
-    count: `${count} task${count === 1 ? '' : 's'} · ${mark.merged} merged`,
+    cost: mark.receipts ? t('wCost', { x: mark.receipts }) : null,
+    costNote: mark.pricesAsOf ? t('wCostNote', { date: mark.pricesAsOf }) : null,
+    count: t('wTasksMerged', { n: count, merged: mark.merged }),
     tasks: mark.tasks.map((task) => ({ title: task.title, word: OUTCOME_WORDS[task.outcome] || task.outcome, merged: task.outcome === 'merged' })),
   };
 }
@@ -165,8 +167,7 @@ export function boostMarkText(boost) {
   if (!boost?.on) return null;
   const limits = boost.limits || {};
   return {
-    label: `Boost on: ${boost.why}`,
-    help: `Boost on (${boost.why})\nRaised limits: a load of ${limits.loadThreshold}, ${limits.maxSessions} team sessions on this node, `
-      + `${limits.maxWorkers} workers per project, ${limits.heavySlots} test and build slots\nClick for Settings`,
+    label: t('wBoostOn', { why: boost.why }),
+    help: t('wBoostHelp', { why: boost.why, load: limits.loadThreshold, sessions: limits.maxSessions, workers: limits.maxWorkers, slots: limits.heavySlots }),
   };
 }

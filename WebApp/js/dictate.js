@@ -7,6 +7,7 @@
 
 import { h } from './dom.js';
 import { icon } from './marks.js';
+import { t } from './i18n.js';
 
 const PREF = 'vibeswitcher.dictation';
 const CHANGED = 'vibeswitcher-dictation';
@@ -57,8 +58,8 @@ export function talkButton(input, env = {}) {
   const storage = 'storage' in env ? env.storage : globalThis.localStorage;
   const target = env.window || globalThis;
   let listening = null;
-  const button = h('button', { class: 'icon-button talk-button', type: 'button', title: 'Hold to dictate into this box (it sends nothing)',
-    'aria-label': 'Hold to dictate', 'aria-pressed': 'false' }, icon('mic', 15));
+  const button = h('button', { class: 'icon-button talk-button', type: 'button', title: t('diHoldToDictateIntoThis'),
+    'aria-label': t('diHoldToDictate'), 'aria-pressed': 'false' }, icon('mic', 15));
   const show = () => { button.hidden = !dictationOn(storage); };
   show();
   target.addEventListener?.(CHANGED, show);
@@ -108,9 +109,9 @@ export function dictationGroup(env = {}) {
   const supported = Boolean(recognizer(env.window || globalThis));
   const box = h('input', { type: 'checkbox', class: 'dictation-toggle', disabled: !supported, onchange: () => setDictation(box.checked, storage, env.window || globalThis) });
   box.checked = supported && dictationOn(storage);
-  return h('section', { class: 'node-group dictation' }, h('h2', { class: 'section-title' }, 'Dictation'),
-    h('label', { class: 'notify-line' }, box, ' Hold the mic beside a message or an answer to dictate into it'),
+  return h('section', { class: 'node-group dictation' }, h('h2', { class: 'section-title' }, t('diDictation')),
+    h('label', { class: 'notify-line' }, box, t('diHoldTheMicBesideA')),
     h('p', { class: 'node-says' }, supported
-      ? 'Your browser turns your voice into text with its own speech service (Chrome sends it to Google). What you say only fills the box: nothing is sent.'
-      : 'This browser has no speech recognition (Firefox hasn’t), so dictation is hidden here. Chrome, Edge and Safari have it.'));
+      ? t('diYourBrowserTurnsYourVoice')
+      : t('diThisBrowserHasNoSpeech')));
 }

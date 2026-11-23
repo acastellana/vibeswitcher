@@ -3,6 +3,8 @@
 // editing the node's launch presets. Each is the `vibeswitcher` command to run in a terminal, where the typed code is
 // asked; nothing here sends anything. No page in it: the views draw these (views/drive.js, views/start.js, the
 // palette), and tests/actions.test.mjs reads them.
+import { t } from './i18n.js';
+
 
 // A session as the command line names it: the first 8 characters of its host id (`vibeswitcher send` takes any prefix
 // of 4 or more that only one session has).
@@ -34,10 +36,10 @@ export function renameLine(session, typed) {
 
 // The Mac's Pause menu (`RowMenu`), in its order, and the flag each is on the command line.
 export const PAUSES = [
-  { id: 'indefinitely', label: 'Until I resume it', flag: '' },
-  { id: 'hour', label: 'For 1 hour', flag: ' --hours 1' },
-  { id: 'morning', label: 'Until tomorrow morning', flag: ' --tomorrow' },
-  { id: 'week', label: 'For 1 week', flag: ' --hours 168' },
+  { id: 'indefinitely', label: t('atUntilIResumeIt'), flag: '' },
+  { id: 'hour', label: t('atFor1Hour'), flag: ' --hours 1' },
+  { id: 'morning', label: t('atUntilTomorrowMorning'), flag: ' --tomorrow' },
+  { id: 'week', label: t('atFor1Week'), flag: ' --hours 168' },
 ];
 
 // `vibeswitcher pause` for one of `PAUSES`, or `--off` (Resume Notifications) with `off`.

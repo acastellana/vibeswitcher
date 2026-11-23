@@ -11,6 +11,7 @@ import {
   sessionShort, shellWord, renameLine, PAUSES, pauseLine, endable, endLine, closeShellsLine, resumeLine, endedEntry, newLine,
   PRESET_VARIABLES, presetProblem, presetLine, presetArgs, leadLine, newProjectLine, projectFolderName,
 } from '../actions.js';
+import { t } from '../i18n.js';
 
 // The command line's words for a session and for what the user typed (js/actions.js, where the page's lines are made).
 export { sessionShort, shellWord };
@@ -36,13 +37,13 @@ export function draftBox(app, { edit }) {
   const refused = h('p', { class: 'card-notice', role: 'alert', hidden: true });
   let id = null;
   let drawn = '';
-  const editButton = h('button', { class: 'confirm-clear', type: 'button', title: 'Put the message back in the box', onclick: () => {
+  const editButton = h('button', { class: 'confirm-clear', type: 'button', title: t('drPutTheMessageBackIn'), onclick: () => {
     const drafted = app.store.sessionDraftOf(id);
     if (drafted) edit(drafted.text, drafted.images || []);
-  } }, 'Edit');
-  const discard = h('button', { class: 'confirm-clear', type: 'button', title: 'Take the draft off the session', onclick: () => app.store.sessionDraft(id, null) }, 'Discard');
-  const note = h('p', { class: 'confirm-note' }, 'Run it in a terminal: it shows the message and asks for a code. Nothing is typed into the session before that.');
-  const el = h('div', { class: 'confirm composer-draft', role: 'group', 'aria-label': 'Send your message from a terminal', hidden: true },
+  } }, t('drEdit'));
+  const discard = h('button', { class: 'confirm-clear', type: 'button', title: t('drTakeTheDraftOffThe'), onclick: () => app.store.sessionDraft(id, null) }, t('drDiscard'));
+  const note = h('p', { class: 'confirm-note' }, t('drRunItInATerminal'));
+  const el = h('div', { class: 'confirm composer-draft', role: 'group', 'aria-label': t('drSendYourMessageFromA'), hidden: true },
     h('div', { class: 'confirm-head' }, label, h('span', { class: 'confirm-actions' }, editButton, discard)), text, pictures, lineSlot, note, refused);
 
   return {
@@ -62,15 +63,15 @@ export function draftBox(app, { edit }) {
       const prompt = drivable(session) ? session.prompt : null;
       const answers = answersQuestion(prompt, drafted);
       setClass(el, 'answers', answers);
-      setText(label, drafted.sending ? 'Saving your message…'
-        : drafted.now ? `Steer ${AGENTS[session.agent] || 'the agent'} now: it gets this at its next step, without stopping`
-          : answers ? `Your answer to the question above (sent as its “${prompt.options[prompt.text[0]]}” words)`
-            : `Your message for ${AGENTS[session.agent] || 'the agent'}`);
+      setText(label, drafted.sending ? t('drSavingYourMessage')
+        : drafted.now ? t('drSteer', { agent: AGENTS[session.agent] || t('drTheAgentLow') })
+          : answers ? t('drAnswerAbove', { option: prompt.options[prompt.text[0]] })
+            : t('drMessageFor', { agent: AGENTS[session.agent] || t('drTheAgentLow') }));
       setText(text, drafted.text);
       text.hidden = !drafted.text;
       const images = drafted.images || [];
       pictures.hidden = !images.length;
-      setText(pictures, images.length ? `With ${images.length === 1 ? 'an image' : `${images.length} images`}: ${images.map((path) => path.split('/').pop()).join(', ')}` : '');
+      setText(pictures, images.length ? t('drWithImages', { n: images.length, names: images.map((path) => path.split('/').pop()).join(', ') }) : '');
       const line = `vibeswitcher send ${sessionShort(id)}`;
       if (line !== drawn) {
         drawn = line;
@@ -86,7 +87,7 @@ export function queuedStrip() {
   const head = h('span', { class: 'confirm-label' });
   const list = h('ol', { class: 'queued-list' });
   const el = h('div', { class: 'confirm composer-draft queued', role: 'status', hidden: true }, head, list,
-    h('p', { class: 'confirm-note' }, 'Typed in, in this order, once what is open on its screen closes: answer it, or close it in the session’s terminal.'));
+    h('p', { class: 'confirm-note' }, t('drTypedInInThisOrder')));
   let drawn = '';
   return {
     el,
@@ -96,8 +97,8 @@ export function queuedStrip() {
       const now = JSON.stringify(queued.map((item) => [item.action, item.text, item.images]));
       if (now === drawn) return;
       drawn = now;
-      setText(head, queued.length === 1 ? 'A message waits to go in' : `${queued.length} messages wait to go in`);
-      list.replaceChildren(...queued.map((item) => h('li', null, item.text || '', item.images ? h('span', { class: 'queued-images' }, ` (+${item.images} image${item.images === 1 ? '' : 's'})`) : null)));
+      setText(head, queued.length === 1 ? t('drAMessageWaitsToGo') : t('drQueuedMany', { n: queued.length }));
+      list.replaceChildren(...queued.map((item) => h('li', null, item.text || '', item.images ? h('span', { class: 'queued-images' }, t('drPlusImages', { n: item.images })) : null)));
     },
   };
 }
@@ -113,7 +114,7 @@ export function promptCard(app) {
 
   function draw(session) {
     const prompt = session.prompt;
-    const agent = AGENTS[session.agent] || 'The agent';
+    const agent = AGENTS[session.agent] || t('drTheAgent');
     const takes = new Set(prompt.text || []);
     const short = sessionShort(session.id);
     const buttons = prompt.options.map((option, index) => h('button', {
@@ -122,26 +123,26 @@ export function promptCard(app) {
     }, h('span', { class: 'option-key', 'aria-hidden': 'true' }, String(index + 1)), h('span', { class: 'option-text' }, option),
     prompt.descriptions?.[index] ? h('span', { class: 'option-note' }, prompt.descriptions[index]) : null));
     const parts = [
-      h('header', { class: 'card-head' }, h('span', { class: 'priority blocking' }, `${agent} is asking`)),
+      h('header', { class: 'card-head' }, h('span', { class: 'priority blocking' }, t('drIsAsking', { agent }))),
       h('pre', { class: 'ask-text' }, prompt.question),
     ];
     if (prompt.multiSelect) {
       parts.push(h('ol', { class: 'options read-only' }, prompt.options.map((option) => h('li', { class: 'option' }, h('span', { class: 'option-text' }, option)))),
-        h('p', { class: 'confirm-note' }, 'It takes several ticks: answer it in the session’s own terminal.'));
+        h('p', { class: 'confirm-note' }, t('drItTakesSeveralTicksAnswer')));
     } else {
       parts.push(h('div', { class: 'options' }, buttons));
       if (chosen !== null && takes.has(chosen)) {
-        const input = h('input', { class: 'answer-input', type: 'text', value: words, placeholder: 'Your words', 'aria-label': 'Your words for this option',
+        const input = h('input', { class: 'answer-input', type: 'text', value: words, placeholder: t('drYourWords'), 'aria-label': t('drYourWordsForThisOption'),
           oninput: () => { words = input.value; line.replaceChildren(command()); } });
         parts.push(input);
       }
       const command = () => {
-        if (chosen === null) return h('p', { class: 'confirm-note' }, 'Pick an answer: the line that gives it in a terminal shows here.');
+        if (chosen === null) return h('p', { class: 'confirm-note' }, t('drPickAnAnswerTheLine'));
         const typed = takes.has(chosen) && words.trim() ? ` ${shellWord(words.trim())}` : '';
-        return copyLine(`vibeswitcher reply ${short} ${chosen + 1}${typed}`, 'the command that answers it');
+        return copyLine(`vibeswitcher reply ${short} ${chosen + 1}${typed}`, t('drTheCommandThatAnswersIt'));
       };
       const line = h('div', { class: 'prompt-line' }, command());
-      parts.push(line, h('p', { class: 'confirm-note' }, 'Run it in a terminal: it shows this question and asks for a code, then answers it as you, only while this question is still on the screen.'));
+      parts.push(line, h('p', { class: 'confirm-note' }, t('drRunItInATerminal2')));
     }
     el.replaceChildren(...parts);
   }
@@ -168,16 +169,16 @@ export function promptCard(app) {
 // node knows its conversation. Returns { el, open(tab), toggle(), update(session, node) → whether it offers anything }.
 export function actionsStrip() {
   const TABS = [
-    { id: 'rename', label: 'Rename' },
-    { id: 'pause', label: 'Pause' },
-    { id: 'end', label: 'End' },
-    { id: 'shells', label: 'Close shells' },
-    { id: 'resume', label: 'Resume' },
+    { id: 'rename', label: t('drRename') },
+    { id: 'pause', label: t('drPause') },
+    { id: 'end', label: t('drEnd') },
+    { id: 'shells', label: t('drCloseShells') },
+    { id: 'resume', label: t('drResume') },
   ];
-  const tabs = h('div', { class: 'segmented', role: 'group', 'aria-label': 'Do' });
+  const tabs = h('div', { class: 'segmented', role: 'group', 'aria-label': t('drDo') });
   const panel = h('div', { class: 'action-panel' });
-  const close = h('button', { class: 'icon-button', type: 'button', 'aria-label': 'Close', title: 'Close' }, icon('close', 13));
-  const el = h('div', { class: 'end-strip action-strip', role: 'group', 'aria-label': 'Rename, pause or end this session', hidden: true }, tabs, panel, close);
+  const close = h('button', { class: 'icon-button', type: 'button', 'aria-label': t('drClose'), title: t('drClose') }, icon('close', 13));
+  const el = h('div', { class: 'end-strip action-strip', role: 'group', 'aria-label': t('drRenamePauseOrEndThis'), hidden: true }, tabs, panel, close);
   let opened = false;
   let tab = 'rename';
   let id = null;
@@ -204,13 +205,13 @@ export function actionsStrip() {
   function body() {
     if (tab === 'rename') {
       if (typed === null) typed = session.name || '';
-      const input = h('input', { class: 'answer-input', type: 'text', value: typed, placeholder: session.task || 'Its own name', 'aria-label': 'Name', spellcheck: 'false', autocomplete: 'off' });
+      const input = h('input', { class: 'answer-input', type: 'text', value: typed, placeholder: session.task || t('drItsOwnName'), 'aria-label': t('drName'), spellcheck: 'false', autocomplete: 'off' });
       const slot = h('div');
       const fill = () => {
         const text = renameLine(session, typed);
-        slot.replaceChildren(...line(text, 'the command that renames it',
-          text ? (typed.trim() ? 'Kept across a resume; the list and status show it.' : 'Gives it its own name back.')
-            : typed.trim() ? 'That’s its name now.' : 'Type a name.'));
+        slot.replaceChildren(...line(text, t('drTheCommandThatRenamesIt'),
+          text ? (typed.trim() ? t('drKeptAcrossAResumeThe') : t('drGivesItItsOwnName'))
+            : typed.trim() ? t('drThatSItsNameNow') : t('drTypeAName')));
       };
       input.addEventListener('input', () => { typed = input.value; fill(); });
       fill();
@@ -218,23 +219,23 @@ export function actionsStrip() {
     }
     if (tab === 'pause') {
       if (session.paused) {
-        return line(pauseLine(session, 'off'), 'the command that resumes its notifications',
-          'Paused: greyed out, never reminded or notified of. This resumes its notifications.');
+        return line(pauseLine(session, 'off'), t('drTheCommandThatResumesIts'),
+          t('drPausedGreyedOutNeverReminded'));
       }
-      const choices = h('div', { class: 'segmented presets', role: 'group', 'aria-label': 'For how long' }, PAUSES.map((one) => h('button', {
+      const choices = h('div', { class: 'segmented presets', role: 'group', 'aria-label': t('drForHowLong') }, PAUSES.map((one) => h('button', {
         type: 'button', 'aria-pressed': String(one.id === pause), onclick: () => { pause = one.id; draw(true); },
       }, one.label)));
-      return [choices, ...line(pauseLine(session, pause), 'the command that pauses it', 'Greyed out, and nothing reminds or notifies you of it until then.')];
+      return [choices, ...line(pauseLine(session, pause), t('drTheCommandThatPausesIt'), t('drGreyedOutAndNothingReminds'))];
     }
-    if (tab === 'end') return line(endLine(session), 'the command that ends it', 'Its agent stops, with everything running in its terminal.');
+    if (tab === 'end') return line(endLine(session), t('drTheCommandThatEndsIt'), t('drItsAgentStopsWithEverything'));
     if (tab === 'shells') {
-      return line(closeShellsLine(session.cwd), 'the command that closes the finished shells',
-        'Ends this node’s shells in this folder or below that are back at their prompt; one still running something stays.');
+      return line(closeShellsLine(session.cwd), t('drTheCommandThatClosesThe'),
+        t('drEndsThisNodeSShells'));
     }
     const ended = endedEntry(node, session.id);
     const resume = resumeLine(ended);
-    return [...line(resume, 'the command that resumes it', resume ? 'Starts it again in its same conversation.' : 'Its conversation id wasn’t known: it can’t be resumed.'),
-      ended?.conversation ? copyLine(ended.conversation, 'its conversation id') : null];
+    return [...line(resume, t('drTheCommandThatResumesIt'), resume ? t('drStartsItAgainInIts') : t('drItsConversationIdWasnT')),
+      ended?.conversation ? copyLine(ended.conversation, t('drItsConversationId')) : null];
   }
 
   function draw(force = false) {
@@ -245,7 +246,7 @@ export function actionsStrip() {
     drawn = key;
     tabs.replaceChildren(...TABS.filter((one) => can.includes(one.id)).map((one) => h('button', {
       type: 'button', 'aria-pressed': String(one.id === tab), onclick: () => { tab = one.id; draw(true); el.querySelector('.action-panel input, .action-panel .copy-button')?.focus(); },
-    }, one.id === 'pause' && session?.paused ? 'Resume notifications' : one.label)));
+    }, one.id === 'pause' && session?.paused ? t('drResumeNotifications') : one.label)));
     tabs.hidden = can.length < 2;
     panel.replaceChildren(...(session && can.length ? body() : []).filter(Boolean));
   }
@@ -279,14 +280,14 @@ export function actionsStrip() {
 // Starting a project lead in a folder (the Mac's Start Project Lead…, and the palette's "Start Project Lead in …"): the
 // folder and the goal, and the line that starts it, a click to copy. Returns { el, choose(folder), update() }.
 export function newLeadForm(app) {
-  const path = h('input', { class: 'answer-input', type: 'text', placeholder: '/path/to/project', 'aria-label': 'Project folder', spellcheck: 'false', autocomplete: 'off' });
-  const goal = h('textarea', { class: 'answer-input lead-goal', rows: 2, placeholder: 'The goal (optional: without one it plans from its records)', 'aria-label': 'Goal' });
+  const path = h('input', { class: 'answer-input', type: 'text', placeholder: '/path/to/project', 'aria-label': t('drProjectFolder'), spellcheck: 'false', autocomplete: 'off' });
+  const goal = h('textarea', { class: 'answer-input lead-goal', rows: 2, placeholder: t('drTheGoalOptionalWithoutOne'), 'aria-label': t('drGoal') });
   const lineSlot = h('div', { class: 'prompt-line' });
-  const el = h('section', { class: 'new-session new-lead', 'aria-label': 'Start a project lead' },
-    h('div', { class: 'new-head' }, h('h2', { class: 'new-title' }, 'Start a project lead')),
+  const el = h('section', { class: 'new-session new-lead', 'aria-label': t('drStartAProjectLead') },
+    h('div', { class: 'new-head' }, h('h2', { class: 'new-title' }, t('drStartAProjectLead'))),
     h('div', { class: 'new-fields' }, path, goal),
     lineSlot,
-    h('p', { class: 'confirm-note' }, 'A lead that runs workers, has their work verified, and merges. Run the line in a terminal on this node: it asks for a code (and, the first time, says to accept the project’s config and base), then starts the lead. A folder that isn’t a git repository yet, or has no commit: add --init, which makes its first commit of the folder’s files.'));
+    h('p', { class: 'confirm-note' }, t('drALeadThatRunsWorkers')));
   function where() {
     const home = app.store.state.node?.home;
     const typed = path.value.trim();
@@ -294,8 +295,8 @@ export function newLeadForm(app) {
   }
   function draw() {
     const folder = where();
-    lineSlot.replaceChildren(folder ? copyLine(leadLine(folder, goal.value), 'the command that starts the lead')
-      : h('p', { class: 'confirm-note' }, 'Give a folder: the line that starts its lead shows here.'));
+    lineSlot.replaceChildren(folder ? copyLine(leadLine(folder, goal.value), t('drTheCommandThatStartsThe'))
+      : h('p', { class: 'confirm-note' }, t('drGiveAFolderTheLine')));
   }
   path.addEventListener('input', draw);
   goal.addEventListener('input', draw);
@@ -316,23 +317,23 @@ export function newLeadForm(app) {
 // New Project… (the Mac's sheet): a name, where (the node's projects folder when empty) and a goal, drafted as the
 // `vibeswitcher new-project` line that makes its folder, repository and first commit, then starts its lead.
 export function newProjectForm(app) {
-  const name = h('input', { class: 'answer-input', type: 'text', placeholder: 'Project name', 'aria-label': 'Project name', spellcheck: 'false', autocomplete: 'off' });
-  const location = h('input', { class: 'answer-input', type: 'text', placeholder: 'Where (optional: the node’s projects folder)', 'aria-label': 'Where', spellcheck: 'false', autocomplete: 'off' });
-  const goal = h('textarea', { class: 'answer-input lead-goal', rows: 2, placeholder: 'The goal (optional)', 'aria-label': 'Goal' });
+  const name = h('input', { class: 'answer-input', type: 'text', placeholder: t('drProjectName'), 'aria-label': t('drProjectName'), spellcheck: 'false', autocomplete: 'off' });
+  const location = h('input', { class: 'answer-input', type: 'text', placeholder: t('drWhereOptionalTheNodeS'), 'aria-label': t('drWhere'), spellcheck: 'false', autocomplete: 'off' });
+  const goal = h('textarea', { class: 'answer-input lead-goal', rows: 2, placeholder: t('drTheGoalOptional'), 'aria-label': t('drGoal') });
   const folderNote = h('p', { class: 'confirm-note', hidden: true });
   const lineSlot = h('div', { class: 'prompt-line' });
-  const el = h('section', { class: 'new-session new-project', 'aria-label': 'New project' },
-    h('div', { class: 'new-head' }, h('h2', { class: 'new-title' }, 'New project')),
+  const el = h('section', { class: 'new-session new-project', 'aria-label': t('drNewProject') },
+    h('div', { class: 'new-head' }, h('h2', { class: 'new-title' }, t('drNewProject'))),
     h('div', { class: 'new-fields' }, name, location, goal),
     folderNote,
     lineSlot,
-    h('p', { class: 'confirm-note' }, 'Makes the project’s folder with a git repository and a first commit (README.md, .gitignore), then starts its lead. Run the line in a terminal on this node: it asks for the lead’s code.'));
+    h('p', { class: 'confirm-note' }, t('drMakesTheProjectSFolder')));
   function draw() {
     const folder = projectFolderName(name.value);
     folderNote.hidden = !folder;
     folderNote.textContent = folder ? `Its folder: ${folder}` : '';
-    lineSlot.replaceChildren(folder ? copyLine(newProjectLine(name.value, location.value, goal.value), 'the command that makes the project')
-      : h('p', { class: 'confirm-note' }, 'Give it a name: the line that makes it shows here.'));
+    lineSlot.replaceChildren(folder ? copyLine(newProjectLine(name.value, location.value, goal.value), t('drTheCommandThatMakesThe'))
+      : h('p', { class: 'confirm-note' }, t('drGiveItANameThe')));
   }
   for (const field of [name, location, goal]) field.addEventListener('input', draw);
   draw();
@@ -347,9 +348,9 @@ export function newSessionForm(app, { folder }) {
   let picked = false;
   let asked = null;
   let timer = null;
-  const path = h('input', { class: 'answer-input', type: 'text', placeholder: '/path/to/project', 'aria-label': 'Folder', spellcheck: 'false', autocomplete: 'off' });
-  const model = h('input', { class: 'answer-input model-input', type: 'text', placeholder: 'Model (optional)', 'aria-label': 'Model', spellcheck: 'false', autocomplete: 'off' });
-  const kinds = h('div', { class: 'segmented presets', role: 'group', 'aria-label': 'Preset' });
+  const path = h('input', { class: 'answer-input', type: 'text', placeholder: '/path/to/project', 'aria-label': t('drFolder'), spellcheck: 'false', autocomplete: 'off' });
+  const model = h('input', { class: 'answer-input model-input', type: 'text', placeholder: t('drModelOptional'), 'aria-label': t('drModel'), spellcheck: 'false', autocomplete: 'off' });
+  const kinds = h('div', { class: 'segmented presets', role: 'group', 'aria-label': t('drPreset') });
   const about = h('p', { class: 'confirm-note preset-about', hidden: true });
   const lineSlot = h('div', { class: 'prompt-line' });
   // Adding, changing and removing the folder's presets: the `vibeswitcher preset` line for each.
@@ -359,13 +360,13 @@ export function newSessionForm(app, { folder }) {
     editor.el.hidden = !open;
     editing.setAttribute('aria-expanded', String(open));
     if (open) editor.update(presets, true);
-  } }, 'Edit presets…');
-  const el = h('section', { class: 'new-session', 'aria-label': 'Start a session' },
-    h('div', { class: 'new-head' }, h('h2', { class: 'new-title' }, 'Start a session'), editing),
+  } }, t('drEditPresets'));
+  const el = h('section', { class: 'new-session', 'aria-label': t('drStartASession') },
+    h('div', { class: 'new-head' }, h('h2', { class: 'new-title' }, t('drStartASession')), editing),
     h('div', { class: 'new-fields' }, path, kinds, model),
     about,
     lineSlot,
-    h('p', { class: 'confirm-note' }, 'Run it in a terminal on this node: it asks for a code, then starts the session here.'),
+    h('p', { class: 'confirm-note' }, t('drRunItInATerminal3')),
     editor.el);
   let offered = false;
 
@@ -395,7 +396,7 @@ export function newSessionForm(app, { folder }) {
   function draw() {
     const preset = presets.find((one) => one.name === chosen && !one.refused) || presets.find((one) => one.name === chosen) || presets[0];
     kinds.replaceChildren(...presets.map((one) => h('button', {
-      type: 'button', 'aria-pressed': String(one === preset), disabled: !!one.refused, title: one.refused ? `Can’t start here: ${one.refused}` : presetNote(one),
+      type: 'button', 'aria-pressed': String(one === preset), disabled: !!one.refused, title: one.refused ? t('drCantStartHere', { why: one.refused }) : presetNote(one),
       onclick: () => { chosen = one.name; picked = true; draw(); },
     }, one.name)));
     model.hidden = preset.kind === 'shell';
@@ -403,7 +404,7 @@ export function newSessionForm(app, { folder }) {
     setText(about, preset.builtIn ? '' : presetNote(preset));
     const folder = where();
     if (!folder) {
-      lineSlot.replaceChildren(h('p', { class: 'confirm-note' }, 'Give a folder: the line that starts it shows here.'));
+      lineSlot.replaceChildren(h('p', { class: 'confirm-note' }, t('drGiveAFolderTheLine2')));
       if (!editor.el.hidden) editor.update(presets);
       return;
     }
@@ -445,8 +446,8 @@ export function presetEditor({ folder }) {
   const list = h('div', { class: 'preset-list' });
   const formSlot = h('div', { class: 'preset-form-slot' });
   const el = h('div', { class: 'preset-editor', hidden: true },
-    h('p', { class: 'new-title' }, 'Your presets'), list, formSlot,
-    h('p', { class: 'confirm-note' }, 'A changed presets file waits for your accept (`vibeswitcher config held`, then `config accept`): none of its presets starts, and no next change is taken, before that.'));
+    h('p', { class: 'new-title' }, t('drYourPresets')), list, formSlot,
+    h('p', { class: 'confirm-note' }, t('drAChangedPresetsFileWaits')));
   let drawn = '';
   // What the form edits: null (closed), { op: 'add' }, { op: 'edit', original } or { op: 'remove', original }.
   let open = null;
@@ -455,17 +456,17 @@ export function presetEditor({ folder }) {
     const where = folder();
     if (open.op === 'remove') {
       const scoped = open.original.project ? where : null;
-      return h('div', { class: 'preset-form' }, h('p', { class: 'confirm-note' }, `Removes ${open.original.name}${scoped ? ' from this folder' : ' (every folder’s)'}.`),
-        copyLine(presetLine('remove', { name: open.original.name }, { folder: scoped, original: open.original }), 'the command that removes it'));
+      return h('div', { class: 'preset-form' }, h('p', { class: 'confirm-note' }, t(scoped ? 'drRemovesHere' : 'drRemovesAll', { name: open.original.name })),
+        copyLine(presetLine('remove', { name: open.original.name }, { folder: scoped, original: open.original }), t('drTheCommandThatRemovesIt')));
     }
     const original = open.original || null;
     const state = {
       name: original?.name || '', kind: original?.kind === 'shell' ? 'shell' : 'claude', args: original ? presetArgs(original) : '',
       keepShell: !!original?.keepShell, isDefault: false, env: [], unset: [], scoped: original ? !!original.project : !!where,
     };
-    const name = h('input', { class: 'answer-input', type: 'text', value: state.name, placeholder: 'Name', 'aria-label': 'Preset name', spellcheck: 'false', autocomplete: 'off' });
-    const args = h('input', { class: 'answer-input', type: 'text', value: state.args, placeholder: 'Claude’s arguments, e.g. --model opus', 'aria-label': 'Claude’s arguments', spellcheck: 'false', autocomplete: 'off' });
-    const kinds = h('div', { class: 'segmented', role: 'group', 'aria-label': 'Runs' });
+    const name = h('input', { class: 'answer-input', type: 'text', value: state.name, placeholder: t('drName'), 'aria-label': t('drPresetName'), spellcheck: 'false', autocomplete: 'off' });
+    const args = h('input', { class: 'answer-input', type: 'text', value: state.args, placeholder: t('drClaudeSArgumentsEG'), 'aria-label': t('drClaudeSArguments'), spellcheck: 'false', autocomplete: 'off' });
+    const kinds = h('div', { class: 'segmented', role: 'group', 'aria-label': t('drRuns') });
     const tick = (label, key, disabled = false) => {
       const box = h('input', { type: 'checkbox', disabled });
       box.checked = state[key];
@@ -476,19 +477,19 @@ export function presetEditor({ folder }) {
     const lineSlot = h('div', { class: 'prompt-line' });
     const listId = 'preset-variables';
     const names = h('datalist', { id: listId }, PRESET_VARIABLES.map((variable) => h('option', { value: variable })));
-    const addVariable = h('button', { class: 'confirm-clear', type: 'button', onclick: () => { state.env.push(['', '']); drawVariables(); variables.querySelector('.preset-var:last-child input')?.focus(); } }, 'Add a variable');
+    const addVariable = h('button', { class: 'confirm-clear', type: 'button', onclick: () => { state.env.push(['', '']); drawVariables(); variables.querySelector('.preset-var:last-child input')?.focus(); } }, t('drAddAVariable'));
 
     function drawVariables() {
       const kept = (original?.env || []).map((variable) => {
         const off = state.unset.includes(variable);
         return h('span', { class: 'preset-chip' + (off ? ' off' : '') }, variable, h('button', {
-          class: 'icon-button', type: 'button', 'aria-label': off ? `Keep ${variable}` : `Take ${variable} off`, title: off ? 'Keep it' : 'Take it off',
+          class: 'icon-button', type: 'button', 'aria-label': t(off ? 'drKeepVar' : 'drTakeVar', { variable }), title: off ? t('drKeepIt') : t('drTakeItOff'),
           onclick: () => { state.unset = off ? state.unset.filter((one) => one !== variable) : [...state.unset, variable]; drawVariables(); fill(); },
         }, icon(off ? 'plus' : 'close', 11)));
       });
       const rows = state.env.map((pair, index) => {
-        const key = h('input', { class: 'answer-input', type: 'text', value: pair[0], placeholder: 'VARIABLE', list: listId, 'aria-label': 'Variable', spellcheck: 'false', autocomplete: 'off' });
-        const value = h('input', { class: 'answer-input', type: 'text', value: pair[1], placeholder: 'Value', 'aria-label': 'Value', spellcheck: 'false', autocomplete: 'off' });
+        const key = h('input', { class: 'answer-input', type: 'text', value: pair[0], placeholder: 'VARIABLE', list: listId, 'aria-label': t('drVariable'), spellcheck: 'false', autocomplete: 'off' });
+        const value = h('input', { class: 'answer-input', type: 'text', value: pair[1], placeholder: t('drValue'), 'aria-label': t('drValue'), spellcheck: 'false', autocomplete: 'off' });
         key.addEventListener('input', () => { state.env[index][0] = key.value.trim(); fill(); });
         value.addEventListener('input', () => { state.env[index][1] = value.value; fill(); });
         return h('div', { class: 'preset-var' }, key, value);
@@ -500,13 +501,13 @@ export function presetEditor({ folder }) {
       args.hidden = state.kind === 'shell';
       [...kinds.children].forEach((button) => button.setAttribute('aria-pressed', String(button.dataset.kind === state.kind)));
       const scoped = state.scoped && where ? where : null;
-      const problem = presetProblem(state) || (state.isDefault && !scoped ? 'A default is a folder’s: give a folder and keep it this folder’s.' : null);
+      const problem = presetProblem(state) || (state.isDefault && !scoped ? t('drADefaultIsAFolder') : null);
       if (problem) { lineSlot.replaceChildren(h('p', { class: 'confirm-note' }, problem)); return; }
       const line = presetLine(open.op, state, { folder: scoped, original });
       // An edit that changes nothing yet: the line with no change in it.
       const unchanged = original && presetLine('edit', { name: original.name, kind: original.kind, args: presetArgs(original), keepShell: original.keepShell }, { folder: scoped, original });
       lineSlot.replaceChildren(open.op === 'edit' && line === unchanged
-        ? h('p', { class: 'confirm-note' }, 'Change something: the line that does it shows here.')
+        ? h('p', { class: 'confirm-note' }, t('drChangeSomethingTheLineThat'))
         : copyLine(line, open.op === 'add' ? 'the command that adds it' : 'the command that changes it'));
     }
 
@@ -517,9 +518,9 @@ export function presetEditor({ folder }) {
     args.addEventListener('input', () => { state.args = args.value; fill(); });
     drawVariables();
     const ticks = h('div', { class: 'preset-ticks' },
-      open.op === 'add' ? tick('Only for this folder', 'scoped', !where) : null,
-      tick('A shell stays when it ends', 'keepShell'),
-      tick('This folder’s default', 'isDefault', !where));
+      open.op === 'add' ? tick(t('drOnlyForThisFolder'), 'scoped', !where) : null,
+      tick(t('drAShellStaysWhenIt'), 'keepShell'),
+      tick(t('drThisFolderSDefault'), 'isDefault', !where));
     const node = h('div', { class: 'preset-form' }, h('div', { class: 'new-fields' }, name, kinds, args), variables, addVariable, names, ticks, lineSlot);
     fill();
     return node;
@@ -528,11 +529,11 @@ export function presetEditor({ folder }) {
   function drawList(presets) {
     const mine = presets.filter((preset) => !preset.builtIn);
     list.replaceChildren(...mine.map((preset) => h('div', { class: 'preset-row' },
-      h('span', { class: 'preset-name' }, preset.name), h('span', { class: 'preset-note' }, [presetNote(preset), preset.project ? 'this folder’s' : 'every folder’s', preset.refused ? `can’t start: ${preset.refused}` : null].filter(Boolean).join(' · ')),
+      h('span', { class: 'preset-name' }, preset.name), h('span', { class: 'preset-note' }, [presetNote(preset), preset.project ? t('drThisFolders') : t('drEveryFolders'), preset.refused ? t('drCantStart', { why: preset.refused }) : null].filter(Boolean).join(' · ')),
       h('span', { class: 'confirm-actions' },
-        h('button', { class: 'confirm-clear', type: 'button', onclick: () => { open = { op: 'edit', original: preset }; formSlot.replaceChildren(form()); formSlot.querySelector('input')?.focus(); } }, 'Edit'),
-        h('button', { class: 'confirm-clear', type: 'button', onclick: () => { open = { op: 'remove', original: preset }; formSlot.replaceChildren(form()); formSlot.querySelector('.copy-button')?.focus(); } }, 'Remove')))),
-    h('button', { class: 'confirm-clear', type: 'button', onclick: () => { open = { op: 'add' }; formSlot.replaceChildren(form()); formSlot.querySelector('input')?.focus(); } }, 'Add a preset'));
+        h('button', { class: 'confirm-clear', type: 'button', onclick: () => { open = { op: 'edit', original: preset }; formSlot.replaceChildren(form()); formSlot.querySelector('input')?.focus(); } }, t('drEdit')),
+        h('button', { class: 'confirm-clear', type: 'button', onclick: () => { open = { op: 'remove', original: preset }; formSlot.replaceChildren(form()); formSlot.querySelector('.copy-button')?.focus(); } }, t('drRemove'))))),
+    h('button', { class: 'confirm-clear', type: 'button', onclick: () => { open = { op: 'add' }; formSlot.replaceChildren(form()); formSlot.querySelector('input')?.focus(); } }, t('drAddAPreset')));
   }
 
   return {
@@ -560,10 +561,10 @@ export function presetChosen(presets, chosen, picked) {
 // A preset in a few words: what it runs, the variables it sets (by name), whether a shell stays.
 export function presetNote(preset) {
   const parts = [];
-  if (preset.kind === 'shell') parts.push('a shell');
-  else if (preset.command) parts.push(`runs ${preset.command}`);
-  if (preset.env?.length) parts.push(`sets ${preset.env.join(', ')}`);
-  if (preset.keepShell) parts.push('a shell stays when it ends');
-  if (preset.default) parts.push('this folder’s default');
+  if (preset.kind === 'shell') parts.push(t('drAShell'));
+  else if (preset.command) parts.push(t('drRunsCommand', { command: preset.command }));
+  if (preset.env?.length) parts.push(t('drSets', { list: preset.env.join(', ') }));
+  if (preset.keepShell) parts.push(t('drShellStays'));
+  if (preset.default) parts.push(t('drFolderDefault'));
   return parts.join(' · ');
 }

@@ -9,6 +9,7 @@ import { dictationGroup } from '../dictate.js';
 import { healthFacts } from '../health.js';
 import { updateFacts } from '../updates.js';
 import { copyLine } from './cards.js';
+import { t } from '../i18n.js';
 
 const row = (name, ...value) => h('div', { class: 'fact' }, h('dt', null, name), h('dd', null, value));
 const ago = (iso) => (iso ? h('time', { data: { since: iso }, title: new Date(iso).toLocaleString() }, since(iso)) : 'unknown');
@@ -19,11 +20,11 @@ const group = (title, ...children) => h('section', { class: 'node-group' }, h('h
 export function usageGroup(usage) {
   const facts = usageFacts(usage);
   if (!facts) return null;
-  return group('Account usage',
-    h('p', { class: 'node-says' }, 'Best effort: what the sessions’ status lines and Claude’s refusals said' + (facts.account ? ` (${facts.account})` : '') + '.'),
+  return group(t('noAccountUsage'),
+    h('p', { class: 'node-says' }, t('noBestEffort') + (facts.account ? ` (${facts.account})` : '') + '.'),
     h('dl', { class: 'facts-list' }, facts.limits.length ? facts.limits.map((limit) => row(limit.title,
-      h('span', { class: limit.holds ? 'dot tone-needs-you' : 'dot tone-done', 'aria-hidden': 'true' }), limit.value, limit.holds ? ' · holds work back' : ''))
-      : row('Limits', 'Nothing known yet')),
+      h('span', { class: limit.holds ? 'dot tone-needs-you' : 'dot tone-done', 'aria-hidden': 'true' }), limit.value, limit.holds ? t('noHoldsWorkBack') : ''))
+      : row(t('noLimits'), t('noNothingKnownYet'))),
     h('ul', { class: 'lines' }, facts.notes.map((note) => h('li', null, note))));
 }
 
@@ -31,7 +32,7 @@ export function usageGroup(usage) {
 export function healthGroup(health) {
   const facts = healthFacts(health);
   if (!facts) return null;
-  return group('Health',
+  return group(t('noHealth'),
     h('dl', { class: 'facts-list' }, facts.rows.map(([name, value], index) => index === 0
       ? row(name, h('span', { class: facts.tone === 'done' ? 'dot tone-done' : 'dot tone-needs-you', 'aria-hidden': 'true' }), value)
       : row(name, value))),
@@ -44,22 +45,22 @@ export function updatesGroup(update) {
   const facts = updateFacts(update);
   if (!facts) return null;
   const tone = facts.tone === 'done' ? 'dot tone-done' : facts.tone === 'needs-you' ? 'dot tone-needs-you' : 'dot';
-  return group('Updates',
+  return group(t('noUpdates'),
     h('dl', { class: 'facts-list' },
-      row('State', h('span', { class: tone, 'aria-hidden': 'true' }), facts.state),
-      facts.checkedAt ? row('Last checked', ago(facts.checkedAt), ' ago') : null,
-      facts.problem ? row('Last try', `couldn’t look: ${facts.problem}`) : null),
-    h('div', { class: 'card-command' }, h('span', { class: 'card-command-label' }, 'In a terminal'),
+      row(t('noState'), h('span', { class: tone, 'aria-hidden': 'true' }), facts.state),
+      facts.checkedAt ? row(t('noLastChecked'), t('noAgo', { d: ago(facts.checkedAt) })) : null,
+      facts.problem ? row(t('noLastTry'), t('noCouldntLook', { why: facts.problem })) : null),
+    h('div', { class: 'card-command' }, h('span', { class: 'card-command-label' }, t('noInATerminal')),
       facts.lines.map((line) => copyLine(line.text, line.label))));
 }
 
 export function nodeView(app) {
   const { store } = app;
   const body = h('div', { class: 'node-column' });
-  const el = h('section', { class: 'node', 'aria-label': 'This node' },
+  const el = h('section', { class: 'node', 'aria-label': t('noThisNode') },
     h('header', { class: 'head' },
-      h('a', { class: 'back icon-button', href: '#/', 'aria-label': 'Sessions' }, icon('back', 16)),
-      h('div', { class: 'head-text' }, h('div', { class: 'head-line' }, h('h1', { class: 'head-title' }, 'This node')))),
+      h('a', { class: 'back icon-button', href: '#/', 'aria-label': t('noSessions') }, icon('back', 16)),
+      h('div', { class: 'head-text' }, h('div', { class: 'head-line' }, h('h1', { class: 'head-title' }, t('noThisNode'))))),
     h('div', { class: 'pane node-pane' }, body));
   let drawn = '';
   const dictation = dictationGroup();
@@ -83,65 +84,65 @@ export function nodeView(app) {
 
     // replaceChildren would write an absent group as the word "null": the groups a node doesn't have are left out.
     body.replaceChildren(...[
-      notices.length ? h('section', { class: 'node-group' }, h('h2', { class: 'section-title' }, plural(notices.length, 'Notice')),
+      notices.length ? h('section', { class: 'node-group' }, h('h2', { class: 'section-title' }, plural(notices.length, t('noNotice'))),
         h('ul', { class: 'notices' }, notices.map((notice) => h('li', null, icon('warning', 14), h('span', null, notice))))) : null,
-      group('Session host',
+      group(t('noSessionHost'),
         h('dl', { class: 'facts-list' },
-          row('State', h('span', { class: connected ? 'dot tone-done' : 'dot tone-needs-you', 'aria-hidden': 'true' }), connected ? 'Connected' : host.state),
-          row('Running for', ago(host.startedAt)),
-          row('Live sessions', String(host.liveSessions)),
-          row('Process', `pid ${host.pid ?? '?'}`),
-          notes ? row('Server restarts', String(notes.serverRestarts)) : null,
-          notes?.refusedAppConnections ? row('Refused connections', String(notes.refusedAppConnections)) : null,
-          (notes?.replacedPaths || []).map((path) => row('Took back its path', tilde(path, home))))),
+          row(t('noState'), h('span', { class: connected ? 'dot tone-done' : 'dot tone-needs-you', 'aria-hidden': 'true' }), connected ? t('noConnected') : host.state),
+          row(t('noRunningFor'), ago(host.startedAt)),
+          row(t('noLiveSessions'), String(host.liveSessions)),
+          row(t('noProcess'), `pid ${host.pid ?? '?'}`),
+          notes ? row(t('noServerRestarts'), String(notes.serverRestarts)) : null,
+          notes?.refusedAppConnections ? row(t('noRefusedConnections'), String(notes.refusedAppConnections)) : null,
+          (notes?.replacedPaths || []).map((path) => row(t('noTookBackItsPath'), tilde(path, home))))),
       usageGroup(node.usage),
       // Boost (the node's `boost`): on or off, why, and the limits it raises to.
-      node.boost ? group('Boost',
+      node.boost ? group(t('noBoost'),
         h('dl', { class: 'facts-list' },
-          row('State', h('span', { class: node.boost.on ? 'dot tone-working' : 'dot', 'aria-hidden': 'true' }), node.boost.on ? `On: ${node.boost.why}` : `Off: ${node.boost.why}`),
-          row('Mode', node.boost.mode),
-          node.boost.on ? row('Raised limits', `a load of ${node.boost.limits.loadThreshold}, ${node.boost.limits.maxSessions} team sessions, ${node.boost.limits.maxWorkers} workers per project, ${node.boost.limits.heavySlots} test and build slots`) : null),
-        h('a', { class: 'link', href: '#/settings' }, 'Change it in Settings')) : null,
+          row(t('noState'), h('span', { class: node.boost.on ? 'dot tone-working' : 'dot', 'aria-hidden': 'true' }), node.boost.on ? t('noBoostOnWhy', { why: node.boost.why }) : t('noBoostOffWhy', { why: node.boost.why })),
+          row(t('noMode'), node.boost.mode),
+          node.boost.on ? row(t('noRaisedLimits'), t('noBoostLimits', { load: node.boost.limits.loadThreshold, sessions: node.boost.limits.maxSessions, workers: node.boost.limits.maxWorkers, slots: node.boost.limits.heavySlots })) : null),
+        h('a', { class: 'link', href: '#/settings' }, t('noChangeItInSettings'))) : null,
       healthGroup(node.health),
       // The feature plugins that are on (`vibeswitcher plugin list` lists them all; on and off from a terminal).
-      Array.isArray(node.plugins) ? group('Plugins',
-        h('dl', { class: 'facts-list' }, node.plugins.length ? node.plugins.map((plugin) => row(plugin.title, h('span', { class: 'dot tone-done', 'aria-hidden': 'true' }), 'On'))
-          : row('On', 'None')),
+      Array.isArray(node.plugins) ? group(t('noPlugins'),
+        h('dl', { class: 'facts-list' }, node.plugins.length ? node.plugins.map((plugin) => row(plugin.title, h('span', { class: 'dot tone-done', 'aria-hidden': 'true' }), t('noOn')))
+          : row(t('noOn'), t('noNone'))),
         h('p', { class: 'node-says' }, 'vibeswitcher plugin list shows every plugin; plugin on NAME and plugin off NAME, in your terminal, change them.')) : null,
-      group('Server',
+      group(t('noServer'),
         h('dl', { class: 'facts-list' },
-          row('Running for', ago(server.startedAt)),
-          row('Process', `pid ${server.pid}`),
-          row('Node', node.node),
-          row('State folder', tilde(node.root, home)))),
+          row(t('noRunningFor'), ago(server.startedAt)),
+          row(t('noProcess'), `pid ${server.pid}`),
+          row(t('noNode'), node.node),
+          row(t('noStateFolder'), tilde(node.root, home)))),
       // The web listener this page came in by (the node's `web`; the mock has none).
-      node.web ? group('Web page',
+      node.web ? group(t('noWebPage'),
         h('dl', { class: 'facts-list' },
-          row('State', node.web.state === 'listening' ? `Listening on 127.0.0.1:${node.web.port}` : node.web.state === 'off' ? 'Off' : node.web.state),
-          row('Pages paired', String(node.web.tokens)),
-          row('Open now', String(node.web.connections)))) : null,
+          row(t('noState'), node.web.state === 'listening' ? t('noListening', { port: node.web.port }) : node.web.state === 'off' ? t('noOff') : node.web.state),
+          row(t('noPagesPaired'), String(node.web.tokens)),
+          row(t('noOpenNow'), String(node.web.connections)))) : null,
       updatesGroup(node.update),
-      group('Build',
+      group(t('noBuild'),
         h('dl', { class: 'facts-list' },
-          row('Running', h('code', null, notes?.build || server.commit)),
-          server.commit !== (notes?.build || server.commit) ? row('Server', h('code', null, server.commit)) : null,
-          others.length ? row('Also installed', others.map((commit) => h('code', null, commit))) : null,
-          builds?.rollback ? row('Rollback goes to', builds.rollback.line) : null)),
-      group('Who may act',
+          row(t('noRunning'), h('code', null, notes?.build || server.commit)),
+          server.commit !== (notes?.build || server.commit) ? row(t('noServer'), h('code', null, server.commit)) : null,
+          others.length ? row(t('noAlsoInstalled'), others.map((commit) => h('code', null, commit))) : null,
+          builds?.rollback ? row(t('noRollbackGoesTo'), builds.rollback.line) : null)),
+      group(t('noWhoMayAct'),
         h('p', { class: 'node-says' }, node.rule?.says || ''),
         h('ul', { class: 'lines' }, (node.facts || []).map((line) => h('li', null, line)))),
-      node.journal?.length ? group('Journal', h('ul', { class: 'lines' }, node.journal.map((line) => h('li', null, line.replace(/^journal: /, ''))))) : null,
-      node.accepted?.length ? group('Requests it took as yours',
-        h('ul', { class: 'lines' }, node.accepted.map((entry) => h('li', null, h('code', null, entry.commandLine.join(' ')), ' · ', ago(entry.at), ' ago · ', entry.cgroup)))) : null,
-      group('Between leads',
-        h('p', { class: 'node-says' }, 'What the projects’ leads told each other, and what became of each message.'),
-        h('a', { class: 'link', href: '#/mail' }, 'Open Between leads')),
-      group('Settings',
-        h('p', { class: 'node-says' }, 'What every project’s leads work under, and each project’s models and review floor.'),
-        h('a', { class: 'link', href: '#/settings' }, 'Open Settings')),
-      app.store.can('stats') ? group('Statistics',
-        h('p', { class: 'node-says' }, 'Load, usage, merges, quality and cost, by project, for today, 7 or 30 days.'),
-        h('a', { class: 'link', href: '#/stats' }, 'Open Statistics')) : null,
+      node.journal?.length ? group(t('noJournal'), h('ul', { class: 'lines' }, node.journal.map((line) => h('li', null, line.replace(/^journal: /, ''))))) : null,
+      node.accepted?.length ? group(t('noRequestsItTookAsYours'),
+        h('ul', { class: 'lines' }, node.accepted.map((entry) => h('li', null, h('code', null, entry.commandLine.join(' ')), ' · ', t('noAgo', { d: ago(entry.at) }), ' · ', entry.cgroup)))) : null,
+      group(t('noBetweenLeads'),
+        h('p', { class: 'node-says' }, t('noWhatTheProjectsLeadsTold')),
+        h('a', { class: 'link', href: '#/mail' }, t('noOpenBetweenLeads'))),
+      group(t('noSettings'),
+        h('p', { class: 'node-says' }, t('noWhatEveryProjectSLeads')),
+        h('a', { class: 'link', href: '#/settings' }, t('noOpenSettings'))),
+      app.store.can('stats') ? group(t('noStatistics'),
+        h('p', { class: 'node-says' }, t('noLoadUsageMergesQualityAnd')),
+        h('a', { class: 'link', href: '#/stats' }, t('noOpenStatistics'))) : null,
       // This page's own: the browser's notifications (js/notify.js).
       app.notifications?.el,
       // This page's own: dictation into a draft (js/dictate.js).

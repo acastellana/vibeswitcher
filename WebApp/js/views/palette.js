@@ -6,6 +6,7 @@ import { h } from '../dom.js';
 import { sessionMark, icon } from '../marks.js';
 import { STATES, stateOf, since } from '../words.js';
 import { projectOf } from '../ui.js';
+import { t } from '../i18n.js';
 
 // How well `text` answers `query`: a run at the start of a word beats one inside it, and the letters in order
 // anywhere beat nothing. 0: no match.
@@ -26,12 +27,12 @@ function score(text, query) {
 export function palette(app) {
   const { store, ui } = app;
   const input = h('input', {
-    class: 'palette-input', type: 'text', placeholder: 'Go to a session or run a command', role: 'combobox', 'aria-expanded': 'true',
-    'aria-controls': 'palette-list', 'aria-autocomplete': 'list', 'aria-label': 'Go to a session or run a command', autocomplete: 'off', spellcheck: 'false',
+    class: 'palette-input', type: 'text', placeholder: t('paGoToASessionOr'), role: 'combobox', 'aria-expanded': 'true',
+    'aria-controls': 'palette-list', 'aria-autocomplete': 'list', 'aria-label': t('paGoToASessionOr'), autocomplete: 'off', spellcheck: 'false',
   });
   const list = h('ul', { class: 'palette-list', id: 'palette-list', role: 'listbox' });
-  const none = h('p', { class: 'palette-none', hidden: true }, 'No matches');
-  const panel = h('div', { class: 'palette-panel', role: 'dialog', 'aria-modal': 'true', 'aria-label': 'Command palette' },
+  const none = h('p', { class: 'palette-none', hidden: true }, t('paNoMatches'));
+  const panel = h('div', { class: 'palette-panel', role: 'dialog', 'aria-modal': 'true', 'aria-label': t('paCommandPalette') },
     h('div', { class: 'palette-field' }, icon('search', 16), input), list, none);
   const el = h('div', { class: 'palette', hidden: true }, panel);
   let entries = [];

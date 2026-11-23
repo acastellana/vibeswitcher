@@ -14,8 +14,9 @@ import { ledger, fileWords, usageWords, costWords } from '../activity.js';
 import { teamTasks } from './lead.js';
 import { boardRecords } from './records.js';
 import { portRow } from '../devports.js';
+import { t } from '../i18n.js';
 
-const TABS = [{ id: 'team', label: 'Team' }, { id: 'overview', label: 'Overview' }, { id: 'activity', label: 'Activity' }];
+const TABS = [{ id: 'team', label: t('inTeam') }, { id: 'overview', label: t('inOverview') }, { id: 'activity', label: t('inActivity') }];
 // How close to the end of the Activity counts as being at its end.
 const NEAR = 48;
 // How often the Overview asks for a session's tokens and cost again while it shows.
@@ -69,51 +70,51 @@ function overview(app) {
   const word = h('span');
   const time = h('time');
   const shown = h('span', { class: 'inspect-state' }, mark, word, time);
-  const state = fact('State', shown);
-  const began = fact('Since');
-  const running = fact('Running');
+  const state = fact(t('inState'), shown);
+  const began = fact(t('inSince'));
+  const running = fact(t('inRunning'));
   const says = h('p', { class: 'inspect-says' });
-  const status = h('section', { class: 'inspect-group' }, h('h2', { class: 'group-head' }, 'Status'), h('dl', null, state.el, began.el, running.el), says);
+  const status = h('section', { class: 'inspect-group' }, h('h2', { class: 'group-head' }, t('inStatus')), h('dl', null, state.el, began.el, running.el), says);
 
-  const folder = fact('Folder');
+  const folder = fact(t('inFolder'));
   folder.el.classList.add('wraps');
-  const branch = fact('Branch');
-  const runsIn = fact('Runs in');
-  const place = group('Place', folder, branch, runsIn);
+  const branch = fact(t('inBranch'));
+  const runsIn = fact(t('inRunsIn'));
+  const place = group(t('inPlace'), folder, branch, runsIn);
 
-  const started = fact('Started');
+  const started = fact(t('inStarted'));
   const lasted = h('time');
-  const runningFor = fact('Running for', lasted);
-  const times = group('Time', started, runningFor);
+  const runningFor = fact(t('inRunningFor'), lasted);
+  const times = group(t('inTime'), started, runningFor);
 
-  const agent = fact('Agent');
-  const agentSession = fact('Session');
-  const process = fact('Process');
-  const command = fact('Command');
-  const size = fact('Size');
-  const agents = group('Agent', agent, agentSession, process, command, size);
+  const agent = fact(t('inAgent'));
+  const agentSession = fact(t('inSession'));
+  const process = fact(t('inProcess'));
+  const command = fact(t('inCommand'));
+  const size = fact(t('inSize'));
+  const agents = group(t('inAgent'), agent, agentSession, process, command, size);
 
   // Tokens and cost (the Mac's ActivityFeed): asked of the node (`session.usage`) as the tab shows, and again while it
   // shows, at most every `USAGE_EVERY` ms.
-  const tokens = fact('Tokens');
+  const tokens = fact(t('inTokens'));
   tokens.el.classList.add('wraps');
-  const cost = fact('Cost');
-  const turns = fact('Turns');
-  const usage = group('Usage', tokens, cost, turns);
+  const cost = fact(t('inCost'));
+  const turns = fact(t('inTurns'));
+  const usage = group(t('inUsage'), tokens, cost, turns);
   let usageFor = null;
   let usageAt = 0;
   let usageAsking = false;
 
-  const role = fact('Role');
+  const role = fact(t('inRole'));
   const leadLink = h('a', { class: 'inspect-link' });
-  const lead = fact('Lead', leadLink);
-  const task = fact('Task');
-  const team = group('Team', role, lead, task);
+  const lead = fact(t('inLead'), leadLink);
+  const task = fact(t('inTask'));
+  const team = group(t('inTeam'), role, lead, task);
 
   // Dev servers (the app's dev pages): the ports the session's processes listen on (`session.ports`), asked as the tab
   // shows and again at most every `USAGE_EVERY` ms; each opens in a new tab on the node's own machine.
   const portList = h('ul', { class: 'inspect-ports' });
-  const ports = { el: h('section', { class: 'inspect-group', hidden: true }, h('h2', { class: 'group-head' }, 'Dev servers'), portList) };
+  const ports = { el: h('section', { class: 'inspect-group', hidden: true }, h('h2', { class: 'group-head' }, t('inDevServers')), portList) };
   let portsFor = null;
   let portsAt = 0;
   let portsAsking = false;
@@ -124,8 +125,8 @@ function overview(app) {
     const rows = (result?.ports || []).map((entry) => portRow(entry, globalThis.location?.hostname)).filter(Boolean);
     ports.el.hidden = !rows.length;
     portList.replaceChildren(...rows.map((row) => h('li', null,
-      row.url ? h('a', { class: 'inspect-link', href: row.url, target: '_blank', rel: 'noopener noreferrer', title: `Opens ${row.url} in a new tab` }, row.label)
-        : h('span', { title: 'On the node’s machine: this page can’t open it from here' }, row.label),
+      row.url ? h('a', { class: 'inspect-link', href: row.url, target: '_blank', rel: 'noopener noreferrer', title: t('inOpensInTab', { url: row.url }) }, row.label)
+        : h('span', { title: t('inOnTheNodeSMachine') }, row.label),
       h('span', { class: 'inspect-port-about' }, ' · ' + row.about))));
   }
   function askPorts(session) {
@@ -152,7 +153,7 @@ function overview(app) {
   function drawUsage(result) {
     tokens.say(usageWords(result));
     cost.say(costWords(result));
-    turns.say(result && result.count ? `${plural(result.count, 'turn')}${result.partial ? ', the transcript’s last part' : ''}` : null);
+    turns.say(result && result.count ? t('inTurnCount', { n: result.count }) + (result.partial ? t('inTurnsPartial') : '') : null);
     usage.settle();
   }
   function askUsage(session) {
@@ -197,7 +198,7 @@ function overview(app) {
 
       folder.say(tilde(session.cwd, home), session.cwd);
       branch.say(session.branch);
-      runsIn.say(session.hosted ? 'The session host' : 'Another terminal');
+      runsIn.say(session.hosted ? t('inTheSessionHost') : t('inAnotherTerminal'));
       place.settle();
 
       started.say(session.startedAt ? moment(session.startedAt) : null);
@@ -209,8 +210,8 @@ function overview(app) {
       agent.say(AGENTS[session.agent] || session.agent);
       agentSession.say(session.agentSession ? `${session.agentSession.slice(0, 8)}…` : null, session.agentSession);
       // "4242 on pts/3" where the node says the process; else the terminal alone, under its own name.
-      setText(process.dt, session.pid ? 'Process' : 'Terminal');
-      process.say(session.pid ? `${session.pid} on ${session.terminal}` : session.terminal);
+      setText(process.dt, session.pid ? t('inProcess') : t('inTerminal'));
+      process.say(session.pid ? t('inPidOn', { pid: session.pid, terminal: session.terminal }) : session.terminal);
       command.say(session.command);
       size.say(session.size ? `${session.size.cols} × ${session.size.rows}` : null);
       agents.settle();
@@ -236,13 +237,13 @@ function teamPane(app) {
   const tasks = teamTasks(app);
   // Under the tasks, as the Mac's Team tab: the scorecard, decisions, answered questions, files.
   const records = boardRecords(app);
-  const later = h('p', { class: 'inspect-note' }, 'The board’s tasks come to this page in a later build.');
+  const later = h('p', { class: 'inspect-note' }, t('inTheBoardSTasksCome'));
   const leadLink = h('a', { class: 'inspect-link' });
-  const leader = fact('Session', leadLink);
-  const questions = fact('Questions');
-  const held = fact('Held');
-  const reports = fact('Reports');
-  const about = group('Lead', leader, questions, held, reports);
+  const leader = fact(t('inSession'), leadLink);
+  const questions = fact(t('inQuestions'));
+  const held = fact(t('inHeld'));
+  const reports = fact(t('inReports'));
+  const about = group(t('inLead'), leader, questions, held, reports);
   const noticeText = h('span');
   const notice = h('p', { class: 'inspect-notice', hidden: true }, icon('warning', 13), noticeText);
   const el = h('div', { class: 'inspect-pane' }, tasks.el, about.el, notice, records.el, later);
@@ -263,9 +264,9 @@ function teamPane(app) {
       pointAt(leadLink, other);
       const asks = lead?.questions;
       questions.say(!asks ? null : asks.open > 0
-        ? `${asks.open} for you` + (asks.blocking > 0 ? ` · ${asks.blocking} blocking` : '') : 'None open');
-      held.say(lead?.held > 0 ? `${plural(lead.held, 'message')} waiting for the lead` : null);
-      reports.say(lead?.reportsWaiting > 0 ? `${lead.reportsWaiting} waiting too long` : null);
+        ? t('inForYou', { n: asks.open }) + (asks.blocking > 0 ? t('inBlocking', { n: asks.blocking }) : '') : t('inNoneOpen'));
+      held.say(lead?.held > 0 ? t('inHeldMessages', { n: lead.held }) : null);
+      reports.say(lead?.reportsWaiting > 0 ? t('inReportsLate', { n: lead.reportsWaiting }) : null);
       about.settle();
       notice.hidden = !lead?.notice;
       setText(noticeText, lead?.notice || '');
@@ -298,7 +299,7 @@ function ledgerRow(first) {
   }
   const title = h('span', { class: 'ledger-title' });
   const trail = h('span', { class: 'ledger-trail' });
-  const running = h('span', { class: 'running', role: 'status', 'aria-label': 'Running', hidden: true });
+  const running = h('span', { class: 'running', role: 'status', 'aria-label': t('inRunning'), hidden: true });
   const el = h('li', { class: 'ledger-row' }, icon('terminal', 13), h('div', { class: 'ledger-text' },
     h('div', { class: 'ledger-line' }, title, running, trail), dim));
   return {
@@ -365,8 +366,8 @@ function activityPane(app, scroller, again) {
       const entries = following && loaded ? ledger(chat.items, { cwd: session.cwd, home, counts }) : [];
       keyed(list, rows, entries, (row) => row.key, ledgerRow);
       skeleton.hidden = !following || loaded;
-      const said = !following ? 'The files this session changes and the commands it runs come to this page with its conversation, in a later build.'
-        : loaded && entries.length === 0 ? 'No files changed or commands run in this conversation yet.' : '';
+      const said = !following ? t('inTheFilesThisSessionChanges')
+        : loaded && entries.length === 0 ? t('inNoFilesChangedOrCommands') : '';
       note.hidden = !said;
       setText(note, said);
       if (pinned) scroller.scrollTop = scroller.scrollHeight;
@@ -377,7 +378,7 @@ function activityPane(app, scroller, again) {
 export function inspector(app) {
   const { store, ui } = app;
   const tabs = TABS.map((tab) => h('button', { type: 'button', onclick: () => ui.setInspectorTab(tab.id) }, tab.label));
-  const close = h('button', { class: 'icon-button inspect-close', type: 'button', 'aria-label': 'Close the inspector', onclick: () => ui.setInspector(false) }, icon('close', 14));
+  const close = h('button', { class: 'icon-button inspect-close', type: 'button', 'aria-label': t('inCloseTheInspector'), onclick: () => ui.setInspector(false) }, icon('close', 14));
   const scroller = h('div', { class: 'inspect-scroll' });
   let current = null;
   const again = framed(() => {
@@ -386,8 +387,8 @@ export function inspector(app) {
   });
   const panes = { team: teamPane(app), overview: overview(app), activity: activityPane(app, scroller, again) };
   scroller.append(panes.team.el, panes.overview.el, panes.activity.el);
-  const el = h('aside', { class: 'inspector', id: 'inspector', 'aria-label': 'Inspector' },
-    h('div', { class: 'inspect-top' }, h('div', { class: 'segmented', role: 'group', 'aria-label': 'Inspector' }, tabs), close), scroller);
+  const el = h('aside', { class: 'inspector', id: 'inspector', 'aria-label': t('inInspector') },
+    h('div', { class: 'inspect-top' }, h('div', { class: 'segmented', role: 'group', 'aria-label': t('inInspector') }, tabs), close), scroller);
   // Under a sheet: a touch beside it closes it.
   const scrim = h('div', { class: 'inspect-scrim', onclick: () => ui.setInspector(false) });
   let shownTab = null;

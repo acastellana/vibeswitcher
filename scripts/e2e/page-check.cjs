@@ -100,11 +100,11 @@ async function shots(page, origin, folder) {
       }
     }
   }
-  // The page in Spanish (?lang=es), its roadmap too.
+  // The page in Spanish (?lang=es): the lead, the roadmap, a session, This node, Settings, Your own sessions, a task.
   await page.send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 900, deviceScaleFactor: 1, mobile: false });
   for (const theme of ['light', 'dark']) {
     await page.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: theme }] });
-    for (const [name, hash] of [['lead', project], ['roadmap', project.replace(/\/lead$/, '/roadmap')]]) {
+    for (const [name, hash] of [['lead', project], ['roadmap', project.replace(/\/lead$/, '/roadmap')], ['session', expect.chatHref], ['this-node', '#/node'], ['settings', '#/settings'], ['own-sessions', '#/sessions'], ['task-open', project + '?task=' + encodeURIComponent(expect.estimated)]]) {
       await page.send('Page.navigate', { url: `${origin}/?lang=es${hash}` });
       await pause(1500);
       fs.writeFileSync(path.join(folder, `${name}-spanish-${theme}.png`), Buffer.from((await page.send('Page.captureScreenshot', { format: 'png' })).data, 'base64'));

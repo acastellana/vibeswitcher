@@ -57,7 +57,7 @@ Screenshots of each main state, light and dark, wide and at 390 px, are in `shot
 | `wire/` | The validators and vectors, generated from the node's encoders (`vibeswitcher wire-vectors`): don't edit them. |
 | `js/ui.js` | What this window shows: the route (every address above, `parseRoute`, `projectHref`), a session's pane, the inspector. |
 | `js/conversation.js` | The redesign's reads of the board and cards, no page in them: the lead conversation's lines and the dial's counts, a question's head line, a task's five steps and colour, whom a blocked task waits on, the projects and which opens first. |
-| `js/i18n.js` | The page's own words in English and Spanish (`t(key, values)`), the browser's language chosen once. |
+| `js/i18n.js`, `js/i18n-es.js` | Every view's own words: the English with the keys and `t(key, values)` (the browser's language chosen once), and the Spanish, a file a language. |
 | `js/words.js` | The vocabulary: state words, durations, a task's words (from `VibeCore`). |
 | `js/dom.js`, `js/marks.js`, `js/text.js` | Building nodes; status marks, agent badges, icons; markdown and diffs as nodes. |
 | `js/terminal.js` | A session's terminal over the socket (the contract's §9): the binary frames, and the stream's life (open, the replay drawn whole, live, resync, reconnect, close). |

@@ -1,6 +1,8 @@
 // A feature plugin's card (Sources/VibeNode/Plugins/Plugin.swift, `card.plugin`): one shape for every plugin, drawn by
 // one renderer (views/cards.js's pluginCard). What it asks, whole, and the lines that settle it in a terminal. A page
 // never acts; an agent's words are only ever text.
+import { t } from './i18n.js';
+
 
 const cap = (text) => { const s = String(text || ''); return s ? s[0].toUpperCase() + s.slice(1) : s; };
 
@@ -9,15 +11,15 @@ const cap = (text) => { const s = String(text || ''); return s ? s[0].toUpperCas
 export function pluginFacts(card) {
   const p = card.plugin || {}, short = String(card.id).replace(/^.*:card:/, '').slice(0, 8), body = p.body || {};
   return {
-    plugin: p.plugin || '', title: p.title || 'An agent asks', severity: p.severity || 'important',
-    asker: p.asker || 'a session', ask: p.ask || '',
+    plugin: p.plugin || '', title: p.title || t('pcAnAgentAsks'), severity: p.severity || 'important',
+    asker: p.asker || t('pcASession'), ask: p.ask || '',
     facts: (p.facts || []).map((fact) => ({ label: cap(fact.label), value: fact.value || '', folder: !!fact.folder })),
-    body: { name: cap(body.name || 'request'), lines: Array.isArray(body.lines) ? body.lines : [], size: body.size || '', note: body.note || '' },
+    body: { name: cap(body.name || t('pcRequest')), lines: Array.isArray(body.lines) ? body.lines : [], size: body.size || '', note: body.note || '' },
     // The agent's own words, marked as its own here whatever the plugin labels them.
-    context: p.context ? { label: `${cap(p.context.label)} (the agent’s words)`, text: `“${p.context.text || ''}”` } : null,
+    context: p.context ? { label: t('pcAgentWords', { label: cap(p.context.label) }), text: `“${p.context.text || ''}”` } : null,
     state: p.state || 'waiting', expiresAt: p.expiresAt || null, waiting: p.waiting || '',
     outcome: p.outcome || null,
-    actions: (p.actions || []).map((action) => ({ word: action.word, label: action.label, line: `vibeswitcher answer ${short} ${action.word}`, says: `the command that ${action.short}` })),
+    actions: (p.actions || []).map((action) => ({ word: action.word, label: action.label, line: `vibeswitcher answer ${short} ${action.word}`, says: t('pcCommandThat', { x: action.short }) })),
   };
 }
 
