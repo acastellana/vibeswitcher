@@ -21,6 +21,16 @@ struct ImageCacheTests {
         #expect(await ImageCache.thumbnail(file: file.path, pixels: 180) === shown)
     }
 
+    /// The Mac short of memory (a loaded full suite was, 2026-11-23): NSCache lets its thumbnails go. One a view still
+    /// shows is the same one when asked again, not a second copy decoded beside it.
+    @Test func aThumbnailStillShownIsTheSameOneAfterTheCacheLetsGo() async throws {
+        let file = scratch.url("shot.png")
+        try ChatMemoryTests.screenshot(seed: 2).write(to: file)
+        let shown = try #require(await ImageCache.thumbnail(file: file.path, pixels: 180))
+        ImageCache.evictAll()
+        #expect(await ImageCache.thumbnail(file: file.path, pixels: 180) === shown)
+    }
+
     @Test func notAnImageOrNoFileGivesNothing() async throws {
         let text = scratch.url("notes.png")
         try Data("not a picture".utf8).write(to: text)
