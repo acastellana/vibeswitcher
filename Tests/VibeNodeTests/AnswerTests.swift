@@ -179,6 +179,9 @@ struct AnswerTests {
         let config = try #require(await world.ask("config.held", ["folder": .string(world.repo)]))
         let configCard = try #require(config.result?["card"]?["id"]?.string, "\(config)")
         #expect(try #require(await world.ask("config.accept", ["card": .string(configCard), "code": .string(NodeIds.code(card: configCard))])).ok)
+        // A move to show (a base at its recorded head draws no card).
+        _ = try await taskBranch(world.repo, task: "moved")
+        try await scratchGit(world.repo, ["merge", "-q", "--ff-only", "agent/moved"])
         let base = try #require(await world.ask("base.show", ["folder": .string(world.repo)]))
         let baseCard = try #require(base.result?["card"]?["id"]?.string, "\(base)")
         #expect(try #require(await world.ask("base.keep", ["card": .string(baseCard), "code": .string(NodeIds.code(card: baseCard))])).ok)

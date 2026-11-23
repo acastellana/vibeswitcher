@@ -763,8 +763,16 @@ extension LeadEngine {
         baseMoves.look(roots)
     }
 
-    /// `base show FOLDER [--from COMMIT]`: a base-move card made on demand, also with no lead running. From any thread.
-    public func baseShow(root: String, from: String?, then: @escaping (Result<CardStore.Card, CardFailure>) -> Void) {
+    /// `base show FOLDER [--from COMMIT]`: a base-move card made on demand, also with no lead running; none when the base
+    /// is where the vault recorded it (`Shown.unmoved`): `.unmoved` with its head, and the open on-demand cards of the
+    /// folder closed (each showed a move that is no longer to accept). The same move shown again is its open card.
+    /// From any thread.
+    public enum BaseShown {
+        case card(CardStore.Card)
+        case unmoved(branch: String, head: String)
+    }
+
+    public func baseShow(root: String, from: String?, then: @escaping (Result<BaseShown, CardFailure>) -> Void) {
         let (vault, node) = (cardVault, self.root)
         work.async { [weak self] in
             // After a host restart the vault lost the head: the snapshot's, marked unverified (E8).
@@ -774,13 +782,24 @@ extension LeadEngine {
                 switch shown {
                 case .failure(let refusal): then(.failure(.refused(refusal.description)))
                 case .success(let shown):
-                    for old in self.cards.list(project: NodeIds.project(root: root)) where old.kind == .baseMove && old.base?.move == nil {
-                        self.cards.change(old.id) { $0.closed = "superseded by a newer card" }
+                    let unmoved = shown.unmoved
+                    // The same move shown again (each `approve` asks, and so does a second `base show`): its open card,
+                    // not another one closing it (cards don't pile up, the 1.4 MB incident's class).
+                    if !unmoved, let same = self.cards.list(project: NodeIds.project(root: root)).first(where: {
+                        $0.isOpen && $0.kind == .baseMove && $0.base?.branch == shown.branch && $0.base?.to == shown.to && $0.base?.from == shown.from
+                    }) {
+                        return then(.success(.card(same)))
                     }
+                    // A base where the vault recorded it settles every open base card of the folder (a look's too: its
+                    // move ended where the head is recorded now); a new card supersedes the shown ones.
+                    for old in self.cards.list(project: NodeIds.project(root: root)) where old.kind == .baseMove && (unmoved || old.base?.move == nil) {
+                        self.cards.change(old.id) { $0.closed = unmoved ? "the base is where the vault recorded it" : "superseded by a newer card" }
+                    }
+                    if unmoved { return then(.success(.unmoved(branch: shown.branch, head: shown.to))) }
                     var card = CardStore.Card(root: root, kind: .baseMove)
                     card.base = shown
                     self.cards.put(card)
-                    then(.success(card))
+                    then(.success(.card(card)))
                 }
             }
         }
