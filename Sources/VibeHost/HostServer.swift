@@ -244,7 +244,11 @@ public final class HostServer {
         timer.setEventHandler { [weak self] in self?.tidy() }
         timer.resume()
         housekeeping = timer
-        if config.watchesItsPath { pathWatch = HostPathWatch.start(for: self, config: config, lockFD: lockFD) }
+        if config.watchesItsPath {
+            // A watch the system can't give is said once in the host's log (its owner checks at housekeeping).
+            Platform.Watches.whenFirstUnmade = { [log] in log.note("host: \($0)") }
+            pathWatch = HostPathWatch.start(for: self, config: config, lockFD: lockFD)
+        }
         log.note("host: started, build \(config.hostBuild), socket \(config.socketPath)")
         if let owner = config.owner { watch(owner: owner) }
     }

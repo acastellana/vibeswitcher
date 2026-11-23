@@ -183,25 +183,71 @@ public final class LeadAdvance: @unchecked Sendable {
     /// Watches the project's folder from now on, and looks once now. The watch is a thread of its own waiting in
     /// kevent, not a dispatch source: it hears the folder change even while every pooled thread is busy (a merge's
     /// tests, a test run's blocked waits).
+    ///
+    /// A watch that tells its folder gone (removed, renamed, or its end lost to an overflow) is made again, and a look
+    /// follows; while one can't be made, a look every `unwatchedLook` seconds stands in for it, and it is asked for
+    /// again each time. Each change is a `trigger`, which a pass under way folds in and a stop ends.
     func start() {
         guard let lead = owner else { return }
         try? lead.store.prepare()
         runningLock = FileLock.attempt(Self.runningLock(lead.store))
-        if let watch = Platform.FolderWatch(path: lead.store.folder) {
-            self.watch = watch
-            Thread.detachNewThread { [weak self] in
-                while watch.wait() != nil {
-                    self?.trigger()
+        let folder = lead.store.folder
+        Thread.detachNewThread { [weak self] in Self.follow(folder, self) }
+        trigger()
+    }
+
+    /// How often the project is looked at while its folder can't be watched (tests set less). Under `lock`.
+    var unwatchedLook: TimeInterval = 60
+
+    /// Whether the project's folder is watched now. For the tests.
+    var isWatching: Bool { lock.withLock { watch != nil } }
+
+    /// The watch thread's life: `folder` watched, and made again when gone, until `advance` stops or goes.
+    private static func follow(_ folder: String, _ advance: LeadAdvance?) {
+        weak var advance = advance
+        while true {
+            guard let current = advance else { return }
+            let made = Platform.FolderWatch(path: folder)
+            current.lock.lock()
+            if current.stopped {
+                current.lock.unlock()
+                made?.stop()
+                return
+            }
+            current.watch = made
+            if made == nil {
+                // The whole while, whatever else wakes the condition (each pass's end does), unless stopped.
+                let began = Date()
+                while !current.stopped, Date() < began.addingTimeInterval(current.unwatchedLook) {
+                    _ = current.lock.wait(until: began.addingTimeInterval(current.unwatchedLook))
                 }
             }
+            current.lock.unlock()
+            guard let made else {
+                current.trigger()
+                continue
+            }
+            // Not held while it waits: the advance can go, and its `stop()` ends the wait.
+            _ = consume current
+            while let change = made.wait() {
+                advance?.trigger()
+                if change.contains(.folderGone) { break }
+            }
+            made.stop()
+            guard let still = advance else { return }
+            still.lock.lock()
+            if still.watch === made { still.watch = nil }
+            still.lock.unlock()
+            still.trigger()
         }
-        trigger()
     }
 
     /// Stops watching, and waits for a run under way to end (`wait`): none starts after.
     func stop(wait: Bool = false) {
         lock.lock()
         stopped = true
+        // Ends the watch thread's wait for a look while the folder can't be watched.
+        lock.broadcast()
         while wait && (busy || !merging.isEmpty) { lock.wait() }
         let watch = self.watch
         self.watch = nil

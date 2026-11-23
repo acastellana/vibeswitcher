@@ -2,6 +2,7 @@ import Foundation
 import Testing
 @testable import VibeCore
 @testable import VibeNode
+@testable import VibePlatform
 
 /// The node's one session list (`NodeSessions`, the engine plan's E3): the app's `SessionStoreTests` cases that aren't
 /// about Terminal.app, Spaces, presence or the ledger, and `AgentQuitTests`' case, their assertions kept (the port map's
@@ -512,6 +513,38 @@ struct NodeSessionsTests {
         queue.async { wake() }
         #expect(await eventually { on(nodes) { nodes.scansApplied } > watched })
         #expect(clock.wakes == 1)
+    }
+
+    /// The state folder's watch couldn't be made (the system had none left): said once, the scans go on, and the watch is
+    /// asked for again at a scan `watchRetry` on; from then a hook write is seen with no scan asked.
+    @Test func aStateFolderWatchThatCouldntBeMadeIsAskedForAgain() async throws {
+        let (root, home) = try node()
+        let state = root.appendingPathComponent("state")
+        let table = [Int32(971): ProcInfo(pid: 971, ppid: 1, tty: "ttypts971", comm: "claude", startTime: Date().addingTimeInterval(-600), agent: .claude)]
+        func hook(_ event: String) throws {
+            var hook = HookState(agent: .claude, tty: "ttypts971", lastEvent: event, lastEventAt: Date().timeIntervalSince1970)
+            hook.agentPid = 971
+            try hook.save(to: state.appendingPathComponent("ttypts971.json"))
+        }
+        try hook("PreToolUse")
+        InotifyHub.shared.failNextWatch(of: state.path)
+        let said = Locked<[String]>([])
+        var timing = NodeSessions.Timing()
+        timing.watchRetry = 0
+        let nodes = NodeSessions(root: root, home: home.path, queue: DispatchQueue(label: "engine"), timing: timing,
+                                 scanner: SessionScanner(processes: { table }, stateDir: { state }, cwd: { _ in "/r/x" }, arguments: { _ in [] }),
+                                 note: { line in said.value.append(line) })
+        nodes.start()
+        defer { nodes.stop() }
+        #expect(await eventually { session(nodes, "ttypts971")?.status == .working })
+        #expect(said.value.contains { $0.contains("the state folder can't be watched") }, "\(said.value)")
+        // A scan (here asked; the clock's on a node) asks for the watch again.
+        nodes.refresh()
+        #expect(await eventually { on(nodes) { nodes.watchedStateFolder } })
+        let scans = on(nodes) { nodes.scansApplied }
+        try hook("PermissionRequest")
+        #expect(await eventually { session(nodes, "ttypts971")?.status == .needsInput })
+        #expect(on(nodes) { nodes.scansApplied } > scans)
     }
 
     /// A session starting or ending on the host scans at once (`HostLink.changes`), with no clock and no refresh: the
