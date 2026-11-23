@@ -590,14 +590,17 @@ struct ClaudeDictationTests {
     @Test func escCancelsTheRecordingAndNothingLands() async throws {
         let h = try await Harness.start(temp)
         defer { h.stop() }
-        // A repeat late past FakeClaude's 120 ms gap (a merge's loaded Mac) ends its recording before the Esc: the
-        // transcript goes in and there's no recording left to cancel (2026-11-16: voiceCancels never came to 1).
-        // A wider gap keeps the one recording, as a held key does, whatever the load (as `heldTheTranscript…`).
-        h.tell(["op": "voice", "mode": "hold", "gap": 1.5])
-        try await h.waitFor { h.agent["voice"] as? String == "hold" }
+        // Claude records until the Esc (`stuck`): a stall past its 120 ms gap between two repeats (a merge's loaded Mac,
+        // the app's or Claude's) would end the recording first, its transcript in, and the run takes that out with no
+        // recording left to cancel (2026-11-16: voiceCancels never came to 1). A wider gap only made it rarer.
+        h.tell(["op": "voice", "mode": "hold", "stuck": true])
+        try await h.waitFor { h.agent["voice"] as? String == "hold" && h.agent["stuck"] as? Bool == true }
         let controller = dictation(h)
         controller.press(h.key, agent: .claude) { "" }
         try await h.waitFor { controller.listening }
+        // Cancelled once Claude records: listening comes before the run has read the screen, and Claude is still warming
+        // up for its first repeats; a cancel then leaves it nothing of its own to cancel.
+        try await h.waitFor { h.agent["recording"] as? String == "listening" }
         controller.cancel()
         try await h.waitFor { controller.phase == .idle }
         try await h.waitFor { h.agent["voiceCancels"] as? Int == 1 }
@@ -616,26 +619,31 @@ struct ClaudeDictationTests {
         let h = try await Harness.start(temp)
         defer { h.stop() }
         h.tell(["op": "work"])
-        // A wider gap than FakeClaude's 120 ms: a repeat late past it (a merge's loaded Mac) would end the held
-        // recording before the cancel, its transcript in (2026-11-16: "held .escape: voiceCancels 0, cancels 1", every
-        // phase after it one off). Let go, it's this long before Claude processes.
-        h.tell(["op": "voice", "mode": "hold", "gap": 1.5])
-        try await h.waitFor { h.agent["voice"] as? String == "hold" && h.agent["mode"] as? String == "working" }
+        // Claude's recording ends when the test says (`stuck`, then `voiceStop`), never on its 120 ms gap between two
+        // repeats: a stall past it (a merge's loaded Mac, the app's or Claude's) ended the held recording before the
+        // cancel, its transcript in (2026-11-16: "held .escape: voiceCancels 0, cancels 1", every phase after it one
+        // off). A wider gap (1.5 s, 2026-11-17) only made it rarer.
+        h.tell(["op": "voice", "mode": "hold", "stuck": true])
+        try await h.waitFor { h.agent["voice"] as? String == "hold" && h.agent["mode"] as? String == "working" && h.agent["stuck"] as? Bool == true }
         let controller = dictation(h)
         var cancels = 0
         for phase in ["held", "waiting", "processing"] {
             for reason in [ClaudeVoiceRun.CancelReason.escape, .button] {
-                h.tell(["op": "voice", "stuck": phase == "waiting", "processing": phase == "processing" ? 30.0 : 0.0])
-                try await h.waitFor { h.agent["stuck"] as? Bool == (phase == "waiting") }
+                let processing = phase == "processing" ? 30.0 : 0.0
+                h.tell(["op": "voice", "processing": processing])
+                try await h.waitFor { h.agent["processing"] as? Double == processing }
                 controller.press(h.key, agent: .claude) { "" }
                 try await h.waitFor { controller.listening }
-                // Held: cancelled once Claude records. Listening comes before the run has read the screen; a cancel
-                // then (a busy Mac's slow screen read) ends the run before Claude ever started, with nothing of its
-                // own to cancel (2026-11-05, at load 150: "held .button: voiceCancels 1, cancels 2").
-                if phase == "held" { try await h.waitFor { !(h.agent["recording"] as? String ?? "").isEmpty } }
+                // Cancelled once Claude records. Listening comes before the run has read the screen, and Claude warms up
+                // for its first repeats; a cancel then (a busy Mac's slow screen read) ends the run before Claude ever
+                // recorded, with nothing of its own to cancel (2026-11-05, at load 150: "held .button: voiceCancels 1,
+                // cancels 2").
+                try await h.waitFor { h.agent["recording"] as? String == "listening" }
                 if phase != "held" {
                     controller.release()
                     #expect(controller.isTranscribing(h.key))
+                    // Waiting: Claude still records after the Spaces stopped. Processing: it took them as let go.
+                    if phase == "processing" { h.tell(["op": "voiceStop"]) }
                     try await h.waitFor { h.agent["recording"] as? String == (phase == "waiting" ? "listening" : "processing") }
                 }
                 controller.cancel(reason)
