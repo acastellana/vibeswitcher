@@ -160,7 +160,7 @@ struct ToolchainLookTests {
         func look() async {
             let done = Locked(false)
             world.queue.async {
-                world.engine.toolchainTools = { answers.tools() }
+                world.engine.toolchain.tools = { answers.tools() }
                 world.engine.lookAtToolchain { done.value = true }
             }
             _ = await eventually(timeout: 60) { done.value }
