@@ -13,8 +13,8 @@
 
 import { h, s, setText, setClass, framed } from '../dom.js';
 import { icon } from '../marks.js';
-import { clock, tilde, lastPart, taskLine } from '../words.js';
-import { t, listed, lang } from '../i18n.js';
+import { clock, moment, tilde, lastPart, taskLine } from '../words.js';
+import { t, listed, lang, nodeWords } from '../i18n.js';
 import { leadLines, shownLines, dialCounts, waitingCards, waitingCount, cut, shortHashes, dayOf, teamCounts, standing, taskTone, taskStep, waitsOn } from '../conversation.js';
 import { projectHref, routeHref } from '../ui.js';
 import { questionStack, pluginCard, copyLine } from './cards.js';
@@ -154,6 +154,12 @@ export function projectView(app, { sheet }) {
       if (words !== day) { day = words; children.push(h('p', { class: 'day' }, words)); }
       children.push(...lineEl(line, route));
     }
+    // A short conversation leaves the centre bare: the lead's latest statement at its top, quietly, opening its sheet.
+    const latest = lines.filter((line) => line.kind === 'update').at(-1);
+    if (shown.length < 3 && latest && !shown.includes(latest)) {
+      children.unshift(h('a', { class: 'latest-said', href: routeHref(route, { sheet: latest.key }) }, h('small', null, t('leadSaid', { time: moment(latest.at) })), cut(shortHashes(latest.head), 220)),
+        h('span', { class: 'col-gap' }));
+    }
     if (!shown.length && route.show !== 'asks') children.push(h('p', { class: 'empty-line' }, t('emptyTalk')));
     if (route.show === 'asks' && !waiting) children.push(h('p', { class: 'empty-line' }, t('emptyAsks')));
     if (waiting) {
@@ -173,7 +179,7 @@ export function projectView(app, { sheet }) {
 
   function taskRow(task, extra = []) {
     return h('div', { class: 'road-row' },
-      h('span', { class: 'road-title' }, task.title, h('small', null, task.state || '')),
+      h('span', { class: 'road-title' }, task.title, h('small', null, nodeWords(task.state))),
       stepBar(task), h('span', { class: 'road-note' }, ...extra));
   }
 
@@ -186,7 +192,7 @@ export function projectView(app, { sheet }) {
     const open = route.open.includes('queue');
     const titles = (slugs) => slugs.map((slug) => board.tasks.find((task) => task.slug === slug)?.title || slug);
     const children = [h('p', { class: 'road-intro' }, t('roadIntro'))];
-    if (team.motion.length) children.push(h('h2', { class: 'road-head' }, t('roadMotion')), ...team.motion.map((task) => taskRow(task, [cut(shortHashes(taskLine(task)), 120)])));
+    if (team.motion.length) children.push(h('h2', { class: 'road-head' }, t('roadMotion')), ...team.motion.map((task) => taskRow(task, [cut(shortHashes(nodeWords(taskLine(task))), 120)])));
     if (team.blocked.length) {
       children.push(h('h2', { class: 'road-head' }, t('roadBlocked')), ...team.blocked.map((task) => {
         const who = waitsOn(task, board, cards);
@@ -195,8 +201,11 @@ export function projectView(app, { sheet }) {
       }));
     }
     if (team.queued.length) {
-      const band = h('a', { class: 'road-band', href: projectHref(route.id, { view: 'roadmap', open: open ? route.open.filter((one) => one !== 'queue') : [...route.open, 'queue'] }), 'aria-expanded': String(open) },
-        h('span', { class: 'road-band-bar' }), h('span', null, t('roadQueue', { n: team.queued.length })), h('small', null, open ? t('roadQueueClose') : t('roadQueueOpen')));
+      // A plain open and close of the row (the address keeps it, so back closes it again).
+      const to = projectHref(route.id, { view: 'roadmap', open: open ? route.open.filter((one) => one !== 'queue') : [...route.open, 'queue'] });
+      const band = h('button', { class: 'road-band', type: 'button', 'aria-expanded': String(open), onclick: () => ui.go(to) },
+        h('span', { class: 'road-band-bar' }), h('span', null, t('roadQueue', { n: team.queued.length })),
+        h('span', { class: 'road-band-toggle' }, open ? t('roadQueueClose') : t('roadQueueOpen'), icon('chevron', 10)));
       children.push(h('h2', { class: 'road-head' }, t('roadQueued')), band);
       if (open) children.push(h('div', { class: 'road-queue' }, team.queued.map((task) => taskRow(task, task.after?.length ? [t('after', { list: listed(titles(task.after)) })] : []))));
     }
