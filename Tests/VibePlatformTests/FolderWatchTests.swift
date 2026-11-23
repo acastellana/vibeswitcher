@@ -502,6 +502,28 @@ struct FolderWatchTests {
         #expect(Self.next(busy) == .entries)
     }
 
+    /// A client that keeps names gets each entry name its own events carry, in order, and only those (another client's
+    /// mask's events give it none); one that doesn't keep names gets none.
+    @Test func aClientThatKeepsNamesGetsItsEventsNames() throws {
+        let folders = try Self.folders()
+        defer { try? FileManager.default.removeItem(at: folders.root) }
+        let hub = InotifyHub.shared
+        let made = try #require(hub.watch(folders.watched.path, mask: UInt32(IN_CREATE) | UInt32(IN_MOVED_TO), folder: true, names: true))
+        let plain = try #require(hub.watch(folders.watched.path, mask: UInt32(IN_DELETE), folder: true))
+        defer {
+            made.stop()
+            plain.stop()
+        }
+        try Self.make(folders.watched.appendingPathComponent("a.tmp"))
+        #expect(rename(folders.watched.appendingPathComponent("a.tmp").path, folders.outside.appendingPathComponent("a").path) == 0)
+        try Self.make(folders.outside.appendingPathComponent("b"))
+        #expect(rename(folders.outside.appendingPathComponent("b").path, folders.watched.appendingPathComponent("b").path) == 0)
+        #expect(unlink(folders.watched.appendingPathComponent("b").path) == 0)
+        #expect(made.takeNames() == ["a.tmp", "b"])
+        #expect(made.takeNames().isEmpty, "taken once")
+        #expect(plain.takeNames().isEmpty)
+    }
+
     /// An overflow that drops a watch's end (its folder removed and made again while the kernel's queue was full, so its
     /// IN_DELETE_SELF and IN_IGNORED were never queued): after it, the watch is found gone (its path names another
     /// inode now) and told `folderGone`, and is out of the table; a watch whose folder is still there is told only to

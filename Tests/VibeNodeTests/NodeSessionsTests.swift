@@ -528,7 +528,9 @@ struct NodeSessionsTests {
             try hook.save(to: state.appendingPathComponent("ttypts971.json"))
         }
         try hook("PreToolUse")
+        #if os(Linux)
         InotifyHub.shared.failNextWatch(of: state.path)
+        #endif
         let said = Locked<[String]>([])
         var timing = NodeSessions.Timing()
         timing.watchRetry = 0

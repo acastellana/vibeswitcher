@@ -19,10 +19,12 @@ struct LeadAdvanceTests: LeadTeamFixture {
     #if os(Linux)
     /// The project's folder couldn't be watched (the system had no watch left): the loop looks every `unwatchedLook`
     /// meanwhile and asks for the watch again each time; once it has one, a change in the folder is a pass by itself.
-    @Test func aFolderWatchThatCouldntBeMadeIsAskedForAgain() async throws {
+    @Test(.enabled(if: !Platform.CodeIdentity.isAvailable, "Linux's watches (the hub)")) func aFolderWatchThatCouldntBeMadeIsAskedForAgain() async throws {
         let (root, _, lead) = try team()
         let folder = BoardStore(root: root).folder
+        #if os(Linux)
         InotifyHub.shared.failNextWatch(of: folder)
+        #endif
         let advancing = Advancing(lead)
         defer { advancing.stop() }
         let advance = try #require(lead.advancing)

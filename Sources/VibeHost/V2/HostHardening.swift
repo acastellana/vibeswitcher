@@ -189,11 +189,16 @@ public enum HostHardening {
         "--server-arg": true, "--hold-first-look": false, "--test-user-seal-life": true,
         HostImages.launcherTestHoldFlag: true, HandoverMemory.failNextTestFlag: false, HandoverMemory.holdTestFlag: true,
         HandoverMemory.holdCheckTestFlag: true, ServerChild.replaceHoldTestFlag: true,
+        noInotifyFlag: false, inotifyCensusFlag: true,
     ]
+
+    /// A scratch host's test flags for its file watches (`Platform.Watches.testNoInstance`, `testCensus`).
+    public static let noInotifyFlag = "--test-no-inotify"
+    public static let inotifyCensusFlag = "--test-inotify-census"
 
     /// The test-only flags a scratch host carries across its handovers, so a test's settings survive one.
     public static let carriedTestFlags: Set<String> = ["--server-arg", "--hold-first-look", "--test-user-seal-life",
-                                                       ServerChild.replaceHoldTestFlag]
+                                                       ServerChild.replaceHoldTestFlag, noInotifyFlag, inotifyCensusFlag]
 
     /// A scratch host's own test flag: it makes itself dumpable again once it knows it is a scratch host, so a test can
     /// count its descriptors from outside (`EndedSessionTests`). Not carried across a handover.

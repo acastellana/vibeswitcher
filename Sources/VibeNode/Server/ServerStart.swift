@@ -84,6 +84,8 @@ public enum ServerStart {
         // A file watch the system can't give (no inotify instance or watch left) is said once here, counted in
         // `status --health`, and its owner looks at its housekeeping instead.
         Platform.Watches.whenFirstUnmade = { say($0) }
+        Platform.Watches.testNoInstance = parsed.testNoInotify
+        Platform.Watches.testCensus = parsed.testInotifyCensus
         let queue = DispatchQueue(label: "vibeswitcher-server.engine")
         let clock = NodeClock(queue: queue)
         let link = HostLink(dialer: ConnectorDialer(path: parsed.hostSocket), root: root, queue: queue, clock: clock, note: say)

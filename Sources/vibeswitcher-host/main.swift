@@ -208,6 +208,11 @@ if arguments.contains(HostStart.appKeyFlag), let key = HostStart.appKeyFromStdin
     log("the app key on stdin isn't the one the vault holds: kept the vault's")
 }
 
+// A scratch host's tests of its file watches (VibePlatform/Watches.swift); the user's host refuses the flags.
+if HostHardening.takesTestFlags(ownsLaunchers: ownsLaunchers) {
+    if arguments.contains(HostHardening.noInotifyFlag) { Platform.Watches.testNoInstance = true }
+    if let census = value(after: HostHardening.inotifyCensusFlag), census.hasPrefix("/") { Platform.Watches.testCensus = census }
+}
 let server = HostServer(config: config)
 server.onExit = { exit(0) }
 // The test-only flags the user's host refuses, said; who an unreadable process is to this host (see `HostHardening`).

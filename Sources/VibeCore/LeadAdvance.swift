@@ -196,8 +196,9 @@ public final class LeadAdvance: @unchecked Sendable {
         trigger()
     }
 
-    /// How often the project is looked at while its folder can't be watched (tests set less). Under `lock`.
-    var unwatchedLook: TimeInterval = 60
+    /// How often the project is looked at while its folder can't be watched (tests set less): a few seconds, so the
+    /// loop moves on about as soon as with its watch. Under `lock`.
+    var unwatchedLook: TimeInterval = 5
 
     /// Whether the project's folder is watched now. For the tests.
     var isWatching: Bool { lock.withLock { watch != nil } }

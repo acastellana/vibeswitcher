@@ -56,18 +56,26 @@ final class InotifyHub: @unchecked Sendable {
     /// can't be watched, or the instance or the watch can't be made (then counted, `Platform.Watches`, once out of the
     /// lock: the process's note is its own code). `named`: the path to look at again after an overflow (8), when `path`
     /// won't name it then (a descriptor's /proc name).
-    func watch(_ path: String, mask: UInt32, folder: Bool, named: String? = nil) -> InotifyClient? {
+    /// `names`: the client keeps the entry names its events carry (`takeNames`).
+    func watch(_ path: String, mask: UInt32, folder: Bool, named: String? = nil, names: Bool = false) -> InotifyClient? {
         var unmade: String?
-        defer { if let unmade { Platform.Watches.noteUnmade(path, unmade) } }
+        var madeInstance = false
+        defer {
+            if let unmade { Platform.Watches.noteUnmade(path, unmade) }
+            if madeInstance { Platform.Watches.noteInstance() }
+        }
         lock.lock()
         defer { lock.unlock() }
         if instance < 0 {
-            let made = inotify_init1(Int32(IN_NONBLOCK) | Int32(IN_CLOEXEC))
+            // A scratch node's `--test-no-inotify`: as when the user has no instance left.
+            let made = Platform.Watches.testNoInstance ? -1 : inotify_init1(Int32(IN_NONBLOCK) | Int32(IN_CLOEXEC))
             guard made >= 0 else {
-                unmade = "no inotify instance (errno \(errno)), fs.inotify.max_user_instances"
+                let code = Platform.Watches.testNoInstance ? EMFILE : errno
+                unmade = "no inotify instance (errno \(code)), fs.inotify.max_user_instances"
                 return nil
             }
             instance = made
+            madeInstance = true
             let thread = Thread { [self] in read(made) }
             thread.name = "vibeswitcher.inotify"
             thread.start()
@@ -79,7 +87,7 @@ final class InotifyHub: @unchecked Sendable {
             if code == ENOSPC || code == ENOMEM { unmade = "no inotify watch left (errno \(code)), fs.inotify.max_user_watches" }
             return nil
         }
-        let client = InotifyClient(hub: self, wd: wd, mask: mask, path: named ?? path, folder: folder)
+        let client = InotifyClient(hub: self, wd: wd, mask: mask, path: named ?? path, folder: folder, keepsNames: names)
         clients[wd, default: []].append(client)
         return client
     }
@@ -182,6 +190,7 @@ final class InotifyHub: @unchecked Sendable {
             // EAGAIN: the queue is empty.
             guard count > 0 else { return }
             var masks: [Int32: UInt32] = [:]
+            var named: [Int32: [(UInt32, String)]] = [:]
             var order: [Int32] = []
             var overflow = false
             var offset = 0
@@ -192,21 +201,26 @@ final class InotifyHub: @unchecked Sendable {
                 guard event.wd >= 0 else { continue }
                 if masks[event.wd] == nil { order.append(event.wd) }
                 masks[event.wd, default: 0] |= event.mask
+                if event.len > 0 {
+                    let start = offset - Int(event.len)
+                    let name = buffer[start..<offset].prefix { $0 != 0 }
+                    named[event.wd, default: []].append((event.mask, String(decoding: name, as: UTF8.self)))
+                }
             }
-            let told: [(InotifyClient, UInt32)] = lock.withLock {
-                var told: [(InotifyClient, UInt32)] = []
+            let told: [(InotifyClient, UInt32, [(UInt32, String)])] = lock.withLock {
+                var told: [(InotifyClient, UInt32, [(UInt32, String)])] = []
                 if overflow {
-                    for list in clients.values { for client in list { told.append((client, UInt32(IN_Q_OVERFLOW))) } }
-                    told += lookAgain()
+                    for list in clients.values { for client in list { told.append((client, UInt32(IN_Q_OVERFLOW), [])) } }
+                    told += lookAgain().map { ($0.0, $0.1, []) }
                 }
                 for wd in order {
                     let mask = masks[wd] ?? 0
-                    for client in clients[wd] ?? [] { told.append((client, mask)) }
+                    for client in clients[wd] ?? [] { told.append((client, mask, client.keepsNames ? named[wd] ?? [] : [])) }
                     if mask & UInt32(IN_IGNORED) != 0 { clients[wd] = nil }
                 }
                 return told
             }
-            for (client, mask) in told { client.tell(mask) }
+            for (client, mask, names) in told { client.tell(mask, names: names) }
         }
     }
 }
@@ -222,6 +236,8 @@ final class InotifyClient: @unchecked Sendable {
     /// The path its watch is added by again after an overflow (`InotifyHub.lookAgain`), and whether it is a folder's.
     let path: String
     let folder: Bool
+    /// It keeps the entry names of its events (`takeNames`).
+    let keepsNames: Bool
     private weak var hub: InotifyHub?
     private let condition = NSCondition()
     // Under `condition`.
@@ -234,23 +250,39 @@ final class InotifyClient: @unchecked Sendable {
     private var scheduled = false
     /// The thread running the handler now, while it runs: `stop()` from another waits for it to return.
     private var calling: pthread_t?
+    /// The entry names its events carried, until taken (`keepsNames`), `namesKept` at most.
+    private var names: [String] = []
+    static let namesKept = 10_000
 
-    init(hub: InotifyHub, wd: Int32, mask: UInt32, path: String, folder: Bool) {
+    init(hub: InotifyHub, wd: Int32, mask: UInt32, path: String, folder: Bool, keepsNames: Bool = false) {
         self.hub = hub
         self.wd = wd
         self.mask = mask
         self.path = path
         self.folder = folder
+        self.keepsNames = keepsNames
+    }
+
+    /// Every entry name its events carried since the last take, in order (the kernel's queue read first).
+    func takeNames() -> [String] {
+        hub?.flush()
+        return condition.withLock {
+            defer { names = [] }
+            return names
+        }
     }
 
     /// The hub read `events` for this client's watch (or an overflow). Never calls the client's code.
-    func tell(_ events: UInt32) {
+    func tell(_ events: UInt32, names told: [(UInt32, String)] = []) {
         let mine = events & (mask | Self.always)
         guard mine != 0 else { return }
         condition.lock()
         defer { condition.unlock() }
         guard !stopped else { return }
         pending |= mine
+        if keepsNames {
+            for (event, name) in told where event & mask != 0 && names.count < Self.namesKept { names.append(name) }
+        }
         if let queue, !scheduled {
             scheduled = true
             queue.async { [self] in fire() }

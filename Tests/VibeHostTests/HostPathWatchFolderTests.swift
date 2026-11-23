@@ -12,7 +12,9 @@ import Testing
     func aFolderWatchThatCouldntBeMadeIsAskedForAgainAtHousekeeping() async throws {
         let socket = scratchSocketPath()
         let folder = URL(fileURLWithPath: socket).deletingLastPathComponent().path
+        #if os(Linux)
         InotifyHub.shared.failNextWatch(of: folder)
+        #endif
         let host = try TestHost(watchesItsPath: true, socket: socket)
         let server = host.server
         let watch = try #require(server.queue.sync { server.pathWatch })
