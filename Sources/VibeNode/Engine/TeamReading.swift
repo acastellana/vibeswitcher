@@ -57,6 +57,9 @@ struct TeamReading {
             guard let info = hosted[id], info.isLive, let session = sessions[id] else { continue }
             team.watched[id] = observer.watching(info, agentPid: session.pid)
             if workers.contains(id) {
+                // A Codex worker's copy its rollout shows it took (typed in mid-turn) isn't held: it's recorded as
+                // delivered first (see `CodexInbox`), so it's neither told as undelivered nor typed again at turn end.
+                observer.retireTaken(info, agent: session.agent, agentPid: session.pid, root: inbox)
                 team.held[id] = SteerInbox.pending(tty: session.tty, root: inbox).filter { $0.agentPid == session.pid }.min { $0.at < $1.at }
             }
         }

@@ -294,7 +294,6 @@ struct LeadReceiptTests: LeadTeamFixture {
         let lead = try lead(root, runtime)
         lead.claudeHome = home
         #expect(!lead.call("configure", ["merge_policy": "auto", "test_command": "printf 'Executed 37 tests, with 0 failures (0 unexpected)\\n'"]).isError)
-        let onto = Git.run(["rev-parse", "main"], in: root).output
         _ = lead.call("add_task", ["title": "Change", "goal": "it changes", "acceptance": ["it's there"], "review": "none"])
         #expect(!lead.call("start_worker", ["task": "change"]).isError)
         let start = try #require(BoardStore(root: root).load().task("change")).createdAt
@@ -306,6 +305,9 @@ struct LeadReceiptTests: LeadTeamFixture {
             Git.run(["commit", "-q", "-m", file], in: worktree)
         }
         #expect(!(try seat("worker-change", runtime)).call("report", doneReport("changed")).isError)
+        // The records go in before the merge starts (`LeadRecords.commitBeforeMerge`): committed now, the base stays put.
+        lead.records.flush(base: "main")
+        let onto = Git.run(["rev-parse", "main"], in: root).output
         let merged = lead.call("merge", ["task": "change"])
         #expect(!merged.isError, "\(merged.text)")
 

@@ -93,3 +93,50 @@ public enum WindowRows {
         return order.map { WindowSection(project: $0, rows: rows[$0] ?? []) }
     }
 }
+
+/// Where a row sorts among its project's window sessions: by start, then terminal, as the store orders them.
+public struct RowPlace: Equatable, Sendable, Comparable {
+    public var start: Date
+    public var tty: String
+
+    public init(start: Date, tty: String) {
+        self.start = start
+        self.tty = tty
+    }
+
+    public init(_ row: WindowRow) {
+        switch row.content {
+        case .agent(let session): self.init(start: session.startedAt, tty: session.tty)
+        case .hosted(let info): self.init(start: info.startedAt, tty: info.tty)
+        }
+    }
+
+    public static func < (a: RowPlace, b: RowPlace) -> Bool { (a.start, a.tty) < (b.start, b.tty) }
+}
+
+extension WindowRows {
+    /// Each lead a handover put in place of an ended one, moved to where that one's row was (`places`: the new lead's
+    /// window session → the place of the lead it replaced): before the first other live window session of its project
+    /// that sorts after that, else where it is. The other rows keep their order; Terminal's own sessions (ordered as
+    /// the screen has them) and ended rows (folded away) aren't counted.
+    public static func placed(_ sections: [WindowSection], places: [UUID: RowPlace]) -> [WindowSection] {
+        guard !places.isEmpty else { return sections }
+        func live(_ row: WindowRow) -> Bool {
+            switch row.content {
+            case .agent: return true
+            case .hosted(let info): return info.isLive
+            }
+        }
+        let ordered = places.sorted { $0.value != $1.value ? $0.value < $1.value : $0.key.uuidString < $1.key.uuidString }
+        return sections.map { section in
+            var rows = section.rows
+            for (id, place) in ordered {
+                guard let from = rows.firstIndex(where: { $0.hostID == id }) else { continue }
+                let row = rows.remove(at: from)
+                let to = rows.firstIndex { $0.hostID != nil && live($0) && RowPlace($0) > place } ?? from
+                rows.insert(row, at: min(to, from))
+            }
+            return WindowSection(project: section.project, rows: rows)
+        }
+    }
+}

@@ -80,6 +80,8 @@ extension LeadRemoteTests {
             #expect(!merged.isError, "\(merged.text)")
             lead.records.flush(base: "main")
         }
+        // The tasks' records committed, so the merge has none to commit before its rebase (`commitBeforeMerge`).
+        lead.records.flush(base: "main")
         return Landing(scene: scene, lead: lead, runtime: runtime, tip: tip, before: head(scene.root))
     }
 

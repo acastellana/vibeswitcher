@@ -57,11 +57,27 @@ public struct LeadDoneEvidence: Codable, Equatable, Sendable {
     public var checks: [Check]
     /// What the blind check found, and what was done about each item.
     public var blindCheck: String
+    /// A bug fix's: the commit that introduced the bug (git blame or git log on the fixed lines), or "unknown"; nil:
+    /// not said (not a bug fix, or a worker from before it was asked). Never required (see `LeadEscapedBugs`).
+    public var introducedBy: String?
 
-    public init(checks: [Check], blindCheck: String) {
+    public init(checks: [Check], blindCheck: String, introducedBy: String? = nil) {
         self.checks = checks
         self.blindCheck = blindCheck
+        self.introducedBy = introducedBy
     }
+
+    /// A report's `introduced_by` as kept: a commit hash (the first run of 7 to 64 hex digits said, a digit among them so
+    /// a word such as "acceded" isn't one, lowercased), "unknown" for anything else said, nil when nothing (or nothing but blanks) was.
+    public static func introducedBy(_ value: Any?) -> String? {
+        let said = ((value as? String) ?? (value as? NSNumber)?.stringValue ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !said.isEmpty else { return nil }
+        let range = NSRange(said.startIndex..., in: said)
+        guard let match = hash.firstMatch(in: said, range: range), let found = Range(match.range, in: said) else { return "unknown" }
+        return said[found].lowercased()
+    }
+
+    private static let hash = try! NSRegularExpression(pattern: "(?<![0-9A-Za-z])(?=[a-fA-F]*[0-9])[0-9a-fA-F]{7,64}(?![0-9A-Za-z])")
 
     /// The acceptance checks (1-based number, text) no entry covers. A contract with none needs one entry at least
     /// (its only check is its goal), else nothing is missing.
@@ -104,7 +120,7 @@ public struct LeadDoneEvidence: Codable, Equatable, Sendable {
         checks.map { entry in
             let shots = entry.screenshots.map { $0.isEmpty ? "" : " (screenshots: \($0.joined(separator: ", ")))" } ?? ""
             return "- \(entry.check): \(entry.how) → \(entry.result)\(shots)"
-        } + ["Blind check: \(blindCheck)"]
+        } + ["Blind check: \(blindCheck)"] + (introducedBy.map { ["Bug introduced by: \($0)"] } ?? [])
     }
 
     /// In a sentence for merge's result: each check's result, then the blind check's, cut at `limit`.

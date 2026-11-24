@@ -111,12 +111,7 @@ struct SidebarDiffTests {
     /// What the crash needs is gone: the sidebar has no group rows, so no header AppKit tracks for its Show/Hide button
     /// (today's had one per Section).
     @Test func theSidebarHasNoGroupRows() async throws {
-        let saved = UserDefaults.standard.string(forKey: "windowGrouping")
-        defer {
-            UserDefaults.standard.set(saved, forKey: "windowGrouping")
-            UserDefaults.standard.removeObject(forKey: WindowModel.endedOpenKey)
-        }
-        let model = WindowModel()
+        let model = WindowModel(defaults: scratch.defaults("sidebar-diff"))
         var members = [Self.member("Alpha", project: "project-c", label: "Shell"), Self.member("Beta", project: "acme", label: "Shell"),
                        Self.member("Gamma", project: "acme", label: "Shell")]
         members[0].status = .needsInput
@@ -154,12 +149,7 @@ struct SidebarDiffTests {
     /// whole walk (11 s) held every other test's main-queue work with it (HostAppMainThreadTests, PickerCardTests).
     @Test(arguments: [1, 2, 3, 4] as [UInt64])
     func theListSurvivesItsUpdates(seed: UInt64) async throws {
-        let saved = UserDefaults.standard.string(forKey: "windowGrouping")
-        defer {
-            UserDefaults.standard.set(saved, forKey: "windowGrouping")
-            UserDefaults.standard.removeObject(forKey: WindowModel.endedOpenKey)
-        }
-        let model = WindowModel()
+        let model = WindowModel(defaults: scratch.defaults("sidebar-diff"))
         model.grouping = .attention
         var random = Generator(state: seed)
         var members = [Self.member("Lead", project: "project-c", label: "Lead · project-c"),

@@ -28,9 +28,9 @@ import VibeCore
 /// more and compared with the warm baseline (`RESULT` lines: the first, cold, closed footprint, the warm baseline, after
 /// churn, the growth from the warm baseline, and the live views and chats, cold and after; the growth by vmmap's region
 /// categories, the top growers first; then what malloc gives back when asked, which the phases after it start from).
-/// Without `--transcript` it writes a made-up one. Every 10 cycles a line gives the footprint and malloc's bytes in use
-/// and held so far. `--dump FOLDER` also writes vmmap, heap and leaks in full (and a memgraph) at the closed snapshots,
-/// as FOLDER/cold-*, FOLDER/before-* (the warm baseline) and FOLDER/after-*, to diff what grew.
+/// Without `--transcript` it writes a made-up one. Every 10 cycles a line gives the footprint, malloc's bytes in use and
+/// held, and the threads so far. `--dump FOLDER` also writes vmmap and heap in full (not leaks: AGENTS.md) at the closed
+/// snapshots, as FOLDER/cold-*, FOLDER/before-* (the warm baseline) and FOLDER/after-*, to diff what grew.
 ///
 /// `--power`: the battery's measure instead, CPU per minute and wakeups with no window, idle and while a lead's team
 /// works (see `PowerBench`; SECONDS per phase, default 60).
@@ -180,7 +180,7 @@ enum IdleBench {
         /// `--views N`: sessions that print, shown one after another.
         let views: (count: Int, lines: Int)?
         var viewSessions: [UUID] = []
-        /// `--dump FOLDER`: vmmap, heap and leaks in full at the snapshots before and after churn.
+        /// `--dump FOLDER`: vmmap and heap in full at the snapshots before and after churn.
         let dumpFolder: String?
         let churned: ChurnedAgents
         let started = Date()
@@ -382,9 +382,12 @@ enum IdleBench {
                 return snapshot(warmup ? "cold" : "before") { [weak self] snapshot in
                     guard let self, let churn = self.churn else { return }
                     if warmup { self.cold = snapshot } else { self.baseline = snapshot }
-                    print(warmup ? String(format: "churn: warm-up, %d cycle(s)", churn.warmup)
-                                 : String(format: "churn: %.0f minutes at %.0f× (%d cycles of %.0f s, each %.2f s here)", churn.minutes,
-                                          churn.speed, churn.cycles, Churn.cycle, churn.interval))
+                    // Display links don't fire while the display sleeps (an animation waiting on one stays): a run's
+                    // numbers say which it was.
+                    let display = CGDisplayIsAsleep(CGMainDisplayID()) != 0 ? "asleep" : "awake"
+                    print(warmup ? String(format: "churn: warm-up, %d cycle(s), the display %@", churn.warmup, display)
+                                 : String(format: "churn: %.0f minutes at %.0f× (%d cycles of %.0f s, each %.2f s here), the display %@",
+                                          churn.minutes, churn.speed, churn.cycles, Churn.cycle, churn.interval, display))
                     fflush(stdout)
                     let began = Date()
                     // The warm-up's cycles come first; the churn's go on from them (its sessions' ttys and pids).
@@ -502,13 +505,24 @@ enum IdleBench {
 
         private static let churnLive = 3
 
+        /// This process's threads now: a count that climbs with the cycles is a thread (and its stack) kept per cycle.
+        private static var threadCount: Int {
+            var threads: thread_act_array_t?
+            var count: mach_msg_type_number_t = 0
+            guard task_threads(mach_task_self_, &threads, &count) == KERN_SUCCESS, let threads else { return -1 }
+            for index in 0..<Int(count) { mach_port_deallocate(mach_task_self_, threads[index]) }
+            vm_deallocate(mach_task_self_, vm_address_t(UInt(bitPattern: threads)), vm_size_t(Int(count) * MemoryLayout<thread_t>.stride))
+            return Int(count)
+        }
+
         /// Growth so far, without vmmap: a rise that levels off is malloc's high water, one that keeps climbing a leak.
         private static func printCurve(_ cycle: Int) {
             var stats = malloc_statistics_t()
             malloc_zone_statistics(nil, &stats)
-            print(String(format: "  cycle %3d  footprint %5.1f MB  malloc in use %5.1f MB, held %5.1f MB  live views %@ chats %@", cycle,
+            print(String(format: "  cycle %3d  footprint %5.1f MB  malloc in use %5.1f MB, held %5.1f MB  threads %d  live views %@ chats %@", cycle,
                          Double(Usage.now().footprint) / 1_048_576, Double(stats.size_in_use) / 1_048_576,
-                         Double(stats.size_allocated) / 1_048_576, Live.views.map(String.init) ?? "n/a", Live.chats.map(String.init) ?? "n/a"))
+                         Double(stats.size_allocated) / 1_048_576, Self.threadCount, Live.views.map(String.init) ?? "n/a",
+                         Live.chats.map(String.init) ?? "n/a"))
             fflush(stdout)
         }
 
@@ -677,10 +691,9 @@ enum IdleBench {
 
     /// `vmmap -summary` of a process: its region categories' dirty + swapped bytes, and the malloc zones' bytes allocated.
     enum VMMap {
-        /// `--dump FOLDER`: vmmap, heap and leaks of the process in full, as PREFIX-vmmap.txt and so on, to diff the
-        /// two snapshots (run with MallocStackLogging=lite for leaks' stacks).
+        /// `--dump FOLDER`: vmmap and heap of the process in full, as PREFIX-vmmap.txt and so on, to diff the snapshots.
         static func dump(pid: Int32, to prefix: String) {
-            for (tool, arguments) in [("vmmap", [String(pid)]), ("heap", ["-s", String(pid)]), ("leaks", [String(pid), "--outputGraph=\(prefix).memgraph"])] {
+            for (tool, arguments) in [("vmmap", [String(pid)]), ("heap", ["-s", String(pid)])] {
                 let process = Process()
                 process.executableURL = URL(fileURLWithPath: "/usr/bin/\(tool)")
                 process.arguments = arguments

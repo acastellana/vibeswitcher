@@ -474,6 +474,8 @@ import Testing
         try fm.copyItem(at: Self.repo.appendingPathComponent("Resources/bin/vs-heavy"), to: copy.appendingPathComponent("Resources/bin/vs-heavy"))
         try ".build/\n".write(to: copy.appendingPathComponent(".gitignore"), atomically: true, encoding: .utf8)
         try "@Test func a() {}\n".write(to: copy.appendingPathComponent("Tests/FakeTests/FooTests.swift"), atomically: true, encoding: .utf8)
+        // A test file another target shares by a symlink (as VibeHostTests has StackGauge.swift): git keeps its link text.
+        try fm.createSymbolicLink(atPath: copy.appendingPathComponent("Tests/FakeTests/Gauge.swift").path, withDestinationPath: "FooTests.swift")
         let git = { (arguments: [String]) in Git.run(arguments, in: copy.path) }
         for arguments in [["init", "-q", "-b", "main"], ["config", "user.email", "t@t"], ["config", "user.name", "T"], ["add", "-A"],
                           ["commit", "-q", "-m", "first"]] {
@@ -528,8 +530,12 @@ import Testing
         for path in ["Tests/FakeTests/FooTests.swift", "Tests/FakeTests/BarTests.swift"] {
             #expect(files[path] == git(["hash-object", path]).output, "\(path): \(files)")
         }
+        // The symlink's is its blob as committed (`git ls-files -s`: mode, blob, stage, path), not its file's content.
+        let link = "Tests/FakeTests/Gauge.swift"
+        let committed = git(["ls-files", "-s", link]).output.split(separator: " ").dropFirst().first.map(String.init)
+        #expect(committed != nil && files[link] == committed && files[link] != files["Tests/FakeTests/FooTests.swift"], "\(link): \(files)")
         // What the done check makes of it, with the files committed as they were.
-        let tests = ["Tests/FakeTests/FooTests.swift", "Tests/FakeTests/BarTests.swift"]
+        let tests = ["Tests/FakeTests/FooTests.swift", "Tests/FakeTests/BarTests.swift", link]
         #expect(LeadToolset.loadProofProblem(try Data(contentsOf: record), tests: tests, blobs: files) == nil)
         // Ignored, so `git add -A` leaves it out.
         #expect(git(["status", "--porcelain", "--ignored=no"]).output == "?? Tests/FakeTests/BarTests.swift")

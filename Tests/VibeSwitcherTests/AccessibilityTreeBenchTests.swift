@@ -78,9 +78,7 @@ struct AccessibilityTreeBenchTests {
     func sidebar(attach: Bool) throws -> (each: Double, worst: Double, elements: Int) {
         let folder = scratch.url("ax-bench")
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-        let saved = UserDefaults.standard.string(forKey: "windowGrouping")
-        defer { UserDefaults.standard.set(saved, forKey: "windowGrouping") }
-        let model = WindowModel()
+        let model = WindowModel(defaults: scratch.defaults("ax-bench-defaults"))
         model.grouping = .projects
         var members = Self.members(Self.rows)
         SidebarDiffTests.feed(model, members, at: MainWindowAccessibilityTests.now)

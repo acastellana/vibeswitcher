@@ -54,7 +54,8 @@ struct SessionNoteTests {
     /// lead's session gets none), and Claude Code's own system prompt says to suggest `! <command>`.
     static func saysToUseAShellCard(_ text: String, _ who: String) {
         #expect(text.contains("vs-shell run"), "\(who)")
-        for need in ["needs a real terminal", "a password or other prompt", "an install", "interactive program"] {
+        for need in ["needs a real terminal", "a password or other prompt", "an install", "interactive program",
+                     "a server, a preview or anything else that keeps running until stopped"] {
             #expect(text.contains(need), "\(who): \(need)")
         }
         #expect(text.contains("one Run click"), "\(who)")

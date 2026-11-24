@@ -185,6 +185,12 @@ struct LeadRotationTests {
         #expect(turns.contains("keep my promise"))
         #expect(BoardStore(root: world.root).load().openQuestions.count == 1)
         #expect(world.controller.rotationNotices[world.fresh.id]?.contains("72% full") == true)
+        // The new lead's chat carries the old one's conversation: the handover is in the project's record, its divider
+        // the notice's words.
+        #expect(await until { !LeadChatHistory.load(root: world.root).isEmpty })
+        let handover = try #require(LeadChatHistory.load(root: world.root).last)
+        #expect(handover.from == world.old.id.uuidString && handover.to == world.fresh.id.uuidString && handover.transcript == world.path.path)
+        #expect(handover.notice == world.controller.rotationNotices[world.fresh.id])
     }
 
     @Test func aTurnOrQueuedReportWaitsForQuiet() async throws {

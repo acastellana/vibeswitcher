@@ -90,14 +90,17 @@ public struct LeadEvidence: Codable, Equatable, Sendable {
     /// The version of the task's contract its verifiers judged (see `LeadTask.contractVersion`); nil on verdicts from
     /// before contracts had versions.
     public var contract: Int?
+    /// Who gave this verdict; nil on older Claude evidence.
+    public var agent: Agent?
 
-    public init(completion: Completion, integrity: Integrity, summary: String, commit: String? = nil, contract: Int? = nil,
+    public init(completion: Completion, integrity: Integrity, summary: String, commit: String? = nil, contract: Int? = nil, agent: Agent? = nil,
                 at: Double = Date().timeIntervalSince1970) {
         self.completion = completion
         self.integrity = integrity
         self.summary = summary
         self.commit = commit
         self.contract = contract
+        self.agent = agent
         self.at = at
     }
 
@@ -354,9 +357,11 @@ public struct LeadMergeRecord: Codable, Equatable, Sendable {
     /// The task's branch head the merge took, before it was rebased and stamped (`commit` is the copy that landed, with
     /// another hash): what's on the branch past this didn't merge (`Worktrees.unmerged`). Nil on older records.
     public var branchHead: String?
+    /// The agent whose verdict let this merge land (nil on older Claude merges).
+    public var agent: Agent?
 
     public init(commit: String, tested: Bool, onto: String? = nil, regression: Bool? = nil, audited: Bool? = nil, batch: [String]? = nil,
-                branchHead: String? = nil, at: Double = Date().timeIntervalSince1970) {
+                branchHead: String? = nil, agent: Agent? = nil, at: Double = Date().timeIntervalSince1970) {
         self.commit = commit
         self.tested = tested
         self.onto = onto
@@ -364,6 +369,7 @@ public struct LeadMergeRecord: Codable, Equatable, Sendable {
         self.audited = audited
         self.batch = batch
         self.branchHead = branchHead
+        self.agent = agent
         self.at = at
     }
 
@@ -398,9 +404,11 @@ public struct LeadFinding: Codable, Equatable, Sendable, Identifiable {
         public var reason: String?
         /// An Important finding's failure: these inputs or this state give this wrong result or crash.
         public var failureScenario: String?
+        /// The REVIEW.md rule it comes from, by id ("R3"; nil: none, or a verifier from before it was asked).
+        public var rule: String? = nil
 
         public init(id: String? = nil, severity: Severity, file: String, line: Int, evidence: String, status: Status = .open, reason: String? = nil,
-                    failureScenario: String? = nil) {
+                    failureScenario: String? = nil, rule: String? = nil) {
             self.id = id
             self.severity = severity
             self.file = file
@@ -409,6 +417,7 @@ public struct LeadFinding: Codable, Equatable, Sendable, Identifiable {
             self.status = status
             self.reason = reason
             self.failureScenario = failureScenario
+            self.rule = rule
         }
     }
 
@@ -431,6 +440,8 @@ public struct LeadFinding: Codable, Equatable, Sendable, Identifiable {
     /// What goes wrong because of it (an Important finding's: one without it is recorded as a Nit; optional: findings
     /// from before it was asked have none).
     public var failureScenario: String?
+    /// The REVIEW.md rule it came from, by id (nil: none, or raised before verifiers were asked).
+    public var rule: String? = nil
 
     public var isOpen: Bool { status == .open }
     /// Open, or unconfirmed: a later round may still say something about it.
@@ -523,6 +534,11 @@ public struct LeadAuditLedger: Codable, Equatable, Sendable {
     public var passed: Bool?
     /// How the last audit's finders voted, when it ran more than one (optional: one verifier gives none).
     public var vote: LeadAuditVote.Outcome?
+    /// Agent of the last audit, from its verifier grant.
+    public var agent: Agent?
+    /// Each audit's REVIEW.md rules: the ids it applied and those that produced a new finding (`LeadReviewRules`;
+    /// optional: audits whose verifier listed none, older ones among them, add nothing).
+    public var ruleUses: [LeadRuleUse]?
 
     /// Failed rounds after which the task is re-rolled (or re-planned), not sent back for a third: fixes past the
     /// second attempt rarely land, and a fresh start from what the rounds learned does better.
@@ -578,8 +594,11 @@ public struct LeadAuditLedger: Codable, Equatable, Sendable {
     /// another severity there doesn't hold the place. `unconfirmed`: new findings an audit's vote keeps without a
     /// majority (see `LeadAuditVote`), added as unconfirmed (one where a finding of its severity already is, is left
     /// out: the vote checked each finder's findings against the ledger); `vote`: how the vote went.
+    /// `rules`: the REVIEW.md rule ids the audit applied, as its verdict listed them (nil: it listed none, and no
+    /// `LeadRuleUse` is kept); with them, the rules its new findings name, at `at`.
     public mutating func record(_ reports: [LeadFinding.Report], unconfirmed: [LeadFinding.Report] = [], vote: LeadAuditVote.Outcome? = nil,
-                                commit: String, passes: Bool, changed: Set<String>? = nil) throws {
+                                commit: String, passes: Bool, changed: Set<String>? = nil, rules: [String]? = nil,
+                                at: Double = Date().timeIntervalSince1970) throws {
         var next = self
         let round = rounds + 1
         var seen: Set<String> = []
@@ -644,20 +663,25 @@ public struct LeadAuditLedger: Codable, Equatable, Sendable {
                 }
                 seen.insert(id)
                 next.findings.append(LeadFinding(id: id, severity: report.severity, file: report.file, line: report.line, evidence: report.evidence,
-                                                 status: .open, reason: nil, raised: round, failureScenario: report.failureScenario))
+                                                 status: .open, reason: nil, raised: round, failureScenario: report.failureScenario, rule: report.rule))
             }
         }
         for report in unconfirmed where !next.findings.contains(where: { $0.file == report.file && $0.line == report.line && $0.severity == report.severity }) {
             var number = next.findings.count + 1
             while next.finding("F\(number)") != nil { number += 1 }
             next.findings.append(LeadFinding(id: "F\(number)", severity: report.severity, file: report.file, line: report.line, evidence: report.evidence,
-                                             status: .unconfirmed, reason: report.reason, raised: round, failureScenario: report.failureScenario))
+                                             status: .unconfirmed, reason: report.reason, raised: round, failureScenario: report.failureScenario, rule: report.rule))
         }
         if isReaudit {
             let skipped = toRecheck.filter { !seen.contains($0.id) }
             guard skipped.isEmpty else {
                 throw Refusal("Say for each open finding whether it's fixed or still open: \(skipped.map(\.label).joined(separator: ", ")) \(skipped.count == 1 ? "isn't" : "aren't") in findings.")
             }
+        }
+        if let rules {
+            // New this round: open or unconfirmed (an earlier round's finding has an earlier `raised`).
+            let found = next.findings.filter { $0.raised == round }
+            next.ruleUses = (ruleUses ?? []) + [LeadRuleUse(round: round, at: at, applied: rules, found: found.compactMap(\.rule))]
         }
         next.rounds = round
         next.commit = commit
@@ -781,6 +805,54 @@ public struct LeadVerifierRetry: Codable, Equatable, Sendable {
     }
 }
 
+/// A sensitive task, or one a Codex worker worked on, merged on Codex is reviewed independently by Claude after its quota reset.
+/// Its original branch and baseline stay until this passes; it never moves the merged task back to work.
+public struct LeadClaudeReaudit: Codable, Equatable, Sendable {
+    public var head: String
+    public var base: String
+    public var model: String
+    public var sensitive: [String]
+    /// A Codex worker worked on the task (`LeadTask.codexWorked`, or agent codex): Codex had the only say on its own work.
+    public var codexWorked: Bool?
+    public var session: String?
+    public var evidence: LeadEvidence?
+    public var passed: Bool?
+    /// How its verifiers ended without a verdict (gone, or ended; a stop at Claude's usage limit isn't one), as the
+    /// ordinary audit's retry counts them: at `LeadClaudeReaudit.maxEndings` nothing restarts it by itself until the
+    /// lead does (audit), and the lead is told once.
+    public var endings: [LeadClaudeReauditEnding]?
+    /// Its verifier (`session`) stopped at Claude's usage limit, which resets then (epoch seconds; one with no reset time
+    /// counts for `AccountUsage.untimed`): nothing restarts it before, whatever newer readings say, and that stop isn't
+    /// an ending. Cleared when the next verifier starts.
+    public var limitedUntil: Double?
+    /// The lead closed it after its verdict, every Important finding of it dismissed (or moved to a task): the reason.
+    public var closed: String?
+
+    public static let maxEndings = 2
+
+    public var pending: Bool { passed != true }
+    /// Its verifiers ended without a verdict `maxEndings` times: it waits for the lead.
+    public var stopped: Bool { passed != true && evidence == nil && (endings?.count ?? 0) >= Self.maxEndings }
+    public var text: String {
+        "Claude re-audit " + (closed != nil ? "closed by the lead (\(closed ?? ""))" : passed == true ? "passed" : evidence != nil ? "needs the lead's attention"
+            : stopped ? "stopped: its verifier ended without a verdict \(Self.maxEndings) times; audit to start it again"
+            : session != nil ? "started" : "pending after Claude's usage limit resets")
+            + " (post-merge, " + ((codexWorked == true ? ["Codex worked it"] : [])
+                + (sensitive.isEmpty ? [] : ["sensitive_paths: " + sensitive.joined(separator: ", ")])).joined(separator: "; ") + ")"
+    }
+}
+
+/// One post-merge re-audit verifier that ended without a verdict, and how.
+public struct LeadClaudeReauditEnding: Codable, Equatable, Sendable {
+    public var session: String
+    public var how: String
+
+    public init(session: String, how: String) {
+        self.session = session
+        self.how = how
+    }
+}
+
 public struct LeadTask: Codable, Equatable, Sendable, Identifiable {
     public enum Status: String, Codable, Sendable, CaseIterable {
         /// On the board, no worker yet.
@@ -883,11 +955,11 @@ public struct LeadTask: Codable, Equatable, Sendable, Identifiable {
     /// The last verdict once the worker reported on a newer commit: shown as for an older commit, never merged on;
     /// gone with the next verdict.
     public var outdatedEvidence: LeadEvidence?
-    public var merged: LeadMergeRecord?
+    @Boxed public var merged: LeadMergeRecord?
     /// When its worker asked the lead something (ask_lead) that the lead hasn't answered with a message yet.
     public var leadQuestionAt: Double?
     /// The witness's latest word that its worker stopped making progress (see `LeadStall`); cleared once it moves.
-    public var stall: LeadStall?
+    @Boxed public var stall: LeadStall?
     /// Why the lead keeps it unmerged (status kept).
     public var keptBecause: String?
     /// The slug of the task it's folded into (status folded).
@@ -930,6 +1002,10 @@ public struct LeadTask: Codable, Equatable, Sendable, Identifiable {
     /// count of bugs the user found against those the system found; nil: not said (tasks from before it was kept).
     /// Kept as text so a board with a value this build doesn't know still decodes (`originKind` reads it).
     public var origin: String?
+    /// The commit that introduced the bug it fixes, as its worker's last done report said (`introduced_by`: a hash, or
+    /// "unknown" when it couldn't find one); nil: not said (a task that isn't a bug fix, a worker from before it was
+    /// asked). The weekly scorecard counts bugs that got past review by it (`LeadEscapedBugs`).
+    public var introducedBy: String?
 
     /// Where a task's work came from (see `origin`). user_report: the user reported it; incident, log_watcher, flake
     /// and audit: the system found it (an incident record, the log watcher, the flake ledger, an audit's finding);
@@ -1010,16 +1086,19 @@ public struct LeadTask: Codable, Equatable, Sendable, Identifiable {
     /// `AccountUsage.fromRefusal`), whatever the task's model or verifier_model says since.
     public var launchedModels: [String: String]?
     /// The agent its worker runs (add_task's and update_task's `agent`); nil: Claude, as before. Codex implements a
-    /// bounded task only: leads and verifiers stay Claude, and a Codex task is always audited (see `codexWorked`).
+    /// bounded task; leads stay Claude, and a Codex task is always audited (see `codexWorked`).
     public var agent: WorkerAgent?
     /// Why its current worker runs the agent it does, when its agent is auto (`UsageRouting.Route.why`: "Codex: Claude
     /// weekly 64%, 12 points ahead of pace; Codex 40%"); nil for a task pinned to an agent.
     public var routed: String?
-    /// A Codex worker was started on it once: its merge needs a Claude verifier's passing audit from then on, whatever
-    /// its review or agent says since (its branch holds Codex's commits).
+    /// A Codex worker was started on it once: its merge needs a passing audit from then on, whatever its review or agent
+    /// says since (its branch holds Codex's commits): a Claude verifier's, or Codex's under the quota fallback
+    /// (`codex_verifier`), recorded as audited by Codex.
     public var codexWorked: Bool?
+    /// Follow-up required for a sensitive or Codex-worked task merged on a Codex verdict.
+    public var claudeReaudit: LeadClaudeReaudit?
 
-    /// Who runs a task's worker. Only workers: Codex never plans, reviews or audits. `auto`: chosen at each start from
+    /// Who runs a task's worker. Codex also verifies only while Claude is held at a usage limit. `auto`: chosen at each start from
     /// both accounts' usage (`UsageRouting.route`): Codex when Claude's runs ahead of pace and Codex has room, else Claude.
     public enum WorkerAgent: String, Codable, Sendable, CaseIterable {
         case claude, codex, auto
@@ -1051,8 +1130,9 @@ public struct LeadTask: Codable, Equatable, Sendable, Identifiable {
     /// Its merge needs a Claude verifier's passing audit because Codex works (or worked) on it; nil when not.
     public var codexAudit: String? {
         guard workerAgent == .codex || codexWorked == true else { return nil }
-        return workerAgent == .codex ? "Its worker is Codex, so a Claude verifier audits it whatever its review says."
-            : "A Codex worker worked on it, so a Claude verifier audits it whatever its review says."
+        return (workerAgent == .codex ? "Its worker is Codex, so a Claude verifier audits it whatever its review says."
+            : "A Codex worker worked on it, so a Claude verifier audits it whatever its review says.")
+            + " At Claude's usage limit Codex verifies instead; its merge then gets a post-merge Claude re-audit."
     }
 
     /// Notes that `sessions` were started on `model` (nil: Claude's default), keeping only its members' entries.
@@ -1088,9 +1168,9 @@ public struct LeadTask: Codable, Equatable, Sendable, Identifiable {
     public var overBudget: LeadOverBudget?
     /// What it cost, once it ended (merged, folded or abandoned): see `LeadReceipt`. nil for tasks that ended before
     /// receipts, and for any still open.
-    public var receipt: LeadReceipt?
+    @Boxed public var receipt: LeadReceipt?
     /// Where its time went while it waited on an audit or a merge's test run (see `LeadWaits`); nil before any.
-    public var waits: LeadWaits?
+    @Boxed public var waits: LeadWaits?
     /// A team task's members, 2 to 4, member 1 the integrator on the task's own branch (see `LeadTeam`); nil: a plain
     /// task, one worker, as before. Not `members`: that's the sessions the witness watches.
     public var team: [LeadTeamMember]?
@@ -1532,8 +1612,13 @@ public struct LeadBoard: Codable, Equatable, Sendable {
     /// Past these, the oldest updates and closed questions move to the board's archive (`BoardStore.archive`).
     public static let keptUpdates = 50
     public static let keptClosedQuestions = 50
-    /// A test that flakes `flakeLimit` times within `flakeWindow` becomes a task to fix it, once.
-    public static let flakeLimit = 3
+    /// A named test's first flake becomes a task to fix it (`FlakeLedger.recordFlakes`), and each flake after that a
+    /// note in the open task that names it: at 3, most flaky tests never got a task (8 merges went ahead on a rerun in
+    /// one week, 2026-11-23). `flakeWindow` bounds the earlier flakes a task counts, and what status lists.
+    public static let flakeLimit = 1
+    /// A merge that hung on a test (`StallWatch.Stall.lastTest`, which may be innocent: it was only the last to run)
+    /// goes in the flake ledger too, and makes a task once `hangLimit` such entries of one test fall within `flakeWindow`.
+    public static let hangLimit = 3
     public static let flakeWindow: Double = 7 * 86_400
 
     public init() {}

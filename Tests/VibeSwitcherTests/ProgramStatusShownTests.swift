@@ -65,7 +65,7 @@ struct ProgramStatusShownTests {
         let agents = Agents()
         let store = SessionStore(scanner: SessionScanner(processes: { agents.table() }, stateDir: { stateDir },
                                                          cwd: { _ in "/tmp/program-status" }, arguments: { _ in [] }))
-        let model = WindowModel()
+        let model = WindowModel(defaults: temp.defaults("program-status-window"))
         var wiring: Set<AnyCancellable> = []
         defer { wiring.removeAll() }
         host.$sessions.receive(on: DispatchQueue.main).sink { store.updateHosted($0) }.store(in: &wiring)

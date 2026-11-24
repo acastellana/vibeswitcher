@@ -274,6 +274,53 @@ What main added that didn't build or pass on Linux, changed in `891d3c47`, `3eae
   `RefusedGitSpellingsTests` reads the settings through `LaunchArguments`, and with `RefusedGitCommandsTests` leaves
   Linux's own deny rules (`LinuxLaunch.denyRules`) out of what holds on both systems.
 
+### The merge of 2026-11-24
+
+main at `b1f24f0a` (206 commits past the merge base `cd6c4ae9`, most of them the lead's records) merged into `v2` at
+`679c31c5`. Of the files the engine replaces or copies from, main changed these; each line says what became of it:
+
+| Commit | File | Status |
+| --- | --- | --- |
+| `fdf591f1` (a Codex worker's inbox copy its rollout shows taken is recorded as delivered) | `Sources/VibeSwitcher/MainWindow/Lead/LeadController.swift` `TeamReading` | ported in this merge: the same call in `Sources/VibeNode/Engine/TeamReading.swift`, the inboxes under the engine's root (CopiedFilesLint's difference) |
+| `b8a85f2d` (a handover ends the replaced lead once the new one has ended a turn) | `LeadController.swift` | not needed: the node ends a replaced lead itself once its current lead is up (`ReplacedLeads.swift`) |
+| `44d30427`, `94f62f66`, `47b04cbf` (whom a handover reads the board names; the replaced lead's place; a lead's turn from its own hooks only) | `LeadController.swift` | owed: to check against the node's `IdleHandover` and `NodeSessions` |
+| `2891eaba`, `cca6bd7e` (a lead's chat across its earlier sessions, with a divider) | `LeadController.swift` | owed: the node's chat store reads the current transcript only; `ChatItem.handover` (VibeCore) isn't on the wire yet (`ChatValue` leaves it out) |
+| `49fb4616`, `b2f0d6a4` (Close Finished (N)…) | `Sources/VibeSwitcher/AppDelegate.swift` | owed (the page): no such action yet |
+| `0a7ed6e1` (Run in New Shell for a code block) | `Sources/VibeSwitcher/Shell/ShellDesk.swift` | owed (the page) |
+| `3e6cd4d4` (Claude Code 2.1.330's Transcribing… footer) | `Tests/VibeSwitcherTests/FakeClaude.swift` | ported in this merge: the same lines in `Tests/VibeNodeTests/FakeClaude.swift` |
+
+Main's settings-suite changes to the ported tests (`050d8606`, `f6b5b90e`: a test's defaults in a suite of its own) need
+no port: the node's tests keep no defaults. `SharedDefaultsLint` (VibeCoreTests) passes on `v2`'s tests as they are.
+
+Nine conflicts, each keeping both sides:
+
+- `Sources/VibeCore/LeadWorkflow.swift`: `v2`'s `security_audit_model` beside main's `codex_verifier` (the field, the
+  key's parse, `configurable`, with main's `disk_headroom_gb`, and the template's lines).
+- `Sources/VibeCore/LeadVaultGuarded.swift`: the guarded keys with main's `codex_verifier` and `v2`'s
+  `security_audit_model` and `SandboxPolicy.keys`.
+- `Sources/VibeCore/LeadToolset.swift`: the audit checks `security_audit_model` and `codex_verifier`; the security
+  reason worked out once, before main's Codex fallback reads it; `configure`'s answer says both.
+- `Sources/VibeCore/LeadAdvance.swift`: `v2`'s portable board watch (`follow`) on main's `ToolThread.detach`.
+- `Sources/VibeCore/MCPServer.swift`: `Platform.Stdio.error` (StdioWriteLint) with main's `ToolThread.detach`.
+- `Sources/VibeCore/RecordLint.swift`: the tools that write no record, `v2`'s goal tools and main's `cleanup`.
+- `Tests/VibeCoreTests/LeadAdvanceTests.swift`: main's stack-measuring `Advancing` (`StackGauge`, `settle(until:)`)
+  with `v2`'s pass numbers (`passed(Int)`, `settle()` waiting for a pass begun after it).
+- `Tests/VibeCoreTests/RoleModelsTests.swift`: `v2`'s `security_audit_model` names with main's `heavy_slots` and
+  `codex_verifier: off`.
+- `docs/guide/development.md`: `SharedDefaultsLint` in `v2`'s lint command and table.
+
+What main added that didn't build or pass on Linux, changed in this merge (kinds 1 to 3, so listed here):
+
+- `Tests/VibeCoreTests/StackGauge.swift` (VibeHostTests has it by a symlink): the thread's stack and its touched
+  pages read through the new `Platform.ThreadStack` (`ThreadStack+Darwin.swift`: as main read them;
+  `ThreadStack+Linux.swift`: `pthread_getattr_np` through the shim's `vibe_thread_stack`, `mincore`'s resident bit);
+  `import Darwin` removed there and in `ToolThreadStackTests.swift`.
+- `Tests/VibeHostTests/HostVaultStackTests.swift`: `import CryptoKit` and `import Darwin` removed (VibeCore exports the
+  crypto), its socket pair through `Platform.Sockets.pair`, a queue's thread's stack size through
+  `Platform.ThreadStack.bounds()`.
+- `Tests/VibeCoreTests/MergeBatchTests.swift`: its pre-rebase hook written by `installScript` (ShebangWriteLint).
+- `Sources/VibeNode/Live/ChatValue.swift`: main's new `ChatItem.handover` left off the wire, as `newMarker` is.
+
 ## Non-seam edits
 
 Rows marked *planned* are the ones the plans expect, listed before they are made so an executor doesn't stop to ask;

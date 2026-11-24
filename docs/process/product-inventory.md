@@ -315,6 +315,7 @@ Settings (⌘,), category by category: each option, under its section, with the 
 - A lead's Team tab: tasks, decisions, scorecard, messages between leads — `Sources/VibeSwitcher/MainWindow/Lead/TeamViews.swift`
 - Brief Me (⇧⌘B): a spoken briefing across led projects, or one project's — `Sources/VibeSwitcher/Briefing/BriefingViews.swift`
 - Statistics window — `Sources/VibeSwitcher/Statistics/StatisticsView.swift`
+- Sidebar: Close Finished (N)… at its foot ends every project's finished agent-opened shells and replaced leads between turns, after one confirmation listing them — `Sources/VibeSwitcher/MainWindow/SessionListView.swift`
 - Menu bar popover: every session, switch, pause, rename — `Sources/VibeSwitcher/PopoverView.swift`
 - Global hot key — `Sources/VibeSwitcher/HotKey.swift`
 - Phone access: a web app for the phone over Tailscale — `Sources/VibeSwitcher/PhoneAccess.swift`
@@ -336,6 +337,7 @@ Settings (⌘,), category by category: each option, under its section, with the 
 - `composer paste|clear|expect TEXT` — the chat's composer: paste presses ⌘V into it as the menu does, with what the sandbox's pasteboard holds (a… — `Sources/VibeSwitcher/Sandbox.swift`
 - `composer [unsent TEXT]` — prints what the shown chat's composer holds and how many messages its fake session was sent; unsent TEXT… — `Sources/VibeSwitcher/Sandbox.swift`
 - `runblock [yes]` — the shown chat's last code block with a Run: shows what Run asks first, as the sheet; with yes, runs it as… — `Sources/VibeSwitcher/Sandbox.swift`
+- `runshell [yes]` — the shown chat's last code block with a Run, by its Run in New Shell: shows what it asks first, as the sheet… — `Sources/VibeSwitcher/Sandbox.swift`
 - `lines FILE N` — waits up to 30 s for FILE (a path under the sandbox's home, e.g. projects/example-api/ran.txt) to hold N… — `Sources/VibeSwitcher/Sandbox.swift`
 - `tell JSON` — hands a fake Claude (the selected one, or the one labelled "to") a FakeClaude op, e.g. '{"op": "permission"… — `Sources/VibeSwitcher/Sandbox.swift`
 - `notify prepare|allow|deny` — a permission prompt's banner for the selected fake session (the sandbox posts no notifications): prepare… — `Sources/VibeSwitcher/Sandbox.swift`
@@ -354,6 +356,7 @@ Settings (⌘,), category by category: each option, under its section, with the 
 - `publish [N]` — has the lead controller publish N times (default 50), each laid out and drawn, and times them — `Sources/VibeSwitcher/Sandbox.swift`
 - `hangs [reset]` — the sandbox's main-thread freezes (its hang reports, as the health digest tells them) and its longest wait… — `Sources/VibeSwitcher/Sandbox.swift`
 - `startlead` — starts a real project lead (LeadController.startLead, as Project Lead does: the host first if none runs, its… — `Sources/VibeSwitcher/Sandbox.swift`
+- `handover [start]` — with start: a project lead (a fake Claude named on its board, holding no role, as after an install) in a… — `Sources/VibeSwitcher/Sandbox.swift`
 - `lead [FILE]` — shows a fake project lead's chat, at its end (started the first time, on FILE's transcript if given): a board… — `Sources/VibeSwitcher/Sandbox.swift`
 - `team` — starts a fake worker on the fake lead's running task, in its worktree (start the lead first); select it and… — `Sources/VibeSwitcher/Sandbox.swift`
 - `team wall` — puts a running team task on the fake lead's board (start the lead first): 3 members with their parts and… — `Sources/VibeSwitcher/Sandbox.swift`
@@ -377,6 +380,7 @@ Settings (⌘,), category by category: each option, under its section, with the 
 - `shell-idle SECONDS` — how long after its command went well an untouched Run-card shell is ended by itself (600 by default), and… — `Sources/VibeSwitcher/Sandbox.swift`
 - `end row|key|window` — ends the selected session as the window does: row is its End Session… in the sidebar's menu, key is the File… — `Sources/VibeSwitcher/Sandbox.swift`
 - `shell-close [PROJECT]` — the sidebar's Close Finished Shells… for PROJECT (the selected session's unless given), its confirmation… — `Sources/VibeSwitcher/Sandbox.swift`
+- `close-finished [yes]` — the sidebar's Close Finished (N)…, in every project: prints the button's words and its confirmation, shown as… — `Sources/VibeSwitcher/Sandbox.swift`
 - `sidebar attention|projects [ended]` — groups the sidebar by attention or by project (a project's header has its menu), with the Ended fold open… — `Sources/VibeSwitcher/Sandbox.swift`
 - `shell-fail on|off` — on: the sandbox's own host refuses to start the shells a card's Run asks for, so the Run says why it didn't… — `Sources/VibeSwitcher/Sandbox.swift`
 - `wallet-card` — prints the newest wallet request card in the selected chat: its id, state, line, not-picked-up hint… — `Sources/VibeSwitcher/Sandbox.swift`
@@ -427,6 +431,7 @@ Settings (⌘,), category by category: each option, under its section, with the 
 - `empty-repository` — `Sources/VibeSwitcher/Sandbox.swift`
 - `missing-claude` — `Sources/VibeSwitcher/Sandbox.swift`
 - `missing-tools` — `Sources/VibeSwitcher/Sandbox.swift`
+- `close-finished` — `Sources/VibeSwitcher/Sandbox.swift`
 - `installing-tools` — `Sources/VibeSwitcher/Sandbox.swift`
 - `choose-folder` — `Sources/VibeSwitcher/Sandbox.swift`
 - `new-session-menu` — `Sources/VibeSwitcher/Sandbox.swift`

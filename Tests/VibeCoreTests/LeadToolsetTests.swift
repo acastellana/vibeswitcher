@@ -1225,6 +1225,9 @@ struct LeadToolsetTests: LeadTeamFixture {
         let runtime = FakeRuntime()
         let lead = try lead(root, runtime)
         #expect(BoardStore(root: root).load().baseBranch == "feature")
+        // The records kept local: none committed before the merge's rebase (`commitBeforeMerge`), so the audited
+        // commit lands on the feature it was made on, stamped and otherwise unchanged.
+        #expect(!call(lead, "configure", ["records_dir": ""]).isError)
         let worktree = try audited(lead, runtime, root: root)
         // The worker started from feature (it has feature's work).
         #expect(FileManager.default.fileExists(atPath: worktree + "/f.txt"))

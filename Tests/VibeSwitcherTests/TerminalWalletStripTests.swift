@@ -10,6 +10,8 @@ import Testing
 @Suite(.serialized)
 struct TerminalWalletStripTests {
     static let now = Date()
+    /// Where the window models keep their settings: a suite of each test's own.
+    let temp = Scratch()
 
     static func shell(_ id: UUID = WalletDeskTests.session) -> HostSession {
         HostSession(id: id, tty: "ttys071", childPID: 1, cwd: "/Users/you/dev/acme", command: "zsh", label: "Shell", agent: nil,
@@ -26,8 +28,8 @@ struct TerminalWalletStripTests {
         return session
     }
 
-    static func model(sessions: [Session] = [], hosted: [HostSession]) -> WindowModel {
-        let model = WindowModel()
+    static func model(sessions: [Session] = [], hosted: [HostSession], defaults: UserDefaults) -> WindowModel {
+        let model = WindowModel(defaults: defaults)
         model.update(sessions: sessions, hosted: hosted, table: TableRead(at: now))
         model.selectedID = "host:\(hosted[0].id)"
         return model
@@ -35,14 +37,14 @@ struct TerminalWalletStripTests {
 
     @Test func aShellSessionHasItsCardsUnderTheTerminalAndAChatSessionInItsChat() throws {
         let shell = Self.shell()
-        let plain = Self.model(hosted: [shell])
+        let plain = Self.model(hosted: [shell], defaults: temp.defaults("wallet-strip-plain"))
         #expect(plain.selectedRow?.hostID == shell.id)
         #expect(plain.chatPath(for: try #require(plain.selectedRow)) == nil)
         #expect(plain.walletUnderTerminal(for: plain.selectedRow) == shell.id)
         #expect(!plain.chatShown)
 
         // With an agent's conversation the cards are in its chat (Chat or Terminal chosen): never under the terminal too.
-        let withChat = Self.model(sessions: [Self.agent(in: shell)], hosted: [shell])
+        let withChat = Self.model(sessions: [Self.agent(in: shell)], hosted: [shell], defaults: temp.defaults("wallet-strip-chat"))
         #expect(withChat.chatPath(for: try #require(withChat.selectedRow)) != nil)
         #expect(withChat.walletUnderTerminal(for: withChat.selectedRow) == nil)
         withChat.showsChat = false
@@ -57,7 +59,7 @@ struct TerminalWalletStripTests {
         let desks = WalletDeskTests()
         let s = try desks.setup()
         defer { s.desk.close(); _ = desks }
-        let model = Self.model(hosted: [Self.shell()])
+        let model = Self.model(hosted: [Self.shell()], defaults: temp.defaults("wallet-strip-shell"))
         let host = NSHostingView(rootView: TerminalWalletStrip(model: model, desk: s.desk) {}.frame(width: 640))
         host.sizingOptions = [.intrinsicContentSize]
         // Nothing filed: zero high, the terminal keeps its full height.

@@ -976,6 +976,7 @@ public enum Worktrees {
                                      scratch: URL, home: URL? = nil, timeout: TimeInterval = testTimeout,
                                      lock: TestLock?, records: String? = nil, remote: String? = nil, trailers: [Trailer] = [],
                                      rerun: ((String) -> String?)? = nil,
+                                     prepareRerun: RerunPreparation? = nil,
                                      baseline: Baseline? = nil, tested output: ((String) -> Void)? = nil, begun: ((Date) -> Void)? = nil) -> Check {
         let path = scratch.path
         let home = (home ?? scratch.deletingLastPathComponent().appendingPathComponent(scratch.lastPathComponent + "-home")).path
@@ -1004,7 +1005,8 @@ public enum Worktrees {
         guard cancel?.isCancelled != true else { return .cancelled }
         let tested = Git.run(["rev-parse", "HEAD"], in: path).output
         let (stopped, outputs) = runChecks(setup: setup, test: test, in: path, home: home, timeout: timeout, lock: lock,
-                                           as: "VibeSwitcher's merge test of \(commit.prefix(8))", place: root, rerun: rerun, baseline: baseline, begun: begun)
+                                           as: "VibeSwitcher's merge test of \(commit.prefix(8))", place: root, rerun: rerun,
+                                           prepareRerun: prepareRerun, baseline: baseline, begun: begun)
         if let stopped { return stopped }
         return passing(outputs, commit: tested, tested: output)
     }
@@ -1346,6 +1348,9 @@ public enum Worktrees {
 
     /// The first line of a rerun's output (`runChecks`' `rerun`).
     public static let rerunHeader = "Rerun once, after the first run failed (its failing tests when they can be picked out, else all of it):\n"
+    /// Plans a rerun with a runner for discovery, holding this run's slot and scratch environment. The runner is
+    /// bounded to a minute: failed or unavailable discovery falls back to a whole rerun rather than holding a merge.
+    public typealias RerunPreparation = (String, (String) -> Git.Result) -> String?
     /// The name of the step that runs the rest of the checks on the branch without the tests its rerun still failed
     /// (`Baseline.rest`), and the first line of its output.
     static let restStep = "rest of the checks"
@@ -1372,7 +1377,8 @@ public enum Worktrees {
     /// failed). After a rerun that passed, nothing runs on the base.
     static func runChecks(setup: String?, test: String?, in path: String, home: String, timeout: TimeInterval,
                           lock: TestLock? = nil, as holder: String = "VibeSwitcher's test run", place: String? = nil,
-                          rerun: ((String) -> String?)? = nil, baseline: Baseline? = nil, begun: ((Date) -> Void)? = nil,
+                          rerun: ((String) -> String?)? = nil, prepareRerun: RerunPreparation? = nil,
+                          baseline: Baseline? = nil, begun: ((Date) -> Void)? = nil,
                           time: MacTime = .real)
         -> (stopped: Check?, outputs: [(name: String, output: String)]) {
         let cancel = ShellCancel.current
@@ -1486,10 +1492,22 @@ public enum Worktrees {
             guard run.ok else {
                 let failed = (name == "init_command" ? "init_command failed:\n" : "") + said
                 // Once, and only after the test command: a rerun that fails is the failure.
-                if name == "test command", let again = rerun?(failed) {
-                    firstFailure = failed
-                    steps.append(("rerun", again))
-                    continue
+                if name == "test command" {
+                    let again: String?
+                    if let prepareRerun {
+                        again = prepareRerun(failed, { discovery in
+                            let stop = progress?.heartbeat { "Discovering the completed suites before the merge's rerun." }
+                            defer { stop?() }
+                            return Shell.run(executable: "/bin/zsh", args: ["-lc", "export HOME=\(RecentProjects.shellQuote(home))\n" + discovery],
+                                             in: path, env: env, timeout: min(60, timeout), interleaved: true,
+                                             branchCode: true, watch: lock?.watch, time: time)
+                        })
+                    } else { again = rerun?(failed) }
+                    if let again {
+                        firstFailure = failed
+                        steps.append(("rerun", again))
+                        continue
+                    }
                 }
                 if name == "rerun" {
                     // The tests it still failed may be red on the base too: the rest of the checks run first, without

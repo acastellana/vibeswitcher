@@ -235,6 +235,35 @@ public enum SteerInbox {
         return withdrawn
     }
 
+    /// Records the waiting messages `ids` as delivered: the agent has them by another way than this inbox (a Codex
+    /// session took one typed into its box, see `CodexInbox`). Under the inbox's lock, so one a hook or a flush took
+    /// meanwhile is left as that recorded it. Returns the ids it took out.
+    @discardableResult
+    public static func recordDelivered(ids: Set<String>, tty: String, root: URL = VibePaths.root) -> Set<String> {
+        guard !ids.isEmpty, let url = try? file(tty, "jsonl", root: root), FileManager.default.fileExists(atPath: url.path) else { return [] }
+        var taken: [String] = []
+        try? locked(url) { handle in
+            try handle.seek(toOffset: 0)
+            let messages = decode(try handle.readToEnd() ?? Data())
+            taken = messages.map(\.id).filter(ids.contains)
+            guard !taken.isEmpty else { return }
+            if let log = try? file(tty, "delivered", root: root) {
+                try? locked(log, wait: 1) { log in
+                    try log.seekToEnd()
+                    try log.write(contentsOf: Data(taken.map { $0 + "\n" }.joined().utf8))
+                }
+            }
+            var rest = Data()
+            for message in messages where !ids.contains(message.id) {
+                rest.append(try JSONEncoder().encode(message))
+                rest.append(0x0A)
+            }
+            try handle.truncate(atOffset: 0)
+            try handle.write(contentsOf: rest)
+        }
+        return Set(taken)
+    }
+
     /// The reports waiting for `agentPid` (see `LeadWake.reports`), handed to `type`, which types the wake-up prompt for
     /// them (or takes it to type: true); those it did are marked as woken for (`SteerMessage.wokenAt`). Under the
     /// inbox's lock, so a hook that took them first leaves nothing to wake for, and one after holds them for the prompt

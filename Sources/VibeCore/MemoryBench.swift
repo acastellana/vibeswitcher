@@ -26,7 +26,8 @@ public enum MemoryBench {
     public static let retryAfter: TimeInterval = 30 * 60
     /// After a wake, the Mac is taken as awake once this has passed (the load averages still carry the sleep).
     public static let awakeAfterWake: TimeInterval = 10 * 60
-    /// vs-heavy's --timeout for the run (a build from nothing and the soak's ~14 minutes take about 25).
+    /// vs-heavy's --timeout for the run (a build from nothing, the footprint bench and the soak's ~15 of its 18 minutes
+    /// took about 18 on 2026-11-19; the soak's guard is ~34 at most).
     public static let timeoutMinutes = 90
     /// The stats file, in `VibePaths.statsDir`: one line a run, kept (a few hundred bytes a day).
     public static let statsName = "memory-bench.jsonl"

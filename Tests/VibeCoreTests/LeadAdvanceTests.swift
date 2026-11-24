@@ -91,18 +91,51 @@ struct LeadAdvanceTests: LeadTeamFixture {
         private var lastPass = 0
         let lead: LeadToolset
 
+        /// The most stack a run of passes took, in bytes (`StackGauge`), and the runs not yet measured.
+        private var deepestUsed = 0
+        private var measuring = 0
+
         init(_ lead: LeadToolset, run: ((@escaping () -> Void) -> Bool)? = nil) {
             self.lead = lead
+            weak var measured: Advancing?
+            measured = self
             lead.startAdvancing(run: run ?? { work in
-                // A main thread's stack (8 MB), not a detached one's 512 KB: in a debug build a pass that starts a
-                // worker runs ~50 frames deep, each with copies of the board's tasks, and filled 512 KB (2026-11-18:
-                // a receipt field 14 bytes larger overflowed it in BoardStore.restore and ended the whole test run).
-                let thread = Thread(block: work)
-                thread.stackSize = 8 << 20
-                thread.start()
+                // On a thread of the tool server's size (ToolThread.stackSize), as the tool server runs them, each run
+                // measured: `stop` fails the test when one took more than a quarter of it (2026-11-18: a receipt field
+                // 14 bytes larger overflowed a detached thread's 512 KB in BoardStore.restore and ended the test run).
+                measured?.measuringStarts()
+                StackGauge.start(work) { used in measured?.took(used) }
                 return true
             })
             lead.advancing?.passed = { [weak self] in self?.ended($0) }
+        }
+
+        private func measuringStarts() {
+            lock.lock()
+            measuring += 1
+            lock.unlock()
+        }
+
+        private func took(_ bytes: Int) {
+            lock.lock()
+            deepestUsed = max(deepestUsed, bytes)
+            measuring -= 1
+            lock.broadcast()
+            lock.unlock()
+        }
+
+        /// Once every run started is measured (a run's thread measures after the run has said it ended).
+        private func measured() {
+            lock.lock()
+            while measuring > 0 { lock.wait() }
+            lock.unlock()
+        }
+
+        /// The most stack a run of passes took so far, in bytes.
+        var deepest: Int {
+            lock.lock()
+            defer { lock.unlock() }
+            return deepestUsed
         }
 
         private func ended(_ pass: Int) {
@@ -125,8 +158,28 @@ struct LeadAdvanceTests: LeadTeamFixture {
         func until(_ condition: () -> Bool) async -> Bool {
             let deadline = MacTime.real.awake() + 60
             while true {
-                if condition() { return true }
+                // Counted before the look: a pass that ends between the look and the count would otherwise go unseen,
+                // and with nothing to start another one it waits out the deadline.
                 let seen = passes
+                if condition() { return true }
+                while passes == seen {
+                    guard MacTime.real.awake() < deadline, !Task.isCancelled else { return false }
+                    try? await Task.sleep(nanoseconds: 10_000_000)
+                }
+            }
+        }
+
+        /// Runs of passes, each asked for as settle() asks for one, until `condition` holds (60 s at most, less when the
+        /// test is cancelled); whether it does. For what a pass records after a change nothing else brings a pass for (a
+        /// power or lock state the folder watch doesn't see): until(_:) only waits on passes something else asks for.
+        @discardableResult
+        func settle(until condition: () -> Bool) async -> Bool {
+            let deadline = MacTime.real.awake() + 60
+            while true {
+                // Counted before the look, as in until(_:).
+                let seen = passes
+                if condition() { return true }
+                lead.advancing?.trigger()
                 while passes == seen {
                     guard MacTime.real.awake() < deadline, !Task.isCancelled else { return false }
                     try? await Task.sleep(nanoseconds: 10_000_000)
@@ -148,7 +201,11 @@ struct LeadAdvanceTests: LeadTeamFixture {
         }
 
         /// No more passes, the one under way ended: nothing writes the test's folders after it.
-        func stop() { lead.advancing?.stop(wait: true) }
+        func stop(sourceLocation: SourceLocation = #_sourceLocation) {
+            lead.advancing?.stop(wait: true)
+            measured()
+            StackGauge.fits(deepest, "A run of auto_advance's passes", sourceLocation: sourceLocation)
+        }
     }
 
     func task(_ slug: String, _ root: String) -> LeadTask? { BoardStore(root: root).load().task(slug) }
@@ -607,7 +664,7 @@ struct LeadAdvanceTests: LeadTeamFixture {
         try work("add-b", file: "b.txt", root: root, runtime)
         #expect(await advancing.until { toWorker("add-b", root, runtime).contains { $0.contains("BROKEN-ON-PURPOSE") } && task("add-b", root)?.status == .running
             && reports(runtime).contains { $0.contains("Merge of add-b failed") } })
-        #expect(head("main", root) == main)
+        #expect(onlyRecords(on: "main", since: main, in: root))
         let after = try #require(task("add-b", root))
         #expect(after.status == .running && after.setback?.stage == .merge, "\(after.status)")
         #expect(reports(runtime).contains { $0.contains("Merge of add-b failed") && $0.contains("Sent its worker the output") })
@@ -943,9 +1000,10 @@ struct LeadAdvanceTests: LeadTeamFixture {
         defer { again.stop() }
         // The audit of the new commit, as any: not a retry on the old one.
         #expect(await again.until { vault.current(.verifier, root: root, task: "add-b")?.auditing == moved })
+        // Its report goes out once its run's passes are done: waited on, not settle()'s run.
+        #expect(await again.until { reports(runtime).contains { $0.contains("Started the audit of add-b at \(moved.prefix(8))") } }, "\(reports(runtime))")
         await again.settle()
         #expect(task("add-b", root)?.verifierRetry == nil)
-        #expect(reports(runtime).contains { $0.contains("Started the audit of add-b at \(moved.prefix(8))") }, "\(reports(runtime))")
         #expect(!reports(runtime).contains { $0.contains("started the audit again") })
         #expect(verifiersSpawned(runtime).count == 2 && killed(first, runtime))
     }
@@ -961,9 +1019,11 @@ struct LeadAdvanceTests: LeadTeamFixture {
         runtime.others = [LeadSessionInfo(id: "other", cwd: "/elsewhere/.vibeswitcher/worktrees/x", label: "Worker: other", live: true, status: "working", tty: nil)]
         runtime.calls.unlock()
         quits(first, runtime, root: root)
-        await advancing.settle()
+        // The pass that records the wait, not settle()'s: the run settle() sees end may have begun its last pass before
+        // quits() (see aStartWaitsForTheMacsRoomAndGoesOnTheAppsNudge).
+        #expect(await advancing.until { roomWaits.waits().contains { $0.wait.auto == true && $0.wait.what == "audit(add-b)" } },
+                "\(roomWaits.waits())")
         #expect(task("add-b", root)?.verifierRetry == nil && verifiersSpawned(runtime).count == 1 && !killed(first, runtime))
-        #expect(roomWaits.waits().contains { $0.wait.auto == true && $0.wait.what == "audit(add-b)" }, "\(roomWaits.waits())")
         // Room again: the app's nudge, and the retry starts.
         runtime.calls.lock()
         runtime.others = []
@@ -1236,7 +1296,7 @@ struct LeadAdvanceTests: LeadTeamFixture {
         let after = try #require(task("add-b", root))
         #expect(after.status == .kept && after.keptBecause == "main's suite fails 2 pre-existing tests" && after.merged == nil, "\(after.status) \(after.keptBecause ?? "")")
         #expect(after.setback == nil, "\(String(describing: after.setback))")
-        #expect(head("main", root) == main)
+        #expect(onlyRecords(on: "main", since: main, in: root))
         #expect(!Git.run(["show", "main:b.txt"], in: root).ok)
         #expect(toWorker("add-b", root, runtime).isEmpty, "\(toWorker("add-b", root, runtime))")
         let told = reports(runtime).filter(aboutMerge)
@@ -1285,8 +1345,10 @@ struct LeadAdvanceTests: LeadTeamFixture {
         }
         let advancing = Advancing(lead)
         defer { advancing.stop() }
+        // The pass that counted them, not just any run's end; then that pass's run over (settle) before the checks.
+        #expect(await advancing.settle(until: { task("waits", root)?.status == .blocked }))
         await advancing.settle()
-        #expect(task("waits", root)?.status == .blocked && task("waits", root)?.worker == nil)
+        #expect(task("waits", root)?.worker == nil)
         #expect(runtime.spawned.isEmpty)
         #expect(!reports(runtime).contains { $0.contains("waits") })
     }
@@ -1303,9 +1365,9 @@ struct LeadAdvanceTests: LeadTeamFixture {
         await advancing.settle()
         probe.release()
         #expect(!LeadAdvance.running(store))
-        // The next run takes it, and keeps it.
-        await advancing.settle()
-        #expect(LeadAdvance.running(store))
+        // The next run takes it, and keeps it: waited on, run by run, not settle()'s run (which may have begun before the
+        // release).
+        #expect(await advancing.settle(until: { LeadAdvance.running(store) }))
     }
 
     @Test func afterTakesTheBoardsTasksAndRefusesLoops() throws {
@@ -1408,12 +1470,16 @@ struct LeadAdvanceTests: LeadTeamFixture {
         let advancing = Advancing(lead)
         defer { advancing.stop() }
         _ = lead.call("add_task", ["title": "Waits", "goal": "g", "acceptance": ["a"]])
-        await advancing.settle()
+        // Waits for the pass that records it, not for settle(): the pass settle() sees end may have started before
+        // add_task (the loop's first, or one whose run went on after the trigger came in) and found no task yet
+        // (2026-11-19, twice under load: waits == []).
+        #expect(await advancing.until { !roomWaits.waits().isEmpty }, "\(roomWaits.waits())")
         #expect(task("waits", root)?.status == .planned)
         let waits = roomWaits.waits()
         #expect(waits.count == 1 && waits[0].wait.auto == true && waits[0].wait.what == "start_worker(waits)", "\(waits)")
         // More passes don't keep recording it.
         _ = lead.call("add_task", ["title": "Later", "goal": "g", "acceptance": ["a"], "after": ["waits"]])
+        await advancing.settle()
         await advancing.settle()
         #expect(roomWaits.waits().count == 1)
 
@@ -1442,9 +1508,10 @@ struct LeadAdvanceTests: LeadTeamFixture {
         let advancing = Advancing(lead)
         defer { advancing.stop() }
         _ = lead.call("add_task", ["title": "Dip", "goal": "g", "acceptance": ["a"]])
-        await advancing.settle()
+        // The pass that records the wait, not settle()'s (see aStartWaitsForTheMacsRoomAndGoesOnTheAppsNudge).
+        #expect(await advancing.until { roomWaits.waits().contains { $0.wait.auto == true && $0.wait.what == "start_worker(dip)" } },
+                "\(roomWaits.waits())")
         #expect(task("dip", root)?.status == .planned)
-        #expect(roomWaits.waits().contains { $0.wait.auto == true && $0.wait.what == "start_worker(dip)" }, "\(roomWaits.waits())")
         // The dip: the 1-minute under load_threshold, the 5-minute not. Nudged as the app's watch would, it still waits.
         set(20, 64)
         LeadAdvance.nudge(root: root)
@@ -1495,15 +1562,15 @@ struct LeadAdvanceTests: LeadTeamFixture {
             await advancing.settle()
         }
         #expect(holds().count == 1, "\(holds())")
-        // A new limit is news; so is a hold after AC power came back.
+        // A new limit is news; so is a hold after AC power came back. Each waited on, run by run: settle()'s run may have
+        // begun before the reading changed.
         power.set(held(20))
-        await advancing.settle()
-        #expect(holds().count == 2 && holds()[1].contains("under your 20 % limit"), "\(holds())")
+        #expect(await advancing.settle(until: { holds().count == 2 }), "\(holds())")
+        #expect(holds()[1].contains("under your 20 % limit"), "\(holds())")
         power.set(PowerState(onBattery: false, percent: 30, charging: true))
-        await advancing.settle()
+        #expect(await advancing.settle(until: { reports(runtime).contains { $0.contains("Released: on AC power") } }), "\(reports(runtime))")
         power.set(held(20))
-        await advancing.settle()
-        #expect(holds().count == 3, "\(holds())")
+        #expect(await advancing.settle(until: { holds().count == 3 }), "\(holds())")
     }
 
     /// The speed review (2026-11-12) couldn't tell how long battery holds lasted: only their start was logged. The
@@ -1584,7 +1651,7 @@ struct LeadAdvanceTests: LeadTeamFixture {
     /// to the worker, and a planned task starts.
     @Test func otherTasksMoveOnWhileAMergesTestsRun() async throws {
         let held = heldRun("echo ran >> '\(log)'")
-        let (root, runtime, lead) = try team(test: held.test, ["max_workers": 5])
+        let (root, runtime, lead) = try team(test: held.test, ["max_workers": 5, "heavy_slots": 2])
         lead.macLimits = { MacLimits(maxSessions: 12) }
         let advancing = Advancing(lead)
         defer { advancing.stop() }

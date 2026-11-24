@@ -9,6 +9,9 @@ import VibeCore
 @MainActor
 struct SessionStoreTests {
     private let stateDir = scratchRoot.appendingPathComponent("store-tests-\(UUID().uuidString)")
+    /// Where the tests' window models keep their settings: a suite of this test's own, not the standard defaults
+    /// every test process on this Mac shares.
+    private let temp = Scratch()
 
     /// A working agent and one whose turn is over with a background shell still running (its age is in the detail).
     /// `readable`: whether the process table can be read at the time. `inTerminal`: a third agent, in Terminal.app (a
@@ -285,7 +288,7 @@ struct SessionStoreTests {
         // A worker's window session whose agent the store's table doesn't show, started just after the first read.
         let worker = HostSession(id: UUID(), tty: "ttys980", childPID: 980, cwd: "/r/acme/.vibeswitcher/worktrees/k", command: nil,
                                  label: "Worker: K", agent: "claude", title: "", startedAt: read + 10, cols: 80, rows: 24, exit: nil)
-        let model = WindowModel()
+        let model = WindowModel(defaults: temp.defaults("store-tests-window"))
         func row() -> WindowRow? {
             model.update(sessions: store.sessions, hosted: [worker], table: store.tableRead)
             return model.allRows.first { $0.hostID == worker.id }
@@ -333,7 +336,7 @@ struct SessionStoreTests {
                                  agent: "claude", title: "w", startedAt: started, cols: 80, rows: 24, exit: nil)
         #expect(!store.agentQuit(window))
         // The window's row and a team row read it as the witness does.
-        let model = WindowModel()
+        let model = WindowModel(defaults: temp.defaults("store-tests-window"))
         func row() -> WindowRow? {
             model.update(sessions: store.sessions, hosted: [window], table: store.tableRead)
             return model.allRows.first { $0.hostID == window.id }

@@ -488,6 +488,15 @@ private final class Driver: NSObject, NSApplicationDelegate {
             self?.shellQuestion = question
             return true
         }
+        tidier.holdsRole = { [weak self] id in
+            self?.leads.boards.values.contains { $0.leadSession.flatMap(UUID.init(uuidString:)) == id } ?? true
+        }
+        tidier.scanned = { [weak self] in (self?.store.sessions ?? [], self?.store.tableRead ?? TableRead()) }
+        // The leads' own, and those `replaced` marks in the window (the sandbox's stand-in for a handover).
+        tidier.replaced = { [weak self] in
+            guard let self else { return [] }
+            return Set(leads.replacedLeads.keys).union(model.replacedLeads.keys)
+        }
         host.onInput = { [weak tidier] id in tidier?.typed(id) }
         return tidier
     }()
@@ -499,6 +508,21 @@ private final class Driver: NSObject, NSApplicationDelegate {
         shellQuestion = nil
         let ended = shellTidier.close(project: project, rows: model.allRows.filter { $0.project == project })
         return (shellQuestion, ended.count)
+    }
+
+    /// The sidebar's Close Finished (N)…, in every project: what it asked (taken as `confirmed`, or as Cancel), and
+    /// what it ended.
+    @discardableResult
+    func closeFinished(confirmed: Bool = true) -> (asked: ShellTidier.Question?, ended: [UUID]) {
+        shellQuestion = nil
+        let ask = shellTidier.ask
+        shellTidier.ask = { [weak self] question in
+            self?.shellQuestion = question
+            return confirmed
+        }
+        defer { shellTidier.ask = ask }
+        let ended = shellTidier.closeFinished()
+        return (shellQuestion, ended)
     }
     /// The Wallet Manager peer the wallet desk sends to: the first made-up one, or none after `wallet-peer none`, or
     /// the Wallet Manager on this Mac after `wallet-peer this-mac`.
@@ -748,15 +772,21 @@ private final class Driver: NSObject, NSApplicationDelegate {
 
     /// The project `startlead` starts a real lead in, and its fake Claude's files.
     private var newLead: (folder: String, transcript: String, control: String, state: String) {
-        let folder = (home as NSString).appendingPathComponent("projects/new-lead")
-        let files = state.appendingPathComponent("lead-new-lead", isDirectory: true).path
-        let transcript = (home as NSString).appendingPathComponent(".claude/projects/-sandbox-new-lead/lead.jsonl")
+        leadFiles((home as NSString).appendingPathComponent("projects/new-lead"))
+    }
+
+    /// The fake Claude's files for a lead the app starts in `folder` (`startlead`'s, `handover`'s).
+    private func leadFiles(_ folder: String) -> (folder: String, transcript: String, control: String, state: String) {
+        let slug = (folder as NSString).lastPathComponent
+        let files = state.appendingPathComponent("lead-\(slug)", isDirectory: true).path
+        let transcript = (home as NSString).appendingPathComponent(".claude/projects/-sandbox-\(slug)/lead.jsonl")
         return (folder, transcript, files + "/control.jsonl", files + "/state.json")
     }
 
-    /// What a lead started in `folder` runs: the fake Claude on `startlead`'s files (a shell's `cat` without its script).
+    /// What a lead started in `folder` runs: the fake Claude on that folder's files (`leadFiles`; a shell's `cat`
+    /// without its script).
     func leadCommand(_ folder: String) -> String {
-        let lead = newLead
+        let lead = leadFiles(folder)
         guard let fakeClaude else { return "exec /bin/cat" }
         return "exec /usr/bin/python3 -I -u '\(fakeClaude)' '\(lead.transcript)' '\(lead.control)' '\(lead.state)'"
     }
@@ -801,6 +831,90 @@ private final class Driver: NSObject, NSApplicationDelegate {
         }
     }
 
+    /// `handover start`: a lead in a project of its own (a fake Claude, named on its board, holding no role: as after
+    /// an install), selected, with a session of yours started after it. `handover`: Project Lead starts a new lead there
+    /// (`LeadController.startLead`, its question answered Start a New Lead; its agent a fake Claude), and once the new
+    /// one has ended its first turn, the old one, between turns, ends by itself and the new one takes its row.
+    func handover(_ step: String, _ reply: @escaping (Bool, String) -> Void) {
+        let slug = "handover-site", label = "Lead · handover-site"
+        let folder = (home as NSString).appendingPathComponent("projects/\(slug)")
+        // Its hooks' state as it is now (`adopt`'s is from before the session started, which a lead's look doesn't take).
+        func stopped(_ fake: Fake) {
+            var hook = HookState(agent: .claude, tty: fake.tty, lastEvent: "Stop", lastEventAt: Date().timeIntervalSince1970)
+            hook.agentPid = fake.pid
+            hook.cwd = folder
+            hook.transcriptPath = fake.transcript
+            try? hook.save(to: VibePaths.stateFile(tty: fake.tty))
+        }
+        if step == "start" {
+            guard !fakeList.contains(where: { $0.label == label }) else { return reply(false, "already started: handover") }
+            return startFake(label: label, slug: slug, firstPrompt: Self.leadFirstPrompt) { [weak self] problem in
+                guard let self else { return }
+                if let problem { return reply(false, problem) }
+                guard let old = self.fakeList.first(where: { $0.label == label }) else { return reply(false, "the old lead didn't start") }
+                try? VibePaths.writePrivate(Data("# Handover site\n".utf8), to: URL(fileURLWithPath: folder + "/README.md"))
+                let made = FileManager.default.fileExists(atPath: folder + "/.git")
+                for args in [["init", "-q", "-b", "main"], ["config", "user.email", "sandbox@example.invalid"], ["config", "user.name", "Sandbox"],
+                             ["add", "README.md"], ["commit", "-q", "-m", "First commit"]] where !made {
+                    guard Git.run(args, in: folder).ok else { return reply(false, "couldn't make its repository: git \(args.joined(separator: " "))") }
+                }
+                do {
+                    try BoardStore(root: folder).prepare()
+                    try BoardStore(root: folder).update { board in
+                        board.leadSession = old.id.uuidString
+                        board.leadPid = old.pid
+                        board.leadTTY = old.tty
+                    }
+                } catch { return reply(false, "couldn't write its board: \(error)") }
+                stopped(old)
+                self.startFake(label: "Claude", slug: slug) { [weak self] problem in
+                    guard let self else { return }
+                    if let problem { return reply(false, problem) }
+                    self.model.select(hostID: old.id)
+                    self.waitFor({ [weak self] in self?.model.selectedRow?.hostID == old.id }) { [weak self] met in
+                        self?.settle { reply(met, met ? "\(label) selected, a session of yours after it" : "its row didn't show") }
+                    }
+                }
+            }
+        }
+        guard let old = fakeList.first(where: { $0.label == label }) else { return reply(false, "no lead to hand over: handover start first") }
+        guard host.sessions.contains(where: { $0.id == old.id && $0.isLive }) else { return reply(false, "its lead was handed over already") }
+        let lead = leadFiles(folder)
+        for path in [(lead.transcript as NSString).deletingLastPathComponent, (lead.state as NSString).deletingLastPathComponent] {
+            try? VibePaths.ensurePrivate(URL(fileURLWithPath: path))
+        }
+        // Its first turn, over as it starts: its start prompt (which its chat leaves out after the old lead's turns), its
+        // greeting, and a turn with you.
+        try? VibePaths.writePrivate(Data(Self.handoverTurn.utf8), to: URL(fileURLWithPath: lead.transcript))
+        try? VibePaths.writePrivate(Data(), to: URL(fileURLWithPath: lead.control))
+        try? FileManager.default.removeItem(atPath: lead.state)
+        stopped(old)
+        let confirm = leads.confirm
+        leads.confirm = { title, text, buttons in title.contains("without its role") ? 1 : confirm(title, text, buttons) }
+        leads.startLead(in: folder)
+        waitFor({ [weak self] in self?.host.sessions.contains { $0.label == label && $0.isLive && $0.id != old.id } ?? true }) { [weak self] _ in
+            guard let self else { return }
+            self.leads.confirm = confirm
+            guard let new = self.host.sessions.first(where: { $0.label == label && $0.isLive && $0.id != old.id }) else {
+                return reply(false, "the new lead didn't start: \(self.refused.joined(separator: "; "))")
+            }
+            self.adopt(new, label: label, folder: folder, transcript: lead.transcript, control: lead.control, agentState: lead.state, agent: .claude) { [weak self] problem in
+                guard let self else { return }
+                if let problem { return reply(false, problem) }
+                if let fake = self.fakeList.first(where: { $0.id == new.id }) { stopped(fake) }
+                self.leads.refresh()
+                self.waitFor({ [weak self] in self?.host.sessions.contains { $0.id == old.id && $0.isLive } == false }, tries: 600) { [weak self] ended in
+                    guard let self else { return }
+                    let selected = self.model.selectedRow?.hostID == new.id
+                    self.settle {
+                        reply(ended && selected, ended ? "the old lead ended by itself; the new one is " + (selected ? "selected" : "not selected")
+                              : "the old lead still runs (replaced: \(self.leads.replacedLeads[old.id] != nil))")
+                    }
+                }
+            }
+        }
+    }
+
     /// The fake agent's pid, from the state it writes once it's drawn (checked every 0.1 s, `tries` times).
     private func waitForPid(_ path: String, tries: Int, _ done: @escaping (Int32?) -> Void) {
         let object = FileManager.default.contents(atPath: path).flatMap { try? JSONSerialization.jsonObject(with: $0) } as? [String: Any]
@@ -833,6 +947,20 @@ private final class Driver: NSObject, NSApplicationDelegate {
                 + tool(2, "Read", #"{"file_path":"jobs/schedule.py"}"#, "def is_due(job):")
                 + tool(3, "Bash", #"{"command":"git log --oneline -3 -- jobs/payouts.py"}"#, "4c1d2e9 Run the payout job per region")
                 + [usage]).joined(separator: "\n") + "\n"
+    }()
+
+    /// The first turns of the lead a `handover` starts: what its chat shows below the handover's line.
+    static let handoverTurn: String = {
+        let stamp = ISO8601DateFormatter().string(from: Date())
+        func line(_ type: String, _ id: String, _ content: String) -> String {
+            let message = type == "user" ? #""\#(content)""# : #"[{"type":"text","text":"\#(content)"}]"#
+            return #"{"type":"\#(type)","uuid":"\#(id)","timestamp":"\#(stamp)","isSidechain":false,"message":{"role":"\#(type)","content":\#(message)}}"#
+        }
+        return [line("user", "h0", LeadPrompts.startOpening + " You replace the lead on /dev/ttys001: read its last turns first."),
+                line("assistant", "h1", "Took over from the last lead: the payout fix is next, its tests first. Nothing else is open."),
+                line("user", "h2", "Go ahead with the lock fix."),
+                line("assistant", "h3", "On it: a worker takes the lock first in `jobs/payouts.py` and runs its tests.")]
+            .joined(separator: "\n") + "\n"
     }()
 
     /// The fake lead's first prompt: its title, and the first line of its conversation.
@@ -1362,7 +1490,9 @@ private final class Driver: NSObject, NSApplicationDelegate {
             startLead: { [weak self] _ in self?.refuse("starting a project lead (a real agent)") },
             projectsFolder: { [weak self] in (self?.home ?? "") + "/projects" },
             projectCreated: { [weak self] folder, _ in self?.refuse("starting a lead in the new project \(folder)") },
-            closeFinishedShells: { [weak self] project in self?.closeFinishedShells(project) })
+            closeFinishedShells: { [weak self] project in self?.closeFinishedShells(project) },
+            closable: { [weak self] in self?.shellTidier.closable() ?? [] },
+            closeFinished: { [weak self] in self?.closeFinished() })
         windowActions = actions
         // The sandbox's finished Run-card shells leave as the app's do (and typing into one is recorded from now on).
         shellTidier.start(interval: 5)
@@ -1430,6 +1560,7 @@ private final class Driver: NSObject, NSApplicationDelegate {
         ("composer paste|clear|expect TEXT", "the chat's composer: paste presses ⌘V into it as the menu does, with what the sandbox's pasteboard holds (a Copy's, never yours), and prints what it holds then; clear empties it; expect fails unless it holds exactly TEXT, saying what it holds"),
         ("composer [unsent TEXT]", "prints what the shown chat's composer holds and how many messages its fake session was sent; unsent TEXT fails unless the box comes to hold exactly TEXT and nothing was sent since the last dictation press (e.g. after dictation press/release: the text lands in the box, unsent)"),
         ("runblock [yes]", "the shown chat's last code block with a Run: shows what Run asks first, as the sheet; with yes, runs it as Run does once you confirm (tell it {\"op\": \"realShell\"} first to see its output)"),
+        ("runshell [yes]", "the shown chat's last code block with a Run, by its Run in New Shell: shows what it asks first, as the sheet (sheet-runshell); with yes, starts the new shell session as the button does once you confirm (selected, as a card's Run does)"),
         ("lines FILE N", "waits up to 30 s for FILE (a path under the sandbox's home, e.g. projects/example-api/ran.txt) to hold N lines, then fails unless it holds exactly N: a command that appends a line there each time it runs ran N times (scripts/ui-journeys/run-card.journey)"),
         ("tell JSON", "hands a fake Claude (the selected one, or the one labelled \"to\") a FakeClaude op, e.g. '{\"op\": \"permission\", \"command\": \"swift build\"}' or '{\"op\": \"work\"}' (see Tests/VibeSwitcherTests/FakeClaude.swift)"),
         ("notify prepare|allow|deny", "a permission prompt's banner for the selected fake session (the sandbox posts no notifications): prepare reads its screen as posting the banner does (whether it gets Allow and Deny); allow or deny runs that banner's action (`PromptActions.handle`), a failure shown as the chat card's notice"),
@@ -1448,6 +1579,7 @@ private final class Driver: NSObject, NSApplicationDelegate {
         ("publish [N]", "has the lead controller publish N times (default 50), each laid out and drawn, and times them"),
         ("hangs [reset]", "the sandbox's main-thread freezes (its hang reports, as the health digest tells them) and its longest wait between two beats (reset: from now on)"),
         ("startlead", "starts a real project lead (LeadController.startLead, as Project Lead does: the host first if none runs, its vault grant) in a new repository, its agent a fake Claude, and shows its chat; first thing after `run --empty`, no session host runs before it"),
+        ("handover [start]", "with start: a project lead (a fake Claude named on its board, holding no role, as after an install) in a project of its own, selected, a session of yours after it; then without: Project Lead starts a new lead there, and once its first turn is over the old one ends by itself, the new one in its row and selected"),
         ("lead [FILE]", "shows a fake project lead's chat, at its end (started the first time, on FILE's transcript if given): a board of tasks, a withdrawn question, tool runs and workers' messages"),
         ("team", "starts a fake worker on the fake lead's running task, in its worktree (start the lead first); select it and tell it a permission to see it wait on its lead"),
         ("team wall", "puts a running team task on the fake lead's board (start the lead first): 3 members with their parts and progress, one waiting on a teammate, and 5 posts on its wall; shows the Team tab with its lane opened to the Wall section"),
@@ -1471,6 +1603,7 @@ private final class Driver: NSObject, NSApplicationDelegate {
         ("shell-idle SECONDS", "how long after its command went well an untouched Run-card shell is ended by itself (600 by default), and looks now: a shell finished that long ago, back at its prompt and not typed into, moves under Ended"),
         ("end row|key|window", "ends the selected session as the window does: row is its End Session… in the sidebar's menu, key is the File menu's End Session… (⇧⌘⌫), window closes the window (⌘W); the sandbox asks nothing first"),
         ("shell-close [PROJECT]", "the sidebar's Close Finished Shells… for PROJECT (the selected session's unless given), its confirmation taken as given: prints what it asked and ends the Run-card shells of that project that are back at their prompt"),
+        ("close-finished [yes]", "the sidebar's Close Finished (N)…, in every project: prints the button's words and its confirmation, shown as the sheet (sheet close-finished) and answered Cancel; with yes, confirmed: ends the finished Run-card shells and the replaced leads between turns it lists, and prints how many"),
         ("sidebar attention|projects [ended]", "groups the sidebar by attention or by project (a project's header has its menu), with the Ended fold open when ended is given, closed otherwise"),
         ("shell-fail on|off", "on: the sandbox's own host refuses to start the shells a card's Run asks for, so the Run says why it didn't go; off: they start again"),
         ("wallet-card", "prints the newest wallet request card in the selected chat: its id, state, line, not-picked-up hint, transaction (tx HASH [EXPLORER URL], once signed and submitted) and the Wallet Manager's checks"),
@@ -2044,6 +2177,13 @@ private final class Driver: NSObject, NSApplicationDelegate {
             alert.layout()
             return alert.window
         }),
+        // The sidebar's Close Finished (N)…: what it asks, for what the sandbox has now (answered Cancel: nothing ends).
+        ("close-finished", { driver in
+            guard let asked = driver.closeFinished(confirmed: false).asked else { return nil }
+            let alert = ShellTidier.makeAlert(asked)
+            alert.layout()
+            return alert.window
+        }),
         // What shows while Apple's installer runs.
         ("installing-tools", { _ in ToolInstaller.waitingPanel(ToolInstaller.waitingText) {} }),
     ] }
@@ -2608,6 +2748,7 @@ private final class Driver: NSObject, NSApplicationDelegate {
         case "tell": tell(rest, reply)
         case "notify": notify(rest, reply)
         case "runblock": runBlock(confirmed: rest == "yes", reply)
+        case "runshell": runBlock(confirmed: rest == "yes", newShell: true, reply)
         case "lines": lines(rest, reply)
         case "clear":
             // Ended first, then removed (the host keeps an ended session's row until it's removed).
@@ -2636,6 +2777,7 @@ private final class Driver: NSObject, NSApplicationDelegate {
                 reply(problem == nil, problem ?? "started")
             }
         case "startlead": startRealLead(reply)
+        case "handover": handover(rest, reply)
         case "lead":
             // Started once; then its chat, once its board is read, at the end (where its pinned questions are).
             let show = { [weak self] in
@@ -2829,6 +2971,18 @@ private final class Driver: NSObject, NSApplicationDelegate {
             let closed = closeFinishedShells(project)
             let asked = closed.asked.map { "\($0.message)\n\($0.detail)\n[\($0.button ?? "OK")]" } ?? "nothing was asked"
             settle { reply(true, "\(asked)\nended: \(closed.ended)") }
+        case "close-finished":
+            guard rest.isEmpty || rest == "yes" else { return reply(false, "close-finished [yes]") }
+            let button = windowActions?.closable().count ?? 0
+            guard rest == "yes" else {
+                return showSheet("close-finished") { ok, said in
+                    reply(ok, "the button: \(button == 0 ? "not shown" : CloseFinished.title(button))\n" + said + "\n"
+                          + (self.shellQuestion.map { "\($0.message)\n\($0.detail)\n[\($0.button ?? "OK")]" } ?? ""))
+                }
+            }
+            let closed = closeFinished()
+            let asked = closed.asked.map { "\($0.message)\n\($0.detail)\n[\($0.button ?? "OK")]" } ?? "nothing was asked"
+            settle { reply(true, "the button: \(button == 0 ? "not shown" : CloseFinished.title(button))\n\(asked)\nended: \(closed.ended.count)") }
         case "shell-tidy":
             guard let seconds = Double(rest), seconds > 0 else { return reply(false, "shell-tidy SECONDS (more than 0)") }
             shellDesk.tidyAfter = seconds
@@ -3487,7 +3641,7 @@ private final class Driver: NSObject, NSApplicationDelegate {
     /// `confirmed`, run as the button runs it after you press Run there. Waits up to 30 s for such a block (a reply
     /// `tell` just handed the fake lands in the chat once its transcript is read), and once run, for the chat to have
     /// it as recorded (not on its way).
-    private func runBlock(confirmed: Bool, _ reply: @escaping (Bool, String) -> Void) {
+    private func runBlock(confirmed: Bool, newShell: Bool = false, _ reply: @escaping (Bool, String) -> Void) {
         guard let chat = window?.chat, model.showsChat else { return reply(false, "no chat: show a fake session's chat first (chat)") }
         func lastRunnable() -> RunnableCommand.Runnable? {
             let replies = chat.items.compactMap { item -> String? in
@@ -3504,8 +3658,35 @@ private final class Driver: NSObject, NSApplicationDelegate {
         waitFor({ lastRunnable() != nil }) { [weak self] _ in
             guard let self else { return }
             guard let runnable = lastRunnable() else { return reply(false, "no code block with a Run in the chat's replies") }
+            if newShell { return self.runInShell(runnable, in: chat, confirmed: confirmed, reply) }
             self.runBlock(runnable, in: chat, confirmed: confirmed, reply)
         }
+    }
+
+    /// `runshell`: the block's Run in New Shell (`RunInShellButton`), in the sandbox's own session host.
+    private func runInShell(_ runnable: RunnableCommand.Runnable, in chat: ChatModel, confirmed: Bool, _ reply: @escaping (Bool, String) -> Void) {
+        closeSheet()
+        guard let folder = chat.runner.folder else { return reply(false, "no Run in New Shell shown: the selected session has no folder") }
+        if confirmed {
+            let asked = runnable.needsConfirmation ? "asked first, then " : ""
+            return RunInShellButton.run(runnable, in: folder, with: chat.runner, confirm: { _ in true }) { [weak self] outcome in
+                guard let self else { return }
+                switch outcome {
+                case .ran?: self.settle { reply(true, "\(asked)started a new shell session in \(folder) running: \(runnable.command)") }
+                case .refused(let reason)?: self.settle { reply(false, reason) }
+                case nil: reply(false, "cancelled")
+                }
+            }
+        }
+        let alert = RunInShellButton.confirmation(runnable, folder: folder)
+        alert.layout()
+        let shown = alert.window
+        Sandbox.hide(shown)
+        sheet = shown
+        sheetName = "runshell"
+        shown.orderFrontRegardless()
+        Sandbox.hide(shown)
+        settle { reply(true, "Run in New Shell's confirmation shown (sheet-runshell)") }
     }
 
     private func runBlock(_ runnable: RunnableCommand.Runnable, in chat: ChatModel, confirmed: Bool, _ reply: @escaping (Bool, String) -> Void) {
