@@ -4481,3 +4481,7 @@ Turn what's a real bug into a task (one already on the board needs nothing); the
 - 2026-11-24 01:39 Planned find-why-the-memory: Find why the memory bench's churn growth went from ~5.5 % to 13 %
 - 2026-11-24 01:39 Started a worker on find-why-the-memory
 - 2026-11-24 01:39 Automatically (auto_advance): Started a worker on find-why-the-memory (Find why the memory bench's churn growth went from ~5.5 % to 13 %).
+- 2026-11-24 02:50 Pipeline held: find-why-the-memory ready to merge with none landing; cause: a merge in progress
+- 2026-11-24 02:50 Merged find-why-the-memory: Find why the memory bench's churn growth went from ~5.5 % to 13 % (no audit: review none) (build 68a67ba8203f)
+- 2026-11-24 02:50 Flaky in find-why-the-memory's merge: afterARunHeardAFlatOneSaysClaudeDidntCatchAnything() failed the first test run and passed its rerun (the failing tests only); merged on the rerun
+- 2026-11-24 02:50 Planned fix-the-flaky-test-26: afterARunHeardAFlatOneSaysClaudeDidntCatchAnything() flaked in find-why-the-memory's merge
