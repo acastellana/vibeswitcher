@@ -261,7 +261,7 @@ public final class Requests: @unchecked Sendable {
             guard let self else { return done() }
             self.queue.async {
                 if let notes { self.notes = (notes, Date()) }
-                self.refreshBuilds(done)
+                self.refreshBuilds { self.refreshHooks(done) }
             }
         }
     }
@@ -271,6 +271,8 @@ public final class Requests: @unchecked Sendable {
     /// change of the node's stream calls. On `queue`.
     private var builds: NodeWire.Value?
     private let buildsReads = DispatchQueue(label: "vibenode.status-builds", qos: .utility)
+    /// The hooks as `vibeswitcher approve` would find them, as last read (`refreshHooks`): `status`'s notice.
+    let hooksLook = HooksLook()
 
     /// The install root read again on a queue of its own, `builds` set on `queue`, then `done` there. At each
     /// `refreshNotes` (each `status`, and each housekeeping). Nothing without an install root.
@@ -840,6 +842,7 @@ public final class Requests: @unchecked Sendable {
             notices.append("the server ended stuck \(stuck) times in a row (its engine's queue didn't answer), and the host started it again each time: its log says what it was doing; if it goes on, `vibeswitcher stop`, then `vibeswitcher start`")
         }
         if let notice = updates?.notice { notices.append(notice) }
+        if let notice = hooksLook.notice { notices.append(notice) }
         return notices
     }
 
