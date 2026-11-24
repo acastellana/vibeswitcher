@@ -192,7 +192,14 @@ extension Requests {
             _ = web.takePairing(code: code)
             return refuse(.voice, "this address was used by another page too: not confirmed. If that wasn't you, run `vibeswitcher web --revoke`")
         }
-        guard shown == phrase else { return refuse(.voice, "that isn't the phrase the page that took the address shows: not confirmed") }
+        // The words the user typed from their own page: a page that won the race shows other words (or the user's
+        // browser shows none), and nothing is confirmed. A wrong try ends the pairing: no second guess.
+        let typed = phrase.lowercased().split(whereSeparator: \.isWhitespace).joined(separator: " ")
+        guard shown == typed else {
+            _ = web.takePairing(code: code)
+            return refuse(.voice, "those aren't the words the page that took the address shows: not confirmed, and that page only reads and drafts. "
+                + "If your browser said it wasn't admitted, run `vibeswitcher web --revoke`")
+        }
         guard seat.holds(code), let pairing = web.takePairing(code: code) else {
             return refuse(.gone, "the page that took the address closed before it was confirmed: run `vibeswitcher web` again")
         }

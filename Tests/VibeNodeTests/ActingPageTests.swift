@@ -9,10 +9,11 @@ final class MemoryVaultV2: @unchecked Sendable {
     private var book: LeadVaultV2.Book?
     var now: () -> Double = { Date().timeIntervalSince1970 }
 
-    var client: LeadVaultV2Client {
-        LeadVaultV2Client { [self] request in
-            lock.withLock { LeadVaultV2.answer(request, from: .app, book: &book, now: now(), on: true) }
-        }
+    var client: LeadVaultV2Client { LeadVaultV2Client { [self] request in answer(request) } }
+
+    /// One request, answered as the host answers the app.
+    func answer(_ request: LeadVaultV2.Request) -> LeadVaultV2.Reply {
+        lock.withLock { LeadVaultV2.answer(request, from: .app, book: &book, now: now(), on: true) }
     }
 
     /// The host restarted: its vault's record starts over.
@@ -372,5 +373,52 @@ struct ActingPageTests {
         #expect(!screen.watching(second))
         queue.sync {}
         #expect(second.closes == ["acts-off"])
+    }
+
+    /// The re-read's R1: a refresh queued just before the level is lowered never puts the higher level back: the lower
+    /// level counts at once, and the refresh's answer (asked before) is turned away when it comes.
+    @Test func aRefreshQueuedBeforeALowerLevelNeverRaisesItAgain() async throws {
+        let vault = MemoryVaultV2()
+        _ = try vault.client.setPageActs(level: "trust")
+        let held = DispatchSemaphore(value: 0), asked = DispatchSemaphore(value: 0)
+        let writing = DispatchSemaphore(value: 0), written = DispatchSemaphore(value: 0)
+        let holding = Locked(false)
+        let acting = ActingPages(vault: LeadVaultV2Client { request in
+            if case .pageActs = request, holding.value {
+                // The refresh's read of `trust`, answered only once the lowering began.
+                let before = try vault.client.pageActs()
+                asked.signal()
+                held.wait()
+                return .pageActs(before)
+            }
+            if case .setPageActs = request {
+                // The lowering's own write, held until the test looked (the refresh's answer has been taken by then).
+                writing.signal()
+                written.wait()
+            }
+            return vault.answer(request)
+        })
+        acting.refreshLater()
+        acting.settled()
+        #expect(acting.level == "trust")
+        holding.value = true
+        acting.refreshLater()
+        asked.wait()
+        holding.value = false
+        let lowering = DispatchQueue(label: "lowering")
+        let done = DispatchSemaphore(value: 0)
+        lowering.async {
+            _ = try? acting.set(level: "off")
+            done.signal()
+        }
+        #expect(await eventually(timeout: 30) { acting.level == "off" }, "off didn't count at once")
+        held.signal()
+        // The refresh answered `trust` and its answer was taken or turned away before the write began.
+        await offPool { writing.wait() }
+        #expect(acting.level == "off", "the refresh asked before put trust back while the write was under way")
+        written.signal()
+        await offPool { done.wait() }
+        acting.settled()
+        #expect(acting.level == "off", "the refresh asked before put trust back")
     }
 }

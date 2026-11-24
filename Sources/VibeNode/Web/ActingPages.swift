@@ -133,11 +133,16 @@ public final class ActingPages: @unchecked Sendable {
     public func set(level: String) throws -> LeadVaultV2.PageActs {
         guard let vault else { throw LeadVaultV2Client.Refused("This node's host keeps no record of the user's actions: no page acts here.") }
         guard let asked = Self.levels.firstIndex(of: level) else { throw LeadVaultV2Client.Refused("web_acts is off, confirm or trust") }
-        if asked < (Self.levels.firstIndex(of: self.level) ?? 0) {
+        // Lower at once, before the vault answers (and before a refresh queued earlier, whose answer the bumped
+        // generation turns away): from here no request acts above `level`. Off counts at once even before the vault ever
+        // answered.
+        if asked < (Self.levels.firstIndex(of: self.level) ?? 0) || level == "off" {
             lock.withLock {
                 generation += 1
-                cache?.level = level
-                if level == "off" { cache?.since = nil; cache?.tokens = [:] }
+                var acts = cache ?? LeadVaultV2.PageActs()
+                acts.level = level
+                if level == "off" { acts.since = nil; acts.tokens = [:] }
+                cache = acts
             }
             onLowered?(level)
         }
