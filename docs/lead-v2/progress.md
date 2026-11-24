@@ -645,3 +645,5 @@
 - 2026-11-24 11:46 Parked sb5-the-host-confines's worker (idle since its last report) for a build switch to e3ef7b07c65f; start_worker continues in its worktree
 - 2026-11-24 11:46 Parked tests-that-write-a's worker (idle since its last report) for a build switch to e3ef7b07c65f; start_worker continues in its worktree
 - 2026-11-24 11:46 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: ~/.claude/shell-snapshots
+- 2026-11-24 11:51 Audit of sb5-the-host-confines at b5d5b6e2 by 2 finders (contract and acceptance; bugs, regressions and security); the shared run: the test command passed
+- 2026-11-24 11:51 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: ~/.claude/shell-snapshots
