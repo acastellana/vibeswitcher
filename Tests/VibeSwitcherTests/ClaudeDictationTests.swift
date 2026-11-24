@@ -840,23 +840,37 @@ struct ClaudeDictationTests {
     /// No text and a flat level cursor after an earlier run in this launch heard fine: the microphone works, so the
     /// notice says Claude didn't catch anything that time, with no privacy settings to open. Until a run has heard, the
     /// microphone's notice stays (`anEmptyTranscriptAfterAFlatLevelCursorSaysClaudeHeardNothing`).
+    ///
+    /// The runs' clock is held, so only the test moves their waits on. 2026-11-24, find-why-the-memory's merge: on the
+    /// wall clock, a loaded Mac's FakeClaude showed no `listening…` within the run's 3 s to start, the run gave up, and
+    /// the wait for it listening ran out at 90 s (and a hold that took 3 s between listening and the release would say
+    /// "only silence", not "didn't catch").
     @Test func afterARunHeardAFlatOneSaysClaudeDidntCatchAnything() async throws {
         let h = try await Harness.start(temp)
         defer { h.stop() }
         h.tell(["op": "voice", "mode": "hold"])
         try await h.waitFor { h.agent["voice"] as? String == "hold" }
-        let controller = dictation(h)
+        let (clock, shown) = (Clock(held: true), Shown())
+        let controller = dictation(h, now: clock.now, shown: shown)
         controller.press(h.key, agent: .claude) { "" }
         try await h.waitFor { controller.listening }
         controller.release()
         try await h.waitFor { controller.phase == .idle }
-        #expect(controller.deliveries[h.key]?.text == "open the composer view on main")
+        #expect(controller.deliveries[h.key]?.text == "open the composer view on main",
+                "\(String(describing: controller.notice)) \(String(describing: ended))")
 
         h.tell(["op": "voice", "transcript": "", "interim": "", "processing": 0.5])
         try await h.waitFor { h.agent["interim"] as? String == "" && h.agent["processing"] as? Double == 0.5 }
+        let inserts = h.agent["voiceInserts"] as? Int ?? 0
         controller.press(h.key, agent: .claude) { "" }
         try await h.waitFor { controller.listening }
         controller.release()
+        // Claude done (its empty transcript in, idle), a read showing that taken in, then past both of the run's waits
+        // for nothing: 3 s with nothing since the release (processing unseen), 2 s of an empty box after processing.
+        try await h.waitFor { h.agent["voiceInserts"] as? Int == inserts + 1 && h.agent["recording"] as? String == "" }
+        let reads = shown.reads
+        try await h.waitFor { shown.reads > reads && !shown.text.contains("processing…") }
+        clock.ahead += max(ClaudeVoiceRun.quietAfterRelease, ClaudeVoiceRun.emptyAfterProcessing) + 0.1
         try await h.waitFor { controller.phase == .idle }
         #expect(controller.notice?.text == ClaudeVoiceRun.didntCatch && controller.notice?.privacy == false,
                 "\(String(describing: controller.notice))")
