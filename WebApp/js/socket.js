@@ -54,9 +54,10 @@ export function connectSocket(store, options) {
   let replacedOf = new Map();
   let socket = null;
   let authed = false;
-  // The second secret an acting pairing gets (`hello.auth.act`): kept in this variable only, never in storage, the
-  // address or a log; sent with the token on a reconnect without a reload. A reload loses it, and the page then reads
-  // and drafts until it is paired again.
+  // The second secret a pairing confirmed in the terminal gets (`paired.act`): kept in this variable only, never in
+  // storage, the address or a log; sent with the token on a reconnect without a reload. It brings "watch" (terminals),
+  // and "act" while the node's level lets pages act. A reload loses it: the page then reads and drafts until it is
+  // paired again.
   let actSecret = null;
   let stopped = false;
   let attempts = 0;
@@ -141,6 +142,7 @@ export function connectSocket(store, options) {
     if (message.re !== undefined) return replied(message);
     switch (message.kind) {
       case 'hello': return hello(message);
+      case 'paired': return paired(message);
       case 'bye': return bye(message);
       case 'snapshot':
       case 'delta': return event(message);
@@ -155,7 +157,10 @@ export function connectSocket(store, options) {
     attempts = 0;
     if (message.auth?.token) keep(message.auth.token);
     if (typeof message.auth?.act === 'string') actSecret = message.auth.act;
-    if (!(message.auth?.rights || []).includes('act')) actSecret = null;
+    // A hello without "watch": this connection's pairing isn't a confirmed one (any more): the secret goes.
+    if (!(message.auth?.rights || []).includes('watch')) actSecret = null;
+    // A page that just redeemed a code: the words `vibeswitcher web` shows too, until the user confirms it there.
+    store.setPhrase(typeof message.auth?.phrase === 'string' ? message.auth.phrase : null);
     pair = null;
     store.setKinds(Array.isArray(message.kinds) ? message.kinds : [], message.plugins, message.auth?.rights || []);
     if (mine && message.assets && message.assets !== mine) {
@@ -172,6 +177,17 @@ export function connectSocket(store, options) {
     }
     settle();
     linked('up');
+  }
+
+  // The user confirmed this page in the terminal: on this same connection, its secret and its new rights. Without the
+  // kinds those rights bring, the page connects again (token and secret) for a hello that lists them.
+  function paired(message) {
+    if (typeof message.act !== 'string' || !Array.isArray(message.rights)) return;
+    actSecret = message.act;
+    store.setPhrase(null);
+    if (Array.isArray(message.kinds)) return store.setKinds(message.kinds, message.plugins ?? store.state.plugins, message.rights);
+    store.setKinds(store.state.kinds, store.state.plugins, message.rights);
+    socket?.close();
   }
 
   function bye(message) {
@@ -379,7 +395,7 @@ export function connectSocket(store, options) {
   }
 
   return {
-    // Acting ended (the node refused an acting request: this pairing's acting ran out): the secret goes.
+    // This page no longer acts (the node's `acts-ended`: the pairing ended, the level was lowered, it was revoked).
     dropAct() { actSecret = null; },
     start() {
       return Promise.resolve(build).then((assets) => { mine = assets || null; }, () => {}).then(open);
