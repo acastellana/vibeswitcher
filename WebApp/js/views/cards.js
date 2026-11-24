@@ -142,7 +142,9 @@ function keyFacts(approval) {
       fact(t('cInto'), approval.base || 'the base'),
       fact(t('cChanges'), approval.diffstat || t('ccFiles', { n: files.length })),
       Object.entries(approval.verdicts || {}).map(([task, verdict]) => fact(t('cVerdict'), `${task}: ${verdict}`)),
-      fact(t('cSensitive'), !sensitive ? t('ccSensitiveUnknown') : sensitive.length ? h('strong', { class: 'sensitive-yes' }, t('ccSensitiveYes', { n: sensitive.length })) : t('ccSensitiveNone')),
+      // The sensitive paths themselves (what the user approves on), five at most and how many more.
+      fact(t('cSensitive'), !sensitive ? t('ccSensitiveUnknown') : sensitive.length ? h('span', { class: 'sensitive-yes' },
+        sensitive.slice(0, 5).flatMap((path, index) => [index ? ', ' : null, h('code', null, path)]).filter(Boolean), sensitive.length > 5 ? ` +${sensitive.length - 5}` : null) : t('ccSensitiveNone')),
       (approval.problems || []).map((problem) => fact(t('cNote'), problem))),
     files.length ? h('details', { class: 'facts-files' }, h('summary', null, t('ccTheFiles', { n: files.length })),
       h('ul', { class: 'files' }, files.map((file) => h('li', { class: sensitive?.includes(file) ? 'sensitive' : null }, h('code', null, file), sensitive?.includes(file) ? h('small', null, ' ' + t('ccSensitiveMark')) : null)))) : null);

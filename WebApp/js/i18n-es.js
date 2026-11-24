@@ -955,7 +955,6 @@ export const ES = {
   ccReadAll: "Leerlo entero",
   ccFiles: { one: "{n} archivo", other: "{n} archivos" },
   ccSensitiveUnknown: "no se pudo comprobar",
-  ccSensitiveYes: { one: "sí: 1 archivo", other: "sí: {n} archivos" },
   ccSensitiveNone: "no toca ninguna",
   ccTheFiles: { one: "El archivo", other: "Los {n} archivos" },
   ccSensitiveMark: "sensible",
