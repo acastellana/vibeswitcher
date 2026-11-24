@@ -151,6 +151,11 @@ public final class Requests: @unchecked Sendable {
     var approvedLines: [String: String] = [:]
     /// The challenges used already (a second use is said so: `passkey`, not `assertion-needed`). On `queue`.
     var usedChallenges: Set<String> = []
+    /// Each action an acting page made: that page's token (its digest), and its kind and arguments as the page sent
+    /// them (their digest): only that page's very same request is a repeat of it. Newest last, `actionPagesKept`. On
+    /// `queue`.
+    var actionPages: [(action: String, token: String, kind: String, args: String)] = []
+    static let actionPagesKept = 512
     /// `status`'s `web`: the listener's state (`NodeLive.webValue`); none: off.
     public var webValue: (() -> NodeWire.Value)?
     /// The `seq` a live stream is at, by collection (`LiveHub.seq(of:)`, set by `NodeLive`): a draft's `applied`. On

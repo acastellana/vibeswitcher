@@ -128,9 +128,12 @@ extension Requests {
     func passkeyCheck(_ request: NodeWire.Request, page: PageAct, done: @escaping @Sendable (NodeWire.Failure?) -> Void) {
         let failed = { (why: String) in done(.init(.passkey, why)) }
         let needed = { (why: String) in done(.init(.assertionNeeded, why)) }
-        // A repeat of an action this server answered, or is doing now (a reconnect resending it): answered as before by
-        // `voiced` (`kept` gives the earlier reply only to the same arguments), its challenge not asked again.
-        if let action = request.action?.lowercased(), replies[action] != nil || doing[action] != nil { return done(nil) }
+        // A real repeat of an action this server answered, or is doing now (a reconnect resending it): the same page's
+        // very same request (kind, arguments as it sent them, token): answered as before by `voiced`, its challenge not
+        // asked again. A known action id with anything else needs the assertion.
+        if let action = request.action?.lowercased(), replies[action] != nil || doing[action] != nil, isPageRepeat(request, token: page.credentials.token) {
+            return done(nil)
+        }
         guard let acting = actingPages, let origin = Self.passkeyOrigin(page.credentials) else { return failed("acting needs a passkey, at http://localhost") }
         guard case .object(let assertion)? = request.assertion else { return needed("this act needs your passkey: ask act.challenge, then send it again with its assertion") }
         guard let id = assertion["id"]?.string, let clientData = assertion["clientDataJSON"]?.string.flatMap(WebAuthn.bytes(base64url:)),

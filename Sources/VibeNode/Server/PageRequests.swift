@@ -96,6 +96,13 @@ extension Requests {
             self?.note("refused \(request.kind) from \(via): \(refusal.error?.message ?? "")")
             reply(refusal)
         }
+        // An action id this server knows (answered, or being done) is only this page's very same request again: else
+        // refused here at `trust` (another page's action, a terminal's, another kind or other arguments); at `confirm` it
+        // needs its passkey's assertion like any act (`passkeyCheck`), and `kept` refuses other arguments after it.
+        if actingPages?.level != "confirm", let action = request.action?.lowercased(), replies[action] != nil || doing[action] != nil,
+           !isPageRepeat(request, token: credentials.token) {
+            return refused(.init(re: request.id, error: .init(.voice, "that action id is another request's: send it with a new one")))
+        }
         guard case .go(let shown) = pageChecks(request) else {
             if case .refused(let refusal) = pageChecks(request) { refused(refusal) }
             return
@@ -116,6 +123,7 @@ extension Requests {
                 case .go(let now):
                     // At `confirm`, recorded with what the passkey approved, and that line given back.
                     let mark = approved.map { String((via + "; passkey approved: " + $0).prefix(200)) } ?? via
+                    self.notePageAction(request, token: credentials.token)
                     self.voiced(now, from: NodeLive.webPeer, via: mark) { answer in
                         var answer = answer
                         if answer.ok, let approved { answer.recorded = approved }
@@ -124,6 +132,20 @@ extension Requests {
                 }
             }
         }
+    }
+
+    /// Whether `request` repeats an action this page made: the same page's token, kind and arguments (as it sent them).
+    func isPageRepeat(_ request: NodeWire.Request, token: String) -> Bool {
+        guard let action = request.action?.lowercased(), Self.recorded.contains(request.kind),
+              let first = actionPages.last(where: { $0.action == action }) else { return false }
+        return first.token == ActingPages.digest(token) && first.kind == request.kind && first.args == Self.argumentsDigest(request.args ?? [:])
+    }
+
+    /// An acting page's action, kept for its repeats (`isPageRepeat`).
+    func notePageAction(_ request: NodeWire.Request, token: String) {
+        guard let action = request.action?.lowercased(), !actionPages.contains(where: { $0.action == action }) else { return }
+        actionPages.append((action, ActingPages.digest(token), request.kind, Self.argumentsDigest(request.args ?? [:])))
+        if actionPages.count > Self.actionPagesKept { actionPages.removeFirst(actionPages.count - Self.actionPagesKept) }
     }
 
     /// An acting page's request as `voiced` takes it, or why not: a setting a page never sets; on a card or a batch,

@@ -170,7 +170,7 @@ struct PasskeyTests {
     /// cross-origin one, a challenge for another card, another `seen`, another action, one run out, one used already, a
     /// sign count that didn't move, a key not registered.
     @Test func eachActNeedsItsOwnTouch() async throws {
-        let (world, soft, credentials, _, card, other) = try await confirmWorld()
+        let (world, soft, credentials, acting, card, other) = try await confirmWorld()
         defer { world.stop() }
         let args: [String: NodeWire.Value] = ["card": .string(card.id), "seen": .string(card.seen), "text": .string("Yes")]
         // Refused, each before any record.
@@ -217,6 +217,19 @@ struct PasskeyTests {
         let again = try #require(await act(world, credentials, kind: "answer", args: args, action: action, assertion: assertion))
         #expect(again.ok, "\(again)")
         #expect(await world.actions().filter { $0.action == action && $0.kind == "answer" }.count == 1)
+        // A known action id with anything else isn't a repeat: another kind, other arguments, another page's token each
+        // need the assertion, and nothing more is done.
+        let otherPage = PageCredentials(token: "another-page", act: acting.confirmed(token: "another-page", tokenEnds: Date().addingTimeInterval(3_600)),
+                                        origin: "localhost:8765")
+        acting.settled()
+        var changedArgs = args
+        changedArgs["text"] = .string("No")
+        for (kind, sent, page, why) in [("hold", args, credentials, "another kind"), ("answer", changedArgs, credentials, "other arguments"),
+                                        ("answer", args, otherPage, "another page's token")] {
+            let reused = try #require(await act(world, page, kind: kind, args: sent, action: action, assertion: nil))
+            #expect(reused.error?.code == "assertion-needed", "\(why): \(reused)")
+        }
+        #expect(await world.actions().filter { $0.action == action }.map(\.kind) == ["answer", "message"], "nothing more done")
         // Used already: a challenge is taken by its first use (here refused, by a key not registered), and a second use
         // with the right key is refused.
         let reuseAction = UUID().uuidString.lowercased()
@@ -318,5 +331,38 @@ struct PasskeyTests {
         #expect(added.ok, "\(added)")
         #expect(acting.state?.keys[soft.idText] != nil)
         #expect(offered.value.allSatisfy { $0 == phraseA || $0 == "acorn acorn acorn" })
+    }
+
+    /// At `trust` too, a known action id is only the same page's very same request: another page's, another kind, other
+    /// arguments are refused before anything is done (and a terminal's action id from a page as well).
+    @Test func atTrustAKnownActionIsTheSamePagesSameRequestAlone() async throws {
+        let world = try await CardWorld.make(scratch)
+        defer { world.stop() }
+        let acting = ActingPages(vault: MemoryVaultV2().client)
+        _ = try acting.set(level: "trust")
+        let page = PageCredentials(token: "page-one", act: acting.confirmed(token: "page-one", tokenEnds: Date().addingTimeInterval(3_600)), origin: "127.0.0.1:8765")
+        let other = PageCredentials(token: "page-two", act: acting.confirmed(token: "page-two", tokenEnds: Date().addingTimeInterval(3_600)), origin: "127.0.0.1:8765")
+        acting.settled()
+        world.queue.sync { world.requests.actingPages = acting }
+        let lead = try await world.sleepingLead()
+        let asked = try await world.asked("Ship it?", options: ["Yes", "No"], lead: lead)
+        let card = try #require(world.card(asked.card.id))
+        let args: [String: NodeWire.Value] = ["card": .string(card.id), "seen": .string(card.seen), "text": .string("Yes")]
+        let action = UUID().uuidString.lowercased()
+        #expect(try #require(await act(world, page, kind: "answer", args: args, action: action, assertion: nil)).ok)
+        #expect(try #require(await act(world, page, kind: "answer", args: args, action: action, assertion: nil)).ok, "the same page's repeat")
+        var changed = args
+        changed["text"] = .string("No")
+        for (kind, sent, from) in [("answer", args, other), ("hold", args, page), ("answer", changed, page)] {
+            let reply = try #require(await act(world, from, kind: kind, args: sent, action: action, assertion: nil))
+            #expect(reply.error?.code == "voice" && reply.error?.message.contains("another request's") == true, "\(reply)")
+        }
+        // A terminal's action id, from a page.
+        let terminalAction = UUID().uuidString.lowercased()
+        _ = try #require(await world.ask("set", ["key": .string("ai_summaries"), "value": .string("off")], action: terminalAction))
+        let borrowed = try #require(await act(world, page, kind: "set", args: ["key": .string("ai_summaries"), "value": .string("off")],
+                                              action: terminalAction, assertion: nil))
+        #expect(borrowed.error?.message.contains("another request's") == true, "\(borrowed)")
+        #expect(await world.actions().filter { $0.action == action && $0.kind == "answer" }.count == 1)
     }
 }
