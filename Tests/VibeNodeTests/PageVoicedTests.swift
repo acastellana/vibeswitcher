@@ -161,7 +161,11 @@ struct PageVoicedTests {
     @Test func aPagesApproveNamesEveryItemAsListedAndNeverATerminalsItem() async throws {
         let world = try await CardWorld.make(scratch)
         defer { world.stop() }
-        let accept = Requests.ApproveItem(kind: "config.accept", args: [:], subject: "/home/user/project", card: nil, reasons: ["changed"])
+        // A held config whose rails an accept the vault sealed left the same: a page's to approve, as far as its card says.
+        var held = CardStore.Card(root: world.repo, kind: .configHeld)
+        held.config = Self.shown()
+        world.queue.sync { world.engine.cards.put(held) }
+        let accept = Requests.ApproveItem(kind: "config.accept", args: ["card": .string(held.id)], subject: world.repo, card: held.value, reasons: ["changed"])
         let hooks = Requests.ApproveItem(kind: "hooks.install", args: [:], subject: "claude", card: nil, reasons: ["missing"])
         func batch(_ items: [Requests.ApproveItem]) -> String {
             let id = "local:approve:" + UUID().uuidString.lowercased()
@@ -192,7 +196,11 @@ struct PageVoicedTests {
     @Test func aPagesApproveListLeavesOutTheTerminalsItems() async throws {
         let world = try await CardWorld.make(scratch)
         defer { world.stop() }
-        let accept = Requests.ApproveItem(kind: "config.accept", args: [:], subject: "/home/user/project", card: nil, reasons: ["changed"])
+        // A held config whose rails an accept the vault sealed left the same: a page's to approve, as far as its card says.
+        var held = CardStore.Card(root: world.repo, kind: .configHeld)
+        held.config = Self.shown()
+        world.queue.sync { world.engine.cards.put(held) }
+        let accept = Requests.ApproveItem(kind: "config.accept", args: ["card": .string(held.id)], subject: world.repo, card: held.value, reasons: ["changed"])
         let hooks = Requests.ApproveItem(kind: "hooks.install", args: [:], subject: "claude", card: nil, reasons: ["missing"])
         func list(_ args: [String: NodeWire.Value]) -> NodeWire.Reply? {
             let got = Locked<NodeWire.Reply?>(nil)
@@ -273,5 +281,90 @@ struct PageVoicedTests {
         let refused = Locked<String?>(nil)
         PasskeyNotBuilt().confirm(NodeWire.Request(id: "1", kind: "stop"), page: "p") { refused.value = $0 }
         #expect(refused.value?.contains("isn't built yet") == true)
+    }
+
+    // MARK: A held config from a page
+
+    static let same = "the same as at your last accept (2026-11-24T00:00:00.000Z)"
+
+    /// A held-config card's data as an accept the vault knows left it: a last accept, `test_command` the same.
+    static func shown(lastAccept: Date? = Date(), rail sinceAccept: String? = same, floor: LeadReviewFloor? = LeadReviewFloor()) -> ConfigHoldStore.Shown {
+        ConfigHoldStore.Shown(items: [], hashes: [:], floor: floor, rails: ["test_command": LeadVault.hash("make test")],
+                              guarded: [.init(key: "test_command", value: "make test", sinceAccept: sinceAccept)], lastAccept: lastAccept)
+    }
+
+    /// From the card alone, a page may accept only what an accept the vault sealed left the same: a first accept, a
+    /// changed or new rail, and a rail whose snapshot isn't sealed by this host's vault (the card's "?") are each refused.
+    @Test func aPageAcceptsAHeldConfigOnlyWhenItsRailsAreTheSame() {
+        #expect(ConfigHoldStore.pageNotSame(Self.shown()).isEmpty)
+        #expect(ConfigHoldStore.pageNotSame(Self.shown(lastAccept: nil)) == ["no accept is recorded yet (a first accept)"])
+        #expect(ConfigHoldStore.pageNotSame(Self.shown(rail: "changed since your last accept (…), from “make check”")) == ["test_command"])
+        #expect(ConfigHoldStore.pageNotSame(Self.shown(rail: AcceptedSnapshot.unvouched("2026-11-24"))) == ["test_command"])
+        #expect(ConfigHoldStore.pageNotSame(Self.shown(rail: nil)) == ["test_command"])
+    }
+
+    /// With the vault: the rails' hashes and the floor the recorded ones, or the page is refused (a changed rail, a
+    /// changed floor, none recorded yet).
+    @Test func aPageAcceptsAHeldConfigOnlyWhenTheVaultHasTheSameRailsAndFloor() throws {
+        func vault(rails: [String: String]?, floor: LeadReviewFloor?) -> LeadVault {
+            LeadVault(folder: scratch.url("vault-\(UUID().uuidString.prefix(6))")) { request in
+                switch request {
+                case .guarded: return .guarded(rails)
+                case .reviewFloor: return .reviewFloor(floor)
+                default: throw LeadVault.Refused("none")
+                }
+            }
+        }
+        let recorded = ["test_command": LeadVault.hash("make test")]
+        #expect(try ConfigHoldStore.pageRefusal(Self.shown(), root: "/r", vault: vault(rails: recorded, floor: LeadReviewFloor())).isEmpty)
+        #expect(try ConfigHoldStore.pageRefusal(Self.shown(), root: "/r", vault: vault(rails: ["test_command": LeadVault.hash("true")], floor: LeadReviewFloor()))
+                == ["test_command"])
+        #expect(try ConfigHoldStore.pageRefusal(Self.shown(), root: "/r", vault: vault(rails: recorded, floor: LeadReviewFloor(auditFinders: 3)))
+                == ["the review floor"])
+        #expect(try ConfigHoldStore.pageRefusal(Self.shown(), root: "/r", vault: vault(rails: recorded, floor: nil)) == ["the review floor"])
+        #expect(try ConfigHoldStore.pageRefusal(Self.shown(), root: "/r", vault: vault(rails: nil, floor: nil)).contains("no guard rails are recorded yet"))
+    }
+
+    /// On a node: a page's accept of a first-accept card is refused before anything is recorded; one whose card says the
+    /// same but whose root the vault recorded no rails for is refused when it acts (the vault asked then), the card left
+    /// open; an acting page's approve list leaves such cards out and counts them for the terminal, and a batch holding
+    /// one is refused.
+    @Test func onANodeAPagesConfigAcceptIsTheTerminalsUnlessTheRailsAreTheSame() async throws {
+        let world = try await CardWorld.make(scratch)
+        defer { world.stop() }
+        let (page, _) = try acting(world)
+        func card(_ shown: ConfigHoldStore.Shown) -> CardStore.Card {
+            var card = CardStore.Card(root: world.repo, kind: .configHeld)
+            card.config = shown
+            world.queue.sync { world.engine.cards.put(card) }
+            return card
+        }
+        let first = card(Self.shown(lastAccept: nil))
+        let firstAction = UUID().uuidString.lowercased()
+        let refused = try #require(await fromPage(world, page, "config.accept", ["card": .string(first.id), "seen": .string(first.seen)], action: firstAction))
+        #expect(refused.error?.code == "voice" && refused.error?.message.contains("accept this one from a terminal") == true, "\(refused)")
+        #expect(await world.actions().allSatisfy { $0.action != firstAction })
+        let looksSame = card(Self.shown())
+        let late = try #require(await fromPage(world, page, "config.accept", ["card": .string(looksSame.id), "seen": .string(looksSame.seen)]))
+        #expect(late.error?.code == "refused" && late.error?.message.contains("no guard rails are recorded yet") == true, "\(late)")
+        #expect(world.card(looksSame.id)?.isOpen == true)
+        // The approve list and its batch.
+        let changed = card(Self.shown(rail: "changed since your last accept (…)"))
+        let items = [Requests.ApproveItem(kind: "config.accept", args: ["card": .string(changed.id)], subject: world.repo, card: changed.value, reasons: []),
+                     Requests.ApproveItem(kind: "config.accept", args: ["card": .string(looksSame.id)], subject: world.repo, card: looksSame.value, reasons: [])]
+        let got = Locked<NodeWire.Reply?>(nil)
+        world.queue.sync {
+            world.requests.listed(NodeWire.Request(id: "1", kind: "approve.list", args: [Requests.pageListMark: .bool(true)]), items: items, own: [],
+                                  engine: world.engine) { got.value = $0 }
+        }
+        let listed = try #require(got.value)
+        #expect(listed.result?["items"]?.array?.count == 1 && listed.result?["terminal"]?["count"]?.int == 1, "\(listed)")
+        let id = "local:approve:" + UUID().uuidString.lowercased()
+        world.queue.sync { world.requests.approveBatches.append(.init(id: id, items: items, at: Platform.Clock.steadyDate())) }
+        let batch = NodeWire.Request(id: "2", kind: "approve", args: ["batch": .string(id), "seen": .array(items.map { .string($0.seen) })], action: UUID().uuidString)
+        switch world.queue.sync(execute: { world.requests.seenStands(batch) }) {
+        case .refused(let reply): #expect(reply.error?.message.contains("a page may not approve") == true, "\(reply)")
+        case .go(let request): Issue.record("a page approved a changed rail: \(request)")
+        }
     }
 }

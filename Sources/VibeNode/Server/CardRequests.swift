@@ -266,7 +266,10 @@ extension Requests {
         guard let (engine, card) = engineCard(request) else { return reply(.init(re: request.id, error: .init(.gone, "no such card"))) }
         // An item of `vibeswitcher approve`'s batch (`batch`, which the batch's own items set): refused when it would
         // record a guard rail or a review floor. Without it, the user's own accept, as before.
-        engine.configAccept(card: card.id, inBatch: request.args?["batch"]?.bool == true) { [weak self] result in
+        // An acting page's (its mark kept while it is done; a batch item's too): refused unless the floor and the guard
+        // rails are the recorded ones (`ConfigHoldStore.pageRefusal`).
+        let fromPage = request.action.map { pageMarks[$0.lowercased()] != nil } ?? false
+        engine.configAccept(card: card.id, inBatch: request.args?["batch"]?.bool == true, fromPage: fromPage) { [weak self] result in
             guard let self else { return }
             switch result {
             case .failure(let failure): reply(self.failed(request, failure))
