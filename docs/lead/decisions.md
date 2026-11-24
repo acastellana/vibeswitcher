@@ -1,10 +1,6 @@
 # Decisions
 
-Archived decisions: 158 entries (superseded, obsolete or now enforced by a check) are in decisions-archive.md, moved there unchanged (last on 2026-11-18).
-
-## 2026-10-17 17:45 The lead's decisions.md and progress.md move into the repository (docs/lead/ by default) and are committed to the base branch automatically by the tool server, touching only those files. board.json, workflow.md and run/ stay local and git-ignored.
-
-User's call. The project's reasoning should survive a lost .vibeswitcher folder, another machine or a new lead, and be visible to teammates. The board holds transient state (sessions, PIDs, questions) and stays local.
+Archived decisions: 170 entries (superseded, obsolete or now enforced by a check) are in decisions-archive.md, moved there unchanged (last on 2026-11-24).
 
 ## 2026-10-17 21:27 The pipeline-lane design is replaced by a calm one-line-per-task Team view with AI plain-language summaries (headless `claude -p`, small model, cached and throttled, can be switched off) and a fading feed of the lead's decisions. Questions get proposals with a 10-minute default timer, where silence means the lead goes ahead. Risky or blocking questions never get a timer.
 
@@ -26,10 +22,6 @@ The user's words: "This is the type of thing that you should be able to decide y
 
 A verifier judges from the contract and the board; an approval that lives only in a message to the worker doesn't count for it, and a repeated full audit costs 20–30 minutes of a loaded Mac each time.
 
-## 2026-10-20 16:56:08 No GitHub push-protection bypass, ever: fixtures that must look like real secrets are assembled at run time from pieces, docs elide the prefixes, and a repo-wide lint keeps complete shapes out of every file; no .github/secret_scanning.yml. The three commits of the failed attempt (2554086, 9a2c0b9, fff5c70) are dropped from project-lead by a reset to 9dca1f7 (which GitHub already has), run by the user.
-
-2026-10-20 17:0x: the user refused a second 'allow me to expose this secret' click ('This is unacceptable'); GitHub matches shapes regardless of EXAMPLE markers, and the ignore config can't land on main through a push it blocks.
-
 ## 2026-10-21 12:30:57 The briefing's ElevenLabs key falls back to ELEVENLABS_API_KEY from the user's login shell, then ~/.config/elevenlabs/key.env, when no key is saved in the Keychain. Settings shows the source by name, never the value, and offers 'Save to Keychain'.
 
 The user asked why the app asks for a key that's already in their environment. A Finder-launched app doesn't inherit shell variables, but the app already reads the login-shell environment for sessions. A typed key still wins, so nothing changes for users without the variable.
@@ -37,10 +29,6 @@ The user asked why the app asks for a key that's already in their environment. A
 ## 2026-10-21 22:52:33 Additions to the working policy after the lead's review (2026-10-21 23:0x): (1) The merge's run is the one full suite; workers run affected tests, and the full suite only when they touch shared test or build infrastructure. (2) Workers own routine calls, including small goal-tied boundary excursions, and list them in their report; they ask the lead only about direction, scope, or risky steps. (3) Timing benches leave the default test run (`--perf`), so merges don't fail on load. (4) Worktrees build warm. (5) The policy reaches every project's leads, workers and verifiers through the app: an editable policy text in every prompt, a witness message to running leads, and a Mac-wide `vs-heavy` lock for any project. (6) The lead posts updates only for merges the user would notice; the rest go into a daily summary.
 
 Remaining causes of slowness after the first policy pass: one extra full suite per task in the worker, merge gates failing on load-sensitive benches, about 2 minutes of clean build per worktree, routine worker questions round-tripping through the lead, and the lead's own update volume. The user asked for the policy to reach the other leads and future ones; the user also asked the lead not to touch other leads directly, so delivery goes through the app.
-
-## 2026-10-23 02:44:18 Ending a session ends only processes of the same uid carrying that session's VIBESWITCHER_SESSION id, plus at cleanup processes whose cwd is inside the removed worktree. Existing orphans on the Mac are not swept automatically; the user decides about those.
-
-The narrowest scope that catches everything an agent starts (the env var is inherited even through setsid) while never touching another session's, another project's or the user's own processes. Reversible: it can be widened later.
 
 ## 2026-10-23 11:59:01 Tasks that change the same input path (PhoneAccess / HostClient.send / the per-session send queue) run one after another, never in parallel; the later one starts from project-lead after the earlier merges.
 
@@ -155,10 +143,6 @@ Production readiness: the Wallet Manager's lead and an independent review both a
 
 2026-11-01: the lead planned terminal-drawing-froze from a report saying '100% of its sample inside the stall' under SwiftTerm.buildAttributedString. 0 of 2092 main-thread samples were actually in terminal drawing. The worker checked before building and the task was abandoned, but it cost a worker start. Third-party code (SwiftTerm, a pinned dependency) was also assumed to be vendored.
 
-## 2026-11-01 08:54:47 From 2026-11-01, every feature or process change the lead plans gets an entry in docs/process/impact.md, written when it's planned: hypothesis, metric, baseline, check date and window. Each retrospective reviews the entries that are due with scripts/impact-metrics.sh, records the result and a verdict (keep/tune/revert/inconclusive) with the why, and each verdict becomes a task or a recorded decision. It starts manual; a lead tool replaces it only once the routine has proved useful.
-
-The user wants to track which features help and why, to self-improve recursively. Today's changes (one suite per task, strict paths, the boost release) were all made on reasoned guesses; the ledger turns them into checked results.
-
 ## 2026-11-02 08:18:57 Usage-aware routing (2026-11-02): when Claude's quota runs ahead of pace, implementation work moves to Codex. Task usage-aware-worker adds agent: auto (Codex when Claude is tight and Codex has room), reads Codex's quota from its rollouts, shows both accounts' pace in status, and lets auto tasks go to Codex instead of waiting at Claude's 80% hold. Until it lands, the lead marks bounded implementation tasks agent: codex by hand whenever Claude's weekly usage is ahead of the week's elapsed share. Leads, planning and audits stay on Claude, and design-heavy or security tasks stay pinned to claude. Once it lands, the lead sets agent_default: auto for this project.
 
 The user, 2026-11-02: "if there's not a lot of quota I should be leveraging Codex much more". Codex workers have worked since 8f44a65, but nothing chose them: the usage watch only stopped work at 80%. A Codex worker spends roughly a tenth of a task's Claude cost (the audit), going by boost-release-3b-codex's receipt: verifier $1.86 against worker $14.79.
@@ -202,10 +186,6 @@ The user wants the lead to handle the GitHub sync and chose "ask me each time: o
 
 Lead mail's first contract made tell_lead unforgeable but missed direct inbox seals under another name, honest-name seals into another team, and the remote URL's trust on first use. That cost 3 follow-up tasks and audits (retrospective, 2026-11-05).
 
-## 2026-11-05 00:30:33 After record_incident, in the same turn, set auto_advance: false on the planned task, sharpen its contract, then set auto_advance back to true.
-
-turn-this-incident-into-9 auto-started on the generic brief before the sharpened contract landed (2026-11-03). If it happens again despite this, make a product task so incident tasks wait for the lead's contract.
-
 ## 2026-11-06 22:35:21 Ideas from Anthropic, OpenAI and METR posts (2026-11-06) stay parked as triggered ideas, not tasks: (2) VibeSwitcher mechanically checks that a branch's new tests fail without its non-test changes and pass with them. Build it when a merged test turns out not to exercise its change, or a merge is reverted for a defect its tests should have caught. (3) A per-contract path-glob field, a PreToolUse reminder on edits outside it, and a deterministic diff-vs-globs check at done. Build it when a worker touches something out of scope that nobody catches. Also parked: - (1)/(6) measure verifier recall with planted bugs, and randomly audit 5–10% of review-none merges; - (4) rerun verifier-eval when verifier_model changes; - (7) mid-task mechanical checks about every 30 min; - (8) a chaos corpus for the orchestrator as regression_command; - an audit of how agent text is rendered in the chat.
 
 The user agreed (2026-11-06). This week's evidence shows no failure these would have caught: workers always ran the reverse-apply check, a verifier reproduced it once, there were no reverts, and every out-of-boundary edit was declared and accepted. They cost usage and heavy slots while usage is ahead of pace and load spikes are the live problem. The policy is incident first, then the check.
@@ -226,10 +206,6 @@ The user chose it on 2026-11-07 (F0181AFD). The 2026-11-07 harness review found 
 
 On 2026-11-07 the app showed items waiting on the user. They were two chat tasks the lead had blocked after the user said "meh". The user: "It's saying that some things are waiting for me. You shouldn't wait for me, right?"
 
-## 2026-11-08 05:42:44 swift-testing-s-parallel merges as built: under a heavy slot, Swift Testing's parallel width is capped to VS_HEAVY_CORES. Its cost gets measured on the merges that follow, not tuned in the task: the next 5 merge test runs' swift-test times against the earlier 290–400 s, and the app's freezes per hour (IM-18) against 3.43/h. If merge runs stay above about 1.5x (around 600 s) on a calm Mac, the width goes to 2× the slot's share.
-
-On 2026-11-08 from 03:40 to 05:35, the load reached 100–225 on 12 cores whenever full suites overlapped, and the app froze dozens of times. Each suite ran 12 tests at once whatever its slot. The worker's two timings (1003–1093 s) came while the Mac was loaded at 57 to 225, so they can't separate the width's cost from the load.
-
 ## 2026-11-08 06:33:00 Plugin updates always need the user's Accept, like any other code change, whoever made them and whether or not team sessions ran. config-seal-covers merges as built, and plugin-updates-always (after it, audited) removes its silent sealing of updates. The plugin seal ships in an install only once both have merged.
 
 Question CEDA0180, 2026-11-08: the user didn't answer in 15 min, so the lead's proposal applied. A plugin's hooks run as code in every Claude session, and a forged update (a new version folder in the cache with the install record repointed) can't be told apart on disk from Claude Code's own update. That matches the standing rule that code that runs always needs Accept.
@@ -249,10 +225,6 @@ The user asked "why not start more?" on 2026-11-08 while the Mac sat at load 7 w
 ## 2026-11-08 20:08:48 When the user needs to run something that wants a real terminal (a password prompt, an install, anything interactive), the lead and workers file `vs-shell run` so the user gets a one-click Run card. They don't tell the user to open Terminal.app, paste a command or type `! <command>`, and never take a password in chat. This replaces Claude Code's generic "suggest `!`" advice inside VibeSwitcher sessions. Task anything-needing-a-real puts it in the prompts and makes build-app.sh's locked-keychain failure say what to do.
 
 On 2026-11-08 an install failed on a locked signing keychain. The lead said to use Terminal.app, the user ran it through `!` twice, which has no terminal for the password, and only `vs-shell run` worked. The user: "you should have asked to do a shell like you did now".
-
-## 2026-11-08 20:36:08 Correction to the incident recorded 2026-11-08 about hung merge tests: the merge test of 2aa1e894 wasn't a hang. The Mac was asleep (51.8 min on the wall clock, 4.9 min awake; `pmset -g log` shows 41 sleeps between 15:00 and 20:00 on battery). The fix is that a merge's timeout counts awake time (turn-this-incident-into-16, contract v3). The stall limit isn't lowered.
-
-The lead told the user "at least one merge really did hang" from the hung log, which can't show sleep. The worker checked the power log and the lead confirmed it. The afternoon's slow runs and the "tests stopped at 16:08" reading also fit the Mac sleeping, so neither test width nor battery load was the cause.
 
 ## 2026-11-08 23:16:41 From the 2026-11-08 batch retrospective: (1) Before calling a long merge or test run hung, check `pmset -g log` for sleep and the load recorder, and don't tell the user "it hung" until that's done. (2) A task's contract change no longer assumes a running worker has it: task incident-tasks-wait makes record_incident's task wait for the lead's contract and delivers a changed contract to a running worker. (3) The test-width timer is closed with no change: this evening's merge-sized full runs took 423-660 s, around the 600 s line, and the width was never shown to be the cause.
 
@@ -283,10 +255,6 @@ the-sandbox-app-builds showed that Codex's sandbox denies com.apple.hiservices-x
 ## 2026-11-12 09:21:45 The periodic prompt audit is a reminder card for the user, not something leads run on their own (task remind-the-user-to). Each project's lead chat gets a card when 14 days have passed since that project's last `/doctor prompt-audit` or when its sessions' model has changed. The card offers Run now (on the user's click only), Remind me in a week, and Not for this project, with an on/off toggle and the interval in Settings › Project lead. The audit's 2026-11-12 findings for AGENTS.md (the stale lint list, and --load 24 being refused on 8 cores) go to task agents-md-run-every. The leftover worktree .claude/worktrees/fix-worker-tools, which holds an older AGENTS.md, stays until the user decides, because it may hold unmerged work.
 
 The user asked for the reminder (via wallet-manager's lead) and left the design to the lead ("do what you consider"). /doctor is a user command, and its proposed diff needs the user's eye, so the user starts each run. A model change is the second trigger because what counts as outdated depends on the model.
-## 2026-11-12 09:06:53 Model routing, 2026-11-12: Opus is the default everywhere. Fable goes to the lead as advisor, to hard tasks as advisor, to re-rolled tasks and to sensitive or security audits (task each-role-gets-the, after when-fable-s-limit). Whether routine audits move from Fable to Opus waits on audit-eval-on-opus. Keep verifier_model=opus until that eval has finished, so its run stays on Opus, and only then reconsider clearing it.
-
-The user: Opus works well for nearly everything, Fable should go to the hardest parts (strategy, decisions, organisation), and "we need to just do optimally" (credits aside, since part of Fable is included in the plan). Claude Code's advisor puts Fable at decision points without running it throughout.
-
 ## 2026-11-12 09:23:09 Contracts for tasks that run on Fable state the outcome and its acceptance checks, give a larger scope than an Opus task would get, and leave the steps and routine test reminders out. Hard tasks get effort xhigh once per-task effort exists (each-role-gets-the). The user's global ~/.claude effort and advisor settings are left alone.
 
 Anthropic's Claude Code guidance for Fable: describe the outcome rather than the steps, skip routine test or check reminders, and give it larger tasks you'd normally split up. xhigh is the recommended effort for agentic coding on these models. A global advisorModel would change every Claude session on the Mac.
@@ -306,10 +274,6 @@ The user's answer to A4977A3E (2026-11-12). Fable's check of the speed review: t
 ## 2026-11-12 11:32:16 Nothing the lead records (dismiss reasons, decisions, contracts, updates, progress) names the user's other projects. Say "another project".
 
 2026-11-12 10:57: a dismiss reason named one, it went into docs/lead/progress.md, and PrivateNamesLint, which scans every tracked file including docs/lead/, then fails every merge's full suite until the line is fixed.
-
-## 2026-11-12 12:16:33 a-calm-mac-merge's timing check (median calm-Mac merge at or under 10 min, against 15) is the lead's to read from merges-*.jsonl after it merges, together with check 4's freezes per hour, in the next retrospective, instead of the worker holding the Mac quiet for 45 minutes.
-
-With 6–8 sessions running, no calm window was available, and holding all work for a measurement costs more than reading the merges' own recorded runs, which now carry their core width.
 
 ## 2026-11-12 15:28:58 After a block clears with many tasks ready, the lead merges them itself in batches of up to 8 (merge with tasks), lowest-risk first, with the batch carrying test fixes (flaky-test fixes, test infrastructure) going first. auto_advance stays off for the few minutes that takes, so it doesn't fall back to one merge at a time.
 
@@ -347,10 +311,6 @@ The user chose it on 2026-11-17 (question 1EA6E8D7). The sync stalled every work
 
 The user asked for it on 2026-11-17, to replace the lead's hand-filed install cards, and chose click plus password over a stored password (question 6867BF0F).
 
-## 2026-11-17 17:02:56 flaky-host-tests-make merges with 4 of its 5 flakes fixed. The fifth, HostedSessionTests/headlessAnswersQueriesOnlyWhenNoClient (finding F1), stays open as a known flake. Its failure diagnosis now prints the probe's output first, and the next failure's log is the evidence for a fix: the flake ledger's rule (3 flakes of one test become a task) picks it up.
-
-It passed 28 of 28 runs under load in the worker's runs and 10 of 10 in the verifier's. The one failing log (2026-11-12) cut off the field that would say which side lost the byte. So another round now would be guesswork, and it would hold back four real fixes, including the app's sleep bug (a parser busy at a sleep was replaced on waking and its bytes dropped).
-
 ## 2026-11-17 19:55:55 The lead speaks to the user only when (1) the user must act (a card to run, a password, a question), (2) something the user asked for is finished (one message at the end, not one per step), (3) a real problem, risk or security finding needs their attention, or (4) the daily summary is due. Routine wakes get no message at all: a worker started, an audit started or passed, findings sent back automatically, a merge running long, a cleanup, an alert caused by our own test or probe.
 
 On 2026-11-17 the user said "we have too much noise... I don't even read 80%". On that afternoon's run (flaky tests, the Code Mode trial, the git guard), about 14 lead messages went out, and only about 4 needed the user: the install password, the trial's plugin finding, the security gap, and the final results.
@@ -383,10 +343,6 @@ About 160 probed runs caught the signal once, before the sharper probe existed (
 
 Today five finished workers waited 1–3 h on the 15 GB load-run floor while new ones kept starting, and six of the lead's turns answered the same disk question; two Codex rounds failed their checks only because of the sandbox. The silent-worker and rerun setbacks already have merged or planned fixes.
 
-## 2026-11-18 22:19:43 verifier_model is set to opus temporarily (the user's answer to BD489D1B, 2026-11-18): reviews on Opus until Fable's limit resets on Nov 24, 01:00, then back to Fable. The first lead turn after the reset clears it with configure(verifier_model: ""). Sensitive and security audits still went to Fable regardless (task sensitive-audits-fall-back makes them follow verifier_model while Fable is refused), so those reviews wait until the reset.
-
-Fable's weekly limit was spent while Opus still worked. The user allowed reviews on the workers' model for those days only.
-
 ## 2026-11-18 22:48:03 From the 2026-11-18 speed review (start to merge, 94 tasks, 294 task-hours): three merge-path fixes, chained because they share the merge code: merge-reruns-only-what (a failure reruns only what failed, not the whole suite), then the-config-seal-is (seal checked before a merge's tests; a passing run survives a seal hold), then the-lead-s-records (records committed before every merge). Not changed now: merge width stays at 4 cores until sigpipe-probe-always-on names the pipe writer; Mac sleep (54 h) and rework rounds (~15 h) get no task.
 
 Whole-suite reruns cost about 35 h in the week (24 of 91 first runs failed; every rerun re-ran everything, a median 39 min against 16 for a clean pass). Seal checks after the tests threw away three passing runs, and the lead's records failed 9 merges. Sleep is mostly the lid closed overnight; rework is spread thin with no single cause.
@@ -394,10 +350,6 @@ Whole-suite reruns cost about 35 h in the week (24 of 91 first runs failed; ever
 ## 2026-11-19 08:20:29 Codex reviews when Claude has no quota (the user, 2026-11-19: "Make sure that the reviews are happening through Codex especially when there's no quota"). When the verifier's Claude model is held back at a usage limit, audits run on Codex instead of waiting, sensitive ones included. The verdict is marked as Codex's, and each sensitive-path merge made on a Codex verdict gets a follow-up Claude audit after the reset. Task audits-run-on-codex (after sensitive-audits-fall). This supersedes "Codex never reviews", but only as a fallback: when Claude has quota, Claude reviews.
 
 Eight finished tasks sat 7–11 h waiting on Fable's limit (resets Nov 24) while Codex had 86% of its week left. The follow-up Claude audit keeps a second-model check on the guard rails without blocking delivery.
-
-## 2026-11-19 08:23:23 While Claude's limits are spent (until Nov 24, 01:00), work that hasn't started goes to Codex, and finished work goes to an Opus review where the gate allows it (the user, 2026-11-19: "the ones that are running, if they have a lot of work done, then they can go through opus 5.5 if not, just kill them and do it through Codex"). Applied: audits-run-on-codex is moved to Codex; task-rows-say-when already runs there. All eight finished tasks have their work done, but their reviews are sensitive or security ones, which VibeSwitcher routes to Fable whatever verifier_model says (LeadWorkflow.auditModel's security route). The Opus fallback for those is unmerged work in sensitive-audits-fall, so the eight stay waiting for the reset. An audit retried on the-lead-s-records on Nov 19 at 08:2x launched on Fable and stopped at the limit, which confirms it.
-
-This follows the user's instruction. The review gate for sensitive paths is a guard rail the lead doesn't work around.
 
 ## 2026-11-19 11:02:14 the-config-seal-is: a passing merge test run that survives a config-seal hold is kept in the tool server's memory only. It is bound to the exact base and branch heads it tested, and it is lost on restart (option b, of the worker's three). No durable pass receipt.
 
