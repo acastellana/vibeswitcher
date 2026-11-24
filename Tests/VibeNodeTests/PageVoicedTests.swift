@@ -98,7 +98,40 @@ struct PageVoicedTests {
             #expect(reply.error?.code == "voice" && reply.error?.message.contains("from a terminal") == true, "\(key): \(reply)")
             #expect(await world.actions().allSatisfy { $0.action != action })
         }
-        #expect(Requests.pageSetRefusal(NodeWire.Request(id: "1", kind: "set", args: ["key": .string("web_acts"), "value": .string("off")])) == nil)
+        let off = NodeWire.Request(id: "1", kind: "set", args: ["key": .string("web_acts"), "value": .string("off")])
+        #expect(world.queue.sync { world.requests.pageSetRefusal(off) } == nil)
+    }
+
+    /// What a page may set, frozen: every setting declares it (`NodeSettings.Setting.page`), and a new one is the
+    /// terminal's until it says otherwise; a plugin's setting is never a page's.
+    @Test func whatAPageMaySetIsFrozen() {
+        let sets = NodeSettings.all.filter { $0.page == .sets }.map(\.key).sorted()
+        #expect(sets == ["ai_summaries", "boost", "boost_heavy_slots", "boost_load_threshold", "boost_max_sessions", "boost_max_workers",
+                         "ignore_usage_limits", "lead_advisor", "lead_model", "lead_rotation", "load_threshold", "node_heavy_slots",
+                         "node_max_sessions", "projects_folder", "prompt_audit", "prompt_audit_days", "worker_advisor"], "\(sets)")
+        #expect(NodeSettings.all.filter { if case .offOnly = $0.page { return true } else { return false } }.map(\.key) == ["web_acts"])
+        for setting in NodeSettings.all where setting.home == .floor || setting.guardRail || setting.home == .policy || setting.home == .acting {
+            #expect(setting.page != .sets, "\(setting.key)")
+        }
+    }
+
+    /// Each setting a page may not set, however it is spelled (its key, in other cases, each alias `set` takes for it),
+    /// is refused from an acting page, and nothing is changed.
+    @Test func everySpellingOfARefusedSettingIsRefused() async throws {
+        let world = try await CardWorld.make(scratch)
+        defer { world.stop() }
+        for setting in NodeSettings.all where setting.page != .sets {
+            let aliases = NodeSettings.aliases.filter { $0.value == setting.key }.map(\.key)
+            for spelling in [setting.key, setting.key.uppercased(), setting.key.capitalized] + aliases {
+                var args: [String: NodeWire.Value] = ["key": .string(spelling), "value": .string("on")]
+                if setting.scope == .project { args["folder"] = .string(world.repo) }
+                let reply = try #require(await fromPage(world, "set", args))
+                #expect(!reply.ok, "\(spelling): \(reply)")
+            }
+        }
+        // Nothing the page asked turned acting on, or changed a floor.
+        let settings = try #require(await world.ask("settings", ["folder": .string(world.repo)], action: nil))
+        #expect(settings.result?["node"]?["settings"]?.array?.first { $0["key"]?.string == "web_acts" }?["value"]?.string != "on")
     }
 
     /// `approve` from a page names each item as listed; a list that isn't the batch is refused before anything, and the

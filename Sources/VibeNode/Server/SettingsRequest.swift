@@ -59,8 +59,20 @@ extension Requests {
         }
     }
 
+    /// The setting `set` takes `key` for: the node's (an alias its own key), else an on plugin's (`<plugin>_<name>`); nil
+    /// for none. The one resolution: `set` and an acting page's refusal (`pageSetRefusal`) both ask it. On `queue`.
+    func setting(named key: String) -> NodeSettings.Setting? {
+        if let setting = NodeSettings.setting(key) { return setting }
+        return engine?.pluginSetting(key).map { LeadEngine.catalogSetting($0.plugin, $0.setting) }
+    }
+
     func set(_ request: NodeWire.Request, reply: @escaping (NodeWire.Reply) -> Void) {
         let refuse = { (code: NodeWire.Code, why: String) in reply(.init(re: request.id, error: .init(code, why))) }
+        // Asked again here for a request an acting page made (its mark kept while it is done): the same resolution as
+        // the refusal before its record, so no spelling gets past.
+        if let action = request.action?.lowercased(), pageMarks[action] != nil, let why = pageSetRefusal(request) {
+            return refuse(.voice, why)
+        }
         // A plugin's setting (one that is on): kept in the vault (`LeadEngine.setPluginSetting`).
         if let asked = request.args?["key"]?.string, NodeSettings.setting(asked) == nil, let engine, engine.pluginSetting(asked) != nil {
             guard request.args?["folder"] == nil else { return refuse(.badArgs, "\(asked) is the node's, for every project: name no folder") }

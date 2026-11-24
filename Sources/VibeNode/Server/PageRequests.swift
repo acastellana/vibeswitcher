@@ -22,13 +22,16 @@ enum PageShown {
 }
 
 extension Requests {
-    /// The settings a page never sets, even acting: they widen what a page or a worker may do (`web_acts` on: a page
-    /// would turn on its own acting; the floors and the policy: a worker's token would lower what holds its own merge).
-    static func pageSetRefusal(_ request: NodeWire.Request) -> String? {
-        guard request.kind == "set", let key = request.args?["key"]?.string else { return nil }
-        if key == "web_acts" { return request.args?["value"]?.string == "off" ? nil : "web_acts is turned on from a terminal" }
-        if key == "policy" || key.hasPrefix("floor_") { return "\(ConfigSeal.inert(key, limit: 80)) is set from a terminal" }
-        return nil
+    /// Why an acting page may not make the `set` `request`, or nil: the setting `set` resolves (`setting(named:)`, the
+    /// one resolution: its aliases, a plugin's), judged by its own `page` (every setting declares it), never by how the
+    /// key is spelled. A key that resolves to nothing is `set`'s to refuse. On `queue`.
+    func pageSetRefusal(_ request: NodeWire.Request) -> String? {
+        guard request.kind == "set", let key = request.args?["key"]?.string, let setting = setting(named: key) else { return nil }
+        switch setting.page {
+        case .sets: return nil
+        case .offOnly(let why): return ["off", "default"].contains(request.args?["value"]?.string ?? "") ? nil : "\(setting.key) is set from a terminal: \(why)"
+        case .terminalOnly(let why): return "\(setting.key) is set from a terminal: \(why)"
+        }
     }
 
     /// A user's request from an acting page (`Principal.Route.pageVoice`: the screen found its right and its kind's
@@ -38,7 +41,7 @@ extension Requests {
     /// `pageVoice`, then `voiced` as a terminal's request, recorded as the user's with the page's mark. On `queue`.
     func pageVoiced(_ request: NodeWire.Request, token: String, origin: String, reply: @escaping (NodeWire.Reply) -> Void) {
         let via = ActingPages.via(token: token, origin: origin)
-        if let why = Self.pageSetRefusal(request) {
+        if let why = pageSetRefusal(request) {
             note("refused \(request.kind) from \(via): \(why)")
             return reply(.init(re: request.id, error: .init(.voice, why)))
         }
