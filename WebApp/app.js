@@ -10,6 +10,7 @@ import { h, setText } from './js/dom.js';
 import { since, until, lastPart, tilde, KEY, MAC } from './js/words.js';
 import { t } from './js/i18n.js';
 import { register as registerPasskey } from './js/passkey.js';
+import { copyLine } from './js/views/cards.js';
 import { projectsOf, firstProject } from './js/conversation.js';
 import { leftColumn, ownSession } from './js/views/left.js';
 import { projectView } from './js/views/project.js';
@@ -55,6 +56,8 @@ const feed = mocked
     // in this module's own address), else /build.json, asked again at a hello while it isn't known.
     build: ownBuild(),
     rebuild: fetchBuild,
+    // The tabs of this node's origin share acting, memory to memory.
+    share: typeof BroadcastChannel === 'function' ? new BroadcastChannel(`vibeswitcher-acting-${location.port || 'default'}`) : null,
   });
 store.connect(feed);
 
@@ -128,15 +131,32 @@ const confirming = h('div', { class: 'offline confirm-pairing', role: 'status', 
 const tabBanner = h('div', { class: 'tab-banner', role: 'alert', hidden: true });
 function drawTabBanner() {
   const state = store.state;
+  const acts = state.node?.web?.acts;
+  const level = acts?.level ?? (acts?.on ? 'trust' : 'off');
+  const connected = state.connection === 'live' || state.connection === 'reconnecting';
+  // Acting is on for the node but not in this tab, and nothing else is being said about it (a pairing waiting for the
+  // terminal has its own banner): one banner, always, in plain words, with the one command and its copy button.
+  const cantYet = connected && level !== 'off' && !store.acts() && !state.phrase && state.actsLost !== 'unconfirmed';
   const lost = state.actsLost && !store.acts();
-  tabBanner.hidden = !lost && !state.newerBuild;
+  tabBanner.hidden = !cantYet && !lost && !state.newerBuild;
   if (tabBanner.hidden) return;
+  if (cantYet) {
+    const elsewhere = level === 'confirm' && acts.passkeyOrigin && location.origin !== acts.passkeyOrigin;
+    if (elsewhere) {
+      tabBanner.replaceChildren(h('span', null, h('strong', null, t('tbCantYet')), ' ', t('acPasskeyOrigin'), ' '),
+        h('a', { class: 'link', href: acts.passkeyOrigin }, acts.passkeyOrigin));
+      return;
+    }
+    const why = state.actsLost === 'reloaded' ? t('tbReloaded') + ' ' : state.actsLost === 'ended' ? t('tbEnded') + ' ' : '';
+    tabBanner.replaceChildren(h('span', null, h('strong', null, t('tbCantYet')), ' ', why, t('tbRunWeb')),
+      copyLine('vibeswitcher web', 'the command that pairs this tab'));
+    return;
+  }
   if (!lost) {
     tabBanner.replaceChildren(h('span', null, h('strong', null, t('tbOlderBuild')), ' ', store.acts() ? t('tbOlderActing') : t('tbOlderReads')),
       h('button', { class: 'button small', type: 'button', onclick: () => store.reloadNow() }, t('tbReload')));
     return;
   }
-  const level = state.node?.web?.acts?.level ?? (state.node?.web?.acts?.on ? 'trust' : 'off');
   const unconfirmed = state.actsLost === 'unconfirmed';
   const why = unconfirmed ? 'tbUnconfirmed' : state.actsLost === 'reloaded' ? 'tbReloaded' : level === 'off' ? 'tbTurnedOff' : 'tbEnded';
   // With acting off on the node, pairing again needs it on first: said too when the reason was another.

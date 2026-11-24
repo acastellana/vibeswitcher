@@ -20,6 +20,9 @@
 // - Level off: This node's Turn off (set web_acts off); the page reconnects reading and drafting: the line that
 //   turns acting on, the open card drafts, and the banner at the top says this tab no longer acts (turned off).
 // - Reloaded: the tab reloaded says it no longer acts (its pairing was in its memory) and to pair again.
+// - Two tabs: a second tab opened by hand acts with the first one's pairing, held in memory only.
+// - Can't act yet: acting on again (OUT/trust.want) with no tab paired: one plain banner with the command; a pick is
+//   one line, "Not sent", the terminal's way behind a disclosure.
 // - Console: no error over the whole run.
 //
 // Usage: node acting-page-check.cjs URL EXPECT-JSON OUT-FOLDER CHROME   (exit 1 on any fail; a table and report.json in OUT)
@@ -121,6 +124,16 @@ async function run() {
       : leaks || logged ? `the secret is kept outside memory (${leaks} stored, ${logged} logged)` : `“${phrase}” confirmed; the page acts; the secret only in memory`);
     if (!acting) return;
 
+    // Two tabs: a second tab of the same origin, opened by hand (no code, no token), acts too: it asks its sibling over
+    // the origin's channel and connects with the pairing it holds.
+    const second = await protocol.tab(out);
+    await second.send('Page.navigate', { url: `${new URL(url).origin}/${expect.projectHref}` });
+    const both = await second.until(`(() => { const c = [...document.querySelectorAll('.wait-box .card')].find((el) => el.innerText.includes(${JSON.stringify(expect.first)})); return c && c.querySelector('.answer button[type=submit]')?.innerText.trim() === 'Answer' && !document.querySelector('.tab-banner:not([hidden])') ? 'the second tab acts' : null; })()`, WAIT);
+    const kept = secret && await second.evaluate(`[sessionStorage, localStorage].flatMap((store) => Object.keys(store).map((key) => store.getItem(key))).filter((value) => value.includes(${JSON.stringify(secret || '')})).length`);
+    await second.shot('second-tab');
+    record('Two tabs', both && kept === 0, !both ? 'the second tab didn’t act' : kept ? 'the secret is stored in the second tab' : both + ', the secret in memory only');
+    await protocol.send('Target.closeTarget', { targetId: (await second.send('Target.getTargetInfo')).targetInfo.targetId }).catch(() => {});
+
     // Answer by click: the first question.
     const clicked = await page.until(clickOption(expect.first, expect.firstOption), WAIT);
     const answered = clicked && await page.until(`(() => { const c = ${card(expect.first)}; return c && c.classList.contains('closed') ? c.innerText.replace(/\\s+/g, ' ').slice(0, 80) : null; })()`, WAIT);
@@ -180,6 +193,18 @@ async function run() {
     const reloaded = await page.until(`(() => { const b = document.querySelector('.tab-banner:not([hidden])'); return b && /no longer acts/.test(b.innerText) && /reloaded/.test(b.innerText) && b.innerText.includes('vibeswitcher web') ? b.innerText.replace(/\\s+/g, ' ').slice(0, 90) : null; })()`, WAIT);
     await page.shot('reloaded');
     record('Reloaded', reloaded, reloaded || 'the reloaded tab didn’t say it no longer acts');
+
+    // Can't act yet: acting on again from a terminal (OUT/trust.want, answered by OUT/trust.done), and no tab holds a
+    // pairing: one plain banner with the command and its copy button; a pick on a card is one line, not sent, the
+    // terminal's way behind a disclosure.
+    fs.writeFileSync(path.join(out, 'trust.want'), 'set web_acts trust');
+    const trusted = await waitFile(path.join(out, 'trust.done'), 60000);
+    const cant = trusted && await page.until(`(() => { const b = document.querySelector('.tab-banner:not([hidden])'); return b && /can’t act yet/.test(b.innerText) && b.querySelector('.copy-line')?.innerText.includes('vibeswitcher web') ? b.innerText.replace(/\\s+/g, ' ').slice(0, 90) : null; })()`, WAIT);
+    await page.go(expect.projectHref);
+    const picked = cant && await page.until(clickOption(expect.second, 'Drop it today'), WAIT);
+    const oneLine = picked && await page.until(`(() => { const c = ${card(expect.second)}; const line = c?.querySelector('.card-notsent')?.innerText || ''; const terminal = c?.querySelector('details.card-terminal'); return /Not sent/.test(line) && terminal && !terminal.open && !c.querySelector('.card-keys') ? line : null; })()`, WAIT);
+    await page.shot('cant-act-yet');
+    record('Can’t act yet', cant && oneLine, !trusted ? 'the test never turned acting on again' : !cant ? 'no banner saying this tab can’t act yet, with the command' : !oneLine ? 'a pick isn’t one line with the terminal behind a disclosure' : cant + '; ' + oneLine);
   } catch (error) {
     record('run', false, error.message);
   } finally {

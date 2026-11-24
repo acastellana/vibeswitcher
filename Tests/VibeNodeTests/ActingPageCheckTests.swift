@@ -17,6 +17,8 @@ import Testing
 ///   with Reload and what reloading costs, and still acts;
 /// - Level off: the page's own Turn off lowers `web_acts`, and the page reads and drafts again, saying so at the top;
 /// - Reloaded: reloaded, the tab says it no longer acts (its pairing lived in its memory) and to pair again;
+/// - Two tabs: a second tab opened by hand acts with the first one's pairing, held in memory only;
+/// - Can't act yet: acting on again with no tab paired: one plain banner with the command, a pick one line, not sent;
 /// - Console: no error.
 /// The node's record must then hold the two answers and the setting, each the page's.
 @Suite(NodeTraits.linuxOnly, .timeLimit(.minutes(5)),
@@ -101,8 +103,15 @@ struct ActingPageCheckTests {
             var confirmed = false
             var revised = false
             var switched = false
+            var trusted = false
             let end = MacTime.real.awake() + 200
-            while !(confirmed && revised && switched), MacTime.real.awake() < end, !Task.isCancelled {
+            while !(confirmed && revised && switched && trusted), MacTime.real.awake() < end, !Task.isCancelled {
+                if !trusted, FileManager.default.fileExists(atPath: out.appendingPathComponent("trust.want").path) {
+                    let again = try await node.runOnTerminal(["set", "web_acts", "trust"])
+                    try #require(again.status == 0, "set web_acts trust again: \(again.output)")
+                    try "done".write(to: out.appendingPathComponent("trust.done"), atomically: true, encoding: .utf8)
+                    trusted = true
+                }
                 if !switched, FileManager.default.fileExists(atPath: out.appendingPathComponent("switch.want").path) {
                     // Build B: one byte more in one file changes the build the node names in its hello.
                     let words = URL(fileURLWithPath: webApp).appendingPathComponent("js/words.js")
@@ -152,7 +161,7 @@ struct ActingPageCheckTests {
                          output: .path(said.path, flags: O_WRONLY | O_TRUNC), limit: 240)
         }
         let table = (try? String(contentsOf: said, encoding: .utf8)) ?? ""
-        for row in ["Pair", "Answer by click", "Approve", "Changed", "Send now", "Older build", "Level off", "Reloaded", "Console"] {
+        for row in ["Pair", "Two tabs", "Answer by click", "Approve", "Changed", "Send now", "Older build", "Level off", "Reloaded", "Can’t act yet", "Console"] {
             #expect(table.split(separator: "\n").contains { $0.hasPrefix(row + " ") && $0.contains(" pass ") }, "\(row):\n\(table)")
         }
         #expect(status == 0, "\(table)\n\(node.said)")

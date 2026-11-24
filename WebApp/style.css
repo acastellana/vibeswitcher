@@ -407,6 +407,10 @@ code, pre, kbd { font-family: var(--mono); }
 .card-context { font-size: var(--small); margin: 6px 0 0; overflow-wrap: anywhere; }
 .card-context-label { color: var(--ink-2); }
 .card > .card-foot { grid-column: 1; color: var(--ink-3); font-size: var(--small); }
+.card-notsent { color: var(--ink-2); font-size: var(--text); }
+.card-terminal { color: var(--ink-2); font-size: var(--small); }
+.card-terminal > summary { cursor: pointer; }
+.card-terminal[open] > summary { margin-bottom: 6px; }
 .card > .card-keys { grid-column: 2; align-self: end; color: var(--ink-3); font-size: var(--small); white-space: nowrap; opacity: 0; transition: opacity 0.14s; }
 .card.ask > .card-keys { grid-column: 1 / -1; }
 .card:focus-within > .card-keys { opacity: 1; }
@@ -725,6 +729,7 @@ kbd { padding: 1px 6px; border-radius: 5px; box-shadow: inset 0 0 0 1px var(--li
 .tab-banner { flex: none; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; padding: 10px 24px; border-bottom: 1px solid var(--line); background: color-mix(in srgb, var(--asked) 10%, var(--bg)); color: var(--ink); }
 .tab-banner strong { color: var(--asked); }
 .tab-banner code { padding: 1px 6px; border-radius: 5px; background: var(--raised); }
+.tab-banner .copy-line { flex: 0 1 auto; min-width: 0; background: var(--raised); }
 .tab-banner-close { margin-left: auto; color: var(--ink-2); font-size: 16px; line-height: 1; }
 .passkey-pill .passkey-line { max-width: 60ch; overflow-wrap: anywhere; }
 .passkey-pill .phrase.passkey-line { font-size: 16px; }
