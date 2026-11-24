@@ -58,7 +58,10 @@ export function leadLines(board) {
   const lines = [];
   for (const question of board.answered || []) {
     lines.push({ key: lineKey('ask', question.id), kind: 'ask', at: question.at, head: questionHead(question.text), full: question.text || '',
-      answer: question.state === 'autoDecided' ? question.proposal : question.answer, state: question.state, why: question.why || null });
+      answer: question.state === 'autoDecided' ? question.proposal : question.answer, state: question.state, why: question.why || null,
+      // Whether the lead has read the answer (`delivered`: a date, null not yet; absent where the node doesn't say),
+      // and what replacing it names (its card and version).
+      id: question.id, delivered: 'delivered' in question ? question.delivered : undefined, card: question.card || null, version: question.version ?? null });
   }
   for (const result of board.results || []) {
     lines.push({ key: lineKey('result', result.id), kind: 'result', at: result.at, head: firstSentence(result.title), full: result.body || result.title || '', title: result.title });
