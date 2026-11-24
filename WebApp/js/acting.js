@@ -81,6 +81,8 @@ export function actsLine(app, { compact = false } = {}) {
   const level = acts.level ?? (acts.on ? 'trust' : 'off');
   if (level === 'off') return compact ? null : h('p', { class: 'acts-line' }, t('acOffWords'), ' ', h('code', null, 'vibeswitcher set web_acts trust'), t('acOffWords2'));
   const since = acts.since ? new Date(acts.since).toLocaleString(undefined, { dateStyle: compact ? undefined : 'medium', timeStyle: 'short' }) : '';
+  // A page waiting for the terminal's confirmation says so in its own banner (the phrase): nothing here meanwhile.
+  if (!here && app.store.state.phrase) return null;
   // Acting is on but this page doesn't act (a reload lost its secret, or its acting ran out): pair it again.
   if (!here) return h(compact ? 'div' : 'p', { class: 'acts-line' + (compact ? ' compact' : '') }, h('span', null, t(compact ? 'acPairAgainShort' : 'acPairAgain', { since })), ' ', h('code', null, 'vibeswitcher web'));
   const words = t(compact ? 'acThisPageShort' : 'acThisPage', { since });
