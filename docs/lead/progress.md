@@ -4492,3 +4492,5 @@ Turn what's a real bug into a task (one already on the board needs nothing); the
 - 2026-11-24 03:12 Released fix-the-flaky-test-26's worker (idle since its done report on 92b1f504) while its audit runs
 - 2026-11-24 03:12 Automatically (auto_advance): Started the audit of fix-the-flaky-test-26 at 92b1f504 (Its review is audit). Released its worker, idle since its done report, while the audit runs: its Mac slot and memory are free, its worktree and branch stay.
 - 2026-11-24 03:18 Audit of fix-the-flaky-test-26: complete, clean, round 1: 1 Nit open
+- 2026-11-24 03:21 Committed the records at 8ea549ae before merging fix-the-flaky-test-26: the last merge failed on docs/lead/decisions.md, docs/lead/progress.md
+- 2026-11-24 03:32 Merged fix-the-flaky-test-26: Fix the flaky test afterARunHeardAFlatOneSaysClaudeDidntCatchAnything() (build 68a67ba8203f)
