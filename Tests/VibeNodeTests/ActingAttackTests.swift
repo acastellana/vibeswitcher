@@ -165,13 +165,103 @@ struct ActingAttackTests {
             let mask = TerminalMask()
             let served = mask.pass(bytes.prefix(split)) + mask.pass(bytes.dropFirst(split)) + mask.flush()
             let text = String(decoding: served, as: UTF8.self)
-            #expect(!text.contains(code) && text.contains("#pair=***"), "split at \(split): \(text)")
+            #expect(!text.contains(code) && text.contains("#pair=" + String(repeating: "*", count: code.count)), "split at \(split): \(text)")
         }
         #expect(!PairingMask.mask("ran `vibeswitcher web`: http://127.0.0.1:8765/#pair=\(code)").contains(code))
         #expect(!PairingMask.mask("the code alone: \(code)").contains(code))
-        // A prompt and plain output aren't held back.
+        // The re-read's R4: cut by what the screen does (a screen replay redraws a wrapped line with a cursor move; a
+        // colour; a line break), split across reads inside an escape sequence, or percent-encoded: still masked, each
+        // code character one `*`, the escapes kept.
+        let half = code.index(code.startIndex, offsetBy: 11)
+        for cut in ["\u{1B}[2;1H", "\u{1B}[0m\u{1B}[38;5;12m", "\r\n", "\u{1B}]8;;x\u{07}"] {
+            let drawn = Data("http://127.0.0.1:8765/#pair=\(code[..<half])\(cut)\(code[half...]) \u{1B}[K$ ".utf8)
+            for split in [30, 40, 41, 42, drawn.count - 6] {
+                let mask = TerminalMask()
+                let served = mask.pass(drawn.prefix(split)) + mask.pass(drawn.dropFirst(split)) + mask.flush()
+                let text = String(decoding: served, as: UTF8.self)
+                #expect(!text.contains(String(code[..<half])) && !text.contains(String(code[half...])), "\(cut.debugDescription) split at \(split): \(text.debugDescription)")
+                #expect(text.contains(cut) && served.count == drawn.count, "the escapes kept, one for one: \(text.debugDescription)")
+            }
+        }
+        let encoded = TerminalMask()
+        let percent = String(decoding: encoded.pass(Data("open http%3A%2F%2F127.0.0.1%3A8765%2F%23pair%3D\(code) now\n".utf8)) + encoded.flush(), as: UTF8.self)
+        #expect(!percent.contains(code), "\(percent)")
+        #expect(!PairingMask.mask("http%3A%2F%2F127.0.0.1%3A8765%2F%23pair%3D\(code)").contains(code))
+        // The automated review of b73aedc5: (1) a code inside an escape sequence's payload (an OSC 8 hyperlink's target,
+        // a window title, a DCS or APC string) is masked on the raw bytes; (2) CAN, SUB and ESC end a string as a
+        // terminal ends it, and what follows is shown (and masked); (3) an unterminated OSC never holds the stream; (4) a
+        // code delivered byte by byte, a quiet flush after each, is masked whole.
+        func served(_ text: String, splits: [Int] = []) -> String {
+            let mask = TerminalMask()
+            let bytes = Data(text.utf8)
+            var out = Data(), from = 0
+            for split in splits + [bytes.count] where split > from && split <= bytes.count {
+                out += mask.pass(bytes.subdata(in: from..<split))
+                from = split
+            }
+            return String(decoding: out + mask.flush(), as: UTF8.self)
+        }
+        for payload in ["\u{1B}]8;;http://127.0.0.1:8765/#pair=\(code)\u{1B}\\the link\u{1B}]8;;\u{1B}\\",
+                        "\u{1B}]0;vibeswitcher web: #pair=\(code)\u{07}", "\u{1B}]2;\(code)\u{1B}\\",
+                        "\u{1B}P1;2|pair=\(code)\u{1B}\\", "\u{1B}_pair%3D\(code)\u{1B}\\"] {
+            for splits in [[], [7], [20, 40]] {
+                let text = served(payload + " $ ", splits: splits)
+                #expect(!text.contains(code), "\(payload.debugDescription) at \(splits): \(text.debugDescription)")
+            }
+        }
+        for ended in ["\u{1B}]0;a title\u{18}#pair=\(code)\r\n", "\u{1B}]0;a title\u{1A}#pair=\(code)\r\n",
+                      "\u{1B}]0;a title\u{1B}[31m#pair=\(code)\r\n", "\u{1B}[31\u{18}#pair=\(code)\r\n"] {
+            #expect(!served(ended).contains(code), "\(ended.debugDescription)")
+            let screen = TerminalMask.shown(Array(ended.utf8))
+            #expect(String(decoding: screen.text, as: UTF8.self).hasPrefix("#pair="), "a terminal shows what follows: \(ended.debugDescription)")
+        }
+        let unterminated = Data(("\u{1B}]0;" + String(repeating: "x", count: 1 << 20)).utf8)
+        let big = TerminalMask()
+        var released = Data(), mostHeld = 0
+        for at in stride(from: 0, to: unterminated.count, by: 4_096) {
+            released += big.pass(unterminated.subdata(in: at..<min(at + 4_096, unterminated.count)))
+            mostHeld = max(mostHeld, big.heldCount)
+        }
+        #expect(released.count >= unterminated.count - TerminalMask.openEscapeHeld - 4_096, "an open OSC held \(unterminated.count - released.count) bytes")
+        #expect(released + big.flush() == unterminated)
+        // What is re-read at each read stays bounded (no read re-reads the megabyte: never quadratic).
+        #expect(mostHeld <= TerminalMask.openEscapeHeld + 4_096, "\(mostHeld) bytes held at once")
+        let slow = TerminalMask()
+        var trickled = Data()
+        for byte in Data("http://127.0.0.1:8765/#pair=\(code) then more\r\n".utf8) {
+            trickled += slow.pass(Data([byte]))
+            trickled += slow.flush() // each byte after a quiet longer than the relay's (`maskQuiet`)
+        }
+        #expect(!String(decoding: trickled, as: UTF8.self).contains(code), "\(String(decoding: trickled, as: UTF8.self))")
+        let live = TerminalMask()
+        var alone = Data()
+        for byte in Data("the code is \(code).\r\n".utf8) { alone += live.pass(Data([byte])) + live.flush() }
+        #expect(!String(decoding: alone, as: UTF8.self).contains(code.prefix(8)), "\(String(decoding: alone, as: UTF8.self))")
+        // The parser's state and the last raw bytes carried across a release: a code inside an OSC payload, split at
+        // every byte across a cap release (past `openEscapeHeld`) and across a quiet flush, the address's form and a
+        // bare live code.
+        for form in ["pair=\(code)", code] {
+            let long = Array("\u{1B}]0;\(String(repeating: "x", count: TerminalMask.openEscapeHeld + 8))\(form) more\u{07} $ ".utf8)
+            let short = Array("\u{1B}]0;a title \(form) more\u{07} $ ".utf8)
+            for (bytes, release) in [(long, "cap"), (short, "flush")] {
+                let at = bytes.count - Array("\(form) more\u{07} $ ".utf8).count
+                for split in (at - 2)...(at + form.utf8.count + 1) {
+                    let mask = TerminalMask()
+                    var out = Data(mask.pass(Data(bytes[..<split])))
+                    if release == "flush" { out += mask.flush() }
+                    out += mask.pass(Data(bytes[split...])) + mask.flush()
+                    let text = String(decoding: out, as: UTF8.self)
+                    #expect(!text.contains(code.prefix(6)) && !text.contains(code.suffix(6)) && out.count == bytes.count,
+                            "\(release) at \(split) of \(form == code ? "a live code" : "an address"): \(text.suffix(60).debugDescription)")
+                }
+            }
+        }
+        // Plain output goes at once but for a tail that may start a code (it goes after a short quiet: `flush`), and
+        // nothing is lost.
         let mask = TerminalMask()
-        #expect(mask.pass(Data("$ ls\r\n".utf8)) == Data("$ ls\r\n".utf8))
+        let now = mask.pass(Data("total 0\r\n$ ".utf8))
+        #expect(String(decoding: now, as: UTF8.self).hasPrefix("total"), "\(String(decoding: now, as: UTF8.self))")
+        #expect(now + mask.flush() == Data("total 0\r\n$ ".utf8))
     }
 
     /// Finding 4: the guard rails that are a project's merge gate are a terminal's, as the floors and the policy are.

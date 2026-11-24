@@ -112,6 +112,8 @@ public final class TerminalRelay: @unchecked Sendable {
         var size: (cols: Int, rows: Int)?
         /// The session's bytes masked of any pairing code (`TerminalMask`), started over with each replay.
         var mask = TerminalMask()
+        /// Counts its outputs: a quiet flush of what the mask holds (`maskQuiet`) goes only if no output came since.
+        var outputs = 0
     }
 
     /// `link`: the server's. `mode`: `.watch` on the user's node. `note`: the server's log.
@@ -275,10 +277,26 @@ public final class TerminalRelay: @unchecked Sendable {
     /// so a stream whose watching ended gets nothing more, whatever its close is waiting on. Unset (tests), all do.
     public var watching: (@Sendable (AnyObject) -> Bool)?
 
+    /// How long the tail the mask holds back (it may be a pairing code's start, `TerminalMask`) waits for more before it
+    /// goes as it is: a prompt never waits longer.
+    static let maskQuiet: TimeInterval = 0.15
+
     private func output(of session: UUID, _ bytes: Data) {
         guard let attachment = attachments[session] else { return }
         // Never a live pairing code to a page (the acting review's fix C): `vibeswitcher web` run in a hosted terminal.
-        let whole = [UInt8](attachment.mask.pass(bytes))
+        attachment.outputs &+= 1
+        feed(attachment, attachment.mask.pass(bytes))
+        guard attachment.mask.holding else { return }
+        let count = attachment.outputs
+        queue.asyncAfter(deadline: .now() + Self.maskQuiet) { [weak self] in
+            guard let self, let now = self.attachments[session], now === attachment, now.outputs == count else { return }
+            self.feed(now, now.mask.flush())
+        }
+    }
+
+    /// `bytes` (masked already) to every stream of `attachment` that takes them.
+    private func feed(_ attachment: Attachment, _ bytes: Data) {
+        let whole = [UInt8](bytes)
         guard !whole.isEmpty else { return }
         for stream in fed(by: attachment) where (stream.state == .replaying || stream.state == .live) && watching?(stream.transport) != false {
             var start = 0
