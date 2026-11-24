@@ -77,6 +77,8 @@ public final class NodeLive: @unchecked Sendable {
         let terminals = mode != nil
         if let mode { hub.terminals = TerminalRelay(link: requests.link, mode: mode, note: note) }
         access = WebAccess(tokens: WebTokens(root: requests.root), note: note)
+        // The terminal's mask hides this server's live pairing codes, no other's.
+        hub.terminals?.liveCodes = access.liveCodes
         let acting = ActingPages(vault: requests.link.vaultV2, note: note)
         self.acting = acting
         access.acting = acting

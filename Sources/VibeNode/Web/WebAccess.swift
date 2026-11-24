@@ -67,6 +67,8 @@ public final class WebAccess: WebGate, @unchecked Sendable {
     }
 
     public let tokens: WebTokens
+    /// This gate's pairing codes still live, for the terminal's mask (`TerminalMask`): dropped once taken or revoked.
+    public let liveCodes = PairingCodes()
     private let now: @Sendable () -> Date
     private let note: @Sendable (String) -> Void
     private let lock = NSLock()
@@ -142,8 +144,8 @@ public final class WebAccess: WebGate, @unchecked Sendable {
             codes.append((WebTokens.digest(code), now.addingTimeInterval(Self.codeLife)))
             if codes.count > Self.codesKept { codes.removeFirst(codes.count - Self.codesKept) }
         }
-        // Never shown to a page in a terminal or a transcript while it lives (`PairingMask`).
-        PairingMask.made(code, until: now.addingTimeInterval(Self.codeLife))
+        // Never shown to a page in a terminal while it lives (`TerminalMask`, this server's codes alone).
+        liveCodes.made(code, until: now.addingTimeInterval(Self.codeLife))
         return code
     }
 
@@ -185,6 +187,7 @@ public final class WebAccess: WebGate, @unchecked Sendable {
             pairings = [:]
             revocations += 1
         }
+        liveCodes.clear()
         if let authority = tokenAuthority { authority.pages.dropPages(scope: authority.scope) }
         let dropped: Int
         do { dropped = try tokens.revokeAll(now: now()) } catch let refusal as WebTokens.Refusal {
@@ -337,6 +340,7 @@ public final class WebAccess: WebGate, @unchecked Sendable {
             for (index, live) in codes.enumerated() where WebTokens.same(live.digest, candidate) && found == nil { found = index }
             guard let found else { return nil }
             codes.remove(at: found)
+            liveCodes.taken(code)
             let id = PagePairing.codeID(digest: candidate)
             takenCodes = takenCodes.filter { $0.until > now } + [(candidate, id, now.addingTimeInterval(PagePairing.waits))]
             return id

@@ -54,71 +54,78 @@ public struct PagePairing: Sendable, Equatable {
     ]
 }
 
-/// The pairing codes a page's terminal and transcripts must never show (the acting review's fix C): any `#pair=<code>`
-/// in what the node serves a page from a terminal or a transcript is masked, and so is any live code's text wherever it
-/// appears. From any thread.
-public enum PairingMask {
-    private static let lock = NSLock()
-    nonisolated(unsafe) private static var live: [String: Date] = [:]
+/// The pairing codes this server made and that are still live (`WebAccess.openCode`; dropped the moment one is taken,
+/// revoked, or runs out): what a page's terminal must never show (the acting review's fix C). One per server instance,
+/// never shared: another server's (another test's) codes are none of this one's. From any thread.
+public final class PairingCodes: @unchecked Sendable {
+    private let lock = NSLock()
+    private var live: [String: Date] = [:]
+    private let now: @Sendable () -> Date
 
-    /// A code made now, alive until `until`.
-    public static func made(_ code: String, until: Date) {
-        lock.withLock {
-            let now = Date()
-            live = live.filter { $0.value > now }
-            live[code] = until
+    public init(now: @escaping @Sendable () -> Date = { Date() }) { self.now = now }
+
+    /// A code made, live until `until`.
+    public func made(_ code: String, until: Date) { lock.withLock { live[code] = until } }
+
+    /// A code taken (or every code: a revoke): live no more.
+    public func taken(_ code: String) { lock.withLock { _ = live.removeValue(forKey: code) } }
+    public func clear() { lock.withLock { live = [:] } }
+
+    /// The codes live now.
+    public var codes: [String] {
+        let at = now()
+        return lock.withLock {
+            live = live.filter { $0.value > at }
+            return Array(live.keys)
         }
     }
-
-    /// The codes alive now.
-    static var codes: [String] { lock.withLock { let now = Date(); return live.filter { $0.value > now }.map(\.key) } }
-
-    /// `text` with every pairing address's code and every live code replaced by `with`.
-    public static func mask(_ text: String, with hidden: String = "…") -> String {
-        var masked = text
-        if masked.contains("pair=") || masked.range(of: "pair%3d", options: .caseInsensitive) != nil {
-            masked = masked.replacingOccurrences(of: #"pair=[A-Za-z0-9_\-]+"#, with: "pair=" + hidden, options: .regularExpression)
-            masked = masked.replacingOccurrences(of: #"pair%3[Dd][A-Za-z0-9_\-]+"#, with: "pair%3D" + hidden, options: .regularExpression)
-        }
-        for code in codes where masked.contains(code) { masked = masked.replacingOccurrences(of: code, with: hidden) }
-        return masked
-    }
-
 }
 
-/// A terminal's bytes on their way to a page, masked (`PairingMask`), each code byte turned into `*` one for one (what
-/// the screen draws keeps its place):
+/// A pairing address's code in text (a transcript's, served to a page): what follows `pair=` or its percent-encoded
+/// `pair%3D`, at most a code's length, replaced. Nothing else is changed.
+public enum PairingMask {
+    /// The longest a pairing code is (16 bytes in base64url).
+    public static let codeLength = 22
+
+    public static func mask(_ text: String, with hidden: String = "…") -> String {
+        guard text.contains("pair=") || text.range(of: "pair%3d", options: .caseInsensitive) != nil else { return text }
+        return text.replacingOccurrences(of: #"pair(=|%3[Dd])[A-Za-z0-9_\-]{1,22}"#, with: "pair$1" + hidden, options: .regularExpression)
+    }
+}
+
+/// A terminal's bytes on their way to a page, masked. It changes no byte but a code's own: (a) the code characters
+/// after a literal `pair=` or `pair%3D`, at most a code's length; (b) an exact match of a code live on this server
+/// (`PairingCodes`). Each such byte becomes `*`, one for one, so what the screen draws keeps its place. With no live code
+/// and no `pair=` in sight it is the identity, whatever the reads' cuts and the quiet flushes.
 ///
-/// - **On what the screen shows** (`shown`): escape sequences and control bytes left out and the matches mapped back, so
-///   a code cut by a cursor move (a screen replay redrawing a wrapped line), a colour or a line break is found; and
-///   across what went before (`tail`: the last run of code characters already sent), so one cut by a read, or by a
-///   quiet flush, is found too.
-/// - **On the raw bytes** as well, a backstop: a code inside an escape sequence's own payload (an OSC title, an OSC 8
-///   hyperlink's target, a DCS or APC string) or anything the parser reads otherwise than a terminal does.
-/// - Both find `pair=` and its percent-encoded `pair%3D` with the code after it, and any live code's text.
-///
-/// A read's tail waits for the next read when what it shows may be a code's start (it holds `pair=`, ends with the start
-/// of `#pair=` or of a live code), and so does an escape sequence it ends inside, up to `openEscapeHeld` bytes (past
-/// that it goes, masked on its raw bytes: an unterminated OSC never holds the stream). What is held goes after a short
-/// quiet (`TerminalRelay.maskQuiet`, `flush`), the end of a run that may be a live code's start masked then.
+/// - **On what the screen shows** (`shown`): escape sequences and control bytes left out and the matches mapped back,
+///   so a code cut by a cursor move, a colour or a line break is found; and across what went before (`tail`: the last
+///   run of code characters sent, `rawTail`: the last raw bytes), so one cut by a read or a release is found too.
+/// - **On the raw bytes** as well, a backstop: a code inside an escape sequence's own payload (a title, a hyperlink's
+///   target, a DCS or APC string).
+/// - **What waits.** A read's tail is held, never masked, while it may be a code's start: it holds `pair=` (or
+///   `pair%3D`) with the code's characters still coming, or ends with at least `heldPrefix` characters that start a live
+///   code; and an escape sequence it ends inside, up to `openEscapeHeld` bytes. A quiet flush releases what is held as
+///   it is, except a run that may start a live code (`heldPrefix` or more of it), which waits for what follows or the
+///   code's end. A held run that doesn't go on as the code goes out unchanged.
 public final class TerminalMask: @unchecked Sendable {
-    /// Where a terminal's parser is (`shown`): carried across reads, so bytes released inside an escape sequence (past
-    /// its cap, or at a quiet) are read on as its payload, as a terminal reads them.
+    /// Where a terminal's parser is (`shown`): carried across reads.
     public enum State: Sendable, Equatable { case ground, escape, intermediate, csi, string }
 
+    private let live: PairingCodes?
     private var held: [UInt8] = []
-    /// The parser's state at the start of `held`.
     private var state = State.ground
-    /// The last run of code characters (and `#`, `=`, `%`) of what the screen was sent, at most `tailKept`.
     private var tail: [UInt8] = []
-    /// The last `tailKept` raw bytes sent: the raw backstop matches across a release (a code split inside a payload).
     private var rawTail: [UInt8] = []
 
     /// The most an escape sequence left open at a read's end holds back.
     public static let openEscapeHeld = 4096
+    /// How many of a live code's first characters a run must end with to be held for it.
+    public static let heldPrefix = 4
     static let tailKept = 64
 
-    public init() {}
+    /// `live`: this server's codes (none: `pair=` alone is masked).
+    public init(codes live: PairingCodes? = nil) { self.live = live }
 
     /// Whether a tail is held back.
     public var holding: Bool { !held.isEmpty }
@@ -128,39 +135,65 @@ public final class TerminalMask: @unchecked Sendable {
     /// What may go now, masked; a tail that may be a code's start, or an open escape (up to its cap), held back.
     public func pass(_ bytes: Data) -> Data {
         held.append(contentsOf: bytes)
-        let shown = Self.shown(held, from: state)
-        var cut = held.count
-        if let open = shown.openEscape, held.count - open <= Self.openEscapeHeld { cut = open }
-        var start = shown.text.count
-        while start > 0, Self.inCode(shown.text[start - 1]) { start -= 1 }
-        // The run continues what went before when it starts the bytes held.
-        let run = (start == 0 && shown.at.first.map { $0 == 0 } != false ? tail : []) + shown.text[start...]
-        if start < shown.text.count, run.count <= Self.tailKept, Self.mayBeCode(String(decoding: run, as: UTF8.self)) {
-            cut = min(cut, shown.at[start])
-        }
-        let out = Array(held[..<cut])
-        held = Array(held[cut...])
-        // Released whole, an open sequence and all (past its cap): the parser goes on inside it; else from ground (a cut
-        // is at an escape's start or inside shown text).
-        let from = state
-        state = cut == out.count && held.isEmpty ? shown.end : .ground
-        return mask(out, from: from, final: shown.openEscape != nil && held.isEmpty)
+        return release(quiet: false)
     }
 
-    /// Everything held, masked (a quiet: the end of a run that may be a live code's start masked too).
-    public func flush() -> Data {
+    /// A quiet: everything held goes, but a run that may start a live code (it waits on, for what follows or the code's
+    /// end: `holding` says so, and the relay asks again after another quiet).
+    public func flush() -> Data { release(quiet: true) }
+
+    /// The stream's end (and tests): everything held goes, masked as it is.
+    public func drain() -> Data {
         let out = held
         held = []
         let from = state
         state = Self.shown(out, from: from).end
-        return mask(out, from: from, final: true)
+        let (masked, nextTail) = Self.masked(out, from: from, after: tail, raw: rawTail, codes: live?.codes ?? [], forced: true)
+        tail = nextTail
+        rawTail = Array((rawTail + out).suffix(Self.tailKept))
+        return Data(masked)
     }
 
-    private func mask(_ bytes: [UInt8], from: State, final: Bool) -> Data {
-        let (masked, tail) = Self.masked(bytes, from: from, after: tail, raw: rawTail, final: final)
-        self.tail = tail
-        rawTail = Array((rawTail + bytes).suffix(Self.tailKept))
+    private func release(quiet: Bool) -> Data {
+        let codes = live?.codes ?? []
+        let shown = Self.shown(held, from: state)
+        var cut = held.count
+        if !quiet, let open = shown.openEscape, held.count - open <= Self.openEscapeHeld { cut = open }
+        var start = shown.text.count
+        while start > 0, Self.inCode(shown.text[start - 1]) { start -= 1 }
+        if start < shown.text.count {
+            let joined = (start == 0 && shown.at.first == 0 ? tail : []) + shown.text[start...]
+            let run = String(decoding: joined, as: UTF8.self)
+            if run.utf8.count <= Self.tailKept, Self.mayBeCode(run, codes: codes, quiet: quiet) { cut = min(cut, shown.at[start]) }
+        }
+        let out = Array(held[..<cut])
+        held = Array(held[cut...])
+        let from = state
+        state = held.isEmpty ? shown.end : (cut == 0 ? state : Self.shown(out, from: from).end)
+        // Released inside an escape sequence's payload (past its cap, or at a quiet): a run there that ends with a live
+        // code's start can't wait, so that start is masked (rule b: an exact proper prefix at the end).
+        let forced = held.isEmpty && shown.openEscape != nil
+        let (masked, nextTail) = Self.masked(out, from: from, after: tail, raw: rawTail, codes: codes, forced: forced)
+        tail = nextTail
+        rawTail = Array((rawTail + out).suffix(Self.tailKept))
         return Data(masked)
+    }
+
+    /// Whether a run (code characters, `#`, `=`, `%`) at the end of what is held may be the start of a code still to
+    /// come: `pair=` / `pair%3D` with fewer than a code's characters after it (not at a quiet: they go, masked), the start
+    /// of `#pair=` (not at a quiet), or `heldPrefix` or more of a live code's first characters (at a quiet too).
+    static func mayBeCode(_ run: String, codes: [String], quiet: Bool) -> Bool {
+        guard !run.isEmpty else { return false }
+        if !quiet {
+            for marker in ["pair=", "pair%3D", "pair%3d"] {
+                if let range = run.range(of: marker, options: .backwards), run[range.upperBound...].count < PairingMask.codeLength { return true }
+            }
+            if run.count >= 3, (3...min(6, run.count)).contains(where: { "#pair=".hasPrefix(run.suffix($0)) }) { return true }
+        }
+        guard run.count >= heldPrefix else { return false }
+        return codes.contains { code in
+            code.count > heldPrefix && (heldPrefix...min(code.count - 1, run.count)).contains { code.hasPrefix(run.suffix($0)) }
+        }
     }
 
     /// What the screen shows of `bytes`, as a terminal parses them (ECMA-48, the DEC/xterm parser): each printed byte and
@@ -177,7 +210,6 @@ public final class TerminalMask: @unchecked Sendable {
         for (index, byte) in bytes.enumerated() {
             if byte == 0x18 || byte == 0x1A { state = .ground; continue }
             if byte == 0x1B {
-                // In a string, ESC \ is its end (ST): the backslash is taken as the escape's final below.
                 state = .escape
                 begun = index
                 continue
@@ -194,28 +226,17 @@ public final class TerminalMask: @unchecked Sendable {
                 case 0x5D, 0x50, 0x58, 0x5E, 0x5F: state = .string
                 case 0x20...0x2F: state = .intermediate
                 case 0x30...0x7E: state = .ground
-                default: break // a C0 control: done; the escape goes on
+                default: break
                 }
             case .intermediate:
                 if (0x30...0x7E).contains(byte) { state = .ground }
             case .csi:
                 if (0x40...0x7E).contains(byte) { state = .ground }
-                // 0x20-0x3F: its parameters and intermediates; a C0 control: done, and it goes on.
             case .string:
                 if byte == 0x07 { state = .ground }
             }
         }
-        // Begun before these bytes (a sequence carried in): open from their start.
         return (text, at, state == .ground ? nil : (start != .ground && begun == 0 && bytes.first != 0x1B ? 0 : begun), state)
-    }
-
-    static func mayBeCode(_ run: String) -> Bool {
-        guard !run.isEmpty else { return false }
-        if run.contains("pair=") || run.range(of: "pair%3d", options: .caseInsensitive) != nil { return true }
-        func endsWithStart(of whole: String) -> Bool {
-            (1...min(whole.count, run.count)).contains { whole.hasPrefix(run.suffix($0)) }
-        }
-        return endsWithStart(of: "#pair=") || endsWithStart(of: "%23pair%3D") || PairingMask.codes.contains(where: endsWithStart)
     }
 
     /// The bytes a code, `#`, `=` or `%` is made of: what a code's run is.
@@ -224,19 +245,15 @@ public final class TerminalMask: @unchecked Sendable {
             || byte == 0x3D || byte == 0x23 || byte == 0x25
     }
 
-    /// The code alphabet alone (base64url).
-    static func codeByte(_ byte: UInt8) -> Bool {
-        (byte >= 0x30 && byte <= 0x39) || (byte >= 0x41 && byte <= 0x5A) || (byte >= 0x61 && byte <= 0x7A) || byte == 0x2D || byte == 0x5F
-    }
-
-    /// The ranges of `text` (Latin-1) a code covers: what follows `pair=` or `pair%3D`, and each live code.
-    static func codeRanges(_ text: String) -> [Range<Int>] {
+    /// The ranges of `text` (Latin-1) a code covers: the code characters after `pair=` / `pair%3D` (a code's length at
+    /// most), and each exact live code.
+    static func codeRanges(_ text: String, codes: [String]) -> [Range<Int>] {
         var hide: [Range<Int>] = []
         let ns = text as NSString
         for match in pairing.matches(in: text, range: NSRange(location: 0, length: ns.length)) where match.numberOfRanges > 1 {
             if let range = Range(match.range(at: 1)) { hide.append(range) }
         }
-        for code in PairingMask.codes {
+        for code in codes {
             var from = 0
             while from < ns.length {
                 let found = ns.range(of: code, range: NSRange(location: from, length: ns.length - from))
@@ -248,54 +265,38 @@ public final class TerminalMask: @unchecked Sendable {
         return hide
     }
 
-    /// `bytes` masked, `tail` what went before: on what the screen shows (with `tail` before it, only this read's bytes
-    /// changed), then on the raw bytes; `final`, the end of a run that may be a live code's start masked too. The new tail.
-    static func masked(_ bytes: [UInt8], from state: State = .ground, after tail: [UInt8], raw rawTail: [UInt8] = [],
-                       final: Bool) -> (bytes: [UInt8], tail: [UInt8]) {
+    /// `bytes` masked, `tail` and `rawTail` what went before (only this read's bytes changed): on what the screen shows,
+    /// then on the raw bytes. The new tail.
+    static func masked(_ bytes: [UInt8], from state: State = .ground, after tail: [UInt8], raw rawTail: [UInt8] = [], codes: [String],
+                       forced: Bool = false) -> (bytes: [UInt8], tail: [UInt8]) {
         guard !bytes.isEmpty else { return (bytes, tail) }
         var out = bytes
         let shown = Self.shown(bytes, from: state)
-        // The tail continues this read's text only when nothing shown came between: it is the run its first bytes join.
         let joined = tail + shown.text
         let offset = tail.count
         if let text = String(bytes: joined, encoding: .isoLatin1) {
-            for range in codeRanges(text) {
+            for range in codeRanges(text, codes: codes) {
                 for index in range where index >= offset && index - offset < shown.at.count { out[shown.at[index - offset]] = 0x2A }
             }
         }
-        // A quiet's end: a run that may be a live code's start is masked, whatever comes next.
-        if final {
-            var start = shown.text.count
-            while start > 0, codeByte(shown.text[start - 1]) { start -= 1 }
-            let run = String(decoding: shown.text[start...], as: UTF8.self)
-            if !run.isEmpty, PairingMask.codes.contains(where: { code in (1...min(code.count, run.count)).contains { code.hasPrefix(run.suffix($0)) } }) {
-                for index in start..<shown.text.count { out[shown.at[index]] = 0x2A }
-            }
-        }
-        // The backstop: the raw bytes, escape payloads among them, after the last raw bytes sent (a code split across a
-        // release inside a payload), only this read's changed; at a release's end, a raw run that may be a live code's
-        // start masked too.
         let rawJoined = rawTail + bytes
         if let raw = String(bytes: rawJoined, encoding: .isoLatin1) {
-            for range in codeRanges(raw) {
+            for range in codeRanges(raw, codes: codes) {
                 for index in range where index >= rawTail.count && index - rawTail.count < out.count { out[index - rawTail.count] = 0x2A }
             }
         }
-        if final {
-            var start = bytes.count
-            while start > 0, codeByte(bytes[start - 1]) { start -= 1 }
-            let run = String(decoding: bytes[start...], as: UTF8.self)
-            if !run.isEmpty, PairingMask.codes.contains(where: { code in (1...min(code.count, run.count)).contains { code.hasPrefix(run.suffix($0)) } }) {
-                for index in start..<bytes.count { out[index] = 0x2A }
-            }
+        if forced, let raw = String(bytes: rawJoined, encoding: .isoLatin1) {
+            // The longest end of the raw bytes, `heldPrefix` or more, that a live code starts with: its bytes in this read.
+            let longest = codes.compactMap { code -> Int? in
+                (heldPrefix..<code.count).reversed().first { raw.count >= $0 && code.hasPrefix(raw.suffix($0)) }
+            }.max()
+            if let longest { for index in max(rawJoined.count - longest, rawTail.count)..<rawJoined.count { out[index - rawTail.count] = 0x2A } }
         }
-        // The new tail: the last run of what the screen was sent, joined to the old one when this read's text continues it.
         var start = joined.count
         while start > 0, inCode(joined[start - 1]) { start -= 1 }
-        let next = Array(joined[max(start, joined.count - tailKept)...])
-        return (out, next)
+        return (out, Array(joined[max(start, joined.count - tailKept)...]))
     }
 
-    /// `pair=` or its percent-encoded `pair%3D`, then the code's characters (group 1).
-    static let pairing = try! NSRegularExpression(pattern: #"pair(?:=|%3[Dd])([A-Za-z0-9_\-]+)"#)
+    /// `pair=` or its percent-encoded `pair%3D`, then the code's characters (group 1), a code's length at most.
+    static let pairing = try! NSRegularExpression(pattern: #"pair(?:=|%3[Dd])([A-Za-z0-9_\-]{1,22})"#)
 }
