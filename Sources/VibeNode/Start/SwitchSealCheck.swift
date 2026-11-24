@@ -114,7 +114,7 @@ public enum SwitchSealCheck {
             guard SwitchSeal.listingHash(prefix) == seen.after else {
                 return Sealed(sealed: [], held: ConfigSeal.held(in: record), refusals: ["the builds folder changed after the install: its change stays held (`vs config held`)"])
             }
-            return accept([SwitchSeal.buildsKey: seen.after], name: SwitchSeal.buildsName, home: home, vault: vault)
+            return vaultAccept([SwitchSeal.buildsKey: seen.after], name: SwitchSeal.buildsName, home: home, vault: vault)
         } catch {
             return Sealed(sealed: [], held: [], refusals: ["the vault couldn't be asked (\(error)): nothing of the builds folder was accepted"])
         }
@@ -135,14 +135,14 @@ public enum SwitchSealCheck {
             guard read.swapped == accepted else {
                 return Sealed(sealed: [], held: ConfigSeal.held(in: record), refusals: ["the unit folder changed beyond the unit's ExecStart since your last accept: it stays held (`vs config held`)"])
             }
-            return accept([SwitchSeal.unitFolderKey: read.now], name: SwitchSeal.unitFolderName, home: home, vault: vault)
+            return vaultAccept([SwitchSeal.unitFolderKey: read.now], name: SwitchSeal.unitFolderName, home: home, vault: vault)
         } catch {
             return Sealed(sealed: [], held: [], refusals: ["the vault couldn't be asked (\(error)): nothing of the unit folder was accepted"])
         }
     }
 
     /// The vault's partial accept of `shown`.
-    static func accept(_ shown: [String: String], name: String, home: String, vault: LeadVault) -> Sealed {
+    static func vaultAccept(_ shown: [String: String], name: String, home: String, vault: LeadVault) -> Sealed {
         do {
             let check = try vault.checkConfig(root: home, shown: shown.merging([SwitchSeal.partialKey: "1"]) { first, _ in first })
             let sealed = !check.held.contains(name)

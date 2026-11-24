@@ -124,7 +124,10 @@ extension Requests {
             return .success((Self.approveShown(batch.items), nil))
         case "build.switch":
             guard let commit = text("commit"), UpdateWatch.isCommit(commit) else { return .failure(.init(why: "build.switch needs a commit: nothing was asked")) }
-            return .success(("switch the node to build \(commit.prefix(12))", nil))
+            return .success(("switch the node to build \(commit.prefix(12))" + (args["buildsAfter"] != nil ? " and accept the builds folder as its install left it" : ""), nil))
+        case "build.seal":
+            guard let commit = text("commit"), UpdateWatch.isCommit(commit) else { return .failure(.init(why: "build.seal needs a commit: nothing was asked")) }
+            return .success(("accept the node's unit naming build \(commit.prefix(12))", nil))
         case "web.open": return .success(("open the web page to one browser \(args["tailnet"]?.bool == true ? "on your tailnet" : "on this machine")", nil))
         case "web.revoke": return .success(("revoke every web page's access", nil))
         case "push", "push.decline":

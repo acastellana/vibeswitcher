@@ -15,8 +15,8 @@ public enum SwitchSeal {
     /// The mark (a key no watched thing has) of an accept that seals only what it shows.
     public static let partialKey = ConfigSeal.keyPrefix + "#partial"
     /// The seal's names of the builds folder and the user manager's unit folder (`LinuxSealList.homeEntries`).
-    public static let buildsName = "~/.vibeswitcher/v2/builds"
-    public static let unitFolderName = "~/.config/systemd/user"
+    public static var buildsName: String { "~/.vibeswitcher/v2/builds" }
+    public static var unitFolderName: String { "~/.config/systemd/user" }
     public static var buildsKey: String { ConfigSeal.keyPrefix + buildsName }
     public static var unitFolderKey: String { ConfigSeal.keyPrefix + unitFolderName }
 
