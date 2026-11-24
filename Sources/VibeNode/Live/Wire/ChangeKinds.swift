@@ -275,10 +275,38 @@ extension WireKinds {
             public var url: String?
             public var expiresIn: Int?
             public var tailnet: Bool?
-            public init(url: String, expiresIn: Int, tailnet: Bool? = nil) {
+            /// The code's id: what `web.pairing` and `web.confirm` name (the loopback page's; none on the tailnet).
+            public var code: String?
+            public init(url: String, expiresIn: Int, tailnet: Bool? = nil, code: String? = nil) {
                 self.url = url
                 self.expiresIn = expiresIn
                 self.tailnet = tailnet
+                self.code = code
+            }
+        }
+    }
+
+    /// `web.confirm` (the user's voice, recorded): the page that took the address `web.open` made, showing `phrase`,
+    /// confirmed as the user's (the acting review's fix A).
+    public enum WebConfirm: WireChangeKind {
+        public static let kind = "web.confirm"
+        public struct Args: WireArgs, Equatable {
+            public var code: String?
+            public var phrase: String?
+            public enum CodingKeys: String, CodingKey, CaseIterable { case code, phrase }
+            public init(code: String, phrase: String) {
+                self.code = code
+                self.phrase = phrase
+            }
+        }
+        public struct Result: Codable, Sendable, Equatable {
+            public var confirmed: Bool?
+            public var rights: [String]?
+            public var level: String?
+            public init(confirmed: Bool, rights: [String], level: String) {
+                self.confirmed = confirmed
+                self.rights = rights
+                self.level = level
             }
         }
     }
@@ -657,6 +685,8 @@ extension WireKinds {
             public var scope: String?
             @WireNull public var project: String?
             @WireNull public var told: String?
+            /// What to say of it (`web_acts`: what turning it on means); nil for every other setting.
+            public var say: [String]?
             public init(key: String, value: String, was: String, scope: String, project: String?, told: String?) {
                 self.key = key
                 self.value = value

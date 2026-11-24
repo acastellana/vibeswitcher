@@ -41,6 +41,10 @@ public final class NodeLive: @unchecked Sendable {
     private var sessionValues: SessionLiveValues?
 
     private let requests: Requests
+    /// The loopback page's screen: an acting page's user's requests go from it to `Requests.pageVoiced`.
+    private let screen: WebRequestScreen
+    /// Acting from the page (`ActingPages`): the loopback page's gate asks it; the tailnet's has none.
+    public let acting: ActingPages
     private let sessions: NodeSessions?
     private let engine: LeadEngine?
     private let clock: NodeClock
@@ -73,10 +77,16 @@ public final class NodeLive: @unchecked Sendable {
         let terminals = mode != nil
         if let mode { hub.terminals = TerminalRelay(link: requests.link, mode: mode, note: note) }
         access = WebAccess(tokens: WebTokens(root: requests.root), note: note)
+        let acting = ActingPages(vault: requests.link.vaultV2, note: note)
+        self.acting = acting
+        access.acting = acting
+        requests.actingPages = acting
+        let screen = WebRequestScreen(hub, terminals: terminals, note: note)
+        self.screen = screen
         let bound = BoundPort()
         let assets = LiveAssets(folder: webRoot, port: { bound.port })
         self.assets = assets
-        web = NodeWebListener(port: port, assets: assets, gate: access, handler: WebRequestScreen(hub, terminals: terminals, note: note),
+        web = NodeWebListener(port: port, assets: assets, gate: access, handler: screen,
                               queue: queue, clock: clock, hello: { [weak requests] admission in
                                   guard let requests else { return nil }
                                   var hello = requests.webHello(admission, assets: assets.build)
@@ -130,10 +140,32 @@ public final class NodeLive: @unchecked Sendable {
             case .privateRead: requests.webRead(request, reply: answer)
             case .read: requests.handle(request, from: NodeLive.webPeer, reply: answer)
             case .refused(let code, let why): answer(.init(re: request.id, error: .init(code, why)))
-            case .unknown, .hub, .terminal, .usersVoice, .toolPost:
+            case .unknown, .hub, .terminal, .usersVoice, .toolPost, .pageVoice:
                 answer(.init(re: request.id, error: .init(.unknownKind, "this server doesn't take \(ConfigSeal.inert(request.kind, limit: 80)) from a page")))
             }
         }
+        // An acting page's user's request (its token's, on this loopback listener: its origin the one it checks).
+        screen.acting = acting
+        // Watching ends at once: no chunk to a connection whose right went, its streams dropped before its close.
+        hub.terminals?.watching = { [weak screen] in screen?.watching($0) ?? false }
+        screen.onWatchEnded = { [weak hub] in hub?.endTerminals($0) }
+        screen.onPageVoice = { [weak requests, weak web] request, credentials, transport in
+            guard let requests else { return }
+            let origin = "http://127.0.0.1:\(web?.port.map(String.init) ?? "?")"
+            requests.pageVoiced(request, credentials: credentials, origin: origin) { reply in transport.send(NodeWire.message(reply)) }
+        }
+        // Marked not acting at once; closed on the listener's queue, as every other close of a page's connection.
+        let listenerQueue = queue
+        acting.onLowered = { [weak screen] level in
+            guard level == "off" else { return }
+            screen?.endActing(code: "acts-off", reason: "acting from the page was turned off: reads and drafts go on after a reconnect", closeOn: listenerQueue)
+        }
+        // Every page token of either gate is the vault's (the acting review's fix B).
+        access.tokenAuthority = (acting, "loopback")
+        self.tailnet?.access.tokenAuthority = (acting, "tailnet")
+        requests.pairings = PairingSeat(holds: { [weak screen] in screen?.holdsPairing($0) ?? false },
+                                        confirm: { [weak screen] code, secret, rights in screen?.confirmPairing(code, secret: secret, rights: rights) ?? false })
+        acting.onLost = { [weak screen] key in screen?.endActing(key: key, closeOn: listenerQueue) }
         let hub = hub
         requests.liveSeq = { [weak hub] in hub?.seq(of: $0) ?? 0 }
         requests.web = access
@@ -215,6 +247,10 @@ public final class NodeLive: @unchecked Sendable {
     /// Late codes dropped, pages whose token ran out closed, and the listener let go once nothing wants it.
     func sweep() {
         access.sweep()
+        // Acting from the page as the vault says, asked again off the queue (the cache this server writes through), and
+        // each connection that acts or watches judged against it: a pairing that ran out or was evicted ends.
+        acting.refreshLater()
+        screen.sweepPairings(closeOn: queue)
         web.closeUnheld()
         web.follow()
         tailnet?.sweep()
@@ -240,8 +276,11 @@ public final class NodeLive: @unchecked Sendable {
         case .on(let bound): (state, port) = ("listening", .int(Int(bound)))
         case .refused(let why): (state, port) = ("refused: " + why, .null)
         }
-        return .object(["state": .string(state), "port": port, "tokens": .int(access.tokens.live(now: Date())),
-                        "connections": .int(web.connectionCount)])
+        // The tokens alive are the ones the vault admits (a token file entry alone admits no page).
+        let now = Date().timeIntervalSince1970
+        let admitted = acting.state?.pages.filter { $0.key.hasPrefix("loopback:") && $0.value > now }.count ?? 0
+        return .object(["state": .string(state), "port": port, "tokens": .int(min(admitted, access.tokens.live(now: Date()))),
+                        "connections": .int(web.connectionCount), "acts": acting.value(pages: screen.actingCount)])
     }
 
     /// This, once made: what `status` and the `node` stream ask for `web`.

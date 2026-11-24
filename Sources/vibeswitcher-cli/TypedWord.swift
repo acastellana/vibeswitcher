@@ -89,6 +89,28 @@ enum TypedWord {
     }
 }
 
+extension TypedWord {
+    /// Asks `question` on the controlling terminal (`/dev/tty` alone) and reads one line there, at most 120 bytes: what
+    /// was typed, trimmed; nil with no terminal.
+    static func line(_ question: String) -> String? {
+        let fd = open("/dev/tty", O_RDWR | O_NOCTTY | O_CLOEXEC)
+        guard fd >= 0 else { return nil }
+        defer { Sys.close(fd) }
+        _ = question.withCString { Sys.write(fd, $0, strlen($0)) }
+        var line: [UInt8] = []
+        var byte: UInt8 = 0
+        while true {
+            let got = Sys.read(fd, &byte, 1)
+            if got < 0, errno == EINTR { continue }
+            guard got == 1 else { break }
+            if byte == UInt8(ascii: "\n") || byte == UInt8(ascii: "\r") { break }
+            line.append(byte)
+            if line.count > 120 { break }
+        }
+        return String(decoding: line, as: UTF8.self).trimmingCharacters(in: .whitespaces)
+    }
+}
+
 extension Result where Success == Typed, Failure == NotTyped {
     /// What the command says when the prompt wasn't answered with the code (empty once it was).
     var refusal: String {

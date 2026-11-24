@@ -148,7 +148,7 @@ async function run() {
 
     // Projects and own sessions: paired, connected, the project listed on the left, the session under Your own sessions.
     const listed = await page.until(`(() => {
-      if (!sessionStorage.getItem('vibeswitcher.token') || document.querySelector('.offline:not([hidden])')) return null;
+      if (!sessionStorage.getItem('vibeswitcher.token') || document.querySelector('.offline:not([hidden]):not(.confirm-pairing)')) return null;
       const projects = document.querySelectorAll('.left .project').length;
       return projects ? projects : null;
     })()`, WAIT);
