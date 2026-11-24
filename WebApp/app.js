@@ -9,6 +9,7 @@ import { createUI, teamOf, projectHref } from './js/ui.js';
 import { h, setText } from './js/dom.js';
 import { since, until, lastPart, tilde, KEY, MAC } from './js/words.js';
 import { t } from './js/i18n.js';
+import { register as registerPasskey } from './js/passkey.js';
 import { projectsOf, firstProject } from './js/conversation.js';
 import { leftColumn, ownSession } from './js/views/left.js';
 import { projectView } from './js/views/project.js';
@@ -148,6 +149,39 @@ function drawTabBanner() {
     h('button', { class: 'icon-button tab-banner-close', type: 'button', 'aria-label': t('close'), title: t('close'), onclick: () => store.forgetActsLost() }, '×'));
 }
 store.subscribe('connection', drawTabBanner);
+
+// At `confirm`: while the browser asks for the passkey, what it approves, large; after, the vault's line for it.
+const passkeyPill = h('div', { class: 'offline confirm-pairing passkey-pill', role: 'status', hidden: true });
+let recordedTimer = null;
+function drawPasskeyPill() {
+  const { confirming, recorded } = store.state;
+  passkeyPill.hidden = !confirming && !recorded;
+  if (confirming) {
+    passkeyPill.replaceChildren(h('span', null, t('pkConfirming')), h('strong', { class: 'phrase passkey-line' }, confirming.line), h('span', { class: 'sub' }, t('pkBrowserAsks')));
+  } else if (recorded) {
+    passkeyPill.replaceChildren(h('span', null, t('pkRecorded')), h('span', { class: 'passkey-line' }, recorded.line));
+    clearTimeout(recordedTimer);
+    recordedTimer = setTimeout(() => store.clearRecorded(), 8000);
+  }
+}
+store.subscribe('connection', drawPasskeyPill);
+
+// The terminal's offer to add a passkey (`vibeswitcher web --passkey`): at the top of the centre, one button.
+const passkeyOffer = h('div', { class: 'tab-banner passkey-offer', role: 'status', hidden: true });
+function drawPasskeyOffer() {
+  const { passkeyOffer: offer, passkeyAdding: adding } = store.state;
+  // Shown while the offer holds (`expires`) and this connection may answer it.
+  const expired = offer?.expires && Date.parse(offer.expires) <= Date.now();
+  passkeyOffer.hidden = !offer || expired || !store.can('passkey.registered');
+  if (passkeyOffer.hidden) return;
+  if (offer.expires) setTimeout(drawPasskeyOffer, Math.max(0, Date.parse(offer.expires) - Date.now()) + 50);
+  const add = h('button', { class: 'button small', type: 'button', disabled: adding?.state === 'adding' || adding?.state === 'added', onclick: () => store.addPasskey(registerPasskey) }, t('pkAdd'));
+  const named = store.state.pageWords ? h('span', { class: 'page-words' }, t('pkThisPage'), ' ', h('strong', null, store.state.pageWords)) : null;
+  const said = !adding ? t('pkOffer') : adding.state === 'adding' ? t('pkAdding') : adding.state === 'added' ? t('pkAdded', { id: adding.id })
+    : adding.state === 'cancelled' ? t('pkCancelled') : adding.state === 'unsupported' ? t('pkUnsupported') : t('pkRefused', { why: adding.why });
+  passkeyOffer.replaceChildren(h('span', null, said), named, adding?.state === 'added' ? null : add);
+}
+store.subscribe('connection', drawPasskeyOffer);
 store.subscribe('node', drawTabBanner);
 // The page never sits scrolled sideways (a focus or a scroll into view past an edge could move it): put back at once.
 const unscroll = () => {
@@ -161,11 +195,11 @@ document.addEventListener('focusin', () => requestAnimationFrame(unscroll));
 const waitingWords = h('h1', { class: 'big' });
 const waitingSub = h('p');
 const waiting = h('section', { class: 'centre screen status-screen', hidden: true }, h('div', { class: 'empty-state' }, waitingWords, waitingSub));
-const centre = h('main', { class: 'centre-wrap' }, tabBanner, project.el, own.el, newProject.el, session.el, node.el, settings.el, stats.el, mail.el, waiting);
+const centre = h('main', { class: 'centre-wrap' }, tabBanner, passkeyOffer, project.el, own.el, newProject.el, session.el, node.el, settings.el, stats.el, mail.el, waiting);
 const root = document.getElementById('app');
 const commandPalette = palette(app);
 const scrim = h('div', { class: 'drawer-scrim', onclick: () => app.drawer(null) });
-root.replaceChildren(left.el, centre, right.el, scrim, sheet.scrim, sheet.el, commandPalette.el, offline, unpaired, confirming, app.notifications.offer);
+root.replaceChildren(left.el, centre, right.el, scrim, sheet.scrim, sheet.el, commandPalette.el, offline, unpaired, confirming, passkeyPill, app.notifications.offer);
 
 // `#/` opens the project with the most waiting on you, else the most active one, else Your own sessions; it takes
 // the address's place (no history entry), so back doesn't land on it again.
