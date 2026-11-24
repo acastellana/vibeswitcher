@@ -660,3 +660,7 @@
 - 2026-11-24 15:00 Workflow: auto_advance = `true`
 - 2026-11-24 15:01 Workflow: handover_idle_min = `10`, handover_tokens = •••
 - 2026-11-24 15:01 Workflow: auto_advance = `false`
+- 2026-11-24 15:12 Handed the lead over to a fresh session: the last one had been idle 10 minutes with 188k tokens of context, past handover_idle_min 10 and handover_tokens 100k
+- 2026-11-24 15:12 Ended the replaced lead session D1AC1BA4 and its tool server: only the current lead acts
+- 2026-11-24 15:13 Workflow: auto_advance = `true`, handover_idle_min = `50`, handover_tokens = •••
+- 2026-11-24 15:13 Automatically (auto_advance): The account's usage is near a limit: the weekly limit (every model): 99% used, resets Nov 26, 12:00. At 80% of a limit VibeSwitcher starts no workers or audits on any model, so the limit doesn't stop one mid-task; sessions already running go on. Tell the user. Nothing on it starts by itself until the reset, then it does; start_worker or audit with override_usage: true starts one anyway.
