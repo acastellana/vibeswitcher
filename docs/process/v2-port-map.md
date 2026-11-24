@@ -320,6 +320,10 @@ What main added that didn't build or pass on Linux, changed in this merge (kinds
   `Platform.ThreadStack.bounds()`.
 - `Tests/VibeCoreTests/MergeBatchTests.swift`: its pre-rebase hook written by `installScript` (ShebangWriteLint).
 - `Sources/VibeNode/Live/ChatValue.swift`: main's new `ChatItem.handover` left off the wire, as `newMarker` is.
+- `Sources/VibeCore/Worktrees.swift` `runChecks`: main's discovery of the completed suites before a merge's rerun
+  (`f2a39ad4`) ran `/bin/zsh`, which Linux hasn't: the discovery failed, the rerun fell back to the whole test command,
+  and a continuation main refuses (no tests run, a suite's second pass missing, a named failure still red) merged on
+  that whole rerun. It runs in `Platform.Tools.loginShell`, as every other step of the merge's checks does.
 
 ## Non-seam edits
 

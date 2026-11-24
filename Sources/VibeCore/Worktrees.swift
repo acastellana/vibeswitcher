@@ -1498,7 +1498,7 @@ public enum Worktrees {
                         again = prepareRerun(failed, { discovery in
                             let stop = progress?.heartbeat { "Discovering the completed suites before the merge's rerun." }
                             defer { stop?() }
-                            return Shell.run(executable: "/bin/zsh", args: ["-lc", "export HOME=\(RecentProjects.shellQuote(home))\n" + discovery],
+                            return Shell.run(executable: Platform.Tools.loginShell, args: ["-lc", "export HOME=\(RecentProjects.shellQuote(home))\n" + discovery],
                                              in: path, env: env, timeout: min(60, timeout), interleaved: true,
                                              branchCode: true, watch: lock?.watch, time: time)
                         })
