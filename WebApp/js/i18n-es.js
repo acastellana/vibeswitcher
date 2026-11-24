@@ -1054,6 +1054,7 @@ export const ES = {
   pkAdding: "Tu navegador pide la nueva llave de acceso…",
   pkAdded: "Añadida: ahora confírmala en tu terminal (llave {id}).",
   pkCancelled: "Cancelado: no se añadió ninguna llave. Añade una de nuevo, o deja que la oferta de la terminal caduque.",
+  pkUnsupported: "Este autenticador no puede crear una llave de acceso ES256: no se añadió nada. Prueba con otro (una llave de seguridad, o tu teléfono).",
   pkRefused: "El nodo lo rechazó: {why}",
   pkNeverUsed: "nunca",
   pkKeyWhen: "añadida {added}, usada por última vez {used}",

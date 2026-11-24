@@ -170,11 +170,14 @@ store.subscribe('connection', drawPasskeyPill);
 const passkeyOffer = h('div', { class: 'tab-banner passkey-offer', role: 'status', hidden: true });
 function drawPasskeyOffer() {
   const { passkeyOffer: offer, passkeyAdding: adding } = store.state;
-  passkeyOffer.hidden = !offer;
-  if (!offer) return;
+  // Shown while the offer holds (`expires`) and this connection may answer it.
+  const expired = offer?.expires && Date.parse(offer.expires) <= Date.now();
+  passkeyOffer.hidden = !offer || expired || !store.can('passkey.registered');
+  if (passkeyOffer.hidden) return;
+  if (offer.expires) setTimeout(drawPasskeyOffer, Math.max(0, Date.parse(offer.expires) - Date.now()) + 50);
   const add = h('button', { class: 'button small', type: 'button', disabled: adding?.state === 'adding' || adding?.state === 'added', onclick: () => store.addPasskey(registerPasskey) }, t('pkAdd'));
   const said = !adding ? t('pkOffer') : adding.state === 'adding' ? t('pkAdding') : adding.state === 'added' ? t('pkAdded', { id: adding.id })
-    : adding.state === 'cancelled' ? t('pkCancelled') : t('pkRefused', { why: adding.why });
+    : adding.state === 'cancelled' ? t('pkCancelled') : adding.state === 'unsupported' ? t('pkUnsupported') : t('pkRefused', { why: adding.why });
   passkeyOffer.replaceChildren(h('span', null, said), adding?.state === 'added' ? null : add);
 }
 store.subscribe('connection', drawPasskeyOffer);

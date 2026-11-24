@@ -1062,6 +1062,7 @@ const EN = {
   pkAdding: "Your browser asks for the new passkey…",
   pkAdded: "Added: now confirm it in your terminal (passkey {id}).",
   pkCancelled: "Cancelled: no passkey was added. Add one again, or let the terminal’s offer run out.",
+  pkUnsupported: "This authenticator can’t make an ES256 passkey: nothing was added. Try another one (a security key, or your phone).",
   pkRefused: "The node refused it: {why}",
   pkNeverUsed: "never",
   pkKeyWhen: "added {added}, last used {used}",

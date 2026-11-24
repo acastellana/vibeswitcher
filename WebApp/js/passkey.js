@@ -33,8 +33,8 @@ export function createOptions(offer) {
     challenge: fromB64url(offer.challenge),
     rp: { id: offer.rp?.id, name: offer.rp?.name },
     user: { id: fromB64url(offer.user.id), name: offer.user.name, displayName: offer.user.displayName },
-    // ES256, and RS256 for the platform keys that only make that (Windows Hello on older builds).
-    pubKeyCredParams: [{ type: 'public-key', alg: -7 }, { type: 'public-key', alg: -257 }],
+    // ES256 only: the node verifies nothing else (RS256 would be its own reviewed change).
+    pubKeyCredParams: [{ type: 'public-key', alg: -7 }],
     authenticatorSelection: { userVerification: 'required', residentKey: 'discouraged' },
     attestation: 'none',
     excludeCredentials: (offer.exclude || []).map((id) => ({ type: 'public-key', id: fromB64url(id) })),

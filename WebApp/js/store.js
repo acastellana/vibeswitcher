@@ -533,7 +533,8 @@ export function createStore(options = {}) {
       try {
         args = await register(offer, credentials());
       } catch (error) {
-        return said({ state: 'cancelled', why: error?.message || '' });
+        // An authenticator that can't make an ES256 key says NotSupportedError: said plainly, apart from a cancel.
+        return said(error?.name === 'NotSupportedError' ? { state: 'unsupported' } : { state: 'cancelled', why: error?.message || '' });
       }
       const reply = await request('passkey.registered', args);
       said(reply.ok ? { state: 'added', id: reply.result?.id || '' } : { state: 'refused', why: reply.error?.message || '' });

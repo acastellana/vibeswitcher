@@ -25,12 +25,12 @@ test('base64url both ways, without padding', () => {
   }
 });
 
-test('the node’s offer and challenge become WebAuthn’s options: bytes where it wants bytes, ES256 and RS256, user verification', () => {
+test('the node’s offer and challenge become WebAuthn’s options: bytes where it wants bytes, ES256 only, user verification', () => {
   const offer = { register: 'r1', challenge: b64(1, 2, 3), rp: { id: 'localhost', name: 'VibeSwitcher' }, user: { id: b64(9, 9), name: 'vibeswitcher', displayName: 'VibeSwitcher on this machine' }, exclude: [b64(7)] };
   const made = createOptions(offer);
   assert.deepEqual(new Uint8Array(made.challenge), new Uint8Array([1, 2, 3]));
   assert.deepEqual(new Uint8Array(made.user.id), new Uint8Array([9, 9]));
-  assert.deepEqual(made.pubKeyCredParams.map((param) => param.alg), [-7, -257]);
+  assert.deepEqual(made.pubKeyCredParams.map((param) => param.alg), [-7]);
   assert.equal(made.authenticatorSelection.userVerification, 'required');
   assert.equal(made.attestation, 'none');
   assert.deepEqual(new Uint8Array(made.excludeCredentials[0].id), new Uint8Array([7]));
@@ -126,4 +126,14 @@ test('a page may lower acting to a passkey per action, never raise it', () => {
   assert.equal(pageMaySet('web_acts', 'confirm'), true);
   assert.equal(pageMaySet('web_acts', 'off'), true);
   assert.equal(pageMaySet('web_acts', 'trust'), false);
+});
+
+test('an authenticator that can’t make an ES256 passkey is said plainly, apart from a cancel', async () => {
+  const fail = (name) => createStore({ credentials: { create: async () => { const error = new Error('no'); error.name = name; throw error; } } });
+  for (const [name, state] of [['NotSupportedError', 'unsupported'], ['NotAllowedError', 'cancelled']]) {
+    const store = fail(name);
+    store.setPasskeyOffer({ register: 'r1', challenge: b64(1), rp: { id: 'localhost', name: 'VibeSwitcher' }, user: { id: b64(2), name: 'v', displayName: 'V' } });
+    await store.addPasskey(register);
+    assert.equal(store.state.passkeyAdding.state, state);
+  }
 });
