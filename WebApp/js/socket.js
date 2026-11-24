@@ -39,7 +39,7 @@ export const UNCONFIRMED_KEY = 'vibeswitcher.unconfirmed';
 
 export function connectSocket(store, options) {
   const {
-    url, WebSocket, storage, validate, build = Promise.resolve(null),
+    url, WebSocket, storage, validate, build = Promise.resolve(null), rebuild = null,
     setTimeout: later = globalThis.setTimeout, clearTimeout: cancel = globalThis.clearTimeout,
     location = globalThis.location, history = globalThis.history, reload = () => globalThis.location.reload(),
     log = (...args) => console.warn(...args),
@@ -195,6 +195,8 @@ export function connectSocket(store, options) {
     acted = false;
     flag(UNCONFIRMED_KEY, false);
     store.setKinds(Array.isArray(message.kinds) ? message.kinds : [], message.plugins, rights);
+    // The page's own build unknown (/build.json failed at its load): asked again, so the next switch is seen.
+    if (!mine && message.assets && rebuild) Promise.resolve(rebuild()).then((assets) => { if (assets && !mine) mine = assets; }, () => {});
     if (newer && actSecret) {
       // A tab that acts isn't reloaded behind the user's back (its pairing lives in this tab's memory): it says the
       // node has a newer page, and reloading is theirs.
@@ -202,6 +204,8 @@ export function connectSocket(store, options) {
     } else if (newer) {
       reloading = true;
       idle();
+      // Held off (an action of its own waits for its reply): it says so meanwhile, and reloads once that settles.
+      if (reloading) store.setNewerBuild(true);
     }
     // The actions that had no answer go again first, with their own ids (the server answers a repeat as before).
     for (const waiting of [...pending.values()]) send(waiting.message);

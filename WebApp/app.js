@@ -30,6 +30,14 @@ const ui = createUI();
 const mocked = params.has('mock') || params.has('still') || params.has('empty') || params.has('rows');
 // The mock is loaded only for ?mock and its kin: the node's embedded page leaves it out (scripts/webapp-embed.sh), so
 // there it says so; WebApp/serve.sh and a scratch server's folder serve it.
+// The build this page's files came from: their address names it (`/_/<build>/app.js`); by a plain path, /build.json.
+function fetchBuild() {
+  return fetch('build.json', { cache: 'no-cache' }).then((reply) => (reply.ok ? reply.json() : null)).then((json) => json?.assets || null, () => null);
+}
+function ownBuild() {
+  const named = /\/_\/([^/]+)\//.exec(import.meta.url)?.[1];
+  return named ? Promise.resolve(decodeURIComponent(named)) : fetchBuild();
+}
 const feed = mocked
   ? await import('./js/mock.js').then(
     ({ createMock }) => createMock(store, { rows: Number(params.get('rows')) || 0, still: params.has('still'), empty: params.has('empty') }),
@@ -42,8 +50,10 @@ const feed = mocked
     WebSocket,
     storage: sessionStorage,
     validate,
-    // The page's own build, which `hello.assets` is weighed against: a newer one on the node reloads the page.
-    build: fetch('build.json', { cache: 'no-cache' }).then((reply) => (reply.ok ? reply.json() : null)).then((json) => json?.assets || null, () => null),
+    // The page's own build, which `hello.assets` is weighed against: the one its files were loaded from (`/_/<build>/`,
+    // in this module's own address), else /build.json, asked again at a hello while it isn't known.
+    build: ownBuild(),
+    rebuild: fetchBuild,
   });
 store.connect(feed);
 
@@ -121,15 +131,19 @@ function drawTabBanner() {
   tabBanner.hidden = !lost && !state.newerBuild;
   if (tabBanner.hidden) return;
   if (!lost) {
-    tabBanner.replaceChildren(h('span', null, t('tbNewerBuild')),
+    tabBanner.replaceChildren(h('span', null, h('strong', null, t('tbOlderBuild')), ' ', store.acts() ? t('tbOlderActing') : t('tbOlderReads')),
       h('button', { class: 'button small', type: 'button', onclick: () => store.reloadNow() }, t('tbReload')));
     return;
   }
   const level = state.node?.web?.acts?.level ?? (state.node?.web?.acts?.on ? 'trust' : 'off');
-  const why = state.actsLost === 'unconfirmed' ? 'tbUnconfirmed' : state.actsLost === 'reloaded' ? 'tbReloaded' : level === 'off' ? 'tbTurnedOff' : 'tbEnded';
-  tabBanner.replaceChildren(h('span', null, h('strong', null, t(state.actsLost === 'unconfirmed' ? 'tbNotPaired' : 'tbNoLonger')), ' ', t(why), ' '),
-    level === 'off' && state.actsLost !== 'unconfirmed' ? h('code', null, 'vibeswitcher set web_acts trust') : null,
-    level === 'off' && state.actsLost !== 'unconfirmed' ? h('span', null, t('tbThen')) : null,
+  const unconfirmed = state.actsLost === 'unconfirmed';
+  const why = unconfirmed ? 'tbUnconfirmed' : state.actsLost === 'reloaded' ? 'tbReloaded' : level === 'off' ? 'tbTurnedOff' : 'tbEnded';
+  // With acting off on the node, pairing again needs it on first: said too when the reason was another.
+  const off = level === 'off' && !unconfirmed;
+  tabBanner.replaceChildren(h('span', null, h('strong', null, t(unconfirmed ? 'tbNotPaired' : 'tbNoLonger')), ' ', t(why), ' ',
+    off ? (why !== 'tbTurnedOff' ? t('tbOffToo') + ' ' : '') : unconfirmed ? '' : t('tbPairIt') + ' '),
+    off ? h('code', null, 'vibeswitcher set web_acts trust') : null,
+    off ? h('span', null, t('tbThen')) : null,
     h('code', null, 'vibeswitcher web'),
     h('button', { class: 'icon-button tab-banner-close', type: 'button', 'aria-label': t('close'), title: t('close'), onclick: () => store.forgetActsLost() }, '×'));
 }

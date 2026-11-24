@@ -12,6 +12,8 @@ import Testing
 /// - Approve: the long approval approved by clicking its "Approve <commit>";
 /// - Changed: a question the lead reworded after the page drew it (its frames held back meanwhile) is refused as
 ///   `changed`, "look again", and nothing is done;
+/// - Older build: the served page changed under the acting tab: at its next hello it says it is from an older build,
+///   with Reload and what reloading costs, and still acts;
 /// - Level off: the page's own Turn off lowers `web_acts`, and the page reads and drafts again, saying so at the top;
 /// - Reloaded: reloaded, the tab says it no longer acts (its pairing lived in its memory) and to pair again;
 /// - Console: no error.
@@ -23,7 +25,11 @@ struct ActingPageCheckTests {
 
     @Test func thePageActsOnceConfirmedInTheTerminal() async throws {
         let chrome = try #require(PageCheckBrowser.chrome, "no Chrome on the CI's runner: the page check needs the image's google-chrome")
-        let webApp = ServerLintTests.repo.appendingPathComponent("WebApp").path
+        // The page's files from a copy of WebApp/ (a scratch server's folder, read at each request), so the test can change
+        // the served page under an open tab.
+        let webApp = scratch.url("WebApp").path
+        try FileManager.default.copyItem(atPath: ServerLintTests.repo.appendingPathComponent("WebApp").path, toPath: webApp)
+        try? FileManager.default.removeItem(atPath: webApp + "/shots")
         let node = try await ScratchNode(scratch, holdFirstLook: true,
                                          hostArguments: LiveScratch.webArguments + ["--server-arg", ServerArguments.testWebRootFlag + webApp])
         defer { node.stop() }
@@ -93,8 +99,16 @@ struct ActingPageCheckTests {
         let terminal = Task {
             var confirmed = false
             var revised = false
+            var switched = false
             let end = MacTime.real.awake() + 200
-            while !(confirmed && revised), MacTime.real.awake() < end, !Task.isCancelled {
+            while !(confirmed && revised && switched), MacTime.real.awake() < end, !Task.isCancelled {
+                if !switched, FileManager.default.fileExists(atPath: out.appendingPathComponent("switch.want").path) {
+                    // Build B: one byte more in one file changes the build the node names in its hello.
+                    let words = URL(fileURLWithPath: webApp).appendingPathComponent("js/words.js")
+                    try (try String(contentsOf: words, encoding: .utf8) + "\n// build B\n").write(to: words, atomically: true, encoding: .utf8)
+                    try "done".write(to: out.appendingPathComponent("switch.done"), atomically: true, encoding: .utf8)
+                    switched = true
+                }
                 if !confirmed, let phrase = try? String(contentsOf: out.appendingPathComponent("phrase"), encoding: .utf8) {
                     let client = try WireClient(node)
                     let reply = try #require(WireClient.reply(client.request("web.confirm", args: ["code": .string(codeID), "phrase": .string(phrase.trimmingCharacters(in: .whitespacesAndNewlines))])),
@@ -137,7 +151,7 @@ struct ActingPageCheckTests {
                          output: .path(said.path, flags: O_WRONLY | O_TRUNC), limit: 240)
         }
         let table = (try? String(contentsOf: said, encoding: .utf8)) ?? ""
-        for row in ["Pair", "Answer by click", "Approve", "Changed", "Level off", "Reloaded", "Console"] {
+        for row in ["Pair", "Answer by click", "Approve", "Changed", "Older build", "Level off", "Reloaded", "Console"] {
             #expect(table.split(separator: "\n").contains { $0.hasPrefix(row + " ") && $0.contains(" pass ") }, "\(row):\n\(table)")
         }
         #expect(status == 0, "\(table)\n\(node.said)")

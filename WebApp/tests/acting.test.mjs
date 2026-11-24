@@ -19,7 +19,7 @@ const vectors = JSON.parse(readFileSync(join(dirname(fileURLToPath(import.meta.u
 setLanguage('en');
 
 // A page on a fake socket whose hello is the node's web hello with `rights` and `kinds` in place of its own.
-async function page({ rights, kinds, act = undefined, flags = {}, build = null, assets = undefined, phrase = undefined }) {
+async function page({ rights, kinds, act = undefined, flags = {}, build = null, assets = undefined, phrase = undefined, rebuild = null }) {
   const store = createStore();
   const sockets = [];
   const stored = [];
@@ -33,7 +33,7 @@ async function page({ rights, kinds, act = undefined, flags = {}, build = null, 
   }
   const feed = connectSocket(store, {
     url: 'ws://127.0.0.1:47830/ws', WebSocket: FakeSocket, storage: { getItem: (key) => kept.get(key) ?? null, setItem: (key, value) => { stored.push([key, value]); kept.set(key, value); }, removeItem: (key) => kept.delete(key) }, validate: () => null,
-    build: Promise.resolve(build), setTimeout: (run) => { timers.push(run); return timers.length; }, clearTimeout: () => {}, location: { hash: '', pathname: '/', search: '' },
+    build: Promise.resolve(build), rebuild, setTimeout: (run) => { timers.push(run); return timers.length; }, clearTimeout: () => {}, location: { hash: '', pathname: '/', search: '' },
     history: { replaceState() {} }, reload: () => reloads.push(true), log: () => {},
   });
   store.connect(feed);
@@ -240,4 +240,27 @@ test('a code redeemed by a page older than the node’s is reloaded before its p
   const reloaded = await page({ rights: ['read', 'draft'], kinds: ['status'], flags: { 'vibeswitcher.unconfirmed': '1' } });
   assert.equal(reloaded.store.state.actsLost, 'unconfirmed');
   assert.equal(reloaded.kept.has('vibeswitcher.unconfirmed'), false);
+});
+
+test('a tab from an older build never sits there looking current: held off by its own action it says so, then reloads once that settles', async () => {
+  const { store, socket, hello, reloads } = await page({ rights: ['read', 'draft', 'act'], kinds: ACTING, build: 'A', assets: 'A' });
+  // An action of its own out (no reply yet), then the node's hello names a newer build.
+  const asked = store.request('tell', { folder: '/f', text: 'hi' });
+  const sent = socket.sent.filter((message) => message.kind === 'tell').pop();
+  socket.onmessage({ data: JSON.stringify({ ...hello, assets: 'B' }) });
+  assert.equal(reloads.length, 0, 'held off while its action waits');
+  assert.equal(store.state.newerBuild, true, 'and says so meanwhile');
+  socket.onmessage({ data: JSON.stringify({ v: 1, re: sent.id, ok: true, result: {} }) });
+  await asked;
+  assert.equal(reloads.length, 1, 'reloaded once the action settled');
+});
+
+test('a page whose own build is unknown asks for it again at a hello, so the next switch is seen', async () => {
+  let asked = 0;
+  const { store, socket, hello, reloads } = await page({ rights: ['read', 'draft'], kinds: ['status'], build: null, assets: 'A', rebuild: () => { asked += 1; return 'A'; } });
+  assert.equal(asked, 1);
+  await new Promise((resolve) => setImmediate(resolve));
+  socket.onmessage({ data: JSON.stringify({ ...hello, assets: 'B' }) });
+  assert.equal(reloads.length, 1, 'the switch to B is seen');
+  assert.equal(store.state.newerBuild, false);
 });

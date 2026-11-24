@@ -247,6 +247,40 @@ async function run() {
         return ${width} + ': ' + (why || 'fits');
       })()`, WAIT));
     }
+    // A zoomed window (the user's: Chrome at 110–150%): every width from 900 to 2000 px in steps of 7 at each zoom,
+    // the page never wider than the window nor scrolled sideways, also after the message box takes the focus; at three
+    // of them, after a task opens and after the side sheet opens. The first element past the edge is named.
+    const sideways = `(() => {
+      const se = document.scrollingElement;
+      const scrolled = scrollX || se.scrollLeft || document.body.scrollLeft || document.querySelector('.app').scrollLeft;
+      if (se.scrollWidth <= innerWidth && document.body.scrollWidth <= innerWidth && !scrolled) return null;
+      const edge = (el) => { const r = el.getBoundingClientRect(); return r.width > 0 && (r.right > innerWidth + 0.5 || r.left < -0.5) && getComputedStyle(el).position !== 'fixed'; };
+      const first = [...document.querySelectorAll('body *')].find((el) => edge(el) && ![...el.children].some(edge) && !el.closest('[hidden]'));
+      return 'wide ' + se.scrollWidth + ' of ' + innerWidth + (scrolled ? ', scrolled ' + scrolled : '') + (first ? ': ' + first.tagName.toLowerCase() + '.' + String(first.className).split(' ')[0] : '');
+    })()`;
+    await page.go(expect.projectHref);
+    const wides = [];
+    for (const scale of [1, 1.1, 1.25, 1.5]) {
+      for (let width = 900; width <= 2000; width += 7) {
+        await page.send('Emulation.setDeviceMetricsOverride', { width, height: 1000, deviceScaleFactor: scale, mobile: false });
+        await page.evaluate(`document.querySelector('.project-view .say')?.focus()`);
+        const wide = await page.evaluate(sideways);
+        if (wide) wides.push(`${width}@${scale}: ${wide}`);
+      }
+    }
+    for (const [width, scale] of [[1816, 1.1], [1598, 1.25], [1331, 1.5]]) {
+      await page.send('Emulation.setDeviceMetricsOverride', { width, height: 1000, deviceScaleFactor: scale, mobile: false });
+      await page.go(expect.projectHref + '?task=' + encodeURIComponent(expect.task));
+      await page.until(`document.querySelector('.right .task-row2.open') ? true : null`, WAIT);
+      const task = await page.evaluate(sideways);
+      if (task) wides.push(`${width}@${scale} with a task open: ${task}`);
+      await page.evaluate(`document.querySelector('.project-view .line.kind-result')?.click()`);
+      await page.until(`document.querySelector('.sheet:not([hidden])') ? true : null`, WAIT);
+      const sheet = await page.evaluate(sideways);
+      if (sheet) wides.push(`${width}@${scale} with the sheet open: ${sheet}`);
+      await page.evaluate(`document.querySelector('.sheet-close')?.click()`);
+    }
+    fits.push(wides.length ? 'zoomed: ' + wides.length + ' too wide, ' + wides.slice(0, 4).join('; ') : 'zoomed 110–150%, 900–2000 px: fits');
     await page.send('Emulation.setDeviceMetricsOverride', { width: 1400, height: 900, deviceScaleFactor: 1, mobile: false });
     record('Columns fit', fits.every((line) => line && line.endsWith(': fits')), fits.map((line) => line || 'never drawn').join('; '));
 

@@ -13,6 +13,8 @@
 // - Changed: the page holds back the node's frames (a test shim around WebSocket, never the page's code), asks the
 //   test to reword the second question (OUT/revise.want, answered by OUT/revise.done), then clicks the option it drew:
 //   the node refuses it as `changed` and the card says to look again; let go, the card shows the new wording.
+// - Older build: the served page changes under the tab (OUT/switch.want, answered by OUT/switch.done once the test
+//   changed a file); at its next hello the acting tab says it is from an older build, with Reload, and still acts.
 // - Level off: This node's Turn off (set web_acts off); the page reconnects reading and drafting: the line that
 //   turns acting on, the open card drafts, and the banner at the top says this tab no longer acts (turned off).
 // - Reloaded: the tab reloaded says it no longer acts (its pairing was in its memory) and to pair again.
@@ -41,7 +43,9 @@ const HOLD = `(() => {
   const held = [];
   window.__vsHold = false;
   window.__vsRelease = () => { window.__vsHold = false; for (const run of held.splice(0)) run(); };
+  window.__vsSockets = [];
   class Holding extends Native {
+    constructor(...args) { super(...args); window.__vsSockets.push(this); }
     set onmessage(handler) {
       super.onmessage = (event) => {
         if (window.__vsHold && typeof event.data === 'string' && !/"re"\\s*:/.test(event.data)) { held.push(() => handler.call(this, event)); return; }
@@ -138,14 +142,26 @@ async function run() {
     await page.shot('changed');
     record('Changed', refused && reworded, !drawn ? 'the second question wasn’t drawn whole' : !revised ? 'the test never reworded it' : !stale ? 'its option couldn’t be clicked' : !refused ? 'no “look again” after the stale click' : !reworded ? 'the new wording never showed' : refused + '; ' + reworded);
 
+    // Older build: the node's files change under the tab (the test edits the served folder); at its next hello the
+    // tab, which acts, isn't reloaded behind the user's back: the banner at the top says it is from an older build,
+    // that reloading ends acting, and offers Reload.
+    fs.writeFileSync(path.join(out, 'switch.want'), 'change the served page');
+    const switched = await waitFile(path.join(out, 'switch.done'), 90000);
+    if (switched) await page.evaluate('window.__vsSockets.at(-1).close()');
+    const older = switched && await page.until(`(() => { const b = document.querySelector('.tab-banner:not([hidden])'); return b && /older build/.test(b.innerText) && /ends acting/.test(b.innerText) && [...b.querySelectorAll('button')].some((el) => el.innerText.trim() === 'Reload') ? b.innerText.replace(/\\s+/g, ' ').slice(0, 90) : null; })()`, WAIT);
+    const stillActs = older && await page.until(`(() => { const c = ${card(expect.second)}; return c && c.querySelector('.answer button[type=submit]')?.innerText.trim() === 'Answer' ? true : null; })()`, WAIT);
+    await page.shot('older-build');
+    record('Older build', older && stillActs, !switched ? 'the test never changed the served page' : !older ? 'no banner saying the tab is from an older build, with Reload' : !stillActs ? 'the tab stopped acting' : older + '; still acts');
+
     // Level off: This node's Turn off; the page reconnects, reading and drafting.
     await page.go('#/node');
     const off = await page.until(`(() => { const b = [...document.querySelectorAll('.node-column .acts-line button')].find((el) => el.innerText.trim() === 'Turn off'); if (!b || b.disabled) return null; b.click(); return true; })()`, WAIT);
     const reads = off && await page.until(`(() => { const line = document.querySelector('.node-column .acts-line'); return line && line.innerText.includes('vibeswitcher set web_acts trust') ? line.innerText.replace(/\\s+/g, ' ').slice(0, 80) : null; })()`, WAIT);
     await page.go(expect.projectHref);
     const drafts = reads && await page.until(`(() => { const c = ${card(expect.second)}; return c && c.querySelector('.answer button[type=submit]')?.innerText.trim() === 'Draft' ? 'the card drafts' : null; })()`, WAIT);
-    // The tab acted and no longer does: said at the top of the centre, with why.
-    const banner = drafts && await page.until(`(() => { const b = document.querySelector('.tab-banner:not([hidden])'); return b && /no longer acts/.test(b.innerText) && /turned off/.test(b.innerText) ? b.innerText.replace(/\\s+/g, ' ').slice(0, 90) : null; })()`, WAIT);
+    // The tab acted and no longer does: said at the top of the centre, with why (acting turned off; this tab, from an
+    // older build and no longer acting, may have reloaded to the node's meanwhile, which it says too).
+    const banner = drafts && await page.until(`(() => { const b = document.querySelector('.tab-banner:not([hidden])'); return b && /no longer acts/.test(b.innerText) && /(turned off|is off too)/.test(b.innerText) && b.innerText.includes('vibeswitcher set web_acts trust') ? b.innerText.replace(/\\s+/g, ' ').slice(0, 90) : null; })()`, WAIT);
     await page.shot('level-off');
     record('Level off', reads && drafts && banner, !off ? 'no Turn off in This node' : !reads ? 'This node never said pages read and draft' : !drafts ? 'the open card still acts' : !banner ? 'no banner saying the tab no longer acts, acting turned off' : reads + '; ' + drafts + '; ' + banner);
 
