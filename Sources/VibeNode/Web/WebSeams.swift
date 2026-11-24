@@ -50,11 +50,15 @@ public struct WebAdmission: Sendable {
     public var rights: LiveRights
     public var auth: NodeWire.Value
     public var token: String
+    /// An acting page's acting secret (`ActingPages`): given once at its pairing, sent again with the token on a
+    /// reconnect from the page's memory; nil for a page that doesn't act.
+    public var act: String?
 
-    public init(rights: LiveRights, auth: NodeWire.Value, token: String) {
+    public init(rights: LiveRights, auth: NodeWire.Value, token: String, act: String? = nil) {
         self.rights = rights
         self.auth = auth
         self.token = token
+        self.act = act
     }
 }
 

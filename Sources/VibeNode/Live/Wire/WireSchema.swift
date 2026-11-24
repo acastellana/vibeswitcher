@@ -108,10 +108,11 @@ public enum WireSchema {
                                                              optional("pid", .int)]),
             shape("hello.peer", from: "NodeWire.Hello.Peer", [field("voice", .words(["user", "other"])), optional("why", .string)]),
             shape("hello.auth", from: "the web gate (F1)", [field("rights", .list(.words(["read", "draft", "act"]))), optional("token", .string),
-                                                           field("expiresAt", .date)]),
+                                                           // The acting secret, once, in answer to a pairing while acting is on.
+                                                           optional("act", .string), field("expiresAt", .date)]),
             shape("bye", from: "NodeWire.Bye", [field("v", .int), field("kind", .words(["bye"])), field("reason", .string),
                                                 optional("code", .words(["auth", "revoked", "version", "too-long", "not-object",
-                                                                         "not-request", "must", "stopping", "busy"]))]),
+                                                                         "not-request", "must", "stopping", "busy", "acts-off"]))]),
             shape("event", from: "any event a client doesn't know", [field("v", .int), field("kind", .string), optional("must", .bool)]),
         ]
 
@@ -136,7 +137,9 @@ public enum WireSchema {
                                                       field("append", .string)]),
             shape("chat.op.set", from: contractChat, [field("op", .words(["set"])), field("item", .shape("chat.item"))]),
             shape("chat.op.remove", from: contractChat, [field("op", .words(["remove"])), field("id", .string)]),
-            shape("auth.args", from: "the contract's §2", [optional("pair", .string), optional("token", .string), field("client", .string),
+            shape("auth.args", from: "the contract's §2", [optional("pair", .string), optional("token", .string),
+                                                             // An acting page's acting secret, from its memory (`ActingPages`).
+                                                             optional("act", .string), field("client", .string),
                                                           optional("assets", .string)]),
             shape("subscribe.args", from: "the contract's §3", [
                 field("sub", .string), field("collection", collection), optional("key", .string),

@@ -34,34 +34,52 @@ extension Requests {
         }
     }
 
-    /// A user's request from an acting page (`Principal.Route.pageVoice`: the screen found its right and its kind's
-    /// `KindSpec.page`), `token` its page's: the settings a page never sets refused; on a card or a batch, what the page
-    /// drew (`seen`) checked against the card or the batch as it is now, and refused (`changed`) when it changed, which
-    /// stands for the code a terminal types (the user's decision: from an acting page the click is the answer); then
-    /// `pageVoice`, then `voiced` as a terminal's request, recorded as the user's with the page's mark. On `queue`.
-    func pageVoiced(_ request: NodeWire.Request, token: String, origin: String, reply: @escaping (NodeWire.Reply) -> Void) {
-        let via = ActingPages.via(token: token, origin: origin)
-        if let why = pageSetRefusal(request) {
-            note("refused \(request.kind) from \(via): \(why)")
-            return reply(.init(re: request.id, error: .init(.voice, why)))
+    /// The argument a page's `approve.list` is marked with (`pageVoiced` puts it in, whatever the page sent): the list
+    /// leaves out what a page may not approve (`ApproveRequest.listed`). A terminal sending it only narrows its own list.
+    static let pageListMark = "fromPage"
+
+    /// A user's request from an acting page (`Principal.Route.pageVoice`: the screen found its right, its kind's
+    /// `KindSpec.page`, and its pairing still acting), with its page's credentials: the page's checks (`pageChecks`), then
+    /// `pageVoice` (the one confirmation seam), then on the queue the page's checks again and whether it still acts (a
+    /// confirmation may take seconds: what was approved is what is shown now, and an off or a revoke meanwhile counts),
+    /// then `voiced` as a terminal's request, recorded as the user's with the page's mark. On `queue`.
+    func pageVoiced(_ request: NodeWire.Request, credentials: PageCredentials, origin: String, reply: @escaping (NodeWire.Reply) -> Void) {
+        let via = ActingPages.via(token: credentials.token, origin: origin)
+        let refused = { [weak self] (refusal: NodeWire.Reply) in
+            self?.note("refused \(request.kind) from \(via): \(refusal.error?.message ?? "")")
+            reply(refusal)
         }
-        let shown: NodeWire.Request
-        switch seenStands(request) {
-        case .refused(let refusal):
-            note("refused \(request.kind) from \(via): \(refusal.error?.message ?? "")")
-            return reply(refusal)
-        case .go(let request): shown = request
+        guard case .go(let shown) = pageChecks(request) else {
+            if case .refused(let refusal) = pageChecks(request) { refused(refusal) }
+            return
         }
-        pageVoice.confirm(shown, page: via) { [weak self] refused in
+        pageVoice.confirm(shown, page: via) { [weak self] notConfirmed in
             guard let self else { return }
             self.queue.async {
-                if let refused {
-                    self.note("refused \(shown.kind) from \(via): the page's confirmation: \(refused)")
-                    return reply(.init(re: shown.id, error: .init(.voice, "not confirmed: \(refused)")))
+                if let notConfirmed { return refused(.init(re: request.id, error: .init(.voice, "not confirmed: \(notConfirmed)"))) }
+                guard self.actingPages?.acts(token: credentials.token, secret: credentials.act) == true else {
+                    return refused(.init(re: request.id, error: .init(.voice, WebRequestScreen.notActing)))
                 }
-                self.voiced(shown, from: NodeLive.webPeer, via: via, reply: reply)
+                switch self.pageChecks(request) {
+                case .refused(let refusal): refused(refusal)
+                case .go(let now): self.voiced(now, from: NodeLive.webPeer, via: via, reply: reply)
+                }
             }
         }
+    }
+
+    /// An acting page's request as `voiced` takes it, or why not: a setting a page never sets; on a card or a batch,
+    /// what the page drew against now (`seenStands`); `approve.list` marked as the page's (`pageListMark`). On `queue`.
+    func pageChecks(_ request: NodeWire.Request) -> PageShown {
+        if let why = pageSetRefusal(request) { return .refused(.init(re: request.id, error: .init(.voice, why))) }
+        if request.kind == "approve.list" {
+            var marked = request
+            var args = request.args ?? [:]
+            args[Self.pageListMark] = .bool(true)
+            marked.args = args
+            return .go(marked)
+        }
+        return seenStands(request)
     }
 
     /// `request` as `voiced` takes it from an acting page: on a card, `seen` the card's now (else refused `changed`), and
@@ -93,6 +111,11 @@ extension Requests {
                 var asked = request
                 asked.args = args
                 return .go(asked)
+            }
+            // Never an item a page may not act (hooks.install: the terminal's), whoever listed the batch.
+            let terminal = held.items.filter { KindSpec.spec($0.kind)?.page != .acts }
+            guard terminal.isEmpty else {
+                return refuse(.voice, "batch \(id) holds \(terminal.count) item\(terminal.count == 1 ? "" : "s") a page may not approve: run `vibeswitcher approve` in a terminal")
             }
             if !known {
                 guard let seen = seen?.array?.compactMap(\.string) else { return refuse(.badArgs, "approve from a page needs seen: one per item, as listed") }

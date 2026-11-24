@@ -145,18 +145,18 @@ public final class NodeLive: @unchecked Sendable {
             }
         }
         // An acting page's user's request (its token's, on this loopback listener: its origin the one it checks).
-        screen.onPageVoice = { [weak requests, weak web] request, token, transport in
+        screen.acting = acting
+        screen.onPageVoice = { [weak requests, weak web] request, credentials, transport in
             guard let requests else { return }
             let origin = "http://127.0.0.1:\(web?.port.map(String.init) ?? "?")"
-            requests.pageVoiced(request, token: token, origin: origin) { reply in transport.send(NodeWire.message(reply)) }
+            requests.pageVoiced(request, credentials: credentials, origin: origin) { reply in transport.send(NodeWire.message(reply)) }
         }
-        // Closed on the listener's queue, as every other close of a page's connection.
+        // Marked not acting at once; closed on the listener's queue, as every other close of a page's connection.
         let listenerQueue = queue
         acting.onOff = { [weak screen] in
-            listenerQueue.async {
-                screen?.closeActing(code: "acts-off", reason: "acting from the page was turned off: reads and drafts go on after a reconnect")
-            }
+            screen?.endActing(code: "acts-off", reason: "acting from the page was turned off: reads and drafts go on after a reconnect", closeOn: listenerQueue)
         }
+        acting.onLost = { [weak screen] key in screen?.endActing(key: key, closeOn: listenerQueue) }
         let hub = hub
         requests.liveSeq = { [weak hub] in hub?.seq(of: $0) ?? 0 }
         requests.web = access
@@ -238,6 +238,8 @@ public final class NodeLive: @unchecked Sendable {
     /// Late codes dropped, pages whose token ran out closed, and the listener let go once nothing wants it.
     func sweep() {
         access.sweep()
+        // Acting from the page as the vault says, asked again off the queue (the cache this server writes through).
+        acting.refreshLater()
         web.closeUnheld()
         web.follow()
         tailnet?.sweep()

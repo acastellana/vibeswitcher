@@ -175,7 +175,11 @@ extension Requests {
     }
 
     /// The batch kept and its list replied, with what needs the user's own decision beside it. On `queue`.
-    private func listed(_ request: NodeWire.Request, items: [ApproveItem], own: [ApproveOwn], engine: LeadEngine, reply: (NodeWire.Reply) -> Void) {
+    func listed(_ request: NodeWire.Request, items all: [ApproveItem], own: [ApproveOwn], engine: LeadEngine, reply: (NodeWire.Reply) -> Void) {
+        // An acting page's list (`pageListMark`): what a page may not approve left out, and counted for the terminal.
+        let fromPage = request.args?[Self.pageListMark]?.bool == true
+        let items = fromPage ? all.filter { KindSpec.spec($0.kind)?.page == .acts } : all
+        let terminalOnly = all.count - items.count
         guard items.count <= Self.approveMost else {
             return reply(.init(re: request.id, error: .init(.refused, "\(items.count) accepts wait, more than one code may cover (\(Self.approveMost)): "
                 + "settle them per folder (vibeswitcher config held FOLDER, base show FOLDER, hooks install), or narrow with --only")))
@@ -192,6 +196,7 @@ extension Requests {
             result.batch = id
             result.code = NodeIds.code(card: id)
         }
+        if terminalOnly > 0 { result.terminal = .init(count: terminalOnly, command: "vibeswitcher approve") }
         reply(.init(re: request.id, typed: result))
     }
 
@@ -231,6 +236,15 @@ extension Requests {
             // Only a kind the table lets a batch hold (`KindSpec`'s `batch`): this server made the batch, so another is a bug.
             guard KindSpec.spec(item.kind)?.recorded?.batch == true else {
                 return reply(.init(re: request.id, error: .init(.internal, "\(item.kind) can't be an item of a batch: nothing more was done")))
+            }
+            // An acting page's batch never holds an item a page may not act (its list left those out, `seenStands`
+            // refused a batch with one): checked again here, where each item runs.
+            if pageMarks[action] != nil, KindSpec.spec(item.kind)?.page != .acts {
+                let left = batch.items.dropFirst(at + 1).map { WireKinds.Approve.Left(kind: $0.kind, subject: $0.subject) }
+                return reply(.init(re: request.id, typed: WireKinds.Approve.Result(
+                    done: done, refused: .init(kind: item.kind, subject: item.subject, action: Self.itemAction(action, at), code: "voice",
+                                               message: "\(item.kind) is the terminal's: run `vibeswitcher approve` in a terminal"),
+                    left: Array(left))))
             }
             var args = item.args
             // The batch's code stood for the card's: the card's own, checked against the card as `config accept` checks it.

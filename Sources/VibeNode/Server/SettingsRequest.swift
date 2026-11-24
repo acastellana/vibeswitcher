@@ -31,7 +31,7 @@ extension Requests {
         let acting = self.actingPages
         (engine?.work ?? DispatchQueue.global(qos: .userInitiated)).async {
             // Acting from the page as the vault says (asked here, off the queue), never a file.
-            let actingNow = acting.map { $0.refresh(); return $0.state?.on == true ? "on" : "off" } ?? "off"
+            let actingNow = acting.map { $0.refreshLater(); $0.settled(); return $0.state?.on == true ? "on" : "off" } ?? "off"
             let node = NodeSettings.node(files: files).map { shown in
                 var shown = shown
                 if shown.setting.home == .acting { shown.value = actingNow }

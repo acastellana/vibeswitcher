@@ -2,40 +2,57 @@ import Foundation
 import VibeCore
 
 /// Acting from the page on this node (the web UI design's step 2, "Acting from the page"): whether the user turned
-/// `web_acts` on, and which page tokens act, as the host's vault keeps them (`LeadVaultV2.PageActs`). Never a file: any
-/// process of the user's can write the token file (`WebTokens`' own note), so a token found there reads and drafts, and
-/// acts only when the vault holds its SHA-256, which only this server's pairing writes, and only while `web_acts` is on.
+/// `web_acts` on, and which pages act, as the host's vault keeps them (`LeadVaultV2.PageActs`). Never a file: any process
+/// of the user's can write the token file (`WebTokens`' own note), and a browser keeps its token where any process of the
+/// user's reads it (Chromium writes a page's storage to its profile on disk, under /mnt/c on WSL). So acting needs a
+/// second secret: one a page paired while `web_acts` is on is given once (`hello.auth.act`) and keeps in its memory only;
+/// the vault holds the SHA-256 of the token with it (`key`), never either. A reload loses it: the page reads and drafts
+/// until it is paired again. An acting pairing lives `life` at most (its token's end if sooner).
 ///
 /// Only the loopback page's gate has one (`WebAccess.acting`, set by `NodeLive`); the tailnet's gate has none, so a
-/// tailnet page never acts, whatever its token.
+/// tailnet page never acts, whatever it sends.
 ///
-/// - At a page's auth with a token, the vault is asked then (`acts`): a revoke, `web_acts` off, or the token's end
-///   counts at once, across the server's restarts and switches (the vault outlives them).
-/// - A page that takes a pairing code (`vibeswitcher web`, the user's voice) while `web_acts` is on acts: its token's
-///   SHA-256 goes to the vault (`paired`).
-/// - `set web_acts off` (`set`) empties the vault's list and closes every acting connection (`onOff`); on again needs a
-///   new pairing. The user's revoke drops every acting token (`revoked`).
-///
-/// What `status` says is the last the vault answered (`state`), asked again at each welcome (`refresh`). From any thread;
-/// each vault call is a host call (`HostCall.vaultTimeout` at most).
+/// What it says comes from its cache of the vault (no host call on the server's queue: a stalled host never holds a
+/// page's auth or request): loaded at each welcome and on a timer (`refreshLater`), and written through by this server,
+/// the vault's only writer of it: a pairing (`paired`), the user's `set web_acts` (`set`), the user's revoke (`revoked`).
+/// Each change applies to the cache at once and goes to the vault in order (one serial queue); a refresh that began
+/// before a change doesn't undo it (`generation`). Acting is judged against the cache at each request (`acts`), so a
+/// pairing's end, an off or a revoke counts at the next request, not the next connection.
 public final class ActingPages: @unchecked Sendable {
+    /// The longest an acting pairing lives: then pair again.
+    public static let life: TimeInterval = 12 * 60 * 60
+
     private let vault: LeadVaultV2Client?
     private let note: (String) -> Void
+    private let now: @Sendable () -> Date
     private let lock = NSLock()
-    private var last: LeadVaultV2.PageActs?
-    /// Called once acting is turned off: the acting connections are closed (`WebRequestScreen.closeActing`).
+    /// The vault's calls, in order, off every server queue.
+    private let writes = DispatchQueue(label: "vibeswitcher.acting-pages")
+    private var cache: LeadVaultV2.PageActs?
+    /// Counts this server's changes: a refresh that began before one doesn't overwrite it.
+    private var generation = 0
+    /// Called once acting is turned off, at once, where `set` runs: the screen marks its acting connections not acting
+    /// and closes them (`WebRequestScreen.endActing`).
     public var onOff: (() -> Void)?
+    /// Called when a pairing's acting couldn't be kept in the vault (its key): that connection acts no more.
+    public var onLost: ((String) -> Void)?
 
     /// `vault`: the host's record (nil where there is none, the Mac's: no page acts).
-    public init(vault: LeadVaultV2Client?, note: @escaping (String) -> Void = { _ in }) {
+    public init(vault: LeadVaultV2Client?, now: @escaping @Sendable () -> Date = { Date() }, note: @escaping (String) -> Void = { _ in }) {
         self.vault = vault
+        self.now = now
         self.note = note
     }
 
-    /// What the vault last said: nil before it answered.
-    public var state: LeadVaultV2.PageActs? { lock.withLock { last } }
+    /// What the cache says now: nil before the vault first answered.
+    public var state: LeadVaultV2.PageActs? { lock.withLock { cache } }
 
-    /// A token's SHA-256 as the vault keeps it: lower-case hex.
+    /// The vault's key of an acting pairing: SHA-256, lower-case hex, of its token and its acting secret.
+    public static func key(token: String, secret: String) -> String {
+        BuildInfo.sha256(of: Data("\(token)\n\(secret)".utf8))
+    }
+
+    /// A token's SHA-256, lower-case hex (its id in a page mark is the first 12 digits).
     public static func digest(_ token: String) -> String { WebTokens.hex(WebTokens.digest(token)) }
 
     /// The page mark a request made from it is recorded with (`LeadVaultV2.UserAction.via`): its token's id (the first
@@ -44,57 +61,92 @@ public final class ActingPages: @unchecked Sendable {
         "page \(digest(token).prefix(12)) from \(ConfigSeal.inert(origin, limit: 120))"
     }
 
-    /// Whether a page whose auth carried `token` acts: the vault asked now. False when it can't be asked.
-    public func acts(token: String) -> Bool {
-        guard let vault else { return false }
-        do {
-            let acts = try vault.pageActs()
-            remember(acts)
-            return acts.on && acts.tokens.contains(Self.digest(token))
-        } catch {
-            note("acting from the page: the vault couldn't be asked (\(error)): this page reads and drafts")
-            return false
-        }
+    /// Whether a page with `token` and acting `secret` acts now: on, and its pairing live in the cache.
+    public func acts(token: String, secret: String?) -> Bool {
+        guard let secret, !secret.isEmpty, let cache = state, cache.on, let end = cache.tokens[Self.key(token: token, secret: secret)] else { return false }
+        return end > now().timeIntervalSince1970
     }
 
-    /// A token just issued from a pairing code: kept as acting, until `until`, when `web_acts` is on. Whether it acts.
-    public func paired(token: String, until: Date) -> Bool {
-        guard let vault else { return false }
-        do {
-            guard try vault.pageActs().on else { return false }
-            let acts = try vault.addActingToken(sha256: Self.digest(token), until: until.timeIntervalSince1970)
-            remember(acts)
-            note("acting from the page: a page paired while it is on acts")
-            return acts.tokens.contains(Self.digest(token))
-        } catch {
-            note("acting from the page: a paired page's token wasn't kept as acting (\(error)): it reads and drafts")
-            return false
+    /// A token just issued from a pairing code: when acting is on, its acting secret (sent once, `hello.auth.act`), kept
+    /// at once in the cache and then in the vault, until `life` from now or the token's end; nil when off (or not known
+    /// yet). Never waits on the host.
+    public func paired(token: String, tokenEnds: Date) -> String? {
+        guard vault != nil, state?.on == true else { return nil }
+        let secret = WebTokens.randomText(bytes: WebTokens.tokenBytes)
+        let key = Self.key(token: token, secret: secret)
+        let until = min(tokenEnds.timeIntervalSince1970, now().addingTimeInterval(Self.life).timeIntervalSince1970)
+        let made = lock.withLock { () -> Int in
+            generation += 1
+            cache?.tokens[key] = until
+            return generation
         }
+        writes.async { [weak self] in
+            guard let self, let vault = self.vault else { return }
+            do {
+                self.apply(try vault.addActingToken(sha256: key, until: until), from: made)
+                self.note("acting from the page: a page paired while it is on acts, for 12 hours at most")
+            } catch {
+                self.note("acting from the page: a paired page's acting wasn't kept in the vault (\(error)): it reads and drafts")
+                self.lock.withLock {
+                    self.generation += 1
+                    _ = self.cache?.tokens.removeValue(forKey: key)
+                }
+                self.onLost?(key)
+            }
+        }
+        return secret
     }
 
-    /// The user's `set web_acts on|off`: kept in the vault; off closes the acting connections.
+    /// The user's `set web_acts on|off` (the request recorded already): kept in the vault, then in the cache; off ends
+    /// every acting connection at once (`onOff`). Waits on the host: called off the server's queue.
     public func set(on: Bool) throws -> LeadVaultV2.PageActs {
         guard let vault else { throw LeadVaultV2Client.Refused("This node's host keeps no record of the user's actions: no page acts here.") }
-        let acts = try vault.setPageActs(on: on)
-        remember(acts)
+        if !on {
+            // Off in the cache first: no request acts from here, whatever the vault's answer.
+            lock.withLock {
+                generation += 1
+                cache = .init(since: nil, tokens: [:])
+            }
+            onOff?()
+        }
+        let acts = try writes.sync { try vault.setPageActs(on: on) }
+        lock.withLock {
+            generation += 1
+            cache = acts
+        }
         note("acting from the page turned \(on ? "on" : "off")")
-        if !on { onOff?() }
         return acts
     }
 
-    /// The user's revoke: no token acts any more.
+    /// The user's revoke: no pairing acts any more (the cache at once, the vault in order).
     public func revoked() {
-        guard let vault else { return }
-        do { remember(try vault.dropActingTokens(nil)) } catch { note("acting from the page: the revoke's drop wasn't kept (\(error))") }
+        let made = lock.withLock { () -> Int in
+            generation += 1
+            cache?.tokens = [:]
+            return generation
+        }
+        writes.async { [weak self] in
+            guard let self, let vault = self.vault else { return }
+            do { self.apply(try vault.dropActingTokens(nil), from: made) } catch { self.note("acting from the page: the revoke's drop wasn't kept (\(error))") }
+        }
     }
 
-    /// The vault asked again (at each welcome), for `status`.
-    public func refresh() {
-        guard let vault, let acts = try? vault.pageActs() else { return }
-        remember(acts)
+    /// The vault asked again, off every server queue (at each welcome, on the timer).
+    public func refreshLater() {
+        let began = lock.withLock { generation }
+        writes.async { [weak self] in
+            guard let self, let vault = self.vault, let acts = try? vault.pageActs() else { return }
+            self.apply(acts, from: began)
+        }
     }
 
-    private func remember(_ acts: LeadVaultV2.PageActs) { lock.withLock { last = acts } }
+    /// Waits for the vault's calls asked so far (tests, and `settings`, which shows what the vault says).
+    func settled() { writes.sync {} }
+
+    /// What the vault said, unless this server changed the cache since the call began.
+    private func apply(_ acts: LeadVaultV2.PageActs, from began: Int) {
+        lock.withLock { if generation == began { cache = acts } }
+    }
 
     /// What `status` and the node stream say: on, since when, and how many acting pages are open (`pages`).
     public func value(pages: Int) -> NodeWire.Value {

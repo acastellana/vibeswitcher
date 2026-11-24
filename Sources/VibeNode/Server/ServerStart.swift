@@ -188,7 +188,7 @@ public enum ServerStart {
         server.hub = live.hub
         link.onWelcome = { _, _ in
             // What `status` says of acting from the page: the vault asked again (a host call, off the queue).
-            DispatchQueue.global(qos: .utility).async { live.acting.refresh() }
+            live.acting.refreshLater()
             requests.refreshNotes()
             requests.restoreHeldSends()
             engine.welcomed()

@@ -330,6 +330,8 @@ extension WireKinds {
             public var own: [Own]?
             public var batch: String?
             public var code: String?
+            /// An acting page's list: how many items it left out (a page may not approve them) and what runs them.
+            public var terminal: Terminal?
             public init(items: [Item], decide: [NodeWire.Value], pushes: [NodeWire.Value], own: [Own], batch: String? = nil, code: String? = nil) {
                 self.items = items
                 self.decide = decide
@@ -337,6 +339,15 @@ extension WireKinds {
                 self.own = own
                 self.batch = batch
                 self.code = code
+            }
+        }
+
+        public struct Terminal: Codable, Sendable, Equatable {
+            public var count: Int?
+            public var command: String?
+            public init(count: Int, command: String) {
+                self.count = count
+                self.command = command
             }
         }
 

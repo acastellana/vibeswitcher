@@ -135,12 +135,13 @@ public enum LeadVaultV2 {
         case recordPageAction(action: String, kind: String, subject: String?, digest: String, via: String)
     }
 
-    /// Acting from the page as the record keeps it: since when it is on (nil: off) and the acting tokens' SHA-256s, live.
+    /// Acting from the page as the record keeps it: since when it is on (nil: off) and the acting pages' keys (the
+    /// SHA-256 of a page's token with its acting secret, `ActingPages.key`), each with its end, live ones only.
     public struct PageActs: Codable, Equatable, Sendable {
         public var since: Double?
-        public var tokens: [String]
+        public var tokens: [String: Double]
         public var on: Bool { since != nil }
-        public init(since: Double?, tokens: [String]) {
+        public init(since: Double?, tokens: [String: Double]) {
             self.since = since
             self.tokens = tokens
         }
@@ -420,7 +421,8 @@ public enum LeadVaultV2 {
     /// Acting from the page now: its tokens past their end dropped first.
     static func pageActs(_ record: inout Book, now: Double) -> PageActs {
         for (sha, until) in Book.part(record.plugin, pageTokenPrefix) where (Double(until) ?? 0) <= now { record.plugin[pageTokenPrefix + sha] = nil }
-        return PageActs(since: record.plugin[pageSinceKey].flatMap(Double.init), tokens: Book.part(record.plugin, pageTokenPrefix).keys.sorted())
+        return PageActs(since: record.plugin[pageSinceKey].flatMap(Double.init),
+                        tokens: Book.part(record.plugin, pageTokenPrefix).compactMapValues(Double.init))
     }
 
     /// Where acting from the page is kept, in the one plugin field (`Book.plugin`: no stored field of its own, see there).

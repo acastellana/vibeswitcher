@@ -13,11 +13,24 @@ struct PageVoicedTests {
     static let token = "page-token-of-a-test"
     static let origin = "http://127.0.0.1:8765"
 
-    /// `kind` with `args` from an acting page: its reply.
-    private func fromPage(_ world: CardWorld, _ kind: String, _ args: [String: NodeWire.Value], action: String = UUID().uuidString.lowercased()) async -> NodeWire.Reply? {
+    /// The world's server with acting on (its vault in the test's memory) and one page paired while it is: that page's
+    /// credentials, and its acting.
+    private func acting(_ world: CardWorld) throws -> (PageCredentials, ActingPages) {
+        let acting = ActingPages(vault: MemoryVaultV2().client)
+        _ = try acting.set(on: true)
+        let secret = try #require(acting.paired(token: Self.token, tokenEnds: Date().addingTimeInterval(3_600)))
+        acting.settled()
+        world.queue.sync { world.requests.actingPages = acting }
+        return (PageCredentials(token: Self.token, act: secret), acting)
+    }
+
+    /// `kind` with `args` from the acting page whose credentials are `page`: its reply.
+    private func fromPage(_ world: CardWorld, _ page: PageCredentials, _ kind: String, _ args: [String: NodeWire.Value],
+                          action: String = UUID().uuidString.lowercased()) async -> NodeWire.Reply? {
+        let credentials = page
         let reply = Locked<NodeWire.Reply?>(nil)
         let request = NodeWire.Request(id: UUID().uuidString, kind: kind, args: args, action: action)
-        world.queue.async { world.requests.pageVoiced(request, token: Self.token, origin: Self.origin) { reply.value = $0 } }
+        world.queue.async { world.requests.pageVoiced(request, credentials: credentials, origin: Self.origin) { reply.value = $0 } }
         _ = await eventually(timeout: 120) { reply.value != nil }
         return reply.value
     }
@@ -30,23 +43,24 @@ struct PageVoicedTests {
     @Test func aPagesAnswerNamesTheCardAsDrawnAndIsRecordedAsThePages() async throws {
         let world = try await CardWorld.make(scratch)
         defer { world.stop() }
+        let (page, _) = try acting(world)
         let lead = try await world.sleepingLead()
         let asked = try await world.asked("Keep the badges?", options: ["Yes", "No"], lead: lead)
         let card = try #require(world.card(asked.card.id))
         #expect(card.seen.count == 64 && card.value["seen"]?.string == card.seen)
 
         // A code from a page is refused: the page sends what it drew.
-        let coded = try #require(await fromPage(world, "answer", ["card": .string(card.id), "code": .string(card.code), "seen": .string(card.seen), "text": .string("Yes")]))
+        let coded = try #require(await fromPage(world, page, "answer", ["card": .string(card.id), "code": .string(card.code), "seen": .string(card.seen), "text": .string("Yes")]))
         #expect(coded.error?.code == "bad-args", "\(coded)")
         // What it drew isn't the card now: refused, nothing recorded.
         let staleAction = UUID().uuidString.lowercased()
-        let stale = try #require(await fromPage(world, "answer", ["card": .string(card.id), "seen": .string(String(repeating: "0", count: 64)), "text": .string("Yes")],
+        let stale = try #require(await fromPage(world, page, "answer", ["card": .string(card.id), "seen": .string(String(repeating: "0", count: 64)), "text": .string("Yes")],
                                                 action: staleAction))
         #expect(stale.error?.code == "changed", "\(stale)")
         #expect(await world.actions().allSatisfy { $0.action != staleAction })
 
         let action = UUID().uuidString.lowercased()
-        let reply = try #require(await fromPage(world, "answer", ["card": .string(card.id), "seen": .string(card.seen), "text": .string("Yes")], action: action))
+        let reply = try #require(await fromPage(world, page, "answer", ["card": .string(card.id), "seen": .string(card.seen), "text": .string("Yes")], action: action))
         #expect(reply.ok, "\(reply)")
         // The answer recorded as the page's (the message it sends the lead is recorded under the same action, as a
         // terminal's answer's is).
@@ -55,7 +69,7 @@ struct PageVoicedTests {
         #expect(recorded.first?.via == ActingPages.via(token: Self.token, origin: Self.origin), "\(recorded)")
         #expect(recorded.first?.via?.hasPrefix("page \(ActingPages.digest(Self.token).prefix(12)) from http://127.0.0.1:8765") == true)
         // Answered again (a lost reply): as before, done once.
-        let again = try #require(await fromPage(world, "answer", ["card": .string(card.id), "seen": .string(card.seen), "text": .string("Yes")], action: action))
+        let again = try #require(await fromPage(world, page, "answer", ["card": .string(card.id), "seen": .string(card.seen), "text": .string("Yes")], action: action))
         #expect(again.ok, "\(again)")
         #expect(await world.actions().filter { $0.action == action && $0.kind == "answer" }.count == 1)
     }
@@ -64,12 +78,13 @@ struct PageVoicedTests {
     @Test func aRevisedCardIsRefusedAsChanged() async throws {
         let world = try await CardWorld.make(scratch)
         defer { world.stop() }
+        let (page, _) = try acting(world)
         let lead = try await world.sleepingLead()
         let asked = try await world.asked("Name it Parser?", options: ["Parser", "Reader"], lead: lead)
         let drawn = try #require(world.card(asked.card.id)).seen
         _ = try await world.revise(asked.question.id, text: "Name it Reader?", options: ["Reader", "Parser"], note: "the other way round", lead: lead)
         #expect(await eventually(timeout: 60) { world.card(asked.card.id)?.seen != drawn })
-        let reply = try #require(await fromPage(world, "answer", ["card": .string(asked.card.id), "seen": .string(drawn), "text": .string("Parser")]))
+        let reply = try #require(await fromPage(world, page, "answer", ["card": .string(asked.card.id), "seen": .string(drawn), "text": .string("Parser")]))
         #expect(reply.error?.code == "changed", "\(reply)")
     }
 
@@ -77,12 +92,13 @@ struct PageVoicedTests {
     @Test func theConfirmationSeamStopsItBeforeTheRecord() async throws {
         let world = try await CardWorld.make(scratch)
         defer { world.stop() }
+        let (page, _) = try acting(world)
         let lead = try await world.sleepingLead()
         let asked = try await world.asked("Ship it?", options: ["Yes", "No"], lead: lead)
         let card = try #require(world.card(asked.card.id))
         world.queue.sync { world.requests.pageVoice = Refusing() }
         let action = UUID().uuidString.lowercased()
-        let reply = try #require(await fromPage(world, "answer", ["card": .string(card.id), "seen": .string(card.seen), "text": .string("Yes")], action: action))
+        let reply = try #require(await fromPage(world, page, "answer", ["card": .string(card.id), "seen": .string(card.seen), "text": .string("Yes")], action: action))
         #expect(reply.error?.code == "voice" && reply.error?.message.contains("no touch") == true, "\(reply)")
         #expect(await world.actions().allSatisfy { $0.action != action })
         #expect(world.card(card.id)?.isOpen == true)
@@ -92,9 +108,10 @@ struct PageVoicedTests {
     @Test func thePageNeverSetsWhatWidensIt() async throws {
         let world = try await CardWorld.make(scratch)
         defer { world.stop() }
+        let (page, _) = try acting(world)
         for (key, value) in [("web_acts", "on"), ("floor_merge_policy", "auto"), ("policy", "anything")] {
             let action = UUID().uuidString.lowercased()
-            let reply = try #require(await fromPage(world, "set", ["key": .string(key), "value": .string(value)], action: action))
+            let reply = try #require(await fromPage(world, page, "set", ["key": .string(key), "value": .string(value)], action: action))
             #expect(reply.error?.code == "voice" && reply.error?.message.contains("from a terminal") == true, "\(key): \(reply)")
             #expect(await world.actions().allSatisfy { $0.action != action })
         }
@@ -120,12 +137,13 @@ struct PageVoicedTests {
     @Test func everySpellingOfARefusedSettingIsRefused() async throws {
         let world = try await CardWorld.make(scratch)
         defer { world.stop() }
+        let (page, _) = try acting(world)
         for setting in NodeSettings.all where setting.page != .sets {
             let aliases = NodeSettings.aliases.filter { $0.value == setting.key }.map(\.key)
             for spelling in [setting.key, setting.key.uppercased(), setting.key.capitalized] + aliases {
                 var args: [String: NodeWire.Value] = ["key": .string(spelling), "value": .string("on")]
                 if setting.scope == .project { args["folder"] = .string(world.repo) }
-                let reply = try #require(await fromPage(world, "set", args))
+                let reply = try #require(await fromPage(world, page, "set", args))
                 #expect(!reply.ok, "\(spelling): \(reply)")
             }
         }
@@ -134,26 +152,90 @@ struct PageVoicedTests {
         #expect(settings.result?["node"]?["settings"]?.array?.first { $0["key"]?.string == "web_acts" }?["value"]?.string != "on")
     }
 
-    /// `approve` from a page names each item as listed; a list that isn't the batch is refused before anything, and the
-    /// batch's own code stands in once it matches.
-    @Test func aPagesApproveNamesEveryItemAsListed() async throws {
+    /// `approve` from a page names each item as listed: a list that isn't the batch is refused before anything, and the
+    /// batch's own code stands in once it matches; a batch that holds an item a page may not act (hooks.install), whoever
+    /// listed it, is refused.
+    @Test func aPagesApproveNamesEveryItemAsListedAndNeverATerminalsItem() async throws {
         let world = try await CardWorld.make(scratch)
         defer { world.stop() }
-        let item = Requests.ApproveItem(kind: "hooks.install", args: [:], subject: "claude", card: nil, reasons: ["missing"])
-        let id = "local:approve:" + UUID().uuidString.lowercased()
-        world.queue.sync { world.requests.approveBatches.append(.init(id: id, items: [item], at: Platform.Clock.steadyDate())) }
-        let request = { (seen: [String]) in
+        let accept = Requests.ApproveItem(kind: "config.accept", args: [:], subject: "/home/user/project", card: nil, reasons: ["changed"])
+        let hooks = Requests.ApproveItem(kind: "hooks.install", args: [:], subject: "claude", card: nil, reasons: ["missing"])
+        func batch(_ items: [Requests.ApproveItem]) -> String {
+            let id = "local:approve:" + UUID().uuidString.lowercased()
+            world.queue.sync { world.requests.approveBatches.append(.init(id: id, items: items, at: Platform.Clock.steadyDate())) }
+            return id
+        }
+        func request(_ id: String, _ seen: [String]) -> NodeWire.Request {
             NodeWire.Request(id: "1", kind: "approve", args: ["batch": .string(id), "seen": .array(seen.map(NodeWire.Value.string))], action: UUID().uuidString)
         }
-        switch world.queue.sync(execute: { world.requests.seenStands(request(["nope"])) }) {
+        let plain = batch([accept])
+        switch world.queue.sync(execute: { world.requests.seenStands(request(plain, ["nope"])) }) {
         case .refused(let reply): #expect(reply.error?.code == "changed", "\(reply)")
         case .go(let request): Issue.record("taken: \(request)")
         }
-        switch world.queue.sync(execute: { world.requests.seenStands(request([item.seen])) }) {
+        switch world.queue.sync(execute: { world.requests.seenStands(request(plain, [accept.seen])) }) {
         case .refused(let reply): Issue.record("refused: \(reply)")
-        case .go(let request):
-            #expect(request.args?["code"]?.string == NodeIds.code(card: id) && request.args?["seen"] == nil, "\(request)")
+        case .go(let request): #expect(request.args?["code"]?.string == NodeIds.code(card: plain) && request.args?["seen"] == nil, "\(request)")
         }
+        let mixed = batch([accept, hooks])
+        switch world.queue.sync(execute: { world.requests.seenStands(request(mixed, [accept.seen, hooks.seen])) }) {
+        case .refused(let reply): #expect(reply.error?.code == "voice" && reply.error?.message.contains("1 item a page may not approve") == true, "\(reply)")
+        case .go(let request): Issue.record("a page approved hooks.install: \(request)")
+        }
+    }
+
+    /// An acting page's `approve.list` leaves out what a page may not approve, and says how many and what runs them; a
+    /// terminal's lists everything.
+    @Test func aPagesApproveListLeavesOutTheTerminalsItems() async throws {
+        let world = try await CardWorld.make(scratch)
+        defer { world.stop() }
+        let accept = Requests.ApproveItem(kind: "config.accept", args: [:], subject: "/home/user/project", card: nil, reasons: ["changed"])
+        let hooks = Requests.ApproveItem(kind: "hooks.install", args: [:], subject: "claude", card: nil, reasons: ["missing"])
+        func list(_ args: [String: NodeWire.Value]) -> NodeWire.Reply? {
+            let got = Locked<NodeWire.Reply?>(nil)
+            world.queue.sync {
+                world.requests.listed(NodeWire.Request(id: "1", kind: "approve.list", args: args), items: [accept, hooks], own: [], engine: world.engine) { got.value = $0 }
+            }
+            return got.value
+        }
+        // What the page path marks (`pageChecks`), whatever the page sent.
+        guard case .go(let marked) = world.queue.sync(execute: { world.requests.pageChecks(NodeWire.Request(id: "1", kind: "approve.list", args: [:])) }) else {
+            Issue.record("approve.list refused")
+            return
+        }
+        let fromPage = try #require(list(marked.args ?? [:]))
+        #expect(fromPage.result?["items"]?.array?.compactMap { $0["kind"]?.string } == ["config.accept"], "\(fromPage)")
+        #expect(fromPage.result?["terminal"]?["count"]?.int == 1 && fromPage.result?["terminal"]?["command"]?.string == "vibeswitcher approve")
+        let terminal = try #require(list([:]))
+        #expect(terminal.result?["items"]?.array?.compactMap { $0["kind"]?.string } == ["config.accept", "hooks.install"])
+        #expect(terminal.result?["terminal"] == nil)
+    }
+
+    /// A confirmation may take seconds: what the page drew is checked again once it is given (a card changed meanwhile
+    /// is refused), and so is whether the page still acts (an off meanwhile is refused).
+    @Test func whatHappensDuringTheConfirmationCounts() async throws {
+        let world = try await CardWorld.make(scratch)
+        defer { world.stop() }
+        let (page, acting) = try acting(world)
+        let lead = try await world.sleepingLead()
+        let asked = try await world.asked("Ship it?", options: ["Yes", "No"], lead: lead)
+        let card = try #require(world.card(asked.card.id))
+        struct During: PageVoice {
+            let meanwhile: @Sendable () -> Void
+            func confirm(_ request: NodeWire.Request, page: String, done: @escaping @Sendable (String?) -> Void) {
+                meanwhile()
+                done(nil)
+            }
+        }
+        let engine = world.engine
+        world.queue.sync { world.requests.pageVoice = During { engine.cards.change(card.id) { $0.notice = "changed meanwhile" } } }
+        let changed = try #require(await fromPage(world, page, "answer", ["card": .string(card.id), "seen": .string(card.seen), "text": .string("Yes")]))
+        #expect(changed.error?.code == "changed", "\(changed)")
+        let now = try #require(world.card(card.id))
+        world.queue.sync { world.requests.pageVoice = During { _ = try? acting.set(on: false) } }
+        let off = try #require(await fromPage(world, page, "answer", ["card": .string(card.id), "seen": .string(now.seen), "text": .string("Yes")]))
+        #expect(off.error?.code == "voice" && off.error?.message == WebRequestScreen.notActing, "\(off)")
+        #expect(world.card(card.id)?.isOpen == true)
     }
 
     /// `set web_acts on` from a terminal (the user's voice, recorded first) keeps it in the vault, says what it means,
