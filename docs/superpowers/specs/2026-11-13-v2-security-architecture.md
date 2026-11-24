@@ -2153,6 +2153,15 @@ against it. Each line says what reduces it now, if anything.
 34. **Under WSL's mirrored networking the web's port is reachable from every Windows process of every Windows user**
     (S1, item 22's reach). The token is the only lock against them; the page's files are public and hold no secret.
     The listener is off until `vibeswitcher web`, and closes with the last token (`vibeswitcher web --revoke`).
+35. **A live session can change what an install builds while it builds** (`install-node.sh`, run by the user or by
+    `vibeswitcher update`, 2026-11-24). The commit is fetched by its hash into a fresh repository, built with the
+    root-owned toolchain under `env -i`, from its pinned `Package.resolved` into fresh caches; but the scratch checkout
+    (`/tmp/install-node.*`, 0700), its build folder and the products are the user's uid's while the build runs, and a
+    lead may run during `update` (only workers and verifiers refuse a switch). A session that edits a source file
+    mid-compile and restores it before the checkout's re-check (git status, untracked and ignored files too) and the
+    products' re-hash gets its code built and installed; one left in place is caught. Closed only by building as
+    another uid or in a private mount namespace the sessions can't enter (the box, S12); `update` doesn't refuse a
+    live lead (the lead's call of 2026-11-24: it would rarely be usable).
 
 **The project allow-list (S2-D11)** is what makes this list acceptable before stage 6: in the user's host on Linux a
 `spawn` whose working folder isn't inside an allowed repository is refused, saying why. The list is

@@ -22,7 +22,8 @@
       "buildsAfter",
       "buildsBefore",
       "commit",
-      "from"
+      "from",
+      "switchAction"
     ],
     "build.switch" : [
       "buildsAfter",
@@ -260,7 +261,8 @@
       "buildsAfter",
       "buildsBefore",
       "commit",
-      "from"
+      "from",
+      "switchAction"
     ],
     "build.switch" : [
       "buildsAfter",

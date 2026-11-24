@@ -60,7 +60,7 @@ enum UpdateCommand {
         guard let running = status.host?.notes?.build, NodeUnit.isCommit(running) else {
             return Say.refused("update: the host's notes name no build it runs: `vibeswitcher status` says what runs")
         }
-        let offered = status.update?["commit"]?.string
+        let offered = status.update?["commit"]?.string.flatMap { NodeUnit.isCommit($0) ? $0 : nil }
         guard let target = named ?? offered else {
             return Say.refused("update: no newer build is known: `vibeswitcher status --check-updates` asks GitHub for one")
         }
@@ -156,8 +156,9 @@ enum UpdateCommand {
         // The unit's ExecStart move, sealed with the same code, on a node whose follow-up writes the unit.
         if case .unitAndCurrent = rewrites {
             if case .success(let fresh) = NodeClient.connect(context) {
-                let seal = WireKinds.BuildSeal.Args(commit: target, from: running, buildsBefore: seen?.0, buildsAfter: seen?.1)
-                switch fresh.change(WireKinds.BuildSeal.self, seal, action: action, typed: typed, timeout: 60) {
+                // An action of its own, naming the switch's (the code typed for this update covers it).
+                let seal = WireKinds.BuildSeal.Args(commit: target, from: running, switchAction: action, buildsBefore: seen?.0, buildsAfter: seen?.1)
+                switch fresh.change(WireKinds.BuildSeal.self, seal, action: UUID().uuidString.lowercased(), typed: typed, timeout: 60) {
                 case .success(let result, _): sealLines(sealed: result.sealed, refusals: result.sealRefusals).forEach(Say.out)
                 case .refused(let reply): Say.out("the unit's change stays held: \(ConfigSeal.inert(reply.error?.message ?? "refused", limit: 400))")
                 case .failure(let failure): Say.out("the unit's change stays held: \(ConfigSeal.inert(failure.message, limit: 400))")

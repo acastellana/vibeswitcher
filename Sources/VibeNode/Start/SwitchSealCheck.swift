@@ -34,6 +34,7 @@ public enum SwitchSealCheck {
     /// The top-level entries that changed between `before` and `after` (`SwitchSeal.entries`) beyond what an install of
     /// `commit` changes: `commit` added (absent before), `installs`, `current`. Empty: only the install's.
     public static func installChange(before: [String: String], after: [String: String], commit: String) -> [String] {
+        guard NodeUnit.isCommit(commit) else { return ["\(ConfigSeal.inert(commit, limit: 80)) isn't a commit (40 lowercase hex digits)"] }
         var other: [String] = []
         if before[commit] != nil { other.append("\(commit) was there before the install") }
         if after[commit] == nil { other.append("\(commit) isn't there after the install") }
@@ -51,6 +52,8 @@ public enum SwitchSealCheck {
     /// Why `<prefix>/<commit>` isn't a build as install-node lays it out, or `current` and `installs` don't name it; nil
     /// when it is.
     public static func layoutRefusal(prefix: String, commit: String) -> String? {
+        // Its shape before any path is made of it or compared with it (`../x`, a name `installs`' line merely starts with).
+        guard NodeUnit.isCommit(commit) else { return "\(ConfigSeal.inert(commit, limit: 80)) isn't a commit (40 lowercase hex digits)" }
         let folder = NodeFolders.join(prefix, commit)
         if case .failure(let refused) = NodeFolders.verifyBuild(folder: folder, prefix: prefix) { return refused.text }
         let allowed: [String: Set<String>] = ["": ["bin", "Resources", "build-info"], "Resources": ["bin", "lib", "install-node.sh"]]
@@ -84,7 +87,7 @@ public enum SwitchSealCheck {
     /// The unit's text `bytes` with its `ExecStart` for `to` put back to `from` (both under `prefix`), when it holds
     /// exactly one `ExecStart` line and that line is the follow-up's for `to`; nil otherwise.
     public static func unitSwap(_ bytes: Data, prefix: String, from: String, to: String) -> Data? {
-        guard let text = String(data: bytes, encoding: .utf8) else { return nil }
+        guard NodeUnit.isCommit(from), NodeUnit.isCommit(to), from != to, let text = String(data: bytes, encoding: .utf8) else { return nil }
         let line = { (commit: String) in "ExecStart=" + NodeUnit.execStart(prefix: prefix, commit: commit).joined(separator: " ") }
         var lines = text.components(separatedBy: "\n")
         let starts = lines.indices.filter { lines[$0].hasPrefix("ExecStart") }
@@ -103,6 +106,7 @@ public enum SwitchSealCheck {
     /// (a) for `commit`: the builds folder at `prefix` sealed as `seen.after`, for the vault's record of `home`, when every
     /// check passes. Reads the disk and the vault.
     public static func sealBuilds(prefix: String, commit: String, seen: InstallSeen, home: String, vault: LeadVault) -> Sealed {
+        guard NodeUnit.isCommit(commit) else { return Sealed(sealed: [], held: [], refusals: ["\(ConfigSeal.inert(commit, limit: 80)) isn't a commit: nothing was sealed"]) }
         do {
             let record = try vault.guardedRecord(root: home) ?? [:]
             guard record[SwitchSeal.buildsKey] == seen.before else {
@@ -123,8 +127,19 @@ public enum SwitchSealCheck {
     /// (b) for a switch from `from` to `to`: the unit folder `unitFolder` sealed when the node's unit in it changed only
     /// in its `ExecStart`, from `from`'s to `to`'s. Reads the disk and the vault.
     public static func sealUnit(unitFolder: String, unitFile: String, prefix: String, from: String, to: String, home: String, vault: LeadVault) -> Sealed {
+        guard NodeUnit.isCommit(from), NodeUnit.isCommit(to), from != to else {
+            return Sealed(sealed: [], held: [], refusals: ["the switch's builds aren't two commits (40 lowercase hex digits): nothing was sealed"])
+        }
         do {
             let record = try vault.guardedRecord(root: home) ?? [:]
+            // The unit may name `to` only once its build is laid out as install-node lays it out and the builds folder,
+            // holding it, is the sealed one (nothing of it held).
+            if let why = layoutRefusal(prefix: prefix, commit: to) {
+                return Sealed(sealed: [], held: ConfigSeal.held(in: record), refusals: ["the unit stays held: \(to)'s build isn't as install-node lays it out (\(why))"])
+            }
+            guard record[SwitchSeal.buildsKey] == SwitchSeal.listingHash(prefix), !ConfigSeal.held(in: record).contains(SwitchSeal.buildsName) else {
+                return Sealed(sealed: [], held: ConfigSeal.held(in: record), refusals: ["the unit stays held: the builds folder holding \(to) isn't the accepted one yet (`vs config held`)"])
+            }
             guard let accepted = record[SwitchSeal.unitFolderKey] else {
                 return Sealed(sealed: [], held: ConfigSeal.held(in: record), refusals: ["the vault records no accepted unit folder: its change stays held (`vs config held`)"])
             }

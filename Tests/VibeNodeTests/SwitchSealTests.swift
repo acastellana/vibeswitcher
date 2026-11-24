@@ -31,6 +31,13 @@ struct SwitchSealTests {
             guard rename(link, (prefix as NSString).appendingPathComponent("current")) == 0 else { throw CocoaError(.fileWriteUnknown) }
         }
 
+        /// `commit` installed and the builds folder sealed as the install left it (rule a).
+        func installAndSeal(_ commit: String) throws -> SwitchSealCheck.Sealed {
+            let before = SwitchSeal.listingHash(prefix)
+            try install(commit)
+            return SwitchSealCheck.sealBuilds(prefix: prefix, commit: commit, seen: .init(before: before, after: SwitchSeal.listingHash(prefix)), home: home, vault: host.vault)
+        }
+
         func held() throws -> [String] { ConfigSeal.held(in: try host.vault.guardedRecord(root: home)) }
         var heldNow: [String] { (try? held()) ?? [] }
         func look() throws { _ = try host.vault.checkConfig(root: home) }
@@ -121,6 +128,20 @@ struct SwitchSealTests {
         func seal() -> SwitchSealCheck.Sealed {
             SwitchSealCheck.sealUnit(unitFolder: rig.unitFolder, unitFile: file, prefix: rig.prefix, from: Self.a, to: Self.b, home: rig.home, vault: rig.host.vault)
         }
+        // B not installed yet: the unit naming it is never sealed, whatever it says.
+        try rig.unitText(Self.b).write(toFile: rig.unit, atomically: true, encoding: .utf8)
+        try rig.look()
+        #expect(seal().sealed.isEmpty && seal().refusals.first?.contains("isn't as install-node lays it out") == true, "\(seal())")
+        // Installed, but the builds folder holding it not accepted: still not.
+        try rig.install(Self.b)
+        try rig.look()
+        #expect(seal().sealed.isEmpty && seal().refusals.first?.contains("isn't the accepted one yet") == true, "\(seal())")
+        // Accepted as the install left it (as an update does: here the folder's state now, both before and after).
+        let now = SwitchSeal.listingHash(rig.prefix)
+        let buildsRecord = try rig.host.vault.guardedRecord(root: rig.home)
+        _ = try rig.host.vault.checkConfig(root: rig.home, shown: [SwitchSeal.buildsKey: try #require(ConfigSeal.heldHashes(in: buildsRecord)[SwitchSeal.buildsKey]),
+                                                                   SwitchSeal.partialKey: "1"])
+        try #require(try !rig.held().contains(SwitchSeal.buildsName) && SwitchSeal.listingHash(rig.prefix) == now, "\(rig.heldNow)")
         // A line added beside the new ExecStart.
         try (rig.unitText(Self.b) + "Environment=LD_PRELOAD=/var/lib/x.so\n").write(toFile: rig.unit, atomically: true, encoding: .utf8)
         try rig.look()
@@ -153,28 +174,85 @@ struct SwitchSealTests {
         #expect(left.contains("~/.claude/settings.json") && !left.contains(SwitchSeal.unitFolderName) && !left.contains(SwitchSeal.buildsName), "\(left)")
     }
 
-    /// `build.seal` is taken only with the action of a switch the vault recorded, with the same arguments, lately: with
-    /// none, or another commit's, nothing is sealed and nothing looked at; with it, the unit folder's check runs (here
-    /// the host's home has none recorded: said, nothing sealed).
-    @Test func buildSealIsTakenOnlyWithTheSwitchsOwnAction() async throws {
+    /// A commit is 40 lowercase hex digits before any path is made of it or compared with it, at every entry point:
+    /// a traversal or a near miss is refused and nothing is sealed.
+    @Test func aTraversalOrANearMissIdSealsNothing() throws {
+        let rig = try rig()
+        let bad = ["../\(Self.a)", "../../etc", String(repeating: "A", count: 40), String(repeating: "a", count: 39), String(repeating: "a", count: 41),
+                   Self.a + "/..", "", String(repeating: "g", count: 40), Self.a.prefix(39) + " "]
+        let seen = SwitchSealCheck.InstallSeen(before: SwitchSeal.listingHash(rig.prefix), after: SwitchSeal.listingHash(rig.prefix))
+        let unit = Data(try rig.unitText(Self.a).utf8)
+        for id in bad {
+            #expect(SwitchSealCheck.layoutRefusal(prefix: rig.prefix, commit: id)?.contains("isn't a commit") == true, "\(id)")
+            #expect(SwitchSealCheck.installChange(before: [:], after: [:], commit: id).first?.contains("isn't a commit") == true, "\(id)")
+            let builds = SwitchSealCheck.sealBuilds(prefix: rig.prefix, commit: id, seen: seen, home: rig.home, vault: rig.host.vault)
+            #expect(builds.sealed.isEmpty && builds.refusals.first?.contains("isn't a commit") == true, "\(id): \(builds)")
+            #expect(SwitchSealCheck.unitSwap(unit, prefix: rig.prefix, from: id, to: Self.a) == nil && SwitchSealCheck.unitSwap(unit, prefix: rig.prefix, from: Self.b, to: id) == nil)
+            for (from, to) in [(id, Self.b), (Self.a, id)] {
+                let sealed = SwitchSealCheck.sealUnit(unitFolder: rig.unitFolder, unitFile: "\(NodeStarter.unitName).service", prefix: rig.prefix,
+                                                      from: from, to: to, home: rig.home, vault: rig.host.vault)
+                #expect(sealed.sealed.isEmpty && sealed.refusals.first?.contains("aren't two commits") == true, "\(from) \(to): \(sealed)")
+            }
+        }
+    }
+
+    /// `build.seal` is taken only for its switch's completed handover to exactly its commit, from the build that
+    /// switch recorded (never the caller's word), lately, once. Through the server's own request: a switch it refused
+    /// (this world's server has no install root) records no handover, so nothing is sealed after it.
+    @Test func buildSealIsTakenOnlyForItsSwitchsCompletedHandoverOnce() async throws {
         let world = try await CardWorld.make(scratch)
         defer { world.stop() }
-        let action = UUID().uuidString.lowercased()
-        let args: [String: NodeWire.Value] = ["commit": .string(Self.b), "from": .string(Self.a)]
-        let alone = try #require(await world.ask("build.seal", args, action: action))
+        let client = world.world.link.vaultV2
+        func seal(_ switchAction: String, commit: String = Self.b, from: String = Self.a) async -> NodeWire.Reply? {
+            await world.ask("build.seal", ["commit": .string(commit), "from": .string(from), "switchAction": .string(switchAction)],
+                            action: UUID().uuidString.lowercased())
+        }
+        let switchDigest = LeadVaultV2.digest(String(decoding: NodeWire.line(["commit": NodeWire.Value.string(Self.b)]), as: UTF8.self))
+
+        // No switch at all.
+        let alone = try #require(await seal(UUID().uuidString.lowercased()))
         #expect(alone.error?.message.contains("taken only with the action of a switch to \(Self.b)") == true, "\(alone)")
-        // The switch of that action, as the server records one (its arguments' digest).
-        let other = UUID().uuidString.lowercased()
-        let digest = LeadVaultV2.digest(String(decoding: NodeWire.line(["commit": NodeWire.Value.string(Self.b)]), as: UTF8.self))
-        _ = try world.world.link.vaultV2.recordUserAction(other, kind: "build.switch", subject: nil, digest: digest)
-        let wrong = UUID().uuidString.lowercased()
-        _ = try world.world.link.vaultV2.recordUserAction(wrong, kind: "build.switch", subject: nil, digest: digest)
-        let another = try #require(await world.ask("build.seal", ["commit": .string(String(repeating: "c", count: 40)), "from": .string(Self.a)], action: wrong))
-        #expect(another.error?.message.contains("taken only with the action of a switch") == true, "\(another)")
-        let taken = try #require(await world.ask("build.seal", args, action: other))
+        // A switch the server refused: recorded (its action), no handover.
+        let refusedAction = UUID().uuidString.lowercased()
+        let refusedSwitch = try #require(await world.ask("build.switch", ["commit": .string(Self.b)], action: refusedAction))
+        #expect(!refusedSwitch.ok, "\(refusedSwitch)")
+        let afterRefused = try #require(await seal(refusedAction))
+        #expect(afterRefused.error?.message.contains("didn't complete a handover") == true, "\(afterRefused)")
+        // A failed one: recorded with a failed outcome, no handover.
+        let failedAction = UUID().uuidString.lowercased()
+        _ = try client.recordUserAction(failedAction, kind: "build.switch", subject: nil, digest: switchDigest)
+        try client.finishUserAction(failedAction, kind: "build.switch", outcome: .init(done: false, note: "no build answered", code: "refused"))
+        let afterFailed = try #require(await seal(failedAction))
+        #expect(afterFailed.error?.message.contains("didn't complete a handover") == true, "\(afterFailed)")
+        // A handover to another commit than the seal's.
+        let otherAction = UUID().uuidString.lowercased()
+        let c = String(repeating: "c", count: 40)
+        _ = try client.recordUserAction(otherAction, kind: "build.switch", subject: nil, digest: switchDigest)
+        _ = try client.recordUserAction(otherAction, kind: Requests.switchedKind, subject: Self.a, digest: Requests.switchedDigest(from: Self.a, to: c))
+        let otherCommit = try #require(await seal(otherAction))
+        #expect(otherCommit.error?.message.contains("didn't complete a handover") == true, "\(otherCommit)")
+        // A completed handover from A: a caller naming another `from` is refused; A's is taken, once.
+        let action = UUID().uuidString.lowercased()
+        _ = try client.recordUserAction(action, kind: "build.switch", subject: nil, digest: switchDigest)
+        _ = try client.recordUserAction(action, kind: Requests.switchedKind, subject: Self.a, digest: Requests.switchedDigest(from: Self.a, to: Self.b))
+        let wrongFrom = try #require(await seal(action, from: c))
+        #expect(wrongFrom.error?.message.contains("that switch was from \(Self.a), not \(c)") == true, "\(wrongFrom)")
+        let second = UUID().uuidString.lowercased()
+        _ = try client.recordUserAction(second, kind: "build.switch", subject: nil, digest: switchDigest)
+        _ = try client.recordUserAction(second, kind: Requests.switchedKind, subject: Self.a, digest: Requests.switchedDigest(from: Self.a, to: Self.b))
+        let taken = try #require(await seal(second))
         #expect(taken.ok, "\(taken)")
-        let result = try #require(taken.result)
-        #expect(result["sealed"]?.array?.isEmpty == true, "\(result)")
+        // Twice (another request, the same switch): refused, nothing sealed again.
+        let twice = try #require(await seal(second))
+        #expect(twice.error?.message.contains("sealed once already") == true, "\(twice)")
+        // Bad ids at the request (and a switch action that isn't an id): refused before anything is read.
+        let notAnID = try #require(await world.ask("build.seal", ["commit": .string(Self.b), "from": .string(Self.a), "switchAction": .string("../x")],
+                                                   action: UUID().uuidString.lowercased()))
+        #expect(notAnID.error?.code == NodeWire.Code.badArgs.rawValue, "\(notAnID)")
+        for id in ["../x", String(repeating: "A", count: 40)] {
+            let bad = try #require(await seal(UUID().uuidString.lowercased(), commit: id))
+            #expect(bad.error?.code == NodeWire.Code.badArgs.rawValue, "\(bad)")
+        }
     }
 
     @Test func aSwappedUnitTextIsTheFollowUpsOnly() {

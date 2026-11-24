@@ -182,7 +182,7 @@ taken on the Unix socket.
 | `board.image` | anyone of the uid |  |  |  | `Requests.act` |  | the page's (WireSchema) |  |  |  |
 | `board.task` | anyone of the uid |  |  |  | `Requests.act` |  | the page's (WireSchema) |  |  |  |
 | `brief` | the user's terminal, or a page that reads |  |  |  | `Requests.act` |  | `WireKinds.Brief` |  |  |  |
-| `build.seal` | the user's terminal | yes | yes |  | `Requests.act` | `buildsAfter`, `buildsBefore`, `commit`, `from` | `WireKinds.BuildSeal` | its result |  | the terminal's alone |
+| `build.seal` | the user's terminal | yes | yes |  | `Requests.act` | `buildsAfter`, `buildsBefore`, `commit`, `from`, `switchAction` | `WireKinds.BuildSeal` | its result |  | the terminal's alone |
 | `build.switch` | the user's terminal | yes | yes |  | `Requests.act` | `buildsAfter`, `buildsBefore`, `commit` | `WireKinds.BuildSwitch` | its result |  | the terminal's alone |
 | `chat.image` | anyone of the uid |  |  |  | the live hub |  | the page's (WireSchema) |  |  |  |
 | `chat.page` | anyone of the uid |  |  |  | the live hub |  | the page's (WireSchema) |  |  |  |

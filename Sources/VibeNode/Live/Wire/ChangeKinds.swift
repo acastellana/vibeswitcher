@@ -286,12 +286,16 @@ extension WireKinds {
         public struct Args: WireArgs, Equatable {
             public var commit: String?
             public var from: String?
+            /// The switch's own action id: this request has an action of its own (a server that answered the switch
+            /// keeps its reply under that action, for that request's retries alone).
+            public var switchAction: String?
             public var buildsBefore: String?
             public var buildsAfter: String?
-            public enum CodingKeys: String, CodingKey, CaseIterable { case commit, from, buildsBefore, buildsAfter }
-            public init(commit: String?, from: String?, buildsBefore: String?, buildsAfter: String?) {
+            public enum CodingKeys: String, CodingKey, CaseIterable { case commit, from, switchAction, buildsBefore, buildsAfter }
+            public init(commit: String?, from: String?, switchAction: String?, buildsBefore: String?, buildsAfter: String?) {
                 self.commit = commit
                 self.from = from
+                self.switchAction = switchAction
                 self.buildsBefore = buildsBefore
                 self.buildsAfter = buildsAfter
             }
