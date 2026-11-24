@@ -7,7 +7,7 @@ import Foundation
 public enum ServerBuildLinux {
     /// What the gate's refusal asks the user to do on Linux (`GateLag.refusal`, the Mac's `scripts/build-app.sh
     /// --install`): an install of the base's head, then the switch to it, which is the user's (D14).
-    public static let installHint = "install it with ~/.vibeswitcher/v2/builds/current/Resources/install-node.sh COMMIT, then vs switch COMMIT"
+    public static let installHint = "`vibeswitcher update COMMIT` installs it and switches to it, with one code"
 
     /// The build of the executable at `path`: the path resolved (`realpath`: `current/bin/x` names the build's own
     /// folder), then the `build-info` two folders up from it (`<c>/bin/x` → `<c>/build-info`), whose commit it is.

@@ -148,7 +148,7 @@ public final class UpdateWatch: @unchecked Sendable {
 
     /// The install line for `commit`: built and installed by the script, then switched to.
     public static func installLine(_ commit: String) -> String {
-        "scripts/install-node.sh \(commit), then `vibeswitcher switch \(commit)`"
+        "`vibeswitcher update` (installs \(commit), switches to it and accepts both, one code)"
     }
 
     /// `status`'s notice for `record` while the build running is `running` (nil: nothing to say).
