@@ -213,16 +213,22 @@ public struct HooksRequest {
         }
         let config = (home as NSString).appendingPathComponent(".codex/config.toml")
         let hook = (binFolder as NSString).appendingPathComponent("vibeswitcher-hook")
-        let outcome = vault.appWrite([config], home: home) {
-            Result { try NodeCodexTrust.trust(codex: codex, home: home, hookBinary: hook, path: ProcessInfo.processInfo.environment["PATH"], limit: limit) }
+        // Sealed only when the file holds nothing but our trust beside what it held (`FileCheck.ours`).
+        let (outcome, file) = vault.appWrite([config], home: home, sealIf: { $0.1 == .ours }) { () -> (Result<NodeCodexTrust.Outcome, Error>, NodeCodexTrust.FileCheck) in
+            var file = NodeCodexTrust.FileCheck.ours
+            let outcome = Result { try NodeCodexTrust.trust(codex: codex, home: home, hookBinary: hook, path: ProcessInfo.processInfo.environment["PATH"], limit: limit, file: &file) }
+            return (outcome, file)
         }
         vault.sealAppWrites()
+        if file == .changedMeanwhile {
+            return (nil, "~/.codex/config.toml changed while this ran: nothing of it was sealed; look at `vibeswitcher config held`")
+        }
         switch outcome {
         case .failure(let error): return (nil, ConfigSeal.inert("\(error)", limit: 300))
         case .success(let done):
             var notes: [String] = []
             if done.putBack {
-                notes.append("codex app-server changed more in ~/.codex/config.toml than VibeSwitcher's trust, or another hash: the file was put back as it was")
+                notes.append("codex app-server wrote more under hooks.state in ~/.codex/config.toml than VibeSwitcher's trust, or another hash: the file was put back as it was")
             } else if !done.notTaken.isEmpty {
                 notes.append("\(done.notTaken.count) written and not taken by Codex")
             }

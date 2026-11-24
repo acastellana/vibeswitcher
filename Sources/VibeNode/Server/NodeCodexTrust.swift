@@ -34,7 +34,8 @@ public enum NodeCodexTrust {
     }
 
     /// What trusting did: how many were trusted (taken, as the second listing says), which keys were refused for their
-    /// hash, or written and not taken, and whether `config.toml` was put back (Codex changed more in it than our trust).
+    /// hash, or written and not taken, and whether `config.toml` was put back (Codex wrote more under `hooks.state` than
+    /// our trust).
     public struct Outcome: Equatable, Sendable {
         public var trusted: Int
         /// Ours Codex listed trusted already (the hash it holds is the entry's).
@@ -50,11 +51,25 @@ public enum NodeCodexTrust {
             && hash.unicodeScalars.allSatisfy { ($0.isASCII && CharacterSet.alphanumerics.contains($0)) || ":+/=_-".unicodeScalars.contains($0) }
     }
 
+    /// What `config.toml` was found holding after the exchange (`check`).
+    public enum FileCheck: Equatable, Sendable {
+        /// As it was, or with only our trust added: the app's to seal.
+        case ours
+        /// Codex wrote more under `hooks.state` than our trust, or another hash: put back as it was.
+        case putBack
+        /// Changed outside `hooks.state`, which Codex's write doesn't touch: a hand edit while this ran (or a Codex
+        /// that isn't Codex). Left as it is and sealed nothing, so it is held: a held file is recoverable, a dropped
+        /// edit isn't.
+        case changedMeanwhile
+    }
+
     /// Trusts our hooks in `home`'s Codex by running `codex app-server`, the server's `path` as its PATH (Codex runs on
-    /// node). `hookBinary`: the node's hook program. Called inside the vault's `appWrite` of `config.toml`: what it
-    /// leaves there is sealed as the app's, so it is checked first (`onlyOurTrust`): anything else Codex changed in the
-    /// file, or a hash other than the one it listed for that entry, and the file is put back as it was.
-    public static func trust(codex: String, home: String, hookBinary: String, path: String?, limit: TimeInterval = limit) throws -> Outcome {
+    /// node). `hookBinary`: the node's hook program. Called inside the vault's `appWrite(_:sealIf:)` of `config.toml`,
+    /// which seals what it leaves there only when `file` is `.ours`: the file is checked once Codex has ended, on every
+    /// path out (`check`).
+    public static func trust(codex: String, home: String, hookBinary: String, path: String?, limit: TimeInterval = limit,
+                             file: inout FileCheck) throws -> Outcome {
+        file = .ours
         var info = stat()
         guard stat(codex, &info) == 0, info.st_mode & S_IFMT == S_IFREG, access(codex, X_OK) == 0 else {
             throw Failure.launch("\(codex) isn't an executable regular file")
@@ -69,7 +84,7 @@ public enum NodeCodexTrust {
             ((listing["data"] as? [[String: Any]]) ?? []).flatMap { entry in
                 ((entry["hooks"] as? [[String: Any]]) ?? []).compactMap { hook -> (String, String, String)? in
                     guard let key = hook["key"] as? String, let hash = hook["currentHash"] as? String,
-                          file(ofKey: key).map(realPath) == ourFile, isOurs(hook, command: command) else { return nil }
+                          Self.file(ofKey: key).map(realPath) == ourFile, isOurs(hook, command: command) else { return nil }
                     return (key, hash, hook["trustStatus"] as? String ?? "")
                 }
             }
@@ -94,7 +109,7 @@ public enum NodeCodexTrust {
             if !trust.isEmpty { try write(session) }
         } catch {
             // Ended (above) before the file is looked at: whatever it wrote before it failed is checked as below.
-            _ = try? keepOnlyOurTrust(config: config, before: before, mode: beforeMode, trust: trust)
+            file = (try? check(config: config, before: before, mode: beforeMode, trust: trust)) ?? .changedMeanwhile
             throw error
         }
         func write(_ session: Session) throws {
@@ -108,22 +123,47 @@ public enum NodeCodexTrust {
             outcome.notTaken = trust.keys.filter { after[$0] != "trusted" }.sorted()
         }
         // Its group ended (`end`): what the file holds now is what it left, ours or not (nothing to trust: as it was).
-        if try keepOnlyOurTrust(config: config, before: before, mode: beforeMode, trust: trust) {
-            return outcome
+        do { file = try check(config: config, before: before, mode: beforeMode, trust: trust) } catch {
+            file = .changedMeanwhile
+            throw error
         }
-        return Outcome(trusted: 0, already: outcome.already, refused: outcome.refused, notTaken: trust.keys.sorted(), putBack: true)
+        guard file == .ours else {
+            return Outcome(trusted: 0, already: outcome.already, refused: outcome.refused, notTaken: trust.keys.sorted(), putBack: file == .putBack)
+        }
+        return outcome
     }
 
-    /// Whether `config` holds only our trust beside what it held (`onlyOurTrust`); if not, it is put back as it was
-    /// (`before`, or taken out when there was none), so the seal finds nothing of the app's to seal.
-    static func keepOnlyOurTrust(config: String, before: Data?, mode: mode_t, trust: [String: String]) throws -> Bool {
+    /// What `config` holds against `before` (`FileCheck`): put back as it was (`before`, or taken out when there was
+    /// none) only when what differs is all under `hooks.state`, Codex's part.
+    static func check(config: String, before: Data?, mode: mode_t, trust: [String: String]) throws -> FileCheck {
         let now = FileManager.default.contents(atPath: config)
-        if now == before { return true }
-        if let now, onlyOurTrust(before: before.map { String(decoding: $0, as: UTF8.self) } ?? "", after: String(decoding: now, as: UTF8.self), trust: trust) {
-            return true
-        }
+        if now == before { return .ours }
+        let was = before.map { String(decoding: $0, as: UTF8.self) } ?? ""
+        guard let now else { return .changedMeanwhile }
+        let text = String(decoding: now, as: UTF8.self)
+        if onlyOurTrust(before: was, after: text, trust: trust) { return .ours }
+        guard sameOutsideHooksState(was, text) else { return .changedMeanwhile }
         if let before { try restore(before, to: config, mode: mode) } else { unlink(config) }
-        return false
+        return .putBack
+    }
+
+    /// Whether `before` and `after` are the same but for the tables under `hooks.state` (blank lines aside).
+    static func sameOutsideHooksState(_ before: String, _ after: String) -> Bool {
+        func outside(_ text: String) -> [String] {
+            tables(text).filter { !($0.header == "[hooks.state]" || $0.header.hasPrefix("[hooks.state.")) }.flatMap { [$0.header] + $0.lines }
+        }
+        return outside(before) == outside(after)
+    }
+
+    /// The file as (table header, its lines), blank lines left out; the lines before any header under "".
+    static func tables(_ text: String) -> [(header: String, lines: [String])] {
+        var found: [(header: String, lines: [String])] = [("", [])]
+        for raw in text.components(separatedBy: "\n") {
+            let line = raw.trimmingCharacters(in: .whitespaces)
+            if line.isEmpty { continue }
+            if line.hasPrefix("[") { found.append((line, [])) } else { found[found.count - 1].lines.append(raw) }
+        }
+        return found
     }
 
     /// `bytes` put in `path` as one rename, the file's mode `mode` from its making (never wider meanwhile).
@@ -156,16 +196,6 @@ public enum NodeCodexTrust {
             "[hooks.state.\"" + key.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"") + "\"]"
         }
         let ourHeaders = Dictionary(uniqueKeysWithValues: trust.map { (header($0.key), $0.value) })
-        // The file as (table header, its lines), blank lines left out; the lines before any header under "".
-        func tables(_ text: String) -> [(header: String, lines: [String])] {
-            var found: [(header: String, lines: [String])] = [("", [])]
-            for raw in text.components(separatedBy: "\n") {
-                let line = raw.trimmingCharacters(in: .whitespaces)
-                if line.isEmpty { continue }
-                if line.hasPrefix("[") { found.append((line, [])) } else { found[found.count - 1].lines.append(raw) }
-            }
-            return found
-        }
         func rest(_ tables: [(header: String, lines: [String])]) -> [String] {
             tables.filter { table in
                 !(ourHeaders[table.header] != nil || (table.header == "[hooks.state]" && table.lines.isEmpty))

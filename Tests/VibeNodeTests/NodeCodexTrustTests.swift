@@ -70,6 +70,13 @@ struct NodeCodexTrustTests {
         return program
     }
 
+    /// `NodeCodexTrust.trust` on `home`, with what it found in the file.
+    static func trust(_ codex: String, _ home: Home, path: String?, limit: TimeInterval) throws -> (outcome: NodeCodexTrust.Outcome, file: NodeCodexTrust.FileCheck) {
+        var file = NodeCodexTrust.FileCheck.changedMeanwhile
+        let outcome = try NodeCodexTrust.trust(codex: codex, home: home.home.path, hookBinary: home.hook, path: path, limit: limit, file: &file)
+        return (outcome, file)
+    }
+
     /// The written request's trust: key to hash.
     static func written(_ folder: URL) throws -> [String: String]? {
         guard let data = FileManager.default.contents(atPath: folder.appendingPathComponent("written.json").path) else { return nil }
@@ -102,7 +109,7 @@ struct NodeCodexTrustTests {
         let folder = scratch.url("stand-in")
         let codex = try Self.standIn(in: folder, config: home.config, first: Self.listing(2, listed, cwd: home.home.path),
                                      second: Self.listing(4, after, cwd: home.home.path), append: "\n[hooks.state]\n" + Self.trustTable(home.key(1), "sha256:ours"))
-        let done = try NodeCodexTrust.trust(codex: codex.path, home: home.home.path, hookBinary: home.hook, path: "/usr/bin:/bin", limit: hangGuard)
+        let done = try Self.trust(codex.path, home, path: "/usr/bin:/bin", limit: hangGuard).outcome
         #expect(done == NodeCodexTrust.Outcome(trusted: 1))
         #expect(try Self.written(folder) == [home.key(1): "sha256:ours"])
         let config = try String(contentsOf: home.config, encoding: .utf8)
@@ -119,7 +126,7 @@ struct NodeCodexTrustTests {
         let home = try Self.home(scratch.url("home"))
         let folder = scratch.url("stand-in")
         let codex = try Self.standIn(in: folder, config: home.config, first: Self.listing(2, [], cwd: home.home.path))
-        let done = try NodeCodexTrust.trust(codex: codex.path, home: home.home.path, hookBinary: home.hook, path: "/usr/bin:/bin", limit: hangGuard)
+        let done = try Self.trust(codex.path, home, path: "/usr/bin:/bin", limit: hangGuard).outcome
         #expect(done.trusted == 0 && done.already == 0)
         let lines = try String(contentsOf: folder.appendingPathComponent("env"), encoding: .utf8).split(separator: "\n").map(String.init)
         let names = Set(lines.compactMap { $0.split(separator: "=", maxSplits: 1).first.map(String.init) })
@@ -135,7 +142,7 @@ struct NodeCodexTrustTests {
         let folder = scratch.url("stand-in")
         let codex = try Self.standIn(in: folder, config: home.config,
                                      first: Self.listing(2, [Self.hook(home.key(0), home.ours, hash: "sha256:a", status: "trusted")], cwd: home.home.path))
-        let done = try NodeCodexTrust.trust(codex: codex.path, home: home.home.path, hookBinary: home.hook, path: "/usr/bin:/bin", limit: hangGuard)
+        let done = try Self.trust(codex.path, home, path: "/usr/bin:/bin", limit: hangGuard).outcome
         #expect(done == NodeCodexTrust.Outcome(trusted: 0, already: 1))
         #expect(try Self.written(folder) == nil)
     }
@@ -149,7 +156,7 @@ struct NodeCodexTrustTests {
         let codex = try Self.standIn(in: folder, config: home.config, first: Self.listing(2, [
             Self.hook(home.key(0), home.ours, hash: "sha256:a\"\nsandbox_mode = \"danger-full-access"),
         ], cwd: home.home.path))
-        let done = try NodeCodexTrust.trust(codex: codex.path, home: home.home.path, hookBinary: home.hook, path: "/usr/bin:/bin", limit: hangGuard)
+        let done = try Self.trust(codex.path, home, path: "/usr/bin:/bin", limit: hangGuard).outcome
         #expect(done == NodeCodexTrust.Outcome(trusted: 0, refused: [home.key(0)]))
         #expect(try Self.written(folder) == nil)
         #expect(!FileManager.default.fileExists(atPath: home.config.path))
@@ -160,7 +167,6 @@ struct NodeCodexTrustTests {
     @Test(arguments: [
         "\n[hooks.state]\n" + trustTable("KEY", "sha256:other"),
         "\n[hooks.state]\n" + trustTable("KEY", "sha256:ours") + "approval_policy = \"never\"\n",
-        "\nsandbox_mode = \"danger-full-access\"\n" + trustTable("KEY", "sha256:ours"),
         "\n[hooks.state]\n" + trustTable("KEY", "sha256:ours") + trustTable("/elsewhere/hooks.json:stop:0:0", "sha256:x"),
     ])
     func moreThanOurTrustInTheFileIsPutBack(_ append: String) throws {
@@ -173,11 +179,33 @@ struct NodeCodexTrustTests {
         after[0]["trustStatus"] = "trusted"
         let codex = try Self.standIn(in: scratch.url("stand-in"), config: home.config, first: Self.listing(2, listed, cwd: home.home.path),
                                      second: Self.listing(4, after, cwd: home.home.path), append: append.replacingOccurrences(of: "KEY", with: home.key(0)))
-        let done = try NodeCodexTrust.trust(codex: codex.path, home: home.home.path, hookBinary: home.hook, path: "/usr/bin:/bin", limit: hangGuard)
+        let done = try Self.trust(codex.path, home, path: "/usr/bin:/bin", limit: hangGuard).outcome
         #expect(done == NodeCodexTrust.Outcome(trusted: 0, notTaken: [home.key(0)], putBack: true))
         #expect(try String(contentsOf: home.config, encoding: .utf8) == before)
         var info = stat()
         #expect(stat(home.config.path, &info) == 0 && info.st_mode & 0o7777 == 0o640)
+    }
+
+    /// A change outside `hooks.state` while it ran (a hand edit, or a Codex that isn't Codex): the file is left as it
+    /// is and nothing is the app's to seal, so it is held; never put back (a dropped edit isn't recoverable).
+    @Test(arguments: [
+        "\n[profiles.mine]\nmodel = \"y\"\n[hooks.state]\n" + trustTable("KEY", "sha256:ours"),
+        "\nsandbox_mode = \"danger-full-access\"\n" + trustTable("KEY", "sha256:ours"),
+    ])
+    func aChangeOutsideHooksStateIsLeftAsItIs(_ append: String) throws {
+        let home = try Self.home(scratch.url("home"))
+        let before = "model = \"x\"\n"
+        try Data(before.utf8).write(to: home.config)
+        let listed = [Self.hook(home.key(0), home.ours, hash: "sha256:ours")]
+        var after = listed
+        after[0]["trustStatus"] = "trusted"
+        let appended = append.replacingOccurrences(of: "KEY", with: home.key(0))
+        let codex = try Self.standIn(in: scratch.url("stand-in"), config: home.config, first: Self.listing(2, listed, cwd: home.home.path),
+                                     second: Self.listing(4, after, cwd: home.home.path), append: appended)
+        let done = try Self.trust(codex.path, home, path: "/usr/bin:/bin", limit: hangGuard)
+        #expect(done.file == .changedMeanwhile)
+        #expect(done.outcome == NodeCodexTrust.Outcome(trusted: 0, notTaken: [home.key(0)]))
+        #expect(try String(contentsOf: home.config, encoding: .utf8) == before + appended)
     }
 
     /// The file check, by itself: Codex's own form passes, a stale trust of ours replaced passes, blank lines aside.
@@ -203,7 +231,7 @@ struct NodeCodexTrustTests {
         let folder = scratch.url("stand-in")
         let codex = try Self.standIn(in: folder, config: home.config, script: "read -r line; exec sleep 300")
         #expect(throws: NodeCodexTrust.Failure.timeout) {
-            try NodeCodexTrust.trust(codex: codex.path, home: home.home.path, hookBinary: home.hook, path: "/usr/bin:/bin", limit: 1)
+            try Self.trust(codex.path, home, path: "/usr/bin:/bin", limit: 1).outcome
         }
         let pid = try #require(pid_t(try String(contentsOf: folder.appendingPathComponent("pid"), encoding: .utf8).trimmingCharacters(in: .whitespacesAndNewlines)))
         #expect(kill(pid, 0) != 0, "collected")
@@ -215,12 +243,12 @@ struct NodeCodexTrustTests {
         let home = try Self.home(scratch.url("home"))
         let missing = scratch.url("nothing").appendingPathComponent("codex").path
         #expect(throws: NodeCodexTrust.Failure.launch("\(missing) isn't an executable regular file")) {
-            try NodeCodexTrust.trust(codex: missing, home: home.home.path, hookBinary: home.hook, path: nil, limit: hangGuard)
+            try Self.trust(missing, home, path: nil, limit: hangGuard).outcome
         }
         let plain = scratch.url("plain")
         try writeClosedOnExec("#!/bin/sh\n", to: plain, mode: 0o644)
         #expect(throws: NodeCodexTrust.Failure.launch("\(plain.path) isn't an executable regular file")) {
-            try NodeCodexTrust.trust(codex: plain.path, home: home.home.path, hookBinary: home.hook, path: nil, limit: hangGuard)
+            try Self.trust(plain.path, home, path: nil, limit: hangGuard).outcome
         }
     }
 
@@ -234,7 +262,7 @@ struct NodeCodexTrustTests {
         let home = try Self.home(scratch.url("home"))
         let codex = try Self.standIn(in: scratch.url("stand-in"), config: home.config, script: script)
         #expect(throws: failure) {
-            try NodeCodexTrust.trust(codex: codex.path, home: home.home.path, hookBinary: home.hook, path: "/usr/bin:/bin", limit: hangGuard)
+            try Self.trust(codex.path, home, path: "/usr/bin:/bin", limit: hangGuard).outcome
         }
         #expect(!FileManager.default.fileExists(atPath: home.config.path))
     }

@@ -43,9 +43,14 @@ enum HooksCommand {
         // The Codex the trust is asked of (`NodeCodexTrust`): the one the node's own Codex sessions run, said before the
         // code; the server runs only this one.
         var codex: String?
+        // With no link but a `codex` on this command line's PATH: the line that makes the link (shown, never run).
+        var linkLine: String?
         if action == "install", agents.contains(.codex) {
             let found = NodePreflight.codex(root: context.root)
-            if let path = found.path {
+            linkLine = found.path == nil ? Self.linkLine(link: NodePreflight.codexLink(root: context.root), home: context.isScratch ? nil : VibePaths.accountHome) : nil
+            if let linkLine {
+                what += "\n" + linkLine
+            } else if let path = found.path {
                 codex = path
                 what += "\nIt then trusts VibeSwitcher's Codex hooks in Codex by running \(ConfigSeal.inert(path, limit: 300)) app-server "
                     + "(the Codex the node's sessions run), with the node's clean environment; only Codex's trust of those hooks is kept in ~/.codex/config.toml."
@@ -78,6 +83,10 @@ enum HooksCommand {
                     if let trusted = result.trusted, trusted > 0 {
                         Say.out("  Codex trusts them (\(trusted) hook\(trusted == 1 ? "" : "s")).")
                     }
+                    if let linkLine {
+                        Say.out("  " + linkLine)
+                        continue
+                    }
                     if let note = result.trustNote { Say.out("  Not trusted in Codex: \(ConfigSeal.inert(note, limit: 400)).") }
                     if result.trustNote != nil || (result.trusted ?? 0) == 0 {
                         Say.out("  Codex asks to trust new hooks: run /hooks in Codex and trust the vibeswitcher-hook entries.")
@@ -86,5 +95,26 @@ enum HooksCommand {
             }
             return 0
         }
+    }
+
+    /// When the node's Codex link (`link`) is missing and a `codex` is on this command line's PATH (an absolute folder,
+    /// an executable regular file): the line that makes the link, `~` for `home`. Looked up for the text only: the
+    /// server runs only what the link names. Nil otherwise (the link there but broken, or no codex found).
+    static func linkLine(link: String, home: String?, path: String? = ProcessInfo.processInfo.environment["PATH"]) -> String? {
+        var info = stat()
+        guard lstat(link, &info) != 0, errno == ENOENT else { return nil }
+        let found = (path ?? "").split(separator: ":").map(String.init).filter { $0.hasPrefix("/") }.lazy
+            .map { ($0 as NSString).appendingPathComponent("codex") }
+            .first { candidate in
+                var info = stat()
+                return stat(candidate, &info) == 0 && info.st_mode & S_IFMT == S_IFREG && access(candidate, X_OK) == 0
+            }
+        guard let found else { return nil }
+        func shown(_ path: String) -> String {
+            guard let home, path.hasPrefix(home + "/") else { return HookInstaller.shellQuoted(path) }
+            return "~/" + HookInstaller.shellQuoted(String(path.dropFirst(home.count + 1)))
+        }
+        return ConfigSeal.inert("Codex isn't linked for this node: `ln -s \(shown(found)) \(shown(link))`, then run hooks install again "
+                                + "(the node holds the new link until you accept it)", limit: 600)
     }
 }
