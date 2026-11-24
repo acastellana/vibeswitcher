@@ -564,6 +564,11 @@ public final class LiveHub: WebSocketHandler, @unchecked Sendable {
         }
     }
 
+    /// `transport`'s terminal streams dropped (its watching ended: `WebRequestScreen.end`), the connection kept.
+    public func endTerminals(_ transport: LiveTransport) {
+        perform { self.terminals?.closed(transport) }
+    }
+
     /// The connection is gone: its subscriptions with it.
     public func closed(_ transport: LiveTransport) {
         perform {

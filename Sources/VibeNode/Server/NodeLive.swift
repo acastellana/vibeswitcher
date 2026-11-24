@@ -146,6 +146,9 @@ public final class NodeLive: @unchecked Sendable {
         }
         // An acting page's user's request (its token's, on this loopback listener: its origin the one it checks).
         screen.acting = acting
+        // Watching ends at once: no chunk to a connection whose right went, its streams dropped before its close.
+        hub.terminals?.watching = { [weak screen] in screen?.watching($0) ?? false }
+        screen.onWatchEnded = { [weak hub] in hub?.endTerminals($0) }
         screen.onPageVoice = { [weak requests, weak web] request, credentials, transport in
             guard let requests else { return }
             let origin = "http://127.0.0.1:\(web?.port.map(String.init) ?? "?")"
@@ -244,8 +247,10 @@ public final class NodeLive: @unchecked Sendable {
     /// Late codes dropped, pages whose token ran out closed, and the listener let go once nothing wants it.
     func sweep() {
         access.sweep()
-        // Acting from the page as the vault says, asked again off the queue (the cache this server writes through).
+        // Acting from the page as the vault says, asked again off the queue (the cache this server writes through), and
+        // each connection that acts or watches judged against it: a pairing that ran out or was evicted ends.
         acting.refreshLater()
+        screen.sweepPairings(closeOn: queue)
         web.closeUnheld()
         web.follow()
         tailnet?.sweep()

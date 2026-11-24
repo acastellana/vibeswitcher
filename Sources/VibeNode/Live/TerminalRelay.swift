@@ -271,12 +271,16 @@ public final class TerminalRelay: @unchecked Sendable {
         replayAgain(session.id, attachment)
     }
 
+    /// Whether a page's connection still watches (`WebRequestScreen.watching`, set by `NodeLive`): asked for each chunk,
+    /// so a stream whose watching ended gets nothing more, whatever its close is waiting on. Unset (tests), all do.
+    public var watching: (@Sendable (AnyObject) -> Bool)?
+
     private func output(of session: UUID, _ bytes: Data) {
         guard let attachment = attachments[session] else { return }
         // Never a live pairing code to a page (the acting review's fix C): `vibeswitcher web` run in a hosted terminal.
         let whole = [UInt8](attachment.mask.pass(bytes))
         guard !whole.isEmpty else { return }
-        for stream in fed(by: attachment) where stream.state == .replaying || stream.state == .live {
+        for stream in fed(by: attachment) where (stream.state == .replaying || stream.state == .live) && watching?(stream.transport) != false {
             var start = 0
             while start < whole.count {
                 let end = min(start + Self.chunk, whole.count)

@@ -323,4 +323,54 @@ struct ActingPageTests {
         closing.sync {}
         #expect(page.closes == ["acts-off"] && reading.closes.isEmpty)
     }
+
+    /// A connection that only watches is ended too when its pairing stops watching (the review of 25a03f63's branch):
+    /// marked at once (`watching`, which the terminal relay asks for each chunk, false before any close), its terminal
+    /// streams dropped (`onWatchEnded`) and then it closed, on the queue given. By the level going to off, and by the
+    /// sweep when its pairing ran out; the sweep leaves a pairing that still watches alone.
+    @Test func aWatchingConnectionEndsWhenItsPairingStopsWatching() throws {
+        let vault = MemoryVaultV2()
+        let clock = Locked(Date())
+        let access = pageGate(vault, root: scratch.url("web-root"), now: { clock.value })
+        let acting = try #require(access.acting)
+        let admissions = Locked<[ObjectIdentifier: WebAdmission]>([:])
+        let screen = WebRequestScreen(Inner(), terminals: true, admissionOf: { admissions.value[ObjectIdentifier($0)] })
+        screen.acting = acting
+        let order = Locked<[String]>([])
+        screen.onWatchEnded = { _ in order.mutate { $0.append("streams dropped") } }
+        /// A page paired and confirmed at the level off: it watches, and doesn't act.
+        func watcher() throws -> Recorder {
+            let (paired, code) = try pagePairs(access)
+            let page = Recorder()
+            admissions.value[ObjectIdentifier(page)] = paired
+            screen.opened(page, rights: paired.rights)
+            let pairing = try #require(access.takePairing(code: code))
+            let secret = acting.confirmed(token: pairing.token, tokenEnds: pairing.tokenEnds)
+            #expect(screen.confirmPairing(code, secret: secret, rights: [.read, .draft, .watch]))
+            return page
+        }
+        let first = try watcher()
+        #expect(screen.watching(first))
+        // The sweep leaves a pairing that still watches alone.
+        let queue = DispatchQueue(label: "closes")
+        screen.sweepPairings(closeOn: queue)
+        queue.sync {}
+        #expect(screen.watching(first) && first.closes.isEmpty)
+        // The level to off (every pairing dropped): ended though it never acted.
+        queue.suspend()
+        screen.endActing(code: "acts-off", reason: "off", closeOn: queue)
+        #expect(!screen.watching(first), "marked before any close")
+        first.onClose = { order.mutate { $0.append("closed") } }
+        queue.resume()
+        queue.sync {}
+        #expect(first.closes == ["acts-off"] && order.value == ["streams dropped", "closed"], "\(order.value)")
+        // The sweep, once a pairing ran out.
+        let second = try watcher()
+        #expect(screen.watching(second))
+        clock.value = clock.value.addingTimeInterval(ActingPages.life + 1)
+        screen.sweepPairings(closeOn: queue)
+        #expect(!screen.watching(second))
+        queue.sync {}
+        #expect(second.closes == ["acts-off"])
+    }
 }

@@ -498,37 +498,73 @@ public final class WebRequestScreen: WebSocketHandler, @unchecked Sendable {
         return true
     }
 
-    /// Every acting connection marked not acting at once (no request of it acts from here), then told `code` and closed
-    /// (acting from the page turned off): a reconnect watches, if its pairing still does, and doesn't act. The closes on
-    /// `closeOn` (the listener's queue).
-    public func endActing(code: String, reason: String, closeOn queue: DispatchQueue) {
-        let ended = lock.withLock { () -> [LiveTransport] in
-            var ended: [LiveTransport] = []
-            for (id, open) in opens where open.principal.acts {
-                if case .page(let rights, let terminals) = open.principal {
-                    opens[id]?.principal = .page(rights.subtracting(.act), terminals: terminals)
-                }
-                if let transport = open.transport { ended.append(transport) }
-            }
-            return ended
+    /// Called, on the queue given to an end, for each connection whose watching ended: its open terminal streams are
+    /// dropped (`LiveHub.endTerminals`) before it is closed, so not one more byte goes to it.
+    public var onWatchEnded: (@Sendable (LiveTransport) -> Void)? {
+        get { lock.withLock { watchEnded } }
+        set { lock.withLock { watchEnded = newValue } }
+    }
+    private var watchEnded: (@Sendable (LiveTransport) -> Void)?
+
+    /// Whether `transport`'s connection watches now, as its rights stand (marked at once when a pairing ends): the
+    /// terminal relay asks it for each chunk (`TerminalRelay.watching`).
+    public func watching(_ transport: AnyObject) -> Bool {
+        lock.withLock {
+            guard case .page(let rights, _)? = opens[ObjectIdentifier(transport)]?.principal else { return false }
+            return rights.contains(.watch)
         }
-        queue.async { for transport in ended { transport.close(code: code, reason: reason) } }
     }
 
-    /// The connections whose acting pairing is `key` (`ActingPages.key`) marked not acting and closed: its acting
-    /// couldn't be kept.
-    public func endActing(key: String, closeOn queue: DispatchQueue) {
-        let ended = lock.withLock { () -> [LiveTransport] in
+    /// The connections `ends` picks marked at once (acting and watching taken from their rights, so no request acts and
+    /// no terminal byte goes from here), then, on `queue`, their terminal streams dropped and each told `code` and closed.
+    private func end(_ ends: (Open) -> Bool, code: String, reason: String, closeOn queue: DispatchQueue) {
+        let (ended, dropStreams) = lock.withLock { () -> ([LiveTransport], (@Sendable (LiveTransport) -> Void)?) in
             var ended: [LiveTransport] = []
-            for (id, open) in opens where open.credentials?.act != nil {
-                guard let credentials = open.credentials, let act = credentials.act, ActingPages.key(token: credentials.token, secret: act) == key,
-                      case .page(let rights, let terminals) = open.principal else { continue }
+            for (id, open) in opens {
+                guard case .page(let rights, let terminals) = open.principal, !rights.isDisjoint(with: [.act, .watch]), ends(open) else { continue }
                 opens[id]?.principal = .page(rights.subtracting([.act, .watch]), terminals: terminals)
                 if let transport = open.transport { ended.append(transport) }
             }
-            return ended
+            return (ended, watchEnded)
         }
-        queue.async { for transport in ended { transport.close(code: "acts-off", reason: "this page's acting wasn't kept: pair it again to act") } }
+        guard !ended.isEmpty else { return }
+        queue.async {
+            for transport in ended {
+                dropStreams?(transport)
+                transport.close(code: code, reason: reason)
+            }
+        }
+    }
+
+    /// Every connection that acts or watches ended (acting turned off: every pairing dropped): marked at once, its
+    /// terminal streams dropped and it closed on `closeOn` (the listener's queue); a reconnect reads and drafts.
+    public func endActing(code: String, reason: String, closeOn queue: DispatchQueue) {
+        end({ _ in true }, code: code, reason: reason, closeOn: queue)
+    }
+
+    /// The connections whose pairing is `key` (`ActingPages.key`) ended: its pairing couldn't be kept.
+    public func endActing(key: String, closeOn queue: DispatchQueue) {
+        end({ open in
+            guard let credentials = open.credentials, let act = credentials.act else { return false }
+            return ActingPages.key(token: credentials.token, secret: act) == key
+        }, code: "acts-off", reason: "this page's pairing wasn't kept: pair it again", closeOn: queue)
+    }
+
+    /// The sweep (`NodeLive.sweep`): each connection that acts or watches whose pairing no longer watches (it ran out,
+    /// was evicted or dropped) ended; one that acts while the level is off now only watches.
+    public func sweepPairings(closeOn queue: DispatchQueue) {
+        guard let acting else { return }
+        end({ open in
+            guard let credentials = open.credentials else { return true }
+            return !acting.watches(token: credentials.token, secret: credentials.act)
+        }, code: "acts-off", reason: "this page's pairing ended: pair it again with `vibeswitcher web`", closeOn: queue)
+        lock.withLock {
+            for (id, open) in opens {
+                guard case .page(let rights, let terminals) = open.principal, rights.contains(.act), let credentials = open.credentials,
+                      !acting.acts(token: credentials.token, secret: credentials.act) else { continue }
+                opens[id]?.principal = .page(rights.subtracting(.act), terminals: terminals)
+            }
+        }
     }
 
     /// How many acting connections are open.
