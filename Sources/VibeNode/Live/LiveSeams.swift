@@ -25,4 +25,7 @@ public struct LiveRights: OptionSet, Sendable, Hashable {
     public static let read = LiveRights(rawValue: 1 << 0)
     /// A draft answer on a card, which does nothing until the user confirms it on the command line.
     public static let draft = LiveRights(rawValue: 1 << 1)
+    /// Acting as the user (acting from the page, the web UI design's step 2): `web_acts` on, a page on this machine's
+    /// loopback, its token paired while it is (the vault keeps it: `ActingPages`). Never a tailnet page's.
+    public static let act = LiveRights(rawValue: 1 << 2)
 }

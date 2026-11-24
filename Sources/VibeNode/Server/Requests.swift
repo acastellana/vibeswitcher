@@ -133,6 +133,13 @@ public final class Requests: @unchecked Sendable {
     /// The page on the user's tailnet (`NodeLive`'s, the user's node only): what `web.open` with `tailnet` acts on, and
     /// `web.revoke` too; none: `web.open` with `tailnet` is refused.
     public var tailnet: TailnetWeb?
+    /// Acting from the page (`ActingPages`, set by `NodeLive`): what `set web_acts` keeps; none: refused.
+    public var actingPages: ActingPages?
+    /// The confirmation an acting page's request passes before it is acted on (`PageVoice`): none today.
+    public var pageVoice: PageVoice = NoPageVoice()
+    /// The page mark of each action an acting page asked, while it is done (`approve`'s items are recorded with it). On
+    /// `queue`.
+    var pageMarks: [String: String] = [:]
     /// `status`'s `web`: the listener's state (`NodeLive.webValue`); none: off.
     public var webValue: (() -> NodeWire.Value)?
     /// The `seq` a live stream is at, by collection (`LiveHub.seq(of:)`, set by `NodeLive`): a draft's `applied`. On
@@ -243,12 +250,13 @@ public final class Requests: @unchecked Sendable {
     }
 
     /// The hello a web connection gets once its `auth` was admitted (the live wire contract's §2): the Unix socket's,
-    /// with the kinds its rights may send, a peer that is never the user's, `auth`, and the build of the files served.
+    /// with the kinds its rights may send (an acting page's: the user's kinds a page may send too), its peer, `auth`, and
+    /// the build of the files served.
     /// On `queue`.
     public func webHello(_ admission: WebAdmission, assets: String) -> NodeWire.Hello {
         var hello = hello(peer: nil)
         hello.kinds = WebAccess.kinds(for: admission.rights)
-        hello.peer = .init(voice: "other", why: WebAccess.peerWhy)
+        hello.peer = .init(voice: "other", why: admission.rights.contains(.act) ? WebAccess.actingWhy : WebAccess.peerWhy)
         hello.auth = admission.auth
         hello.assets = assets
         return hello
@@ -355,7 +363,8 @@ public final class Requests: @unchecked Sendable {
 
     /// A user's-voice request whose voice passed: its action id, the card's code, the vault's record, then the act. On
     /// `queue`.
-    func voiced(_ request: NodeWire.Request, from facts: PeerFacts, reply given: @escaping (NodeWire.Reply) -> Void) {
+    /// `via`: made from an acting page (`pageVoiced`): which, for its record.
+    func voiced(_ request: NodeWire.Request, from facts: PeerFacts, via: String? = nil, reply given: @escaping (NodeWire.Reply) -> Void) {
         // Checked here too: `approve` calls this for each of its batch's items, which `handle` doesn't see.
         let reply = { [weak self] (answer: NodeWire.Reply) in
             if DispatchQueue.getSpecific(key: Self.onQueue) != true { self?.noteOffQueue(request.kind) }
@@ -382,7 +391,7 @@ public final class Requests: @unchecked Sendable {
             return reply(refusal)
         }
         if records, let action = request.action?.lowercased() {
-            return record(request, action: action, from: facts) { [weak self] recorded in
+            return record(request, action: action, from: facts, via: via) { [weak self] recorded in
                 guard let self else { return }
                 switch recorded {
                 case .failure(let why):
@@ -394,7 +403,11 @@ public final class Requests: @unchecked Sendable {
                     if self.testHoldsAct?() == true {
                         return self.note("a scratch node's test: \(request.kind) (action \(action)) recorded, and held for good before its act")
                     }
-                    self.perform(request, action: action, from: facts, reply: reply)
+                    if let via { self.pageMarks[action] = via }
+                    self.perform(request, action: action, from: facts) { [weak self] answer in
+                        self?.pageMarks[action] = nil
+                        reply(answer)
+                    }
                 }
             }
         }
@@ -773,12 +786,16 @@ public final class Requests: @unchecked Sendable {
 
     /// A user's-voice request, recorded in the vault (`done` on `queue` with whether it is the action's first record,
     /// or why it wasn't recorded), then kept for `status`.
-    private func record(_ request: NodeWire.Request, action: String, from facts: PeerFacts, done: @escaping (Result<Bool, RecordFailure>) -> Void) {
+    private func record(_ request: NodeWire.Request, action: String, from facts: PeerFacts, via: String? = nil,
+                        done: @escaping (Result<Bool, RecordFailure>) -> Void) {
         let subject = Self.subject(request)
         let digest = LeadVaultV2.digest(String(decoding: NodeWire.line(request.args ?? [:]), as: UTF8.self))
         let (client, kind) = (link.vaultV2, request.kind)
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            let recorded = Result { try client.recordUserAction(action, kind: kind, subject: subject, digest: digest) }.mapError { RecordFailure("\($0)") }
+            let recorded = Result {
+                if let via { return try client.recordPageAction(action, kind: kind, subject: subject, digest: digest, via: via) }
+                return try client.recordUserAction(action, kind: kind, subject: subject, digest: digest)
+            }.mapError { RecordFailure("\($0)") }
             guard let self else { return }
             self.queue.async {
                 if case .success = recorded {
@@ -786,7 +803,7 @@ public final class Requests: @unchecked Sendable {
                                                   cgroup: facts.cgroup.flatMap { PeerFacts.unifiedPath($0) ?? PeerFacts.systemdPath($0) },
                                                   commandLine: facts.commandLine))
                     if self.accepted.count > Self.acceptedKept { self.accepted.removeFirst(self.accepted.count - Self.acceptedKept) }
-                    self.note("accepted \(request.kind) (action \(action)) from pid \(facts.pid), recorded in the vault")
+                    self.note("accepted \(request.kind) (action \(action)) from \(via ?? "pid \(facts.pid)"), recorded in the vault")
                 }
                 done(recorded)
             }

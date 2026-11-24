@@ -125,7 +125,7 @@ struct PrincipalTests {
                     case .draft: #expect(rights.contains(.draft) && spec.sender == .webDraft, "\(spec.name)")
                     case .terminal: #expect(terminals && rights.contains(.read) && spec.sender == .webTerminal, "\(spec.name)")
                     case .unknown: #expect(spec.sender == .webTerminal && !terminals, "\(spec.name)")
-                    case .refused, .usersVoice, .toolPost: break
+                    case .refused, .usersVoice, .toolPost, .pageVoice: break
                     }
                 }
                 let terminal = terminals && rights.contains(.read) ? NodeLive.terminalKinds : []

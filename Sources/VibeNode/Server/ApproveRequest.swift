@@ -34,6 +34,14 @@ extension Requests {
         var subject: String
         var card: NodeWire.Value?
         var reasons: [String] = []
+
+        /// What an acting page names for it (`approve`'s `seen`): its card's `seen` as listed, or, with no card, the
+        /// SHA-256 of what was listed of it.
+        var seen: String {
+            if let seen = card?["seen"]?.string { return seen }
+            let listed = NodeWire.Value.object(["kind": .string(kind), "subject": .string(subject), "reasons": .array(reasons.map(NodeWire.Value.string))])
+            return BuildInfo.sha256(of: NodeWire.line(listed))
+        }
     }
 
     struct ApproveBatch: Sendable {
@@ -175,7 +183,7 @@ extension Requests {
         let decide = engine.cards.list().filter { $0.isOpen && [.question, .approval, .plugin].contains($0.kind) }.map(\.value)
         let pushes = engine.leads.leads.values.compactMap { lead in lead.push.map { _ in NodeWire.Value.string(lead.root) } }
         var result = WireKinds.ApproveList.Result(
-            items: items.map { .init(kind: $0.kind, subject: $0.subject, card: $0.card, reasons: $0.reasons) }, decide: decide, pushes: pushes,
+            items: items.map { .init(kind: $0.kind, subject: $0.subject, card: $0.card, reasons: $0.reasons, seen: $0.seen) }, decide: decide, pushes: pushes,
             own: own.map { .init(text: $0.text, command: $0.command) })
         if !items.isEmpty {
             let id = "local:approve:" + UUID().uuidString.lowercased()
@@ -229,7 +237,8 @@ extension Requests {
             if let card = item.args["card"]?.string, let held = engine?.cards.resolve(card) { args["code"] = .string(held.code) }
             let itemAction = Self.itemAction(action, at)
             let itemRequest = NodeWire.Request(id: "\(request.id).\(at)", kind: item.kind, args: args, action: itemAction)
-            voiced(itemRequest, from: facts) { [weak self] answer in
+            // An acting page's batch: each item recorded with its mark too.
+            voiced(itemRequest, from: facts, via: pageMarks[action]) { [weak self] answer in
                 guard let self else { return }
                 let shown = WireKinds.Approve.Done(kind: item.kind, subject: item.subject, action: itemAction, result: answer.result)
                 guard answer.ok else {

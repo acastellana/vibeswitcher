@@ -657,6 +657,8 @@ extension WireKinds {
             public var scope: String?
             @WireNull public var project: String?
             @WireNull public var told: String?
+            /// What to say of it (`web_acts`: what turning it on means); nil for every other setting.
+            public var say: [String]?
             public init(key: String, value: String, was: String, scope: String, project: String?, told: String?) {
                 self.key = key
                 self.value = value

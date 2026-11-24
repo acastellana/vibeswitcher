@@ -33,6 +33,11 @@ struct WireVectorsTests {
             #expect(failure == nil, "\(what): \(failure ?? "")")
         }
         for (index, card) in Samples.cards.enumerated() { check(card.value, "card", "card sample \(index) (\(card.kind.rawValue))") }
+        // A card as a server before acting from the page sent it: no `seen` (a page never acts on it).
+        if case .object(var older)? = Samples.cards.first?.value {
+            older["seen"] = nil
+            check(.object(older), "card", "a card from a server before acting from the page")
+        }
         for (index, lead) in Samples.leads.enumerated() { check(lead.value, "lead", "lead sample \(index)") }
         for (index, hello) in Samples.hellos.enumerated() { check(try Samples.value(hello), "hello", "hello sample \(index)") }
         for (index, bye) in Samples.byes.enumerated() { check(try Samples.value(bye), "bye", "bye sample \(index)") }

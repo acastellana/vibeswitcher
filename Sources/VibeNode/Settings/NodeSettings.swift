@@ -54,6 +54,8 @@ public enum NodeSettings {
         case floor
         /// The session host's vault, a feature plugin's (`PluginRegistry`): listed while its plugin is on.
         case plugin
+        /// The session host's vault: acting from the page (`ActingPages`), which no file may say.
+        case acting
     }
 
     public struct Setting: Equatable, Sendable {
@@ -84,6 +86,9 @@ public enum NodeSettings {
             Setting(key: "projects_folder", title: "Projects folder",
                     about: "Where `vibeswitcher new-project` makes a project when --in names no other place.",
                     section: "General", scope: .node, form: .folder, home: .preferences),
+            Setting(key: "web_acts", title: "Act from the page",
+                    about: "A page on this machine, paired while this is on, may do everything the command line does, as you; a tailnet page still only reads and drafts. Turned on from a terminal only.",
+                    section: "General", scope: .node, form: .choice, home: .acting, choices: ["off", "on"]),
             Setting(key: "node_max_sessions", title: "Team sessions on this node, at most",
                     about: "How many workers and verifiers, across every project, may run at once.",
                     section: "Machine-wide limits", scope: .node, form: .count, home: .limits, range: 1...99),
@@ -241,6 +246,7 @@ public enum NodeSettings {
         case .workflow: return project.map(workflowPath(project:)) ?? ".vibeswitcher/workflow.md"
         case .floor: return "the session host's vault"
         case .plugin: return "the session host's vault (a plugin's setting)"
+        case .acting: return "the session host's vault (acting from the page)"
         }
     }
 
@@ -284,6 +290,8 @@ public enum NodeSettings {
                 case "prompt_audit_days": return (String(store.map(PromptAudit.intervalDays) ?? PromptAudit.defaultIntervalDays), String(PromptAudit.defaultIntervalDays))
                 case "policy": return (WorkingPolicy.load(from: files.policy), WorkingPolicy.defaultText)
                 case "projects_folder": return (projectsFolder(files: files), ProjectCreation.defaultLocation)
+                // Kept in the vault, never a file: `settings` puts in what the vault says (`ActingPages.state`).
+                case "web_acts": return ("off", "off")
                 default: return ("", "")
                 }
             }()

@@ -345,11 +345,14 @@ extension WireKinds {
             public var subject: String?
             @WireNull public var card: NodeWire.Value?
             public var reasons: [String]?
-            public init(kind: String, subject: String, card: NodeWire.Value?, reasons: [String]) {
+            /// What an acting page names for it in `approve`'s `seen` (its card's `seen`, or the item's own digest).
+            public var seen: String?
+            public init(kind: String, subject: String, card: NodeWire.Value?, reasons: [String], seen: String? = nil) {
                 self.kind = kind
                 self.subject = subject
                 self.card = card
                 self.reasons = reasons
+                self.seen = seen
             }
         }
 

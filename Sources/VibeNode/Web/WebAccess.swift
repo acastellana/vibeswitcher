@@ -24,6 +24,16 @@ public final class WebAccess: WebGate, @unchecked Sendable {
     public static let codesKept = 8
     /// What a token may do.
     public static let rights: LiveRights = [.read, .draft]
+
+    /// Acting from the page (`ActingPages`): the loopback page's gate only (`NodeLive` sets it); nil on the tailnet's,
+    /// so no tailnet page acts.
+    public var acting: ActingPages? {
+        get { lock.withLock { actingPages } }
+        set { lock.withLock { actingPages = newValue } }
+    }
+    private var actingPages: ActingPages?
+    /// `hello`'s `peer.why` on an acting page's connection.
+    public static let actingWhy = "a web client on this machine's loopback, paired while acting from the page is on: it acts as the user"
     /// What a refused `auth` is told, whatever the reason: the `bye`'s `reason`.
     public static let refusedReason = "not admitted: run `vibeswitcher web` in a terminal for a new address"
     /// `hello`'s `peer.why` on a web connection.
@@ -161,6 +171,7 @@ public final class WebAccess: WebGate, @unchecked Sendable {
             return .failure(WebTokens.Refusal("\(error)"))
         }
         note("web.revoke: \(dropped) tokens dropped; their connections are closed")
+        acting?.revoked()
         onRevoke?()
         onChange?()
         return .success(dropped)
@@ -203,13 +214,17 @@ public final class WebAccess: WebGate, @unchecked Sendable {
                 return refused()
             }
             note("a pairing code was taken: a web token issued")
+            // Paired while `web_acts` is on, on the loopback page's gate (the only one with `acting`): it acts.
+            let rights = Self.rights.union(acting?.paired(token: issued.token, until: issued.expiresAt) == true ? .act : [])
             onChange?()
             afterAdmit?()
-            return WebAdmission(rights: Self.rights, auth: Self.auth(token: issued.token, expiresAt: issued.expiresAt), token: issued.token)
+            return WebAdmission(rights: rights, auth: Self.auth(token: issued.token, expiresAt: issued.expiresAt, rights: rights), token: issued.token)
         case (nil, let token?):
             guard let expiresAt = tokens.expiry(of: token, now: at) else { return refused() }
+            // Acting only when the vault holds this token as acting now (never what the token file says).
+            let rights = Self.rights.union(acting?.acts(token: token) == true ? .act : [])
             afterAdmit?()
-            return WebAdmission(rights: Self.rights, auth: Self.auth(token: nil, expiresAt: expiresAt), token: token)
+            return WebAdmission(rights: rights, auth: Self.auth(token: nil, expiresAt: expiresAt, rights: rights), token: token)
         default:
             return refused()
         }
@@ -235,7 +250,7 @@ public final class WebAccess: WebGate, @unchecked Sendable {
     }
 
     /// `hello`'s `auth`: the rights, the token (only in answer to a code) and when it runs out.
-    static func auth(token: String?, expiresAt: Date) -> NodeWire.Value {
+    static func auth(token: String?, expiresAt: Date, rights: LiveRights = WebAccess.rights) -> NodeWire.Value {
         var fields: [String: NodeWire.Value] = ["rights": .array(names(rights).map(NodeWire.Value.string)), "expiresAt": .date(expiresAt)]
         if let token { fields["token"] = .string(token) }
         return .object(fields)
@@ -243,7 +258,7 @@ public final class WebAccess: WebGate, @unchecked Sendable {
 
     /// The rights' names on the wire, in order.
     public static func names(_ rights: LiveRights) -> [String] {
-        [(LiveRights.read, "read"), (LiveRights.draft, "draft")].filter { rights.contains($0.0) }.map(\.1)
+        [(LiveRights.read, "read"), (LiveRights.draft, "draft"), (LiveRights.act, "act")].filter { rights.contains($0.0) }.map(\.1)
     }
 
     // MARK: What a web connection may send
@@ -271,23 +286,50 @@ public final class WebRequestScreen: WebSocketHandler, @unchecked Sendable {
     /// on to the hub.
     private let terminals: Bool
     private let lock = NSLock()
-    /// Each connection's peer, resolved at its open (`Principal.page`).
-    private var principals: [ObjectIdentifier: Principal] = [:]
+    /// Each connection's peer, resolved at its open (`Principal.page`), with its token (an acting page's requests are
+    /// marked with it) and the connection (an acting one is closed when acting is turned off).
+    private var opens: [ObjectIdentifier: Open] = [:]
+    private var actingHandler: (@Sendable (NodeWire.Request, String, LiveTransport) -> Void)?
 
-    public init(_ inner: WebSocketHandler, terminals: Bool = false, note: @escaping @Sendable (String) -> Void = { _ in }) {
+    struct Open {
+        var principal: Principal
+        var token: String?
+        weak var transport: LiveTransport?
+    }
+
+    /// Where an acting page's user's request goes (`Principal.Route.pageVoice`), with its token: `NodeLive` sets it on the
+    /// loopback page's screen alone. Unset (the tailnet's screen), such a request is refused whatever the rights say.
+    public var onPageVoice: (@Sendable (NodeWire.Request, String, LiveTransport) -> Void)? {
+        get { lock.withLock { actingHandler } }
+        set { lock.withLock { actingHandler = newValue } }
+    }
+
+    /// The token a connection was admitted under (the listener's transport keeps its admission; a test's says its own).
+    private let tokenOf: @Sendable (LiveTransport) -> String?
+
+    public init(_ inner: WebSocketHandler, terminals: Bool = false, note: @escaping @Sendable (String) -> Void = { _ in },
+                tokenOf: (@Sendable (LiveTransport) -> String?)? = nil) {
         self.inner = inner
         self.terminals = terminals
         self.note = note
+        self.tokenOf = tokenOf ?? { ($0 as? NodeWebTransport)?.admission?.token }
     }
 
     public func opened(_ transport: LiveTransport, rights: LiveRights) {
-        lock.withLock { principals[ObjectIdentifier(transport)] = .page(rights, terminals: terminals) }
+        let token = tokenOf(transport)
+        lock.withLock { opens[ObjectIdentifier(transport)] = Open(principal: .page(rights, terminals: terminals), token: token, transport: transport) }
         inner.opened(transport, rights: rights)
     }
 
     public func text(_ message: Data, on transport: LiveTransport) {
         guard let request = NodeWire.decode(NodeWire.Request.self, message) else { return inner.text(message, on: transport) }
-        let principal = lock.withLock { principals[ObjectIdentifier(transport)] } ?? .page([], terminals: terminals)
+        let (open, acting) = lock.withLock { (opens[ObjectIdentifier(transport)], actingHandler) }
+        let principal = open?.principal ?? .page([], terminals: terminals)
+        if principal.route(request.kind) == .pageVoice {
+            if let acting, let token = open?.token { return acting(request, token, transport) }
+            note("refused \(ConfigSeal.inert(request.kind, limit: 80)) from a web connection: this screen takes no page's acts")
+            return transport.send(Data(NodeWire.line(NodeWire.Reply(re: request.id, error: .init(.voice, "this page doesn't act"))).dropLast()))
+        }
         guard let refused = principal.refusal(request) else { return inner.text(message, on: transport) }
         note("refused \(ConfigSeal.inert(request.kind, limit: 80)) from a web connection: \(refused.error?.code ?? "")")
         transport.send(Data(NodeWire.line(refused).dropLast()))
@@ -296,10 +338,19 @@ public final class WebRequestScreen: WebSocketHandler, @unchecked Sendable {
         }
     }
 
+    /// Every acting connection told `code` and closed (acting from the page turned off): a reconnect reads and drafts.
+    public func closeActing(code: String, reason: String) {
+        let acting = lock.withLock { opens.values.filter { $0.principal.acts }.compactMap(\.transport) }
+        for transport in acting { transport.close(code: code, reason: reason) }
+    }
+
+    /// How many acting connections are open.
+    public var actingCount: Int { lock.withLock { opens.values.filter { $0.principal.acts && $0.transport != nil }.count } }
+
     public func binary(_ message: Data, on transport: LiveTransport) { inner.binary(message, on: transport) }
 
     public func closed(_ transport: LiveTransport) {
-        lock.withLock { _ = principals.removeValue(forKey: ObjectIdentifier(transport)) }
+        lock.withLock { _ = opens.removeValue(forKey: ObjectIdentifier(transport)) }
         inner.closed(transport)
     }
 }

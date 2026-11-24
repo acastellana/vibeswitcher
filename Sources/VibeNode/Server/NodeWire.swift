@@ -277,6 +277,8 @@ public enum NodeWire {
         case notYet = "not-yet"
         /// The card or session is no longer there.
         case gone
+        /// What an acting page drew (a card, a batch) changed since: nothing was done or recorded; look again.
+        case changed
         case `internal`
     }
 

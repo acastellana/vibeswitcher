@@ -24,15 +24,19 @@ public enum LeadVaultV2 {
         /// reads here as begun, and a build before it reads this record as its own (JSON's unknown key is passed over):
         /// a handover from an older host and back loses the outcomes, nothing else.
         public var outcome: Outcome?
+        /// Made from a page (acting from the page, the web UI design's step 2): which (its token's id, its origin); nil
+        /// from a terminal. Optional, as `outcome` is: an older build passes over it.
+        public var via: String?
 
         public init(action: String, kind: String, subject: String?, digest: String, at: Double = Date().timeIntervalSince1970,
-                    outcome: Outcome? = nil) {
+                    outcome: Outcome? = nil, via: String? = nil) {
             self.action = action
             self.kind = kind
             self.subject = subject
             self.digest = digest
             self.at = at
             self.outcome = outcome
+            self.via = via
         }
 
         /// A recorded action's end: done, with its answer when that fits (`outcomeBytes`); or failed, with why.
@@ -116,6 +120,30 @@ public enum LeadVaultV2 {
         /// The user set a plugin's setting `key` to `value` (nil: back to its default): kept here, where no session's write
         /// reaches, as on and off are.
         case setPluginSetting(key: String, value: String?)
+        /// Acting from the page (the web UI design's step 2): whether the user turned it on, since when, and the acting
+        /// pages' tokens, by SHA-256. Answered `pageActs`.
+        case pageActs
+        /// The user turned acting from the page on or off (`vibeswitcher set web_acts`, the user's voice, recorded first):
+        /// on keeps its first `since`; off drops every acting token too, so on again needs a new pairing.
+        case setPageActs(on: Bool)
+        /// A page paired while acting is on (its pairing code the user's `vibeswitcher web`): its token, by SHA-256, acts
+        /// until `until` (the token's own end). Refused while off.
+        case addActingToken(sha256: String, until: Double)
+        /// These acting tokens act no more (nil: every one: the user's revoke).
+        case dropActingTokens([String]?)
+        /// `recordUserAction` for a request made from a page: `via` says which page (its token's id, its origin).
+        case recordPageAction(action: String, kind: String, subject: String?, digest: String, via: String)
+    }
+
+    /// Acting from the page as the record keeps it: since when it is on (nil: off) and the acting tokens' SHA-256s, live.
+    public struct PageActs: Codable, Equatable, Sendable {
+        public var since: Double?
+        public var tokens: [String]
+        public var on: Bool { since != nil }
+        public init(since: Double?, tokens: [String]) {
+            self.since = since
+            self.tokens = tokens
+        }
     }
 
     public enum Reply: Codable, Equatable, Sendable {
@@ -129,6 +157,7 @@ public enum LeadVaultV2 {
         case since(Double)
         case external([String: String])
         case pluginSettings([String: String])
+        case pageActs(PageActs)
     }
 
     /// The record in the vault's state (`LeadVault.Book`'s `v2`).
@@ -260,10 +289,16 @@ public enum LeadVaultV2 {
         if record.plugin[sinceKey] == nil { record.plugin[sinceKey] = String(now) }
         defer { book = record }
         switch request {
-        case .recordUserAction(let action, let kind, let subject, let digest):
+        case .recordUserAction(let action, let kind, let subject, let digest),
+             .recordPageAction(let action, let kind, let subject, let digest, _):
             guard !action.isEmpty, !kind.isEmpty else { return .refused("A user's action has an id and a kind.") }
+            var via: String?
+            if case .recordPageAction(_, _, _, _, let page) = request {
+                guard !page.isEmpty, page.utf8.count <= 200 else { return .refused("A page's mark is 1 to 200 bytes.") }
+                via = page
+            }
             if record.actions.contains(where: { $0.action == action && $0.kind == kind }) { return .recorded(first: false) }
-            record.actions.append(UserAction(action: action, kind: kind, subject: subject, digest: digest, at: now))
+            record.actions.append(UserAction(action: action, kind: kind, subject: subject, digest: digest, at: now, via: via))
             if record.actions.count > actionsKept {
                 record.actions.removeFirst(record.actions.count - actionsKept)
                 let kept = Set(record.actions.map(\.action))
@@ -352,8 +387,47 @@ public enum LeadVaultV2 {
             guard (value?.utf8.count ?? 0) <= pluginSettingBytes else { return .refused("A plugin's setting is \(pluginSettingBytes / 1024) KiB at most.") }
             record.pluginSettings[key] = value
             return .pluginSettings(record.pluginSettings)
+        case .pageActs:
+            return .pageActs(pageActs(&record, now: now))
+        case .setPageActs(let on):
+            if on {
+                if record.plugin[pageSinceKey] == nil { record.plugin[pageSinceKey] = String(now) }
+            } else {
+                record.plugin[pageSinceKey] = nil
+                for key in record.plugin.keys where key.hasPrefix(pageTokenPrefix) { record.plugin[key] = nil }
+            }
+            return .pageActs(pageActs(&record, now: now))
+        case .addActingToken(let sha256, let until):
+            guard record.plugin[pageSinceKey] != nil else { return .refused("Acting from the page is off: no page acts.") }
+            guard sha256.utf8.count == 64, sha256.unicodeScalars.allSatisfy({ ("0"..."9").contains($0) || ("a"..."f").contains($0) }) else {
+                return .refused("A token is kept by its SHA-256, 64 lower-case hex digits.")
+            }
+            guard until > now else { return .refused("That token has run out.") }
+            _ = pageActs(&record, now: now)
+            record.plugin[pageTokenPrefix + sha256] = String(until)
+            // The newest `actingTokensKept` at most.
+            let acting = Book.part(record.plugin, pageTokenPrefix).compactMapValues(Double.init).sorted { $0.value > $1.value }
+            for (old, _) in acting.dropFirst(actingTokensKept) { record.plugin[pageTokenPrefix + old] = nil }
+            return .pageActs(pageActs(&record, now: now))
+        case .dropActingTokens(let tokens):
+            for key in record.plugin.keys where key.hasPrefix(pageTokenPrefix) {
+                if tokens.map({ $0.contains(String(key.dropFirst(pageTokenPrefix.count))) }) ?? true { record.plugin[key] = nil }
+            }
+            return .pageActs(pageActs(&record, now: now))
         }
     }
+
+    /// Acting from the page now: its tokens past their end dropped first.
+    static func pageActs(_ record: inout Book, now: Double) -> PageActs {
+        for (sha, until) in Book.part(record.plugin, pageTokenPrefix) where (Double(until) ?? 0) <= now { record.plugin[pageTokenPrefix + sha] = nil }
+        return PageActs(since: record.plugin[pageSinceKey].flatMap(Double.init), tokens: Book.part(record.plugin, pageTokenPrefix).keys.sorted())
+    }
+
+    /// Where acting from the page is kept, in the one plugin field (`Book.plugin`: no stored field of its own, see there).
+    static let pageSinceKey = "page:since"
+    static let pageTokenPrefix = "page:token:"
+    /// How many acting tokens the record keeps (a token's own store keeps fewer: `WebTokens.cap`).
+    public static let actingTokensKept = 32
 
     /// The plugin record's key for when the record began.
     static let sinceKey = "record:since"
@@ -483,6 +557,34 @@ public struct LeadVaultV2Client: Sendable {
             throw Refused("The session host answered something else.")
         }
         return first
+    }
+
+    /// Records an accepted request made from a page (`via`: which); false when that action of that kind was recorded already.
+    @discardableResult
+    public func recordPageAction(_ action: String, kind: String, subject: String?, digest: String, via: String) throws -> Bool {
+        guard case .recorded(let first) = try call(.recordPageAction(action: action, kind: kind, subject: subject, digest: digest, via: via)) else {
+            throw Refused("The session host answered something else.")
+        }
+        return first
+    }
+
+    /// Acting from the page, as the record keeps it.
+    public func pageActs() throws -> LeadVaultV2.PageActs { try pageActsReply(.pageActs) }
+
+    /// The user turned acting from the page on or off.
+    public func setPageActs(on: Bool) throws -> LeadVaultV2.PageActs { try pageActsReply(.setPageActs(on: on)) }
+
+    /// A page paired while acting is on: its token acts until `until`.
+    public func addActingToken(sha256: String, until: Double) throws -> LeadVaultV2.PageActs {
+        try pageActsReply(.addActingToken(sha256: sha256, until: until))
+    }
+
+    /// These acting tokens act no more (nil: every one).
+    public func dropActingTokens(_ tokens: [String]?) throws -> LeadVaultV2.PageActs { try pageActsReply(.dropActingTokens(tokens)) }
+
+    private func pageActsReply(_ request: LeadVaultV2.Request) throws -> LeadVaultV2.PageActs {
+        guard case .pageActs(let acts) = try call(request) else { throw Refused("The session host answered something else.") }
+        return acts
     }
 
     /// The act of a recorded action finished so (`LeadVaultV2.Request.finishUserAction`).
