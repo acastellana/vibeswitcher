@@ -657,3 +657,6 @@
 - 2026-11-24 12:15 Automatically (auto_advance): Cleaned up team-sessions-start (freed 2.0 GB of build output and temporary folders). It stays done.
 - 2026-11-24 12:15 Update: Merged into v2: finders read their audit's logs, team sessions start with the updater off, interop phase 2 — All three merged on your approvals of Nov 24; each merge's full test run passed.
 - 2026-11-24 14:33 Workflow: auto_advance = `false`
+- 2026-11-24 15:00 Workflow: auto_advance = `true`
+- 2026-11-24 15:01 Workflow: handover_idle_min = `10`, handover_tokens = •••
+- 2026-11-24 15:01 Workflow: auto_advance = `false`
