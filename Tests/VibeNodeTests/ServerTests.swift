@@ -328,7 +328,8 @@ struct ServerTests {
         let client = try WireClient(node)
         let status = try #require(WireClient.reply(client.request("status", action: nil))?.result)
         #expect(status["accepted"]?.array?.isEmpty == true)
-        #expect(status["notices"]?.array?.isEmpty == true)
+        // No notice but the hooks' (a scratch home has none installed: `status` says so, as `approve` lists them).
+        #expect(status["notices"]?.array?.filter { $0.string?.hasPrefix("the hooks are out of date") != true }.isEmpty == true, "\(String(describing: status["notices"]))")
         #expect(node.process.isRunning)
     }
 

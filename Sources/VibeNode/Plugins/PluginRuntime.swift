@@ -22,7 +22,7 @@ protocol PluginHost: AnyObject {
 final class PluginRuntime {
     let registry: PluginRegistry
     let queue: DispatchQueue
-    private let cards: CardStore
+    let cards: CardStore
     private let link: HostLink
     /// The node's root and its log (what a desk hands a plugin).
     let root: URL
@@ -400,6 +400,8 @@ final class PluginRuntime {
     /// anyway, or a file put there). `done` on `queue` once every look is done. On `queue`.
     func look(done: (() -> Void)? = nil) {
         EngineWatch.assertOn(queue)
+        // Cards a server before this one kept are taken back first, so a request is drawn again under its kept id.
+        guard !cards.restoring else { done?(); return }
         guard registry.known, settledKnown else {
             return ask { [weak self] in
                 guard let self, self.registry.known, self.settledKnown else { done?(); return }

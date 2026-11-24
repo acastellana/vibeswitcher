@@ -254,7 +254,9 @@ struct RequestsTests {
                                     // A feature plugin turned on or off (2026-11-22).
                                     "plugin.on", "plugin.off", "plugin.add", "plugin.remove",
                                     // A page's pairing confirmed in the terminal (2026-11-24).
-                                    "web.confirm"]
+                                    "web.confirm",
+                                    // `vibeswitcher update`'s seal of the unit's ExecStart move after its switch (2026-11-24).
+                                    "build.seal"]
         #expect(Set(NodeWire.kinds.keys) == reads.union(changes), "a kind added to NodeWire.kinds is classified here")
         for kind in reads { #expect(!NodeWire.changesState(kind), "\(kind)") }
         for kind in changes { #expect(NodeWire.changesState(kind), "\(kind)") }

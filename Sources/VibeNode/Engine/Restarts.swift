@@ -14,9 +14,9 @@ public struct Roleless: Equatable, Sendable {
 /// user's only when the vault's record of the user's actions holds its action, EN-D9), the witness's told keys and
 /// auto_advance's first sightings (so nothing is told or nudged twice), the last host start it saw and the roots with a
 /// lead under that host. At its first welcome each live lead session the vault binds the role to is bound to it again
-/// (`keepRunningLeads`); one it doesn't bind is left as it is and `status` says so. The cards were in the old server's
-/// memory, so each lead is told which of its open questions the user no longer sees (`tellUnshownQuestions`), and asks
-/// again those it needs. Answers and holds are taken only from the user at the command line (E6): nothing at rest is.
+/// (`keepRunningLeads`); one it doesn't bind is left as it is and `status` says so. The open cards come back from
+/// `cards.json` while the vault vouches for its bytes (`CardKeep`); each lead is told which of its open questions no
+/// card shows then (`tellUnshownQuestions`), and asks again those it needs. Answers and holds are taken only from the user at the command line (E6): nothing at rest is.
 ///
 /// **After a host restart** (the welcome's start time isn't the one `engine.json` holds) every project's lead and team
 /// ended with the old host, and its vault started over: `status` says the team is gone, project by project, until a lead
@@ -86,11 +86,12 @@ extension LeadEngine {
     func restartLook() {
         let first = !welcomedOnce
         welcomedOnce = true
+        var tell = false
         if let started = link.hostStartedAt?.timeIntervalSince1970 {
             if let last = lastHostStart, abs(last - started) > 0.001 {
                 hostRestarted(at: started, before: last)
             } else if first, lastHostStart != nil {
-                tellUnshownQuestions()
+                tell = true
             }
             if lastHostStart.map({ abs($0 - started) > 0.001 }) ?? true {
                 lastHostStart = started
@@ -98,6 +99,9 @@ extension LeadEngine {
             }
         }
         if first || rebindAgain { keepRunningLeads() }
+        // The cards the server before this one kept (`CardKeep`), taken back first: a lead is told only of the open
+        // questions no card shows then.
+        if first { restoreCards { [weak self] in if tell { self?.tellUnshownQuestions() } } }
     }
 
     /// The host that welcomed the engine isn't the one before (`at`, `before`): every project's lead and team ended with
@@ -221,9 +225,9 @@ extension LeadEngine {
         return roleless.sorted { $0.key < $1.key }.filter { live.contains($0.value.session) }.map(\.value.text)
     }
 
-    /// The server restarted under the same host: the cards were in the old server's memory, so each running lead is told
-    /// which of its open questions the user no longer sees (its board's open questions with no card here), once, to
-    /// withdraw them and ask again those it still needs. The boards are read on `reads`. On `queue`.
+    /// The server restarted under the same host: each running lead is told of its open questions the user no longer sees
+    /// (its board's open questions with no card here once `cards.json` was taken back, `CardKeep`), once, to withdraw
+    /// them and ask again those it still needs. The boards are read on `reads`. On `queue`.
     func tellUnshownQuestions() {
         let roots = leadRoots
         guard !roots.isEmpty else { return }

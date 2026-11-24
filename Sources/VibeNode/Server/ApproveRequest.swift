@@ -162,7 +162,7 @@ extension Requests {
                         // stays a step of its own.
                         if items.contains(where: { $0.kind == "config.accept" }) {
                             own.append(ApproveOwn(text: "the hooks are out of date: " + found.hooks.joined(separator: "; "),
-                                                  command: "vibeswitcher hooks install" + agents.map { " --agent \($0)" }.joined()))
+                                                  command: HooksRequest.installCommand))
                         } else {
                             items.append(ApproveItem(kind: "hooks.install", args: ["agents": .array(agents.map(NodeWire.Value.string))],
                                                      subject: agents.joined(separator: ","), reasons: found.hooks))

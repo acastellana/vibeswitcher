@@ -123,6 +123,27 @@ public enum NodeTexts {
         ] + written
     }
 
+    /// `vibeswitcher update`'s confirmation (2026-11-24): from and to, how far, what it runs, and what its one code
+    /// accepts beside the switch (`SwitchSealCheck`), with what stays held.
+    public static func update(from: String, to: String, aheadBy: Int?, rewrites: SwitchRewrites, held: [String]) -> String {
+        let commit = ConfigSeal.inert(to, limit: 64)
+        var lines = [
+            "This updates the node from the build of commit \(ConfigSeal.inert(from, limit: 64)) to \(commit)"
+                + (aheadBy.map { " (\($0) commit\($0 == 1 ? "" : "s") ahead)" } ?? "") + ":",
+            "  1. it installs \(commit): install-node fetches that commit by its hash, builds it with the root-owned toolchain from a fresh checkout, and lays it out (a build: often ten minutes or more; each step is printed); if it fails, nothing is switched",
+            "  2. it switches to it:",
+        ] + switchConsequences(to: to, rewrites: rewrites).map { "  " + $0 }
+        let accepts: String
+        switch rewrites {
+        case .unitAndCurrent: accepts = "the builds folder with \(commit) installed, as this install leaves it, and your unit's ExecStart naming \(commit)"
+        case .currentOnly, .nothing: accepts = "the builds folder with \(commit) installed, as this install leaves it"
+        }
+        lines.append("  3. this one code also accepts \(accepts); nothing else, and only when each is exactly that")
+        let others = held.filter { $0 != SwitchSeal.buildsName && $0 != SwitchSeal.unitFolderName }.map { ConfigSeal.inert($0, limit: 120) }
+        if !others.isEmpty { lines.append("  these stay held: " + others.joined(separator: ", ") + " (`vibeswitcher approve` after)") }
+        return lines.joined(separator: "\n")
+    }
+
     /// What `status` says of a node started detached (ST-D6).
     public static let weakerRule = "no systemd: the weaker voice rule; the node's pid file is yours, and any worker's, to write"
 

@@ -13,17 +13,21 @@ public enum ChatValue {
     /// `item` as the wire's, or nil for a case the wire doesn't carry. No URL's credentials reach a page in it
     /// (`PushText.scrub` on every string: a remote's `https://user:token@…` that a tool's reply, a command or the lead's
     /// push_remote quotes, a token in a URL's query); nothing else is rewritten.
-    public static func value(_ item: ChatItem) -> NodeWire.Value? {
-        unscrubbed(item).map(scrubbed)
+    public static func value(_ item: ChatItem) -> NodeWire.Value? { value(item, codes: nil) }
+
+    /// `codes`: the node's live pairing codes, masked wherever they appear.
+    public static func value(_ item: ChatItem, codes: PairingCodes?) -> NodeWire.Value? {
+        let live = codes?.codes ?? []
+        return unscrubbed(item).map { scrubbed($0, codes: live) }
     }
 
     /// `value` with every string scrubbed of URL credentials and of pairing codes (`PairingMask`: a `!vibeswitcher web`
-    /// in a transcript never gives a page the address).
-    static func scrubbed(_ value: NodeWire.Value) -> NodeWire.Value {
+    /// in a transcript never gives a page the address, nor a live code quoted alone).
+    static func scrubbed(_ value: NodeWire.Value, codes: [String] = []) -> NodeWire.Value {
         switch value {
-        case .string(let text): return .string(PairingMask.mask(PushText.scrub(text)))
-        case .array(let values): return .array(values.map(scrubbed))
-        case .object(let fields): return .object(fields.mapValues(scrubbed))
+        case .string(let text): return .string(PairingMask.mask(PushText.scrub(text), codes: codes))
+        case .array(let values): return .array(values.map { scrubbed($0, codes: codes) })
+        case .object(let fields): return .object(fields.mapValues { scrubbed($0, codes: codes) })
         default: return value
         }
     }

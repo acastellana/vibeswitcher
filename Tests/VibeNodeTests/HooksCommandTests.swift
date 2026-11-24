@@ -364,6 +364,129 @@ struct HooksCommandTests {
         #expect(!names(node.home.appendingPathComponent(".vibeswitcher")).contains { $0.contains(".tmp") })
     }
 
+    // MARK: Trusted in Codex
+
+    /// A stand-in Codex where the node's Codex link is read (`<root>/v2/test/codex` on a scratch node,
+    /// `NodeCodexTrustTests.standIn`): it lists the hook the install wrote untrusted, then trusted once written.
+    private func standInCodex(_ node: ScratchNode, script: String? = nil, before: String = "") throws -> (program: String, folder: URL) {
+        let home = NodeCodexTrustTests.Home(home: node.home)
+        let key = "\(codexHooks(node).path):stop:0:0"
+        let listed = [NodeCodexTrustTests.hook(key, "\(hook(node)) codex", hash: "sha256:ours")]
+        var after = listed
+        after[0]["trustStatus"] = "trusted"
+        let folder = node.root.appendingPathComponent("stand-in")
+        let program = try NodeCodexTrustTests.standIn(
+            in: folder, config: home.config, first: NodeCodexTrustTests.listing(2, listed, cwd: node.home.path),
+            second: NodeCodexTrustTests.listing(4, after, cwd: node.home.path),
+            append: before + "\n[hooks.state]\n" + NodeCodexTrustTests.trustTable(key, "sha256:ours"), script: script)
+        let link = node.root.appendingPathComponent("v2/test/codex")
+        try FileManager.default.createDirectory(at: link.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try FileManager.default.createSymbolicLink(atPath: link.path, withDestinationPath: program.path)
+        let resolved = try #require(realpath(program.path, nil))
+        defer { free(resolved) }
+        return (String(cString: resolved), folder)
+    }
+
+    /// The install trusts our Codex hook by running the Codex it named before the code, and the trust it wrote in
+    /// `~/.codex/config.toml` is sealed as the app's: the next look holds nothing.
+    @Test func hooksInstallTrustsTheCodexHooksAndTheSealHoldsNothingAfter() async throws {
+        let (node, repo) = try await acceptedNode()
+        defer { node.stop() }
+        try await node.acceptConfig(repo)
+        let codex = try standInCodex(node)
+
+        let ran = try await node.runOnTerminal(["hooks", "install"])
+        #expect(ran.status == 0, "\(ran.output)\n\(node.said)")
+        #expect(ran.output.contains("trusts VibeSwitcher's Codex hooks in Codex by running \(codex.program) app-server"), "\(ran.output)")
+        #expect(ran.output.components(separatedBy: "and Enter to go on").count == 2, "one code: \(ran.output)")
+        #expect(ran.output.contains("Codex trusts them (1 hook)."), "\(ran.output)")
+        #expect(!ran.output.contains("run /hooks"), "\(ran.output)")
+        let config = try String(contentsOf: node.home.appendingPathComponent(".codex/config.toml"), encoding: .utf8)
+        #expect(config.contains("trusted_hash = \"sha256:ours\""), "\(config)")
+        #expect(try await held(node, repo).isEmpty)
+    }
+
+    /// `--agent claude` alone doesn't touch Codex: nothing said of it, the stand-in never run.
+    @Test func aClaudeOnlyInstallDoesNotRunCodex() async throws {
+        let node = try await ScratchNode(scratch)
+        defer { node.stop() }
+        try ownPrograms(node)
+        let codex = try standInCodex(node)
+        let ran = try await node.runOnTerminal(["hooks", "install", "--agent", "claude"])
+        #expect(ran.status == 0, "\(ran.output)\n\(node.said)")
+        #expect(!ran.output.contains("Codex"), "\(ran.output)")
+        #expect(!FileManager.default.fileExists(atPath: codex.folder.appendingPathComponent("pid").path))
+        #expect(!FileManager.default.fileExists(atPath: node.home.appendingPathComponent(".codex").path))
+    }
+
+    /// No Codex where its link is read: said before the code, and the install still succeeds with today's line.
+    @Test func withNoCodexTheInstallSucceedsAndSaysToRunHooks() async throws {
+        let node = try await ScratchNode(scratch)
+        defer { node.stop() }
+        try ownPrograms(node)
+        // No codex on the command line's PATH either.
+        let ran = try await ScratchNodes.onTerminal(commandLine.path, ["hooks", "install", "--agent", "codex"],
+                                                    environment: node.environment(["PATH": "/usr/bin:/bin"]), answer: { $0 })
+        #expect(ran.status == 0, "\(ran.output)\n\(node.said)")
+        #expect(ran.output.contains("Codex isn't asked to trust the hooks (codex: "), "\(ran.output)")
+        #expect(ran.output.contains("Not trusted in Codex: no Codex was named to trust them with."), "\(ran.output)")
+        #expect(ran.output.contains("run /hooks in Codex and trust the vibeswitcher-hook entries"), "\(ran.output)")
+        #expect(HookInstaller.isInstalled(in: try object(codexHooks(node))))
+    }
+
+    /// No link but a `codex` on the command line's PATH: the confirmation and the result say the line that makes the
+    /// link; that codex is never run.
+    @Test func aCodexOnThePathIsShownAsTheLinkToMake() async throws {
+        let node = try await ScratchNode(scratch)
+        defer { node.stop() }
+        try ownPrograms(node)
+        let folder = node.root.appendingPathComponent("path-bin")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let marker = node.root.appendingPathComponent("path-codex-ran")
+        let found = folder.appendingPathComponent("codex")
+        try writeClosedOnExec("#!/bin/sh\ntouch \(HookInstaller.shellQuoted(marker.path))\n", to: found)
+        let link = node.root.appendingPathComponent("v2/test/codex").path
+        let ran = try await ScratchNodes.onTerminal(commandLine.path, ["hooks", "install", "--agent", "codex"],
+                                                    environment: node.environment(["PATH": "\(folder.path):/usr/bin:/bin"]), answer: { $0 })
+        #expect(ran.status == 0, "\(ran.output)\n\(node.said)")
+        let line = "Codex isn't linked for this node: `ln -s \(HookInstaller.shellQuoted(found.path)) \(HookInstaller.shellQuoted(link))`, "
+            + "then run hooks install again (the node holds the new link until you accept it)"
+        #expect(ran.output.components(separatedBy: line).count == 3, "in the confirmation and the result: \(ran.output)")
+        #expect(!ran.output.contains("run /hooks"), "\(ran.output)")
+        #expect(!FileManager.default.fileExists(atPath: marker.path))
+        #expect(HookInstaller.isInstalled(in: try object(codexHooks(node))))
+    }
+
+    /// `config.toml` changed outside Codex's part while the trust ran (a hand edit): left as it is, nothing of it
+    /// sealed, so the next look holds it; the result says so.
+    @Test func aHandEditWhileTheTrustRanIsHeldNotDropped() async throws {
+        let (node, repo) = try await acceptedNode()
+        defer { node.stop() }
+        try await node.acceptConfig(repo)
+        _ = try standInCodex(node, before: "\n[profiles.mine]\nmodel = \"y\"\n")
+        let ran = try await node.runOnTerminal(["hooks", "install"])
+        #expect(ran.status == 0, "\(ran.output)\n\(node.said)")
+        #expect(ran.output.contains("~/.codex/config.toml changed while this ran (by Codex or something else): nothing of it was sealed; `vibeswitcher config held` shows it"), "\(ran.output)")
+        #expect(ran.output.contains("run /hooks in Codex and trust the vibeswitcher-hook entries"), "\(ran.output)")
+        let config = try String(contentsOf: node.home.appendingPathComponent(".codex/config.toml"), encoding: .utf8)
+        #expect(config.contains("[profiles.mine]") && config.contains("trusted_hash = \"sha256:ours\""), "left as it is: \(config)")
+        #expect(try await held(node, repo) == ["~/.codex/config.toml"])
+    }
+
+    /// A Codex that quits mid-way: the install still succeeds, says why and today's line, and the seal holds nothing.
+    @Test func aCodexThatQuitsLeavesTheInstallDoneAndNothingHeld() async throws {
+        let (node, repo) = try await acceptedNode()
+        defer { node.stop() }
+        try await node.acceptConfig(repo)
+        _ = try standInCodex(node, script: "read -r line; exit 0")
+        let ran = try await node.runOnTerminal(["hooks", "install"])
+        #expect(ran.status == 0, "\(ran.output)\n\(node.said)")
+        #expect(ran.output.contains("Not trusted in Codex: codex app-server quit before it was done."), "\(ran.output)")
+        #expect(ran.output.contains("run /hooks in Codex and trust the vibeswitcher-hook entries"), "\(ran.output)")
+        #expect(HookInstaller.isInstalled(in: try object(codexHooks(node))))
+        #expect(try await held(node, repo).isEmpty)
+    }
+
     @Test func hooksRemoveTakesThemOut() async throws {
         let node = try await ScratchNode(scratch)
         defer { node.stop() }

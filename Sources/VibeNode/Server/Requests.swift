@@ -275,7 +275,7 @@ public final class Requests: @unchecked Sendable {
             guard let self else { return done() }
             self.queue.async {
                 if let notes { self.notes = (notes, Date()) }
-                self.refreshBuilds(done)
+                self.refreshBuilds { self.refreshHooks(done) }
             }
         }
     }
@@ -285,6 +285,8 @@ public final class Requests: @unchecked Sendable {
     /// change of the node's stream calls. On `queue`.
     private var builds: NodeWire.Value?
     private let buildsReads = DispatchQueue(label: "vibenode.status-builds", qos: .utility)
+    /// The hooks as `vibeswitcher approve` would find them, as last read (`refreshHooks`): `status`'s notice.
+    let hooksLook = HooksLook()
 
     /// The install root read again on a queue of its own, `builds` set on `queue`, then `done` there. At each
     /// `refreshNotes` (each `status`, and each housekeeping). Nothing without an install root.
@@ -477,6 +479,7 @@ public final class Requests: @unchecked Sendable {
         case "base.accept", "base.keep": baseAnswer(request, reply: reply)
         case "hooks.install", "hooks.remove": hooks(request, reply: reply)
         case "build.switch": buildSwitch(request, reply: reply)
+        case "build.seal": buildSeal(request, reply: reply)
         case "web.open", "web.revoke":
             if request.kind == "web.open", request.args?["tailnet"]?.bool == true { return webOpenTailnet(request, reply: reply) }
             guard let web else { return reply(.init(re: request.id, error: .init(.refused, "this server has no web listener"))) }
@@ -492,7 +495,12 @@ public final class Requests: @unchecked Sendable {
         doing[action] = Self.argsDigest(request)
         act(request, from: facts) { [weak self] answer in
             guard let self else { return reply(answer) }
-            self.queue.async {
+            // An act on a card (an answer, an accept, a batch of them): the open cards' file written first (`flushCards`).
+            let flush: (@escaping () -> Void) -> Void = { [weak self] next in
+                guard let engine = self?.engine, Self.carded.contains(request.kind) || request.kind == "approve" else { return next() }
+                engine.queue.async { engine.flushCards(then: next) }
+            }
+            flush { self.queue.async {
                 self.keep(answer, for: action, request: request)
                 let (client, kind, outcome) = (self.link.vaultV2, request.kind, Self.outcome(of: answer, kind: request.kind))
                 DispatchQueue.global(qos: .userInitiated).async { [weak self] in
@@ -507,7 +515,7 @@ public final class Requests: @unchecked Sendable {
                         reply(answer)
                     }
                 }
-            }
+            } }
         }
     }
 
@@ -705,6 +713,7 @@ public final class Requests: @unchecked Sendable {
         case "answer", "approve": return "`vibeswitcher questions` shows whether the card is still open (a shell request's session shows whether its command ran)"
         case "push": return "the repository's remote shows whether the push went"
         case "build.switch": return "`vibeswitcher status` names the build running now"
+        case "build.seal": return "`vibeswitcher config held` shows what is still held"
         case "web.open": return "`vibeswitcher web open` gives a link again"
         case "presets.edit": return "`vibeswitcher presets` shows the presets now"
         default: return "`vibeswitcher status` shows what is now"
@@ -867,6 +876,7 @@ public final class Requests: @unchecked Sendable {
             notices.append("the server ended stuck \(stuck) times in a row (its engine's queue didn't answer), and the host started it again each time: its log says what it was doing; if it goes on, `vibeswitcher stop`, then `vibeswitcher start`")
         }
         if let notice = updates?.notice { notices.append(notice) }
+        if let notice = hooksLook.notice { notices.append(notice) }
         return notices
     }
 
@@ -1017,8 +1027,13 @@ public final class Requests: @unchecked Sendable {
         guard !install || nodeRoot != nil else {
             return reply(.init(re: request.id, error: .init(.refused, "this server has no build folder to install the hooks' programs from")))
         }
-        let (nodeRoot, home, vault, commit) = (self.nodeRoot ?? "", self.home, link.vault, self.commit)
-        let work = { (binaries: [String: String]?, hostBuild: String?) -> NodeWire.Reply in
+        let (nodeRoot, home, vault, commit, root) = (self.nodeRoot ?? "", self.home, link.vault, self.commit, self.root)
+        // The Codex the user was shown before the typed code (`hooks install`'s confirmation): trusted by only while the
+        // link still resolves to it.
+        let shownCodex = request.args?["codex"]?.string
+        // The reply, or (install with Codex) the step that trusts Codex's hooks and gives it: run off the board reads'
+        // queue, as it waits on `codex app-server` (`NodeCodexTrust.limit`).
+        let work = { (binaries: [String: String]?, hostBuild: String?) -> (reply: NodeWire.Reply, trusting: (() -> NodeWire.Reply)?) in
             var hooks = HooksRequest(nodeRoot: nodeRoot, home: home, binaries: binaries, vault: vault)
             // While the host runs another build than this server, a program that isn't its `binaries` entry is the
             // build switch not finished yet (the server restarts onto it once idle), said so.
@@ -1026,20 +1041,41 @@ public final class Requests: @unchecked Sendable {
             let configs = agents.map { hooks.configPath($0) }
             if install {
                 switch hooks.install(agents: agents) {
-                case .failure(let refusal): return .init(re: request.id, error: .init(.refused, refusal.text))
+                case .failure(let refusal): return (.init(re: request.id, error: .init(.refused, refusal.text)), nil)
                 case .success(let installed):
-                    return .init(re: request.id, typed: WireKinds.HooksInstall.Result(programs: installed.programs, configs: installed.configs))
+                    let result = WireKinds.HooksInstall.Result(programs: installed.programs, configs: installed.configs)
+                    guard agents.contains(.codex) else { return (.init(re: request.id, typed: result), nil) }
+                    return (.init(re: request.id, typed: result), { [hooks] in
+                        var trusted = result
+                        // The user's node, its systemd manager reachable: in a transient scope of its own (as update
+                        // runs install-node); a scratch node, or no manager: its own process group.
+                        let scope = NodeFolders.isUsersRoot(root, accountHome: VibePaths.accountHome) && SwitchSealCheck.userManagerRefusal() == nil
+                            ? "/usr/bin/systemd-run" : nil
+                        (trusted.trusted, trusted.trustNote) = hooks.trustCodex(shown: shownCodex, root: root, expected: installed.codexPositions, scope: scope)
+                        return .init(re: request.id, typed: trusted)
+                    })
                 }
             }
             switch hooks.remove(agents: agents) {
-            case .failure(let refusal): return .init(re: request.id, error: .init(.refused, refusal.text))
-            case .success: return .init(re: request.id, typed: WireKinds.HooksRemove.Result(configs: configs))
+            case .failure(let refusal): return (.init(re: request.id, error: .init(.refused, refusal.text)), nil)
+            case .success: return (.init(re: request.id, typed: WireKinds.HooksRemove.Result(configs: configs)), nil)
             }
         }
         let note = self.note
-        let said = { (answer: NodeWire.Reply) in
-            note("\(request.kind) \(names.joined(separator: ",")): \(answer.ok ? "done" : answer.error?.message ?? "refused")")
-            reply(answer)
+        let queue = self.queue
+        let said = { (done: (reply: NodeWire.Reply, trusting: (() -> NodeWire.Reply)?)) in
+            let (answer, trusting) = done
+            guard let trusting else {
+                note("\(request.kind) \(names.joined(separator: ",")): \(answer.ok ? "done" : answer.error?.message ?? "refused")")
+                return reply(answer)
+            }
+            DispatchQueue.global(qos: .userInitiated).async {
+                let trusted = trusting()
+                queue.async {
+                    note("\(request.kind) \(names.joined(separator: ",")): done")
+                    reply(trusted)
+                }
+            }
         }
         // On `queue`: the notes as last asked.
         let run = { [weak self] in
@@ -1098,13 +1134,118 @@ public final class Requests: @unchecked Sendable {
                 engine.parkForSwitch(live, commit: commit) { parked in done(parked.map(\.named)) }
             }
         } }
-        SwitchRequest(link: link, installRoot: installRoot, timing: switchTiming, held: held, park: park,
-                      describe: { [weak self] in self?.switchDoing($0) }, note: note).run(commit: commit) { [weak self] answer in
-            switch answer {
-            case .done(let result): reply(.init(re: request.id, typed: result))
-            case .refused(let code, let why): reply(.init(re: request.id, error: .init(code, why)))
+        let seen = Self.installSeen(request.args)
+        let run = { [weak self] (sealed: SwitchSealCheck.Sealed?) in
+            guard let self else { return }
+            SwitchRequest(link: self.link, installRoot: installRoot, timing: self.switchTiming, held: held, park: park,
+                          describe: { [weak self] in self?.switchDoing($0) }, note: self.note).run(commit: commit) { [weak self] answer in
+                self?.refreshNotes()
+                switch answer {
+                case .done(var result):
+                    if let sealed {
+                        result.sealed = sealed.sealed
+                        result.held = sealed.held
+                        result.sealRefusals = sealed.refusals
+                    }
+                    // A completed handover to exactly `commit`, for `build.seal` (its one seal, its `from`): recorded
+                    // under this request's action before the reply goes, from the switch's own outcome.
+                    guard let self, let action = request.action?.lowercased(), result.outcome == "handed-over", result.commit == commit,
+                          let from = result.from, NodeUnit.isCommit(from) else { return reply(.init(re: request.id, typed: result)) }
+                    let (client, note, queue) = (self.link.vaultV2, self.note, self.queue)
+                    DispatchQueue.global(qos: .userInitiated).async {
+                        do { _ = try client.recordUserAction(action, kind: Self.switchedKind, subject: from, digest: Self.switchedDigest(from: from, to: commit)) } catch {
+                            note("build.switch \(commit): the handover's record for build.seal wasn't written (\(error)): the unit's change stays for `vs config accept`")
+                        }
+                        queue.async { reply(.init(re: request.id, typed: result)) }
+                    }
+                    return
+                case .refused(let code, let why):
+                    let said = sealed.map { Self.sealWords($0) } ?? ""
+                    reply(.init(re: request.id, error: .init(code, why + said)))
+                }
             }
-            self?.refreshNotes()
+        }
+        // `update`'s install: the builds folder sealed first, when the checks pass (`SwitchSealCheck`, a), so the
+        // handover isn't refused for it.
+        guard let seen, NodeUnit.isCommit(commit) else { return run(nil) }
+        let (queue, note) = (self.queue, self.note)
+        DispatchQueue.global(qos: .userInitiated).async {
+            let sealed = SwitchSealCheck.sealBuilds(prefix: NodeFolders.defaultPrefix(accountHome: home), commit: commit, seen: seen, home: home, vault: vault)
+            note("build.switch \(commit): " + (sealed.sealed.isEmpty ? "the builds folder not sealed: " + sealed.refusals.joined(separator: "; ") : "the builds folder sealed as the install left it"))
+            queue.async { run(sealed) }
+        }
+    }
+
+    /// What `update` saw of the builds folder around its install, when a request carries both hashes.
+    static func installSeen(_ args: [String: NodeWire.Value]?) -> SwitchSealCheck.InstallSeen? {
+        guard let lines = args?["buildsBeforeListing"]?.array, let after = args?["buildsAfter"]?.string else { return nil }
+        let listing = lines.compactMap(\.string)
+        guard listing.count == lines.count, !listing.isEmpty else { return nil }
+        return .init(beforeListing: listing, after: after)
+    }
+
+    /// A refusal's tail saying what the seal did.
+    static func sealWords(_ sealed: SwitchSealCheck.Sealed) -> String {
+        (sealed.sealed.isEmpty ? "" : "; sealed first: " + sealed.sealed.joined(separator: ", "))
+            + (sealed.refusals.isEmpty ? "" : "; " + sealed.refusals.joined(separator: "; "))
+    }
+
+    /// How long after its switch `build.seal` is taken.
+    static let sealWithin: TimeInterval = 15 * 60
+
+    /// The record `build.switch` writes under its action once it handed over (`switchedKind`, subject the build it
+    /// switched from), and the record `build.seal` writes once it sealed (`sealedKind`): kinds of the vault's record of
+    /// user actions, never requests.
+    static let switchedKind = "build.switched"
+    static let sealedKind = "build.sealed"
+    /// `build.seal`'s check, seal and mark, one request at a time.
+    static let sealings = DispatchQueue(label: "vibenode.build-seal", qos: .userInitiated)
+    static func switchedDigest(from: String, to: String) -> String { LeadVaultV2.digest("build.switched \(from) \(to)") }
+
+    /// Why `build.seal` (its switch's `action`, `commit`, `from`) isn't taken, from the vault's records under that
+    /// action: the switch recorded, its completed handover (written by this server after it, never a caller) to exactly
+    /// `commit` from exactly `from` (the switch's own record of it, never the caller's word), within `sealWithin`, and
+    /// no seal already. Nil: taken. Reads the vault.
+    static func sealRefusal(action: String, commit: String, from: String, client: LeadVaultV2Client,
+                            now: Double = Date().timeIntervalSince1970) -> String? {
+        guard (try? client.userAction(action, kind: WireKinds.BuildSwitch.kind)) != nil else {
+            return "build.seal is taken only with the action of a switch to \(commit): nothing was sealed"
+        }
+        guard let switched = try? client.userAction(action, kind: switchedKind),
+              switched.digest == switchedDigest(from: switched.subject ?? "", to: commit), let recorded = switched.subject else {
+            return "that switch to \(commit) didn't complete a handover to it (refused, failed, or another commit's): nothing was sealed"
+        }
+        guard recorded == from else { return "that switch was from \(recorded), not \(from): nothing was sealed" }
+        guard now - switched.at <= sealWithin else {
+            return "that switch is more than \(Int(sealWithin / 60)) minutes old: nothing was sealed (`vs config held`)"
+        }
+        if (try? client.userAction(action, kind: sealedKind)) != nil { return "that switch's unit was sealed once already: nothing more is sealed" }
+        return nil
+    }
+
+    /// `build.seal` (`WireKinds.BuildSeal`), naming its switch's action (`switchAction`): taken only as `sealRefusal` lets it, then the unit folder sealed when only
+    /// its unit's `ExecStart` moved from the switch's recorded `from` to `commit`'s and the builds folder holds `commit`
+    /// sealed (`SwitchSealCheck.sealUnit`); once (`sealedKind`). The vault and the disk are read off `queue`.
+    private func buildSeal(_ request: NodeWire.Request, reply: @escaping (NodeWire.Reply) -> Void) {
+        guard let commit = request.args?["commit"]?.string, let from = request.args?["from"]?.string, NodeUnit.isCommit(commit), NodeUnit.isCommit(from),
+              let action = request.args?["switchAction"]?.string?.lowercased(), UUID(uuidString: action) != nil else {
+            return reply(.init(re: request.id, error: .init(.badArgs, "build.seal needs commit and from, each 40 lowercase hex digits, and switchAction, the switch's action id")))
+        }
+        let (home, vault, client, queue, note) = (self.home, link.vault, link.vaultV2, self.queue, self.note)
+        // One at a time (`sealings`): the check that none was sealed for this switch, the seal and its mark, so two
+        // requests for one switch never both seal; the mark only once something was sealed, so a refusal (a read that
+        // failed, a change since) leaves the switch's seal to a later request.
+        Self.sealings.async {
+            if let why = Self.sealRefusal(action: action, commit: commit, from: from, client: client) {
+                return queue.async { reply(.init(re: request.id, error: .init(.refused, why))) }
+            }
+            let sealed = SwitchSealCheck.sealUnit(unitFolder: NodeFolders.join(home, ".config/systemd/user"), unitFile: "\(NodeStarter.unitName).service",
+                                                  prefix: NodeFolders.defaultPrefix(accountHome: home), from: from, to: commit, home: home, vault: vault)
+            if !sealed.sealed.isEmpty {
+                _ = try? client.recordUserAction(action, kind: Self.sealedKind, subject: commit, digest: Self.switchedDigest(from: from, to: commit))
+            }
+            note("build.seal \(commit): " + (sealed.sealed.isEmpty ? "the unit folder not sealed: " + (sealed.refusals.isEmpty ? "nothing held" : sealed.refusals.joined(separator: "; ")) : "the unit folder sealed"))
+            queue.async { reply(.init(re: request.id, typed: WireKinds.BuildSeal.Result(sealed: sealed.sealed, held: sealed.held, sealRefusals: sealed.refusals))) }
         }
     }
 

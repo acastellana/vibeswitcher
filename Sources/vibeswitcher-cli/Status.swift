@@ -136,6 +136,7 @@ enum StatusCommand {
             out.append("  \(inert(session["terminal"]?.string))  \(inert(session["agent"]?.string))  \(inert(session["cwd"]?.string))  \(inert(session["status"]?.string))\(name)\(paused)")
         }
         out += CardText.statusLines(leads: result.leads ?? [], cards: result.cards.map(NodeWire.Value.init(wire:)))
+        if let line = CardText.waitingLine(result.cards) { out.append(line) }
         // What a build switch would wait on now, each with what it does and since when (the rule on switches).
         let holders = (result.switchBlockers ?? []).map { inert($0) }
         if !holders.isEmpty { out.append("a build switch waits now on: " + holders.joined(separator: "; ")) }

@@ -56,6 +56,13 @@ import Testing
                            copy: "static func reviews(_ board: LeadBoard, team: TeamReading, now: Date, root: String? = nil) -> [String: ReviewUsageWait] {",
                            why: "`UsageWaits.reviews`, the node's name for `TeamRows.usageWaits`"),
              ]),
+        // The Mac's Codex trust for the node's `hooks.install`: which hooks are ours, the same; the exchange is the node's
+        // own (Platform.Spawn, the Codex link, a clean environment, the file checked before it is sealed).
+        Copy(copy: node + "Server/NodeCodexTrust.swift", original: app + "CodexTrust.swift",
+             parts: ["func file", "func realPath", "func isOurs"].map { Part(original: $0, copy: $0) }, differences: [
+                Difference(original: "private static func realPath(_ path: String) -> String {", copy: "static func realPath(_ path: String) -> String {",
+                           why: "the node's tests resolve the stand-in Codex with it"),
+             ]),
         Copy(copy: node + "Engine/WitnessWork.swift", original: app + "MainWindow/Lead/LeadController.swift",
              parts: [Part(original: "struct WitnessWork", copy: "struct WitnessWork")]),
         Copy(copy: node + "Engine/TeamReading.swift", original: app + "MainWindow/Lead/LeadController.swift",

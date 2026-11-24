@@ -32,6 +32,41 @@ struct SwitchTests {
 
     /// The app's `theBundledBuildIsUsed` and `noRestartIsOfferedWithoutAnOutdatedHost`: the build that runs is the one
     /// asked for, so nothing is switched (asked of a host already on it, with live teams or none).
+    /// What `vs switch` waits for once handed over (`SwitchSettle`): a replacement is due only when the two builds'
+    /// records give their servers other bytes; unknown when a record can't be read (not waited for); the server that
+    /// stays is the target's under another pid; a page's listener only when it held a token, on the same port.
+    @Test(NodeTraits.linuxOnly) func aSwitchWaitsForTheServerThatStaysAndAPagesListener() throws {
+        let builds = scratch.url("builds")
+        try ScratchBuilds.install(commit: Self.a, into: builds)
+        try ScratchBuilds.install(commit: Self.b, into: builds)
+        var bytes = try Data(contentsOf: builtProducts.appendingPathComponent(BuildInfo.server))
+        bytes.append(0)
+        let padded = scratch.url("padded-server")
+        try bytes.write(to: padded)
+        let c = String(repeating: "c", count: 40)
+        try ScratchBuilds.install(commit: c, into: builds, replacing: [BuildInfo.server: padded.path])
+        #expect(SwitchSettle.serverDue(installRoot: builds.path, running: Self.a, target: Self.b) == false)
+        #expect(SwitchSettle.serverDue(installRoot: builds.path, running: Self.a, target: c) == true)
+        #expect(SwitchSettle.serverDue(installRoot: builds.path, running: "unknown", target: c) == nil)
+        #expect(SwitchSettle.serverDue(installRoot: builds.path, running: String(repeating: "d", count: 40), target: c) == nil)
+        #expect(SwitchSettle.serverDue(installRoot: nil, running: Self.a, target: c) == nil)
+
+        #expect(!SwitchSettle.serverSettled(pid: 10, commit: Self.a, before: 10, target: c, due: true))
+        #expect(!SwitchSettle.serverSettled(pid: 11, commit: Self.a, before: 10, target: c, due: true), "a server restarted on the old build")
+        #expect(SwitchSettle.serverSettled(pid: 11, commit: c, before: 10, target: c, due: true))
+        #expect(SwitchSettle.serverSettled(pid: 10, commit: Self.a, before: 10, target: Self.b, due: false))
+        #expect(SwitchSettle.serverSettled(pid: 10, commit: Self.a, before: 10, target: c, due: nil))
+
+        let paired = SwitchSettle.Web(.object(["state": .string("listening"), "port": .int(7311), "tokens": .int(1), "connections": .int(0)]))
+        let codeOnly = SwitchSettle.Web(.object(["state": .string("listening"), "port": .int(7311), "tokens": .int(0)]))
+        #expect(paired?.awaited == true && codeOnly?.awaited == false && SwitchSettle.Web(nil) == nil)
+        #expect(SwitchSettle.webSettled(before: codeOnly, now: nil))
+        #expect(!SwitchSettle.webSettled(before: paired, now: nil))
+        #expect(!SwitchSettle.webSettled(before: paired, now: SwitchSettle.Web(listening: false, port: nil, tokens: 1)))
+        #expect(!SwitchSettle.webSettled(before: paired, now: SwitchSettle.Web(listening: true, port: 7312, tokens: 1)))
+        #expect(SwitchSettle.webSettled(before: paired, now: SwitchSettle.Web(listening: true, port: 7311, tokens: 1)))
+    }
+
     @Test func theRunningCommitIsAlreadyRunning() {
         #expect(SwitchPlan.plan(running: Self.a, target: Self.a, installed: [Self.a, Self.b], live: []) == .already)
         #expect(SwitchPlan.plan(running: Self.a, target: Self.a, installed: [Self.a], live: [.lead, .worker, .verifier]) == .already)
@@ -1069,8 +1104,9 @@ struct SwitchTests {
     }
 
     /// The reply reaches the command line before its server is replaced: `switch B` (`B`'s server's bytes differ, so
-    /// the server is started again from `B`'s) exits 0 with the handover named while the server it asked still runs,
-    /// and that server is replaced afterwards.
+    /// the server is started again from `B`'s) has the handover named in the reply (never the lost reply's follow-up),
+    /// then waits for `B`'s server (2026-11-24, `SwitchSettle`): when it exits 0 the old server was replaced, and the
+    /// next command reaches the new one.
     @Test(NodeTraits.linuxOnly, .timeLimit(.minutes(10))) func theSwitchsReplyReachesTheCommandLineBeforeTheServerIsReplaced() async throws {
         let builds = try twoBuilds(paddedServer: true)
         let node = try await ScratchNode(scratch, build: builds.a, installRoot: builds.root)
@@ -1080,11 +1116,31 @@ struct SwitchTests {
         let switched = try await node.runOnTerminal(["switch", Self.b])
         #expect(switched.status == 0, "\(switched.output)\n\(node.said)")
         #expect(switched.output.contains("handed over") && switched.output.contains("build \(Self.b)"), "\(switched.output)")
-        #expect(!node.said.contains(ended), "the server was replaced before the command line had its reply: \(node.said)")
-        let replaced = await eventually(timeout: ServerChild.idleLimit + ServerChild.reconnectGrace + 60) {
-            ((try? WireClient(node).hello).map { $0.server.pid != server }) == true
-        }
-        #expect(replaced && node.said.contains(ended), "\(node.said)")
+        #expect(!switched.output.contains("reply was lost"), "the server was replaced before the command line had its reply: \(switched.output)")
+        #expect(switched.output.contains("the new build's server starts in place of pid \(server)")
+                && switched.output.contains("the new build's server answers"), "\(switched.output)")
+        let hello = try WireClient(node).hello
+        #expect(hello.server.pid != server && hello.server.commit == Self.b, "\(hello.server)")
+        #expect(await eventually(timeout: 30) { node.said.contains(ended) }, "\(node.said)")
+    }
+
+    /// A new build's server slower than the switch's wait (here the wait cut to a second, as a loaded machine stretches
+    /// the replacement past two minutes): the handover happened, so the switch exits 0, says so in a line, and its
+    /// follow-up still runs; the new server answers later. The wait polls until the hello (the switch's own test above
+    /// returns as soon as it comes).
+    @Test(NodeTraits.linuxOnly, .timeLimit(.minutes(10))) func aServerSlowerThanTheWaitIsSaidNotAFailure() async throws {
+        let builds = try twoBuilds(paddedServer: true)
+        let node = try await ScratchNode(scratch, build: builds.a, installRoot: builds.root)
+        defer { node.stop() }
+        let server = try #require(node.serverPID)
+        let switched = try await node.runOnTerminal(["switch", Self.b, "--test-server-wait", "1"])
+        #expect(switched.status == 0, "\(switched.output)\n\(node.said)")
+        #expect(switched.output.contains("handed over to \(Self.b); its server hasn't answered yet after")
+                && switched.output.contains("`vibeswitcher status` shows when it does"), "\(switched.output)")
+        #expect(switched.output.contains("scratch node: no unit to rewrite"), "the follow-up didn't run: \(switched.output)")
+        #expect(await eventually(timeout: ServerChild.idleLimit + ServerChild.reconnectGrace + 120) {
+            ((try? WireClient(node).hello).map { $0.server.pid != server && $0.server.commit == Self.b }) == true
+        }, "\(node.said)")
     }
 
     /// No controlling terminal (`setsid --wait`, stdin /dev/null): refused before anything is asked; the server records

@@ -217,15 +217,33 @@ extension WireKinds {
         public init(agents: [String]?) { self.agents = agents }
     }
 
+    /// `hooks install`'s: the agents, and `codex`, the Codex program the user was shown before the typed code (the link
+    /// `NodePreflight.codex` resolves): the server trusts the Codex hooks by running it, only when it still resolves so.
+    public struct HooksInstallArgs: WireArgs, Equatable {
+        public var agents: [String]?
+        public var codex: String?
+        public enum CodingKeys: String, CodingKey, CaseIterable { case agents, codex }
+        public init(agents: [String]?, codex: String? = nil) {
+            self.agents = agents
+            self.codex = codex
+        }
+    }
+
     public enum HooksInstall: WireChangeKind {
         public static let kind = "hooks.install"
-        public typealias Args = AgentsArgs
+        public typealias Args = HooksInstallArgs
+        /// `trusted`: the Codex hooks trusted (`NodeCodexTrust`), absent when none was tried; `trustNote`: why none was
+        /// (or what was refused).
         public struct Result: Codable, Sendable, Equatable {
             public var programs: [String]?
             public var configs: [String]?
-            public init(programs: [String], configs: [String]) {
+            public var trusted: Int?
+            public var trustNote: String?
+            public init(programs: [String], configs: [String], trusted: Int? = nil, trustNote: String? = nil) {
                 self.programs = programs
                 self.configs = configs
+                self.trusted = trusted
+                self.trustNote = trustNote
             }
         }
     }
@@ -245,8 +263,17 @@ extension WireKinds {
         public static let kind = "build.switch"
         public struct Args: WireArgs, Equatable {
             public var commit: String?
-            public enum CodingKeys: String, CodingKey, CaseIterable { case commit }
-            public init(commit: String?) { self.commit = commit }
+            /// `vibeswitcher update`'s: the builds folder's listing lines before and its listing hash right after the
+            /// install it ran (`SwitchSealCheck.InstallSeen`): the folder is sealed as it was then, when the checks pass,
+            /// before the plan.
+            public var buildsBeforeListing: [String]?
+            public var buildsAfter: String?
+            public enum CodingKeys: String, CodingKey, CaseIterable { case commit, buildsBeforeListing, buildsAfter }
+            public init(commit: String?, buildsBeforeListing: [String]? = nil, buildsAfter: String? = nil) {
+                self.commit = commit
+                self.buildsBeforeListing = buildsBeforeListing
+                self.buildsAfter = buildsAfter
+            }
         }
         public struct Result: Codable, Sendable, Equatable {
             public var outcome: String?
@@ -256,10 +283,45 @@ extension WireKinds {
             public var afterTheWait: Bool?
             public var said: String?
             public var parked: [String]?
+            /// With `buildsBefore` and `buildsAfter`: what was sealed (`~/.vibeswitcher/v2/builds`), what stays held, and
+            /// why the folder wasn't sealed when it wasn't.
+            public var sealed: [String]?
+            public var held: [String]?
+            public var sealRefusals: [String]?
             public init(outcome: String, commit: String, said: String) {
                 self.outcome = outcome
                 self.commit = commit
                 self.said = said
+            }
+        }
+    }
+
+    /// `build.seal` (`vibeswitcher update`, after the switch's follow-up, naming the switch's action): the node's unit
+    /// folder sealed when its unit's `ExecStart` moved from `from`'s build to `commit`'s and nothing else
+    /// (`SwitchSealCheck.sealUnit`), taken only for that switch's completed handover (`Requests.sealRefusal`).
+    public enum BuildSeal: WireChangeKind {
+        public static let kind = "build.seal"
+        public struct Args: WireArgs, Equatable {
+            public var commit: String?
+            public var from: String?
+            /// The switch's own action id: this request has an action of its own (a server that answered the switch
+            /// keeps its reply under that action, for that request's retries alone).
+            public var switchAction: String?
+            public enum CodingKeys: String, CodingKey, CaseIterable { case commit, from, switchAction }
+            public init(commit: String?, from: String?, switchAction: String?) {
+                self.commit = commit
+                self.from = from
+                self.switchAction = switchAction
+            }
+        }
+        public struct Result: Codable, Sendable, Equatable {
+            public var sealed: [String]?
+            public var held: [String]?
+            public var sealRefusals: [String]?
+            public init(sealed: [String], held: [String], sealRefusals: [String]) {
+                self.sealed = sealed
+                self.held = held
+                self.sealRefusals = sealRefusals
             }
         }
     }

@@ -1,6 +1,6 @@
 import Foundation
 import Testing
-import VibeCore
+@testable import VibeCore
 @testable import VibeNode
 
 /// The attacker's cases against acting from the page (the second security review of 8a28a36d, branch v2-acting-review),
@@ -158,17 +158,18 @@ struct ActingAttackTests {
     @Test func aReadingPageWatchesNothingAndNoCodeIsServed() throws {
         #expect(Principal.page([.read, .draft], terminals: true).route("term.open") != .terminal)
         let code = WebTokens.randomText(bytes: WebAccess.codeBytes)
-        PairingMask.made(code, until: Date().addingTimeInterval(120))
+        // This server's live codes (another server's, another test's, are none of its mask's).
+        let codes = PairingCodes()
+        codes.made(code, until: Date().addingTimeInterval(120))
         let line = "Open this address in a browser within 120 s; it works once:\r\nhttp://127.0.0.1:8765/#pair=\(code)\r\n$ "
         let bytes = Data(line.utf8)
         for split in [10, 60, 85, 90, bytes.count - 3] {
-            let mask = TerminalMask()
-            let served = mask.pass(bytes.prefix(split)) + mask.pass(bytes.dropFirst(split)) + mask.flush()
+            let mask = TerminalMask(codes: codes)
+            let served = mask.pass(bytes.prefix(split)) + mask.pass(bytes.dropFirst(split)) + mask.drain()
             let text = String(decoding: served, as: UTF8.self)
             #expect(!text.contains(code) && text.contains("#pair=" + String(repeating: "*", count: code.count)), "split at \(split): \(text)")
         }
         #expect(!PairingMask.mask("ran `vibeswitcher web`: http://127.0.0.1:8765/#pair=\(code)").contains(code))
-        #expect(!PairingMask.mask("the code alone: \(code)").contains(code))
         // The re-read's R4: cut by what the screen does (a screen replay redraws a wrapped line with a cursor move; a
         // colour; a line break), split across reads inside an escape sequence, or percent-encoded: still masked, each
         // code character one `*`, the escapes kept.
@@ -176,15 +177,15 @@ struct ActingAttackTests {
         for cut in ["\u{1B}[2;1H", "\u{1B}[0m\u{1B}[38;5;12m", "\r\n", "\u{1B}]8;;x\u{07}"] {
             let drawn = Data("http://127.0.0.1:8765/#pair=\(code[..<half])\(cut)\(code[half...]) \u{1B}[K$ ".utf8)
             for split in [30, 40, 41, 42, drawn.count - 6] {
-                let mask = TerminalMask()
-                let served = mask.pass(drawn.prefix(split)) + mask.pass(drawn.dropFirst(split)) + mask.flush()
+                let mask = TerminalMask(codes: codes)
+                let served = mask.pass(drawn.prefix(split)) + mask.pass(drawn.dropFirst(split)) + mask.drain()
                 let text = String(decoding: served, as: UTF8.self)
                 #expect(!text.contains(String(code[..<half])) && !text.contains(String(code[half...])), "\(cut.debugDescription) split at \(split): \(text.debugDescription)")
                 #expect(text.contains(cut) && served.count == drawn.count, "the escapes kept, one for one: \(text.debugDescription)")
             }
         }
-        let encoded = TerminalMask()
-        let percent = String(decoding: encoded.pass(Data("open http%3A%2F%2F127.0.0.1%3A8765%2F%23pair%3D\(code) now\n".utf8)) + encoded.flush(), as: UTF8.self)
+        let encoded = TerminalMask(codes: codes)
+        let percent = String(decoding: encoded.pass(Data("open http%3A%2F%2F127.0.0.1%3A8765%2F%23pair%3D\(code) now\n".utf8)) + encoded.drain(), as: UTF8.self)
         #expect(!percent.contains(code), "\(percent)")
         #expect(!PairingMask.mask("http%3A%2F%2F127.0.0.1%3A8765%2F%23pair%3D\(code)").contains(code))
         // The automated review of b73aedc5: (1) a code inside an escape sequence's payload (an OSC 8 hyperlink's target,
@@ -192,14 +193,14 @@ struct ActingAttackTests {
         // terminal ends it, and what follows is shown (and masked); (3) an unterminated OSC never holds the stream; (4) a
         // code delivered byte by byte, a quiet flush after each, is masked whole.
         func served(_ text: String, splits: [Int] = []) -> String {
-            let mask = TerminalMask()
+            let mask = TerminalMask(codes: codes)
             let bytes = Data(text.utf8)
             var out = Data(), from = 0
             for split in splits + [bytes.count] where split > from && split <= bytes.count {
                 out += mask.pass(bytes.subdata(in: from..<split))
                 from = split
             }
-            return String(decoding: out + mask.flush(), as: UTF8.self)
+            return String(decoding: out + mask.drain(), as: UTF8.self)
         }
         for payload in ["\u{1B}]8;;http://127.0.0.1:8765/#pair=\(code)\u{1B}\\the link\u{1B}]8;;\u{1B}\\",
                         "\u{1B}]0;vibeswitcher web: #pair=\(code)\u{07}", "\u{1B}]2;\(code)\u{1B}\\",
@@ -216,27 +217,29 @@ struct ActingAttackTests {
             #expect(String(decoding: screen.text, as: UTF8.self).hasPrefix("#pair="), "a terminal shows what follows: \(ended.debugDescription)")
         }
         let unterminated = Data(("\u{1B}]0;" + String(repeating: "x", count: 1 << 20)).utf8)
-        let big = TerminalMask()
+        let big = TerminalMask(codes: codes)
         var released = Data(), mostHeld = 0
         for at in stride(from: 0, to: unterminated.count, by: 4_096) {
             released += big.pass(unterminated.subdata(in: at..<min(at + 4_096, unterminated.count)))
             mostHeld = max(mostHeld, big.heldCount)
         }
         #expect(released.count >= unterminated.count - TerminalMask.openEscapeHeld - 4_096, "an open OSC held \(unterminated.count - released.count) bytes")
-        #expect(released + big.flush() == unterminated)
+        #expect(released + big.drain() == unterminated)
         // What is re-read at each read stays bounded (no read re-reads the megabyte: never quadratic).
         #expect(mostHeld <= TerminalMask.openEscapeHeld + 4_096, "\(mostHeld) bytes held at once")
-        let slow = TerminalMask()
+        let slow = TerminalMask(codes: codes)
         var trickled = Data()
         for byte in Data("http://127.0.0.1:8765/#pair=\(code) then more\r\n".utf8) {
             trickled += slow.pass(Data([byte]))
             trickled += slow.flush() // each byte after a quiet longer than the relay's (`maskQuiet`)
         }
         #expect(!String(decoding: trickled, as: UTF8.self).contains(code), "\(String(decoding: trickled, as: UTF8.self))")
-        let live = TerminalMask()
+        let live = TerminalMask(codes: codes)
         var alone = Data()
         for byte in Data("the code is \(code).\r\n".utf8) { alone += live.pass(Data([byte])) + live.flush() }
-        #expect(!String(decoding: alone, as: UTF8.self).contains(code.prefix(8)), "\(String(decoding: alone, as: UTF8.self))")
+        alone += live.drain()
+        // A live code's start waits at a quiet (from its `heldPrefix`th character), so no more than its first few go.
+        #expect(!String(decoding: alone, as: UTF8.self).contains(code.prefix(TerminalMask.heldPrefix)), "\(String(decoding: alone, as: UTF8.self))")
         // The parser's state and the last raw bytes carried across a release: a code inside an OSC payload, split at
         // every byte across a cap release (past `openEscapeHeld`) and across a quiet flush, the address's form and a
         // bare live code.
@@ -246,10 +249,10 @@ struct ActingAttackTests {
             for (bytes, release) in [(long, "cap"), (short, "flush")] {
                 let at = bytes.count - Array("\(form) more\u{07} $ ".utf8).count
                 for split in (at - 2)...(at + form.utf8.count + 1) {
-                    let mask = TerminalMask()
+                    let mask = TerminalMask(codes: codes)
                     var out = Data(mask.pass(Data(bytes[..<split])))
                     if release == "flush" { out += mask.flush() }
-                    out += mask.pass(Data(bytes[split...])) + mask.flush()
+                    out += mask.pass(Data(bytes[split...])) + mask.drain()
                     let text = String(decoding: out, as: UTF8.self)
                     #expect(!text.contains(code.prefix(6)) && !text.contains(code.suffix(6)) && out.count == bytes.count,
                             "\(release) at \(split) of \(form == code ? "a live code" : "an address"): \(text.suffix(60).debugDescription)")
@@ -258,10 +261,89 @@ struct ActingAttackTests {
         }
         // Plain output goes at once but for a tail that may start a code (it goes after a short quiet: `flush`), and
         // nothing is lost.
-        let mask = TerminalMask()
+        let mask = TerminalMask(codes: codes)
         let now = mask.pass(Data("total 0\r\n$ ".utf8))
         #expect(String(decoding: now, as: UTF8.self).hasPrefix("total"), "\(String(decoding: now, as: UTF8.self))")
-        #expect(now + mask.flush() == Data("total 0\r\n$ ".utf8))
+        #expect(now + mask.drain() == Data("total 0\r\n$ ".utf8))
+    }
+
+    /// The mask changes no byte but a code's own (team-lead's rule after the load gate): with no live code and no `pair=`,
+    /// it is the identity whatever the reads' cuts and the quiet flushes; with a live code, text made only of a code's
+    /// characters that isn't the code comes out unchanged; another server's live codes are none of this mask's.
+    @Test func theMaskChangesNothingButACode() {
+        var generator = SystemRandomNumberGenerator()
+        let alphabet = Array("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_".utf8)
+        func through(_ mask: TerminalMask, _ bytes: [UInt8]) -> Data {
+            var out = Data(), at = 0
+            while at < bytes.count {
+                let next = min(bytes.count, at + Int.random(in: 1...64, using: &generator))
+                out += mask.pass(Data(bytes[at..<next]))
+                if Bool.random(using: &generator) { out += mask.flush() }
+                at = next
+            }
+            return out + mask.drain()
+        }
+        for _ in 0..<2_000 {
+            var bytes = (0..<Int.random(in: 0...512, using: &generator)).map { _ in UInt8.random(in: 0...255, using: &generator) }
+            if String(decoding: bytes, as: UTF8.self).lowercased().contains("pair") { bytes = bytes.filter { $0 != 0x70 } }
+            #expect(through(TerminalMask(codes: PairingCodes()), bytes) == Data(bytes), "random bytes changed")
+        }
+        let codes = PairingCodes()
+        let code = WebTokens.randomText(bytes: WebAccess.codeBytes)
+        codes.made(code, until: Date().addingTimeInterval(120))
+        for _ in 0..<500 {
+            let words = (0..<Int.random(in: 1...400, using: &generator)).map { _ in alphabet.randomElement(using: &generator)! }
+            guard !String(decoding: words, as: UTF8.self).contains(code.prefix(TerminalMask.heldPrefix)) else { continue }
+            #expect(through(TerminalMask(codes: codes), words) == Data(words), "code-alphabet text that isn't the code changed")
+            // The footer the page's terminal shows, all a code's letters and spaces, unchanged however it comes.
+            let footer = Array("  ? for shortcuts\r\n> ".utf8)
+            #expect(through(TerminalMask(codes: codes), footer) == Data(footer))
+        }
+        // Another server's code: this mask doesn't know it, and changes nothing of it.
+        let other = TerminalMask(codes: PairingCodes())
+        #expect(through(other, Array("the code \(code) here".utf8)) == Data("the code \(code) here".utf8))
+        // Taken, a code is live no more.
+        codes.taken(code)
+        #expect(through(TerminalMask(codes: codes), Array("the code \(code) here".utf8)) == Data("the code \(code) here".utf8))
+    }
+
+    /// The node's live codes are one set, its loopback's and its tailnet's (team-lead's review of the per-server fix):
+    /// a tailnet pairing code printed in a watched terminal is masked; a bare live code quoted in a transcript is masked
+    /// (as is any `pair=` address's code); a revoke on one gate leaves the other's codes live; and still, with no live
+    /// code and no `pair=`, the terminal's mask and the transcript's change nothing.
+    @Test func theNodesLiveCodesAreItsGatesBoth() async throws {
+        let world = try await CardWorld.make(scratch)
+        defer { world.stop() }
+        let clock = NodeClock(queue: world.queue, now: { 0 }, schedule: { _, _ in {} })
+        let unreachable: Tailnet.Finder = { .failure(WebTokens.Refusal("no tailnet in this test")) }
+        let live = NodeLive(requests: world.requests, sessions: nil, engine: world.engine, clock: clock, port: 0,
+                            terminals: .watch, tailnet: .init(find: unreachable, admitPeer: { _ in false }))
+        let tailnet = try #require(live.tailnet)
+        let relayCodes = try #require(live.hub.terminals?.liveCodes)
+        let plain = Data("  ? for shortcuts\r\n> \(String(repeating: "abcdefghijklmnopqrstuvwxyz", count: 8))\r\n".utf8)
+        func shown(_ bytes: Data) -> Data {
+            let mask = TerminalMask(codes: relayCodes)
+            var out = Data()
+            for at in stride(from: 0, to: bytes.count, by: 7) { out += mask.pass(bytes.subdata(in: at..<min(at + 7, bytes.count))) + mask.flush() }
+            return out + mask.drain()
+        }
+        #expect(shown(plain) == plain, "no live code, no pair=: the identity")
+        let fromTailnet = tailnet.access.openCode(now: Date())
+        let fromLoopback = live.access.openCode(now: Date())
+        for code in [fromTailnet, fromLoopback] {
+            let line = Data("Open this address on your tailnet: http://node.example.ts.net:8765/#pair=\(code)\r\nor the code: \(code)\r\n$ ".utf8)
+            #expect(!String(decoding: shown(line), as: UTF8.self).contains(code), code == fromTailnet ? "the tailnet's code" : "the loopback's code")
+        }
+        #expect(shown(plain) == plain, "with live codes, text that isn't one: unchanged")
+        // A transcript: a live code quoted alone is masked, as is an address's code; other text is left as it is.
+        let reply = ChatItem.reply(ChatEntry(id: "r1", at: nil, kind: .reply("The code alone: \(fromTailnet). Run `vibeswitcher web` again for ? for shortcuts.")))
+        let value = try #require(ChatValue.value(reply, codes: live.access.liveCodes))
+        let text = "\(value)"
+        #expect(!text.contains(fromTailnet) && text.contains("for ? for shortcuts"), "\(text)")
+        #expect(PairingMask.mask("? for shortcuts and abcdefghijklmnopqrstuvwxyz", codes: relayCodes.codes) == "? for shortcuts and abcdefghijklmnopqrstuvwxyz")
+        // The loopback's revoke: its codes live no more, the tailnet's stay.
+        _ = live.access.revoke()
+        #expect(Set(relayCodes.codes) == [fromTailnet])
     }
 
     /// Finding 4: the guard rails that are a project's merge gate are a terminal's, as the floors and the policy are.

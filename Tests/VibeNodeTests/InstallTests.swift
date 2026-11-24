@@ -356,6 +356,19 @@ extension InstallTests {
         #expect(!FileManager.default.fileExists(atPath: world.prefix.path))
     }
 
+    /// `--repo none` (`vibeswitcher update`'s): no courtesy check, whatever the folder it runs in: a dirty clone beside
+    /// it stops nothing, and the install runs on (to the link check, as every install of the debug products here).
+    @Test(NodeTraits.linuxOnly, .timeLimit(.minutes(10))) func noRepoRunsWithoutTheCourtesyCheck() async throws {
+        let world = try await world()
+        try "0.0.0\n".write(to: world.clone.appendingPathComponent(".swift-version"), atomically: true, encoding: .utf8)
+        var arguments = try world.arguments(world.base, products: true)
+        let at = try #require(arguments.firstIndex(of: "--repo"))
+        arguments[at + 1] = "none"
+        let ran = try await world.install(arguments)
+        #expect(ran.status == 69, "\(ran.status) \(ran.errors)")
+        #expect(try !world.calls().isEmpty, "gh was never asked: the courtesy check stopped it")
+    }
+
     /// The courtesy check ignores what the user's own `git status` ignores under the HOME it runs with: the
     /// `core.excludesFile` of `~/.gitconfig`, else `~/.config/git/ignore`. A file neither lists is still refused.
     @Test(NodeTraits.linuxOnly, .timeLimit(.minutes(10))) func theAccountsOwnIgnoreFileIsHonouredByTheCleanCheck() async throws {
@@ -596,6 +609,32 @@ extension InstallTests {
         let fromCurrent = try await world.install(try world.arguments(next, products: true), script: current)
         #expect(fromCurrent.status == 69, "\(fromCurrent.status) \(fromCurrent.errors)")
         #expect(fromCurrent.output.contains("checked out \(next) "), "\(fromCurrent.output)")
+        // Run as `vibeswitcher update` runs it, from a descriptor (`bash /dev/fd/N`): its path still resolves to the
+        // installed copy, so its own checks pass as from its path; the repository's copy so is still refused.
+        func fromDescriptor(_ script: URL) async throws -> CommandRun {
+            try await run(URL(fileURLWithPath: "/bin/bash"), ["-c", #"exec 7< "$0"; exec /bin/bash /dev/fd/7 "$@""#, script.path] + (try world.arguments(next, products: true)),
+                          environment: scratchEnvironment(world.root), limit: 120, ownGroup: true)
+        }
+        let currentByDescriptor = try await fromDescriptor(current)
+        #expect(currentByDescriptor.status == 69 && currentByDescriptor.output.contains("checked out \(next) "), "\(currentByDescriptor.status) \(currentByDescriptor.errors)")
+        let repositoryByDescriptor = try await fromDescriptor(world.script)
+        #expect(repositoryByDescriptor.status == 66 && repositoryByDescriptor.errors.contains(current.path), "\(repositoryByDescriptor.status) \(repositoryByDescriptor.errors)")
+        // From a copy of its bytes no path names (as `update`'s sealed copy: here a file removed once opened), with
+        // `--self` naming where it is installed: its checks pass on that path and on the bytes running. `--self` naming
+        // a file of other bytes, or the repository's bytes running with `--self` naming the installed copy: refused.
+        func fromCopy(_ bytes: URL, selfPath: String) async throws -> CommandRun {
+            let copy = world.root.appendingPathComponent("copy-\(UUID().uuidString.prefix(6))")
+            try FileManager.default.copyItem(at: bytes, to: copy)
+            return try await run(URL(fileURLWithPath: "/bin/bash"), ["-c", #"exec 7< "$0"; rm -f -- "$0"; exec /bin/bash /dev/fd/7 "$@""#, copy.path]
+                                    + (try world.arguments(next, products: true)) + ["--self", selfPath],
+                                 environment: scratchEnvironment(world.root), limit: 120, ownGroup: true)
+        }
+        let sealedRun = try await fromCopy(current, selfPath: current.path)
+        #expect(sealedRun.status == 69 && sealedRun.output.contains("checked out \(next) "), "\(sealedRun.status) \(sealedRun.errors)")
+        let otherSelf = try await fromCopy(current, selfPath: world.script.path)
+        #expect(otherSelf.status == 66 && otherSelf.errors.contains("the bytes running aren't \(world.script.path)'s"), "\(otherSelf.status) \(otherSelf.errors)")
+        let otherBytes = try await fromCopy(world.script, selfPath: current.path)
+        #expect(otherBytes.status == 66 && otherBytes.errors.contains("the bytes running aren't"), "\(otherBytes.status) \(otherBytes.errors)")
 
         // The installed copy changed: refused.
         try ScratchNode.script(installedScript + "# changed\n", at: resources.appendingPathComponent("install-node.sh"))

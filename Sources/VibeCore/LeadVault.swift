@@ -1591,7 +1591,10 @@ extension LeadVault {
             }
             // Held, named, for the app to show you: names and hashes only, never contents. What the lead's look may
             // seal (quiet, instructions only) is sealed meanwhile.
-            let sealed = caller == .app ? [:] : differ.filter { unseen[$0.key] == nil }
+            // A switch's one code (`SwitchSeal.partialKey`, 2026-11-24): the app's click marked partial seals each thing it
+            // showed as shown, and the rest stays held as a look holds it.
+            let partial = caller == .app && shown?[SwitchSeal.partialKey] != nil
+            let sealed = caller == .app ? (partial ? differ.filter { shown?[$0.key] == $0.value } : [:]) : differ.filter { unseen[$0.key] == nil }
             let holding = differ.filter { sealed[$0.key] == nil }
             // Changed outside a team session: seen so now, or seen so before and not moved since. Not one that came
             // back changed: when it changed isn't known.
