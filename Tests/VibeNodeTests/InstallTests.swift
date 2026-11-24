@@ -609,6 +609,16 @@ extension InstallTests {
         let fromCurrent = try await world.install(try world.arguments(next, products: true), script: current)
         #expect(fromCurrent.status == 69, "\(fromCurrent.status) \(fromCurrent.errors)")
         #expect(fromCurrent.output.contains("checked out \(next) "), "\(fromCurrent.output)")
+        // Run as `vibeswitcher update` runs it, from a descriptor (`bash /dev/fd/N`): its path still resolves to the
+        // installed copy, so its own checks pass as from its path; the repository's copy so is still refused.
+        func fromDescriptor(_ script: URL) async throws -> CommandRun {
+            try await run(URL(fileURLWithPath: "/bin/bash"), ["-c", #"exec 7< "$0"; exec /bin/bash /dev/fd/7 "$@""#, script.path] + (try world.arguments(next, products: true)),
+                          environment: scratchEnvironment(world.root), limit: 120, ownGroup: true)
+        }
+        let currentByDescriptor = try await fromDescriptor(current)
+        #expect(currentByDescriptor.status == 69 && currentByDescriptor.output.contains("checked out \(next) "), "\(currentByDescriptor.status) \(currentByDescriptor.errors)")
+        let repositoryByDescriptor = try await fromDescriptor(world.script)
+        #expect(repositoryByDescriptor.status == 66 && repositoryByDescriptor.errors.contains(current.path), "\(repositoryByDescriptor.status) \(repositoryByDescriptor.errors)")
 
         // The installed copy changed: refused.
         try ScratchNode.script(installedScript + "# changed\n", at: resources.appendingPathComponent("install-node.sh"))

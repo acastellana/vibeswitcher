@@ -13,9 +13,11 @@ import VibeNode
 ///    held; then ONE typed code.
 /// 4. The install: the install-node of the build this command line runs from, proved by its own image, which `current`
 ///    must name, run only while the builds folder is the accepted one (nothing of it held, unchanged since the vault's
-///    look and while the code was asked: `SwitchSealCheck.installScript`), under `env -i HOME=… PATH=/usr/bin:/bin`
-///    as its header says, in a session of its own (no controlling terminal), stdin /dev/null, its output on this
-///    terminal. The builds folder's listing is read before and after it
+///    look and while the code was asked: `SwitchSealCheck.installScript`), opened once and checked against the
+///    listing's line for it, run from that descriptor (`bash /dev/fd/N`: `openScript`), in a transient scope of the
+///    user's systemd manager (`systemd-run --user --scope`: what it starts is never the user's voice; no manager, no
+///    update), under `env -i HOME=… PATH=/usr/bin:/bin` as its header says, with no controlling terminal and stdin
+///    /dev/null, its output on this terminal. The builds folder's listing is read before and after it
 ///    (`SwitchSeal`): the top-level entries it changed must be the install's alone (`SwitchSealCheck.installChange`). A
 ///    failed install switches nothing, and a build folder it left that wasn't there before is removed.
 /// 5. `build.switch` with the code and both listing hashes: the server seals the builds folder first when its checks
@@ -26,7 +28,8 @@ import VibeNode
 ///
 /// A scratch node takes `--test-installer PROGRAM` in place of install-node (run as `PROGRAM COMMIT PREFIX`, none of the
 /// checks of 4), or `--test-build FOLDER` for the build its command line "runs from" (every check of 4, its script run
-/// with `--prefix`); the user's node refuses both.
+/// with `--prefix`) with `--test-scope PROGRAM` standing in for systemd-run (a test never asks the user's manager), and
+/// `--test-hold DIR` (`hold`); the user's node refuses each.
 ///
 /// A new build's integrity rests on install-node verifying what it fetches (the commit by its hash, CI's runs, its own
 /// bytes against the commit's blob): the layout check after it (`SwitchSealCheck.layoutRefusal`) compares the build
@@ -41,16 +44,36 @@ enum UpdateCommand {
         var named: String?
         var installer: String?
         var testBuild: String?
+        var testScope: String?
+        var testHold: String?
         var words = arguments[...]
         while let word = words.popFirst() {
             if word == "--test-installer", let program = words.popFirst() { installer = program; continue }
             if word == "--test-build", let folder = words.popFirst() { testBuild = folder; continue }
+            if word == "--test-scope", let program = words.popFirst() { testScope = program; continue }
+            if word == "--test-hold", let folder = words.popFirst() { testHold = folder; continue }
             guard named == nil, NodeUnit.isCommit(word) else { return Say.usage(usage) }
             named = word
         }
         let context = NodeContext.current()
         context.sayScratch()
-        if installer != nil || testBuild != nil, !context.isScratch { return Say.refused("update: --test-installer and --test-build are a scratch node's test flags") }
+        if installer != nil || testBuild != nil || testScope != nil || testHold != nil, !context.isScratch {
+            return Say.refused("update: --test-installer, --test-build, --test-scope and --test-hold are a scratch node's test flags")
+        }
+        // The install runs in a scope of the user's systemd manager, never this terminal's (a scratch node's test names
+        // a stand-in for systemd-run): no manager, no update.
+        let scope: String
+        if let testScope {
+            scope = testScope
+        } else if installer == nil {
+            if context.isScratch { return Say.refused("update: a scratch node's --test-build needs --test-scope (a test never asks the user's manager)") }
+            if let why = SwitchSealCheck.userManagerRefusal() {
+                return Say.refused("update: the install runs only in a scope of its own, and \(why): nothing was asked or run; install by hand (install-node.sh COMMIT, then vs switch COMMIT)")
+            }
+            scope = "/usr/bin/systemd-run"
+        } else {
+            scope = ""
+        }
         let accountHome = VibePaths.accountHome
         // The build this command line runs from, proved by its own image (a scratch node's test names one): its
         // install-node is the one run (`SwitchSealCheck.installScript`).
@@ -129,9 +152,21 @@ enum UpdateCommand {
         }
         let folder = (prefix as NSString).appendingPathComponent(target)
         let existed = FileManager.default.fileExists(atPath: folder)
+        // The script opened as the listing just read lists it, and run through that descriptor (never its path again).
+        var scriptFD: Int32 = -1
+        if installer == nil {
+            hold(testHold, "before-open")
+            switch SwitchSealCheck.openScript(script, prefix: prefix, listing: before) {
+            case .failure(let refused): return Say.refused(refused.text)
+            case .success(let fd): scriptFD = fd
+            }
+            hold(testHold, "after-open")
+        }
+        defer { if scriptFD >= 0 { Sys.close(scriptFD) } }
         let started = Platform.Clock.steadyDate()
         Say.out("installing \(target) (each step below is install-node's)…")
-        let installed = install(script: script, test: installer != nil, commit: target, prefix: prefix, home: accountHome, scratch: context.isScratch)
+        let installed = install(script: script, fd: scriptFD, scope: scope, test: installer != nil, commit: target, prefix: prefix, home: accountHome,
+                                scratch: context.isScratch)
         let took = Int(Platform.Clock.steadyDate().timeIntervalSince(started))
         guard installed == 0 else {
             if !existed, FileManager.default.fileExists(atPath: folder) { try? FileManager.default.removeItem(atPath: folder) }
@@ -211,26 +246,41 @@ enum UpdateCommand {
         (sealed ?? []).map { "accepted with this code: \(ConfigSeal.inert($0, limit: 200))" } + (refusals ?? []).map { ConfigSeal.inert($0, limit: 400) }
     }
 
+    /// A scratch node's test hold (`--test-hold DIR`): `DIR/at-POINT` written, then `DIR/go-POINT` waited for (a minute at
+    /// most). Nothing without one.
+    static func hold(_ folder: String?, _ point: String) {
+        guard let folder else { return }
+        FileManager.default.createFile(atPath: (folder as NSString).appendingPathComponent("at-" + point), contents: nil)
+        let go = (folder as NSString).appendingPathComponent("go-" + point)
+        let deadline = Platform.Clock.steadyDate().addingTimeInterval(60)
+        while !FileManager.default.fileExists(atPath: go), Platform.Clock.steadyDate() < deadline { usleep(50_000) }
+    }
+
     /// install-node for `commit` in `prefix` (or a scratch node's stand-in, `test`), its output on this terminal: its
-    /// exit status (-1 when it couldn't be started or didn't end in `installWait`).
-    static func install(script: String, test: Bool, commit: String, prefix: String, home: String, scratch: Bool) -> Int32 {
+    /// exit status (-1 when it couldn't be started or didn't end in `installWait`). install-node runs from `fd`, the
+    /// script as opened and checked (`/dev/fd/N`: its path still resolves to the file, for its own checks), under
+    /// `scope` (`systemd-run --user --scope`: a scope of its own in the user's manager), its environment emptied again
+    /// inside.
+    static func install(script: String, fd: Int32, scope: String, test: Bool, commit: String, prefix: String, home: String, scratch: Bool) -> Int32 {
         var spawn: Platform.Spawn
         if test {
             spawn = Platform.Spawn(executable: script, arguments: [script, commit, prefix])
-        } else if scratch {
-            // A scratch node's build's script (`--test-build`): its prefix named, under the same empty environment.
-            spawn = Platform.Spawn(executable: "/usr/bin/env", arguments: ["/usr/bin/env", "-i", "HOME=\(home)", "PATH=/usr/bin:/bin", "/bin/bash", script, commit, "--prefix", prefix])
         } else {
-            // As its header says to run it: nothing of this shell's environment shapes it.
-            // `--repo none`: no courtesy check of a checkout (the commit is the node's check's), where the script takes it
-            // (a build's script before it wants to run inside a clean checkout: this terminal's folder, then).
-            let takesNone = (try? String(contentsOfFile: script, encoding: .utf8))?.contains("[[ $repo != none ]]") == true
-            spawn = Platform.Spawn(executable: "/usr/bin/env",
-                                   arguments: ["/usr/bin/env", "-i", "HOME=\(home)", "PATH=/usr/bin:/bin", "/bin/bash", script, commit] + (takesNone ? ["--repo", "none"] : []))
+            // As its header says to run it: nothing of this shell's environment shapes it. `--repo none`: no courtesy
+            // check of a checkout (the commit is the node's check's), where the script takes it (a build's script before it
+            // wants to run inside a clean checkout: this terminal's folder, then). A scratch node's build's script: its
+            // prefix named.
+            var text = [UInt8](repeating: 0, count: 1 << 20)
+            let read = text.withUnsafeMutableBytes { pread(fd, $0.baseAddress, $0.count, 0) }
+            let takesNone = read > 0 && String(decoding: text[0..<read], as: UTF8.self).contains("[[ $repo != none ]]")
+            let tail = scratch ? ["--prefix", prefix] : (takesNone ? ["--repo", "none"] : [])
+            let inner = ["/usr/bin/env", "-i", "HOME=\(home)", "PATH=/usr/bin:/bin", "/bin/bash", "/dev/fd/\(fd)", commit] + tail
+            spawn = Platform.Spawn(executable: scope, arguments: SwitchSealCheck.scopeArguments(runner: scope, command: inner))
+            // systemd-run's own: the manager's place, and nothing else of this shell's.
+            spawn.environment = ["XDG_RUNTIME_DIR=/run/user/\(getuid())", "PATH=/usr/bin:/bin"]
+            spawn.keep = [fd]
         }
-        // Nothing to read from this terminal, and none to control: a session of its own (the voice rule's weaker form
-        // takes no state change from a process without a controlling terminal; under the cgroup rule its processes
-        // stay in this terminal's scope, the security document's S11, item 36).
+        // Nothing to read from this terminal, and none to control: a session of its own.
         spawn.stdin = .path("/dev/null", flags: O_RDONLY)
         spawn.group = .ownSession
         guard case .success(let pid) = spawn.start() else { return -1 }

@@ -197,7 +197,7 @@ public enum LinuxSealList {
     }
 
     /// One entry's line: its name (its length first, so no name can pass for two), type, mode, size, inode, times.
-    private static func line(_ info: stat, path: String, relative: String) -> String {
+    static func line(_ info: stat, path: String, relative: String) -> String {
         let type: String
         switch info.st_mode & S_IFMT {
         case S_IFDIR: type = "d"

@@ -21,7 +21,14 @@ struct UpdateCommandTests {
         /// as it starts.
         let buildA: URL
         let marker: URL
+        /// A stand-in for systemd-run (`--test-scope`): it writes its arguments, then runs what follows `--`.
+        let scope: URL
+        let scopeArgs: URL
         var ran: Bool { FileManager.default.fileExists(atPath: marker.path) }
+        /// The arguments of `update` with the build's own script, through the scope's stand-in.
+        func update(_ extra: [String] = []) -> [String] {
+            ["update", UpdateCommandTests.b, "--test-build", buildA.path, "--test-scope", scope.path] + extra
+        }
     }
 
     /// A node running A from its home's builds folder, `current` naming A, B staged for the stand-in (its server a byte
@@ -56,8 +63,16 @@ struct UpdateCommandTests {
         let resources = buildA.appendingPathComponent("Resources", isDirectory: true)
         try FileManager.default.createDirectory(at: resources, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o755])
         try writeClosedOnExec(script, to: resources.appendingPathComponent("install-node.sh"))
+        let scope = scratch.url("scope"), scopeArgs = scratch.url("scope-args")
+        try writeClosedOnExec("""
+            #!/bin/bash
+            printf '%s\\n' "$@" > '\(scopeArgs.path)'
+            while [[ $# -gt 0 && $1 != -- ]]; do shift; done
+            shift
+            exec "$@"
+            """, to: scope)
         let node = try await ScratchNode(scratch, reusing: root, build: buildA, installRoot: installs)
-        return Rig(node: node, installs: installs, installer: installer, buildA: buildA, marker: marker)
+        return Rig(node: node, installs: installs, installer: installer, buildA: buildA, marker: marker, scope: scope, scopeArgs: scopeArgs)
     }
 
     func held(_ node: ScratchNode) async throws -> String {
@@ -84,8 +99,12 @@ struct UpdateCommandTests {
         let server = try #require(node.serverPID)
 
         // The build's own install script, as on the node (`--test-build`: the build this command line "runs from").
-        let updated = try await node.runOnTerminal(["update", Self.b, "--test-build", rig.buildA.path])
+        let updated = try await node.runOnTerminal(rig.update())
         let out = updated.output
+        // Run in a scope of the user's manager (here the stand-in), from the descriptor it was checked through.
+        let scoped = (try? String(contentsOf: rig.scopeArgs, encoding: .utf8))?.split(separator: "\n").map(String.init) ?? []
+        #expect(Array(scoped.prefix(5)) == ["--user", "--scope", "--quiet", "--collect", "--"], "\(scoped)")
+        #expect(scoped.contains { $0.hasPrefix("/dev/fd/") } && !scoped.contains { $0.hasSuffix("install-node.sh") }, "\(scoped)")
         #expect(updated.status == 0, "\(out)\(updated.errors)\n\(node.said)")
         #expect(out.contains("This updates the node from the build of commit \(Self.a) to \(Self.b)") && out.contains("these stay held: ~/bin"),
                 "\(out)")
@@ -134,7 +153,7 @@ struct UpdateCommandTests {
         defer { node.stop() }
         _ = try await held(node)
         func refused(_ says: String) async throws {
-            let updated = try await node.runOnTerminal(["update", Self.b, "--test-build", rig.buildA.path])
+            let updated = try await node.runOnTerminal(rig.update())
             let out = updated.output + updated.errors
             #expect(updated.status != 0 && out.contains(says) && !out.contains("and Enter"), "\(out)\n\(node.said)")
             #expect(!rig.ran, "the script ran")
@@ -157,5 +176,44 @@ struct UpdateCommandTests {
         handle.write(Data("\necho planted\n".utf8))
         try handle.close()
         try await refused("the builds folder has a change you haven't accepted")
+    }
+
+    /// The script is run through the descriptor it was checked through (the re-read of e2fa0714, B): another script
+    /// renamed into its place before it is opened is refused (its inode isn't the listing's); after it is opened, the
+    /// original is what runs, never the swap.
+    @Test func aScriptSwappedInAfterTheListingIsNeverWhatRuns() async throws {
+        for point in ["before-open", "after-open"] {
+            let rig = try await rig()
+            let node = rig.node
+            defer { node.stop() }
+            _ = try await held(node)
+            let holds = scratch.url("holds-\(point)")
+            try FileManager.default.createDirectory(at: holds, withIntermediateDirectories: true)
+            async let updated = node.runOnTerminal(rig.update(["--test-hold", holds.path]))
+            try #require(await eventually(timeout: 120) { FileManager.default.fileExists(atPath: holds.appendingPathComponent("at-" + point).path) })
+            // Another script, written beside it and renamed over it, as a session would.
+            let script = rig.buildA.appendingPathComponent("Resources/install-node.sh")
+            let swap = rig.buildA.appendingPathComponent("Resources/swap")
+            try writeClosedOnExec("#!/bin/bash\necho swapped > '\(rig.marker.path)'\n", to: swap)
+            try #require(rename(swap.path, script.path) == 0)
+            for go in ["before-open", "after-open"] { FileManager.default.createFile(atPath: holds.appendingPathComponent("go-" + go).path, contents: nil) }
+            let run = try await updated
+            let said = (try? String(contentsOf: rig.marker, encoding: .utf8)) ?? ""
+            #expect(!said.contains("swapped"), "\(point): the swap ran: \(run.output)")
+            if point == "before-open" {
+                #expect(run.status != 0 && (run.output + run.errors).contains("isn't the file the accepted builds folder lists") && !rig.ran, "\(run.output)\(run.errors)")
+            } else {
+                #expect(said.contains("ran"), "\(point): the original didn't run: \(run.output)\(run.errors)")
+            }
+        }
+    }
+
+    /// A scratch node's `--test-build` never asks the user's manager: without a stand-in scope it is refused.
+    @Test func theBuildsScriptNeedsAScope() async throws {
+        let rig = try await rig()
+        let node = rig.node
+        defer { node.stop() }
+        let refused = try await node.runOnTerminal(["update", Self.b, "--test-build", rig.buildA.path])
+        #expect(refused.status != 0 && (refused.output + refused.errors).contains("needs --test-scope") && !rig.ran, "\(refused.output)")
     }
 }

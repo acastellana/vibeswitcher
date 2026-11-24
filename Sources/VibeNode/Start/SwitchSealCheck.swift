@@ -198,4 +198,40 @@ public enum SwitchSealCheck {
         }
         return .success(script)
     }
+
+    /// The install script opened for its run (the re-read of e2fa0714, B): its descriptor, when what it opened is the
+    /// regular file whose line the listing `listing` (the builds folder at `prefix` as last read, the accepted one) holds
+    /// for it, the same inode, size, mode and times, on the folder's device. The run reads the script through this
+    /// descriptor (`/dev/fd/N`), so a file renamed into its place after this is never what runs. Close-on-exec here; the
+    /// spawn keeps it.
+    public static func openScript(_ script: String, prefix: String, listing: [String]) -> Result<Int32, StartRefusal> {
+        let refused = { (why: String) in Result<Int32, StartRefusal>.failure(StartRefusal("update: \(why): nothing was run or switched (`vibeswitcher config held`)")) }
+        guard let prefixReal = NodeFolders.resolved(prefix), script.hasPrefix(prefixReal + "/") else { return refused("the install script isn't under the builds folder") }
+        let relative = String(script.dropFirst(prefixReal.count + 1))
+        let fd = open(script, O_RDONLY | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC | O_NOCTTY)
+        guard fd >= 0 else { return refused("the install script can't be opened") }
+        var info = stat(), folder = stat()
+        guard fstat(fd, &info) == 0, info.st_mode & S_IFMT == S_IFREG, lstat(prefixReal, &folder) == 0, info.st_dev == folder.st_dev,
+              listing.contains(SwitchSeal.listingLine(info, path: script, relative: relative)) else {
+            close(fd)
+            return refused("the install script opened isn't the file the accepted builds folder lists")
+        }
+        return .success(fd)
+    }
+
+    /// The argv that runs `command` in a transient scope of the user's systemd manager (the re-read of e2fa0714, A):
+    /// nothing the install starts is in the terminal's scope, so the voice rule never takes it for the user's.
+    public static func scopeArguments(runner: String, command: [String]) -> [String] {
+        [runner, "--user", "--scope", "--quiet", "--collect", "--"] + command
+    }
+
+    /// Why the user's systemd manager can't take the install's scope (no `systemd-run`, no manager's socket under
+    /// `/run/user/<uid>`), or nil.
+    public static func userManagerRefusal(runner: String = "/usr/bin/systemd-run", uid: uid_t = getuid()) -> String? {
+        guard FileManager.default.isExecutableFile(atPath: runner) else { return "\(runner) isn't there" }
+        let socket = "/run/user/\(uid)/systemd/private"
+        var info = stat()
+        guard lstat(socket, &info) == 0, info.st_mode & S_IFMT == S_IFSOCK else { return "the user's systemd manager isn't running (no \(socket))" }
+        return nil
+    }
 }

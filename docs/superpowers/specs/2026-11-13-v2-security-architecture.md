@@ -2165,15 +2165,22 @@ against it. Each line says what reduces it now, if anything.
     verifying what it fetches (the commit by its hash, both CI runs, its own bytes against the commit's blob): the
     layout check after it (`SwitchSealCheck.layoutRefusal`) compares the build with its own `build-info`, so it says the
     folder is whole, not that it is the commit's.
-36. **What `vibeswitcher update` runs is the user's voice while it runs.** It runs the install-node of the build its
+36. **What `vibeswitcher update` runs, and what the install starts.** It runs the install-node of the build its
     command line was proved installed from, only while `current` names that build and the builds folder is the one the
-    user accepted (unchanged since the vault's look and while the code was asked): a script a session planted or
-    repointed never runs. The window left is the moment between that last read and bash opening the file. What does run
-    (install-node, git, gh, the compiler, the dependencies' build plugins, the built products' link check) runs from the
-    user's terminal: in a session of its own with no controlling terminal and stdin `/dev/null`, so the weaker voice rule
-    takes no state change from it, but under the cgroup rule its processes are in the terminal's scope and a request from
-    them is the user's. A pinned dependency's build plugin could act as the user then. Closed by running the install in
-    a scope of its own (`systemd-run --user --scope`, not a terminal's) or in the box (S12).
+    user accepted (unchanged since the vault's look and while the code was asked), opened once and checked against
+    the listing's line for it (inode, size, mode, times, the folder's device) and run from that descriptor
+    (`bash /dev/fd/N`): a script a session planted, repointed or renamed into place never runs. It runs in a transient
+    scope of the user's systemd manager (`systemd-run --user --scope`), with no controlling terminal and stdin
+    `/dev/null`: what it starts (install-node, git, gh, the compiler, a pinned dependency's build plugin) is never the
+    user's voice under either rule; without the manager, `update` refuses. Left: the build's own integrity (item 35),
+    and that its processes run as the user's uid, with what any process of the uid can do (items 25 to 28).
+37. **Nothing vouches for the command line the user's PATH resolves.** `vibeswitcher` on the user's PATH is a file of
+    the user's uid (`~/.vibeswitcher/v2/builds/current/bin`, or wherever PATH leads): a session that writes a
+    `vibeswitcher` earlier on PATH, or a shell alias in a startup file, gets the user's typed code and acts with it as
+    the user's terminal. The seal holds the builds folder and the startup files, so such a change waits for an accept,
+    but a PATH entry outside what the seal watches is not. Later hardening: the server judges a voiced peer's
+    `/proc/<pid>/exe` against an accepted build's `bin` (its sealed copy's hash), refusing a request from any other
+    program.
 
 **The project allow-list (S2-D11)** is what makes this list acceptable before stage 6: in the user's host on Linux a
 `spawn` whose working folder isn't inside an allowed repository is refused, saying why. The list is

@@ -23,6 +23,12 @@ public enum SwitchSeal {
     /// The whole of a `.listing` folder, hashed as the seal hashes it.
     public static func listingHash(_ path: String) -> String { LinuxSealList.listingHash(path) }
 
+    /// The listing line of the entry `relative` (under the listing's folder) whose stat is `info` (`path`: where it is,
+    /// for a link's target): what an open file's `fstat` is compared with.
+    public static func listingLine(_ info: stat, path: String, relative: String) -> String {
+        LinuxSealList.line(info, path: path, relative: relative)
+    }
+
     /// A listing's lines, as its hash hashes them (empty when nothing is there), and the hash of such lines.
     public static func listingLines(_ path: String) -> [String] { LinuxSealList.listingLines(path) ?? [] }
     public static func listingHash(lines: [String]) -> String { LinuxSealList.listingHash(lines: lines) }

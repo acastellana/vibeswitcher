@@ -87,6 +87,16 @@ struct VoiceRuleTests {
         #expect(Self.systemd.cgroupRefusal(["0::" + Self.systemdRunUnit]) != nil)
     }
 
+    /// `vibeswitcher update`'s install runs under `systemd-run --user --scope` (the re-read of e2fa0714, A): what it
+    /// starts is in a `run-u*.scope` of the user's manager, never the terminal's, so a request from it is never the
+    /// user's, whatever its terminal.
+    @Test func aRequestFromTheInstallsScopeIsRefused() {
+        let path = "/user.slice/user-1000.slice/user@1000.service/app.slice/run-u42.scope"
+        for cgroup in [Self.hybrid(path), ["0::" + path]] {
+            #expect(Self.judged(Self.peer(cgroup: cgroup)) == .notUser("its cgroup \(path) is in the user's systemd manager (a user unit, systemd-run, a service)"), "\(cgroup)")
+        }
+    }
+
     @Test func atAndCronAreRefused() {
         for path in ["/system.slice/atd.service", "/system.slice/cron.service"] {
             let voice = Self.judged(Self.peer(cgroup: Self.hybrid(path)))
