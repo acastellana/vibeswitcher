@@ -4526,3 +4526,4 @@ Turn what's a real bug into a task (one already on the board needs nothing); the
 - 2026-11-24 22:11 Planned test-github-s-v2: Test GitHub's v2 branch in full on this Mac, in a separate clone (report only, nothing merges)
 - 2026-11-24 22:22 Workflow: disk_headroom_gb = `2`
 - 2026-11-24 22:23 Started a worker on test-github-s-v2
+- 2026-11-24 23:47 Handed the lead over to a fresh session: the last one had been idle 50 minutes with 183k tokens of context, past handover_idle_min 50 and handover_tokens 150k
