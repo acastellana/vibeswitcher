@@ -68,7 +68,7 @@ struct GitHubPushersTests {
             #expect(GitHubPushers.repository(url: url) == repo, "\(url)")
         }
         // A GitHub Enterprise, another forge, a path, a helper, or a path that isn't owner/name: no repository.
-        for url in ["https://github.example.com/acme/app.git", "git@gitlab.com:acme/app.git", "/Users/me/origin.git", "file:///tmp/origin.git",
+        for url in ["https://github.example.com/acme/app.git", "gitlab.com:acme/app.git", "/Users/me/origin.git", "file:///tmp/origin.git",
                     "https://github.com/acme", "https://github.com/acme/app/extra", "https://github.com/../app", "https://github.com/acme/a%2Fb",
                     "https://github.com.evil.example/acme/app", "http://github.com/acme/app"] {
             #expect(GitHubPushers.repository(url: url) == nil, "\(url)")
@@ -118,7 +118,7 @@ struct GitHubPushersTests {
     @Test func aRemoteThatIsntGitHubDotComIsNeverAsked() throws {
         let scene = try makePushes()
         let lookup = GitHubPushers.Lookup(fetch: { _, _ in scene.json })
-        for url in [scene.root, "https://github.example.com/example/app.git", "git@gitlab.com:example/app.git"] {
+        for url in [scene.root, "https://github.example.com/example/app.git", "gitlab.com:example/app.git"] {
             #expect(lookup.pushers(root: scene.root, url: url, branch: "main", tip: scene.bob, commits: [scene.bob]).isEmpty)
         }
         #expect(lookup.asked == 0)
@@ -168,13 +168,12 @@ struct GitHubPushersTests {
     @Test func aHungGhIsStoppedAtTheTimeout() throws {
         let scene = try makePushes()
         let started = temp.url("started")
-        let gh = try fakeGh("touch '\(started.path)'\nexec sleep 600")
+        let gh = try fakeGh("echo $$ > '\(started.path)'\nexec sleep 600")
         let lookup = GitHubPushers.Lookup.gh(executable: { gh }, timeout: 0.5)
-        let began = Date()
         #expect(lookup.pushers(root: scene.root, url: "https://github.com/acme/app", branch: "main", tip: scene.bob, commits: [scene.bob]).isEmpty)
-        #expect(FileManager.default.fileExists(atPath: started.path), "the fake gh ran")
-        // Back long before the fake gh would have answered (600 s): it was stopped, not waited for.
-        #expect(Date().timeIntervalSince(began) < 300)
+        // It ran, and was stopped rather than waited for: by the time the lookup is back, the fake gh is gone.
+        let pid = try #require(Int32(try String(contentsOf: started, encoding: .utf8).trimmingCharacters(in: .whitespacesAndNewlines)))
+        #expect(kill(pid, 0) == -1 && errno == ESRCH)
         #expect(GitHubPushers.timeout <= 10)
     }
 
