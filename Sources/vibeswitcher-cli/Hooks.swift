@@ -40,16 +40,30 @@ enum HooksCommand {
                 + "from the node's build into ~/.vibeswitcher/bin, written as VibeSwitcher's own (sealed)."
             : "This removes VibeSwitcher's hooks for \(named) from the node's home (your own hooks stay), written as VibeSwitcher's own (sealed)."
         let environment = ProcessInfo.processInfo.environment
+        // The Codex the trust is asked of (`NodeCodexTrust`): the one the node's own Codex sessions run, said before the
+        // code; the server runs only this one.
+        var codex: String?
+        if action == "install", agents.contains(.codex) {
+            let found = NodePreflight.codex(root: context.root)
+            if let path = found.path {
+                codex = path
+                what += "\nIt then trusts VibeSwitcher's Codex hooks in Codex by running \(ConfigSeal.inert(path, limit: 300)) app-server "
+                    + "(the Codex the node's sessions run), with the node's clean environment; only Codex's trust of those hooks is kept in ~/.codex/config.toml."
+            } else {
+                what += "\nCodex isn't asked to trust the hooks (\(ConfigSeal.inert(found.why ?? "no codex", limit: 300))): run /hooks in Codex after."
+            }
+        }
         let ignored = ["CLAUDE_CONFIG_DIR", "CODEX_HOME"].filter { environment[$0] != nil }
         if !ignored.isEmpty { what += "\n\(ignored.joined(separator: " and ")) \(ignored.count == 1 ? "plays" : "play") no part: the node's own home is written." }
         let id = UUID().uuidString.lowercased()
         let said = TypedWord.said(approval: client.approvalRule, action: id, what: what)
         guard case .success(let typed) = said else { return Say.refused(said.refusal) }
-        let args = WireKinds.AgentsArgs(agents: agents.map(\.rawValue))
-        // Install's result names the programs copied too; remove's only the configs.
-        let sent: NodeClient.Read<(programs: [String], configs: [String])> = kind == "hooks.install"
-            ? client.change(WireKinds.HooksInstall.self, args, action: id, typed: typed, timeout: 120).map { ($0.programs ?? [], $0.configs ?? []) }
-            : client.change(WireKinds.HooksRemove.self, args, action: id, typed: typed, timeout: 120).map { ([], $0.configs ?? []) }
+        let names = agents.map(\.rawValue)
+        // Install's result names the programs copied too, and the Codex trust; remove's only the configs.
+        let sent: NodeClient.Read<(programs: [String], configs: [String], trusted: Int?, trustNote: String?)> = kind == "hooks.install"
+            ? client.change(WireKinds.HooksInstall.self, .init(agents: names, codex: codex), action: id, typed: typed, timeout: 120)
+                .map { ($0.programs ?? [], $0.configs ?? [], $0.trusted, $0.trustNote) }
+            : client.change(WireKinds.HooksRemove.self, .init(agents: names), action: id, typed: typed, timeout: 120).map { ([], $0.configs ?? [], nil, nil) }
         switch sent {
         case .failure(let failure): return Say.failed(failure)
         case .refused(let reply): return Say.replyError(reply)
@@ -61,7 +75,13 @@ enum HooksCommand {
             for (agent, config) in zip(agents, configs) {
                 Say.out(kind == "hooks.install" ? "\(agent.displayName): hooks installed in \(config)" : "\(agent.displayName): hooks removed from \(config)")
                 if kind == "hooks.install", agent == .codex {
-                    Say.out("  Codex asks to trust new hooks: run /hooks in Codex and trust the vibeswitcher-hook entries.")
+                    if let trusted = result.trusted, trusted > 0 {
+                        Say.out("  Codex trusts them (\(trusted) hook\(trusted == 1 ? "" : "s")).")
+                    }
+                    if let note = result.trustNote { Say.out("  Not trusted in Codex: \(ConfigSeal.inert(note, limit: 400)).") }
+                    if result.trustNote != nil || (result.trusted ?? 0) == 0 {
+                        Say.out("  Codex asks to trust new hooks: run /hooks in Codex and trust the vibeswitcher-hook entries.")
+                    }
                 }
             }
             return 0

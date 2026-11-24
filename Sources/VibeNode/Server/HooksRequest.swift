@@ -199,6 +199,40 @@ public struct HooksRequest {
         return .success(Installed(programs: targets, configs: configs))
     }
 
+    /// The Codex hooks just installed, trusted (`NodeCodexTrust`) by running `shown`, the Codex the user was shown
+    /// before the typed code, when the node's Codex link (`NodePreflight.codex`) still resolves to it. The write it makes
+    /// in `~/.codex/config.toml` is the app's own, sealed as the hooks' (`appWrite`). How many were trusted (nil: none was
+    /// tried; else ours trusted now, those just trusted and those trusted before), and a note when one of ours is left
+    /// untrusted or none was listed: the caller then says to run /hooks in Codex.
+    public func trustCodex(shown: String?, root: URL, limit: TimeInterval = NodeCodexTrust.limit) -> (trusted: Int?, note: String?) {
+        guard let shown else { return (nil, "no Codex was named to trust them with") }
+        let found = NodePreflight.codex(root: root)
+        guard let codex = found.path else { return (nil, ConfigSeal.inert(found.why ?? "no Codex", limit: 300)) }
+        guard codex == shown else {
+            return (nil, "the Codex link now names \(ConfigSeal.inert(codex, limit: 200)), not the \(ConfigSeal.inert(shown, limit: 200)) you confirmed: nothing was run")
+        }
+        let config = (home as NSString).appendingPathComponent(".codex/config.toml")
+        let hook = (binFolder as NSString).appendingPathComponent("vibeswitcher-hook")
+        let outcome = vault.appWrite([config], home: home) {
+            Result { try NodeCodexTrust.trust(codex: codex, home: home, hookBinary: hook, path: ProcessInfo.processInfo.environment["PATH"], limit: limit) }
+        }
+        vault.sealAppWrites()
+        switch outcome {
+        case .failure(let error): return (nil, ConfigSeal.inert("\(error)", limit: 300))
+        case .success(let done):
+            var notes: [String] = []
+            if done.putBack {
+                notes.append("codex app-server changed more in ~/.codex/config.toml than VibeSwitcher's trust, or another hash: the file was put back as it was")
+            } else if !done.notTaken.isEmpty {
+                notes.append("\(done.notTaken.count) written and not taken by Codex")
+            }
+            if !done.refused.isEmpty { notes.append("\(done.refused.count) refused for a hash or key not in Codex's form") }
+            let trusted = done.trusted + done.already
+            if trusted == 0, notes.isEmpty { notes.append("Codex listed none of VibeSwitcher's hooks to trust") }
+            return (trusted, notes.isEmpty ? nil : notes.joined(separator: "; "))
+        }
+    }
+
     public func remove(agents: [Agent]) -> Result<Void, StartRefusal> {
         guard !agents.isEmpty else { return .failure(StartRefusal("no agent named")) }
         do {
