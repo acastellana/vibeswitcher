@@ -49,9 +49,17 @@ struct UpdateCommandTests {
         let script = """
             #!/bin/bash
             set -e
-            commit=$1 prefix=$2
-            [[ $2 == --prefix ]] && prefix=$3
-            echo ran > '\(marker.path)'
+            commit=$1
+            shift
+            prefix="" self_given=""
+            while (( $# )); do
+                case $1 in
+                    --prefix) prefix=$2; shift 2 ;;
+                    --self) self_given=$2; shift 2 ;;
+                    *) prefix=$1; shift ;;
+                esac
+            done
+            echo "ran ${self_given:+self=$self_given}" > '\(marker.path)'
             echo "stand-in install of $commit"
             \(fails ? "/bin/cp -a -- '\(staged.path)/'\"$commit\" \"$prefix/$commit\"; echo 'the build failed' >&2; exit 3" : "")
             /bin/cp -a -- '\(staged.path)/'"$commit" "$prefix/$commit"
@@ -104,7 +112,11 @@ struct UpdateCommandTests {
         // Run in a scope of the user's manager (here the stand-in), from the descriptor it was checked through.
         let scoped = (try? String(contentsOf: rig.scopeArgs, encoding: .utf8))?.split(separator: "\n").map(String.init) ?? []
         #expect(Array(scoped.prefix(5)) == ["--user", "--scope", "--quiet", "--collect", "--"], "\(scoped)")
-        #expect(scoped.contains { $0.hasPrefix("/dev/fd/") } && !scoped.contains { $0.hasSuffix("install-node.sh") }, "\(scoped)")
+        #expect(scoped.contains { $0.hasPrefix("/dev/fd/") }, "\(scoped)")
+        // From the sealed copy, its installed path given as --self (the stand-in takes it).
+        let script = rig.buildA.appendingPathComponent("Resources/install-node.sh").path
+        #expect(scoped.suffix(2) == ["--self", script], "\(scoped)")
+        #expect((try? String(contentsOf: rig.marker, encoding: .utf8))?.contains("self=\(script)") == true)
         #expect(updated.status == 0, "\(out)\(updated.errors)\n\(node.said)")
         #expect(out.contains("This updates the node from the build of commit \(Self.a) to \(Self.b)") && out.contains("these stay held: ~/bin"),
                 "\(out)")
@@ -189,6 +201,9 @@ struct UpdateCommandTests {
             _ = try await held(node)
             let holds = scratch.url("holds-\(point)")
             try FileManager.default.createDirectory(at: holds, withIntermediateDirectories: true)
+            for other in ["before-open", "after-open", "after-copy"] where other != point {
+                FileManager.default.createFile(atPath: holds.appendingPathComponent("go-" + other).path, contents: nil)
+            }
             async let updated = node.runOnTerminal(rig.update(["--test-hold", holds.path]))
             try #require(await eventually(timeout: 120) { FileManager.default.fileExists(atPath: holds.appendingPathComponent("at-" + point).path) })
             // Another script, written beside it and renamed over it, as a session would.
@@ -203,7 +218,9 @@ struct UpdateCommandTests {
             if point == "before-open" {
                 #expect(run.status != 0 && (run.output + run.errors).contains("isn't the file the accepted builds folder lists") && !rig.ran, "\(run.output)\(run.errors)")
             } else {
-                #expect(said.contains("ran"), "\(point): the original didn't run: \(run.output)\(run.errors)")
+                // The open file's inode lost its name (its change time moved): refused before its copy, or the original ran.
+                #expect(said.contains("ran") || (run.output + run.errors).contains("changed after the accepted builds folder was read"),
+                        "\(point): \(run.output)\(run.errors)")
             }
         }
     }
@@ -215,5 +232,43 @@ struct UpdateCommandTests {
         defer { node.stop() }
         let refused = try await node.runOnTerminal(["update", Self.b, "--test-build", rig.buildA.path])
         #expect(refused.status != 0 && (refused.output + refused.errors).contains("needs --test-scope") && !rig.ran, "\(refused.output)")
+    }
+
+    /// A write in place (the same inode, its bytes rewritten) between the check and the run never runs (the review of
+    /// a1ce87ce): before the sealed copy is made, the file's change time is no longer the listing's (refused); after it,
+    /// the copy's bytes are what runs.
+    @Test func aScriptRewrittenInPlaceIsNeverWhatRuns() async throws {
+        for point in ["after-open", "after-copy"] {
+            let rig = try await rig()
+            let node = rig.node
+            defer { node.stop() }
+            _ = try await held(node)
+            let holds = scratch.url("in-place-\(point)")
+            try FileManager.default.createDirectory(at: holds, withIntermediateDirectories: true)
+            // Only this point holds.
+            for other in ["before-open", "after-open", "after-copy"] where other != point {
+                FileManager.default.createFile(atPath: holds.appendingPathComponent("go-" + other).path, contents: nil)
+            }
+            async let updated = node.runOnTerminal(rig.update(["--test-hold", holds.path]))
+            try #require(await eventually(timeout: 120) { FileManager.default.fileExists(atPath: holds.appendingPathComponent("at-" + point).path) })
+            let script = rig.buildA.appendingPathComponent("Resources/install-node.sh")
+            var before = stat(), after = stat()
+            #expect(stat(script.path, &before) == 0)
+            let handle = try FileHandle(forWritingTo: script)
+            try handle.truncate(atOffset: 0)
+            handle.write(Data("#!/bin/bash\necho rewritten > '\(rig.marker.path)'\n".utf8))
+            try handle.close()
+            #expect(stat(script.path, &after) == 0 && after.st_ino == before.st_ino, "the same inode")
+            for go in ["before-open", "after-open", "after-copy"] { FileManager.default.createFile(atPath: holds.appendingPathComponent("go-" + go).path, contents: nil) }
+            let run = try await updated
+            let said = (try? String(contentsOf: rig.marker, encoding: .utf8)) ?? ""
+            #expect(!said.contains("rewritten"), "\(point): the rewrite ran: \(run.output)")
+            if point == "after-open" {
+                #expect(run.status != 0 && (run.output + run.errors).contains("changed after the accepted builds folder was read") && !rig.ran,
+                        "\(run.output)\(run.errors)")
+            } else {
+                #expect(said.hasPrefix("ran"), "\(point): the copy didn't run: \(run.output)\(run.errors)")
+            }
+        }
     }
 }

@@ -619,6 +619,22 @@ extension InstallTests {
         #expect(currentByDescriptor.status == 69 && currentByDescriptor.output.contains("checked out \(next) "), "\(currentByDescriptor.status) \(currentByDescriptor.errors)")
         let repositoryByDescriptor = try await fromDescriptor(world.script)
         #expect(repositoryByDescriptor.status == 66 && repositoryByDescriptor.errors.contains(current.path), "\(repositoryByDescriptor.status) \(repositoryByDescriptor.errors)")
+        // From a copy of its bytes no path names (as `update`'s sealed copy: here a file removed once opened), with
+        // `--self` naming where it is installed: its checks pass on that path and on the bytes running. `--self` naming
+        // a file of other bytes, or the repository's bytes running with `--self` naming the installed copy: refused.
+        func fromCopy(_ bytes: URL, selfPath: String) async throws -> CommandRun {
+            let copy = world.root.appendingPathComponent("copy-\(UUID().uuidString.prefix(6))")
+            try FileManager.default.copyItem(at: bytes, to: copy)
+            return try await run(URL(fileURLWithPath: "/bin/bash"), ["-c", #"exec 7< "$0"; rm -f -- "$0"; exec /bin/bash /dev/fd/7 "$@""#, copy.path]
+                                    + (try world.arguments(next, products: true)) + ["--self", selfPath],
+                                 environment: scratchEnvironment(world.root), limit: 120, ownGroup: true)
+        }
+        let sealedRun = try await fromCopy(current, selfPath: current.path)
+        #expect(sealedRun.status == 69 && sealedRun.output.contains("checked out \(next) "), "\(sealedRun.status) \(sealedRun.errors)")
+        let otherSelf = try await fromCopy(current, selfPath: world.script.path)
+        #expect(otherSelf.status == 66 && otherSelf.errors.contains("the bytes running aren't \(world.script.path)'s"), "\(otherSelf.status) \(otherSelf.errors)")
+        let otherBytes = try await fromCopy(world.script, selfPath: current.path)
+        #expect(otherBytes.status == 66 && otherBytes.errors.contains("the bytes running aren't"), "\(otherBytes.status) \(otherBytes.errors)")
 
         // The installed copy changed: refused.
         try ScratchNode.script(installedScript + "# changed\n", at: resources.appendingPathComponent("install-node.sh"))

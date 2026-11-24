@@ -14,7 +14,9 @@ import VibeNode
 /// 4. The install: the install-node of the build this command line runs from, proved by its own image, which `current`
 ///    must name, run only while the builds folder is the accepted one (nothing of it held, unchanged since the vault's
 ///    look and while the code was asked: `SwitchSealCheck.installScript`), opened once and checked against the
-///    listing's line for it, run from that descriptor (`bash /dev/fd/N`: `openScript`), in a transient scope of the
+///    listing's line for it (`openScript`), its bytes read once into sealed memory and the file checked again
+///    (`sealedScript`), run from that copy with `--self` (`bash /dev/fd/N`; an older install-node, without `--self`,
+///    from the checked descriptor), in a transient scope of the
 ///    user's systemd manager (`systemd-run --user --scope`: what it starts is never the user's voice; no manager, no
 ///    update), under `env -i HOME=… PATH=/usr/bin:/bin` as its header says, with no controlling terminal and stdin
 ///    /dev/null, its output on this terminal. The builds folder's listing is read before and after it
@@ -163,10 +165,20 @@ enum UpdateCommand {
             hold(testHold, "after-open")
         }
         defer { if scriptFD >= 0 { Sys.close(scriptFD) } }
+        // Its bytes, as listed, in sealed memory: what runs, whatever is written to the file from now on.
+        var copy: Platform.ProcessSelf.SealedCopy?
+        if installer == nil {
+            switch SwitchSealCheck.sealedScript(scriptFD, script: script, prefix: prefix, listing: before) {
+            case .failure(let refused): return Say.refused(refused.text)
+            case .success(let made): copy = made
+            }
+            hold(testHold, "after-copy")
+        }
+        defer { if let copy { Sys.close(copy.fd) } }
         let started = Platform.Clock.steadyDate()
         Say.out("installing \(target) (each step below is install-node's)…")
-        let installed = install(script: script, fd: scriptFD, scope: scope, test: installer != nil, commit: target, prefix: prefix, home: accountHome,
-                                scratch: context.isScratch)
+        let installed = install(script: script, fd: scriptFD, copy: copy, scope: scope, test: installer != nil, commit: target, prefix: prefix,
+                                home: accountHome, scratch: context.isScratch)
         let took = Int(Platform.Clock.steadyDate().timeIntervalSince(started))
         guard installed == 0 else {
             if !existed, FileManager.default.fileExists(atPath: folder) { try? FileManager.default.removeItem(atPath: folder) }
@@ -261,7 +273,8 @@ enum UpdateCommand {
     /// script as opened and checked (`/dev/fd/N`: its path still resolves to the file, for its own checks), under
     /// `scope` (`systemd-run --user --scope`: a scope of its own in the user's manager), its environment emptied again
     /// inside.
-    static func install(script: String, fd: Int32, scope: String, test: Bool, commit: String, prefix: String, home: String, scratch: Bool) -> Int32 {
+    static func install(script: String, fd: Int32, copy: Platform.ProcessSelf.SealedCopy?, scope: String, test: Bool, commit: String, prefix: String,
+                        home: String, scratch: Bool) -> Int32 {
         var spawn: Platform.Spawn
         if test {
             spawn = Platform.Spawn(executable: script, arguments: [script, commit, prefix])
@@ -269,16 +282,19 @@ enum UpdateCommand {
             // As its header says to run it: nothing of this shell's environment shapes it. `--repo none`: no courtesy
             // check of a checkout (the commit is the node's check's), where the script takes it (a build's script before it
             // wants to run inside a clean checkout: this terminal's folder, then). A scratch node's build's script: its
-            // prefix named.
-            var text = [UInt8](repeating: 0, count: 1 << 20)
-            let read = text.withUnsafeMutableBytes { pread(fd, $0.baseAddress, $0.count, 0) }
-            let takesNone = read > 0 && String(decoding: text[0..<read], as: UTF8.self).contains("[[ $repo != none ]]")
-            let tail = scratch ? ["--prefix", prefix] : (takesNone ? ["--repo", "none"] : [])
-            let inner = ["/usr/bin/env", "-i", "HOME=\(home)", "PATH=/usr/bin:/bin", "/bin/bash", "/dev/fd/\(fd)", commit] + tail
+            // prefix named. From the sealed copy with `--self` where the script takes it; else (an older install-node)
+            // from the checked descriptor, said.
+            let text = copy?.withBytes { String(decoding: $0, as: UTF8.self) } ?? ""
+            let takesNone = text.contains("[[ $repo != none ]]")
+            let sealed = copy.map { _ in text.contains(SwitchSealCheck.takesSelf) } ?? false
+            if !sealed { Say.out("this build's install-node runs from its checked file (it takes no --self): a write to it now would be read") }
+            let runs = sealed ? (copy?.fd ?? fd) : fd
+            let tail = (scratch ? ["--prefix", prefix] : (takesNone ? ["--repo", "none"] : [])) + (sealed ? ["--self", script] : [])
+            let inner = ["/usr/bin/env", "-i", "HOME=\(home)", "PATH=/usr/bin:/bin", "/bin/bash", "/dev/fd/\(runs)", commit] + tail
             spawn = Platform.Spawn(executable: scope, arguments: SwitchSealCheck.scopeArguments(runner: scope, command: inner))
             // systemd-run's own: the manager's place, and nothing else of this shell's.
             spawn.environment = ["XDG_RUNTIME_DIR=/run/user/\(getuid())", "PATH=/usr/bin:/bin"]
-            spawn.keep = [fd]
+            spawn.keep = [runs]
         }
         // Nothing to read from this terminal, and none to control: a session of its own.
         spawn.stdin = .path("/dev/null", flags: O_RDONLY)

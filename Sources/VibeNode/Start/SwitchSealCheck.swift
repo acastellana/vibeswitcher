@@ -219,6 +219,33 @@ public enum SwitchSealCheck {
         return .success(fd)
     }
 
+    /// The text by which an install-node takes `--self PATH` (runs from a sealed copy of its bytes): an older one, without
+    /// it, runs from the checked descriptor itself.
+    public static let takesSelf = "--self) self_given=$2"
+
+    /// The checked script's bytes (`fd`, `openScript`'s) read once into a sealed memfd (the review of a1ce87ce: a
+    /// descriptor pins the inode, not the bytes), then the file's `fstat` compared with the listing's line for it again:
+    /// a write in place anywhere between the listing's read and the end of the copy changed its change time, which
+    /// nothing sets back, so the copy is the listed file's bytes, or nothing is run.
+    public static func sealedScript(_ fd: Int32, script: String, prefix: String, listing: [String]) -> Result<Platform.ProcessSelf.SealedCopy, StartRefusal> {
+        let refused = { (why: String) in
+            Result<Platform.ProcessSelf.SealedCopy, StartRefusal>.failure(StartRefusal("update: \(why): nothing was run or switched (`vibeswitcher config held`)"))
+        }
+        guard let prefixReal = NodeFolders.resolved(prefix), script.hasPrefix(prefixReal + "/") else { return refused("the install script isn't under the builds folder") }
+        let copy: Platform.ProcessSelf.SealedCopy
+        switch Platform.ProcessSelf.sealedCopy(of: fd, name: "install-node.sh") {
+        case .failure(let error): return refused("the install script couldn't be copied to sealed memory (\(error))")
+        case .success(let made): copy = made
+        }
+        var info = stat()
+        guard fstat(fd, &info) == 0, Int(info.st_size) == copy.size,
+              listing.contains(SwitchSeal.listingLine(info, path: script, relative: String(script.dropFirst(prefixReal.count + 1)))) else {
+            close(copy.fd)
+            return refused("the install script changed after the accepted builds folder was read")
+        }
+        return .success(copy)
+    }
+
     /// The argv that runs `command` in a transient scope of the user's systemd manager (the re-read of e2fa0714, A):
     /// nothing the install starts is in the terminal's scope, so the voice rule never takes it for the user's.
     public static func scopeArguments(runner: String, command: [String]) -> [String] {

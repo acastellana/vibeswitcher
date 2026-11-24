@@ -2168,8 +2168,13 @@ against it. Each line says what reduces it now, if anything.
 36. **What `vibeswitcher update` runs, and what the install starts.** It runs the install-node of the build its
     command line was proved installed from, only while `current` names that build and the builds folder is the one the
     user accepted (unchanged since the vault's look and while the code was asked), opened once and checked against
-    the listing's line for it (inode, size, mode, times, the folder's device) and run from that descriptor
-    (`bash /dev/fd/N`): a script a session planted, repointed or renamed into place never runs. It runs in a transient
+    the listing's line for it (inode, size, mode, times, the folder's device), its bytes read once into a sealed memfd
+    and the file checked against that line again (a write in place moves its change time), and run from that copy
+    (`bash /dev/fd/N --self PATH`: install-node takes PATH for its own checks only when PATH's bytes are the ones
+    running): a script a session planted, repointed, renamed into place or rewrote in place never runs. An installed
+    install-node from before `--self` runs from the checked descriptor itself, said: a write in place after the check is
+    read then, which the scope (below) leaves without a voice and the builds folder's listing after the install catches
+    (nothing sealed or switched). It runs in a transient
     scope of the user's systemd manager (`systemd-run --user --scope`), with no controlling terminal and stdin
     `/dev/null`: what it starts (install-node, git, gh, the compiler, a pinned dependency's build plugin) is never the
     user's voice under either rule; without the manager, `update` refuses. Left: the build's own integrity (item 35),
