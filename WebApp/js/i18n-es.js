@@ -952,6 +952,13 @@ export const ES = {
   coUsed: { one: "usó {n} herramienta", other: "usó {n} herramientas" },
   coReplies: { one: "{n} respuesta", other: "{n} respuestas" },
   // js/views/cards.js
+  ccReadAll: "Leerlo entero",
+  ccFiles: { one: "{n} archivo", other: "{n} archivos" },
+  ccSensitiveUnknown: "no se pudo comprobar",
+  ccSensitiveYes: { one: "sí: 1 archivo", other: "sí: {n} archivos" },
+  ccSensitiveNone: "no toca ninguna",
+  ccTheFiles: { one: "El archivo", other: "Los {n} archivos" },
+  ccSensitiveMark: "sensible",
   ccNoSubject: "(sin asunto)",
   ccTheNodeRefusedIt: "El nodo lo rechazó.",
   ccWaitsAnswer: "; espera tu respuesta.",

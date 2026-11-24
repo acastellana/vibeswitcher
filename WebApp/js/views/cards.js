@@ -17,6 +17,8 @@ import { talkButton } from '../dictate.js';
 import { pluginFacts } from '../plugincard.js';
 import { t } from '../i18n.js';
 import { actsFor, refusalWords, doButton, answerArgs, cardArgs } from '../acting.js';
+import { questionHead, shortHashes, lineKey, contextOf } from '../conversation.js';
+import { routeHref } from '../ui.js';
 
 const PRIORITY = { blocking: t('cBlocking'), important: t('cImportant'), whenever: t('cWhenever') };
 
@@ -114,7 +116,7 @@ function readOnlyAnswer(card, counting) {
 
 // What git and the vault say about a merge, apart from anything the lead wrote (the design's security rule 2: the
 // person approves facts, not prose). Nothing here is shortened: these fields are what an approval covers.
-function approvalFacts(approval) {
+export function approvalFacts(approval) {
   const fact = (name, ...value) => [h('dt', null, name), h('dd', null, value)];
   return h('div', { class: 'facts' },
     h('div', { class: 'facts-head' }, t('cFacts')),
@@ -128,6 +130,24 @@ function approvalFacts(approval) {
       (approval.problems || []).map((problem) => fact(t('cNote'), problem))));
 }
 
+// The approval's key rows on the card (commit, base, how much changes, the verdicts, whether it touches a sensitive
+// path, the problems), with the files and the sensitive paths one click away in place: every fact stays on the card.
+function keyFacts(approval) {
+  const fact = (name, ...value) => [h('dt', null, name), h('dd', null, value)];
+  const sensitive = approval.sensitive;
+  const files = approval.files || [];
+  return h('div', { class: 'facts key-facts' },
+    h('dl', null,
+      fact(t('cCommit'), h('code', null, approval.commit)),
+      fact(t('cInto'), approval.base || 'the base'),
+      fact(t('cChanges'), approval.diffstat || t('ccFiles', { n: files.length })),
+      Object.entries(approval.verdicts || {}).map(([task, verdict]) => fact(t('cVerdict'), `${task}: ${verdict}`)),
+      fact(t('cSensitive'), !sensitive ? t('ccSensitiveUnknown') : sensitive.length ? h('strong', { class: 'sensitive-yes' }, t('ccSensitiveYes', { n: sensitive.length })) : t('ccSensitiveNone')),
+      (approval.problems || []).map((problem) => fact(t('cNote'), problem))),
+    files.length ? h('details', { class: 'facts-files' }, h('summary', null, t('ccTheFiles', { n: files.length })),
+      h('ul', { class: 'files' }, files.map((file) => h('li', { class: sensitive?.includes(file) ? 'sensitive' : null }, h('code', null, file), sensitive?.includes(file) ? h('small', null, ' ' + t('ccSensitiveMark')) : null)))) : null);
+}
+
 // A card the node withheld from the page whole, too large for a snapshot's part (`tooLarge`): what it asks is never cut,
 // so it is read whole in a terminal. Its place and title only; nothing of what it asks.
 export function tooLargeCard(card) {
@@ -139,9 +159,11 @@ export function tooLargeCard(card) {
 }
 
 // A lead's question or approval. Returns { el, update(card) }; `el` keeps its text field and its focus across updates.
-export function questionCard(app, first) {
+export function questionCard(app, first, { expand = null } = {}) {
   const el = h('article', { class: 'card', tabindex: -1 });
   let card = first;
+  // One of several open questions, not the one shown whole: its question line only, which opens it.
+  let collapsed = false;
   let shape = '';
   let input = null;
   let keys = { buttons: [], hold: null };
@@ -189,11 +211,21 @@ export function questionCard(app, first) {
     const who = h('span', { class: 'card-asker' }, task ? t('askerTask', { task }) : t('askerLead'));
     el.append(h('header', { class: 'card-head' }, priority, who, asked));
 
-    if (card.kind === 'approval' && card.approval) {
-      el.append(approvalFacts(card.approval));
-      el.append(h('p', { class: 'said-by' }, t('cLeadSays')));
+    // The question's line (the sentence that asks), a few lines of what follows, the key facts; the whole text in the
+    // side sheet, drawn from its markdown.
+    const head = shortHashes(questionHead(question.text));
+    if (collapsed) {
+      el.classList.add('folded');
+      el.append(h('button', { class: 'card-question card-unfold', type: 'button', 'aria-expanded': 'false', onclick: () => expand?.(card) }, head));
+      keys = { buttons: [], hold: null };
+      return;
     }
-    el.append(h('h3', { class: 'card-question' }, question.text));
+    el.append(h('h3', { class: 'card-question' }, head));
+    const context = contextOf(question.text, questionHead(question.text));
+    if (context) el.append(h('p', { class: 'card-lines' }, context));
+    // "Read it all" when there is more than those lines show: a long text, its markdown, or an approval's files.
+    if (context.length > 200 || /\n|\*\*|`/.test(question.text || '') || card.kind === 'approval') el.append(h('p', { class: 'card-whole' }, readAll()));
+    if (card.kind === 'approval' && card.approval) el.append(keyFacts(card.approval));
     if (question.whyNow) el.append(h('p', { class: 'card-why' }, question.whyNow));
     if (question.revisionNote) el.append(h('p', { class: 'card-revised' }, `${t('cUpdated')}: ${question.revisionNote}`));
 
@@ -280,12 +312,22 @@ export function questionCard(app, first) {
     keys = { buttons: list.buttons, hold: null };
   }
 
+  // "Read it all": the side sheet with the question's whole text from its markdown (and an approval's facts whole).
+  // On a project's screen it is the address's `sheet=`, so back closes it; elsewhere it opens over the screen.
+  function readAll() {
+    const route = app.ui?.state?.route;
+    const key = lineKey('card', app.store.cardKey(card.id));
+    if (route?.name === 'project') return h('a', { class: 'link', href: routeHref(route, { sheet: key }) }, t('ccReadAll'));
+    return h('button', { class: 'link', type: 'button', onclick: () => app.sheet?.open(cardSheet(card)) }, t('ccReadAll'));
+  }
+
   // The card is built again only when what it shows changed, so typing into it survives every other delta.
-  function update(next) {
+  function update(next, fold = collapsed) {
     card = next;
+    collapsed = fold;
     const acting = app.store.state.acting.get(card.id);
     const drafting = [app.store.draftOf(card.id), app.store.state.draftRefused.get(card.id) || null, app.store.can('draft')];
-    const now = JSON.stringify([card, acting || null, actsFor(app, 'answer'), drafting]);
+    const now = JSON.stringify([card, acting || null, actsFor(app, 'answer'), drafting, collapsed, app.ui?.state?.route?.id || null]);
     if (now === shape) return;
     const focused = el.contains(document.activeElement);
     // The option that had the focus keeps it (a pick never sends it to the text box, nor opens a phone's keyboard).
@@ -303,6 +345,15 @@ export function questionCard(app, first) {
   cardKeys(el, () => ({ ...keys, choose: drafts() ? (answer) => { if (input) input.value = ''; if (answer.trim()) app.store.draft(card.id, answer.trim()); } : choose }));
   update(first);
   return { el, update };
+}
+
+// What the side sheet shows of a question card: its line, its whole text (markdown), and an approval's facts whole.
+export function cardSheet(card) {
+  const question = card.question || {};
+  return {
+    kicker: card.kind === 'approval' ? t('cMergeToApprove') : t('cAQuestion'), title: shortHashes(questionHead(question.text)), at: card.at, text: question.text || '',
+    more: [card.kind === 'approval' && card.approval ? approvalFacts(card.approval) : null, question.whyNow ? h('p', { class: 'card-why' }, question.whyNow) : null].filter(Boolean),
+  };
 }
 
 // The stack under a lead's chat: "2 questions for you", then the cards, open ones first.
@@ -370,6 +421,9 @@ export function questionStack(app, project) {
   // posts again after a restart (a new card id, the same question) keeps its row, its place and what was typed in it.
   const keyOf = (card) => app.store.cardKey(card.id);
   const firstAt = new Map();
+  // With several open, one shows whole (the first, or the one the user opened) and the others their question line.
+  let chosen = null;
+  const expand = (card) => { chosen = keyOf(card); update(); };
 
   function update() {
     const cards = [...app.store.state.cards.values()].filter((card) => card.project === project && (card.kind === 'question' || card.kind === 'approval'));
@@ -390,13 +444,15 @@ export function questionStack(app, project) {
     setClass(count, 'blocking', open.some((card) => card.blocking));
     order.hidden = open.length < 2;
     const before = rows.size;
+    const whole = open.some((card) => keyOf(card) === chosen) ? chosen : open[0] ? keyOf(open[0]) : null;
     // Built by hand rather than with `keyed`'s slide: a card that closes shrinks in place.
     const next = new Map();
     let cursor = list.firstChild;
     for (const card of cards) {
       let row = rows.get(keyOf(card));
       const fresh = !row;
-      if (fresh) row = questionCard(app, card); else row.update(card);
+      const fold = isOpen(card) && open.length > 1 && keyOf(card) !== whole;
+      if (fresh) { row = questionCard(app, card, { expand }); row.update(card, fold); } else row.update(card, fold);
       next.set(keyOf(card), row);
       if (row.el === cursor) cursor = cursor.nextSibling; else list.insertBefore(row.el, cursor);
       if (fresh && before > 0) row.el.classList.add('enter');
