@@ -55,6 +55,17 @@ export function updatesGroup(update) {
       facts.lines.map((line) => copyLine(line.text, line.label))));
 }
 
+// The node's passkeys for acting at `confirm` (`node.web.acts.keys`), and its notice when one was added lately.
+function passkeysPart(acts) {
+  const keys = acts.keys || [];
+  if (!keys.length && !acts.notice) return null;
+  const when = (iso) => (iso ? new Date(iso).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' }) : t('pkNeverUsed'));
+  return h('div', { class: 'passkeys' },
+    acts.notice ? h('p', { class: 'node-says passkey-notice' }, acts.notice) : null,
+    keys.length ? h('p', { class: 'col-title' }, t('pkKeys', { n: keys.length })) : null,
+    keys.map((key) => h('p', { class: 'passkey-row' }, h('code', null, key.id), ' ', t('pkKeyWhen', { added: when(key.added), used: when(key.lastUsed) }))));
+}
+
 export function nodeView(app) {
   const { store } = app;
   const body = h('div', { class: 'node-column' });
@@ -122,7 +133,7 @@ export function nodeView(app) {
       notices.length ? h('section', { class: 'node-group' }, h('h2', { class: 'section-title' }, plural(notices.length, t('noNotice'))),
         h('ul', { class: 'notices' }, notices.map((notice) => h('li', null, icon('warning', 14), h('span', null, notice))))) : null,
       // Acting from a page (`web_acts`): first, whether this page acts for you and since when, and the switch.
-      node.web?.acts ? group(t('acGroupTitle'), actsLine(app)) : null,
+      node.web?.acts ? group(t('acGroupTitle'), actsLine(app), passkeysPart(node.web.acts)) : null,
       group(t('noSessionHost'),
         h('dl', { class: 'facts-list' },
           row(t('noState'), h('span', { class: connected ? 'dot tone-done' : 'dot tone-needs-you', 'aria-hidden': 'true' }), connected ? t('noConnected') : host.state),

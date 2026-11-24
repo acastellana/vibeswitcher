@@ -156,6 +156,7 @@ export function connectSocket(store, options) {
     switch (message.kind) {
       case 'hello': return hello(message);
       case 'paired': return paired(message);
+      case 'passkey': return passkey(message);
       case 'bye': return bye(message);
       case 'snapshot':
       case 'delta': return event(message);
@@ -230,6 +231,12 @@ export function connectSocket(store, options) {
     if (Array.isArray(message.kinds)) return store.setKinds(message.kinds, message.plugins ?? store.state.plugins, message.rights);
     store.setKinds(store.state.kinds, store.state.plugins, message.rights);
     socket?.close();
+  }
+
+  // The terminal asks to add a passkey (`vibeswitcher web --passkey`): its offer, until it ends here or elsewhere.
+  function passkey(message) {
+    if (message.op === 'register' && typeof message.register === 'string' && message.challenge && message.user?.id) store.setPasskeyOffer(message);
+    else if (message.op === 'ended' && (!message.register || store.state.passkeyOffer?.register === message.register)) store.setPasskeyOffer(null);
   }
 
   function bye(message) {

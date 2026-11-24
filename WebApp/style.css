@@ -726,6 +726,11 @@ kbd { padding: 1px 6px; border-radius: 5px; box-shadow: inset 0 0 0 1px var(--li
 .tab-banner strong { color: var(--asked); }
 .tab-banner code { padding: 1px 6px; border-radius: 5px; background: var(--raised); }
 .tab-banner-close { margin-left: auto; color: var(--ink-2); font-size: 16px; line-height: 1; }
+.passkey-pill .passkey-line { max-width: 60ch; overflow-wrap: anywhere; }
+.passkey-pill .phrase.passkey-line { font-size: 16px; }
+.passkeys { display: grid; gap: 4px; margin-top: 8px; }
+.passkey-row { color: var(--ink-2); font-size: var(--small); }
+.passkey-row code { color: var(--ink); }
 /* The notifications' one offer (js/notify.js): the same quiet pill, with its two answers. */
 .offline.offer { gap: 10px; width: max-content; max-width: calc(100% - 32px); border-radius: 14px; }
 .offer span { flex: 1 1 auto; min-width: 0; }
