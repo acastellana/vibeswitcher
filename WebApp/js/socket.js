@@ -78,7 +78,9 @@ export function connectSocket(store, options) {
     if (message.type === 'ask' && message.from !== tabId && actSecret && !borrowed && token()) {
       share.postMessage({ type: 'give', to: message.from, token: token(), act: actSecret });
     } else if (message.type === 'give' && (!message.to || message.to === tabId) && !actSecret
-               && typeof message.act === 'string' && typeof message.token === 'string' && !refused.has(message.act)) {
+               && typeof message.act === 'string' && typeof message.token === 'string' && !refused.has(message.act)
+               // A tab holding another pairing's token never swaps it for this one silently.
+               && (!token() || token() === message.token)) {
       actSecret = message.act;
       borrowed = true;
       keep(message.token);

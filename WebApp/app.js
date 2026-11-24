@@ -32,6 +32,10 @@ const ui = createUI();
 const mocked = params.has('mock') || params.has('still') || params.has('empty') || params.has('rows');
 // The mock is loaded only for ?mock and its kin: the node's embedded page leaves it out (scripts/webapp-embed.sh), so
 // there it says so; WebApp/serve.sh and a scratch server's folder serve it.
+// Whether this page runs inside a frame (a cross-origin parent can't be read: framed too).
+function framed() {
+  try { return window.top !== window; } catch { return true; }
+}
 // The build this page's files came from: their address names it (`/_/<build>/app.js`); by a plain path, /build.json.
 function fetchBuild() {
   return fetch('build.json', { cache: 'no-cache' }).then((reply) => (reply.ok ? reply.json() : null)).then((json) => json?.assets || null, () => null);
@@ -56,8 +60,10 @@ const feed = mocked
     // in this module's own address), else /build.json, asked again at a hello while it isn't known.
     build: ownBuild(),
     rebuild: fetchBuild,
-    // The tabs of this node's origin share acting, memory to memory.
-    share: typeof BroadcastChannel === 'function' ? new BroadcastChannel(`vibeswitcher-acting-${location.port || 'default'}`) : null,
+    // The tabs of this node's origin share acting, memory to memory: never in a frame (the node's pages refuse being
+    // framed anyway). The channel is the origin's own; its name carries host and port too, so localhost and 127.0.0.1
+    // (two origins, two pairings) stay apart by construction as well.
+    share: typeof BroadcastChannel === 'function' && !framed() ? new BroadcastChannel(`vibeswitcher-acting-${location.host}`) : null,
   });
 store.connect(feed);
 

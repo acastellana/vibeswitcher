@@ -145,3 +145,24 @@ test('a sibling’s secret the node doesn’t take in this tab is dropped here o
   await settle();
   assert.equal(b.sockets.length, count, 'not taken again');
 });
+
+test('a tab holding another pairing’s token never takes a sibling’s: it keeps its own', async () => {
+  const origin = bus();
+  const a = await tab(origin.channel());
+  const b = await tab(origin.channel(), { token: 'token-b' });
+  a.welcome(['read', 'draft']);
+  b.welcome(['read', 'draft']);
+  await settle();
+  const count = b.sockets.length;
+  a.latest().onmessage({ data: JSON.stringify({ v: 1, kind: 'paired', act: 'o'.repeat(43), rights: CONFIRMED, kinds: ACTING }) });
+  await settle();
+  assert.equal(b.kept.get('vibeswitcher.token'), 'token-b', 'its own token kept');
+  assert.equal(b.sockets.length, count, 'no reconnect with the other pairing');
+  assert.equal(b.latest().readyState, 1, 'its socket left open');
+});
+
+test('the page shares acting only unframed, on a channel named by host and port', () => {
+  const app = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'app.js'), 'utf8');
+  assert.match(app, /share: typeof BroadcastChannel === 'function' && !framed\(\) \? new BroadcastChannel\(`vibeswitcher-acting-\$\{location\.host\}`\)/);
+  assert.match(app, /function framed\(\) \{\n  try \{ return window\.top !== window; \} catch \{ return true; \}/);
+});
