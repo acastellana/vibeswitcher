@@ -68,7 +68,7 @@ public final class WebAccess: WebGate, @unchecked Sendable {
 
     public let tokens: WebTokens
     /// This gate's pairing codes still live, for the terminal's mask (`TerminalMask`): dropped once taken or revoked.
-    public let liveCodes = PairingCodes()
+    public let liveCodes: PairingCodes
     private let now: @Sendable () -> Date
     private let note: @Sendable (String) -> Void
     private let lock = NSLock()
@@ -87,8 +87,11 @@ public final class WebAccess: WebGate, @unchecked Sendable {
 
     /// `now` is the clock codes and tokens are judged on (a test's own); `note` the server's log, which never gets a
     /// code or a token.
-    public init(tokens: WebTokens, now: @escaping @Sendable () -> Date = { Date() }, note: @escaping @Sendable (String) -> Void = { _ in }) {
+    /// `codes`: the node's live pairing codes, shared by its loopback and tailnet gates (`PairingCodes`).
+    public init(tokens: WebTokens, codes: PairingCodes = PairingCodes(), now: @escaping @Sendable () -> Date = { Date() },
+                note: @escaping @Sendable (String) -> Void = { _ in }) {
         self.tokens = tokens
+        liveCodes = codes
         self.now = now
         self.note = note
     }
@@ -145,7 +148,7 @@ public final class WebAccess: WebGate, @unchecked Sendable {
             if codes.count > Self.codesKept { codes.removeFirst(codes.count - Self.codesKept) }
         }
         // Never shown to a page in a terminal while it lives (`TerminalMask`, this server's codes alone).
-        liveCodes.made(code, until: now.addingTimeInterval(Self.codeLife))
+        liveCodes.made(code, until: now.addingTimeInterval(Self.codeLife), by: self)
         return code
     }
 
@@ -187,7 +190,7 @@ public final class WebAccess: WebGate, @unchecked Sendable {
             pairings = [:]
             revocations += 1
         }
-        liveCodes.clear()
+        liveCodes.clear(by: self)
         if let authority = tokenAuthority { authority.pages.dropPages(scope: authority.scope) }
         let dropped: Int
         do { dropped = try tokens.revokeAll(now: now()) } catch let refusal as WebTokens.Refusal {

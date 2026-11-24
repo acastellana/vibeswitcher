@@ -54,42 +54,51 @@ public struct PagePairing: Sendable, Equatable {
     ]
 }
 
-/// The pairing codes this server made and that are still live (`WebAccess.openCode`; dropped the moment one is taken,
-/// revoked, or runs out): what a page's terminal must never show (the acting review's fix C). One per server instance,
-/// never shared: another server's (another test's) codes are none of this one's. From any thread.
+/// The pairing codes this node's gates made and that are still live (`WebAccess.openCode`, the loopback's and the
+/// tailnet's; dropped the moment one is taken, revoked, or runs out): what a page's terminal and transcripts must never
+/// show (the acting review's fix C). One per server instance, never a static: another server's (another test's) codes
+/// are none of this one's. From any thread.
 public final class PairingCodes: @unchecked Sendable {
     private let lock = NSLock()
-    private var live: [String: Date] = [:]
+    private var live: [String: (until: Date, by: ObjectIdentifier?)] = [:]
     private let now: @Sendable () -> Date
 
     public init(now: @escaping @Sendable () -> Date = { Date() }) { self.now = now }
 
-    /// A code made, live until `until`.
-    public func made(_ code: String, until: Date) { lock.withLock { live[code] = until } }
+    /// A code made by `by` (a gate), live until `until`.
+    public func made(_ code: String, until: Date, by: AnyObject? = nil) {
+        lock.withLock { live[code] = (until, by.map(ObjectIdentifier.init)) }
+    }
 
-    /// A code taken (or every code: a revoke): live no more.
+    /// A code taken: live no more.
     public func taken(_ code: String) { lock.withLock { _ = live.removeValue(forKey: code) } }
-    public func clear() { lock.withLock { live = [:] } }
+    /// Every code `by` made (its revoke): live no more; another gate's stay.
+    public func clear(by: AnyObject) { lock.withLock { live = live.filter { $0.value.by != ObjectIdentifier(by) } } }
 
     /// The codes live now.
     public var codes: [String] {
         let at = now()
         return lock.withLock {
-            live = live.filter { $0.value > at }
+            live = live.filter { $0.value.until > at }
             return Array(live.keys)
         }
     }
 }
 
-/// A pairing address's code in text (a transcript's, served to a page): what follows `pair=` or its percent-encoded
-/// `pair%3D`, at most a code's length, replaced. Nothing else is changed.
+/// Pairing codes in text (a transcript's, served to a page): what follows `pair=` or its percent-encoded `pair%3D`, at
+/// most a code's length, and each of `codes` (the node's live ones, `PairingCodes`) wherever it appears, replaced.
+/// Nothing else is changed.
 public enum PairingMask {
     /// The longest a pairing code is (16 bytes in base64url).
     public static let codeLength = 22
 
-    public static func mask(_ text: String, with hidden: String = "…") -> String {
-        guard text.contains("pair=") || text.range(of: "pair%3d", options: .caseInsensitive) != nil else { return text }
-        return text.replacingOccurrences(of: #"pair(=|%3[Dd])[A-Za-z0-9_\-]{1,22}"#, with: "pair$1" + hidden, options: .regularExpression)
+    public static func mask(_ text: String, codes: [String] = [], with hidden: String = "…") -> String {
+        var masked = text
+        if masked.contains("pair=") || masked.range(of: "pair%3d", options: .caseInsensitive) != nil {
+            masked = masked.replacingOccurrences(of: #"pair(=|%3[Dd])[A-Za-z0-9_\-]{1,22}"#, with: "pair$1" + hidden, options: .regularExpression)
+        }
+        for code in codes where !code.isEmpty && masked.contains(code) { masked = masked.replacingOccurrences(of: code, with: hidden) }
+        return masked
     }
 }
 

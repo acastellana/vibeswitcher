@@ -76,9 +76,11 @@ public final class NodeLive: @unchecked Sendable {
         hub = LiveHub(queue: queue, epoch: requests.epoch)
         let terminals = mode != nil
         if let mode { hub.terminals = TerminalRelay(link: requests.link, mode: mode, note: note) }
-        access = WebAccess(tokens: WebTokens(root: requests.root), note: note)
-        // The terminal's mask hides this server's live pairing codes, no other's.
-        hub.terminals?.liveCodes = access.liveCodes
+        // The node's live pairing codes, its loopback's and its tailnet's: what a terminal's mask and a transcript hide,
+        // no other server's.
+        let codes = PairingCodes()
+        access = WebAccess(tokens: WebTokens(root: requests.root), codes: codes, note: note)
+        hub.terminals?.liveCodes = codes
         let acting = ActingPages(vault: requests.link.vaultV2, note: note)
         self.acting = acting
         access.acting = acting
@@ -104,7 +106,7 @@ public final class NodeLive: @unchecked Sendable {
                        hello: { [weak requests] admission in
                            guard let requests else { return nil }
                            return NodeWire.message(requests.webHello(admission, assets: assets.build))
-                       }, note: note)
+                       }, codes: codes, note: note)
         }
         let said = SaidWeb()
         status = NodeStatusStore(requests: requests, web: { said.live?.webValue() ?? NodeStatusStore.webOff })
@@ -205,7 +207,7 @@ public final class NodeLive: @unchecked Sendable {
             // Long messages' TL;DRs from the engine's AI summaries (`TeamSummaryWatch`), when there is an engine.
             let chats = ChatStore(queue: queue, home: requests.home, sessions: sessions.changes, note: note, summaries: engine?.messageSummaries,
                                   ask: engine.map { engine in { session, entry, message in engine.summarizeMessage(session: session, entry: entry, message: message) } },
-                                  extras: engine?.chatExtras)
+                                  extras: engine?.chatExtras, codes: access.liveCodes)
             chats.start(clock: clock)
             hub.chats = chats
             self.chats = chats
