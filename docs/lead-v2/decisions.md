@@ -114,3 +114,7 @@ The user's override 149E7C35 covers the agreed order only (SB5, the interop task
 
 A successor must not answer the withdrawn ids (D5BD68B0, 64C0164C, D745A6E8, BD6DBB5F) or redo the comparison of file times. The lead's tool server was still the 63411f50 build's (pid 3622870) right after the switch.
 
+## 2026-11-24 14:34:13 The user (Nov 24, about 14:50): end the two verifiers stuck on a dialog (verify-sb5-the-host-confines, verify-tests-that-write-a) and start no worker or verifier until the user says so; they are switching the node's build, which has the fix for that dialog. auto_advance is set to false until then (configure), so nothing starts by itself. When the user gives the go: configure(auto_advance: true), then audit sb5-the-host-confines (b5d5b6e2) and tests-that-write-a (3f269664) again.
+
+The user's instruction. Both finder 1 sessions had waited since 12:16 and 12:19 on a background task; the user reports a dialog nobody can answer. A successor lead must not start an audit or a worker before the user's go.
+
