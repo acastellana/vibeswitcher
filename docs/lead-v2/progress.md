@@ -652,3 +652,5 @@
 - 2026-11-24 12:01 Audit of tests-that-write-a: finder 2 of 2 submitted (complete, clean, 1 finding)
 - 2026-11-24 12:05 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: ~/.claude/shell-snapshots
 - 2026-11-24 12:05 Merged turn-this-incident-into-4: An audit's finder can read the audit's own run logs without a permission prompt (build 63411f509118)
+- 2026-11-24 12:15 Merged team-sessions-start: Team sessions start Claude Code with its updater off (in a batch: team-sessions-start, measured-with-a-real landed on one test run) (build 63411f509118)
+- 2026-11-24 12:15 Merged measured-with-a-real: Measured with a real Windows program: no box starts one or reaches the Windows side (WSL interop's F flag), and what is still open is closed (in a batch: team-sessions-start, measured-with-a-real landed on one test run) (build 63411f509118)
