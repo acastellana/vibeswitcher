@@ -156,6 +156,7 @@ export function connectSocket(store, options) {
     switch (message.kind) {
       case 'hello': return hello(message);
       case 'paired': return paired(message);
+      case 'passkey': return passkey(message);
       case 'bye': return bye(message);
       case 'snapshot':
       case 'delta': return event(message);
@@ -177,7 +178,11 @@ export function connectSocket(store, options) {
       actSecret = null;
       store.setActsLost('ended');
     }
-    const phrase = typeof message.auth?.phrase === 'string' ? message.auth.phrase : null;
+    // The words: a pairing waiting for the terminal (no "watch" yet) shows them to be typed there; a confirmed one
+    // keeps them as this page's name (the terminal names a page by them, as when it adds a passkey).
+    const words = typeof message.auth?.phrase === 'string' ? message.auth.phrase : null;
+    const phrase = rights.includes('watch') ? null : words;
+    store.setPageWords(rights.includes('watch') ? words : null);
     const newer = !!(mine && message.assets && message.assets !== mine);
     pair = null;
     // A code just redeemed by a page older than the node's build: reloaded before any phrase shows (the confirmation
@@ -225,11 +230,22 @@ export function connectSocket(store, options) {
     if (typeof message.act !== 'string' || !Array.isArray(message.rights)) return;
     actSecret = message.act;
     store.setPhrase(null);
-    store.setActsLost(null);
-    flag(ACTED_KEY, true);
+    if (typeof message.phrase === 'string') store.setPageWords(message.phrase);
+    // Also sent again when the level rises under an open page: "act" then may come, or not (127.0.0.1 at confirm). Only
+    // a pairing that acts counts as this tab having acted.
+    if (message.rights.includes('act')) {
+      store.setActsLost(null);
+      flag(ACTED_KEY, true);
+    }
     if (Array.isArray(message.kinds)) return store.setKinds(message.kinds, message.plugins ?? store.state.plugins, message.rights);
     store.setKinds(store.state.kinds, store.state.plugins, message.rights);
     socket?.close();
+  }
+
+  // The terminal asks to add a passkey (`vibeswitcher web --passkey`): its offer, until it ends here or elsewhere.
+  function passkey(message) {
+    if (message.op === 'register' && typeof message.register === 'string' && message.challenge && message.user?.id) store.setPasskeyOffer(message);
+    else if (message.op === 'ended' && (!message.register || store.state.passkeyOffer?.register === message.register)) store.setPasskeyOffer(null);
   }
 
   function bye(message) {

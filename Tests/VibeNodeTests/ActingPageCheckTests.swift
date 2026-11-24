@@ -12,6 +12,7 @@ import Testing
 /// - Approve: the long approval approved by clicking its "Approve <commit>";
 /// - Changed: a question the lead reworded after the page drew it (its frames held back meanwhile) is refused as
 ///   `changed`, "look again", and nothing is done;
+/// - Send now: the message box's second button sends to the lead's session at once, saying what became of it;
 /// - Older build: the served page changed under the acting tab: at its next hello it says it is from an older build,
 ///   with Reload and what reloading costs, and still acts;
 /// - Level off: the page's own Turn off lowers `web_acts`, and the page reads and drafts again, saying so at the top;
@@ -151,7 +152,7 @@ struct ActingPageCheckTests {
                          output: .path(said.path, flags: O_WRONLY | O_TRUNC), limit: 240)
         }
         let table = (try? String(contentsOf: said, encoding: .utf8)) ?? ""
-        for row in ["Pair", "Answer by click", "Approve", "Changed", "Older build", "Level off", "Reloaded", "Console"] {
+        for row in ["Pair", "Answer by click", "Approve", "Changed", "Send now", "Older build", "Level off", "Reloaded", "Console"] {
             #expect(table.split(separator: "\n").contains { $0.hasPrefix(row + " ") && $0.contains(" pass ") }, "\(row):\n\(table)")
         }
         #expect(status == 0, "\(table)\n\(node.said)")
@@ -159,7 +160,7 @@ struct ActingPageCheckTests {
         // the test's own from a terminal (the level, the accepts, the lead).
         let accepted = (try await node.statusJSON())["accepted"] as? [[String: Any]] ?? []
         let fromPage = accepted.filter { ($0["commandLine"] as? [Any])?.isEmpty == true }.compactMap { $0["kind"] as? String }
-        #expect(fromPage == ["answer", "answer", "set"], "\(accepted)")
+        #expect(fromPage == ["answer", "answer", "send", "set"], "\(accepted)")
         let files = (try? FileManager.default.contentsOfDirectory(atPath: out.path)) ?? []
         // With PAGE_SHOTS=DIR, its screenshots there too, named acting-*.png (WebApp/shots/ is made that way).
         if let shots = ProcessInfo.processInfo.environment["PAGE_SHOTS"] {

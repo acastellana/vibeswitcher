@@ -412,7 +412,11 @@ export function pluginCard(card, app = null) {
     card.notice ? h('p', { class: 'card-notice' }, card.notice) : null);
 }
 
-export function questionStack(app, project) {
+// How long an answered card stays in the waiting block, saying it was answered: the conversation is the record.
+export const ANSWERED_SHOWN = 4000;
+
+// `onChange`: an answered card left (its few seconds over), so whoever holds the stack may draw again.
+export function questionStack(app, project, { onChange = () => {}, now = () => Date.now() } = {}) {
   const count = h('h2', { class: 'stack-title' });
   const order = h('span', { class: 'stack-note' }, t('anyOrder'));
   const pushSlot = h('div', { class: 'stack-cards' });
@@ -427,12 +431,28 @@ export function questionStack(app, project) {
   // With several open, one shows whole (the first, or the one the user opened) and the others their question line.
   let chosen = null;
   const expand = (card) => { chosen = keyOf(card); update(); };
+  // When each card closed here (answered, decided, withdrawn): shown that long, then gone. One already closed when
+  // first seen is never shown.
+  const closedAt = new Map();
+  let leaving = null;
 
   function update() {
     const cards = [...app.store.state.cards.values()].filter((card) => card.project === project && (card.kind === 'question' || card.kind === 'approval'));
     for (const card of cards) if (!firstAt.has(keyOf(card))) firstAt.set(keyOf(card), Date.parse(card.at));
     const isOpen = (card) => card.open && app.store.state.acting.get(card.id)?.kind !== 'answer';
     const open = cards.filter(isOpen);
+    const at = now();
+    for (const card of cards) {
+      const key = keyOf(card);
+      if (isOpen(card)) closedAt.delete(key);
+      else if (!closedAt.has(key)) closedAt.set(key, rows.has(key) ? at : 0);
+    }
+    const stays = (card) => isOpen(card) || at - (closedAt.get(keyOf(card)) || 0) < ANSWERED_SHOWN;
+    cards.splice(0, cards.length, ...cards.filter(stays));
+    // The next answered card to leave: drawn again then, and the holder told.
+    const soonest = Math.min(...cards.filter((card) => !isOpen(card)).map((card) => closedAt.get(keyOf(card)) + ANSWERED_SHOWN));
+    clearTimeout(leaving);
+    if (Number.isFinite(soonest)) leaving = setTimeout(() => { update(); onChange(); }, Math.max(0, soonest - at) + 20);
     cards.sort((a, b) => (isOpen(b) - isOpen(a)) || (firstAt.get(keyOf(a)) - firstAt.get(keyOf(b))));
     const lead = app.store.state.leads.get(project);
     const push = lead?.push && lead.root ? lead : null;

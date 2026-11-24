@@ -26,11 +26,14 @@
 // The keyed collections, and the field each entry is keyed by (a lead and its board by their project's id).
 import { applyOps, reindex } from './chatops.js';
 import { parts as imageParts } from './composing.js';
+import { assert as passkeyAssert } from './passkey.js';
 
 const KEYS = { sessions: 'id', cards: 'id', leads: 'project', boards: 'project' };
 const COLLECTIONS = Object.keys(KEYS);
 
-export function createStore() {
+// `options.credentials`: the browser's WebAuthn (navigator.credentials), asked for a passkey at the `confirm` level.
+export function createStore(options = {}) {
+  const credentials = () => ('credentials' in options ? options.credentials : globalThis.navigator?.credentials);
   const state = {
     // connecting: no snapshot yet. live. reconnecting: the feed dropped; what's shown is the last known.
     // unpaired: the node doesn't know this page (no code or token, or it refused them), revoked: its access was
@@ -45,12 +48,21 @@ export function createStore() {
     plugins: null,
     // The words a page that just redeemed a pairing code shows until the user confirms it in the terminal.
     phrase: null,
+    // A confirmed page's words: its name, by which the terminal names it (`vibeswitcher web --passkey`).
+    pageWords: null,
     // Why this tab no longer acts for the user, once it did: 'reloaded' (a pairing lives in the tab's memory only),
     // 'ended' (its pairing ended: 12 hours, ended in the terminal, acting lowered or turned off), 'unconfirmed' (it
     // reloaded to the node's newer page before the terminal confirmed it). Null: nothing to say.
     actsLost: null,
     // The node serves a newer page than this tab runs, and this tab acts, so it isn't reloaded for the user.
     newerBuild: false,
+    // At `confirm`: what the passkey now asked for approves ({ line }), and the vault's line for the last one done.
+    confirming: null,
+    recorded: null,
+    // The terminal's offer to add a passkey (`vibeswitcher web --passkey`), while it holds: the node's message, and
+    // what became of it here ({ state: 'adding' | 'added' | 'cancelled' | 'refused', id, why }).
+    passkeyOffer: null,
+    passkeyAdding: null,
     // The collections the feed follows; null: all of them (the mock). The node sends no lead's board yet.
     follows: null,
     // A card's place across a server restart: card ids are the server's memory and change, so a card that comes back
@@ -304,7 +316,7 @@ export function createStore() {
   function request(kind, args = {}, action = crypto.randomUUID()) {
     const message = { v: 1, id: String(nextRequest++), kind, args, action };
     if (!feed) return Promise.resolve({ ok: false, error: { code: 'not-yet', message: 'Not connected to the node yet.' } });
-    return feed.request(message).then((reply) => {
+    return feed.request(message).then((reply) => confirmed(message, reply)).then((reply) => {
       // This page no longer acts (`acts-ended`: its pairing ended, the level was lowered, it was revoked): the secret
       // goes, and the page reads and drafts until it is paired again. A `voice` refusal (the terminal's kind or
       // setting) changes nothing.
@@ -319,6 +331,35 @@ export function createStore() {
   }
 
   // A read: no action id, so nothing is sent again after a reconnect (asked again by whoever wants it).
+  // At the `confirm` level an acting request without a passkey's assertion is refused `assertion-needed`: the node is
+  // asked for a challenge over exactly this request, the line it approves is shown while the browser asks for the
+  // passkey, and the request goes again (its action the same) with the assertion. Once; the user's cancel sends
+  // nothing. The vault's line for it (`recorded`) is said after.
+  async function confirmed(message, reply) {
+    if (reply?.error?.code !== 'assertion-needed' || message.assertion) return reply;
+    const challenge = await read('act.challenge', { kind: message.kind, args: message.args, action: message.action });
+    if (!challenge.ok) return challenge;
+    const changed = () => emit(new Map([['connection', [{ connection: state.connection }]]]));
+    state.confirming = { line: challenge.result?.line || '', kind: message.kind };
+    changed();
+    let assertion;
+    try {
+      assertion = await passkeyAssert(challenge.result, credentials());
+    } catch (error) {
+      state.confirming = null;
+      changed();
+      return { ok: false, error: { code: 'passkey-cancelled', message: error?.message || 'The passkey wasn’t given.' } };
+    }
+    state.confirming = null;
+    changed();
+    const again = await feed.request({ ...message, id: String(nextRequest++), assertion });
+    if (again?.ok && again.recorded) {
+      state.recorded = { line: again.recorded, at: Date.now() };
+      changed();
+    }
+    return again;
+  }
+
   function read(kind, args = {}) {
     if (!feed) return Promise.resolve({ ok: false, error: { code: 'not-yet', message: 'Not connected to the node yet.' } });
     return feed.request({ v: 1, id: String(nextRequest++), kind, args });
@@ -478,6 +519,29 @@ export function createStore() {
     acts: () => state.rights === null || state.rights.includes('act'),
     // Whether it may watch terminals (`watch`: a pairing confirmed in the terminal).
     watches: () => state.rights === null || state.rights.includes('watch'),
+    // The terminal's offer to add a passkey, or its end (`op: ended`).
+    setPasskeyOffer(offer) {
+      state.passkeyOffer = offer;
+      if (!offer) state.passkeyAdding = null;
+      emit(new Map([['connection', [{ connection: state.connection }]]]));
+    },
+    // Adds a passkey for the offer: the browser asks, the node is told; then the terminal confirms it.
+    async addPasskey(register) {
+      const offer = state.passkeyOffer;
+      if (!offer) return;
+      const said = (adding) => { state.passkeyAdding = adding; emit(new Map([['connection', [{ connection: state.connection }]]])); };
+      said({ state: 'adding' });
+      let args;
+      try {
+        args = await register(offer, credentials());
+      } catch (error) {
+        // An authenticator that can't make an ES256 key says NotSupportedError: said plainly, apart from a cancel.
+        return said(error?.name === 'NotSupportedError' ? { state: 'unsupported' } : { state: 'cancelled', why: error?.message || '' });
+      }
+      const reply = await request('passkey.registered', args);
+      said(reply.ok ? { state: 'added', id: reply.result?.id || '' } : { state: 'refused', why: reply.error?.message || '' });
+    },
+    clearRecorded() { state.recorded = null; emit(new Map([['connection', [{ connection: state.connection }]]])); },
     setActsLost(why) {
       if (state.actsLost === why) return;
       state.actsLost = why;
@@ -491,6 +555,11 @@ export function createStore() {
     // "This tab no longer acts" dismissed; a reload asked for by the user.
     forgetActsLost() { state.actsLost = null; feed?.forgetActed?.(); emit(new Map([['connection', [{ connection: state.connection }]]])); },
     reloadNow() { feed?.reloadNow?.(); },
+    setPageWords(words) {
+      if (state.pageWords === words) return;
+      state.pageWords = words;
+      emit(new Map([['connection', [{ connection: state.connection }]]]));
+    },
     setPhrase(phrase) {
       if (state.phrase === phrase) return;
       state.phrase = phrase;
