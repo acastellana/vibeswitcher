@@ -153,6 +153,30 @@ struct SwitchSealTests {
         #expect(left.contains("~/.claude/settings.json") && !left.contains(SwitchSeal.unitFolderName) && !left.contains(SwitchSeal.buildsName), "\(left)")
     }
 
+    /// `build.seal` is taken only with the action of a switch the vault recorded, with the same arguments, lately: with
+    /// none, or another commit's, nothing is sealed and nothing looked at; with it, the unit folder's check runs (here
+    /// the host's home has none recorded: said, nothing sealed).
+    @Test func buildSealIsTakenOnlyWithTheSwitchsOwnAction() async throws {
+        let world = try await CardWorld.make(scratch)
+        defer { world.stop() }
+        let action = UUID().uuidString.lowercased()
+        let args: [String: NodeWire.Value] = ["commit": .string(Self.b), "from": .string(Self.a)]
+        let alone = try #require(await world.ask("build.seal", args, action: action))
+        #expect(alone.error?.message.contains("taken only with the action of a switch to \(Self.b)") == true, "\(alone)")
+        // The switch of that action, as the server records one (its arguments' digest).
+        let other = UUID().uuidString.lowercased()
+        let digest = LeadVaultV2.digest(String(decoding: NodeWire.line(["commit": NodeWire.Value.string(Self.b)]), as: UTF8.self))
+        _ = try world.world.link.vaultV2.recordUserAction(other, kind: "build.switch", subject: nil, digest: digest)
+        let wrong = UUID().uuidString.lowercased()
+        _ = try world.world.link.vaultV2.recordUserAction(wrong, kind: "build.switch", subject: nil, digest: digest)
+        let another = try #require(await world.ask("build.seal", ["commit": .string(String(repeating: "c", count: 40)), "from": .string(Self.a)], action: wrong))
+        #expect(another.error?.message.contains("taken only with the action of a switch") == true, "\(another)")
+        let taken = try #require(await world.ask("build.seal", args, action: other))
+        #expect(taken.ok, "\(taken)")
+        let result = try #require(taken.result)
+        #expect(result["sealed"]?.array?.isEmpty == true, "\(result)")
+    }
+
     @Test func aSwappedUnitTextIsTheFollowUpsOnly() {
         let prefix = "/home/u/.vibeswitcher/v2/builds"
         let line = { (commit: String) in "ExecStart=" + NodeUnit.execStart(prefix: prefix, commit: commit).joined(separator: " ") }
