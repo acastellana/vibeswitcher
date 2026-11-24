@@ -6,6 +6,8 @@
 # scripts/install-node.sh COMMIT [--prefix DIR] [--repo DIR] [--toolchain DIR]
 #   COMMIT           40 lowercase hex digits: a commit on v2 that both CI runners (`v2 linux`, `v2 macos`) passed
 #   --prefix DIR     the builds folder (default: <your home from getent passwd>/.vibeswitcher/v2/builds)
+#   --self PATH      where this script is installed, when it runs from a copy of its bytes (`vibeswitcher update` runs
+#                    a sealed copy, /dev/fd/N): taken only when PATH's bytes are the ones running
 #   --repo DIR       your checkout, only for the courtesy check that it is clean (default: the current folder's);
 #                    `none`: no courtesy check (`vibeswitcher update` passes it: it installs the commit the node's check named)
 #   --toolchain DIR  the root-owned Swift toolchain (default /opt/swift-6.4.2), always checked
@@ -89,10 +91,10 @@ install_node_main() {
 
     # --- 1. Arguments ------------------------------------------------------------------------------------------------
     local commit="" prefix="" prefix_given=0 repo="" toolchain=/opt/swift-6.4.2 gh=/usr/bin/gh gh_given=0
-    local test_origin="" test_products="" test_hold=""
+    local test_origin="" test_products="" test_hold="" self_given=""
     while (( $# )); do
         case $1 in
-            --prefix|--repo|--toolchain|--gh|--test-origin|--test-products|--test-hold)
+            --prefix|--repo|--toolchain|--gh|--test-origin|--test-products|--test-hold|--self)
                 (( $# >= 2 )) && [[ -n $2 ]] || fail 64 "$1 needs a value"
                 case $1 in
                     --prefix) prefix=$2; prefix_given=1 ;;
@@ -102,9 +104,10 @@ install_node_main() {
                     --test-origin) test_origin=$2 ;;
                     --test-products) test_products=$2 ;;
                     --test-hold) test_hold=$2 ;;
+                    --self) self_given=$2 ;;
                 esac
                 shift 2 ;;
-            -h|--help) /usr/bin/sed -n '2,45p' "${BASH_SOURCE[0]}" | /usr/bin/sed 's/^# \{0,1\}//'; exit 0 ;;
+            -h|--help) /usr/bin/sed -n '2,47p' "${BASH_SOURCE[0]}" | /usr/bin/sed 's/^# \{0,1\}//'; exit 0 ;;
             -*) fail 64 "unknown option $1" ;;
             *) [[ -z $commit ]] || fail 64 "one COMMIT only (also given: $1)"; commit=$1; shift ;;
         esac
@@ -153,6 +156,17 @@ install_node_main() {
             ${git_test[@]+"${git_test[@]}"} "$@"
     }
     jq_run() { /usr/bin/env -i PATH=/usr/bin:/bin /usr/bin/jq "$@"; }
+
+    # This script's own path, for the checks below that name it (where it is installed, its folder's libraries): its
+    # own, or with `--self PATH` (`vibeswitcher update`, which runs a sealed copy of the bytes it checked, `/dev/fd/N`)
+    # PATH, only when its bytes are the very bytes running. The bytes compared with the commit's blob are always the
+    # running ones.
+    local self_path=${BASH_SOURCE[0]}
+    if [[ -n $self_given ]]; then
+        [[ $self_given == /* && -f $self_given && ! -L $self_given ]] || fail 64 "--self $self_given isn't an absolute path to a regular file"
+        /usr/bin/cmp -s -- "${BASH_SOURCE[0]}" "$self_given" || fail 66 "the bytes running aren't $self_given's"
+        self_path=$self_given
+    fi
 
     # --- 2. The courtesy check: the checkout is clean (an install of a commit you meant to amend) -------------------
     # Nothing of the checkout's own git configuration acts (the security follow-ups' item 25): its .git/config can name
@@ -334,7 +348,7 @@ install_node_main() {
         current_commit=$(jq_run -r '.commit // empty' "$current_real/build-info" 2> /dev/null) \
             || fail 66 "can't read $prefix/current/build-info"
         [[ $current_commit == "${current_real##*/}" ]] || fail 66 "$prefix/current/build-info names ${current_commit:-no commit}, not its folder's ${current_real##*/}"
-        self_real=$(/usr/bin/realpath -e -- "${BASH_SOURCE[0]}") || fail 66 "can't resolve this script's path"
+        self_real=$(/usr/bin/realpath -e -- "$self_path") || fail 66 "can't resolve this script's path"
         expected_self=$(/usr/bin/realpath -e -- "$prefix/current/Resources/install-node.sh" 2> /dev/null) \
             || fail 66 "$prefix/current/Resources/install-node.sh isn't there: the next install runs the installed build's copy"
         [[ $self_real == "$expected_self" ]] \
@@ -379,7 +393,7 @@ install_node_main() {
 
     # --- 5. Provenance: this script and its libraries are the expected commit's, byte for byte (ST-D9) -------------
     local expected=${current_commit:-$commit} self here blob scratch_lib=""
-    self=$(/usr/bin/realpath -e -- "${BASH_SOURCE[0]}") || fail 66 "can't resolve this script's path"
+    self=$(/usr/bin/realpath -e -- "$self_path") || fail 66 "can't resolve this script's path"
     here=${self%/*}
     # blob PATH: the expected commit's PATH, byte for byte (the x keeps its last line ends), in $blob; held in memory,
     # never in a file another process could change between the comparison and the source.
@@ -388,7 +402,7 @@ install_node_main() {
         blob=${blob%x}
     }
     read_blob scripts/install-node.sh || fail 66 "$expected has no scripts/install-node.sh"
-    /usr/bin/cmp -s -- "$self" <(printf '%s' "$blob") \
+    /usr/bin/cmp -s -- "${BASH_SOURCE[0]}" <(printf '%s' "$blob") \
         || fail 66 "$self isn't $expected's scripts/install-node.sh: run the copy that commit holds"
     for name in scratch.sh swift-jobs.sh; do
         read_blob "scripts/lib/$name" || fail 66 "$expected has no scripts/lib/$name"
