@@ -647,3 +647,8 @@
 - 2026-11-24 11:46 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: ~/.claude/shell-snapshots
 - 2026-11-24 11:51 Audit of sb5-the-host-confines at b5d5b6e2 by 2 finders (contract and acceptance; bugs, regressions and security); the shared run: the test command passed
 - 2026-11-24 11:51 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: ~/.claude/shell-snapshots
+- 2026-11-24 11:54 Audit of sb5-the-host-confines: finder 2 of 2 submitted (complete, clean, 2 findings)
+- 2026-11-24 11:54 Audit of tests-that-write-a at 3f269664 by 2 finders (contract and acceptance; bugs, regressions and security); the shared run: the test command passed
+- 2026-11-24 12:01 Audit of tests-that-write-a: finder 2 of 2 submitted (complete, clean, 1 finding)
+- 2026-11-24 12:05 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: ~/.claude/shell-snapshots
+- 2026-11-24 12:05 Merged turn-this-incident-into-4: An audit's finder can read the audit's own run logs without a permission prompt (build 63411f509118)
