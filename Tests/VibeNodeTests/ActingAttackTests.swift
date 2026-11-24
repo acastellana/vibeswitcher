@@ -215,7 +215,9 @@ struct ActingAttackTests {
             let screen = TerminalMask.shown(Array(ended.utf8))
             #expect(String(decoding: screen.text, as: UTF8.self).hasPrefix("#pair="), "a terminal shows what follows: \(ended.debugDescription)")
         }
-        let unterminated = Data(("\u{1B}]0;" + String(repeating: "x", count: 1 << 20)).utf8)
+        // Its filler isn't a code's alphabet (a live code another test made could start with any letter, and the end of a
+        // run that may start one is masked: right, but not what this case looks at).
+        let unterminated = Data(("\u{1B}]0;" + String(repeating: ".", count: 1 << 20)).utf8)
         let big = TerminalMask()
         var released = Data(), mostHeld = 0
         for at in stride(from: 0, to: unterminated.count, by: 4_096) {

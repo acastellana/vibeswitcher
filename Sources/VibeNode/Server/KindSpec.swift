@@ -213,6 +213,18 @@ public struct KindSpec: Sendable {
                  voiced: .recorded(.init(arguments: .ofType, keepsResult: false, rerun: false, carded: false, batch: false, phrase: "open the web page to a device", dialog: .asArguments))),
         KindSpec("web.revoke", sender: .user, effect: .change, servedBy: .requests, page: .acts, wire: .typed(WireKinds.WebRevoke.self),
                  voiced: .recorded(.init(arguments: .ofType, keepsResult: true, rerun: true, carded: false, batch: false, phrase: "revoke a device's web access", dialog: .asArguments))),
+        // The level `confirm`'s passkeys: registered and forgotten from a terminal only; a confirmed page's challenge
+        // for an act and its registration's answer.
+        KindSpec("web.passkey", sender: .user, effect: .read, servedBy: .requests, page: .terminalOnly("it asks a page to register a passkey: a page would choose its own"),
+                 wire: .typed(WireKinds.WebPasskey.self), voiced: .notRecorded(phrase: nil)),
+        KindSpec("web.passkey.add", sender: .user, effect: .change, servedBy: .requests, page: .terminalOnly("it keeps a passkey that approves acts as you"),
+                 wire: .typed(WireKinds.WebPasskeyAdd.self),
+                 voiced: .recorded(.init(arguments: .ofType, keepsResult: true, rerun: false, carded: false, batch: false, phrase: "add a passkey for acting from the page", dialog: .asArguments))),
+        KindSpec("web.passkey.forget", sender: .user, effect: .change, servedBy: .requests, page: .terminalOnly("it forgets a passkey"),
+                 wire: .typed(WireKinds.WebPasskeyForget.self),
+                 voiced: .recorded(.init(arguments: .ofType, keepsResult: true, rerun: true, carded: false, batch: false, phrase: "forget a passkey for acting from the page", dialog: .asArguments))),
+        KindSpec("act.challenge", sender: .webPaired, effect: .read, servedBy: .requests, page: .bySender, wire: page, voiced: .notRecorded(phrase: nil)),
+        KindSpec("passkey.registered", sender: .webPaired, effect: .read, servedBy: .requests, page: .bySender, wire: page, voiced: .notRecorded(phrase: nil)),
         // A page's pairing, confirmed in the terminal that made its address (the acting review's fix A): never a page's.
         KindSpec("web.pairing", sender: .user, effect: .read, servedBy: .requests, page: .terminalOnly("it is the terminal's side of a pairing"),
                  wire: .typed(WireKinds.WebPairing.self), voiced: .notRecorded(phrase: nil)),

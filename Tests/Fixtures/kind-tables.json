@@ -147,13 +147,21 @@
       "phrase"
     ],
     "web.open" : [
+      "localhost",
       "tailnet"
+    ],
+    "web.passkey.add" : [
+      "register"
+    ],
+    "web.passkey.forget" : [
+      "id"
     ],
     "web.revoke" : [
 
     ]
   },
   "approvalPhrases" : {
+    "act.challenge" : "do act.challenge for you",
     "answer" : "answer a lead's question for you",
     "approve" : "accept the batch you listed",
     "approve.list" : "do approve.list for you",
@@ -177,6 +185,7 @@
     "lead" : "start a project's lead for you",
     "mail" : "do mail for you",
     "no.such.kind" : "do no.such.kind for you",
+    "passkey.registered" : "do passkey.registered for you",
     "plugin.add" : "add a program as a plugin of this node",
     "plugin.file" : "do plugin.file for you",
     "plugin.inspect" : "read a plugin's folder",
@@ -226,6 +235,9 @@
     "web.confirm" : "confirm a web page's pairing",
     "web.open" : "open the web page to a device",
     "web.pairing" : "do web.pairing for you",
+    "web.passkey" : "do web.passkey for you",
+    "web.passkey.add" : "add a passkey for acting from the page",
+    "web.passkey.forget" : "forget a passkey for acting from the page",
     "web.revoke" : "revoke a device's web access"
   },
   "arguments" : {
@@ -375,7 +387,14 @@
       "phrase"
     ],
     "web.open" : [
+      "localhost",
       "tailnet"
+    ],
+    "web.passkey.add" : [
+      "register"
+    ],
+    "web.passkey.forget" : [
+      "id"
     ],
     "web.revoke" : [
 
@@ -396,9 +415,11 @@
     "shells",
     "start",
     "update.check",
-    "web.pairing"
+    "web.pairing",
+    "web.passkey"
   ],
   "changesState" : {
+    "act.challenge" : false,
     "answer" : true,
     "approve" : true,
     "approve.list" : false,
@@ -422,6 +443,7 @@
     "lead" : true,
     "mail" : false,
     "no.such.kind" : true,
+    "passkey.registered" : false,
     "plugin.add" : true,
     "plugin.file" : false,
     "plugin.inspect" : false,
@@ -471,6 +493,9 @@
     "web.confirm" : true,
     "web.open" : true,
     "web.pairing" : false,
+    "web.passkey" : false,
+    "web.passkey.add" : true,
+    "web.passkey.forget" : true,
     "web.revoke" : true
   },
   "hub" : [
@@ -514,6 +539,8 @@
     "tell",
     "web.confirm",
     "web.open",
+    "web.passkey.add",
+    "web.passkey.forget",
     "web.revoke"
   ],
   "retryRules" : {
@@ -649,6 +676,14 @@
       "keepsResult" : false,
       "rerun" : false
     },
+    "web.passkey.add" : {
+      "keepsResult" : true,
+      "rerun" : false
+    },
+    "web.passkey.forget" : {
+      "keepsResult" : true,
+      "rerun" : true
+    },
     "web.revoke" : {
       "keepsResult" : true,
       "rerun" : true
@@ -679,6 +714,9 @@
     "unsubscribe",
     "web.open",
     "web.revoke",
+    "web.passkey",
+    "web.passkey.add",
+    "web.passkey.forget",
     "web.pairing",
     "web.confirm",
     "chat.page",
@@ -731,6 +769,7 @@
     "term.close"
   ],
   "voices" : {
+    "act.challenge" : "webPaired",
     "answer" : "user",
     "approve" : "user",
     "approve.list" : "user",
@@ -753,6 +792,7 @@
     "hooks.remove" : "user",
     "lead" : "user",
     "mail" : "webRead",
+    "passkey.registered" : "webPaired",
     "plugin.add" : "user",
     "plugin.file" : "anyone",
     "plugin.inspect" : "user",
@@ -802,6 +842,9 @@
     "web.confirm" : "user",
     "web.open" : "user",
     "web.pairing" : "user",
+    "web.passkey" : "user",
+    "web.passkey.add" : "user",
+    "web.passkey.forget" : "user",
     "web.revoke" : "user"
   },
   "webKindsBoth" : [

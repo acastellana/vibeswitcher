@@ -6,20 +6,34 @@ import VibeCore
 /// completely"); a passkey touch per request slots in here, with no change to the kinds or the page's requests. `done`
 /// with nil when it passes, else why not; on any thread (`Requests` goes back to its queue).
 public protocol PageVoice: Sendable {
-    func confirm(_ request: NodeWire.Request, page: String, done: @escaping @Sendable (String?) -> Void)
+    func confirm(_ request: NodeWire.Request, page: PageAct, done: @escaping @Sendable (String?) -> Void)
+}
+
+/// The page an acting request came from: its mark (`via`) and its credentials (the token a challenge was bound to, the
+/// origin its assertion must name).
+public struct PageAct: Sendable {
+    public var via: String
+    public var credentials: PageCredentials
+    public init(via: String, credentials: PageCredentials) {
+        self.via = via
+        self.credentials = credentials
+    }
 }
 
 /// No confirmation: the click is the user's (the level `trust`).
 public struct NoPageVoice: PageVoice {
     public init() {}
-    public func confirm(_ request: NodeWire.Request, page: String, done: @escaping @Sendable (String?) -> Void) { done(nil) }
+    public func confirm(_ request: NodeWire.Request, page: PageAct, done: @escaping @Sendable (String?) -> Void) { done(nil) }
 }
 
-/// The level `confirm`'s check before it exists: every request refused, saying so.
-public struct PasskeyNotBuilt: PageVoice {
-    public init() {}
-    public func confirm(_ request: NodeWire.Request, page: String, done: @escaping @Sendable (String?) -> Void) {
-        done("the passkey check of web_acts confirm isn't built yet")
+/// The level `confirm`'s check: the request's passkey assertion, for a challenge this node issued for exactly it
+/// (`Requests.passkeyCheck`).
+public final class PasskeyVoice: PageVoice, @unchecked Sendable {
+    weak var requests: Requests?
+    public init(requests: Requests? = nil) { self.requests = requests }
+    public func confirm(_ request: NodeWire.Request, page: PageAct, done: @escaping @Sendable (String?) -> Void) {
+        guard let requests else { return done("this server checks no passkey") }
+        requests.queue.async { requests.passkeyCheck(request, page: page, done: done) }
     }
 }
 
@@ -28,9 +42,13 @@ public struct PasskeyNotBuilt: PageVoice {
 public struct PairingSeat: Sendable {
     public var holds: @Sendable (String) -> Bool
     public var confirm: @Sendable (String, String, LiveRights) -> Bool
-    public init(holds: @escaping @Sendable (String) -> Bool, confirm: @escaping @Sendable (String, String, LiveRights) -> Bool) {
+    /// One message to every confirmed pairing's connection on the origin a passkey works on: how many.
+    public var toPasskeyPages: @Sendable (Data) -> Int
+    public init(holds: @escaping @Sendable (String) -> Bool, confirm: @escaping @Sendable (String, String, LiveRights) -> Bool,
+                toPasskeyPages: @escaping @Sendable (Data) -> Int = { _ in 0 }) {
         self.holds = holds
         self.confirm = confirm
+        self.toPasskeyPages = toPasskeyPages
     }
 }
 
@@ -80,16 +98,25 @@ extension Requests {
         }
         // The level chooses the check: `trust` none, `confirm` a passkey per request.
         let voice = actingPages?.level == "trust" ? pageVoice : confirmVoice
-        voice.confirm(shown, page: via) { [weak self] notConfirmed in
+        // The request as the page sent it (a passkey's challenge was bound to exactly that).
+        voice.confirm(request, page: PageAct(via: via, credentials: credentials)) { [weak self] notConfirmed in
             guard let self else { return }
             self.queue.async {
+                let approved = request.action.flatMap { self.approvedLines.removeValue(forKey: $0.lowercased()) }
                 if let notConfirmed { return refused(.init(re: request.id, error: .init(.voice, "not confirmed: \(notConfirmed)"))) }
-                guard self.actingPages?.acts(token: credentials.token, secret: credentials.act) == true else {
+                guard self.actingPages?.acts(token: credentials.token, secret: credentials.act, origin: credentials.origin) == true else {
                     return refused(.init(re: request.id, error: .init(.actsEnded, WebRequestScreen.notActing)))
                 }
                 switch self.pageChecks(request) {
                 case .refused(let refusal): refused(refusal)
-                case .go(let now): self.voiced(now, from: NodeLive.webPeer, via: via, reply: reply)
+                case .go(let now):
+                    // At `confirm`, recorded with what the passkey approved, and that line given back.
+                    let mark = approved.map { String((via + "; passkey approved: " + $0).prefix(200)) } ?? via
+                    self.voiced(now, from: NodeLive.webPeer, via: mark) { answer in
+                        var answer = answer
+                        if answer.ok, let approved { answer.recorded = approved }
+                        reply(answer)
+                    }
                 }
             }
         }

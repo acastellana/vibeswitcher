@@ -201,7 +201,7 @@ struct ActingPageTests {
         #expect(access.admit(["token": .string(again.admission.token)]) == nil, "a revoke drops every page token")
         acting.settled()
         #expect(try vault.client.pageActs().tokens.isEmpty && vault.client.pageActs().pages.isEmpty)
-        #expect(!ActingPages.confirmBuilt)
+        #expect(ActingPages.confirmBuilt)
     }
 
     /// A page's auth never waits on the host: with the vault stalled, a token's auth and a pairing's answer at once.
@@ -234,7 +234,8 @@ struct ActingPageTests {
     /// An acting page sends every user's kind its entry lets it, and none it doesn't; a page without the right sends
     /// none; the right changes nothing for any other kind; a terminal needs the watch right, never reading alone.
     @Test func anActingPageRoutesTheUsersKindsItsEntryLets() {
-        let terminalOnly: Set<String> = ["start", "web.open", "build.switch", "hooks.install", "plugin.add", "plugin.inspect", "web.pairing", "web.confirm"]
+        let terminalOnly: Set<String> = ["start", "web.open", "build.switch", "hooks.install", "plugin.add", "plugin.inspect", "web.pairing", "web.confirm",
+                                         "web.passkey", "web.passkey.add", "web.passkey.forget"]
         for spec in KindSpec.all {
             switch (spec.sender, spec.page) {
             case (.user, .acts): #expect(!terminalOnly.contains(spec.name), "\(spec.name)")

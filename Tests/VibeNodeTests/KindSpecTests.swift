@@ -68,12 +68,13 @@ struct KindSpecTests {
             switch spec.sender {
             case .anyone, .webRead: #expect(spec.effect == .read, "\(spec.name): \(spec.sender) may send it, so it changes nothing")
             case .webDraft, .webTerminal: #expect(spec.effect == .change, "\(spec.name)")
+            case .webPaired: #expect(spec.effect == .read, "\(spec.name)")
             case .leadToolServer: #expect(spec.effect == .toolPost, "\(spec.name)")
             case .user: break
             }
         }
         let usersReads = KindSpec.all.filter { $0.sender == .user && $0.effect != .change }
-        #expect(usersReads.map(\.name).sorted() == ["approve.list", "base.show", "config.held", "plugin.inspect", "shells", "start", "update.check", "web.pairing"],
+        #expect(usersReads.map(\.name).sorted() == ["approve.list", "base.show", "config.held", "plugin.inspect", "shells", "start", "update.check", "web.pairing", "web.passkey"],
                 "a user's-voice read added or gone: \(usersReads.map(\.name).sorted())")
         for spec in usersReads { #expect(spec.effect == .read && (spec.recorded == nil) == (spec.name != "start"), "\(spec.name)") }
         for spec in KindSpec.all where spec.effect == .toolPost { #expect(spec.sender == .leadToolServer, "\(spec.name)") }
@@ -104,7 +105,7 @@ struct PrincipalTests {
             case .user, .webRead: #expect(route == .usersVoice, "\(spec.name)")
             case .leadToolServer: #expect(route == .toolPost, "\(spec.name)")
             case .webDraft: if case .refused(.voice, _) = route {} else { Issue.record("\(spec.name): \(route)") }
-            case .webTerminal: #expect(route == .unknown, "\(spec.name)")
+            case .webTerminal, .webPaired: #expect(route == .unknown, "\(spec.name)")
             }
             #expect((route != .unknown) == NodeWire.taken.contains(spec.name), "\(spec.name): \(route)")
         }
@@ -125,7 +126,7 @@ struct PrincipalTests {
                     case .draft: #expect(rights.contains(.draft) && spec.sender == .webDraft, "\(spec.name)")
                     case .terminal: #expect(terminals && rights.contains(.watch) && spec.sender == .webTerminal, "\(spec.name)")
                     case .unknown: #expect(spec.sender == .webTerminal && !terminals, "\(spec.name)")
-                    case .refused, .usersVoice, .toolPost, .pageVoice: break
+                    case .refused, .usersVoice, .toolPost, .pageVoice, .pagePaired: break
                     }
                 }
                 let terminal = terminals && rights.contains(.watch) ? NodeLive.terminalKinds : []

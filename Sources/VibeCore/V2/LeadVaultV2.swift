@@ -136,6 +136,14 @@ public enum LeadVaultV2 {
         case addPageToken(scope: String, sha256: String, until: Double)
         /// These page tokens of `scope` are admitted no more (nil: every one: the user's revoke).
         case dropPageTokens(scope: String, tokens: [String]?)
+        /// A passkey the user registered for the level `confirm` (`vibeswitcher web --passkey`, the user's voice, recorded
+        /// first): its credential id and its P-256 public key (X9.63), both base64url. At most `passkeysKept`.
+        case addPasskey(id: String, publicKey: String)
+        /// These passkeys dropped (nil: every one).
+        case dropPasskeys([String]?)
+        /// An assertion by passkey `id` checked: its sign count, which must be past the one kept (both 0: an authenticator
+        /// that doesn't count), kept with when it was used. Refused otherwise (a replay, a cloned key).
+        case usePasskey(id: String, count: UInt32)
         /// `recordUserAction` for a request made from a page: `via` says which page (its token's id, its origin).
         case recordPageAction(action: String, kind: String, subject: String?, digest: String, via: String)
     }
@@ -148,14 +156,36 @@ public enum LeadVaultV2 {
         public var since: Double?
         public var tokens: [String: Double]
         public var pages: [String: Double]
+        /// The passkeys registered for `confirm`, by credential id (base64url).
+        public var keys: [String: Passkey]
         public var on: Bool { level != "off" }
-        public init(level: String = "off", since: Double? = nil, tokens: [String: Double] = [:], pages: [String: Double] = [:]) {
+        public init(level: String = "off", since: Double? = nil, tokens: [String: Double] = [:], pages: [String: Double] = [:],
+                    keys: [String: Passkey] = [:]) {
             self.level = level
             self.since = since
             self.tokens = tokens
             self.pages = pages
+            self.keys = keys
         }
     }
+
+    /// A passkey as the record keeps it: its P-256 public key (X9.63, base64url), its last sign count, when it was
+    /// added and last used.
+    public struct Passkey: Codable, Equatable, Sendable {
+        public var publicKey: String
+        public var count: UInt32
+        public var added: Double
+        public var lastUsed: Double?
+        public init(publicKey: String, count: UInt32 = 0, added: Double, lastUsed: Double? = nil) {
+            self.publicKey = publicKey
+            self.count = count
+            self.added = added
+            self.lastUsed = lastUsed
+        }
+    }
+
+    /// How many passkeys the record keeps.
+    public static let passkeysKept = 5
 
     /// Acting from the page's levels, lowest first.
     public static let pageActsLevels = ["off", "confirm", "trust"]
@@ -427,12 +457,34 @@ public enum LeadVaultV2 {
             }
             return .pageActs(pageActs(&record, now: now))
         case .addPageToken(let scope, let sha256, let until):
-            guard ["loopback", "tailnet"].contains(scope) else { return .refused("A page token's scope is loopback or tailnet.") }
+            guard ["loopback", "localhost", "tailnet"].contains(scope) else { return .refused("A page token's scope is loopback, localhost or tailnet.") }
             guard hexDigest(sha256) else { return .refused("A token is kept by its SHA-256, 64 lower-case hex digits.") }
             guard until > now else { return .refused("That token has run out.") }
             _ = pageActs(&record, now: now)
             record.plugin[pagesPrefix + scope + ":" + sha256] = String(until)
             keepNewest(&record, pagesPrefix + scope + ":", pageTokensKept)
+            return .pageActs(pageActs(&record, now: now))
+        case .addPasskey(let id, let publicKey):
+            guard (1...200).contains(id.utf8.count), (1...200).contains(publicKey.utf8.count),
+                  (id + publicKey).unicodeScalars.allSatisfy({ ("a"..."z").contains($0) || ("A"..."Z").contains($0) || ("0"..."9").contains($0) || $0 == "-" || $0 == "_" }) else {
+                return .refused("A passkey is kept by its id and key, base64url.")
+            }
+            let keys = passkeys(record)
+            guard keys[id] == nil else { return .refused("That passkey is registered already.") }
+            guard keys.count < passkeysKept else { return .refused("At most \(passkeysKept) passkeys: forget one first (vibeswitcher web --passkey --forget ID).") }
+            setPasskey(&record, id, Passkey(publicKey: publicKey, added: now))
+            return .pageActs(pageActs(&record, now: now))
+        case .dropPasskeys(let ids):
+            for (id, _) in passkeys(record) where ids.map({ $0.contains(id) }) ?? true { record.plugin[passkeyPrefix + id] = nil }
+            return .pageActs(pageActs(&record, now: now))
+        case .usePasskey(let id, let count):
+            guard var key = passkeys(record)[id] else { return .refused("No such passkey.") }
+            guard count > key.count || (count == 0 && key.count == 0) else {
+                return .refused("The passkey's count didn't move past \(key.count): a replay or a copied key. Not taken.")
+            }
+            key.count = count
+            key.lastUsed = now
+            setPasskey(&record, id, key)
             return .pageActs(pageActs(&record, now: now))
         case .dropPageTokens(let scope, let tokens):
             let prefix = pagesPrefix + scope + ":"
@@ -441,6 +493,14 @@ public enum LeadVaultV2 {
             }
             return .pageActs(pageActs(&record, now: now))
         }
+    }
+
+    static func passkeys(_ record: Book) -> [String: Passkey] {
+        Book.part(record.plugin, passkeyPrefix).compactMapValues { try? JSONDecoder().decode(Passkey.self, from: Data($0.utf8)) }
+    }
+
+    static func setPasskey(_ record: inout Book, _ id: String, _ key: Passkey) {
+        record.plugin[passkeyPrefix + id] = (try? JSONEncoder().encode(key)).map { String(decoding: $0, as: UTF8.self) }
     }
 
     static func hexDigest(_ text: String) -> Bool {
@@ -460,7 +520,7 @@ public enum LeadVaultV2 {
         }
         return PageActs(level: record.plugin[pageLevelKey] ?? "off", since: record.plugin[pageSinceKey].flatMap(Double.init),
                         tokens: Book.part(record.plugin, pageTokenPrefix).compactMapValues(Double.init),
-                        pages: Book.part(record.plugin, pagesPrefix).compactMapValues(Double.init))
+                        pages: Book.part(record.plugin, pagesPrefix).compactMapValues(Double.init), keys: passkeys(record))
     }
 
     /// Where acting from the page is kept, in the one plugin field (`Book.plugin`: no stored field of its own, see there).
@@ -468,6 +528,7 @@ public enum LeadVaultV2 {
     static let pageLevelKey = "page:level"
     static let pageTokenPrefix = "page:act:"
     static let pagesPrefix = "page:tok:"
+    static let passkeyPrefix = "page:key:"
     /// How many page tokens of a scope the record keeps (a token store keeps fewer: `WebTokens.cap`).
     public static let pageTokensKept = 32
     /// How many acting tokens the record keeps (a token's own store keeps fewer: `WebTokens.cap`).
@@ -622,6 +683,15 @@ public struct LeadVaultV2Client: Sendable {
     public func addPageToken(scope: String, sha256: String, until: Double) throws -> LeadVaultV2.PageActs {
         try pageActsReply(.addPageToken(scope: scope, sha256: sha256, until: until))
     }
+
+    /// A passkey registered (its credential id and X9.63 key, base64url).
+    public func addPasskey(id: String, publicKey: String) throws -> LeadVaultV2.PageActs { try pageActsReply(.addPasskey(id: id, publicKey: publicKey)) }
+
+    /// These passkeys dropped (nil: every one).
+    public func dropPasskeys(_ ids: [String]?) throws -> LeadVaultV2.PageActs { try pageActsReply(.dropPasskeys(ids)) }
+
+    /// An assertion by passkey `id` with sign count `count`: refused unless the count moved past the kept one.
+    public func usePasskey(id: String, count: UInt32) throws -> LeadVaultV2.PageActs { try pageActsReply(.usePasskey(id: id, count: count)) }
 
     /// These page tokens of `scope` admitted no more (nil: every one).
     public func dropPageTokens(scope: String, _ tokens: [String]?) throws -> LeadVaultV2.PageActs {

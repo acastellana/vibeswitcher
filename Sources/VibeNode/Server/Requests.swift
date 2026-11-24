@@ -137,14 +137,18 @@ public final class Requests: @unchecked Sendable {
     public var actingPages: ActingPages?
     /// The confirmation an acting page's request passes at the level `trust` (`PageVoice`): none.
     public var pageVoice: PageVoice = NoPageVoice()
-    /// The confirmation at the level `confirm`: a passkey per request, not built yet (it refuses every request, and
-    /// `set web_acts confirm` is refused meanwhile).
-    public var confirmVoice: PageVoice = PasskeyNotBuilt()
+    /// The confirmation at the level `confirm`: a passkey per request (`PasskeyVoice`, set at init).
+    public lazy var confirmVoice: PageVoice = PasskeyVoice(requests: self)
     /// The loopback screen's pairings (`NodeLive`): whether a pairing's connection is open, and its confirmation.
     public var pairings: PairingSeat?
     /// The page mark of each action an acting page asked, while it is done (`approve`'s items are recorded with it). On
     /// `queue`.
     var pageMarks: [String: String] = [:]
+    /// The level `confirm`'s challenges issued for acts, by challenge (base64url), and its registrations asked, by id;
+    /// the line each act's passkey approved, by action, while it is done. On `queue`.
+    var passkeyChallenges: [String: PasskeyChallenge] = [:]
+    var passkeyRegistrations: [String: PasskeyRegistration] = [:]
+    var approvedLines: [String: String] = [:]
     /// `status`'s `web`: the listener's state (`NodeLive.webValue`); none: off.
     public var webValue: (() -> NodeWire.Value)?
     /// The `seq` a live stream is at, by collection (`LiveHub.seq(of:)`, set by `NodeLive`): a draft's `applied`. On
@@ -439,6 +443,9 @@ public final class Requests: @unchecked Sendable {
         case "approve.list": approveList(request, reply: reply)
         case "web.pairing": webPairing(request, reply: reply)
         case "web.confirm": webConfirm(request, reply: reply)
+        case "web.passkey": webPasskey(request, reply: reply)
+        case "web.passkey.add": webPasskeyAdd(request, reply: reply)
+        case "web.passkey.forget": webPasskeyForget(request, reply: reply)
         case "approve": approve(request, from: facts, reply: reply)
         case "plugin.list": pluginList(request, page: facts.pid == NodeLive.webPeer.pid, reply: reply)
         case "plugin.on", "plugin.off": pluginSet(request, reply: reply)

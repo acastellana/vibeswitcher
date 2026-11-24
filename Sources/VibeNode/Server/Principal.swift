@@ -39,6 +39,8 @@ public enum Principal: Sendable, Equatable {
         /// A user's kind from an acting page (`LiveRights.act`): `PageVoice` confirms it, then `Requests.voiced`, recorded
         /// as the user's, marked as the page's.
         case pageVoice
+        /// A confirmed pairing's passkey request (`act.challenge`, `passkey.registered`): `Requests.pagePaired`.
+        case pagePaired
     }
 
     /// Where `kind` from this peer goes.
@@ -55,7 +57,7 @@ public enum Principal: Sendable, Equatable {
             case .webDraft:
                 return .refused(.voice, "a draft comes from a web page; in a terminal, `vibeswitcher answer CARD TEXT` answers and `vibeswitcher send SESSION TEXT` sends")
             // A page's alone: the socket doesn't take it.
-            case .webTerminal: return .unknown
+            case .webTerminal, .webPaired: return .unknown
             }
         case .page(let rights, let terminals):
             let noRead = Route.refused(.voice, "this page's token doesn't read")
@@ -75,6 +77,8 @@ public enum Principal: Sendable, Equatable {
                 case .bySender: return .refused(.voice, "\(shown) is the user's voice")
                 }
             case .leadToolServer: return .refused(.voice, "\(shown) is the lead's tool server's alone")
+            case .webPaired:
+                return rights.contains(.watch) ? .pagePaired : .refused(.voice, "\(shown) needs this page's pairing confirmed in a terminal")
             case .webTerminal:
                 guard terminals else { return .unknown }
                 // Watching needs a pairing the user confirmed in a terminal (the acting review's fix C).
@@ -92,7 +96,7 @@ public enum Principal: Sendable, Equatable {
         case .unknown:
             return .init(re: request.id, error: .init(.unknownKind, "this server doesn't take \(ConfigSeal.inert(request.kind, limit: 80))"))
         case .refused(let code, let why): return .init(re: request.id, error: .init(code, why))
-        case .hub, .terminal, .read, .usersVoice, .toolPost, .draft, .privateRead, .pageVoice: return nil
+        case .hub, .terminal, .read, .usersVoice, .toolPost, .draft, .privateRead, .pageVoice, .pagePaired: return nil
         }
     }
 

@@ -200,6 +200,9 @@ struct RequestsTests {
         let reads: Set<String> = ["status", "questions", "start", "config.held", "base.show", "mail", "question.post", "question.revise", "question.withdraw",
                                   // The terminal's side of a page's pairing (the acting review's fix A, 2026-11-24).
                                   "web.pairing",
+                                  // The level `confirm`'s passkeys: the terminal's registration asked, a page's challenge
+                                  // and its registration's answer (2026-11-24).
+                                  "web.passkey", "act.challenge", "passkey.registered",
                                   "subscribe", "unsubscribe", "chat.page", "board",
                                   // It changes nothing but a session's seen mark (done or idle), so it needs no voice.
                                   "seen",
@@ -254,7 +257,9 @@ struct RequestsTests {
                                     // A feature plugin turned on or off (2026-11-22).
                                     "plugin.on", "plugin.off", "plugin.add", "plugin.remove",
                                     // A page's pairing confirmed in the terminal (2026-11-24).
-                                    "web.confirm"]
+                                    "web.confirm",
+                                    // A passkey kept or forgotten (2026-11-24).
+                                    "web.passkey.add", "web.passkey.forget"]
         #expect(Set(NodeWire.kinds.keys) == reads.union(changes), "a kind added to NodeWire.kinds is classified here")
         for kind in reads { #expect(!NodeWire.changesState(kind), "\(kind)") }
         for kind in changes { #expect(NodeWire.changesState(kind), "\(kind)") }

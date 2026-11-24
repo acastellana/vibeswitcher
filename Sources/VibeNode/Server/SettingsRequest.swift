@@ -154,6 +154,10 @@ extension Requests {
             return refuse(.refused, "web_acts confirm asks for your passkey at each act, and that check isn't built yet: off or trust for now")
         }
         guard let acting = actingPages else { return refuse(.refused, "this server has no web page") }
+        // `confirm` needs a passkey to confirm with.
+        guard level != "confirm" || !(acting.state?.keys.isEmpty ?? true) else {
+            return refuse(.refused, "web_acts confirm needs a passkey first: pair a page at http://localhost (`vibeswitcher web --localhost`), then `vibeswitcher web --passkey`")
+        }
         let queue = self.queue, note = self.note
         let was = acting.level
         DispatchQueue.global(qos: .userInitiated).async {

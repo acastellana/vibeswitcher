@@ -29,7 +29,7 @@ public final class ActingPages: @unchecked Sendable {
     /// The levels, lowest first.
     public static let levels = LeadVaultV2.pageActsLevels
     /// Whether `confirm`'s per-request check (a passkey) exists yet: until it does, `confirm` can't be set.
-    public static let confirmBuilt = false
+    public static let confirmBuilt = true
 
     private let vault: LeadVaultV2Client?
     private let note: (String) -> Void
@@ -103,7 +103,15 @@ public final class ActingPages: @unchecked Sendable {
     }
 
     /// Whether it acts now: a confirmed pairing, live, and the level above off.
-    public func acts(token: String, secret: String?) -> Bool { level != "off" && watches(token: token, secret: secret) }
+    /// At `confirm`, only on the origin that can do passkeys (`http://localhost:PORT`: `origin` the page's host).
+    public func acts(token: String, secret: String?, origin: String? = nil) -> Bool {
+        let level = self.level
+        guard level != "off", watches(token: token, secret: secret) else { return false }
+        return level != "confirm" || Self.passkeyHost(origin)
+    }
+
+    /// Whether `host` (a page's, `name:port`) is the one a passkey works on: `localhost`.
+    public static func passkeyHost(_ host: String?) -> Bool { host?.hasPrefix(WebAuthn.rpID + ":") == true }
 
     /// A pairing the user confirmed in a terminal (`web.confirm`): its secret (sent once, on its connection), kept at
     /// once in the cache and then in the vault, until `life` from now or the token's end. Never waits on the host.
@@ -124,6 +132,35 @@ public final class ActingPages: @unchecked Sendable {
     /// The user's revoke: no pairing watches or acts any more.
     public func revoked() {
         change({ $0.tokens = [:] }) { try $0.dropActingTokens(nil) } lost: {}
+    }
+
+    // MARK: Passkeys (the level `confirm`)
+
+    /// A passkey kept (the terminal's `web.passkey.add`). Waits on the host: off the server's queue.
+    public func addPasskey(id: String, publicKey: String) throws -> LeadVaultV2.PageActs {
+        try written { try $0.addPasskey(id: id, publicKey: publicKey) }
+    }
+
+    /// These passkeys forgotten. Waits on the host: off the server's queue.
+    public func dropPasskeys(_ ids: [String]) throws -> LeadVaultV2.PageActs {
+        try written { try $0.dropPasskeys(ids) }
+    }
+
+    /// An assertion by passkey `id` with sign count `count` taken (refused unless the count moved past the kept one).
+    /// Waits on the host: off the server's queue.
+    public func usePasskey(id: String, count: UInt32) throws {
+        _ = try written { try $0.usePasskey(id: id, count: count) }
+    }
+
+    /// One write to the vault, in order with the others, its answer the cache.
+    private func written(_ write: (LeadVaultV2Client) throws -> LeadVaultV2.PageActs) throws -> LeadVaultV2.PageActs {
+        guard let vault else { throw LeadVaultV2Client.Refused("This node's host keeps no record of the user's actions.") }
+        let acts = try writes.sync { try write(vault) }
+        lock.withLock {
+            generation += 1
+            cache = acts
+        }
+        return acts
     }
 
     // MARK: The level
@@ -199,9 +236,19 @@ public final class ActingPages: @unchecked Sendable {
 
     /// What `status` and the node stream say: the level (and whether it is above off), since when, and how many acting
     /// pages are open (`pages`).
-    public func value(pages: Int) -> NodeWire.Value {
+    public func value(pages: Int, port: UInt16? = nil) -> NodeWire.Value {
         let acts = state
+        let keys = (acts?.keys ?? [:]).sorted { $0.value.added < $1.value.added }
+        // A passkey added in the last week is said (one added by something passing as the user's voice doesn't go unseen).
+        let recent = keys.filter { now().timeIntervalSince1970 - $0.value.added < 7 * 86_400 }
+        let notice: NodeWire.Value = recent.isEmpty ? .null : .string(recent.map { "a passkey (\($0.key.prefix(12))) was added on "
+            + NodeWire.dateText(Date(timeIntervalSince1970: $0.value.added)) }.joined(separator: "; ")
+            + ": if that wasn't you, run `vibeswitcher web --passkey --forget ID`")
         return .object(["level": .string(acts?.level ?? "off"), "on": .bool(acts?.on == true),
-                        "since": acts?.since.map { .date(Date(timeIntervalSince1970: $0)) } ?? .null, "pages": .int(pages)])
+                        "since": acts?.since.map { .date(Date(timeIntervalSince1970: $0)) } ?? .null, "pages": .int(pages),
+                        "keys": .array(keys.map { key in .object(["id": .string(String(key.key.prefix(12))),
+                                                                  "added": .date(Date(timeIntervalSince1970: key.value.added)),
+                                                                  "lastUsed": key.value.lastUsed.map { .date(Date(timeIntervalSince1970: $0)) } ?? .null]) }),
+                        "passkeyOrigin": port.map { .string("http://\(WebAuthn.rpID):\($0)") } ?? .null, "notice": notice])
     }
 }

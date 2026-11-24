@@ -336,6 +336,29 @@ extension WireKinds {
         }
     }
 
+    /// `web.passkey` (the user's, from a terminal): with no `register`, a registration asked of the confirmed pages on
+    /// localhost (its id, and how many pages were asked); with one, where it stands: `waiting`, `received` (the
+    /// credential's id prefix: the terminal shows it before the typed code), or `gone`.
+    public enum WebPasskey: WireKind {
+        public static let kind = "web.passkey"
+        public struct Args: Codable, Sendable, Equatable {
+            public var register: String?
+            public init(register: String? = nil) { self.register = register }
+        }
+        public struct Result: Codable, Sendable, Equatable {
+            public var register: String?
+            public var pages: Int?
+            public var state: String?
+            public var id: String?
+            public init(register: String, pages: Int? = nil, state: String, id: String? = nil) {
+                self.register = register
+                self.pages = pages
+                self.state = state
+                self.id = id
+            }
+        }
+    }
+
     public enum ApproveList: WireKind {
         public static let kind = "approve.list"
 

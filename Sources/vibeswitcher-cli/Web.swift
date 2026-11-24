@@ -13,15 +13,19 @@ import VibeNode
 /// stdout, its explanation on stderr. The address holds a one-time pairing code in its fragment, good for 120 s: once a
 /// browser has taken it, nothing in the scrollback or the browser's history opens anything.
 enum WebCommand {
-    static let usage = "usage: vibeswitcher web [--tailnet | --revoke]"
+    static let usage = "usage: vibeswitcher web [--localhost | --tailnet | --revoke | --passkey [--forget ID|all]]"
 
     static func run(_ arguments: [String]) -> Int32 {
-        let revoke: Bool, tailnet: Bool
+        let revoke: Bool, tailnet: Bool, localhost: Bool
         switch arguments {
-        case []: (revoke, tailnet) = (false, false)
-        case ["--revoke"]: (revoke, tailnet) = (true, false)
-        case ["--tailnet"]: (revoke, tailnet) = (false, true)
-        default: return Say.usage(usage)
+        case []: (revoke, tailnet, localhost) = (false, false, false)
+        case ["--localhost"]: (revoke, tailnet, localhost) = (false, false, true)
+        case ["--revoke"]: (revoke, tailnet, localhost) = (true, false, false)
+        case ["--tailnet"]: (revoke, tailnet, localhost) = (false, true, false)
+        case ["--passkey"]: return PasskeyCommand.add()
+        default:
+            if arguments.count == 3, arguments[0] == "--passkey", arguments[1] == "--forget" { return PasskeyCommand.forget(arguments[2]) }
+            return Say.usage(usage)
         }
         let context = NodeContext.current()
         context.sayScratch()
@@ -54,7 +58,7 @@ enum WebCommand {
                 return 0
             }
         }
-        switch client.change(WireKinds.WebOpen.self, .init(tailnet: tailnet ? true : nil), action: id, typed: typed, timeout: 30) {
+        switch client.change(WireKinds.WebOpen.self, .init(tailnet: tailnet ? true : nil, localhost: localhost ? true : nil), action: id, typed: typed, timeout: 30) {
         case .failure(let failure): return Say.failed(failure)
         case .refused(let reply): return Say.replyError(reply)
         case .success(let result, _):
@@ -135,7 +139,7 @@ enum WebCommand {
     /// `http://127.0.0.1:<port>/#pair=<base64url>` and nothing else: what is printed is never the listener's choice of
     /// text.
     static func isPageAddress(_ url: String) -> Bool {
-        isAddress(url, host: "127.0.0.1")
+        isAddress(url, host: "127.0.0.1") || isAddress(url, host: WebAuthn.rpID)
     }
 
     /// `http://<machine>.<tailnet>.ts.net:<port>/#pair=<base64url>` (a MagicDNS name as `Tailnet.name` takes it) and
@@ -159,5 +163,76 @@ enum WebCommand {
         guard rest.hasPrefix("/#pair=") else { return false }
         let code = rest.dropFirst("/#pair=".count)
         return !code.isEmpty && code.count <= 64 && code.allSatisfy { $0.isASCII && ($0.isLetter || $0.isNumber || $0 == "-" || $0 == "_") }
+    }
+}
+
+/// `vibeswitcher web --passkey [--forget ID|all]` (the level `confirm`): a passkey registered by a page confirmed at
+/// `http://localhost:PORT`, kept once the terminal shows its id and the user types the code; or forgotten.
+enum PasskeyCommand {
+    static func connected() -> NodeClient? {
+        let context = NodeContext.current()
+        context.sayScratch()
+        switch NodeClient.connect(context) {
+        case .failure(let failure):
+            _ = Say.failed(failure)
+            return nil
+        case .success(let client): return client
+        }
+    }
+
+    static func add() -> Int32 {
+        guard let client = connected() else { return 1 }
+        let register: String
+        switch client.read(WireKinds.WebPasskey.self, .init(), timeout: 30) {
+        case .failure(let failure): return Say.failed(failure)
+        case .refused(let reply): return Say.replyError(reply)
+        case .success(let asked, _):
+            guard let id = asked.register, (asked.pages ?? 0) > 0 else {
+                return Say.refused("No page paired at http://localhost is open: run `vibeswitcher web --localhost`, confirm it, then this again.")
+            }
+            register = id
+            Say.err("Asked \(asked.pages ?? 0) page\(asked.pages == 1 ? "" : "s") at http://localhost: press \"Add a passkey\" there and follow your device (Ctrl-C stops)…")
+        }
+        let started = MacTime.real.awake()
+        var credential: String?
+        while MacTime.real.awake() - started < Requests.registrationWait {
+            switch client.read(WireKinds.WebPasskey.self, .init(register: register), timeout: 30) {
+            case .failure(let failure): return Say.failed(failure)
+            case .refused(let reply): return Say.replyError(reply)
+            case .success(let state, _):
+                if state.state == "gone" { return Say.refused("The registration ran out: run `vibeswitcher web --passkey` again.") }
+                credential = state.id
+            }
+            if credential != nil { break }
+            usleep(500_000)
+        }
+        guard let credential else { return Say.refused("No page registered a passkey in time.") }
+        let action = UUID().uuidString.lowercased()
+        let what = "This keeps the passkey \(ConfigSeal.inert(credential, limit: 20))… that a page just registered: at `web_acts confirm` each act from a "
+            + "page needs a touch of it. Keep it only if YOUR device just asked you to make one."
+        let said = TypedWord.said(approval: client.approvalRule, action: action, what: what)
+        guard case .success(let typed) = said else { return Say.refused(said.refusal) }
+        switch client.change(WireKinds.WebPasskeyAdd.self, .init(register: register), action: action, typed: typed, timeout: 30) {
+        case .failure(let failure): return Say.failed(failure)
+        case .refused(let reply): return Say.replyError(reply)
+        case .success(let result, _):
+            Say.out("Passkey \(result.id ?? credential) kept (\(result.keys ?? 1) in all). `vibeswitcher set web_acts confirm` asks for it at each act.")
+            return 0
+        }
+    }
+
+    static func forget(_ id: String) -> Int32 {
+        guard let client = connected() else { return 1 }
+        let action = UUID().uuidString.lowercased()
+        let what = "This forgets the passkey\(id == "all" ? "s, every one" : " whose id starts with \(ConfigSeal.inert(id, limit: 40))"): it approves no act any more."
+        let said = TypedWord.said(approval: client.approvalRule, action: action, what: what)
+        guard case .success(let typed) = said else { return Say.refused(said.refusal) }
+        switch client.change(WireKinds.WebPasskeyForget.self, .init(id: id), action: action, typed: typed, timeout: 30) {
+        case .failure(let failure): return Say.failed(failure)
+        case .refused(let reply): return Say.replyError(reply)
+        case .success(let result, _):
+            Say.out("Forgotten: \((result.forgotten ?? []).joined(separator: ", ")); \(result.keys ?? 0) left.")
+            return 0
+        }
     }
 }

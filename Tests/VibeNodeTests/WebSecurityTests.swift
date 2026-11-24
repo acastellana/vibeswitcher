@@ -19,13 +19,14 @@ struct WebSecurityTests {
     // MARK: Host: DNS rebinding
 
     /// A page on another name resolving to 127.0.0.1 sends its own name as `Host`: 421 with no body, for a file and for
-    /// the upgrade alike. Only `127.0.0.1:<port>`, once, is taken.
+    /// the upgrade alike. Only `127.0.0.1:<port>` and `localhost:<port>` (the origin a passkey works on: the level
+    /// `confirm`), once each, are taken; the upgrade only with its own name's Origin.
     @Test func aRequestUnderAnotherHostNameIsRefused() async throws {
         let rig = try WebSecurityRig(scratch)
         defer { rig.stop() }
         let port = rig.port
         let wrong: [[String]] = [
-            ["Host: evil.example:\(port)"], ["Host: localhost:\(port)"], ["Host: 127.0.0.1"], ["Host: 127.0.0.1:\(port + 1)"],
+            ["Host: evil.example:\(port)"], ["Host: localhost"], ["Host: localhost:\(port + 1)"], ["Host: localhost.:\(port)"], ["Host: 127.0.0.1"], ["Host: 127.0.0.1:\(port + 1)"],
             ["Host: 127.0.0.1:\(port)."], ["Host: 127.0.0.1:\(port).evil.example"], ["Host: 127.0.0.2:\(port)"],
             ["Host: [::1]:\(port)"], ["Host: 0x7f.0.0.1:\(port)"], ["Host: 127.0.0.1:0\(port)"], ["Host: "],
             [], ["Host: 127.0.0.1:\(port)", "Host: 127.0.0.1:\(port)"], ["Host: 127.0.0.1:\(port)", "Host: evil.example:\(port)"],
@@ -39,9 +40,13 @@ struct WebSecurityTests {
                 #expect(answer.body.isEmpty, "\(headers) \(target): a body \(answer.body.count) bytes")
             }
         }
-        // The exact one is taken.
+        // The exact one is taken; localhost's too, with its own Origin and never the other's.
         let right = try RawClient.ask(port: port, "GET /ws HTTP/1.1", ["Host: \(rig.host)"] + RawClient.upgradeHeaders(origin: rig.origin))
         #expect(right.status == 101, "\(right.head)")
+        let local = try RawClient.ask(port: port, "GET /ws HTTP/1.1", ["Host: localhost:\(port)"] + RawClient.upgradeHeaders(origin: "http://localhost:\(port)"))
+        #expect(local.status == 101, "\(local.head)")
+        let crossed = try RawClient.ask(port: port, "GET /ws HTTP/1.1", ["Host: localhost:\(port)"] + RawClient.upgradeHeaders(origin: rig.origin))
+        #expect(crossed.status == 403, "\(crossed.head)")
     }
 
     // MARK: Origin: cross-site WebSocket hijacking

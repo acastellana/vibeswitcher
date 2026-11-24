@@ -140,7 +140,7 @@ public final class NodeLive: @unchecked Sendable {
             case .privateRead: requests.webRead(request, reply: answer)
             case .read: requests.handle(request, from: NodeLive.webPeer, reply: answer)
             case .refused(let code, let why): answer(.init(re: request.id, error: .init(code, why)))
-            case .unknown, .hub, .terminal, .usersVoice, .toolPost, .pageVoice:
+            case .unknown, .hub, .terminal, .usersVoice, .toolPost, .pageVoice, .pagePaired:
                 answer(.init(re: request.id, error: .init(.unknownKind, "this server doesn't take \(ConfigSeal.inert(request.kind, limit: 80)) from a page")))
             }
         }
@@ -164,7 +164,11 @@ public final class NodeLive: @unchecked Sendable {
         access.tokenAuthority = (acting, "loopback")
         self.tailnet?.access.tokenAuthority = (acting, "tailnet")
         requests.pairings = PairingSeat(holds: { [weak screen] in screen?.holdsPairing($0) ?? false },
-                                        confirm: { [weak screen] code, secret, rights in screen?.confirmPairing(code, secret: secret, rights: rights) ?? false })
+                                        confirm: { [weak screen] code, secret, rights in screen?.confirmPairing(code, secret: secret, rights: rights) ?? false },
+                                        toPasskeyPages: { [weak screen] in screen?.toPasskeyPages($0) ?? 0 })
+        screen.onPagePaired = { [weak requests] request, credentials, transport in
+            requests?.pagePaired(request, credentials: credentials) { reply in transport.send(NodeWire.message(reply)) }
+        }
         acting.onLost = { [weak screen] key in screen?.endActing(key: key, closeOn: listenerQueue) }
         let hub = hub
         requests.liveSeq = { [weak hub] in hub?.seq(of: $0) ?? 0 }
@@ -280,7 +284,7 @@ public final class NodeLive: @unchecked Sendable {
         let now = Date().timeIntervalSince1970
         let admitted = acting.state?.pages.filter { $0.key.hasPrefix("loopback:") && $0.value > now }.count ?? 0
         return .object(["state": .string(state), "port": port, "tokens": .int(min(admitted, access.tokens.live(now: Date()))),
-                        "connections": .int(web.connectionCount), "acts": acting.value(pages: screen.actingCount)])
+                        "connections": .int(web.connectionCount), "acts": acting.value(pages: screen.actingCount, port: web.port)])
     }
 
     /// This, once made: what `status` and the `node` stream ask for `web`.
