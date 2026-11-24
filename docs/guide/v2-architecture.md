@@ -191,7 +191,7 @@ taken on the Unix socket.
 | `draft` | a page that drafts | yes |  |  | `draft` |  | the page's (WireSchema) |  |  |  |
 | `draft.clear` | a page that drafts | yes |  |  | `draft` |  | the page's (WireSchema) |  |  |  |
 | `hold` | the user's terminal | yes | yes | yes | `Requests.act` | `card`, `code` | `WireKinds.Hold` | its result |  | yes |
-| `hooks.install` | the user's terminal | yes | yes |  | `Requests.act` | `agents` | `WireKinds.HooksInstall` | its result; done again | yes | the terminal's alone |
+| `hooks.install` | the user's terminal | yes | yes |  | `Requests.act` | `agents`, `codex` | `WireKinds.HooksInstall` | its result; done again | yes | the terminal's alone |
 | `hooks.remove` | the user's terminal | yes | yes |  | `Requests.act` | `agents` | `WireKinds.HooksRemove` | its result; done again |  | yes |
 | `lead` | the user's terminal | yes | yes |  | `Requests.act` | `folder`, `goal`, `initialized`, `replace`, `resume`, `takeHead` | `WireKinds.Lead` | its result |  | yes |
 | `mail` | the user's terminal, or a page that reads |  |  |  | `Requests.act` |  | `WireKinds.Mail` |  |  |  |

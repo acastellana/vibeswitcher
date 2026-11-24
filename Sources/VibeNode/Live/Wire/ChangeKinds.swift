@@ -217,15 +217,33 @@ extension WireKinds {
         public init(agents: [String]?) { self.agents = agents }
     }
 
+    /// `hooks install`'s: the agents, and `codex`, the Codex program the user was shown before the typed code (the link
+    /// `NodePreflight.codex` resolves): the server trusts the Codex hooks by running it, only when it still resolves so.
+    public struct HooksInstallArgs: WireArgs, Equatable {
+        public var agents: [String]?
+        public var codex: String?
+        public enum CodingKeys: String, CodingKey, CaseIterable { case agents, codex }
+        public init(agents: [String]?, codex: String? = nil) {
+            self.agents = agents
+            self.codex = codex
+        }
+    }
+
     public enum HooksInstall: WireChangeKind {
         public static let kind = "hooks.install"
-        public typealias Args = AgentsArgs
+        public typealias Args = HooksInstallArgs
+        /// `trusted`: the Codex hooks trusted (`NodeCodexTrust`), absent when none was tried; `trustNote`: why none was
+        /// (or what was refused).
         public struct Result: Codable, Sendable, Equatable {
             public var programs: [String]?
             public var configs: [String]?
-            public init(programs: [String], configs: [String]) {
+            public var trusted: Int?
+            public var trustNote: String?
+            public init(programs: [String], configs: [String], trusted: Int? = nil, trustNote: String? = nil) {
                 self.programs = programs
                 self.configs = configs
+                self.trusted = trusted
+                self.trustNote = trustNote
             }
         }
     }

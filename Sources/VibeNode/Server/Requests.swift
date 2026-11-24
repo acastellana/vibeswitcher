@@ -1027,8 +1027,13 @@ public final class Requests: @unchecked Sendable {
         guard !install || nodeRoot != nil else {
             return reply(.init(re: request.id, error: .init(.refused, "this server has no build folder to install the hooks' programs from")))
         }
-        let (nodeRoot, home, vault, commit) = (self.nodeRoot ?? "", self.home, link.vault, self.commit)
-        let work = { (binaries: [String: String]?, hostBuild: String?) -> NodeWire.Reply in
+        let (nodeRoot, home, vault, commit, root) = (self.nodeRoot ?? "", self.home, link.vault, self.commit, self.root)
+        // The Codex the user was shown before the typed code (`hooks install`'s confirmation): trusted by only while the
+        // link still resolves to it.
+        let shownCodex = request.args?["codex"]?.string
+        // The reply, or (install with Codex) the step that trusts Codex's hooks and gives it: run off the board reads'
+        // queue, as it waits on `codex app-server` (`NodeCodexTrust.limit`).
+        let work = { (binaries: [String: String]?, hostBuild: String?) -> (reply: NodeWire.Reply, trusting: (() -> NodeWire.Reply)?) in
             var hooks = HooksRequest(nodeRoot: nodeRoot, home: home, binaries: binaries, vault: vault)
             // While the host runs another build than this server, a program that isn't its `binaries` entry is the
             // build switch not finished yet (the server restarts onto it once idle), said so.
@@ -1036,20 +1041,41 @@ public final class Requests: @unchecked Sendable {
             let configs = agents.map { hooks.configPath($0) }
             if install {
                 switch hooks.install(agents: agents) {
-                case .failure(let refusal): return .init(re: request.id, error: .init(.refused, refusal.text))
+                case .failure(let refusal): return (.init(re: request.id, error: .init(.refused, refusal.text)), nil)
                 case .success(let installed):
-                    return .init(re: request.id, typed: WireKinds.HooksInstall.Result(programs: installed.programs, configs: installed.configs))
+                    let result = WireKinds.HooksInstall.Result(programs: installed.programs, configs: installed.configs)
+                    guard agents.contains(.codex) else { return (.init(re: request.id, typed: result), nil) }
+                    return (.init(re: request.id, typed: result), { [hooks] in
+                        var trusted = result
+                        // The user's node, its systemd manager reachable: in a transient scope of its own (as update
+                        // runs install-node); a scratch node, or no manager: its own process group.
+                        let scope = NodeFolders.isUsersRoot(root, accountHome: VibePaths.accountHome) && SwitchSealCheck.userManagerRefusal() == nil
+                            ? "/usr/bin/systemd-run" : nil
+                        (trusted.trusted, trusted.trustNote) = hooks.trustCodex(shown: shownCodex, root: root, expected: installed.codexPositions, scope: scope)
+                        return .init(re: request.id, typed: trusted)
+                    })
                 }
             }
             switch hooks.remove(agents: agents) {
-            case .failure(let refusal): return .init(re: request.id, error: .init(.refused, refusal.text))
-            case .success: return .init(re: request.id, typed: WireKinds.HooksRemove.Result(configs: configs))
+            case .failure(let refusal): return (.init(re: request.id, error: .init(.refused, refusal.text)), nil)
+            case .success: return (.init(re: request.id, typed: WireKinds.HooksRemove.Result(configs: configs)), nil)
             }
         }
         let note = self.note
-        let said = { (answer: NodeWire.Reply) in
-            note("\(request.kind) \(names.joined(separator: ",")): \(answer.ok ? "done" : answer.error?.message ?? "refused")")
-            reply(answer)
+        let queue = self.queue
+        let said = { (done: (reply: NodeWire.Reply, trusting: (() -> NodeWire.Reply)?)) in
+            let (answer, trusting) = done
+            guard let trusting else {
+                note("\(request.kind) \(names.joined(separator: ",")): \(answer.ok ? "done" : answer.error?.message ?? "refused")")
+                return reply(answer)
+            }
+            DispatchQueue.global(qos: .userInitiated).async {
+                let trusted = trusting()
+                queue.async {
+                    note("\(request.kind) \(names.joined(separator: ",")): done")
+                    reply(trusted)
+                }
+            }
         }
         // On `queue`: the notes as last asked.
         let run = { [weak self] in
