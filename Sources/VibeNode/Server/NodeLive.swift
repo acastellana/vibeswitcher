@@ -219,6 +219,7 @@ public final class NodeLive: @unchecked Sendable {
             status.watch(engine.cards.changes)
             follows.append(engine.leads.changes.subscribe(on: queue) { [weak self] _ in self?.lookLeads() })
             follows.append(engine.cards.changes.subscribe(on: queue) { [weak self] _ in self?.lookLeads() })
+            follows.append(engine.deliveryMarks.subscribe(on: queue) { [weak self] _ in self?.lookLeads() })
         }
         lookLeads()
         hub.follow(leads, into: leadsStream) { $0 }
@@ -236,7 +237,7 @@ public final class NodeLive: @unchecked Sendable {
     /// The `boards` stream (the parity table's gap 4): each lead's board, read by `LiveBoards`, and `board`'s answer.
     private func startBoards(_ engine: LeadEngine) {
         let boards = LiveBoards(queue: queue, leads: engine.leads.changes, usageWaits: engine.usageWaits, summaries: engine.teamSummaries,
-                                decisions: engine.boardDecisions, note: note)
+                                decisions: engine.boardDecisions, deliveries: engine.deliveryMarks, note: note)
         let stream = LiveStream(collection: "boards", order: .field("project"))
         // A board holds nothing a person decides on (its tasks' notes, the lead's records; a question is a card): one
         // past a part, which its own budget keeps it under, may have its longest texts cut.

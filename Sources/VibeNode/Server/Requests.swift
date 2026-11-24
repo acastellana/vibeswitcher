@@ -451,6 +451,8 @@ public final class Requests: @unchecked Sendable {
         case "session.ports": sessionPorts(request, reply: reply)
         case "set": set(request, reply: reply)
         case "answer": answer(request, reply: reply)
+        case "answer.replace": answerReplace(request, reply: reply)
+        case "tell.retract": tellRetract(request, reply: reply)
         case "hold": hold(request, reply: reply)
         case "tell": tell(request, reply: reply)
         case "push", "push.decline": push(request, reply: reply)
@@ -708,7 +710,8 @@ public final class Requests: @unchecked Sendable {
     static func unknownCheck(_ kind: String) -> String {
         switch kind {
         case "send", "session.reply": return "the session's screen shows whether the text arrived"
-        case "tell": return "the lead's chat shows whether the message arrived"
+        case "tell", "tell.retract": return "the lead's chat shows whether the message arrived"
+        case "answer.replace": return "`vibeswitcher questions --all` shows the card's answer now"
         case "lead", "session.new", "session.reopen": return "`vibeswitcher status` lists the sessions running now"
         case "answer", "approve": return "`vibeswitcher questions` shows whether the card is still open (a shell request's session shows whether its command ran)"
         case "push": return "the repository's remote shows whether the push went"
@@ -950,6 +953,8 @@ public final class Requests: @unchecked Sendable {
         let questions = open.filter { $0.kind == .question || $0.kind == .approval }
         fields["questions"] = .object(["open": .int(questions.count), "blocking": .int(questions.filter(\.isBlocking).count)])
         fields["cards"] = .array(open.map { .string($0.id) })
+        // The user's tells to it and whether it took each (`UserDeliveries.swift`), never their words.
+        fields["told"] = engine?.deliveryMarks.values[lead.root]?["told"] ?? .array([])
         return .object(fields)
     }
 

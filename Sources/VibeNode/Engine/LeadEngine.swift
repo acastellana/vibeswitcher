@@ -172,6 +172,9 @@ public final class LeadEngine: @unchecked Sendable {
     /// Of `postedUser`, the ids a lead start's handover withdrew (`LeadHandover.takeWaiting`): retired by name at the
     /// next look, whatever the inbox shows then.
     var withdrawnUser: Set<String> = []
+    /// The user's answers and tells followed to their lead, by action (`UserDeliveries.swift`), and each root's marks.
+    var userDeliveries: [String: UserDelivery] = [:]
+    public let deliveryMarks = Changes<NodeWire.Value>()
     /// Of `postedUser`, how many looks each id was out of a readable inbox and out of the delivered record
     /// (`retireTaken`): retired once that's `PostedUser.goneLooks` looks, so one read between a rewriter's truncate and
     /// write retires nothing.

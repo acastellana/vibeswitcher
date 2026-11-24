@@ -370,6 +370,48 @@ extension WireKinds {
 
     // MARK: Leads
 
+    /// `answer.replace` (2026-11-24): the user's answer on `card` taken back before its lead had it, and `text` sent in
+    /// its place (`LeadEngine.replaceAnswer`); refused `delivered` when the lead has the first one.
+    public enum AnswerReplace: WireChangeKind {
+        public static let kind = "answer.replace"
+        public struct Args: WireArgs, Equatable {
+            public var card: String?
+            public var code: String?
+            public var text: String?
+            public var version: Int?
+            public enum CodingKeys: String, CodingKey, CaseIterable { case card, code, text, version }
+            public init(card: String?, code: String?, text: String?, version: Int? = nil) {
+                self.card = card
+                self.code = code
+                self.text = text
+                self.version = version
+            }
+        }
+        public struct Result: Codable, Sendable, Equatable {
+            public var outcome: String?
+            public var card: NodeWire.Value?
+            public init(outcome: String, card: NodeWire.Value?) {
+                self.outcome = outcome
+                self.card = card
+            }
+        }
+    }
+
+    /// `tell.retract` (2026-11-24): the user's tell under `action` taken back before its lead had it
+    /// (`LeadEngine.retractTell`); refused `delivered` when the lead has it.
+    public enum TellRetract: WireChangeKind {
+        public static let kind = "tell.retract"
+        public struct Args: WireArgs, Equatable {
+            public var action: String?
+            public enum CodingKeys: String, CodingKey, CaseIterable { case action }
+            public init(action: String?) { self.action = action }
+        }
+        public struct Result: Codable, Sendable, Equatable {
+            public var retracted: Bool?
+            public init(retracted: Bool) { self.retracted = retracted }
+        }
+    }
+
     public enum Tell: WireChangeKind {
         public static let kind = "tell"
         public struct Args: WireArgs, Equatable {
@@ -471,12 +513,16 @@ extension WireKinds {
             public var text: String?
             public var images: [String]?
             public var now: Bool?
-            public enum CodingKeys: String, CodingKey, CaseIterable { case session, text, images, now }
-            public init(session: String?, text: String?, images: [String]? = nil, now: Bool? = nil) {
+            /// Esc first, the idle prompt waited for, then the words typed as the user's turn (a lead's or the user's own
+            /// session only): one unit, or nothing typed and said why.
+            public var interrupt: Bool?
+            public enum CodingKeys: String, CodingKey, CaseIterable { case session, text, images, now, interrupt }
+            public init(session: String?, text: String?, images: [String]? = nil, now: Bool? = nil, interrupt: Bool? = nil) {
                 self.session = session
                 self.text = text
                 self.images = images
                 self.now = now
+                self.interrupt = interrupt
             }
         }
         /// What became of it: typed in now, opened, waiting (`waits`), steered in while working, or an answer to the
@@ -492,6 +538,8 @@ extension WireKinds {
             public var steered: Bool?
             public var answered: String?
             public var agent: String?
+            /// With `interrupt`: its turn was stopped (Esc) before the words went in.
+            public var interrupted: Bool?
             public init(session: String, terminal: String, working: Bool, characters: Int, queued: Bool) {
                 self.session = session
                 self.terminal = terminal

@@ -86,14 +86,21 @@ public enum BoardRecords {
     /// The fields the board's value gains.
     /// `summaries`: the engine's decisions with their AI lines (`LeadEngine.boardDecisions`): a line is taken for a
     /// decision read here (by its id), never a decision of the engine's own read.
-    static func fields(board: LeadBoard?, read: Read, now: Date, summaries: [BoardDecision] = []) -> [String: NodeWire.Value] {
+    /// `delivered`: when the lead took each answer the engine followed, by question id (`LeadEngine.deliveryMarks`):
+    /// an answered question carries it, null while not taken or not known (a server restart since).
+    static func fields(board: LeadBoard?, read: Read, now: Date, summaries: [BoardDecision] = [],
+                       delivered: [String: NodeWire.Value] = [:]) -> [String: NodeWire.Value] {
         var fields: [String: NodeWire.Value] = [:]
         let lines = Dictionary(summaries.compactMap { decision in decision.summary.map { (decision.id, $0) } }, uniquingKeysWith: { first, _ in first })
         fields["decisions"] = BoardValue.decisions(read.decisions.suffix(decisionsKept).reversed().map { decision in
             BoardDecision(id: decision.id, at: decision.at, text: decision.text, why: decision.why, summary: lines[decision.id])
         }, limit: decisionsKept)
         fields["scorecard"] = board.map { scorecard($0, now: now) } ?? .null
-        fields["answered"] = .array(Array(closed(board?.questions ?? []).prefix(answeredKept)).map(question))
+        fields["answered"] = .array(Array(closed(board?.questions ?? []).prefix(answeredKept)).map { closed in
+            guard case .object(var item) = question(closed) else { return question(closed) }
+            item["delivered"] = delivered[closed.id] ?? .null
+            return .object(item)
+        })
         fields["files"] = .array(files.map { name in
             .object(["name": .string(name), "path": .string(path(of: name, recordsDir: read.recordsDir).joined(separator: "/")),
                      "present": .bool(read.present[name] ?? false)])

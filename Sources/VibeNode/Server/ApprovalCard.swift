@@ -101,6 +101,9 @@ extension Requests {
             }
             let typed = text("text").map { " with the words \(whole($0))" } ?? ""
             return .success(("answer \(sessionLabel(session))'s question with option \(choice)\(typed)", nil))
+        case "tell.retract":
+            guard let action = text("action") else { return .failure(.init(why: "tell.retract needs the tell's action: nothing was asked")) }
+            return .success(("take back your message (action \(ConfigSeal.inert(action, limit: 40))) before the lead has it", nil))
         case "tell":
             guard let folder = text("folder"), let words = text("text") else { return .failure(.init(why: "tell needs a folder and words: nothing was asked")) }
             return .success(("tell the lead of \(Self.place(folder)): \(whole(words))", nil))
@@ -205,6 +208,11 @@ extension Requests {
             return .success(("answer \(Self.whole(words)) in \(project)", asks))
         case "hold":
             return .success(("hold the timer of a question in \(project)", asks))
+        case "answer.replace":
+            guard let words = answer, !words.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                return .failure(.init(why: "a replaced answer needs words: nothing was asked"))
+            }
+            return .success(("change your answer to \(Self.whole(words)) in \(project), before the lead has the first", asks))
         case "config.accept":
             let config = card.config
             let items = config?.items.count ?? 0

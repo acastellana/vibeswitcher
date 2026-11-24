@@ -41,6 +41,8 @@ extension LeadEngine {
     public enum CardFailure: Error, Equatable {
         /// The card or what it is about is no longer there.
         case gone(String)
+        /// The lead has it already: nothing was taken back (`answer.replace`, `tell.retract`).
+        case delivered(String)
         case refused(String)
         case badArgs(String)
     }
@@ -366,7 +368,9 @@ extension LeadEngine {
                     card.notice = notice
                 }
                 self.cardsChanged()
-                if let message = outcome.message(given: text) { self.tellAsUser(message, root: root, action: action) }
+                if let message = outcome.message(given: text) {
+                    self.tellAsUser(message, root: root, action: action, about: .answer(question: question.id, card: id))
+                }
                 then(.success(WireKinds.Answer.Result(outcome: Self.word(outcome), notice: notice, card: self.cards.cards[id]?.value)))
                 // The app refreshes after each answer (`LeadController.refresh`): the board as answered, its timers.
                 self.refresh()
@@ -481,8 +485,10 @@ extension LeadEngine {
     /// `text` to `root`'s lead as the user's: its digest recorded in the vault under `action` (kind `message`), so after
     /// a restart a held copy is vouched for (EN-D9), then delivered (or held). Its place among what's sent to that lead
     /// is taken now: what's sent while it's recorded waits behind it (`recordingUser`). On `queue`.
-    func tellAsUser(_ text: String, root: String, action: String?) {
+    /// `about`: an answer or a tell, followed to the lead for its read mark (`UserDeliveries.swift`).
+    func tellAsUser(_ text: String, root: String, action: String?, about: UserDelivery.Kind? = nil) {
         guard let action else { return deliver(built: { text }, from: .user, root: root, action: nil) }
+        if let about { follow(action, root: root, kind: about) }
         let (client, project, note, order) = (link.vaultV2, NodeIds.project(root: root), self.note, leads.next())
         recordingUser[root, default: 0] += 1
         work.async { [weak self] in
@@ -521,8 +527,8 @@ extension LeadEngine {
         guard !postedUser.isEmpty, !retiring else { return }
         retiring = true
         let (posted, withdrawn, inbox, client, note) = (postedUser, withdrawnUser, root, link.vaultV2, self.note)
-        reads.async({ _ -> (taken: [String], waiting: [String], gone: [String], seen: [String]) in
-            var taken: [String] = [], waiting: [String] = [], gone: [String] = [], seen: [String] = []
+        reads.async({ _ -> (taken: [String], waiting: [String], gone: [String], seen: [String], delivered: [String]) in
+            var taken: [String] = [], waiting: [String] = [], gone: [String] = [], seen: [String] = [], took: [String] = []
             for (tty, entries) in Dictionary(grouping: posted, by: \.value.tty) {
                 let delivered = SteerInbox.delivered(tty: tty, root: inbox)
                 let lines = SteerInbox.pending(tty: tty, root: inbox)
@@ -537,15 +543,18 @@ extension LeadEngine {
                         if was.isPosted(line) { waiting.append(id) }
                     } else if delivered.contains(id) {
                         taken.append(id)
+                        took.append(id)
                     } else if !lines.isEmpty {
                         gone.append(id)
                     }
                 }
             }
-            return (taken, waiting, gone, seen)
+            return (taken, waiting, gone, seen, took)
         }) { [weak self] found in
             guard let self else { return }
             found.seen.forEach { self.goneUser[$0] = nil }
+            // The read marks: what the lead's hook took (`UserDeliveries.swift`).
+            if !found.delivered.isEmpty { self.taken(found.delivered) }
             var taken = found.taken
             for id in found.gone {
                 let looks = (self.goneUser[id] ?? 0) + 1

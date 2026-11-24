@@ -59,7 +59,9 @@ extension Requests {
         let text = (request.args?["text"]?.string ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         let images = request.args?["images"]?.array?.map { $0.string ?? "" } ?? []
         let now = request.args?["now"]?.bool == true
+        let interrupt = request.args?["interrupt"]?.bool == true
         guard !text.isEmpty || !images.isEmpty else { return reply(.init(re: request.id, error: .init(.badArgs, "send needs text or images"))) }
+        guard !(now && interrupt) else { return reply(.init(re: request.id, error: .init(.badArgs, "send takes now or interrupt, not both"))) }
         guard images.count <= Self.imagesLimit else {
             return reply(.init(re: request.id, error: .init(.badArgs, "at most \(Self.imagesLimit) images a message")))
         }
@@ -88,6 +90,19 @@ extension Requests {
             return reply(.init(re: request.id, error: .init(.refused, "session \(short) is a lead another one replaced: what you type there reaches "
                                                             + "no live lead (`vibeswitcher tell FOLDER TEXT` tells the running one)")))
         }
+        // `interrupt` (2026-11-24): Esc, then the words as the user's turn, into a Claude agent the user may stop: their own
+        // session or a lead, never a worker or a verifier (it would stop mid-task or mid-audit).
+        if interrupt {
+            guard HostedAgents.agent(of: session) == .claude else {
+                return reply(.init(re: request.id, error: .init(.refused, "session \(short) isn't a Claude agent's: interrupt is Claude's Esc (send it without interrupt)")))
+            }
+            switch LeadTeams.role(label: session.label) {
+            case .worker?, .verifier?:
+                return reply(.init(re: request.id, error: .init(.refused, "session \(short) is a team's worker or verifier: it isn't stopped mid-task or mid-audit "
+                                                                + "(tell its lead instead, or send without interrupt: it goes after its turn)")))
+            default: break
+            }
+        }
         guard !now || engine != nil else {
             return reply(.init(re: request.id, error: .init(.refused, "this server has no engine to steer through: send it without --now")))
         }
@@ -104,6 +119,7 @@ extension Requests {
             result.waits = queued
             result.opened = opened
             if now { result.steered = steered }
+            if interrupt { result.interrupted = true }
             result.answered = answered
             result.agent = HostedAgents.agent(of: session)?.rawValue
             reply(.init(re: request.id, typed: result))
@@ -117,6 +133,27 @@ extension Requests {
                 if let missing { return reply(.init(re: request.id, error: .init(.refused, missing))) }
                 guard let pid else {
                     return reply(.init(re: request.id, error: .init(.refused, "no agent runs in session \(short)'s terminal now (it quit, or ended): nothing typed")))
+                }
+                if interrupt {
+                    // One unit: Esc, its idle prompt waited for, the words; or nothing after the Esc, said.
+                    guard (self.heldSends.values[id] ?? []).isEmpty else {
+                        return reply(.init(re: request.id, error: .init(.refused, "session \(short) has messages waiting behind a question on its screen: "
+                                                                        + "answer it first (`vibeswitcher reply`); nothing typed")))
+                    }
+                    // At work by its screen: Esc first. Between turns already: no Esc (a second one opens its rewind menu).
+                    return self.link.screen(session.id) { screen in
+                        queue.async {
+                            let busy = screen.map(Self.working) ?? false
+                            self.typeIn(held, into: session, interrupt: busy) { outcome in
+                                switch outcome {
+                                case .typed: answer(nil, nil, false, nil)
+                                case .menuOpen(let open):
+                                    reply(.init(re: request.id, error: .init(.refused, "session \(short): \(open), so it wasn't interrupted: answer it first; nothing typed")))
+                                case .refused(let why): reply(.init(re: request.id, error: .init(.refused, "session \(short): \(why)")))
+                                }
+                            }
+                        }
+                    }
                 }
                 let typeIt = { [weak self] in
                     guard let self else { return }
@@ -211,14 +248,41 @@ extension Requests {
 
     /// `held` typed into `session` as one unit whose gate reads the screen right before the first write (a menu open:
     /// nothing typed, `menuOpen`), and whose Enter waits for its images to show taken. `done` on the queue.
-    func typeIn(_ held: HeldSend, into session: HostSession, done: @escaping (TypeOutcome) -> Void) {
+    /// `interrupt`: Esc first (only while its screen says it works: `esc to interrupt`), then the words once its idle
+    /// prompt shows (no `esc to interrupt`, no question open), at most `interruptWait`; else nothing after the Esc goes in.
+    func typeIn(_ held: HeldSend, into session: HostSession, interrupt: Bool = false, done: @escaping (TypeOutcome) -> Void) {
         let (link, note, queue) = (self.link, self.note, self.queue)
         let short = String(session.id.uuidString.lowercased().prefix(8))
         let stopped = Locked<TypeOutcome?>(nil)
-        let writes = ComposerText.writes(held.message, bracketed: true)
+        let lead = interrupt ? 1 : 0
+        let writes = (interrupt ? [LeadWitness.DeclinePlan.escape] : []) + ComposerText.writes(held.message, bracketed: true)
         let images = held.images
         link.type(writes, into: session.id, gate: { index, go in
-            if index > 0 {
+            if interrupt, index == 0 {
+                // The Esc: only into a turn at work, never onto a question (it would dismiss it).
+                return link.screen(session.id) { screen in
+                    guard let screen else {
+                        stopped.set(.refused("its screen couldn't be read: nothing typed"))
+                        return go(false)
+                    }
+                    if let open = Self.openMenu(screen) {
+                        stopped.set(.menuOpen(open))
+                        return go(false)
+                    }
+                    go(true)
+                }
+            }
+            if interrupt, index == 1 {
+                // Its idle prompt, after the Esc: the words go in only then.
+                return Self.waitForIdle(session.id, link: link, queue: queue, until: Platform.Clock.steadyDate().addingTimeInterval(Self.interruptWait)) { idle in
+                    if !idle {
+                        stopped.set(.refused("Esc went in, but its prompt didn't come back in \(Int(Self.interruptWait)) s (a question, or a turn that didn't stop): "
+                                             + "nothing more was typed; look at its terminal"))
+                    }
+                    go(idle)
+                }
+            }
+            if index > lead {
                 guard !images.isEmpty else { return go(true) }
                 return Self.waitForImages(images, in: session.id, link: link, queue: queue, until: Platform.Clock.steadyDate().addingTimeInterval(Self.imageWait), go)
             }
@@ -245,6 +309,23 @@ extension Requests {
             }
             done(outcome)
         })
+    }
+
+    /// How long an interrupt waits for the idle prompt after its Esc.
+    static let interruptWait: TimeInterval = 10
+
+    /// Whether `screen` shows Claude at work (its spinner line's "esc to interrupt").
+    static func working(_ screen: String) -> Bool { screen.contains("esc to interrupt") }
+
+    /// Answers whether the session's idle prompt shows (not working, no question open) before `deadline`.
+    static func waitForIdle(_ id: UUID, link: HostLink, queue: DispatchQueue, until deadline: Date, _ idle: @escaping (Bool) -> Void) {
+        link.screen(id) { screen in
+            queue.async {
+                if let screen, !working(screen), openMenu(screen) == nil { return idle(true) }
+                guard Platform.Clock.steadyDate() < deadline else { return idle(false) }
+                queue.asyncAfter(deadline: .now() + 0.2) { waitForIdle(id, link: link, queue: queue, until: deadline, idle) }
+            }
+        }
     }
 
     /// How long the screen is watched for a picker after a `/` command went in.

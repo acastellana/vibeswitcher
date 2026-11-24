@@ -214,15 +214,16 @@ public enum SteerInbox {
                      + "or tell the user.", from: .system("disk full"), agentPid: agentPid)
     }
 
-    /// Takes one waiting message back (it's being sent another way, or returned to the composer).
+    /// Takes one waiting message back (it's being sent another way, or returned to the composer). `unless`: left where it
+    /// is when it says so of the line, judged under the lock (a v2 node's `answer.replace`: not a message partly handed).
     @discardableResult
-    public static func withdraw(id: String, tty: String, root: URL = VibePaths.root) -> SteerMessage? {
+    public static func withdraw(id: String, tty: String, root: URL = VibePaths.root, unless: (SteerMessage) -> Bool = { _ in false }) -> SteerMessage? {
         guard let url = try? file(tty, "jsonl", root: root), FileManager.default.fileExists(atPath: url.path) else { return nil }
         var withdrawn: SteerMessage?
         try? locked(url) { handle in
             try handle.seek(toOffset: 0)
             let messages = decode(try handle.readToEnd() ?? Data())
-            guard let index = messages.firstIndex(where: { $0.id == id }) else { return }
+            guard let index = messages.firstIndex(where: { $0.id == id }), !unless(messages[index]) else { return }
             withdrawn = messages[index]
             var rest = Data()
             for message in messages where message.id != id {

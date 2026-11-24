@@ -22,10 +22,26 @@ extension Requests {
                 engine.tellLead(text, root: root, action: action) { result in
                     switch result {
                     case .success(let told): reply(.init(re: request.id, typed: told))
-                    case .failure(.refused(let why)), .failure(.gone(let why)), .failure(.badArgs(let why)):
+                    case .failure(.refused(let why)), .failure(.gone(let why)), .failure(.badArgs(let why)), .failure(.delivered(let why)):
                         reply(.init(re: request.id, error: .init(.refused, why)))
                     }
                 }
+            }
+        }
+    }
+
+    /// `tell.retract` (`WireKinds.TellRetract`): the user's tell under `action` taken back before its lead had it
+    /// (`LeadEngine.retractTell`); `delivered` when the lead has it.
+    func tellRetract(_ request: NodeWire.Request, reply: @escaping (NodeWire.Reply) -> Void) {
+        guard let action = request.args?["action"]?.string, UUID(uuidString: action) != nil else {
+            return reply(.init(re: request.id, error: .init(.badArgs, "tell.retract needs action, the tell's action id")))
+        }
+        guard let engine else { return reply(.init(re: request.id, error: .init(.refused, "this server runs no leads"))) }
+        engine.retractTell(action: action) { [weak self] result in
+            guard let self else { return }
+            switch result {
+            case .success(let retracted): reply(.init(re: request.id, typed: retracted))
+            case .failure(let failure): reply(self.failed(request, failure))
             }
         }
     }

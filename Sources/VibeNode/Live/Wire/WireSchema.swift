@@ -346,7 +346,10 @@ public enum WireSchema {
                 field("bound", Kind.string.orNull), field("replaced", strings), field("held", .int), field("reportsWaiting", .int),
                 field("notice", Kind.string.orNull), field("starting", .bool), field("lastStart", Kind.string.orNull),
                 field("lastStartAt", Kind.date.orNull), field("push", Kind.shape("lead.push").orNull), pending(field("looks", .int), byStatus),
-                pending(field("questions", .shape("lead.questions")), byStatus), pending(field("cards", strings), byStatus)]),
+                pending(field("questions", .shape("lead.questions")), byStatus), pending(field("cards", strings), byStatus),
+                optional("told", .list(.shape("lead.told")))]),
+            // The user's tells to the lead, newest last, without their words, and whether the lead took each (2026-11-24).
+            shape("lead.told", from: "LeadEngine.marks", [field("action", .string), field("at", .date), field("delivered", Kind.date.orNull)]),
             shape("lead.questions", from: "Requests.leadValue", [field("open", .int), field("blocking", .int)]),
             // The push its lead asked for, while it's open (push_remote, `PushAsks.swift`).
             shape("lead.push", from: "LeadStore.Lead.pushValue", [
@@ -484,7 +487,9 @@ public enum WireSchema {
             shape("board.question", from: "BoardRecords.question", [
                 field("id", .string), field("state", .words(["answered", "withdrawn", "autoDecided"])), field("text", .string),
                 field("answer", Kind.string.orNull), field("proposal", Kind.string.orNull), field("why", Kind.string.orNull),
-                field("reworded", .bool), field("task", Kind.string.orNull), field("at", .date)]),
+                field("reworded", .bool), field("task", Kind.string.orNull), field("at", .date),
+                // When the lead took the user's answer (2026-11-24): null while not taken, or not known.
+                optional("delivered", Kind.date.orNull)]),
             shape("board.file", from: "BoardRecords.fields", [field("name", .string), field("path", .string), field("present", .bool)]),
             shape("board.task", from: "BoardValue.task", [
                 field("id", .string), field("slug", .string), field("title", .string), field("status", taskStatus),

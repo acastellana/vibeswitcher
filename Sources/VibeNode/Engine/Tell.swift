@@ -25,7 +25,7 @@ extension LeadEngine {
                 return then(.failure(.refused("no lead runs in \(ConfigSeal.inert(root, limit: 400)): nothing was sent "
                                               + "(`vibeswitcher lead FOLDER` starts one)")))
             }
-            tellAsUser(Self.toldText(text), root: root, action: action)
+            tellAsUser(Self.toldText(text), root: root, action: action, about: .tell)
             note("lead: the user's message for \(LeadMail.project(of: root)) is on its way (action \(action ?? "none"))")
             then(.success(WireKinds.Tell.Result(project: project, session: NodeIds.session(host: session))))
         }

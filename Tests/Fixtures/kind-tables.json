@@ -6,6 +6,12 @@
       "text",
       "version"
     ],
+    "answer.replace" : [
+      "card",
+      "code",
+      "text",
+      "version"
+    ],
     "approve" : [
       "batch",
       "code"
@@ -91,6 +97,7 @@
     ],
     "send" : [
       "images",
+      "interrupt",
       "now",
       "session",
       "text"
@@ -149,6 +156,9 @@
       "folder",
       "text"
     ],
+    "tell.retract" : [
+      "action"
+    ],
     "web.confirm" : [
       "code",
       "phrase"
@@ -162,6 +172,7 @@
   },
   "approvalPhrases" : {
     "answer" : "answer a lead's question for you",
+    "answer.replace" : "change your answer before the lead has it",
     "approve" : "accept the batch you listed",
     "approve.list" : "do approve.list for you",
     "base.accept" : "accept a moved base branch",
@@ -227,6 +238,7 @@
     "stop" : "stop your VibeSwitcher node",
     "subscribe" : "do subscribe for you",
     "tell" : "tell a lead something for you",
+    "tell.retract" : "take back a message before the lead has it",
     "term.close" : "do term.close for you",
     "term.open" : "do term.open for you",
     "unsubscribe" : "do unsubscribe for you",
@@ -238,6 +250,12 @@
   },
   "arguments" : {
     "answer" : [
+      "card",
+      "code",
+      "text",
+      "version"
+    ],
+    "answer.replace" : [
       "card",
       "code",
       "text",
@@ -329,6 +347,7 @@
     ],
     "send" : [
       "images",
+      "interrupt",
       "now",
       "session",
       "text"
@@ -385,6 +404,9 @@
       "folder",
       "text"
     ],
+    "tell.retract" : [
+      "action"
+    ],
     "web.confirm" : [
       "code",
       "phrase"
@@ -398,6 +420,7 @@
   },
   "carded" : [
     "answer",
+    "answer.replace",
     "base.accept",
     "base.keep",
     "config.accept",
@@ -415,6 +438,7 @@
   ],
   "changesState" : {
     "answer" : true,
+    "answer.replace" : true,
     "approve" : true,
     "approve.list" : false,
     "base.accept" : true,
@@ -480,6 +504,7 @@
     "stop" : true,
     "subscribe" : false,
     "tell" : true,
+    "tell.retract" : true,
     "term.close" : true,
     "term.open" : true,
     "unsubscribe" : false,
@@ -498,6 +523,7 @@
   ],
   "recorded" : [
     "answer",
+    "answer.replace",
     "approve",
     "base.accept",
     "base.keep",
@@ -529,12 +555,17 @@
     "start",
     "stop",
     "tell",
+    "tell.retract",
     "web.confirm",
     "web.open",
     "web.revoke"
   ],
   "retryRules" : {
     "answer" : {
+      "keepsResult" : true,
+      "rerun" : false
+    },
+    "answer.replace" : {
       "keepsResult" : true,
       "rerun" : false
     },
@@ -662,6 +693,10 @@
       "keepsResult" : true,
       "rerun" : false
     },
+    "tell.retract" : {
+      "keepsResult" : true,
+      "rerun" : false
+    },
     "web.confirm" : {
       "keepsResult" : true,
       "rerun" : false
@@ -684,6 +719,7 @@
     "draft",
     "draft.clear",
     "answer",
+    "answer.replace",
     "hold",
     "config.held",
     "config.accept",
@@ -705,6 +741,7 @@
     "web.confirm",
     "chat.page",
     "tell",
+    "tell.retract",
     "board",
     "seen",
     "send",
@@ -754,6 +791,7 @@
   ],
   "voices" : {
     "answer" : "user",
+    "answer.replace" : "user",
     "approve" : "user",
     "approve.list" : "user",
     "base.accept" : "user",
@@ -818,6 +856,7 @@
     "stop" : "user",
     "subscribe" : "anyone",
     "tell" : "user",
+    "tell.retract" : "user",
     "term.close" : "webTerminal",
     "term.open" : "webTerminal",
     "unsubscribe" : "anyone",

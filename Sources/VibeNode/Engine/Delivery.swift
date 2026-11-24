@@ -50,6 +50,7 @@ extension LeadEngine {
                  order given: Int? = nil, then: @escaping (Bool) -> Void = { _ in }) {
         let project = NodeIds.project(root: root)
         let (order, id) = (given ?? leads.next(), UUID().uuidString)
+        if sender == .user, let action { went(action, as: id) }
         if leads.held[project]?.isEmpty == false || sendingHeld.contains(root) || posting.contains(root) || recordingUser[root] != nil {
             reads.async({ _ in built() }) { [weak self] text in
                 guard let self else { return }
