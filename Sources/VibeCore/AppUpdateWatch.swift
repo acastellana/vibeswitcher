@@ -65,6 +65,9 @@ public final class AppUpdateWatch {
     public var batteryLimit: () -> Int
     /// The headless summary (`AppUpdate.headless`); nil while AI summaries are off.
     public var summarize: ((String) -> String?)?
+    /// Who pushed GitHub's changes, given the remote's tip and their ids (`GitHubPushers.Lookup`, cached per tip, a
+    /// few seconds at most, from the remote's URL only when it's the lead's pinned one, as `fetch`); empty: no names.
+    public var pushers: (_ checkout: Checkout, _ tip: String, _ commits: [String]) -> [String: String]
     /// Tells the project's lead (a report on its board).
     public var tellLead: (_ root: String, _ text: String) -> Void
     public var log: (String) -> Void
@@ -83,6 +86,7 @@ public final class AppUpdateWatch {
     public init(launched: Date, file: URL, checkout: @escaping () -> Checkout?, installed: @escaping () -> ServerBuild?,
                 fetch: @escaping (Checkout) -> Result<String, AppUpdate.Failure>, power: @escaping () -> PowerState? = { nil },
                 batteryLimit: @escaping () -> Int = { 0 }, summarize: ((String) -> String?)? = nil,
+                pushers: @escaping (_ checkout: Checkout, _ tip: String, _ commits: [String]) -> [String: String] = { _, _, _ in [:] },
                 tellLead: @escaping (_ root: String, _ text: String) -> Void = { _, _ in },
                 log: @escaping (String) -> Void = { Breadcrumbs.shared.note("update: " + $0) }) {
         self.file = file
@@ -94,6 +98,7 @@ public final class AppUpdateWatch {
         self.power = power
         self.batteryLimit = batteryLimit
         self.summarize = summarize
+        self.pushers = pushers
         self.tellLead = tellLead
         self.log = log
     }
@@ -166,7 +171,9 @@ public final class AppUpdateWatch {
                 fetchFailing = true
             }
         }
-        switch AppUpdate.find(root: checkout.root, remote: checkout.remote, base: checkout.base, installed: installed()) {
+        let pushers = self.pushers
+        let named = { (tip: String, commits: [String]) in pushers(checkout, tip, commits) }
+        switch AppUpdate.find(root: checkout.root, remote: checkout.remote, base: checkout.base, installed: installed(), pushers: named) {
         case .failure(let error):
             return unavailable(error.description)
         case .success(nil):

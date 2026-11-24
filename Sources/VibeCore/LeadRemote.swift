@@ -219,6 +219,8 @@ public enum LeadRemote {
         public var ahead: Int
         public var behind: Int
         public var subjects: [String]
+        /// The full ids of `subjects`' commits, in their order.
+        public var ids: [String]
         public var outlook: Outlook
     }
 
@@ -227,9 +229,10 @@ public enum LeadRemote {
         let numbers = counts.output.split(whereSeparator: \.isWhitespace).compactMap { Int($0) }
         guard counts.ok, numbers.count == 2 else { return .failure(Failure("git rev-list \(head.prefix(8))...\(tip.prefix(8)) failed: \(Worktrees.said(counts))")) }
         let (ahead, behind) = (numbers[0], numbers[1])
-        let log = Git.run(["log", "--format=%h %s", "--max-count=\(limit)", "\(head)..\(tip)"], in: root)
-        guard log.ok else { return .failure(Failure("git log \(head.prefix(8))..\(tip.prefix(8)) failed: \(Worktrees.said(log))")) }
-        let subjects = log.output.split(whereSeparator: \.isNewline).map(String.init)
+        guard let listed = commits(root: root, from: head, to: tip, limit: limit) else {
+            return .failure(Failure("git log \(head.prefix(8))..\(tip.prefix(8)) failed"))
+        }
+        let (ids, subjects) = (listed.map(\.id), listed.map(\.line))
         let outlook: Outlook
         if behind == 0 {
             outlook = .upToDate
@@ -244,7 +247,18 @@ public enum LeadRemote {
                 outlook = outside.isEmpty ? .recordsByUnion(conflicts) : .conflict(outside)
             }
         }
-        return .success(Incoming(head: head, tip: tip, ahead: ahead, behind: behind, subjects: subjects, outlook: outlook))
+        return .success(Incoming(head: head, tip: tip, ahead: ahead, behind: behind, subjects: subjects, ids: ids, outlook: outlook))
+    }
+
+    /// The commits `tip` has that `head` hasn't, newest first, at most `limit`: each one's full id, and its line as the
+    /// reports list it ("abc1234 subject"). Nil when git failed.
+    static func commits(root: String, from head: String, to tip: String, limit: Int) -> [(id: String, line: String)]? {
+        let log = Git.run(["log", "--format=%H %h %s", "--max-count=\(limit)", "\(head)..\(tip)"], in: root)
+        guard log.ok else { return nil }
+        return log.output.split(whereSeparator: \.isNewline).map { line in
+            let parts = line.split(separator: " ", maxSplits: 1, omittingEmptySubsequences: false)
+            return (String(parts[0]), parts.count > 1 ? String(parts[1]) : "")
+        }
     }
 
     /// One of the lead's records (`LeadRecords.paths`), which merge by union; or the product inventory, which both
@@ -413,10 +427,22 @@ extension LeadToolset {
         var lines = ["Fetched \(label) (\(tip.prefix(8))) from \(url)\(first ? " (its first fetch: this URL is now the one fetch_remote takes; configure(remote) takes another)" : ""): \(standing)."]
         if !incoming.subjects.isEmpty {
             lines.append("Incoming, newest first\(incoming.behind > incoming.subjects.count ? " (the first \(incoming.subjects.count))" : ""):")
-            lines += incoming.subjects.map { "- \($0)" }
+            // Who pushed each to GitHub, when it's a github.com remote and gh answers (a few seconds at most).
+            let pushed = pushers.pushers(root: root, url: url, branch: base, tip: tip, commits: incoming.ids)
+            lines += zip(incoming.subjects, incoming.ids).map { "- \($0)" + GitHubPushers.note(pushed[$1]) }
         }
         lines.append("merge_remote would " + Self.outlook(incoming.outlook, base: base, label: label))
         return MCPToolResult(text: lines.joined(separator: "\n"))
+    }
+
+    /// merge_remote's list of the commits it brought, newest first (the first 30), each with who pushed it to GitHub
+    /// when that's known; empty when git can't list them. The URL is the one fetch_remote pinned, or none is asked.
+    func broughtList(from current: String, to tip: String, count: Int, remote: String, base: String) -> String {
+        guard let listed = LeadRemote.commits(root: root, from: current, to: tip, limit: 30), !listed.isEmpty else { return "" }
+        let url = (try? pinnedURL(remote, not: "Not named", first: false))?.url
+        let pushed = url.map { pushers.pushers(root: root, url: $0, branch: base, tip: tip, commits: listed.map(\.id)) } ?? [:]
+        return "\nBrought, newest first\(count > listed.count ? " (the first \(listed.count))" : ""):\n"
+            + listed.map { "- \($0.line)" + GitHubPushers.note(pushed[$0.id]) }.joined(separator: "\n")
     }
 
     /// The remote's tip as fetch_remote last fetched it (the vault's, never the ref's: any session can move that); nil
@@ -594,7 +620,8 @@ extension LeadToolset {
             try? store.appendProgress("Merged \(label) into \(base): \(Self.commits(brought)) from the remote, as \(how); the tests passed on it" + buildNote)
             let patience = waited.map { " (The tests waited \(Worktrees.duration($0.after)) for the Mac's load to drop.)" } ?? ""
             return MCPToolResult(text: "Merged \(label) into \(base) as \(how): \(Self.commits(brought)) from the remote, the test command passing on the result. "
-                                 + "\(label) (\(tip.prefix(8))) is an ancestor of \(base) now, so pushing \(base) is a fast-forward.\(patience)")
+                                 + "\(label) (\(tip.prefix(8))) is an ancestor of \(base) now, so pushing \(base) is a fast-forward.\(patience)"
+                                 + broughtList(from: current, to: tip, count: brought, remote: remote, base: base))
         case .refused(let reason):
             throw Problem(text: "Not merged: \(reason) The tests passed on \(made.prefix(8)), but \(base) wasn't moved; run merge_remote again.")
         }
