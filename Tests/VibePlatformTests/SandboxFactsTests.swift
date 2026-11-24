@@ -155,6 +155,28 @@ import Testing
         #expect(text.contains("isatty True ttyname error \(ENODEV) tty_nr \(ttyNumber) own pts ['ptmx']"), "\(text)")
     }
 
+    /// The binfmt probe says `.none` only when the kernel answered no (mount(8)'s exit 32, its mount refused); a probe
+    /// that failed before the kernel answered is `.unknown`, never `.none`, since a box plans no binfmt_misc of its own
+    /// only for `.none` and then tries the machine's entries (the-node-s-gate:F2: every failure read as "no need to
+    /// hide"). Commands stand in for unshare(1) and mount(8), each ending one way.
+    @Test(.enabled(if: linux)) func aBinfmtProbeThatFailsIsUnknownNotNone() throws {
+        let scratch = try ProcessesTests.scratch("facts-binfmt-probe")
+        defer { try? FileManager.default.removeItem(at: scratch) }
+        let missing = scratch.appendingPathComponent("not-here").path
+        typealias System = Platform.Sandbox.System
+        #expect(System.binfmt(["/bin/sh", "-c", "exit 0"]) == .own)
+        // mount(8)'s exit 32: the kernel refused the mount.
+        #expect(System.binfmt(["/bin/sh", "-c", "exit 32"]) == .none)
+        // unshare(1) failing to make the namespaces (1), unable to run mount(8) (126, 127), mount(8) itself refusing its
+        // arguments (1): no answer from the kernel.
+        for code in [1, 2, 126, 127] { #expect(System.binfmt(["/bin/sh", "-c", "exit \(code)"]) == .unknown, "exit \(code)") }
+        #expect(System.binfmt(["/bin/sh", "-c", "kill -KILL $$"]) == .unknown, "killed")
+        #expect(System.binfmt([missing]) == .unknown, "no unshare(1)")
+        #expect(System.binfmt(["/bin/sh", "-c", "exit 0"], mount: missing) == .unknown, "no mount(8)")
+        // A child that never ends: killed at its bound (here 50 ms; 10 s in the probe), and no answer.
+        #expect(System.binfmt(["/bin/sleep", "600"], bound: 50_000) == .unknown, "hung")
+    }
+
     @Test(.enabled(if: linux && ShimBox.unavailable == nil && FileManager.default.fileExists(atPath: "/proc/sys/fs/binfmt_misc/WSLInterop"),
                    "WSL's interop"))
     func aWindowsStubDoesntStartWithoutInit() throws {
@@ -180,13 +202,13 @@ import Testing
         let held = entries.filter { entry in
             ShimBox.procText("/proc/sys/fs/binfmt_misc/" + entry).split(separator: "\n").contains { $0.hasPrefix("flags:") && $0.contains("F") }
         }
-        let kept = Platform.Sandbox.probe().binfmt ? "" : " (this kernel gives a box no binfmt_misc of its own, so the machine's entries are tried; with F: \(held))"
+        let kept = Platform.Sandbox.probe().binfmt != .none ? "" : " (this kernel gives a box no binfmt_misc of its own, so the machine's entries are tried; with F: \(held))"
         // The promise, on every kernel: /init never runs in a box on an MZ file, so nothing reaches the Windows side.
         // The shell couldn't run it: 126 (not executable as it is) or 127 (no interpreter, or "MZ" run as a script, a
         // command not found). /init, where it ran, would say so ("WSL (…) ERROR: UtilGetPpid … /proc/1/stat") and end 1.
         #expect(lines.last == "stub status 127" || lines.last == "stub status 126", "\(ended.output) \(errors)\(kept)")
         #expect(!(ended.output + errors).contains("WSL ("), "\(ended.output) \(errors)\(kept)")
-        if Platform.Sandbox.probe().binfmt {
+        if Platform.Sandbox.probe().binfmt != .none {
             // The box's own binfmt_misc, with no entry: the machine's go untried.
             #expect(lines.contains("binfmt_misc: register status"), "\(ended.output)")
         } else {
@@ -198,6 +220,83 @@ import Testing
                   + (held.isEmpty ? "" : "; \(held.joined(separator: ", ")) carries F, so /init would start there were it tried first"))
         }
         print("SB: interop entries \(entries) (with F: \(held)); a box's own binfmt_misc: \(Platform.Sandbox.probe().binfmt)")
+    }
+
+    /// The promise `aWindowsStubDoesntStartWithoutInit` checks against WSL's own entry, kept where that entry can't be
+    /// seen: in a branch run's box (the merge gate, an audit's run, a done check) the box's own empty binfmt_misc hides
+    /// WSLInterop, so that test is skipped there (the-node-s-gate:F6). Here the launcher starts in a user namespace of
+    /// its own (unshare(1), as root of it) whose own binfmt_misc, mounted over a scratch folder, holds a made-up entry
+    /// for the `MZ` magic with F, its interpreter a copy of echo(1) outside the box, as WSL's `/init` is. The kernel
+    /// tries a program's entries in the nearest user namespace with an instance: a box that plans one of its own
+    /// (`ShimBox.plan`'s default, as `SandboxPlanner` plans it) never tries the made-up entry, and a two-byte `MZ` file
+    /// doesn't start there (126/127); a box without one (the control) runs the interpreter the kernel holds open,
+    /// though its path isn't in the box. Only where a user namespace gets a binfmt_misc of its own (6.18 here); the
+    /// machine's binfmt_misc is never written.
+    @Test(.enabled(if: linux && ShimBox.unavailable == nil && Platform.Sandbox.probe().binfmt == .own,
+                   "a user namespace's own binfmt_misc"))
+    func aBoxDoesntTryAnEntryWithFOfTheNamespaceItStartsIn() throws {
+        let (root, box) = try ShimBox.scratch("facts-nested-binfmt")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let instance = root.appendingPathComponent("binfmt")
+        try FileManager.default.createDirectory(at: instance, withIntermediateDirectories: false)
+        // The interpreter: a copy of echo(1) outside the box, so only the kernel's open file can run it inside.
+        let interpreter = root.appendingPathComponent("interpreter")
+        try FileManager.default.copyItem(atPath: "/usr/bin/echo", toPath: interpreter.path)
+        let stub = box.appendingPathComponent("stub.exe")
+        try Data("MZ".utf8).write(to: stub)
+        chmod(stub.path, 0o755)
+        // In the outer namespace: its own binfmt_misc, the entry, the stub run there (echo prints its path), then the
+        // launcher as a child, never exec'd, so the namespace and its instance stay while the box runs.
+        let outer = """
+            set -e
+            \(Platform.Sandbox.System.mount) -t binfmt_misc binfmt_misc "$1"
+            printf ':vibe-test:M::MZ::%s:F' "$2" > "$1/register"
+            echo "outer flags: $(grep '^flags:' "$1/vibe-test")"
+            echo "outer stub: $("$3")"
+            shift 3
+            set +e
+            "$@"
+            status=$?
+            exit $status
+            """
+        let prefix = [Platform.Sandbox.System.unshare, "--user", "--map-root-user", "--mount", "/bin/sh", "-c", outer, "sh",
+                      instance.path, interpreter.path, stub.path]
+        let script = """
+            [ -e '\(interpreter.path)' ] && echo "interpreter present" || echo "interpreter absent"
+            ./stub.exe; echo "stub status $?"
+            """
+        // The control: a box with no binfmt_misc of its own tries the outer namespace's entry, and the interpreter runs.
+        let control = try ShimBox.shell(script, ShimBox.plan(box.path, binfmt: false), in: box, prefix: prefix)
+        let seen = ShimBox.lines(control.ended.output)
+        try #require(seen.prefix(2) == ["outer flags: flags: F", "outer stub: \(stub.path)"], "\(control.ended.output) \(control.errors)")
+        try #require(seen.dropFirst(2) == ["interpreter absent", "./stub.exe", "stub status 0"], "\(control.ended.output) \(control.errors)")
+        // The promise: a box with its own binfmt_misc doesn't try it, and the stub doesn't start.
+        let (ended, errors) = try ShimBox.shell(script, ShimBox.plan(box.path), in: box, prefix: prefix)
+        let lines = ShimBox.lines(ended.output)
+        #expect(ended.exit == 0, "\(ended.output) \(errors)")
+        #expect(lines.prefix(3) == ["outer flags: flags: F", "outer stub: \(stub.path)", "interpreter absent"], "\(ended.output) \(errors)")
+        #expect(lines.last == "stub status 127" || lines.last == "stub status 126", "\(ended.output) \(errors)")
+        #expect(!lines.contains("./stub.exe"), "\(ended.output) \(errors)")
+        print("SB: a made-up F entry of the namespace a box starts in: the control box ran it, a box with its own binfmt_misc said \(lines.last ?? "nothing")")
+    }
+
+    /// Where the gate runs `aBoxDoesntTryAnEntryWithFOfTheNamespaceItStartsIn`: a branch run's box nests (the project's
+    /// `sandbox_nesting`), and there the probe's own command (`System.binfmtProbe`) still gets a binfmt_misc of a user
+    /// namespace's own, so the probe answers `.own` and that test runs there, where `aWindowsStubDoesntStartWithoutInit`
+    /// is skipped (the-node-s-gate:F6). A box without nesting can make no user namespace (the filter refuses it): its
+    /// probe fails, which is `.unknown` (a box plans its own binfmt_misc for it), never `.own` or `.none`.
+    @Test(.enabled(if: linux && ShimBox.unavailable == nil && Platform.Sandbox.probe().binfmt == .own,
+                   "a user namespace's own binfmt_misc"))
+    func theBinfmtProbeAnswersOwnInANestingBox() throws {
+        let (root, box) = try ShimBox.scratch("facts-binfmt-in-box")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let command = Platform.Sandbox.System.binfmtProbe.map { "'\($0)'" }.joined(separator: " ")
+        let script = "\(command); echo \"probe status $?\""
+        let (nested, nestedErrors) = try ShimBox.shell(script, ShimBox.plan(box.path, nesting: true), in: box)
+        #expect(ShimBox.lines(nested.output).last == "probe status 0", "\(nested.output) \(nestedErrors)")
+        let (plain, plainErrors) = try ShimBox.shell(script, ShimBox.plan(box.path), in: box)
+        let last = ShimBox.lines(plain.output).last
+        #expect(last != nil && last != "probe status 0" && last != "probe status 32", "\(plain.output) \(plainErrors)")
     }
 }
 #endif

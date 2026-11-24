@@ -38,9 +38,9 @@ public struct SandboxInputs: Equatable, Sendable {
     public var agentLogin: Bool
     /// The user's git name and email for the box's generated `~/.gitconfig`; nil: no file.
     public var gitIdentity: GitIdentity?
-    /// Whether the kernel gives the box a binfmt_misc of its own (`Platform.Sandbox.Facts.binfmt`): see
-    /// `SandboxPlanner.hidesInterpreters`.
-    public var binfmt: Bool
+    /// What the kernel answered when asked for a binfmt_misc of a user namespace's own (`Platform.Sandbox.Facts.binfmt`):
+    /// see `SandboxPlanner.hidesInterpreters`.
+    public var binfmt: Platform.Sandbox.Binfmt
 
     public struct GitIdentity: Equatable, Sendable {
         public var name: String
@@ -56,7 +56,7 @@ public struct SandboxInputs: Equatable, Sendable {
                 temporary: String, build: String, pathFolders: [String], agentProgram: String?, box: String,
                 policy: SandboxPolicy = .standard, network: Platform.Sandbox.Network, slots: String?, environment: [String] = [],
                 agentConfig: Data? = nil, agentLogin: Bool = true, gitIdentity: GitIdentity? = nil,
-                binfmt: Bool = Platform.Sandbox.probe().binfmt) {
+                binfmt: Platform.Sandbox.Binfmt = Platform.Sandbox.probe().binfmt) {
         self.role = role
         self.home = home
         self.accountHome = accountHome
@@ -119,17 +119,70 @@ public enum SandboxPlanner {
     /// WSL's interop entry among them, which starts a Windows program through `/init`. With the entry's F flag the
     /// kernel opened `/init` when the entry was registered, so the box's missing `/init` doesn't stop it (kernel 6.18,
     /// measured 2026-11-20: `/init` ran inside a box on a two-byte `MZ` file). Only where the kernel gives a user
-    /// namespace one (`SandboxInputs.binfmt`, from the probe); elsewhere the box tries the machine's entries, and only
-    /// the missing `/run/WSL` and the filter's refusal of `AF_VSOCK` stand between a program and the Windows side. The
-    /// one place a box would keep the machine's entries, for a session the user gave Windows.
-    public static func hidesInterpreters(_ inputs: SandboxInputs) -> Bool { inputs.binfmt }
+    /// namespace one (`SandboxInputs.binfmt`, from the probe), and where the probe failed before the kernel answered
+    /// (`.unknown`: a failed probe is no answer, so the box plans its own and the shim fails it closed if the kernel
+    /// refuses the mount); elsewhere (`.none`) the box tries the machine's entries, so it doesn't start while an enabled
+    /// interop entry carries F (`interopRefusal`), and without one only the missing `/init` and `/run/WSL` and the
+    /// filter's refusal of `AF_VSOCK` stand between a program and the Windows side. The one place a box would keep the
+    /// machine's entries, for a session the user gave Windows.
+    public static func hidesInterpreters(_ inputs: SandboxInputs) -> Bool { inputs.binfmt != .none }
+
+    /// The machine's binfmt_misc entries (`interpreters`) by name, `register` left out, each one's text ("" when it
+    /// can't be read); nil when the folder can't be listed (binfmt_misc isn't mounted: nothing is registered). Read
+    /// when a box is planned, never kept: an entry can be registered or enabled at any time (`WSLInterop-late`).
+    public static func machineInterpreters() -> [String: String]? {
+        guard let names = try? FileManager.default.contentsOfDirectory(atPath: interpreters) else { return nil }
+        var entries: [String: String] = [:]
+        for name in names where name != "register" {
+            entries[name] = FileManager.default.contents(atPath: interpreters + "/" + name).map { String(decoding: $0, as: UTF8.self) } ?? ""
+        }
+        return entries
+    }
+
+    /// Why a box that tries the machine's binfmt_misc `entries` (`machineInterpreters`; a kernel that gives a user
+    /// namespace none of its own, `hidesInterpreters` false) must not start; nil when it may. The user's choice
+    /// (2026-11-21): no box while an enabled WSL interop entry carries the F flag. With F the kernel opened the entry's
+    /// interpreter, WSL's `/init`, when the entry was registered, so the box's missing `/init` doesn't stop a Windows
+    /// program from running it inside (kernel 6.18, measured 2026-11-20). An interop entry is one WSL registers
+    /// (`WSLInterop`, `WSLInterop-late`: the name's prefix) or any whose interpreter is `/init`, as `NodeFacts.interop`
+    /// counts them; an entry of another interpreter (a qemu-user one, F or not) runs inside the box, confined like the
+    /// rest. One whose state or flags can't be read counts as F and enabled. None while binfmt_misc's `status` is
+    /// `disabled`, or where it isn't mounted (nil: nothing registered).
+    public static func interopRefusal(_ entries: [String: String]?) -> SandboxRefusal? {
+        guard let entries else { return nil }
+        func lines(_ text: String) -> [String] { text.split(whereSeparator: \.isNewline).map { $0.trimmingCharacters(in: .whitespaces) } }
+        if let status = entries["status"], lines(status).first == "disabled" { return nil }
+        for (name, text) in entries.sorted(by: { $0.key < $1.key }) where name != "status" && name != "register" {
+            let read = lines(text)
+            guard name.hasPrefix("WSLInterop") || read.contains("interpreter /init") else { continue }
+            let path = interpreters + "/" + name
+            let state = read.first
+            let flags = read.first { $0.hasPrefix("flags:") }
+            if state == "disabled" { continue }
+            guard state == "enabled", let flags else {
+                return SandboxRefusal(value: path, reason: "WSL's interop entry can't be read (its state and flags), and this kernel gives a box no "
+                                      + "binfmt_misc of its own to hide the machine's behind: no box is built while it can't be told whether "
+                                      + "it carries the F flag")
+            }
+            if flags.dropFirst("flags:".count).contains("F") {
+                return SandboxRefusal(value: path, reason: "WSL's interop entry is enabled with the F flag (\(flags)): the kernel holds its interpreter, "
+                                      + "WSL's /init, open, and this kernel gives a box no binfmt_misc of its own to hide the machine's behind, so a "
+                                      + "Windows program would start inside; no box is built while it is so")
+            }
+        }
+        return nil
+    }
 
     public static func plan(_ inputs: SandboxInputs, exists: (String) -> Bool = { FileManager.default.fileExists(atPath: $0) },
                             gitRoots: (String) -> Result<GitRoots.Roots, SandboxRefusal> = GitRoots.read,
-                            entry: (String) -> Entry = SandboxPlanner.entry)
+                            entry: (String) -> Entry = SandboxPlanner.entry,
+                            binfmtEntries: () -> [String: String]? = SandboxPlanner.machineInterpreters)
         -> Result<Platform.Sandbox.Plan, SandboxRefusal> {
         let role = inputs.role
         let agent = role != .branchRun
+        // A box that would try the machine's binfmt_misc entries doesn't start while one of them would run a Windows
+        // program in it.
+        if !hidesInterpreters(inputs), let refusal = interopRefusal(binfmtEntries()) { return .failure(refusal) }
         // The project's paths are judged whether or not they exist yet.
         for path in inputs.policy.read + inputs.policy.privateFolders {
             if let refusal = sourceRefusal(path, inputs) { return .failure(refusal) }
