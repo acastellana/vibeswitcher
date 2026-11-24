@@ -403,3 +403,7 @@ The user asked on 2026-11-24 to see who triggered an update's merge, and chose t
 
 The user's answer to 99E29A76 (2026-11-18 12:17) is the standing rule: workers and routine audits on Opus, Fable only for the lead, security and sensitive audits, and hard-task advice. The later "back to Fable" answer (BD489D1B) was about the sensitive reviews only. Cleared, the setting picks the audit model from the Claude command's default (Fable), which per-task Opus pins could flip.
 
+## 2026-11-24 22:22:58 disk_headroom_gb goes from 6 to 2, so new workers start at about 18.1 GB free instead of 22.1 GB (the user's answer to C08E0405, 2026-11-24).
+
+22 GB was more than a single worker needs (about 3 GB for a clone and build), and it held the v2 test with nothing else of this project in flight. If finished workers start waiting on disk for their load runs again, as on Nov 18, raise it back.
+
