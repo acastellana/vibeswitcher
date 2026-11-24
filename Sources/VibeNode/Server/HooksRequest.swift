@@ -46,6 +46,9 @@ public struct HooksRequest {
     public struct Installed: Equatable, Sendable {
         public var programs: [String]
         public var configs: [String]
+        /// Where this install's Codex hooks are in `~/.codex/hooks.json` (`NodeCodexTrust.positions`): the only ones
+        /// the Codex trust takes.
+        public var codexPositions: Set<String> = []
     }
 
     /// The programs an agent's session runs that install puts in `<home>/.vibeswitcher/bin`.
@@ -153,6 +156,7 @@ public struct HooksRequest {
             }
         }
         let dot = URL(fileURLWithPath: home).appendingPathComponent(".vibeswitcher", isDirectory: true)
+        var codexPositions: Set<String> = []
         // The programs' bytes written and flushed before `appWrite` takes its fingerprints, so only the renames and the
         // config edits fall between those and the ones it takes after (the S6 review: what changes in between is
         // sealed with the write).
@@ -182,6 +186,9 @@ public struct HooksRequest {
                         throw ConfigFailure(path: configPath(agent), error: error, done: done)
                     }
                     done.append(configPath(agent))
+                    if agent == .codex, let written = FileManager.default.contents(atPath: configPath(agent)) {
+                        codexPositions = NodeCodexTrust.positions(hooksJSON: written, command: HookInstaller.command(for: .codex, hookBinary: hook))
+                    }
                 }
             }
         } catch let failure as ConfigFailure {
@@ -196,7 +203,7 @@ public struct HooksRequest {
             return .failure(StartRefusal("the hooks weren't all installed: \(ConfigSeal.inert(Self.describe(error), limit: .max))", exitCode: 1))
         }
         vault.sealAppWrites()
-        return .success(Installed(programs: targets, configs: configs))
+        return .success(Installed(programs: targets, configs: configs, codexPositions: codexPositions))
     }
 
     /// The Codex hooks just installed, trusted (`NodeCodexTrust`) by running `shown`, the Codex the user was shown
@@ -204,7 +211,10 @@ public struct HooksRequest {
     /// in `~/.codex/config.toml` is the app's own, sealed as the hooks' (`appWrite`). How many were trusted (nil: none was
     /// tried; else ours trusted now, those just trusted and those trusted before), and a note when one of ours is left
     /// untrusted or none was listed: the caller then says to run /hooks in Codex.
-    public func trustCodex(shown: String?, root: URL, limit: TimeInterval = NodeCodexTrust.limit) -> (trusted: Int?, note: String?) {
+    /// `expected`: the places the install wrote ours in `~/.codex/hooks.json` (`Installed.codexPositions`); `scope`:
+    /// `systemd-run` when the user's manager takes a transient scope (the user's node), nil for the process group.
+    public func trustCodex(shown: String?, root: URL, expected: Set<String>, scope: String? = nil,
+                           limit: TimeInterval = NodeCodexTrust.limit) -> (trusted: Int?, note: String?) {
         guard let shown else { return (nil, "no Codex was named to trust them with") }
         let found = NodePreflight.codex(root: root)
         guard let codex = found.path else { return (nil, ConfigSeal.inert(found.why ?? "no Codex", limit: 300)) }
@@ -213,23 +223,22 @@ public struct HooksRequest {
         }
         let config = (home as NSString).appendingPathComponent(".codex/config.toml")
         let hook = (binFolder as NSString).appendingPathComponent("vibeswitcher-hook")
-        // Sealed only when the file holds nothing but our trust beside what it held (`FileCheck.ours`).
-        let (outcome, file) = vault.appWrite([config], home: home, sealIf: { $0.1 == .ours }) { () -> (Result<NodeCodexTrust.Outcome, Error>, NodeCodexTrust.FileCheck) in
-            var file = NodeCodexTrust.FileCheck.ours
-            let outcome = Result { try NodeCodexTrust.trust(codex: codex, home: home, hookBinary: hook, path: ProcessInfo.processInfo.environment["PATH"], limit: limit, file: &file) }
-            return (outcome, file)
+        // Sealed only when the file, read again as the vault decides, is our trust alone beside what it held
+        // (`NodeCodexTrust.sealable`); else left as it is, held. Never put back.
+        var seen = NodeCodexTrust.Seen()
+        let (outcome, sealed) = vault.appWrite([config], home: home, sealIf: { _ in NodeCodexTrust.sealable(seen) }) {
+            Result { try NodeCodexTrust.trust(codex: codex, home: home, hookBinary: hook, expected: expected,
+                                              path: ProcessInfo.processInfo.environment["PATH"], scope: scope, limit: limit, seen: &seen) }
         }
         vault.sealAppWrites()
-        if file == .changedMeanwhile {
-            return (nil, "~/.codex/config.toml changed while this ran: nothing of it was sealed; look at `vibeswitcher config held`")
+        if !sealed, FileManager.default.contents(atPath: config) != seen.before {
+            return (nil, "~/.codex/config.toml changed while this ran (by Codex or something else): nothing of it was sealed; `vibeswitcher config held` shows it")
         }
         switch outcome {
         case .failure(let error): return (nil, ConfigSeal.inert("\(error)", limit: 300))
         case .success(let done):
             var notes: [String] = []
-            if done.putBack {
-                notes.append("codex app-server wrote more under hooks.state in ~/.codex/config.toml than VibeSwitcher's trust, or another hash: the file was put back as it was")
-            } else if !done.notTaken.isEmpty {
+            if !done.notTaken.isEmpty {
                 notes.append("\(done.notTaken.count) written and not taken by Codex")
             }
             if !done.refused.isEmpty { notes.append("\(done.refused.count) refused for a hash or key not in Codex's form") }

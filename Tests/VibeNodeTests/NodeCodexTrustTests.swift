@@ -71,10 +71,15 @@ struct NodeCodexTrustTests {
     }
 
     /// `NodeCodexTrust.trust` on `home`, with what it found in the file.
-    static func trust(_ codex: String, _ home: Home, path: String?, limit: TimeInterval) throws -> (outcome: NodeCodexTrust.Outcome, file: NodeCodexTrust.FileCheck) {
-        var file = NodeCodexTrust.FileCheck.changedMeanwhile
-        let outcome = try NodeCodexTrust.trust(codex: codex, home: home.home.path, hookBinary: home.hook, path: path, limit: limit, file: &file)
-        return (outcome, file)
+    /// Every place the tests' listings use (`Home.key`).
+    static let anyPlace: Set<String> = Set((0..<4).map { "stop:0:\($0)" } + ["pre_tool_use:0:0"])
+
+    /// `NodeCodexTrust.trust` on `home`, and whether what it left is the app's to seal (`sealable`, read after).
+    static func trust(_ codex: String, _ home: Home, expected: Set<String> = anyPlace, path: String?, limit: TimeInterval) throws
+        -> (outcome: NodeCodexTrust.Outcome, sealable: Bool) {
+        var seen = NodeCodexTrust.Seen()
+        let outcome = try NodeCodexTrust.trust(codex: codex, home: home.home.path, hookBinary: home.hook, expected: expected, path: path, limit: limit, seen: &seen)
+        return (outcome, NodeCodexTrust.sealable(seen))
     }
 
     /// The written request's trust: key to hash.
@@ -109,8 +114,10 @@ struct NodeCodexTrustTests {
         let folder = scratch.url("stand-in")
         let codex = try Self.standIn(in: folder, config: home.config, first: Self.listing(2, listed, cwd: home.home.path),
                                      second: Self.listing(4, after, cwd: home.home.path), append: "\n[hooks.state]\n" + Self.trustTable(home.key(1), "sha256:ours"))
-        let done = try Self.trust(codex.path, home, path: "/usr/bin:/bin", limit: hangGuard).outcome
+        let trusted = try Self.trust(codex.path, home, path: "/usr/bin:/bin", limit: hangGuard)
+        let done = trusted.outcome
         #expect(done == NodeCodexTrust.Outcome(trusted: 1))
+        #expect(trusted.sealable)
         #expect(try Self.written(folder) == [home.key(1): "sha256:ours"])
         let config = try String(contentsOf: home.config, encoding: .utf8)
         #expect(config.hasPrefix(before) && config.contains("trusted_hash = \"sha256:ours\""), "\(config)")
@@ -162,14 +169,21 @@ struct NodeCodexTrustTests {
         #expect(!FileManager.default.fileExists(atPath: home.config.path))
     }
 
-    /// Codex writing another hash than the one it listed for the entry, or anything else into the file, has the file
-    /// put back as it was: nothing of it is the app's to seal.
-    @Test(arguments: [
-        "\n[hooks.state]\n" + trustTable("KEY", "sha256:other"),
-        "\n[hooks.state]\n" + trustTable("KEY", "sha256:ours") + "approval_policy = \"never\"\n",
-        "\n[hooks.state]\n" + trustTable("KEY", "sha256:ours") + trustTable("/elsewhere/hooks.json:stop:0:0", "sha256:x"),
-    ])
-    func moreThanOurTrustInTheFileIsPutBack(_ append: String) throws {
+    /// Anything in the file but our trust beside what it held (another hash than the one Codex listed, more under
+    /// `hooks.state`, a hand edit elsewhere, a top-level setting): nothing of it is the app's to seal, and it is left
+    /// exactly as it is (never put back: a held file is recoverable, a dropped edit isn't).
+    static let notOurs: [String] = {
+        var cases: [String] = []
+        cases.append("\n[hooks.state]\n" + trustTable("KEY", "sha256:other"))
+        cases.append("\n[hooks.state]\n" + trustTable("KEY", "sha256:ours") + "approval_policy = \"never\"\n")
+        cases.append("\n[hooks.state]\n" + trustTable("KEY", "sha256:ours") + trustTable("/elsewhere/hooks.json:stop:0:0", "sha256:x"))
+        cases.append("\n[profiles.mine]\nmodel = \"y\"\n[hooks.state]\n" + trustTable("KEY", "sha256:ours"))
+        cases.append("\nsandbox_mode = \"danger-full-access\"\n" + trustTable("KEY", "sha256:ours"))
+        return cases
+    }()
+
+    @Test(arguments: notOurs)
+    func anythingButOurTrustIsLeftAsItIsAndNotSealable(_ append: String) throws {
         let home = try Self.home(scratch.url("home"))
         let before = "model = \"x\"\n"
         try Data(before.utf8).write(to: home.config)
@@ -177,35 +191,62 @@ struct NodeCodexTrustTests {
         let listed = [Self.hook(home.key(0), home.ours, hash: "sha256:ours")]
         var after = listed
         after[0]["trustStatus"] = "trusted"
-        let codex = try Self.standIn(in: scratch.url("stand-in"), config: home.config, first: Self.listing(2, listed, cwd: home.home.path),
-                                     second: Self.listing(4, after, cwd: home.home.path), append: append.replacingOccurrences(of: "KEY", with: home.key(0)))
-        let done = try Self.trust(codex.path, home, path: "/usr/bin:/bin", limit: hangGuard).outcome
-        #expect(done == NodeCodexTrust.Outcome(trusted: 0, notTaken: [home.key(0)], putBack: true))
-        #expect(try String(contentsOf: home.config, encoding: .utf8) == before)
-        var info = stat()
-        #expect(stat(home.config.path, &info) == 0 && info.st_mode & 0o7777 == 0o640)
-    }
-
-    /// A change outside `hooks.state` while it ran (a hand edit, or a Codex that isn't Codex): the file is left as it
-    /// is and nothing is the app's to seal, so it is held; never put back (a dropped edit isn't recoverable).
-    @Test(arguments: [
-        "\n[profiles.mine]\nmodel = \"y\"\n[hooks.state]\n" + trustTable("KEY", "sha256:ours"),
-        "\nsandbox_mode = \"danger-full-access\"\n" + trustTable("KEY", "sha256:ours"),
-    ])
-    func aChangeOutsideHooksStateIsLeftAsItIs(_ append: String) throws {
-        let home = try Self.home(scratch.url("home"))
-        let before = "model = \"x\"\n"
-        try Data(before.utf8).write(to: home.config)
-        let listed = [Self.hook(home.key(0), home.ours, hash: "sha256:ours")]
-        var after = listed
-        after[0]["trustStatus"] = "trusted"
         let appended = append.replacingOccurrences(of: "KEY", with: home.key(0))
         let codex = try Self.standIn(in: scratch.url("stand-in"), config: home.config, first: Self.listing(2, listed, cwd: home.home.path),
                                      second: Self.listing(4, after, cwd: home.home.path), append: appended)
         let done = try Self.trust(codex.path, home, path: "/usr/bin:/bin", limit: hangGuard)
-        #expect(done.file == .changedMeanwhile)
-        #expect(done.outcome == NodeCodexTrust.Outcome(trusted: 0, notTaken: [home.key(0)]))
+        #expect(done.outcome == NodeCodexTrust.Outcome(trusted: 1))
+        #expect(!done.sealable)
         #expect(try String(contentsOf: home.config, encoding: .utf8) == before + appended)
+        var info = stat()
+        #expect(stat(home.config.path, &info) == 0 && info.st_mode & 0o7777 == 0o640)
+    }
+
+    /// Ours only at the places this install wrote it (`expected`): the same command planted at another place in the
+    /// file (another event, another group) isn't trusted.
+    @Test func ourCommandAtAPlaceThisInstallDidNotWriteIsNotTrusted() throws {
+        let home = try Self.home(scratch.url("home"))
+        let planted = "\(home.codexHooks.path):session_start:1:0"
+        let listed = [Self.hook(home.key(0), home.ours, hash: "sha256:ours"), Self.hook(planted, home.ours, hash: "sha256:planted")]
+        var after = listed
+        after[0]["trustStatus"] = "trusted"
+        let folder = scratch.url("stand-in")
+        let codex = try Self.standIn(in: folder, config: home.config, first: Self.listing(2, listed, cwd: home.home.path),
+                                     second: Self.listing(4, after, cwd: home.home.path), append: "\n[hooks.state]\n" + Self.trustTable(home.key(0), "sha256:ours"))
+        let done = try Self.trust(codex.path, home, expected: ["stop:0:0"], path: "/usr/bin:/bin", limit: hangGuard)
+        #expect(done.outcome == NodeCodexTrust.Outcome(trusted: 1))
+        #expect(done.sealable)
+        #expect(try Self.written(folder) == [home.key(0): "sha256:ours"])
+    }
+
+    /// `positions`: where a hooks.json holds our command, by Codex's event names; another command, or a prompt handler
+    /// with ours, isn't one.
+    @Test func thePositionsAreWhereOurCommandIs() throws {
+        let ours = "/h/.vibeswitcher/bin/vibeswitcher-hook codex"
+        let json: [String: Any] = ["hooks": [
+            "Stop": [["hooks": [["type": "command", "command": ours]]]],
+            "PreToolUse": [["hooks": [["type": "command", "command": "/usr/bin/other"]]], ["hooks": [["type": "command", "command": "/x"], ["type": "command", "command": ours]]]],
+            "SessionStart": [["hooks": [["type": "prompt", "command": ours]]]],
+        ]]
+        let found = NodeCodexTrust.positions(hooksJSON: try JSONSerialization.data(withJSONObject: json), command: ours)
+        #expect(found == ["stop:0:0", "pre_tool_use:1:1"])
+        // What HookInstaller writes for Codex, from an empty file: one place per event.
+        let file = scratch.url("hooks.json")
+        try HookInstaller.install(agent: .codex, at: file, hookBinary: "/h/.vibeswitcher/bin/vibeswitcher-hook")
+        let written = NodeCodexTrust.positions(hooksJSON: try Data(contentsOf: file), command: ours)
+        #expect(written.contains("stop:0:0") && written.contains("pre_tool_use:0:0") && written.allSatisfy { $0.hasSuffix(":0:0") }, "\(written)")
+    }
+
+    /// The scope: `systemd-run --user --scope` with a unit of its own, `env -i` inside it; without one, Codex itself.
+    @Test func inAScopeOrItsOwnGroup() {
+        let scoped = NodeCodexTrust.Session.command(codex: "/c/codex", home: "/h", path: "/usr/bin:/bin", scope: "/usr/bin/systemd-run", unit: "u")
+        #expect(scoped.executable == "/usr/bin/systemd-run")
+        #expect(scoped.arguments == ["/usr/bin/systemd-run", "--user", "--scope", "--quiet", "--collect", "--unit=u", "--",
+                                     "/usr/bin/env", "-i", "HOME=/h", "PATH=/usr/bin:/bin", "LANG=C.UTF-8", "/c/codex", "app-server"])
+        #expect(scoped.environment == ["XDG_RUNTIME_DIR=/run/user/\(getuid())", "PATH=/usr/bin:/bin"])
+        let plain = NodeCodexTrust.Session.command(codex: "/c/codex", home: "/h", path: nil, scope: nil, unit: nil)
+        #expect(plain.executable == "/c/codex" && plain.arguments == ["/c/codex", "app-server"])
+        #expect(plain.environment == ["HOME=/h", "PATH=/usr/bin:/bin", "LANG=C.UTF-8"])
     }
 
     /// The file check, by itself: Codex's own form passes, a stale trust of ours replaced passes, blank lines aside.
@@ -217,6 +258,14 @@ struct NodeCodexTrustTests {
         #expect(!NodeCodexTrust.onlyOurTrust(before: before, after: after, trust: [key: "sha256:other"]))
         #expect(NodeCodexTrust.onlyOurTrust(before: "", after: "[hooks.state]\n" + Self.trustTable(key, "sha256:n"), trust: [key: "sha256:n"]))
         #expect(!NodeCodexTrust.onlyOurTrust(before: "a = 1\n", after: "a = 2\n" + Self.trustTable(key, "sha256:n"), trust: [key: "sha256:n"]))
+        // Every raw line outside our tables counts: a blank line taken out, one added, one made whitespace-only.
+        let mine = "model = \"x\"\n\n# mine\n[projects.\"/a\"]\ntrust_level = \"trusted\"\n"
+        let codexs = "\n[hooks.state]\n" + Self.trustTable(key, "sha256:n")
+        #expect(NodeCodexTrust.onlyOurTrust(before: mine, after: mine + codexs, trust: [key: "sha256:n"]))
+        for edited in [mine.replacingOccurrences(of: "\n\n# mine", with: "\n# mine"), mine.replacingOccurrences(of: "\n# mine", with: "\n\n\n# mine"),
+                       mine.replacingOccurrences(of: "\n\n# mine", with: "\n  \n# mine"), mine.replacingOccurrences(of: "trust_level", with: " trust_level")] {
+            #expect(!NodeCodexTrust.onlyOurTrust(before: mine, after: edited + codexs, trust: [key: "sha256:n"]), "\(edited)")
+        }
         // Two tables for ours: not Codex's form.
         #expect(!NodeCodexTrust.onlyOurTrust(before: "", after: Self.trustTable(key, "sha256:n") + Self.trustTable(key, "sha256:n"), trust: [key: "sha256:n"]))
         #expect(NodeCodexTrust.hashShape("sha256:465eccb153e24a7e64fabed2ebac7e51ba352d2225e441c32c6996720fa18e00"))

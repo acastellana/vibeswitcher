@@ -466,7 +466,7 @@ struct HooksCommandTests {
         _ = try standInCodex(node, before: "\n[profiles.mine]\nmodel = \"y\"\n")
         let ran = try await node.runOnTerminal(["hooks", "install"])
         #expect(ran.status == 0, "\(ran.output)\n\(node.said)")
-        #expect(ran.output.contains("~/.codex/config.toml changed while this ran: nothing of it was sealed; look at `vibeswitcher config held`"), "\(ran.output)")
+        #expect(ran.output.contains("~/.codex/config.toml changed while this ran (by Codex or something else): nothing of it was sealed; `vibeswitcher config held` shows it"), "\(ran.output)")
         #expect(ran.output.contains("run /hooks in Codex and trust the vibeswitcher-hook entries"), "\(ran.output)")
         let config = try String(contentsOf: node.home.appendingPathComponent(".codex/config.toml"), encoding: .utf8)
         #expect(config.contains("[profiles.mine]") && config.contains("trusted_hash = \"sha256:ours\""), "left as it is: \(config)")

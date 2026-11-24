@@ -1047,7 +1047,11 @@ public final class Requests: @unchecked Sendable {
                     guard agents.contains(.codex) else { return (.init(re: request.id, typed: result), nil) }
                     return (.init(re: request.id, typed: result), { [hooks] in
                         var trusted = result
-                        (trusted.trusted, trusted.trustNote) = hooks.trustCodex(shown: shownCodex, root: root)
+                        // The user's node, its systemd manager reachable: in a transient scope of its own (as update
+                        // runs install-node); a scratch node, or no manager: its own process group.
+                        let scope = NodeFolders.isUsersRoot(root, accountHome: VibePaths.accountHome) && SwitchSealCheck.userManagerRefusal() == nil
+                            ? "/usr/bin/systemd-run" : nil
+                        (trusted.trusted, trusted.trustNote) = hooks.trustCodex(shown: shownCodex, root: root, expected: installed.codexPositions, scope: scope)
                         return .init(re: request.id, typed: trusted)
                     })
                 }
