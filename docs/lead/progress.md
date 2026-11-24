@@ -4518,3 +4518,7 @@ Turn what's a real bug into a task (one already on the board needs nothing); the
 - 2026-11-24 16:09 Asked the user to push main at 1051d510 (12 commits) to origin/main
 - 2026-11-24 16:09 Pushed main at 1051d510 (12 commits) to origin/main, on the user's click
 - 2026-11-24 17:05 Automatically fetched origin/main at 1051d510: 0 commits from the other Mac at origin/main (1051d51098e0d0fa4e400717aecc088f48f0c0f7): merge_remote would do nothing: main has everything origin/main has.
+- 2026-11-24 21:15 Automatically (auto_advance): Fable is back: its usage limit reset, so new workers and audits run on Fable again (sessions already on Opus go on there).
+- 2026-11-24 21:15 Workflow: cleared verifier_model
+- 2026-11-24 21:15 Workflow: verifier_model = `opus`
+- 2026-11-24 21:15 Update: Today: 5 merges, the GitHub handle on updates, pushed twice — **Landed**

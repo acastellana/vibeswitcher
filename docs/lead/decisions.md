@@ -447,3 +447,7 @@ With the fix the bench passes at 5.6–6.5 % with the display asleep, and the ab
 
 The user asked on 2026-11-24 to see who triggered an update's merge, and chose this scope (DEC96FEA). There are no PRs (direct pushes from two Macs), and git author names aren't handles.
 
+## 2026-11-24 21:15:47 Fable's reset, 2026-11-24 21:15: verifier_model stays opus, set explicitly. It is not cleared as the 2026-11-18 22:19 entry and the handover said. Routine audits run on Opus, and sensitive and security audits on Fable (VibeSwitcher routes those to Fable whatever verifier_model says, while Fable is available). Workers stay pinned to model: opus per task (2026-11-18 12:17).
+
+The user's answer to 99E29A76 (2026-11-18 12:17) is the standing rule: workers and routine audits on Opus, Fable only for the lead, security and sensitive audits, and hard-task advice. The later "back to Fable" answer (BD489D1B) was about the sensitive reviews only. Cleared, the setting picks the audit model from the Claude command's default (Fable), which per-task Opus pins could flip.
+
