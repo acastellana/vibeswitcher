@@ -340,13 +340,17 @@ public final class ChatStore: @unchecked Sendable {
 
     /// `home`: the node's (whose agents' folders hold the transcripts). `sessions`: the sessions store's changes (each
     /// session's `transcriptPath`). `now`: seconds, for the idle drop; `date`: an op's `at`.
+    /// The node's live pairing codes, masked in what a transcript serves (`PairingMask`).
+    private let codes: PairingCodes?
+
     public init(queue: DispatchQueue, home: String, sessions: Changes<Session>,
                 now: @escaping @Sendable () -> TimeInterval = { Date().timeIntervalSince1970 },
                 date: @escaping @Sendable () -> Date = { Date() }, note: @escaping @Sendable (String) -> Void = { _ in },
                 summaries: Changes<String>? = nil, ask: (@Sendable (String, String, TeamMessage) -> Void)? = nil,
                 extras: Changes<[NodeWire.Value]>? = nil,
-                window: (items: Int, bytes: Int) = (ChatStore.windowItems, ChatStore.windowBytes)) {
+                window: (items: Int, bytes: Int) = (ChatStore.windowItems, ChatStore.windowBytes), codes: PairingCodes? = nil) {
         self.window = window
+        self.codes = codes
         self.queue = queue
         self.home = home
         self.sessions = sessions
@@ -478,7 +482,7 @@ public final class ChatStore: @unchecked Sendable {
             return .refused(.init(.gone, "that session's transcript isn't in the agents' own folders"))
         }
         let stream = ChatStream(session: session, start: reached[session].map { $0 + 1 } ?? 0, now: date)
-        let feed = Feed(session: session, stream: stream, follow: TranscriptFollow(url: url, format: format, windowItems: window.items, windowBytes: window.bytes))
+        let feed = Feed(session: session, stream: stream, follow: TranscriptFollow(url: url, format: format, windowItems: window.items, windowBytes: window.bytes, codes: codes))
         feed.idleSince = now()
         feeds[session] = feed
         watch(feed)
@@ -536,7 +540,7 @@ public final class ChatStore: @unchecked Sendable {
     private func look(_ feed: Feed) {
         if let path = sessions.values[feed.session]?.transcriptPath, let (url, format) = TranscriptReader.checkedURL(path, home: home),
            url != feed.follow.url, !feed.reading {
-            feed.follow = TranscriptFollow(url: url, format: format, windowItems: window.items, windowBytes: window.bytes)
+            feed.follow = TranscriptFollow(url: url, format: format, windowItems: window.items, windowBytes: window.bytes, codes: codes)
             feed.watch?.stop()
             feed.watch = nil
         }
