@@ -98,6 +98,56 @@ struct UserDeliveriesTests {
         #expect(world.card(asked.card.id)?.question?.answer == "Yes")
     }
 
+    /// The answer is on the lead's board as well (the review of a5a5da80, S1): one tool call of the lead's that doesn't
+    /// take the inbox line (it may read the board) makes it the lead's: `delivered`, the line and the board as they were.
+    @Test func aReplaceAfterTheLeadTookAStepIsRefusedDelivered() async throws {
+        let world = try await CardWorld.make(scratch)
+        defer { world.stop() }
+        let harness = try await world.world.lead(idle: false)
+        let asked = try await world.asked("Ship it?", options: ["Yes", "No"], lead: harness.session)
+        _ = try #require(await world.answer(asked.card, "Yes"))
+        try #require(await eventually(timeout: 60) { userLines(world, harness).contains { $0.text.contains("Ship it?") } })
+        let question = try #require(asked.card.question?.id)
+        #expect(marks(world)?["answers"]?[question]?["replaceable"]?.bool == true, "\(String(describing: marks(world)))")
+        try world.world.hook(harness, "PostToolUse")
+        let refused = try #require(await world.ask("answer.replace", ["card": .string(asked.card.id), "code": .string(asked.card.code),
+                                                                      "text": .string("No")]))
+        #expect(refused.error?.code == NodeWire.Code.delivered.rawValue && refused.error?.message.contains("took a step") == true, "\(refused)")
+        #expect(userLines(world, harness).contains { $0.text.contains("Ship it?") }, "the line is the lead's still")
+        #expect(marks(world)?["answers"]?[question]?["replaceable"]?.bool == false)
+        #expect(try BoardStore(root: world.repo).load().questions.first { $0.id == question }?.answer == "Yes")
+        #expect(world.card(asked.card.id)?.question?.answer == "Yes")
+    }
+
+    /// Its lead's hooks said nothing when the answer reached the board: whether it read it there can't be told, so no
+    /// replace; and a look marks a step taken since without a replace asking.
+    @Test func anAnswerWhoseLeadsStepsCantBeToldIsntReplaceable() async throws {
+        let world = try await CardWorld.make(scratch)
+        defer { world.stop() }
+        let harness = try await world.world.lead(idle: false)
+        let file = world.world.host.root.appendingPathComponent("state/\(harness.session.tty).json")
+        try FileManager.default.removeItem(at: file)
+        let asked = try await world.asked("Ship it?", options: ["Yes", "No"], lead: harness.session)
+        _ = try #require(await world.answer(asked.card, "Yes"))
+        try #require(await eventually(timeout: 60) { userLines(world, harness).contains { $0.text.contains("Ship it?") } })
+        let question = try #require(asked.card.question?.id)
+        #expect(marks(world)?["answers"]?[question]?["replaceable"]?.bool == false, "\(String(describing: marks(world)))")
+        let refused = try #require(await world.ask("answer.replace", ["card": .string(asked.card.id), "code": .string(asked.card.code),
+                                                                      "text": .string("No")]))
+        #expect(refused.error?.code == NodeWire.Code.delivered.rawValue && refused.error?.message.contains("can't be told") == true, "\(refused)")
+
+        // A second question, its lead's hooks there: a step, then a look, and its mark stops offering a replace.
+        try world.world.hook(harness, "PreToolUse")
+        let again = try await world.asked("And the docs?", options: ["Yes", "No"], lead: harness.session)
+        _ = try #require(await world.answer(again.card, "Yes"))
+        try #require(await eventually(timeout: 60) { userLines(world, harness).contains { $0.text.contains("And the docs?") } })
+        let second = try #require(again.card.question?.id)
+        #expect(marks(world)?["answers"]?[second]?["replaceable"]?.bool == true, "\(String(describing: marks(world)))")
+        try world.world.hook(harness, "PostToolUse")
+        world.world.look()
+        #expect(await eventually(timeout: 60) { marks(world)?["answers"]?[second]?["replaceable"]?.bool == false })
+    }
+
     /// A message partly handed (a long one's first part went) or named by a wake-up prompt is the lead's: the inbox's
     /// conditional withdrawal leaves it, under the lock.
     @Test func aPartlyHandedOrWokenMessageIsntPulled() throws {

@@ -324,7 +324,7 @@ extension LeadEngine {
                 return then(.failure(.gone("no question card \(id)")))
             }
             if let why = Self.approvalRefusal(text, card: card) { return then(.failure(.refused(why))) }
-            let (root, vault, seen, note) = (card.root, cardVault, min(version ?? question.version, question.version), self.note)
+            let (root, vault, seen, note, stateFile) = (card.root, cardVault, min(version ?? question.version, question.version), self.note, observer.stateFile)
             var shown = LeadBoard()
             shown.questions = [question]
             let outcome = shown.answer(question.id, with: text, saw: seen)
@@ -341,20 +341,24 @@ extension LeadEngine {
                     card.closed = Self.closed(recorded) ?? card.closed
                 }
             }
-            reads.async({ _ -> String? in
-                guard recorded != nil else { return nil }
+            reads.async({ _ -> (approval: String?, lead: LeadStep?) in
+                guard recorded != nil else { return (nil, nil) }
+                // The board's lead and its hooks' state just before the answer reaches the board: any step it takes after
+                // may read it there (`answer.replace` takes it back only before one, `UserDeliveries.swift`).
+                let lead = LeadStep.read(root: root, stateFile: stateFile)
                 // The board is the lead's record of it, as before; what it holds is neither shown nor sent.
                 do { _ = try BoardStore(root: root).update { board in board.answer(question.id, with: text, saw: seen) } } catch {
                     note("lead: the user's answer to question \(question.short) wasn't written to the board of \(LeadMail.project(of: root)) (\(error)); the lead is told it")
                 }
-                guard case .answered(let answered, _) = outcome else { return nil }
+                guard case .answered(let answered, _) = outcome else { return (nil, lead) }
                 do {
-                    guard let tasks = try vault.recordApproval(text, of: answered, root: root) else { return nil }
-                    return tasks.isEmpty ? "No task's branch is at that commit now, so the approval wasn't recorded: merge won't take it." : nil
+                    guard let tasks = try vault.recordApproval(text, of: answered, root: root) else { return (nil, lead) }
+                    return (tasks.isEmpty ? "No task's branch is at that commit now, so the approval wasn't recorded: merge won't take it." : nil, lead)
                 } catch {
-                    return "Your approval wasn't recorded, so merge won't take it: \(error)"
+                    return ("Your approval wasn't recorded, so merge won't take it: \(error)", lead)
                 }
-            }) { [weak self] approval in
+            }) { [weak self] read in
+                let (approval, lead) = read
                 guard let self else { return }
                 let notice = approval ?? Self.notice(outcome)
                 self.cards.change(id) { card in
@@ -369,7 +373,7 @@ extension LeadEngine {
                 }
                 self.cardsChanged()
                 if let message = outcome.message(given: text) {
-                    self.tellAsUser(message, root: root, action: action, about: .answer(question: question.id, card: id))
+                    self.tellAsUser(message, root: root, action: action, about: .answer(question: question.id, card: id), lead: lead)
                 }
                 then(.success(WireKinds.Answer.Result(outcome: Self.word(outcome), notice: notice, card: self.cards.cards[id]?.value)))
                 // The app refreshes after each answer (`LeadController.refresh`): the board as answered, its timers.
@@ -486,9 +490,10 @@ extension LeadEngine {
     /// a restart a held copy is vouched for (EN-D9), then delivered (or held). Its place among what's sent to that lead
     /// is taken now: what's sent while it's recorded waits behind it (`recordingUser`). On `queue`.
     /// `about`: an answer or a tell, followed to the lead for its read mark (`UserDeliveries.swift`).
-    func tellAsUser(_ text: String, root: String, action: String?, about: UserDelivery.Kind? = nil) {
+    /// `lead`: an answer's, the board's lead as `LeadStep` read it just before the answer reached the board.
+    func tellAsUser(_ text: String, root: String, action: String?, about: UserDelivery.Kind? = nil, lead: LeadStep? = nil) {
         guard let action else { return deliver(built: { text }, from: .user, root: root, action: nil) }
-        if let about { follow(action, root: root, kind: about) }
+        if let about { follow(action, root: root, kind: about, lead: lead) }
         let (client, project, note, order) = (link.vaultV2, NodeIds.project(root: root), self.note, leads.next())
         recordingUser[root, default: 0] += 1
         work.async { [weak self] in
