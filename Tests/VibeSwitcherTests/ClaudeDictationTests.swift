@@ -865,11 +865,13 @@ struct ClaudeDictationTests {
         controller.press(h.key, agent: .claude) { "" }
         try await h.waitFor { controller.listening }
         controller.release()
-        // Claude done (its empty transcript in, idle), a read showing that taken in, then past both of the run's waits
-        // for nothing: 3 s with nothing since the release (processing unseen), 2 s of an empty box after processing.
+        // Claude done (its empty transcript in, idle), a read showing it idle taken in (no voice footer: the screen read
+        // can be behind the state file, and a late `listening…` or `processing…` read would still move the run's waits),
+        // then past both of the run's waits for nothing: 3 s with nothing since the release (processing unseen), 2 s of
+        // an empty box after processing.
         try await h.waitFor { h.agent["voiceInserts"] as? Int == inserts + 1 && h.agent["recording"] as? String == "" }
         let reads = shown.reads
-        try await h.waitFor { shown.reads > reads && !shown.text.contains("processing…") }
+        try await h.waitFor { shown.reads > reads && ClaudeVoiceScreen.footer(shown.text) == .none }
         clock.ahead += max(ClaudeVoiceRun.quietAfterRelease, ClaudeVoiceRun.emptyAfterProcessing) + 0.1
         try await h.waitFor { controller.phase == .idle }
         #expect(controller.notice?.text == ClaudeVoiceRun.didntCatch && controller.notice?.privacy == false,
