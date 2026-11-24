@@ -218,11 +218,28 @@ struct UserDeliveriesTests {
         let transcript = try String(contentsOf: harness.files.transcript, encoding: .utf8)
         #expect(transcript.contains("stop and keep the old name"), "the words weren't typed in after the Esc")
 
-        let worker = try await NodeHarness.start(on: world.host, fake: world.world.fake, cwd: world.repo, label: "Worker: write-the-parser")
-        let refused = try #require(await world.ask("send", ["session": .string(NodeIds.session(host: worker.session.id)), "text": .string("stop"),
+        // The vault's roster says who is a team's, not the label (the review of a5a5da80, S3): a verifier labelled
+        // "Notes" is refused; a session the user labelled "Worker: …" isn't.
+        let verifier = try await NodeHarness.start(on: world.host, fake: world.world.fake, cwd: world.repo, label: "Notes")
+        let (repo, rostered) = (world.repo, verifier.session.id.uuidString)
+        world.queue.sync {
+            world.requests.teamRoster = { _ in [LeadVault.RosterEntry(root: repo, session: rostered, role: .verifier, task: "parser", holds: true)] }
+        }
+        let refused = try #require(await world.ask("send", ["session": .string(NodeIds.session(host: verifier.session.id)), "text": .string("stop"),
                                                             "when": .string("interrupt")]))
         #expect(!refused.ok && refused.error?.message.contains("worker or verifier") == true, "\(refused)")
-        #expect(!((try? String(contentsOf: worker.files.transcript, encoding: .utf8)) ?? "").contains("stop"))
+        #expect(!((try? String(contentsOf: verifier.files.transcript, encoding: .utf8)) ?? "").contains("stop"))
+        // Between turns, an interrupt sends no Esc, and says so (S4).
+        let named = try await NodeHarness.start(on: world.host, fake: world.world.fake, cwd: world.repo, label: "Worker: write-the-parser")
+        let plain = try #require(await world.ask("send", ["session": .string(NodeIds.session(host: named.session.id)), "text": .string("rename it"),
+                                                          "when": .string("interrupt")]))
+        #expect(plain.ok && plain.result?["when"]?.string == "step" && plain.result?["said"]?.string?.contains("no Esc") == true, "\(plain)")
+        try await named.waitFor { ((try? String(contentsOf: named.files.transcript, encoding: .utf8)) ?? "").contains("rename it") }
+        // The roster not answering: it can't be told, so no interrupt.
+        world.queue.sync { world.requests.teamRoster = { _ in throw LeadVault.Refused("down") } }
+        let unknown = try #require(await world.ask("send", ["session": .string(NodeIds.session(host: named.session.id)), "text": .string("stop"),
+                                                            "when": .string("interrupt")]))
+        #expect(!unknown.ok && unknown.error?.message.contains("can't be told") == true, "\(unknown)")
     }
 
     /// An interrupt into a session whose screen shows a question: no Esc (it would dismiss the question), nothing typed.
@@ -313,6 +330,18 @@ struct UserDeliveriesTests {
         #expect(sent.ok && sent.result?["when"]?.string == "now" && sent.result?["said"] == nil, "\(sent)")
         try await harness.waitFor { (harness.agent["sentNow"] as? Int) == 1 }
         #expect(((try? String(contentsOf: harness.files.transcript, encoding: .utf8)) ?? "").contains("use the lexer"))
+        // A team's worker by the vault's roster gets no send-now: at its next step, said (the review of a5a5da80, S2).
+        let (repo, rostered) = (world.repo, harness.session.id.uuidString)
+        world.queue.sync {
+            world.requests.teamRoster = { _ in [LeadVault.RosterEntry(root: repo, session: rostered, role: .worker, task: "parser", holds: true)] }
+        }
+        let worker = try #require(await world.ask("send", ["session": .string(NodeIds.session(host: harness.session.id)), "text": .string("and the parser"),
+                                                           "when": .string("now")]))
+        #expect(worker.ok && worker.result?["when"]?.string == "step" && worker.result?["said"]?.string?.contains("worker or verifier") == true, "\(worker)")
+        // Typed in and queued for after its turn (its hooks said nothing here, so no steer).
+        try await harness.screenShows { $0.contains("and the parser") }
+        #expect((harness.agent["sentNow"] as? Int) == 1, "no second send-now")
+        world.queue.sync { world.requests.teamRoster = { try $0.roster() } }
 
         let older = try await NodeHarness.start(on: world.host, fake: try versioned("2.1.200"))
         let fell = try #require(await world.ask("send", ["session": .string(NodeIds.session(host: older.session.id)), "text": .string("use the lexer"),

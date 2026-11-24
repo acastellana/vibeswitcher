@@ -91,15 +91,23 @@ public enum AgentVersion {
 }
 
 extension AgentVersion {
-    private static let kept = Locked<[Int32: [Int]?]>([:])
+    private struct Process: Hashable {
+        var pid: Int32
+        var started: Date
+    }
 
-    /// `of(session:pid:)`, read once per agent process (its program doesn't change under its pid).
+    private static let kept = Locked<[Process: [Int]?]>([:])
+
+    /// `of(session:pid:)`, read once per agent process: by its pid and its start time (a pid reused by a later process,
+    /// an update's Claude among them, is read again). A process whose start can't be read is read each time.
     public static func cached(session: HostSession, pid: Int32) -> [Int]? {
-        if let found = kept.get()[pid] { return found }
+        guard let started = ProcessTable.info(pid: pid)?.startTime else { return of(session: session, pid: pid) }
+        let process = Process(pid: pid, started: started)
+        if let found = kept.get()[process] { return found }
         let found = of(session: session, pid: pid)
         var all = kept.get()
         if all.count > 512 { all.removeAll() }
-        all[pid] = found
+        all[process] = found
         kept.set(all)
         return found
     }

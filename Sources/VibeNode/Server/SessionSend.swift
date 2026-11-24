@@ -93,21 +93,11 @@ extension Requests {
             return reply(.init(re: request.id, error: .init(.refused, "session \(short) is a lead another one replaced: what you type there reaches "
                                                             + "no live lead (`vibeswitcher tell FOLDER TEXT` tells the running one)")))
         }
-        // `interrupt` (2026-11-24): Esc, then the words as the user's turn, into an agent the user may stop: their own
-        // session or a lead, never a worker or a verifier (it would stop mid-task or mid-audit).
-        if asked == .interrupt {
-            switch LeadTeams.role(label: session.label) {
-            case .worker?, .verifier?:
-                return reply(.init(re: request.id, error: .init(.refused, "session \(short) is a team's worker or verifier: it isn't stopped mid-task or mid-audit "
-                                                                + "(tell its lead instead, or send without interrupt: it goes after its turn)")))
-            default: break
-            }
-        }
         guard asked != .step || engine != nil || HostedAgents.agent(of: session) != .claude else {
             return reply(.init(re: request.id, error: .init(.refused, "this server has no engine to steer through: send it without when")))
         }
         let working = sessions?.sessions.first { $0.hostID == session.id }?.status == .working
-        let (queue, drafts) = (self.queue, sessionDrafts)
+        let (queue, drafts, vault, roster) = (self.queue, sessionDrafts, engine?.cardVault ?? link.vault, teamRoster)
         let id = NodeIds.session(host: session.id)
         let held = HeldSend(message: message, text: text, images: images, at: Date(), action: request.action ?? request.id)
         // What was done, once known (`SendWhen.resolve`): the reply says it.
@@ -133,6 +123,9 @@ extension Requests {
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             let pid = HostedAgents.agentPid(of: session)
             let version = asked == nil ? nil : AgentVersion.of(session: session, pid: pid)
+            // Interrupt and send-now stop a turn: whether it is a team's worker or verifier, as the vault's roster says
+            // (the host's record, not a label anyone can give a session; nil: the roster didn't answer).
+            let team: Bool? = asked == .interrupt || asked == .now ? Self.isTeam(session, roster: { try roster(vault) }) : false
             let missing = images.lazy.compactMap { Self.imageRefusal($0, onDisk: true) }.first
             queue.async {
                 guard let self else { return }
@@ -141,7 +134,19 @@ extension Requests {
                     return reply(.init(re: request.id, error: .init(.refused, "no agent runs in session \(short)'s terminal now (it quit, or ended): nothing typed")))
                 }
                 let agent = HostedAgents.agent(of: session)
-                let resolved = asked.map { SendWhen.resolve($0, agent: agent, version: version) }
+                var resolved = asked.map { SendWhen.resolve($0, agent: agent, version: version) }
+                // `interrupt` (2026-11-24): Esc, then the words as the user's turn, into an agent the user may stop: their
+                // own session or a lead, never a worker or a verifier (it would stop mid-task or mid-audit).
+                if resolved?.way == .interrupt, team != false {
+                    return reply(.init(re: request.id, error: .init(.refused, (team == true ? "session \(short) is a team's worker or verifier"
+                        : "the vault's roster didn't answer, so whether session \(short) is a team's worker or verifier can't be told")
+                        + ": it isn't stopped mid-task or mid-audit (tell its lead instead, or send without interrupt: it goes after its turn); nothing typed")))
+                }
+                // Claude's send-now stops its turn too: a worker's or a verifier's gets it at its next step instead.
+                if resolved?.way == .now, agent == .claude, team != false {
+                    resolved = (.step, team == true ? "a team's worker or verifier isn't stopped mid-task or mid-audit, so it gets it at its next step"
+                                                    : "the vault's roster didn't answer, so whether it is a team's worker or verifier can't be told: at its next step")
+                }
                 done.set(resolved)
                 if let resolved, resolved.way == .step, agent == .claude, message.count > Self.steerLimit {
                     return reply(.init(re: request.id, error: .init(.badArgs, "too long to steer (at most \(Self.steerLimit) characters): send it without when, "
@@ -153,13 +158,28 @@ extension Requests {
                         return reply(.init(re: request.id, error: .init(.refused, "session \(short) has messages waiting behind a question on its screen: "
                                                                         + "answer it first (`vibeswitcher reply`); nothing typed")))
                     }
-                    // At work by its screen: Esc first. Between turns already: no Esc (a second one opens its rewind menu).
+                    // At work by its screen: Esc first (its gate reads the screen again). Between turns already: no Esc (a
+                    // second one opens its rewind menu), the words typed in as a message, and the reply says so.
+                    let notWorking = "its agent wasn't working: no Esc went in, the words were typed in as a message"
+                    let typePlain = {
+                        done.set((.step, notWorking))
+                        self.typeIn(held, into: session) { outcome in
+                            switch outcome {
+                            case .typed, .typedOnly: answer(nil, nil, false, nil)
+                            case .menuOpen(let open), .notWorking(let open):
+                                reply(.init(re: request.id, error: .init(.refused, "session \(short): \(open), so it wasn't interrupted: answer it first; nothing typed")))
+                            case .refused(let why): reply(.init(re: request.id, error: .init(.refused, "session \(short): \(why)")))
+                            }
+                        }
+                    }
                     return self.link.screen(session.id) { screen in
                         queue.async {
-                            let busy = screen.map(Self.working) ?? false
-                            self.typeIn(held, into: session, interrupt: busy) { outcome in
+                            guard screen.map(Self.working) == true else { return typePlain() }
+                            self.typeIn(held, into: session, interrupt: true) { outcome in
                                 switch outcome {
-                                case .typed: answer(nil, nil, false, nil)
+                                case .typed, .typedOnly: answer(nil, nil, false, nil)
+                                // Its turn ended between the two looks: nothing went in, so it goes as a message.
+                                case .notWorking: typePlain()
                                 case .menuOpen(let open):
                                     reply(.init(re: request.id, error: .init(.refused, "session \(short): \(open), so it wasn't interrupted: answer it first; nothing typed")))
                                 case .refused(let why): reply(.init(re: request.id, error: .init(.refused, "session \(short): \(why)")))
@@ -181,7 +201,11 @@ extension Requests {
                     }
                     self.typeIn(held, into: session, submit: submit, trailing: trailing) { outcome in
                         switch outcome {
-                        case .typed:
+                        case .typedOnly(let why):
+                            // The words went in (queued for after its turn); its send-now didn't.
+                            done.set((.after, why))
+                            answer(nil, nil, false, nil)
+                        case .typed, .notWorking:
                             // A command may open a picker (`/model`, `/resume`): the reply says so, as the app's composer
                             // watches the screen for one.
                             guard text.hasPrefix("/"), images.isEmpty else { return answer(nil, nil, false, nil) }
@@ -234,6 +258,13 @@ extension Requests {
         }
     }
 
+    /// Whether `session` is a team's worker or verifier by the vault's roster; nil when the roster didn't answer.
+    static func isTeam(_ session: HostSession, roster: () throws -> [LeadVault.RosterEntry]) -> Bool? {
+        guard let entries = try? roster() else { return nil }
+        let id = session.id.uuidString.lowercased()
+        return entries.contains { $0.role != .lead && $0.session.lowercased() == id }
+    }
+
     private func refuseHeldFull(_ request: NodeWire.Request, _ short: String, _ reply: (NodeWire.Reply) -> Void) {
         reply(.init(re: request.id, error: .init(.refused, "session \(short) holds \(Self.heldLimit) messages already, waiting for its question: "
                                                  + "answer it first (`vibeswitcher reply`), or close what is open in its terminal")))
@@ -267,6 +298,10 @@ extension Requests {
 
     enum TypeOutcome: Sendable {
         case typed
+        /// The words went in, what was to follow them (`trailing`) didn't: why.
+        case typedOnly(String)
+        /// An interrupt's Esc: its turn had ended by its gate (nothing typed).
+        case notWorking(String)
         /// Not typed: what's open on the screen.
         case menuOpen(String)
         case refused(String)
@@ -288,9 +323,11 @@ extension Requests {
         if let last = words.indices.last, submit != [13] { words[last] = HostInput.Write(bytes: submit, delay: words[last].delay) }
         let writes = (interrupt ? [LeadWitness.DeclinePlan.escape] : []) + words + trailing
         let images = held.images
+        let trailingAt = lead + words.count
         link.type(writes, into: session.id, gate: { index, go in
             if interrupt, index == 0 {
-                // The Esc: only into a turn at work, never onto a question (it would dismiss it).
+                // The Esc: only into a turn at work (read again here: one that ended meanwhile gets no Esc, a second
+                // one would open its rewind menu), never onto a question (it would dismiss it).
                 return link.screen(session.id) { screen in
                     guard let screen else {
                         stopped.set(.refused("its screen couldn't be read: nothing typed"))
@@ -298,6 +335,21 @@ extension Requests {
                     }
                     if let open = Self.openMenu(screen) {
                         stopped.set(.menuOpen(open))
+                        return go(false)
+                    }
+                    guard Self.working(screen) else {
+                        stopped.set(.notWorking("its turn ended before the Esc"))
+                        return go(false)
+                    }
+                    go(true)
+                }
+            }
+            if !trailing.isEmpty, index == trailingAt {
+                // Claude's send-now: only while it still works, nothing opened on its screen since the words went in.
+                return link.screen(session.id) { screen in
+                    guard let screen, Self.openMenu(screen) == nil, Self.working(screen) else {
+                        stopped.set(.typedOnly(screen == nil ? "its screen couldn't be read after the words went in, so its send-now wasn't sent: they wait for its turn's end"
+                                               : "a question or menu opened, or its turn ended, as the words went in, so its send-now wasn't sent: they wait for its turn's end"))
                         return go(false)
                     }
                     go(true)
@@ -313,7 +365,7 @@ extension Requests {
                     go(idle)
                 }
             }
-            if index > lead {
+            if index > lead, index < trailingAt {
                 guard !images.isEmpty else { return go(true) }
                 return Self.waitForImages(images, in: session.id, link: link, queue: queue, until: Platform.Clock.steadyDate().addingTimeInterval(Self.imageWait), go)
             }
@@ -332,9 +384,10 @@ extension Requests {
             // Nothing of the text in the log: it is the user's words.
             let outcome: TypeOutcome = typed ? .typed : stopped.get() ?? .refused("the host didn't take all of it: it may not have gone in")
             switch outcome {
-            case .typed:
+            case .typed, .typedOnly:
                 note("send to session \(short): typed in, \(held.message.count) characters, \(images.count) image(s)")
                 queue.async { [weak self] in self?.engine?.noteUserInput(session) }
+            case .notWorking(let why): note("send to session \(short): not typed: \(why)")
             case .menuOpen(let open): note("send to session \(short): held, \(open)")
             case .refused(let why): note("send to session \(short): not typed: \(why)")
             }
@@ -503,9 +556,9 @@ extension Requests {
                             }
                             self.typeIn(first, into: session) { outcome in
                                 switch outcome {
-                                case .menuOpen:
+                                case .menuOpen, .notWorking:
                                     later(Self.heldEvery)
-                                case .typed, .refused:
+                                case .typed, .typedOnly, .refused:
                                     if case .refused(let why) = outcome { self.note("send to session \(short): a held message dropped: \(why)") }
                                     let rest = Array((self.heldSends.values[id] ?? []).drop { $0.action == first.action })
                                     self.heldSends.send(id, rest.isEmpty ? nil : rest)
