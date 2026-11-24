@@ -200,7 +200,9 @@ struct LeadCodexVerifierTests: LeadTeamFixture {
         advancing.stop()
         let session = try #require(followup(root)["session"] as? String)
         #expect(runtime.agents[session] == "claude")
-        let prompt = try String(contentsOf: vault.runFolder(root: root, name: "verify-fix").appendingPathComponent("prompt.md"), encoding: .utf8)
+        // A Claude launch's prompt as its command gives it: its file on the Mac, its text on Linux (inlined, the file
+        // removed: the security architecture document's inline launch settings).
+        let prompt = try LaunchArguments.prompt(of: "verify-fix", runtime)
         #expect(prompt.contains("Review the whole change against the pinned baseline") && prompt.contains("Codex worked"))
         #expect(prompt.contains("## Security checklist") == security)
         #expect(!(try verifier(root, runtime)).call("submit_audit", ["completion": "complete", "integrity": "clean", "summary": "Claude checked"]).isError)
@@ -254,7 +256,7 @@ struct LeadCodexVerifierTests: LeadTeamFixture {
         advancing.stop()
         let session = try #require(followup(root)["session"] as? String)
         #expect(runtime.agents[session] == "claude" && runtime.spawned.last?.trust == true)
-        let prompt = try String(contentsOf: vault.runFolder(root: root, name: "verify-fix").appendingPathComponent("prompt.md"), encoding: .utf8)
+        let prompt = try LaunchArguments.prompt(of: "verify-fix", runtime)
         #expect(prompt.contains("Review the whole change against the pinned baseline"))
         let base = try #require(followup(root)["base"] as? String)
         #expect(prompt.contains("git diff " + base + "...HEAD"))
