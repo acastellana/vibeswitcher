@@ -178,7 +178,7 @@ extension Requests {
     func listed(_ request: NodeWire.Request, items all: [ApproveItem], own: [ApproveOwn], engine: LeadEngine, reply: (NodeWire.Reply) -> Void) {
         // An acting page's list (`pageListMark`): what a page may not approve left out, and counted for the terminal.
         let fromPage = request.args?[Self.pageListMark]?.bool == true
-        let items = fromPage ? all.filter { KindSpec.spec($0.kind)?.page == .acts } : all
+        let items = fromPage ? all.filter(pageMayApprove) : all
         let terminalOnly = all.count - items.count
         guard items.count <= Self.approveMost else {
             return reply(.init(re: request.id, error: .init(.refused, "\(items.count) accepts wait, more than one code may cover (\(Self.approveMost)): "

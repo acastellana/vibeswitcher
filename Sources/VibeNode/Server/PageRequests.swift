@@ -99,6 +99,12 @@ extension Requests {
     /// what the page drew against now (`seenStands`); `approve.list` marked as the page's (`pageListMark`). On `queue`.
     func pageChecks(_ request: NodeWire.Request) -> PageShown {
         if let why = pageSetRefusal(request) { return .refused(.init(re: request.id, error: .init(.voice, why))) }
+        // A held config whose floor or guard rails aren't known to be the recorded ones: the terminal's (the vault is
+        // asked again when it acts: `LeadEngine.configAccept(fromPage:)`).
+        if request.kind == "config.accept", let id = request.args?["card"]?.string, let shown = engine?.cards.resolve(id)?.config {
+            let changed = ConfigHoldStore.pageNotSame(shown)
+            if !changed.isEmpty { return .refused(.init(re: request.id, error: .init(.voice, ConfigHoldStore.pageRefusalWords(changed)))) }
+        }
         if request.kind == "approve.list" {
             var marked = request
             var args = request.args ?? [:]
@@ -139,8 +145,9 @@ extension Requests {
                 asked.args = args
                 return .go(asked)
             }
-            // Never an item a page may not act (hooks.install: the terminal's), whoever listed the batch.
-            let terminal = held.items.filter { KindSpec.spec($0.kind)?.page != .acts }
+            // Never an item a page may not act (hooks.install: the terminal's; a held config whose floor or rails aren't
+            // known to be the recorded ones), whoever listed the batch.
+            let terminal = held.items.filter { !pageMayApprove($0) }
             guard terminal.isEmpty else {
                 return refuse(.voice, "batch \(id) holds \(terminal.count) item\(terminal.count == 1 ? "" : "s") a page may not approve: run `vibeswitcher approve` in a terminal")
             }
@@ -212,5 +219,14 @@ extension Requests {
         }
         note("web.confirm: the page showing its phrase is paired: it watches\(rights.contains(.act) ? " and acts" : "")")
         reply(.init(re: request.id, typed: WireKinds.WebConfirm.Result(confirmed: true, rights: WebAccess.names(rights), level: acting.level)))
+    }
+
+    /// Whether an acting page may approve `item` in a batch: its kind is a page's, and a held config's floor and rails
+    /// are known to be the recorded ones (`ConfigHoldStore.pageNotSame`). On `queue`.
+    func pageMayApprove(_ item: ApproveItem) -> Bool {
+        guard KindSpec.spec(item.kind)?.page == .acts else { return false }
+        guard item.kind == "config.accept" else { return true }
+        guard let id = item.args["card"]?.string ?? item.card?["id"]?.string, let shown = engine?.cards.resolve(id)?.config else { return false }
+        return ConfigHoldStore.pageNotSame(shown).isEmpty
     }
 }
