@@ -443,6 +443,12 @@ public enum LeadLaunch {
 
     static let autoMemoryVariable = "CLAUDE_CODE_DISABLE_AUTO_MEMORY"
 
+    /// Claude Code's updater off (its plugins' auto-update too): `prepare` sets it to 1 in every role's process
+    /// environment, a boxed session's too (`SandboxPlanner`). An interactive session whose binary is older than the
+    /// newest version on disk otherwise re-creates `~/.local/bin/claude`, which the vault takes as a config change made
+    /// while the team ran (docs/lead-v2/incidents.md, 2026-11-20; with it set, measured with 2.1.328, the link stays).
+    public static let autoUpdaterVariable = "DISABLE_AUTOUPDATER"
+
     /// Claude Code's folder for the project at `path` (in `~/.claude/projects`): every character but an ASCII letter or
     /// digit made a "-", and a name longer than 200 cut there and followed by "-" and its hash (as Claude Code 2.1.319
     /// names it: a JavaScript string hash of the UTF-16 path, its absolute value in base 36).
@@ -690,6 +696,8 @@ public enum LeadLaunch {
         var prepared = Prepared(command: parts.joined(separator: " "), promptFile: promptFile, mcpFile: mcpFile, settingsFile: settingsFile)
         // Marks the role's session: its hook gives it none of the notes plain sessions get (`SessionNote`).
         prepared.environment[SessionNote.roleVariable] = role.rawValue
+        // Its updater off, from the start (`autoUpdaterVariable`).
+        prepared.environment[autoUpdaterVariable] = "1"
         // The lead's model, for its tool server to note on the board (`LeadBoard.leadModel`): a refusal its session
         // stops at is then kept for that model, so a lead stopped at Fable's limit holds Fable back.
         if role == .lead, let model { prepared.environment[leadModelVariable] = model }

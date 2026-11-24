@@ -303,7 +303,7 @@ public enum SandboxPlanner {
         environment += ["HOME=\(inputs.home)", "PATH=\((toolchain.filter { inputs.pathFolders.map(SandboxPolicy.lexical).contains($0) } + ["/usr/local/bin", "/usr/bin", "/bin"]).joined(separator: ":"))",
                         "SHELL=/bin/bash", "TMPDIR=\(inputs.temporary)", "VIBESWITCHER_ROLE=\(role.rawValue)"]
         if agent {
-            environment += ["\(DoorProtocol.variable)=\(door)", "DISABLE_AUTOUPDATER=1"]
+            environment += ["\(DoorProtocol.variable)=\(door)", "\(LeadLaunch.autoUpdaterVariable)=1"]
         }
         if role == .worker, let common = try? gitRoots(inputs.worktree ?? "").get().common {
             environment += ["GIT_OBJECT_DIRECTORY=\(objectsFolder(inputs))", "GIT_ALTERNATE_OBJECT_DIRECTORIES=\(common)/objects"]

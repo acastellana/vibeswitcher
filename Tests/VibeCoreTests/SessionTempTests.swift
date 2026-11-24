@@ -64,13 +64,13 @@ struct SessionTempTests {
                                               server: "/s", name: "verify-x", folder: temp.url("run-verifier"), temporary: sessions)
         let worktree = Worktrees.path(root: root, slug: "x")
         #expect(lead.environment == ["TMPDIR": SessionTemp.folder(cwd: root, name: "lead-acme", in: sessions).path + "/",
-                                     SessionNote.roleVariable: "lead"])
+                                     SessionNote.roleVariable: "lead", "DISABLE_AUTOUPDATER": "1"])
         #expect(worker.environment == ["TMPDIR": SessionTemp.folder(cwd: worktree, name: "worker-x", in: sessions).path + "/",
-                                     SessionNote.roleVariable: "worker"])
+                                     SessionNote.roleVariable: "worker", "DISABLE_AUTOUPDATER": "1"])
         // A verifier's also runs its commands as branch code, with no auto-memory (`LeadLaunch.verifierEnvironment`),
         // and carries the settings for its commands' boxes it was started with (none given: the standard ones).
         #expect(verifier.environment == ["TMPDIR": SessionTemp.folder(cwd: worktree, name: "verify-x", in: sessions).path + "/",
-                                     SessionNote.roleVariable: "verifier"].merging(LeadLaunch.verifierEnvironment(server: "/s")) { $1 }
+                                     SessionNote.roleVariable: "verifier", "DISABLE_AUTOUPDATER": "1"].merging(LeadLaunch.verifierEnvironment(server: "/s")) { $1 }
             .merging([BranchRun.policyVariable: BranchRun.carried(.success(.standard))]) { $1 })
         for launch in [lead, worker, verifier] {
             let tmpdir = try #require(launch.environment["TMPDIR"])
@@ -96,7 +96,7 @@ struct SessionTempTests {
         try FileManager.default.createSymbolicLink(at: link, withDestinationURL: elsewhere)
         let launch = try LeadLaunch.prepare(role: .worker, root: root, task: "x", base: "claude", prompt: "p", start: "Go.",
                                             server: "/s", name: "worker-x", folder: temp.url("run"), temporary: link)
-        #expect(launch.environment == [SessionNote.roleVariable: "worker"])
+        #expect(launch.environment == [SessionNote.roleVariable: "worker", "DISABLE_AUTOUPDATER": "1"])
         // Nothing made or changed where it points.
         #expect(try FileManager.default.contentsOfDirectory(atPath: elsewhere.path) == [])
         #expect(try mode(elsewhere.path) == 0o755)

@@ -780,6 +780,20 @@ struct LeadStartTests {
         #expect(slots != "\(Platform.Files.sharedTemporaryRoot)/vibeswitcher-\(getuid())")
     }
 
+    /// The lead's session starts with Claude Code's updater off, in its process environment: an older lead binary's
+    /// interactive start would otherwise re-create `~/.local/bin/claude` (docs/lead-v2/incidents.md, 2026-11-20).
+    @Test func theLeadStartsWithTheUpdaterOff() async throws {
+        let world = try await world()
+        defer { world.stop() }
+        let lead = try started(await world.start())
+        #expect(world.spawns.value.first?.env["DISABLE_AUTOUPDATER"] == "1")
+        let session = try #require(world.leads().first { $0.id == lead })
+        let harness = NodeHarness(found: session, on: world.host, fake: world.fake)
+        try await harness.waitFor { harness.agentPid != nil }
+        let pid = try #require(harness.agentPid)
+        #expect(Self.environment(of: pid)?["DISABLE_AUTOUPDATER"] == "1")
+    }
+
     /// The security document's decision 15: the lead's tool server starts no Codex worker.
     @Test func theLeadGetsNoCodexWorkers() async throws {
         let world = try await world()
