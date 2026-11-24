@@ -217,12 +217,15 @@ struct ActingAttackTests {
         }
         let unterminated = Data(("\u{1B}]0;" + String(repeating: "x", count: 1 << 20)).utf8)
         let big = TerminalMask()
-        let started = Date()
-        var released = Data()
-        for at in stride(from: 0, to: unterminated.count, by: 4_096) { released += big.pass(unterminated.subdata(in: at..<min(at + 4_096, unterminated.count))) }
+        var released = Data(), mostHeld = 0
+        for at in stride(from: 0, to: unterminated.count, by: 4_096) {
+            released += big.pass(unterminated.subdata(in: at..<min(at + 4_096, unterminated.count)))
+            mostHeld = max(mostHeld, big.heldCount)
+        }
         #expect(released.count >= unterminated.count - TerminalMask.openEscapeHeld - 4_096, "an open OSC held \(unterminated.count - released.count) bytes")
         #expect(released + big.flush() == unterminated)
-        #expect(Date().timeIntervalSince(started) < 10, "a megabyte took too long: the held bytes re-read each time")
+        // What is re-read at each read stays bounded (no read re-reads the megabyte: never quadratic).
+        #expect(mostHeld <= TerminalMask.openEscapeHeld + 4_096, "\(mostHeld) bytes held at once")
         let slow = TerminalMask()
         var trickled = Data()
         for byte in Data("http://127.0.0.1:8765/#pair=\(code) then more\r\n".utf8) {

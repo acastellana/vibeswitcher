@@ -122,6 +122,8 @@ public final class TerminalMask: @unchecked Sendable {
 
     /// Whether a tail is held back.
     public var holding: Bool { !held.isEmpty }
+    /// How many bytes are held back (each read re-reads these: tests hold them bounded).
+    var heldCount: Int { held.count }
 
     /// What may go now, masked; a tail that may be a code's start, or an open escape (up to its cap), held back.
     public func pass(_ bytes: Data) -> Data {
