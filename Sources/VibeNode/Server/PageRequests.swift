@@ -122,7 +122,9 @@ extension Requests {
                 case .refused(let refusal): refused(refusal)
                 case .go(let now):
                     // At `confirm`, recorded with what the passkey approved, and that line given back.
-                    let mark = approved.map { String((via + "; passkey approved: " + $0).prefix(200)) } ?? via
+                    // The vault keeps a mark of 200 bytes at most: cut there, at a character's end (the line's quotes
+                    // and words may be more than one byte each).
+                    let mark = approved.map { Self.cut(via + "; passkey approved: " + $0, bytes: 200) } ?? via
                     self.notePageAction(request, token: credentials.token)
                     self.voiced(now, from: NodeLive.webPeer, via: mark) { answer in
                         var answer = answer
@@ -132,6 +134,16 @@ extension Requests {
                 }
             }
         }
+    }
+
+    /// `text` cut to at most `bytes` of UTF-8, at a character's end.
+    static func cut(_ text: String, bytes: Int) -> String {
+        var kept = ""
+        for character in text {
+            guard kept.utf8.count + character.utf8.count <= bytes else { break }
+            kept.append(character)
+        }
+        return kept
     }
 
     /// Whether `request` repeats an action this page made: the same page's token, kind and arguments (as it sent them).

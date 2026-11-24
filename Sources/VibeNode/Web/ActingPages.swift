@@ -43,6 +43,8 @@ public final class ActingPages: @unchecked Sendable {
     /// Called when the level goes down, at once, where `set` runs (the level now): the screen marks its connections
     /// as the level allows and closes those that acted (`WebRequestScreen.levelLowered`).
     public var onLowered: ((String) -> Void)?
+    /// Called once a new level is kept (above off): the screen gives each confirmed connection its rights at that level.
+    public var onLevel: ((String) -> Void)?
     /// Called when a write this server made couldn't be kept in the vault (a pairing's key, or a page token's digest):
     /// what it admitted ends.
     public var onLost: ((String) -> Void)?
@@ -189,6 +191,7 @@ public final class ActingPages: @unchecked Sendable {
             cache = acts
         }
         note("acting from the page set to \(level)")
+        if level != "off" { onLevel?(level) }
         return acts
     }
 

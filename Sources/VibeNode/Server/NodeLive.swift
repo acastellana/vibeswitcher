@@ -171,6 +171,8 @@ public final class NodeLive: @unchecked Sendable {
             requests?.pagePaired(request, credentials: credentials) { reply in transport.send(NodeWire.message(reply)) }
         }
         acting.onLost = { [weak screen] key in screen?.endActing(key: key, closeOn: listenerQueue) }
+        // A new level: each confirmed page told its rights at it, on its open connection.
+        acting.onLevel = { [weak screen] _ in screen?.relevel(on: listenerQueue) }
         let hub = hub
         requests.liveSeq = { [weak hub] in hub?.seq(of: $0) ?? 0 }
         requests.web = access

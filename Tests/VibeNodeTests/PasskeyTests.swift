@@ -139,7 +139,9 @@ struct PasskeyTests {
         acting.settled()
         world.queue.sync { world.requests.actingPages = acting }
         let lead = try await world.sleepingLead()
-        let first = try await world.asked("Ship it?", options: ["Yes", "No"], lead: lead)
+        // A question whose line, with its quotes, runs past the vault's 200 bytes for a page's mark (the browser check
+        // found the mark cut by characters, not bytes, and the act not recorded).
+        let first = try await world.asked("Ship it? " + String(repeating: "“Launch the onboarding page” ", count: 6), options: ["Yes", "No"], lead: lead)
         let second = try await world.asked("Rename it?", options: ["Yes", "No"], lead: lead)
         return (world, soft, PageCredentials(token: token, act: secret, origin: "localhost:8765"), acting,
                 try #require(world.card(first.card.id)), try #require(world.card(second.card.id)))

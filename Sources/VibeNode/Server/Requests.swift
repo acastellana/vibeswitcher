@@ -357,8 +357,9 @@ public final class Requests: @unchecked Sendable {
             return reply(.init(re: request.id, error: .init(code, why)))
         }
         // A scratch server's form (--test-web-pair, refused on the user's node): a test pairs its page, and confirms it
-        // (`web.pairing`, `web.confirm`), from its own socket, as it opens the web.
-        if ["web.open", "web.pairing", "web.confirm"].contains(request.kind), openWebForAnyone, request.args?["tailnet"] == nil {
+        // (`web.pairing`, `web.confirm`) and registers its passkey (`web.passkey`, `web.passkey.add`), from its own
+        // socket, as it opens the web.
+        if ["web.open", "web.pairing", "web.confirm", "web.passkey", "web.passkey.add"].contains(request.kind), openWebForAnyone, request.args?["tailnet"] == nil {
             note("web.open from pid \(facts.pid), in a scratch server's form (--test-web-pair): no voice asked")
             return act(request, from: facts, reply: reply)
         }

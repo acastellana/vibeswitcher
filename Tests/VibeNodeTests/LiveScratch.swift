@@ -11,9 +11,10 @@ enum LiveScratch {
     static let webArguments = ["--server-arg", ServerArguments.testWebPortFlag + "0", "--server-arg", ServerArguments.testWebPairFlag]
 
     /// `web.open` in the scratch form, on the server's socket: the page's address.
-    static func open(_ node: ScratchNode) throws -> (url: String, port: UInt16, code: String) {
+    static func open(_ node: ScratchNode, localhost: Bool = false) throws -> (url: String, port: UInt16, code: String) {
         let client = try WireClient(node)
-        let reply = try #require(WireClient.reply(client.request("web.open")), "no reply to web.open: \(node.said)")
+        let reply = try #require(WireClient.reply(client.request("web.open", args: localhost ? ["localhost": .bool(true)] : nil)),
+                                 "no reply to web.open: \(node.said)")
         let url = try #require(reply.result?["url"]?.string, "\(reply)")
         let rest = try #require(url.split(separator: ":").last.map(String.init))
         let port = try #require(UInt16(rest.prefix { $0.isNumber }), "\(url)")

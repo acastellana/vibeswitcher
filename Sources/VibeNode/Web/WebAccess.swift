@@ -638,6 +638,39 @@ public final class WebRequestScreen: WebSocketHandler, @unchecked Sendable {
         }
     }
 
+    /// The level changed (above off): each confirmed connection's rights as they are at it (`act` while it acts there:
+    /// at `confirm`, at localhost alone), told in a `paired` message (its secret as it holds it, its rights and kinds),
+    /// the hub too; on `queue` (the listener's).
+    public func relevel(on queue: DispatchQueue) {
+        guard let acting = actingPages else { return }
+        let changed = lock.withLock { () -> [(LiveTransport, LiveRights, PageCredentials)] in
+            var changed: [(LiveTransport, LiveRights, PageCredentials)] = []
+            for (id, open) in opens {
+                guard let transport = open.transport, let credentials = open.credentials, acting.watches(token: credentials.token, secret: credentials.act),
+                      case .page(let rights, let terminals) = open.principal else { continue }
+                var now = rights.union([.watch])
+                if acting.acts(token: credentials.token, secret: credentials.act, origin: credentials.origin) { now.insert(.act) } else { now.remove(.act) }
+                guard now != rights else { continue }
+                opens[id]?.principal = .page(now, terminals: terminals)
+                changed.append((transport, now, credentials))
+            }
+            return changed
+        }
+        queue.async { [weak self] in
+            guard let self else { return }
+            for (transport, rights, credentials) in changed {
+                self.inner.opened(transport, rights: rights)
+                let message = NodeWire.Value.object([
+                    "v": .int(NodeWire.version), "kind": .string("paired"), "act": .string(credentials.act ?? ""),
+                    "rights": .array(WebAccess.names(rights).map(NodeWire.Value.string)),
+                    "kinds": .array(Principal.page(rights, terminals: self.terminals).kinds.map(NodeWire.Value.string)),
+                    "phrase": .string(PagePairing.phrase(token: credentials.token)),
+                ])
+                transport.send(Data(NodeWire.line(message).dropLast()))
+            }
+        }
+    }
+
     /// How many acting connections are open.
     public var actingCount: Int { lock.withLock { opens.values.filter { $0.principal.acts && $0.transport != nil }.count } }
 

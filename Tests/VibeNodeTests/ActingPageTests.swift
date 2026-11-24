@@ -421,4 +421,43 @@ struct ActingPageTests {
         acting.settled()
         #expect(acting.level == "off", "the refresh asked before put trust back")
     }
+
+    /// A level raised while a confirmed page is open: the page is told its rights at it on its open connection (a
+    /// `paired` message with its secret as it holds it, its rights and kinds), the hub too; at `confirm`, only a page at
+    /// localhost gets `act` (the browser check found a page confirmed at off never learning it acts).
+    @Test func aNewLevelReachesTheOpenConfirmedPages() throws {
+        let vault = MemoryVaultV2()
+        let access = pageGate(vault, root: scratch.url("web-root"))
+        let acting = try #require(access.acting)
+        let admissions = Locked<[ObjectIdentifier: WebAdmission]>([:])
+        let inner = Inner()
+        let screen = WebRequestScreen(inner, admissionOf: { admissions.value[ObjectIdentifier($0)] })
+        screen.acting = acting
+        var pages: [(Recorder, String)] = []
+        for origin in ["localhost:8765", "127.0.0.1:8765"] {
+            var (admission, code) = try pagePairs(access)
+            admission.origin = origin
+            let page = Recorder()
+            admissions.value[ObjectIdentifier(page)] = admission
+            screen.opened(page, rights: admission.rights)
+            let pairing = try #require(access.takePairing(code: code))
+            let secret = acting.confirmed(token: pairing.token, tokenEnds: pairing.tokenEnds)
+            #expect(screen.confirmPairing(code, secret: secret, rights: [.read, .draft, .watch]))
+            pages.append((page, secret))
+        }
+        let queue = DispatchQueue(label: "relevel")
+        acting.onLevel = { _ in screen.relevel(on: queue) }
+        _ = try acting.addPasskey(id: "a2V5", publicKey: "cHVi")
+        _ = try acting.set(level: "confirm")
+        queue.sync {}
+        let local = try #require(pages[0].0.messages.last), loopback = pages[1].0.messages.last
+        #expect(local["kind"]?.string == "paired" && local["act"]?.string == pages[0].1, "\(local)")
+        #expect(local["rights"]?.array?.compactMap(\.string) == ["read", "draft", "watch", "act"])
+        #expect(local["kinds"]?.array?.contains(.string("answer")) == true)
+        #expect(loopback?["rights"]?.array?.contains(.string("act")) != true, "127.0.0.1 doesn't act at confirm")
+        _ = try acting.set(level: "trust")
+        queue.sync {}
+        #expect(pages[1].0.messages.last?["rights"]?.array?.contains(.string("act")) == true, "at trust it does")
+        #expect(inner.rights.value.last?.contains(.act) == true, "the hub told")
+    }
 }
