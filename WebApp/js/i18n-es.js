@@ -161,7 +161,7 @@ export const ES = {
   quietForm: 'O dale un objetivo en el formulario de líder de Nuevo proyecto.',
   connecting: 'Conectando con el nodo…',
   apConfirmInTerminal: "Confirma esta página en tu terminal:",
-  apConfirmSub: "vibeswitcher web muestra las mismas palabras: compruébalas y confirma allí.",
+  apConfirmSub: "Escribe estas palabras donde vibeswitcher web las pida.",
   unpaired: 'Sin vincular con un nodo',
   unpairedSub: 'Ejecuta vibeswitcher web en una terminal y abre en este navegador la dirección que muestra.',
   menu: 'Proyectos y lugares',

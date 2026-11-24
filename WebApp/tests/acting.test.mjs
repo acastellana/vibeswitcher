@@ -101,7 +101,7 @@ test('a card’s request carries the card, the seen the page drew it with and it
   assert.equal(refusalWords({ code: 'changed' }), 'This changed since the page drew it: look again. Nothing was done.');
 });
 
-test('the settings a page may not set even when it acts stay the terminal’s: web_acts on, a floor, the policy', () => {
+test('the settings a page may not set even when it acts stay the terminal’s: web_acts raised, a floor, the policy', () => {
   assert.equal(pageMaySet('web_acts', 'off'), true, 'off, the one value');
   assert.equal(pageMaySet('web_acts', ' OFF '), true);
   assert.equal(pageMaySet('web_acts', 'on'), false);
