@@ -99,5 +99,7 @@ export function actsLine(app, { compact = false } = {}) {
   // From trust a page may lower acting to a passkey per action (never raise it).
   const lower = !compact && here && level === 'trust' && acts.passkeyOrigin && app.store.can('set')
     ? doButton(app, { label: t('acAskPasskey'), kind: 'set', quiet: true, className: 'small', args: () => ({ key: 'web_acts', value: 'confirm' }) }).el : null;
-  return h(compact ? 'div' : 'p', { class: 'acts-line' + (compact ? ' compact' : '') }, h('span', null, words), lower, off);
+  // This page's words (its name, by which the terminal names it), on This node.
+  const named = !compact && app.store.state.pageWords ? h('span', { class: 'page-words' }, ' ', t('pkThisPage'), ' ', h('strong', null, app.store.state.pageWords)) : null;
+  return h(compact ? 'div' : 'p', { class: 'acts-line' + (compact ? ' compact' : '') }, h('span', null, words), named, lower, off);
 }

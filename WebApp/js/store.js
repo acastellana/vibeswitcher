@@ -48,6 +48,8 @@ export function createStore(options = {}) {
     plugins: null,
     // The words a page that just redeemed a pairing code shows until the user confirms it in the terminal.
     phrase: null,
+    // A confirmed page's words: its name, by which the terminal names it (`vibeswitcher web --passkey`).
+    pageWords: null,
     // Why this tab no longer acts for the user, once it did: 'reloaded' (a pairing lives in the tab's memory only),
     // 'ended' (its pairing ended: 12 hours, ended in the terminal, acting lowered or turned off), 'unconfirmed' (it
     // reloaded to the node's newer page before the terminal confirmed it). Null: nothing to say.
@@ -553,6 +555,11 @@ export function createStore(options = {}) {
     // "This tab no longer acts" dismissed; a reload asked for by the user.
     forgetActsLost() { state.actsLost = null; feed?.forgetActed?.(); emit(new Map([['connection', [{ connection: state.connection }]]])); },
     reloadNow() { feed?.reloadNow?.(); },
+    setPageWords(words) {
+      if (state.pageWords === words) return;
+      state.pageWords = words;
+      emit(new Map([['connection', [{ connection: state.connection }]]]));
+    },
     setPhrase(phrase) {
       if (state.phrase === phrase) return;
       state.phrase = phrase;

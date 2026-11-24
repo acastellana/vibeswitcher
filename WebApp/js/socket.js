@@ -178,7 +178,11 @@ export function connectSocket(store, options) {
       actSecret = null;
       store.setActsLost('ended');
     }
-    const phrase = typeof message.auth?.phrase === 'string' ? message.auth.phrase : null;
+    // The words: a pairing waiting for the terminal (no "watch" yet) shows them to be typed there; a confirmed one
+    // keeps them as this page's name (the terminal names a page by them, as when it adds a passkey).
+    const words = typeof message.auth?.phrase === 'string' ? message.auth.phrase : null;
+    const phrase = rights.includes('watch') ? null : words;
+    store.setPageWords(rights.includes('watch') ? words : null);
     const newer = !!(mine && message.assets && message.assets !== mine);
     pair = null;
     // A code just redeemed by a page older than the node's build: reloaded before any phrase shows (the confirmation
@@ -226,6 +230,7 @@ export function connectSocket(store, options) {
     if (typeof message.act !== 'string' || !Array.isArray(message.rights)) return;
     actSecret = message.act;
     store.setPhrase(null);
+    if (typeof message.phrase === 'string') store.setPageWords(message.phrase);
     store.setActsLost(null);
     flag(ACTED_KEY, true);
     if (Array.isArray(message.kinds)) return store.setKinds(message.kinds, message.plugins ?? store.state.plugins, message.rights);

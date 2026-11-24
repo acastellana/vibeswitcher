@@ -176,9 +176,10 @@ function drawPasskeyOffer() {
   if (passkeyOffer.hidden) return;
   if (offer.expires) setTimeout(drawPasskeyOffer, Math.max(0, Date.parse(offer.expires) - Date.now()) + 50);
   const add = h('button', { class: 'button small', type: 'button', disabled: adding?.state === 'adding' || adding?.state === 'added', onclick: () => store.addPasskey(registerPasskey) }, t('pkAdd'));
+  const named = store.state.pageWords ? h('span', { class: 'page-words' }, t('pkThisPage'), ' ', h('strong', null, store.state.pageWords)) : null;
   const said = !adding ? t('pkOffer') : adding.state === 'adding' ? t('pkAdding') : adding.state === 'added' ? t('pkAdded', { id: adding.id })
     : adding.state === 'cancelled' ? t('pkCancelled') : adding.state === 'unsupported' ? t('pkUnsupported') : t('pkRefused', { why: adding.why });
-  passkeyOffer.replaceChildren(h('span', null, said), adding?.state === 'added' ? null : add);
+  passkeyOffer.replaceChildren(h('span', null, said), named, adding?.state === 'added' ? null : add);
 }
 store.subscribe('connection', drawPasskeyOffer);
 store.subscribe('node', drawTabBanner);
