@@ -43,7 +43,8 @@
       "code"
     ],
     "hooks.install" : [
-      "agents"
+      "agents",
+      "codex"
     ],
     "hooks.remove" : [
       "agents"
@@ -293,7 +294,8 @@
       "code"
     ],
     "hooks.install" : [
-      "agents"
+      "agents",
+      "codex"
     ],
     "hooks.remove" : [
       "agents"
