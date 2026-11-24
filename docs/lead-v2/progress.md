@@ -673,3 +673,11 @@
 - 2026-11-24 17:04 Audit of sb5-the-host-confines: complete, clean, round 2: 1 Important closed, 5 Nit (4 unconfirmed), 1 Pre-existing unconfirmed (2 finders voted: 0 new findings confirmed, 0 unconfirmed)
 - 2026-11-24 17:06 Started a worker on sb5-the-host-confines
 - 2026-11-24 17:06 Planned an-audit-whose-own: An audit whose own test run failed never reads "complete, clean" (review audit, for security)
+- 2026-11-24 17:12 Audit of tests-that-write-a at 3f269664 by 2 finders (contract and acceptance; bugs, regressions and security); the shared run of its merged result 8e169c85: test command failed
+- 2026-11-24 17:12 Automatically (auto_advance): The verifier on tests-that-write-a ended without a verdict (exited 143): closed its session and started the audit again on the same commit, 3f269664. If this one ends without a verdict too, it's left to you.
+- 2026-11-24 17:12 Automatically (auto_advance): sandbox-env-hygiene-no's audit at 4b0a7eb2 is held (update_task hold_audit): nothing moves it on until an exception is recorded, or hold_audit: false.
+- 2026-11-24 17:12 Automatically (auto_advance): the-config-card-says's audit at 42eee715 is held (update_task hold_audit): nothing moves it on until an exception is recorded, or hold_audit: false.
+- 2026-11-24 17:12 Automatically (auto_advance): The account's usage is near a limit: the weekly limit (every model): 88% used, resets Nov 25, 18:00. At 80% of a limit VibeSwitcher starts no workers or audits on any model, so the limit doesn't stop one mid-task; sessions already running go on. Tell the user. Nothing on it starts by itself until the reset, then it does; start_worker or audit with override_usage: true starts one anyway.
+- 2026-11-24 17:13 Audit of tests-that-write-a: finder 2 of 2 submitted (complete, clean, 0 findings)
+- 2026-11-24 17:13 Audit of tests-that-write-a: incomplete, clean, round 1: 1 Important unconfirmed (2 finders voted: 0 new findings confirmed, 1 unconfirmed)
+- 2026-11-24 17:13 Started a worker on tests-that-write-a
