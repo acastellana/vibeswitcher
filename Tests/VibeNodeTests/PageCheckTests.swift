@@ -74,9 +74,34 @@ struct PageCheckTests {
         let question = "Launch the onboarding page to the testers on Thursday, or wait for the copy review?"
         try tools.call("ask_user", ["question": question, "options": ["Thursday", "Wait for the review"]])
         try #require(await eventually(timeout: 120) { tools.calls().count == 1 }, "\(node.said)")
+        // A long approval, as the real node's leads ask them: markdown (bold, code, a list) around the question, and a
+        // commit on its task's branch changing ten files. The waiting block shows its question line, a few lines and the
+        // key facts, the files one click away; "Read it all" opens the whole text in the side sheet.
+        _ = try await scratchGit(repo.path, ["checkout", "-q", "-b", "agent/upload-retry"])
+        for index in 1...10 {
+            let file = repo.appendingPathComponent("Sources/Upload/Part\(index).swift")
+            try FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try "// part \(index) of the upload retry\nlet part\(index) = \(index)\n".write(to: file, atomically: true, encoding: .utf8)
+        }
+        _ = try await scratchGit(repo.path, ["add", "-A"])
+        _ = try await scratchGit(repo.path, ["commit", "-q", "-m", "upload: retry a failed upload once"])
+        let approved = try await scratchGit(repo.path, ["rev-parse", "HEAD"])
+        _ = try await scratchGit(repo.path, ["checkout", "-q", "main"])
+        let approval = "Asked again (the node's restart lost the card): merge the upload retry task (`upload-retry`, phase 2) at `\(approved.prefix(8))`?"
+            + " Its audit passed: two finders, complete and clean, and the full test run passed.\n\n"
+            + "**What it changes (10 files, all upload code):**\n"
+            + "- **A failed upload is retried once.** The retry waits a second, then gives up with the server's own words.\n"
+            + "- **Your choice of Nov 21 is built.** A retry never sends a file twice: the server's `upload-id` says so.\n"
+            + "- **The promise is tested where the gate runs.** A new test fails the first upload on purpose.\n\n"
+            + "**How it was checked:** the upload suites and lints passed (138 tests), the new tests passed 3 of 3 under load, and both "
+            + "finders ran them in their own boxes. **Risk:** a slow server now waits one more second. Revert: `revert(upload-retry)`."
+        try tools.call("ask_user", ["question": approval, "options": ["Approve \(approved)", "Not yet"]])
+        try #require(await eventually(timeout: 120) { tools.calls().count == 2 }, "\(node.said)")
         // The sample board with its two goals (the launch, open, with the first two tasks; the uploads, done), the rest unsorted.
-        let made = WireVectors.goaled(WireVectors.sampleBoard(now: Date().timeIntervalSince1970, worker: site.session.id), now: Date().timeIntervalSince1970)
+        var made = WireVectors.goaled(WireVectors.sampleBoard(now: Date().timeIntervalSince1970, worker: site.session.id), now: Date().timeIntervalSince1970)
         // A result the lead posted, its body markdown with a table: the conversation's line and the side sheet's.
+        // A task title as long as the real node's: it wraps inside the right column, never past the window's edge.
+        made.tasks[2].title = "Tests that write a program and run it no longer fail with \"Text file busy\" on a loaded Linux host"
         let result = "The pricing page has its new copy"
         let goals = WireVectors.sampleGoals(now: Date().timeIntervalSince1970)
         try GoalStore(root: repo.path).update { $0 = goals }
@@ -99,7 +124,9 @@ struct PageCheckTests {
 
         // The lead's latest statement (a decision in its records), which a short conversation shows at its top.
         let statement = "Ship the copy first and the pricing table after"
-        try BoardStore(root: repo.path).appendDecision(statement, why: "The table waits on the plan names")
+        try BoardStore(root: repo.path).appendDecision(statement + ": Nov 24, about 11:50, the user switched the node's build to e3ef7b07 (not a commit in this "
+            + "clone); the node restarted, the five idle workers were parked and the four open cards were lost. Asked again: F78A484D (accept the held "
+            + "config) and the merge.", why: "The table waits on the plan names")
 
         // A second lead session of the project that its board doesn't name: a lead it replaced, still running, as four
         // were on the real node on 2026-11-23 while a merge held the rotation gate (the engine ends a replaced lead only
@@ -130,10 +157,10 @@ struct PageCheckTests {
             let listed = try await node.run(["questions", "--json"])
             let cards = ((try? JSONSerialization.jsonObject(with: Data(listed.output.utf8)) as? [String: Any])?["cards"] as? [[String: Any]]) ?? []
             kinds = Set(cards.compactMap { $0["kind"] as? String })
-            if kinds.isSuperset(of: ["question", "plugin"]) { break }
+            if kinds.isSuperset(of: ["question", "approval", "plugin"]) { break }
             try await Task.sleep(nanoseconds: 300_000_000)
         }
-        try #require(kinds.isSuperset(of: ["question", "plugin"]), "cards: \(kinds)\n\(node.said)")
+        try #require(kinds.isSuperset(of: ["question", "approval", "plugin"]), "cards: \(kinds)\n\(node.said)")
 
         let launch = try #require(goals.goals.first, "the sample board's goals")
         let opened = try LiveScratch.open(node)
@@ -141,7 +168,7 @@ struct PageCheckTests {
             "session": "example-site", "chatHref": "#/s/" + NodeIds.session(host: site.session.id),
             "chat": "The headline never wraps",
             "projectHref": "#/p/" + NodeIds.project(root: repo.path).addingPercentEncoding(withAllowedCharacters: .alphanumerics)! + "/lead",
-            "question": "Launch the onboarding page to the testers", "result": result, "task": made.tasks[0].slug, "statement": statement,
+            "question": "Launch the onboarding page to the testers", "approval": "Merge the upload retry task", "approvalFiles": "10", "result": result, "task": made.tasks[0].slug, "statement": statement,
             "shellHref": "#/s/" + NodeIds.session(host: asker.id), "shell": "echo page-check-ran",
             "board": made.tasks[0].title, "goal": launch.title, "goalID": launch.id, "estimated": made.tasks[1].slug,
             "plainHref": "#/p/" + NodeIds.project(root: docs.path).addingPercentEncoding(withAllowedCharacters: .alphanumerics)! + "/roadmap",
@@ -162,7 +189,7 @@ struct PageCheckTests {
                          output: .path(said.path, flags: O_WRONLY | O_TRUNC), limit: 240)
         }
         let table = (try? String(contentsOf: said, encoding: .utf8)) ?? ""
-        for row in ["Projects and own sessions", "Chat", "Question card", "Lead conversation", "Latest statement", "What waits elsewhere", "Side sheet", "Team tab",
+        for row in ["Projects and own sessions", "Chat", "Question card", "Long approval", "Columns fit", "Lead conversation", "Latest statement", "What waits elsewhere", "Side sheet", "Team tab",
                     "Replaced lead", "Shell card", "Roadmap", "Roadmap dates", "Task estimate", "Estimates in Stats", "Plain roadmap",
                     "Deep links", "This node", "Settings", "Language", "Phone", "Console"] {
             #expect(table.split(separator: "\n").contains { $0.hasPrefix(row + " ") && $0.contains(" pass ") }, "\(row):\n\(table)")

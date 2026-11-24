@@ -94,6 +94,7 @@ function brief() {
 }
 
 const sheet = sideSheet();
+app.sheet = sheet;
 const left = leftColumn(app, { brief });
 const project = projectView(app, { sheet });
 const right = rightColumn(app);

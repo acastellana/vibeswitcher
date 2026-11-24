@@ -53,7 +53,7 @@ function editor(setting, folder, editing, app = null) {
     problem.hidden = !why;
     if (why) setText(problem, t('svIsWhy', { key: setting.key, why }));
     // With the `act` right, Set sets it from here (`set`), but for what a page may not set (a floor, the policy,
-    // web_acts on): those stay the terminal's line.
+    // web_acts raised): those stay the terminal's line.
     const acts = !why && app && actsFor(app, 'set') && pageMaySet(setting.key, value);
     lineSlot.replaceChildren(...(why ? [h('span')] : [acts ? doButton(app, { label: t('acSet'), kind: 'set',
       args: () => ({ ...(folder ? { folder } : {}), key: setting.key, value: String(editing.get(setting.key) ?? '') }), done: () => { editing.delete(setting.key); } }).el : null,
