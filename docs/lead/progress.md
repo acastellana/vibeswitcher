@@ -4494,3 +4494,5 @@ Turn what's a real bug into a task (one already on the board needs nothing); the
 - 2026-11-24 03:18 Audit of fix-the-flaky-test-26: complete, clean, round 1: 1 Nit open
 - 2026-11-24 03:21 Committed the records at 8ea549ae before merging fix-the-flaky-test-26: the last merge failed on docs/lead/decisions.md, docs/lead/progress.md
 - 2026-11-24 03:32 Merged fix-the-flaky-test-26: Fix the flaky test afterARunHeardAFlatOneSaysClaudeDidntCatchAnything() (build 68a67ba8203f)
+- 2026-11-24 03:32 Automatically (auto_advance): Merged fix-the-flaky-test-26 (Fix the flaky test afterARunHeardAFlatOneSaysClaudeDidntCatchAnything()) into main at 64a599ce, on its passing audit and the full test run.
+- 2026-11-24 03:32 Automatically (auto_advance): Cleaned up fix-the-flaky-test-26 (freed 1.8 GB of build output and temporary folders). It stays done.
