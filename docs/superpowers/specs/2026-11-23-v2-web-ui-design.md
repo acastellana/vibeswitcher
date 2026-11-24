@@ -139,6 +139,12 @@ merge). Recommended instead, and the planned next step: a passkey touch per acti
 - What a page shows before an acting click is what the command line shows before its code: the card whole, the batch
   listed, the command of a shell request in full.
 - `status` and This node say the page can act and since when.
+- One pairing serves every tab of that origin in that browser profile: the tabs pass its secret to each other in memory
+  (a BroadcastChannel named by the origin's host and port), never through storage, never inside a frame, and a tab
+  holding another pairing's token keeps its own.
+- What that widens: any script that runs on the node's own origin could ask for the secret. Nothing else runs there:
+  the page's content policy allows only its own scripts, it is never framed (`frame-ancestors 'none'`), and plugin
+  pages are served on their own port, another origin.
 
 As built (the node's side, after its security reviews):
 

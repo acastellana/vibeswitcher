@@ -137,3 +137,17 @@ test('an authenticator that can’t make an ES256 passkey is said plainly, apart
     assert.equal(store.state.passkeyAdding.state, state);
   }
 });
+
+test('the ways to send follow the session’s agent, and the note says what the node did, in its words first', async () => {
+  const { waysFor, sendArgs, sentWords } = await import('../js/sendways.js');
+  assert.deepEqual(waysFor({}), ['step', 'now'], 'until the node lists them');
+  assert.deepEqual(waysFor({ sendWays: ['interrupt', 'after', 'step', 'now', 'sideways'] }), ['step', 'now', 'after', 'interrupt']);
+  assert.deepEqual(sendArgs({ id: 's1', sendWays: ['step', 'now'] }, 'hi', 'now'), { session: 's1', text: 'hi', when: 'now', now: true }, 'now said the old way too');
+  assert.deepEqual(sendArgs({ id: 's1', sendWays: ['interrupt'] }, 'hi', 'interrupt', ['/a.png']), { session: 's1', text: 'hi', when: 'interrupt', images: ['/a.png'] });
+  assert.deepEqual(sendArgs({ id: 's1' }, 'hi', 'now'), { session: 's1', text: 'hi', now: true }, 'no `when` to a node that lists no ways');
+  assert.deepEqual(sendArgs({ id: 's1' }, 'hi', 'step'), { session: 's1', text: 'hi' });
+  assert.equal(sentWords('after', { when: 'step', said: 'Claude Code has no queue for after its turn: sent at its next step.' }), 'Claude Code has no queue for after its turn: sent at its next step.');
+  assert.equal(sentWords('now', { when: 'step' }), 'Sent: read at its next step.', 'what was done, not what was asked');
+  assert.equal(sentWords('interrupt', { when: 'interrupt' }), 'Interrupted, then sent.');
+  assert.equal(sentWords('now', { queued: true, waits: 'a question is open on its screen' }), 'Held: a question is open on its screen. It goes in as soon as that closes.');
+});

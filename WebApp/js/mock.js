@@ -68,7 +68,7 @@ const ago = (seconds) => new Date(now() - seconds * 1000).toISOString();
   const sessions = new Map();
   const add = (sid, fields) => sessions.set(sid, session(sid, fields));
   if (!options.empty) {
-    add(LEAD, { status: 'needs-you', since: ago(39), startedAt: ago(5400), role: 'lead', lead: SITE_PROJECT, branch: 'landing-base', title: 'Sync the landing pages and finish the sidebar review' });
+    add(LEAD, { sendWays: ['step', 'now', 'interrupt'], status: 'needs-you', since: ago(39), startedAt: ago(5400), role: 'lead', lead: SITE_PROJECT, branch: 'landing-base', title: 'Sync the landing pages and finish the sidebar review' });
     add(W_SYNC, { status: 'working', since: ago(252), role: 'worker', lead: SITE_PROJECT, task: 'sync-landing-base', branch: 'agent/sync-landing-base', title: 'Sync landing-base with main', detail: 'Resolving the hero’s conflicts', activity: 'Edit pages/hero.html', activitySince: ago(12) });
     add(W_CLEAN, { agent: 'codex', status: 'idle', since: ago(130), startedAt: ago(1300), role: 'worker', lead: SITE_PROJECT, task: 'cleanup-ended-folders', branch: 'agent/cleanup-ended-folders', title: 'Clean up ended sessions’ folders' });
     add(V_CLEAN, { status: 'working', since: ago(118), role: 'verifier', lead: SITE_PROJECT, task: 'cleanup-ended-folders', branch: 'agent/cleanup-ended-folders', title: 'Clean up ended sessions’ folders', detail: 'Checking the work', activity: 'Read tools/cleanup.py', activitySince: ago(60) });
@@ -88,6 +88,8 @@ const ago = (seconds) => new Date(now() - seconds * 1000).toISOString();
   const leads = new Map(options.empty ? [] : [[SITE_PROJECT, {
     project: SITE_PROJECT, root: SITE, session: LEAD, named: null, bound: LEAD, replaced: [], held: 0, reportsWaiting: 0, notice: null,
     starting: false, lastStart: null, lastStartAt: ago(5400), looks: 14, questions: { open: 1, blocking: 1 }, cards: [CARD_LAUNCH],
+    // What the user told the lead (by action), and whether it has read it (the node's `delivered`).
+    told: [],
     // The push the lead asked for (push_remote), open: its card in the lead's chat drafts the two lines that settle it.
     push: { id: '3c9e1f20', commit: 'c41d7e09b2a65f38d1e0c7b94a2f6e1d3b8c5a70', short: 'c41d7e09', branch: 'landing-base', remote: 'origin',
       target: 'origin/landing-base', url: 'git@example.invalid:example-site.git', ahead: 2,
@@ -134,7 +136,7 @@ const ago = (seconds) => new Date(now() - seconds * 1000).toISOString();
       { id: 'mock-decision-4', summary: null, at: ago(9000), text: 'Run the page tests on every merge', why: 'Two merges broke the hero last week.' },
     ],
     answered: [
-      { id: 'q-cache', state: 'answered', text: 'Cache for a day or a year?', answer: 'A year, with hashed names', proposal: null, why: null, reworded: false, task: 'cache-static-assets', at: ago(2100) },
+      { id: 'q-cache', state: 'answered', text: 'Cache for a day or a year?', answer: 'A year, with hashed names', proposal: null, why: null, reworded: false, task: 'cache-static-assets', at: ago(2100), delivered: ago(2000) },
       { id: 'q-footer', state: 'withdrawn', text: 'Should the footer link to the old blog?', answer: null, proposal: null, why: 'The blog moved; the link goes to the new one.', reworded: false, task: null, at: ago(4000) },
     ],
     files: [
@@ -618,6 +620,12 @@ const ago = (seconds) => new Date(now() - seconds * 1000).toISOString();
         ? `The timer had run out: the lead went ahead with ‘${card.question.answer}’. Your answer reached it as a note.`
         : `Already answered: ${card.question.answer}. Your new answer wasn’t sent.`);
       closeCard(card, 'answered', { state: 'answered', answer: args.answer, answeredVersion: card.question.version });
+      // The conversation's record of it, not read by the lead until its next step (the node's `delivered`).
+      const board = boards.get(SITE_PROJECT);
+      const entry = { id: card.question.id, card: card.id, version: card.question.version, state: 'answered', text: card.question.text, answer: args.answer, proposal: null, why: null, reworded: false, task: card.question.task, at: new Date().toISOString(), delivered: null, replaceable: card.kind === 'question' };
+      board.answered = [...(board.answered || []).filter((one) => one.id !== entry.id), entry];
+      emit(put('boards', boards, SITE_PROJECT));
+      later(25000, () => { entry.delivered = new Date().toISOString(); entry.replaceable = false; emit(put('boards', boards, SITE_PROJECT)); });
       if (card.kind === 'approval' && args.answer.startsWith('Approve')) {
         emit(setTask('cleanup-ended-folders', { status: 'done', since: new Date().toISOString(), merged: { commit: COMMIT.slice(0, 7), at: new Date().toISOString(), tested: true } }));
         later(700, () => stream(LEAD, 'Approved and merged: the clean-up is on landing-base.'));
@@ -625,6 +633,34 @@ const ago = (seconds) => new Date(now() - seconds * 1000).toISOString();
         later(700, () => stream(LEAD, `Got it: ${args.answer}. I’ll plan the rest around that.`));
       }
       return { ok: true, result: { card: card.id, state: 'answered' } };
+    }
+    // Changing an answer the lead hasn't read (`answer.replace`), and the user's messages to the lead (`tell`, and
+    // `tell.retract` while unread).
+    if (message.kind === 'answer.replace') {
+      const board = boards.get(SITE_PROJECT);
+      const entry = (board.answered || []).find((one) => one.card === args.card);
+      if (!entry) return { ok: false, error: { code: 'gone', message: 'That answer isn’t on the board.' } };
+      if (entry.delivered) return { ok: false, error: { code: 'delivered', message: 'The lead has read that answer already.' } };
+      entry.answer = args.text;
+      emit(put('boards', boards, SITE_PROJECT));
+      return { ok: true, result: { outcome: 'replaced', card: args.card } };
+    }
+    if (message.kind === 'tell') {
+      const lead = leads.get(SITE_PROJECT);
+      const told = { action: message.action, at: new Date().toISOString(), delivered: null };
+      lead.told = [...(lead.told || []), told];
+      emit(put('leads', leads, SITE_PROJECT));
+      later(20000, () => { if (lead.told.includes(told)) { told.delivered = new Date().toISOString(); emit(put('leads', leads, SITE_PROJECT)); } });
+      return { ok: true, result: { project: SITE_PROJECT, session: LEAD } };
+    }
+    if (message.kind === 'tell.retract') {
+      const lead = leads.get(SITE_PROJECT);
+      const told = (lead.told || []).find((one) => one.action === args.action);
+      if (!told) return { ok: false, error: { code: 'gone', message: 'That message was taken back already, or isn’t known.' } };
+      if (told.delivered) return { ok: false, error: { code: 'delivered', message: 'The lead has read it already.' } };
+      lead.told = lead.told.filter((one) => one !== told);
+      emit(put('leads', leads, SITE_PROJECT));
+      return { ok: true, result: { retracted: true } };
     }
     if (message.kind === 'hold') {
       const card = cards.get(args.card);
@@ -660,7 +696,10 @@ const ago = (seconds) => new Date(now() - seconds * 1000).toISOString();
         if (args.session === LEAD) emit(...refreshLead('done'));
         else emit(setSession(args.session, { status: 'done', since: new Date().toISOString() }));
       }));
-      return { ok: true, result: {} };
+      // What was done, in the node's words (`when`, `said`): Claude Code has no queue for after the turn.
+      const when = args.when || (args.now ? 'now' : 'step');
+      const said = when === 'after' && target.agent !== 'codex' ? 'Claude Code has no key for after this turn: sent at its next step.' : null;
+      return { ok: true, result: { session: args.session, when: said ? 'step' : when, ...(said ? { said } : {}) } };
     }
     if (message.kind === 'session.draft' || message.kind === 'session.draft.clear') {
       const target = sessions.get(args.session);

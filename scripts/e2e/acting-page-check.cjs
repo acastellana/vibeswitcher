@@ -13,7 +13,7 @@
 // - Changed: the page holds back the node's frames (a test shim around WebSocket, never the page's code), asks the
 //   test to reword the second question (OUT/revise.want, answered by OUT/revise.done), then clicks the option it drew:
 //   the node refuses it as `changed` and the card says to look again; let go, the card shows the new wording.
-// - Send now: the message box's Send now sends to the lead's session at once (`send` now); its note says what became
+// - Send now: the Send menu's Now sends to the lead's session at once (`send`, when now); its note says what became
 //   of it.
 // - Older build: the served page changes under the tab (OUT/switch.want, answered by OUT/switch.done once the test
 //   changed a file); at its next hello the acting tab says it is from an older build, with Reload, and still acts.
@@ -160,10 +160,20 @@ async function run() {
     record('Changed', refused && reworded, !drawn ? 'the second question wasn’t drawn whole' : !revised ? 'the test never reworded it' : !stale ? 'its option couldn’t be clicked' : !refused ? 'no “look again” after the stale click' : !reworded ? 'the new wording never showed' : refused + '; ' + reworded);
 
     // Send now: the message box's second way, `send` to the lead's session now; the note says what the node did.
-    const typed = await page.evaluate(`(() => { const say = document.querySelector('.project-view .say'); const now = document.querySelector('.project-view .say-now'); if (!say || !now || now.hidden) return null; say.value = 'Run the audits on Fable'; now.click(); return true; })()`);
+    const typed = await page.evaluate(`(async () => {
+      const say = document.querySelector('.project-view .say');
+      const more = document.querySelector('.project-view .lead-send .send-more');
+      if (!say || !more || more.hidden) return null;
+      say.value = 'Run the audits on Fable';
+      more.click();
+      const now = [...document.querySelectorAll('.lead-send .send-way')].find((el) => el.querySelector('strong')?.innerText.trim() === 'Now');
+      if (!now) return null;
+      now.click();
+      return true;
+    })()`);
     const sentNow = typed && await page.until(`(() => { const note = [...document.querySelectorAll('.project-view .note .confirm-note')].pop()?.innerText || ''; return /^(Sent now|Held)/.test(note) ? note : null; })()`, WAIT);
     await page.shot('send-now');
-    record('Send now', sentNow, !typed ? 'no Send now beside the message box' : sentNow || 'no note saying it was sent now');
+    record('Send now', sentNow, !typed ? 'no Now in the Send menu beside the message box' : sentNow || 'no note saying it was sent now');
 
     // Older build: the node's files change under the tab (the test edits the served folder); at its next hello the
     // tab, which acts, isn't reloaded behind the user's back: the banner at the top says it is from an older build,

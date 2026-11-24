@@ -12,7 +12,9 @@ import {
   PRESET_VARIABLES, presetProblem, presetLine, presetArgs, leadLine, newProjectLine, projectFolderName,
 } from '../actions.js';
 import { t } from '../i18n.js';
-import { actsFor, doButton } from '../acting.js';
+import { actsFor, doButton, refusalWords } from '../acting.js';
+import { waysFor, sendArgs } from '../sendways.js';
+import { sendMenu } from './sendmenu.js';
 
 // The command line's words for a session and for what the user typed (js/actions.js, where the page's lines are made).
 export { sessionShort, shellWord };
@@ -81,16 +83,34 @@ export function draftBox(app, { edit }) {
       // With the `act` right, Send sends it from here (`send`, as the command line would), and the draft goes.
       const acts = actsFor(app, 'send');
       const line = `vibeswitcher send ${sessionShort(id)}`;
-      const key = JSON.stringify([line, acts, drafted.text, drafted.now, images]);
+      const key = JSON.stringify([line, acts, drafted.text, drafted.now, images, session?.sendWays || null]);
       if (key !== drawn) {
         drawn = key;
         note.hidden = acts;
-        lineSlot.replaceChildren(acts ? doButton(app, { label: drafted.now ? t('acSendNow') : t('acSend'), kind: 'send',
-          args: () => ({ session: id, text: drafted.text, now: !!drafted.now, ...(images.length ? { images } : {}) }), done: () => app.store.sessionDraft(id, null) }).el
-          : copyLine(line, 'the command that sends it'));
+        lineSlot.replaceChildren(acts ? sessionSender(app, session, drafted, images) : copyLine(line, 'the command that sends it'));
       }
     },
   };
+}
+
+// The draft's Send with the menu of the ways the session's agent takes a message (js/sendways.js): the button sends it
+// the way it was left (now, for a draft left to steer a working agent; else at its next step); the draft goes once sent,
+// and a refusal is said beside it.
+function sessionSender(app, session, drafted, images) {
+  const said = h('span', { class: 'act-said refused', role: 'status' });
+  const menu = sendMenu({
+    primary: drafted.now ? 'now' : 'step',
+    send: (way) => {
+      menu.el.querySelectorAll('button').forEach((button) => { button.disabled = true; });
+      app.store.request('send', sendArgs(session, drafted.text, way, images)).then((reply) => {
+        menu.el.querySelectorAll('button').forEach((button) => { button.disabled = false; });
+        if (reply.ok) app.store.sessionDraft(session.id, null);
+        else setText(said, refusalWords(reply.error));
+      });
+    },
+  });
+  menu.update(waysFor(session));
+  return h('span', { class: 'session-send' }, menu.el, said);
 }
 
 // The messages `vibeswitcher send` sent while a question or picker was open on the session's screen, which the node
