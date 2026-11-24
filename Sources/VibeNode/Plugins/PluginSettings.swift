@@ -11,7 +11,10 @@ extension LeadEngine {
     /// The catalog's entry for a plugin's setting, and its plugin.
     static func catalogSetting(_ plugin: FeaturePlugin, _ setting: PluginInfo.Setting) -> NodeSettings.Setting {
         NodeSettings.Setting(key: "\(plugin.info.id)_\(setting.key)", title: setting.title, about: setting.about, section: plugin.info.title,
-                             scope: .node, form: NodeSettings.Form(rawValue: setting.form) ?? .text, home: .plugin, choices: setting.choices)
+                             scope: .node, form: NodeSettings.Form(rawValue: setting.form) ?? .text, home: .plugin,
+                             // No plugin says yet which of its settings a page may set: none is (a shell plugin's
+                             // allow list among them).
+                             page: .terminalOnly("a plugin's setting: no plugin says yet that a page may set it"), choices: setting.choices)
     }
 
     /// The on plugins' settings as `settings` shows them, from what the vault last said. On `queue`.

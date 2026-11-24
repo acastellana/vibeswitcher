@@ -315,6 +315,27 @@ extension WireKinds {
 
     /// `approve.list [only]`: what one code would settle (`items`, with the batch's id and code when there are any), what
     /// needs the user's own decision (`own`, `decide`: open questions and plugin cards, `pushes`: leads' roots).
+    /// `web.pairing` (the user's, from the terminal that ran `vibeswitcher web`): whether a page took its address, the
+    /// phrase that page shows, and whether another tried the address after.
+    public enum WebPairing: WireKind {
+        public static let kind = "web.pairing"
+        public struct Args: Codable, Sendable, Equatable {
+            public var code: String?
+            public init(code: String) { self.code = code }
+        }
+        public struct Result: Codable, Sendable, Equatable {
+            /// `waiting`, `taken`, or `gone` (its page closed before the confirmation).
+            public var state: String?
+            public var phrase: String?
+            public var contested: Bool?
+            public init(state: String, phrase: String?, contested: Bool?) {
+                self.state = state
+                self.phrase = phrase
+                self.contested = contested
+            }
+        }
+    }
+
     public enum ApproveList: WireKind {
         public static let kind = "approve.list"
 
@@ -330,6 +351,8 @@ extension WireKinds {
             public var own: [Own]?
             public var batch: String?
             public var code: String?
+            /// An acting page's list: how many items it left out (a page may not approve them) and what runs them.
+            public var terminal: Terminal?
             public init(items: [Item], decide: [NodeWire.Value], pushes: [NodeWire.Value], own: [Own], batch: String? = nil, code: String? = nil) {
                 self.items = items
                 self.decide = decide
@@ -340,16 +363,28 @@ extension WireKinds {
             }
         }
 
+        public struct Terminal: Codable, Sendable, Equatable {
+            public var count: Int?
+            public var command: String?
+            public init(count: Int, command: String) {
+                self.count = count
+                self.command = command
+            }
+        }
+
         public struct Item: Codable, Sendable {
             public var kind: String?
             public var subject: String?
             @WireNull public var card: NodeWire.Value?
             public var reasons: [String]?
-            public init(kind: String, subject: String, card: NodeWire.Value?, reasons: [String]) {
+            /// What an acting page names for it in `approve`'s `seen` (its card's `seen`, or the item's own digest).
+            public var seen: String?
+            public init(kind: String, subject: String, card: NodeWire.Value?, reasons: [String], seen: String? = nil) {
                 self.kind = kind
                 self.subject = subject
                 self.card = card
                 self.reasons = reasons
+                self.seen = seen
             }
         }
 

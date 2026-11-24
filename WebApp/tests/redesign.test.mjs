@@ -223,3 +223,12 @@ test('the forecasts: whether a board has a date to draw, each landing said as th
   const long = timeAxis([now + 50 * 3600e3], now);
   assert.ok(long.ticks.some((tick) => tick.day), 'a span past midnight marks each midnight');
 });
+
+test('a waiting card shows its question line and the words after it, plain: no markdown marks, no "Asked again", hashes short', async () => {
+  const { questionHead, contextOf } = await import('../js/conversation.js');
+  const text = "Asked again (the node's restart lost the card): merge the interop task (`measured-with-a-real`, phase 2) at `fc16375c400f5f7efd73c159ceec9bfde10f16ac`? Its audit passed.\n\n**What it changes:**\n- **A failed probe no longer fails open.** The probe has three answers.";
+  const head = questionHead(text);
+  assert.equal(head, 'Merge the interop task (measured-with-a-real, phase 2) at fc16375c400f5f7efd73c159ceec9bfde10f16ac?');
+  assert.equal(contextOf(text, head), 'Its audit passed. What it changes: A failed probe no longer fails open. The probe has three answers.');
+  assert.equal(contextOf('Thursday or Friday?', 'Thursday or Friday?'), '');
+});

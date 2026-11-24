@@ -245,10 +245,17 @@ enum StatusCommand {
     static func webLine(_ web: NodeWire.Value?) -> String? {
         guard let web, let state = web["state"]?.string else { return nil }
         let tokens = web["tokens"]?.int ?? 0, connections = web["connections"]?.int ?? 0
+        // Acting from the page (its level, since when, the acting pages open); and that pairings are the host's vault's.
+        let acts = web["acts"].map { acts -> String in
+            let level = acts["level"]?.string ?? (acts["on"]?.bool == true ? "on" : "off")
+            let since = acts["since"]?.string.flatMap(NodeWire.date).map { " since \(NodeWire.dateText($0))" } ?? ""
+            return "; acting from the page: \(inert(level))\(level == "off" ? "" : since)" + ((acts["pages"]?.int ?? 0) > 0 ? ", \(acts["pages"]?.int ?? 0) acting" : "")
+        } ?? ""
+        let vault = "; pairings are kept by the host: after a host restart, pair each page again (`vibeswitcher web`)"
         switch state {
-        case "off": return "web: off (`vibeswitcher web` opens it)" + (tokens > 0 ? "; \(tokens) tokens alive" : "")
+        case "off": return "web: off (`vibeswitcher web` opens it)" + (tokens > 0 ? "; \(tokens) tokens alive" : "") + acts
         case "listening":
-            return "web: http://127.0.0.1:\(web["port"]?.int.map(String.init) ?? "?")/, \(tokens) tokens alive, \(connections) pages open"
+            return "web: http://127.0.0.1:\(web["port"]?.int.map(String.init) ?? "?")/, \(tokens) tokens alive, \(connections) pages open" + acts + vault
         default: return "web: \(inert(state))"
         }
     }

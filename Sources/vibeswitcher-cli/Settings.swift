@@ -189,6 +189,8 @@ enum SetCommand {
             let was = result.was ?? "?"
             let shown = { (text: String) in text.contains("\n") ? "(\(text.split(separator: "\n").count) lines)" : ConfigSeal.inert(text, limit: 200) }
             var said = was == now ? "\(named) was \(shown(now)) already" : "set \(named): \(shown(was)) → \(shown(now))"
+            // What the change means (`web_acts`), said after it.
+            if let lines = result.say, !lines.isEmpty { said += "\n" + lines.map { ConfigSeal.inert($0, limit: 400) }.joined(separator: "\n") }
             switch result.told {
             case "lead": said += "; the project's lead is told at its next step"
             case "leads": said += "; the running leads are told"

@@ -64,6 +64,8 @@ extension NodeSettings {
             throw Refusal("\(setting.key) is a project's")
         case .plugin:
             throw Refusal("\(setting.key) is a plugin's, kept in the session host's vault")
+        case .acting:
+            throw Refusal("\(setting.key) is kept in the session host's vault (`Requests.setActing`)")
         }
         let read = node(files: files).first { $0.setting.key == setting.key }
         let now = read?.value ?? ""

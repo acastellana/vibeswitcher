@@ -198,6 +198,8 @@ struct RequestsTests {
         // changes state, and a kind no table lists is a state change. The live protocol's kinds too: its reads, a web
         // client's draft and terminal, and opening the web.
         let reads: Set<String> = ["status", "questions", "start", "config.held", "base.show", "mail", "question.post", "question.revise", "question.withdraw",
+                                  // The terminal's side of a page's pairing (the acting review's fix A, 2026-11-24).
+                                  "web.pairing",
                                   "subscribe", "unsubscribe", "chat.page", "board",
                                   // It changes nothing but a session's seen mark (done or idle), so it needs no voice.
                                   "seen",
@@ -250,7 +252,9 @@ struct RequestsTests {
                                     // `vibeswitcher approve`'s batch (2026-11-22), each item recorded as its own action too.
                                     "approve",
                                     // A feature plugin turned on or off (2026-11-22).
-                                    "plugin.on", "plugin.off", "plugin.add", "plugin.remove"]
+                                    "plugin.on", "plugin.off", "plugin.add", "plugin.remove",
+                                    // A page's pairing confirmed in the terminal (2026-11-24).
+                                    "web.confirm"]
         #expect(Set(NodeWire.kinds.keys) == reads.union(changes), "a kind added to NodeWire.kinds is classified here")
         for kind in reads { #expect(!NodeWire.changesState(kind), "\(kind)") }
         for kind in changes { #expect(NodeWire.changesState(kind), "\(kind)") }
