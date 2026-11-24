@@ -74,7 +74,15 @@ export function projectView(app, { sheet }) {
   const waitBox = h('section', { class: 'wait-box', hidden: true, 'aria-label': t('cQuestionsForYou') });
   const toWho = h('span', { class: 'to' });
   const input = h('input', { class: 'say', type: 'text', placeholder: t('messageLead'), 'aria-label': t('messageLead'), autocomplete: 'off', maxlength: 4000 });
-  const composer = h('form', { class: 'composer-lead', onsubmit: (event) => { event.preventDefault(); note(); } }, toWho, input);
+  // Two ways to send, with the `act` right: at the lead's next step (`tell`, the default: Enter), or now (`send` to the
+  // lead's session with `now`: Ctrl+Enter or its button), steered in as the user's words at its very next step, or
+  // typed in as the user's turn when it is between turns.
+  const nextButton = h('button', { class: 'button small say-next', type: 'submit', title: t('sayNextTitle') }, t('sayNext'));
+  const nowButton = h('button', { class: 'button small quiet say-now', type: 'button', title: t('sayNowTitle'), onclick: () => note({ now: true }) }, t('sayNow'));
+  input.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter' && (event.ctrlKey || event.metaKey) && !nowButton.hidden) { event.preventDefault(); note({ now: true }); }
+  });
+  const composer = h('form', { class: 'composer-lead', onsubmit: (event) => { event.preventDefault(); note(); } }, toWho, input, nextButton, nowButton);
   // A project whose lead isn't running: how to start it again, plainly (the line, and New project's lead form).
   const quietWords = h('p', { class: 'quiet-words' });
   const quietLines = h('div', { class: 'quiet-lines' });
@@ -95,7 +103,7 @@ export function projectView(app, { sheet }) {
   // The waiting block's cards, one stack a project (it keeps what was typed in a card across updates).
   const stacks = new Map();
   const stackOf = (project) => {
-    if (!stacks.has(project)) stacks.set(project, questionStack(app, project));
+    if (!stacks.has(project)) stacks.set(project, questionStack(app, project, { onChange: () => { drawn = ''; render(); } }));
     return stacks.get(project);
   };
   // Notes drafted for a lead, this page's only: the line that tells it from a terminal.
@@ -106,22 +114,32 @@ export function projectView(app, { sheet }) {
   let sheetShown = null;
   let waitShown = false;
 
+  // "Send now" reaches the lead's own session (`send`), so it needs that kind and a live lead session.
+  const sendsNowTo = (lead) => actsFor(app, 'send') && !!lead?.session && store.state.sessions.has(lead.session);
+  // The note under a sent message: which way it went and what the node said of it; nothing it didn't say.
+  const sentWords = (entry) => !entry.now ? t('acToldLead') : entry.how === 'steered' ? t('saySteered') : entry.how === 'held' ? t('sayHeld', { why: entry.waits || '' }) : t('sayTyped');
+
   // A note for the lead: with the `act` right it is sent (`tell`), and said as sent or refused under it; else drafted,
   // with the line that sends it from a terminal.
-  function note() {
+  function note({ now = false } = {}) {
     const route = ui.state.route;
     const text = input.value.trim();
     const lead = store.state.leads.get(route.id);
     if (!text || !lead?.root) return;
-    const entry = { text, state: actsFor(app, 'tell') ? 'sending' : 'draft', why: '' };
+    const sendsNow = now && sendsNowTo(lead);
+    const entry = { text, state: actsFor(app, 'tell') || sendsNow ? 'sending' : 'draft', why: '', now: sendsNow };
     notes.set(route.id, [...(notes.get(route.id) || []), entry]);
     input.value = '';
     if (entry.state === 'sending') {
       input.disabled = true;
-      store.request('tell', { folder: lead.root, text }).then((reply) => {
+      const asked = sendsNow ? store.request('send', { session: lead.session, text, now: true }) : store.request('tell', { folder: lead.root, text });
+      asked.then((reply) => {
         input.disabled = false;
         entry.state = reply.ok ? 'sent' : 'refused';
         entry.why = reply.ok ? '' : refusalWords(reply.error);
+        // What became of a message sent now, as the node says: steered in, typed in as a turn, or held (and why).
+        entry.how = !reply.ok || !sendsNow ? null : reply.result?.queued ? 'held' : reply.result?.steered ? 'steered' : 'typed';
+        entry.waits = reply.result?.waits || null;
         if (!reply.ok) input.value = text;
         drawn = '';
         render();
@@ -231,7 +249,7 @@ export function projectView(app, { sheet }) {
         children.push(h('div', { class: 'note' }, h('p', { class: 'mine' }, entry.text), copyLine(tellLine(lead.root, entry.text), 'the command that tells the lead'), h('p', { class: 'confirm-note' }, t('tellNote'))));
       } else {
         children.push(h('div', { class: 'note' }, h('p', { class: 'mine' + (entry.state === 'refused' ? ' refused' : '') }, entry.text),
-          h('p', { class: 'confirm-note' + (entry.state === 'refused' ? ' refused' : '') }, entry.state === 'sending' ? t('acSending') : entry.state === 'sent' ? t('acToldLead') : entry.why)));
+          h('p', { class: 'confirm-note' + (entry.state === 'refused' ? ' refused' : '') }, entry.state === 'sending' ? t('acSending') : entry.state === 'sent' ? sentWords(entry) : entry.why)));
       }
     }
     col.replaceChildren(...children);
@@ -457,6 +475,9 @@ export function projectView(app, { sheet }) {
     const live = !!lead?.session && state.sessions.has(lead.session);
     setText(toWho, lead?.root ? t('toLead', { p: lastPart(root) }) : t('noLeadToTell'));
     input.disabled = !lead?.root;
+    // The buttons only where the page sends: next step with `tell`; now with `send` to a live lead session.
+    nextButton.hidden = !actsFor(app, 'tell') || !lead?.root;
+    nowButton.hidden = !sendsNowTo(lead);
     setClass(el, 'quiet', !live);
     quiet.hidden = live || route.view !== 'lead' || !root;
     const quietKey = JSON.stringify([root, live, lang(), store.acts()]);

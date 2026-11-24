@@ -13,6 +13,8 @@
 // - Changed: the page holds back the node's frames (a test shim around WebSocket, never the page's code), asks the
 //   test to reword the second question (OUT/revise.want, answered by OUT/revise.done), then clicks the option it drew:
 //   the node refuses it as `changed` and the card says to look again; let go, the card shows the new wording.
+// - Send now: the message box's Send now sends to the lead's session at once (`send` now); its note says what became
+//   of it.
 // - Older build: the served page changes under the tab (OUT/switch.want, answered by OUT/switch.done once the test
 //   changed a file); at its next hello the acting tab says it is from an older build, with Reload, and still acts.
 // - Level off: This node's Turn off (set web_acts off); the page reconnects reading and drafting: the line that
@@ -122,7 +124,9 @@ async function run() {
     // Answer by click: the first question.
     const clicked = await page.until(clickOption(expect.first, expect.firstOption), WAIT);
     const answered = clicked && await page.until(`(() => { const c = ${card(expect.first)}; return c && c.classList.contains('closed') ? c.innerText.replace(/\\s+/g, ' ').slice(0, 80) : null; })()`, WAIT);
-    record('Answer by click', answered, answered || 'the question’s option didn’t answer it');
+    // Answered, the card says so in the waiting block for a few seconds, then leaves it: the conversation is the record.
+    const gone = answered && await page.until(`!${card(expect.first)} ? true : null`, WAIT);
+    record('Answer by click', answered && gone, !answered ? 'the question’s option didn’t answer it' : !gone ? 'the answered card stayed in the waiting block' : answered + '; then gone from the waiting block');
 
     // Approve: the long approval, its "Approve <commit>".
     const approving = await page.until(clickOption(expect.approval, expect.approve), WAIT);
@@ -141,6 +145,12 @@ async function run() {
     const reworded = refused && await page.until(`(() => { const c = ${card(expect.second)}; return c && !c.classList.contains('closed') && /Monday/.test(c.innerText) ? 'the new wording shown' : null; })()`, WAIT);
     await page.shot('changed');
     record('Changed', refused && reworded, !drawn ? 'the second question wasn’t drawn whole' : !revised ? 'the test never reworded it' : !stale ? 'its option couldn’t be clicked' : !refused ? 'no “look again” after the stale click' : !reworded ? 'the new wording never showed' : refused + '; ' + reworded);
+
+    // Send now: the message box's second way, `send` to the lead's session now; the note says what the node did.
+    const typed = await page.evaluate(`(() => { const say = document.querySelector('.project-view .say'); const now = document.querySelector('.project-view .say-now'); if (!say || !now || now.hidden) return null; say.value = 'Run the audits on Fable'; now.click(); return true; })()`);
+    const sentNow = typed && await page.until(`(() => { const note = [...document.querySelectorAll('.project-view .note .confirm-note')].pop()?.innerText || ''; return /^(Sent now|Held)/.test(note) ? note : null; })()`, WAIT);
+    await page.shot('send-now');
+    record('Send now', sentNow, !typed ? 'no Send now beside the message box' : sentNow || 'no note saying it was sent now');
 
     // Older build: the node's files change under the tab (the test edits the served folder); at its next hello the
     // tab, which acts, isn't reloaded behind the user's back: the banner at the top says it is from an older build,
