@@ -54,6 +54,10 @@ export function connectSocket(store, options) {
   let replacedOf = new Map();
   let socket = null;
   let authed = false;
+  // The second secret an acting pairing gets (`hello.auth.act`): kept in this variable only, never in storage, the
+  // address or a log; sent with the token on a reconnect without a reload. A reload loses it, and the page then reads
+  // and drafts until it is paired again.
+  let actSecret = null;
   let stopped = false;
   let attempts = 0;
   let timer = null;
@@ -101,7 +105,7 @@ export function connectSocket(store, options) {
     ws.binaryType = 'arraybuffer';
     ws.onopen = () => {
       if (socket !== ws) return;
-      send({ v: 1, id: '0', kind: 'auth', args: { ...credential, client: 'webapp', ...(mine ? { assets: mine } : {}) } });
+      send({ v: 1, id: '0', kind: 'auth', args: { ...credential, ...(actSecret && credential.token ? { act: actSecret } : {}), client: 'webapp', ...(mine ? { assets: mine } : {}) } });
     };
     ws.onmessage = (event) => {
       if (socket !== ws) return;
@@ -150,6 +154,8 @@ export function connectSocket(store, options) {
     authed = true;
     attempts = 0;
     if (message.auth?.token) keep(message.auth.token);
+    if (typeof message.auth?.act === 'string') actSecret = message.auth.act;
+    if (!(message.auth?.rights || []).includes('act')) actSecret = null;
     pair = null;
     store.setKinds(Array.isArray(message.kinds) ? message.kinds : [], message.plugins, message.auth?.rights || []);
     if (mine && message.assets && message.assets !== mine) {
@@ -373,6 +379,8 @@ export function connectSocket(store, options) {
   }
 
   return {
+    // Acting ended (the node refused an acting request: this pairing's acting ran out): the secret goes.
+    dropAct() { actSecret = null; },
     start() {
       return Promise.resolve(build).then((assets) => { mine = assets || null; }, () => {}).then(open);
     },

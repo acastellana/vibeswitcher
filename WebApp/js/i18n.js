@@ -981,6 +981,10 @@ const EN = {
   dpEvery: "every address",
   dpLocal: "this machine only",
   // js/acting.js
+  acEnded: "Acting from this page ended: pair it again with `vibeswitcher web` to act. Nothing was done.",
+  acPairAgain: "Acting from a page is on (since {since}), but this page reads and drafts: pair it again to act, with",
+  acPairAgainShort: "Pair again to act:",
+  acTerminalMore: { one: "{n} more needs the terminal:", other: "{n} more need the terminal:" },
   acResume: "Resume",
   acPushNote: "Push pushes that commit itself, as a fast-forward only, recorded as yours.",
   acSendNow: "Send now",
@@ -1003,7 +1007,6 @@ const EN = {
   acApproveAll: { one: "Accept it", other: "Accept all {n}" },
   acRefused: "The node refused it.",
   acChanged: "This changed since the page drew it: look again. Nothing was done.",
-  acVoice: "A page can’t do this one: run it in a terminal.",
   acNotYet: "The node isn’t answering yet: try again in a moment.",
   acPush: "Push",
   acDecline: "Decline",
@@ -1022,7 +1025,6 @@ const EN = {
   acThisPageShort: "This page acts for you since {since}",
   acTurnOff: "Turn off",
   acGroupTitle: "Acting from a page",
-  acPagesMay: { one: "Pages on this machine may act for you since {since} ({n} paired); this one reads and drafts.", other: "Pages on this machine may act for you since {since} ({n} paired); this one reads and drafts." },
 };
 
 
