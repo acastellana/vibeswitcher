@@ -654,3 +654,5 @@
 - 2026-11-24 12:05 Merged turn-this-incident-into-4: An audit's finder can read the audit's own run logs without a permission prompt (build 63411f509118)
 - 2026-11-24 12:15 Merged team-sessions-start: Team sessions start Claude Code with its updater off (in a batch: team-sessions-start, measured-with-a-real landed on one test run) (build 63411f509118)
 - 2026-11-24 12:15 Merged measured-with-a-real: Measured with a real Windows program: no box starts one or reaches the Windows side (WSL interop's F flag), and what is still open is closed (in a batch: team-sessions-start, measured-with-a-real landed on one test run) (build 63411f509118)
+- 2026-11-24 12:15 Automatically (auto_advance): Cleaned up team-sessions-start (freed 2.0 GB of build output and temporary folders). It stays done.
+- 2026-11-24 12:15 Update: Merged into v2: finders read their audit's logs, team sessions start with the updater off, interop phase 2 — All three merged on your approvals of Nov 24; each merge's full test run passed.
