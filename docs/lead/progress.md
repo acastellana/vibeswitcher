@@ -4510,3 +4510,4 @@ Turn what's a real bug into a task (one already on the board needs nothing); the
 - 2026-11-24 14:42 Released github-commits-name-the's worker (idle since its done report on 9a11f39c) while its audit runs
 - 2026-11-24 14:42 Automatically (auto_advance): Released github-commits-name-the's worker, idle since its done report on 9a11f39c, while its audit runs (ended pid 49059 (Worker: GitHub commits name the handle that pushed them, on the update card and in fetch_remote/merge_remote reports)): its Mac slot and memory are free. Its worktree and branch stay; findings the verdict sends back go to a fresh worker there, and a clean verdict merges with none.
 - 2026-11-24 14:46 Audit of github-commits-name-the: complete, clean, round 1: 3 Nit open
+- 2026-11-24 15:05 Merged github-commits-name-the: GitHub commits name the handle that pushed them, on the update card and in fetch_remote/merge_remote reports (build 629a5b790b40)
