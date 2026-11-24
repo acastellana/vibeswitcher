@@ -530,17 +530,17 @@ extension WireKinds {
             public var session: String?
             public var text: String?
             public var images: [String]?
+            /// An older page's and command line's `now: true`: taken as `when: now`.
             public var now: Bool?
-            /// Esc first, the idle prompt waited for, then the words typed as the user's turn (a lead's or the user's own
-            /// session only): one unit, or nothing typed and said why.
-            public var interrupt: Bool?
-            public enum CodingKeys: String, CodingKey, CaseIterable { case session, text, images, now, interrupt }
-            public init(session: String?, text: String?, images: [String]? = nil, now: Bool? = nil, interrupt: Bool? = nil) {
+            /// When it reaches the agent (`SendWhen`): step, now, after, interrupt; absent: typed in as before.
+            public var when: String?
+            public enum CodingKeys: String, CodingKey, CaseIterable { case session, text, images, now, when }
+            public init(session: String?, text: String?, images: [String]? = nil, now: Bool? = nil, when: String? = nil) {
                 self.session = session
                 self.text = text
                 self.images = images
                 self.now = now
-                self.interrupt = interrupt
+                self.when = when
             }
         }
         /// What became of it: typed in now, opened, waiting (`waits`), steered in while working, or an answer to the
@@ -556,8 +556,9 @@ extension WireKinds {
             public var steered: Bool?
             public var answered: String?
             public var agent: String?
-            /// With `interrupt`: its turn was stopped (Esc) before the words went in.
-            public var interrupted: Bool?
+            /// With `when`: what was done (`SendWhen`), and why when it isn't what was asked.
+            public var when: String?
+            public var said: String?
             public init(session: String, terminal: String, working: Bool, characters: Int, queued: Bool) {
                 self.session = session
                 self.terminal = terminal

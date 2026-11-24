@@ -125,18 +125,21 @@ enum SessionCommand {
 /// its agent works): a working Claude agent gets it mid-turn, at its next step and without stopping, through its hook;
 /// one between turns gets it typed in (`Requests.send`'s `now`). A draft the page left to go now goes so.
 enum SendCommand {
-    static let usage = "usage: vibeswitcher send SESSION [TEXT] [--image PATH]... [--now]  (neither: the message drafted on the session's web page)"
+    static let usage = "usage: vibeswitcher send SESSION [TEXT] [--image PATH]... [--when step|now|after|interrupt | --now]  (no TEXT: the message drafted on the session's web page)"
 
     static func run(_ arguments: [String]) -> Int32 {
         var words = arguments[...]
         guard let session = words.popFirst(), !session.isEmpty, !session.hasPrefix("--") else { return Say.usage(usage) }
         var text: String?
         var images: [String] = []
-        var now = false
+        var when: SendWhen?
         while let word = words.popFirst() {
             if word == "--now" {
-                guard !now else { return Say.usage(usage) }
-                now = true
+                guard when == nil else { return Say.usage(usage) }
+                when = .now
+            } else if word == "--when" {
+                guard when == nil, let way = words.popFirst().flatMap(SendWhen.init) else { return Say.usage(usage) }
+                when = way
             } else if word == "--image" {
                 guard let path = words.popFirst(), !path.isEmpty else { return Say.usage(usage) }
                 images.append(CardCommand.absolute(path))
@@ -145,7 +148,7 @@ enum SendCommand {
                 text = word
             }
         }
-        if text == nil && images.isEmpty { return takeDraft(session, now: now) }
+        if text == nil && images.isEmpty { return takeDraft(session, when: when) }
         let typed = text ?? ""
         guard !typed.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !images.isEmpty else { return Say.usage(usage) }
         // The session found first (its id, its terminal name, or a prefix only one has), so what is shown names it. One
@@ -164,18 +167,28 @@ enum SendCommand {
                 }
             }
         }, args: { found in
-            .init(session: found["id"]?.string ?? session, text: typed, images: images.isEmpty ? nil : images, now: now ? true : nil)
+            .init(session: found["id"]?.string ?? session, text: typed, images: images.isEmpty ? nil : images, when: when?.rawValue)
         }, what: { found in
             // "session <short>" first, as before the lookup (SteerNowTests), then what the node lists of it.
             let named = "session \(SessionCommand.short(found["id"]?.string ?? session))"
             let about = found["status"] == nil ? "" : " " + String(SessionCommand.describe(found).drop { $0 != "(" })
-            return (now ? "This steers \(named) now, as you (\(steerWhen))\(about): " : "This types into \(named)\(about), as you: ")
-                + ConfigSeal.inert(typed, limit: 400) + attached(images)
+            return opening(named + about, when) + ConfigSeal.inert(typed, limit: 400) + attached(images)
         }, say: said)
     }
 
-    /// What `--now` does, as what is shown says it.
+    /// What a step does, as what is shown says it.
     static let steerWhen = "a working agent gets it at its next step, without stopping; one between turns gets it typed in"
+
+    /// The consent's opening for `when` (2026-11-24): how it is delivered, said whole, as the Mac's dialog says it.
+    static func opening(_ named: String, _ when: SendWhen?) -> String {
+        switch when {
+        case nil: return "This types into \(named), as you: "
+        case .step?: return "This steers \(named) at its next step, as you (\(steerWhen)): "
+        case .now?: return "This sends to \(named) now, as you (\(SendWhen.now.consent); an agent without send-now gets it at its next step): "
+        case .after?: return "This sends to \(named) after its turn, as you (Codex queues it; Claude Code has no such key and gets it at its next step): "
+        case .interrupt?: return "This stops the turn of \(named) (Esc), then types into it, as you: "
+        }
+    }
 
     /// The images a message carries, as what is shown says them.
     static func attached(_ images: [String]) -> String {
@@ -191,22 +204,21 @@ enum SendCommand {
         return (text, images, session["draft"]?["now"]?.bool == true)
     }
 
-    /// `now`: `--now` given, or the page left the draft to go now.
-    private static func takeDraft(_ wanted: String, now: Bool) -> Int32 {
+    /// `when`: given, or `now` when the page left the draft to go now.
+    private static func takeDraft(_ wanted: String, when given: SendWhen?) -> Int32 {
         SessionCommand.act(WireKinds.Send.self, lookup: wanted, refuse: { session in
             guard draft(of: session) == nil else { return nil }
             return Say.usage("\(usage)\n\(SessionCommand.describe(session)) has no draft: write it on its web page, or give TEXT")
         }, args: { session in
             let drafted = draft(of: session)
             let images = drafted?.images ?? []
+            let when = given ?? (drafted?.now == true ? .now : nil)
             return .init(session: session["id"]?.string ?? wanted, text: drafted?.text ?? "", images: images.isEmpty ? nil : images,
-                         now: now || drafted?.now == true ? true : nil)
+                         when: when?.rawValue)
         }, what: { session in
             // Whole: this is what the agent will take as the user's.
             let drafted = draft(of: session)
-            return (now || drafted?.now == true
-                    ? "This steers \(SessionCommand.describe(session)) now, as you (\(steerWhen)), with the message drafted on its web page: "
-                    : "This types into \(SessionCommand.describe(session)), as you, the message drafted on its web page: ")
+            return opening(SessionCommand.describe(session), given ?? (drafted?.now == true ? .now : nil)) + "the message drafted on its web page: "
                 + ConfigSeal.inert(drafted?.text ?? "", limit: .max) + attached(drafted?.images ?? [])
         }, say: said)
     }
@@ -214,6 +226,8 @@ enum SendCommand {
     static func said(_ result: WireKinds.Send.Result) {
         let short = SessionCommand.short(result.session)
         let characters = result.characters ?? 0
+        // What was done, when it isn't what was asked (`SendWhen.resolve`).
+        if let said = result.said { Say.out(ConfigSeal.inert(said, limit: 300)) }
         if result.queued == true {
             Say.out("queued: \(ConfigSeal.inert(result.waits ?? "a question is open on its screen", limit: 200)); the node types your "
                 + "message into session \(short) once that closes (`vibeswitcher reply \(short) CHOICE` answers a question). "

@@ -86,8 +86,9 @@ public enum BoardRecords {
     /// The fields the board's value gains.
     /// `summaries`: the engine's decisions with their AI lines (`LeadEngine.boardDecisions`): a line is taken for a
     /// decision read here (by its id), never a decision of the engine's own read.
-    /// `delivered`: when the lead took each answer the engine followed, by question id (`LeadEngine.deliveryMarks`):
-    /// an answered question carries it, null while not taken or not known (a server restart since).
+    /// `delivered`: each answer the engine followed, by question id (`LeadEngine.marks`): an answered question carries
+    /// when the lead took it (null while not, or not known: a server restart since), whether `answer.replace` would take
+    /// it now (`replaceable`, false when not known), and its card.
     static func fields(board: LeadBoard?, read: Read, now: Date, summaries: [BoardDecision] = [],
                        delivered: [String: NodeWire.Value] = [:]) -> [String: NodeWire.Value] {
         var fields: [String: NodeWire.Value] = [:]
@@ -98,7 +99,10 @@ public enum BoardRecords {
         fields["scorecard"] = board.map { scorecard($0, now: now) } ?? .null
         fields["answered"] = .array(Array(closed(board?.questions ?? []).prefix(answeredKept)).map { closed in
             guard case .object(var item) = question(closed) else { return question(closed) }
-            item["delivered"] = delivered[closed.id] ?? .null
+            let mark = delivered[closed.id]
+            item["delivered"] = mark?["delivered"] ?? .null
+            item["replaceable"] = mark?["replaceable"] ?? .bool(false)
+            item["card"] = mark?["card"] ?? .null
             return .object(item)
         })
         fields["files"] = .array(files.map { name in

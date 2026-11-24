@@ -211,7 +211,7 @@ taken on the Unix socket.
 | `questions` | anyone of the uid |  |  |  | `Requests.act` |  | `WireKinds.Questions` |  |  |  |
 | `recent` | the user's terminal, or a page that reads |  |  |  | `Requests.act` |  | the page's (WireSchema) |  |  |  |
 | `seen` | anyone of the uid |  |  |  | `Requests.act` |  | the page's (WireSchema) |  |  |  |
-| `send` | the user's terminal | yes | yes |  | `Requests.act` | `images`, `interrupt`, `now`, `session`, `text` | `WireKinds.Send` | its result |  | yes |
+| `send` | the user's terminal | yes | yes |  | `Requests.act` | `images`, `now`, `session`, `text`, `when` | `WireKinds.Send` | its result |  | yes |
 | `session.attach` | a page that drafts | yes |  |  | `draft` |  | the page's (WireSchema) |  |  |  |
 | `session.close-shells` | the user's terminal | yes | yes |  | `Requests.act` | `sessions` | `WireKinds.CloseShells` | its result; done again |  | yes |
 | `session.complete` | anyone of the uid |  |  |  | `Requests.act` |  | the page's (WireSchema) |  |  |  |

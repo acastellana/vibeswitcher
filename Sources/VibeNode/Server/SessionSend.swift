@@ -58,10 +58,13 @@ extension Requests {
     func send(_ request: NodeWire.Request, reply: @escaping (NodeWire.Reply) -> Void) {
         let text = (request.args?["text"]?.string ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         let images = request.args?["images"]?.array?.map { $0.string ?? "" } ?? []
-        let now = request.args?["now"]?.bool == true
-        let interrupt = request.args?["interrupt"]?.bool == true
+        // When it reaches the agent (`SendWhen`): `when`, or an older page's and command line's `now: true` as `now`.
+        let whenText = request.args?["when"]?.string
+        guard whenText.map({ SendWhen(rawValue: $0) != nil }) ?? true else {
+            return reply(.init(re: request.id, error: .init(.badArgs, "when is one of step, now, after, interrupt")))
+        }
+        let asked: SendWhen? = whenText.flatMap(SendWhen.init) ?? (request.args?["now"]?.bool == true ? .now : nil)
         guard !text.isEmpty || !images.isEmpty else { return reply(.init(re: request.id, error: .init(.badArgs, "send needs text or images"))) }
-        guard !(now && interrupt) else { return reply(.init(re: request.id, error: .init(.badArgs, "send takes now or interrupt, not both"))) }
         guard images.count <= Self.imagesLimit else {
             return reply(.init(re: request.id, error: .init(.badArgs, "at most \(Self.imagesLimit) images a message")))
         }
@@ -73,9 +76,9 @@ extension Requests {
             return reply(.init(re: request.id, error: .init(.badArgs, "too long to type into a terminal (at most \(Self.sendLimit / 1024) KB): "
                                                             + "save it to a file and mention the file instead")))
         }
-        guard !now || message.count <= Self.steerLimit else {
+        guard asked != .step || message.count <= Self.steerLimit else {
             return reply(.init(re: request.id, error: .init(.badArgs, "too long to steer (at most \(Self.steerLimit) characters, what a hook hands "
-                                                            + "Claude at once): send it without --now (it goes after the turn), or save it to a file and mention the file")))
+                                                            + "Claude at once): send it without when (it goes after the turn), or save it to a file and mention the file")))
         }
         let session: HostSession
         switch hostedSession(request.args?["session"]?.string, for: "send", id: request.id) {
@@ -90,12 +93,9 @@ extension Requests {
             return reply(.init(re: request.id, error: .init(.refused, "session \(short) is a lead another one replaced: what you type there reaches "
                                                             + "no live lead (`vibeswitcher tell FOLDER TEXT` tells the running one)")))
         }
-        // `interrupt` (2026-11-24): Esc, then the words as the user's turn, into a Claude agent the user may stop: their own
+        // `interrupt` (2026-11-24): Esc, then the words as the user's turn, into an agent the user may stop: their own
         // session or a lead, never a worker or a verifier (it would stop mid-task or mid-audit).
-        if interrupt {
-            guard HostedAgents.agent(of: session) == .claude else {
-                return reply(.init(re: request.id, error: .init(.refused, "session \(short) isn't a Claude agent's: interrupt is Claude's Esc (send it without interrupt)")))
-            }
+        if asked == .interrupt {
             switch LeadTeams.role(label: session.label) {
             case .worker?, .verifier?:
                 return reply(.init(re: request.id, error: .init(.refused, "session \(short) is a team's worker or verifier: it isn't stopped mid-task or mid-audit "
@@ -103,13 +103,15 @@ extension Requests {
             default: break
             }
         }
-        guard !now || engine != nil else {
-            return reply(.init(re: request.id, error: .init(.refused, "this server has no engine to steer through: send it without --now")))
+        guard asked != .step || engine != nil || HostedAgents.agent(of: session) != .claude else {
+            return reply(.init(re: request.id, error: .init(.refused, "this server has no engine to steer through: send it without when")))
         }
         let working = sessions?.sessions.first { $0.hostID == session.id }?.status == .working
         let (queue, drafts) = (self.queue, sessionDrafts)
         let id = NodeIds.session(host: session.id)
         let held = HeldSend(message: message, text: text, images: images, at: Date(), action: request.action ?? request.id)
+        // What was done, once known (`SendWhen.resolve`): the reply says it.
+        let done = Locked<(way: SendWhen, said: String?)?>(nil)
         let answer = { (queued: String?, opened: String?, steered: Bool, answered: String?) in
             // The page's draft it was is sent (or waits to be): it goes from beside the session.
             if let draft = drafts.values[id], draft.text.trimmingCharacters(in: .whitespacesAndNewlines) == text, draft.images == images {
@@ -118,8 +120,11 @@ extension Requests {
             var result = WireKinds.Send.Result(session: id, terminal: session.tty, working: working, characters: message.count, queued: queued != nil)
             result.waits = queued
             result.opened = opened
-            if now { result.steered = steered }
-            if interrupt { result.interrupted = true }
+            if let done = done.get() {
+                result.when = done.way.rawValue
+                result.said = done.said
+                if done.way == .step { result.steered = steered }
+            }
             result.answered = answered
             result.agent = HostedAgents.agent(of: session)?.rawValue
             reply(.init(re: request.id, typed: result))
@@ -127,6 +132,7 @@ extension Requests {
         // Off the engine's queue: the agent's process is read from /proc, the images from the disk.
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             let pid = HostedAgents.agentPid(of: session)
+            let version = asked == nil ? nil : AgentVersion.of(session: session, pid: pid)
             let missing = images.lazy.compactMap { Self.imageRefusal($0, onDisk: true) }.first
             queue.async {
                 guard let self else { return }
@@ -134,7 +140,14 @@ extension Requests {
                 guard let pid else {
                     return reply(.init(re: request.id, error: .init(.refused, "no agent runs in session \(short)'s terminal now (it quit, or ended): nothing typed")))
                 }
-                if interrupt {
+                let agent = HostedAgents.agent(of: session)
+                let resolved = asked.map { SendWhen.resolve($0, agent: agent, version: version) }
+                done.set(resolved)
+                if let resolved, resolved.way == .step, agent == .claude, message.count > Self.steerLimit {
+                    return reply(.init(re: request.id, error: .init(.badArgs, "too long to steer (at most \(Self.steerLimit) characters): send it without when, "
+                                                                    + "or save it to a file and mention the file")))
+                }
+                if resolved?.way == .interrupt {
                     // One unit: Esc, its idle prompt waited for, the words; or nothing after the Esc, said.
                     guard (self.heldSends.values[id] ?? []).isEmpty else {
                         return reply(.init(re: request.id, error: .init(.refused, "session \(short) has messages waiting behind a question on its screen: "
@@ -155,6 +168,10 @@ extension Requests {
                         }
                     }
                 }
+                // `now` on a Claude with send-now: typed, Enter, then Ctrl+X Ctrl+S while it works. `after` on Codex: Tab.
+                var submit: [UInt8] = [13]
+                var trailing: [HostInput.Write] = []
+                if resolved?.way == .after, agent == .codex { submit = [9] }
                 let typeIt = { [weak self] in
                     guard let self else { return }
                     // Behind the messages it holds already, in the order sent.
@@ -162,7 +179,7 @@ extension Requests {
                         guard self.hold(held, for: session) else { return self.refuseHeldFull(request, short, reply) }
                         return answer("messages sent before it wait in session \(short)", nil, false, nil)
                     }
-                    self.typeIn(held, into: session) { outcome in
+                    self.typeIn(held, into: session, submit: submit, trailing: trailing) { outcome in
                         switch outcome {
                         case .typed:
                             // A command may open a picker (`/model`, `/resume`): the reply says so, as the app's composer
@@ -188,9 +205,18 @@ extension Requests {
                         }
                     }
                 }
-                // `--now` to a Claude agent: through its hook while it works (the app's steer). Codex takes what's typed
+                if resolved?.way == .now, agent == .claude {
+                    // Its send-now only while it works by its screen (between turns, Enter submits it already).
+                    return self.link.screen(session.id) { screen in
+                        queue.async {
+                            if screen.map(Self.working) == true { trailing = [HostInput.Write(bytes: SendWhen.sendNowBytes, delay: 0.15)] }
+                            typeIt()
+                        }
+                    }
+                }
+                // `step` to a Claude agent: through its hook while it works (the app's steer). Codex takes what's typed
                 // during its turn as a steer itself, so it's typed, as the app types it.
-                guard now, HostedAgents.agent(of: session) == .claude, let engine = self.engine else { return typeIt() }
+                guard resolved?.way == .step, agent == .claude, let engine = self.engine else { return typeIt() }
                 engine.steerAsUser(message, session: session, agentPid: pid) { outcome in
                     switch outcome {
                     case .steered:
@@ -198,7 +224,7 @@ extension Requests {
                         answer(nil, nil, true, nil)
                     case .idle:
                         // Its turn is over (or its hooks say nothing): a steer would wait for a step that never comes.
-                        self.note("send to session \(short): --now, but its agent isn't working by its hooks: typed in instead")
+                        self.note("send to session \(short): at its next step, but its agent isn't working by its hooks: typed in instead")
                         typeIt()
                     case .refused(let why):
                         reply(.init(re: request.id, error: .init(.refused, "session \(short): \(why)")))
@@ -250,12 +276,17 @@ extension Requests {
     /// nothing typed, `menuOpen`), and whose Enter waits for its images to show taken. `done` on the queue.
     /// `interrupt`: Esc first (only while its screen says it works: `esc to interrupt`), then the words once its idle
     /// prompt shows (no `esc to interrupt`, no question open), at most `interruptWait`; else nothing after the Esc goes in.
-    func typeIn(_ held: HeldSend, into session: HostSession, interrupt: Bool = false, done: @escaping (TypeOutcome) -> Void) {
+    /// `submit`: the key that sends the words (Enter; Codex's Tab queues them for after its turn). `trailing`: written after
+    /// them in the same unit (Claude's send-now).
+    func typeIn(_ held: HeldSend, into session: HostSession, interrupt: Bool = false, submit: [UInt8] = [13], trailing: [HostInput.Write] = [],
+                done: @escaping (TypeOutcome) -> Void) {
         let (link, note, queue) = (self.link, self.note, self.queue)
         let short = String(session.id.uuidString.lowercased().prefix(8))
         let stopped = Locked<TypeOutcome?>(nil)
         let lead = interrupt ? 1 : 0
-        let writes = (interrupt ? [LeadWitness.DeclinePlan.escape] : []) + ComposerText.writes(held.message, bracketed: true)
+        var words = ComposerText.writes(held.message, bracketed: true)
+        if let last = words.indices.last, submit != [13] { words[last] = HostInput.Write(bytes: submit, delay: words[last].delay) }
+        let writes = (interrupt ? [LeadWitness.DeclinePlan.escape] : []) + words + trailing
         let images = held.images
         link.type(writes, into: session.id, gate: { index, go in
             if interrupt, index == 0 {

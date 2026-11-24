@@ -194,9 +194,12 @@ struct SteerNowTests {
         let pid = try #require((EngineEndToEndTests.state(files)["pid"] as? Int).map(Int32.init))
         try hook(node, ["hook_event_name": "UserPromptSubmit", "prompt": "Fix the parser"], tty: session.tty, pid: pid)
         let short = String(session.id.uuidString.lowercased().prefix(8))
+        // `--now` on a Claude whose version the node can't tell (the fake's): at its next step, said (`SendWhen`).
         let sent = try await node.runOnTerminal(["send", short, "Use the new tokenizer", "--now"])
         #expect(sent.status == 0, "\(sent.output)\(sent.errors)\n\(node.said)")
-        #expect(sent.output.contains("This steers session \(short) now, as you"), "\(sent.output)")
+        // (What the node lists of the session, when its scan has it, comes after its name.)
+        #expect(sent.output.contains("This sends to session \(short)") && sent.output.contains(" now, as you (now: "), "\(sent.output)")
+        #expect(sent.output.contains("now fell back to step"), "\(sent.output)")
         #expect(sent.output.contains("steered: 21 characters into session \(short)'s steer inbox"), "\(sent.output)")
         let waiting = node.inbox(session.tty).filter { $0.agentPid == pid }
         #expect(waiting.count == 1 && waiting.first?.from == .user && waiting.first?.text == "Use the new tokenizer", "\(waiting)")
@@ -204,10 +207,15 @@ struct SteerNowTests {
         let taken = leadsHookTakes(node, event: "PostToolUse", tty: session.tty, pid: pid)
         #expect(taken.messages.map(\.from) == [.user] && taken.context.contains("The user sent this"), "\(taken.context)")
         #expect(EngineEndToEndTests.prompts(files).isEmpty, "\(EngineEndToEndTests.prompts(files))")
-        for words in [["send", short, "x", "--now", "--now"], ["send", short, "--now", "x", "y"]] {
+        for words in [["send", short, "x", "--now", "--now"], ["send", short, "--now", "x", "y"], ["send", short, "x", "--when", "soon"],
+                      ["send", short, "x", "--when", "step", "--now"]] {
             let usage = try await node.run(words)
-            #expect(usage.status == 64 && usage.errors.contains("[--now]"), "\(words): \(usage.output)\(usage.errors)")
+            #expect(usage.status == 64 && usage.errors.contains("[--when step|now|after|interrupt | --now]"), "\(words): \(usage.output)\(usage.errors)")
         }
+        // `--when step` says so whole before the code.
+        let step = try await node.runOnTerminal(["send", short, "And the lexer", "--when", "step"])
+        #expect(step.status == 0 && step.output.contains("This steers session \(short)") && step.output.contains(" at its next step, as you"),
+                "\(step.output)\(step.errors)")
     }
 
     /// A page leaves a draft to go now (its "send now"): the session's value carries it, in the wire's shape.

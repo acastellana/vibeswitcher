@@ -79,8 +79,11 @@ extension Requests {
             let words = text("text") ?? ""
             let images = args["images"]?.array?.count ?? 0
             let what = words.isEmpty ? "no words" : whole(words)
-            return .success(("type into \(sessionLabel(session)): \(what)" + (images > 0 ? " with \(images) image\(images == 1 ? "" : "s")" : ""),
-                             args["now"]?.bool == true ? "now, at its agent's next step" : nil))
+            // How it is delivered, said whole (2026-11-24): the user consents to stopping a turn, not just to typing.
+            let when = text("when").flatMap(SendWhen.init) ?? (args["now"]?.bool == true ? .now : nil)
+            let how = when.map { $0 == .interrupt ? "stop the turn of \(sessionLabel(session)) (Esc), then type into it" : "type into \(sessionLabel(session)) \($0.consent)" }
+                ?? "type into \(sessionLabel(session))"
+            return .success(("\(how): \(what)" + (images > 0 ? " with \(images) image\(images == 1 ? "" : "s")" : ""), nil))
         case "session.new":
             guard let folder = text("folder") else { return .failure(.init(why: "session.new needs a folder: nothing was asked")) }
             var what = "start \(text("preset").map { "the preset \(whole($0))" } ?? whole(text("agent") ?? "claude")) in \(Self.place(folder))"

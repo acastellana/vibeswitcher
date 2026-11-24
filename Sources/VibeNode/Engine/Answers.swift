@@ -541,6 +541,8 @@ extension LeadEngine {
                     } else if let line = pending[id] {
                         seen.append(id)
                         if was.isPosted(line) { waiting.append(id) }
+                        // Partly handed, or a wake-up prompt named it: the lead has it (`answer.replace` refuses it so).
+                        if line.handedOver != nil || line.wokenAt != nil { took.append(id) }
                     } else if delivered.contains(id) {
                         taken.append(id)
                         took.append(id)

@@ -72,9 +72,14 @@ extension LeadEngine {
     /// and the tells, newest last.
     func marks(root: String) -> NodeWire.Value {
         let entries = userDeliveries.values.filter { $0.root == root && $0.withdrawn == nil }.sorted { ($0.at, $0.action) < ($1.at, $1.action) }
+        // Each answer's mark, as `answer.replace` judges it: `replaceable` exactly when a replace would be taken (followed,
+        // not taken back, not delivered, a question card's), so a page never offers what would be refused.
         var answers: [String: NodeWire.Value] = [:]
         for entry in entries {
-            if case .answer(let question, _) = entry.kind { answers[question] = entry.delivered.map(NodeWire.Value.date) ?? .null }
+            guard case .answer(let question, let card) = entry.kind else { continue }
+            let replaceable = entry.delivered == nil && entry.message != nil && cards.cards[card]?.kind == .question
+            answers[question] = .object(["delivered": entry.delivered.map(NodeWire.Value.date) ?? .null, "replaceable": .bool(replaceable),
+                                         "card": .string(card)])
         }
         let told = entries.filter { $0.kind == .tell }.suffix(Self.toldKept).map { entry -> NodeWire.Value in
             .object(["action": .string(entry.action), "at": .date(entry.at), "delivered": entry.delivered.map(NodeWire.Value.date) ?? .null])
