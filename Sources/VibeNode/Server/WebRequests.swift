@@ -14,7 +14,9 @@ extension Requests {
         case .failure(let refusal):
             reply(.init(re: request.id, error: .init(.refused, "the web isn't open: \(refusal.description)")))
         case .success(let opened):
-            reply(.init(re: request.id, typed: WireKinds.WebOpen.Result(url: opened.url, expiresIn: opened.expiresIn)))
+            // The code's id when the page that takes it waits for this terminal's confirmation (the loopback gate's).
+            reply(.init(re: request.id, typed: WireKinds.WebOpen.Result(url: opened.url, expiresIn: opened.expiresIn,
+                                                                         code: web.acting == nil ? nil : opened.code)))
         }
     }
 

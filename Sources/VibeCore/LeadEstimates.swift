@@ -204,7 +204,7 @@ public enum LeadForecast {
     }
 
     /// Each task's and goal's landing on `board` at `now`, its queue run on `workers` slots.
-    public static func forecast(_ board: LeadBoard, workers: Int, now: Double) -> Result {
+    public static func forecast(_ board: LeadBoard, goals: [LeadGoal] = [], workers: Int, now: Double) -> Result {
         let score = score(board)
         // A clock or a board time outside the sane window: nothing is placed by it.
         guard LeadTime.sane(now) != nil else { return Result(score: score, tasks: [:], goals: [:]) }
@@ -272,23 +272,23 @@ public enum LeadForecast {
             landings[task.slug] = landing
         }
         // A goal lands with its last task; with some undated, at least then.
-        var goals: [String: LeadLanding] = [:]
-        for goal in board.goals ?? [] {
+        var goalLandings: [String: LeadLanding] = [:]
+        for goal in goals {
             let mine = board.tasks.filter { $0.goalID == goal.id }
-            guard !mine.isEmpty else { goals[goal.id] = LeadLanding(basis: .none); continue }
+            guard !mine.isEmpty else { goalLandings[goal.id] = LeadLanding(basis: .none); continue }
             let open = mine.filter(\.unfinished)
             if open.isEmpty {
                 let last = mine.compactMap { landings[$0.slug]?.likely }.max()
-                goals[goal.id] = LeadLanding(likely: last, worst: last, basis: .done)
+                goalLandings[goal.id] = LeadLanding(likely: last, worst: last, basis: .done)
                 continue
             }
             let dated = open.compactMap { landings[$0.slug] }.filter { $0.likely != nil && $0.basis != .done }
             let undated = open.count - dated.count
-            goals[goal.id] = dated.isEmpty ? LeadLanding(basis: .none, undated: undated)
+            goalLandings[goal.id] = dated.isEmpty ? LeadLanding(basis: .none, undated: undated)
                 : LeadLanding(likely: dated.compactMap(\.likely).max(), worst: dated.compactMap(\.worst).max(), basis: undated > 0 ? .partial : .estimated,
                               undated: undated)
         }
-        return Result(score: score, tasks: landings, goals: goals)
+        return Result(score: score, tasks: landings, goals: goalLandings)
     }
 
     /// The line a lead's tool result carries for a task at work past its worst case, once a task an estimate (the
@@ -369,7 +369,7 @@ extension LeadToolset {
     func overdueNotice() -> String? {
         let board = store.load()
         let now = Date().timeIntervalSince1970
-        let result = LeadForecast.forecast(board, workers: maxWorkers(workflow), now: now)
+        let result = LeadForecast.forecast(board, goals: GoalStore(board: store).load().goals, workers: maxWorkers(workflow), now: now)
         guard let (line, due) = LeadForecast.overdueLine(board, result: result) else { return nil }
         _ = try? store.update { board in
             for (slug, at) in due { if let index = board.taskIndex(slug) { board.tasks[index].overdueTold = at } }

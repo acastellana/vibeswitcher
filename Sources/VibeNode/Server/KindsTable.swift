@@ -46,11 +46,20 @@ public enum KindsTable {
         return (recorded.keepsResult ? "its result" : "done, no result") + (recorded.rerun ? "; done again" : "")
     }
 
+    /// Whether an acting page may send a user's kind (`KindSpec.page`).
+    static func page(_ spec: KindSpec) -> String {
+        switch spec.page {
+        case .bySender: return ""
+        case .acts: return "yes"
+        case .terminalOnly: return "the terminal's alone"
+        }
+    }
+
     /// The table, one row per kind (`KindSpec.all`), sorted.
     public static func markdown() -> String {
         var lines = ["| Kind | Who may send it | Changes state | Recorded first | Card code | Handled by | Arguments (state changes) | Typed "
-                     + "| A retry | In approve's batch |",
-                     "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |"]
+                     + "| A retry | In approve's batch | From an acting page |",
+                     "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |"]
         let taken = Set(NodeWire.taken)
         for spec in KindSpec.all.sorted(by: { $0.name < $1.name }) {
             let kind = spec.name
@@ -59,7 +68,7 @@ public enum KindsTable {
             let on = taken.contains(kind) ? "" : " (a page only)"
             lines.append("| `\(kind)` | \(voice(spec.sender))\(on) | \(yes(spec.changesState)) | \(yes(Requests.recorded.contains(kind))) "
                          + "| \(yes(Requests.carded.contains(kind))) | \(handler(spec)) | \(arguments) | \(wire(spec)) | \(retry(spec)) "
-                         + "| \(yes(spec.recorded?.batch == true)) |")
+                         + "| \(yes(spec.recorded?.batch == true)) | \(page(spec)) |")
         }
         return lines.joined(separator: "\n")
     }

@@ -141,6 +141,34 @@ public enum ConfigHoldStore {
         return said
     }
 
+    /// What keeps an acting page from accepting `shown` (a page never seals a review floor or a guard rail it didn't see
+    /// recorded: an agent's edit of workflow.md, held, then clicked through, would be the floors' `set` by another path),
+    /// from the card alone: no accept recorded yet (a first accept), or a guard rail not known to be the same as at the
+    /// last accept (changed, new, or its snapshot not sealed by this host's vault: the card's "?"). Empty: the card may
+    /// be accepted from a page, as far as the card says (`pageRefusal` asks the vault too).
+    public static func pageNotSame(_ shown: Shown) -> [String] {
+        guard shown.lastAccept != nil else { return ["no accept is recorded yet (a first accept)"] }
+        return shown.guarded.filter { !($0.sinceAccept?.hasPrefix("the same as at your last accept") ?? false) }.map(\.key)
+    }
+
+    /// What an acting page is told when it may not accept a card (`pageNotSame`, `pageRefusal`'s names).
+    public static func pageRefusalWords(_ changed: [String]) -> String {
+        "the review floor or guard rails changed (" + changed.map { ConfigSeal.inert($0, limit: 80) }.joined(separator: ", ")
+            + "): accept this one from a terminal (vibeswitcher config held)"
+    }
+
+    /// The same, the vault asked (in the accept's own turn of `work`): `pageNotSame`, and each guard rail whose hash
+    /// isn't the one recorded or never was (`wouldRecord`), a review floor proposed while none is recorded, one proposed
+    /// that isn't the recorded one, or no rails recorded at all.
+    public static func pageRefusal(_ shown: Shown, root: String, vault: LeadVault) throws -> [String] {
+        var said = pageNotSame(shown)
+        guard try vault.guardedSettings(root: root) != nil else { return said + ["no guard rails are recorded yet"] }
+        said += try wouldRecord(shown, root: root, vault: vault)
+        if let proposed = shown.floor, let recorded = try vault.reviewFloor(root: root), proposed != recorded { said.append("the review floor") }
+        var seen = Set<String>()
+        return said.filter { seen.insert($0).inserted }
+    }
+
     public static func held(root: String, vault: LeadVault, home: String, look: Bool = true,
                             snapshot: AcceptedSnapshot.Project? = nil) -> Result<Shown, Error> {
         // The server's own writes of the agents' config (`hooks install`) the host couldn't seal when they were made,

@@ -69,13 +69,15 @@ public enum BoardValue {
     /// under its root, read with no link followed (`BoardRecords`); the value's `decisions`, `scorecard`, `answered`,
     /// `files` and `recordsDir` are made from them and the board (2026-11-21).
     /// `workers`: how many the project runs at once (workflow.md's max_workers), what its queue's forecast runs on.
+    /// `goals`: the project's goals (goals.json beside the board, `GoalStore`).
     public static func value(project: String, root: String, board: LeadBoard?, refusal: String? = nil, now: Date,
                              usageWaits: [String: ReviewUsageWait] = [:], summaries: [String: String] = [:],
-                             decisions: [BoardDecision] = [], records: BoardRecords.Read = BoardRecords.Read(), workers: Int = 3) -> NodeWire.Value {
+                             decisions: [BoardDecision] = [], records: BoardRecords.Read = BoardRecords.Read(), workers: Int = 3,
+                             goals: LeadGoalsFile = LeadGoalsFile()) -> NodeWire.Value {
         var shown: [(group: Int, position: Int, value: NodeWire.Value)] = []
         var slugs: Set<String> = []
         // The forecast (`LeadForecast`, VibeCore's: the lead's tools say the same numbers), once a board.
-        let forecast = board.map { LeadForecast.forecast($0, workers: workers, now: now.timeIntervalSince1970) }
+        let forecast = board.map { LeadForecast.forecast($0, goals: goals.goals, workers: workers, now: now.timeIntervalSince1970) }
         if let board {
             for (position, task) in board.tasks.enumerated() where slugs.insert(task.slug).inserted {
                 guard let (group, value) = Self.task(task, position: position, board: board, now: now, usageWait: usageWaits[task.id],
@@ -87,7 +89,7 @@ public enum BoardValue {
         var kept = Array(shown.prefix(mostTasks))
         // The byte budget: the tasks' encoded sizes and the rest of the value's, the last tasks dropped till it fits.
         var extra = BoardRecords.fields(board: board, read: records, now: now, summaries: decisions)
-        extra["goals"] = board.map { goals($0, landings: forecast?.goals ?? [:]) } ?? .array([])
+        extra["goals"] = board.map { Self.goals($0, goals, landings: forecast?.goals ?? [:]) } ?? .array([])
         extra["score"] = forecast.map { score($0.score) } ?? .null
         var size = 2_048 + root.utf8.count + project.utf8.count + NodeWire.message(NodeWire.Value.object(extra)).count
             + kept.reduce(0) { $0 + NodeWire.message($1.value).count + 1 }
@@ -146,8 +148,8 @@ public enum BoardValue {
 
     /// The project's goals, in their order, at most `mostGoals`: each its id, title and what done means (inert, capped:
     /// the lead wrote them), open or done, and how many of the board's tasks it has to go and finished.
-    static func goals(_ board: LeadBoard, landings: [String: LeadLanding] = [:]) -> NodeWire.Value {
-        .array((board.goals ?? []).prefix(mostGoals).map { goal in
+    static func goals(_ board: LeadBoard, _ kept: LeadGoalsFile, landings: [String: LeadLanding] = [:]) -> NodeWire.Value {
+        .array(kept.goals.prefix(mostGoals).map { goal in
             let mine = board.tasks.filter { $0.goalID == goal.id }
             return .object(["id": .string(text(goal.id, limit: 120)), "title": .string(text(goal.title, limit: titleBytes)),
                             "done": .string(text(goal.done, limit: lineBytes)), "state": .string(goal.state.rawValue),

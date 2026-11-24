@@ -187,6 +187,8 @@ public enum ServerStart {
         requests.openWebForAnyone = parsed.testWebPair
         server.hub = live.hub
         link.onWelcome = { _, _ in
+            // What `status` says of acting from the page: the vault asked again (a host call, off the queue).
+            live.acting.refreshLater()
             requests.refreshNotes()
             requests.restoreHeldSends()
             engine.welcomed()

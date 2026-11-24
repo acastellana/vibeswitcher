@@ -9,7 +9,7 @@
 import { h, setText } from '../dom.js';
 import { clock, moment, tilde, lastPart, taskLine } from '../words.js';
 import { t, listed, lang, nodeWords } from '../i18n.js';
-import { standing, waitsOn, cut, shortHashes } from '../conversation.js';
+import { standing, waitsOn, cut, shortHashes, lineKey } from '../conversation.js';
 import { routeHref, sessionHref, projectHref } from '../ui.js';
 import { settingsHref } from './settings.js';
 import { stepBar } from './project.js';
@@ -71,7 +71,8 @@ export function rightColumn(app) {
     const said = [...(board?.decisions || [])].sort((a, b) => Date.parse(b.at) - Date.parse(a.at))[0];
     const team = standing(board);
     const parts = [];
-    if (said) parts.push(h('p', { class: 'now' }, h('small', null, t('leadSaid', { time: moment(said.at) })), cut(shortHashes(said.summary || said.text), 220)));
+    // Its first three lines or so, cut at a word; the whole in the side sheet.
+    if (said) parts.push(h('a', { class: 'now', href: routeHref(route, { sheet: lineKey('update', said.id), task: null }) }, h('small', null, t('leadSaid', { time: moment(said.at) })), h('span', { class: 'now-text' }, cut(shortHashes(said.summary || said.text), 130))));
     parts.push(h('h3', { class: 'col-title' }, t('inMotionTitle', { n: team.motion.length })));
     parts.push(...(team.motion.length ? team.motion.flatMap((task) => taskRow(task, board, route)) : [h('p', { class: 'col-note' }, t('nothingMoving'))]));
     if (team.blocked.length) parts.push(h('h3', { class: 'col-title' }, t('blockedTitle', { n: team.blocked.length })), ...team.blocked.flatMap((task) => taskRow(task, board, route)));

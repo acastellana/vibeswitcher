@@ -30,6 +30,14 @@ const ui = createUI();
 const mocked = params.has('mock') || params.has('still') || params.has('empty') || params.has('rows');
 // The mock is loaded only for ?mock and its kin: the node's embedded page leaves it out (scripts/webapp-embed.sh), so
 // there it says so; WebApp/serve.sh and a scratch server's folder serve it.
+// The build this page's files came from: their address names it (`/_/<build>/app.js`); by a plain path, /build.json.
+function fetchBuild() {
+  return fetch('build.json', { cache: 'no-cache' }).then((reply) => (reply.ok ? reply.json() : null)).then((json) => json?.assets || null, () => null);
+}
+function ownBuild() {
+  const named = /\/_\/([^/]+)\//.exec(import.meta.url)?.[1];
+  return named ? Promise.resolve(decodeURIComponent(named)) : fetchBuild();
+}
 const feed = mocked
   ? await import('./js/mock.js').then(
     ({ createMock }) => createMock(store, { rows: Number(params.get('rows')) || 0, still: params.has('still'), empty: params.has('empty') }),
@@ -42,8 +50,10 @@ const feed = mocked
     WebSocket,
     storage: sessionStorage,
     validate,
-    // The page's own build, which `hello.assets` is weighed against: a newer one on the node reloads the page.
-    build: fetch('build.json', { cache: 'no-cache' }).then((reply) => (reply.ok ? reply.json() : null)).then((json) => json?.assets || null, () => null),
+    // The page's own build, which `hello.assets` is weighed against: the one its files were loaded from (`/_/<build>/`,
+    // in this module's own address), else /build.json, asked again at a hello while it isn't known.
+    build: ownBuild(),
+    rebuild: fetchBuild,
   });
 store.connect(feed);
 
@@ -94,6 +104,7 @@ function brief() {
 }
 
 const sheet = sideSheet();
+app.sheet = sheet;
 const left = leftColumn(app, { brief });
 const project = projectView(app, { sheet });
 const right = rightColumn(app);
@@ -108,15 +119,53 @@ const offline = h('div', { class: 'offline', role: 'status', hidden: true }, t('
 // The node doesn't know this page, or dropped it: said once, quietly, with the one thing that fixes it. The rows it
 // had stay readable underneath.
 const unpaired = h('div', { class: 'offline signed-out', role: 'status', hidden: true });
+// A page that just redeemed a pairing code: the words to check against what `vibeswitcher web` shows, until the user
+// confirms it there.
+const confirming = h('div', { class: 'offline confirm-pairing', role: 'status', hidden: true });
+// This tab acted for the user and no longer does, or the node serves a newer page than this acting tab runs: said at
+// the top of the centre, on every screen, with why and the one thing that fixes it.
+const tabBanner = h('div', { class: 'tab-banner', role: 'alert', hidden: true });
+function drawTabBanner() {
+  const state = store.state;
+  const lost = state.actsLost && !store.acts();
+  tabBanner.hidden = !lost && !state.newerBuild;
+  if (tabBanner.hidden) return;
+  if (!lost) {
+    tabBanner.replaceChildren(h('span', null, h('strong', null, t('tbOlderBuild')), ' ', store.acts() ? t('tbOlderActing') : t('tbOlderReads')),
+      h('button', { class: 'button small', type: 'button', onclick: () => store.reloadNow() }, t('tbReload')));
+    return;
+  }
+  const level = state.node?.web?.acts?.level ?? (state.node?.web?.acts?.on ? 'trust' : 'off');
+  const unconfirmed = state.actsLost === 'unconfirmed';
+  const why = unconfirmed ? 'tbUnconfirmed' : state.actsLost === 'reloaded' ? 'tbReloaded' : level === 'off' ? 'tbTurnedOff' : 'tbEnded';
+  // With acting off on the node, pairing again needs it on first: said too when the reason was another.
+  const off = level === 'off' && !unconfirmed;
+  tabBanner.replaceChildren(h('span', null, h('strong', null, t(unconfirmed ? 'tbNotPaired' : 'tbNoLonger')), ' ', t(why), ' ',
+    off ? (why !== 'tbTurnedOff' ? t('tbOffToo') + ' ' : '') : unconfirmed ? '' : t('tbPairIt') + ' '),
+    off ? h('code', null, 'vibeswitcher set web_acts trust') : null,
+    off ? h('span', null, t('tbThen')) : null,
+    h('code', null, 'vibeswitcher web'),
+    h('button', { class: 'icon-button tab-banner-close', type: 'button', 'aria-label': t('close'), title: t('close'), onclick: () => store.forgetActsLost() }, '×'));
+}
+store.subscribe('connection', drawTabBanner);
+store.subscribe('node', drawTabBanner);
+// The page never sits scrolled sideways (a focus or a scroll into view past an edge could move it): put back at once.
+const unscroll = () => {
+  if (scrollX) scrollTo(0, scrollY);
+  for (const el of [document.documentElement, document.body, root]) if (el && el.scrollLeft) el.scrollLeft = 0;
+};
+addEventListener('scroll', unscroll, { passive: true });
+addEventListener('resize', unscroll);
+document.addEventListener('focusin', () => requestAnimationFrame(unscroll));
 // What the centre says before there is anything to show: connecting, or not paired.
 const waitingWords = h('h1', { class: 'big' });
 const waitingSub = h('p');
 const waiting = h('section', { class: 'centre screen status-screen', hidden: true }, h('div', { class: 'empty-state' }, waitingWords, waitingSub));
-const centre = h('main', { class: 'centre-wrap' }, project.el, own.el, newProject.el, session.el, node.el, settings.el, stats.el, mail.el, waiting);
+const centre = h('main', { class: 'centre-wrap' }, tabBanner, project.el, own.el, newProject.el, session.el, node.el, settings.el, stats.el, mail.el, waiting);
 const root = document.getElementById('app');
 const commandPalette = palette(app);
 const scrim = h('div', { class: 'drawer-scrim', onclick: () => app.drawer(null) });
-root.replaceChildren(left.el, centre, right.el, scrim, sheet.scrim, sheet.el, commandPalette.el, offline, unpaired, app.notifications.offer);
+root.replaceChildren(left.el, centre, right.el, scrim, sheet.scrim, sheet.el, commandPalette.el, offline, unpaired, confirming, app.notifications.offer);
 
 // `#/` opens the project with the most waiting on you, else the most active one, else Your own sessions; it takes
 // the address's place (no history entry), so back doesn't land on it again.
@@ -180,6 +229,9 @@ store.subscribe('connection', () => {
   const connection = store.state.connection;
   offline.hidden = connection !== 'reconnecting';
   unpaired.hidden = (connection !== 'unpaired' && connection !== 'revoked') || store.state.sessions.size === 0;
+  const phrase = store.state.phrase;
+  confirming.hidden = !phrase || connection === 'unpaired' || connection === 'revoked';
+  if (!confirming.hidden) confirming.replaceChildren(h('span', null, t('apConfirmInTerminal')), h('strong', { class: 'phrase' }, phrase), h('span', { class: 'sub' }, t('apConfirmSub')));
   if (!unpaired.hidden) {
     unpaired.replaceChildren(connection === 'revoked' ? t('apThisPageSAccessWas') : t('apThisPageIsnTPaired'),
       t('apRun'), h('code', null, 'vibeswitcher web'), t('apInATerminalAndOpen'));

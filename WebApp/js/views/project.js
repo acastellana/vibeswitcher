@@ -16,9 +16,9 @@ import { icon } from '../marks.js';
 import { clock, moment, tilde, lastPart, taskLine } from '../words.js';
 import { t, listed, lang, nodeWords } from '../i18n.js';
 import { hasDates, dated, timeAxis, axisPoints, landingWords, basisWords } from '../forecast.js';
-import { leadLines, shownLines, dialCounts, waitingCards, waitingCount, cut, shortHashes, dayOf, teamCounts, standing, taskTone, taskStep, waitsOn, goalRows } from '../conversation.js';
+import { leadLines, shownLines, dialCounts, waitingCards, waitingCount, cut, shortHashes, dayOf, teamCounts, standing, taskTone, taskStep, waitsOn, goalRows, lineKey } from '../conversation.js';
 import { projectHref, routeHref } from '../ui.js';
-import { questionStack, pluginCard, copyLine } from './cards.js';
+import { questionStack, pluginCard, copyLine, cardSheet } from './cards.js';
 import { tellLine, shellWord, leadLine } from '../actions.js';
 import { actsFor, doButton, cardArgs, refusalWords } from '../acting.js';
 
@@ -69,6 +69,9 @@ export function projectView(app, { sheet }) {
   const strip = h('div', { class: 'team-strip' });
   const col = h('div', { class: 'col' });
   const talk = h('div', { class: 'talk' }, col);
+  // What waits on the user, at the bottom above the message box: never more than about 60% of the centre's height
+  // (it scrolls inside itself beyond that), so the conversation stays in sight above it.
+  const waitBox = h('section', { class: 'wait-box', hidden: true, 'aria-label': t('cQuestionsForYou') });
   const toWho = h('span', { class: 'to' });
   const input = h('input', { class: 'say', type: 'text', placeholder: t('messageLead'), 'aria-label': t('messageLead'), autocomplete: 'off', maxlength: 4000 });
   const composer = h('form', { class: 'composer-lead', onsubmit: (event) => { event.preventDefault(); note(); } }, toWho, input);
@@ -80,7 +83,14 @@ export function projectView(app, { sheet }) {
     h('h2', { class: 'quiet-title' }, t('quietProject')), quietWords, quietLines, h('p', { class: 'confirm-note' }, t('quietNote'), ' ', quietForm));
   let quietDrawn = '';
   const gone = h('div', { class: 'empty-state', hidden: true }, h('h2', null, t('goneProject')), h('p', null, t('goneProjectSub')));
-  const el = h('section', { class: 'centre project-view', 'aria-label': t('lead') }, head, strip, quiet, talk, composer, gone);
+  const el = h('section', { class: 'centre project-view', 'aria-label': t('lead') }, head, strip, quiet, talk, waitBox, composer, gone);
+  // The project's name beside "N things need you" shrinks to an ellipsis; squeezed to a mark, it goes (the right
+  // column's head names the project).
+  const fitName = () => {
+    name.classList.remove('squeezed');
+    if (name.textContent && name.clientWidth < 56 && name.scrollWidth > name.clientWidth) name.classList.add('squeezed');
+  };
+  if (typeof ResizeObserver === 'function') new ResizeObserver(fitName).observe(head);
 
   // The waiting block's cards, one stack a project (it keeps what was typed in a card across updates).
   const stacks = new Map();
@@ -94,6 +104,7 @@ export function projectView(app, { sheet }) {
   let lastProject = null;
   let lastLevel = null;
   let sheetShown = null;
+  let waitShown = false;
 
   // A note for the lead: with the `act` right it is sent (`tell`), and said as sent or refused under it; else drafted,
   // with the line that sends it from a terminal.
@@ -205,11 +216,16 @@ export function projectView(app, { sheet }) {
     }
     if (!shown.length && route.show !== 'asks') children.push(h('p', { class: 'empty-line' }, t('emptyTalk')));
     if (route.show === 'asks' && !waiting) children.push(h('p', { class: 'empty-line' }, t('emptyAsks')));
+    const waits = [];
     if (waiting) {
       const push = lead?.push ? 1 : 0;
-      children.push(h('h2', { class: 'asked-title' }, push && waiting === 1 ? t('pushWaits') : t('questionsForYou', { n: waiting - push }) + (push ? t('andAPush') : '')));
+      waits.push(h('h2', { class: 'asked-title' }, push && waiting === 1 ? t('pushWaits') : t('questionsForYou', { n: waiting - push }) + (push ? t('andAPush') : '')));
     }
-    children.push(stack.el, ...extra.map(otherCard));
+    waits.push(stack.el, ...extra.map(otherCard));
+    const inner = h('div', { class: 'wait-col' }, waits);
+    waitBox.replaceChildren(inner);
+    waitShown = !!waiting || !stack.el.hidden || extra.length > 0;
+    waitBox.hidden = !waitShown;
     for (const entry of mine) {
       if (entry.state === 'draft') {
         children.push(h('div', { class: 'note' }, h('p', { class: 'mine' }, entry.text), copyLine(tellLine(lead.root, entry.text), 'the command that tells the lead'), h('p', { class: 'confirm-note' }, t('tellNote'))));
@@ -388,6 +404,19 @@ export function projectView(app, { sheet }) {
       return;
     }
     if (sheetShown === route.sheet && sheet.shown()) return;
+    const close = () => {
+      if (sheetShown !== route.sheet) return;
+      sheetShown = null;
+      const now = ui.state.route;
+      if (now.name === 'project' && now.sheet) ui.go(routeHref(now, { sheet: null }));
+    };
+    // A waiting card's whole text ("Read it all"): its key is the card's first id's.
+    const card = [...store.state.cards.values()].find((one) => one.project === route.id && one.question && lineKey('card', store.cardKey(one.id)) === route.sheet);
+    if (card) {
+      sheetShown = route.sheet;
+      sheet.open(cardSheet(card), close);
+      return;
+    }
     const line = leadLines(board).find((one) => one.key === route.sheet);
     if (!line) return;
     sheetShown = route.sheet;
@@ -396,12 +425,7 @@ export function projectView(app, { sheet }) {
     if (line.kind === 'ask' && line.state === 'withdrawn') more.push(h('p', { class: 'sheet-sub' }, t('withdrawn') + (line.why ? `: ${line.why}` : '')));
     if (line.kind === 'update' && line.why) more.push(h('h3', { class: 'sheet-sub' }, t('why')), h('p', null, line.why));
     const kicker = { ask: 'question', result: 'result', update: 'decision' }[line.kind];
-    sheet.open({ kicker: t(kicker), title: line.kind === 'result' ? line.title : line.head, at: line.at, text: line.full, more }, () => {
-      if (sheetShown !== route.sheet) return;
-      sheetShown = null;
-      const now = ui.state.route;
-      if (now.name === 'project' && now.sheet) ui.go(routeHref(now, { sheet: null }));
-    });
+    sheet.open({ kicker: t(kicker), title: line.kind === 'result' ? line.title : line.head, at: line.at, text: line.full, more }, close);
   }
 
   function render() {
@@ -413,6 +437,7 @@ export function projectView(app, { sheet }) {
     const known = !!lead || !!board;
     const connecting = state.connection === 'connecting';
     for (const part of [head, strip, talk, composer]) part.hidden = !known && !connecting;
+    if (!known && !connecting) waitBox.hidden = true;
     gone.hidden = known || connecting;
     if (!known) return;
     const root = lead?.root || board?.root || '';
@@ -420,12 +445,14 @@ export function projectView(app, { sheet }) {
     setText(big, waiting ? t('thingsNeedYou', { n: waiting }) : t('nothingNeedsYou'));
     setClass(big, 'asked', waiting > 0);
     setText(name, lastPart(root));
+    fitName();
     name.title = tilde(root, state.node?.home);
     leadLink.setAttribute('href', projectHref(route.id));
     roadLink.setAttribute('href', projectHref(route.id, { view: 'roadmap' }));
     if (route.view === 'roadmap') { roadLink.setAttribute('aria-current', 'page'); leadLink.removeAttribute('aria-current'); } else { leadLink.setAttribute('aria-current', 'page'); roadLink.removeAttribute('aria-current'); }
     dial.hidden = route.view !== 'lead';
     composer.hidden = route.view !== 'lead';
+    waitBox.hidden = route.view !== 'lead' || !waitShown;
     strip.replaceChildren(h('b', null, t('team')), ...stripCounts(board));
     const live = !!lead?.session && state.sessions.has(lead.session);
     setText(toWho, lead?.root ? t('toLead', { p: lastPart(root) }) : t('noLeadToTell'));

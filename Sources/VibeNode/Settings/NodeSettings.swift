@@ -54,6 +54,17 @@ public enum NodeSettings {
         case floor
         /// The session host's vault, a feature plugin's (`PluginRegistry`): listed while its plugin is on.
         case plugin
+        /// The session host's vault: acting from the page (`ActingPages`), which no file may say.
+        case acting
+    }
+
+    /// Whether an acting page may set a setting.
+    public enum Page: Equatable, Sendable {
+        case sets
+        /// Only lower than it is now (its choices lowest first; default the lowest): raising it is the terminal's, why.
+        case lowersOnly(String)
+        /// The terminal's alone: why.
+        case terminalOnly(String)
     }
 
     public struct Setting: Equatable, Sendable {
@@ -66,6 +77,9 @@ public enum NodeSettings {
         public let scope: Scope
         public let form: Form
         public let home: Home
+        /// Whether an acting page may set it (acting from the page, the web UI design's step 2): every setting says, so a
+        /// new one can't be a page's by being left out; `Requests.pageSetRefusal` asks it of the setting `set` resolves.
+        public let page: Page
         public var choices: [String] = []
         /// A count's least and most.
         public var range: ClosedRange<Int>? = nil
@@ -83,95 +97,100 @@ public enum NodeSettings {
         return [
             Setting(key: "projects_folder", title: "Projects folder",
                     about: "Where `vibeswitcher new-project` makes a project when --in names no other place.",
-                    section: "General", scope: .node, form: .folder, home: .preferences),
+                    section: "General", scope: .node, form: .folder, home: .preferences, page: .sets),
+            Setting(key: "web_acts", title: "Act from the page",
+                    about: "How far a page on this machine, its pairing confirmed in a terminal, may act as you: off (it reads and drafts), confirm (each act asks for your passkey; not built yet), trust (each click acts as you). "
+                        + "Trust risks this: whatever holds the page's two secrets while it is open acts as you, a team's own session included. Raised from a terminal only.",
+                    section: "General", scope: .node, form: .choice, home: .acting, page: .lowersOnly("acting from the page is raised from a terminal"),
+                    choices: ActingPages.levels),
             Setting(key: "node_max_sessions", title: "Team sessions on this node, at most",
                     about: "How many workers and verifiers, across every project, may run at once.",
-                    section: "Machine-wide limits", scope: .node, form: .count, home: .limits, range: 1...99),
+                    section: "Machine-wide limits", scope: .node, form: .count, home: .limits, page: .sets, range: 1...99),
             Setting(key: "load_threshold", title: "Start nothing above a load of",
                     about: "Leads start nothing while the load is above this; default means twice the cores (\(2 * cores)).",
-                    section: "Machine-wide limits", scope: .node, form: .number, home: .limits),
+                    section: "Machine-wide limits", scope: .node, form: .number, home: .limits, page: .sets),
             Setting(key: "node_heavy_slots", title: "Test and build slots at once",
                     about: "How many builds and full test runs may run at once on this node.",
-                    section: "Machine-wide limits", scope: .node, form: .count, home: .limits, range: 1...MacLimits.heavySlotsCeiling),
+                    section: "Machine-wide limits", scope: .node, form: .count, home: .limits, page: .sets, range: 1...MacLimits.heavySlotsCeiling),
             Setting(key: "ignore_usage_limits", title: "Ignore usage limits",
                     about: "Leads keep starting work at any share of a Claude limit, instead of stopping at \(Int(AccountUsage.threshold)) %.",
-                    section: "Usage limits", scope: .node, form: .flag, home: .limits),
+                    section: "Usage limits", scope: .node, form: .flag, home: .limits, page: .sets),
             Setting(key: "boost", title: "Boost",
                     about: "Raises the machine-wide limits for more throughput. On a node Automatic acts as Off: it can't tell whether you're away.",
-                    section: "Boost", scope: .node, form: .choice, home: .preferences, choices: BoostMode.allCases.map(\.rawValue)),
+                    section: "Boost", scope: .node, form: .choice, home: .preferences, page: .sets, choices: BoostMode.allCases.map(\.rawValue)),
             Setting(key: "boost_load_threshold", title: "Start nothing above a load of, while boosted",
                     about: "While boosted, leads start nothing once the load is above this.",
-                    section: "Boost", scope: .node, form: .number, home: .preferences, ceiling: BoostLimits.loadCeiling),
+                    section: "Boost", scope: .node, form: .number, home: .preferences, page: .sets, ceiling: BoostLimits.loadCeiling),
             Setting(key: "boost_max_sessions", title: "Team sessions while boosted, at most",
                     about: "How many workers and verifiers may run at once across every project while boosted.",
-                    section: "Boost", scope: .node, form: .count, home: .preferences, range: 1...BoostLimits.countCeiling),
+                    section: "Boost", scope: .node, form: .count, home: .preferences, page: .sets, range: 1...BoostLimits.countCeiling),
             Setting(key: "boost_max_workers", title: "Workers per project while boosted, at most",
                     about: "The most workers any one project may run at once while boosted.",
-                    section: "Boost", scope: .node, form: .count, home: .preferences, range: 1...BoostLimits.countCeiling),
+                    section: "Boost", scope: .node, form: .count, home: .preferences, page: .sets, range: 1...BoostLimits.countCeiling),
             Setting(key: "boost_heavy_slots", title: "Test and build slots while boosted",
                     about: "How many builds and full test runs may run at once while boosted.",
-                    section: "Boost", scope: .node, form: .count, home: .preferences, range: 1...BoostLimits.slotCeiling),
+                    section: "Boost", scope: .node, form: .count, home: .preferences, page: .sets, range: 1...BoostLimits.slotCeiling),
             Setting(key: "lead_mail", title: "Let project leads message each other",
                     about: "Lets one project's lead send messages to another's (tell_lead).",
-                    section: "Leads", scope: .node, form: .flag, home: .preferences),
+                    section: "Leads", scope: .node, form: .flag, home: .preferences, page: .terminalOnly("it opens one project's lead to another's messages")),
             Setting(key: "prompt_audit", title: "Remind me to run a prompt audit",
                     about: "Says in status when a project's lead should run /doctor prompt-audit: after the days below, or when its model changes.",
-                    section: "Leads", scope: .node, form: .flag, home: .preferences),
+                    section: "Leads", scope: .node, form: .flag, home: .preferences, page: .sets),
             Setting(key: "prompt_audit_days", title: "Days between prompt audits",
                     about: "How many days after a project's last prompt audit its reminder shows.",
-                    section: "Leads", scope: .node, form: .count, home: .preferences, range: PromptAudit.intervalRange),
+                    section: "Leads", scope: .node, form: .count, home: .preferences, page: .sets, range: PromptAudit.intervalRange),
             Setting(key: "ai_summaries", title: "AI summaries",
                     about: "A small model (Haiku) writes one plain line of what each worker and verifier is doing, for the board; at most one an agent every 3 minutes.",
-                    section: "Leads", scope: .node, form: .flag, home: .preferences),
+                    section: "Leads", scope: .node, form: .flag, home: .preferences, page: .sets),
             Setting(key: "policy", title: "Working policy",
                     about: "The rules every project's lead, workers and verifiers get in their prompts; running leads are told when it changes.",
-                    section: "Working policy", scope: .node, form: .text, home: .policy),
+                    section: "Working policy", scope: .node, form: .text, home: .policy, page: .terminalOnly("the rules every agent works under: a page's token would loosen its own")),
             Setting(key: "lead_model", title: "The lead's model",
                     about: "The model the project's lead runs on (Opus in Fable's place while Fable is held back); from its next start.",
-                    section: "Models", scope: .project, form: .model, home: .workflow),
+                    section: "Models", scope: .project, form: .model, home: .workflow, page: .sets),
             Setting(key: "lead_advisor", title: "The lead's advisor",
                     about: "The lead's advisor while it runs on Opus: fable, opus or none; from its next start.",
-                    section: "Models", scope: .project, form: .choice, home: .workflow, choices: LeadLaunch.advisorChoices),
+                    section: "Models", scope: .project, form: .choice, home: .workflow, page: .sets, choices: LeadLaunch.advisorChoices),
             Setting(key: "worker_advisor", title: "Workers' advisor",
                     about: "Every worker's advisor when its task sets none: none, fable or opus.",
-                    section: "Models", scope: .project, form: .choice, home: .workflow, choices: ["none", "fable", "opus"]),
+                    section: "Models", scope: .project, form: .choice, home: .workflow, page: .sets, choices: ["none", "fable", "opus"]),
             Setting(key: "verifier_model", title: "Verifier's model",
                     about: "The model audits run on; default means another model than the workers', at least as capable.",
-                    section: "Models", scope: .project, form: .model, home: .workflow),
+                    section: "Models", scope: .project, form: .model, home: .workflow, page: .terminalOnly("what reviews the work: a page's token would choose a weaker review of its own")),
             Setting(key: "security_audit_model", title: "Security audits' model",
                     about: "The model a sensitive or security audit runs on, whatever the verifier's model is.",
-                    section: "Models", scope: .project, form: .model, home: .workflow),
+                    section: "Models", scope: .project, form: .model, home: .workflow, page: .terminalOnly("what audits sensitive work (a guard rail): a page's token would choose its own audit")),
             Setting(key: "lead_rotation", title: "Start a fresh lead session",
                     about: "When the lead's session is started anew, so it keeps working with a clear context: daily, when its context is large, or never.",
-                    section: "Models", scope: .project, form: .choice, home: .workflow, choices: LeadRotationMode.allCases.map(\.rawValue)),
+                    section: "Models", scope: .project, form: .choice, home: .workflow, page: .sets, choices: LeadRotationMode.allCases.map(\.rawValue)),
             Setting(key: "max_workers", title: "Workers at once, at most",
                     about: "How many workers the project's lead may run at once.",
-                    section: "Team", scope: .project, form: .count, home: .workflow, range: 1...99),
+                    section: "Team", scope: .project, form: .count, home: .workflow, page: .terminalOnly("a guard rail, recorded in the vault as yours"), range: 1...99),
             Setting(key: "floor_sensitive_paths", title: "Sensitive paths",
                     about: "Paths whose changes always count as sensitive; a lead can add to these, never remove them.",
-                    section: "Review rules floor", scope: .project, form: .paths, home: .floor),
+                    section: "Review rules floor", scope: .project, form: .paths, home: .floor, page: .terminalOnly("a review rule's floor: a page's token would lower what holds its own merge")),
             Setting(key: "floor_strict_paths", title: "Strict paths",
                     about: "Paths whose changes get the strictest review; a lead can add to these, never remove them.",
-                    section: "Review rules floor", scope: .project, form: .paths, home: .floor),
+                    section: "Review rules floor", scope: .project, form: .paths, home: .floor, page: .terminalOnly("a review rule's floor: a page's token would lower what holds its own merge")),
             Setting(key: "floor_audit_finders", title: "Audit finders, at least",
                     about: "The fewest independent checkers an audit may use in this project.",
-                    section: "Review rules floor", scope: .project, form: .count, home: .floor, range: 1...LeadWorkflow.maxFinders),
+                    section: "Review rules floor", scope: .project, form: .count, home: .floor, page: .terminalOnly("a review rule's floor: a page's token would lower what holds its own merge"), range: 1...LeadWorkflow.maxFinders),
             Setting(key: "floor_merge_policy", title: "Merge policy, at least",
                     about: "How much approval a merge needs at minimum, from automatic to asking you every time.",
-                    section: "Review rules floor", scope: .project, form: .choice, home: .floor,
+                    section: "Review rules floor", scope: .project, form: .choice, home: .floor, page: .terminalOnly("a review rule's floor: a page's token would lower what holds its own merge"),
                     choices: LeadWorkflow.MergePolicy.allCases.map(\.rawValue)),
             Setting(key: "floor_risk_lines", title: "Risk lines, at most",
                     about: "A change bigger than this many lines counts as risky; 0 sets no floor, and the project's own limit applies.",
-                    section: "Review rules floor", scope: .project, form: .count, home: .floor, range: 0...1_000_000),
+                    section: "Review rules floor", scope: .project, form: .count, home: .floor, page: .terminalOnly("a review rule's floor: a page's token would lower what holds its own merge"), range: 0...1_000_000),
             Setting(key: "floor_risk_model", title: "Risk check's model pass",
                     about: "Keeps the model's second look at a change's risk switched on.",
-                    section: "Review rules floor", scope: .project, form: .flag, home: .floor),
+                    section: "Review rules floor", scope: .project, form: .flag, home: .floor, page: .terminalOnly("a review rule's floor: a page's token would lower what holds its own merge")),
             Setting(key: "floor_audit_sample_percent", title: "Audit sample, at least",
                     about: "The smallest share of finished work, in percent, that gets audited.",
-                    section: "Review rules floor", scope: .project, form: .count, home: .floor, range: 0...100),
+                    section: "Review rules floor", scope: .project, form: .count, home: .floor, page: .terminalOnly("a review rule's floor: a page's token would lower what holds its own merge"), range: 0...100),
             Setting(key: "floor_verifier_different", title: "Verifier never on the workers' model",
                     about: "Keeps audits on a different model from the one the workers use.",
-                    section: "Review rules floor", scope: .project, form: .flag, home: .floor),
+                    section: "Review rules floor", scope: .project, form: .flag, home: .floor, page: .terminalOnly("a review rule's floor: a page's token would lower what holds its own merge")),
         ]
     }
 
@@ -241,6 +260,7 @@ public enum NodeSettings {
         case .workflow: return project.map(workflowPath(project:)) ?? ".vibeswitcher/workflow.md"
         case .floor: return "the session host's vault"
         case .plugin: return "the session host's vault (a plugin's setting)"
+        case .acting: return "the session host's vault (acting from the page)"
         }
     }
 
@@ -284,6 +304,8 @@ public enum NodeSettings {
                 case "prompt_audit_days": return (String(store.map(PromptAudit.intervalDays) ?? PromptAudit.defaultIntervalDays), String(PromptAudit.defaultIntervalDays))
                 case "policy": return (WorkingPolicy.load(from: files.policy), WorkingPolicy.defaultText)
                 case "projects_folder": return (projectsFolder(files: files), ProjectCreation.defaultLocation)
+                // Kept in the vault, never a file: `settings` puts in what the vault says (`ActingPages.state`).
+                case "web_acts": return ("off", "off")
                 default: return ("", "")
                 }
             }()

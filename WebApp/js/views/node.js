@@ -74,10 +74,12 @@ export function nodeView(app) {
     const load = () => store.read('approve.list', {}).then((reply) => {
       const result = reply.ok ? reply.result : null;
       const items = result?.items || [];
-      el.hidden = !items.length && !(result?.own || []).length;
+      el.hidden = !items.length && !(result?.own || []).length && !result?.terminal?.count;
       el.replaceChildren(h('h2', { class: 'section-title' }, t('acApproveTitle')),
         items.length ? h('ol', { class: 'approve-list' }, items.map((item) => h('li', null, h('b', null, item.subject || item.kind), (item.reasons || []).length ? h('ul', { class: 'lines' }, item.reasons.map((reason) => h('li', null, reason))) : null))) : null,
         items.length && result.batch ? doButton(app, { label: t('acApproveAll', { n: items.length }), kind: 'approve', args: () => ({ batch: result.batch, seen: items.map((item) => item.seen ?? null) }), done: load }).el : null,
+        // What a page may not approve (the hooks' install): left out of the list, its count and the terminal's command.
+        result?.terminal?.count ? h('p', { class: 'node-says' }, t('acTerminalMore', { n: result.terminal.count }), ' ', h('code', null, result.terminal.command || 'vibeswitcher approve')) : null,
         (result?.own || []).length ? h('div', null, h('p', { class: 'node-says' }, t('acOwnDecision')), h('ul', { class: 'lines' }, result.own.map((one) => h('li', null, one.text, ' ', h('code', null, one.command))))) : null);
     });
     return { el, refresh(key) { if (key !== asked) { asked = key; load(); } } };
@@ -99,7 +101,7 @@ export function nodeView(app) {
   function render() {
     if (app.ui.state.route.name !== 'node') return;
     const node = store.state.node;
-    const now = JSON.stringify([node, store.state.connection, store.acts()]);
+    const now = JSON.stringify([node, store.state.connection, store.acts(), store.state.phrase]);
     if (node && actsFor(app, 'plugin.on') && store.can('plugin.list')) pluginActs.refresh(JSON.stringify(node.plugins));
     if (node && actsFor(app, 'approve') && store.can('approve.list')) approveActs.refresh(JSON.stringify(node.cards));
     if (now === drawn) return;

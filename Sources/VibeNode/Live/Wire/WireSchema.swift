@@ -56,7 +56,7 @@ public enum WireSchema {
     /// The entities: one per keyed collection's value, and a chat's item.
     public static let entities = ["node", "session", "lead", "card", "chat.item", "board"]
     /// The messages: the envelopes, and each live kind's `args` and `result` (`<kind>.args`, `<kind>.result`).
-    public static let messages = ["request", "reply", "failure", "hello", "bye", "event", "snapshot", "delta", "auth.args",
+    public static let messages = ["request", "reply", "failure", "hello", "bye", "event", "snapshot", "delta", "paired", "auth.args",
                                   "subscribe.args", "subscribe.result", "unsubscribe.args", "chat.page.args", "chat.page.result",
                                   "draft.args", "draft.result", "draft.clear.args",
                                   "board.args", "board.result", "seen.args",
@@ -107,11 +107,20 @@ public enum WireSchema {
             shape("hello.host", from: "NodeWire.Hello.Host", [optional("startedAt", .date), optional("notes", .shape("host.notes")),
                                                              optional("pid", .int)]),
             shape("hello.peer", from: "NodeWire.Hello.Peer", [field("voice", .words(["user", "other"])), optional("why", .string)]),
-            shape("hello.auth", from: "the web gate (F1)", [field("rights", .list(.words(["read", "draft"]))), optional("token", .string),
-                                                           field("expiresAt", .date)]),
+            shape("hello.auth", from: "the web gate (F1)", [field("rights", .list(.words(["read", "draft", "watch", "act"]))), optional("token", .string),
+                                                           // A pairing just taken: the phrase the terminal shows too, to confirm it.
+                                                           optional("phrase", .string),
+                                                           // Never sent in a hello now (the `paired` message gives it); kept for a
+                                                           // page of the build before.
+                                                           optional("act", .string), field("expiresAt", .date)]),
+            // A pairing the user confirmed in the terminal (`WebRequestScreen.confirmPairing`): its secret, once, and the
+            // connection's rights now.
+            shape("paired", from: "WebRequestScreen.confirmPairing", [field("v", .int), field("kind", .words(["paired"])), field("act", .string),
+                                                                      field("rights", .list(.words(["read", "draft", "watch", "act"]))),
+                                                                      field("kinds", .list(.string))]),
             shape("bye", from: "NodeWire.Bye", [field("v", .int), field("kind", .words(["bye"])), field("reason", .string),
                                                 optional("code", .words(["auth", "revoked", "version", "too-long", "not-object",
-                                                                         "not-request", "must", "stopping", "busy"]))]),
+                                                                         "not-request", "must", "stopping", "busy", "acts-off"]))]),
             shape("event", from: "any event a client doesn't know", [field("v", .int), field("kind", .string), optional("must", .bool)]),
         ]
 
@@ -136,7 +145,9 @@ public enum WireSchema {
                                                       field("append", .string)]),
             shape("chat.op.set", from: contractChat, [field("op", .words(["set"])), field("item", .shape("chat.item"))]),
             shape("chat.op.remove", from: contractChat, [field("op", .words(["remove"])), field("id", .string)]),
-            shape("auth.args", from: "the contract's §2", [optional("pair", .string), optional("token", .string), field("client", .string),
+            shape("auth.args", from: "the contract's §2", [optional("pair", .string), optional("token", .string),
+                                                             // An acting page's acting secret, from its memory (`ActingPages`).
+                                                             optional("act", .string), field("client", .string),
                                                           optional("assets", .string)]),
             shape("subscribe.args", from: "the contract's §3", [
                 field("sub", .string), field("collection", collection), optional("key", .string),
@@ -287,7 +298,11 @@ public enum WireSchema {
             // How it ended (the inspector's Exit, 2026-11-21): `HostSession.Exit`'s status, its `cause` and when.
             shape("node.ended.exit", from: "LeadEngine.endedValue", [field("status", .int), field("cause", .string), field("at", .date)]),
             shape("node.web", from: contractNode, [field("state", .string), field("port", Kind.int.orNull), field("tokens", .int),
-                                                  field("connections", .int)]),
+                                                  field("connections", .int), optional("acts", .shape("node.web.acts"))]),
+            // Acting from the page (the web UI design's step 2): on, since when, the acting pages open now.
+            // `level` absent from a node before levels (its `on` says on or off).
+            shape("node.web.acts", from: "ActingPages.value", [optional("level", .words(ActingPages.levels)), field("on", .bool),
+                                                               field("since", Kind.date.orNull), field("pages", .int)]),
             // The account's usage (the parity table's "Usage shown to you", 2026-11-21): null until the engine's first refresh.
             shape("node.usage", from: "NodeUsage.value", [
                 field("account", Kind.string.orNull), field("limits", .list(.shape("node.usage.limit"))), field("ignored", .bool),
@@ -346,7 +361,10 @@ public enum WireSchema {
                 field("root", .string), field("open", .bool), field("closed", Kind.string.orNull), field("notice", Kind.string.orNull),
                 field("at", .date), field("blocking", .bool), optional("question", .shape("card.question")),
                 optional("approval", .shape("card.approval")), optional("config", .shape("card.config")),
-                optional("base", .shape("card.base")), optional("plugin", .shape("card.plugin")), field("draft", Kind.shape("card.draft").orNull)]),
+                optional("base", .shape("card.base")), optional("plugin", .shape("card.plugin")), field("draft", Kind.shape("card.draft").orNull),
+                // What an acting page names to answer or accept it (`CardStore.Card.seen`); absent from a server before
+                // acting from the page (its cards are never acted on from a page: no `seen` to name).
+                optional("seen", .string)]),
             // A feature plugin's card (`PluginCard`, Plugins/PluginWire.swift, 2026-11-22): one shape for every plugin.
             shape("card.plugin", from: "PluginCard.value", [
                 field("plugin", .string), field("request", .string), field("session", .string), field("asker", .string),
@@ -681,7 +699,7 @@ public enum WireSchema {
             if fields["re"] != nil { return "reply" }
             if fields["id"] != nil { return "request" }
             let kind = fields["kind"]?.string ?? ""
-            return ["hello", "bye", "snapshot", "delta"].contains(kind) ? kind : "event"
+            return ["hello", "bye", "snapshot", "delta", "paired"].contains(kind) ? kind : "event"
         }
 
         private func at(_ path: String, _ key: String) -> String { path.isEmpty ? key : "\(path).\(key)" }

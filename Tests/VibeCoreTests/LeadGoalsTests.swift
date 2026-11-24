@@ -34,7 +34,8 @@ struct LeadGoalsTests: LeadTeamFixture {
         #expect(!added.isError && added.text.contains("Added goal launch-the-paid-plans"), "\(added.text)")
         #expect(!lead.call("add_goal", ["title": "Uploads never lose a file", "done": "A failed upload retries once"]).isError)
         let board = { BoardStore(root: root).load() }
-        #expect(board().goals?.map(\.id) == ["launch-the-paid-plans", "uploads-never-lose-a"])
+        let goals = { GoalStore(root: root).load() }
+        #expect(goals().goals.map(\.id) == ["launch-the-paid-plans", "uploads-never-lose-a"])
 
         // A task with a goal, one moved to another, one cleared; unknown and closed goals refused.
         #expect(!add(lead, "Pricing copy", goal: "launch-the-paid-plans").isError)
@@ -50,17 +51,17 @@ struct LeadGoalsTests: LeadTeamFixture {
 
         // Renamed (its id kept), reordered, closed (its unfinished task then unsorted), opened again.
         #expect(!lead.call("update_goal", ["goal": "launch-the-paid-plans", "title": "Launch the plans"]).isError)
-        #expect(board().goal("launch-the-paid-plans")?.title == "Launch the plans")
+        #expect(goals().goal("launch-the-paid-plans")?.title == "Launch the plans")
         #expect(lead.call("order_goals", ["goals": ["uploads-never-lose-a"]]).isError, "every open goal, once")
         #expect(!lead.call("order_goals", ["goals": ["uploads-never-lose-a", "launch-the-paid-plans"]]).isError)
-        #expect(board().goals?.map(\.id) == ["uploads-never-lose-a", "launch-the-paid-plans"])
+        #expect(goals().goals.map(\.id) == ["uploads-never-lose-a", "launch-the-paid-plans"])
         let closed = lead.call("update_goal", ["goal": "launch-the-paid-plans", "state": "done"])
-        #expect(closed.text.contains("unsorted now") && board().goal("launch-the-paid-plans")?.closedAt != nil, "\(closed.text)")
-        #expect(board().unsorted.map(\.slug) == ["pricing-copy"])
+        #expect(closed.text.contains("unsorted now") && goals().goal("launch-the-paid-plans")?.closedAt != nil, "\(closed.text)")
+        #expect(goals().unsorted(board()).map(\.slug) == ["pricing-copy"])
         let toClosed = lead.call("update_task", ["task": "pricing-copy", "goal_id": "launch-the-paid-plans"])
         #expect(toClosed.isError && toClosed.text.contains("is done"), "\(toClosed.text)")
         #expect(!lead.call("update_goal", ["goal": "launch-the-paid-plans", "state": "open"]).isError)
-        #expect(board().goal("launch-the-paid-plans")?.state == .open && board().unsorted.isEmpty)
+        #expect(goals().goal("launch-the-paid-plans")?.state == .open && goals().unsorted(board()).isEmpty)
         #expect(!lead.call("update_task", ["task": "pricing-copy", "goal_id": ""]).isError)
         #expect(board().task("pricing-copy")?.goalID == nil)
     }
@@ -71,17 +72,17 @@ struct LeadGoalsTests: LeadTeamFixture {
         lead.recordLints = { .all }
         let bad = lead.call("add_goal", ["title": "Ship it for \(LeadRecordTextTests.privateName)", "done": "It is live"])
         #expect(bad.isError && bad.text.contains("nothing recorded"), "\(bad.text)")
-        #expect((BoardStore(root: root).load().goals ?? []).isEmpty)
+        #expect(GoalStore(root: root).load().goals.isEmpty)
         #expect(!lead.call("add_goal", ["title": "Ship it", "done": "It is live"]).isError)
         let renamed = lead.call("update_goal", ["goal": "ship-it", "done": "\(LeadRecordTextTests.privateName) says so"])
         #expect(renamed.isError, "\(renamed.text)")
-        #expect(BoardStore(root: root).load().goals?.first?.done == "It is live")
+        #expect(GoalStore(root: root).load().goals.first?.done == "It is live")
     }
 
     @Test func atMostEightOpenGoals() throws {
         let root = try repo()
         let lead = try lead(root, FakeRuntime())
-        for index in 1...LeadBoard.mostOpenGoals { #expect(!lead.call("add_goal", ["title": "Goal number \(index)", "done": "It is done"]).isError) }
+        for index in 1...LeadGoalsFile.mostOpen { #expect(!lead.call("add_goal", ["title": "Goal number \(index)", "done": "It is done"]).isError) }
         let ninth = lead.call("add_goal", ["title": "One more", "done": "It is done"])
         #expect(ninth.isError && ninth.text.contains("Close one") && ninth.text.contains("merge two"), "\(ninth.text)")
         #expect(!lead.call("update_goal", ["goal": "goal-number-1", "state": "done"]).isError)
@@ -101,7 +102,7 @@ struct LeadGoalsTests: LeadTeamFixture {
         let fifth = add(lead, "Task number 5")
         #expect(fifth.text.contains(LeadGoals.noGoals), "\(fifth.text)")
         #expect(!lead.call("board", [:]).text.contains(LeadGoals.noGoals), "once a day")
-        _ = try BoardStore(root: root).update { $0.goalsNudgedAt = Date().timeIntervalSince1970 - LeadBoard.goalsNudgeEvery - 1 }
+        _ = try GoalStore(root: root).update { $0.nudgedAt = Date().timeIntervalSince1970 - LeadGoalsFile.nudgeEvery - 1 }
         #expect(lead.call("board", [:]).text.contains(LeadGoals.noGoals), "a day on, again")
 
         let goal = lead.call("add_goal", ["title": "Ship it", "done": "It ships"])
@@ -128,32 +129,53 @@ struct LeadGoalsTests: LeadTeamFixture {
         #expect(at.allSatisfy { $0 != nil } && zip(at, at.dropFirst()).allSatisfy { $0! < $1! }, "\(text)")
     }
 
-    /// A board with goals read by a build before them (its types with neither field) keeps what it knew; an old board
-    /// reads here with none; this build's goals survive its own round trip.
-    @Test func boardFilesReadBothWays() throws {
-        var board = LeadBoard()
-        board.goals = [LeadGoal(id: "g", title: "A goal", done: "Done", createdAt: 1)]
-        board.goalsNudgedAt = 5
-        var task = LeadTask(slug: "t", title: "T", contract: LeadContract(goal: "x", acceptance: ["y"], boundaries: [], context: ""))
-        task.goalID = "g"
-        board.tasks = [task]
-        let data = try JSONEncoder().encode(board)
+    /// The goals live in goals.json beside the board, never in it (the Mac app's tests pin LeadBoard's stored
+    /// properties); a task's goalID is on the board, which a build before it reads as it knew it (it passes over the key);
+    /// an old board reads with no goals.
+    @Test func goalsAreKeptBesideTheBoardAndFilesReadBothWays() throws {
+        let root = try repo()
+        let lead = try lead(root, FakeRuntime())
+        _ = lead.call("add_goal", ["title": "A goal", "done": "Done"])
+        _ = lead.call("add_task", ["title": "T", "goal": "x", "acceptance": ["y"], "goal_id": "a-goal"])
+        let folder = BoardStore(root: root).folder
+        let boardData = try Data(contentsOf: URL(fileURLWithPath: folder + "/board.json"))
+        let object = try #require(try JSONSerialization.jsonObject(with: boardData) as? [String: Any])
+        #expect(object["goals"] == nil && object["goalsNudgedAt"] == nil, "the board holds no goals")
+        #expect(((object["tasks"] as? [[String: Any]])?.first?["goalID"] as? String) == "a-goal")
+        let kept = try JSONDecoder().decode(LeadGoalsFile.self, from: Data(contentsOf: URL(fileURLWithPath: folder + "/goals.json")))
+        #expect(kept.goals.map(\.id) == ["a-goal"])
         // A build before goals: its board and task without the fields (a stand-in with the keys it knew).
-        struct OldTask: Codable, Equatable { var id: String; var slug: String; var title: String; var status: String }
+        struct OldTask: Codable, Equatable { var slug: String; var title: String; var status: String }
         struct OldBoard: Codable { var tasks: [OldTask]; var baseBranch: String? }
-        let old = try JSONDecoder().decode(OldBoard.self, from: data)
-        #expect(old.tasks == [OldTask(id: task.id, slug: "t", title: "T", status: "planned")])
-        let object = try #require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
-        #expect(object["goals"] != nil && ((object["tasks"] as? [[String: Any]])?.first?["goalID"] as? String) == "g")
-        // And this build reads it back whole; an old board (no goals keys) reads with none.
-        let again = try JSONDecoder().decode(LeadBoard.self, from: data)
-        #expect(again.goals == board.goals && again.tasks.first?.goalID == "g" && again.goalsNudgedAt == 5)
+        #expect(try JSONDecoder().decode(OldBoard.self, from: boardData).tasks == [OldTask(slug: "t", title: "T", status: "planned")])
+        // An old board (no goalID) reads here with none, and no goals file: none, nothing unsorted.
         var stripped = object
-        stripped["goals"] = nil
-        stripped["goalsNudgedAt"] = nil
         stripped["tasks"] = (object["tasks"] as? [[String: Any]])?.map { var task = $0; task["goalID"] = nil; return task }
         let older = try JSONDecoder().decode(LeadBoard.self, from: JSONSerialization.data(withJSONObject: stripped))
-        #expect(older.goals == nil && older.tasks.first?.goalID == nil && older.unsorted.isEmpty)
-        #expect(LeadGoals.statusLine(older).contains("none set"))
+        #expect(older.tasks.first?.goalID == nil && LeadGoalsFile().unsorted(older).isEmpty)
+        #expect(LeadGoals.statusLine(older, LeadGoalsFile()).contains("none set"))
+        #expect(try JSONDecoder().decode(LeadGoalsFile.self, from: Data("{}".utf8)) == LeadGoalsFile())
+    }
+
+    /// A board file a build of 2026-11-23 wrote with its goals in it (`goals`, `goalsNudgedAt`): read once, the goals
+    /// moved to goals.json, and the board's next write drops them there.
+    @Test func goalsInABoardFileAreMovedToTheirOwnFile() throws {
+        let root = try repo()
+        let store = BoardStore(root: root)
+        try store.prepare()
+        var task = LeadTask(slug: "t", title: "T", contract: LeadContract(goal: "x", acceptance: ["y"], boundaries: [], context: ""))
+        task.goalID = "g"
+        var object = try #require(try JSONSerialization.jsonObject(with: JSONEncoder().encode({ var board = LeadBoard(); board.tasks = [task]; return board }())) as? [String: Any])
+        object["goals"] = [["id": "g", "title": "A goal", "done": "Done", "state": "open", "createdAt": 1.0]]
+        object["goalsNudgedAt"] = 5.0
+        try JSONSerialization.data(withJSONObject: object).write(to: URL(fileURLWithPath: store.folder + "/board.json"))
+        #expect(!FileManager.default.fileExists(atPath: store.folder + "/goals.json"))
+        let goals = GoalStore(board: store).load()
+        #expect(goals.goals.map(\.id) == ["g"] && goals.nudgedAt == 5)
+        #expect(FileManager.default.fileExists(atPath: store.folder + "/goals.json"), "moved at the first read")
+        _ = try store.update { $0.baseBranch = "main" }
+        let rewritten = try #require(try JSONSerialization.jsonObject(with: Data(contentsOf: URL(fileURLWithPath: store.folder + "/board.json"))) as? [String: Any])
+        #expect(rewritten["goals"] == nil && rewritten["goalsNudgedAt"] == nil)
+        #expect(GoalStore(board: store).load().goals.map(\.id) == ["g"], "still the goals file's")
     }
 }

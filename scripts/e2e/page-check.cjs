@@ -4,7 +4,7 @@
 // fixed time, so a loaded machine is only slower.
 //
 // What is looked for comes from the test, which made the node's state (EXPECT, a JSON file):
-//   { session, chatHref, chat, projectHref, question, result, statement, task, shellHref, shell, board, goal, goalID, replacedHref, plugin,
+//   { session, chatHref, chat, projectHref, question, approval, approvalFiles, approvalSensitive, result, statement, task, shellHref, shell, board, goal, goalID, replacedHref, plugin,
 //     setting }
 // The page is the redesigned one (docs/superpowers/specs/2026-11-23-v2-web-ui-design.md): three columns, a project's
 // lead conversation in the centre, its team on the right, the session view under Your own sessions.
@@ -12,8 +12,15 @@
 // - Chat: the session's conversation shows a line of its transcript (the session view, at its old address).
 // - Question card: the lead's open question, in the project's waiting block, under "1 question for you", saying
 //   the lead asks.
+// - Long approval: an approval with a long markdown text and ten files, folded under the first question; opened, its
+//   question line and a few lines at body size, the key facts (the sensitive paths listed), the files one click away, the whole in the side sheet;
+//   the waiting block under about 60% of the centre.
+// - Columns fit: at 1850, 1440, 1280 and 1024 px wide the three columns are inside the window, nothing scrolls
+//   sideways, the right column's long texts wrap inside it (the lead's statement in three lines at most), and every
+//   scroller has the thin, buttonless scrollbar.
 // - Lead conversation: the lead's result as a line, and the header saying what needs you.
-// - Latest statement: the lead's latest decision at the top of a short conversation.
+// - Latest statement: the lead's latest decision once: at the right column's top while it is in sight, else (on a
+//   phone) at the top of a short conversation.
 // - What waits elsewhere: the summary's count a link to the next place that waits, that place marked.
 // - Side sheet: the result's line opens its whole text, its markdown table drawn as a table.
 // - Team tab: the right column's Team tab shows a task by its title, and it opens in place naming its goal.
@@ -100,6 +107,33 @@ async function shots(page, origin, folder) {
       }
     }
   }
+  // The user's window zoomed (1997 px at 110% and 125%), the message box focused: the lead.
+  await page.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: 'dark' }] });
+  for (const [width, scale, name] of [[1816, 1.1, 'zoom110'], [1598, 1.25, 'zoom125']]) {
+    await page.send('Emulation.setDeviceMetricsOverride', { width, height: 1000, deviceScaleFactor: scale, mobile: false });
+    await page.go(project);
+    await pause(900);
+    await page.evaluate(`document.querySelector('.project-view .say')?.focus()`);
+    await pause(300);
+    fs.writeFileSync(path.join(folder, `lead-${name}-dark.png`), Buffer.from((await page.send('Page.captureScreenshot', { format: 'png' })).data, 'base64'));
+  }
+  // At 1850 px wide (the user's window): the lead, the long approval opened in the waiting block, its sheet.
+  await page.send('Emulation.setDeviceMetricsOverride', { width: 1850, height: 1000, deviceScaleFactor: 1, mobile: false });
+  for (const theme of ['light', 'dark']) {
+    await page.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: theme }] });
+    await page.go(project);
+    await pause(900);
+    fs.writeFileSync(path.join(folder, `lead-1850-${theme}.png`), Buffer.from((await page.send('Page.captureScreenshot', { format: 'png' })).data, 'base64'));
+    await page.evaluate(`[...document.querySelectorAll('.wait-box .card.folded')].find((el) => el.innerText.includes(${JSON.stringify(expect.approval)}))?.querySelector('.card-unfold')?.click()`);
+    await pause(400);
+    await page.evaluate(`(() => { const card = [...document.querySelectorAll('.wait-box .card')].find((el) => el.innerText.includes(${JSON.stringify(expect.approval)})); card?.scrollIntoView({ block: 'end' }); })()`);
+    await pause(400);
+    fs.writeFileSync(path.join(folder, `long-approval-1850-${theme}.png`), Buffer.from((await page.send('Page.captureScreenshot', { format: 'png' })).data, 'base64'));
+    await page.evaluate(`[...document.querySelectorAll('.wait-box .card')].find((el) => el.innerText.includes(${JSON.stringify(expect.approval)}))?.querySelector('.card-whole .link')?.click()`);
+    await pause(700);
+    fs.writeFileSync(path.join(folder, `long-approval-sheet-1850-${theme}.png`), Buffer.from((await page.send('Page.captureScreenshot', { format: 'png' })).data, 'base64'));
+    await page.evaluate(`document.querySelector('.sheet-close')?.click()`);
+  }
   // The page in Spanish (?lang=es): the lead, the roadmap, a session, This node, Settings, Your own sessions, a task.
   await page.send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 900, deviceScaleFactor: 1, mobile: false });
   for (const theme of ['light', 'dark']) {
@@ -126,7 +160,7 @@ async function run() {
 
     // Projects and own sessions: paired, connected, the project listed on the left, the session under Your own sessions.
     const listed = await page.until(`(() => {
-      if (!sessionStorage.getItem('vibeswitcher.token') || document.querySelector('.offline:not([hidden])')) return null;
+      if (!sessionStorage.getItem('vibeswitcher.token') || document.querySelector('.offline:not([hidden]):not(.confirm-pairing)')) return null;
       const projects = document.querySelectorAll('.left .project').length;
       return projects ? projects : null;
     })()`, WAIT);
@@ -155,6 +189,129 @@ async function run() {
     await page.shot('question-card');
     record('Question card', question, question || `no card with "${expect.question}" under the waiting block's title`);
 
+    // Long approval: the second question folds to its line under the first; opened, it shows its question line, a few
+    // lines at body size with no markdown marks, the key facts with the files one click away, and "Read it all" opens
+    // the whole text in the side sheet drawn from its markdown. The waiting block keeps under about 60% of the centre.
+    const unfolded = await page.until(`(() => {
+      const card = [...document.querySelectorAll('.wait-box .card')].find((el) => el.innerText.includes(${JSON.stringify(expect.approval)}));
+      if (!card) return null;
+      if (card.classList.contains('folded')) { card.querySelector('.card-unfold').click(); return null; }
+      return card.querySelector('.key-facts') ? true : null;
+    })()`, WAIT);
+    const approval = unfolded && await page.until(`(() => {
+      const card = [...document.querySelectorAll('.wait-box .card')].find((el) => el.innerText.includes(${JSON.stringify(expect.approval)}));
+      const body = parseFloat(getComputedStyle(document.body).fontSize);
+      const said = [...card.querySelectorAll('.card-question, .card-lines')];
+      const tall = said.filter((el) => parseFloat(getComputedStyle(el).fontSize) > body || el.getBoundingClientRect().height > 4.6 * parseFloat(getComputedStyle(el).lineHeight));
+      const marks = said.filter((el) => /\\*\\*|\\x60/.test(el.innerText));
+      const rows = [...card.querySelectorAll('.key-facts dt')].map((dt) => dt.innerText.trim());
+      const files = card.querySelector('.facts-files');
+      const box = document.querySelector('.wait-box').getBoundingClientRect().height;
+      const centre = document.querySelector('.project-view').getBoundingClientRect().height;
+      const talk = document.querySelector('.project-view .talk').getBoundingClientRect().height;
+      const why = tall.length ? 'agent text too large or long: ' + tall.map((el) => el.className).join(', ')
+        : marks.length ? 'markdown marks shown: ' + marks.map((el) => el.className).join(', ')
+        : !['Commit', 'Into', 'Changes'].every((row) => rows.includes(row)) ? 'key rows: ' + rows.join(', ')
+        : !files || files.open || !files.innerText.includes(${JSON.stringify(expect.approvalFiles)}) ? 'the files aren’t one click away'
+        : !(card.querySelector('.sensitive-yes')?.querySelectorAll('code').length === 5 && card.querySelector('.sensitive-yes').innerText.trim().endsWith(${JSON.stringify(expect.approvalSensitive)})) ? 'the sensitive paths aren’t listed (five, then how many more)'
+        : box > 0.62 * centre || talk < 80 ? 'the waiting block takes ' + Math.round(box) + ' of ' + Math.round(centre) + ' px'
+        : null;
+      return why ? 'FAIL ' + why : rows.join(', ') + '; block ' + Math.round(100 * box / centre) + '% of the centre';
+    })()`, WAIT);
+    const readAll = approval && !approval.startsWith('FAIL') && await page.evaluate(`(() => { const card = [...document.querySelectorAll('.wait-box .card')].find((el) => el.innerText.includes(${JSON.stringify(expect.approval)})); const link = card?.querySelector('.card-whole .link'); link?.click(); return !!link; })()`);
+    const whole = readAll && await page.until(`(() => {
+      const sheet = document.querySelector('.sheet:not([hidden])');
+      if (!sheet || !/[?&]sheet=/.test(location.hash)) return null;
+      const body = sheet.querySelector('.sheet-body');
+      return body.querySelector('strong') && body.querySelector('code') && body.querySelector('li') && sheet.querySelectorAll('.facts .files li').length === ${Number(expect.approvalFiles)}
+        ? 'the sheet: ' + sheet.querySelector('.sheet-title').innerText.slice(0, 50) + ', its markdown drawn, the ' + ${JSON.stringify(expect.approvalFiles)} + ' files' : null;
+    })()`, WAIT);
+    await page.shot('long-approval');
+    await page.evaluate(`document.querySelector('.sheet-close')?.click()`);
+    record('Long approval', approval && !approval.startsWith('FAIL') && whole, !unfolded ? `no approval card "${expect.approval}" to open` : approval?.startsWith('FAIL') ? approval : whole ? approval + '; ' + whole : '"Read it all" opened no sheet with the whole text drawn');
+
+    // Columns fit: at each width the three columns are inside the window, nothing scrolls sideways, the header and the
+    // right column hold their text (the long task title and the lead's long statement wrap inside it).
+    const fits = [];
+    for (const width of [1850, 1440, 1280, 1024]) {
+      await page.send('Emulation.setDeviceMetricsOverride', { width, height: 1000, deviceScaleFactor: 1, mobile: false });
+      await page.go(expect.projectHref);
+      fits.push(await page.until(`(() => {
+        const right = document.querySelector('aside.right');
+        if (!right || !right.querySelector('.task-row2')) return null;
+        const out = [...document.querySelectorAll('.app > .left, .app > .centre-wrap, aside.right, .centre-head, .right .colbody, .right .task-name, .right .now')]
+          .filter((el) => el.offsetParent && (el.getBoundingClientRect().right > innerWidth + 0.5 || el.scrollWidth > el.clientWidth + 1));
+        const lines = (el) => el ? Math.round(el.getBoundingClientRect().height / parseFloat(getComputedStyle(el).lineHeight)) : 0;
+        const said = lines(right.querySelector('.now-text'));
+        // Thin scrollbars without buttons everywhere: no scroller sets scrollbar-width (it overrides WebKit's own thin,
+        // buttonless bar), and the stylesheet hides the buttons.
+        const scrollers = [...document.querySelectorAll('body *')].filter((el) => el.offsetParent && /auto|scroll/.test(getComputedStyle(el).overflowY + getComputedStyle(el).overflowX));
+        const styled = scrollers.filter((el) => !['auto', 'none'].includes(getComputedStyle(el).scrollbarWidth));
+        const buttonless = [...document.styleSheets].some((sheet) => [...sheet.cssRules].some((rule) => /::-webkit-scrollbar-button/.test(rule.selectorText || '') && rule.style.display === 'none'));
+        const why = document.documentElement.scrollWidth > innerWidth ? 'the page scrolls sideways'
+          : styled.length ? 'a scrollbar styled past the thin rule: ' + styled.map((el) => el.className.split(' ')[0]).join(', ')
+          : !buttonless ? 'no rule hides the scrollbars\u2019 buttons'
+          : out.length ? 'past its edge: ' + out.map((el) => el.className.split(' ')[0]).join(', ')
+          : said > 3 ? 'the lead’s statement takes ' + said + ' lines'
+          : null;
+        return ${width} + ': ' + (why || 'fits');
+      })()`, WAIT));
+    }
+    // A zoomed window (the user's: Chrome at 110–150%), and the guard (anything too wide clipped, never scrolled to): every width from 900 to 2000 px in steps of 7 at each zoom,
+    // the page never wider than the window nor scrolled sideways, also after the message box takes the focus; at three
+    // of them, after a task opens and after the side sheet opens. The first element past the edge is named.
+    const sideways = `(() => {
+      const se = document.scrollingElement;
+      const scrolled = scrollX || se.scrollLeft || document.body.scrollLeft || document.querySelector('.app').scrollLeft;
+      if (se.scrollWidth <= innerWidth && document.body.scrollWidth <= innerWidth && !scrolled) return null;
+      const edge = (el) => { const r = el.getBoundingClientRect(); return r.width > 0 && (r.right > innerWidth + 0.5 || r.left < -0.5) && getComputedStyle(el).position !== 'fixed'; };
+      const first = [...document.querySelectorAll('body *')].find((el) => edge(el) && ![...el.children].some(edge) && !el.closest('[hidden]'));
+      return 'wide ' + se.scrollWidth + ' of ' + innerWidth + (scrolled ? ', scrolled ' + scrolled : '') + (first ? ': ' + first.tagName.toLowerCase() + '.' + String(first.className).split(' ')[0] : '');
+    })()`;
+    await page.go(expect.projectHref);
+    const wides = [];
+    for (const scale of [1, 1.1, 1.25, 1.5]) {
+      for (let width = 900; width <= 2000; width += 7) {
+        await page.send('Emulation.setDeviceMetricsOverride', { width, height: 1000, deviceScaleFactor: scale, mobile: false });
+        await page.evaluate(`document.querySelector('.project-view .say')?.focus()`);
+        const wide = await page.evaluate(sideways);
+        if (wide) wides.push(`${width}@${scale}: ${wide}`);
+      }
+    }
+    for (const [width, scale] of [[1816, 1.1], [1598, 1.25], [1331, 1.5]]) {
+      await page.send('Emulation.setDeviceMetricsOverride', { width, height: 1000, deviceScaleFactor: scale, mobile: false });
+      await page.go(expect.projectHref + '?task=' + encodeURIComponent(expect.task));
+      await page.until(`document.querySelector('.right .task-row2.open') ? true : null`, WAIT);
+      const task = await page.evaluate(sideways);
+      if (task) wides.push(`${width}@${scale} with a task open: ${task}`);
+      await page.evaluate(`document.querySelector('.project-view .line.kind-result')?.click()`);
+      await page.until(`document.querySelector('.sheet:not([hidden])') ? true : null`, WAIT);
+      const sheet = await page.evaluate(sideways);
+      if (sheet) wides.push(`${width}@${scale} with the sheet open: ${sheet}`);
+      await page.evaluate(`document.querySelector('.sheet-close')?.click()`);
+    }
+    // The guard: something far wider than the window put in the centre, and a field at its far end focused: the page
+    // is neither wider than the window nor scrolled sideways.
+    await page.send('Emulation.setDeviceMetricsOverride', { width: 1598, height: 1000, deviceScaleFactor: 1.25, mobile: false });
+    const guard = await page.evaluate(`(() => {
+      const wide = document.createElement('div');
+      wide.style.setProperty('width', '3000px');
+      const field = document.createElement('input');
+      field.style.setProperty('margin-left', '2900px');
+      wide.append(field);
+      document.querySelector('.project-view .centre-head').append(wide);
+      field.focus();
+      const said = ${sideways};
+      wide.remove();
+      return said;
+    })()`);
+    await pause(100);
+    const after = await page.evaluate(sideways);
+    if (guard || after) wides.push('a wide element in the centre: ' + (guard || after));
+    fits.push(wides.length ? 'zoomed: ' + wides.length + ' too wide, ' + wides.slice(0, 4).join('; ') : 'zoomed 110–150%, 900–2000 px: fits');
+    await page.send('Emulation.setDeviceMetricsOverride', { width: 1400, height: 900, deviceScaleFactor: 1, mobile: false });
+    record('Columns fit', fits.every((line) => line && line.endsWith(': fits')), fits.map((line) => line || 'never drawn').join('; '));
+
     // Lead conversation: the result as a line; the header says what needs you.
     await page.go(expect.projectHref);
     const talk = await page.until(`(() => {
@@ -164,9 +321,14 @@ async function run() {
     })()`, WAIT);
     record('Lead conversation', talk, talk || `no result line "${expect.result}", or the header doesn't say what needs you`);
 
-    // Latest statement: the conversation is short (one line), so the lead's latest decision shows at its top.
-    const statement = await page.until(`(() => { const said = document.querySelector('.project-view .latest-said'); return said && said.innerText.includes(${JSON.stringify(expect.statement)}) ? said.innerText.replace(/\\s+/g, ' ') : null; })()`, WAIT);
-    record('Latest statement', statement, statement || `no "${expect.statement}" above a short conversation`);
+    // Latest statement: shown once. With the right column in sight it is at the right column's top, not above the
+    // conversation; at 390 px (the right column a drawer) it is at the top of the short conversation.
+    const statement = await page.until(`(() => {
+      const right = document.querySelector('.right .now');
+      const above = document.querySelector('.project-view .latest-said');
+      return right && right.offsetParent && right.innerText.includes(${JSON.stringify(expect.statement)}) && (!above || !above.offsetParent) ? right.innerText.replace(/\\s+/g, ' ').slice(0, 90) : null;
+    })()`, WAIT);
+    record('Latest statement', statement, statement || `no "${expect.statement}" at the right column's top, or it shows twice`);
 
     // What waits elsewhere: the header counts this project's; the summary's count links to the next place that waits,
     // and Your own sessions (where the replaced lead needs you) carries the asking colour.
@@ -315,6 +477,7 @@ async function run() {
       const card = document.querySelector('.project-view .card');
       const big = document.querySelector('.project-view .big');
       if (!card || !big || !big.offsetParent) return null;
+      if (!document.querySelector('.project-view .latest-said')?.offsetParent) return 'the lead\u2019s latest statement isn\u2019t above the conversation';
       const wide = [...document.querySelectorAll('body *')].filter((el) => el.offsetParent && el.getBoundingClientRect().right > innerWidth + 1 && !el.closest('.left, .right, .sheet, .switch, .team-strip, pre, .copy-line, .table'));
       return document.documentElement.scrollWidth <= innerWidth && !wide.length ? 'fits 390 px' : 'too wide: ' + wide.slice(0, 3).map((el) => el.className).join(', ');
     })()`, WAIT);

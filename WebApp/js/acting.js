@@ -15,6 +15,7 @@ export function refusalWords(error) {
   if (!error) return t('acRefused');
   if (error.code === 'changed') return t('acChanged');
   if (error.code === 'voice') return t('acVoice');
+  if (error.code === 'acts-ended') return t('acEnded');
   if (error.code === 'not-yet') return t('acNotYet');
   return error.message || t('acRefused');
 }
@@ -26,7 +27,7 @@ export const cardArgs = (card, args = {}) => ({ card: card.id, seen: card.seen ?
 // A question's version answered; a plugin's card (a shell request's) has none, so none is sent.
 export const answerArgs = (card, text) => cardArgs(card, { text, ...(card.question?.version != null ? { version: card.question.version } : {}) });
 
-// A setting a page may not set even when it acts: web_acts on (only off), a floor, the policy. The node refuses them
+// A setting a page may not set even when it acts: web_acts raised (only off), a floor, the policy. The node refuses them
 // (`voice`); the page shows their terminal line instead of a button.
 export function pageMaySet(key, value) {
   if (key === 'policy' || /^floor_/.test(key)) return false;
@@ -76,9 +77,15 @@ export function actsLine(app, { compact = false } = {}) {
   const acts = app.store.state.node?.web?.acts;
   if (!acts) return null;
   const here = app.store.acts();
-  if (!acts.on) return compact ? null : h('p', { class: 'acts-line' }, t('acOffWords'), ' ', h('code', null, 'vibeswitcher set web_acts on'), t('acOffWords2'));
+  // The node's level: off, confirm (a passkey per request, later), trust; `on` from a node before levels.
+  const level = acts.level ?? (acts.on ? 'trust' : 'off');
+  if (level === 'off') return compact ? null : h('p', { class: 'acts-line' }, t('acOffWords'), ' ', h('code', null, 'vibeswitcher set web_acts trust'), t('acOffWords2'));
   const since = acts.since ? new Date(acts.since).toLocaleString(undefined, { dateStyle: compact ? undefined : 'medium', timeStyle: 'short' }) : '';
-  const words = here ? t(compact ? 'acThisPageShort' : 'acThisPage', { since }) : t('acPagesMay', { since, n: acts.pages ?? 0 });
+  // A page waiting for the terminal's confirmation says so in its own banner (the phrase): nothing here meanwhile.
+  if (!here && app.store.state.phrase) return null;
+  // Acting is on but this page doesn't act (a reload lost its secret, or its acting ran out): pair it again.
+  if (!here) return h(compact ? 'div' : 'p', { class: 'acts-line' + (compact ? ' compact' : '') }, h('span', null, t(compact ? 'acPairAgainShort' : 'acPairAgain', { since })), ' ', h('code', null, 'vibeswitcher web'));
+  const words = t(compact ? 'acThisPageShort' : 'acThisPage', { since });
   const off = here && app.store.can('set') ? doButton(app, { label: t('acTurnOff'), kind: 'set', quiet: true, className: 'small', args: () => ({ key: 'web_acts', value: 'off' }) }).el : null;
   return h(compact ? 'div' : 'p', { class: 'acts-line' + (compact ? ' compact' : '') }, h('span', null, words), off);
 }

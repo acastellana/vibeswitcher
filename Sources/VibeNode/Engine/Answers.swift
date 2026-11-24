@@ -708,11 +708,25 @@ extension LeadEngine {
     /// `inBatch`: an item of `vibeswitcher approve`'s batch, refused when the card would record any guard rail or a review
     /// floor (`ConfigHoldStore.wouldRecord`, asked in the same turn of `work` as the accept, of the card the accept would
     /// record): nothing accepted, the card left open for the folder's own `config held` and `config accept`.
-    public func configAccept(card id: String, inBatch: Bool = false, then: @escaping (Result<WireKinds.ConfigAccept.Result, CardFailure>) -> Void) {
+    /// `fromPage`: an acting page's accept (single, or an item of its batch), refused when the floor or a guard rail
+    /// isn't known to be the recorded one (`ConfigHoldStore.pageRefusal`): accepted from a terminal only.
+    public func configAccept(card id: String, inBatch: Bool = false, fromPage: Bool = false,
+                             then: @escaping (Result<WireKinds.ConfigAccept.Result, CardFailure>) -> Void) {
         queue.async { [self] in
             guard let card = cards.cards[id], let shown = card.config else { return then(.failure(.gone("no held-config card \(id)"))) }
             let (root, vault, node, queue) = (card.root, cardVault, self.root, self.queue)
             work.async { [weak self] in
+                if fromPage {
+                    let changed: [String]
+                    do { changed = try ConfigHoldStore.pageRefusal(shown, root: root, vault: vault) } catch {
+                        return queue.async { then(.failure(.refused("the vault can't say what this accept would record (\(error)): nothing was accepted"))) }
+                    }
+                    if !changed.isEmpty {
+                        let why = ConfigHoldStore.pageRefusalWords(changed)
+                        self?.note("config accept of \(id) from a page refused: \(why)")
+                        return queue.async { then(.failure(.refused(why))) }
+                    }
+                }
                 if inBatch {
                     // Answered on `queue`, as every other outcome (`Requests.offQueueReplies` found these from `work`).
                     let pending: [String]

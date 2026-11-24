@@ -74,7 +74,7 @@ public enum WireVectors {
               if (!isObject(value)) return "event";
               if (has(value, "re")) return "reply";
               if (has(value, "id")) return "request";
-              return ["hello", "bye", "snapshot", "delta"].includes(value.kind) ? value.kind : "event";
+              return ["hello", "bye", "snapshot", "delta", "paired"].includes(value.kind) ? value.kind : "event";
             }
 
             export function validate(kind, value) {
@@ -594,15 +594,20 @@ public enum WireVectors {
         return board
     }
 
-    /// `board` with two goals (the web design's "Goals", 2026-11-23): the launch, with its first two tasks; the uploads,
-    /// done, with the third; the rest unsorted.
-    static func goaled(_ board: LeadBoard, now: Double) -> LeadBoard {
-        var board = board
+    /// The sample project's two goals (the web design's "Goals", 2026-11-23, goals.json beside the board): the launch,
+    /// open; the uploads, done.
+    static func sampleGoals(now: Double) -> LeadGoalsFile {
         var shipped = LeadGoal(id: "uploads", title: "Uploads never lose a file", done: "A failed upload retries once and says so", createdAt: now - 9000)
         shipped.state = .done
         shipped.closedAt = now - 100
-        board.goals = [LeadGoal(id: "launch", title: "Launch the paid plans", done: "Pricing and onboarding are live for new sign-ups", createdAt: now - 9000),
-                       shipped]
+        return LeadGoalsFile(goals: [LeadGoal(id: "launch", title: "Launch the paid plans", done: "Pricing and onboarding are live for new sign-ups",
+                                              createdAt: now - 9000), shipped])
+    }
+
+    /// `board` with its tasks in the sample goals (`sampleGoals`): the launch's the first two; the uploads' the third; the
+    /// rest unsorted.
+    static func goaled(_ board: LeadBoard, now: Double) -> LeadBoard {
+        var board = board
         for (index, goal) in [(0, "launch"), (1, "launch"), (2, "uploads")] where index < board.tasks.count { board.tasks[index].goalID = goal }
         // Estimates (the web design's "Estimates"): the worker at work said 30 minutes (60 at worst) ten minutes ago; the
         // one in review is past its likely estimate; the lead estimated the queued one, which comes after the first.
@@ -623,7 +628,7 @@ public enum WireVectors {
                          // The same decisions as the records folder holds them (oldest first): the board carries each with its line.
                          records: BoardRecords.Read(decisions: sampleDecisions(now: boardNow.timeIntervalSince1970).reversed().map {
                              LeadDecision(at: $0.at, text: $0.text, why: $0.why)
-                         }, recordsDir: "docs/lead", present: ["workflow.md": true, "decisions.md": true, "progress.md": true, "incidents.md": false]))
+                         }, recordsDir: "docs/lead", present: ["workflow.md": true, "decisions.md": true, "progress.md": true, "incidents.md": false]), goals: sampleGoals(now: boardNow.timeIntervalSince1970))
     }
 
     /// `mail`'s answer for the vectors' project: a question it asked another project's lead, the answer that came
@@ -661,7 +666,8 @@ public enum WireVectors {
         board.tasks[0].blocker = nil
         board.tasks[0].since = now
         board.tasks[2].evidence = LeadEvidence(completion: .complete, integrity: .clean, summary: "Retries only an idempotent PUT", at: now)
-        return BoardValue.value(project: NodeIds.project(root: root), root: root, board: board, now: Date(timeIntervalSince1970: now))
+        return BoardValue.value(project: NodeIds.project(root: root), root: root, board: board, now: Date(timeIntervalSince1970: now),
+                                goals: sampleGoals(now: boardNow.timeIntervalSince1970))
     }
 
     // The node's settings (`settings`' result), from a few of them whose words and limits are the same on any machine.

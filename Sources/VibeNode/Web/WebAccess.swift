@@ -24,6 +24,31 @@ public final class WebAccess: WebGate, @unchecked Sendable {
     public static let codesKept = 8
     /// What a token may do.
     public static let rights: LiveRights = [.read, .draft]
+
+    /// Acting from the page (`ActingPages`): the loopback page's gate only (`NodeLive` sets it); nil on the tailnet's,
+    /// so no tailnet page acts.
+    public var acting: ActingPages? {
+        get { lock.withLock { actingPages } }
+        set { lock.withLock { actingPages = newValue } }
+    }
+    private var actingPages: ActingPages?
+
+    /// The authority on this gate's tokens (the acting review's fix B): the host's vault as `ActingPages` keeps it, for
+    /// `scope` (`loopback`, `tailnet`). Set, a token is admitted only when the vault knows it, whatever the token file
+    /// says (any process of the user's writes it); unset (a test's gate), the file alone.
+    public var tokenAuthority: (pages: ActingPages, scope: String)? {
+        get { lock.withLock { authority } }
+        set { lock.withLock { authority = newValue } }
+    }
+    private var authority: (pages: ActingPages, scope: String)?
+    /// The pairings taken and waiting for the terminal's confirmation (the loopback gate's), by code id.
+    private var pairings: [String: PagePairing] = [:]
+    /// The codes taken, by digest: their id, while a second try with one is worth saying (`PagePairing.contested`).
+    private var takenCodes: [(digest: [UInt8], id: String, until: Date)] = []
+    /// `hello`'s `peer.why` on a confirmed pairing's connection that watches but doesn't act.
+    public static let watchingWhy = "a web client on this machine's loopback, its pairing confirmed in a terminal: it watches the terminals"
+    /// `hello`'s `peer.why` on an acting page's connection.
+    public static let actingWhy = "a web client on this machine's loopback, paired while acting from the page is on: it acts as the user"
     /// What a refused `auth` is told, whatever the reason: the `bye`'s `reason`.
     public static let refusedReason = "not admitted: run `vibeswitcher web` in a terminal for a new address"
     /// `hello`'s `peer.why` on a web connection.
@@ -37,6 +62,8 @@ public final class WebAccess: WebGate, @unchecked Sendable {
         public var url: String
         public var port: UInt16
         public var expiresIn: Int
+        /// The code's id (`PagePairing.codeID`): what the terminal waits on for the page that takes it.
+        public var code: String = ""
     }
 
     public let tokens: WebTokens
@@ -115,6 +142,8 @@ public final class WebAccess: WebGate, @unchecked Sendable {
             codes.append((WebTokens.digest(code), now.addingTimeInterval(Self.codeLife)))
             if codes.count > Self.codesKept { codes.removeFirst(codes.count - Self.codesKept) }
         }
+        // Never shown to a page in a terminal or a transcript while it lives (`PairingMask`).
+        PairingMask.made(code, until: now.addingTimeInterval(Self.codeLife))
         return code
     }
 
@@ -144,7 +173,8 @@ public final class WebAccess: WebGate, @unchecked Sendable {
             let host = host
             note("web.open: a pairing code made, taken once in the next \(Int(Self.codeLife)) s; the web listens on \(host):\(port)")
             onChange?()
-            return .success(Opened(url: Self.url(port: port, code: code, host: host), port: port, expiresIn: Int(Self.codeLife)))
+            return .success(Opened(url: Self.url(port: port, code: code, host: host), port: port, expiresIn: Int(Self.codeLife),
+                                   code: PagePairing.codeID(digest: WebTokens.digest(code))))
         }
     }
 
@@ -152,8 +182,10 @@ public final class WebAccess: WebGate, @unchecked Sendable {
     public func revoke() -> Result<Int, WebTokens.Refusal> {
         lock.withLock {
             codes = []
+            pairings = [:]
             revocations += 1
         }
+        if let authority = tokenAuthority { authority.pages.dropPages(scope: authority.scope) }
         let dropped: Int
         do { dropped = try tokens.revokeAll(now: now()) } catch let refusal as WebTokens.Refusal {
             return .failure(refusal)
@@ -161,6 +193,7 @@ public final class WebAccess: WebGate, @unchecked Sendable {
             return .failure(WebTokens.Refusal("\(error)"))
         }
         note("web.revoke: \(dropped) tokens dropped; their connections are closed")
+        acting?.revoked()
         onRevoke?()
         onChange?()
         return .success(dropped)
@@ -184,7 +217,11 @@ public final class WebAccess: WebGate, @unchecked Sendable {
 
     /// Whether `token` is still taken (a connection admitted under it is closed once it isn't: it ran out, or every
     /// token was revoked).
-    public func holds(_ token: String) -> Bool { tokens.check(token, now: now()) }
+    public func holds(_ token: String) -> Bool {
+        guard tokens.check(token, now: now()) else { return false }
+        guard let authority = tokenAuthority else { return true }
+        return authority.pages.admits(scope: authority.scope, token: token)
+    }
 
     public func admit(_ args: [String: NodeWire.Value]) -> WebAdmission? {
         let pair = args["pair"]?.string, token = args["token"]?.string
@@ -194,7 +231,12 @@ public final class WebAccess: WebGate, @unchecked Sendable {
             // The revocations seen before the code is taken, and again once its token is issued: a revoke between the
             // two (it dropped every token, but not this one, issued after it) leaves this one dropped and the page out.
             let before = lock.withLock { revocations }
-            guard pair.utf8.count <= 64, take(pair, now: at) else { return refused() }
+            guard pair.utf8.count <= 64, let code = take(pair, now: at) else {
+                // A code taken already, tried again: said in the terminal that waits on it (another page may have read
+                // the address first).
+                if pair.utf8.count <= 64 { contest(pair, now: at) }
+                return refused()
+            }
             betweenTakeAndIssue?()
             guard let issued = try? tokens.issue(now: at) else { return refused() }
             guard lock.withLock({ revocations }) == before else {
@@ -203,15 +245,79 @@ public final class WebAccess: WebGate, @unchecked Sendable {
                 return refused()
             }
             note("a pairing code was taken: a web token issued")
+            if let authority = tokenAuthority { authority.pages.issued(scope: authority.scope, token: issued.token, until: issued.expiresAt) }
+            // The loopback page's gate (the only one with `acting`): the pairing waits for the terminal's confirmation,
+            // the page shows its phrase meanwhile and reads and drafts.
+            var phrase: String?
+            if acting != nil {
+                let pairing = PagePairing(code: code, token: issued.token, tokenEnds: issued.expiresAt, phrase: PagePairing.phrase(token: issued.token),
+                                          at: at, contested: false)
+                phrase = pairing.phrase
+                lock.withLock {
+                    pairings = pairings.filter { at.timeIntervalSince($0.value.at) < PagePairing.waits }
+                    pairings[code] = pairing
+                }
+            }
             onChange?()
             afterAdmit?()
-            return WebAdmission(rights: Self.rights, auth: Self.auth(token: issued.token, expiresAt: issued.expiresAt), token: issued.token)
+            var auth = Self.auth(token: issued.token, expiresAt: issued.expiresAt)
+            if let phrase, case .object(var fields) = auth {
+                fields["phrase"] = .string(phrase)
+                auth = .object(fields)
+            }
+            return WebAdmission(rights: Self.rights, auth: auth, token: issued.token, pairing: phrase == nil ? nil : code)
         case (nil, let token?):
             guard let expiresAt = tokens.expiry(of: token, now: at) else { return refused() }
+            // Only a token the vault knows (never what the token file says).
+            if let authority = tokenAuthority, !authority.pages.admits(scope: authority.scope, token: token) { return refused() }
+            // Watching and acting only with the secret a confirmed pairing gave (from the page's memory), live in the
+            // vault's list as this server keeps it.
+            let secret = args["act"]?.string.flatMap { $0.utf8.count <= 64 ? $0 : nil }
+            var rights = Self.rights
+            if let acting, acting.watches(token: token, secret: secret) {
+                rights.insert(.watch)
+                if acting.acts(token: token, secret: secret) { rights.insert(.act) }
+            }
             afterAdmit?()
-            return WebAdmission(rights: Self.rights, auth: Self.auth(token: nil, expiresAt: expiresAt), token: token)
+            return WebAdmission(rights: rights, auth: Self.auth(token: nil, expiresAt: expiresAt, rights: rights), token: token,
+                                act: rights.contains(.watch) ? secret : nil)
         default:
             return refused()
+        }
+    }
+
+    /// Where a taken code's pairing stands, for the terminal that made it (`web.pairing`).
+    public enum PairingState: Equatable, Sendable {
+        /// Not taken yet (or it ran out: the terminal's own clock says).
+        case waiting
+        case taken(phrase: String, contested: Bool)
+    }
+
+    public func pairing(code: String) -> PairingState {
+        let at = now()
+        return lock.withLock {
+            guard let pairing = pairings[code], at.timeIntervalSince(pairing.at) < PagePairing.waits else { return .waiting }
+            return .taken(phrase: pairing.phrase, contested: pairing.contested)
+        }
+    }
+
+    /// The pairing of `code`, taken out (`web.confirm`): once only.
+    public func takePairing(code: String) -> PagePairing? {
+        let at = now()
+        return lock.withLock {
+            guard let pairing = pairings.removeValue(forKey: code), at.timeIntervalSince(pairing.at) < PagePairing.waits else { return nil }
+            return pairing
+        }
+    }
+
+    /// A taken code tried again: its pairing marked contested.
+    private func contest(_ code: String, now: Date) {
+        let candidate = WebTokens.digest(code)
+        lock.withLock {
+            takenCodes = takenCodes.filter { $0.until > now }
+            guard let taken = takenCodes.first(where: { WebTokens.same($0.digest, candidate) }) else { return }
+            // Said to the terminal waiting on it (`web.pairing`), not in the log: every refusal notes the same line.
+            pairings[taken.id]?.contested = true
         }
     }
 
@@ -221,29 +327,34 @@ public final class WebAccess: WebGate, @unchecked Sendable {
         return nil
     }
 
-    /// Whether `code` is a live code's; it is taken (dropped) when it is. Every live code compared, none skipped.
-    private func take(_ code: String, now: Date) -> Bool {
+    /// Whether `code` is a live code's: its id, and it is taken (dropped) when it is. Every live code compared, none
+    /// skipped. A taken code is remembered a while, so a second try with it is said (`contest`).
+    private func take(_ code: String, now: Date) -> String? {
         let candidate = WebTokens.digest(code)
         return lock.withLock {
             codes = codes.filter { $0.expiresAt > now }
             var found: Int?
             for (index, live) in codes.enumerated() where WebTokens.same(live.digest, candidate) && found == nil { found = index }
-            guard let found else { return false }
+            guard let found else { return nil }
             codes.remove(at: found)
-            return true
+            let id = PagePairing.codeID(digest: candidate)
+            takenCodes = takenCodes.filter { $0.until > now } + [(candidate, id, now.addingTimeInterval(PagePairing.waits))]
+            return id
         }
     }
 
     /// `hello`'s `auth`: the rights, the token (only in answer to a code) and when it runs out.
-    static func auth(token: String?, expiresAt: Date) -> NodeWire.Value {
+    static func auth(token: String?, expiresAt: Date, rights: LiveRights = WebAccess.rights, act: String? = nil) -> NodeWire.Value {
         var fields: [String: NodeWire.Value] = ["rights": .array(names(rights).map(NodeWire.Value.string)), "expiresAt": .date(expiresAt)]
+        // The acting secret, once, in answer to the pairing (the page keeps it in its memory only).
+        if let act { fields["act"] = .string(act) }
         if let token { fields["token"] = .string(token) }
         return .object(fields)
     }
 
     /// The rights' names on the wire, in order.
     public static func names(_ rights: LiveRights) -> [String] {
-        [(LiveRights.read, "read"), (LiveRights.draft, "draft")].filter { rights.contains($0.0) }.map(\.1)
+        [(LiveRights.read, "read"), (LiveRights.draft, "draft"), (LiveRights.watch, "watch"), (LiveRights.act, "act")].filter { rights.contains($0.0) }.map(\.1)
     }
 
     // MARK: What a web connection may send
@@ -261,6 +372,16 @@ public final class WebAccess: WebGate, @unchecked Sendable {
     public static func kinds(for rights: LiveRights) -> [String] { Principal.page(rights, terminals: false).kinds }
 }
 
+/// What an acting page's connection came in with: its token and its acting secret.
+public struct PageCredentials: Sendable, Equatable {
+    public var token: String
+    public var act: String?
+    public init(token: String, act: String?) {
+        self.token = token
+        self.act = act
+    }
+}
+
 /// What stands between the listener and the hub (I1 hands the listener one around the hub): every request a web
 /// connection sends is judged by `WebAccess.refusal(for:rights:)` before any handler sees it, and a refused one is
 /// answered here and goes no further. What isn't a request (not JSON, not an object) goes on, for the hub to close.
@@ -271,23 +392,75 @@ public final class WebRequestScreen: WebSocketHandler, @unchecked Sendable {
     /// on to the hub.
     private let terminals: Bool
     private let lock = NSLock()
-    /// Each connection's peer, resolved at its open (`Principal.page`).
-    private var principals: [ObjectIdentifier: Principal] = [:]
+    /// Each connection's peer, resolved at its open (`Principal.page`), with its token and acting secret (an acting
+    /// page's requests are judged and marked with them) and the connection (an acting one is closed when acting ends).
+    private var opens: [ObjectIdentifier: Open] = [:]
+    private var actingHandler: (@Sendable (NodeWire.Request, PageCredentials, LiveTransport) -> Void)?
+    private var actingPages: ActingPages?
 
-    public init(_ inner: WebSocketHandler, terminals: Bool = false, note: @escaping @Sendable (String) -> Void = { _ in }) {
+    struct Open {
+        var principal: Principal
+        var credentials: PageCredentials?
+        /// A pairing taken on this connection and waiting for the terminal's confirmation: its code id.
+        var pairing: String?
+        weak var transport: LiveTransport?
+    }
+
+    /// Where an acting page's user's request goes (`Principal.Route.pageVoice`), with its credentials: `NodeLive` sets it
+    /// on the loopback page's screen alone. Unset (the tailnet's screen), such a request is refused whatever the rights.
+    public var onPageVoice: (@Sendable (NodeWire.Request, PageCredentials, LiveTransport) -> Void)? {
+        get { lock.withLock { actingHandler } }
+        set { lock.withLock { actingHandler = newValue } }
+    }
+
+    /// What says, at each request, whether an acting connection still acts (`ActingPages.acts`: its pairing's end, an
+    /// off, a revoke count at once); unset, none acts.
+    public var acting: ActingPages? {
+        get { lock.withLock { actingPages } }
+        set { lock.withLock { actingPages = newValue } }
+    }
+
+    /// The admission a connection came in under (the listener's transport keeps it; a test's says its own).
+    private let admissionOf: @Sendable (LiveTransport) -> WebAdmission?
+
+    public init(_ inner: WebSocketHandler, terminals: Bool = false, note: @escaping @Sendable (String) -> Void = { _ in },
+                admissionOf: (@Sendable (LiveTransport) -> WebAdmission?)? = nil) {
         self.inner = inner
         self.terminals = terminals
         self.note = note
+        self.admissionOf = admissionOf ?? { ($0 as? NodeWebTransport)?.admission }
     }
 
     public func opened(_ transport: LiveTransport, rights: LiveRights) {
-        lock.withLock { principals[ObjectIdentifier(transport)] = .page(rights, terminals: terminals) }
+        let admission = admissionOf(transport)
+        let credentials = admission.map { PageCredentials(token: $0.token, act: $0.act) }
+        lock.withLock {
+            opens[ObjectIdentifier(transport)] = Open(principal: .page(rights, terminals: terminals), credentials: credentials,
+                                                      pairing: admission?.pairing, transport: transport)
+        }
         inner.opened(transport, rights: rights)
     }
 
     public func text(_ message: Data, on transport: LiveTransport) {
         guard let request = NodeWire.decode(NodeWire.Request.self, message) else { return inner.text(message, on: transport) }
-        let principal = lock.withLock { principals[ObjectIdentifier(transport)] } ?? .page([], terminals: terminals)
+        let (open, handler, acting) = lock.withLock { (opens[ObjectIdentifier(transport)], actingHandler, actingPages) }
+        let principal = open?.principal ?? .page([], terminals: terminals)
+        let route = principal.route(request.kind)
+        if route == .pageVoice {
+            // Judged again at each request: still acting as the vault's list stands now (its end, the level, a revoke).
+            if let handler, let acting, let credentials = open?.credentials, acting.acts(token: credentials.token, secret: credentials.act) {
+                return handler(request, credentials, transport)
+            }
+            note("refused \(ConfigSeal.inert(request.kind, limit: 80)) from a web connection: it doesn't act (now)")
+            return transport.send(Data(NodeWire.line(NodeWire.Reply(re: request.id, error: .init(.actsEnded, Self.notActing))).dropLast()))
+        }
+        if route == .terminal {
+            // Watching too, judged at each request against the confirmed pairing.
+            guard let acting, let credentials = open?.credentials, acting.watches(token: credentials.token, secret: credentials.act) else {
+                note("refused \(ConfigSeal.inert(request.kind, limit: 80)) from a web connection: its pairing doesn't watch (now)")
+                return transport.send(Data(NodeWire.line(NodeWire.Reply(re: request.id, error: .init(.actsEnded, Self.notActing))).dropLast()))
+            }
+        }
         guard let refused = principal.refusal(request) else { return inner.text(message, on: transport) }
         note("refused \(ConfigSeal.inert(request.kind, limit: 80)) from a web connection: \(refused.error?.code ?? "")")
         transport.send(Data(NodeWire.line(refused).dropLast()))
@@ -296,10 +469,111 @@ public final class WebRequestScreen: WebSocketHandler, @unchecked Sendable {
         }
     }
 
+    /// What a page that doesn't act or watch (any more) is told for a user's request or a terminal.
+    public static let notActing = "this page doesn't act or watch now: pair it again with `vibeswitcher web` and confirm it in the terminal"
+
+    /// Whether the connection that took pairing `code` is open (the terminal's confirmation needs it).
+    public func holdsPairing(_ code: String) -> Bool {
+        lock.withLock { opens.values.contains { $0.pairing == code && $0.transport != nil } }
+    }
+
+    /// The pairing `code`'s connection confirmed: given `secret` once (the `paired` message), its rights now `rights`
+    /// (the hub told too), its requests judged with the secret from here. False when that connection is gone.
+    public func confirmPairing(_ code: String, secret: String, rights: LiveRights) -> Bool {
+        let confirmed = lock.withLock { () -> LiveTransport? in
+            guard let (id, open) = opens.first(where: { $0.value.pairing == code && $0.value.transport != nil }), let transport = open.transport else { return nil }
+            opens[id]?.pairing = nil
+            opens[id]?.credentials?.act = secret
+            opens[id]?.principal = .page(rights, terminals: terminals)
+            return transport
+        }
+        guard let transport = confirmed else { return false }
+        inner.opened(transport, rights: rights)
+        // The kinds it may send now, as `hello.kinds` says them.
+        let kinds = Principal.page(rights, terminals: terminals).kinds
+        let message = NodeWire.Value.object(["v": .int(NodeWire.version), "kind": .string("paired"), "act": .string(secret),
+                                             "rights": .array(WebAccess.names(rights).map(NodeWire.Value.string)),
+                                             "kinds": .array(kinds.map(NodeWire.Value.string))])
+        transport.send(Data(NodeWire.line(message).dropLast()))
+        return true
+    }
+
+    /// Called, on the queue given to an end, for each connection whose watching ended: its open terminal streams are
+    /// dropped (`LiveHub.endTerminals`) before it is closed, so not one more byte goes to it.
+    public var onWatchEnded: (@Sendable (LiveTransport) -> Void)? {
+        get { lock.withLock { watchEnded } }
+        set { lock.withLock { watchEnded = newValue } }
+    }
+    private var watchEnded: (@Sendable (LiveTransport) -> Void)?
+
+    /// Whether `transport`'s connection watches now, as its rights stand (marked at once when a pairing ends): the
+    /// terminal relay asks it for each chunk (`TerminalRelay.watching`).
+    public func watching(_ transport: AnyObject) -> Bool {
+        lock.withLock {
+            guard case .page(let rights, _)? = opens[ObjectIdentifier(transport)]?.principal else { return false }
+            return rights.contains(.watch)
+        }
+    }
+
+    /// The connections `ends` picks marked at once (acting and watching taken from their rights, so no request acts and
+    /// no terminal byte goes from here), then, on `queue`, their terminal streams dropped and each told `code` and closed.
+    private func end(_ ends: (Open) -> Bool, code: String, reason: String, closeOn queue: DispatchQueue) {
+        let (ended, dropStreams) = lock.withLock { () -> ([LiveTransport], (@Sendable (LiveTransport) -> Void)?) in
+            var ended: [LiveTransport] = []
+            for (id, open) in opens {
+                guard case .page(let rights, let terminals) = open.principal, !rights.isDisjoint(with: [.act, .watch]), ends(open) else { continue }
+                opens[id]?.principal = .page(rights.subtracting([.act, .watch]), terminals: terminals)
+                if let transport = open.transport { ended.append(transport) }
+            }
+            return (ended, watchEnded)
+        }
+        guard !ended.isEmpty else { return }
+        queue.async {
+            for transport in ended {
+                dropStreams?(transport)
+                transport.close(code: code, reason: reason)
+            }
+        }
+    }
+
+    /// Every connection that acts or watches ended (acting turned off: every pairing dropped): marked at once, its
+    /// terminal streams dropped and it closed on `closeOn` (the listener's queue); a reconnect reads and drafts.
+    public func endActing(code: String, reason: String, closeOn queue: DispatchQueue) {
+        end({ _ in true }, code: code, reason: reason, closeOn: queue)
+    }
+
+    /// The connections whose pairing is `key` (`ActingPages.key`) ended: its pairing couldn't be kept.
+    public func endActing(key: String, closeOn queue: DispatchQueue) {
+        end({ open in
+            guard let credentials = open.credentials, let act = credentials.act else { return false }
+            return ActingPages.key(token: credentials.token, secret: act) == key
+        }, code: "acts-off", reason: "this page's pairing wasn't kept: pair it again", closeOn: queue)
+    }
+
+    /// The sweep (`NodeLive.sweep`): each connection that acts or watches whose pairing no longer watches (it ran out,
+    /// was evicted or dropped) ended; one that acts while the level is off now only watches.
+    public func sweepPairings(closeOn queue: DispatchQueue) {
+        guard let acting else { return }
+        end({ open in
+            guard let credentials = open.credentials else { return true }
+            return !acting.watches(token: credentials.token, secret: credentials.act)
+        }, code: "acts-off", reason: "this page's pairing ended: pair it again with `vibeswitcher web`", closeOn: queue)
+        lock.withLock {
+            for (id, open) in opens {
+                guard case .page(let rights, let terminals) = open.principal, rights.contains(.act), let credentials = open.credentials,
+                      !acting.acts(token: credentials.token, secret: credentials.act) else { continue }
+                opens[id]?.principal = .page(rights.subtracting(.act), terminals: terminals)
+            }
+        }
+    }
+
+    /// How many acting connections are open.
+    public var actingCount: Int { lock.withLock { opens.values.filter { $0.principal.acts && $0.transport != nil }.count } }
+
     public func binary(_ message: Data, on transport: LiveTransport) { inner.binary(message, on: transport) }
 
     public func closed(_ transport: LiveTransport) {
-        lock.withLock { _ = principals.removeValue(forKey: ObjectIdentifier(transport)) }
+        lock.withLock { _ = opens.removeValue(forKey: ObjectIdentifier(transport)) }
         inner.closed(transport)
     }
 }

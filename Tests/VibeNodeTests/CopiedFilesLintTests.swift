@@ -80,6 +80,22 @@ import Testing
                            copy: "team.reviewUsageWaits = UsageWaits.reviews(board, team: team, now: account.now, root: root)",
                            why: "the node's copy (UsageWaits.swift), on the given clock"),
              ]),
+        // The Mac's text lints run on Linux (`MacText`, 2026-11-24): their functions copied from the Mac tests.
+        Copy(copy: "Tests/VibeCoreTests/MacElapsedTimeLintTests.swift", original: "Tests/VibeSwitcherTests/ElapsedTimeLintTests.swift",
+             parts: [Part(original: "struct Allowed", copy: "struct Allowed"), Part(original: "func flagged", copy: "func flagged")],
+             differences: [
+                Difference(original: "suiteTagged = PerfRunTests.isTagged(line)", copy: "suiteTagged = MacPerfRunLintTests.isTagged(line)",
+                           why: "the Linux copy of PerfRunTests is MacPerfRunLintTests"),
+                Difference(original: "if opening.hasPrefix(\"@Test\") { perfTest = PerfRunTests.isTagged(line) }",
+                           copy: "if opening.hasPrefix(\"@Test\") { perfTest = MacPerfRunLintTests.isTagged(line) }",
+                           why: "the Linux copy of PerfRunTests is MacPerfRunLintTests"),
+             ]),
+        Copy(copy: "Tests/VibeCoreTests/MacPerfRunLintTests.swift", original: "Tests/VibeSwitcherTests/PerfRunTests.swift",
+             parts: ["func listed", "func testFiles", "func isTagged", "func tagged"].map { Part(original: $0, copy: $0) }),
+        Copy(copy: "Tests/VibeCoreTests/MacPerfRunLintTests.swift", original: "Tests/VibeSwitcherTests/DebugAidsLintTests.swift",
+             parts: [Part(original: "func blocks", copy: "func blocks")]),
+        Copy(copy: "Tests/VibeCoreTests/MacGlossaryLintTests.swift", original: "Tests/VibeSwitcherTests/GlossaryTests.swift",
+             parts: ["func literals", "func core", "func offGlossaryWords"].map { Part(original: $0, copy: $0) }),
     ]
 
     // MARK: Reading

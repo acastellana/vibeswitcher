@@ -140,6 +140,25 @@ merge). Recommended instead, and the planned next step: a passkey touch per acti
   listed, the command of a shell request in full.
 - `status` and This node say the page can act and since when.
 
+As built (the node's side, after its security reviews):
+
+- Acting needs two secrets. One is the page's token, which the browser keeps where any process of yours can read it.
+  The other is an acting secret, given once when a page is paired while `web_acts` is on. The page keeps it in its
+  memory only. Reloading the page loses it, and the page then only reads and drafts until it is paired again
+  (`vibeswitcher web`). An acting pairing lasts 12 hours at most. The vault keeps `web_acts` and the acting pairings,
+  never a file. Turning it off, or revoking, ends acting at the next request.
+- On a card or a batch, the page sends what it drew. If the card has changed since then, the node refuses
+  (`changed`). This is checked again once the confirmation is given.
+- What the terminal-only list protects, and what it doesn't. It keeps an acting page's token from widening its own
+  reach, or from lasting: a page can't turn acting on, pair another page, switch the node to other code, install the
+  agents' hooks, add a plugin, start the node, or set the review floors, the working policy, the reviewers' models, the
+  guard rails, lead mail or a plugin's settings. An approve list from a page leaves out the hooks install. It does
+  **not** keep an acting page from doing what you can do in a session's day. A page can accept a held config change or
+  a base move, answer and approve the leads' cards (merges included), edit the session presets, send text into any
+  session, start and end sessions, and stop the node. So whatever holds both of a page's secrets while it is open acts
+  as you there. That is the cost the user accepted ("for now trust the page completely"). A passkey touch per request
+  (`PageVoice`) is the planned next step.
+
 ## Constraints
 
 - The page stays plain HTML, CSS and JavaScript, embedded, no framework, no remote anything (its content policy).

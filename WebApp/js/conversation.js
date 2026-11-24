@@ -34,6 +34,15 @@ export function questionHead(text) {
   return head.charAt(0).toUpperCase() + head.slice(1);
 }
 
+// A question's words past its line, plain (markdown's marks dropped), for the card's few lines of context.
+export function contextOf(text, head) {
+  const plain = String(text ?? '').replace(/^\s*Asked again \([^)]*\):\s*/i, '').replace(/\*\*|__|`/g, '').replace(/^\s*(?:[-*+]|\d+\.)\s+/gm, '').replace(/^#+\s*/gm, '');
+  const flat = plain.replace(/\s+/g, ' ').trim();
+  const bare = head.replace(/\s+/g, ' ').trim();
+  const at = flat.toLowerCase().indexOf(bare.toLowerCase());
+  return shortHashes(at >= 0 ? (flat.slice(0, at) + ' ' + flat.slice(at + bare.length)).replace(/\s+/g, ' ').trim().replace(/^[:;,.\s]+/, '') : flat);
+}
+
 // A short, stable key for a line (its kind and the node's id), for the address's `sheet=`.
 export function lineKey(kind, id) {
   let hash = 5381;
