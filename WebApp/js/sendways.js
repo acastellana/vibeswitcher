@@ -29,7 +29,8 @@ export const wayLine = (way) => t({ step: 'swStepLine', now: 'swNowLine', after:
 export function sentWords(way, result = {}) {
   if (result?.said) return result.said;
   if (result?.queued) return t('sayHeld', { why: result.waits || '' });
-  const done = WAYS.includes(result?.when) ? result.when : result?.steered ? 'now' : way;
-  if (done === 'now' && result?.steered === false && result?.working === false) return t('sayTyped');
-  return t({ step: 'swSentStep', now: 'swSentNow', after: 'swSentAfter', interrupt: 'swSentInterrupt' }[done]);
+  // A node that says what it did (`when`); an older one says only whether it steered.
+  if (WAYS.includes(result?.when)) return t({ step: 'swSentStep', now: 'swSentNow', after: 'swSentAfter', interrupt: 'swSentInterrupt' }[result.when]);
+  if (way === 'now' && result?.steered === false && result?.working === false) return t('sayTyped');
+  return t({ step: 'swSentStep', now: 'swSentNow', after: 'swSentAfter', interrupt: 'swSentInterrupt' }[result?.steered ? 'now' : way]);
 }

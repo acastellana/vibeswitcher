@@ -622,10 +622,10 @@ const ago = (seconds) => new Date(now() - seconds * 1000).toISOString();
       closeCard(card, 'answered', { state: 'answered', answer: args.answer, answeredVersion: card.question.version });
       // The conversation's record of it, not read by the lead until its next step (the node's `delivered`).
       const board = boards.get(SITE_PROJECT);
-      const entry = { id: card.question.id, card: card.id, version: card.question.version, state: 'answered', text: card.question.text, answer: args.answer, proposal: null, why: null, reworded: false, task: card.question.task, at: new Date().toISOString(), delivered: null };
+      const entry = { id: card.question.id, card: card.id, version: card.question.version, state: 'answered', text: card.question.text, answer: args.answer, proposal: null, why: null, reworded: false, task: card.question.task, at: new Date().toISOString(), delivered: null, replaceable: card.kind === 'question' };
       board.answered = [...(board.answered || []).filter((one) => one.id !== entry.id), entry];
       emit(put('boards', boards, SITE_PROJECT));
-      later(25000, () => { entry.delivered = new Date().toISOString(); emit(put('boards', boards, SITE_PROJECT)); });
+      later(25000, () => { entry.delivered = new Date().toISOString(); entry.replaceable = false; emit(put('boards', boards, SITE_PROJECT)); });
       if (card.kind === 'approval' && args.answer.startsWith('Approve')) {
         emit(setTask('cleanup-ended-folders', { status: 'done', since: new Date().toISOString(), merged: { commit: COMMIT.slice(0, 7), at: new Date().toISOString(), tested: true } }));
         later(700, () => stream(LEAD, 'Approved and merged: the clean-up is on landing-base.'));
@@ -643,7 +643,7 @@ const ago = (seconds) => new Date(now() - seconds * 1000).toISOString();
       if (entry.delivered) return { ok: false, error: { code: 'delivered', message: 'The lead has read that answer already.' } };
       entry.answer = args.text;
       emit(put('boards', boards, SITE_PROJECT));
-      return { ok: true, result: { card: args.card, state: 'answered' } };
+      return { ok: true, result: { outcome: 'replaced', card: args.card } };
     }
     if (message.kind === 'tell') {
       const lead = leads.get(SITE_PROJECT);
@@ -656,11 +656,11 @@ const ago = (seconds) => new Date(now() - seconds * 1000).toISOString();
     if (message.kind === 'tell.retract') {
       const lead = leads.get(SITE_PROJECT);
       const told = (lead.told || []).find((one) => one.action === args.action);
-      if (!told) return { ok: false, error: { code: 'gone', message: 'No such message.' } };
+      if (!told) return { ok: false, error: { code: 'gone', message: 'That message was taken back already, or isn’t known.' } };
       if (told.delivered) return { ok: false, error: { code: 'delivered', message: 'The lead has read it already.' } };
       lead.told = lead.told.filter((one) => one !== told);
       emit(put('leads', leads, SITE_PROJECT));
-      return { ok: true, result: {} };
+      return { ok: true, result: { retracted: true } };
     }
     if (message.kind === 'hold') {
       const card = cards.get(args.card);
@@ -698,7 +698,7 @@ const ago = (seconds) => new Date(now() - seconds * 1000).toISOString();
       }));
       // What was done, in the node's words (`when`, `said`): Claude Code has no queue for after the turn.
       const when = args.when || (args.now ? 'now' : 'step');
-      const said = when === 'after' && target.agent !== 'codex' ? 'Claude Code has no queue for after its turn: sent at its next step.' : null;
+      const said = when === 'after' && target.agent !== 'codex' ? 'Claude Code has no key for after this turn: sent at its next step.' : null;
       return { ok: true, result: { session: args.session, when: said ? 'step' : when, ...(said ? { said } : {}) } };
     }
     if (message.kind === 'session.draft' || message.kind === 'session.draft.clear') {

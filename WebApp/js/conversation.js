@@ -61,7 +61,9 @@ export function leadLines(board) {
       answer: question.state === 'autoDecided' ? question.proposal : question.answer, state: question.state, why: question.why || null,
       // Whether the lead has read the answer (`delivered`: a date, null not yet; absent where the node doesn't say),
       // and what replacing it names (its card and version).
-      id: question.id, delivered: 'delivered' in question ? question.delivered : undefined, card: question.card || null, version: question.version ?? null });
+      id: question.id, delivered: 'delivered' in question ? question.delivered : undefined, card: question.card || null, version: question.version ?? null,
+      // Whether the node would take `answer.replace` for it now (followed, not taken, a question's, not replaced).
+      replaceable: question.replaceable === true });
   }
   for (const result of board.results || []) {
     lines.push({ key: lineKey('result', result.id), kind: 'result', at: result.at, head: firstSentence(result.title), full: result.body || result.title || '', title: result.title });

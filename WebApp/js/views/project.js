@@ -185,9 +185,10 @@ export function projectView(app, { sheet }) {
   function answerState(line) {
     if (line.state !== 'answered' || line.delivered === undefined) return [];
     if (line.delivered) return [h('p', { class: 'answer-state' }, t('swReadByLead'))];
-    const card = line.card ? store.state.cards.get(line.card) : [...store.state.cards.values()].find((one) => one.question?.id === line.id);
-    const cardId = line.card || card?.id;
-    if (!cardId || !actsFor(app, 'answer.replace')) return [h('p', { class: 'answer-state' }, t('swNotReadYet'))];
+    // Change only where the node says it would take it (`replaceable`), by the card it names.
+    const card = line.card ? store.state.cards.get(line.card) : null;
+    const cardId = line.card;
+    if (!cardId || !line.replaceable || !actsFor(app, 'answer.replace')) return [h('p', { class: 'answer-state' }, t('swNotReadYet'))];
     const open = changing.has(line.key);
     const why = changing.get(line.key) || '';
     if (!open) {
@@ -282,7 +283,7 @@ export function projectView(app, { sheet }) {
     stack.update();
     const extra = cards.filter((card) => !['question', 'approval'].includes(card.kind));
     const mine = notes.get(route.id) || [];
-    const key = JSON.stringify([route.id, route.show, lines.map((line) => [line.key, line.answer, line.state, line.delivered]), extra.map((card) => [card.id, card.seen]), mine, waiting, lang(), store.acts(),
+    const key = JSON.stringify([route.id, route.show, lines.map((line) => [line.key, line.answer, line.state, line.delivered, line.replaceable]), extra.map((card) => [card.id, card.seen]), mine, waiting, lang(), store.acts(),
       lead?.told || null, [...changing]]);
     if (key === drawn) return;
     const atEnd = talk.scrollHeight - talk.scrollTop - talk.clientHeight < 40;

@@ -232,3 +232,12 @@ test('a waiting card shows its question line and the words after it, plain: no m
   assert.equal(contextOf(text, head), 'Its audit passed. What it changes: A failed probe no longer fails open. The probe has three answers.');
   assert.equal(contextOf('Thursday or Friday?', 'Thursday or Friday?'), '');
 });
+
+test('an answered line carries what the node says of it: read (`delivered`), changeable (`replaceable`), its card', () => {
+  const lines = leadLines({ answered: [
+    { id: 'q1', state: 'answered', text: 'Sonnet or Fable?', answer: 'Sonnet', at: '2026-11-24T10:00:00Z', delivered: null, replaceable: true, card: 'local:card:1', version: 2 },
+    { id: 'q2', state: 'answered', text: 'Ship it?', answer: 'Yes', at: '2026-11-24T10:01:00Z', delivered: '2026-11-24T10:02:00Z', replaceable: false, card: 'local:card:2' },
+    { id: 'q3', state: 'answered', text: 'Older node?', answer: 'Yes', at: '2026-11-24T10:03:00Z' },
+  ] });
+  assert.deepEqual(lines.map((line) => [line.delivered, line.replaceable, line.card]), [[null, true, 'local:card:1'], ['2026-11-24T10:02:00Z', false, 'local:card:2'], [undefined, false, null]]);
+});
