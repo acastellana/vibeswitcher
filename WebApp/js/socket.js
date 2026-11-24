@@ -231,8 +231,12 @@ export function connectSocket(store, options) {
     actSecret = message.act;
     store.setPhrase(null);
     if (typeof message.phrase === 'string') store.setPageWords(message.phrase);
-    store.setActsLost(null);
-    flag(ACTED_KEY, true);
+    // Also sent again when the level rises under an open page: "act" then may come, or not (127.0.0.1 at confirm). Only
+    // a pairing that acts counts as this tab having acted.
+    if (message.rights.includes('act')) {
+      store.setActsLost(null);
+      flag(ACTED_KEY, true);
+    }
     if (Array.isArray(message.kinds)) return store.setKinds(message.kinds, message.plugins ?? store.state.plugins, message.rights);
     store.setKinds(store.state.kinds, store.state.plugins, message.rights);
     socket?.close();
