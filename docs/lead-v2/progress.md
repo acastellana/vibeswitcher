@@ -639,3 +639,9 @@
 - 2026-11-24 10:10 Kept turn-this-incident-into-4 unmerged: Audit clean at 909bccc18a54d7374732aa09a1a875d15d243e46; waits on the user's approval of that exact commit (D5BD68B0) and on the ~/.claude/plugins hold (BD6DBB5F). Kept only to stop the half-hourly "merges are held" notices. On the approval: status planned, then merge.
 - 2026-11-24 10:10 Kept team-sessions-start unmerged: Audit clean at 81c94cecaed9a896d58c9878dfa62568b949ecf2; waits on the user's approval of that exact commit (64C0164C) and on the ~/.claude/plugins hold (BD6DBB5F). Kept only to stop the half-hourly "merges are held" notices. On the approval: status planned, then merge.
 - 2026-11-24 10:10 Kept measured-with-a-real unmerged: Audit clean at fc16375c400f5f7efd73c159ceec9bfde10f16ac; waits on the user's approval of that exact commit (D745A6E8) and on the ~/.claude/plugins hold (BD6DBB5F). Kept only to stop the half-hourly "merges are held" notices. On the approval: status planned, then merge.
+- 2026-11-24 11:46 Parked measured-with-a-real's worker (idle since its last report) for a build switch to e3ef7b07c65f; start_worker continues in its worktree
+- 2026-11-24 11:46 Parked sandbox-env-hygiene-no's worker (idle since its last report) for a build switch to e3ef7b07c65f; start_worker continues in its worktree
+- 2026-11-24 11:46 Parked the-config-card-says's worker (idle since its last report) for a build switch to e3ef7b07c65f; start_worker continues in its worktree
+- 2026-11-24 11:46 Parked sb5-the-host-confines's worker (idle since its last report) for a build switch to e3ef7b07c65f; start_worker continues in its worktree
+- 2026-11-24 11:46 Parked tests-that-write-a's worker (idle since its last report) for a build switch to e3ef7b07c65f; start_worker continues in its worktree
+- 2026-11-24 11:46 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: ~/.claude/shell-snapshots
