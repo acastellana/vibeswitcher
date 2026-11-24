@@ -78,9 +78,10 @@ struct PageCheckTests {
         let made = WireVectors.goaled(WireVectors.sampleBoard(now: Date().timeIntervalSince1970, worker: site.session.id), now: Date().timeIntervalSince1970)
         // A result the lead posted, its body markdown with a table: the conversation's line and the side sheet's.
         let result = "The pricing page has its new copy"
+        let goals = WireVectors.sampleGoals(now: Date().timeIntervalSince1970)
+        try GoalStore(root: repo.path).update { $0 = goals }
         try BoardStore(root: repo.path).update {
             $0.tasks = made.tasks
-            $0.goals = made.goals
             $0.updates = [LeadUpdate(id: "page-check-result", title: result, body: "What changed:\n\n| Plan | Price |\n|---|---|\n| Starter | $9 |\n| Team | $29 |")]
         }
         // A second project, with no goals and no estimates: its roadmap draws the plain form (in motion, blocked, the
@@ -134,7 +135,7 @@ struct PageCheckTests {
         }
         try #require(kinds.isSuperset(of: ["question", "plugin"]), "cards: \(kinds)\n\(node.said)")
 
-        let launch = try #require(made.goals?.first, "the sample board's goals")
+        let launch = try #require(goals.goals.first, "the sample board's goals")
         let opened = try LiveScratch.open(node)
         let expect: [String: String] = [
             "session": "example-site", "chatHref": "#/s/" + NodeIds.session(host: site.session.id),

@@ -130,9 +130,9 @@ struct LeadEstimatesTests: LeadTeamFixture {
         var queuedBehind = Self.task("behind", .planned, after: ["blocked"])
         queuedBehind.goalID = "h"
         board.tasks = [running, over, overdue, first, second, blocked, queuedBehind]
-        board.goals = [LeadGoal(id: "g", title: "G", done: "d"), LeadGoal(id: "h", title: "H", done: "d")]
+        let goals = [LeadGoal(id: "g", title: "G", done: "d"), LeadGoal(id: "h", title: "H", done: "d")]
         // One worker: the running ones hold it.
-        let result = LeadForecast.forecast(board, workers: 1, now: now)
+        let result = LeadForecast.forecast(board, goals: goals, workers: 1, now: now)
         #expect(result.tasks["running"] == LeadLanding(likely: now + 1200, worst: now + 3000, basis: .estimated))
         #expect(result.tasks["over"] == LeadLanding(likely: now, worst: now + 1200, basis: .estimated, over: true))
         #expect(result.tasks["overdue"] == LeadLanding(basis: .overdue, overdueMinutes: 2))
@@ -189,10 +189,10 @@ struct LeadEstimatesTests: LeadTeamFixture {
             }
             board.tasks.append(task)
         }
-        board.goals = [LeadGoal(id: "g", title: "G", done: "d")]
+        let goals = [LeadGoal(id: "g", title: "G", done: "d")]
         board.tasks[0].goalID = "g"
         for workers in [Int.max, 0, -5, 1_000_000_000] {
-            let result = LeadForecast.forecast(board, workers: workers, now: 1_000_000_000)
+            let result = LeadForecast.forecast(board, goals: goals, workers: workers, now: 1_000_000_000)
             for landing in result.tasks.values { _ = LeadForecast.text(landing, now: 1_000_000_000) }
             _ = result.score.line
         }
@@ -212,7 +212,8 @@ struct LeadEstimatesTests: LeadTeamFixture {
             if let at = task.merged?.at { task.merged?.at = finite(at) }
             return task
         }
-        _ = try BoardStore(root: root).update { $0.tasks = onDisk; $0.goals = board.goals }
+        _ = try BoardStore(root: root).update { $0.tasks = onDisk }
+        _ = try GoalStore(root: root).update { $0.goals = goals }
         #expect(!lead.call("status", [:]).isError)
         #expect(!lead.call("board", [:]).isError)
     }
