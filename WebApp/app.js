@@ -108,6 +108,9 @@ const offline = h('div', { class: 'offline', role: 'status', hidden: true }, t('
 // The node doesn't know this page, or dropped it: said once, quietly, with the one thing that fixes it. The rows it
 // had stay readable underneath.
 const unpaired = h('div', { class: 'offline signed-out', role: 'status', hidden: true });
+// A page that just redeemed a pairing code: the words to check against what `vibeswitcher web` shows, until the user
+// confirms it there.
+const confirming = h('div', { class: 'offline confirm-pairing', role: 'status', hidden: true });
 // What the centre says before there is anything to show: connecting, or not paired.
 const waitingWords = h('h1', { class: 'big' });
 const waitingSub = h('p');
@@ -116,7 +119,7 @@ const centre = h('main', { class: 'centre-wrap' }, project.el, own.el, newProjec
 const root = document.getElementById('app');
 const commandPalette = palette(app);
 const scrim = h('div', { class: 'drawer-scrim', onclick: () => app.drawer(null) });
-root.replaceChildren(left.el, centre, right.el, scrim, sheet.scrim, sheet.el, commandPalette.el, offline, unpaired, app.notifications.offer);
+root.replaceChildren(left.el, centre, right.el, scrim, sheet.scrim, sheet.el, commandPalette.el, offline, unpaired, confirming, app.notifications.offer);
 
 // `#/` opens the project with the most waiting on you, else the most active one, else Your own sessions; it takes
 // the address's place (no history entry), so back doesn't land on it again.
@@ -180,6 +183,9 @@ store.subscribe('connection', () => {
   const connection = store.state.connection;
   offline.hidden = connection !== 'reconnecting';
   unpaired.hidden = (connection !== 'unpaired' && connection !== 'revoked') || store.state.sessions.size === 0;
+  const phrase = store.state.phrase;
+  confirming.hidden = !phrase || connection === 'unpaired' || connection === 'revoked';
+  if (!confirming.hidden) confirming.replaceChildren(h('span', null, t('apConfirmInTerminal')), h('strong', { class: 'phrase' }, phrase), h('span', { class: 'sub' }, t('apConfirmSub')));
   if (!unpaired.hidden) {
     unpaired.replaceChildren(connection === 'revoked' ? t('apThisPageSAccessWas') : t('apThisPageIsnTPaired'),
       t('apRun'), h('code', null, 'vibeswitcher web'), t('apInATerminalAndOpen'));

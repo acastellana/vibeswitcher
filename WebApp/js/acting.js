@@ -15,6 +15,7 @@ export function refusalWords(error) {
   if (!error) return t('acRefused');
   if (error.code === 'changed') return t('acChanged');
   if (error.code === 'voice') return t('acVoice');
+  if (error.code === 'acts-ended') return t('acEnded');
   if (error.code === 'not-yet') return t('acNotYet');
   return error.message || t('acRefused');
 }
@@ -76,9 +77,13 @@ export function actsLine(app, { compact = false } = {}) {
   const acts = app.store.state.node?.web?.acts;
   if (!acts) return null;
   const here = app.store.acts();
-  if (!acts.on) return compact ? null : h('p', { class: 'acts-line' }, t('acOffWords'), ' ', h('code', null, 'vibeswitcher set web_acts on'), t('acOffWords2'));
+  // The node's level: off, confirm (a passkey per request, later), trust; `on` from a node before levels.
+  const level = acts.level ?? (acts.on ? 'trust' : 'off');
+  if (level === 'off') return compact ? null : h('p', { class: 'acts-line' }, t('acOffWords'), ' ', h('code', null, 'vibeswitcher set web_acts on'), t('acOffWords2'));
   const since = acts.since ? new Date(acts.since).toLocaleString(undefined, { dateStyle: compact ? undefined : 'medium', timeStyle: 'short' }) : '';
-  const words = here ? t(compact ? 'acThisPageShort' : 'acThisPage', { since }) : t('acPagesMay', { since, n: acts.pages ?? 0 });
+  // Acting is on but this page doesn't act (a reload lost its secret, or its acting ran out): pair it again.
+  if (!here) return h(compact ? 'div' : 'p', { class: 'acts-line' + (compact ? ' compact' : '') }, h('span', null, t(compact ? 'acPairAgainShort' : 'acPairAgain', { since })), ' ', h('code', null, 'vibeswitcher web'));
+  const words = t(compact ? 'acThisPageShort' : 'acThisPage', { since });
   const off = here && app.store.can('set') ? doButton(app, { label: t('acTurnOff'), kind: 'set', quiet: true, className: 'small', args: () => ({ key: 'web_acts', value: 'off' }) }).el : null;
   return h(compact ? 'div' : 'p', { class: 'acts-line' + (compact ? ' compact' : '') }, h('span', null, words), off);
 }

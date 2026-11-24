@@ -43,6 +43,8 @@ export function createStore() {
     rights: null,
     // The feature plugins the node has on (`hello.plugins`: [{ id, title }]); null: a node before plugins (or the mock).
     plugins: null,
+    // The words a page that just redeemed a pairing code shows until the user confirms it in the terminal.
+    phrase: null,
     // The collections the feed follows; null: all of them (the mock). The node sends no lead's board yet.
     follows: null,
     // A card's place across a server restart: card ids are the server's memory and change, so a card that comes back
@@ -296,7 +298,17 @@ export function createStore() {
   function request(kind, args = {}, action = crypto.randomUUID()) {
     const message = { v: 1, id: String(nextRequest++), kind, args, action };
     if (!feed) return Promise.resolve({ ok: false, error: { code: 'not-yet', message: 'Not connected to the node yet.' } });
-    return feed.request(message);
+    return feed.request(message).then((reply) => {
+      // This page no longer acts (`acts-ended`: its pairing ended, the level was lowered, it was revoked): the secret
+      // goes, and the page reads and drafts until it is paired again. A `voice` refusal (the terminal's kind or
+      // setting) changes nothing.
+      if (reply?.error?.code === 'acts-ended' && state.rights) {
+        state.rights = state.rights.filter((right) => right !== 'act' && right !== 'watch');
+        feed.dropAct?.();
+        emit(new Map([['connection', [{ connection: state.connection }]]]));
+      }
+      return reply;
+    });
   }
 
   // A read: no action id, so nothing is sent again after a reconnect (asked again by whoever wants it).
@@ -457,6 +469,13 @@ export function createStore() {
     cardKey: (id) => state.cardKeys.get(id) || id,
     // Whether this page acts for the user (the node's `act` right): its buttons send, else they draft and show the line.
     acts: () => state.rights === null || state.rights.includes('act'),
+    // Whether it may watch terminals (`watch`: a pairing confirmed in the terminal).
+    watches: () => state.rights === null || state.rights.includes('watch'),
+    setPhrase(phrase) {
+      if (state.phrase === phrase) return;
+      state.phrase = phrase;
+      emit(new Map([['connection', [{ connection: state.connection }]]]));
+    },
     setKinds(kinds, plugins = null, rights = undefined) {
       state.kinds = kinds;
       if (rights !== undefined) state.rights = Array.isArray(rights) ? rights : [];

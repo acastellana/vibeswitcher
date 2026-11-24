@@ -168,6 +168,8 @@ const EN = {
   quietNote: 'Each asks for a code, and the first time says what to accept.',
   quietForm: 'Or give it a goal in New project’s lead form.',
   connecting: 'Connecting to the node…',
+  apConfirmInTerminal: "Confirm this page in your terminal:",
+  apConfirmSub: "vibeswitcher web shows the same words: check them, then confirm there.",
   unpaired: 'Not paired with a node',
   unpairedSub: 'Run vibeswitcher web in a terminal, then open the address it prints in this browser.',
   menu: 'Projects and places',
@@ -576,6 +578,7 @@ const EN = {
   teShowChat: "Show Chat",
   teTryAgain: "Try Again",
   teTerminal: "Terminal",
+  teNeedsWatch: "Watching a terminal needs this page confirmed in your terminal: run vibeswitcher web and pair it again.",
   teTheLiveTerminalComesTo: "The live terminal comes to this page in a later build. Until then, the session’s conversation is in Chat.",
   teTheLiveTerminalComesTo2: "The live terminal comes to this page in a later build.",
   teNoTerminalForThisSession: "No terminal for this session",
@@ -981,6 +984,11 @@ const EN = {
   dpEvery: "every address",
   dpLocal: "this machine only",
   // js/acting.js
+  acVoice: "A page can’t do this one: run it in a terminal. Nothing was done.",
+  acEnded: "This page no longer acts: pair it again with `vibeswitcher web` to act. Nothing was done.",
+  acPairAgain: "Acting from a page is on (since {since}), but this page reads and drafts: pair it again to act, with",
+  acPairAgainShort: "Pair again to act:",
+  acTerminalMore: { one: "{n} more needs the terminal:", other: "{n} more need the terminal:" },
   acResume: "Resume",
   acPushNote: "Push pushes that commit itself, as a fast-forward only, recorded as yours.",
   acSendNow: "Send now",
@@ -1003,7 +1011,6 @@ const EN = {
   acApproveAll: { one: "Accept it", other: "Accept all {n}" },
   acRefused: "The node refused it.",
   acChanged: "This changed since the page drew it: look again. Nothing was done.",
-  acVoice: "A page can’t do this one: run it in a terminal.",
   acNotYet: "The node isn’t answering yet: try again in a moment.",
   acPush: "Push",
   acDecline: "Decline",
@@ -1022,7 +1029,6 @@ const EN = {
   acThisPageShort: "This page acts for you since {since}",
   acTurnOff: "Turn off",
   acGroupTitle: "Acting from a page",
-  acPagesMay: { one: "Pages on this machine may act for you since {since} ({n} paired); this one reads and drafts.", other: "Pages on this machine may act for you since {since} ({n} paired); this one reads and drafts." },
 };
 
 

@@ -175,6 +175,7 @@ export function terminalView(app) {
       setText(heading, t('teTerminal'));
       words = elsewhere
         ? t('teOtherTerminal', { terminal: session.terminal || t('teNotHost') })
+        : !store.watches() ? t('teNeedsWatch')
         : chatFollowed ? t('teTheLiveTerminalComesTo')
           : t('teTheLiveTerminalComesTo2');
     } else if (phase === 'gone') {
