@@ -33,6 +33,11 @@ struct WireVectorsTests {
             #expect(failure == nil, "\(what): \(failure ?? "")")
         }
         for (index, card) in Samples.cards.enumerated() { check(card.value, "card", "card sample \(index) (\(card.kind.rawValue))") }
+        // A card as a server before acting from the page sent it: no `seen` (a page never acts on it).
+        if case .object(var older)? = Samples.cards.first?.value {
+            older["seen"] = nil
+            check(.object(older), "card", "a card from a server before acting from the page")
+        }
         for (index, lead) in Samples.leads.enumerated() { check(lead.value, "lead", "lead sample \(index)") }
         for (index, hello) in Samples.hellos.enumerated() { check(try Samples.value(hello), "hello", "hello sample \(index)") }
         for (index, bye) in Samples.byes.enumerated() { check(try Samples.value(bye), "bye", "bye sample \(index)") }
@@ -430,7 +435,9 @@ enum Samples {
                                                                     lockHeldElsewhere: "pid 7", build: "f62aef61"), at: at),
                                     pid: 1),
                         kinds: ["status"], peer: .init(voice: "other", why: "a web client"), rule: "systemd",
-                        auth: .object(["rights": .array([.string("read")]), "token": .string("t"), "expiresAt": .date(at)]),
+                        // An acting pairing's: its acting secret, once.
+                        auth: .object(["rights": .array([.string("read"), .string("draft"), .string("act")]), "token": .string("t"), "act": .string("a"),
+                                       "phrase": .string("amber cedar fox"), "expiresAt": .date(at)]),
                         assets: "9f2c61d0", plugins: .array([.object(["id": .string("shell"), "title": .string("Shell requests")])])),
          NodeWire.Hello(node: "local", epoch: "e", server: .init(commit: "c", startedAt: NodeWire.dateText(at), pid: 2),
                         host: .init(startedAt: nil, notes: nil, pid: nil), kinds: [], peer: .init(voice: "user", why: nil), rule: "weaker"),

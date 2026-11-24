@@ -74,7 +74,7 @@ public enum WireVectors {
               if (!isObject(value)) return "event";
               if (has(value, "re")) return "reply";
               if (has(value, "id")) return "request";
-              return ["hello", "bye", "snapshot", "delta"].includes(value.kind) ? value.kind : "event";
+              return ["hello", "bye", "snapshot", "delta", "paired"].includes(value.kind) ? value.kind : "event";
             }
 
             export function validate(kind, value) {

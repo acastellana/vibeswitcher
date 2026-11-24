@@ -36,6 +36,9 @@ public enum Principal: Sendable, Equatable {
         case draft
         /// A page's read of a private record (`Requests.webRead`).
         case privateRead
+        /// A user's kind from an acting page (`LiveRights.act`): `PageVoice` confirms it, then `Requests.voiced`, recorded
+        /// as the user's, marked as the page's.
+        case pageVoice
     }
 
     /// Where `kind` from this peer goes.
@@ -63,14 +66,25 @@ public enum Principal: Sendable, Equatable {
             case .webRead: return rights.contains(.read) ? .privateRead : noRead
             case .webDraft: return rights.contains(.draft) ? .draft : .refused(.voice, "this page's token doesn't draft")
             case .user:
-                return .refused(.voice, "\(shown) is the user's voice: a web page is never that; run it with `vibeswitcher` in a terminal")
+                guard rights.contains(.act) else {
+                    return .refused(.voice, "\(shown) is the user's voice: a web page is never that; run it with `vibeswitcher` in a terminal")
+                }
+                switch spec.page {
+                case .acts: return .pageVoice
+                case .terminalOnly(let why): return .refused(.voice, "\(shown) is the terminal's alone: \(why); run it with `vibeswitcher` in a terminal")
+                case .bySender: return .refused(.voice, "\(shown) is the user's voice")
+                }
             case .leadToolServer: return .refused(.voice, "\(shown) is the lead's tool server's alone")
             case .webTerminal:
                 guard terminals else { return .unknown }
-                return rights.contains(.read) ? .terminal : noRead
+                // Watching needs a pairing the user confirmed in a terminal (the acting review's fix C).
+                return rights.contains(.watch) ? .terminal : .refused(.voice, "watching a terminal needs this page's pairing confirmed in a terminal (`vibeswitcher web`)")
             }
         }
     }
+
+    /// Whether it is an acting page (`LiveRights.act`).
+    public var acts: Bool { if case .page(let rights, _) = self { return rights.contains(.act) } else { return false } }
 
     /// A page's refusal of `request`, or nil when it goes on (`WebAccess.refusal`).
     public func refusal(_ request: NodeWire.Request) -> NodeWire.Reply? {
@@ -78,7 +92,7 @@ public enum Principal: Sendable, Equatable {
         case .unknown:
             return .init(re: request.id, error: .init(.unknownKind, "this server doesn't take \(ConfigSeal.inert(request.kind, limit: 80))"))
         case .refused(let code, let why): return .init(re: request.id, error: .init(code, why))
-        case .hub, .terminal, .read, .usersVoice, .toolPost, .draft, .privateRead: return nil
+        case .hub, .terminal, .read, .usersVoice, .toolPost, .draft, .privateRead, .pageVoice: return nil
         }
     }
 

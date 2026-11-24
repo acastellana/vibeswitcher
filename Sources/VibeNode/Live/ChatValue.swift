@@ -17,10 +17,11 @@ public enum ChatValue {
         unscrubbed(item).map(scrubbed)
     }
 
-    /// `value` with every string scrubbed of URL credentials.
+    /// `value` with every string scrubbed of URL credentials and of pairing codes (`PairingMask`: a `!vibeswitcher web`
+    /// in a transcript never gives a page the address).
     static func scrubbed(_ value: NodeWire.Value) -> NodeWire.Value {
         switch value {
-        case .string(let text): return .string(PushText.scrub(text))
+        case .string(let text): return .string(PairingMask.mask(PushText.scrub(text)))
         case .array(let values): return .array(values.map(scrubbed))
         case .object(let fields): return .object(fields.mapValues(scrubbed))
         default: return value

@@ -165,7 +165,9 @@ public final class WebTokens: @unchecked Sendable {
         entries = (file.tokens ?? []).compactMap { entry in
             guard let digest = Self.bytes(hex: entry.sha256), digest.count == 32,
                   let issued = NodeWire.date(entry.issuedAt), let expires = NodeWire.date(entry.expiresAt) else { return nil }
-            return (digest, issued, expires)
+            // Never past a token's life from its issue: an end the file says (any process may write it) is capped (the
+            // acting review's finding 5).
+            return (digest, issued, min(expires, issued.addingTimeInterval(tokenLife)))
         }
     }
 

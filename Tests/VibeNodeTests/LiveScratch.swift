@@ -20,6 +20,18 @@ enum LiveScratch {
         let code = try #require(url.components(separatedBy: "#pair=").last, "\(url)")
         return (url, port, code)
     }
+
+    /// The page that took `code` confirmed as the terminal does (`web.pairing`'s phrase, then `web.confirm`), in the
+    /// scratch form: its connection is sent its pairing secret (`paired`), and watches.
+    static func confirm(_ node: ScratchNode, code: String) throws {
+        let client = try WireClient(node)
+        let id = PagePairing.codeID(digest: WebTokens.digest(code))
+        let pairing = try #require(WireClient.reply(client.request("web.pairing", args: ["code": .string(id)], action: nil)), "no reply to web.pairing: \(node.said)")
+        let phrase = try #require(pairing.result?["phrase"]?.string, "the page hasn't taken the code: \(pairing)")
+        let confirmed = try #require(WireClient.reply(client.request("web.confirm", args: ["code": .string(id), "phrase": .string(phrase)])),
+                                     "no reply to web.confirm: \(node.said)")
+        try #require(confirmed.ok, "\(confirmed)")
+    }
 }
 
 /// Stage 1's fake agent on a session of the node's host (`ServerTests.statusThroughTheServerListsWhatTheProbeLists`'s):

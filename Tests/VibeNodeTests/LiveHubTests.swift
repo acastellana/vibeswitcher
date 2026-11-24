@@ -487,7 +487,20 @@ final class Recorder: LiveTransport, @unchecked Sendable {
         set { lock.withLock { sendHook = newValue } }
     }
 
-    func close(code: String, reason: String) { lock.withLock { closed.append(code) } }
+    func close(code: String, reason: String) {
+        let hook = lock.withLock { () -> (() -> Void)? in
+            closed.append(code)
+            return closeHook
+        }
+        hook?()
+    }
+
+    private var closeHook: (() -> Void)?
+    /// Called at each close (tests that check what came before it).
+    var onClose: (() -> Void)? {
+        get { lock.withLock { closeHook } }
+        set { lock.withLock { closeHook = newValue } }
+    }
 
     var closes: [String] { lock.withLock { closed } }
 

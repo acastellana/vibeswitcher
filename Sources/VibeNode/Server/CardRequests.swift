@@ -494,6 +494,19 @@ extension CardStore.Card {
             b["commits"] = .array(base.commits.map { NodeWire.Value.object(["sha": .string($0.sha), "subject": .string($0.subject)]) })
             fields["base"] = .object(b)
         }
+        fields["seen"] = .string(Self.seen(of: fields))
         return .object(fields)
+    }
+
+    /// What an acting page names to answer or accept it (acting from the page, the web UI design's step 2): the SHA-256,
+    /// lower-case hex, of the card as the protocol carries it, but its draft (the page's own words) and this. Anything
+    /// else on it changes it, so the node refuses an act on a card that changed since the page drew it.
+    public var seen: String { value["seen"]?.string ?? "" }
+
+    static func seen(of fields: [String: NodeWire.Value]) -> String {
+        var shown = fields
+        shown["draft"] = nil
+        shown["seen"] = nil
+        return BuildInfo.sha256(of: NodeWire.line(NodeWire.Value.object(shown)))
     }
 }
