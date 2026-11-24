@@ -296,7 +296,16 @@ export function createStore() {
   function request(kind, args = {}, action = crypto.randomUUID()) {
     const message = { v: 1, id: String(nextRequest++), kind, args, action };
     if (!feed) return Promise.resolve({ ok: false, error: { code: 'not-yet', message: 'Not connected to the node yet.' } });
-    return feed.request(message);
+    return feed.request(message).then((reply) => {
+      // An acting page refused by voice: its acting ran out (12 hours, or its token): the secret goes, and the page
+      // reads and drafts until it is paired again.
+      if (reply?.error?.code === 'voice' && state.rights?.includes('act')) {
+        state.rights = state.rights.filter((right) => right !== 'act');
+        feed.dropAct?.();
+        emit(new Map([['connection', [{ connection: state.connection }]]]));
+      }
+      return reply;
+    });
   }
 
   // A read: no action id, so nothing is sent again after a reconnect (asked again by whoever wants it).

@@ -973,6 +973,10 @@ export const ES = {
   dpEvery: "todas las direcciones",
   dpLocal: "solo esta máquina",
   // js/acting.js
+  acEnded: "Se acabó actuar desde esta página: vuelve a vincularla con `vibeswitcher web` para actuar. No se hizo nada.",
+  acPairAgain: "Actuar desde una página está activado (desde {since}), pero esta página lee y prepara borradores: vuelve a vincularla para actuar, con",
+  acPairAgainShort: "Vuelve a vincularla para actuar:",
+  acTerminalMore: { one: "{n} más necesita la terminal:", other: "{n} más necesitan la terminal:" },
   acResume: "Reanudar",
   acPushNote: "Push sube ese commit exacto, solo como avance rápido, y queda registrado como tuyo.",
   acSendNow: "Enviar ya",
@@ -995,7 +999,6 @@ export const ES = {
   acApproveAll: { one: "Aceptarlo", other: "Aceptar los {n}" },
   acRefused: "El nodo lo rechazó.",
   acChanged: "Esto cambió desde que la página lo dibujó: vuelve a mirarlo. No se hizo nada.",
-  acVoice: "Una página no puede hacer esto: ejecútalo en una terminal.",
   acNotYet: "El nodo aún no responde: inténtalo de nuevo en un momento.",
   acPush: "Hacer push",
   acDecline: "Rechazar",
@@ -1014,5 +1017,4 @@ export const ES = {
   acThisPageShort: "Esta página actúa por ti desde {since}",
   acTurnOff: "Desactivar",
   acGroupTitle: "Actuar desde una página",
-  acPagesMay: { one: "Las páginas de esta máquina pueden actuar por ti desde {since} ({n} vinculada); esta lee y prepara borradores.", other: "Las páginas de esta máquina pueden actuar por ti desde {since} ({n} vinculadas); esta lee y prepara borradores." },
 };

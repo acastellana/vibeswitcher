@@ -19,17 +19,19 @@ const vectors = JSON.parse(readFileSync(join(dirname(fileURLToPath(import.meta.u
 setLanguage('en');
 
 // A page on a fake socket whose hello is the node's web hello with `rights` and `kinds` in place of its own.
-async function page({ rights, kinds }) {
+async function page({ rights, kinds, act = undefined }) {
   const store = createStore();
   const sockets = [];
+  const stored = [];
+  const timers = [];
   class FakeSocket {
     constructor() { this.sent = []; this.readyState = 0; sockets.push(this); }
     send(text) { this.sent.push(JSON.parse(text)); }
     close() { this.readyState = 3; this.onclose?.(); }
   }
   const feed = connectSocket(store, {
-    url: 'ws://127.0.0.1:47830/ws', WebSocket: FakeSocket, storage: { getItem: () => 'token', setItem() {}, removeItem() {} }, validate: () => null,
-    build: Promise.resolve(null), setTimeout: () => 0, clearTimeout: () => {}, location: { hash: '', pathname: '/', search: '' },
+    url: 'ws://127.0.0.1:47830/ws', WebSocket: FakeSocket, storage: { getItem: () => 'token', setItem: (key, value) => stored.push([key, value]), removeItem() {} }, validate: () => null,
+    build: Promise.resolve(null), setTimeout: (run) => { timers.push(run); return timers.length; }, clearTimeout: () => {}, location: { hash: '', pathname: '/', search: '' },
     history: { replaceState() {} }, reload() {}, log: () => {},
   });
   store.connect(feed);
@@ -38,11 +40,20 @@ async function page({ rights, kinds }) {
   socket.readyState = 1;
   socket.onopen();
   const hello = structuredClone(vectors['hello.web']);
-  hello.auth = { ...(hello.auth || {}), rights };
+  hello.auth = { ...(hello.auth || {}), rights, ...(act ? { act } : {}) };
   hello.kinds = kinds;
   socket.onmessage({ data: JSON.stringify(hello) });
   await new Promise((resolve) => setImmediate(resolve));
-  return { store, socket, app: { store } };
+  // The socket drops and the page connects again without a reload: the newest socket, opened.
+  const reconnect = () => {
+    sockets[sockets.length - 1].close();
+    timers.pop()?.();
+    const again = sockets[sockets.length - 1];
+    again.readyState = 1;
+    again.onopen?.();
+    return again;
+  };
+  return { store, socket, sockets, stored, feed, hello, reconnect, app: { store } };
 }
 
 const ACTING = ['answer', 'hold', 'approve', 'approve.list', 'config.accept', 'base.accept', 'base.keep', 'tell', 'send', 'session.end', 'session.rename', 'session.pause',
@@ -97,7 +108,7 @@ test('the settings a page may not set even when it acts stay the terminal’s: w
   assert.equal(pageMaySet('floor_audit_finders', '1'), false);
   assert.equal(pageMaySet('policy', 'auto'), false);
   assert.equal(pageMaySet('max_workers', '3'), true);
-  assert.equal(refusalWords({ code: 'voice', message: 'not the user' }), 'A page can’t do this one: run it in a terminal.');
+  assert.equal(refusalWords({ code: 'voice', message: 'this page doesn’t act' }), 'Acting from this page ended: pair it again with `vibeswitcher web` to act. Nothing was done.');
   assert.equal(refusalWords({ code: 'gone', message: 'That card is gone.' }), 'That card is gone.', 'any other: the node’s own words');
   assert.equal(refusalWords(null), 'The node refused it.');
 });
@@ -108,4 +119,33 @@ test('a pause’s arguments are the command line’s, as the node takes them', (
   assert.deepEqual(pauseArgs('morning'), { for: 'morning' });
   assert.deepEqual(pauseArgs('week'), { for: 'hours', hours: 168 });
   assert.deepEqual(pauseArgs('off'), { for: 'off' });
+});
+
+test('the act secret is kept in memory only, sent with the token on a reconnect, and dropped when acting ends', async () => {
+  const secret = 'a'.repeat(43);
+  const { store, sockets, stored, hello, reconnect } = await page({ rights: ['read', 'draft', 'act'], kinds: ACTING, act: secret });
+  assert.equal(store.acts(), true);
+  assert.equal(stored.some(([, value]) => String(value).includes(secret)), false, 'never in storage');
+  // The socket drops; the page connects again without a reload: the auth carries the token and the act secret.
+  const again = reconnect();
+  assert.notEqual(again, sockets[0]);
+  const auth = again.sent.find((message) => message.kind === 'auth');
+  assert.deepEqual({ token: auth?.args.token, act: auth?.args.act }, { token: 'token', act: secret });
+  // An acting request refused by voice: acting ended, the page reads and drafts, and the next auth carries no secret.
+  again.onmessage({ data: JSON.stringify({ ...hello, auth: { ...hello.auth, act: undefined, rights: ['read', 'draft', 'act'] } }) });
+  const asked = store.request('tell', { folder: '/f', text: 'hi' });
+  const sent = again.sent.find((message) => message.kind === 'tell');
+  again.onmessage({ data: JSON.stringify({ v: 1, re: sent.id, ok: false, error: { code: 'voice', message: 'this page doesn’t act: pair it again with `vibeswitcher web` (acting from the page is on) to act' } }) });
+  await asked;
+  assert.equal(store.acts(), false);
+  const third = reconnect();
+  assert.equal('act' in (third.sent.find((message) => message.kind === 'auth')?.args || {}), false);
+});
+
+test('a hello without "act" drops the secret: a page that doesn’t act shows no acting control', async () => {
+  const { store, sockets, hello, reconnect } = await page({ rights: ['read', 'draft', 'act'], kinds: ACTING, act: 'b'.repeat(43) });
+  sockets[0].onmessage({ data: JSON.stringify({ ...hello, auth: { ...hello.auth, act: undefined, rights: ['read', 'draft'] }, kinds: ['status'] }) });
+  assert.equal(store.acts(), false);
+  const again = reconnect();
+  assert.equal('act' in (again.sent.find((message) => message.kind === 'auth')?.args || {}), false);
 });
