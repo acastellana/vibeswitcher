@@ -19,15 +19,13 @@
       "code"
     ],
     "build.seal" : [
-      "buildsAfter",
-      "buildsBefore",
       "commit",
       "from",
       "switchAction"
     ],
     "build.switch" : [
       "buildsAfter",
-      "buildsBefore",
+      "buildsBeforeListing",
       "commit"
     ],
     "config.accept" : [
@@ -258,15 +256,13 @@
       "code"
     ],
     "build.seal" : [
-      "buildsAfter",
-      "buildsBefore",
       "commit",
       "from",
       "switchAction"
     ],
     "build.switch" : [
       "buildsAfter",
-      "buildsBefore",
+      "buildsBeforeListing",
       "commit"
     ],
     "config.accept" : [

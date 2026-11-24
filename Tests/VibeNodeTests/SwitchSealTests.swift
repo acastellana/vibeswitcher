@@ -33,9 +33,9 @@ struct SwitchSealTests {
 
         /// `commit` installed and the builds folder sealed as the install left it (rule a).
         func installAndSeal(_ commit: String) throws -> SwitchSealCheck.Sealed {
-            let before = SwitchSeal.listingHash(prefix)
+            let before = SwitchSeal.listingLines(prefix)
             try install(commit)
-            return SwitchSealCheck.sealBuilds(prefix: prefix, commit: commit, seen: .init(before: before, after: SwitchSeal.listingHash(prefix)), home: home, vault: host.vault)
+            return SwitchSealCheck.sealBuilds(prefix: prefix, commit: commit, seen: .init(beforeListing: before, after: SwitchSeal.listingHash(prefix)), home: home, vault: host.vault)
         }
 
         func held() throws -> [String] { ConfigSeal.held(in: try host.vault.guardedRecord(root: home)) }
@@ -56,11 +56,11 @@ struct SwitchSealTests {
 
     @Test func theInstallsBuildsFolderAndTheUnitsExecStartAreSealedAndNothingElse() throws {
         let rig = try rig()
-        let before = SwitchSeal.listingHash(rig.prefix)
-        let entriesBefore = SwitchSeal.entries(listing: rig.prefix)
+        let before = SwitchSeal.listingLines(rig.prefix)
+        let entriesBefore = SwitchSeal.entries(lines: before)
         try rig.install(Self.b)
         let after = SwitchSeal.listingHash(rig.prefix)
-        #expect(SwitchSealCheck.installChange(before: entriesBefore, after: SwitchSeal.entries(listing: rig.prefix), commit: Self.b).isEmpty)
+        #expect(SwitchSealCheck.installChange(before: entriesBefore, after: SwitchSeal.entries(lines: SwitchSeal.listingLines(rig.prefix)), commit: Self.b).isEmpty)
         // Something else changed meanwhile, which the code never seals.
         let settings = rig.host.home.appendingPathComponent(".claude/settings.json")
         try FileManager.default.createDirectory(at: settings.deletingLastPathComponent(), withIntermediateDirectories: true)
@@ -68,7 +68,7 @@ struct SwitchSealTests {
         try rig.look()
         #expect(try rig.held().contains(SwitchSeal.buildsName))
 
-        let builds = SwitchSealCheck.sealBuilds(prefix: rig.prefix, commit: Self.b, seen: .init(before: before, after: after), home: rig.home, vault: rig.host.vault)
+        let builds = SwitchSealCheck.sealBuilds(prefix: rig.prefix, commit: Self.b, seen: .init(beforeListing: before, after: after), home: rig.home, vault: rig.host.vault)
         #expect(builds.sealed == [SwitchSeal.buildsName] && builds.refusals.isEmpty, "\(builds)")
         #expect(try !rig.held().contains(SwitchSeal.buildsName) && rig.held().contains("~/.claude/settings.json"), "\(rig.heldNow)")
 
@@ -85,13 +85,24 @@ struct SwitchSealTests {
 
     @Test func aPlantBesideTheInstallOrInItsFolderIsNeverSealed() throws {
         let rig = try rig()
-        let before = SwitchSeal.listingHash(rig.prefix)
-        let entriesBefore = SwitchSeal.entries(listing: rig.prefix)
+        let before = SwitchSeal.listingLines(rig.prefix)
+        let entriesBefore = SwitchSeal.entries(lines: before)
         try rig.install(Self.b)
         // Another build's folder changed beside the install: said by `update` itself.
         try Data("x".utf8).write(to: URL(fileURLWithPath: rig.prefix).appendingPathComponent("\(Self.a)/planted"))
-        let other = SwitchSealCheck.installChange(before: entriesBefore, after: SwitchSeal.entries(listing: rig.prefix), commit: Self.b)
+        let other = SwitchSealCheck.installChange(before: entriesBefore, after: SwitchSeal.entries(lines: SwitchSeal.listingLines(rig.prefix)), commit: Self.b)
         #expect(other == ["\(Self.a) changed"], "\(other)")
+        // The server judges it itself from the lines the accepted hash vouches for (whatever a caller says of them).
+        try rig.look()
+        let judged = SwitchSealCheck.sealBuilds(prefix: rig.prefix, commit: Self.b, seen: .init(beforeListing: before, after: SwitchSeal.listingHash(rig.prefix)),
+                                                home: rig.home, vault: rig.host.vault)
+        #expect(judged.sealed.isEmpty && judged.refusals.first?.contains("changed beyond the install (\(Self.a) changed)") == true, "\(judged)")
+        // Lines that don't hash to the accepted state (a caller's story of the folder before): refused.
+        var told = before
+        told.append("f 3:zzz 420 0 0 0.0 0.0")
+        let story = SwitchSealCheck.sealBuilds(prefix: rig.prefix, commit: Self.b, seen: .init(beforeListing: told, after: SwitchSeal.listingHash(rig.prefix)),
+                                               home: rig.home, vault: rig.host.vault)
+        #expect(story.sealed.isEmpty && story.refusals.first?.contains("wasn't the one you last accepted") == true, "\(story)")
         try FileManager.default.removeItem(atPath: URL(fileURLWithPath: rig.prefix).appendingPathComponent("\(Self.a)/planted").path)
 
         // A file added in the new build after the install: not as install-node lays one out, and not what was seen.
@@ -99,11 +110,11 @@ struct SwitchSealTests {
         let extra = URL(fileURLWithPath: rig.prefix).appendingPathComponent("\(Self.b)/bin.d")
         try Data("x".utf8).write(to: extra)
         try rig.look()
-        let planted = SwitchSealCheck.sealBuilds(prefix: rig.prefix, commit: Self.b, seen: .init(before: before, after: after), home: rig.home, vault: rig.host.vault)
+        let planted = SwitchSealCheck.sealBuilds(prefix: rig.prefix, commit: Self.b, seen: .init(beforeListing: before, after: after), home: rig.home, vault: rig.host.vault)
         #expect(planted.sealed.isEmpty && planted.refusals.first?.contains("bin.d isn't part of a build install-node lays out") == true, "\(planted)")
         try FileManager.default.removeItem(at: extra)
         // Removed again, the folder's times aren't the ones seen: still not sealed.
-        let again = SwitchSealCheck.sealBuilds(prefix: rig.prefix, commit: Self.b, seen: .init(before: before, after: after), home: rig.home, vault: rig.host.vault)
+        let again = SwitchSealCheck.sealBuilds(prefix: rig.prefix, commit: Self.b, seen: .init(beforeListing: before, after: after), home: rig.home, vault: rig.host.vault)
         #expect(again.sealed.isEmpty && again.refusals.first?.contains("changed after the install") == true, "\(again)")
         // A program swapped with build-info rewritten to match still has another inode and change time.
         let seenNow = SwitchSeal.listingHash(rig.prefix)
@@ -112,12 +123,12 @@ struct SwitchSealTests {
         try FileManager.default.removeItem(at: program)
         try bytes.write(to: program)
         try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: program.path)
-        let swapped = SwitchSealCheck.sealBuilds(prefix: rig.prefix, commit: Self.b, seen: .init(before: before, after: seenNow), home: rig.home, vault: rig.host.vault)
+        let swapped = SwitchSealCheck.sealBuilds(prefix: rig.prefix, commit: Self.b, seen: .init(beforeListing: before, after: seenNow), home: rig.home, vault: rig.host.vault)
         #expect(swapped.sealed.isEmpty, "\(swapped)")
         #expect(try rig.held().contains(SwitchSeal.buildsName))
 
         // The folder before the install wasn't the accepted one: nothing sealed.
-        let wrong = SwitchSealCheck.sealBuilds(prefix: rig.prefix, commit: Self.b, seen: .init(before: String(repeating: "0", count: 64), after: SwitchSeal.listingHash(rig.prefix)),
+        let wrong = SwitchSealCheck.sealBuilds(prefix: rig.prefix, commit: Self.b, seen: .init(beforeListing: ["listing d 0:"], after: SwitchSeal.listingHash(rig.prefix)),
                                                home: rig.home, vault: rig.host.vault)
         #expect(wrong.sealed.isEmpty && wrong.refusals.first?.contains("wasn't the one you last accepted") == true, "\(wrong)")
     }
@@ -180,7 +191,7 @@ struct SwitchSealTests {
         let rig = try rig()
         let bad = ["../\(Self.a)", "../../etc", String(repeating: "A", count: 40), String(repeating: "a", count: 39), String(repeating: "a", count: 41),
                    Self.a + "/..", "", String(repeating: "g", count: 40), Self.a.prefix(39) + " "]
-        let seen = SwitchSealCheck.InstallSeen(before: SwitchSeal.listingHash(rig.prefix), after: SwitchSeal.listingHash(rig.prefix))
+        let seen = SwitchSealCheck.InstallSeen(beforeListing: SwitchSeal.listingLines(rig.prefix), after: SwitchSeal.listingHash(rig.prefix))
         let unit = Data(try rig.unitText(Self.a).utf8)
         for id in bad {
             #expect(SwitchSealCheck.layoutRefusal(prefix: rig.prefix, commit: id)?.contains("isn't a commit") == true, "\(id)")
@@ -242,7 +253,12 @@ struct SwitchSealTests {
         _ = try client.recordUserAction(second, kind: Requests.switchedKind, subject: Self.a, digest: Requests.switchedDigest(from: Self.a, to: Self.b))
         let taken = try #require(await seal(second))
         #expect(taken.ok, "\(taken)")
-        // Twice (another request, the same switch): refused, nothing sealed again.
+        // Nothing sealed (this host's home records no unit folder): no mark, so a later request may still seal.
+        #expect(taken.result?["sealed"]?.array?.isEmpty == true, "\(taken)")
+        let again = try #require(await seal(second))
+        #expect(again.ok, "\(again)")
+        // Once sealed (its mark recorded), twice is refused, nothing sealed again.
+        _ = try client.recordUserAction(second, kind: Requests.sealedKind, subject: Self.b, digest: Requests.switchedDigest(from: Self.a, to: Self.b))
         let twice = try #require(await seal(second))
         #expect(twice.error?.message.contains("sealed once already") == true, "\(twice)")
         // Bad ids at the request (and a switch action that isn't an id): refused before anything is read.

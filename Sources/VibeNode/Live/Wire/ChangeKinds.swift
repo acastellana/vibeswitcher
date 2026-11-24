@@ -245,14 +245,15 @@ extension WireKinds {
         public static let kind = "build.switch"
         public struct Args: WireArgs, Equatable {
             public var commit: String?
-            /// `vibeswitcher update`'s: the builds folder's listing hash before and right after the install it ran
-            /// (`SwitchSealCheck.InstallSeen`): the folder is sealed as it was then, when the checks pass, before the plan.
-            public var buildsBefore: String?
+            /// `vibeswitcher update`'s: the builds folder's listing lines before and its listing hash right after the
+            /// install it ran (`SwitchSealCheck.InstallSeen`): the folder is sealed as it was then, when the checks pass,
+            /// before the plan.
+            public var buildsBeforeListing: [String]?
             public var buildsAfter: String?
-            public enum CodingKeys: String, CodingKey, CaseIterable { case commit, buildsBefore, buildsAfter }
-            public init(commit: String?, buildsBefore: String? = nil, buildsAfter: String? = nil) {
+            public enum CodingKeys: String, CodingKey, CaseIterable { case commit, buildsBeforeListing, buildsAfter }
+            public init(commit: String?, buildsBeforeListing: [String]? = nil, buildsAfter: String? = nil) {
                 self.commit = commit
-                self.buildsBefore = buildsBefore
+                self.buildsBeforeListing = buildsBeforeListing
                 self.buildsAfter = buildsAfter
             }
         }
@@ -277,10 +278,9 @@ extension WireKinds {
         }
     }
 
-    /// `build.seal` (`vibeswitcher update`, after the switch's follow-up, with the switch's own action and code): the
-    /// node's unit folder sealed when its unit's `ExecStart` moved from `from`'s build to `commit`'s and nothing else
-    /// (`SwitchSealCheck.sealUnit`), taken only for an action recorded as that switch (the same arguments) in the last
-    /// `Requests.sealWithin`.
+    /// `build.seal` (`vibeswitcher update`, after the switch's follow-up, naming the switch's action): the node's unit
+    /// folder sealed when its unit's `ExecStart` moved from `from`'s build to `commit`'s and nothing else
+    /// (`SwitchSealCheck.sealUnit`), taken only for that switch's completed handover (`Requests.sealRefusal`).
     public enum BuildSeal: WireChangeKind {
         public static let kind = "build.seal"
         public struct Args: WireArgs, Equatable {
@@ -289,15 +289,11 @@ extension WireKinds {
             /// The switch's own action id: this request has an action of its own (a server that answered the switch
             /// keeps its reply under that action, for that request's retries alone).
             public var switchAction: String?
-            public var buildsBefore: String?
-            public var buildsAfter: String?
-            public enum CodingKeys: String, CodingKey, CaseIterable { case commit, from, switchAction, buildsBefore, buildsAfter }
-            public init(commit: String?, from: String?, switchAction: String?, buildsBefore: String?, buildsAfter: String?) {
+            public enum CodingKeys: String, CodingKey, CaseIterable { case commit, from, switchAction }
+            public init(commit: String?, from: String?, switchAction: String?) {
                 self.commit = commit
                 self.from = from
                 self.switchAction = switchAction
-                self.buildsBefore = buildsBefore
-                self.buildsAfter = buildsAfter
             }
         }
         public struct Result: Codable, Sendable, Equatable {

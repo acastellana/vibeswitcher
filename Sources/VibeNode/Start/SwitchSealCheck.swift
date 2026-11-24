@@ -8,7 +8,8 @@ import VibeCore
 ///     the request carries what `update` saw (`InstallSeen`):
 ///   1. the folder before the install was the one the vault accepted (`before`, its listing hash, is the accepted one);
 ///   2. between before and after, only these top-level entries changed: `COMMIT` added (absent before), `installs`
-///      and `current` (`installChange`, judged by `update` itself, the user's process, as it ran the install);
+///      and `current` (`installChange`, judged here from the listing's lines `update` sends, which hash to the
+///      accepted hash, against the lines read now);
 ///   3. the folder now is the one `update` saw right after the install (`after`, its listing hash: inodes and change
 ///      times included, which no process can set back), and the vault seals exactly that hash;
 ///   4. `COMMIT` is laid out as install-node lays it out (`layoutRefusal`: `bin/`, `Resources/`, `build-info`, regular
@@ -21,12 +22,15 @@ import VibeCore
 ///
 /// The vault's accept carries `SwitchSeal.partialKey`, so it seals what it is shown and holds the rest.
 public enum SwitchSealCheck {
-    /// What `update` saw of the builds folder around its install: the listing hash before and after.
+    /// What `update` saw of the builds folder around its install: the listing's lines before (`SwitchSeal.listingLines`:
+    /// the server hashes them to the accepted hash, and judges the top-level entries from them itself) and its hash
+    /// after.
     public struct InstallSeen: Codable, Equatable, Sendable {
-        public var before: String
+        public var beforeListing: [String]
         public var after: String
-        public init(before: String, after: String) {
-            self.before = before
+        public var before: String { SwitchSeal.listingHash(lines: beforeListing) }
+        public init(beforeListing: [String], after: String) {
+            self.beforeListing = beforeListing
             self.after = after
         }
     }
@@ -115,8 +119,14 @@ public enum SwitchSealCheck {
             if let why = layoutRefusal(prefix: prefix, commit: commit) {
                 return Sealed(sealed: [], held: ConfigSeal.held(in: record), refusals: ["the builds folder isn't as the install left it: \(why)"])
             }
-            guard SwitchSeal.listingHash(prefix) == seen.after else {
+            let now = SwitchSeal.listingLines(prefix)
+            guard SwitchSeal.listingHash(lines: now) == seen.after else {
                 return Sealed(sealed: [], held: ConfigSeal.held(in: record), refusals: ["the builds folder changed after the install: its change stays held (`vs config held`)"])
+            }
+            // Judged here, from the lines the accepted hash vouches for: only the install's top-level entries changed.
+            let other = installChange(before: SwitchSeal.entries(lines: seen.beforeListing), after: SwitchSeal.entries(lines: now), commit: commit)
+            guard other.isEmpty else {
+                return Sealed(sealed: [], held: ConfigSeal.held(in: record), refusals: ["the builds folder changed beyond the install (" + other.joined(separator: "; ") + "): it stays held (`vs config held`)"])
             }
             return vaultAccept([SwitchSeal.buildsKey: seen.after], name: SwitchSeal.buildsName, home: home, vault: vault)
         } catch {
@@ -166,5 +176,26 @@ public enum SwitchSealCheck {
         } catch {
             return Sealed(sealed: [], held: [], refusals: ["the vault didn't take the accept (\(error))"])
         }
+    }
+
+    /// `update`'s install script, or why it isn't run (the review of 16f0ce69, U1): the install-node of the build this
+    /// command line was proved installed from (`own`, its folder: `NodeFolders.installedBuild` of `/proc/self/exe`),
+    /// never whatever `current` names; `current` naming that very build (install-node runs only as `current`'s copy);
+    /// the script a regular file, no link, writable by its owner alone. Whether it is the accepted one is the builds
+    /// folder's seal's to say (`buildsHeld`, asked of the server around this).
+    public static func installScript(prefix: String, own: String) -> Result<String, StartRefusal> {
+        guard let ownReal = NodeFolders.resolved(own), let currentReal = NodeFolders.resolved(NodeFolders.join(prefix, "current")) else {
+            return .failure(StartRefusal("update: \(ConfigSeal.inert(prefix, limit: .max))/current or this command line's build can't be resolved: nothing was asked or run"))
+        }
+        guard ownReal == currentReal else {
+            return .failure(StartRefusal("update: current names \(ConfigSeal.inert(currentReal, limit: .max)), not the build this command line runs from "
+                                         + "(\(ConfigSeal.inert(ownReal, limit: .max))): nothing was asked or run; `vibeswitcher config held` shows what changed under the builds folder"))
+        }
+        let script = NodeFolders.join(ownReal, "Resources/install-node.sh")
+        var info = stat()
+        guard lstat(script, &info) == 0, info.st_mode & S_IFMT == S_IFREG, info.st_mode & 0o022 == 0 else {
+            return .failure(StartRefusal("update: \(ConfigSeal.inert(script, limit: .max)) isn't a regular file only its owner can write: nothing was asked or run"))
+        }
+        return .success(script)
     }
 }

@@ -2161,7 +2161,19 @@ against it. Each line says what reduces it now, if anything.
     mid-compile and restores it before the checkout's re-check (git status, untracked and ignored files too) and the
     products' re-hash gets its code built and installed; one left in place is caught. Closed only by building as
     another uid or in a private mount namespace the sessions can't enter (the box, S12); `update` doesn't refuse a
-    live lead (the lead's call of 2026-11-24: it would rarely be usable).
+    live lead (the lead's call of 2026-11-24: it would rarely be usable). A new build's integrity rests on install-node
+    verifying what it fetches (the commit by its hash, both CI runs, its own bytes against the commit's blob): the
+    layout check after it (`SwitchSealCheck.layoutRefusal`) compares the build with its own `build-info`, so it says the
+    folder is whole, not that it is the commit's.
+36. **What `vibeswitcher update` runs is the user's voice while it runs.** It runs the install-node of the build its
+    command line was proved installed from, only while `current` names that build and the builds folder is the one the
+    user accepted (unchanged since the vault's look and while the code was asked): a script a session planted or
+    repointed never runs. The window left is the moment between that last read and bash opening the file. What does run
+    (install-node, git, gh, the compiler, the dependencies' build plugins, the built products' link check) runs from the
+    user's terminal: in a session of its own with no controlling terminal and stdin `/dev/null`, so the weaker voice rule
+    takes no state change from it, but under the cgroup rule its processes are in the terminal's scope and a request from
+    them is the user's. A pinned dependency's build plugin could act as the user then. Closed by running the install in
+    a scope of its own (`systemd-run --user --scope`, not a terminal's) or in the box (S12).
 
 **The project allow-list (S2-D11)** is what makes this list acceptable before stage 6: in the user's host on Linux a
 `spawn` whose working folder isn't inside an allowed repository is refused, saying why. The list is

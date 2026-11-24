@@ -495,7 +495,12 @@ public final class Requests: @unchecked Sendable {
         doing[action] = Self.argsDigest(request)
         act(request, from: facts) { [weak self] answer in
             guard let self else { return reply(answer) }
-            self.queue.async {
+            // An act on a card (an answer, an accept, a batch of them): the open cards' file written first (`flushCards`).
+            let flush: (@escaping () -> Void) -> Void = { [weak self] next in
+                guard let engine = self?.engine, Self.carded.contains(request.kind) || request.kind == "approve" else { return next() }
+                engine.queue.async { engine.flushCards(then: next) }
+            }
+            flush { self.queue.async {
                 self.keep(answer, for: action, request: request)
                 let (client, kind, outcome) = (self.link.vaultV2, request.kind, Self.outcome(of: answer, kind: request.kind))
                 DispatchQueue.global(qos: .userInitiated).async { [weak self] in
@@ -510,7 +515,7 @@ public final class Requests: @unchecked Sendable {
                         reply(answer)
                     }
                 }
-            }
+            } }
         }
     }
 
@@ -1147,8 +1152,10 @@ public final class Requests: @unchecked Sendable {
 
     /// What `update` saw of the builds folder around its install, when a request carries both hashes.
     static func installSeen(_ args: [String: NodeWire.Value]?) -> SwitchSealCheck.InstallSeen? {
-        guard let before = args?["buildsBefore"]?.string, let after = args?["buildsAfter"]?.string else { return nil }
-        return .init(before: before, after: after)
+        guard let lines = args?["buildsBeforeListing"]?.array, let after = args?["buildsAfter"]?.string else { return nil }
+        let listing = lines.compactMap(\.string)
+        guard listing.count == lines.count, !listing.isEmpty else { return nil }
+        return .init(beforeListing: listing, after: after)
     }
 
     /// A refusal's tail saying what the seal did.
@@ -1165,17 +1172,18 @@ public final class Requests: @unchecked Sendable {
     /// user actions, never requests.
     static let switchedKind = "build.switched"
     static let sealedKind = "build.sealed"
+    /// `build.seal`'s check, seal and mark, one request at a time.
+    static let sealings = DispatchQueue(label: "vibenode.build-seal", qos: .userInitiated)
     static func switchedDigest(from: String, to: String) -> String { LeadVaultV2.digest("build.switched \(from) \(to)") }
 
-    /// Why `build.seal` (its `action`, `commit`, `from`, the switch's install hashes) isn't taken, from the vault's
-    /// records under that action: the switch recorded with exactly these arguments, its completed handover to exactly
+    /// Why `build.seal` (its switch's `action`, `commit`, `from`) isn't taken, from the vault's records under that
+    /// action: the switch recorded, its completed handover (written by this server after it, never a caller) to exactly
     /// `commit` from exactly `from` (the switch's own record of it, never the caller's word), within `sealWithin`, and
     /// no seal already. Nil: taken. Reads the vault.
-    static func sealRefusal(action: String, commit: String, from: String, switchArgs: [String: NodeWire.Value], client: LeadVaultV2Client,
+    static func sealRefusal(action: String, commit: String, from: String, client: LeadVaultV2Client,
                             now: Double = Date().timeIntervalSince1970) -> String? {
-        let digest = LeadVaultV2.digest(String(decoding: NodeWire.line(switchArgs), as: UTF8.self))
-        guard let asked = try? client.userAction(action, kind: WireKinds.BuildSwitch.kind), asked.digest == digest else {
-            return "build.seal is taken only with the action of a switch to \(commit) recorded with these arguments: nothing was sealed"
+        guard (try? client.userAction(action, kind: WireKinds.BuildSwitch.kind)) != nil else {
+            return "build.seal is taken only with the action of a switch to \(commit): nothing was sealed"
         }
         guard let switched = try? client.userAction(action, kind: switchedKind),
               switched.digest == switchedDigest(from: switched.subject ?? "", to: commit), let recorded = switched.subject else {
@@ -1197,16 +1205,19 @@ public final class Requests: @unchecked Sendable {
               let action = request.args?["switchAction"]?.string?.lowercased(), UUID(uuidString: action) != nil else {
             return reply(.init(re: request.id, error: .init(.badArgs, "build.seal needs commit and from, each 40 lowercase hex digits, and switchAction, the switch's action id")))
         }
-        var switchArgs: [String: NodeWire.Value] = ["commit": .string(commit)]
-        for key in ["buildsBefore", "buildsAfter"] { if let value = request.args?[key] { switchArgs[key] = value } }
         let (home, vault, client, queue, note) = (self.home, link.vault, link.vaultV2, self.queue, self.note)
-        DispatchQueue.global(qos: .userInitiated).async {
-            if let why = Self.sealRefusal(action: action, commit: commit, from: from, switchArgs: switchArgs, client: client) {
+        // One at a time (`sealings`): the check that none was sealed for this switch, the seal and its mark, so two
+        // requests for one switch never both seal; the mark only once something was sealed, so a refusal (a read that
+        // failed, a change since) leaves the switch's seal to a later request.
+        Self.sealings.async {
+            if let why = Self.sealRefusal(action: action, commit: commit, from: from, client: client) {
                 return queue.async { reply(.init(re: request.id, error: .init(.refused, why))) }
             }
             let sealed = SwitchSealCheck.sealUnit(unitFolder: NodeFolders.join(home, ".config/systemd/user"), unitFile: "\(NodeStarter.unitName).service",
                                                   prefix: NodeFolders.defaultPrefix(accountHome: home), from: from, to: commit, home: home, vault: vault)
-            _ = try? client.recordUserAction(action, kind: Self.sealedKind, subject: commit, digest: Self.switchedDigest(from: from, to: commit))
+            if !sealed.sealed.isEmpty {
+                _ = try? client.recordUserAction(action, kind: Self.sealedKind, subject: commit, digest: Self.switchedDigest(from: from, to: commit))
+            }
             note("build.seal \(commit): " + (sealed.sealed.isEmpty ? "the unit folder not sealed: " + (sealed.refusals.isEmpty ? "nothing held" : sealed.refusals.joined(separator: "; ")) : "the unit folder sealed"))
             queue.async { reply(.init(re: request.id, typed: WireKinds.BuildSeal.Result(sealed: sealed.sealed, held: sealed.held, sealRefusals: sealed.refusals))) }
         }

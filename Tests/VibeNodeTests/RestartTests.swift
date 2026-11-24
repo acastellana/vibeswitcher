@@ -205,6 +205,23 @@ struct RestartTests {
                 "\(node.inbox(lead.session.tty))\n\(node.said)")
     }
 
+    /// A card answered and the server killed the moment the answer's reply came (the review of 16f0ce69, U3): the
+    /// reply came once the open cards' file no longer held it, so it doesn't come back open after the restart.
+    @Test func aCardAnsweredJustBeforeACrashDoesntComeBackOpen() async throws {
+        let node = try await ScratchNode(scratch)
+        defer { node.stop() }
+        let lead = try await node.askingLead("Name the parser?", options: ["Parser", "Reader"])
+        try #require(await eventually(timeout: 60) { node.keptCards().contains(lead.card) }, "\(node.said)")
+        let answered = try await node.runOnTerminal(["answer", lead.card, "Parser"])
+        let server = try #require(node.serverPID)
+        kill(server, SIGKILL)
+        #expect(answered.status == 0, "\(answered.output)\(answered.errors)")
+        #expect(!node.keptCards().contains(lead.card), "\(node.keptCards())")
+        _ = try await node.restartServer(after: server)
+        try await node.looks(1, at: lead.repo)
+        #expect(try await node.listedCard(lead.card) == nil, "\(node.said)")
+    }
+
     /// `cards.json` changed while the server was down (a question's words rewritten, as any worker of the user's uid
     /// could): its bytes aren't what the vault keeps the digest of, so nothing is taken back, said in the log, and the
     /// lead is told, once, which of its open questions the user no longer sees, to withdraw them and ask again those it

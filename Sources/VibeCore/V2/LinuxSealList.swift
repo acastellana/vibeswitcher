@@ -163,13 +163,27 @@ public enum LinuxSealList {
     /// Startup folder the user's known-startup list names shortcuts of: each known shortcut by its line, and the
     /// folder's own line without its times (`StartupShortcuts`).
     static func listingHash(_ path: String) -> String {
-        var hasher = SHA256()
-        let add = { (text: String) in hasher.update(data: Data((text + "\n").utf8)) }
-        var info = stat()
-        guard lstat(path, &info) == 0 else {
+        guard let lines = listingLines(path) else {
+            var hasher = SHA256()
             hasher.update(data: Data("absent".utf8))
             return ConfigSeal.hex(hasher.finalize())
         }
+        return listingHash(lines: lines)
+    }
+
+    /// The hash of a listing's lines (`listingLines`), as `listingHash` makes it.
+    static func listingHash(lines: [String]) -> String {
+        var hasher = SHA256()
+        for text in lines { hasher.update(data: Data((text + "\n").utf8)) }
+        return ConfigSeal.hex(hasher.finalize())
+    }
+
+    /// The lines `listingHash` hashes, in order; nil when nothing is at `path`.
+    static func listingLines(_ path: String) -> [String]? {
+        var lines: [String] = []
+        let add = { (text: String) in lines.append(text) }
+        var info = stat()
+        guard lstat(path, &info) == 0 else { return nil }
         var known: [String: StartupShortcuts.Known] = [:]
         if let startup = StartupShortcuts.startupFolder(path), let list = StartupShortcuts.list(root: startup.root),
            list.contains(where: { $0.user == startup.user }), (info.st_mode & S_IFMT) == S_IFDIR {
@@ -179,7 +193,7 @@ public enum LinuxSealList {
             add("listing " + line(info, path: path, relative: ""))
         }
         walk(path, relative: "", known: known, add)
-        return ConfigSeal.hex(hasher.finalize())
+        return lines
     }
 
     /// One entry's line: its name (its length first, so no name can pass for two), type, mode, size, inode, times.

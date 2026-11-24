@@ -17,6 +17,11 @@ struct UpdateCommandTests {
         let node: ScratchNode
         let installs: URL
         let installer: URL
+        /// A's folder, whose `Resources/install-node.sh` is the same stand-in (`--test-build`), and the file it writes
+        /// as it starts.
+        let buildA: URL
+        let marker: URL
+        var ran: Bool { FileManager.default.fileExists(atPath: marker.path) }
     }
 
     /// A node running A from its home's builds folder, `current` naming A, B staged for the stand-in (its server a byte
@@ -33,10 +38,13 @@ struct UpdateCommandTests {
         try bytes.write(to: padded)
         try ScratchBuilds.install(commit: Self.b, into: staged, replacing: [BuildInfo.server: padded.path])
         let installer = scratch.url("installer")
+        let marker = scratch.url("installer-ran")
         let script = """
             #!/bin/bash
             set -e
             commit=$1 prefix=$2
+            [[ $2 == --prefix ]] && prefix=$3
+            echo ran > '\(marker.path)'
             echo "stand-in install of $commit"
             \(fails ? "/bin/cp -a -- '\(staged.path)/'\"$commit\" \"$prefix/$commit\"; echo 'the build failed' >&2; exit 3" : "")
             /bin/cp -a -- '\(staged.path)/'"$commit" "$prefix/$commit"
@@ -45,8 +53,11 @@ struct UpdateCommandTests {
             \(extra)
             """
         try writeClosedOnExec(script, to: installer)
+        let resources = buildA.appendingPathComponent("Resources", isDirectory: true)
+        try FileManager.default.createDirectory(at: resources, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o755])
+        try writeClosedOnExec(script, to: resources.appendingPathComponent("install-node.sh"))
         let node = try await ScratchNode(scratch, reusing: root, build: buildA, installRoot: installs)
-        return Rig(node: node, installs: installs, installer: installer)
+        return Rig(node: node, installs: installs, installer: installer, buildA: buildA, marker: marker)
     }
 
     func held(_ node: ScratchNode) async throws -> String {
@@ -72,7 +83,8 @@ struct UpdateCommandTests {
         try #require(seen.contains("~/bin"), "\(seen)")
         let server = try #require(node.serverPID)
 
-        let updated = try await node.runOnTerminal(["update", Self.b, "--test-installer", rig.installer.path])
+        // The build's own install script, as on the node (`--test-build`: the build this command line "runs from").
+        let updated = try await node.runOnTerminal(["update", Self.b, "--test-build", rig.buildA.path])
         let out = updated.output
         #expect(updated.status == 0, "\(out)\(updated.errors)\n\(node.said)")
         #expect(out.contains("This updates the node from the build of commit \(Self.a) to \(Self.b)") && out.contains("these stay held: ~/bin"),
@@ -110,5 +122,40 @@ struct UpdateCommandTests {
         #expect(updated.status != 0 && out.contains("the install of \(Self.b) failed (exit 3") && out.contains("nothing was switched")
                 && out.contains("the folder it made is removed"), "\(out)")
         #expect(!FileManager.default.fileExists(atPath: rig.installs.appendingPathComponent(Self.b).path))
+    }
+
+    /// The script `update` runs (the review of 16f0ce69, U1) is the install-node of the build its command line runs
+    /// from, only while `current` names that build and the builds folder is the accepted one: a repointed `current`,
+    /// an edited script, any held change under the builds folder: refused before the code is asked and before
+    /// anything runs.
+    @Test func aRepointedCurrentAnEditedScriptOrAHeldBuildsFolderRunsNothing() async throws {
+        let rig = try await rig()
+        let node = rig.node
+        defer { node.stop() }
+        _ = try await held(node)
+        func refused(_ says: String) async throws {
+            let updated = try await node.runOnTerminal(["update", Self.b, "--test-build", rig.buildA.path])
+            let out = updated.output + updated.errors
+            #expect(updated.status != 0 && out.contains(says) && !out.contains("and Enter"), "\(out)\n\(node.said)")
+            #expect(!rig.ran, "the script ran")
+        }
+        // `current` repointed to another installed build.
+        let c = String(repeating: "c", count: 40)
+        try ScratchBuilds.install(commit: c, into: rig.installs)
+        let current = rig.installs.appendingPathComponent("current")
+        try FileManager.default.removeItem(at: current)
+        try FileManager.default.createSymbolicLink(atPath: current.path, withDestinationPath: c)
+        try await refused("current names \(rig.installs.appendingPathComponent(c).path), not the build this command line runs from")
+        try FileManager.default.removeItem(at: current)
+        try FileManager.default.createSymbolicLink(atPath: current.path, withDestinationPath: Self.a)
+        // Back as it was named, the folder still isn't the accepted one (the link's and C's times): held.
+        try await refused("the builds folder has a change you haven't accepted")
+        // The script edited (in place, its bytes): the same, and it never runs.
+        let script = rig.buildA.appendingPathComponent("Resources/install-node.sh")
+        let handle = try FileHandle(forWritingTo: script)
+        handle.seekToEndOfFile()
+        handle.write(Data("\necho planted\n".utf8))
+        try handle.close()
+        try await refused("the builds folder has a change you haven't accepted")
     }
 }

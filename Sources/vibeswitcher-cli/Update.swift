@@ -11,8 +11,11 @@ import VibeNode
 /// 3. The confirmation (`NodeTexts.update`): from and to, how far, what it runs, what its code accepts beside the
 ///    switch (the builds folder as this install leaves it, the unit's `ExecStart` naming the target) and what stays
 ///    held; then ONE typed code.
-/// 4. The install: `<prefix>/current/Resources/install-node.sh COMMIT` under `env -i HOME=… PATH=/usr/bin:/bin`, as its
-///    header says to run it, its output on this terminal. The builds folder's listing is read before and after it
+/// 4. The install: the install-node of the build this command line runs from, proved by its own image, which `current`
+///    must name, run only while the builds folder is the accepted one (nothing of it held, unchanged since the vault's
+///    look and while the code was asked: `SwitchSealCheck.installScript`), under `env -i HOME=… PATH=/usr/bin:/bin`
+///    as its header says, in a session of its own (no controlling terminal), stdin /dev/null, its output on this
+///    terminal. The builds folder's listing is read before and after it
 ///    (`SwitchSeal`): the top-level entries it changed must be the install's alone (`SwitchSealCheck.installChange`). A
 ///    failed install switches nothing, and a build folder it left that wasn't there before is removed.
 /// 5. `build.switch` with the code and both listing hashes: the server seals the builds folder first when its checks
@@ -21,8 +24,13 @@ import VibeNode
 ///    `build.seal` with the same action and code: the unit folder sealed when only its unit's `ExecStart` moved (b).
 /// 6. What still waits, in one line (`CardText.waitingLine`), and what stays held.
 ///
-/// A scratch node takes `--test-installer PROGRAM` in place of install-node (run as `PROGRAM COMMIT PREFIX`): a test's
-/// stand-in that lays a build out; the user's node refuses it.
+/// A scratch node takes `--test-installer PROGRAM` in place of install-node (run as `PROGRAM COMMIT PREFIX`, none of the
+/// checks of 4), or `--test-build FOLDER` for the build its command line "runs from" (every check of 4, its script run
+/// with `--prefix`); the user's node refuses both.
+///
+/// A new build's integrity rests on install-node verifying what it fetches (the commit by its hash, CI's runs, its own
+/// bytes against the commit's blob): the layout check after it (`SwitchSealCheck.layoutRefusal`) compares the build
+/// with its own `build-info`, so it says the folder is whole, not that it is the commit's.
 enum UpdateCommand {
     static let usage = "usage: vibeswitcher update [COMMIT]"
 
@@ -32,19 +40,26 @@ enum UpdateCommand {
     static func run(_ arguments: [String]) -> Int32 {
         var named: String?
         var installer: String?
+        var testBuild: String?
         var words = arguments[...]
         while let word = words.popFirst() {
             if word == "--test-installer", let program = words.popFirst() { installer = program; continue }
+            if word == "--test-build", let folder = words.popFirst() { testBuild = folder; continue }
             guard named == nil, NodeUnit.isCommit(word) else { return Say.usage(usage) }
             named = word
         }
         let context = NodeContext.current()
         context.sayScratch()
-        if installer != nil, !context.isScratch { return Say.refused("update: --test-installer is a scratch node's test flag") }
+        if installer != nil || testBuild != nil, !context.isScratch { return Say.refused("update: --test-installer and --test-build are a scratch node's test flags") }
         let accountHome = VibePaths.accountHome
-        if !context.isScratch, !Platform.CodeIdentity.isAvailable,
-           case .failure(let refused) = NodeFolders.installedBuild(executable: "/proc/self/exe", prefix: NodeFolders.defaultPrefix(accountHome: accountHome)) {
-            return Say.refused("update: \(refused.text)")
+        // The build this command line runs from, proved by its own image (a scratch node's test names one): its
+        // install-node is the one run (`SwitchSealCheck.installScript`).
+        var own = testBuild
+        if !context.isScratch, !Platform.CodeIdentity.isAvailable {
+            switch NodeFolders.installedBuild(executable: "/proc/self/exe", prefix: NodeFolders.defaultPrefix(accountHome: accountHome)) {
+            case .failure(let refused): return Say.refused("update: \(refused.text)")
+            case .success(let build): own = build.folder
+            }
         }
         let client: NodeClient
         switch NodeClient.connect(context) {
@@ -77,15 +92,29 @@ enum UpdateCommand {
         if !blockers.isEmpty {
             return Say.refused("update can't run now: " + SwitchRequest.blockedText(blockers) + ". Nothing was asked, installed or switched.")
         }
-        let script = (prefix as NSString).appendingPathComponent("current/Resources/install-node.sh")
-        if installer == nil, !FileManager.default.isExecutableFile(atPath: script) {
-            return Say.refused("update: \(ConfigSeal.inert(script, limit: .max)) isn't there to install with: install the first build by hand (`install-node.sh COMMIT`)")
+        var script = installer ?? ""
+        if installer == nil {
+            guard let own else { return Say.refused("update: a scratch node's update needs --test-installer or --test-build") }
+            switch SwitchSealCheck.installScript(prefix: prefix, own: own) {
+            case .failure(let refused): return Say.refused(refused.text)
+            case .success(let path): script = path
+            }
         }
-        // What stays held: the home's held config, as `config held` shows it.
+        // What stays held: the home's held config, as `config held` shows it (the vault's look of now). The builds
+        // folder must be the accepted one, nothing of it held, the same before and after that look: so the script run
+        // below is the one the user accepted (its file's inode, size and times are in the folder's listing).
         let home = context.isScratch ? VibePaths.home : accountHome
-        var held: [String] = []
+        let looked = SwitchSeal.listingLines(prefix)
+        var held: [String]?
         if case .success(let result, _) = client.read(WireKinds.ConfigHeld.self, .init(folder: home, diff: nil), timeout: 60) {
             held = (result.card?["config"]?["items"]?.array ?? []).compactMap { $0["name"]?.string }
+        }
+        guard let held else { return Say.refused("update: the server couldn't say what the seal holds: nothing was asked or run") }
+        if installer == nil {
+            guard !held.contains(SwitchSeal.buildsName), SwitchSeal.listingLines(prefix) == looked else {
+                return Say.refused("update: the builds folder has a change you haven't accepted (`vibeswitcher config held`): nothing was asked or run, "
+                                   + "as its install script may not be the one you accepted")
+            }
         }
         let what = NodeTexts.update(from: running, to: target, aheadBy: target == offered ? status.update?["aheadBy"]?.int : nil,
                                     rewrites: rewrites, held: held)
@@ -93,14 +122,16 @@ enum UpdateCommand {
         let said = TypedWord.said(approval: client.approvalRule, action: action, what: what)
         guard case .success(let typed) = said else { return Say.refused(said.refusal) }
 
-        // The install, the builds folder read around it.
-        let before = SwitchSeal.listingHash(prefix)
-        let entriesBefore = SwitchSeal.entries(listing: prefix)
+        // The install, the builds folder read around it: still as the vault's look found it (the code took a while).
+        let before = SwitchSeal.listingLines(prefix)
+        if installer == nil, before != looked {
+            return Say.refused("update: the builds folder changed while the code was asked: nothing was run or switched (`vibeswitcher config held`)")
+        }
         let folder = (prefix as NSString).appendingPathComponent(target)
         let existed = FileManager.default.fileExists(atPath: folder)
         let started = Platform.Clock.steadyDate()
         Say.out("installing \(target) (each step below is install-node's)…")
-        let installed = install(script: installer ?? script, test: installer != nil, commit: target, prefix: prefix, home: accountHome)
+        let installed = install(script: script, test: installer != nil, commit: target, prefix: prefix, home: accountHome, scratch: context.isScratch)
         let took = Int(Platform.Clock.steadyDate().timeIntervalSince(started))
         guard installed == 0 else {
             if !existed, FileManager.default.fileExists(atPath: folder) { try? FileManager.default.removeItem(atPath: folder) }
@@ -108,8 +139,9 @@ enum UpdateCommand {
                                + (existed ? "" : "; the folder it made is removed"))
         }
         Say.out("installed \(target) in \(took / 60) min \(took % 60) s")
-        let after = SwitchSeal.listingHash(prefix)
-        let others = SwitchSealCheck.installChange(before: entriesBefore, after: SwitchSeal.entries(listing: prefix), commit: target)
+        let afterLines = SwitchSeal.listingLines(prefix)
+        let after = SwitchSeal.listingHash(lines: afterLines)
+        let others = SwitchSealCheck.installChange(before: SwitchSeal.entries(lines: before), after: SwitchSeal.entries(lines: afterLines), commit: target)
         if !others.isEmpty {
             Say.out("the builds folder changed beyond this install (" + others.joined(separator: "; ") + "): it stays held for `vibeswitcher config held`")
         }
@@ -119,7 +151,7 @@ enum UpdateCommand {
         let hostPid = status.host?.pid.map { pid_t($0) }
         let serverBefore = client.hello.server
         let webBefore = SwitchSettle.Web(status.web)
-        let args = WireKinds.BuildSwitch.Args(commit: target, buildsBefore: seen?.0, buildsAfter: seen?.1)
+        let args = WireKinds.BuildSwitch.Args(commit: target, buildsBeforeListing: seen?.0, buildsAfter: seen?.1)
         let handedOver: Bool
         switch client.change(WireKinds.BuildSwitch.self, args, action: action, typed: typed, timeout: SwitchRequest.longestWait + 30) {
         case .failure(let failure):
@@ -157,7 +189,7 @@ enum UpdateCommand {
         if case .unitAndCurrent = rewrites {
             if case .success(let fresh) = NodeClient.connect(context) {
                 // An action of its own, naming the switch's (the code typed for this update covers it).
-                let seal = WireKinds.BuildSeal.Args(commit: target, from: running, switchAction: action, buildsBefore: seen?.0, buildsAfter: seen?.1)
+                let seal = WireKinds.BuildSeal.Args(commit: target, from: running, switchAction: action)
                 switch fresh.change(WireKinds.BuildSeal.self, seal, action: UUID().uuidString.lowercased(), typed: typed, timeout: 60) {
                 case .success(let result, _): sealLines(sealed: result.sealed, refusals: result.sealRefusals).forEach(Say.out)
                 case .refused(let reply): Say.out("the unit's change stays held: \(ConfigSeal.inert(reply.error?.message ?? "refused", limit: 400))")
@@ -181,10 +213,13 @@ enum UpdateCommand {
 
     /// install-node for `commit` in `prefix` (or a scratch node's stand-in, `test`), its output on this terminal: its
     /// exit status (-1 when it couldn't be started or didn't end in `installWait`).
-    static func install(script: String, test: Bool, commit: String, prefix: String, home: String) -> Int32 {
+    static func install(script: String, test: Bool, commit: String, prefix: String, home: String, scratch: Bool) -> Int32 {
         var spawn: Platform.Spawn
         if test {
             spawn = Platform.Spawn(executable: script, arguments: [script, commit, prefix])
+        } else if scratch {
+            // A scratch node's build's script (`--test-build`): its prefix named, under the same empty environment.
+            spawn = Platform.Spawn(executable: "/usr/bin/env", arguments: ["/usr/bin/env", "-i", "HOME=\(home)", "PATH=/usr/bin:/bin", "/bin/bash", script, commit, "--prefix", prefix])
         } else {
             // As its header says to run it: nothing of this shell's environment shapes it.
             // `--repo none`: no courtesy check of a checkout (the commit is the node's check's), where the script takes it
@@ -193,8 +228,11 @@ enum UpdateCommand {
             spawn = Platform.Spawn(executable: "/usr/bin/env",
                                    arguments: ["/usr/bin/env", "-i", "HOME=\(home)", "PATH=/usr/bin:/bin", "/bin/bash", script, commit] + (takesNone ? ["--repo", "none"] : []))
         }
+        // Nothing to read from this terminal, and none to control: a session of its own (the voice rule's weaker form
+        // takes no state change from a process without a controlling terminal; under the cgroup rule its processes
+        // stay in this terminal's scope, the security document's S11, item 36).
         spawn.stdin = .path("/dev/null", flags: O_RDONLY)
-        spawn.group = .ownGroup
+        spawn.group = .ownSession
         guard case .success(let pid) = spawn.start() else { return -1 }
         let deadline = Platform.Clock.steadyDate().addingTimeInterval(installWait)
         var status: Int32 = 0
@@ -203,7 +241,7 @@ enum UpdateCommand {
             if ended == pid { break }
             if ended < 0, errno != EINTR { return -1 }
             if Platform.Clock.steadyDate() > deadline {
-                kill(-pid, SIGTERM)
+                kill(-pid, SIGTERM)  // its session's group: its id is its pid
                 return -1
             }
             usleep(200_000)

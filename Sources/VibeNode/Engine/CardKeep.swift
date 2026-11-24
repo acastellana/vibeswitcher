@@ -131,6 +131,16 @@ extension LeadEngine {
         }
     }
 
+    /// `cards.json` written now, as the cards are, its digest kept, then `then` on `queue` (the review of 16f0ce69, U3: an
+    /// answer or an accept that closed a card is replied to only once the file no longer holds it open, so a crash right
+    /// after the reply never brings it back). At once when nothing is written (before the restore). On `queue`.
+    func flushCards(then: @escaping () -> Void) {
+        guard cardKeep.saving else { return then() }
+        writeCards()
+        let queue = self.queue
+        cardKeep.writes.async { queue.async(execute: then) }
+    }
+
     /// Every open card written to `cards.json` once this turn of the queue is done (`CardKeep`). On `queue`.
     func keepCards() {
         guard cardKeep.saving, !cardKeep.pending else { return }
@@ -138,7 +148,7 @@ extension LeadEngine {
         queue.async { [weak self] in self?.writeCards() }
     }
 
-    private func writeCards() {
+    func writeCards() {
         cardKeep.pending = false
         guard cardKeep.saving else { return }
         let now = Date()

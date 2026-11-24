@@ -7,8 +7,8 @@ import Foundation
 ///
 /// - `partialKey`: the mark an app's accept carries when it seals only what it shows (`LeadVault`'s judge), the rest
 ///   held as a look holds it. Without it, an accept that doesn't show everything held seals nothing, as ever.
-/// - `entries(listing:)`: a `.listing` folder's top-level entries, each hashed as the seal hashes the whole
-///   (`LinuxSealList.listingHash`: names, types, modes, sizes, inodes, times, link targets, never contents).
+/// - `listingLines` and `entries(lines:)`: a `.listing` folder's lines as its hash hashes them (names, types, modes,
+///   sizes, inodes, times, link targets, never contents), and its top-level entries' groups of them, each hashed.
 /// - `folderHashes(folder:name:file:swap:)`: a `.folder`'s hash as the seal reads it, with one file read once: as it is, and with
 ///   its bytes as `swap` makes them, so a check can say the folder is the accepted one but for that file's change.
 public enum SwitchSeal {
@@ -23,11 +23,35 @@ public enum SwitchSeal {
     /// The whole of a `.listing` folder, hashed as the seal hashes it.
     public static func listingHash(_ path: String) -> String { LinuxSealList.listingHash(path) }
 
-    /// Each top-level entry of the folder at `path`, by name, hashed as the seal hashes a listing (its subtree for a
-    /// folder). Empty when it can't be read.
-    public static func entries(listing path: String) -> [String: String] {
-        let names = (try? FileManager.default.contentsOfDirectory(atPath: path)) ?? []
-        return Dictionary(uniqueKeysWithValues: names.map { ($0, LinuxSealList.listingHash((path as NSString).appendingPathComponent($0))) })
+    /// A listing's lines, as its hash hashes them (empty when nothing is there), and the hash of such lines.
+    public static func listingLines(_ path: String) -> [String] { LinuxSealList.listingLines(path) ?? [] }
+    public static func listingHash(lines: [String]) -> String { LinuxSealList.listingHash(lines: lines) }
+
+    /// A listing's lines (`listingLines`) grouped by the top-level entry each is of (its relative path's first name,
+    /// read by its length prefix), each group's lines hashed; the folder's own line belongs to none. A line that doesn't
+    /// read is its own group under its text, so it is never the same as anything.
+    public static func entries(lines: [String]) -> [String: String] {
+        var groups: [String: [String]] = [:]
+        for text in lines.dropFirst() {
+            groups[topName(text) ?? ("?" + text), default: []].append(text)
+        }
+        return groups.mapValues { listingHash(lines: $0) }
+    }
+
+    /// The first name of a listing line's relative path ("f 12:name/sub …", "unreadable 4:name").
+    static func topName(_ line: String) -> String? {
+        let bytes = Array(line.utf8)
+        guard let space = bytes.firstIndex(of: UInt8(ascii: " ")) else { return nil }
+        var index = space + 1
+        var count = 0
+        while index < bytes.count, (UInt8(ascii: "0")...UInt8(ascii: "9")).contains(bytes[index]) {
+            count = count * 10 + Int(bytes[index] - UInt8(ascii: "0"))
+            index += 1
+            guard count <= 1 << 20 else { return nil }
+        }
+        guard index < bytes.count, bytes[index] == UInt8(ascii: ":"), index + 1 + count <= bytes.count, count > 0 else { return nil }
+        let path = String(decoding: bytes[(index + 1)..<(index + 1 + count)], as: UTF8.self)
+        return path.split(separator: "/", omittingEmptySubsequences: false).first.map(String.init)
     }
 
     /// The folder at `path` (a `.folder` the seal names `name`) hashed as the seal hashes it, with its file `file` (relative) read once: the
