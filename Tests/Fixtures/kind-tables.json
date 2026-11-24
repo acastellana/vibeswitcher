@@ -18,7 +18,14 @@
       "card",
       "code"
     ],
+    "build.seal" : [
+      "commit",
+      "from",
+      "switchAction"
+    ],
     "build.switch" : [
+      "buildsAfter",
+      "buildsBeforeListing",
       "commit"
     ],
     "config.accept" : [
@@ -172,6 +179,7 @@
     "board.image" : "do board.image for you",
     "board.task" : "do board.task for you",
     "brief" : "do brief for you",
+    "build.seal" : "accept the node's unit naming the build you switched to",
     "build.switch" : "switch your node to another build",
     "chat.image" : "do chat.image for you",
     "chat.page" : "do chat.page for you",
@@ -259,7 +267,14 @@
       "card",
       "code"
     ],
+    "build.seal" : [
+      "commit",
+      "from",
+      "switchAction"
+    ],
     "build.switch" : [
+      "buildsAfter",
+      "buildsBeforeListing",
       "commit"
     ],
     "config.accept" : [
@@ -430,6 +445,7 @@
     "board.image" : false,
     "board.task" : false,
     "brief" : false,
+    "build.seal" : true,
     "build.switch" : true,
     "chat.image" : false,
     "chat.page" : false,
@@ -510,6 +526,7 @@
     "approve",
     "base.accept",
     "base.keep",
+    "build.seal",
     "build.switch",
     "config.accept",
     "hold",
@@ -557,6 +574,10 @@
       "rerun" : false
     },
     "base.keep" : {
+      "keepsResult" : true,
+      "rerun" : false
+    },
+    "build.seal" : {
       "keepsResult" : true,
       "rerun" : false
     },
@@ -710,6 +731,7 @@
     "hooks.install",
     "hooks.remove",
     "build.switch",
+    "build.seal",
     "subscribe",
     "unsubscribe",
     "web.open",
@@ -780,6 +802,7 @@
     "board.image" : "anyone",
     "board.task" : "anyone",
     "brief" : "webRead",
+    "build.seal" : "user",
     "build.switch" : "user",
     "chat.image" : "anyone",
     "chat.page" : "anyone",
@@ -883,7 +906,7 @@
   ],
   "webKindsNone" : [
 
-  ],
+    ],
   "webKindsRead" : [
     "status",
     "questions",

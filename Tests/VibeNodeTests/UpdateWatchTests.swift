@@ -85,7 +85,7 @@ struct UpdateWatchTests {
         let record = UpdateWatch.Record(running: running, checkedAt: Date(), offer: .init(commit: newer, aheadBy: 1))
         let notice = try #require(UpdateWatch.notice(record, running: running))
         #expect(notice.contains(newer) && notice.contains("(1 commit ahead)"))
-        #expect(notice.contains("scripts/install-node.sh \(newer), then `vibeswitcher switch \(newer)`"))
+        #expect(notice.contains("`vibeswitcher update` (installs \(newer), switches to it and accepts both, one code)"))
         // Kept for another build (since switched): not this one's.
         #expect(UpdateWatch.notice(record, running: newest) == nil)
         #expect(UpdateWatch.notice(UpdateWatch.Record(running: running, checkedAt: Date()), running: running) == nil)

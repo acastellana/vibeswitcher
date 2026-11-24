@@ -74,6 +74,10 @@ public struct HooksRequest {
         self.vault = vault
     }
 
+    /// The command a hint names for an install (2026-11-24: the user ran the plain form, which installed both agents'
+    /// hooks; a hint naming one agent left the other out): `vibeswitcher hooks install`, every agent, as the user ran it.
+    public static let installCommand = "vibeswitcher hooks install"
+
     /// `<home>/.vibeswitcher/bin`, as the seal spells it.
     public var binFolder: String { (home as NSString).appendingPathComponent(".vibeswitcher/bin") }
 
@@ -83,7 +87,8 @@ public struct HooksRequest {
     /// What an install would change now, one line each (none: the hooks are up to date): a program in the bin folder that
     /// isn't there or isn't the build's (its SHA-256 isn't `binaries`'), an agent's config without our hooks. A program the
     /// host's notes name no hash for is said unknown, never out of date. (`vibeswitcher approve`'s list.)
-    public func outOfDate(agents: [Agent]) -> [String] {
+    /// `hash`: a program's SHA-256 (`sha256`; `status` passes one that keeps each by its file's stat, `HooksLook`).
+    public func outOfDate(agents: [Agent], hash: (String) -> String? = HooksRequest.sha256) -> [String] {
         var said: [String] = []
         for name in Self.programs {
             let path = (binFolder as NSString).appendingPathComponent(name)
@@ -97,7 +102,7 @@ public struct HooksRequest {
                 said.append("\(Self.shown(path)) isn't a plain file of a program's size")
                 continue
             }
-            if let expected = binaries?[name], Self.sha256(path) != expected {
+            if let expected = binaries?[name], hash(path) != expected {
                 said.append("\(Self.shown(path)) isn't this build's \(name)")
             }
         }
@@ -116,7 +121,7 @@ public struct HooksRequest {
     static let programLimit: Int = 512 << 20
 
     /// `path`'s SHA-256, read in parts (never whole in memory), or nil when it can't be read.
-    static func sha256(_ path: String) -> String? {
+    public static func sha256(_ path: String) -> String? {
         guard let handle = FileHandle(forReadingAtPath: path) else { return nil }
         defer { try? handle.close() }
         var hasher = SHA256()

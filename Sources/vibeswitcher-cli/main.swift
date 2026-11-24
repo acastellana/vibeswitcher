@@ -15,7 +15,7 @@ let usage = """
            vibeswitcher doctor | logs [--lines N] [--sessions]
            vibeswitcher start [--interop-is-on] [--at-login] [--node-version vX.Y.Z]
            vibeswitcher stop
-           vibeswitcher switch COMMIT | rollback
+           vibeswitcher switch COMMIT | rollback | update [COMMIT]   (update: install, switch and accept both, one code)
            vibeswitcher lead FOLDER [--goal TEXT | --resume] [--take-head] [--replace] [--init]
            vibeswitcher questions [FOLDER] [--all | --wait] [--json]
            vibeswitcher board [FOLDER] [--json]
@@ -56,6 +56,8 @@ case "switch":
     exit(SwitchCommand.run(Array(words.dropFirst()), rollback: false))
 case "rollback":
     exit(SwitchCommand.run(Array(words.dropFirst()), rollback: true))
+case "update":
+    exit(UpdateCommand.run(Array(words.dropFirst())))
 case "lead":
     exit(LeadCommand.run(Array(words.dropFirst())))
 case "questions":

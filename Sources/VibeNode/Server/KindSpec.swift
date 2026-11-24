@@ -205,6 +205,8 @@ public struct KindSpec: Sendable {
                  voiced: .recorded(.init(arguments: .ofType, keepsResult: true, rerun: true, carded: false, batch: false, phrase: "remove VibeSwitcher's hooks", dialog: .asArguments))),
         KindSpec("build.switch", sender: .user, effect: .change, servedBy: .requests, page: .terminalOnly("it runs another commit's code as the node: a page's token would choose the code that judges it"), wire: .typed(WireKinds.BuildSwitch.self),
                  voiced: .recorded(.init(arguments: .ofType, keepsResult: true, rerun: false, carded: false, batch: false, phrase: "switch your node to another build", dialog: .asArguments))),
+        KindSpec("build.seal", sender: .user, effect: .change, servedBy: .requests, page: .terminalOnly("it seals the unit that starts the node's build: only the switch's own code, from a terminal, may"), wire: .typed(WireKinds.BuildSeal.self),
+                 voiced: .recorded(.init(arguments: .ofType, keepsResult: true, rerun: false, carded: false, batch: false, phrase: "accept the node's unit naming the build you switched to", dialog: .asArguments))),
         KindSpec("subscribe", sender: .anyone, effect: .read, servedBy: .hub, page: .bySender, wire: live,
                  voiced: .notRecorded(phrase: nil)),
         KindSpec("unsubscribe", sender: .anyone, effect: .read, servedBy: .hub, page: .bySender, wire: live,

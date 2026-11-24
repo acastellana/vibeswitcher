@@ -278,7 +278,9 @@ public struct PluginDesk {
         guard expires > now else { return .failure(PluginRefusal("request \(shown.request) expired before it was drawn")) }
         guard !runtime.hasCard(key) else { return .failure(PluginRefusal("request \(shown.request) has a card already")) }
         guard !runtime.isSettled(key.name) else { return .failure(PluginRefusal("request \(shown.request) was settled already")) }
-        var made = CardStore.Card(root: root, kind: .plugin, at: stamp.created)
+        // A request a server before this one drew (kept across its restart or a switch) keeps its card's id.
+        let kept = runtime.cards.adopt(plugin: id, request: shown.request, now: now)
+        var made = CardStore.Card(id: kept?.id ?? NodeIds.card(), root: root, kind: .plugin, at: stamp.created)
         made.plugin = card.drawn
         runtime.drew(made, key: key, digest: stamp.digest)
         return .success(made)

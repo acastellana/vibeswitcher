@@ -160,6 +160,9 @@ public final class LeadEngine: @unchecked Sendable {
     // Cards, answers and holds (E6), on `queue`.
     /// Every card the user answers: the lead's questions and approvals, held config, base moves.
     public let cards = CardStore()
+    /// The open cards kept across a server restart or a switch (`CardKeep`), and the watch that writes each change.
+    let cardKeep = CardKeep()
+    var cardKeepWatch: Subscription?
     /// Each lead's base, watched (`BaseMoveStore`): a move nobody accounts for becomes a card.
     public private(set) lazy var baseMoves: BaseMoveStore = makeBaseMoves()
     /// The `.user` messages posted to a lead's inbox, by id, with the terminal and what was posted: retired in the vault
@@ -366,6 +369,7 @@ public final class LeadEngine: @unchecked Sendable {
         pluginRuntime.host = self
         room.leads = self
         restoreState()
+        cards.restoring = CardKeep.exists(root: root)
         leads.heldChanged = { [weak self] in self?.saveState() }
         watch = link.changes.subscribe(on: link.queue) { [weak self] _ in self?.sessionsChanged() }
         if options.sweepsRoles { roleSweep = makeRoleSweep() }

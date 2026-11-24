@@ -6,7 +6,8 @@
 # scripts/install-node.sh COMMIT [--prefix DIR] [--repo DIR] [--toolchain DIR]
 #   COMMIT           40 lowercase hex digits: a commit on v2 that both CI runners (`v2 linux`, `v2 macos`) passed
 #   --prefix DIR     the builds folder (default: <your home from getent passwd>/.vibeswitcher/v2/builds)
-#   --repo DIR       your checkout, only for the courtesy check that it is clean (default: the current folder's)
+#   --repo DIR       your checkout, only for the courtesy check that it is clean (default: the current folder's);
+#                    `none`: no courtesy check (`vibeswitcher update` passes it: it installs the commit the node's check named)
 #   --toolchain DIR  the root-owned Swift toolchain (default /opt/swift-6.4.2), always checked
 # Test-only, each refused unless --prefix names a scratch folder (not the default one, by its realpath or its device
 # and inode, and not inside <home>/.vibeswitcher):
@@ -103,7 +104,7 @@ install_node_main() {
                     --test-hold) test_hold=$2 ;;
                 esac
                 shift 2 ;;
-            -h|--help) /usr/bin/sed -n '2,44p' "${BASH_SOURCE[0]}" | /usr/bin/sed 's/^# \{0,1\}//'; exit 0 ;;
+            -h|--help) /usr/bin/sed -n '2,45p' "${BASH_SOURCE[0]}" | /usr/bin/sed 's/^# \{0,1\}//'; exit 0 ;;
             -*) fail 64 "unknown option $1" ;;
             *) [[ -z $commit ]] || fail 64 "one COMMIT only (also given: $1)"; commit=$1; shift ;;
         esac
@@ -163,6 +164,8 @@ install_node_main() {
     # The early folder (removed by fail until on_exit can) holds that git folder, then the fresh repository (step 4).
     early=$(/usr/bin/mktemp -d /tmp/install-node-early.XXXXXX) || fail 1 "can't make a scratch folder under /tmp"
     early_ours=1
+    # `--repo none` (`vibeswitcher update`): no courtesy check, the commit being the node's own check's, not a checkout's.
+    if [[ $repo != none ]]; then
     local nocheckout top gitdir common head ref line
     if [[ -n $repo ]]; then
         nocheckout="--repo $repo isn't a git checkout with a commit"
@@ -263,6 +266,7 @@ install_node_main() {
     /bin/rm -rf -- "$check"
     dirty=$(printf '%s\n%s\n' "$changed" "$untracked" | /usr/bin/sed '/^$/d' | /usr/bin/head -n 5 | /usr/bin/paste -sd ' ')
     [[ -z $dirty ]] || fail 65 "$top isn't clean: $dirty (commit or remove, then install)"
+    fi
 
     # --- 3. The toolchain: root's all the way up, nothing in it the user can write -----------------------------------
     # root_only PATH: PATH and every folder up to / owned by root and writable by nobody else, or the first that isn't.

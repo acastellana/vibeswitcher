@@ -19,9 +19,8 @@ To try the node, see [Try it](v2-try-it.md).
 | `vibeswitcher-hook` | Claude Code and Codex, from the hooks `vibeswitcher hooks install` writes | Tells the node a session's status (working, needs you, done). |
 | The page (`WebApp/`) | a browser, at the address `vibeswitcher web` prints (loopback; `--tailnet` for the phone, port 47830) | Shows the node live and leaves drafts. The server holds the page's files (`WebAssets.generated.swift`). |
 
-Dependencies go one way: `VibeNode` (the server's and the command line's code) never imports `VibeHost`. It reaches
-the host only through `HostLink`. Every system call goes through `VibePlatform` (`Platform.X`), and PlatformLint
-enforces that.
+Dependencies go one way: `VibeNode` (the server's and the command line's code) never imports `VibeHost`. It reaches the
+host only through `HostLink`. Every system call goes through `VibePlatform` (`Platform.X`), as PlatformLint enforces.
 
 ## The principals, and what each may do
 
@@ -179,7 +178,8 @@ first": the vault records it before it is done. "Card code": its code is checked
 | `board.image` | anyone of the uid |  |  |  | `Requests.act` |  | the page's (WireSchema) |  |  |  |
 | `board.task` | anyone of the uid |  |  |  | `Requests.act` |  | the page's (WireSchema) |  |  |  |
 | `brief` | the user's terminal, or a page that reads |  |  |  | `Requests.act` |  | `WireKinds.Brief` |  |  |  |
-| `build.switch` | the user's terminal | yes | yes |  | `Requests.act` | `commit` | `WireKinds.BuildSwitch` | its result |  | the terminal's alone |
+| `build.seal` | the user's terminal | yes | yes |  | `Requests.act` | `commit`, `from`, `switchAction` | `WireKinds.BuildSeal` | its result |  | the terminal's alone |
+| `build.switch` | the user's terminal | yes | yes |  | `Requests.act` | `buildsAfter`, `buildsBeforeListing`, `commit` | `WireKinds.BuildSwitch` | its result |  | the terminal's alone |
 | `chat.image` | anyone of the uid |  |  |  | the live hub |  | the page's (WireSchema) |  |  |  |
 | `chat.page` | anyone of the uid |  |  |  | the live hub |  | the page's (WireSchema) |  |  |  |
 | `config.accept` | the user's terminal | yes | yes | yes | `Requests.act` | `batch`, `card`, `code` | `WireKinds.ConfigAccept` | its result | yes | yes |

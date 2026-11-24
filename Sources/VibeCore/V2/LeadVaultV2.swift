@@ -120,6 +120,11 @@ public enum LeadVaultV2 {
         /// The user set a plugin's setting `key` to `value` (nil: back to its default): kept here, where no session's write
         /// reaches, as on and off are.
         case setPluginSetting(key: String, value: String?)
+        /// The open cards' file (`<root>/v2/cards.json`, `CardStore` in VibeNode) is the one of SHA-256 `digest` now (nil:
+        /// none kept): a server restart or a switch takes the file back only while its bytes are these. Answered `ok`.
+        case keepCards(digest: String?)
+        /// The digest `keepCards` last kept: answered `cards`.
+        case keptCards
         /// Acting from the page (the web UI design's step 2): its level, since when it is above off, the acting pairings
         /// (by `ActingPages.key`) and every page token the node admits (by scope and SHA-256). Answered `pageActs`.
         case pageActs
@@ -201,6 +206,7 @@ public enum LeadVaultV2 {
         case since(Double)
         case external([String: String])
         case pluginSettings([String: String])
+        case cards(String?)
         case pageActs(PageActs)
     }
 
@@ -431,6 +437,14 @@ public enum LeadVaultV2 {
             guard (value?.utf8.count ?? 0) <= pluginSettingBytes else { return .refused("A plugin's setting is \(pluginSettingBytes / 1024) KiB at most.") }
             record.pluginSettings[key] = value
             return .pluginSettings(record.pluginSettings)
+        case .keepCards(let digest):
+            guard digest.map({ $0.utf8.count == 64 && $0.utf8.allSatisfy { (48...57).contains($0) || (97...102).contains($0) } }) ?? true else {
+                return .refused("A cards digest is 64 lower-case hex digits.")
+            }
+            record.plugin[cardsKey] = digest
+            return .ok
+        case .keptCards:
+            return .cards(record.plugin[cardsKey])
         case .pageActs:
             return .pageActs(pageActs(&record, now: now))
         case .setPageActs(let level):
@@ -502,6 +516,9 @@ public enum LeadVaultV2 {
     static func setPasskey(_ record: inout Book, _ id: String, _ key: Passkey) {
         record.plugin[passkeyPrefix + id] = (try? JSONEncoder().encode(key)).map { String(decoding: $0, as: UTF8.self) }
     }
+
+    /// The plugin record's key for the open cards' file's digest (in the one field, as `sinceKey`: no new stored field).
+    static let cardsKey = "record:cards"
 
     static func hexDigest(_ text: String) -> Bool {
         text.utf8.count == 64 && text.unicodeScalars.allSatisfy { ("0"..."9").contains($0) || ("a"..."f").contains($0) }
@@ -792,6 +809,17 @@ public struct LeadVaultV2Client: Sendable {
     }
 
     /// These plugin requests are settled now.
+    /// The open cards' file is of `digest` now (nil: none kept).
+    public func keepCards(digest: String?) throws {
+        guard case .ok = try call(.keepCards(digest: digest)) else { throw Refused("The session host answered something else.") }
+    }
+
+    /// The open cards' file's digest the vault keeps, nil when none.
+    public func keptCards() throws -> String? {
+        guard case .cards(let digest) = try call(.keptCards) else { throw Refused("The session host answered something else.") }
+        return digest
+    }
+
     public func settleRequests(_ keys: [String]) throws {
         guard !keys.isEmpty else { return }
         _ = try call(.settleRequests(keys))
