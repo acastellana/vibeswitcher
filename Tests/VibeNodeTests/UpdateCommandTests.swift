@@ -271,4 +271,18 @@ struct UpdateCommandTests {
             }
         }
     }
+
+    /// `update` likewise: a new server slower than the wait is a line, and the update's seal of the builds folder and
+    /// its follow-up stand; exit 0.
+    @Test func aServerSlowerThanTheWaitIsSaidNotAFailure() async throws {
+        let rig = try await rig()
+        let node = rig.node
+        defer { node.stop() }
+        _ = try await held(node)
+        let updated = try await node.runOnTerminal(rig.update(["--test-server-wait", "1"]))
+        let out = updated.output
+        #expect(updated.status == 0, "\(out)\(updated.errors)\n\(node.said)")
+        #expect(out.contains("accepted with this code: ~/.vibeswitcher/v2/builds") && out.contains("its server hasn't answered yet after"), "\(out)")
+        #expect(out.contains("scratch node: no unit to rewrite"), "the follow-up didn't run: \(out)")
+    }
 }
