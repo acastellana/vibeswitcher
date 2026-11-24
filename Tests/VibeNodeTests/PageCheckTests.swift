@@ -61,6 +61,9 @@ struct PageCheckTests {
         let repo = node.root.appendingPathComponent("example-app")
         try await scratchRepository(repo)
         try EngineEndToEndTests.workflow(repo)
+        // The upload code is sensitive here: the long approval below touches ten such files, and its card lists them.
+        try "---\ntest_command: true\nmerge_policy: ask_all\naudit_finders: 1\nsensitive_paths: Sources/Upload/**\n---\n"
+            .write(toFile: ConfigHoldStore.workflowPath(root: repo.path), atomically: true, encoding: .utf8)
         let head = Git.run(["rev-parse", "main"], in: repo.path).output
         try await node.acceptConfig(repo)
         try await node.acceptBase(repo, from: head)
@@ -168,7 +171,7 @@ struct PageCheckTests {
             "session": "example-site", "chatHref": "#/s/" + NodeIds.session(host: site.session.id),
             "chat": "The headline never wraps",
             "projectHref": "#/p/" + NodeIds.project(root: repo.path).addingPercentEncoding(withAllowedCharacters: .alphanumerics)! + "/lead",
-            "question": "Launch the onboarding page to the testers", "approval": "Merge the upload retry task", "approvalFiles": "10", "result": result, "task": made.tasks[0].slug, "statement": statement,
+            "question": "Launch the onboarding page to the testers", "approval": "Merge the upload retry task", "approvalFiles": "10", "approvalSensitive": "+5", "result": result, "task": made.tasks[0].slug, "statement": statement,
             "shellHref": "#/s/" + NodeIds.session(host: asker.id), "shell": "echo page-check-ran",
             "board": made.tasks[0].title, "goal": launch.title, "goalID": launch.id, "estimated": made.tasks[1].slug,
             "plainHref": "#/p/" + NodeIds.project(root: docs.path).addingPercentEncoding(withAllowedCharacters: .alphanumerics)! + "/roadmap",

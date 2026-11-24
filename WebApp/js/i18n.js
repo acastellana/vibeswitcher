@@ -963,7 +963,6 @@ const EN = {
   ccReadAll: "Read it all",
   ccFiles: { one: "{n} file", other: "{n} files" },
   ccSensitiveUnknown: "couldn’t be checked",
-  ccSensitiveYes: { one: "yes: 1 file", other: "yes: {n} files" },
   ccSensitiveNone: "none touched",
   ccTheFiles: { one: "The file", other: "The {n} files" },
   ccSensitiveMark: "sensitive",
