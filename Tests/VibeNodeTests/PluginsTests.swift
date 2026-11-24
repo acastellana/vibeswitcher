@@ -19,6 +19,8 @@ struct PluginsTests {
         let info: PluginInfo
         let performed = Locked<[String]>([])
         let withdrawnRequests = Locked<[String]>([])
+        /// How many looks the runtime asked of it.
+        let looks = Locked(0)
         let blankFacts: Bool
         init(id: String = "probe", defaultOn: Bool = false, unavailable: String? = nil, blankFacts: Bool = false) {
             info = PluginInfo(id: id, title: "Probes", summary: "A probe for tests.", defaultOn: defaultOn,
@@ -32,6 +34,7 @@ struct PluginsTests {
         func availability() -> String? { unavailable }
 
         func look(_ desk: PluginDesk, done: @escaping () -> Void) {
+            looks.mutate { $0 += 1 }
             desk.stamped({ try ShellRequest.parse($0) }) { requests in
                 let live = desk.live
                 for request in requests where desk.card(request: request.id) == nil {
@@ -499,6 +502,54 @@ struct PluginsTests {
 // MARK: The second review of steps 1 and 2
 
 extension PluginsTests {
+    /// A request a server before this one drew (kept in `cards.json`, `CardKeep`) is drawn again under its kept card's
+    /// id, and only from what the plugin answers now; a kept card past its expiry gives its id to nothing. While the
+    /// kept cards aren't taken back yet, no plugin looks.
+    @Test func aRequestDrawnBeforeARestartKeepsItsCardsID() async throws {
+        let probe = Probe(defaultOn: true)
+        let world = try await CardWorld.make(scratch, plugins: [probe])
+        defer { world.stop() }
+        // Not taken back yet: no look asks the plugin (one already under way when it was set went on: a server sets it
+        // at its start, before any look).
+        let looked = world.queue.sync { () -> Int in
+            world.engine.cards.restoring = true
+            return probe.looks.value
+        }
+        await look(world)
+        #expect(probe.looks.value == looked)
+        world.queue.sync { world.engine.cards.restoring = false }
+        let (asker, request) = try await file(world)
+        let desk = world.queue.sync { world.engine.desk(probe) }
+        await look(world)
+        let first = try #require(card(world, request))
+        // As the next server finds it: no card in memory, the old one kept aside (with words the plugin didn't say now).
+        let key = CardStore.keptKey(plugin: "probe", request: request.id)
+        var kept = first
+        kept.plugin?.title = "Words from the file"
+        world.queue.sync {
+            desk.forget(request: request.id, closed: "x")
+            world.engine.pluginRuntime.unsettle("probe:\(request.id)")
+            world.engine.cards.remove(first.id)
+            world.engine.cards.kept[key] = kept
+        }
+        let asked = Probe.card(request, asker: PluginDesk.asker(asker))
+        let again = try world.queue.sync { try desk.draw(asked, root: world.repo, at: request.created).get() }
+        #expect(again.id == first.id && again.code == first.code && again.plugin?.title == "A probe asked for", "\(again)")
+        #expect(world.queue.sync { world.engine.cards.kept.isEmpty })
+
+        // Kept past its expiry: a new id.
+        var expired = first
+        expired.plugin?.expiresAt = Date().addingTimeInterval(-1)
+        world.queue.sync {
+            desk.forget(request: request.id, closed: "x")
+            world.engine.pluginRuntime.unsettle("probe:\(request.id)")
+            world.engine.cards.remove(first.id)
+            world.engine.cards.kept[key] = expired
+        }
+        let fresh = try world.queue.sync { try desk.draw(asked, root: world.repo, at: request.created).get() }
+        #expect(fresh.id != first.id)
+    }
+
     /// A request swapped under its id after its card was drawn isn't read again; the card's session, name and filing time
     /// are the stamped request's, whatever the plugin's card says; an answered card never waits again.
     @Test func aCardIsTiedToTheStampedRequestItWasDrawnFrom() async throws {

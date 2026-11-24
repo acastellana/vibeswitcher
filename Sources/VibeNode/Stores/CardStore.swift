@@ -3,13 +3,14 @@ import VibeCore
 
 /// Every card the user answers, by id (the engine plan's E6, the security architecture document's S3): the lead's
 /// questions, its approvals of held merges, the agents' config the vault holds, and a base that moved. Held in the
-/// server's memory only: nothing on a card is read back from a file the team can write. A question card is made from
+/// server's memory; the open ones are kept across a restart in `cards.json`, taken back only while the vault vouches for
+/// its bytes (`CardKeep`), so nothing on a card is read back from a file the team could have written. A question card is made from
 /// the lead's tool server's post (`question.post`, EN-D10), never from `board.json`; an approval card's facts are the
 /// engine's, from git and the vault, with the lead's wording beside them marked as the lead's; a held-config card is
 /// bound to the hashes it showed; a base-move card to the move it showed. Each has a four-letter code (`NodeIds.code`)
 /// the user types to act on it. On the engine's queue; `changes` carries each card as it changes.
 public final class CardStore: @unchecked Sendable {
-    public enum Kind: String, Sendable, CaseIterable {
+    public enum Kind: String, Codable, Sendable, CaseIterable {
         case question
         case approval
         case configHeld = "config"
@@ -19,7 +20,7 @@ public final class CardStore: @unchecked Sendable {
     }
 
     /// An approval card's facts (S3): what the engine derives itself, never the board's words.
-    public struct ApprovalFacts: Equatable, Sendable {
+    public struct ApprovalFacts: Codable, Equatable, Sendable {
         /// The commit the lead's option approves, whole.
         public var commit: String
         /// The tasks whose branch `agent/<slug>` points at that commit now (`git for-each-ref --points-at`).
@@ -56,7 +57,7 @@ public final class CardStore: @unchecked Sendable {
     /// memory and told to nobody. The lead hears nothing and the vault records nothing until the user takes it with
     /// `vibeswitcher answer CARD` in a terminal and types the card's code; that request is the user's voice, as every
     /// answer is. The last one wins.
-    public struct Draft: Equatable, Sendable {
+    public struct Draft: Codable, Equatable, Sendable {
         public var text: String
         /// The question's version the page showed when the draft was made.
         public var version: Int
@@ -72,7 +73,7 @@ public final class CardStore: @unchecked Sendable {
         }
     }
 
-    public struct Card: Equatable, Sendable {
+    public struct Card: Codable, Equatable, Sendable {
         public var id: String
         public var code: String
         public var project: String
@@ -136,7 +137,27 @@ public final class CardStore: @unchecked Sendable {
     /// How long a closed card is kept at most.
     public static let closedLife: TimeInterval = 24 * 60 * 60
 
+    /// The plugin cards a server before this one drew, taken back from `cards.json` (`LeadEngine.restoreCards`), by
+    /// `<plugin>:<request>`, until their plugin draws its request again (`adopt`): the card it draws then takes the kept
+    /// one's id. Not shown meanwhile: the plugin's own program, started again, is asked about the request anew, and only
+    /// what it answers is drawn (the kept card's words never come back). Dropped past their expiry.
+    var kept: [String: Card] = [:]
+    /// Whether cards a server before this one kept may still be taken back (a kept file was there at the start, and the
+    /// first welcome's restore hasn't run yet): plugins draw nothing until it has (`PluginRuntime.look`), so a request is
+    /// drawn again under its kept id.
+    var restoring = false
+
     public init() {}
+
+    /// `<plugin>:<request>`.
+    static func keptKey(plugin: String, request: String) -> String { plugin + ":" + request }
+
+    /// The id and time of the card a server before this one drew for `request` of `plugin`, taken out of `kept`; nil
+    /// when none was kept, or it expired.
+    func adopt(plugin: String, request: String, now: Date) -> Card? {
+        guard let card = kept.removeValue(forKey: Self.keptKey(plugin: plugin, request: request)) else { return nil }
+        return (card.plugin?.expiresAt).map { $0 > now } == true ? card : nil
+    }
 
     /// `card` kept and sent. A draft doesn't outlive the card's question as it was drafted for: a card that closed (an
     /// answer, a withdrawal, its timer) or whose question the lead revised since loses it. A card that closes here is
@@ -155,8 +176,7 @@ public final class CardStore: @unchecked Sendable {
     /// line's limit, and `answer` broke): the held-config ones past the newest `keptClosedConfig` go first, then any
     /// closed longer than `closedLife` ago, then the oldest closed past `keptClosed`, then the oldest closed past
     /// `keptClosedBytes` of their encoded values together (`value`). An open card is never pruned. A
-    /// pruned card is told to the stream as gone; asked for later it is `gone`, as after a restart (S3: cards are memory
-    /// only). On the engine's queue.
+    /// pruned card is told to the stream as gone; asked for later it is `gone` (S3). On the engine's queue.
     func prune() {
         let closed = cards.values.filter { !$0.isOpen }.sorted { ($0.closedAt ?? $0.at, $0.id) > ($1.closedAt ?? $1.at, $1.id) }
         guard !closed.isEmpty else { return }
