@@ -632,3 +632,6 @@
 - 2026-11-23 18:44 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: /run/user/1000/systemd/transient
 - 2026-11-23 18:44 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: /run/user/1000/systemd/transient
 - 2026-11-23 22:16 Claude Code's skill sync finished a round (1795468579.8981943) in ~/.claude/skills/synced, accepted by itself (nothing held): 11 changed
+- 2026-11-24 09:40 Pipeline held: turn-this-incident-into-4, team-sessions-start, measured-with-a-real ready to merge with none landing; cause: every test slot held
+- 2026-11-24 09:40 Update: Today: nothing can move until the plugins hold is accepted; three merges wait on approval — **Landed on Nov 23 (not posted one by one)**
+- 2026-11-24 09:41 Automatically (auto_advance): The account's usage is near a limit: the weekly limit (every model): 83% used, resets Nov 26, 12:00. At 80% of a limit VibeSwitcher starts no workers or audits on any model, so the limit doesn't stop one mid-task; sessions already running go on. Tell the user. Nothing on it starts by itself until the reset, then it does; start_worker or audit with override_usage: true starts one anyway.

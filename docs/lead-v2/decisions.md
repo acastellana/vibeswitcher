@@ -106,3 +106,7 @@ An install between the two merges would stop every worker on the node; the warni
 
 A second hold of the same kind in one day; a later lead must know its likely cause, what was asked, what it holds and the check to make after the next install.
 
+## 2026-11-24 09:41:35 Usage read 83% of the weekly limit on Nov 24 (resets Nov 26, 12:00). Once the ~/.claude/plugins hold (BD6DBB5F) is accepted: audit sb5-the-host-confines (b5d5b6e2) and tests-that-write-a (3f269664) with override_usage: true, one at a time. The audits of the-config-card-says (42eee715) and sandbox-env-hygiene-no (4b0a7eb2), and every planned task, wait for the reset unless the user says to spend more or the reading falls under 80% again. Merges of approved commits go ahead: a merge starts no model session.
+
+The user's override 149E7C35 covers the agreed order only (SB5, the interop task, turn-this-incident-into-4, team-sessions-start, tests-that-write-a, hookscommandtests-hooks), and those two audits are what finishes two of its tasks. The config-card and env-hygiene tasks belong to the queue behind it; their workers ran on Nov 23 only because the reading was then under 80%. The lead's reading of what 149E7C35 covers; the user was told and can widen or narrow it.
+
