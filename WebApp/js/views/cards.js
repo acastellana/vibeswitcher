@@ -270,8 +270,9 @@ export function questionCard(app, first, { expand = null } = {}) {
 
     el.append(h('p', { class: 'card-foot' }, counting
       ? t('cPickOrHold', { x: question.proposal, time: clock(question.decideBy) })
-      : t('cKeepsWorking')),
-      h('p', { class: 'card-keys', 'aria-hidden': 'true' }, t('cKeysAnswers', { n: Math.max(question.options.length, 1) }) + (counting ? t('cKeysHold') : '')));
+      : t('cKeepsWorking')));
+    // The keys, as a tooltip on the options.
+    list.el.title = t('cKeysAnswers', { n: Math.max(question.options.length, 1) }) + (counting ? t('cKeysHold') : '');
     keys = { buttons: list.buttons, hold: counting ? hold : null };
   }
 
@@ -297,7 +298,11 @@ export function questionCard(app, first, { expand = null } = {}) {
     const typed = input?.value ?? '';
     input = h('input', { class: 'answer-input', type: 'text', placeholder: question.options.length ? t('cOwnWords') : t('yourAnswer'), 'aria-label': t('yourAnswer'), autocomplete: 'off', maxlength: 4000 });
     input.value = typed || own;
-    const send = h('button', { class: 'button quiet', type: 'submit', disabled: !input.value.trim() || input.value.trim() === drafted?.text }, t('cDraft'));
+    // Acting is on for the node but not in this tab (it isn't paired): a pick isn't a draft for a terminal, it's a choice
+    // this tab can't send; the banner at the top says how to make it act.
+    const level = app.store.state.node?.web?.acts?.level ?? (app.store.state.node?.web?.acts?.on ? 'trust' : 'off');
+    const notYet = level !== 'off';
+    const send = h('button', { class: 'button quiet', type: 'submit', disabled: !input.value.trim() || input.value.trim() === drafted?.text }, t(notYet ? 'cChoose' : 'cDraft'));
     input.addEventListener('input', () => { send.disabled = !input.value.trim() || input.value.trim() === app.store.draftOf(card.id)?.text; });
     el.append(h('form', { class: 'answer', onsubmit: (event) => { event.preventDefault(); pick(input.value); } }, input, talkButton(input), send));
 
@@ -305,13 +310,15 @@ export function questionCard(app, first, { expand = null } = {}) {
     if (refused) el.append(h('p', { class: 'card-notice', role: 'alert' }, refused));
     else if (card.notice) el.append(h('p', { class: 'card-notice' }, card.notice));
 
-    if (drafted) el.append(confirmBox(card, drafted, () => app.store.draft(card.id, null)));
-    if (counting) el.append(h('div', { class: 'card-hold' }, h('span', { class: 'card-hold-label' }, t('cToStop')), copyLine(`vibeswitcher hold ${cardShort(card.id)}`, 'the command that holds the timer')));
-
-    el.append(h('p', { class: 'card-foot' }, drafted
-      ? (counting ? t('cUntilConfirm', { x: question.proposal, time: clock(question.decideBy) }) : t('cPickAnother'))
-      : t('cPickThenConfirm')),
-      h('p', { class: 'card-keys', 'aria-hidden': 'true' }, question.options.length > 1 ? t('cKeysPicks', { n: question.options.length }) : t('cKeysMove')));
+    // One line once picked; the terminal's way one click away, never the pile of it.
+    if (drafted) el.append(h('p', { class: 'card-notsent' }, notYet ? t('cNotSent') : t('cDrafted')));
+    if (drafted || counting) {
+      el.append(h('details', { class: 'card-terminal' }, h('summary', null, t('cUseTerminal')),
+        drafted ? confirmBox(card, drafted, () => app.store.draft(card.id, null)) : null,
+        counting ? h('div', { class: 'card-hold' }, h('span', { class: 'card-hold-label' }, t('cToStop')), copyLine(`vibeswitcher hold ${cardShort(card.id)}`, 'the command that holds the timer')) : null,
+        counting ? h('p', { class: 'card-foot' }, t('cUntilConfirm', { x: question.proposal, time: clock(question.decideBy) })) : null));
+    }
+    list.el.title = question.options.length > 1 ? t('cKeysPicks', { n: question.options.length }) : t('cKeysMove');
     keys = { buttons: list.buttons, hold: null };
   }
 
@@ -516,7 +523,7 @@ export function askCard(app, session, item, local, asked, redraw) {
     h('pre', { class: 'ask-text' }, item.text),
     list.el);
   if (local?.refused) el.append(h('p', { class: 'card-notice', role: 'alert' }, local.refused));
-  el.append(h('p', { class: 'card-keys', 'aria-hidden': 'true' }, t('cKeysAnswers', { n: item.options.length })));
+  list.el.title = t('cKeysAnswers', { n: item.options.length });
   cardKeys(el, () => ({ buttons: list.buttons, choose, hold: null }));
   return el;
 }

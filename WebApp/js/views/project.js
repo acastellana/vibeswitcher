@@ -195,9 +195,13 @@ export function projectView(app, { sheet }) {
       acts ? h('div', { class: 'card-acts' },
         doButton(app, { label: t(config ? 'acAccept' : 'acAcceptMove'), kind: config ? 'config.accept' : 'base.accept', args: () => cardArgs(card) }).el,
         !config && actsFor(app, 'base.keep') ? doButton(app, { label: t('acKeepBase'), kind: 'base.keep', quiet: true, args: () => cardArgs(card) }).el : null) : null,
-      h('div', { class: 'card-command' }, h('span', { class: 'card-command-label' }, acts ? t('acSeeFirst') : t('settleInTerminal')),
-        config ? copyLine(`vibeswitcher config held ${shellWord(root)}`, 'the command that shows it') : copyLine(`vibeswitcher base show ${shellWord(root)}`, 'the command that shows it'),
-        config && !acts ? copyLine('vibeswitcher approve', 'the command that accepts it') : null));
+      // The terminal's lines: beside the buttons when this tab acts; else one click away, never the pile of them.
+      acts ? h('div', { class: 'card-command' }, h('span', { class: 'card-command-label' }, t('acSeeFirst')),
+        config ? copyLine(`vibeswitcher config held ${shellWord(root)}`, 'the command that shows it') : copyLine(`vibeswitcher base show ${shellWord(root)}`, 'the command that shows it'))
+        : h('details', { class: 'card-terminal' }, h('summary', null, t('cUseTerminal')),
+          h('div', { class: 'card-command' }, h('span', { class: 'card-command-label' }, t('settleInTerminal')),
+            config ? copyLine(`vibeswitcher config held ${shellWord(root)}`, 'the command that shows it') : copyLine(`vibeswitcher base show ${shellWord(root)}`, 'the command that shows it'),
+            config ? copyLine('vibeswitcher approve', 'the command that accepts it') : null)));
   }
 
   function drawLead(route, board, lead) {
