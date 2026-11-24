@@ -76,8 +76,9 @@ public enum PairingMask {
     /// `text` with every pairing address's code and every live code replaced by `with`.
     public static func mask(_ text: String, with hidden: String = "…") -> String {
         var masked = text
-        if masked.contains("pair=") {
+        if masked.contains("pair=") || masked.range(of: "pair%3d", options: .caseInsensitive) != nil {
             masked = masked.replacingOccurrences(of: #"pair=[A-Za-z0-9_\-]+"#, with: "pair=" + hidden, options: .regularExpression)
+            masked = masked.replacingOccurrences(of: #"pair%3[Dd][A-Za-z0-9_\-]+"#, with: "pair%3D" + hidden, options: .regularExpression)
         }
         for code in codes where masked.contains(code) { masked = masked.replacingOccurrences(of: code, with: hidden) }
         return masked
@@ -85,52 +86,132 @@ public enum PairingMask {
 
 }
 
-/// A terminal's bytes on their way to a page, masked (`PairingMask`) though a code may be split across reads: a read's
-/// trailing run of the bytes a code is made of waits for the next read only when it may be the start of one (it holds
-/// `pair=`, ends with the start of `pair=`, or ends with the start of a live code); anything else goes at once.
+/// A terminal's bytes on their way to a page, masked (`PairingMask`): matched on what the screen shows, so a code is
+/// found though escape sequences (a cursor move, a colour, a screen replay's redraw of a wrapped line) or line breaks cut
+/// it, and its characters alone become `*`, one for one (what the screen draws keeps its place); `pair=` and its
+/// percent-encoded form `pair%3D` too. A code split across reads is held: the read's tail waits for the next when what
+/// it shows may be the start of one (it holds `pair=`, ends with the start of `#pair=`, or with the start of a live
+/// code), and so does an escape sequence the read ends inside; anything else goes at once. What is held goes after a
+/// short quiet (`TerminalRelay.maskQuiet`), so a prompt never waits.
 public final class TerminalMask: @unchecked Sendable {
-    private var held = Data()
+    private var held: [UInt8] = []
 
     public init() {}
 
     /// What may go now, masked; a tail that may be a code's start held back.
     public func pass(_ bytes: Data) -> Data {
-        held.append(bytes)
-        var start = held.count
-        while start > 0, Self.inCode(held[held.startIndex + start - 1]) { start -= 1 }
-        let run = String(decoding: held.suffix(held.count - start), as: UTF8.self)
-        let cut = run.utf8.count <= 64 && Self.mayBeCode(run) ? start : held.count
-        let out = held.prefix(cut)
-        held = Data(held.dropFirst(cut))
-        return Self.masked(Data(out))
+        held.append(contentsOf: bytes)
+        let shown = Self.shown(held)
+        var cut = held.count
+        if let open = shown.openEscape { cut = open }
+        // The trailing run of what the screen shows that a code is made of.
+        var start = shown.text.count
+        while start > 0, Self.inCode(shown.text[start - 1]) { start -= 1 }
+        let run = String(decoding: shown.text[start...], as: UTF8.self)
+        if start < shown.text.count, run.utf8.count <= 64, Self.mayBeCode(run) { cut = min(cut, shown.at[start]) }
+        let out = Array(held[..<cut])
+        held = Array(held[cut...])
+        return Self.masked(out)
     }
+
+    /// Whether a tail is held back.
+    public var holding: Bool { !held.isEmpty }
 
     /// Everything held, masked.
     public func flush() -> Data {
         let out = held
-        held = Data()
+        held = []
         return Self.masked(out)
+    }
+
+    /// What the screen shows of `bytes`: each printed byte and where it is; escape sequences (CSI, OSC, DCS and the like,
+    /// and two-byte ones) and control bytes (line breaks among them) left out; `openEscape`: where an escape sequence
+    /// the bytes end inside begins.
+    static func shown(_ bytes: [UInt8]) -> (text: [UInt8], at: [Int], openEscape: Int?) {
+        var text: [UInt8] = [], at: [Int] = []
+        text.reserveCapacity(bytes.count)
+        at.reserveCapacity(bytes.count)
+        var index = 0
+        while index < bytes.count {
+            let byte = bytes[index]
+            if byte == 0x1B {
+                let begun = index
+                guard index + 1 < bytes.count else { return (text, at, begun) }
+                let kind = bytes[index + 1]
+                index += 2
+                switch kind {
+                case 0x5B: // CSI: parameters and intermediates, then a final byte 0x40-0x7E
+                    while index < bytes.count, !(0x40...0x7E).contains(bytes[index]) { index += 1 }
+                    guard index < bytes.count else { return (text, at, begun) }
+                    index += 1
+                case 0x5D, 0x50, 0x58, 0x5E, 0x5F: // OSC, DCS, SOS, PM, APC: to BEL or ST (ESC \)
+                    var ended = false
+                    while index < bytes.count {
+                        if bytes[index] == 0x07 { index += 1; ended = true; break }
+                        if bytes[index] == 0x1B, index + 1 < bytes.count, bytes[index + 1] == 0x5C { index += 2; ended = true; break }
+                        index += 1
+                    }
+                    guard ended else { return (text, at, begun) }
+                default:
+                    // A two-byte sequence, or one with intermediates (ESC ( B): its intermediates, then its final byte.
+                    if (0x20...0x2F).contains(kind) {
+                        while index < bytes.count, (0x20...0x2F).contains(bytes[index]) { index += 1 }
+                        guard index < bytes.count else { return (text, at, begun) }
+                        index += 1
+                    }
+                }
+                continue
+            }
+            if byte >= 0x20, byte != 0x7F {
+                text.append(byte)
+                at.append(index)
+            }
+            index += 1
+        }
+        return (text, at, nil)
     }
 
     static func mayBeCode(_ run: String) -> Bool {
         guard !run.isEmpty else { return false }
-        if run.contains("pair=") { return true }
+        if run.contains("pair=") || run.contains("pair%3D") { return true }
         func endsWithStart(of whole: String) -> Bool {
             (1...min(whole.count, run.count)).contains { whole.hasPrefix(run.suffix($0)) }
         }
-        return endsWithStart(of: "#pair=") || PairingMask.codes.contains(where: endsWithStart)
+        return endsWithStart(of: "#pair=") || endsWithStart(of: "%23pair%3D") || PairingMask.codes.contains(where: endsWithStart)
     }
 
     static func inCode(_ byte: UInt8) -> Bool {
         (byte >= 0x30 && byte <= 0x39) || (byte >= 0x41 && byte <= 0x5A) || (byte >= 0x61 && byte <= 0x7A) || byte == 0x2D || byte == 0x5F
-            || byte == 0x3D || byte == 0x23
+            || byte == 0x3D || byte == 0x23 || byte == 0x25
     }
 
-    /// Masked byte for byte (Latin-1 reads every byte, so a character split across reads never stops the mask; a code
-    /// and `pair=` are ASCII).
-    static func masked(_ data: Data) -> Data {
-        guard !data.isEmpty, let text = String(data: data, encoding: .isoLatin1) else { return data }
-        let masked = PairingMask.mask(text, with: "***")
-        return masked == text ? data : (masked.data(using: .isoLatin1) ?? data)
+    /// `bytes` with each code character the screen shows (a live code's, or what follows `pair=` / `pair%3D`) turned
+    /// into `*`, escape sequences and line breaks between them left as they were.
+    static func masked(_ bytes: [UInt8]) -> Data {
+        guard !bytes.isEmpty else { return Data() }
+        let shown = Self.shown(bytes)
+        guard let text = String(bytes: shown.text, encoding: .isoLatin1) else { return Data(bytes) }
+        var hide: [Range<Int>] = []
+        let whole = NSRange(location: 0, length: (text as NSString).length)
+        for match in Self.pairing.matches(in: text, range: whole) where match.numberOfRanges > 1 {
+            if let range = Range(match.range(at: 1)) { hide.append(range) }
+        }
+        let nsText = text as NSString
+        for code in PairingMask.codes {
+            var from = 0
+            while from < nsText.length {
+                let found = nsText.range(of: code, range: NSRange(location: from, length: nsText.length - from))
+                guard found.location != NSNotFound, let range = Range(found) else { break }
+                hide.append(range)
+                from = found.location + found.length
+            }
+        }
+        guard !hide.isEmpty else { return Data(bytes) }
+        var out = bytes
+        for range in hide { for index in range where index < shown.at.count { out[shown.at[index]] = 0x2A } }
+        return Data(out)
     }
+
+    /// `pair=` or its percent-encoded `pair%3D`, then the code's characters (group 1).
+    static let pairing = try! NSRegularExpression(pattern: #"pair(?:=|%3[Dd])([A-Za-z0-9_\-]+)"#)
 }

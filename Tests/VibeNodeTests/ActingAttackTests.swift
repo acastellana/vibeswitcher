@@ -165,13 +165,34 @@ struct ActingAttackTests {
             let mask = TerminalMask()
             let served = mask.pass(bytes.prefix(split)) + mask.pass(bytes.dropFirst(split)) + mask.flush()
             let text = String(decoding: served, as: UTF8.self)
-            #expect(!text.contains(code) && text.contains("#pair=***"), "split at \(split): \(text)")
+            #expect(!text.contains(code) && text.contains("#pair=" + String(repeating: "*", count: code.count)), "split at \(split): \(text)")
         }
         #expect(!PairingMask.mask("ran `vibeswitcher web`: http://127.0.0.1:8765/#pair=\(code)").contains(code))
         #expect(!PairingMask.mask("the code alone: \(code)").contains(code))
-        // A prompt and plain output aren't held back.
+        // The re-read's R4: cut by what the screen does (a screen replay redraws a wrapped line with a cursor move; a
+        // colour; a line break), split across reads inside an escape sequence, or percent-encoded: still masked, each
+        // code character one `*`, the escapes kept.
+        let half = code.index(code.startIndex, offsetBy: 11)
+        for cut in ["\u{1B}[2;1H", "\u{1B}[0m\u{1B}[38;5;12m", "\r\n", "\u{1B}]8;;x\u{07}"] {
+            let drawn = Data("http://127.0.0.1:8765/#pair=\(code[..<half])\(cut)\(code[half...]) \u{1B}[K$ ".utf8)
+            for split in [30, 40, 41, 42, drawn.count - 6] {
+                let mask = TerminalMask()
+                let served = mask.pass(drawn.prefix(split)) + mask.pass(drawn.dropFirst(split)) + mask.flush()
+                let text = String(decoding: served, as: UTF8.self)
+                #expect(!text.contains(String(code[..<half])) && !text.contains(String(code[half...])), "\(cut.debugDescription) split at \(split): \(text.debugDescription)")
+                #expect(text.contains(cut) && served.count == drawn.count, "the escapes kept, one for one: \(text.debugDescription)")
+            }
+        }
+        let encoded = TerminalMask()
+        let percent = String(decoding: encoded.pass(Data("open http%3A%2F%2F127.0.0.1%3A8765%2F%23pair%3D\(code) now\n".utf8)) + encoded.flush(), as: UTF8.self)
+        #expect(!percent.contains(code), "\(percent)")
+        #expect(!PairingMask.mask("http%3A%2F%2F127.0.0.1%3A8765%2F%23pair%3D\(code)").contains(code))
+        // Plain output goes at once but for a tail that may start a code (it goes after a short quiet: `flush`), and
+        // nothing is lost.
         let mask = TerminalMask()
-        #expect(mask.pass(Data("$ ls\r\n".utf8)) == Data("$ ls\r\n".utf8))
+        let now = mask.pass(Data("total 0\r\n$ ".utf8))
+        #expect(String(decoding: now, as: UTF8.self).hasPrefix("total"), "\(String(decoding: now, as: UTF8.self))")
+        #expect(now + mask.flush() == Data("total 0\r\n$ ".utf8))
     }
 
     /// Finding 4: the guard rails that are a project's merge gate are a terminal's, as the floors and the policy are.
