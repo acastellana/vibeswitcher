@@ -2,7 +2,7 @@ import Foundation
 import VibeCore
 import VibeNode
 
-/// `vibeswitcher hooks install|remove [--agent claude|codex]` (the start plan's S6, ST-D17): the server's
+/// `vibeswitcher hooks install|remove [--agent claude|codex]...` (the start plan's S6, ST-D17): the server's
 /// `hooks.install` or `hooks.remove`, in the user's voice, after the command line's own typed code (EN-D5). With no
 /// `--agent` both agents go in one request, under one code.
 ///
@@ -13,18 +13,19 @@ import VibeNode
 /// out (the user's own handlers stay). Nothing is written here, and `CLAUDE_CONFIG_DIR` and `CODEX_HOME` play no part.
 /// The accepted request is written to the journal (ids only).
 enum HooksCommand {
-    static let usage = "usage: vibeswitcher hooks install|remove [--agent claude|codex]"
+    static let usage = "usage: vibeswitcher hooks install|remove [--agent claude|codex]..."
 
     static func run(_ arguments: [String]) -> Int32 {
         guard let action = arguments.first, ["install", "remove"].contains(action) else { return Say.usage(usage) }
-        var agents = Agent.allCases
-        switch Array(arguments.dropFirst()) {
-        case []: break
-        case let words where words.count == 2 && words[0] == "--agent":
-            guard let agent = Agent(rawValue: words[1]) else { return Say.usage(usage) }
-            agents = [agent]
-        default: return Say.usage(usage)
+        // `--agent` once or more (each agent once, in the order given: `approve` and `status` print it once per agent);
+        // none is both.
+        var agents: [Agent] = []
+        var words = Array(arguments.dropFirst())[...]
+        while let flag = words.popFirst() {
+            guard flag == "--agent", let name = words.popFirst(), let agent = Agent(rawValue: name) else { return Say.usage(usage) }
+            if !agents.contains(agent) { agents.append(agent) }
         }
+        if agents.isEmpty { agents = Agent.allCases }
         let context = NodeContext.current()
         context.sayScratch()
         let client: NodeClient
