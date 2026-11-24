@@ -234,6 +234,25 @@ struct ActingAttackTests {
         var alone = Data()
         for byte in Data("the code is \(code).\r\n".utf8) { alone += live.pass(Data([byte])) + live.flush() }
         #expect(!String(decoding: alone, as: UTF8.self).contains(code.prefix(8)), "\(String(decoding: alone, as: UTF8.self))")
+        // The parser's state and the last raw bytes carried across a release: a code inside an OSC payload, split at
+        // every byte across a cap release (past `openEscapeHeld`) and across a quiet flush, the address's form and a
+        // bare live code.
+        for form in ["pair=\(code)", code] {
+            let long = Array("\u{1B}]0;\(String(repeating: "x", count: TerminalMask.openEscapeHeld + 8))\(form) more\u{07} $ ".utf8)
+            let short = Array("\u{1B}]0;a title \(form) more\u{07} $ ".utf8)
+            for (bytes, release) in [(long, "cap"), (short, "flush")] {
+                let at = bytes.count - Array("\(form) more\u{07} $ ".utf8).count
+                for split in (at - 2)...(at + form.utf8.count + 1) {
+                    let mask = TerminalMask()
+                    var out = Data(mask.pass(Data(bytes[..<split])))
+                    if release == "flush" { out += mask.flush() }
+                    out += mask.pass(Data(bytes[split...])) + mask.flush()
+                    let text = String(decoding: out, as: UTF8.self)
+                    #expect(!text.contains(code.prefix(6)) && !text.contains(code.suffix(6)) && out.count == bytes.count,
+                            "\(release) at \(split) of \(form == code ? "a live code" : "an address"): \(text.suffix(60).debugDescription)")
+                }
+            }
+        }
         // Plain output goes at once but for a tail that may start a code (it goes after a short quiet: `flush`), and
         // nothing is lost.
         let mask = TerminalMask()

@@ -102,9 +102,17 @@ public enum PairingMask {
 /// that it goes, masked on its raw bytes: an unterminated OSC never holds the stream). What is held goes after a short
 /// quiet (`TerminalRelay.maskQuiet`, `flush`), the end of a run that may be a live code's start masked then.
 public final class TerminalMask: @unchecked Sendable {
+    /// Where a terminal's parser is (`shown`): carried across reads, so bytes released inside an escape sequence (past
+    /// its cap, or at a quiet) are read on as its payload, as a terminal reads them.
+    public enum State: Sendable, Equatable { case ground, escape, intermediate, csi, string }
+
     private var held: [UInt8] = []
+    /// The parser's state at the start of `held`.
+    private var state = State.ground
     /// The last run of code characters (and `#`, `=`, `%`) of what the screen was sent, at most `tailKept`.
     private var tail: [UInt8] = []
+    /// The last `tailKept` raw bytes sent: the raw backstop matches across a release (a code split inside a payload).
+    private var rawTail: [UInt8] = []
 
     /// The most an escape sequence left open at a read's end holds back.
     public static let openEscapeHeld = 4096
@@ -118,7 +126,7 @@ public final class TerminalMask: @unchecked Sendable {
     /// What may go now, masked; a tail that may be a code's start, or an open escape (up to its cap), held back.
     public func pass(_ bytes: Data) -> Data {
         held.append(contentsOf: bytes)
-        let shown = Self.shown(held)
+        let shown = Self.shown(held, from: state)
         var cut = held.count
         if let open = shown.openEscape, held.count - open <= Self.openEscapeHeld { cut = open }
         var start = shown.text.count
@@ -130,19 +138,26 @@ public final class TerminalMask: @unchecked Sendable {
         }
         let out = Array(held[..<cut])
         held = Array(held[cut...])
-        return mask(out, final: false)
+        // Released whole, an open sequence and all (past its cap): the parser goes on inside it; else from ground (a cut
+        // is at an escape's start or inside shown text).
+        let from = state
+        state = cut == out.count && held.isEmpty ? shown.end : .ground
+        return mask(out, from: from, final: shown.openEscape != nil && held.isEmpty)
     }
 
     /// Everything held, masked (a quiet: the end of a run that may be a live code's start masked too).
     public func flush() -> Data {
         let out = held
         held = []
-        return mask(out, final: true)
+        let from = state
+        state = Self.shown(out, from: from).end
+        return mask(out, from: from, final: true)
     }
 
-    private func mask(_ bytes: [UInt8], final: Bool) -> Data {
-        let (masked, tail) = Self.masked(bytes, after: tail, final: final)
+    private func mask(_ bytes: [UInt8], from: State, final: Bool) -> Data {
+        let (masked, tail) = Self.masked(bytes, from: from, after: tail, raw: rawTail, final: final)
         self.tail = tail
+        rawTail = Array((rawTail + bytes).suffix(Self.tailKept))
         return Data(masked)
     }
 
@@ -151,9 +166,8 @@ public final class TerminalMask: @unchecked Sendable {
     /// (0x20-0x2F) bytes to its final (0x40-0x7E); a C0 control inside it is done and it goes on; CAN or SUB ends it, ESC
     /// ends it and begins another. An OSC, DCS, SOS, PM or APC string runs to BEL or ST (ESC \); CAN or SUB ends it, any
     /// other ESC ends it and begins another. `openEscape`: where a sequence the bytes end inside begins.
-    static func shown(_ bytes: [UInt8]) -> (text: [UInt8], at: [Int], openEscape: Int?) {
-        enum State { case ground, escape, intermediate, csi, string }
-        var state = State.ground
+    static func shown(_ bytes: [UInt8], from start: State = .ground) -> (text: [UInt8], at: [Int], openEscape: Int?, end: State) {
+        var state = start
         var text: [UInt8] = [], at: [Int] = []
         text.reserveCapacity(bytes.count)
         at.reserveCapacity(bytes.count)
@@ -189,7 +203,8 @@ public final class TerminalMask: @unchecked Sendable {
                 if byte == 0x07 { state = .ground }
             }
         }
-        return (text, at, state == .ground ? nil : begun)
+        // Begun before these bytes (a sequence carried in): open from their start.
+        return (text, at, state == .ground ? nil : (start != .ground && begun == 0 && bytes.first != 0x1B ? 0 : begun), state)
     }
 
     static func mayBeCode(_ run: String) -> Bool {
@@ -233,10 +248,11 @@ public final class TerminalMask: @unchecked Sendable {
 
     /// `bytes` masked, `tail` what went before: on what the screen shows (with `tail` before it, only this read's bytes
     /// changed), then on the raw bytes; `final`, the end of a run that may be a live code's start masked too. The new tail.
-    static func masked(_ bytes: [UInt8], after tail: [UInt8], final: Bool) -> (bytes: [UInt8], tail: [UInt8]) {
+    static func masked(_ bytes: [UInt8], from state: State = .ground, after tail: [UInt8], raw rawTail: [UInt8] = [],
+                       final: Bool) -> (bytes: [UInt8], tail: [UInt8]) {
         guard !bytes.isEmpty else { return (bytes, tail) }
         var out = bytes
-        let shown = Self.shown(bytes)
+        let shown = Self.shown(bytes, from: state)
         // The tail continues this read's text only when nothing shown came between: it is the run its first bytes join.
         let joined = tail + shown.text
         let offset = tail.count
@@ -254,9 +270,22 @@ public final class TerminalMask: @unchecked Sendable {
                 for index in start..<shown.text.count { out[shown.at[index]] = 0x2A }
             }
         }
-        // The backstop: the raw bytes, escape payloads among them.
-        if let raw = String(bytes: bytes, encoding: .isoLatin1) {
-            for range in codeRanges(raw) { for index in range where index < out.count { out[index] = 0x2A } }
+        // The backstop: the raw bytes, escape payloads among them, after the last raw bytes sent (a code split across a
+        // release inside a payload), only this read's changed; at a release's end, a raw run that may be a live code's
+        // start masked too.
+        let rawJoined = rawTail + bytes
+        if let raw = String(bytes: rawJoined, encoding: .isoLatin1) {
+            for range in codeRanges(raw) {
+                for index in range where index >= rawTail.count && index - rawTail.count < out.count { out[index - rawTail.count] = 0x2A }
+            }
+        }
+        if final {
+            var start = bytes.count
+            while start > 0, codeByte(bytes[start - 1]) { start -= 1 }
+            let run = String(decoding: bytes[start...], as: UTF8.self)
+            if !run.isEmpty, PairingMask.codes.contains(where: { code in (1...min(code.count, run.count)).contains { code.hasPrefix(run.suffix($0)) } }) {
+                for index in start..<bytes.count { out[index] = 0x2A }
+            }
         }
         // The new tail: the last run of what the screen was sent, joined to the old one when this read's text continues it.
         var start = joined.count
