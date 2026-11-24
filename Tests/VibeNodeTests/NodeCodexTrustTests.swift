@@ -140,7 +140,9 @@ struct NodeCodexTrustTests {
         #expect(lines.contains("HOME=\(home.home.path)") && lines.contains("PATH=/usr/bin:/bin"), "\(lines)")
         // What sh itself sets (PWD, SHLVL, _) aside, only what was given.
         #expect(names.subtracting(["PWD", "OLDPWD", "SHLVL", "_"]) == ["HOME", "PATH", "LANG"], "\(names)")
-        #expect(lines.contains("PWD=\(home.home.path)"), "\(lines)")
+        // The Mac's scratch folder is under a link (/var → /private/var), and sh says the real one.
+        let pwd = lines.first { $0.hasPrefix("PWD=") }.map { URL(fileURLWithPath: String($0.dropFirst(4))).resolvingSymlinksInPath().path }
+        #expect(pwd == home.home.resolvingSymlinksInPath().path, "\(lines)")
     }
 
     /// One already trusted is counted as such, and nothing is written.
