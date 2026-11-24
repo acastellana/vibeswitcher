@@ -101,7 +101,7 @@ export function nodeView(app) {
   function render() {
     if (app.ui.state.route.name !== 'node') return;
     const node = store.state.node;
-    const now = JSON.stringify([node, store.state.connection, store.acts()]);
+    const now = JSON.stringify([node, store.state.connection, store.acts(), store.state.phrase]);
     if (node && actsFor(app, 'plugin.on') && store.can('plugin.list')) pluginActs.refresh(JSON.stringify(node.plugins));
     if (node && actsFor(app, 'approve') && store.can('approve.list')) approveActs.refresh(JSON.stringify(node.cards));
     if (now === drawn) return;

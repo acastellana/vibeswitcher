@@ -132,7 +132,7 @@ export function leftColumn(app, { brief }) {
     setText(summaryRest, moving ? ` · ${t('inMotion', { n: moving })}` : '');
     briefButton.hidden = !store.can?.('brief');
     // Whether this page acts for the user, and since when, with the switch that turns it off.
-    const actsKey = JSON.stringify([state.node?.web?.acts, store.acts(), lang()]);
+    const actsKey = JSON.stringify([state.node?.web?.acts, store.acts(), state.phrase, lang()]);
     if (actsKey !== actsDrawn) { actsDrawn = actsKey; actsSlot.replaceChildren(...[actsLine(app, { compact: true })].filter(Boolean)); }
     // The places that hold what waits carry the asking colour, so the user sees where it is.
     setClass(own, 'asked', waits.some((place) => place.kind === 'session'));

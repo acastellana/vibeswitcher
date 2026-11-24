@@ -45,6 +45,12 @@ export function createStore() {
     plugins: null,
     // The words a page that just redeemed a pairing code shows until the user confirms it in the terminal.
     phrase: null,
+    // Why this tab no longer acts for the user, once it did: 'reloaded' (a pairing lives in the tab's memory only),
+    // 'ended' (its pairing ended: 12 hours, ended in the terminal, acting lowered or turned off), 'unconfirmed' (it
+    // reloaded to the node's newer page before the terminal confirmed it). Null: nothing to say.
+    actsLost: null,
+    // The node serves a newer page than this tab runs, and this tab acts, so it isn't reloaded for the user.
+    newerBuild: false,
     // The collections the feed follows; null: all of them (the mock). The node sends no lead's board yet.
     follows: null,
     // A card's place across a server restart: card ids are the server's memory and change, so a card that comes back
@@ -304,6 +310,7 @@ export function createStore() {
       // setting) changes nothing.
       if (reply?.error?.code === 'acts-ended' && state.rights) {
         state.rights = state.rights.filter((right) => right !== 'act' && right !== 'watch');
+        state.actsLost = 'ended';
         feed.dropAct?.();
         emit(new Map([['connection', [{ connection: state.connection }]]]));
       }
@@ -471,6 +478,19 @@ export function createStore() {
     acts: () => state.rights === null || state.rights.includes('act'),
     // Whether it may watch terminals (`watch`: a pairing confirmed in the terminal).
     watches: () => state.rights === null || state.rights.includes('watch'),
+    setActsLost(why) {
+      if (state.actsLost === why) return;
+      state.actsLost = why;
+      emit(new Map([['connection', [{ connection: state.connection }]]]));
+    },
+    setNewerBuild(on) {
+      if (state.newerBuild === on) return;
+      state.newerBuild = on;
+      emit(new Map([['connection', [{ connection: state.connection }]]]));
+    },
+    // "This tab no longer acts" dismissed; a reload asked for by the user.
+    forgetActsLost() { state.actsLost = null; feed?.forgetActed?.(); emit(new Map([['connection', [{ connection: state.connection }]]])); },
+    reloadNow() { feed?.reloadNow?.(); },
     setPhrase(phrase) {
       if (state.phrase === phrase) return;
       state.phrase = phrase;

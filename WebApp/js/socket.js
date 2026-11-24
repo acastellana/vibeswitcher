@@ -32,10 +32,14 @@ const COLLECTIONS = ['node', 'sessions', 'leads', 'cards', 'boards'];
 const RETRY = [100, 200, 400];
 const RETRY_AFTER = 1000;
 export const TOKEN_KEY = 'vibeswitcher.token';
+// That this tab acted (a pairing confirmed in it), and that it reloaded before its pairing was confirmed: flags the
+// tab keeps across a reload (sessionStorage), never the secret, so a reloaded tab can say why it no longer acts.
+export const ACTED_KEY = 'vibeswitcher.acted';
+export const UNCONFIRMED_KEY = 'vibeswitcher.unconfirmed';
 
 export function connectSocket(store, options) {
   const {
-    url, WebSocket, storage, validate, build = Promise.resolve(null),
+    url, WebSocket, storage, validate, build = Promise.resolve(null), rebuild = null,
     setTimeout: later = globalThis.setTimeout, clearTimeout: cancel = globalThis.clearTimeout,
     location = globalThis.location, history = globalThis.history, reload = () => globalThis.location.reload(),
     log = (...args) => console.warn(...args),
@@ -87,6 +91,15 @@ export function connectSocket(store, options) {
   function token() {
     try { return storage?.getItem(TOKEN_KEY) || null; } catch { return null; }
   }
+  function flag(key, on) {
+    try { if (on) storage?.setItem(key, '1'); else storage?.removeItem(key); } catch { /* a private window */ }
+  }
+  function flagged(key) {
+    try { return storage?.getItem(key) === '1'; } catch { return false; }
+  }
+  // Said once the first hello is in: this tab acted before its reload, or reloaded before the terminal confirmed it.
+  let acted = flagged(ACTED_KEY);
+  let unconfirmed = flagged(UNCONFIRMED_KEY);
   function keep(value) {
     try { if (value) storage?.setItem(TOKEN_KEY, value); else storage?.removeItem(TOKEN_KEY); } catch { /* a private window: this tab pairs again */ }
   }
@@ -157,15 +170,42 @@ export function connectSocket(store, options) {
     attempts = 0;
     if (message.auth?.token) keep(message.auth.token);
     if (typeof message.auth?.act === 'string') actSecret = message.auth.act;
-    // A hello without "watch": this connection's pairing isn't a confirmed one (any more): the secret goes.
-    if (!(message.auth?.rights || []).includes('watch')) actSecret = null;
-    // A page that just redeemed a code: the words `vibeswitcher web` shows too, until the user confirms it there.
-    store.setPhrase(typeof message.auth?.phrase === 'string' ? message.auth.phrase : null);
+    const rights = message.auth?.rights || [];
+    // A hello without "watch": this connection's pairing isn't a confirmed one (any more): the secret goes, and the
+    // tab says it no longer acts (its pairing ended: run out, ended in the terminal, acting lowered).
+    if (!rights.includes('watch') && actSecret) {
+      actSecret = null;
+      store.setActsLost('ended');
+    }
+    const phrase = typeof message.auth?.phrase === 'string' ? message.auth.phrase : null;
+    const newer = !!(mine && message.assets && message.assets !== mine);
     pair = null;
-    store.setKinds(Array.isArray(message.kinds) ? message.kinds : [], message.plugins, message.auth?.rights || []);
-    if (mine && message.assets && message.assets !== mine) {
+    // A code just redeemed by a page older than the node's build: reloaded before any phrase shows (the confirmation
+    // is this connection's, so the reloaded page says to fetch a new address); never after a pairing is confirmed.
+    if (newer && phrase) {
+      flag(UNCONFIRMED_KEY, true);
+      stopped = true;
+      return reload();
+    }
+    // A page that just redeemed a code: the words `vibeswitcher web` asks the user to type, until they're confirmed.
+    store.setPhrase(phrase);
+    if (unconfirmed && !phrase && !actSecret) store.setActsLost('unconfirmed');
+    else if (acted && !actSecret && !rights.includes('act')) store.setActsLost('reloaded');
+    unconfirmed = false;
+    acted = false;
+    flag(UNCONFIRMED_KEY, false);
+    store.setKinds(Array.isArray(message.kinds) ? message.kinds : [], message.plugins, rights);
+    // The page's own build unknown (/build.json failed at its load): asked again, so the next switch is seen.
+    if (!mine && message.assets && rebuild) Promise.resolve(rebuild()).then((assets) => { if (assets && !mine) mine = assets; }, () => {});
+    if (newer && actSecret) {
+      // A tab that acts isn't reloaded behind the user's back (its pairing lives in this tab's memory): it says the
+      // node has a newer page, and reloading is theirs.
+      store.setNewerBuild(true);
+    } else if (newer) {
       reloading = true;
       idle();
+      // Held off (an action of its own waits for its reply): it says so meanwhile, and reloads once that settles.
+      if (reloading) store.setNewerBuild(true);
     }
     // The actions that had no answer go again first, with their own ids (the server answers a repeat as before).
     for (const waiting of [...pending.values()]) send(waiting.message);
@@ -185,6 +225,8 @@ export function connectSocket(store, options) {
     if (typeof message.act !== 'string' || !Array.isArray(message.rights)) return;
     actSecret = message.act;
     store.setPhrase(null);
+    store.setActsLost(null);
+    flag(ACTED_KEY, true);
     if (Array.isArray(message.kinds)) return store.setKinds(message.kinds, message.plugins ?? store.state.plugins, message.rights);
     store.setKinds(store.state.kinds, store.state.plugins, message.rights);
     socket?.close();
@@ -397,6 +439,10 @@ export function connectSocket(store, options) {
   return {
     // This page no longer acts (the node's `acts-ended`: the pairing ended, the level was lowered, it was revoked).
     dropAct() { actSecret = null; },
+    // The user dismissed "this tab no longer acts": it isn't said again after a reload either.
+    forgetActed() { flag(ACTED_KEY, false); },
+    // The user's own reload, for a newer build: the tab then says it no longer acts.
+    reloadNow() { stopped = true; reload(); },
     start() {
       return Promise.resolve(build).then((assets) => { mine = assets || null; }, () => {}).then(open);
     },
