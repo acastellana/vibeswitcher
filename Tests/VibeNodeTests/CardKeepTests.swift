@@ -43,6 +43,32 @@ struct CardKeepTests {
         #expect(CardKeep.encoded(read) == bytes, "the same bytes again: a look that changed nothing writes nothing")
     }
 
+    /// A card's code isn't kept: it is its id's (a digest of it, which anyone who lists the cards can work out), made
+    /// again as the file is read; a code written into the file is never taken.
+    @Test func theFileKeepsNoCodeAndACodeInItIsNeverTaken() throws {
+        let cards = Self.cards(root: "/repo")
+        let bytes = CardKeep.encoded(.init(cards: cards))
+        #expect(!String(decoding: bytes, as: UTF8.self).contains("\"code\""), "\(String(decoding: bytes, as: UTF8.self).prefix(300))")
+        var object = try #require(try JSONSerialization.jsonObject(with: bytes) as? [String: Any])
+        var listed = try #require(object["cards"] as? [[String: Any]])
+        listed[0]["code"] = "ZZZZ"
+        object["cards"] = listed
+        let read = try JSONDecoder().decode(CardKeep.File.self, from: JSONSerialization.data(withJSONObject: object))
+        #expect(read.cards[0].code == NodeIds.code(card: cards[0].id) && read.cards[0].code != "ZZZZ")
+    }
+
+    /// A restored card's right code from any sender but the user's terminal (here the lead's tool server, a session's
+    /// process) is refused by the voice rule before the code is looked at: nothing answered.
+    @Test(NodeTraits.linuxOnly) func aRestoredCardsCodeFromAnotherSenderAnswersNothing() async throws {
+        let world = try await CardWorld.make(scratch)
+        defer { world.stop() }
+        let lead = try await world.sleepingLead()
+        let card = try await world.asked("Approve the merge?", options: ["Yes", "No"], lead: lead).card
+        let reply = try #require(await world.answer(card, "Yes", code: card.code, from: CardWorld.toolServer(of: lead)))
+        #expect(reply.error?.code == NodeWire.Code.voice.rawValue, "\(reply)")
+        #expect(world.card(card.id)?.isOpen == true)
+    }
+
     @Test func onlyTheBytesTheVaultVouchesForAreTaken() throws {
         let cards = Self.cards(root: "/repo")
         let good = CardKeep.encoded(.init(cards: cards))

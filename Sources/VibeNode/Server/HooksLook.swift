@@ -21,8 +21,8 @@ final class HooksLook: @unchecked Sendable {
     }
 
     static func notice(reasons: [String], agents: [Agent]) -> String {
-        "the hooks are out of date: " + reasons.joined(separator: "; ") + ": vibeswitcher hooks install"
-            + agents.map { " --agent \($0.rawValue)" }.joined() + " (or `vibeswitcher approve`, with what else waits)"
+        "the hooks are out of date: " + reasons.joined(separator: "; ") + ": " + HooksRequest.installCommand
+            + " (or `vibeswitcher approve`, with what else waits)"
     }
 
     func set(reasons: [String], agents: [Agent]) { lock.withLock { (self.reasons, self.agents) = (reasons, agents) } }

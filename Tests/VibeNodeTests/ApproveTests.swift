@@ -304,7 +304,7 @@ extension ApproveTests {
         world.queue.sync { world.requests.nodeRoot = world.host.folder.path }
         let withConfig = try await list(world, only: ["config", "hooks"])
         #expect(!(withConfig["items"]?.array ?? []).contains { $0["kind"]?.string == "hooks.install" }, "\(withConfig)")
-        #expect((withConfig["own"]?.array ?? []).contains { $0["command"]?.string?.hasPrefix("vibeswitcher hooks install --agent claude") == true }, "\(withConfig)")
+        #expect((withConfig["own"]?.array ?? []).contains { $0["command"]?.string == HooksRequest.installCommand }, "\(withConfig)")
         let alone = try await list(world, only: ["hooks"])
         #expect(alone["items"]?.array?.map { $0["kind"]?.string } == ["hooks.install"], "\(alone)")
     }
@@ -416,7 +416,7 @@ struct HooksOutOfDateTests {
         #expect(CardText.waitingLine(Counts(questions: 1, approvals: nil, config: nil, base: 2))
             == "waiting on you: 2 base moves: `vibeswitcher approve` settles them with one code; 1 question to answer: `vibeswitcher questions`")
         #expect(HooksLook.notice(reasons: ["a", "b"], agents: [.claude, .codex])
-            == "the hooks are out of date: a; b: vibeswitcher hooks install --agent claude --agent codex (or `vibeswitcher approve`, with what else waits)")
+            == "the hooks are out of date: a; b: vibeswitcher hooks install (or `vibeswitcher approve`, with what else waits)")
 
         // Kept by the file's stat: the same file isn't read again; a changed one is.
         let look = HooksLook()
@@ -438,7 +438,7 @@ struct HooksOutOfDateTests {
         }
         try #require(await eventually(timeout: 60) { done.value })
         let notices = world.queue.sync { world.requests.statusNotices() }
-        #expect(notices.contains { $0.hasPrefix("the hooks are out of date: ") && $0.contains(": vibeswitcher hooks install --agent claude") }, "\(notices)")
+        #expect(notices.contains { $0.hasPrefix("the hooks are out of date: ") && $0.contains(": vibeswitcher hooks install (or") }, "\(notices)")
     }
 
     @Test func aMissingProgramAndAConfigWithoutTheHooksAreSaid() throws {

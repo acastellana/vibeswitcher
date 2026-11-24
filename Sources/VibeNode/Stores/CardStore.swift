@@ -109,6 +109,30 @@ public final class CardStore: @unchecked Sendable {
 
         public var isOpen: Bool { closed == nil }
 
+        /// As `cards.json` keeps it (`CardKeep`): every field but `code`, which is its id's (`NodeIds.code(card:)`, a
+        /// digest of the id, no secret: the voice rule is what keeps a code from any sender but the user's terminal) and
+        /// is made again from the id as it's read, never taken from the file.
+        enum CodingKeys: String, CodingKey { case id, project, root, kind, question, approval, config, base, plugin, notice, closed, at, closedAt, draft }
+
+        public init(from decoder: Decoder) throws {
+            let keys = try decoder.container(keyedBy: CodingKeys.self)
+            id = try keys.decode(String.self, forKey: .id)
+            code = NodeIds.code(card: id)
+            project = try keys.decode(String.self, forKey: .project)
+            root = try keys.decode(String.self, forKey: .root)
+            kind = try keys.decode(Kind.self, forKey: .kind)
+            question = try keys.decodeIfPresent(LeadQuestion.self, forKey: .question)
+            approval = try keys.decodeIfPresent(ApprovalFacts.self, forKey: .approval)
+            config = try keys.decodeIfPresent(ConfigHoldStore.Shown.self, forKey: .config)
+            base = try keys.decodeIfPresent(BaseMoveStore.Shown.self, forKey: .base)
+            plugin = try keys.decodeIfPresent(PluginCard.self, forKey: .plugin)
+            notice = try keys.decodeIfPresent(String.self, forKey: .notice)
+            closed = try keys.decodeIfPresent(String.self, forKey: .closed)
+            at = try keys.decode(Date.self, forKey: .at)
+            closedAt = try keys.decodeIfPresent(Date.self, forKey: .closedAt)
+            draft = try keys.decodeIfPresent(Draft.self, forKey: .draft)
+        }
+
         /// Whether it blocks the lead's work: a blocking question, any approval, held config, a base move.
         public var isBlocking: Bool {
             switch kind {

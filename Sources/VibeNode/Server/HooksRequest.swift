@@ -74,6 +74,10 @@ public struct HooksRequest {
         self.vault = vault
     }
 
+    /// The command a hint names for an install (2026-11-24: the user ran the plain form, which installed both agents'
+    /// hooks; a hint naming one agent left the other out): `vibeswitcher hooks install`, every agent, as the user ran it.
+    public static let installCommand = "vibeswitcher hooks install"
+
     /// `<home>/.vibeswitcher/bin`, as the seal spells it.
     public var binFolder: String { (home as NSString).appendingPathComponent(".vibeswitcher/bin") }
 

@@ -152,18 +152,21 @@ struct HintCommandsTests {
         }
     }
 
-    /// The one that started it: `hooks install` takes `--agent` once per agent, as `approve` and `status` print it.
-    @Test(NodeTraits.linuxOnly) func hooksInstallTakesAnAgentFlagPerAgent() async throws {
+    /// The one that started it: the hooks' hint, in `status`'s notice and `approve`'s own line, is a command line the
+    /// command line takes, and it is the plain form (every agent), as the user ran it; `--agent` once per agent parses too.
+    @Test(NodeTraits.linuxOnly) func theHooksHintIsThePlainInstallAndParses() async throws {
         let notice = HooksLook.notice(reasons: ["x"], agents: [.claude, .codex])
         let command = try #require(notice.range(of: "vibeswitcher hooks install[a-z -]*", options: .regularExpression).map { String(notice[$0]) })
-        let words = command.split(separator: " ").dropFirst().map(String.init).filter { !$0.isEmpty }
-        #expect(words == ["hooks", "install", "--agent", "claude", "--agent", "codex"], "\(words)")
+        #expect(command.trimmingCharacters(in: .whitespaces) == HooksRequest.installCommand, "\(notice)")
         var environment = ProcessInfo.processInfo.environment
         environment["HOME"] = scratch.url("home").path
         environment["VIBESWITCHER_HOME"] = scratch.url("root").path
         for made in ["home", "root"] { try FileManager.default.createDirectory(at: scratch.url(made), withIntermediateDirectories: true) }
-        let parsed = try await run(commandLine, words, environment: environment, limit: 30)
-        #expect(parsed.status != 64 && !(parsed.output + parsed.errors).contains("usage:"), "\(parsed)")
+        for words in [Array(HooksRequest.installCommand.split(separator: " ").dropFirst().map(String.init)),
+                      ["hooks", "install", "--agent", "claude", "--agent", "codex"]] {
+            let parsed = try await run(commandLine, words, environment: environment, limit: 30)
+            #expect(parsed.status != 64 && !(parsed.output + parsed.errors).contains("usage:"), "\(words): \(parsed)")
+        }
         let refused = try await run(commandLine, ["hooks", "install", "--agent", "claude", "--agent"], environment: environment, limit: 30)
         #expect(refused.status == 64, "\(refused)")
     }
