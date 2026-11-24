@@ -443,3 +443,7 @@ fix-the-flaky-test-25 showed that an unbundled test binary's UserDefaults.standa
 
 With the fix the bench passes at 5.6–6.5 % with the display asleep, and the absolute growth left (3.2–3.7 MB) matches the daytime passes since before Nov 22, so it isn't new. File a root-cause task (agent claude, advisor fable) only if churn-growth-percent passes 8 % again on a run with the display awake, or the live app's malloc in use keeps climbing across a day (the 2026-11-21 memory decision's conditions).
 
+## 2026-11-24 14:05:16 Commits from GitHub show the GitHub handle that pushed them: on the update card and in fetch_remote and merge_remote reports (task github-commits-name-the, audited as security). The handle comes from GitHub's record of the push, read-only through the user's gh. When the handle can't be found, the commit shows as before. Merges made on this Mac aren't in scope.
+
+The user asked on 2026-11-24 to see who triggered an update's merge, and chose this scope (DEC96FEA). There are no PRs (direct pushes from two Macs), and git author names aren't handles.
+
