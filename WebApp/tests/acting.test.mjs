@@ -285,3 +285,15 @@ test('a confirmed page whose node has a newer build isn’t taken for one redeem
   assert.equal(confirmed.kept.has('vibeswitcher.unconfirmed'), false);
   assert.equal(confirmed.store.state.phrase, null);
 });
+
+test('a `paired` again on a level change: rights and kinds taken, the secret kept; one without "act" doesn’t count as acting', async () => {
+  const watching = await page({ rights: ['read', 'draft'], kinds: ['status'], phrase: 'amber fox lantern' });
+  watching.socket.onmessage({ data: JSON.stringify({ v: 1, kind: 'paired', act: 'g'.repeat(43), rights: ['read', 'draft', 'watch'], kinds: ['status', 'term.open'] }) });
+  assert.equal(watching.store.acts(), false);
+  assert.equal(watching.kept.has('vibeswitcher.acted'), false, 'watching only: not acting');
+  // The level rises: the same secret, now with "act".
+  watching.socket.onmessage({ data: JSON.stringify({ v: 1, kind: 'paired', act: 'g'.repeat(43), rights: CONFIRMED, kinds: ACTING }) });
+  assert.equal(watching.store.acts(), true);
+  assert.equal(watching.kept.get('vibeswitcher.acted'), '1');
+  assert.equal(authOf(watching.reconnect()).act, 'g'.repeat(43));
+});
