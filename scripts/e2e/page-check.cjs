@@ -107,6 +107,16 @@ async function shots(page, origin, folder) {
       }
     }
   }
+  // The user's window zoomed (1997 px at 110% and 125%), the message box focused: the lead.
+  await page.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: 'dark' }] });
+  for (const [width, scale, name] of [[1816, 1.1, 'zoom110'], [1598, 1.25, 'zoom125']]) {
+    await page.send('Emulation.setDeviceMetricsOverride', { width, height: 1000, deviceScaleFactor: scale, mobile: false });
+    await page.go(project);
+    await pause(900);
+    await page.evaluate(`document.querySelector('.project-view .say')?.focus()`);
+    await pause(300);
+    fs.writeFileSync(path.join(folder, `lead-${name}-dark.png`), Buffer.from((await page.send('Page.captureScreenshot', { format: 'png' })).data, 'base64'));
+  }
   // At 1850 px wide (the user's window): the lead, the long approval opened in the waiting block, its sheet.
   await page.send('Emulation.setDeviceMetricsOverride', { width: 1850, height: 1000, deviceScaleFactor: 1, mobile: false });
   for (const theme of ['light', 'dark']) {
@@ -247,7 +257,7 @@ async function run() {
         return ${width} + ': ' + (why || 'fits');
       })()`, WAIT));
     }
-    // A zoomed window (the user's: Chrome at 110–150%): every width from 900 to 2000 px in steps of 7 at each zoom,
+    // A zoomed window (the user's: Chrome at 110–150%), and the guard (anything too wide clipped, never scrolled to): every width from 900 to 2000 px in steps of 7 at each zoom,
     // the page never wider than the window nor scrolled sideways, also after the message box takes the focus; at three
     // of them, after a task opens and after the side sheet opens. The first element past the edge is named.
     const sideways = `(() => {
@@ -280,6 +290,24 @@ async function run() {
       if (sheet) wides.push(`${width}@${scale} with the sheet open: ${sheet}`);
       await page.evaluate(`document.querySelector('.sheet-close')?.click()`);
     }
+    // The guard: something far wider than the window put in the centre, and a field at its far end focused: the page
+    // is neither wider than the window nor scrolled sideways.
+    await page.send('Emulation.setDeviceMetricsOverride', { width: 1598, height: 1000, deviceScaleFactor: 1.25, mobile: false });
+    const guard = await page.evaluate(`(() => {
+      const wide = document.createElement('div');
+      wide.style.setProperty('width', '3000px');
+      const field = document.createElement('input');
+      field.style.setProperty('margin-left', '2900px');
+      wide.append(field);
+      document.querySelector('.project-view .centre-head').append(wide);
+      field.focus();
+      const said = ${sideways};
+      wide.remove();
+      return said;
+    })()`);
+    await pause(100);
+    const after = await page.evaluate(sideways);
+    if (guard || after) wides.push('a wide element in the centre: ' + (guard || after));
     fits.push(wides.length ? 'zoomed: ' + wides.length + ' too wide, ' + wides.slice(0, 4).join('; ') : 'zoomed 110–150%, 900–2000 px: fits');
     await page.send('Emulation.setDeviceMetricsOverride', { width: 1400, height: 900, deviceScaleFactor: 1, mobile: false });
     record('Columns fit', fits.every((line) => line && line.endsWith(': fits')), fits.map((line) => line || 'never drawn').join('; '));

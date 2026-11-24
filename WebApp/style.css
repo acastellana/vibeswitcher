@@ -78,6 +78,9 @@
 * { box-sizing: border-box; }
 [hidden] { display: none !important; }
 html, body { height: 100%; margin: 0; }
+/* The page never scrolls sideways: whatever runs past the window is clipped, never scrolled to (app.js puts a stray
+   sideways scroll back too). */
+html { overflow: clip; }
 body {
   background: var(--bg);
   color: var(--ink);
@@ -711,10 +714,10 @@ kbd { padding: 1px 6px; border-radius: 5px; box-shadow: inset 0 0 0 1px var(--li
 .card-command { display: grid; gap: 4px; padding: 8px 12px; border-radius: 8px; box-shadow: inset 0 0 0 1px var(--line); }
 .card-command-label { color: var(--ink-3); font-size: var(--small); }
 .card-command code { overflow-wrap: anywhere; user-select: all; }
-.offline.signed-out { display: block; max-width: calc(100vw - 32px); padding-left: 26px; text-align: center; }
+.offline.signed-out { display: block; max-width: calc(100% - 32px); padding-left: 26px; text-align: center; }
 .offline.signed-out::before { position: absolute; top: 50%; left: 12px; margin-top: -3.5px; background: var(--ink-3); animation: none; }
 /* A page that just redeemed a pairing code: its words, large, until the terminal confirms it. */
-.offline.confirm-pairing { flex-direction: column; gap: 2px; width: max-content; max-width: calc(100vw - 32px); padding: 10px 18px; border-radius: 14px; color: var(--ink); text-align: center; }
+.offline.confirm-pairing { flex-direction: column; gap: 2px; width: max-content; max-width: calc(100% - 32px); padding: 10px 18px; border-radius: 14px; color: var(--ink); text-align: center; }
 .offline.confirm-pairing::before { display: none; }
 .confirm-pairing .phrase { font-size: 20px; font-weight: 650; letter-spacing: 0.02em; color: var(--accent); }
 .confirm-pairing .sub { color: var(--ink-3); }
@@ -724,7 +727,7 @@ kbd { padding: 1px 6px; border-radius: 5px; box-shadow: inset 0 0 0 1px var(--li
 .tab-banner code { padding: 1px 6px; border-radius: 5px; background: var(--raised); }
 .tab-banner-close { margin-left: auto; color: var(--ink-2); font-size: 16px; line-height: 1; }
 /* The notifications' one offer (js/notify.js): the same quiet pill, with its two answers. */
-.offline.offer { gap: 10px; width: max-content; max-width: calc(100vw - 32px); border-radius: 14px; }
+.offline.offer { gap: 10px; width: max-content; max-width: calc(100% - 32px); border-radius: 14px; }
 .offer span { flex: 1 1 auto; min-width: 0; }
 .offline.offer::before { background: var(--accent); animation: none; }
 .offer button { flex: none; white-space: nowrap; padding: 2px 10px; border: 0; border-radius: 999px; background: transparent; color: var(--accent); font: inherit; cursor: pointer; }
@@ -900,7 +903,7 @@ kbd { padding: 1px 6px; border-radius: 5px; box-shadow: inset 0 0 0 1px var(--li
 .app { display: grid; grid-template-columns: 220px minmax(0, 1fr); height: 100dvh; }
 .app.with-right { grid-template-columns: 220px minmax(0, 1fr) 320px; }
 .left, .right { display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow: hidden; }
-.app { width: 100%; max-width: 100vw; }
+.app { width: 100%; overflow: clip; }
 .right .colbody { overflow-wrap: anywhere; }
 .left { background: var(--side); border-right: 1px solid var(--line); }
 .right { display: none; border-left: 1px solid var(--line); background: var(--bg); }
@@ -1165,7 +1168,7 @@ kbd { padding: 1px 6px; border-radius: 5px; box-shadow: inset 0 0 0 1px var(--li
 .own-state.tone-text-needs-you { color: var(--needs-you); font-weight: 600; }
 
 /* The side sheet */
-.sheet { position: fixed; top: 0; right: 0; bottom: 0; z-index: 8; width: min(560px, 92vw); padding: 26px 30px 40px; overflow-y: auto; background: var(--raised); box-shadow: -1px 0 0 var(--line), -16px 0 40px var(--shadow); outline: none; animation: sheet-in 0.16s var(--ease); }
+.sheet { position: fixed; top: 0; right: 0; bottom: 0; z-index: 8; width: min(560px, 92%); padding: 26px 30px 40px; overflow-y: auto; background: var(--raised); box-shadow: -1px 0 0 var(--line), -16px 0 40px var(--shadow); outline: none; animation: sheet-in 0.16s var(--ease); }
 @keyframes sheet-in { from { transform: translateX(24px); opacity: 0; } }
 .sheet-scrim { position: fixed; inset: 0; z-index: 7; background: rgb(0 0 0 / 0.1); }
 .sheet-close { position: absolute; top: 14px; right: 14px; }
@@ -1194,7 +1197,7 @@ kbd { padding: 1px 6px; border-radius: 5px; box-shadow: inset 0 0 0 1px var(--li
 .drawer-scrim { display: none; }
 @media (max-width: 900px) {
   .app, .app.with-right { grid-template-columns: minmax(0, 1fr); }
-  .left, .app.with-right .right { position: fixed; top: 0; bottom: 0; z-index: 8; width: min(320px, 88vw); box-shadow: 0 0 40px var(--shadow); transition: transform 0.18s var(--ease), visibility 0s 0.18s; visibility: hidden; }
+  .left, .app.with-right .right { position: fixed; top: 0; bottom: 0; z-index: 8; width: min(320px, 88%); box-shadow: 0 0 40px var(--shadow); transition: transform 0.18s var(--ease), visibility 0s 0.18s; visibility: hidden; }
   .left { left: 0; transform: translateX(-102%); padding-top: env(safe-area-inset-top); }
   .app.with-right .right { right: 0; transform: translateX(102%); }
   .app[data-drawer="left"] .left, .app.with-right[data-drawer="right"] .right { transform: none; visibility: visible; transition-delay: 0s; }
@@ -1222,7 +1225,7 @@ kbd { padding: 1px 6px; border-radius: 5px; box-shadow: inset 0 0 0 1px var(--li
   .axis-row { grid-template-columns: 0 minmax(0, 1fr) 0 0; gap: 0; padding-left: 0; }
   .road-note { grid-column: 1 / -1; }
   .screen-col { padding: 14px 14px 40px; }
-  .sheet { width: 100vw; padding: calc(20px + env(safe-area-inset-top)) 18px 32px; }
+  .sheet { width: 100%; padding: calc(20px + env(safe-area-inset-top)) 18px 32px; }
   .tdet { margin-left: 0; }
 }
 

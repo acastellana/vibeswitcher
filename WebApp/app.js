@@ -149,6 +149,14 @@ function drawTabBanner() {
 }
 store.subscribe('connection', drawTabBanner);
 store.subscribe('node', drawTabBanner);
+// The page never sits scrolled sideways (a focus or a scroll into view past an edge could move it): put back at once.
+const unscroll = () => {
+  if (scrollX) scrollTo(0, scrollY);
+  for (const el of [document.documentElement, document.body, root]) if (el && el.scrollLeft) el.scrollLeft = 0;
+};
+addEventListener('scroll', unscroll, { passive: true });
+addEventListener('resize', unscroll);
+document.addEventListener('focusin', () => requestAnimationFrame(unscroll));
 // What the centre says before there is anything to show: connecting, or not paired.
 const waitingWords = h('h1', { class: 'big' });
 const waitingSub = h('p');
