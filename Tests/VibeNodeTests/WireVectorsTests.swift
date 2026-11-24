@@ -451,11 +451,17 @@ enum Samples {
 
     static var requests: [NodeWire.Request] {
         [NodeWire.Request(id: "1", kind: "answer", args: ["card": .string("c")], action: "a", must: true),
-         NodeWire.Request(id: "2", kind: "status")]
+         NodeWire.Request(id: "2", kind: "status"),
+         // An act at the level `confirm`: its passkey assertion beside its args.
+         NodeWire.Request(id: "3", kind: "answer", args: ["card": .string("c"), "seen": .string("s"), "text": .string("Yes")], action: "a",
+                          assertion: .object(["id": .string("aWQ"), "clientDataJSON": .string("Y2Q"), "authenticatorData": .string("YWQ"),
+                                              "signature": .string("c2ln")]))]
     }
 
     static var replies: [NodeWire.Reply] {
-        [NodeWire.Reply(re: "1", result: .object([:])), NodeWire.Reply(re: "2", error: .init(.voice, "not the user's voice"))]
+        var recorded = NodeWire.Reply(re: "3", result: .object([:]))
+        recorded.recorded = "answer a lead's question for you: “Ship it?” → “Yes”"
+        return [NodeWire.Reply(re: "1", result: .object([:])), NodeWire.Reply(re: "2", error: .init(.voice, "not the user's voice")), recorded]
     }
 
     /// One of each chat item and tool detail the reader makes, with optional fields set and unset.

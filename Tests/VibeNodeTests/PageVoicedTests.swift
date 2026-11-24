@@ -37,7 +37,7 @@ struct PageVoicedTests {
 
     /// A refusing confirmation.
     struct Refusing: PageVoice {
-        func confirm(_ request: NodeWire.Request, page: PageAct, done: @escaping @Sendable (String?) -> Void) { done("no touch") }
+        func confirm(_ request: NodeWire.Request, page: PageAct, done: @escaping @Sendable (NodeWire.Failure?) -> Void) { done(.init(.voice, "not confirmed: no touch")) }
     }
 
     @Test func aPagesAnswerNamesTheCardAsDrawnAndIsRecordedAsThePages() async throws {
@@ -233,7 +233,7 @@ struct PageVoicedTests {
         let card = try #require(world.card(asked.card.id))
         struct During: PageVoice {
             let meanwhile: @Sendable () -> Void
-            func confirm(_ request: NodeWire.Request, page: PageAct, done: @escaping @Sendable (String?) -> Void) {
+            func confirm(_ request: NodeWire.Request, page: PageAct, done: @escaping @Sendable (NodeWire.Failure?) -> Void) {
                 meanwhile()
                 done(nil)
             }

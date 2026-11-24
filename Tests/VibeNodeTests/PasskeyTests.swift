@@ -157,7 +157,7 @@ struct PasskeyTests {
     }
 
     private func act(_ world: CardWorld, _ credentials: PageCredentials, kind: String, args: [String: NodeWire.Value], action: String,
-                     assertion: NodeWire.Value) async -> NodeWire.Reply? {
+                     assertion: NodeWire.Value?) async -> NodeWire.Reply? {
         let got = Locked<NodeWire.Reply?>(nil)
         let request = NodeWire.Request(id: UUID().uuidString, kind: kind, args: args, action: action, assertion: assertion)
         world.queue.async { world.requests.pageVoiced(request, credentials: credentials, origin: "http://localhost:8765") { got.value = $0 } }
@@ -174,13 +174,14 @@ struct PasskeyTests {
         defer { world.stop() }
         let args: [String: NodeWire.Value] = ["card": .string(card.id), "seen": .string(card.seen), "text": .string("Yes")]
         // Refused, each before any record.
-        func refused(_ why: String, _ make: (_ action: String) throws -> (args: [String: NodeWire.Value], assertion: NodeWire.Value)) async throws {
+        func refused(_ why: String, code: String = "passkey", _ make: (_ action: String) throws -> (args: [String: NodeWire.Value], assertion: NodeWire.Value?)) async throws {
             let action = UUID().uuidString.lowercased()
             let (sent, assertion) = try make(action)
             let reply = try #require(await act(world, credentials, kind: "answer", args: sent, action: action, assertion: assertion))
-            #expect(!reply.ok && reply.error?.message.hasPrefix("not confirmed") == true, "\(why): \(reply)")
+            #expect(!reply.ok && reply.error?.code == code, "\(why): \(reply)")
             #expect(await world.actions().allSatisfy { $0.action != action }, "\(why): recorded")
         }
+        try await refused("no assertion", code: "assertion-needed") { _ in (args, nil) }
         try await refused("another origin") { action in (args, try soft.assertion(challenge: try challenge(world, credentials, kind: "answer", args: args, action: action).bytes, origin: "http://127.0.0.1:8765")) }
         try await refused("another relying party") { action in (args, try soft.assertion(challenge: try challenge(world, credentials, kind: "answer", args: args, action: action).bytes, rp: "example.com")) }
         try await refused("no user verification") { action in (args, try soft.assertion(challenge: try challenge(world, credentials, kind: "answer", args: args, action: action).bytes, flags: 0x01)) }
@@ -195,7 +196,7 @@ struct PasskeyTests {
             return (args, try soft.assertion(challenge: try challenge(world, credentials, kind: "answer", args: drawn, action: action).bytes))
         }
         try await refused("another action") { action in (args, try soft.assertion(challenge: try challenge(world, credentials, kind: "answer", args: args, action: UUID().uuidString.lowercased()).bytes)) }
-        try await refused("run out") { action in
+        try await refused("run out", code: "assertion-needed") { action in
             let issued = try challenge(world, credentials, kind: "answer", args: args, action: action).bytes
             world.queue.sync { world.requests.passkeyChallenges[WebAuthn.base64url(issued)]?.until = Platform.Clock.steadyDate().addingTimeInterval(-1) }
             return (args, try soft.assertion(challenge: issued))
@@ -211,6 +212,11 @@ struct PasskeyTests {
         #expect(reply.ok && reply.recorded == line, "\(reply)")
         let recorded = await world.actions().first { $0.action == action && $0.kind == "answer" }
         #expect(recorded?.via?.contains("passkey approved: ") == true, "\(String(describing: recorded))")
+        // A repeat after a lost reply (the same action and assertion, sent again after a reconnect): the earlier reply,
+        // not a refusal for a used challenge; done once.
+        let again = try #require(await act(world, credentials, kind: "answer", args: args, action: action, assertion: assertion))
+        #expect(again.ok, "\(again)")
+        #expect(await world.actions().filter { $0.action == action && $0.kind == "answer" }.count == 1)
         // Used already: a challenge is taken by its first use (here refused, by a key not registered), and a second use
         // with the right key is refused.
         let reuseAction = UUID().uuidString.lowercased()

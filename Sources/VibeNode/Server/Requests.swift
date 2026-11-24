@@ -149,6 +149,8 @@ public final class Requests: @unchecked Sendable {
     var passkeyChallenges: [String: PasskeyChallenge] = [:]
     var passkeyRegistrations: [String: PasskeyRegistration] = [:]
     var approvedLines: [String: String] = [:]
+    /// The challenges used already (a second use is said so: `passkey`, not `assertion-needed`). On `queue`.
+    var usedChallenges: Set<String> = []
     /// `status`'s `web`: the listener's state (`NodeLive.webValue`); none: off.
     public var webValue: (() -> NodeWire.Value)?
     /// The `seq` a live stream is at, by collection (`LiveHub.seq(of:)`, set by `NodeLive`): a draft's `applied`. On

@@ -288,6 +288,11 @@ public enum NodeWire {
         /// This page no longer acts or watches (its pairing ran out or was dropped, the level was lowered, a revoke):
         /// it drops its pairing secret, reads and drafts, and is paired again to act.
         case actsEnded = "acts-ended"
+        /// An act at the level `confirm` came without a passkey assertion, or with one whose challenge ran out: ask
+        /// `act.challenge` and send it again with one. Nothing was done or kept.
+        case assertionNeeded = "assertion-needed"
+        /// Its passkey assertion didn't check: nothing was done.
+        case passkey
         case `internal`
     }
 

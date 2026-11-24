@@ -97,15 +97,17 @@ public enum WireSchema {
                                                         // An acting page's passkey assertion, at the level `confirm`.
                                                         optional("assertion", .shape("assertion"))]),
             shape("assertion", from: "PasskeyVoice", [field("id", .string), field("clientDataJSON", .string), field("authenticatorData", .string),
-                                                      field("signature", .string), optional("userHandle", Kind.string.orNull)]),
+                                                      field("signature", .string)]),
             shape("reply", from: "NodeWire.Reply", [field("v", .int), field("re", .string), field("ok", .bool), optional("result", .any),
                                                     optional("error", .shape("failure")),
                                                     // What the vault recorded an act at `confirm` with: what its passkey approved.
                                                     optional("recorded", .string)]),
             // The terminal's `web --passkey`, to each confirmed page at http://localhost: a passkey to make.
-            shape("passkey", from: "Requests.webPasskey", [field("v", .int), field("kind", .words(["passkey"])), field("op", .words(["register"])),
-                                                           field("register", .string), field("challenge", .string), field("rp", .shape("passkey.rp")),
-                                                           field("user", .shape("passkey.user")), field("exclude", .list(.string))]),
+            // `register`: a passkey to make (its offer's end, `expires`); `ended`: the offer is over (answered, run out).
+            shape("passkey", from: "Requests.webPasskey", [field("v", .int), field("kind", .words(["passkey"])), field("op", .words(["register", "ended"])),
+                                                           field("register", .string), optional("expires", .date), optional("challenge", .string),
+                                                           optional("rp", .shape("passkey.rp")), optional("user", .shape("passkey.user")),
+                                                           optional("exclude", .list(.string))]),
             shape("passkey.rp", from: "Requests.webPasskey", [field("id", .string), field("name", .string)]),
             shape("passkey.user", from: "Requests.webPasskey", [field("id", .string), field("name", .string), field("displayName", .string)]),
             shape("act.challenge.args", from: "Requests.actChallenge", [field("kind", .string), field("args", .map(.any)), field("action", .string)]),

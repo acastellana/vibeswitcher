@@ -6,7 +6,8 @@ import VibeCore
 /// completely"); a passkey touch per request slots in here, with no change to the kinds or the page's requests. `done`
 /// with nil when it passes, else why not; on any thread (`Requests` goes back to its queue).
 public protocol PageVoice: Sendable {
-    func confirm(_ request: NodeWire.Request, page: PageAct, done: @escaping @Sendable (String?) -> Void)
+    /// `done` with nil when it passes, else the refusal (its code and why).
+    func confirm(_ request: NodeWire.Request, page: PageAct, done: @escaping @Sendable (NodeWire.Failure?) -> Void)
 }
 
 /// The page an acting request came from: its mark (`via`) and its credentials (the token a challenge was bound to, the
@@ -23,7 +24,7 @@ public struct PageAct: Sendable {
 /// No confirmation: the click is the user's (the level `trust`).
 public struct NoPageVoice: PageVoice {
     public init() {}
-    public func confirm(_ request: NodeWire.Request, page: PageAct, done: @escaping @Sendable (String?) -> Void) { done(nil) }
+    public func confirm(_ request: NodeWire.Request, page: PageAct, done: @escaping @Sendable (NodeWire.Failure?) -> Void) { done(nil) }
 }
 
 /// The level `confirm`'s check: the request's passkey assertion, for a challenge this node issued for exactly it
@@ -31,8 +32,8 @@ public struct NoPageVoice: PageVoice {
 public final class PasskeyVoice: PageVoice, @unchecked Sendable {
     weak var requests: Requests?
     public init(requests: Requests? = nil) { self.requests = requests }
-    public func confirm(_ request: NodeWire.Request, page: PageAct, done: @escaping @Sendable (String?) -> Void) {
-        guard let requests else { return done("this server checks no passkey") }
+    public func confirm(_ request: NodeWire.Request, page: PageAct, done: @escaping @Sendable (NodeWire.Failure?) -> Void) {
+        guard let requests else { return done(.init(.passkey, "this server checks no passkey")) }
         requests.queue.async { requests.passkeyCheck(request, page: page, done: done) }
     }
 }
@@ -103,7 +104,7 @@ extension Requests {
             guard let self else { return }
             self.queue.async {
                 let approved = request.action.flatMap { self.approvedLines.removeValue(forKey: $0.lowercased()) }
-                if let notConfirmed { return refused(.init(re: request.id, error: .init(.voice, "not confirmed: \(notConfirmed)"))) }
+                if let notConfirmed { return refused(.init(re: request.id, error: notConfirmed)) }
                 guard self.actingPages?.acts(token: credentials.token, secret: credentials.act, origin: credentials.origin) == true else {
                     return refused(.init(re: request.id, error: .init(.actsEnded, WebRequestScreen.notActing)))
                 }

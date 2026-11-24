@@ -120,25 +120,36 @@ extension Requests {
     /// exactly this request and page (kind, action, arguments, token), live and unused; its key a registered one; its
     /// origin, relying party, presence, verification and signature right; its count past the kept one (the vault's
     /// `usePasskey`, off the queue). `done` with nil when it passes (its line kept for the record), else why. On `queue`.
-    func passkeyCheck(_ request: NodeWire.Request, page: PageAct, done: @escaping @Sendable (String?) -> Void) {
-        guard let acting = actingPages, let origin = Self.passkeyOrigin(page.credentials) else { return done("acting needs a passkey, at http://localhost") }
-        guard case .object(let assertion)? = request.assertion,
-              let id = assertion["id"]?.string, let clientData = assertion["clientDataJSON"]?.string.flatMap(WebAuthn.bytes(base64url:)),
+    func passkeyCheck(_ request: NodeWire.Request, page: PageAct, done: @escaping @Sendable (NodeWire.Failure?) -> Void) {
+        let failed = { (why: String) in done(.init(.passkey, why)) }
+        let needed = { (why: String) in done(.init(.assertionNeeded, why)) }
+        // A repeat of an action this server answered, or is doing now (a reconnect resending it): answered as before by
+        // `voiced` (`kept` gives the earlier reply only to the same arguments), its challenge not asked again.
+        if let action = request.action?.lowercased(), replies[action] != nil || doing[action] != nil { return done(nil) }
+        guard let acting = actingPages, let origin = Self.passkeyOrigin(page.credentials) else { return failed("acting needs a passkey, at http://localhost") }
+        guard case .object(let assertion)? = request.assertion else { return needed("this act needs your passkey: ask act.challenge, then send it again with its assertion") }
+        guard let id = assertion["id"]?.string, let clientData = assertion["clientDataJSON"]?.string.flatMap(WebAuthn.bytes(base64url:)),
               let authData = assertion["authenticatorData"]?.string.flatMap(WebAuthn.bytes(base64url:)),
               let signature = assertion["signature"]?.string.flatMap(WebAuthn.bytes(base64url:)) else {
-            return done("no passkey assertion came with it")
+            return failed("its assertion isn't whole")
         }
         // The challenge the client data names: taken (once only), and bound to exactly this request.
         guard let object = try? JSONSerialization.jsonObject(with: Data(clientData)) as? [String: Any], let named = object["challenge"] as? String,
-              let challenge = WebAuthn.bytes(base64url: named), let issued = passkeyChallenges.removeValue(forKey: WebAuthn.base64url(challenge)) else {
-            return done("its challenge isn't one this node issued (or it was used already)")
+              let challenge = WebAuthn.bytes(base64url: named) else {
+            return failed("its client data names no challenge")
         }
-        guard issued.until > Platform.Clock.steadyDate() else { return done("its challenge ran out: ask again") }
+        let key = WebAuthn.base64url(challenge)
+        guard let issued = passkeyChallenges.removeValue(forKey: key) else {
+            return usedChallenges.contains(key) ? failed("its challenge was used already") : needed("its challenge ran out or isn't one this node issued: ask again")
+        }
+        usedChallenges.insert(key)
+        if usedChallenges.count > 256 { usedChallenges.removeAll() }
+        guard issued.until > Platform.Clock.steadyDate() else { return needed("its challenge ran out: ask again") }
         guard issued.kind == request.kind, issued.action == request.action?.lowercased(), issued.arguments == Self.argumentsDigest(request.args ?? [:]),
               issued.token == ActingPages.digest(page.credentials.token), issued.origin == origin else {
-            return done("its challenge was for another request")
+            return failed("its challenge was for another request")
         }
-        guard let key = acting.state?.keys[id], let publicKey = WebAuthn.bytes(base64url: key.publicKey) else { return done("its passkey isn't registered") }
+        guard let stored = acting.state?.keys[id], let publicKey = WebAuthn.bytes(base64url: stored.publicKey) else { return failed("its passkey isn't registered") }
         let queue = self.queue, action = issued.action, line = issued.line
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             let checked = Result {
@@ -148,7 +159,7 @@ extension Requests {
             }
             queue.async {
                 switch checked {
-                case .failure(let error): done("the passkey's check failed: \(error)")
+                case .failure(let error): failed("the passkey's check failed: \(error)")
                 case .success:
                     self?.approvedLines[action] = line
                     done(nil)
@@ -179,14 +190,22 @@ extension Requests {
         let challenge = [UInt8](WebAuthn.bytes(base64url: WebTokens.randomText(bytes: 32)) ?? [])
         let user = Array(SHA256.hash(data: Data("vibeswitcher:\(root.path)".utf8)))
         passkeyRegistrations[id] = PasskeyRegistration(challenge: challenge, user: user, until: now.addingTimeInterval(Self.registrationWait))
+        // The page's clock's date it is shown as (no guard: the node ends the offer on its own steady clock, below).
+        let expires = Date(timeIntervalSinceNow: Self.registrationWait)
         let message = NodeWire.Value.object([
-            "v": .int(NodeWire.version), "kind": .string("passkey"), "op": .string("register"), "register": .string(id),
+            "v": .int(NodeWire.version), "kind": .string("passkey"), "op": .string("register"), "register": .string(id), "expires": .date(expires),
             "challenge": .string(WebAuthn.base64url(challenge)),
             "rp": .object(["id": .string(WebAuthn.rpID), "name": .string("VibeSwitcher")]),
             "user": .object(["id": .string(WebAuthn.base64url(user)), "name": .string("vibeswitcher"), "displayName": .string("VibeSwitcher on this machine")]),
             "exclude": .array((acting.state?.keys.keys.sorted() ?? []).map(NodeWire.Value.string)),
         ])
         let pages = seat.toPasskeyPages(NodeWire.message(message))
+        // Run out: every page holding the offer told it ended (unless a page answered it first: told then).
+        queue.asyncAfter(deadline: .now() + Self.registrationWait) { [weak self] in
+            guard let self, let left = self.passkeyRegistrations[id], left.received == nil else { return }
+            self.passkeyRegistrations[id] = nil
+            self.endOffer(id)
+        }
         reply(.init(re: request.id, typed: WireKinds.WebPasskey.Result(register: id, pages: pages, state: "waiting")))
     }
 
@@ -209,11 +228,19 @@ extension Requests {
             guard WebAuthn.base64url(made.id) == credential else { return refuse("the credential's id isn't its own") }
             registration.received = (credential, WebAuthn.base64url(made.publicKey), ActingPages.digest(credentials.token))
             passkeyRegistrations[id] = registration
+            // Answered: the offer ends on every page that holds it.
+            endOffer(id)
             note("a page registered a passkey (\(credential.prefix(12))): the terminal confirms it")
             reply(.init(re: request.id, result: .object(["id": .string(String(credential.prefix(12)))])))
         } catch {
             refuse("the passkey's registration didn't check: \(error)")
         }
+    }
+
+    /// The registration offer `id` ended (answered, run out): every page holding it told, so its button goes.
+    func endOffer(_ id: String) {
+        let message = NodeWire.Value.object(["v": .int(NodeWire.version), "kind": .string("passkey"), "op": .string("ended"), "register": .string(id)])
+        _ = pairings?.toPasskeyPages(NodeWire.message(message))
     }
 
     /// `web.passkey.add` `{register}` (the user's voice, recorded): the passkey a page registered kept in the vault.
