@@ -375,6 +375,33 @@ struct ActingPageTests {
         #expect(second.closes == ["acts-off"])
     }
 
+    /// Tabs of one browser sharing a pairing: each connection that comes with the token and its acting secret is
+    /// admitted as the pairing is (it watches and acts), at once and in any number; an off ends every one of them.
+    @Test func tabsSharingAPairingAreEachAdmitted() throws {
+        let vault = MemoryVaultV2()
+        let access = pageGate(vault, root: scratch.url("web-root"))
+        let acting = try #require(access.acting)
+        _ = try acting.set(level: "trust")
+        let (paired, code) = try pagePairs(access)
+        let secret = try pageConfirmed(access, code)
+        let admissions = Locked<[ObjectIdentifier: WebAdmission]>([:])
+        let screen = WebRequestScreen(Inner(), terminals: true, admissionOf: { admissions.value[ObjectIdentifier($0)] })
+        screen.acting = acting
+        let tabs = try (0..<3).map { _ -> Recorder in
+            let admission = try #require(access.admit(["token": .string(paired.token), "act": .string(secret)]))
+            #expect(admission.rights == [.read, .draft, .watch, .act])
+            let tab = Recorder()
+            admissions.value[ObjectIdentifier(tab)] = admission
+            screen.opened(tab, rights: admission.rights)
+            return tab
+        }
+        #expect(tabs.allSatisfy { screen.watching($0) })
+        let queue = DispatchQueue(label: "closes")
+        screen.endActing(code: "acts-off", reason: "off", closeOn: queue)
+        queue.sync {}
+        #expect(tabs.allSatisfy { $0.closes == ["acts-off"] })
+    }
+
     /// The re-read's R1: a refresh queued just before the level is lowered never puts the higher level back: the lower
     /// level counts at once, and the refresh's answer (asked before) is turned away when it comes.
     @Test func aRefreshQueuedBeforeALowerLevelNeverRaisesItAgain() async throws {
