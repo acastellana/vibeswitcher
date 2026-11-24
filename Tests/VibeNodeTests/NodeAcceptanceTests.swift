@@ -586,6 +586,91 @@ struct NodeAcceptanceTests {
         #expect(hooks.status == 0 && hooks.output.contains("Claude: hooks installed"), "\(hooks.output)\(hooks.errors)\n\(node.said)")
     }
 
+    // MARK: A49, a switch with open cards and a paired page
+
+    @Test("A49: vs switch with four open cards keeps each (id, version, draft), answers one by its old id after, and returns only once the new build's server answers and the paired page's listener is back")
+    func a49SwitchKeepsCardsAndPage() async throws {
+        let (a, b) = (String(repeating: "a", count: 40), String(repeating: "b", count: 40))
+        let installs = scratch.url("builds")
+        let buildA = try ScratchBuilds.install(commit: a, into: installs)
+        // B's server differs by a byte, as every switch between commits: the server is replaced after the handover.
+        var bytes = try Data(contentsOf: builtProducts.appendingPathComponent(BuildInfo.server))
+        bytes.append(0)
+        let padded = scratch.url("padded-server")
+        try bytes.write(to: padded)
+        _ = try ScratchBuilds.install(commit: b, into: installs, replacing: [BuildInfo.server: padded.path])
+        let node = try await ScratchNode(scratch, holdFirstLook: true, build: buildA, hostArguments: LiveScratch.webArguments, installRoot: installs)
+        defer { node.stop() }
+        let repo = try await Self.repository(node)
+        let lead = try await Self.startLead(node, repo, goal: "write the parser")
+        // Four open cards: a question (with a page's draft), an approval, held config, a base move.
+        try lead.tools.call("ask_user", ["question": "Which name for the parser?", "options": ["Parser", "Reader"]])
+        let question = try await EngineEndToEndTests.card(node, question: "Which name for the parser?")
+        let head = Git.run(["rev-parse", "main"], in: repo.path).output.trimmingCharacters(in: .whitespacesAndNewlines)
+        try lead.tools.call("ask_user", ["question": "Merge the parser?", "options": ["Approve \(head)", "Not yet"]])
+        let approval = try await EngineEndToEndTests.card(node, question: "Merge the parser?")
+        let settings = repo.appendingPathComponent(".claude/settings.json")
+        try FileManager.default.createDirectory(at: settings.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try #"{"env":{"A49":"1"}}"#.write(to: settings, atomically: true, encoding: .utf8)
+        let held = try await node.run(["config", "held", repo.path])
+        let config = try #require(ScratchNode.card(held.output, "config accept"), "\(held.output)")
+        try "moved\n".write(to: repo.appendingPathComponent("moved.txt"), atomically: true, encoding: .utf8)
+        _ = Git.run(["add", "moved.txt"], in: repo.path)
+        _ = Git.run(["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "moved outside a team session"], in: repo.path)
+        let shown = try await node.run(["base", "show", repo.path])
+        let base = try #require(ScratchNode.card(shown.output, "base accept"), "\(shown.output)")
+        let opened = try LiveScratch.open(node)
+        let page = try LivePage(port: opened.port)
+        _ = try page.send("auth", ["pair": .string(opened.code), "client": .string("test")])
+        let token = try #require(try page.next()?["auth"]?["token"]?.string)
+        let drafted = try page.send("draft", ["card": .string(question), "text": .string("Parser, keep Reader as an alias"), "version": .int(1)],
+                                    action: UUID().uuidString.lowercased())
+        let ack = try #require(try page.until { $0["re"]?.string == drafted }?.last)
+        #expect(ack["ok"]?.bool == true, "\(ack)")
+        let before = try #require(try await Self.cards(node))
+        let ids = [question, approval, config, base]
+        try #require(ids.allSatisfy { before[$0] != nil }, "\(before.keys.sorted())")
+        try #require(await eventually(timeout: 60) { ids.allSatisfy { node.keptCards().contains($0) } && node.keptCards().contains("keep Reader") }, "\(node.said)")
+        let serverBefore = try #require(node.serverPID)
+
+        let switched = try await node.runOnTerminal(["switch", b])
+        #expect(switched.status == 0 && switched.output.contains("handed over") && switched.output.contains("the new build's server answers")
+                && switched.output.contains("the web listener is back on port \(opened.port)"), "\(switched.output)\(switched.errors)\n\(node.said)")
+        // Right after it returns, a command reaches the new build's server.
+        let hello = try WireClient(node).hello
+        #expect(hello.server.pid != serverBefore && hello.server.commit == b, "\(hello.server)")
+        // The four cards, as they were.
+        let after = try #require(try await Self.cards(node))
+        for id in ids {
+            let card = try #require(after[id], "\(id) not kept: \(after.keys.sorted())\n\(node.said)")
+            #expect(card["code"] as? String == before[id]?["code"] as? String)
+            #expect((card["question"] as? [String: Any])?["version"] as? Int == (before[id]?["question"] as? [String: Any])?["version"] as? Int)
+        }
+        #expect((after[question]?["draft"] as? [String: Any])?["text"] as? String == "Parser, keep Reader as an alias", "\(String(describing: after[question]))")
+        #expect(!node.inbox(lead.session.tty).contains { $0.text.contains("no longer sees your open question") })
+        // The page paired before the switch is let in again with its token.
+        let again = try LivePage(port: opened.port)
+        _ = try again.send("auth", ["token": .string(token), "client": .string("test")])
+        let welcomed = try #require(try again.next())
+        #expect(welcomed["kind"]?.string == "hello", "\(welcomed)")
+        // Answered by its old id; the held config accepted by its old id too, and then (the seal no longer holding the
+        // project's team) the lead gets the user's answer.
+        let answered = try await node.runOnTerminal(["answer", question, "Parser"])
+        #expect(answered.status == 0 && answered.output.contains("answered: the lead is told"), "\(answered.output)\(answered.errors)\n\(node.said)")
+        let accepted = try await node.runOnTerminal(["config", "accept", config])
+        #expect(accepted.status == 0 && accepted.output.contains("accepted"), "\(accepted.output)\(accepted.errors)\n\(node.said)")
+        let posted = await eventually(timeout: 120) { node.inbox(lead.session.tty).contains { $0.text.hasSuffix(": Parser") && $0.from == .user } }
+        #expect(posted, "\(node.inbox(lead.session.tty))\n\(node.said)")
+    }
+
+    /// The open cards `questions --json` lists, by id.
+    static func cards(_ node: ScratchNode) async throws -> [String: [String: Any]]? {
+        let ran = try await node.run(["questions", "--json"])
+        guard ran.status == 0, let object = try? JSONSerialization.jsonObject(with: Data(ran.output.utf8)) as? [String: Any],
+              let cards = object["cards"] as? [[String: Any]] else { return nil }
+        return Dictionary(cards.compactMap { card in (card["id"] as? String).map { ($0, card) } }) { first, _ in first }
+    }
+
     // MARK: A22-A23, who may act as the user
 
     @Test("A22: vibeswitcher answer run from inside a session is refused: not the user's voice")

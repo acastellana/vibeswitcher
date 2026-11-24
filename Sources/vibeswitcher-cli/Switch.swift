@@ -17,12 +17,14 @@ import VibeNode
 ///    review), so it is waited for `SwitchRequest.longestWait`. A reply lost all the same is followed by a fresh look at
 ///    the host (`SwitchFollowUp.afterLostReply`): on the target with its pid unchanged it is handed over; otherwise the
 ///    refusal says the host may have switched and how to finish.
-/// 4. The follow-up (`SwitchFollowUp`), once the host handed over, or when it runs the target already and the unit or
+/// 4. Once handed over, the server that stays and a paired page's listener waited for (`SwitchSettle`): a command run
+///    right after the switch never reaches the outgoing server (2026-11-24).
+/// 5. The follow-up (`SwitchFollowUp`), once the host handed over, or when it runs the target already and the unit or
 ///    `current` lag behind it (a follow-up a failure left unfinished: `vs switch <target>` again finishes it): on a node
 ///    under systemd `apply` (the unit's `ExecStart`, `daemon-reload`, `current`); on a node started detached
 ///    `applyDetached` (`current` only: its `start` starts the build `vs` runs from). Each checks the host first through
 ///    a fresh, checked connection (`hostCheck`). A scratch node has no unit: "scratch node: no unit to rewrite".
-/// 5. The host's start line (ST-D24), read back and shown: from the journal (`NodeJournal.events`), or on a node
+/// 6. The host's start line (ST-D24), read back and shown: from the journal (`NodeJournal.events`), or on a node
 ///    started detached from the host's log (`NodeJournal.hostLogStart`).
 enum SwitchCommand {
     static let usage = "usage: vibeswitcher switch COMMIT | rollback"
@@ -101,6 +103,9 @@ enum SwitchCommand {
                     + "start_worker continues there, and their leads are told): " + parks.joined(separator: ", ")
                     + "\n  then it runs, unless one of them has begun a turn meanwhile (a change the seal holds under the builds or the unit's folder would still stop it: `vs config held`)")
 
+        // What the switch waits for before it returns (`SwitchSettle`): the server that stays, and a paired page's listener.
+        let serverBefore = client.hello.server
+        let webBefore = SwitchSettle.Web(status.web)
         let action = UUID().uuidString.lowercased()
         let said = TypedWord.said(approval: client.approvalRule, action: action, what: what)
         guard case .success(let typed) = said else { return Say.refused(said.refusal) }
@@ -130,12 +135,74 @@ enum SwitchCommand {
             }
             handedOver = result.outcome == "handed-over"
         }
+        if handedOver {
+            let due = SwitchSettle.serverDue(installRoot: buildsRoot(context, prefix: prefix, status: status), running: serverBefore.commit, target: target)
+            if let refused = settle(context, serverBefore: serverBefore, due: due, web: webBefore, target: target) {
+                Say.err("vibeswitcher: \(ConfigSeal.inert(refused.text, limit: .max))")
+                return refused.exitCode
+            }
+        }
         if let refused = followUp(context, prefix: prefix, accountHome: home, commit: target, handedOver: handedOver, hostPid: hostPid) {
             Say.err("vibeswitcher: \(ConfigSeal.inert(refused.text, limit: .max))")
             return refused.exitCode
         }
         Say.out(startLine(context, commit: target, hostPid: hostPid))
         return 0
+    }
+
+    /// Waits, after a handover, for the server that stays and, when a page held a token, its web listener on the same
+    /// port (`SwitchSettle`), each said as it comes; nil once both are there. A server that doesn't come in
+    /// `SwitchSettle.serverWait` (or a listener in `webWait`) is a refusal naming what is missing: the host handed over
+    /// all the same.
+    static func settle(_ context: NodeContext, serverBefore: NodeWire.Hello.Server, due: Bool?, web: SwitchSettle.Web?,
+                       target: String) -> StartRefusal? {
+        switch due {
+        case .some(true):
+            Say.out("the new build's server starts in place of pid \(serverBefore.pid) once the old one is idle (up to \(Int(SwitchSettle.serverWait)) s): waiting for it")
+        case .some(false): break
+        case .none:
+            Say.out("whether the server is replaced isn't known (its build's record or the target's can't be read): not waited for")
+        }
+        let started = Platform.Clock.steadyDate()
+        var answered: NodeWire.Hello.Server?
+        var why = "no server answered"
+        while answered == nil {
+            switch NodeClient.connect(context, warn: false) {
+            case .failure(.refused(let refusal)): return StartRefusal(refusal, exitCode: 77)
+            case .failure(let failure): why = failure.message
+            case .success(let client):
+                let server = client.hello.server
+                if SwitchSettle.serverSettled(pid: server.pid, commit: server.commit, before: serverBefore.pid, target: target, due: due) {
+                    answered = server
+                } else {
+                    why = "the server that answers is pid \(server.pid), build \(ConfigSeal.inert(server.commit, limit: 64))"
+                }
+            }
+            if answered != nil { break }
+            guard Platform.Clock.steadyDate().timeIntervalSince(started) < SwitchSettle.serverWait else {
+                return StartRefusal("handed over, but the new build's server didn't answer in \(Int(SwitchSettle.serverWait)) s (\(why)): "
+                                    + "`vs status` shows which answers; `vs switch \(target)` again finishes the follow-up", exitCode: 1)
+            }
+            usleep(250_000)
+        }
+        if let answered, due == true { Say.out("the new build's server answers: pid \(answered.pid), build \(ConfigSeal.inert(answered.commit, limit: 64))") }
+        guard let web, web.awaited else { return nil }
+        let waited = Platform.Clock.steadyDate()
+        var now: SwitchSettle.Web?
+        while true {
+            if case .success(let client) = NodeClient.connect(context, warn: false),
+               case .success(let status, _) = client.read(WireKinds.Status.self, WireNoArgs()) {
+                now = SwitchSettle.Web(status.web)
+                if SwitchSettle.webSettled(before: web, now: now) { break }
+            }
+            guard Platform.Clock.steadyDate().timeIntervalSince(waited) < SwitchSettle.webWait else {
+                let seen = now.map { $0.listening ? "listening on port \($0.port.map(String.init) ?? "none")" : "not listening" } ?? "not known"
+                return StartRefusal("handed over, but the web listener isn't back on port \(web.port ?? 0) (\(seen)): `vibeswitcher web` opens it again", exitCode: 1)
+            }
+            usleep(250_000)
+        }
+        Say.out("the web listener is back on port \(web.port ?? 0): a page paired before the switch reconnects by itself")
+        return nil
     }
 
     /// What the follow-up writes on this node (`NodeTexts.SwitchRewrites`), for the confirmation.
