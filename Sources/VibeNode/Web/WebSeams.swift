@@ -53,12 +53,15 @@ public struct WebAdmission: Sendable {
     /// An acting page's acting secret (`ActingPages`): given once at its pairing, sent again with the token on a
     /// reconnect from the page's memory; nil for a page that doesn't act.
     public var act: String?
+    /// A pairing just taken that waits for the terminal's confirmation (`PagePairing`): its code id.
+    public var pairing: String?
 
-    public init(rights: LiveRights, auth: NodeWire.Value, token: String, act: String? = nil) {
+    public init(rights: LiveRights, auth: NodeWire.Value, token: String, act: String? = nil, pairing: String? = nil) {
         self.rights = rights
         self.auth = auth
         self.token = token
         self.act = act
+        self.pairing = pairing
     }
 }
 

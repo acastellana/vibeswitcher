@@ -102,9 +102,9 @@ export const shapes = {
   "draft.result": {"fields":[{"name":"applied","type":{"map":"int"}},{"name":"card","type":"string"}],"from":"Requests.draft"},
   "entry": {"fields":[{"name":"id","type":"string"},{"name":"value","type":"any"}],"from":"the contract's §3 and §4 until B1's LiveStream"},
   "event": {"fields":[{"name":"v","type":"int"},{"name":"kind","type":"string"},{"name":"must","optional":true,"type":"bool"}],"from":"any event a client doesn't know"},
-  "failure": {"fields":[{"name":"code","type":{"words":["unknown-kind","version","bad-args","voice","refused","stopping","not-yet","gone","changed","internal"]}},{"name":"message","type":"string"}],"from":"NodeWire.Failure"},
+  "failure": {"fields":[{"name":"code","type":{"words":["unknown-kind","version","bad-args","voice","refused","stopping","not-yet","gone","changed","acts-ended","internal"]}},{"name":"message","type":"string"}],"from":"NodeWire.Failure"},
   "hello": {"fields":[{"name":"v","type":"int"},{"name":"kind","type":{"words":["hello"]}},{"name":"node","type":"string"},{"name":"epoch","type":"string"},{"name":"server","type":{"shape":"hello.server"}},{"name":"host","type":{"shape":"hello.host"}},{"name":"kinds","type":{"list":"string"}},{"name":"peer","type":{"shape":"hello.peer"}},{"name":"rule","type":{"words":["systemd","weaker","closed","approval"]}},{"name":"auth","optional":true,"type":{"shape":"hello.auth"}},{"name":"assets","optional":true,"type":"string"},{"name":"plugins","optional":true,"type":{"list":{"shape":"hello.plugin"}}}],"from":"NodeWire.Hello"},
-  "hello.auth": {"fields":[{"name":"rights","type":{"list":{"words":["read","draft","act"]}}},{"name":"token","optional":true,"type":"string"},{"name":"act","optional":true,"type":"string"},{"name":"expiresAt","type":"date"}],"from":"the web gate (F1)"},
+  "hello.auth": {"fields":[{"name":"rights","type":{"list":{"words":["read","draft","watch","act"]}}},{"name":"token","optional":true,"type":"string"},{"name":"phrase","optional":true,"type":"string"},{"name":"act","optional":true,"type":"string"},{"name":"expiresAt","type":"date"}],"from":"the web gate (F1)"},
   "hello.host": {"fields":[{"name":"startedAt","optional":true,"type":"date"},{"name":"notes","optional":true,"type":{"shape":"host.notes"}},{"name":"pid","optional":true,"type":"int"}],"from":"NodeWire.Hello.Host"},
   "hello.peer": {"fields":[{"name":"voice","type":{"words":["user","other"]}},{"name":"why","optional":true,"type":"string"}],"from":"NodeWire.Hello.Peer"},
   "hello.plugin": {"fields":[{"name":"id","type":"string"},{"name":"title","type":"string"}],"from":"PluginRegistry.onValue"},
@@ -140,7 +140,8 @@ export const shapes = {
   "node.usage": {"fields":[{"name":"account","type":{"nullable":"string"}},{"name":"limits","type":{"list":{"shape":"node.usage.limit"}}},{"name":"ignored","type":"bool"},{"name":"threshold","type":"int"},{"name":"fableHeldBack","type":{"nullable":"date"}}],"from":"NodeUsage.value"},
   "node.usage.limit": {"fields":[{"name":"name","type":"string"},{"name":"label","type":"string"},{"name":"model","type":{"nullable":"string"}},{"name":"usedPercent","type":"int"},{"name":"reached","type":"bool"},{"name":"resetsAt","type":{"nullable":"date"}},{"name":"holds","type":"bool"},{"name":"text","type":"string"}],"from":"NodeUsage.value"},
   "node.web": {"fields":[{"name":"state","type":"string"},{"name":"port","type":{"nullable":"int"}},{"name":"tokens","type":"int"},{"name":"connections","type":"int"},{"name":"acts","optional":true,"type":{"shape":"node.web.acts"}}],"from":"the contract's §5 until B2's NodeStatusStore"},
-  "node.web.acts": {"fields":[{"name":"on","type":"bool"},{"name":"since","type":{"nullable":"date"}},{"name":"pages","type":"int"}],"from":"ActingPages.value"},
+  "node.web.acts": {"fields":[{"name":"level","optional":true,"type":{"words":["off","confirm","trust"]}},{"name":"on","type":"bool"},{"name":"since","type":{"nullable":"date"}},{"name":"pages","type":"int"}],"from":"ActingPages.value"},
+  "paired": {"fields":[{"name":"v","type":"int"},{"name":"kind","type":{"words":["paired"]}},{"name":"act","type":"string"},{"name":"rights","type":{"list":{"words":["read","draft","watch","act"]}}},{"name":"kinds","type":{"list":"string"}}],"from":"WebRequestScreen.confirmPairing"},
   "recent.args": {"fields":[],"from":"Requests.recent"},
   "recent.project": {"fields":[{"name":"folder","type":"string"},{"name":"lastUsed","type":{"nullable":"date"}},{"name":"lead","type":{"nullable":"string"}}],"from":"Requests.recent"},
   "recent.result": {"fields":[{"name":"projects","type":{"list":{"shape":"recent.project"}}}],"from":"Requests.recent"},
@@ -214,7 +215,7 @@ export function frameKind(value) {
   if (!isObject(value)) return "event";
   if (has(value, "re")) return "reply";
   if (has(value, "id")) return "request";
-  return ["hello", "bye", "snapshot", "delta"].includes(value.kind) ? value.kind : "event";
+  return ["hello", "bye", "snapshot", "delta", "paired"].includes(value.kind) ? value.kind : "event";
 }
 
 export function validate(kind, value) {

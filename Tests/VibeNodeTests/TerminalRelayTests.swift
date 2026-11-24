@@ -264,7 +264,7 @@ struct TerminalRelayTests {
         #expect(try ServerArguments.parse(base + ["--root", "/x"]).get().webTerminal == nil)
         let open = NodeWire.Request(id: "t", kind: "term.open")
         #expect(WebAccess.refusal(for: open, rights: WebAccess.rights)?.error?.code == NodeWire.Code.unknownKind.rawValue)
-        #expect(WebAccess.refusal(for: open, rights: WebAccess.rights, terminals: true) == nil)
+        #expect(WebAccess.refusal(for: open, rights: WebAccess.rights.union(.watch), terminals: true) == nil)
         #expect(WebAccess.refusal(for: open, rights: [], terminals: true)?.error?.code == NodeWire.Code.voice.rawValue)
     }
 
@@ -323,13 +323,24 @@ final class TermPage {
         guard status == 101 else { throw RawClient.Failure("the upgrade was answered \(status)") }
     }
 
-    /// `web.open` in the scratch form, the upgrade, `auth` with the code, and its `hello`.
+    /// `web.open` in the scratch form, the upgrade, `auth` with the code, and its `hello`; then the pairing confirmed as
+    /// the terminal does (`LiveScratch.confirm`), and its `paired` message, which carries the right to watch (the acting
+    /// review's fix C: a page that only reads watches no terminal). Its `hello` is the paired one's kinds as well.
     static func paired(_ node: ScratchNode) throws -> TermPage {
         let opened = try LiveScratch.open(node)
         let page = try TermPage(port: opened.port)
         _ = try page.send("auth", ["pair": .string(opened.code), "client": .string("test")])
         page.hello = try page.next()?.json
         guard page.hello?["kind"]?.string == "hello" else { throw RawClient.Failure("no hello: \(String(describing: page.hello))") }
+        try LiveScratch.confirm(node, code: opened.code)
+        let paired = try page.next()?.json
+        guard paired?["kind"]?.string == "paired", paired?["rights"]?.array?.contains(.string("watch")) == true else {
+            throw RawClient.Failure("no paired message: \(String(describing: paired))")
+        }
+        if case .object(var hello)? = page.hello {
+            hello["kinds"] = paired?["kinds"]
+            page.hello = .object(hello)
+        }
         return page
     }
 

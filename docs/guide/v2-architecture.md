@@ -30,12 +30,11 @@ enforces that.
 | The user's terminal | A peer of the uid that passes `Voice.judge`: its cgroup in one of the login's terminal scopes (systemd rule), no live session's program in its ancestry, a controlling terminal that is no session's, no `VIBESWITCHER_SESSION`, not under a branch runner. Under the weaker rule (no systemd) it also needs a controlling terminal. | Every kind. A state change also needs the code typed on `/dev/tty`. The vault records it first, and it leaves a journal entry. |
 | A session (any process of the uid that isn't the user's) | Everything else on the Unix socket | The reads the table marks "anyone of the uid". With the host: its own children; a lead also its team. |
 | A lead's tool server | The host's seal on its post, bound to the lead's role in the vault | `question.post`, `question.revise`, `question.withdraw`: questions on cards, never answers. |
-| A page | A token from `vibeswitcher web`'s pairing, with rights `read`, `draft` and, on the user's node, a terminal to watch | Reads, and drafts (an answer, a message). Never the user's voice: the user acts on a draft with the line the page shows, in a terminal (S7). |
+| A page | A token the host's vault knows, from `vibeswitcher web`'s pairing; on loopback, its pairing confirmed in that terminal by its phrase, and a pairing secret held in the page's memory (12 hours at most) | Reads and drafts. Confirmed: watches the terminals, and, as `web_acts` allows (`off`, `confirm`, `trust`), sends the user's kinds the table marks for a page, recorded as the user's and marked as the page's (`pageVoiced`). A tailnet page only reads and drafts. |
 | The host | Its own socket; the server is "the app" through its connector | Sessions, the vault, handover. Only the app may shut the host down, hand over, or use the server's vault record. |
 
-A kind missing from `NodeWire.kinds` needs the user's voice and counts as a state change, so a kind added later fails
-closed. Under the Mac's rule (`VoiceRule.Mode.approval`), Touch ID or the login password takes the typed code's
-place. Under the closed rule (the server couldn't read its own cgroup), no peer is the user's.
+A kind missing from the table needs the user's voice and counts as a state change: a later kind fails closed. Under the
+Mac's rule Touch ID or the login password stands for the typed code; under the closed rule, no peer is the user's.
 
 ## A request's path
 
@@ -49,10 +48,9 @@ On the server:
 1. **Envelope** (`NodeWire.unwrap`, the same on both transports). The message must be a JSON object, a request
    (`v`, `id`, `kind`), at no newer a version. Otherwise the connection gets a `bye` with its code. A kind the server
    doesn't take is answered `unknown-kind`; with `must`, the connection ends.
-2. **Transport**. On the Unix socket, `LiveHub.kinds` go to the hub; the rest go to `Requests.handle` with the
-   peer's facts (`PeerFacts`, read from the kernel). On a WebSocket, the token's rights are checked first
-   (`WebRequestScreen`). Drafts go to `draft`, private reads to `webRead`, anything else to `Requests.handle` as
-   `webPeer`, which is never the user's.
+2. **Transport** (`Principal.route`). On the Unix socket, the hub's kinds go to the hub, the rest to `Requests.handle`
+   with the peer's facts. On a WebSocket (`WebRequestScreen`): drafts to `draft`, private reads to `webRead`, an acting
+   page's user's kinds to `pageVoiced`, anything else to `Requests.handle` as `webPeer`, which is never the user's.
 3. **Voice** (`Requests.handle`). The kind's voice decides: the tool server's posts go to `questionPost` (host-sealed);
    the user's kinds pass `Voice.judge`, then, for a state change, the hands check (`Voice.handsRefusal`).
 4. **Checks** (`Requests.voiced`). An action this server has answered, or is doing now, is answered so first (its
@@ -243,6 +241,8 @@ taken on the Unix socket.
 | `term.open` | a page's terminal (a page only) | yes |  |  | the terminal relay |  | the page's (WireSchema) |  |  |  |
 | `unsubscribe` | anyone of the uid |  |  |  | the live hub |  | the page's (WireSchema) |  |  |  |
 | `update.check` | the user's terminal |  |  |  | `Requests.act` |  | `WireKinds.UpdateCheck` |  |  | yes |
+| `web.confirm` | the user's terminal | yes | yes |  | `Requests.act` | `code`, `phrase` | `WireKinds.WebConfirm` | its result |  | the terminal's alone |
 | `web.open` | the user's terminal | yes | yes |  | `Requests.act` | `tailnet` | `WireKinds.WebOpen` | done, no result |  | the terminal's alone |
+| `web.pairing` | the user's terminal |  |  |  | `Requests.act` |  | `WireKinds.WebPairing` |  |  | the terminal's alone |
 | `web.revoke` | the user's terminal | yes | yes |  | `Requests.act` | none | `WireKinds.WebRevoke` | its result; done again |  | yes |
 <!-- kinds-table end -->

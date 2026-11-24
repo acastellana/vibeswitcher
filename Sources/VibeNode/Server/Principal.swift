@@ -77,7 +77,8 @@ public enum Principal: Sendable, Equatable {
             case .leadToolServer: return .refused(.voice, "\(shown) is the lead's tool server's alone")
             case .webTerminal:
                 guard terminals else { return .unknown }
-                return rights.contains(.read) ? .terminal : noRead
+                // Watching needs a pairing the user confirmed in a terminal (the acting review's fix C).
+                return rights.contains(.watch) ? .terminal : .refused(.voice, "watching a terminal needs this page's pairing confirmed in a terminal (`vibeswitcher web`)")
             }
         }
     }

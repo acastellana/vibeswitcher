@@ -120,32 +120,45 @@ public enum LeadVaultV2 {
         /// The user set a plugin's setting `key` to `value` (nil: back to its default): kept here, where no session's write
         /// reaches, as on and off are.
         case setPluginSetting(key: String, value: String?)
-        /// Acting from the page (the web UI design's step 2): whether the user turned it on, since when, and the acting
-        /// pages' tokens, by SHA-256. Answered `pageActs`.
+        /// Acting from the page (the web UI design's step 2): its level, since when it is above off, the acting pairings
+        /// (by `ActingPages.key`) and every page token the node admits (by scope and SHA-256). Answered `pageActs`.
         case pageActs
-        /// The user turned acting from the page on or off (`vibeswitcher set web_acts`, the user's voice, recorded first):
-        /// on keeps its first `since`; off drops every acting token too, so on again needs a new pairing.
-        case setPageActs(on: Bool)
-        /// A page paired while acting is on (its pairing code the user's `vibeswitcher web`): its token, by SHA-256, acts
-        /// until `until` (the token's own end). Refused while off.
+        /// The user set acting from the page to `level` (`vibeswitcher set web_acts`, the user's voice, recorded first):
+        /// `off`, `confirm` or `trust`. Off drops every acting pairing too, so on again needs a new pairing.
+        case setPageActs(level: String)
+        /// A pairing the user confirmed in a terminal: its key acts (and watches) until `until`. Refused while off for
+        /// acting; kept for watching whatever the level (`watchOnly`).
         case addActingToken(sha256: String, until: Double)
-        /// These acting tokens act no more (nil: every one: the user's revoke).
+        /// These acting pairings act no more (nil: every one: the user's revoke).
         case dropActingTokens([String]?)
+        /// A page token the node issued (a pairing code taken) for `scope` (`loopback` or `tailnet`): admitted until
+        /// `until`. The vault is the only authority on page tokens: a token file any process writes is not.
+        case addPageToken(scope: String, sha256: String, until: Double)
+        /// These page tokens of `scope` are admitted no more (nil: every one: the user's revoke).
+        case dropPageTokens(scope: String, tokens: [String]?)
         /// `recordUserAction` for a request made from a page: `via` says which page (its token's id, its origin).
         case recordPageAction(action: String, kind: String, subject: String?, digest: String, via: String)
     }
 
-    /// Acting from the page as the record keeps it: since when it is on (nil: off) and the acting pages' keys (the
-    /// SHA-256 of a page's token with its acting secret, `ActingPages.key`), each with its end, live ones only.
+    /// Acting from the page as the record keeps it: its level (`off`, `confirm`, `trust`), since when it is above off,
+    /// the confirmed pairings' keys (the SHA-256 of a page's token with its pairing secret, `ActingPages.key`) and every
+    /// admitted page token (`<scope>:<sha256>`), each with its end, live ones only.
     public struct PageActs: Codable, Equatable, Sendable {
+        public var level: String
         public var since: Double?
         public var tokens: [String: Double]
-        public var on: Bool { since != nil }
-        public init(since: Double?, tokens: [String: Double]) {
+        public var pages: [String: Double]
+        public var on: Bool { level != "off" }
+        public init(level: String = "off", since: Double? = nil, tokens: [String: Double] = [:], pages: [String: Double] = [:]) {
+            self.level = level
             self.since = since
             self.tokens = tokens
+            self.pages = pages
         }
     }
+
+    /// Acting from the page's levels, lowest first.
+    public static let pageActsLevels = ["off", "confirm", "trust"]
 
     public enum Reply: Codable, Equatable, Sendable {
         case recorded(first: Bool)
@@ -390,44 +403,73 @@ public enum LeadVaultV2 {
             return .pluginSettings(record.pluginSettings)
         case .pageActs:
             return .pageActs(pageActs(&record, now: now))
-        case .setPageActs(let on):
-            if on {
-                if record.plugin[pageSinceKey] == nil { record.plugin[pageSinceKey] = String(now) }
-            } else {
+        case .setPageActs(let level):
+            guard pageActsLevels.contains(level) else { return .refused("Acting from the page is off, confirm or trust.") }
+            if level == "off" {
+                record.plugin[pageLevelKey] = nil
                 record.plugin[pageSinceKey] = nil
                 for key in record.plugin.keys where key.hasPrefix(pageTokenPrefix) { record.plugin[key] = nil }
+            } else {
+                if record.plugin[pageSinceKey] == nil { record.plugin[pageSinceKey] = String(now) }
+                record.plugin[pageLevelKey] = level
             }
             return .pageActs(pageActs(&record, now: now))
         case .addActingToken(let sha256, let until):
-            guard record.plugin[pageSinceKey] != nil else { return .refused("Acting from the page is off: no page acts.") }
-            guard sha256.utf8.count == 64, sha256.unicodeScalars.allSatisfy({ ("0"..."9").contains($0) || ("a"..."f").contains($0) }) else {
-                return .refused("A token is kept by its SHA-256, 64 lower-case hex digits.")
-            }
-            guard until > now else { return .refused("That token has run out.") }
+            guard hexDigest(sha256) else { return .refused("A pairing is kept by its SHA-256, 64 lower-case hex digits.") }
+            guard until > now else { return .refused("That pairing has run out.") }
             _ = pageActs(&record, now: now)
             record.plugin[pageTokenPrefix + sha256] = String(until)
-            // The newest `actingTokensKept` at most.
-            let acting = Book.part(record.plugin, pageTokenPrefix).compactMapValues(Double.init).sorted { $0.value > $1.value }
-            for (old, _) in acting.dropFirst(actingTokensKept) { record.plugin[pageTokenPrefix + old] = nil }
+            keepNewest(&record, pageTokenPrefix, actingTokensKept)
             return .pageActs(pageActs(&record, now: now))
         case .dropActingTokens(let tokens):
             for key in record.plugin.keys where key.hasPrefix(pageTokenPrefix) {
                 if tokens.map({ $0.contains(String(key.dropFirst(pageTokenPrefix.count))) }) ?? true { record.plugin[key] = nil }
             }
             return .pageActs(pageActs(&record, now: now))
+        case .addPageToken(let scope, let sha256, let until):
+            guard ["loopback", "tailnet"].contains(scope) else { return .refused("A page token's scope is loopback or tailnet.") }
+            guard hexDigest(sha256) else { return .refused("A token is kept by its SHA-256, 64 lower-case hex digits.") }
+            guard until > now else { return .refused("That token has run out.") }
+            _ = pageActs(&record, now: now)
+            record.plugin[pagesPrefix + scope + ":" + sha256] = String(until)
+            keepNewest(&record, pagesPrefix + scope + ":", pageTokensKept)
+            return .pageActs(pageActs(&record, now: now))
+        case .dropPageTokens(let scope, let tokens):
+            let prefix = pagesPrefix + scope + ":"
+            for key in record.plugin.keys where key.hasPrefix(prefix) {
+                if tokens.map({ $0.contains(String(key.dropFirst(prefix.count))) }) ?? true { record.plugin[key] = nil }
+            }
+            return .pageActs(pageActs(&record, now: now))
         }
+    }
+
+    static func hexDigest(_ text: String) -> Bool {
+        text.utf8.count == 64 && text.unicodeScalars.allSatisfy { ("0"..."9").contains($0) || ("a"..."f").contains($0) }
+    }
+
+    /// The newest `kept` entries under `prefix` (by their end), the rest dropped.
+    static func keepNewest(_ record: inout Book, _ prefix: String, _ kept: Int) {
+        let entries = Book.part(record.plugin, prefix).compactMapValues(Double.init).sorted { $0.value > $1.value }
+        for (old, _) in entries.dropFirst(kept) { record.plugin[prefix + old] = nil }
     }
 
     /// Acting from the page now: its tokens past their end dropped first.
     static func pageActs(_ record: inout Book, now: Double) -> PageActs {
-        for (sha, until) in Book.part(record.plugin, pageTokenPrefix) where (Double(until) ?? 0) <= now { record.plugin[pageTokenPrefix + sha] = nil }
-        return PageActs(since: record.plugin[pageSinceKey].flatMap(Double.init),
-                        tokens: Book.part(record.plugin, pageTokenPrefix).compactMapValues(Double.init))
+        for prefix in [pageTokenPrefix, pagesPrefix] {
+            for (key, until) in Book.part(record.plugin, prefix) where (Double(until) ?? 0) <= now { record.plugin[prefix + key] = nil }
+        }
+        return PageActs(level: record.plugin[pageLevelKey] ?? "off", since: record.plugin[pageSinceKey].flatMap(Double.init),
+                        tokens: Book.part(record.plugin, pageTokenPrefix).compactMapValues(Double.init),
+                        pages: Book.part(record.plugin, pagesPrefix).compactMapValues(Double.init))
     }
 
     /// Where acting from the page is kept, in the one plugin field (`Book.plugin`: no stored field of its own, see there).
     static let pageSinceKey = "page:since"
-    static let pageTokenPrefix = "page:token:"
+    static let pageLevelKey = "page:level"
+    static let pageTokenPrefix = "page:act:"
+    static let pagesPrefix = "page:tok:"
+    /// How many page tokens of a scope the record keeps (a token store keeps fewer: `WebTokens.cap`).
+    public static let pageTokensKept = 32
     /// How many acting tokens the record keeps (a token's own store keeps fewer: `WebTokens.cap`).
     public static let actingTokensKept = 32
 
@@ -574,7 +616,17 @@ public struct LeadVaultV2Client: Sendable {
     public func pageActs() throws -> LeadVaultV2.PageActs { try pageActsReply(.pageActs) }
 
     /// The user turned acting from the page on or off.
-    public func setPageActs(on: Bool) throws -> LeadVaultV2.PageActs { try pageActsReply(.setPageActs(on: on)) }
+    public func setPageActs(level: String) throws -> LeadVaultV2.PageActs { try pageActsReply(.setPageActs(level: level)) }
+
+    /// A page token the node issued for `scope`, admitted until `until`.
+    public func addPageToken(scope: String, sha256: String, until: Double) throws -> LeadVaultV2.PageActs {
+        try pageActsReply(.addPageToken(scope: scope, sha256: sha256, until: until))
+    }
+
+    /// These page tokens of `scope` admitted no more (nil: every one).
+    public func dropPageTokens(scope: String, _ tokens: [String]?) throws -> LeadVaultV2.PageActs {
+        try pageActsReply(.dropPageTokens(scope: scope, tokens: tokens))
+    }
 
     /// A page paired while acting is on: its token acts until `until`.
     public func addActingToken(sha256: String, until: Double) throws -> LeadVaultV2.PageActs {

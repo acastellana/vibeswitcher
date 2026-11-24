@@ -315,6 +315,27 @@ extension WireKinds {
 
     /// `approve.list [only]`: what one code would settle (`items`, with the batch's id and code when there are any), what
     /// needs the user's own decision (`own`, `decide`: open questions and plugin cards, `pushes`: leads' roots).
+    /// `web.pairing` (the user's, from the terminal that ran `vibeswitcher web`): whether a page took its address, the
+    /// phrase that page shows, and whether another tried the address after.
+    public enum WebPairing: WireKind {
+        public static let kind = "web.pairing"
+        public struct Args: Codable, Sendable, Equatable {
+            public var code: String?
+            public init(code: String) { self.code = code }
+        }
+        public struct Result: Codable, Sendable, Equatable {
+            /// `waiting`, `taken`, or `gone` (its page closed before the confirmation).
+            public var state: String?
+            public var phrase: String?
+            public var contested: Bool?
+            public init(state: String, phrase: String?, contested: Bool?) {
+                self.state = state
+                self.phrase = phrase
+                self.contested = contested
+            }
+        }
+    }
+
     public enum ApproveList: WireKind {
         public static let kind = "approve.list"
 

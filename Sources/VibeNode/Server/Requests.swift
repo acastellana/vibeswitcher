@@ -135,8 +135,13 @@ public final class Requests: @unchecked Sendable {
     public var tailnet: TailnetWeb?
     /// Acting from the page (`ActingPages`, set by `NodeLive`): what `set web_acts` keeps; none: refused.
     public var actingPages: ActingPages?
-    /// The confirmation an acting page's request passes before it is acted on (`PageVoice`): none today.
+    /// The confirmation an acting page's request passes at the level `trust` (`PageVoice`): none.
     public var pageVoice: PageVoice = NoPageVoice()
+    /// The confirmation at the level `confirm`: a passkey per request, not built yet (it refuses every request, and
+    /// `set web_acts confirm` is refused meanwhile).
+    public var confirmVoice: PageVoice = PasskeyNotBuilt()
+    /// The loopback screen's pairings (`NodeLive`): whether a pairing's connection is open, and its confirmation.
+    public var pairings: PairingSeat?
     /// The page mark of each action an acting page asked, while it is done (`approve`'s items are recorded with it). On
     /// `queue`.
     var pageMarks: [String: String] = [:]
@@ -256,7 +261,8 @@ public final class Requests: @unchecked Sendable {
     public func webHello(_ admission: WebAdmission, assets: String) -> NodeWire.Hello {
         var hello = hello(peer: nil)
         hello.kinds = WebAccess.kinds(for: admission.rights)
-        hello.peer = .init(voice: "other", why: admission.rights.contains(.act) ? WebAccess.actingWhy : WebAccess.peerWhy)
+        hello.peer = .init(voice: "other", why: admission.rights.contains(.act) ? WebAccess.actingWhy
+                                                : admission.rights.contains(.watch) ? WebAccess.watchingWhy : WebAccess.peerWhy)
         hello.auth = admission.auth
         hello.assets = assets
         return hello
@@ -339,7 +345,9 @@ public final class Requests: @unchecked Sendable {
             refusalNote(facts.pid, "refused \(request.kind) from pid \(facts.pid): a draft comes from a web page")
             return reply(.init(re: request.id, error: .init(code, why)))
         }
-        if request.kind == "web.open", openWebForAnyone, request.args?["tailnet"] == nil {
+        // A scratch server's form (--test-web-pair, refused on the user's node): a test pairs its page, and confirms it
+        // (`web.pairing`, `web.confirm`), from its own socket, as it opens the web.
+        if ["web.open", "web.pairing", "web.confirm"].contains(request.kind), openWebForAnyone, request.args?["tailnet"] == nil {
             note("web.open from pid \(facts.pid), in a scratch server's form (--test-web-pair): no voice asked")
             return act(request, from: facts, reply: reply)
         }
@@ -429,6 +437,8 @@ public final class Requests: @unchecked Sendable {
         case "brief": brief(request, reply: reply)
         case "update.check": updateCheck(request, reply: reply)
         case "approve.list": approveList(request, reply: reply)
+        case "web.pairing": webPairing(request, reply: reply)
+        case "web.confirm": webConfirm(request, reply: reply)
         case "approve": approve(request, from: facts, reply: reply)
         case "plugin.list": pluginList(request, page: facts.pid == NodeLive.webPeer.pid, reply: reply)
         case "plugin.on", "plugin.off": pluginSet(request, reply: reply)

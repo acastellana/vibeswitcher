@@ -31,7 +31,7 @@ extension Requests {
         let acting = self.actingPages
         (engine?.work ?? DispatchQueue.global(qos: .userInitiated)).async {
             // Acting from the page as the vault says (asked here, off the queue), never a file.
-            let actingNow = acting.map { $0.refreshLater(); $0.settled(); return $0.state?.on == true ? "on" : "off" } ?? "off"
+            let actingNow = acting.map { $0.refreshLater(); $0.settled(); return $0.level } ?? "off"
             let node = NodeSettings.node(files: files).map { shown in
                 var shown = shown
                 if shown.setting.home == .acting { shown.value = actingNow }
@@ -146,42 +146,49 @@ extension Requests {
     func setActing(_ request: NodeWire.Request, reply: @escaping (NodeWire.Reply) -> Void) {
         let refuse = { (code: NodeWire.Code, why: String) in reply(.init(re: request.id, error: .init(code, why))) }
         guard request.args?["folder"] == nil else { return refuse(.badArgs, "web_acts is the node's: name no folder") }
-        guard let given = request.args?["value"]?.string, ["on", "off", "default"].contains(given) else {
-            return refuse(.badArgs, "web_acts is on or off (default: off)")
+        guard let given = request.args?["value"]?.string, (ActingPages.levels + ["default"]).contains(given) else {
+            return refuse(.badArgs, "web_acts is off, confirm or trust (default: off)")
+        }
+        let level = given == "default" ? "off" : given
+        guard level != "confirm" || ActingPages.confirmBuilt else {
+            return refuse(.refused, "web_acts confirm asks for your passkey at each act, and that check isn't built yet: off or trust for now")
         }
         guard let acting = actingPages else { return refuse(.refused, "this server has no web page") }
-        let on = given == "on", queue = self.queue, note = self.note
-        let was = acting.state?.on == true ? "on" : "off"
+        let queue = self.queue, note = self.note
+        let was = acting.level
         DispatchQueue.global(qos: .userInitiated).async {
-            let kept = Result { try acting.set(on: on) }
+            let kept = Result { try acting.set(level: level) }
             queue.async {
                 switch kept {
                 case .failure(let error):
                     note("set web_acts: not changed: \(error)")
                     refuse(.refused, ConfigSeal.inert("\(error)", limit: 2_000))
                 case .success(let acts):
-                    var result = WireKinds.SetSetting.Result(key: "web_acts", value: acts.on ? "on" : "off", was: was, scope: "node", project: nil, told: nil)
-                    result.say = acts.on ? Self.actingOnSaid : Self.actingOffSaid
+                    var result = WireKinds.SetSetting.Result(key: "web_acts", value: acts.level, was: was, scope: "node", project: nil, told: nil)
+                    result.say = Self.actingSaid[acts.level] ?? []
                     reply(.init(re: request.id, typed: result))
                 }
             }
         }
     }
 
-    /// What turning acting from the page on means, said to the terminal that turns it on (the user's decision of
-    /// 2026-11-23, and what it costs).
-    static let actingOnSaid = [
-        "Acting from the page is on. A page on this machine (http://127.0.0.1), paired from now on with `vibeswitcher web`, may do",
-        "everything the command line does, as you, with no code typed: answer and approve, accept, send, tell, start and end sessions,",
-        "settings, stop. Each act is recorded in the host's vault as yours, marked as the page's.",
-        "What it costs: any process that reaches a paired page's token can act as you, a team's own session included (it could",
-        "approve its own merge). A page reached over the tailnet still only reads and drafts.",
-        "Pages paired before now don't act: run `vibeswitcher web` and open its address. `vibeswitcher set web_acts off` ends it.",
-    ]
-
-    static let actingOffSaid = [
-        "Acting from the page is off: every acting page's connection was closed, and no page token acts any more.",
-        "Pages still read and draft. Turning it on again needs a new pairing (`vibeswitcher web`).",
+    /// What each level means, said to the terminal that sets it (the user's decisions of 2026-11-23 and 2026-11-24, and
+    /// what `trust` costs).
+    static let actingSaid: [String: [String]] = [
+        "trust": [
+            "Acting from the page: trust. A page on this machine, paired with `vibeswitcher web` and confirmed here by its phrase, may do",
+            "what the command line does, as you, with no code typed: answer and approve, accept, send, tell, start and end sessions, settings,",
+            "stop. Each act is recorded in the host's vault as yours, marked as the page's. A reload, or 12 hours, ends a page's acting.",
+            "What it risks: whatever holds the page's token and its pairing secret while it is open acts as you, a team's own session",
+            "included (it could approve its own merge). A page over the tailnet still only reads and drafts. `vibeswitcher set web_acts off` ends it.",
+        ],
+        "confirm": [
+            "Acting from the page: confirm. Each act from a paired page asks for your passkey first.",
+        ],
+        "off": [
+            "Acting from the page is off: every page's pairing was dropped and its acting connection closed; pages read and draft.",
+            "To watch the terminals or act again, pair a page anew (`vibeswitcher web`, confirmed here by its phrase).",
+        ],
     ]
 }
 

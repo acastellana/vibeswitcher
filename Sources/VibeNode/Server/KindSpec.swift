@@ -213,6 +213,12 @@ public struct KindSpec: Sendable {
                  voiced: .recorded(.init(arguments: .ofType, keepsResult: false, rerun: false, carded: false, batch: false, phrase: "open the web page to a device", dialog: .asArguments))),
         KindSpec("web.revoke", sender: .user, effect: .change, servedBy: .requests, page: .acts, wire: .typed(WireKinds.WebRevoke.self),
                  voiced: .recorded(.init(arguments: .ofType, keepsResult: true, rerun: true, carded: false, batch: false, phrase: "revoke a device's web access", dialog: .asArguments))),
+        // A page's pairing, confirmed in the terminal that made its address (the acting review's fix A): never a page's.
+        KindSpec("web.pairing", sender: .user, effect: .read, servedBy: .requests, page: .terminalOnly("it is the terminal's side of a pairing"),
+                 wire: .typed(WireKinds.WebPairing.self), voiced: .notRecorded(phrase: nil)),
+        KindSpec("web.confirm", sender: .user, effect: .change, servedBy: .requests, page: .terminalOnly("it pairs a page: a page would pair itself"),
+                 wire: .typed(WireKinds.WebConfirm.self),
+                 voiced: .recorded(.init(arguments: .ofType, keepsResult: true, rerun: false, carded: false, batch: false, phrase: "confirm a web page's pairing", dialog: .asArguments))),
         KindSpec("chat.page", sender: .anyone, effect: .read, servedBy: .hub, page: .bySender, wire: live,
                  voiced: .notRecorded(phrase: nil)),
         KindSpec("tell", sender: .user, effect: .change, servedBy: .requests, page: .acts, wire: .typed(WireKinds.Tell.self),

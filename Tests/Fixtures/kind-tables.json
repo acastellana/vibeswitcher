@@ -132,16 +132,26 @@
       "key",
       "value"
     ],
-    "start" : [],
-    "stop" : [],
+    "start" : [
+
+    ],
+    "stop" : [
+
+    ],
     "tell" : [
       "folder",
       "text"
     ],
+    "web.confirm" : [
+      "code",
+      "phrase"
+    ],
     "web.open" : [
       "tailnet"
     ],
-    "web.revoke" : []
+    "web.revoke" : [
+
+    ]
   },
   "approvalPhrases" : {
     "answer" : "answer a lead's question for you",
@@ -213,7 +223,9 @@
     "term.open" : "do term.open for you",
     "unsubscribe" : "do unsubscribe for you",
     "update.check" : "do update.check for you",
+    "web.confirm" : "confirm a web page's pairing",
     "web.open" : "open the web page to a device",
+    "web.pairing" : "do web.pairing for you",
     "web.revoke" : "revoke a device's web access"
   },
   "arguments" : {
@@ -348,16 +360,26 @@
       "key",
       "value"
     ],
-    "start" : [],
-    "stop" : [],
+    "start" : [
+
+    ],
+    "stop" : [
+
+    ],
     "tell" : [
       "folder",
       "text"
     ],
+    "web.confirm" : [
+      "code",
+      "phrase"
+    ],
     "web.open" : [
       "tailnet"
     ],
-    "web.revoke" : []
+    "web.revoke" : [
+
+    ]
   },
   "carded" : [
     "answer",
@@ -373,7 +395,8 @@
     "plugin.inspect",
     "shells",
     "start",
-    "update.check"
+    "update.check",
+    "web.pairing"
   ],
   "changesState" : {
     "answer" : true,
@@ -445,7 +468,9 @@
     "term.open" : true,
     "unsubscribe" : false,
     "update.check" : false,
+    "web.confirm" : true,
     "web.open" : true,
+    "web.pairing" : false,
     "web.revoke" : true
   },
   "hub" : [
@@ -487,6 +512,7 @@
     "start",
     "stop",
     "tell",
+    "web.confirm",
     "web.open",
     "web.revoke"
   ],
@@ -615,6 +641,10 @@
       "keepsResult" : true,
       "rerun" : false
     },
+    "web.confirm" : {
+      "keepsResult" : true,
+      "rerun" : false
+    },
     "web.open" : {
       "keepsResult" : false,
       "rerun" : false
@@ -649,6 +679,8 @@
     "unsubscribe",
     "web.open",
     "web.revoke",
+    "web.pairing",
+    "web.confirm",
     "chat.page",
     "tell",
     "board",
@@ -767,7 +799,9 @@
     "term.open" : "webTerminal",
     "unsubscribe" : "anyone",
     "update.check" : "user",
+    "web.confirm" : "user",
     "web.open" : "user",
+    "web.pairing" : "user",
     "web.revoke" : "user"
   },
   "webKindsBoth" : [
@@ -804,7 +838,9 @@
     "session.draft.clear",
     "session.attach"
   ],
-  "webKindsNone" : [],
+  "webKindsNone" : [
+
+  ],
   "webKindsRead" : [
     "status",
     "questions",

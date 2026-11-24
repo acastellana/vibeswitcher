@@ -25,6 +25,18 @@ struct RealPageCheckTests {
         let said = scratch.url("real-page.out")
         FileManager.default.createFile(atPath: said.path, contents: nil)
         let script = ServerLintTests.repo.appendingPathComponent("scripts/e2e/real-page-check.sh").path
+        // The terminal's side of the pairing (the acting review's fix A): once the script's page takes the code, it is
+        // confirmed as `vibeswitcher web` does (the scratch form), so the page watches the terminals (fix C).
+        let confirming = Task {
+            _ = await eventually(timeout: 120) {
+                guard let client = try? WireClient(node),
+                      let pairing = try? WireClient.reply(client.request("web.pairing", args: ["code": .string(PagePairing.codeID(digest: WebTokens.digest(opened.code)))], action: nil)),
+                      pairing.result?["state"]?.string == "taken" else { return false }
+                try? LiveScratch.confirm(node, code: opened.code)
+                return true
+            }
+        }
+        defer { confirming.cancel() }
         let status = try await offPool {
             try runToEnd("/bin/bash", [script, opened.url, out.path], environment: ["PATH": ProcessInfo.processInfo.environment["PATH"] ?? "/usr/bin:/bin", "HOME": node.home.path],
                          output: .path(said.path, flags: O_WRONLY | O_TRUNC), limit: 240)
@@ -33,9 +45,12 @@ struct RealPageCheckTests {
         func outcome(_ row: String) -> String? {
             table.split(separator: "\n").first { $0.hasPrefix(row + " ") }?.dropFirst(row.count).split(separator: " ").first.map(String.init)
         }
-        for row in ["A3 pair", "A3 chat", "A3 inspector", "A3 settings", "A3 console", "Health", "Stats", "Mail", "A10 terminal", "A19 notifications", "A23 page token"] {
+        for row in ["A3 pair", "A3 chat", "A3 inspector", "A3 settings", "A3 console", "Health", "Stats", "Mail", "A19 notifications", "A23 page token"] {
             #expect(outcome(row) == "pass", "\(row): \(table)")
         }
+        // A10 needs the page's side of a confirmed pairing (its `paired` message: the page agent's, to follow); until the
+        // page takes it, a page that only reads watches no terminal (the acting review's fix C), and the row is a skip.
+        #expect(["pass", "skip"].contains(outcome("A10 terminal")), "A10 terminal: \(table)")
         for row in ["Team tab", "Side sheet", "A3 roadmap", "Dev servers", "Shell card"] { #expect(outcome(row) == "skip", "\(row): \(table)") }
         #expect(status == 0 && !table.contains(" fail "), "\(table)\n\(node.said)")
         // Its screenshots and report, and no Chrome profile left behind.

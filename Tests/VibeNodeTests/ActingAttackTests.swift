@@ -3,42 +3,43 @@ import Testing
 import VibeCore
 @testable import VibeNode
 
-/// An independent security read of acting from the page (8a28a36d, the web UI design's "Acting from the page"), from the
-/// attacker's side: a hosted agent session of the user's uid (it reads and writes the files the sandbox leaves open,
-/// opens 127.0.0.1, signals the user's processes) trying to get one user's-voice act done without the user's click. Each
-/// case drives the real gate (`WebAccess` with `ActingPages` on a vault in memory), the real screen and the node's
-/// listener from a raw TCP client, so the agent sends whatever headers it likes.
+/// The attacker's cases against acting from the page (the second security review of 8a28a36d, branch v2-acting-review),
+/// each turned into a test that the attack now fails. The attacker is a hosted agent session of the user's uid: it reads
+/// and writes the files the sandbox leaves open, opens 127.0.0.1 with whatever headers it likes, watches what a reading
+/// page may watch, and signals the user's processes. Each case drives the real gate (`WebAccess` with `ActingPages` on a
+/// vault in memory, its tokens the vault's), the real screen, and the node's listener from a raw TCP client.
 ///
-/// What holds: the token file buys a reading page, never an acting one; a page paired before acting was on never acts.
-/// What doesn't (the findings): an acting token is a bearer credential any local process uses with no browser; whoever
-/// redeems a pairing code first, while acting is on, gets an acting page; any reading page watches every hosted
-/// terminal, where `vibeswitcher web` prints its code when the user runs it in one.
+/// The chain the review found: (a) a token written into web-tokens.json (the server killed, the host restarts it, it
+/// reads the file again) gave a reading page; (b) a reading page watched every hosted terminal, replay and all, so it
+/// read `#pair=<code>` when the user ran `vibeswitcher web` in one (or a transcript, run via `!`); (c) whoever redeemed
+/// the code first got the acting page. Now: (a) a token the vault doesn't know isn't admitted; (b) watching needs a
+/// pairing confirmed in the terminal, and no page is ever served a live code; (c) redeeming a code gives a page that
+/// reads and drafts until the terminal confirms it by its phrase, and a second try with the code is said there.
 @Suite(.timeLimit(.minutes(5)))
 struct ActingAttackTests {
     private let scratch = Scratch()
 
-    /// The loopback page's gate and screen as `NodeLive` wires them, acting on a vault in memory, every request that
-    /// reaches the acting path (`onPageVoice`) recorded instead of acted on.
+    /// The loopback page's gate and screen as `NodeLive` wires them, every request that reaches the acting path
+    /// (`onPageVoice`) recorded instead of acted on.
     final class Rig: @unchecked Sendable {
         let vault = MemoryVaultV2()
         let access: WebAccess
         let acting: ActingPages
+        let screen: WebRequestScreen
         let listener: WebListenerUnderTest
-        let reached = Locked<[(kind: String, token: String)]>([])
-        let now = Date()
+        let reached = Locked<[String]>([])
         let root: URL
 
         init(_ scratch: Scratch, root: URL? = nil) throws {
             let root = root ?? scratch.url("acting-root")
             self.root = root
-            let now = self.now
-            access = WebAccess(tokens: WebTokens(root: root), now: { now })
-            acting = ActingPages(vault: vault.client)
-            access.acting = acting
-            let screen = WebRequestScreen(RecordingHandler())
+            access = pageGate(vault, root: root)
+            acting = try #require(access.acting)
+            screen = WebRequestScreen(RecordingHandler(), terminals: true)
+            screen.acting = acting
             let reached = self.reached
-            screen.onPageVoice = { request, token, transport in
-                reached.mutate { $0.append((request.kind, token)) }
+            screen.onPageVoice = { request, _, transport in
+                reached.mutate { $0.append(request.kind) }
                 transport.send(NodeWire.message(NodeWire.Reply(re: request.id, result: .object(["acted": .bool(true)]))))
             }
             listener = try WebSecurityRig.listener(gate: access, handler: screen, clock: WebTestTime(), note: { _ in })
@@ -54,16 +55,21 @@ struct ActingAttackTests {
             return client
         }
 
-        /// `auth` with `credential` (`"pair"` or `"token"`): the hello's rights, and the token it gave (a pairing's).
-        func auth(_ client: RawClient, _ key: String, _ value: String) throws -> (rights: [String], token: String?) {
-            try client.sendText(#"{"v":1,"id":"0","kind":"auth","args":{"\#(key)":"\#(value)","client":"webapp"}}"#)
-            let hello = try client.nextFrame()?.json
-            return ((hello?["auth"]?["rights"]?.array ?? []).compactMap(\.string), hello?["auth"]?["token"]?.string)
+        /// `auth` with `args`: the hello's rights, token and phrase, or the bye's code.
+        func auth(_ client: RawClient, _ args: [String: String]) throws -> (rights: [String], token: String?, phrase: String?, bye: String?) {
+            var all = args
+            all["client"] = "webapp"
+            let fields = all.map { "\"\($0.key)\":\"\($0.value)\"" }.sorted().joined(separator: ",")
+            try client.sendText(#"{"v":1,"id":"0","kind":"auth","args":{\#(fields)}}"#)
+            let frame = try client.nextFrame()?.json
+            if frame?["kind"]?.string == "bye" { return ([], nil, nil, frame?["code"]?.string ?? "bye") }
+            let auth = frame?["auth"]
+            return ((auth?["rights"]?.array ?? []).compactMap(\.string), auth?["token"]?.string, auth?["phrase"]?.string, nil)
         }
 
-        /// A user's kind sent on `client`: whether it reached the acting path (its reply says so), else the refusal's code.
-        func act(_ client: RawClient, _ kind: String, id: String = "9") throws -> String {
-            try client.sendText(#"{"v":1,"id":"\#(id)","kind":"\#(kind)","args":{"key":"ai_summaries","value":"off"},"action":"\#(UUID().uuidString.lowercased())"}"#)
+        /// A user's kind sent on `client`: `acted` when it reached the acting path, else the refusal's code.
+        func act(_ client: RawClient, _ kind: String = "set") throws -> String {
+            try client.sendText(#"{"v":1,"id":"9","kind":"\#(kind)","args":{"key":"ai_summaries","value":"off"},"action":"\#(UUID().uuidString.lowercased())"}"#)
             let reply = try client.nextFrame()?.json
             if reply?["result"]?["acted"]?.bool == true { return "acted" }
             return reply?["error"]?["code"]?.string ?? "no reply"
@@ -72,102 +78,107 @@ struct ActingAttackTests {
         func stop() { listener.stop() }
     }
 
-    // MARK: What holds
-
-    /// Attempt: the agent writes its own token's SHA-256 into `<root>/v2/web-tokens.json` (0600, but the user's: any of
-    /// its processes may) and has the server read it again (it can end the server, which the host starts again in a
-    /// second). The token is taken: a page that reads and drafts. It never acts, `web_acts` on or not: acting is the
-    /// vault's list, which only a pairing writes.
-    @Test func aTokenTheAgentWritesIntoTheFileReadsButNeverActs() throws {
+    /// (a) The agent writes its own token's SHA-256 into web-tokens.json (with an end a year off) and has the server read
+    /// it again: the token isn't admitted at all (the vault doesn't know it).
+    @Test func aTokenTheAgentWritesIntoTheFileIsntAdmitted() throws {
         let root = scratch.url("acting-root")
         let forged = "a-token-the-agent-chose-for-itself-0123456789"
         let file = root.appendingPathComponent("v2/web-tokens.json")
         try FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
-        // Its own end, a year off: the file's dates are taken as written (no cap at a token's life).
         let entry = #"{"format":1,"tokens":[{"sha256":"\#(ActingPages.digest(forged))","issuedAt":"2026-11-24T00:00:00.000Z","expiresAt":"2027-11-24T00:00:00.000Z"}]}"#
         try Data(entry.utf8).write(to: file)
         let rig = try Rig(scratch, root: root)
         defer { rig.stop() }
-        _ = try rig.vault.client.setPageActs(on: true)
+        _ = try rig.acting.set(level: "trust")
         let client = try rig.agentClient()
-        let (rights, _) = try rig.auth(client, "token", forged)
-        #expect(rights == ["read", "draft"], "a forged token is taken, reading and drafting: \(rights)")
-        #expect(try rig.act(client, "set") == "voice", "it never acts")
+        #expect(try rig.auth(client, ["token": forged]).bye == "auth", "a token the vault doesn't know: not admitted")
         #expect(rig.reached.value.isEmpty)
     }
 
-    /// Attempt: a token from a pairing made while acting was off, then acting turned on: it never acts.
-    @Test func aPagePairedBeforeActingWasOnNeverActs() throws {
+    /// A page that took a code, never confirmed in the terminal, never acts nor watches, whatever the level.
+    @Test func anUnconfirmedPageNeverActsNorWatches() throws {
         let rig = try Rig(scratch)
         defer { rig.stop() }
+        _ = try rig.acting.set(level: "trust")
         let first = try rig.agentClient()
-        let (rights, token) = try rig.auth(first, "pair", rig.access.openCode(now: rig.now))
-        #expect(rights == ["read", "draft"])
-        _ = try rig.vault.client.setPageActs(on: true)
+        let (rights, token, phrase, _) = try rig.auth(first, ["pair": rig.access.openCode(now: Date())])
+        #expect(rights == ["read", "draft"] && phrase != nil)
+        #expect(try rig.act(first) == "voice")
         let again = try rig.agentClient()
-        #expect(try rig.auth(again, "token", try #require(token)).rights == ["read", "draft"])
-        #expect(try rig.act(again, "set") == "voice")
+        #expect(try rig.auth(again, ["token": try #require(token)]).rights == ["read", "draft"])
+        #expect(try rig.act(again) == "voice")
+        #expect(rig.reached.value.isEmpty)
     }
 
-    // MARK: The findings
-
-    /// Finding 1 (as decided, but wider than a browser): an acting token is a bearer credential. The listener's Host,
-    /// Origin and Sec-Fetch-Site checks keep other sites' pages out of the user's browser, but a process sends any
-    /// headers: whoever holds the token (read from the browser's profile on disk, where Chromium keeps a tab's
-    /// sessionStorage, the page's `vibeswitcher.token`, and Firefox its session; or from a page's memory) acts from a
-    /// socket of its own, with no browser and nothing to tell it from the user's tab.
-    @Test func anActingTokenActsFromAnyLocalProcessWithNoBrowser() throws {
+    /// Finding 1: the token alone, copied out of the browser's storage, acts nowhere: acting needs the pairing secret the
+    /// confirmed page holds in its memory only, given once on its own connection.
+    @Test func aCopiedTokenActsFromNoOtherSocket() throws {
         let rig = try Rig(scratch)
         defer { rig.stop() }
-        _ = try rig.vault.client.setPageActs(on: true)
-        // The user's browser pairs, as `vibeswitcher web`'s address has it do: an acting page.
+        _ = try rig.acting.set(level: "trust")
         let browser = try rig.agentClient()
-        let (rights, issued) = try rig.auth(browser, "pair", rig.access.openCode(now: rig.now))
-        #expect(rights == ["read", "draft", "act"])
+        let code = rig.access.openCode(now: Date())
+        let (_, issued, _, _) = try rig.auth(browser, ["pair": code])
         let token = try #require(issued)
-        // The agent, with the token copied out of the browser's storage: its own socket, forged headers, the user's act.
+        // The terminal confirms the user's page (`web.confirm`'s part).
+        let id = PagePairing.codeID(digest: WebTokens.digest(code))
+        let pairing = try #require(rig.access.takePairing(code: id))
+        let secret = rig.acting.confirmed(token: pairing.token, tokenEnds: pairing.tokenEnds)
+        #expect(rig.screen.confirmPairing(id, secret: secret, rights: [.read, .draft, .watch, .act]))
+        let paired = try browser.nextFrame()?.json
+        #expect(paired?["kind"]?.string == "paired" && paired?["act"]?.string == secret)
+        #expect(try rig.act(browser) == "acted", "the user's own page acts")
+        // The agent, with the token copied out of the browser's storage: its own socket, forged headers.
         let agent = try rig.agentClient()
-        #expect(try rig.auth(agent, "token", token).rights == ["read", "draft", "act"])
-        #expect(try rig.act(agent, "set") == "acted", "a user's act from the agent's own socket")
-        #expect(rig.reached.value.map(\.kind) == ["set"])
+        #expect(try rig.auth(agent, ["token": token]).rights == ["read", "draft"])
+        #expect(try rig.act(agent) == "voice", "no user's act from the agent's socket")
+        #expect(rig.reached.value == ["set"])
     }
 
-    /// Finding 2: while acting is on, whoever redeems a pairing code first gets the acting page; the user's browser,
-    /// coming second, is refused and simply asks for another address. The code is in the address `vibeswitcher web`
-    /// prints: wherever the agent reads that output (a hosted terminal: finding 3; a Claude Code `!` command's transcript
-    /// in ~/.claude), it wins the race of a human opening a link.
-    @Test func whoeverRedeemsTheCodeFirstGetsTheActingPage() throws {
+    /// Finding 2: whoever redeems the code first gets a page that reads and drafts and shows its phrase; the user's
+    /// browser, second, is turned away, and the terminal is told the code was tried again, so nothing is confirmed.
+    @Test func redeemingTheCodeFirstGivesNoActingPage() throws {
         let rig = try Rig(scratch)
         defer { rig.stop() }
-        _ = try rig.vault.client.setPageActs(on: true)
-        let code = rig.access.openCode(now: rig.now)
+        _ = try rig.acting.set(level: "trust")
+        let code = rig.access.openCode(now: Date())
         let agent = try rig.agentClient()
-        #expect(try rig.auth(agent, "pair", code).rights == ["read", "draft", "act"], "the agent's page acts")
+        let (rights, _, phrase, _) = try rig.auth(agent, ["pair": code])
+        #expect(rights == ["read", "draft"], "the agent's page doesn't act")
         let browser = try rig.agentClient()
-        try browser.sendText(#"{"v":1,"id":"0","kind":"auth","args":{"pair":"\#(code)","client":"webapp"}}"#)
-        #expect(try browser.nextFrame()?.json?["code"]?.string == "auth", "the user's own browser is turned away")
-        #expect(try rig.act(agent, "set") == "acted")
+        #expect(try rig.auth(browser, ["pair": code]).bye == "auth")
+        let id = PagePairing.codeID(digest: WebTokens.digest(code))
+        #expect(rig.access.pairing(code: id) == .taken(phrase: try #require(phrase), contested: true), "said in the terminal")
+        #expect(try rig.act(agent) == "voice")
+        #expect(rig.reached.value.isEmpty)
     }
 
-    /// Finding 3: any page that reads may watch every hosted session's terminal (`term.open`, `.read` alone), and the
-    /// token file gives the agent such a page (above). So when the user runs `vibeswitcher web` in a terminal the node
-    /// hosts (a `vs new --agent shell` shell, a page's terminal), the agent watching it reads the pairing address and
-    /// redeems it first (finding 2): an acting page, with no click and no code of the user's.
-    @Test func aReadingPageMayWatchEveryHostedTerminal() {
-        let reading = Principal.page([.read, .draft], terminals: true)
-        #expect(reading.route("term.open") == .terminal, "a reading page's term.open goes to the terminal relay")
-        // The relay asks nothing more of it (TerminalRelay.open: `.read`, then any session the host runs).
-    }
-
-    /// Finding 4 (low): an acting page may set guard rails that are a project's merge gate as the user's
-    /// (`security_audit_model`, `max_workers`), which `pageSetRefusal`'s own reason ("a worker's token would lower what
-    /// holds its own merge") argues against, while `policy` and the floors are refused.
-    @Test func anActingPageMaySetGuardRailsBesidesTheFloors() {
-        func refusal(_ key: String) -> String? {
-            Requests.pageSetRefusal(.init(id: "1", kind: "set", args: ["key": .string(key), "value": .string("x")], action: "a"))
+    /// Finding 3: a reading page watches no terminal (watching needs a confirmed pairing), and no page is ever served a
+    /// live pairing code, in a terminal's bytes (even split across reads) or a transcript.
+    @Test func aReadingPageWatchesNothingAndNoCodeIsServed() throws {
+        #expect(Principal.page([.read, .draft], terminals: true).route("term.open") != .terminal)
+        let code = WebTokens.randomText(bytes: WebAccess.codeBytes)
+        PairingMask.made(code, until: Date().addingTimeInterval(120))
+        let line = "Open this address in a browser within 120 s; it works once:\r\nhttp://127.0.0.1:8765/#pair=\(code)\r\n$ "
+        let bytes = Data(line.utf8)
+        for split in [10, 60, 85, 90, bytes.count - 3] {
+            let mask = TerminalMask()
+            let served = mask.pass(bytes.prefix(split)) + mask.pass(bytes.dropFirst(split)) + mask.flush()
+            let text = String(decoding: served, as: UTF8.self)
+            #expect(!text.contains(code) && text.contains("#pair=***"), "split at \(split): \(text)")
         }
-        #expect(refusal("floor_merge_policy") != nil && refusal("policy") != nil && refusal("web_acts") != nil)
-        #expect(refusal("security_audit_model") == nil, "the sensitive audit's model, set from a page")
-        #expect(refusal("max_workers") == nil)
+        #expect(!PairingMask.mask("ran `vibeswitcher web`: http://127.0.0.1:8765/#pair=\(code)").contains(code))
+        #expect(!PairingMask.mask("the code alone: \(code)").contains(code))
+        // A prompt and plain output aren't held back.
+        let mask = TerminalMask()
+        #expect(mask.pass(Data("$ ls\r\n".utf8)) == Data("$ ls\r\n".utf8))
+    }
+
+    /// Finding 4: the guard rails that are a project's merge gate are a terminal's, as the floors and the policy are.
+    @Test func noPageSetsAGuardRail() {
+        for key in ["security_audit_model", "max_workers", "floor_merge_policy", "policy", "verifier_model"] {
+            guard case .terminalOnly? = NodeSettings.setting(key)?.page else { Issue.record("\(key) is a page's"); continue }
+        }
+        if case .lowersOnly? = NodeSettings.setting("web_acts")?.page {} else { Issue.record("web_acts is raised from a page") }
     }
 }

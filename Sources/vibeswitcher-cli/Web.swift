@@ -37,7 +37,8 @@ enum WebCommand {
             : tailnet ? tailnetWhat
             : "This opens the node's web page on this machine's loopback (127.0.0.1) for one browser: the address printed works once, "
                 + "within 120 s, and gives that browser a token that reads the node and leaves draft answers for 24 hours. "
-                + "It never answers, holds, starts or stops anything. Under WSL's mirrored networking Windows' processes reach "
+                + "Then this asks you to confirm the page by the phrase it shows; confirmed, it also watches the terminals, and acts "
+                + "as you as `web_acts` allows. Under WSL's mirrored networking Windows' processes reach "
                 + "the port too: the token is what keeps them out. `vibeswitcher web --revoke` drops every token."
         let id = UUID().uuidString.lowercased()
         let said = TypedWord.said(approval: client.approvalRule, action: id, what: what)
@@ -67,6 +68,52 @@ enum WebCommand {
             }
             Say.err("Open this address in a browser within \(result.expiresIn ?? 120) s; it works once:")
             Say.out(url)
+            guard let code = result.code else { return 0 }
+            return confirm(code, expiresIn: result.expiresIn ?? 120, client: client)
+        }
+    }
+
+    /// The page that takes the address, confirmed here (the acting review's fix A): this waits for a page to take it,
+    /// shows the phrase that page shows, and asks the user's typed code to confirm it is theirs. Until then, and if it is
+    /// never confirmed, the page reads and drafts; confirmed, it watches the terminals, and acts as `web_acts` allows.
+    /// Another page trying the same address is said, and nothing is confirmed. Ctrl-C leaves the page reading.
+    static func confirm(_ code: String, expiresIn: Int, client: NodeClient) -> Int32 {
+        Say.err("Waiting for the page to open it, to confirm it here (Ctrl-C leaves it reading and drafting only)…")
+        // On the awake clock: a wall clock that jumps neither ends the wait early nor holds it.
+        let started = MacTime.real.awake(), waits = TimeInterval(expiresIn) + 5
+        var taken: WireKinds.WebPairing.Result?
+        while MacTime.real.awake() - started < waits {
+            switch client.read(WireKinds.WebPairing.self, .init(code: code), timeout: 30) {
+            case .failure(let failure): return Say.failed(failure)
+            case .refused(let reply): return Say.replyError(reply)
+            case .success(let state, _):
+                if state.state != "waiting" { taken = state }
+            }
+            if taken != nil { break }
+            usleep(500_000)
+        }
+        guard let taken, let phrase = taken.phrase else {
+            Say.err("No page opened the address in time: it reads nothing. Run `vibeswitcher web` again.")
+            return 1
+        }
+        if taken.contested == true {
+            return Say.refused("This address was used by another page too: not confirmed, and that page only reads and drafts. "
+                + "If the page you opened didn't show it, run `vibeswitcher web --revoke`.")
+        }
+        if taken.state == "gone" { return Say.refused("The page that opened the address closed before it was confirmed: run `vibeswitcher web` again.") }
+        Say.err("The page that opened the address shows: \(ConfigSeal.inert(phrase, limit: 80))")
+        let id = UUID().uuidString.lowercased()
+        let what = "Confirm only if YOUR page shows “\(ConfigSeal.inert(phrase, limit: 80))”: confirmed, it watches this node's terminals, "
+            + "and acts as you as `web_acts` allows (`vibeswitcher settings` says the level), until it is reloaded or 12 hours pass. "
+            + "If your browser instead said it wasn't admitted, another process took the address: don't confirm; run `vibeswitcher web --revoke`."
+        let said = TypedWord.said(approval: client.approvalRule, action: id, what: what)
+        guard case .success(let typed) = said else { return Say.refused(said.refusal) }
+        switch client.change(WireKinds.WebConfirm.self, .init(code: code, phrase: phrase), action: id, typed: typed, timeout: 30) {
+        case .failure(let failure): return Say.failed(failure)
+        case .refused(let reply): return Say.replyError(reply)
+        case .success(let result, _):
+            let acts = result.rights?.contains("act") == true
+            Say.out("Paired: the page \(acts ? "watches the terminals and acts as you (web_acts \(result.level ?? "?"))" : "watches the terminals; it acts only when web_acts is above off")")
             return 0
         }
     }

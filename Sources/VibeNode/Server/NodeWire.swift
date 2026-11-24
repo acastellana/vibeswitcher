@@ -279,6 +279,9 @@ public enum NodeWire {
         case gone
         /// What an acting page drew (a card, a batch) changed since: nothing was done or recorded; look again.
         case changed
+        /// This page no longer acts or watches (its pairing ran out or was dropped, the level was lowered, a revoke):
+        /// it drops its pairing secret, reads and drafts, and is paired again to act.
+        case actsEnded = "acts-ended"
         case `internal`
     }
 

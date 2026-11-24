@@ -73,7 +73,7 @@ struct KindSpecTests {
             }
         }
         let usersReads = KindSpec.all.filter { $0.sender == .user && $0.effect != .change }
-        #expect(usersReads.map(\.name).sorted() == ["approve.list", "base.show", "config.held", "plugin.inspect", "shells", "start", "update.check"],
+        #expect(usersReads.map(\.name).sorted() == ["approve.list", "base.show", "config.held", "plugin.inspect", "shells", "start", "update.check", "web.pairing"],
                 "a user's-voice read added or gone: \(usersReads.map(\.name).sorted())")
         for spec in usersReads { #expect(spec.effect == .read && (spec.recorded == nil) == (spec.name != "start"), "\(spec.name)") }
         for spec in KindSpec.all where spec.effect == .toolPost { #expect(spec.sender == .leadToolServer, "\(spec.name)") }
@@ -112,9 +112,9 @@ struct PrincipalTests {
     }
 
     /// A page: never the user's voice or the tool server's, each right what it admits, a terminal's only on a server
-    /// that opens them and with `read`, `plugin.file` never.
+    /// that opens them and with `watch` (a pairing confirmed in the terminal), `plugin.file` never.
     @Test func aPageRoutesEachKindByItsRights() {
-        for rights: LiveRights in [[], .read, .draft, [.read, .draft]] {
+        for rights: LiveRights in [[], .read, .draft, [.read, .draft], [.read, .draft, .watch]] {
             for terminals in [false, true] {
                 let page = Principal.page(rights, terminals: terminals)
                 for spec in KindSpec.all {
@@ -123,12 +123,12 @@ struct PrincipalTests {
                     switch route {
                     case .read, .hub, .privateRead: #expect(rights.contains(.read) && spec.name != "plugin.file", "\(spec.name)")
                     case .draft: #expect(rights.contains(.draft) && spec.sender == .webDraft, "\(spec.name)")
-                    case .terminal: #expect(terminals && rights.contains(.read) && spec.sender == .webTerminal, "\(spec.name)")
+                    case .terminal: #expect(terminals && rights.contains(.watch) && spec.sender == .webTerminal, "\(spec.name)")
                     case .unknown: #expect(spec.sender == .webTerminal && !terminals, "\(spec.name)")
                     case .refused, .usersVoice, .toolPost, .pageVoice: break
                     }
                 }
-                let terminal = terminals && rights.contains(.read) ? NodeLive.terminalKinds : []
+                let terminal = terminals && rights.contains(.watch) ? NodeLive.terminalKinds : []
                 #expect(page.kinds == WebAccess.kinds(for: rights) + terminal)
             }
         }

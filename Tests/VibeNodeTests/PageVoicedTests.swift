@@ -17,8 +17,8 @@ struct PageVoicedTests {
     /// credentials, and its acting.
     private func acting(_ world: CardWorld) throws -> (PageCredentials, ActingPages) {
         let acting = ActingPages(vault: MemoryVaultV2().client)
-        _ = try acting.set(on: true)
-        let secret = try #require(acting.paired(token: Self.token, tokenEnds: Date().addingTimeInterval(3_600)))
+        _ = try acting.set(level: "trust")
+        let secret = acting.confirmed(token: Self.token, tokenEnds: Date().addingTimeInterval(3_600))
         acting.settled()
         world.queue.sync { world.requests.actingPages = acting }
         return (PageCredentials(token: Self.token, act: secret), acting)
@@ -104,19 +104,22 @@ struct PageVoicedTests {
         #expect(world.card(card.id)?.isOpen == true)
     }
 
-    /// The settings a page never sets: web_acts on, the floors, the policy; web_acts off it may.
+    /// The settings a page never sets: web_acts raised (trust, or confirm, from trust's page: nothing above), the floors,
+    /// the policy; web_acts lowered it may.
     @Test func thePageNeverSetsWhatWidensIt() async throws {
         let world = try await CardWorld.make(scratch)
         defer { world.stop() }
         let (page, _) = try acting(world)
-        for (key, value) in [("web_acts", "on"), ("floor_merge_policy", "auto"), ("policy", "anything")] {
+        for (key, value) in [("web_acts", "trust"), ("floor_merge_policy", "auto"), ("policy", "anything")] {
             let action = UUID().uuidString.lowercased()
             let reply = try #require(await fromPage(world, page, "set", ["key": .string(key), "value": .string(value)], action: action))
             #expect(reply.error?.code == "voice" && reply.error?.message.contains("from a terminal") == true, "\(key): \(reply)")
             #expect(await world.actions().allSatisfy { $0.action != action })
         }
-        let off = NodeWire.Request(id: "1", kind: "set", args: ["key": .string("web_acts"), "value": .string("off")])
-        #expect(world.queue.sync { world.requests.pageSetRefusal(off) } == nil)
+        for value in ["off", "default", "confirm"] {
+            let lower = NodeWire.Request(id: "1", kind: "set", args: ["key": .string("web_acts"), "value": .string(value)])
+            #expect(world.queue.sync { world.requests.pageSetRefusal(lower) } == nil, "\(value): lower than trust")
+        }
     }
 
     /// What a page may set, frozen: every setting declares it (`NodeSettings.Setting.page`), and a new one is the
@@ -126,7 +129,7 @@ struct PageVoicedTests {
         #expect(sets == ["ai_summaries", "boost", "boost_heavy_slots", "boost_load_threshold", "boost_max_sessions", "boost_max_workers",
                          "ignore_usage_limits", "lead_advisor", "lead_model", "lead_rotation", "load_threshold", "node_heavy_slots",
                          "node_max_sessions", "projects_folder", "prompt_audit", "prompt_audit_days", "worker_advisor"], "\(sets)")
-        #expect(NodeSettings.all.filter { if case .offOnly = $0.page { return true } else { return false } }.map(\.key) == ["web_acts"])
+        #expect(NodeSettings.all.filter { if case .lowersOnly = $0.page { return true } else { return false } }.map(\.key) == ["web_acts"])
         for setting in NodeSettings.all where setting.home == .floor || setting.guardRail || setting.home == .policy || setting.home == .acting {
             #expect(setting.page != .sets, "\(setting.key)")
         }
@@ -232,34 +235,43 @@ struct PageVoicedTests {
         let changed = try #require(await fromPage(world, page, "answer", ["card": .string(card.id), "seen": .string(card.seen), "text": .string("Yes")]))
         #expect(changed.error?.code == "changed", "\(changed)")
         let now = try #require(world.card(card.id))
-        world.queue.sync { world.requests.pageVoice = During { _ = try? acting.set(on: false) } }
+        world.queue.sync { world.requests.pageVoice = During { _ = try? acting.set(level: "off") } }
         let off = try #require(await fromPage(world, page, "answer", ["card": .string(card.id), "seen": .string(now.seen), "text": .string("Yes")]))
-        #expect(off.error?.code == "voice" && off.error?.message == WebRequestScreen.notActing, "\(off)")
+        #expect(off.error?.code == "acts-ended" && off.error?.message == WebRequestScreen.notActing, "\(off)")
         #expect(world.card(card.id)?.isOpen == true)
     }
 
-    /// `set web_acts on` from a terminal (the user's voice, recorded first) keeps it in the vault, says what it means,
-    /// and `settings` shows it from there; off says pages read and draft again, and closes the acting pages (`onOff`).
-    @Test func webActsIsSetFromATerminalAndKeptInTheVault() async throws {
+    /// `set web_acts trust` from a terminal (the user's voice, recorded first) keeps the level in the vault, says what it
+    /// means and risks, and `settings` shows it from there; `confirm` is refused until its check exists; `on` is no level;
+    /// off says pages read and draft again, and tells the screen at once (`onLowered`); at `confirm` (were it set) an
+    /// acting page's request passes the passkey seam, which refuses it now.
+    @Test func webActsIsALevelSetFromATerminalAndKeptInTheVault() async throws {
         let world = try await CardWorld.make(scratch)
         defer { world.stop() }
         let vault = MemoryVaultV2()
         let acting = ActingPages(vault: vault.client)
-        let offs = Locked(0)
-        acting.onOff = { offs.value += 1 }
+        let lowered = Locked<[String]>([])
+        acting.onLowered = { lowered.value.append($0) }
         world.queue.sync { world.requests.actingPages = acting }
-        let on = try #require(await world.ask("set", ["key": .string("web_acts"), "value": .string("on")]))
-        #expect(on.ok && on.result?["value"]?.string == "on" && on.result?["was"]?.string == "off", "\(on)")
-        #expect(on.result?["say"]?.array?.first?.string?.hasPrefix("Acting from the page is on.") == true, "\(on)")
-        #expect(try vault.client.pageActs().on)
+        let trust = try #require(await world.ask("set", ["key": .string("web_acts"), "value": .string("trust")]))
+        #expect(trust.ok && trust.result?["value"]?.string == "trust" && trust.result?["was"]?.string == "off", "\(trust)")
+        #expect(trust.result?["say"]?.array?.first?.string?.hasPrefix("Acting from the page: trust.") == true, "\(trust)")
+        #expect(trust.result?["say"]?.array?.contains { $0.string?.contains("What it risks") == true } == true)
+        #expect(try vault.client.pageActs().level == "trust")
         let settings = try #require(await world.ask("settings", [:], action: nil))
         let shown = settings.result?["node"]?["settings"]?.array?.first { $0["key"]?.string == "web_acts" }
-        #expect(shown?["value"]?.string == "on", "\(String(describing: shown))")
+        #expect(shown?["value"]?.string == "trust", "\(String(describing: shown))")
+        let confirm = try #require(await world.ask("set", ["key": .string("web_acts"), "value": .string("confirm")]))
+        #expect(confirm.error?.code == "refused" && confirm.error?.message.contains("isn't built yet") == true, "\(confirm)")
+        let on = try #require(await world.ask("set", ["key": .string("web_acts"), "value": .string("on")]))
+        #expect(!on.ok, "\(on)")
         let off = try #require(await world.ask("set", ["key": .string("web_acts"), "value": .string("off")]))
         #expect(off.ok && off.result?["value"]?.string == "off", "\(off)")
-        #expect(offs.value == 1)
-        #expect(try !vault.client.pageActs().on)
-        let wrong = try #require(await world.ask("set", ["key": .string("web_acts"), "value": .string("maybe")]))
-        #expect(wrong.error?.code == "bad-args", "\(wrong)")
+        #expect(lowered.value == ["off"])
+        #expect(try vault.client.pageActs().level == "off")
+        // The passkey seam the level `confirm` uses refuses every request until it is built.
+        let refused = Locked<String?>(nil)
+        PasskeyNotBuilt().confirm(NodeWire.Request(id: "1", kind: "stop"), page: "p") { refused.value = $0 }
+        #expect(refused.value?.contains("isn't built yet") == true)
     }
 }

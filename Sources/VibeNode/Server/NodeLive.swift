@@ -153,9 +153,15 @@ public final class NodeLive: @unchecked Sendable {
         }
         // Marked not acting at once; closed on the listener's queue, as every other close of a page's connection.
         let listenerQueue = queue
-        acting.onOff = { [weak screen] in
+        acting.onLowered = { [weak screen] level in
+            guard level == "off" else { return }
             screen?.endActing(code: "acts-off", reason: "acting from the page was turned off: reads and drafts go on after a reconnect", closeOn: listenerQueue)
         }
+        // Every page token of either gate is the vault's (the acting review's fix B).
+        access.tokenAuthority = (acting, "loopback")
+        self.tailnet?.access.tokenAuthority = (acting, "tailnet")
+        requests.pairings = PairingSeat(holds: { [weak screen] in screen?.holdsPairing($0) ?? false },
+                                        confirm: { [weak screen] code, secret, rights in screen?.confirmPairing(code, secret: secret, rights: rights) ?? false })
         acting.onLost = { [weak screen] key in screen?.endActing(key: key, closeOn: listenerQueue) }
         let hub = hub
         requests.liveSeq = { [weak hub] in hub?.seq(of: $0) ?? 0 }
@@ -265,7 +271,10 @@ public final class NodeLive: @unchecked Sendable {
         case .on(let bound): (state, port) = ("listening", .int(Int(bound)))
         case .refused(let why): (state, port) = ("refused: " + why, .null)
         }
-        return .object(["state": .string(state), "port": port, "tokens": .int(access.tokens.live(now: Date())),
+        // The tokens alive are the ones the vault admits (a token file entry alone admits no page).
+        let now = Date().timeIntervalSince1970
+        let admitted = acting.state?.pages.filter { $0.key.hasPrefix("loopback:") && $0.value > now }.count ?? 0
+        return .object(["state": .string(state), "port": port, "tokens": .int(min(admitted, access.tokens.live(now: Date()))),
                         "connections": .int(web.connectionCount), "acts": acting.value(pages: screen.actingCount)])
     }
 

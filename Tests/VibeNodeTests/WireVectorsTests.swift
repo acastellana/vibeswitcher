@@ -437,7 +437,7 @@ enum Samples {
                         kinds: ["status"], peer: .init(voice: "other", why: "a web client"), rule: "systemd",
                         // An acting pairing's: its acting secret, once.
                         auth: .object(["rights": .array([.string("read"), .string("draft"), .string("act")]), "token": .string("t"), "act": .string("a"),
-                                       "expiresAt": .date(at)]),
+                                       "phrase": .string("amber cedar fox"), "expiresAt": .date(at)]),
                         assets: "9f2c61d0", plugins: .array([.object(["id": .string("shell"), "title": .string("Shell requests")])])),
          NodeWire.Hello(node: "local", epoch: "e", server: .init(commit: "c", startedAt: NodeWire.dateText(at), pid: 2),
                         host: .init(startedAt: nil, notes: nil, pid: nil), kinds: [], peer: .init(voice: "user", why: nil), rule: "weaker"),

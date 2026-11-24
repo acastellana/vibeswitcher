@@ -9,10 +9,29 @@ public protocol PageVoice: Sendable {
     func confirm(_ request: NodeWire.Request, page: String, done: @escaping @Sendable (String?) -> Void)
 }
 
-/// No confirmation: the click is the user's.
+/// No confirmation: the click is the user's (the level `trust`).
 public struct NoPageVoice: PageVoice {
     public init() {}
     public func confirm(_ request: NodeWire.Request, page: String, done: @escaping @Sendable (String?) -> Void) { done(nil) }
+}
+
+/// The level `confirm`'s check before it exists: every request refused, saying so.
+public struct PasskeyNotBuilt: PageVoice {
+    public init() {}
+    public func confirm(_ request: NodeWire.Request, page: String, done: @escaping @Sendable (String?) -> Void) {
+        done("the passkey check of web_acts confirm isn't built yet")
+    }
+}
+
+/// The loopback screen's side of a pairing's confirmation (`NodeLive` wires it): whether the connection that took a
+/// code is open, and its confirmation (the secret given, the rights raised).
+public struct PairingSeat: Sendable {
+    public var holds: @Sendable (String) -> Bool
+    public var confirm: @Sendable (String, String, LiveRights) -> Bool
+    public init(holds: @escaping @Sendable (String) -> Bool, confirm: @escaping @Sendable (String, String, LiveRights) -> Bool) {
+        self.holds = holds
+        self.confirm = confirm
+    }
 }
 
 /// A request as an acting page's checks leave it: to go on (as `voiced` takes it), or refused.
@@ -29,7 +48,13 @@ extension Requests {
         guard request.kind == "set", let key = request.args?["key"]?.string, let setting = setting(named: key) else { return nil }
         switch setting.page {
         case .sets: return nil
-        case .offOnly(let why): return ["off", "default"].contains(request.args?["value"]?.string ?? "") ? nil : "\(setting.key) is set from a terminal: \(why)"
+        case .lowersOnly(let why):
+            // Only below what it is now (`default` is the lowest): raising it is the terminal's.
+            let given = request.args?["value"]?.string ?? ""
+            let asked = given == "default" ? 0 : setting.choices.firstIndex(of: given)
+            let now = setting.choices.firstIndex(of: actingPages?.level ?? "off") ?? 0
+            guard let asked, asked < now || asked == 0 else { return "\(setting.key) is raised from a terminal: \(why)" }
+            return nil
         case .terminalOnly(let why): return "\(setting.key) is set from a terminal: \(why)"
         }
     }
@@ -53,12 +78,14 @@ extension Requests {
             if case .refused(let refusal) = pageChecks(request) { refused(refusal) }
             return
         }
-        pageVoice.confirm(shown, page: via) { [weak self] notConfirmed in
+        // The level chooses the check: `trust` none, `confirm` a passkey per request.
+        let voice = actingPages?.level == "trust" ? pageVoice : confirmVoice
+        voice.confirm(shown, page: via) { [weak self] notConfirmed in
             guard let self else { return }
             self.queue.async {
                 if let notConfirmed { return refused(.init(re: request.id, error: .init(.voice, "not confirmed: \(notConfirmed)"))) }
                 guard self.actingPages?.acts(token: credentials.token, secret: credentials.act) == true else {
-                    return refused(.init(re: request.id, error: .init(.voice, WebRequestScreen.notActing)))
+                    return refused(.init(re: request.id, error: .init(.actsEnded, WebRequestScreen.notActing)))
                 }
                 switch self.pageChecks(request) {
                 case .refused(let refusal): refused(refusal)
@@ -131,5 +158,52 @@ extension Requests {
         var shown = request
         shown.args = args
         return .go(shown)
+    }
+
+    // MARK: A pairing confirmed in the terminal
+
+    /// `web.pairing` `{code}` (the user's, from the terminal that ran `vibeswitcher web`): whether a page took the code,
+    /// and if so its phrase, and whether the code was tried again after (`contested`). On `queue`.
+    func webPairing(_ request: NodeWire.Request, reply: @escaping (NodeWire.Reply) -> Void) {
+        guard let web, let code = request.args?["code"]?.string else { return reply(.init(re: request.id, error: .init(.badArgs, "web.pairing needs code"))) }
+        let result: WireKinds.WebPairing.Result
+        switch web.pairing(code: code) {
+        case .waiting: result = .init(state: "waiting", phrase: nil, contested: nil)
+        case .taken(let phrase, let contested):
+            result = .init(state: pairings?.holds(code) == false ? "gone" : "taken", phrase: phrase, contested: contested)
+        }
+        reply(.init(re: request.id, typed: result))
+    }
+
+    /// `web.confirm` `{code, phrase}` (the user's voice, recorded first): the page that took `code`, showing `phrase`,
+    /// confirmed: its connection given its pairing secret, watching, and acting while the level is above off. Refused
+    /// when no page took the code, it was tried again by another (`contested`), the phrase isn't that page's, or its
+    /// connection is gone. On `queue`.
+    func webConfirm(_ request: NodeWire.Request, reply: @escaping (NodeWire.Reply) -> Void) {
+        let refuse = { (code: NodeWire.Code, why: String) in reply(.init(re: request.id, error: .init(code, why))) }
+        guard let web, let acting = actingPages, let seat = pairings else { return refuse(.refused, "this server pairs no page") }
+        guard let code = request.args?["code"]?.string, let phrase = request.args?["phrase"]?.string else {
+            return refuse(.badArgs, "web.confirm needs code and phrase")
+        }
+        guard case .taken(let shown, let contested) = web.pairing(code: code) else {
+            return refuse(.gone, "no page took that address yet, or it waited too long: run `vibeswitcher web` again")
+        }
+        guard !contested else {
+            _ = web.takePairing(code: code)
+            return refuse(.voice, "this address was used by another page too: not confirmed. If that wasn't you, run `vibeswitcher web --revoke`")
+        }
+        guard shown == phrase else { return refuse(.voice, "that isn't the phrase the page that took the address shows: not confirmed") }
+        guard seat.holds(code), let pairing = web.takePairing(code: code) else {
+            return refuse(.gone, "the page that took the address closed before it was confirmed: run `vibeswitcher web` again")
+        }
+        let secret = acting.confirmed(token: pairing.token, tokenEnds: pairing.tokenEnds)
+        var rights = WebAccess.rights.union(.watch)
+        if acting.level != "off" { rights.insert(.act) }
+        guard seat.confirm(code, secret, rights) else {
+            acting.dropPairing(key: ActingPages.key(token: pairing.token, secret: secret))
+            return refuse(.gone, "the page that took the address closed before it was confirmed: run `vibeswitcher web` again")
+        }
+        note("web.confirm: the page showing its phrase is paired: it watches\(rights.contains(.act) ? " and acts" : "")")
+        reply(.init(re: request.id, typed: WireKinds.WebConfirm.Result(confirmed: true, rights: WebAccess.names(rights), level: acting.level)))
     }
 }

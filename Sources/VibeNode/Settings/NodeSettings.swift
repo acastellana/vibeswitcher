@@ -61,8 +61,8 @@ public enum NodeSettings {
     /// Whether an acting page may set a setting.
     public enum Page: Equatable, Sendable {
         case sets
-        /// Only to off (or its default, off): turning it on is the terminal's, why.
-        case offOnly(String)
+        /// Only lower than it is now (its choices lowest first; default the lowest): raising it is the terminal's, why.
+        case lowersOnly(String)
         /// The terminal's alone: why.
         case terminalOnly(String)
     }
@@ -99,8 +99,10 @@ public enum NodeSettings {
                     about: "Where `vibeswitcher new-project` makes a project when --in names no other place.",
                     section: "General", scope: .node, form: .folder, home: .preferences, page: .sets),
             Setting(key: "web_acts", title: "Act from the page",
-                    about: "A page on this machine, paired while this is on, may do everything the command line does, as you; a tailnet page still only reads and drafts. Turned on from a terminal only.",
-                    section: "General", scope: .node, form: .choice, home: .acting, page: .offOnly("acting from the page is turned on from a terminal"), choices: ["off", "on"]),
+                    about: "How far a page on this machine, its pairing confirmed in a terminal, may act as you: off (it reads and drafts), confirm (each act asks for your passkey; not built yet), trust (each click acts as you). "
+                        + "Trust risks this: whatever holds the page's two secrets while it is open acts as you, a team's own session included. Raised from a terminal only.",
+                    section: "General", scope: .node, form: .choice, home: .acting, page: .lowersOnly("acting from the page is raised from a terminal"),
+                    choices: ActingPages.levels),
             Setting(key: "node_max_sessions", title: "Team sessions on this node, at most",
                     about: "How many workers and verifiers, across every project, may run at once.",
                     section: "Machine-wide limits", scope: .node, form: .count, home: .limits, page: .sets, range: 1...99),

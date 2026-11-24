@@ -110,6 +110,8 @@ public final class TerminalRelay: @unchecked Sendable {
         var starting = true
         /// Watching: the size the last replay was sent at (type 5).
         var size: (cols: Int, rows: Int)?
+        /// The session's bytes masked of any pairing code (`TerminalMask`), started over with each replay.
+        var mask = TerminalMask()
     }
 
     /// `link`: the server's. `mode`: `.watch` on the user's node. `note`: the server's log.
@@ -137,8 +139,9 @@ public final class TerminalRelay: @unchecked Sendable {
         guard let carrier = transport as? TerminalTransport else {
             return reply(.init(re: request.id, error: .init(.unknownKind, "this connection carries no terminal")), on: transport)
         }
-        guard rights.contains(.read) else {
-            return reply(.init(re: request.id, error: .init(.voice, "this connection may not read")), on: transport)
+        // A confirmed pairing's right (`LiveRights.watch`), never a reading page's alone (the acting review's fix C).
+        guard rights.contains(.watch) else {
+            return reply(.init(re: request.id, error: .init(.voice, "watching a terminal needs this page's pairing confirmed in a terminal")), on: transport)
         }
         guard let session = request.args?["session"]?.string, let cols = request.args?["cols"]?.int, let rows = request.args?["rows"]?.int else {
             return reply(.init(re: request.id, error: .init(.badArgs, "term.open needs a session, cols and rows")), on: transport)
@@ -270,7 +273,9 @@ public final class TerminalRelay: @unchecked Sendable {
 
     private func output(of session: UUID, _ bytes: Data) {
         guard let attachment = attachments[session] else { return }
-        let whole = [UInt8](bytes)
+        // Never a live pairing code to a page (the acting review's fix C): `vibeswitcher web` run in a hosted terminal.
+        let whole = [UInt8](attachment.mask.pass(bytes))
+        guard !whole.isEmpty else { return }
         for stream in fed(by: attachment) where stream.state == .replaying || stream.state == .live {
             var start = 0
             while start < whole.count {
@@ -303,6 +308,7 @@ public final class TerminalRelay: @unchecked Sendable {
     private func replayAgain(_ session: UUID, _ attachment: Attachment) {
         guard !attachment.starting else { return }
         attachment.starting = true
+        attachment.mask = TerminalMask()
         link.resync(session)
     }
 

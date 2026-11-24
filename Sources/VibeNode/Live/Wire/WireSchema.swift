@@ -56,7 +56,7 @@ public enum WireSchema {
     /// The entities: one per keyed collection's value, and a chat's item.
     public static let entities = ["node", "session", "lead", "card", "chat.item", "board"]
     /// The messages: the envelopes, and each live kind's `args` and `result` (`<kind>.args`, `<kind>.result`).
-    public static let messages = ["request", "reply", "failure", "hello", "bye", "event", "snapshot", "delta", "auth.args",
+    public static let messages = ["request", "reply", "failure", "hello", "bye", "event", "snapshot", "delta", "paired", "auth.args",
                                   "subscribe.args", "subscribe.result", "unsubscribe.args", "chat.page.args", "chat.page.result",
                                   "draft.args", "draft.result", "draft.clear.args",
                                   "board.args", "board.result", "seen.args",
@@ -107,9 +107,17 @@ public enum WireSchema {
             shape("hello.host", from: "NodeWire.Hello.Host", [optional("startedAt", .date), optional("notes", .shape("host.notes")),
                                                              optional("pid", .int)]),
             shape("hello.peer", from: "NodeWire.Hello.Peer", [field("voice", .words(["user", "other"])), optional("why", .string)]),
-            shape("hello.auth", from: "the web gate (F1)", [field("rights", .list(.words(["read", "draft", "act"]))), optional("token", .string),
-                                                           // The acting secret, once, in answer to a pairing while acting is on.
+            shape("hello.auth", from: "the web gate (F1)", [field("rights", .list(.words(["read", "draft", "watch", "act"]))), optional("token", .string),
+                                                           // A pairing just taken: the phrase the terminal shows too, to confirm it.
+                                                           optional("phrase", .string),
+                                                           // Never sent in a hello now (the `paired` message gives it); kept for a
+                                                           // page of the build before.
                                                            optional("act", .string), field("expiresAt", .date)]),
+            // A pairing the user confirmed in the terminal (`WebRequestScreen.confirmPairing`): its secret, once, and the
+            // connection's rights now.
+            shape("paired", from: "WebRequestScreen.confirmPairing", [field("v", .int), field("kind", .words(["paired"])), field("act", .string),
+                                                                      field("rights", .list(.words(["read", "draft", "watch", "act"]))),
+                                                                      field("kinds", .list(.string))]),
             shape("bye", from: "NodeWire.Bye", [field("v", .int), field("kind", .words(["bye"])), field("reason", .string),
                                                 optional("code", .words(["auth", "revoked", "version", "too-long", "not-object",
                                                                          "not-request", "must", "stopping", "busy", "acts-off"]))]),
@@ -292,7 +300,9 @@ public enum WireSchema {
             shape("node.web", from: contractNode, [field("state", .string), field("port", Kind.int.orNull), field("tokens", .int),
                                                   field("connections", .int), optional("acts", .shape("node.web.acts"))]),
             // Acting from the page (the web UI design's step 2): on, since when, the acting pages open now.
-            shape("node.web.acts", from: "ActingPages.value", [field("on", .bool), field("since", Kind.date.orNull), field("pages", .int)]),
+            // `level` absent from a node before levels (its `on` says on or off).
+            shape("node.web.acts", from: "ActingPages.value", [optional("level", .words(ActingPages.levels)), field("on", .bool),
+                                                               field("since", Kind.date.orNull), field("pages", .int)]),
             // The account's usage (the parity table's "Usage shown to you", 2026-11-21): null until the engine's first refresh.
             shape("node.usage", from: "NodeUsage.value", [
                 field("account", Kind.string.orNull), field("limits", .list(.shape("node.usage.limit"))), field("ignored", .bool),
@@ -689,7 +699,7 @@ public enum WireSchema {
             if fields["re"] != nil { return "reply" }
             if fields["id"] != nil { return "request" }
             let kind = fields["kind"]?.string ?? ""
-            return ["hello", "bye", "snapshot", "delta"].contains(kind) ? kind : "event"
+            return ["hello", "bye", "snapshot", "delta", "paired"].contains(kind) ? kind : "event"
         }
 
         private func at(_ path: String, _ key: String) -> String { path.isEmpty ? key : "\(path).\(key)" }
