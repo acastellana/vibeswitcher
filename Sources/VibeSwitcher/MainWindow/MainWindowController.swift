@@ -378,9 +378,13 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
         showSelection()
     }
 
-    /// `--idle-bench`: the window up but off screen, without a Dock icon or taking the keyboard.
+    /// `--idle-bench`: the window up but off screen, without a Dock icon or taking the keyboard. Without AppKit's
+    /// open and close animation, which nobody sees off screen: it runs on a display link, which never fires while the
+    /// display is asleep, so each animation stayed with its display link's thread and run loop (2026-11-24, the memory
+    /// bench at night: a thread and ~130 KB kept per churn cycle, the growth 13.1 % against ~5.5 % by day).
     func presentOffscreen() {
         mountViews()
+        window?.animationBehavior = .none
         window?.setFrame(NSRect(x: -20_000, y: -20_000, width: 1280, height: 800), display: false)
         window?.orderFrontRegardless()
         window?.setFrameOrigin(NSPoint(x: -20_000, y: -20_000))
