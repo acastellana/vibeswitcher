@@ -1,6 +1,6 @@
 import Foundation
 import Testing
-import VibeCore
+@testable import VibeCore
 @testable import VibeNode
 
 /// The attacker's cases against acting from the page (the second security review of 8a28a36d, branch v2-acting-review),
@@ -305,6 +305,45 @@ struct ActingAttackTests {
         // Taken, a code is live no more.
         codes.taken(code)
         #expect(through(TerminalMask(codes: codes), Array("the code \(code) here".utf8)) == Data("the code \(code) here".utf8))
+    }
+
+    /// The node's live codes are one set, its loopback's and its tailnet's (team-lead's review of the per-server fix):
+    /// a tailnet pairing code printed in a watched terminal is masked; a bare live code quoted in a transcript is masked
+    /// (as is any `pair=` address's code); a revoke on one gate leaves the other's codes live; and still, with no live
+    /// code and no `pair=`, the terminal's mask and the transcript's change nothing.
+    @Test func theNodesLiveCodesAreItsGatesBoth() async throws {
+        let world = try await CardWorld.make(scratch)
+        defer { world.stop() }
+        let clock = NodeClock(queue: world.queue, now: { 0 }, schedule: { _, _ in {} })
+        let unreachable: Tailnet.Finder = { .failure(WebTokens.Refusal("no tailnet in this test")) }
+        let live = NodeLive(requests: world.requests, sessions: nil, engine: world.engine, clock: clock, port: 0,
+                            terminals: .watch, tailnet: .init(find: unreachable, admitPeer: { _ in false }))
+        let tailnet = try #require(live.tailnet)
+        let relayCodes = try #require(live.hub.terminals?.liveCodes)
+        let plain = Data("  ? for shortcuts\r\n> \(String(repeating: "abcdefghijklmnopqrstuvwxyz", count: 8))\r\n".utf8)
+        func shown(_ bytes: Data) -> Data {
+            let mask = TerminalMask(codes: relayCodes)
+            var out = Data()
+            for at in stride(from: 0, to: bytes.count, by: 7) { out += mask.pass(bytes.subdata(in: at..<min(at + 7, bytes.count))) + mask.flush() }
+            return out + mask.drain()
+        }
+        #expect(shown(plain) == plain, "no live code, no pair=: the identity")
+        let fromTailnet = tailnet.access.openCode(now: Date())
+        let fromLoopback = live.access.openCode(now: Date())
+        for code in [fromTailnet, fromLoopback] {
+            let line = Data("Open this address on your tailnet: http://node.example.ts.net:8765/#pair=\(code)\r\nor the code: \(code)\r\n$ ".utf8)
+            #expect(!String(decoding: shown(line), as: UTF8.self).contains(code), code == fromTailnet ? "the tailnet's code" : "the loopback's code")
+        }
+        #expect(shown(plain) == plain, "with live codes, text that isn't one: unchanged")
+        // A transcript: a live code quoted alone is masked, as is an address's code; other text is left as it is.
+        let reply = ChatItem.reply(ChatEntry(id: "r1", at: nil, kind: .reply("The code alone: \(fromTailnet). Run `vibeswitcher web` again for ? for shortcuts.")))
+        let value = try #require(ChatValue.value(reply, codes: live.access.liveCodes))
+        let text = "\(value)"
+        #expect(!text.contains(fromTailnet) && text.contains("for ? for shortcuts"), "\(text)")
+        #expect(PairingMask.mask("? for shortcuts and abcdefghijklmnopqrstuvwxyz", codes: relayCodes.codes) == "? for shortcuts and abcdefghijklmnopqrstuvwxyz")
+        // The loopback's revoke: its codes live no more, the tailnet's stay.
+        _ = live.access.revoke()
+        #expect(Set(relayCodes.codes) == [fromTailnet])
     }
 
     /// Finding 4: the guard rails that are a project's merge gate are a terminal's, as the floors and the policy are.
