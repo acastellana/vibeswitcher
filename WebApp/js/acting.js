@@ -27,7 +27,7 @@ export const cardArgs = (card, args = {}) => ({ card: card.id, seen: card.seen ?
 // A question's version answered; a plugin's card (a shell request's) has none, so none is sent.
 export const answerArgs = (card, text) => cardArgs(card, { text, ...(card.question?.version != null ? { version: card.question.version } : {}) });
 
-// A setting a page may not set even when it acts: web_acts on (only off), a floor, the policy. The node refuses them
+// A setting a page may not set even when it acts: web_acts raised (only off), a floor, the policy. The node refuses them
 // (`voice`); the page shows their terminal line instead of a button.
 export function pageMaySet(key, value) {
   if (key === 'policy' || /^floor_/.test(key)) return false;
@@ -79,7 +79,7 @@ export function actsLine(app, { compact = false } = {}) {
   const here = app.store.acts();
   // The node's level: off, confirm (a passkey per request, later), trust; `on` from a node before levels.
   const level = acts.level ?? (acts.on ? 'trust' : 'off');
-  if (level === 'off') return compact ? null : h('p', { class: 'acts-line' }, t('acOffWords'), ' ', h('code', null, 'vibeswitcher set web_acts on'), t('acOffWords2'));
+  if (level === 'off') return compact ? null : h('p', { class: 'acts-line' }, t('acOffWords'), ' ', h('code', null, 'vibeswitcher set web_acts trust'), t('acOffWords2'));
   const since = acts.since ? new Date(acts.since).toLocaleString(undefined, { dateStyle: compact ? undefined : 'medium', timeStyle: 'short' }) : '';
   // Acting is on but this page doesn't act (a reload lost its secret, or its acting ran out): pair it again.
   if (!here) return h(compact ? 'div' : 'p', { class: 'acts-line' + (compact ? ' compact' : '') }, h('span', null, t(compact ? 'acPairAgainShort' : 'acPairAgain', { since })), ' ', h('code', null, 'vibeswitcher web'));

@@ -169,7 +169,7 @@ const EN = {
   quietForm: 'Or give it a goal in New project’s lead form.',
   connecting: 'Connecting to the node…',
   apConfirmInTerminal: "Confirm this page in your terminal:",
-  apConfirmSub: "vibeswitcher web shows the same words: check them, then confirm there.",
+  apConfirmSub: "Type these words where vibeswitcher web asks for them.",
   unpaired: 'Not paired with a node',
   unpairedSub: 'Run vibeswitcher web in a terminal, then open the address it prints in this browser.',
   menu: 'Projects and places',
