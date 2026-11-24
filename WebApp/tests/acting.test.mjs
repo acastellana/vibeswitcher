@@ -108,7 +108,8 @@ test('the settings a page may not set even when it acts stay the terminal’s: w
   assert.equal(pageMaySet('floor_audit_finders', '1'), false);
   assert.equal(pageMaySet('policy', 'auto'), false);
   assert.equal(pageMaySet('max_workers', '3'), true);
-  assert.equal(refusalWords({ code: 'voice', message: 'this page doesn’t act' }), 'Acting from this page ended: pair it again with `vibeswitcher web` to act. Nothing was done.');
+  assert.equal(refusalWords({ code: 'voice', message: 'not the user' }), 'A page can’t do this one: run it in a terminal. Nothing was done.');
+  assert.equal(refusalWords({ code: 'acts-ended', message: 'this page doesn’t act' }), 'This page no longer acts: pair it again with `vibeswitcher web` to act. Nothing was done.');
   assert.equal(refusalWords({ code: 'gone', message: 'That card is gone.' }), 'That card is gone.', 'any other: the node’s own words');
   assert.equal(refusalWords(null), 'The node refused it.');
 });
@@ -121,31 +122,71 @@ test('a pause’s arguments are the command line’s, as the node takes them', (
   assert.deepEqual(pauseArgs('off'), { for: 'off' });
 });
 
+// The node refuses `kind` with `code`: the reply to the newest request of that kind on `socket`.
+async function refuse(store, socket, kind, args, code) {
+  const asked = store.request(kind, args);
+  const sent = socket.sent.filter((message) => message.kind === kind).pop();
+  socket.onmessage({ data: JSON.stringify({ v: 1, re: sent.id, ok: false, error: { code, message: 'refused' } }) });
+  return asked;
+}
+const authOf = (socket) => socket.sent.find((message) => message.kind === 'auth')?.args || {};
+const CONFIRMED = ['read', 'draft', 'watch', 'act'];
+
 test('the act secret is kept in memory only, sent with the token on a reconnect, and dropped when acting ends', async () => {
   const secret = 'a'.repeat(43);
-  const { store, sockets, stored, hello, reconnect } = await page({ rights: ['read', 'draft', 'act'], kinds: ACTING, act: secret });
+  const { store, sockets, stored, hello, reconnect } = await page({ rights: CONFIRMED, kinds: ACTING, act: secret });
+  const welcome = (socket) => socket.onmessage({ data: JSON.stringify({ ...hello, auth: { ...hello.auth, act: undefined, rights: CONFIRMED } }) });
   assert.equal(store.acts(), true);
   assert.equal(stored.some(([, value]) => String(value).includes(secret)), false, 'never in storage');
   // The socket drops; the page connects again without a reload: the auth carries the token and the act secret.
   const again = reconnect();
   assert.notEqual(again, sockets[0]);
-  const auth = again.sent.find((message) => message.kind === 'auth');
-  assert.deepEqual({ token: auth?.args.token, act: auth?.args.act }, { token: 'token', act: secret });
-  // An acting request refused by voice: acting ended, the page reads and drafts, and the next auth carries no secret.
-  again.onmessage({ data: JSON.stringify({ ...hello, auth: { ...hello.auth, act: undefined, rights: ['read', 'draft', 'act'] } }) });
-  const asked = store.request('tell', { folder: '/f', text: 'hi' });
-  const sent = again.sent.find((message) => message.kind === 'tell');
-  again.onmessage({ data: JSON.stringify({ v: 1, re: sent.id, ok: false, error: { code: 'voice', message: 'this page doesn’t act: pair it again with `vibeswitcher web` (acting from the page is on) to act' } }) });
-  await asked;
-  assert.equal(store.acts(), false);
+  assert.deepEqual({ token: authOf(again).token, act: authOf(again).act }, { token: 'token', act: secret });
+  welcome(again);
+  // A voice refusal (the terminal's kind or setting) changes nothing.
+  await refuse(store, again, 'set', { key: 'policy', value: 'x' }, 'voice');
+  assert.equal(store.acts(), true);
   const third = reconnect();
-  assert.equal('act' in (third.sent.find((message) => message.kind === 'auth')?.args || {}), false);
+  assert.equal(authOf(third).act, secret);
+  welcome(third);
+  // acts-ended: the page reads and drafts, and the next auth carries no secret.
+  await refuse(store, third, 'tell', { folder: '/f', text: 'hi' }, 'acts-ended');
+  assert.equal(store.acts(), false);
+  assert.equal(store.watches(), false);
+  assert.equal('act' in authOf(reconnect()), false);
 });
 
-test('a hello without "act" drops the secret: a page that doesn’t act shows no acting control', async () => {
-  const { store, sockets, hello, reconnect } = await page({ rights: ['read', 'draft', 'act'], kinds: ACTING, act: 'b'.repeat(43) });
-  sockets[0].onmessage({ data: JSON.stringify({ ...hello, auth: { ...hello.auth, act: undefined, rights: ['read', 'draft'] }, kinds: ['status'] }) });
+test('a hello without "watch" drops the secret; one with watch but not act keeps it (the level was lowered)', async () => {
+  const { store, sockets, hello, reconnect } = await page({ rights: CONFIRMED, kinds: ACTING, act: 'b'.repeat(43) });
+  sockets[0].onmessage({ data: JSON.stringify({ ...hello, auth: { ...hello.auth, act: undefined, rights: ['read', 'draft', 'watch'] }, kinds: ['status', 'term.open'] }) });
   assert.equal(store.acts(), false);
+  assert.equal(store.watches(), true);
   const again = reconnect();
-  assert.equal('act' in (again.sent.find((message) => message.kind === 'auth')?.args || {}), false);
+  assert.equal(authOf(again).act, 'b'.repeat(43));
+  again.onmessage({ data: JSON.stringify({ ...hello, auth: { ...hello.auth, act: undefined, rights: ['read', 'draft'] }, kinds: ['status'] }) });
+  assert.equal(store.watches(), false);
+  assert.equal('act' in authOf(reconnect()), false);
+});
+
+test('a redeemed code shows its phrase until the terminal confirms the page; `paired` brings the secret and the rights', async () => {
+  const { store, sockets, stored, hello, reconnect } = await page({ rights: ['read', 'draft'], kinds: ['status'] });
+  sockets[0].onmessage({ data: JSON.stringify({ ...hello, auth: { ...hello.auth, rights: ['read', 'draft'], phrase: 'amber fox lantern' }, kinds: ['status'] }) });
+  assert.equal(store.state.phrase, 'amber fox lantern');
+  assert.equal(store.acts(), false);
+  // Confirmed with the kinds: rights and kinds at once, on the same connection.
+  sockets[0].onmessage({ data: JSON.stringify({ v: 1, kind: 'paired', act: 'c'.repeat(43), rights: CONFIRMED, kinds: ACTING }) });
+  assert.equal(store.state.phrase, null);
+  assert.equal(store.acts(), true);
+  assert.equal(store.can('answer'), true);
+  assert.equal(sockets.length, 1, 'no reconnect');
+  assert.equal(stored.some(([, value]) => String(value).includes('c'.repeat(43))), false, 'never in storage');
+  assert.equal(authOf(reconnect()).act, 'c'.repeat(43));
+});
+
+test('`paired` without kinds: the page connects again with its secret for a hello that lists them', async () => {
+  const { store, sockets, hello } = await page({ rights: ['read', 'draft'], kinds: ['status'] });
+  sockets[0].onmessage({ data: JSON.stringify({ ...hello, auth: { ...hello.auth, rights: ['read', 'draft'], phrase: 'amber fox lantern' }, kinds: ['status'] }) });
+  sockets[0].onmessage({ data: JSON.stringify({ v: 1, kind: 'paired', act: 'd'.repeat(43), rights: CONFIRMED }) });
+  assert.equal(sockets[0].readyState, 3, 'closed to connect again');
+  assert.equal(store.state.phrase, null);
 });
