@@ -439,3 +439,7 @@ Each is a setback from today's batch: a fix task with nothing to fix, a manual m
 
 fix-the-flaky-test-25 showed that an unbundled test binary's UserDefaults.standard lives in the real ~/Library/Preferences through cfprefsd, whatever the scratch HOME says, so every test process on the Mac shares it (6 of 10 EndedFoldTests runs failed under load). 19 more test files still use it, a latent cross-process flake source while merges miss their rerun objective.
 
+## 2026-11-24 02:27:23 Memory bench churn growth: the Nov 23–24 rise was the bench's off-screen window keeping an open/close animation per cycle while the display slept (fixed in find-why-the-memory: animationBehavior .none on presentOffscreen only). The ~1.8 MB malloc rise left over 40 cycles (AppKit KVO dependency tables, SwiftUI glass display links) is not a task now.
+
+With the fix the bench passes at 5.6–6.5 % with the display asleep, and the absolute growth left (3.2–3.7 MB) matches the daytime passes since before Nov 22, so it isn't new. File a root-cause task (agent claude, advisor fable) only if churn-growth-percent passes 8 % again on a run with the display awake, or the live app's malloc in use keeps climbing across a day (the 2026-11-21 memory decision's conditions).
+
