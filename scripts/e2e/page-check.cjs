@@ -4,7 +4,7 @@
 // fixed time, so a loaded machine is only slower.
 //
 // What is looked for comes from the test, which made the node's state (EXPECT, a JSON file):
-//   { session, chatHref, chat, projectHref, question, approval, approvalFiles, result, statement, task, shellHref, shell, board, goal, goalID, replacedHref, plugin,
+//   { session, chatHref, chat, projectHref, question, approval, approvalFiles, approvalSensitive, result, statement, task, shellHref, shell, board, goal, goalID, replacedHref, plugin,
 //     setting }
 // The page is the redesigned one (docs/superpowers/specs/2026-11-23-v2-web-ui-design.md): three columns, a project's
 // lead conversation in the centre, its team on the right, the session view under Your own sessions.
@@ -13,12 +13,14 @@
 // - Question card: the lead's open question, in the project's waiting block, under "1 question for you", saying
 //   the lead asks.
 // - Long approval: an approval with a long markdown text and ten files, folded under the first question; opened, its
-//   question line and a few lines at body size, the key facts, the files one click away, the whole in the side sheet;
+//   question line and a few lines at body size, the key facts (the sensitive paths listed), the files one click away, the whole in the side sheet;
 //   the waiting block under about 60% of the centre.
 // - Columns fit: at 1850, 1440, 1280 and 1024 px wide the three columns are inside the window, nothing scrolls
-//   sideways, and the right column's long texts wrap inside it (the lead's statement in three lines at most).
+//   sideways, the right column's long texts wrap inside it (the lead's statement in three lines at most), and every
+//   scroller has the thin, buttonless scrollbar.
 // - Lead conversation: the lead's result as a line, and the header saying what needs you.
-// - Latest statement: the lead's latest decision at the top of a short conversation.
+// - Latest statement: the lead's latest decision once: at the right column's top while it is in sight, else (on a
+//   phone) at the top of a short conversation.
 // - What waits elsewhere: the summary's count a link to the next place that waits, that place marked.
 // - Side sheet: the result's line opens its whole text, its markdown table drawn as a table.
 // - Team tab: the right column's Team tab shows a task by its title, and it opens in place naming its goal.
@@ -201,6 +203,7 @@ async function run() {
         : marks.length ? 'markdown marks shown: ' + marks.map((el) => el.className).join(', ')
         : !['Commit', 'Into', 'Changes'].every((row) => rows.includes(row)) ? 'key rows: ' + rows.join(', ')
         : !files || files.open || !files.innerText.includes(${JSON.stringify(expect.approvalFiles)}) ? 'the files aren’t one click away'
+        : !(card.querySelector('.sensitive-yes')?.querySelectorAll('code').length === 5 && card.querySelector('.sensitive-yes').innerText.trim().endsWith(${JSON.stringify(expect.approvalSensitive)})) ? 'the sensitive paths aren’t listed (five, then how many more)'
         : box > 0.62 * centre || talk < 80 ? 'the waiting block takes ' + Math.round(box) + ' of ' + Math.round(centre) + ' px'
         : null;
       return why ? 'FAIL ' + why : rows.join(', ') + '; block ' + Math.round(100 * box / centre) + '% of the centre';
@@ -230,7 +233,14 @@ async function run() {
           .filter((el) => el.offsetParent && (el.getBoundingClientRect().right > innerWidth + 0.5 || el.scrollWidth > el.clientWidth + 1));
         const lines = (el) => el ? Math.round(el.getBoundingClientRect().height / parseFloat(getComputedStyle(el).lineHeight)) : 0;
         const said = lines(right.querySelector('.now-text'));
+        // Thin scrollbars without buttons everywhere: no scroller sets scrollbar-width (it overrides WebKit's own thin,
+        // buttonless bar), and the stylesheet hides the buttons.
+        const scrollers = [...document.querySelectorAll('body *')].filter((el) => el.offsetParent && /auto|scroll/.test(getComputedStyle(el).overflowY + getComputedStyle(el).overflowX));
+        const styled = scrollers.filter((el) => !['auto', 'none'].includes(getComputedStyle(el).scrollbarWidth));
+        const buttonless = [...document.styleSheets].some((sheet) => [...sheet.cssRules].some((rule) => /::-webkit-scrollbar-button/.test(rule.selectorText || '') && rule.style.display === 'none'));
         const why = document.documentElement.scrollWidth > innerWidth ? 'the page scrolls sideways'
+          : styled.length ? 'a scrollbar styled past the thin rule: ' + styled.map((el) => el.className.split(' ')[0]).join(', ')
+          : !buttonless ? 'no rule hides the scrollbars\u2019 buttons'
           : out.length ? 'past its edge: ' + out.map((el) => el.className.split(' ')[0]).join(', ')
           : said > 3 ? 'the lead’s statement takes ' + said + ' lines'
           : null;
@@ -249,9 +259,14 @@ async function run() {
     })()`, WAIT);
     record('Lead conversation', talk, talk || `no result line "${expect.result}", or the header doesn't say what needs you`);
 
-    // Latest statement: the conversation is short (one line), so the lead's latest decision shows at its top.
-    const statement = await page.until(`(() => { const said = document.querySelector('.project-view .latest-said'); return said && said.innerText.includes(${JSON.stringify(expect.statement)}) ? said.innerText.replace(/\\s+/g, ' ') : null; })()`, WAIT);
-    record('Latest statement', statement, statement || `no "${expect.statement}" above a short conversation`);
+    // Latest statement: shown once. With the right column in sight it is at the right column's top, not above the
+    // conversation; at 390 px (the right column a drawer) it is at the top of the short conversation.
+    const statement = await page.until(`(() => {
+      const right = document.querySelector('.right .now');
+      const above = document.querySelector('.project-view .latest-said');
+      return right && right.offsetParent && right.innerText.includes(${JSON.stringify(expect.statement)}) && (!above || !above.offsetParent) ? right.innerText.replace(/\\s+/g, ' ').slice(0, 90) : null;
+    })()`, WAIT);
+    record('Latest statement', statement, statement || `no "${expect.statement}" at the right column's top, or it shows twice`);
 
     // What waits elsewhere: the header counts this project's; the summary's count links to the next place that waits,
     // and Your own sessions (where the replaced lead needs you) carries the asking colour.
@@ -400,6 +415,7 @@ async function run() {
       const card = document.querySelector('.project-view .card');
       const big = document.querySelector('.project-view .big');
       if (!card || !big || !big.offsetParent) return null;
+      if (!document.querySelector('.project-view .latest-said')?.offsetParent) return 'the lead\u2019s latest statement isn\u2019t above the conversation';
       const wide = [...document.querySelectorAll('body *')].filter((el) => el.offsetParent && el.getBoundingClientRect().right > innerWidth + 1 && !el.closest('.left, .right, .sheet, .switch, .team-strip, pre, .copy-line, .table'));
       return document.documentElement.scrollWidth <= innerWidth && !wide.length ? 'fits 390 px' : 'too wide: ' + wide.slice(0, 3).map((el) => el.className).join(', ');
     })()`, WAIT);
