@@ -21,7 +21,9 @@ struct LeadCodexVerifierTests: LeadTeamFixture {
         lead.power = { nil }
         try codexRoom(lead, used: 20)
         lead.usageClock = { Self.now }
-        #expect(!lead.call("configure", ["merge_policy": "auto", "small_task_min": 0, "test_command": "echo AUDIT_HOST_LOG", "verifier_model": "fable"]).isError)
+        #expect(!lead.call("configure", ["merge_policy": "auto", "small_task_min": 0, "test_command": "echo AUDIT_HOST_LOG", "verifier_model": "fable",
+                                         // v2: a sensitive or security audit runs on security_audit_model (mythos when unset); these cases are Fable's.
+                                         "security_audit_model": "fable"]).isError)
         #expect(!lead.call("add_task", ["title": "Fix", "goal": "add b", "acceptance": ["b exists"], "review": "audit", "agent": worker]).isError)
         #expect(!lead.call("start_worker", ["task": "fix"]).isError)
         let path = Worktrees.path(root: root, slug: "fix")
@@ -93,6 +95,21 @@ struct LeadCodexVerifierTests: LeadTeamFixture {
         #expect(LeadWorkflow.template.contains("codex_verifier: fallback"))
         #expect(!lead.call("configure", ["codex_verifier": ""]).isError)
         #expect(!lead.call("configure", [:]).text.contains("- codex_verifier: off"))
+    }
+
+    /// The difference from main, written down (a decision owed at the merge to main, the port map's merge of
+    /// 2026-11-24): with security_audit_model unset, v2 runs a sensitive audit on mythos; main runs it on Fable (it has
+    /// no such setting). These tests set it to fable, as they're about Codex against Claude, not the default model.
+    @Test func anUnsetSecurityAuditModelIsMythosOnV2WhereMainSaysFable() throws {
+        #expect(LeadWorkflow().securityAuditModel == "mythos")
+        #expect(LeadWorkflow.defaultSecurityAuditModel == "mythos")
+        let (root, runtime, lead) = try team(sensitive: true)
+        #expect(!lead.call("configure", ["security_audit_model": ""]).isError)
+        #expect(lead.workflow.securityAuditModel == "mythos")
+        #expect(!lead.call("audit", ["task": "fix"]).isError)
+        let session = try #require(vault.current(.verifier, root: root, task: "fix")?.session)
+        #expect(runtime.agents[session] == "claude")
+        #expect(LeadWorkflow.claudeModel(command: runtime.spawned.last?.command ?? "") == "mythos")
     }
 
     @Test func availableClaudeStaysOnItsVerifierModel() throws {

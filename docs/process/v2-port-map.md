@@ -324,6 +324,14 @@ What main added that didn't build or pass on Linux, changed in this merge (kinds
   (`f2a39ad4`) ran `/bin/zsh`, which Linux hasn't: the discovery failed, the rerun fell back to the whole test command,
   and a continuation main refuses (no tests run, a suite's second pass missing, a named failure still red) merged on
   that whole rerun. It runs in `Platform.Tools.loginShell`, as every other step of the merge's checks does.
+- `Tests/VibeCoreTests/LeadCodexVerifierTests.swift` (main's): a Claude verifier's prompt read from its launch
+  (`LaunchArguments.prompt`), not the run folder's `prompt.md`, which Linux removes once the prompt is inlined; its
+  team sets `security_audit_model: fable`, the cases being about Codex against Claude, and
+  `anUnsetSecurityAuditModelIsMythosOnV2WhereMainSaysFable` states the default.
+
+**A decision owed at the merge to main:** with `security_audit_model` unset, `v2` runs a sensitive or security audit
+on mythos (`LeadWorkflow.defaultSecurityAuditModel`); main runs it on Fable and has no such setting. Main's tests
+that assume Fable set it to fable here.
 
 ## Non-seam edits
 
