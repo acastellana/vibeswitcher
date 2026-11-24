@@ -367,6 +367,38 @@ public enum LeadLaunch {
         }
     }
 
+    /// The files of an audit's shared build and test run (`LeadToolset.auditRun`'s folder).
+    public static let auditLogFiles = ["init.log", "test.log", "run.txt"]
+
+    /// What a verifier or finder on `task` may also read outside its worktree without a prompt: the files of the audit's
+    /// one shared run its brief names (`logs`, all in `<root>/.vibeswitcher/audit/<task>/<run>/`), each of
+    /// `auditLogFiles` by name, read-only (the verifier's deny rules refuse every Edit and Write). On 2026-11-20 and
+    /// 2026-11-21 a finder stopped on the Read prompt for test.log and init.log there, which no one on the node answers,
+    /// and the audit never reached a verdict. As `evidenceReads`: a rule per spelling of the folder (as `root` spells it
+    /// and as the file system does), so a link out of it, another run's or task's folder and the rest of `.vibeswitcher`
+    /// stay as they were; nothing for a worker or the lead, nor for logs not in one such folder, a folder that isn't
+    /// there or is reached through a link, or a name a rule can't hold as it is.
+    public static func auditLogReads(_ role: Role, root: String, task: String?, logs: [String]) -> [String] {
+        guard role == .verifier, let task, !task.hasPrefix("."), root.hasPrefix("/") else { return [] }
+        let parents = Set(logs.map { URL(fileURLWithPath: $0).standardizedFileURL.deletingLastPathComponent().path })
+        guard parents.count == 1, let parent = parents.first else { return [] }
+        let run = (parent as NSString).lastPathComponent
+        guard !run.hasPrefix("."), [task, run].allSatisfy({ !$0.isEmpty && $0.unicodeScalars.allSatisfy(ruleSafe.contains) }) else { return [] }
+        let spelled = URL(fileURLWithPath: root, isDirectory: true).standardizedFileURL.path
+        guard let found = realpath(spelled, nil) else { return [] }
+        let resolved = String(cString: found)
+        free(found)
+        let inside = "/.vibeswitcher/audit/\(task)/\(run)"
+        guard spelled != "/", resolved != "/", parent == spelled + inside || parent == resolved + inside else { return [] }
+        // The folder is where it says it is: no link on the way out of the project's.
+        guard let landing = realpath(resolved + inside, nil) else { return [] }
+        defer { free(landing) }
+        guard String(cString: landing) == resolved + inside else { return [] }
+        let folders = Array(Set([spelled + inside, resolved + inside])).sorted()
+        guard folders.allSatisfy(isRuleSafe) else { return [] }
+        return folders.flatMap { folder in auditLogFiles.map { "Read(/\(folder)/\($0))" } }
+    }
+
     /// The hook every role's settings add: its `PermissionRequest` hook lets a command line run without a prompt when
     /// it parses cleanly as git reads and grep/rg/head/tail/wc/sort with known flags, every path in the role's worktree
     /// `root` (symlinks resolved), and for a worker its own `git add`, `git rm`, `git commit -m` and `git apply`
@@ -577,7 +609,8 @@ public enum LeadLaunch {
                                branch: String? = nil, records: String? = nil, folder: URL? = nil, cwd: String? = nil,
                                temporary: URL = SessionTemp.root, home: String = VibePaths.home, resume: String? = nil,
                                teamPlugins: [String] = [], listedPlugins: [String]? = nil,
-                               box: Result<SandboxPolicy, SandboxRefusal> = .success(.standard)) throws -> Prepared {
+                               box: Result<SandboxPolicy, SandboxRefusal> = .success(.standard),
+                               auditLogs: [String] = []) throws -> Prepared {
         let folder = folder?.path ?? (root as NSString).appendingPathComponent(".vibeswitcher/run/\(name)")
         try VibePaths.ensurePrivate(URL(fileURLWithPath: folder, isDirectory: true))
         let promptFile = (folder as NSString).appendingPathComponent("prompt.md")
@@ -603,7 +636,8 @@ public enum LeadLaunch {
         if role == .verifier, let task {
             rules += memberTranscripts(root: root, slug: task, team: try team(root: root, task: task), cwd: cwd, home: home)
         }
-        var settings: [String: Any] = ["permissions": ["allow": allow(role, base: branch) + evidenceReads(role, root: root, task: task),
+        var settings: [String: Any] = ["permissions": ["allow": allow(role, base: branch) + evidenceReads(role, root: root, task: task)
+                                                           + auditLogReads(role, root: root, task: task, logs: auditLogs),
                                                        "deny": rules]]
         var env = environment(role)
         if role == .verifier {
