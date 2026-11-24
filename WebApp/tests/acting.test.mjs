@@ -19,10 +19,12 @@ const vectors = JSON.parse(readFileSync(join(dirname(fileURLToPath(import.meta.u
 setLanguage('en');
 
 // A page on a fake socket whose hello is the node's web hello with `rights` and `kinds` in place of its own.
-async function page({ rights, kinds, act = undefined }) {
+async function page({ rights, kinds, act = undefined, flags = {}, build = null, assets = undefined, phrase = undefined }) {
   const store = createStore();
   const sockets = [];
   const stored = [];
+  const kept = new Map([['vibeswitcher.token', 'token'], ...Object.entries(flags)]);
+  const reloads = [];
   const timers = [];
   class FakeSocket {
     constructor() { this.sent = []; this.readyState = 0; sockets.push(this); }
@@ -30,9 +32,9 @@ async function page({ rights, kinds, act = undefined }) {
     close() { this.readyState = 3; this.onclose?.(); }
   }
   const feed = connectSocket(store, {
-    url: 'ws://127.0.0.1:47830/ws', WebSocket: FakeSocket, storage: { getItem: () => 'token', setItem: (key, value) => stored.push([key, value]), removeItem() {} }, validate: () => null,
-    build: Promise.resolve(null), setTimeout: (run) => { timers.push(run); return timers.length; }, clearTimeout: () => {}, location: { hash: '', pathname: '/', search: '' },
-    history: { replaceState() {} }, reload() {}, log: () => {},
+    url: 'ws://127.0.0.1:47830/ws', WebSocket: FakeSocket, storage: { getItem: (key) => kept.get(key) ?? null, setItem: (key, value) => { stored.push([key, value]); kept.set(key, value); }, removeItem: (key) => kept.delete(key) }, validate: () => null,
+    build: Promise.resolve(build), setTimeout: (run) => { timers.push(run); return timers.length; }, clearTimeout: () => {}, location: { hash: '', pathname: '/', search: '' },
+    history: { replaceState() {} }, reload: () => reloads.push(true), log: () => {},
   });
   store.connect(feed);
   await feed.start();
@@ -40,7 +42,8 @@ async function page({ rights, kinds, act = undefined }) {
   socket.readyState = 1;
   socket.onopen();
   const hello = structuredClone(vectors['hello.web']);
-  hello.auth = { ...(hello.auth || {}), rights, ...(act ? { act } : {}) };
+  hello.auth = { ...(hello.auth || {}), rights, ...(act ? { act } : {}), ...(phrase ? { phrase } : {}) };
+  if (assets !== undefined) hello.assets = assets;
   hello.kinds = kinds;
   socket.onmessage({ data: JSON.stringify(hello) });
   await new Promise((resolve) => setImmediate(resolve));
@@ -53,7 +56,7 @@ async function page({ rights, kinds, act = undefined }) {
     again.onopen?.();
     return again;
   };
-  return { store, socket, sockets, stored, feed, hello, reconnect, app: { store } };
+  return { store, socket, sockets, stored, kept, reloads, feed, hello, reconnect, app: { store } };
 }
 
 const ACTING = ['answer', 'hold', 'approve', 'approve.list', 'config.accept', 'base.accept', 'base.keep', 'tell', 'send', 'session.end', 'session.rename', 'session.pause',
@@ -141,7 +144,7 @@ test('the act secret is kept in memory only, sent with the token on a reconnect,
   // The socket drops; the page connects again without a reload: the auth carries the token and the act secret.
   const again = reconnect();
   assert.notEqual(again, sockets[0]);
-  assert.deepEqual({ token: authOf(again).token, act: authOf(again).act }, { token: 'token', act: secret });
+  assert.deepEqual({ token: authOf(again).token, act: authOf(again).act }, { token: hello.auth.token, act: secret });
   welcome(again);
   // A voice refusal (the terminal's kind or setting) changes nothing.
   await refuse(store, again, 'set', { key: 'policy', value: 'x' }, 'voice');
@@ -189,4 +192,52 @@ test('`paired` without kinds: the page connects again with its secret for a hell
   sockets[0].onmessage({ data: JSON.stringify({ v: 1, kind: 'paired', act: 'd'.repeat(43), rights: CONFIRMED }) });
   assert.equal(sockets[0].readyState, 3, 'closed to connect again');
   assert.equal(store.state.phrase, null);
+});
+
+// The node confirms the page: its `paired` on the connection that redeemed the code.
+const confirm = (socket, act = 'e'.repeat(43)) => socket.onmessage({ data: JSON.stringify({ v: 1, kind: 'paired', act, rights: CONFIRMED, kinds: ACTING }) });
+
+test('a tab that acted says why it no longer does: reloaded (its pairing was in memory), or its pairing ended', async () => {
+  // Reloaded: the tab's flag says it acted; the hello brings no act.
+  const reloaded = await page({ rights: ['read', 'draft'], kinds: ['status'], flags: { 'vibeswitcher.acted': '1' } });
+  assert.equal(reloaded.store.state.actsLost, 'reloaded');
+  reloaded.store.forgetActsLost();
+  assert.equal(reloaded.store.state.actsLost, null);
+  assert.equal(reloaded.kept.has('vibeswitcher.acted'), false, 'dismissed: not said again after another reload');
+  // Confirmed: the flag kept (never the secret), nothing to say; then a hello without "watch": its pairing ended.
+  const paired = await page({ rights: ['read', 'draft'], kinds: ['status'], phrase: 'amber fox lantern' });
+  confirm(paired.socket);
+  assert.equal(paired.kept.get('vibeswitcher.acted'), '1');
+  assert.equal(paired.store.state.actsLost, null);
+  paired.socket.onmessage({ data: JSON.stringify({ ...paired.hello, auth: { ...paired.hello.auth, phrase: undefined, rights: ['read', 'draft'] }, kinds: ['status'] }) });
+  assert.equal(paired.store.state.actsLost, 'ended');
+  // acts-ended on a request: ended too.
+  const refused = await page({ rights: ['read', 'draft'], kinds: ['status'], phrase: 'amber fox lantern' });
+  confirm(refused.socket);
+  await refuse(refused.store, refused.socket, 'tell', { folder: '/f', text: 'hi' }, 'acts-ended');
+  assert.equal(refused.store.state.actsLost, 'ended');
+});
+
+test('a newer page on the node: an acting tab isn’t reloaded behind the user’s back; a tab that doesn’t act is', async () => {
+  const acting = await page({ rights: ['read', 'draft'], kinds: ['status'], phrase: 'amber fox lantern', build: 'A', assets: 'A' });
+  confirm(acting.socket);
+  const again = acting.reconnect();
+  again.onmessage({ data: JSON.stringify({ ...acting.hello, assets: 'B', auth: { ...acting.hello.auth, phrase: undefined, rights: CONFIRMED }, kinds: ACTING }) });
+  assert.equal(acting.reloads.length, 0, 'not reloaded while it acts');
+  assert.equal(acting.store.state.newerBuild, true);
+  assert.equal(acting.store.acts(), true);
+  acting.store.reloadNow();
+  assert.equal(acting.reloads.length, 1, 'reloaded when the user asks');
+  const reading = await page({ rights: ['read', 'draft'], kinds: ['status'], build: 'A', assets: 'B' });
+  assert.equal(reading.reloads.length, 1, 'a tab that only reads reloads at once');
+});
+
+test('a code redeemed by a page older than the node’s is reloaded before its phrase shows, and the reloaded page says the address is used up', async () => {
+  const older = await page({ rights: ['read', 'draft'], kinds: ['status'], phrase: 'amber fox lantern', build: 'A', assets: 'B' });
+  assert.equal(older.reloads.length, 1);
+  assert.equal(older.store.state.phrase, null, 'no phrase shown');
+  assert.equal(older.kept.get('vibeswitcher.unconfirmed'), '1');
+  const reloaded = await page({ rights: ['read', 'draft'], kinds: ['status'], flags: { 'vibeswitcher.unconfirmed': '1' } });
+  assert.equal(reloaded.store.state.actsLost, 'unconfirmed');
+  assert.equal(reloaded.kept.has('vibeswitcher.unconfirmed'), false);
 });

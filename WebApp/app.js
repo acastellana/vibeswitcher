@@ -112,11 +112,34 @@ const unpaired = h('div', { class: 'offline signed-out', role: 'status', hidden:
 // A page that just redeemed a pairing code: the words to check against what `vibeswitcher web` shows, until the user
 // confirms it there.
 const confirming = h('div', { class: 'offline confirm-pairing', role: 'status', hidden: true });
+// This tab acted for the user and no longer does, or the node serves a newer page than this acting tab runs: said at
+// the top of the centre, on every screen, with why and the one thing that fixes it.
+const tabBanner = h('div', { class: 'tab-banner', role: 'alert', hidden: true });
+function drawTabBanner() {
+  const state = store.state;
+  const lost = state.actsLost && !store.acts();
+  tabBanner.hidden = !lost && !state.newerBuild;
+  if (tabBanner.hidden) return;
+  if (!lost) {
+    tabBanner.replaceChildren(h('span', null, t('tbNewerBuild')),
+      h('button', { class: 'button small', type: 'button', onclick: () => store.reloadNow() }, t('tbReload')));
+    return;
+  }
+  const level = state.node?.web?.acts?.level ?? (state.node?.web?.acts?.on ? 'trust' : 'off');
+  const why = state.actsLost === 'unconfirmed' ? 'tbUnconfirmed' : state.actsLost === 'reloaded' ? 'tbReloaded' : level === 'off' ? 'tbTurnedOff' : 'tbEnded';
+  tabBanner.replaceChildren(h('span', null, h('strong', null, t(state.actsLost === 'unconfirmed' ? 'tbNotPaired' : 'tbNoLonger')), ' ', t(why), ' '),
+    level === 'off' && state.actsLost !== 'unconfirmed' ? h('code', null, 'vibeswitcher set web_acts trust') : null,
+    level === 'off' && state.actsLost !== 'unconfirmed' ? h('span', null, t('tbThen')) : null,
+    h('code', null, 'vibeswitcher web'),
+    h('button', { class: 'icon-button tab-banner-close', type: 'button', 'aria-label': t('close'), title: t('close'), onclick: () => store.forgetActsLost() }, '×'));
+}
+store.subscribe('connection', drawTabBanner);
+store.subscribe('node', drawTabBanner);
 // What the centre says before there is anything to show: connecting, or not paired.
 const waitingWords = h('h1', { class: 'big' });
 const waitingSub = h('p');
 const waiting = h('section', { class: 'centre screen status-screen', hidden: true }, h('div', { class: 'empty-state' }, waitingWords, waitingSub));
-const centre = h('main', { class: 'centre-wrap' }, project.el, own.el, newProject.el, session.el, node.el, settings.el, stats.el, mail.el, waiting);
+const centre = h('main', { class: 'centre-wrap' }, tabBanner, project.el, own.el, newProject.el, session.el, node.el, settings.el, stats.el, mail.el, waiting);
 const root = document.getElementById('app');
 const commandPalette = palette(app);
 const scrim = h('div', { class: 'drawer-scrim', onclick: () => app.drawer(null) });

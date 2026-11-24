@@ -14,7 +14,8 @@
 //   test to reword the second question (OUT/revise.want, answered by OUT/revise.done), then clicks the option it drew:
 //   the node refuses it as `changed` and the card says to look again; let go, the card shows the new wording.
 // - Level off: This node's Turn off (set web_acts off); the page reconnects reading and drafting: the line that
-//   turns acting on, and the open card drafts.
+//   turns acting on, the open card drafts, and the banner at the top says this tab no longer acts (turned off).
+// - Reloaded: the tab reloaded says it no longer acts (its pairing was in its memory) and to pair again.
 // - Console: no error over the whole run.
 //
 // Usage: node acting-page-check.cjs URL EXPECT-JSON OUT-FOLDER CHROME   (exit 1 on any fail; a table and report.json in OUT)
@@ -143,8 +144,16 @@ async function run() {
     const reads = off && await page.until(`(() => { const line = document.querySelector('.node-column .acts-line'); return line && line.innerText.includes('vibeswitcher set web_acts trust') ? line.innerText.replace(/\\s+/g, ' ').slice(0, 80) : null; })()`, WAIT);
     await page.go(expect.projectHref);
     const drafts = reads && await page.until(`(() => { const c = ${card(expect.second)}; return c && c.querySelector('.answer button[type=submit]')?.innerText.trim() === 'Draft' ? 'the card drafts' : null; })()`, WAIT);
+    // The tab acted and no longer does: said at the top of the centre, with why.
+    const banner = drafts && await page.until(`(() => { const b = document.querySelector('.tab-banner:not([hidden])'); return b && /no longer acts/.test(b.innerText) && /turned off/.test(b.innerText) ? b.innerText.replace(/\\s+/g, ' ').slice(0, 90) : null; })()`, WAIT);
     await page.shot('level-off');
-    record('Level off', reads && drafts, !off ? 'no Turn off in This node' : !reads ? 'This node never said pages read and draft' : !drafts ? 'the open card still acts' : reads + '; ' + drafts);
+    record('Level off', reads && drafts && banner, !off ? 'no Turn off in This node' : !reads ? 'This node never said pages read and draft' : !drafts ? 'the open card still acts' : !banner ? 'no banner saying the tab no longer acts, acting turned off' : reads + '; ' + drafts + '; ' + banner);
+
+    // Reloaded: a tab keeps its pairing in memory only; reloaded, it says so (and to pair again), never silently.
+    await page.send('Page.reload');
+    const reloaded = await page.until(`(() => { const b = document.querySelector('.tab-banner:not([hidden])'); return b && /no longer acts/.test(b.innerText) && /reloaded/.test(b.innerText) && b.innerText.includes('vibeswitcher web') ? b.innerText.replace(/\\s+/g, ' ').slice(0, 90) : null; })()`, WAIT);
+    await page.shot('reloaded');
+    record('Reloaded', reloaded, reloaded || 'the reloaded tab didn’t say it no longer acts');
   } catch (error) {
     record('run', false, error.message);
   } finally {

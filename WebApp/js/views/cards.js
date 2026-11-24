@@ -175,7 +175,8 @@ export function questionCard(app, first, { expand = null } = {}) {
   const hold = () => app.store.act(card.id, 'hold', { seen: card.seen ?? null });
 
   function closedLine(mark, ...text) {
-    return h('div', { class: 'card-closed' }, mark, h('div', null, h('p', null, text), h('p', { class: 'card-about' }, card.question.text)));
+    // What it asked, as its line (the sentence that asks, no markdown marks), never its whole text.
+    return h('div', { class: 'card-closed' }, mark, h('div', null, h('p', null, text), h('p', { class: 'card-about' }, shortHashes(questionHead(card.question.text)))));
   }
 
   function build() {
