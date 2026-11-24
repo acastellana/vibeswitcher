@@ -184,7 +184,11 @@ export function projectView(app, { sheet }) {
   // changed (`answer.replace`, by its card and version); nothing when the node doesn't say.
   function answerState(line) {
     if (line.state !== 'answered' || line.delivered === undefined) return [];
-    if (line.delivered) return [h('p', { class: 'answer-state' }, t('swReadByLead'))];
+    // Read: and if a Change was open here meanwhile, it says the change can't be made (the node's refusal, or the mark).
+    if (line.delivered) {
+      return [h('p', { class: 'answer-state' }, t('swReadByLead')),
+        changing.has(line.key) ? h('p', { class: 'card-notice answer-state', role: 'alert' }, changing.get(line.key) || t('swAlreadyReadAnswer')) : null].filter(Boolean);
+    }
     // Change only where the node says it would take it (`replaceable`), by the card it names.
     const card = line.card ? store.state.cards.get(line.card) : null;
     const cardId = line.card;
