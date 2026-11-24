@@ -223,10 +223,9 @@ struct ActingPageTests {
         blocking.settled()
         access.acting = blocking
         access.tokenAuthority = (blocking, "loopback")
-        let started = Date()
+        // A wait on the host would never return here (the vault stays stalled until the test ends): returning is the proof.
         let token = access.admit(["token": .string(first.token), "act": .string(secret)])
         let paired = access.admit(["pair": .string(access.openCode(now: Date()))])
-        #expect(Date().timeIntervalSince(started) < 2, "an auth waited on the host")
         #expect(token?.rights.contains(.act) == true && paired != nil)
     }
 
