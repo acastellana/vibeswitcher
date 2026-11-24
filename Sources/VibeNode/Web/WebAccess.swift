@@ -295,8 +295,13 @@ public final class WebAccess: WebGate, @unchecked Sendable {
                 if acting.acts(token: token, secret: secret, origin: origin) { rights.insert(.act) }
             }
             afterAdmit?()
-            var admission = WebAdmission(rights: rights, auth: Self.auth(token: nil, expiresAt: expiresAt, rights: rights), token: token,
-                                         act: rights.contains(.watch) ? secret : nil)
+            var auth = Self.auth(token: nil, expiresAt: expiresAt, rights: rights)
+            // A confirmed page shows its pairing's words (a terminal names it by them: `web --passkey`).
+            if rights.contains(.watch), case .object(var fields) = auth {
+                fields["phrase"] = .string(PagePairing.phrase(token: token))
+                auth = .object(fields)
+            }
+            var admission = WebAdmission(rights: rights, auth: auth, token: token, act: rights.contains(.watch) ? secret : nil)
             admission.origin = origin
             return admission
         default:
@@ -451,6 +456,19 @@ public final class WebRequestScreen: WebSocketHandler, @unchecked Sendable {
         return pages.count
     }
 
+    /// One message to the connections of the confirmed page at localhost whose pairing's phrase is `phrase` (the page a
+    /// terminal named): its token's digest, or nil when none (or two pages show the same words).
+    public func toPasskeyPage(_ phrase: String, _ message: Data) -> String? {
+        let pages = lock.withLock { () -> [(LiveTransport, PageCredentials)] in
+            opens.values.compactMap { open in open.transport.flatMap { t in open.credentials.map { (t, $0) } } }
+        }.filter { ActingPages.passkeyHost($0.1.origin) && actingPages?.watches(token: $0.1.token, secret: $0.1.act) == true
+            && PagePairing.phrase(token: $0.1.token) == phrase }
+        let tokens = Set(pages.map(\.1.token))
+        guard tokens.count == 1, let token = tokens.first else { return nil }
+        for (transport, _) in pages { transport.send(Data(message.last == 0x0A ? message.dropLast() : message)) }
+        return ActingPages.digest(token)
+    }
+
     /// What says, at each request, whether an acting connection still acts (`ActingPages.acts`: its pairing's end, an
     /// off, a revoke count at once); unset, none acts.
     public var acting: ActingPages? {
@@ -542,7 +560,9 @@ public final class WebRequestScreen: WebSocketHandler, @unchecked Sendable {
         inner.opened(transport, rights: rights)
         // The kinds it may send now, as `hello.kinds` says them.
         let kinds = Principal.page(rights, terminals: terminals).kinds
+        let phrase = lock.withLock { opens[ObjectIdentifier(transport)]?.credentials?.token }.map(PagePairing.phrase(token:))
         let message = NodeWire.Value.object(["v": .int(NodeWire.version), "kind": .string("paired"), "act": .string(secret),
+                                             "phrase": phrase.map(NodeWire.Value.string) ?? .null,
                                              "rights": .array(WebAccess.names(rights).map(NodeWire.Value.string)),
                                              "kinds": .array(kinds.map(NodeWire.Value.string))])
         transport.send(Data(NodeWire.line(message).dropLast()))

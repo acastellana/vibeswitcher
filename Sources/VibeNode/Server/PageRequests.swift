@@ -45,11 +45,14 @@ public struct PairingSeat: Sendable {
     public var confirm: @Sendable (String, String, LiveRights) -> Bool
     /// One message to every confirmed pairing's connection on the origin a passkey works on: how many.
     public var toPasskeyPages: @Sendable (Data) -> Int
+    /// One message to the confirmed page at localhost whose pairing shows `phrase`: its token's digest, or nil for none.
+    public var toPasskeyPage: @Sendable (String, Data) -> String?
     public init(holds: @escaping @Sendable (String) -> Bool, confirm: @escaping @Sendable (String, String, LiveRights) -> Bool,
-                toPasskeyPages: @escaping @Sendable (Data) -> Int = { _ in 0 }) {
+                toPasskeyPages: @escaping @Sendable (Data) -> Int = { _ in 0 }, toPasskeyPage: @escaping @Sendable (String, Data) -> String? = { _, _ in nil }) {
         self.holds = holds
         self.confirm = confirm
         self.toPasskeyPages = toPasskeyPages
+        self.toPasskeyPage = toPasskeyPage
     }
 }
 

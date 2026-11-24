@@ -165,7 +165,8 @@ public final class NodeLive: @unchecked Sendable {
         self.tailnet?.access.tokenAuthority = (acting, "tailnet")
         requests.pairings = PairingSeat(holds: { [weak screen] in screen?.holdsPairing($0) ?? false },
                                         confirm: { [weak screen] code, secret, rights in screen?.confirmPairing(code, secret: secret, rights: rights) ?? false },
-                                        toPasskeyPages: { [weak screen] in screen?.toPasskeyPages($0) ?? 0 })
+                                        toPasskeyPages: { [weak screen] in screen?.toPasskeyPages($0) ?? 0 },
+                                        toPasskeyPage: { [weak screen] in screen?.toPasskeyPage($0, $1) })
         screen.onPagePaired = { [weak requests] request, credentials, transport in
             requests?.pagePaired(request, credentials: credentials) { reply in transport.send(NodeWire.message(reply)) }
         }

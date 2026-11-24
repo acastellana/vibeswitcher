@@ -248,4 +248,75 @@ struct PasskeyTests {
         #expect(!acting.acts(token: "t", secret: secret, origin: "127.0.0.1:8765"), "127.0.0.1 can't do passkeys")
         #expect(acting.watches(token: "t", secret: secret))
     }
+
+    /// A passkey's registration is bound to the one page the terminal names by its words: none showing them is refused;
+    /// one at a time; another page's answer is refused and makes the registration contested (nothing kept, the terminal
+    /// told); the named page's second answer too; the named page's one answer is kept by the typed code.
+    @Test func aRegistrationIsTheNamedPagesAlone() async throws {
+        let world = try await CardWorld.make(scratch)
+        defer { world.stop() }
+        let acting = ActingPages(vault: MemoryVaultV2().client)
+        let (tokenA, tokenB) = ("the-named-pages-token", "another-pages-token")
+        let secretA = acting.confirmed(token: tokenA, tokenEnds: Date().addingTimeInterval(3_600))
+        let secretB = acting.confirmed(token: tokenB, tokenEnds: Date().addingTimeInterval(3_600))
+        acting.settled()
+        let phraseA = PagePairing.phrase(token: tokenA)
+        let offered = Locked<[String]>([])
+        world.queue.sync {
+            world.requests.actingPages = acting
+            world.requests.pairings = PairingSeat(holds: { _ in true }, confirm: { _, _, _ in true },
+                                                  toPasskeyPages: { _ in 0 },
+                                                  toPasskeyPage: { phrase, _ in
+                                                      offered.mutate { $0.append(phrase) }
+                                                      return phrase == phraseA ? ActingPages.digest(tokenA) : nil
+                                                  })
+        }
+        let pageA = PageCredentials(token: tokenA, act: secretA, origin: "localhost:8765")
+        let pageB = PageCredentials(token: tokenB, act: secretB, origin: "localhost:8765")
+        func registered(_ page: PageCredentials, _ register: String, _ soft: SoftAuthenticator) throws -> NodeWire.Reply {
+            let challenge = try #require(world.queue.sync { world.requests.passkeyRegistrations[register]?.challenge })
+            let made = soft.registration(challenge: challenge)
+            let got = Locked<NodeWire.Reply?>(nil)
+            world.queue.sync {
+                world.requests.pagePaired(NodeWire.Request(id: "r", kind: "passkey.registered", args: [
+                    "register": .string(register), "id": .string(soft.idText), "clientDataJSON": .string(WebAuthn.base64url(made.clientData)),
+                    "attestationObject": .string(WebAuthn.base64url(made.attestation)),
+                ], action: UUID().uuidString), credentials: page) { got.value = $0 }
+            }
+            return try #require(got.value)
+        }
+        func begin(_ phrase: String) async throws -> NodeWire.Reply { try #require(await world.ask("web.passkey", ["phrase": .string(phrase)], action: nil)) }
+        func state(_ register: String) async throws -> String? {
+            try #require(await world.ask("web.passkey", ["register": .string(register)], action: nil)).result?["state"]?.string
+        }
+        func clear() { world.queue.sync { world.requests.passkeyRegistrations = [:] } }
+
+        // No page shows those words.
+        #expect(try await begin("acorn acorn acorn").error?.code == "gone")
+        // Another page answers the offer made to the named one: refused, contested, not kept.
+        let first = try #require(try await begin(phraseA.uppercased()).result?["register"]?.string)
+        #expect(try await begin(phraseA).error?.message.contains("waits already") == true, "one at a time")
+        #expect(try registered(pageB, first, SoftAuthenticator()).error?.code == "voice")
+        #expect(try await state(first) == "contested")
+        let refusedAdd = try #require(await world.ask("web.passkey.add", ["register": .string(first)]))
+        #expect(refusedAdd.error?.message.contains("another page answered") == true, "\(refusedAdd)")
+        #expect(acting.state?.keys.isEmpty == true)
+        clear()
+        // The named page answers twice: the second is refused, and nothing is kept.
+        let twice = try #require(try await begin(phraseA).result?["register"]?.string)
+        #expect(try registered(pageA, twice, SoftAuthenticator()).ok)
+        #expect(try registered(pageA, twice, SoftAuthenticator()).error?.code == "voice")
+        #expect(try await state(twice) == "contested")
+        clear()
+        // The named page answers once: kept by the typed code (the user's voice), its id said.
+        let soft = SoftAuthenticator()
+        let once = try #require(try await begin(phraseA).result?["register"]?.string)
+        #expect(try registered(pageA, once, soft).ok)
+        let waiting = try #require(await world.ask("web.passkey", ["register": .string(once)], action: nil))
+        #expect(waiting.result?["state"]?.string == "received" && waiting.result?["phrase"]?.string == phraseA, "\(waiting)")
+        let added = try #require(await world.ask("web.passkey.add", ["register": .string(once)]))
+        #expect(added.ok, "\(added)")
+        #expect(acting.state?.keys[soft.idText] != nil)
+        #expect(offered.value.allSatisfy { $0 == phraseA || $0 == "acorn acorn acorn" })
+    }
 }

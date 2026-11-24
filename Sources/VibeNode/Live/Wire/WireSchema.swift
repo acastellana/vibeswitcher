@@ -138,7 +138,9 @@ public enum WireSchema {
             // connection's rights now.
             shape("paired", from: "WebRequestScreen.confirmPairing", [field("v", .int), field("kind", .words(["paired"])), field("act", .string),
                                                                       field("rights", .list(.words(["read", "draft", "watch", "act"]))),
-                                                                      field("kinds", .list(.string))]),
+                                                                      field("kinds", .list(.string)),
+                                                                      // Its pairing's words, shown on This node from here on.
+                                                                      optional("phrase", Kind.string.orNull)]),
             shape("bye", from: "NodeWire.Bye", [field("v", .int), field("kind", .words(["bye"])), field("reason", .string),
                                                 optional("code", .words(["auth", "revoked", "version", "too-long", "not-object",
                                                                          "not-request", "must", "stopping", "busy", "acts-off"]))]),

@@ -192,9 +192,11 @@ As built (the node's side, after its security reviews):
     address as its relying party. The page answers on both names. They are two origins to the browser, so a pairing
     belongs to the one it was made on. `vibeswitcher web` prints the localhost address at `confirm`, or with
     `--localhost`. At `confirm`, a page at 127.0.0.1 watches but doesn't act.
-  - **Registration.** `vibeswitcher web --passkey` asks the confirmed pages at localhost to make one. Your device asks
-    you (Windows Hello, a security key). The terminal then shows its id and asks your code. The vault keeps the public
-    key and its count, at most 5 keys.
+  - **Registration.** `vibeswitcher web --passkey` asks you to type the three words of the one page to register on.
+    Each confirmed page shows its words on This node. The offer goes to that page alone. If another page answers, or it
+    answers twice, the terminal says so and nothing is kept. Your device asks you (Windows Hello, a security key). The
+    terminal then shows the page's words and the key's id and asks your code. The vault keeps the public key and its
+    count, at most 5 keys, one registration at a time.
     - `status` and This node list the keys, with when each was added and last used.
     - A key added in the last week is said there too.
     - `vibeswitcher web --passkey --forget ID` drops one.
@@ -212,6 +214,8 @@ As built (the node's side, after its security reviews):
       device's prompt doesn't name the request, so a touch proves you were there and meant to approve something, not
       what you read. The vault's record shows what was approved, so a mismatch can be seen afterwards; nothing stops
       it before.
+    - The attestation is "none": the node makes no claim about the device that made a key (a software key in a
+      browser profile passes as well as a security key). The page you named and your code are what vouch for it.
     - Registration and the level itself rest on the user's-voice rule. On a machine where that rule can be passed
       (WSL's interop: the second review's finding B), a process that passes as the terminal can register its own key
       or change the level. So `confirm` protects against a stolen token or a driven browser. It does not protect

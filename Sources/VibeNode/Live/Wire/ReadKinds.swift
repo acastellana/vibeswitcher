@@ -343,18 +343,28 @@ extension WireKinds {
         public static let kind = "web.passkey"
         public struct Args: Codable, Sendable, Equatable {
             public var register: String?
-            public init(register: String? = nil) { self.register = register }
+            /// The page to register on, by the three words its pairing shows.
+            public var phrase: String?
+            public init(register: String? = nil, phrase: String? = nil) {
+                self.register = register
+                self.phrase = phrase
+            }
         }
         public struct Result: Codable, Sendable, Equatable {
             public var register: String?
             public var pages: Int?
+            /// `waiting`, `received`, `contested` (another page answered, or it was answered twice: nothing kept), `gone`.
             public var state: String?
             public var id: String?
-            public init(register: String, pages: Int? = nil, state: String, id: String? = nil) {
+            public var why: String?
+            public var phrase: String?
+            public init(register: String, pages: Int? = nil, state: String, id: String? = nil, why: String? = nil, phrase: String? = nil) {
                 self.register = register
                 self.pages = pages
                 self.state = state
                 self.id = id
+                self.why = why
+                self.phrase = phrase
             }
         }
     }

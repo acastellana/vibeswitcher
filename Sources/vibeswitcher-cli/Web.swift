@@ -182,16 +182,21 @@ enum PasskeyCommand {
 
     static func add() -> Int32 {
         guard let client = connected() else { return 1 }
+        // The one page to register on, named by the words it shows (This node, at http://localhost): an offer to any page
+        // would let any confirmed page (or whatever drives one) answer with its own key.
+        guard let typedPhrase = TypedWord.line("Type the three words of the page to add a passkey on (it shows them on This node, at http://localhost): "),
+              !typedPhrase.isEmpty else {
+            return Say.refused("No page named: nothing was asked.")
+        }
+        let phrase = typedPhrase.lowercased().split(whereSeparator: \.isWhitespace).joined(separator: " ")
         let register: String
-        switch client.read(WireKinds.WebPasskey.self, .init(), timeout: 30) {
+        switch client.read(WireKinds.WebPasskey.self, .init(phrase: phrase), timeout: 30) {
         case .failure(let failure): return Say.failed(failure)
         case .refused(let reply): return Say.replyError(reply)
         case .success(let asked, _):
-            guard let id = asked.register, (asked.pages ?? 0) > 0 else {
-                return Say.refused("No page paired at http://localhost is open: run `vibeswitcher web --localhost`, confirm it, then this again.")
-            }
+            guard let id = asked.register else { return Say.refused("The node asked no page.") }
             register = id
-            Say.err("Asked \(asked.pages ?? 0) page\(asked.pages == 1 ? "" : "s") at http://localhost: press \"Add a passkey\" there and follow your device (Ctrl-C stops)…")
+            Say.err("Asked the page showing “\(ConfigSeal.inert(phrase, limit: 80))”: press \"Add a passkey\" there and follow your device (Ctrl-C stops)…")
         }
         let started = MacTime.real.awake()
         var credential: String?
@@ -201,15 +206,18 @@ enum PasskeyCommand {
             case .refused(let reply): return Say.replyError(reply)
             case .success(let state, _):
                 if state.state == "gone" { return Say.refused("The registration ran out: run `vibeswitcher web --passkey` again.") }
+                if state.state == "contested" {
+                    return Say.refused("Not kept: \(ConfigSeal.inert(state.why ?? "another page answered", limit: 120)). If that wasn't you, run `vibeswitcher web --revoke`.")
+                }
                 credential = state.id
             }
             if credential != nil { break }
             usleep(500_000)
         }
-        guard let credential else { return Say.refused("No page registered a passkey in time.") }
+        guard let credential else { return Say.refused("The page registered no passkey in time.") }
         let action = UUID().uuidString.lowercased()
-        let what = "This keeps the passkey \(ConfigSeal.inert(credential, limit: 20))… that a page just registered: at `web_acts confirm` each act from a "
-            + "page needs a touch of it. Keep it only if YOUR device just asked you to make one."
+        let what = "This keeps the passkey \(ConfigSeal.inert(credential, limit: 20))… made on the page showing “\(ConfigSeal.inert(phrase, limit: 80))”: "
+            + "at `web_acts confirm` each act from a page needs a touch of it. Keep it only if YOUR device just asked you to make one there."
         let said = TypedWord.said(approval: client.approvalRule, action: action, what: what)
         guard case .success(let typed) = said else { return Say.refused(said.refusal) }
         switch client.change(WireKinds.WebPasskeyAdd.self, .init(register: register), action: action, typed: typed, timeout: 30) {
