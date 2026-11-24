@@ -163,6 +163,9 @@ public enum GitHubPushers {
         let repository: (_ url: String) -> Repository?
         private let lock = NSLock()
         private var cache: [String: [Push]] = [:]
+        /// Per tip: the commits matched to its pushes so far, and the handles found for them.
+        private var looked: [String: Set<String>] = [:]
+        private var named: [String: [String: String]] = [:]
         /// How many times GitHub was asked (the cache's tests).
         public var asked: Int { lock.withLock { askedCount } }
         private var askedCount = 0
@@ -197,7 +200,18 @@ public enum GitHubPushers {
                 cache[key] = fetched
                 return fetched
             }
-            return found.isEmpty ? [:] : GitHubPushers.attribute(commits, pushes: found, root: root)
+            guard !found.isEmpty else { return [:] }
+            // Commits already matched for this tip aren't matched again (the card's minute looks ask for the same
+            // ones): only the new ones go through git.
+            let (known, matched) = lock.withLock { (looked[key] ?? [], named[key] ?? [:]) }
+            let fresh = commits.filter { !known.contains($0) }
+            let more = fresh.isEmpty ? [:] : GitHubPushers.attribute(fresh, pushes: found, root: root)
+            let all = matched.merging(more) { $1 }
+            lock.withLock {
+                looked[key, default: []].formUnion(fresh)
+                named[key] = all
+            }
+            return all.filter { commits.contains($0.key) }
         }
     }
 

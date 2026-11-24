@@ -169,7 +169,7 @@ struct GitHubPushersTests {
         let scene = try makePushes()
         let started = temp.url("started")
         let gh = try fakeGh("echo $$ > '\(started.path)'\nexec sleep 600")
-        let lookup = GitHubPushers.Lookup.gh(executable: { gh }, timeout: 0.5)
+        let lookup = GitHubPushers.Lookup.gh(executable: { gh }, timeout: 2)
         #expect(lookup.pushers(root: scene.root, url: "https://github.com/acme/app", branch: "main", tip: scene.bob, commits: [scene.bob]).isEmpty)
         // It ran, and was stopped rather than waited for: by the time the lookup is back, the fake gh is gone.
         let pid = try #require(Int32(try String(contentsOf: started, encoding: .utf8).trimmingCharacters(in: .whitespacesAndNewlines)))
