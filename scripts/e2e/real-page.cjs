@@ -53,7 +53,7 @@ async function run() {
 
     // A3: paired and connected, the projects and your own sessions listed.
     await page.send('Page.navigate', { url });
-    const connected = await page.until(`!!document.querySelector('.left') && !document.querySelector('.offline:not([hidden])') && !!sessionStorage.getItem('vibeswitcher.token')`, 20000);
+    const connected = await page.until(`!!document.querySelector('.left') && !document.querySelector('.offline:not([hidden]):not(.confirm-pairing)') && !!sessionStorage.getItem('vibeswitcher.token')`, 20000);
     await page.shot('a3-start');
     const projects = connected ? await page.evaluate(`[...document.querySelectorAll('.left .project')].map((a) => a.getAttribute('href'))`) : [];
     await page.go('#/sessions');
