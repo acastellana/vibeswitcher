@@ -185,7 +185,8 @@ public final class LiveBoards: @unchecked Sendable {
             // The workers its queue's forecast runs on: workflow.md's max_workers.
             let workers = LeadWorkflow.load(from: (feed.folder as NSString).appendingPathComponent("workflow.md")).maxWorkers
             let value = BoardValue.value(project: feed.project, root: feed.root, board: loaded.board, refusal: loaded.refusal, now: now(),
-                                         usageWaits: waits, summaries: lines, decisions: decided, records: feed.records.load(), workers: workers)
+                                         usageWaits: waits, summaries: lines, decisions: decided, records: feed.records.load(), workers: workers,
+                                         goals: loaded.goals)
             self?.queue.async { [weak self] in
                 guard let self else { return }
                 feed.reading = false
@@ -208,7 +209,8 @@ final class BoardFile: @unchecked Sendable {
     let root: String
     let path: String
     private var stamp: BoardFiles.Stamp?
-    private var kept: (board: LeadBoard?, refusal: String?)?
+    private var kept: (board: LeadBoard?, refusal: String?, goals: LeadGoalsFile)?
+    private var goalsStamp: BoardFiles.Stamp?
 
     init(root: String) {
         self.root = root
@@ -217,24 +219,40 @@ final class BoardFile: @unchecked Sendable {
 
     /// The board (an empty one when there is no file yet), or why it can't be read; `fresh` when this read decoded it
     /// (not the copy kept from the last).
-    func load() -> (board: LeadBoard?, refusal: String?, fresh: Bool) {
+    func load() -> (board: LeadBoard?, refusal: String?, fresh: Bool, goals: LeadGoalsFile) {
         let now = BoardFiles.Stamp(path)
-        if let kept, now != nil, now == stamp { return (kept.board, kept.refusal, false) }
+        let goalsNow = BoardFiles.Stamp(([root] + Self.goalsComponents).joined(separator: "/"))
+        if let kept, now != nil, now == stamp, goalsNow == goalsStamp { return (kept.board, kept.refusal, false, kept.goals) }
         let read = Self.read(root: root)
         stamp = now
+        goalsStamp = goalsNow
         kept = read
-        return (read.board, read.refusal, true)
+        return (read.board, read.refusal, true, read.goals)
     }
+
+    /// Where the project's goals are under its root (`GoalStore`), beside the board.
+    static let goalsComponents = [".vibeswitcher", "goals.json"]
+    /// The most bytes the goals' file is read at.
+    static let goalsBytes = 1 << 20
 
     /// The board under `root`: none there is an empty one; a link on the way, a file that isn't regular or is over
     /// `mostBytes`, one that can't be read or isn't a board this build knows is refused, saying why.
-    static func read(root: String, mostBytes: Int = LiveBoards.mostBytes) -> (board: LeadBoard?, refusal: String?) {
+    /// The goals beside it (goals.json, read the same careful way; none when absent or unreadable), or, while there's no
+    /// such file, those a board written by a build that kept them in it still holds.
+    static func read(root: String, mostBytes: Int = LiveBoards.mostBytes) -> (board: LeadBoard?, refusal: String?, goals: LeadGoalsFile) {
+        var goals = LeadGoalsFile()
+        var hasFile = false
+        if case .data(let data) = Platform.Files.readRegular(in: root, path: goalsComponents, limit: goalsBytes) {
+            hasFile = true
+            goals = (try? JSONDecoder().decode(LeadGoalsFile.self, from: data)) ?? LeadGoalsFile()
+        }
         switch Platform.Files.readRegular(in: root, path: components, limit: mostBytes) {
-        case .absent: return (LeadBoard(), nil)
-        case .refused(let why): return (nil, "the board isn't read: \(why)")
+        case .absent: return (LeadBoard(), nil, goals)
+        case .refused(let why): return (nil, "the board isn't read: \(why)", goals)
         case .data(let data):
-            guard let board = try? JSONDecoder().decode(LeadBoard.self, from: data) else { return (nil, "the board isn't one this build reads") }
-            return (board, nil)
+            guard let board = try? JSONDecoder().decode(LeadBoard.self, from: data) else { return (nil, "the board isn't one this build reads", goals) }
+            if !hasFile, let legacy = LeadGoalsFile.legacy(boardData: data) { goals = legacy }
+            return (board, nil, goals)
         }
     }
 }

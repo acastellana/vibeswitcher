@@ -735,7 +735,7 @@ public final class LeadToolset: MCPToolset {
                                          "advisor": Self.advisorProperty, "effort": Self.effortProperty,
                                          "origin": Self.originProperty, "team": Self.teamProperty, "goal_id": Self.goalIDProperty,
                                          "likely_min": Self.likelyProperty, "worst_min": Self.worstProperty]),
-                MCPToolInfo(name: "add_goal", description: "Add a goal for the project: one of the 3 to 5 the roadmap is drawn from, in plain words, with what done means. Every task belongs to one (goal_id on add_task and update_task). At most \(LeadBoard.mostOpenGoals) open at once.",
+                MCPToolInfo(name: "add_goal", description: "Add a goal for the project: one of the 3 to 5 the roadmap is drawn from, in plain words, with what done means. Every task belongs to one (goal_id on add_task and update_task). At most \(LeadGoalsFile.mostOpen) open at once.",
                             properties: ["title": P(type: "string", description: "The goal, in plain words, one line"),
                                          "done": P(type: "string", description: "What done means for it, one line")],
                             required: ["title", "done"]),
@@ -1246,8 +1246,9 @@ public final class LeadToolset: MCPToolset {
         let review: LeadTask.Review? = agent == .codex || auditReason != nil ? .audit : givenReview
         let taskOrigin = try Self.originArgument(arguments) ?? (origin != nil ? .audit : nil)
         let parts = try Self.teamArgument(arguments)
+        let goals = GoalStore(board: store).load()
         let task = try store.update { board -> LeadTask in
-            let goalID = try goalArgument(arguments, on: board)
+            let goalID = try goalArgument(arguments, on: goals)
             var task = LeadTask(slug: Slug.make(title, taken: store.takenSlugs(board)), title: title, contract: contract)
             task.goalID = goalID ?? nil
             if let estimate = try Self.estimateArgument(arguments, by: .lead) { task.add(estimate) }
@@ -1560,9 +1561,10 @@ public final class LeadToolset: MCPToolset {
         // A task's goal: set (or cleared) first, on its own; alone, that is the whole call.
         var goalNote = ""
         if arguments["goal_id"] != nil {
+            let goals = GoalStore(board: store).load()
             let goal = try store.update { board -> String? in
                 guard let at = board.taskIndex(slug) else { throw Problem(text: "No task \(slug) on the board. Nothing was changed.") }
-                let goal = try goalArgument(arguments, on: board) ?? nil
+                let goal = try goalArgument(arguments, on: goals) ?? nil
                 board.tasks[at].goalID = goal
                 return goal
             }
@@ -6845,7 +6847,8 @@ public final class LeadToolset: MCPToolset {
         if let red = board.mainRed { lines.append(red.text(base: workflow.base).replacingOccurrences(of: "\n", with: " ")) }
         if let line = archiveNudgeOnce() { lines.append(line) }
         if let line = progressNudgeOnce() { lines.append(line) }
-        lines.append(Self.clip(LeadGoals.unsortedLine(board) ?? LeadGoals.statusLine(board), 600))
+        let goals = GoalStore(board: store).load()
+        lines.append(Self.clip(LeadGoals.unsortedLine(board, goals) ?? LeadGoals.statusLine(board, goals), 600))
         // How this project's estimates run, once any task has one.
         if board.tasks.contains(where: { $0.estimates?.isEmpty == false }) { lines.append(Self.clip(LeadForecast.score(board).line, 400)) }
         if let listing {
@@ -7528,7 +7531,7 @@ public final class LeadToolset: MCPToolset {
         if let receipts = LeadReceiptTotals.line(board) { lines.append(receipts) }
         if board.tasks.contains(where: { !LeadTeams.isFinished($0) }) { lines.append(Self.reviewLegend) }
         // Under the goals, in their order, then the unsorted (`LeadGoals.grouped`); as before with none.
-        lines += LeadGoals.grouped(board, lines: board.tasks.map { task in
+        lines += LeadGoals.grouped(GoalStore(board: store).load(), lines: board.tasks.map { task in
             let ended = sessions.flatMap { Self.endedMember(task, $0) }
             // A running task whose worker ended reads so, not running.
             let state = ended.map { $0.hasPrefix("worker") ? "worker ended" : "verifier ended" } ?? (task.isAbandoned ? "abandoned" : task.status.rawValue)

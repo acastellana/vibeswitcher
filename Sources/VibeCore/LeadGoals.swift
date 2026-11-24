@@ -2,7 +2,7 @@ import Foundation
 
 /// A project's goal (the web design of 2026-11-23, "Goals (new in the node)"): the lead keeps three to five, in plain
 /// words, each with one line on what "done" means, and every task belongs to one (`LeadTask.goalID`). The user's roadmap
-/// is drawn from them. Kept on the board (`LeadBoard.goals`, in their order), the lead's own records: no new trust.
+/// is drawn from them. Kept beside the board (`GoalStore`, goals.json), the lead's own records: no new trust.
 public struct LeadGoal: Codable, Equatable, Sendable, Identifiable {
     public enum State: String, Codable, Sendable, CaseIterable {
         case open, done
@@ -32,31 +32,108 @@ extension LeadTask {
     public var unfinished: Bool { [.planned, .running, .review, .blocked, .failed, .kept].contains(status) }
 }
 
-extension LeadBoard {
+/// A project's goals and when its lead was last told it has none: `<repo>/.vibeswitcher/goals.json` (`GoalStore`),
+/// beside the board, not in it. `LeadBoard`'s stored properties are pinned by the Mac app's tests (`TeamChurnTests`: its
+/// `isSame` compares each one), and the Mac app isn't changed on v2: the goals live in their own file.
+public struct LeadGoalsFile: Codable, Equatable, Sendable {
+    /// In their order.
+    public var goals: [LeadGoal] = []
+    /// When the lead was last told this project has no goals yet (at most once a day, `LeadGoals.nudge`).
+    public var nudgedAt: Double?
+
+    public init(goals: [LeadGoal] = [], nudgedAt: Double? = nil) {
+        self.goals = goals
+        self.nudgedAt = nudgedAt
+    }
+
+    /// A file saved without either field reads with none.
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        goals = try container.decodeIfPresent([LeadGoal].self, forKey: .goals) ?? []
+        nudgedAt = try container.decodeIfPresent(Double.self, forKey: .nudgedAt)
+    }
+
     /// The most open goals a project keeps: a ninth is refused (close or merge one).
-    public static let mostOpenGoals = 8
+    public static let mostOpen = 8
     /// The unfinished tasks from which a project with no goals has its lead told to set some (`LeadGoals.nudge`).
-    public static let goalsNudgeTasks = 5
+    public static let nudgeTasks = 5
     /// How often, at most, that is told.
-    public static let goalsNudgeEvery: Double = 86_400
+    public static let nudgeEvery: Double = 86_400
 
-    public var openGoals: [LeadGoal] { (goals ?? []).filter { $0.state == .open } }
+    public var open: [LeadGoal] { goals.filter { $0.state == .open } }
 
-    public func goal(_ id: String) -> LeadGoal? { (goals ?? []).first { $0.id == id } }
+    public func goal(_ id: String) -> LeadGoal? { goals.first { $0.id == id } }
 
-    /// The unfinished tasks with no open goal (none, or a goal closed or gone), while the project has an open goal: what
-    /// the lead is reminded of. Empty when it has none (`LeadGoals.nudge` says that instead).
-    public var unsorted: [LeadTask] {
-        guard !openGoals.isEmpty else { return [] }
-        return tasks.filter { task in task.unfinished && task.goalID.flatMap { goal($0) }?.state != .open }
+    /// `board`'s unfinished tasks with no open goal (none, or a goal closed or gone), while there is an open goal: what
+    /// the lead is reminded of. Empty when there is none (`LeadGoals.nudge` says that instead).
+    public func unsorted(_ board: LeadBoard) -> [LeadTask] {
+        guard !open.isEmpty else { return [] }
+        return board.tasks.filter { task in task.unfinished && task.goalID.flatMap { goal($0) }?.state != .open }
+    }
+
+    /// What a board file a build of 2026-11-23 wrote with its goals in it (`goals`, `goalsNudgedAt`) holds of them: the
+    /// goals moved to their own file once (`GoalStore`). Nil when it holds neither.
+    public static func legacy(boardData data: Data) -> LeadGoalsFile? {
+        struct Legacy: Decodable { var goals: [LeadGoal]?; var goalsNudgedAt: Double? }
+        // Only a file that names them is decoded again (most boards are most of a MB, and hold neither).
+        guard data.range(of: Data("\"goals".utf8)) != nil,
+              let legacy = try? JSONDecoder().decode(Legacy.self, from: data), legacy.goals != nil || legacy.goalsNudgedAt != nil else { return nil }
+        return LeadGoalsFile(goals: legacy.goals ?? [], nudgedAt: legacy.goalsNudgedAt)
+    }
+}
+
+/// A project's goals on disk (`LeadGoalsFile`), beside its board: read and written under the board's lock, atomically
+/// and private, kept out of git with the rest of `.vibeswitcher/` (`BoardStore.ensureExcluded`). A board file that still
+/// holds goals (written by a build that kept them there) has them moved here at the first read.
+public final class GoalStore: @unchecked Sendable {
+    public let board: BoardStore
+    var file: String { (board.folder as NSString).appendingPathComponent("goals.json") }
+
+    public init(board: BoardStore) { self.board = board }
+    public convenience init(root: String) { self.init(board: BoardStore(root: root)) }
+
+    /// The goals, or none when there's no file or it can't be read (for showing them).
+    public func load() -> LeadGoalsFile { (try? read()) ?? LeadGoalsFile() }
+
+    /// The goals; a board file that still holds some has them moved here first (under the lock). Throws when the file is
+    /// there but doesn't read, so nothing writes an empty one over it.
+    public func read() throws -> LeadGoalsFile {
+        if let data = FileManager.default.contents(atPath: file) {
+            do { return try JSONDecoder().decode(LeadGoalsFile.self, from: data) } catch {
+                throw BoardError(text: "\(file) doesn't read as the project's goals (\(error)); fix or move it, nothing was changed.")
+            }
+        }
+        guard let data = FileManager.default.contents(atPath: board.file), LeadGoalsFile.legacy(boardData: data) != nil else { return LeadGoalsFile() }
+        return try update { $0 }
+    }
+
+    /// Reads, changes and writes the goals under the board's lock, atomically.
+    @discardableResult
+    public func update<T>(_ change: (inout LeadGoalsFile) throws -> T) throws -> T {
+        try board.locked {
+            var goals: LeadGoalsFile
+            if let data = FileManager.default.contents(atPath: file) {
+                do { goals = try JSONDecoder().decode(LeadGoalsFile.self, from: data) } catch {
+                    throw BoardError(text: "\(file) doesn't read as the project's goals (\(error)); fix or move it, nothing was changed.")
+                }
+            } else {
+                // Moved once from a board file that still holds them; the board's next write drops them there.
+                goals = FileManager.default.contents(atPath: board.file).flatMap(LeadGoalsFile.legacy(boardData:)) ?? LeadGoalsFile()
+            }
+            let result = try change(&goals)
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+            try VibePaths.writePrivate(try encoder.encode(goals), to: URL(fileURLWithPath: file))
+            return result
+        }
     }
 }
 
 /// The goals' words for the lead: the reminder at its next step, the status line, the board's grouping.
 public enum LeadGoals {
     /// The line every lead tool's result carries (but the goal tools') while a task is unsorted.
-    public static func unsortedLine(_ board: LeadBoard) -> String? {
-        let unsorted = board.unsorted
+    public static func unsortedLine(_ board: LeadBoard, _ goals: LeadGoalsFile) -> String? {
+        let unsorted = goals.unsorted(board)
         guard !unsorted.isEmpty else { return nil }
         let named = unsorted.prefix(8).map(\.slug).joined(separator: ", ") + (unsorted.count > 8 ? ", …" : "")
         return "Goals: \(unsorted.count) open task\(unsorted.count == 1 ? " has" : "s have") no goal (\(named)): give each one with update_task(task, goal_id)."
@@ -64,17 +141,17 @@ public enum LeadGoals {
 
     /// The line a project with no goals and `goalsNudgeTasks` unfinished tasks or more gets at the lead's next step, then
     /// at most once a day (`goalsNudgeEvery`), until a goal is added: nil when it isn't due.
-    public static func nudge(_ board: LeadBoard, now: Double) -> String? {
-        guard (board.goals ?? []).isEmpty, board.tasks.filter(\.unfinished).count >= LeadBoard.goalsNudgeTasks,
-              board.goalsNudgedAt.map({ now - $0 >= LeadBoard.goalsNudgeEvery }) ?? true else { return nil }
+    public static func nudge(_ board: LeadBoard, _ goals: LeadGoalsFile, now: Double) -> String? {
+        guard goals.goals.isEmpty, board.tasks.filter(\.unfinished).count >= LeadGoalsFile.nudgeTasks,
+              goals.nudgedAt.map({ now - $0 >= LeadGoalsFile.nudgeEvery }) ?? true else { return nil }
         return noGoals
     }
 
     public static let noGoals = "This project has no goals yet: add 3 to 5 with add_goal, in plain words, and give each task one; the user's roadmap is drawn from them."
 
     /// `status`'s line about goals: none set, or the open ones with their tasks to go.
-    public static func statusLine(_ board: LeadBoard) -> String {
-        let open = board.openGoals
+    public static func statusLine(_ board: LeadBoard, _ goals: LeadGoalsFile) -> String {
+        let open = goals.open
         guard !open.isEmpty else { return "Goals: none set (add_goal)." }
         let parts = open.map { goal in
             let mine = board.tasks.filter { $0.goalID == goal.id }
@@ -85,8 +162,8 @@ public enum LeadGoals {
 
     /// The board's task lines (`lines`, in board order, each for its task) grouped under the goals: each open goal in
     /// its order, then the done ones, each with its tasks; then "Unsorted". Unchanged with no goals.
-    public static func grouped(_ board: LeadBoard, lines: [(task: LeadTask, line: String)]) -> [String] {
-        let goals = board.goals ?? []
+    public static func grouped(_ goals: LeadGoalsFile, lines: [(task: LeadTask, line: String)]) -> [String] {
+        let goals = goals.goals
         guard !goals.isEmpty else { return lines.map(\.line) }
         var out: [String] = []
         var placed = Set<String>()
@@ -125,23 +202,22 @@ extension LeadToolset {
         MCPToolInfo.Property(type: "string", description: "The project's goal this task serves (its id, as status and board show it; add_goal makes one). Empty clears it")
     }
 
-    /// `add_goal(title, done)`: a goal at the end of the order, open. Refused past `mostOpenGoals` open ones.
+    /// `add_goal(title, done)`: a goal at the end of the order, open. Refused past `LeadGoalsFile.mostOpen` open ones.
     func addGoal(_ arguments: [String: Any]) throws -> MCPToolResult {
         guard let title = try LeadGoals.text(arguments["title"], "title"), let done = try LeadGoals.text(arguments["done"], "done") else {
             throw Problem(text: "A goal needs a title and done (what done means, in one line). Nothing was changed.")
         }
-        let goal = try store.update { board -> LeadGoal in
-            guard board.openGoals.count < LeadBoard.mostOpenGoals else {
-                throw Problem(text: "Not added: this project has \(LeadBoard.mostOpenGoals) open goals, the most it keeps. Close one (update_goal(goal, state: done)) "
+        let goal = try GoalStore(board: store).update { board -> LeadGoal in
+            guard board.open.count < LeadGoalsFile.mostOpen else {
+                throw Problem(text: "Not added: this project has \(LeadGoalsFile.mostOpen) open goals, the most it keeps. Close one (update_goal(goal, state: done)) "
                               + "or merge two (move one's tasks with update_task(task, goal_id), then close it). Nothing was changed.")
             }
-            let goal = LeadGoal(id: Slug.make(title, taken: Set((board.goals ?? []).map(\.id))), title: title, done: done)
-            board.goals = (board.goals ?? []) + [goal]
+            let goal = LeadGoal(id: Slug.make(title, taken: Set(board.goals.map(\.id))), title: title, done: done)
+            board.goals.append(goal)
             return goal
         }
         try? store.appendProgress("Goal \(goal.id) added: \(title)")
-        let board = store.load()
-        return MCPToolResult(text: "Added goal \(goal.id) (\(title)), \(board.openGoals.count) open. Give tasks to it with add_task or update_task(task, goal_id: \(goal.id)).")
+        return MCPToolResult(text: "Added goal \(goal.id) (\(title)), \(GoalStore(board: store).load().open.count) open. Give tasks to it with add_task or update_task(task, goal_id: \(goal.id)).")
     }
 
     /// `update_goal(goal, title?, done?, state?)`: renamed, redefined, closed (done) or opened again.
@@ -158,12 +234,13 @@ extension LeadToolset {
             state = wanted
         }
         guard title != nil || done != nil || state != nil else { throw Problem(text: "Give a title, done or state to change. Nothing was changed.") }
-        let goal = try store.update { board -> LeadGoal in
-            guard var goals = board.goals, let at = goals.firstIndex(where: { $0.id == id }) else {
-                throw Problem(text: "No goal \(id): " + ((board.goals ?? []).isEmpty ? "this project has none yet (add_goal)." : "its goals are \((board.goals ?? []).map(\.id).joined(separator: ", ")).") + " Nothing was changed.")
+        let goal = try GoalStore(board: store).update { board -> LeadGoal in
+            var goals = board.goals
+            guard let at = goals.firstIndex(where: { $0.id == id }) else {
+                throw Problem(text: "No goal \(id): " + (goals.isEmpty ? "this project has none yet (add_goal)." : "its goals are \(goals.map(\.id).joined(separator: ", ")).") + " Nothing was changed.")
             }
-            if state == .open, goals[at].state == .done, board.openGoals.count >= LeadBoard.mostOpenGoals {
-                throw Problem(text: "Not opened again: this project has \(LeadBoard.mostOpenGoals) open goals already; close one first. Nothing was changed.")
+            if state == .open, goals[at].state == .done, board.open.count >= LeadGoalsFile.mostOpen {
+                throw Problem(text: "Not opened again: this project has \(LeadGoalsFile.mostOpen) open goals already; close one first. Nothing was changed.")
             }
             if let title { goals[at].title = title }
             if let done { goals[at].done = done }
@@ -184,25 +261,25 @@ extension LeadToolset {
     func orderGoals(_ arguments: [String: Any]) throws -> MCPToolResult {
         let given = (arguments["goals"] as? [Any])?.compactMap { $0 as? String } ?? (arguments["goals"] as? String).map { [$0] } ?? []
         let order = given.map { $0.trimmingCharacters(in: .whitespaces) }
-        let goals = try store.update { board -> [LeadGoal] in
-            let open = board.openGoals
+        let goals = try GoalStore(board: store).update { board -> [LeadGoal] in
+            let open = board.open
             guard Set(order) == Set(open.map(\.id)), order.count == open.count else {
                 throw Problem(text: "Give every open goal once, in the order wanted: \(open.map(\.id).joined(separator: ", ")). Nothing was changed.")
             }
             let byID = Dictionary(uniqueKeysWithValues: open.map { ($0.id, $0) })
-            board.goals = order.compactMap { byID[$0] } + (board.goals ?? []).filter { $0.state == .done }
-            return board.goals ?? []
+            board.goals = order.compactMap { byID[$0] } + board.goals.filter { $0.state == .done }
+            return board.goals
         }
         return MCPToolResult(text: "Goals in order: " + goals.filter { $0.state == .open }.map { "\($0.id) (\($0.title))" }.joined(separator: ", ") + ".")
     }
 
     /// The `goal_id` given to add_task or update_task: nil when none was; .some(nil) to clear it (""); else an open goal's.
-    func goalArgument(_ arguments: [String: Any], on board: LeadBoard) throws -> String?? {
+    func goalArgument(_ arguments: [String: Any], on board: LeadGoalsFile) throws -> String?? {
         guard let given = arguments["goal_id"], !(given is NSNull) else { return nil }
         guard let text = (given as? String)?.trimmingCharacters(in: .whitespaces) else { throw Problem(text: "goal_id is a goal's id. Nothing was changed.") }
         if text.isEmpty { return .some(nil) }
         guard let goal = board.goal(text) else {
-            throw Problem(text: "No goal \(text): " + ((board.goals ?? []).isEmpty ? "this project has none yet (add_goal)." : "its goals are \((board.goals ?? []).map(\.id).joined(separator: ", ")).") + " Nothing was changed.")
+            throw Problem(text: "No goal \(text): " + (board.goals.isEmpty ? "this project has none yet (add_goal)." : "its goals are \(board.goals.map(\.id).joined(separator: ", ")).") + " Nothing was changed.")
         }
         guard goal.state == .open else { throw Problem(text: "Goal \(text) is done: give the task an open one, or open it again (update_goal). Nothing was changed.") }
         return .some(goal.id)
@@ -214,10 +291,12 @@ extension LeadToolset {
     func goalsNotice(after tool: String) -> String? {
         guard !["add_goal", "update_goal", "order_goals", "status"].contains(tool) else { return nil }
         let board = store.load()
-        if let line = LeadGoals.unsortedLine(board) { return line }
+        let goals = GoalStore(board: store)
+        let kept = goals.load()
+        if let line = LeadGoals.unsortedLine(board, kept) { return line }
         let now = Date().timeIntervalSince1970
-        guard let line = LeadGoals.nudge(board, now: now) else { return nil }
-        _ = try? store.update { $0.goalsNudgedAt = now }
+        guard let line = LeadGoals.nudge(board, kept, now: now) else { return nil }
+        _ = try? goals.update { $0.nudgedAt = now }
         return line
     }
 }

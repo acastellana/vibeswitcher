@@ -853,7 +853,7 @@ public struct LeadTask: Codable, Equatable, Sendable, Identifiable {
     public var evidence: LeadEvidence?
     public var createdAt: Double
     // The fields below are optional: older boards have none of them.
-    /// The project's goal it serves (`LeadBoard.goals`, by id; `LeadGoals.swift`). Nil: none, "unsorted" while unfinished.
+    /// The project's goal it serves (by id: `GoalStore`'s goals.json, `LeadGoals.swift`). Nil: none, "unsorted" while unfinished.
     /// Not `goal`: the contract's `goal` is what this task itself must make true.
     public var goalID: String?
     /// Its estimates as given, oldest first: the worker's (`progress`'s likely_min, worst_min) and the lead's
@@ -1521,12 +1521,6 @@ public struct LeadBoard: Codable, Equatable, Sendable {
     public var mainRed: LeadMainRed?
     /// The pipeline watch's state (`LeadPipeline`): when it last told the lead what holds the merges. Optional.
     public var pipeline: LeadPipeline.Told?
-    /// The project's goals, in their order (`LeadGoals.swift`): three to five in plain words, each with what done means;
-    /// every task belongs to one (`LeadTask.goalID`). Optional: older boards have none, and a build before goals reads
-    /// a board with them as it knew it (it passes over both keys).
-    public var goals: [LeadGoal]?
-    /// When the lead was last told this project has no goals yet (at most once a day, `LeadGoals.nudge`). Optional.
-    public var goalsNudgedAt: Double?
 
     public static let keptReports = 50
     /// Past these, the oldest updates and closed questions move to the board's archive (`BoardStore.archive`).
