@@ -102,6 +102,32 @@ struct ActingPageCheckTests {
         }
         try #require(open == 5, "\(open) cards open\n\(node.said)")
 
+        // A held config as long as the user's real one: seven things changed in the home and the checkout, and the
+        // project's rules (19 guard rails) written anew; the page's card says it in four lines. Written once the lead runs; `config held` looks,
+        // and the node holds them.
+        try "---\ntest_command: true\nregression_command: true\ninit_command: true\nmerge_policy: ask_all\nsensitive_paths: Sources/Upload/**\n"
+            .appending("strict_paths: Sources/Upload/**\nrecords_dir: docs/lead\nmax_workers: 3\nheavy_slots: 1\naudit_finders: 1\naudit_nit_cap: 2\n")
+            .appending("codex_verifier: false\nauto_advance: true\nrisk_lines: 400\nrisk_model: false\naudit_sample_percent: 10\nsmall_task_min: 5\n")
+            .appending("merge_batching: false\nsecurity_audit_model: opus\n---\n")
+            .write(toFile: ConfigHoldStore.workflowPath(root: repo.path), atomically: true, encoding: .utf8)
+        for (file, text) in [(".zshrc", "export EDITOR=vim\n"), (".bashrc", "alias ll='ls -l'\n"), (".gitconfig", "[user]\n\tname = Test\n"),
+                             (".claude/settings.json", "{\"model\": \"opus\"}\n"), (".claude/agents/reviewer.md", "A reviewer.\n"),
+                             (".vibeswitcher/bin/vs-note", "#!/bin/sh\n")] {
+            let url = node.home.appendingPathComponent(file)
+            try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try text.write(to: url, atomically: true, encoding: .utf8)
+        }
+        _ = try await scratchGit(repo.path, ["config", "core.autocrlf", "false"])
+        _ = try await node.run(["config", "held", repo.path])
+        var heldItems = 0
+        let heldBy = MacTime.real.awake() + 120
+        while heldItems < 5, MacTime.real.awake() < heldBy {
+            let listed = try await node.run(["questions", "--json"])
+            let cards = ((try? JSONSerialization.jsonObject(with: Data(listed.output.utf8)) as? [String: Any])?["cards"] as? [[String: Any]]) ?? []
+            heldItems = cards.compactMap { (($0["config"] as? [String: Any])?["items"] as? [Any])?.count }.max() ?? 0
+            if heldItems < 5 { try await Task.sleep(nanoseconds: 500_000_000) }
+        }
+        try #require(heldItems >= 5, "the changed config wasn't held: \(heldItems) items\n\(node.said)")
         let opened = try LiveScratch.open(node)
         let out = scratch.url("acting-page-check")
         try FileManager.default.createDirectory(at: out, withIntermediateDirectories: true)
@@ -180,7 +206,7 @@ struct ActingPageCheckTests {
                          output: .path(said.path, flags: O_WRONLY | O_TRUNC), limit: 240)
         }
         let table = (try? String(contentsOf: said, encoding: .utf8)) ?? ""
-        for row in ["Pair", "Two tabs", "Answer by click", "Approve", "Changed", "Told and taken back", "Change while unread", "Read by the lead", "Send menu", "Older build", "Level off", "Reloaded", "Can’t act yet", "Console"] {
+        for row in ["Pair", "Held config", "Two tabs", "Answer by click", "Approve", "Changed", "Told and taken back", "Change while unread", "Read by the lead", "Send menu", "Older build", "Level off", "Reloaded", "Can’t act yet", "Console"] {
             #expect(table.split(separator: "\n").contains { $0.hasPrefix(row + " ") && $0.contains(" pass ") }, "\(row):\n\(table)")
         }
         #expect(status == 0, "\(table)\n\(node.said)")

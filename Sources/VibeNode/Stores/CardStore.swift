@@ -141,7 +141,10 @@ public final class CardStore: @unchecked Sendable {
         public var isBlocking: Bool {
             switch kind {
             case .question: return question?.rank == .blocking
-            case .approval, .configHeld, .baseMove: return true
+            case .approval, .baseMove: return true
+            // Something held (its own, or the home folder's it leaves to that card): no worker, verifier or merge until
+            // accepted. A card with nothing held (rails to record, a first look owed) holds nothing up.
+            case .configHeld: return config.map { !$0.items.isEmpty || $0.sharedHome != nil } ?? true
             // The agent waits on it, not the lead's work.
             case .plugin: return false
             }

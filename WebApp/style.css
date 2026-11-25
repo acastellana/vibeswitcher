@@ -407,6 +407,24 @@ code, pre, kbd { font-family: var(--mono); }
 .card-context { font-size: var(--small); margin: 6px 0 0; overflow-wrap: anywhere; }
 .card-context-label { color: var(--ink-2); }
 .card > .card-foot { grid-column: 1; color: var(--ink-3); font-size: var(--small); }
+.hc-line { color: var(--ink-2); font-size: var(--text); margin-top: -4px; }
+.hc-rules { display: grid; gap: 2px; }
+.hc-rules-label { color: var(--needs-you); font-size: var(--small); font-weight: 600; }
+.hc-rail { color: var(--ink); font-size: var(--text); }
+.hc-rail code { padding: 0 4px; border-radius: 4px; background: var(--fill-2); }
+.hc-quiet { color: var(--ink-3); font-size: var(--small); }
+.hc-quiet .link, .hc-details summary { color: var(--accent); cursor: pointer; }
+.hc-terminal { display: grid; gap: 6px; color: var(--ink-2); font-size: var(--text); }
+.hc-details { font-size: var(--small); color: var(--ink-2); }
+.hc-details[open] > summary { margin-bottom: 8px; }
+.hc-items { display: grid; gap: 6px; margin-bottom: 10px; }
+.hc-rails { width: 100%; border-collapse: collapse; margin-bottom: 8px; }
+.hc-rails th, .hc-rails td { padding: 3px 8px 3px 0; text-align: left; vertical-align: top; border-top: 1px solid var(--line); font-weight: 400; overflow-wrap: anywhere; }
+.hc-rails th { color: var(--ink); white-space: nowrap; }
+.hc-rails tr.changed th, .hc-rails tr.changed .hc-state { color: var(--needs-you); }
+.hc-state { color: var(--ink-3); white-space: nowrap; }
+.hc-technical { margin-top: 6px; }
+.receipt { align-self: flex-end; color: var(--ink-2); font-size: var(--small); }
 .card-notsent { color: var(--ink-2); font-size: var(--text); }
 .card-terminal { color: var(--ink-2); font-size: var(--small); }
 .card-terminal > summary { cursor: pointer; }

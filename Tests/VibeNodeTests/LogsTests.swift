@@ -52,8 +52,11 @@ struct LogsTests {
         let log = node.root.appendingPathComponent("host.log")
         let elsewhere = scratch.url("elsewhere.txt")
         try "not the log\n".write(to: elsewhere, atomically: true, encoding: .utf8)
-        try FileManager.default.removeItem(at: log)
-        try FileManager.default.createSymbolicLink(at: log, withDestinationURL: elsewhere)
+        // The link takes the log's place in one step (a rename over it): the host can write its log again between a
+        // removal and a link made after it, and the link then fails with "file exists" (CI, 2026-11-24 and 11-25).
+        let link = node.root.appendingPathComponent("host.log.link")
+        try FileManager.default.createSymbolicLink(at: link, withDestinationURL: elsewhere)
+        try #require(rename(link.path, log.path) == 0, "errno \(errno)")
         let ran = try await node.run(["logs", "--sessions"])
         #expect(ran.status == 0 && !ran.output.contains("not the log") && ran.output.contains("couldn't be read"), "\(ran.output)")
     }

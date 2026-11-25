@@ -225,7 +225,8 @@ export function questionCard(app, first, { expand = null } = {}) {
     }
     el.append(h('h3', { class: 'card-question' }, head));
     const context = contextOf(question.text, questionHead(question.text));
-    if (context) el.append(h('p', { class: 'card-lines' }, context));
+    // An approval's face is its question line and its key facts (the lead's prose is one click away).
+    if (context && card.kind !== 'approval') el.append(h('p', { class: 'card-lines' }, context));
     // "Read it all" when there is more than those lines show: a long text, its markdown, or an approval's files.
     if (context.length > 200 || /\n|\*\*|`/.test(question.text || '') || card.kind === 'approval') el.append(h('p', { class: 'card-whole' }, readAll()));
     if (card.kind === 'approval' && card.approval) el.append(keyFacts(card.approval));

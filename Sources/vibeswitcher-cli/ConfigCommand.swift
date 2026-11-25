@@ -76,6 +76,11 @@ enum ConfigCommand {
                 if let lines = difference.array { lines.compactMap(\.string).forEach { Say.out(ConfigSeal.inert($0, limit: .max)) } }
                 else { Say.out(ConfigSeal.inert(difference.string ?? "", limit: .max)) }
             }
+            // Nothing held and nothing to record: shown, not kept (no card to accept).
+            guard card["open"]?.bool != false else {
+                Say.out("Nothing is held and nothing waits to be recorded: nothing to accept.")
+                return 0
+            }
             Say.out("accept it with: vibeswitcher config accept \(ConfigSeal.inert(card["id"]?.string ?? "", limit: 80))")
             return 0
         }

@@ -486,6 +486,7 @@ extension CardStore.Card {
                 .object(["key": .string(rail.key), "value": .string(rail.value), "sinceAccept": text(rail.sinceAccept)])
             })
             c["lastAccept"] = config.lastAccept.map(NodeWire.Value.date) ?? .null
+            if config.firstLook == true { c["firstLook"] = .bool(true) }
             c["sharedHome"] = config.sharedHome.map { shared in
                 .object(["names": texts(shared.names), "card": .string(shared.card), "folder": .string(shared.folder)])
             } ?? .null
