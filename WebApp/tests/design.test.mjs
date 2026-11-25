@@ -275,3 +275,46 @@ test('states: no selector puts a space before a pseudo-class after a parenthesis
   const split = RULES.filter((block) => /\)\s+:(not|hover|active|focus|disabled)\b/.test(block.selector)).map((block) => block.selector.slice(0, 100));
   assert.deepEqual(split, []);
 });
+
+// ---- Control sizes (D2) ----
+
+// Each kind of button and field, and its height on the scale (rows, options and the palette's big field are rows).
+const SIZED = {
+  '.button': 'm', '.button.small': 's', '.icon-button': 'm', '.row-action': 's', '.task-more': 's', '.segmented button': 's', '.switch-link': 's',
+  '.copy-button': 's', '.code-run': 's', '.confirm-clear': 's', '.summary-brief': 's', '.offer button': 's', '.latest': 's', '.look-colour': 's',
+  '.send': 'l', '.composer-attach': 'l', '.composer-input': 'l', '.say': 'l',
+  '.answer-input': 'm', '.setting-input': 'm', '.setting-search': 'm', '.look-input': 'm', '.find-input': 'm', '.left-filter': 'm', '.setting-picker': 'm', '.tc-find': 'm',
+};
+const TOUCH = '(hover: none) and (pointer: coarse)';
+
+test('sizes: buttons and fields come in three heights (24, 30, 36), and 44 on a touch screen', () => {
+  const wrong = [];
+  for (const [selector, size] of Object.entries(SIZED)) {
+    const own = RULES.filter((block) => block.media === '' && listed(block.selector).includes(selector)).flatMap((block) => block.declarations);
+    const height = own.filter((d) => d.property === 'height' || d.property === 'min-height').at(-1);
+    if (!height) wrong.push(`${selector}: no height of its own (its padding decides it)`);
+    else if (height.value !== `var(--ctl-${size})`) wrong.push(`${selector}: ${height.property} ${height.value}, not var(--ctl-${size})`);
+  }
+  // Wherever a button's or a field's height is set, it is one of the scale's.
+  for (const block of RULES) {
+    const controls = listed(block.selector).filter((one) => SIZED[one] || /\.(button|icon-button|switch-link|dial-fold|strip-fold)(?![a-z0-9-])/.test(named(one)));
+    if (!controls.length) continue;
+    for (const d of block.declarations) {
+      if (!/^(min-)?height$/.test(d.property) || reasoned(d)) continue;
+      const allowed = block.media === TOUCH ? /^var\(--ctl-(touch|s|m|l)\)$/ : /^var\(--ctl-(s|m|l|touch)\)$|^auto$/;
+      if (!allowed.test(d.value)) wrong.push(where(block, d));
+    }
+  }
+  // A tab inside its track: the track is the standard height (24 and 3 px either side).
+  for (const track of ['.segmented', '.switch']) {
+    const padding = RULES.filter((block) => block.media === '' && block.selector === track).flatMap((block) => block.declarations).filter((d) => d.property === 'padding').at(-1)?.value;
+    if (24 + 2 * parseFloat(padding) !== 30) wrong.push(`${track}: padding ${padding} makes the track ${24 + 2 * parseFloat(padding)} px`);
+  }
+  // The touch block keeps every control a fingertip, on the token.
+  const touch = RULES.filter((block) => block.media === TOUCH);
+  for (const selector of ['.icon-button', '.send', '.button', '.switch-link', '.segmented button', '.copy-button', '.offer button']) {
+    const sizes = touch.filter((block) => listed(block.selector).includes(selector)).flatMap((block) => block.declarations).filter((d) => /^(min-)?height$/.test(d.property)).map((d) => d.value);
+    if (!sizes.includes('var(--ctl-touch)')) wrong.push(`${selector}: not 44 on a touch screen`);
+  }
+  assert.deepEqual(wrong, []);
+});

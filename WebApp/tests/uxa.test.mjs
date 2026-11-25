@@ -216,7 +216,9 @@ test('U8: on a touch screen every kind of control is 44 px both ways by its padd
       const listed = rule.selector.split(/,(?![^(]*\))/).map((one) => one.trim());
       if (!listed.includes(selector)) continue;
       const value = declarations(rule.body)[property];
-      if (value) found = parseFloat(value);
+      // A token (the scale's --ctl-touch) read as its px.
+      const token = value?.match(/^var\((--[a-z0-9-]+)\)$/)?.[1];
+      if (value) found = parseFloat(token ? tokens()[token]?.light : value);
     }
     return found;
   };
@@ -236,7 +238,8 @@ test('U8: on a touch screen every kind of control is 44 px both ways by its padd
   assert.equal(size('input[type="checkbox"]', 'height'), 24);
   assert.equal(size('label:has(> input[type="checkbox"])', 'min-height'), 44);
   const inputs = touch.find((rule) => rule.selector.startsWith(':is(textarea, select, input'));
-  assert.ok(inputs && parseFloat(declarations(inputs.body)['font-size']) >= 16, 'text boxes at 16 px');
+  const field = declarations(inputs.body)['font-size'];
+  assert.ok(inputs && parseFloat(field.startsWith('var(') ? tokens()[field.slice(4, -1)].light : field) >= 16, 'text boxes at 16 px');
 });
 
 test('U6: the reconnecting line, the page not paired and the notifications’ offer are a row of the centre, never over its header', async () => {
