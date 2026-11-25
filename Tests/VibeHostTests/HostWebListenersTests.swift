@@ -13,7 +13,7 @@ struct HostWebListenersTests {
     static func identity(_ fd: Int32) -> [UInt64]? {
         var info = stat()
         guard fstat(fd, &info) == 0 else { return nil }
-        return [UInt64(info.st_dev), UInt64(info.st_ino)]
+        return [Platform.Files.device(info), UInt64(info.st_ino)]
     }
 
     private let scratch = Scratch()

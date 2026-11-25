@@ -314,7 +314,7 @@ struct FolderWatchTests {
         var status = stat()
         guard stat(folder.path, &status) == 0 else { throw Failure(what: "\(folder.path): errno \(errno)") }
         // fdinfo gives the device as the kernel keeps it (major << 20 | minor), stat as glibc encodes it.
-        let device = UInt64(status.st_dev)
+        let device = Platform.Files.device(status)
         let major = ((device >> 8) & 0xfff) | ((device >> 32) & ~UInt64(0xfff))
         let minor = (device & 0xff) | ((device >> 12) & ~UInt64(0xff))
         let watch = "ino:\(String(UInt64(status.st_ino), radix: 16)) sdev:\(String(major << 20 | minor, radix: 16)) "

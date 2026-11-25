@@ -90,7 +90,7 @@ keychain code is reachable from a test any other way. The one test of the real k
 Run them before you call a change done; they take seconds:
 
 ```sh
-bash scripts/test.sh --filter 'AccessibilityLint|AgentExportLint|ArchitectureDocLint|CLIChangeLint|CloseOnExecLint|CopiedFilesLint|DebugAidsLint|DocLinksLint|ElapsedGuardLint|ElapsedTimeLint|HomePathLint|KeychainLint|MacCompileLint|MacElapsedTimeLint|MacGlossaryLint|MacPerfRunLint|MacPinsLint|MacOnlyTestsLint|MCPLint|PhoneMainSyncLint|PlatformLint|PluginLint|PreferencesLint|PrivateNamesLint|PrivateWriteLint|RequestKindsLint|SandboxLint|ScriptScratchLint|SecretShapeLint|SecurityDocumentLint|ServerLint|SharedDefaultsLint|ShebangWriteLint|StdioWriteLint|TemporaryFolderLint|WebAppLint'
+bash scripts/test.sh --filter 'AccessibilityLint|AgentExportLint|ArchitectureDocLint|CLIChangeLint|CloseOnExecLint|CopiedFilesLint|DebugAidsLint|DeviceNumberLint|DocLinksLint|ElapsedGuardLint|ElapsedTimeLint|HomePathLint|KeychainLint|MacCompileLint|MacElapsedTimeLint|MacGlossaryLint|MacPerfRunLint|MacPinsLint|MacOnlyTestsLint|MCPLint|PhoneMainSyncLint|PlatformLint|PluginLint|PreferencesLint|PrivateNamesLint|PrivateWriteLint|RequestKindsLint|SandboxLint|ScriptScratchLint|SecretShapeLint|SecurityDocumentLint|ServerLint|SharedDefaultsLint|ShebangWriteLint|StdioWriteLint|TemporaryFolderLint|WebAppLint'
 bash scripts/test.sh --filter 'LintTests/'   # the same suites, as AGENTS.md runs them: every `…LintTests` type
 ```
 
@@ -103,6 +103,7 @@ bash scripts/test.sh --filter 'LintTests/'   # the same suites, as AGENTS.md run
 | `CloseOnExecLint` | A descriptor made in the session host, its launcher, `UnixSocket` or `VibePlatform` that isn't close-on-exec from the call that makes it (a bare `socket(`, `socketpair(`, `accept(` or `pipe(`, or an `open(` naming flags without `O_CLOEXEC`), outside the exemptions the test lists with their reasons; or a `Platform.Spawn` in the host that doesn't name what its child keeps. |
 | `CopiedFilesLint` | A verbatim copy of the Mac app's code in `Sources/VibeNode` (the port map's "Copied from the app": the Statistics files, `UsageWaits`, `WitnessWork`, `TeamReading`) that drifted from its original, other than its listed differences. |
 | `DebugAidsLint` | A notification handler that writes a session's screen where the (unknown) sender says. |
+| `DeviceNumberLint` | A file's device (`st_dev`, `st_rdev`) converted to an unsigned number by `UInt64(…)`, which traps on the Mac's NODEV (-1, a socket's or a pipe's): `Platform.Files.device` keeps its bits. |
 | `DocLinksLint` | A relative link or `#anchor` in README.md or `docs/**/*.md` that doesn't resolve, an image in `docs/images` no doc shows, or a lint suite missing from the command above. |
 | `ElapsedGuardLint` | An elapsed-time guard in the node's processes on the wall clock (`Date().timeIntervalSince(`, `.timeIntervalSinceNow`, a deadline on `Date()`, `Date()` compared): the wall clock steps; `Platform.Clock.steadyDate()` doesn't. |
 | `ElapsedTimeLint` | A correctness test judging an elapsed time against a bare number (`took < 0.05`, `Date().timeIntervalSince(x) < 5`): it judges the order of events, a baseline from the same test, or it's a `.perf` bench; the short allow list is in `ElapsedTimeLintTests.swift`. |

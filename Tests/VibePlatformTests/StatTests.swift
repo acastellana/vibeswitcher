@@ -140,6 +140,17 @@ struct StatTests {
         #expect(Platform.Files.allocatedSize(of: folder.appendingPathComponent("never-made")) == nil)
     }
 
+    /// A Unix socket's device reads as its 64 bits, whatever its sign: the Mac's `dev_t` is a signed 32-bit number and a
+    /// socket's is NODEV (-1), where `UInt64(info.st_dev)` trapped (the v2 macos host job of b7ef0ca3: a closed
+    /// descriptor's number, taken by another test's socket, asked for its identity).
+    @Test func aSocketsDeviceReadsWithoutATrap() throws {
+        let (one, other) = try #require(Platform.Sockets.pair(type: Platform.Sockets.stream))
+        defer { close(one); close(other) }
+        var socket = stat()
+        #expect(fstat(one, &socket) == 0)
+        #expect(Platform.Files.device(socket) == UInt64(truncatingIfNeeded: Int64(socket.st_dev)))
+    }
+
     #if os(Linux)
     /// /proc keeps no birth time: "not known", not an error's garbage and not 1970.
     @Test func aFileSystemWithNoBirthTimesReadsNil() {

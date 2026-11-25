@@ -184,7 +184,7 @@ public enum LeadInit {
     static func identityOf(_ path: String) -> (device: UInt64, inode: UInt64)? {
         var info = stat()
         guard lstat(path, &info) == 0 else { return nil }
-        return (UInt64(info.st_dev), UInt64(info.st_ino))
+        return (Platform.Files.device(info), UInt64(info.st_ino))
     }
 
     /// Why `folder` isn't one to make a repository in (not a folder, a link, `/`, the home folder), or nil.
@@ -301,7 +301,7 @@ public enum LeadInit {
         guard directory >= 0 else { return .failure(Refusal("\(shown) couldn't be opened (errno \(errno))")) }
         defer { close(directory) }
         var opened = stat()
-        guard fstat(directory, &opened) == 0, UInt64(opened.st_dev) == id.device, UInt64(opened.st_ino) == id.inode else {
+        guard fstat(directory, &opened) == 0, Platform.Files.device(opened) == id.device, UInt64(opened.st_ino) == id.inode else {
             return .failure(Refusal("\(shown) changed while it was looked at"))
         }
         var fingerprints: [String: Fingerprint] = [:]
@@ -465,7 +465,7 @@ public enum LeadInit {
         guard directory >= 0 else { return .failure(Refusal("\(shown) couldn't be opened (errno \(errno))")) }
         defer { close(directory) }
         var opened = stat()
-        guard fstat(directory, &opened) == 0, UInt64(opened.st_dev) == plan.device, UInt64(opened.st_ino) == plan.inode, resolved(folder) == folder else {
+        guard fstat(directory, &opened) == 0, Platform.Files.device(opened) == plan.device, UInt64(opened.st_ino) == plan.inode, resolved(folder) == folder else {
             return .failure(Refusal("\(shown) isn't the folder it was when the code was asked"))
         }
         let probe = scratch.appendingPathComponent("lead-init-\(UUID().uuidString)", isDirectory: true)
