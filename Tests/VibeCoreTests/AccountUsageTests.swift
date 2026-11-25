@@ -324,7 +324,9 @@ struct AccountUsageTests: LeadTeamFixture {
         for base in ["claude --model opus --verbose", "claude --verbose --model=opus", "claude --model 'opus' --verbose", "claude  --model   opus"] {
             let given = try command(base, model: "sonnet")
             #expect(given.components(separatedBy: "--model").count == 2 && given.contains("--model 'sonnet'"), "\(given)")
-            #expect(!given.contains("opus") && given.hasPrefix("claude"), "\(given)")
+            // Its flags, ahead of the launch's inline settings (whose `env` pins every family's alias to its id).
+            let flags = given.components(separatedBy: " --settings ")[0]
+            #expect(!flags.contains("opus") && given.hasPrefix("claude"), "\(given)")
             #expect(LeadWorkflow.claudeModel(command: given) == "sonnet")
         }
         // Other options stay, --fallback-model too; no model given: the command as it is.
