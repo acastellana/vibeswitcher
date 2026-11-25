@@ -186,12 +186,13 @@ extension NodeSettings {
         case "floor_risk_model": floor.riskModel = value.map { $0 == "on" } ?? none.riskModel
         case "floor_audit_sample_percent": floor.auditSamplePercent = value.flatMap(Int.init) ?? none.auditSamplePercent
         case "floor_verifier_different": floor.verifierDifferent = value.map { $0 == "on" } ?? none.verifierDifferent
+        case "floor_worker_model": floor.workerModel = value
         default: throw Refusal("\(setting.key) isn't a rule of the floor")
         }
         // Kept as the vault keeps it (`LeadReviewFloor`'s own bounds).
         floor = LeadReviewFloor(sensitivePaths: floor.sensitivePaths, strictPaths: floor.strictPaths, auditFinders: floor.auditFinders,
                                 mergePolicy: floor.mergePolicy, riskLines: floor.riskLines, riskModel: floor.riskModel,
-                                verifierDifferent: floor.verifierDifferent, auditSamplePercent: floor.auditSamplePercent)
+                                verifierDifferent: floor.verifierDifferent, auditSamplePercent: floor.auditSamplePercent, workerModel: floor.workerModel)
         let recordedNow: LeadReviewFloor?
         do { recordedNow = try vault.setReviewFloor(floor, root: root) } catch {
             throw Refusal("the session host didn't record the floor (\(error)): nothing was changed")
@@ -199,7 +200,12 @@ extension NodeSettings {
         guard let saved = recordedNow else { throw Refusal("the session host recorded no floor: nothing was changed. Try again") }
         let now = shown(saved)
         let rule = setting.key.dropFirst("floor_".count)
-        let told = "The user set this project's review rules' floor with `vibeswitcher set`: \(rule) is now \(now). configure may raise a rule "
+        let told = setting.key == "floor_worker_model"
+            ? "The user set this project's workers' model with `vibeswitcher set`: " + (saved.workerModel.map {
+                "every worker now starts with --model \($0) unless its task names a model, and under the floor audits are kept off \($0) "
+                    + "(and off every model a worker of the task was launched on) in place of Claude Code's default"
+            } ?? "cleared: workers start on Claude Code's default, which audits are kept off under the floor, as before") + ". Workers already running keep their model."
+            : "The user set this project's review rules' floor with `vibeswitcher set`: \(rule) is now \(now). configure may raise a rule "
             + "above the floor, never lower one below it; status shows what's in force."
         return Applied(key: setting.key, value: now, was: shown(recorded), told: told)
     }

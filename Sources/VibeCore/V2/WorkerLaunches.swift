@@ -8,9 +8,11 @@ import Foundation
 /// under its member slug), never trimmed and never cleared, not even at retire (the branch may outlive it).
 ///
 /// These only ever ADD to what an audit is kept off under the floor that keeps audits off the workers' model
-/// (`excluded`): Claude Code's default and the lead's model stay excluded as before, with the board's task model and
-/// launched model. Nothing here unlocks a model: argv isn't proof of what ran (a decoy bind, Claude Code's own
-/// precedence, `/model` mid-session). A name that isn't a known family adds nothing and removes nothing.
+/// (`excluded`): the workers' model (the floor's worker_model, the user's word, else Claude Code's default) stays
+/// excluded as before, with the board's task model and launched model. Nothing here unlocks a model: argv isn't proof
+/// of what ran (a decoy bind, Claude Code's own precedence, `/model` mid-session). A name that isn't a known family
+/// adds nothing and removes nothing. The lead's own model was never part of the rule and isn't here (the security
+/// architecture's open list: a lead that writes a task's code itself, and `--advisor`).
 public enum WorkerLaunch {
     /// What the host saw of a session it binds a role to: the command it started it with (nil: a plain shell).
     public struct Seen: Equatable, Sendable {
@@ -26,41 +28,73 @@ public enum WorkerLaunch {
         return families.first { name.contains($0) }
     }
 
-    /// Every `--model` (or `--model=`) a launch command passes before its `--` (what follows is the start message: the
-    /// brief's words, never options), in order.
-    public static func launchModels(command: String) -> [String] {
-        let words = command.split(whereSeparator: \.isWhitespace).prefix { $0 != "--" }
-            .map { $0.trimmingCharacters(in: CharacterSet(charactersIn: "'\"")) }
-        var found: [String] = []
-        for (index, word) in words.enumerated() {
-            if word == "--model", index + 1 < words.count, !words[index + 1].isEmpty { found.append(words[index + 1]) }
-            if word.hasPrefix("--model="), word.count > "--model=".count { found.append(String(word.dropFirst("--model=".count))) }
+    /// The `--model` (or `--model=`) a launch command passes before its `--` (what follows is the start message: the
+    /// brief's words, never options): the last one, as Claude Code's own option parsing takes it; nil when none. The
+    /// command split as a shell splits it (`words`).
+    public static func launchModel(command: String) -> String? {
+        let options = words(command).prefix { $0 != "--" }
+        var found: String?
+        for (index, word) in options.enumerated() {
+            if word == "--model", index + 1 < options.count { found = options[options.startIndex + index + 1] }
+            if word.hasPrefix("--model=") { found = String(word.dropFirst("--model=".count)) }
         }
-        return found
+        return found.flatMap { $0.isEmpty ? nil : $0 }
     }
 
-    /// The families a launch adds (`seen` nil: the host didn't know the session, none): each `--model`'s, or with none,
-    /// Claude Code's default's as `home` holds it now. Unknown names add nothing.
+    /// `command`'s words as a POSIX shell splits them: single quotes literal, double quotes with `\` escaping `"`, `\`,
+    /// `$` and `` ` ``, a bare `\` escaping the next character (`RecentProjects.shellQuote`'s `'\''` among them).
+    static func words(_ command: String) -> [String] {
+        var words: [String] = []
+        var word = "", inWord = false
+        var characters = command.makeIterator()
+        while let character = characters.next() {
+            switch character {
+            case "'":
+                inWord = true
+                while let next = characters.next(), next != "'" { word.append(next) }
+            case "\"":
+                inWord = true
+                while let next = characters.next(), next != "\"" {
+                    if next == "\\", let escaped = characters.next() {
+                        if !"\"\\$`".contains(escaped) { word.append(next) }
+                        word.append(escaped)
+                    } else {
+                        word.append(next)
+                    }
+                }
+            case "\\":
+                inWord = true
+                if let escaped = characters.next() { word.append(escaped) }
+            case _ where character.isWhitespace:
+                if inWord { words.append(word) }
+                word = ""
+                inWord = false
+            default:
+                inWord = true
+                word.append(character)
+            }
+        }
+        if inWord { words.append(word) }
+        return words
+    }
+
+    /// The family a launch adds (`seen` nil: the host didn't know the session, none): its `--model`'s, or with none,
+    /// Claude Code's default's as `home` holds it now. An unknown name adds nothing.
     public static func families(seen: Seen?, home: String) -> [String] {
         guard let seen else { return [] }
-        let models = seen.command.map(launchModels(command:)) ?? []
-        let named: [String?] = models.isEmpty ? [LeadWorkflow.claudeModel(command: "", home: home)] : models
-        return Array(Set(named.compactMap(family(of:)))).sorted()
+        let model = seen.command.flatMap(launchModel(command:)) ?? LeadWorkflow.claudeModel(command: "", home: home)
+        return family(of: model).map { [$0] } ?? []
     }
 
-    /// What a task's audit is kept off under the floor, and the line that says so: Claude Code's default
-    /// (`projectDefault`), the lead's model(s), and the families the vault recorded for the task's launches
-    /// (`launched`, nil: no record).
-    public static func excluded(projectDefault: String?, lead: [String?], launched: [String]?) -> (workers: [String?], text: String) {
-        let leads = Array(Set(lead.compactMap { $0 }.map(LeadReviewFloor.workersModel).map(shown))).sorted()
-        var parts = ["Claude Code's default \(projectDefault.map(shown) ?? "(Claude's own, counted as opus)")"]
-        if !leads.isEmpty { parts.append("the lead's \(leads.joined(separator: " and "))") }
-        if let launched, !launched.isEmpty {
-            parts.append("workers launched on \(launched.joined(separator: " and ")) by the host's record")
-        } else {
-            parts.append("no launch record")
-        }
-        return ([projectDefault] + lead + (launched ?? []), "kept off the workers' models: " + parts.joined(separator: "; "))
+    /// What a task's audit is kept off under the floor, and the line that says so: the workers' model (`floorModel`,
+    /// the floor's worker_model, else `projectDefault`, Claude Code's default) and the families the vault recorded for
+    /// the task's launches (`launched`, nil: no record).
+    public static func excluded(floorModel: String?, projectDefault: String?, launched: [String]?) -> (workers: [String?], text: String) {
+        let base = floorModel.map { "workers' model \(shown($0)) by your review floor" }
+            ?? "Claude Code's default \(projectDefault.map(shown) ?? "(Claude's own, counted as opus)")"
+        let record = launched.flatMap { $0.isEmpty ? nil : $0 }.map { " and launched on \($0.joined(separator: " and ")) by the host's record" }
+            ?? ", no launch record"
+        return ([floorModel ?? projectDefault] + (launched ?? []), "kept off " + base + record)
     }
 
     /// A model as the line says it: its family when known.

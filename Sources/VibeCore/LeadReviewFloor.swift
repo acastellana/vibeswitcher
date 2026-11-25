@@ -28,9 +28,14 @@ public struct LeadReviewFloor: Codable, Equatable, Sendable {
     /// The least share, in percent, of review none tasks auto_advance audits anyway (audit_sample_percent; higher is
     /// stricter); 0: no floor on it.
     public var auditSamplePercent: Int
+    /// The model every worker starts on (`--model`, unless its task names its own), as the user set it; nil: Claude
+    /// Code's default. Set, it's the workers' model the floor keeps audits off in place of Claude Code's default
+    /// (`LeadToolset.workersBasis`): the user's word for what the workers run, where nothing else is (the launches the
+    /// host recorded only ever add). A name that doesn't say which model it is isn't kept.
+    public var workerModel: String?
 
     public init(sensitivePaths: [String] = [], strictPaths: [String] = [], auditFinders: Int = 1, mergePolicy: LeadWorkflow.MergePolicy = .auto,
-                riskLines: Int = 0, riskModel: Bool = false, verifierDifferent: Bool = true, auditSamplePercent: Int = 0) {
+                riskLines: Int = 0, riskModel: Bool = false, verifierDifferent: Bool = true, auditSamplePercent: Int = 0, workerModel: String? = nil) {
         self.sensitivePaths = Self.clean(sensitivePaths)
         self.strictPaths = Self.clean(strictPaths)
         self.auditFinders = min(LeadWorkflow.maxFinders, max(1, auditFinders))
@@ -39,10 +44,11 @@ public struct LeadReviewFloor: Codable, Equatable, Sendable {
         self.riskModel = riskModel
         self.verifierDifferent = verifierDifferent
         self.auditSamplePercent = min(100, max(0, auditSamplePercent))
+        self.workerModel = workerModel.map { $0.trimmingCharacters(in: .whitespaces).lowercased() }.flatMap { Self.knownModel($0) ? $0 : nil }
     }
 
     enum CodingKeys: String, CodingKey {
-        case sensitivePaths, strictPaths, auditFinders, mergePolicy, riskLines, riskModel, verifierDifferent, auditSamplePercent
+        case sensitivePaths, strictPaths, auditFinders, mergePolicy, riskLines, riskModel, verifierDifferent, auditSamplePercent, workerModel
     }
 
     /// A floor recorded before audit_sample_percent was part of it holds no share (0).
@@ -52,7 +58,8 @@ public struct LeadReviewFloor: Codable, Equatable, Sendable {
                   auditFinders: try c.decode(Int.self, forKey: .auditFinders), mergePolicy: try c.decode(LeadWorkflow.MergePolicy.self, forKey: .mergePolicy),
                   riskLines: try c.decode(Int.self, forKey: .riskLines), riskModel: try c.decode(Bool.self, forKey: .riskModel),
                   verifierDifferent: try c.decode(Bool.self, forKey: .verifierDifferent),
-                  auditSamplePercent: try c.decodeIfPresent(Int.self, forKey: .auditSamplePercent) ?? 0)
+                  auditSamplePercent: try c.decodeIfPresent(Int.self, forKey: .auditSamplePercent) ?? 0,
+                  workerModel: try c.decodeIfPresent(String.self, forKey: .workerModel))
     }
 
     /// The floor at a project's values now: its sensitive_paths (the defaults when it names none) and strict_paths,
@@ -183,6 +190,7 @@ public struct LeadReviewFloor: Codable, Equatable, Sendable {
         rule("risk_model", workflow.riskModelInForce ? "on" : "off", file.riskModelInForce ? "on" : "off")
         rule("audit_sample_percent", String(workflow.samplePercentInForce), String(file.samplePercentInForce))
         rule("audits on", workflow.auditModel(workerModel: workerModel), file.auditModel(workerModel: workerModel))
+        if let model = self.workerModel { held.append("workers start on \(model) (worker_model)") }
         for (name, inForce, written) in [("sensitive_paths", workflow.sensitiveGlobs, file.sensitiveGlobs),
                                          ("strict_paths", workflow.strictGlobs ?? [], file.strictGlobs ?? [])] {
             let added = inForce.filter { !written.contains($0) }
@@ -204,6 +212,7 @@ public struct LeadReviewFloor: Codable, Equatable, Sendable {
             "- risk_model: floor \(riskModel ? "on" : "off (either)"); in force \(workflow.riskModelInForce)",
             "- audit_sample_percent: floor \(auditSamplePercent); in force \(workflow.samplePercentInForce)",
             "- verifier: floor \(verifierDifferent ? "never the workers' model" : "any model"); audits run on \(auditModel)",
+            "- worker_model: " + (workerModel.map { "\($0): every worker starts on it unless its task names a model" } ?? "not set (Claude Code's default)"),
         ]
     }
 }

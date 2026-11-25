@@ -2250,7 +2250,7 @@ public final class LeadToolset: MCPToolset {
     // MARK: The account's usage (see `AccountUsage`)
 
     /// The model a task's worker runs on: its own (add_task's `model`), else the project's Claude command's.
-    func workerModel(for task: LeadTask) -> String? { task.intendedModel ?? runtime.workerModel(root: root) }
+    func workerModel(for task: LeadTask) -> String? { task.intendedModel ?? workflow.floor?.workerModel ?? runtime.workerModel(root: root) }
 
     /// The model a session of the team was started on, as its task noted at its start (`LeadTask.launchedModels`); nil
     /// for Claude's default or a session no task names: not known. Never the task's model or verifier_model as they are
@@ -5878,7 +5878,7 @@ public final class LeadToolset: MCPToolset {
             throw Problem(text: "Nothing was changed: the session host couldn't say what floor the user set for the review rules (\(error)), so \(rules.map(\.key).joined(separator: ", ")) can't be checked against it. Try again.")
         }
         guard let floor else { return }
-        let model = runtime.workerModel(root: root)
+        let model = floor.workerModel ?? runtime.workerModel(root: root)
         let refused = rules.compactMap { floor.refusal(key: $0.key, value: $0.value, workerModel: model) }
         guard !refused.isEmpty else { return }
         throw Problem(text: "Nothing was changed: \(refused.joined(separator: "; ")). The user set that floor in \(LeadReviewFloor.place); "
@@ -6878,7 +6878,7 @@ public final class LeadToolset: MCPToolset {
         if let line = sleepCost().statusLine(root: root, now: Date()) { lines.append(line) }
         // One line, only where the floor holds a rule above workflow.md: status stays bounded on a big board;
         // configure() shows every rule.
-        if let line = workflow.floor?.statusLine(workflow, workerModel: runtime.workerModel(root: root)) { lines.append(Self.clip(line, 600)) }
+        if let line = workflow.floor?.statusLine(workflow, workerModel: workflow.floor?.workerModel ?? runtime.workerModel(root: root)) { lines.append(Self.clip(line, 600)) }
         if let line = teamPluginsStatusLine(workflow) { lines.append(Self.clip(line, 600)) }
         if let line = heavyLockLine(board) { lines.append(line) }
         lines += usageLines(sessions: listing)

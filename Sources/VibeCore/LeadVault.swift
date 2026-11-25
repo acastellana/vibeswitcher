@@ -1226,6 +1226,8 @@ extension LeadVault {
             case .smallTaskFacts(let root, let task):
                 return .smallTask(team(root)?.smallTasks?[task])
             case .launchedFamilies(let root, let task):
+                // Read by the repository's lead (its tool server) and the app only.
+                guard caller == .app || isLead(caller, root) else { return .refused("Only the repository's lead or VibeSwitcher reads its launches.") }
                 // The task's own and its team members' (`Worktrees.memberSlug`), whatever the board lists now.
                 let kept = (team(root)?.launchedFamilies ?? [:]).filter { $0.key == task || $0.key.hasPrefix(task + LeadTeam.joiner) }
                 return .families(kept.isEmpty ? nil : Array(Set(kept.values.flatMap { $0 })).sorted())

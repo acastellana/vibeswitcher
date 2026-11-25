@@ -1076,15 +1076,15 @@ public enum LeadLaunch {
     }
 
     /// A worker's run on `task`. Claude: the task's model, else Fable once it's been re-rolled (`rerollModel`), else the
-    /// command's; its advisor (none: no advisor), else worker_advisor; its effort, else high for a hard task. Codex: no
+    /// review floor's worker_model (the user's: an explicit `--model` on every launch), else the command's; its advisor (none: no advisor), else worker_advisor; its effort, else high for a hard task. Codex: no
     /// advisor (a Claude flag), the task's model unless an auto task was routed there (`routed`: Claude's model names
     /// mean nothing to Codex), and the effort as Codex's model_reasoning_effort.
     public static func workerRun(_ task: LeadTask, workflow: LeadWorkflow, codex: Bool, routed: Bool = false, defaultModel: String?,
                                  fableHeldBack: Bool) -> Run {
         let effort = task.effort ?? (task.hard ? hardEffort : nil)
         if codex { return Run(model: routed ? nil : task.model, effort: effort) }
-        return run(model: task.intendedModel, advisor: task.advisor ?? workflow.workerAdvisor, effort: effort, defaultModel: defaultModel,
-                   fableHeldBack: fableHeldBack)
+        return run(model: task.intendedModel ?? workflow.floor?.workerModel, advisor: task.advisor ?? workflow.workerAdvisor, effort: effort,
+                   defaultModel: defaultModel, fableHeldBack: fableHeldBack)
     }
 
     /// Where a new lead finds the last turns of the lead it replaces: in the project's `.vibeswitcher` folder (kept out

@@ -2,17 +2,18 @@ import Foundation
 import Testing
 @testable import VibeCore
 
-/// What a task's audit is kept off under the floor that keeps audits off the workers' model: Claude Code's default
-/// and the lead's model, as before, and every model family the session host recorded for the task's worker launches
-/// (`WorkerLaunch`), which only ever adds. Nothing unlocks a model: a launch on Opus under a Fable default still keeps
-/// the audit off Fable. Fake sessions only; the vault's book stands in for the host's table (`LeadVault.Book.seenOf`).
+/// What a task's audit is kept off under the floor that keeps audits off the workers' model: the workers' model (the
+/// floor's worker_model, the user's word, else Claude Code's default) and every model family the session host recorded
+/// for the task's worker launches (`WorkerLaunch`), which only ever adds. The record unlocks nothing: a launch on Opus
+/// under a Fable default still keeps the audit off Fable; the user's worker_model is what moves the workers' model.
+/// Fake sessions only; the vault's book stands in for the host's table (`LeadVault.Book.seenOf`).
 extension LeadAdvanceTests {
     static let fableDefault = "claude-fable-5-2[1m]"
 
     /// A lead under the review floor, security_audit_model fable, the host's view of each session its spawn's command.
     /// `defaultModel`: Claude Code's default, for the project (`settingsModel`) and in the vault's home;
-    /// `leadModel`: lead_model.
-    func floorTeam(defaultModel: String, leadModel: String) throws -> (root: String, runtime: FakeRuntime, lead: LeadToolset) {
+    /// `leadModel`: lead_model; `workerModel`: the floor's worker_model.
+    func floorTeam(defaultModel: String, leadModel: String, workerModel: String? = nil) throws -> (root: String, runtime: FakeRuntime, lead: LeadToolset) {
         let (root, runtime, lead) = try team(test: nil, ["auto_advance": false, "max_workers": 5])
         runtime.claude = "claude --dangerously-skip-permissions"
         runtime.settingsModel = defaultModel
@@ -20,7 +21,7 @@ extension LeadAdvanceTests {
         book.seenOf = { [runtime] session in runtime.hostSeen(session) }
         let reads = FloorReads()
         lead.floorClock = { reads.next() }
-        try vault.setReviewFloor(LeadReviewFloor(), root: root)
+        try vault.setReviewFloor(LeadReviewFloor(workerModel: workerModel), root: root)
         for (key, value) in ["security_audit_model": "fable", "lead_model": leadModel] {
             let set = lead.call("configure", [key: value])
             #expect(!set.isError, "\(set.text)")
@@ -57,7 +58,7 @@ extension LeadAdvanceTests {
         try commit("opus.txt", "x\n", in: Worktrees.path(root: root, slug: "opus"))
         let audited = lead.call("audit", ["task": "opus"])
         #expect(!audited.isError, "\(audited.text)")
-        let line = "kept off the workers' models: Claude Code's default fable; workers launched on opus by the host's record"
+        let line = "kept off Claude Code's default fable and launched on opus by the host's record"
         #expect(audited.text.contains("(on sonnet: \(line))"), "\(audited.text)")
         let progress = try String(contentsOfFile: BoardStore(root: root).recordPath("progress.md"), encoding: .utf8)
         #expect(progress.contains("Audit of opus on sonnet: \(line)."), "\(progress.suffix(600))")
@@ -88,7 +89,7 @@ extension LeadAdvanceTests {
         #expect(lead.auditModel(lead.workflow, task: try #require(task("plain", root)), security: true) == "sonnet")
     }
 
-    /// An alias or unknown id adds nothing and takes nothing off; every --model of a command counts.
+    /// An alias or unknown id adds nothing and takes nothing off; the last --model of a command counts.
     @Test func anAliasAddsNothingAndEveryModelOfACommandCounts() throws {
         let (root, _, lead) = try floorTeam(defaultModel: "opus", leadModel: "opus")
         _ = lead.call("add_task", ["title": "Alias", "goal": "g", "acceptance": ["a"], "review": "audit"])
@@ -96,8 +97,9 @@ extension LeadAdvanceTests {
         #expect(vault.launchedFamilies(root: root, task: "alias") == nil)
         let alias = try #require(task("alias", root))
         #expect(lead.auditModel(lead.workflow, task: alias, security: true) == "fable")
-        bindWorker("alias", root: root, session: "twice", command: "claude --model opus --model=claude-fable-5-2[1m] -- 'x --model haiku'")
-        #expect(vault.launchedFamilies(root: root, task: "alias") == ["fable", "opus"])
+        // The last --model is what Claude Code runs; one inside a quoted word or after `--` isn't an option.
+        bindWorker("alias", root: root, session: "twice", command: "claude --model opus --name 'a --model haiku' --model=claude-fable-5-2[1m] -- 'x --model sonnet'")
+        #expect(vault.launchedFamilies(root: root, task: "alias") == ["fable"])
         #expect(lead.auditModel(lead.workflow, task: alias, security: true) == "sonnet")
     }
 
@@ -123,10 +125,9 @@ extension LeadAdvanceTests {
         let carried = LeadVault.Book(restoring: book.serialized)
         #expect(carried.answer(.launchedFamilies(root: root, task: "plain"), from: .app) == .families(["fable"]))
         #expect(LeadVault.Book().answer(.launchedFamilies(root: root, task: "plain"), from: .app) == .families(nil))
-        #expect(WorkerLaunch.excluded(projectDefault: "opus", lead: ["opus"], launched: nil).text
-                == "kept off the workers' models: Claude Code's default opus; the lead's opus; no launch record")
-        #expect(WorkerLaunch.excluded(projectDefault: "opus", lead: [], launched: ["fable"]).text
-                == "kept off the workers' models: Claude Code's default opus; workers launched on fable by the host's record")
+        #expect(WorkerLaunch.excluded(floorModel: nil, projectDefault: "opus", launched: nil).text == "kept off Claude Code's default opus, no launch record")
+        #expect(WorkerLaunch.excluded(floorModel: "claude-opus-5-5", projectDefault: Self.fableDefault, launched: ["fable"]).text
+                == "kept off workers' model opus by your review floor and launched on fable by the host's record")
     }
 
     /// A verifier's bind adds nothing; a session the host doesn't know adds nothing.
@@ -146,5 +147,77 @@ extension LeadAdvanceTests {
         #expect(book.answer(.launchedFamilies(root: root, task: "t"), from: .app) == .families(nil))
         bind(.worker, "w", WorkerLaunch.Seen(command: "claude --model haiku"))
         #expect(book.answer(.launchedFamilies(root: root, task: "t"), from: .app) == .families(["haiku"]))
+    }
+
+    /// The user's set-up with worker_model opus in the floor: Claude Code's default Fable, every task's worker on Opus.
+    /// Every worker starts with --model opus (a task naming none too), and the sensitive audit runs on Fable.
+    @Test func workerModelInTheFloorPutsAuditsOnFableForOpusWorkers() throws {
+        let (root, runtime, lead) = try floorTeam(defaultModel: Self.fableDefault, leadModel: "fable", workerModel: "opus")
+        _ = lead.call("add_task", ["title": "Opus", "goal": "g", "acceptance": ["a"], "review": "audit", "model": "opus"])
+        _ = lead.call("add_task", ["title": "Plain", "goal": "g", "acceptance": ["a"], "review": "audit"])
+        for slug in ["opus", "plain"] { #expect(!lead.call("start_worker", ["task": slug]).isError) }
+        #expect(try #require(command("plain", runtime)).contains("--model 'opus'"))
+        for slug in ["opus", "plain"] {
+            #expect(lead.auditModel(lead.workflow, task: try #require(task(slug, root)), security: true) == "fable", "\(slug)")
+        }
+        try commit("plain.txt", "x\n", in: Worktrees.path(root: root, slug: "plain"))
+        let audited = lead.call("audit", ["task": "plain"])
+        #expect(!audited.isError, "\(audited.text)")
+        #expect(audited.text.contains("(on fable: kept off workers' model opus by your review floor and launched on opus by the host's record)"), "\(audited.text)")
+        #expect(lead.call("status", [:]).text.contains("workers start on opus (worker_model)"))
+    }
+
+    /// Under worker_model opus, a task naming Fable runs its worker on Fable: kept off by its record, after the board
+    /// forgets the task's model.
+    @Test func aTaskNamingFableUnderAnOpusWorkerModelIsExcludedByItsRecord() throws {
+        let (root, runtime, lead) = try floorTeam(defaultModel: Self.fableDefault, leadModel: "fable", workerModel: "opus")
+        _ = lead.call("add_task", ["title": "Hard", "goal": "g", "acceptance": ["a"], "review": "audit", "model": "fable"])
+        #expect(!lead.call("start_worker", ["task": "hard"]).isError)
+        #expect(try #require(command("hard", runtime)).contains("--model 'fable'"))
+        var hard = try #require(task("hard", root))
+        hard.model = nil
+        hard.launchedModels = nil
+        #expect(lead.auditModel(lead.workflow, task: hard, security: true) == "sonnet")
+    }
+
+    /// A worktree's .claude/settings.json naming Fable (branch content) doesn't change the --model a worker starts with.
+    @Test func aWorktreesSettingsDontChangeTheLaunchModel() throws {
+        let (root, runtime, lead) = try floorTeam(defaultModel: Self.fableDefault, leadModel: "fable", workerModel: "opus")
+        try FileManager.default.createDirectory(atPath: root + "/.claude", withIntermediateDirectories: true)
+        try commit(".claude/settings.json", "{\"model\": \"claude-fable-5-2\", \"env\": {\"ANTHROPIC_MODEL\": \"fable\"}}\n", in: root)
+        _ = lead.call("add_task", ["title": "Plain", "goal": "g", "acceptance": ["a"], "review": "audit"])
+        #expect(!lead.call("start_worker", ["task": "plain"]).isError)
+        let launched = try #require(command("plain", runtime))
+        #expect(launched.contains("--model 'opus'") && !launched.contains("fable'"), "\(launched)")
+        #expect(vault.launchedFamilies(root: root, task: "plain") == ["opus"])
+    }
+
+    /// The task's launches are the lead's and the app's to read, not a worker's or verifier's.
+    @Test func onlyTheLeadAndTheAppReadTheLaunches() throws {
+        let (root, _, lead) = try floorTeam(defaultModel: "opus", leadModel: "opus")
+        _ = lead.call("add_task", ["title": "Plain", "goal": "g", "acceptance": ["a"], "review": "audit"])
+        #expect(!lead.call("start_worker", ["task": "plain"]).isError)
+        let worker = try #require(task("plain", root)?.worker)
+        guard case .refused = book.answer(.launchedFamilies(root: root, task: "plain"), from: .session(worker)) else {
+            Issue.record("a worker read the launches")
+            return
+        }
+        #expect(book.answer(.launchedFamilies(root: root, task: "plain"), from: .app) == .families(["opus"]))
+    }
+
+    /// The floor keeps a known model only; parse takes one and refuses an alias.
+    @Test func theFloorsWorkerModelIsAKnownModel() throws {
+        #expect(LeadReviewFloor(workerModel: "Opus").workerModel == "opus")
+        #expect(LeadReviewFloor(workerModel: "best").workerModel == nil)
+        let coded = try JSONDecoder().decode(LeadReviewFloor.self, from: JSONEncoder().encode(LeadReviewFloor(workerModel: "claude-opus-5-5")))
+        #expect(coded.workerModel == "claude-opus-5-5")
+        let older = try JSONDecoder().decode(LeadReviewFloor.self, from: Data(#"{"sensitivePaths":[],"strictPaths":[],"auditFinders":1,"mergePolicy":"auto","riskLines":0,"riskModel":false,"verifierDifferent":true}"#.utf8))
+        #expect(older.workerModel == nil)
+    }
+
+    @Test func theWordsAreSplitAsAShellSplitsThem() {
+        #expect(WorkerLaunch.words("claude --name 'it'\\''s --model fable' --model \"op\\\"us\" -- go") == ["claude", "--name", "it's --model fable", "--model", "op\"us", "--", "go"])
+        #expect(WorkerLaunch.launchModel(command: "claude --name 'it'\\''s --model fable' -- go") == nil)
+        #expect(WorkerLaunch.launchModel(command: "claude --model opus --model 'sonnet' -- go") == "sonnet")
     }
 }

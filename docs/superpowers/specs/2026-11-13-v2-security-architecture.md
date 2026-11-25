@@ -2428,6 +2428,15 @@ the bootstrap path's [Decisions awaiting the user](../plans/2026-11-13-v2-bootst
 with what only the user can do on the machine beside them. "Decision N" in this document is that list's tag DN. The
 answers go into the design's Decided section before stage 2's Task 2.
 
+**Open, for the user (2026-11-25): the lead and the workers'-model rule.** The review floor's "audits never run on
+the workers' model" keeps an audit off the workers' model (the floor's `worker_model` when the user set it, else
+Claude Code's default), the task's own and launched models, and every model family the host recorded for the task's
+worker launches (`WorkerLaunch`, only ever added to). It doesn't cover a lead that writes a task's code itself: the
+lead's own model (lead_model, Fable by default) isn't in the set, so such code can be audited on the lead's model.
+Nor does it cover a worker's `--advisor`: an advisor on the audit's model shapes the work it judges. Adding either
+would keep audits off Fable on every project whose lead (or advisors) run on Fable, the user's set-up today, so it is
+the user's call: keep it as is, add the lead's model, add advisors, or both.
+
 ### The author's calls the user doesn't need to confirm
 
 From the plan: S2-D2 (the Mac-only bodies move into `VibePlatform`), S2-D4 (per-message credentials), S2-D5
