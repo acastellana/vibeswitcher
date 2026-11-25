@@ -100,6 +100,10 @@ export function sideSheet() {
 // one with changes, Show what changed (`config.held` with `diff`: its difference, lines of text); the guard rails with
 // their values; a base's branch, its move, why and every commit. `read(kind, args)` asks the node. Returns the sheet's
 // parts ({ kicker, title, more }).
+// What a held thing or a guard rail is against your last accept (the node's `sinceAccept`: same, changed, new), in
+// the page's words; another word as the node wrote it.
+export const sinceWord = (how) => ({ same: t('shSame'), changed: t('shChanged'), new: t('shNew') }[how] || how);
+
 export function heldParts(card, { root, kicker = '', read = null, kind = 'config.held' } = {}) {
   const fact = (name, ...value) => [h('dt', null, name), h('dd', null, value)];
   if (card?.kind === 'base' && card.base) {
@@ -131,7 +135,7 @@ export function heldParts(card, { root, kicker = '', read = null, kind = 'config
     return h('li', { class: 'held-item' },
       h('div', { class: 'held-name' }, h('b', null, one.name), one.outside ? h('span', { class: 'held-outside' }, ' · ', t('shOutside')) : null),
       one.change ? h('p', null, one.change) : null,
-      h('p', { class: 'confirm-note' }, [one.changedAt ? t('shChangedAt', { time: moment(one.changedAt) }) : null, one.sinceAccept ? t('shSinceAccept', { how: one.sinceAccept }) : null].filter(Boolean).join(' · ')),
+      h('p', { class: 'confirm-note' }, [one.changedAt ? t('shChangedAt', { time: moment(one.changedAt) }) : null, one.sinceAccept ? t('shSinceAccept', { how: sinceWord(one.sinceAccept) }) : null].filter(Boolean).join(' · ')),
       (one.files || []).length ? h('ul', { class: 'files' }, one.files.map((file) => (typeof file === 'string' ? h('li', null, h('code', null, file))
         : h('li', null, h('code', null, file.path || ''), file.change ? ` · ${t({ added: 'shAdded', changed: 'shChanged', removed: 'shRemoved' }[file.change] || 'shChanged')}` : '')))) : null,
       show, slot);
@@ -139,7 +143,7 @@ export function heldParts(card, { root, kicker = '', read = null, kind = 'config
   return { kicker, title: t('heldConfig'), more: [
     items.length ? h('ul', { class: 'held-items' }, items.map(item)) : h('p', null, t('shNothingHeld')),
     rails.length ? h('h3', { class: 'sheet-sub' }, t('shGuardRails')) : null,
-    rails.length ? h('dl', { class: 'held-whole' }, rails.map((rail) => fact(rail.key, h('code', null, rail.value), rail.sinceAccept ? ` (${rail.sinceAccept})` : ''))) : null,
+    rails.length ? h('dl', { class: 'held-whole' }, rails.map((rail) => fact(rail.key, h('code', null, rail.value), rail.sinceAccept ? ` (${sinceWord(rail.sinceAccept)})` : ''))) : null,
     config.lastAccept ? h('p', { class: 'confirm-note' }, t('shLastAccept', { time: moment(config.lastAccept) })) : null,
   ].filter(Boolean) };
 }

@@ -727,3 +727,20 @@ test('the mock lists the buttons’ kinds and answers each as the node does, ref
   assert.match((await refusing.ask('presets.edit', { op: 'add', name: 'X' })).error.message, /haven’t accepted/);
   refusing.mock.stop();
 });
+
+test('B8: a held folder’s files read as their paths and what became of them, on the card and in the sheet; the node’s since-accept words in the page’s', async () => {
+  const { projectView } = await import('../js/views/project.js');
+  const { heldParts } = await import('../js/views/sheet.js');
+  setLanguage('es');
+  const app = fakeApp({ route: { name: 'project', id: P, view: 'lead', show: 'asks' }, kinds: ['config.held', 'config.accept'], state: { cards: new Map([[HELD.id, HELD]]), leads: new Map([[P, quietLead]]) } });
+  const view = projectView(app, { sheet: { open() {}, close() {}, shown: () => false } });
+  view.render();
+  const box = find(view.el, byClass('wait-box'));
+  assert.doesNotMatch(box.textContent, /object Object/);
+  assert.match(box.textContent, /reviewer\.md · añadido/);
+  const sheet = document.createElement('div');
+  sheet.append(...heldParts(HELD, { root: SITE_ROOT }).more);
+  assert.match(sheet.textContent, /cambiado desde tu última aceptación/);
+  assert.doesNotMatch(sheet.textContent, /\bchanged\b/);
+  setLanguage('en');
+});

@@ -1230,6 +1230,8 @@ export const ES = {
   apInTheLeftColumn: "En la columna izquierda",
   apFilterLeft: "Filtrar los proyectos y las sesiones",
   apFilterLeftAbout: "Por nombre o carpeta; primero lo que te necesita",
+  shSame: "igual",
+  shNew: "nuevo",
   // END buttons
   // The two columns of Your own sessions, This node and Settings (views/twocol.js).
   tcBackToList: "Volver a la lista",

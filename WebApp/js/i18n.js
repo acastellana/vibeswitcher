@@ -1241,6 +1241,8 @@ const EN = {
   apInTheLeftColumn: "In the left column",
   apFilterLeft: "Filter the projects and sessions",
   apFilterLeftAbout: "By name or folder; what needs you first",
+  shSame: "the same",
+  shNew: "new",
   // END buttons
   // The two columns of Your own sessions, This node and Settings (views/twocol.js).
   tcBackToList: "Back to the list",
