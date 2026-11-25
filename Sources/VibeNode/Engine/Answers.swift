@@ -617,6 +617,18 @@ extension LeadEngine {
                 .map { SessionPresets.withPresetsToAccept($0, vault: vault, home: home, nodeRoot: node) }
             // The home folder's watched things' names (the Mac-wide seal's): what another root's open card may show too.
             let homeNames = Set(ConfigSeal.homeWatched(home: home).map(\.name))
+            // With nothing held: whether accepting would record anything (guard rails or a floor workflow.md proposes that
+            // the vault doesn't hold), and whether the last accept's snapshot is one this host's vault sealed (none: the
+            // vault's first look is owed, a host restart since, or the project never accepted). Nothing owed: the card is
+            // shown, never kept open (the real node, 2026-11-25, drew one with nothing held, shown as blocking, that a
+            // page couldn't accept).
+            let owed: (record: Bool, firstLook: Bool)? = {
+                guard case .success(let shown) = held, shown.items.isEmpty else { return nil }
+                let pending = (try? ConfigHoldStore.wouldRecord(shown, root: root, vault: vault)) ?? ["?"]
+                let record = (try? vault.guardedRecord(root: root)) ?? nil
+                let sealed = AcceptedSnapshot.vouch(snapshot.projects[root], root: root, vault: vault, record: record).sealed
+                return (!pending.isEmpty || !sealed, !sealed)
+            }()
             let difference: [String]? = {
                 guard case .success(let shown) = held, let diff else { return nil }
                 // The presets file: what changed in presets since the user's accept, not its text (`SessionPresets.difference`).
@@ -628,9 +640,23 @@ extension LeadEngine {
                 switch held {
                 case .failure(let error): then(.failure(.refused("the vault can't be asked what it holds for \(root): \(error)")))
                 case .success(let held):
-                    let shown = self.sharingHome(held, root: root, homeNames: homeNames)
+                    var shown = self.sharingHome(held, root: root, homeNames: homeNames)
                     let project = NodeIds.project(root: root)
                     let open = self.cards.list(project: project).filter { $0.kind == .configHeld }
+                    if let owed, shown.sharedHome == nil {
+                        // A root whose accept left its rails and floor to the home's card (`secondAccepts`) owes one.
+                        guard owed.record || self.secondAccepts[root] != nil else {
+                            for old in open { self.cards.change(old.id) { $0.closed = "nothing held any more" } }
+                            // What `config held` shows of the rails, on a card no one needs to accept: not kept, not open.
+                            var shownOnly = CardStore.Card(root: root, kind: .configHeld)
+                            shownOnly.config = shown
+                            shownOnly.closed = "nothing to accept"
+                            var result = WireKinds.ConfigHeld.Result(card: shownOnly.value)
+                            if let diff { result.difference = .string("nothing held is named \(diff)") }
+                            return then(.success(result))
+                        }
+                        shown.firstLook = owed.firstLook ? true : nil
+                    }
                     // Nothing changed since an open card was drawn: that card again, so a `config held` and a `config
                     // accept` from two separate calls meet (2026-11-20, the node's frictions). Only a card showing all
                     // the same (every field of `Shown`) is kept; anything else closes the open ones and draws anew.
