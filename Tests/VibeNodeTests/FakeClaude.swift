@@ -107,7 +107,8 @@ enum FakeClaude {
 # "Teach auto mode about your environment?" popup over its box: Esc closes it, "autoMode" "declined" in STATE; Enter on
 # Continue "scanned"; Space or Enter on a setting toggles it) | "dialog" (a dialog it draws over its box that nothing
 # reads: "lines", the text drawn; Esc closes it) |
-# "exit" (it quits, as /exit) | "mcp" (the node's: {"op": "mcp", "tool": NAME, "arguments": {...}} starts the tool
+# "exit" (it quits, as /exit) | Ctrl+X Ctrl+S (bytes 0x18 0x13, 2.1.275's send-now: what is queued while it works goes in
+# now, as the user's turn's words, "sentNow" counting them) | "mcp" (the node's: {"op": "mcp", "tool": NAME, "arguments": {...}} starts the tool
 # server its --mcp-config names, a path or inline JSON, "server" or the one named vibeswitcher or the first; sends
 # initialize and the tools/call, and records the reply, or what failed, in "mcp" in STATE)).
 # Its /voice keeps Claude Code 2.1.312's timings: a repeat chain breaks 120 ms after the last Space (the key let go),
@@ -1090,6 +1091,13 @@ def key(name):
             if mode == "working":
                 state["mode"] = "idle"
                 state["reply"] = "Interrupted."
+        elif name == "send-now":
+            # What is queued goes in now, as the user's, in this turn; nothing queued: nothing happens.
+            if mode == "working" and state["queued"]:
+                for text in state["queued"]:
+                    record({"type": "user", "message": {"role": "user", "content": text}})
+                state["sentNow"] = state.get("sentNow", 0) + len(state["queued"])
+                state["queued"] = []
         elif len(name) == 1 or name == "space":
             state["input"] += " " if name == "space" else name
 
@@ -1178,6 +1186,11 @@ def feed(data):
                 continue
             key("esc")
             i += 1
+            continue
+        if c == "\x18" and text[i + 1:i + 2] == "\x13":
+            # Ctrl+X Ctrl+S: Claude Code's send-now (2.1.275+): what is queued is read in this turn, now.
+            key("send-now")
+            i += 2
             continue
         if (c == "\r" or c == "\n") and reading is not None:
             reading["enter"] = True

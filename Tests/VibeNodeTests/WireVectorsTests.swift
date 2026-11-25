@@ -39,6 +39,12 @@ struct WireVectorsTests {
             check(.object(older), "card", "a card from a server before acting from the page")
         }
         for (index, lead) in Samples.leads.enumerated() { check(lead.value, "lead", "lead sample \(index)") }
+        // A lead with the user's tells as `Requests.leadValue` adds them (`UserDeliveries.swift`): one taken, one not.
+        if case .object(var fields)? = Samples.leads.first?.value {
+            fields["told"] = .array([.object(["action": .string(UUID().uuidString.lowercased()), "at": .date(Samples.at), "delivered": .null]),
+                                     .object(["action": .string(UUID().uuidString.lowercased()), "at": .date(Samples.at), "delivered": .date(Samples.at)])])
+            check(.object(fields), "lead", "a lead with tells")
+        }
         for (index, hello) in Samples.hellos.enumerated() { check(try Samples.value(hello), "hello", "hello sample \(index)") }
         for (index, bye) in Samples.byes.enumerated() { check(try Samples.value(bye), "bye", "bye sample \(index)") }
         for (index, request) in Samples.requests.enumerated() { check(try Samples.value(request), "request", "request sample \(index)") }

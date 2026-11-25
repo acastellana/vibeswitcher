@@ -48,18 +48,20 @@ enum UpdateCommand {
         var testBuild: String?
         var testScope: String?
         var testHold: String?
+        var serverWait = SwitchSettle.serverWait
         var words = arguments[...]
         while let word = words.popFirst() {
             if word == "--test-installer", let program = words.popFirst() { installer = program; continue }
             if word == "--test-build", let folder = words.popFirst() { testBuild = folder; continue }
             if word == "--test-scope", let program = words.popFirst() { testScope = program; continue }
             if word == "--test-hold", let folder = words.popFirst() { testHold = folder; continue }
+            if word == "--test-server-wait", let text = words.popFirst(), let seconds = TimeInterval(text) { serverWait = seconds; continue }
             guard named == nil, NodeUnit.isCommit(word) else { return Say.usage(usage) }
             named = word
         }
         let context = NodeContext.current()
         context.sayScratch()
-        if installer != nil || testBuild != nil || testScope != nil || testHold != nil, !context.isScratch {
+        if installer != nil || testBuild != nil || testScope != nil || testHold != nil || serverWait != SwitchSettle.serverWait, !context.isScratch {
             return Say.refused("update: --test-installer, --test-build, --test-scope and --test-hold are a scratch node's test flags")
         }
         // The install runs in a scope of the user's systemd manager, never this terminal's (a scratch node's test names
@@ -223,7 +225,7 @@ enum UpdateCommand {
         }
         if handedOver {
             let due = SwitchSettle.serverDue(installRoot: prefix, running: serverBefore.commit, target: target)
-            if let refused = SwitchCommand.settle(context, serverBefore: serverBefore, due: due, web: webBefore, target: target) {
+            if let refused = SwitchCommand.settle(context, serverBefore: serverBefore, due: due, web: webBefore, target: target, serverWait: serverWait) {
                 Say.err("vibeswitcher: \(ConfigSeal.inert(refused.text, limit: .max))")
                 return refused.exitCode
             }

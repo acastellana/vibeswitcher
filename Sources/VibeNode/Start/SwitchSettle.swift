@@ -15,12 +15,20 @@ import VibeCore
 ///   the server that stays is waited for until its `web` says listening on the same port again (the host holds the
 ///   socket across the handover, H1); a page that was paired then reconnects with its token (kept at rest).
 ///
-/// Each wait is bounded (`serverWait`, `webWait`); past it the command line says what didn't come and how to look.
+/// Each wait polls until what it waits for answers, bounded (`serverWait`, `webWait`); past it the command line says
+/// what didn't come and how to look, and goes on: the handover happened (`slowServer`).
 public enum SwitchSettle {
     /// The longest a replacement takes: the reconnect's grace, the idle limit, the end's limit, and a start.
     public static let serverWait: TimeInterval = 120
     /// How long the web listener is waited for once the server answers.
     public static let webWait: TimeInterval = 30
+
+    /// What a switch says when the new build's server hasn't answered in its wait (`why`: what answered instead): the
+    /// handover happened, so it goes on.
+    public static func slowServer(target: String, after seconds: Int, why: String) -> String {
+        "handed over to \(target); its server hasn't answered yet after \(seconds) s (\(ConfigSeal.inert(why, limit: 200))): "
+            + "`vibeswitcher status` shows when it does"
+    }
 
     /// Whether the switch to `target` replaces a server running `running`'s build, from their `build-info` under
     /// `installRoot`: the server's recorded SHA-256 differ. Nil when either can't be read (a server that names no

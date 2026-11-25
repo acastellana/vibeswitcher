@@ -47,6 +47,9 @@ final class DeliveryWorld: @unchecked Sendable {
         queue.sync {
             // The disk watch (E7) reads no real volume unless a case gives it one: a full disk here isn't the case's.
             engine.freeSpace = { _ in nil }
+            // A post that finds no lead is tried again a few times before its notice: quickly here (a case that needs
+            // the node's own waits sets them).
+            engine.heldRetryDelays = [0.05, 0.1, 0.2]
             engine.wakeStep = { step in
                 steps.mutate { $0.append(step) }
                 onStep.value(step)

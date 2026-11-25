@@ -73,7 +73,7 @@ public enum BoardValue {
     public static func value(project: String, root: String, board: LeadBoard?, refusal: String? = nil, now: Date,
                              usageWaits: [String: ReviewUsageWait] = [:], summaries: [String: String] = [:],
                              decisions: [BoardDecision] = [], records: BoardRecords.Read = BoardRecords.Read(), workers: Int = 3,
-                             goals: LeadGoalsFile = LeadGoalsFile()) -> NodeWire.Value {
+                             goals: LeadGoalsFile = LeadGoalsFile(), delivered: [String: NodeWire.Value] = [:]) -> NodeWire.Value {
         var shown: [(group: Int, position: Int, value: NodeWire.Value)] = []
         var slugs: Set<String> = []
         // The forecast (`LeadForecast`, VibeCore's: the lead's tools say the same numbers), once a board.
@@ -88,7 +88,7 @@ public enum BoardValue {
         shown.sort { ($0.group, $0.position) < ($1.group, $1.position) }
         var kept = Array(shown.prefix(mostTasks))
         // The byte budget: the tasks' encoded sizes and the rest of the value's, the last tasks dropped till it fits.
-        var extra = BoardRecords.fields(board: board, read: records, now: now, summaries: decisions)
+        var extra = BoardRecords.fields(board: board, read: records, now: now, summaries: decisions, delivered: delivered)
         extra["goals"] = board.map { Self.goals($0, goals, landings: forecast?.goals ?? [:]) } ?? .array([])
         extra["score"] = forecast.map { score($0.score) } ?? .null
         var size = 2_048 + root.utf8.count + project.utf8.count + NodeWire.message(NodeWire.Value.object(extra)).count

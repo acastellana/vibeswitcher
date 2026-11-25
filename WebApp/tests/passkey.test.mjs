@@ -90,7 +90,7 @@ test('at trust nothing changes: no challenge, no assertion', async () => {
 });
 
 test('the terminal’s offer to add a passkey: shown, added through the browser, told to the node, ended', async () => {
-  const store = createStore({ credentials: { create: async (options) => { assert.equal(options.publicKey.rp.id, 'localhost'); return { rawId: bytes(8), response: { clientDataJSON: bytes(1), attestationObject: bytes(2) } }; } } });
+  const store = createStore({ credentials: { create: async (options) => { assert.equal(options.publicKey.rp.id, 'localhost'); return { rawId: bytes(8, 9, 10, 11, 12), response: { clientDataJSON: bytes(1), attestationObject: bytes(2) } }; } } });
   const sockets = [];
   class FakeSocket {
     constructor() { this.sent = []; this.readyState = 0; sockets.push(this); }
@@ -106,18 +106,25 @@ test('the terminal’s offer to add a passkey: shown, added through the browser,
   const socket = sockets[0];
   socket.readyState = 1;
   socket.onopen();
-  socket.onmessage({ data: JSON.stringify({ ...structuredClone(vectors['hello.web']), auth: { rights: ['read', 'draft', 'watch', 'act'] }, kinds: ['passkey.registered', 'status'] }) });
-  const offer = { v: 1, kind: 'passkey', op: 'register', register: 'r1', challenge: b64(1, 2), rp: { id: 'localhost', name: 'VibeSwitcher' },
-    user: { id: b64(3), name: 'vibeswitcher', displayName: 'VibeSwitcher on this machine' }, exclude: [], expires: new Date(Date.now() + 60000).toISOString() };
-  socket.onmessage({ data: JSON.stringify(offer) });
-  assert.equal(store.state.passkeyOffer.register, 'r1');
+  socket.onmessage({ data: JSON.stringify({ ...structuredClone(vectors['hello.web']), auth: { rights: ['read', 'draft', 'watch', 'act'] }, kinds: ['passkey.ask', 'passkey.registered', 'status'] }) });
+  // The offer: waiting, no challenge; the clicked tab asks for it.
+  const expires = new Date(Date.now() + 300000).toISOString();
+  socket.onmessage({ data: JSON.stringify({ v: 1, kind: 'passkey', op: 'waiting', register: 'r1', expires }) });
+  assert.deepEqual(store.state.passkeyOffer, { register: 'r1', expires });
   const adding = store.addPasskey(register);
   await new Promise((resolve) => setImmediate(resolve));
+  const ask = socket.sent.find((message) => message.kind === 'passkey.ask');
+  assert.deepEqual(ask.args, { register: 'r1' });
+  assert.equal(ask.action, undefined, 'asked as a read');
+  socket.onmessage({ data: JSON.stringify({ v: 1, re: ask.id, ok: true, result: { register: 'r1', challenge: b64(1, 2), rp: { id: 'localhost', name: 'VibeSwitcher' },
+    user: { id: b64(3), name: 'vibeswitcher', displayName: 'VibeSwitcher on this machine' }, exclude: [], expires } }) });
+  for (let turn = 0; turn < 20 && !socket.sent.some((message) => message.kind === 'passkey.registered'); turn += 1) await new Promise((resolve) => setImmediate(resolve));
   const told = socket.sent.find((message) => message.kind === 'passkey.registered');
-  assert.deepEqual(told.args, { register: 'r1', id: b64(8), clientDataJSON: b64(1), attestationObject: b64(2) });
-  socket.onmessage({ data: JSON.stringify({ v: 1, re: told.id, ok: true, result: { id: '0a1b2c3d4e5f' } }) });
+  assert.deepEqual(told.args, { register: 'r1', id: b64(8, 9, 10, 11, 12), clientDataJSON: b64(1), attestationObject: b64(2) });
+  socket.onmessage({ data: JSON.stringify({ v: 1, re: told.id, ok: true, result: { state: 'received' } }) });
   await adding;
-  assert.deepEqual(store.state.passkeyAdding, { state: 'added', id: '0a1b2c3d4e5f' });
+  // The 6 characters to type: this tab's own key's, never the node's.
+  assert.deepEqual(store.state.passkeyAdding, { state: 'added', id: b64(8, 9, 10, 11, 12).slice(0, 6) });
   socket.onmessage({ data: JSON.stringify({ v: 1, kind: 'passkey', op: 'ended', register: 'r1' }) });
   assert.equal(store.state.passkeyOffer, null);
 });
@@ -136,4 +143,27 @@ test('an authenticator that can’t make an ES256 passkey is said plainly, apart
     await store.addPasskey(register);
     assert.equal(store.state.passkeyAdding.state, state);
   }
+});
+
+test('the ways to send follow the session’s agent, and the note says what the node did, in its words first', async () => {
+  const { waysFor, sendArgs, sentWords } = await import('../js/sendways.js');
+  assert.deepEqual(waysFor({}), ['step', 'now'], 'until the node lists them');
+  assert.deepEqual(waysFor({ sendWays: ['interrupt', 'after', 'step', 'now', 'sideways'] }), ['step', 'now', 'after', 'interrupt']);
+  assert.deepEqual(sendArgs({ id: 's1', sendWays: ['step', 'now'] }, 'hi', 'now'), { session: 's1', text: 'hi', when: 'now', now: true }, 'now said the old way too');
+  assert.deepEqual(sendArgs({ id: 's1', sendWays: ['interrupt'] }, 'hi', 'interrupt', ['/a.png']), { session: 's1', text: 'hi', when: 'interrupt', images: ['/a.png'] });
+  assert.deepEqual(sendArgs({ id: 's1' }, 'hi', 'now'), { session: 's1', text: 'hi', now: true }, 'no `when` to a node that lists no ways');
+  assert.deepEqual(sendArgs({ id: 's1' }, 'hi', 'step'), { session: 's1', text: 'hi' });
+  assert.equal(sentWords('after', { when: 'step', said: 'Claude Code has no queue for after its turn: sent at its next step.' }), 'Claude Code has no queue for after its turn: sent at its next step.');
+  assert.equal(sentWords('now', { when: 'step' }), 'Sent: read at its next step.', 'what was done, not what was asked');
+  assert.equal(sentWords('interrupt', { when: 'interrupt' }), 'Interrupted, then sent.');
+  assert.equal(sentWords('now', { queued: true, waits: 'a question is open on its screen' }), 'Held: a question is open on its screen. It goes in as soon as that closes.');
+});
+
+test('a contested offer (another tab asked first) adds nothing and says so', async () => {
+  const store = createStore({ credentials: { create: async () => assert.fail('no passkey made') } });
+  store.connect({ request: (message) => Promise.resolve(message.kind === 'passkey.ask'
+    ? { v: 1, re: message.id, ok: false, error: { code: 'voice', message: 'another page asked for this offer: it is contested and ended' } } : { v: 1, re: message.id, ok: true, result: {} }) });
+  store.setPasskeyOffer({ register: 'r1', expires: null });
+  await store.addPasskey(register);
+  assert.deepEqual(store.state.passkeyAdding, { state: 'refused', why: 'another page asked for this offer: it is contested and ended' });
 });

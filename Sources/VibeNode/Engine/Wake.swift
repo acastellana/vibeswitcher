@@ -27,8 +27,9 @@ extension LeadEngine {
             wake(root: root)
         }
         // E6: the user's messages the leads took retired in the vault (those still waiting renewed), the leads' bases
-        // and what the vault holds for them looked at.
+        // and what the vault holds for them looked at; an answer whose lead took a step since is no longer replaceable.
         retireTaken()
+        lookLeadSteps()
         lookAtBases()
         lookAtConfig()
     }

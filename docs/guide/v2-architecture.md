@@ -1,10 +1,8 @@
 # VibeSwitcher 2: how it works
 
-One current page for V2, the Linux node (branch `v2`). It describes the code as it is. The kinds table at the end is
-generated from the code, and a lint fails when it goes stale. For why each rule exists, see the
-[security architecture](../superpowers/specs/2026-11-13-v2-security-architecture.md) (its S-numbers are cited below).
-For what is wrong today and the order of work, see the [architecture review](../process/v2-architecture-review.md).
-To try the node, see [Try it](v2-try-it.md).
+One current page for V2, the Linux node (branch `v2`), describing the code as it is; the kinds table at the end is
+generated from the code (a lint fails when it goes stale). Why each rule exists: the [security architecture](../superpowers/specs/2026-11-13-v2-security-architecture.md)
+(its S-numbers below); what is wrong and the order of work: the [architecture review](../process/v2-architecture-review.md); [Try it](v2-try-it.md).
 
 ## The processes, and who starts whom
 
@@ -167,6 +165,7 @@ first": the vault records it before it is done. "Card code": its code is checked
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | `act.challenge` | a confirmed page (its passkey) (a page only) |  |  |  | `Requests.act` |  | the page's (WireSchema) |  |  |  |
 | `answer` | the user's terminal | yes | yes | yes | `Requests.act` | `card`, `code`, `text`, `version` | `WireKinds.Answer` | its result |  | yes |
+| `answer.replace` | the user's terminal | yes | yes | yes | `Requests.act` | `card`, `code`, `text`, `version` | `WireKinds.AnswerReplace` | its result |  | yes |
 | `approve` | the user's terminal | yes | yes |  | `Requests.act` | `batch`, `code` | `WireKinds.Approve` | its result |  | yes |
 | `approve.list` | the user's terminal |  |  |  | `Requests.act` |  | `WireKinds.ApproveList` |  |  | yes |
 | `base.accept` | the user's terminal | yes | yes | yes | `Requests.act` | `card`, `code` | `WireKinds.BaseAccept` | its result | yes | yes |
@@ -185,7 +184,7 @@ first": the vault records it before it is done. "Card code": its code is checked
 | `draft` | a page that drafts | yes |  |  | `draft` |  | the page's (WireSchema) |  |  |  |
 | `draft.clear` | a page that drafts | yes |  |  | `draft` |  | the page's (WireSchema) |  |  |  |
 | `hold` | the user's terminal | yes | yes | yes | `Requests.act` | `card`, `code` | `WireKinds.Hold` | its result |  | yes |
-| `hooks.install` | the user's terminal | yes | yes |  | `Requests.act` | `agents` | `WireKinds.HooksInstall` | its result; done again | yes | the terminal's alone |
+| `hooks.install` | the user's terminal | yes | yes |  | `Requests.act` | `agents`, `codex` | `WireKinds.HooksInstall` | its result; done again | yes | the terminal's alone |
 | `hooks.remove` | the user's terminal | yes | yes |  | `Requests.act` | `agents` | `WireKinds.HooksRemove` | its result; done again |  | yes |
 | `lead` | the user's terminal | yes | yes |  | `Requests.act` | `folder`, `goal`, `initialized`, `replace`, `resume`, `takeHead` | `WireKinds.Lead` | its result |  | yes |
 | `mail` | the user's terminal, or a page that reads |  |  |  | `Requests.act` |  | `WireKinds.Mail` |  |  |  |
@@ -208,7 +207,7 @@ first": the vault records it before it is done. "Card code": its code is checked
 | `questions` | anyone of the uid |  |  |  | `Requests.act` |  | `WireKinds.Questions` |  |  |  |
 | `recent` | the user's terminal, or a page that reads |  |  |  | `Requests.act` |  | the page's (WireSchema) |  |  |  |
 | `seen` | anyone of the uid |  |  |  | `Requests.act` |  | the page's (WireSchema) |  |  |  |
-| `send` | the user's terminal | yes | yes |  | `Requests.act` | `images`, `now`, `session`, `text` | `WireKinds.Send` | its result |  | yes |
+| `send` | the user's terminal | yes | yes |  | `Requests.act` | `images`, `now`, `session`, `text`, `when` | `WireKinds.Send` | its result |  | yes |
 | `session.attach` | a page that drafts | yes |  |  | `draft` |  | the page's (WireSchema) |  |  |  |
 | `session.close-shells` | the user's terminal | yes | yes |  | `Requests.act` | `sessions` | `WireKinds.CloseShells` | its result; done again |  | yes |
 | `session.complete` | anyone of the uid |  |  |  | `Requests.act` |  | the page's (WireSchema) |  |  |  |
@@ -233,6 +232,7 @@ first": the vault records it before it is done. "Card code": its code is checked
 | `stop` | the user's terminal | yes | yes |  | `Requests.act` | none | `WireKinds.Stop` | its result |  | yes |
 | `subscribe` | anyone of the uid |  |  |  | the live hub |  | the page's (WireSchema) |  |  |  |
 | `tell` | the user's terminal | yes | yes |  | `Requests.act` | `folder`, `text` | `WireKinds.Tell` | its result |  | yes |
+| `tell.retract` | the user's terminal | yes | yes |  | `Requests.act` | `action` | `WireKinds.TellRetract` | its result |  | yes |
 | `term.close` | a page's terminal (a page only) | yes |  |  | the terminal relay |  | the page's (WireSchema) |  |  |  |
 | `term.open` | a page's terminal (a page only) | yes |  |  | the terminal relay |  | the page's (WireSchema) |  |  |  |
 | `unsubscribe` | anyone of the uid |  |  |  | the live hub |  | the page's (WireSchema) |  |  |  |

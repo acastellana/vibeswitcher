@@ -30,6 +30,14 @@ enum SwitchCommand {
     static let usage = "usage: vibeswitcher switch COMMIT | rollback"
 
     static func run(_ arguments: [String], rollback: Bool) -> Int32 {
+        var arguments = arguments
+        // A scratch node's test: the wait for the new server, shortened (`--test-server-wait SECONDS`).
+        var serverWait = SwitchSettle.serverWait
+        if let at = arguments.firstIndex(of: "--test-server-wait"), at + 1 < arguments.count, let seconds = TimeInterval(arguments[at + 1]) {
+            guard NodeContext.current().isScratch else { return Say.refused("--test-server-wait is a scratch node's test flag") }
+            serverWait = seconds
+            arguments.removeSubrange(at...(at + 1))
+        }
         let command = rollback ? "rollback" : "switch"
         guard rollback ? arguments.isEmpty : arguments.count == 1 else { return Say.usage(usage) }
         if !rollback, !NodeUnit.isCommit(arguments[0]) {
@@ -137,7 +145,7 @@ enum SwitchCommand {
         }
         if handedOver {
             let due = SwitchSettle.serverDue(installRoot: buildsRoot(context, prefix: prefix, status: status), running: serverBefore.commit, target: target)
-            if let refused = settle(context, serverBefore: serverBefore, due: due, web: webBefore, target: target) {
+            if let refused = settle(context, serverBefore: serverBefore, due: due, web: webBefore, target: target, serverWait: serverWait) {
                 Say.err("vibeswitcher: \(ConfigSeal.inert(refused.text, limit: .max))")
                 return refused.exitCode
             }
@@ -151,14 +159,14 @@ enum SwitchCommand {
     }
 
     /// Waits, after a handover, for the server that stays and, when a page held a token, its web listener on the same
-    /// port (`SwitchSettle`), each said as it comes; nil once both are there. A server that doesn't come in
-    /// `SwitchSettle.serverWait` (or a listener in `webWait`) is a refusal naming what is missing: the host handed over
-    /// all the same.
+    /// port (`SwitchSettle`), polling until each answers, each said as it comes. One that doesn't come in `serverWait`
+    /// (or a listener in `webWait`) is said in a line, and the switch goes on: the handover happened, so it is no
+    /// failure (2026-11-24, a loaded machine). Only a server that fails the node's check is a refusal.
     static func settle(_ context: NodeContext, serverBefore: NodeWire.Hello.Server, due: Bool?, web: SwitchSettle.Web?,
-                       target: String) -> StartRefusal? {
+                       target: String, serverWait: TimeInterval = SwitchSettle.serverWait) -> StartRefusal? {
         switch due {
         case .some(true):
-            Say.out("the new build's server starts in place of pid \(serverBefore.pid) once the old one is idle (up to \(Int(SwitchSettle.serverWait)) s): waiting for it")
+            Say.out("the new build's server starts in place of pid \(serverBefore.pid) once the old one is idle (up to \(Int(serverWait)) s): waiting for it")
         case .some(false): break
         case .none:
             Say.out("whether the server is replaced isn't known (its build's record or the target's can't be read): not waited for")
@@ -179,9 +187,11 @@ enum SwitchCommand {
                 }
             }
             if answered != nil { break }
-            guard Platform.Clock.steadyDate().timeIntervalSince(started) < SwitchSettle.serverWait else {
-                return StartRefusal("handed over, but the new build's server didn't answer in \(Int(SwitchSettle.serverWait)) s (\(why)): "
-                                    + "`vs status` shows which answers; `vs switch \(target)` again finishes the follow-up", exitCode: 1)
+            // The handover happened: a server slow to come (a loaded machine) is said, never a failure, and the
+            // follow-up goes on.
+            guard Platform.Clock.steadyDate().timeIntervalSince(started) < serverWait else {
+                Say.out(SwitchSettle.slowServer(target: target, after: Int(Platform.Clock.steadyDate().timeIntervalSince(started)), why: why))
+                return nil
             }
             usleep(250_000)
         }
@@ -197,7 +207,8 @@ enum SwitchCommand {
             }
             guard Platform.Clock.steadyDate().timeIntervalSince(waited) < SwitchSettle.webWait else {
                 let seen = now.map { $0.listening ? "listening on port \($0.port.map(String.init) ?? "none")" : "not listening" } ?? "not known"
-                return StartRefusal("handed over, but the web listener isn't back on port \(web.port ?? 0) (\(seen)): `vibeswitcher web` opens it again", exitCode: 1)
+                Say.out("handed over to \(target); the web listener isn't back on port \(web.port ?? 0) yet (\(seen)): `vibeswitcher web` opens it again if it doesn't come")
+                return nil
             }
             usleep(250_000)
         }

@@ -92,6 +92,8 @@ export function actsLine(app, { compact = false } = {}) {
     return h(compact ? 'div' : 'p', { class: 'acts-line' + (compact ? ' compact' : '') }, h('span', null, t('acPasskeyOrigin')), ' ',
       h('a', { class: 'link', href: acts.passkeyOrigin }, acts.passkeyOrigin), compact ? null : h('span', null, ' ', t('acPasskeyOriginRun'), ' '), compact ? null : h('code', null, 'vibeswitcher web --localhost'));
   }
+  // Acting is on but this page doesn't act: the banner at the top of the centre says it (the footer says nothing).
+  if (!here && compact) return null;
   // Acting is on but this page doesn't act (a reload lost its secret, or its acting ran out): pair it again.
   if (!here) return h(compact ? 'div' : 'p', { class: 'acts-line' + (compact ? ' compact' : '') }, h('span', null, t(compact ? 'acPairAgainShort' : 'acPairAgain', { since })), ' ', h('code', null, 'vibeswitcher web'));
   const words = level === 'confirm' ? t(compact ? 'acConfirmShort' : 'acConfirm', { since }) : t(compact ? 'acThisPageShort' : 'acThisPage', { since });

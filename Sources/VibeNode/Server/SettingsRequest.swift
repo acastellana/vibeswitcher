@@ -80,7 +80,7 @@ extension Requests {
             return engine.setPluginSetting(asked, given: given) { result in
                 switch result {
                 case .failure(.badArgs(let why)): refuse(.badArgs, why)
-                case .failure(.gone(let why)), .failure(.refused(let why)): refuse(.refused, why)
+                case .failure(.gone(let why)), .failure(.refused(let why)), .failure(.delivered(let why)): refuse(.refused, why)
                 case .success(let applied):
                     reply(.init(re: request.id, typed: WireKinds.SetSetting.Result(key: asked, value: Self.capped(applied.value), was: Self.capped(applied.was),
                                                                                 scope: "node", project: nil, told: nil)))

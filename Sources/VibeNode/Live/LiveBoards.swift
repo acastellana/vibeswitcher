@@ -38,6 +38,9 @@ public final class LiveBoards: @unchecked Sendable {
     /// Each lead's latest decisions with their lines, by root (`LeadEngine.boardDecisions`).
     private let decisions: Changes<[BoardDecision]>?
     private var decisionsWatch: Subscription?
+    /// Each lead's read marks, by root (`LeadEngine.deliveryMarks`): an answered question carries `delivered`.
+    private let deliveries: Changes<NodeWire.Value>?
+    private var deliveriesWatch: Subscription?
     private let now: @Sendable () -> Date
     private let note: @Sendable (String) -> Void
     private var feeds: [String: Feed] = [:]
@@ -71,7 +74,9 @@ public final class LiveBoards: @unchecked Sendable {
     /// `summaries`: the engine's AI summaries, by root; a change reads that board's value again.
     public init(queue: DispatchQueue, leads: Changes<LeadStore.Lead>, usageWaits: Changes<[String: ReviewUsageWait]>? = nil,
                 summaries: Changes<[String: String]>? = nil, decisions: Changes<[BoardDecision]>? = nil,
+                deliveries: Changes<NodeWire.Value>? = nil,
                 now: @escaping @Sendable () -> Date = { Date() }, note: @escaping @Sendable (String) -> Void = { _ in }) {
+        self.deliveries = deliveries
         self.queue = queue
         self.leads = leads
         self.usageWaits = usageWaits
@@ -92,6 +97,7 @@ public final class LiveBoards: @unchecked Sendable {
         waitsWatch = usageWaits?.subscribe(on: queue) { [weak self] batch in self?.readAgain(roots: Set(batch.map(\.id))) }
         summariesWatch = summaries?.subscribe(on: queue) { [weak self] batch in self?.readAgain(roots: Set(batch.map(\.id))) }
         decisionsWatch = decisions?.subscribe(on: queue) { [weak self] batch in self?.readAgain(roots: Set(batch.map(\.id))) }
+        deliveriesWatch = deliveries?.subscribe(on: queue) { [weak self] batch in self?.readAgain(roots: Set(batch.map(\.id))) }
         if let clock {
             ticks.append(clock.every(Self.lookEvery) { [weak self] in self?.lookAll() })
             ticks.append(clock.every(Self.unwatchedEvery) { [weak self] in self?.lookUnwatched() })
@@ -104,6 +110,7 @@ public final class LiveBoards: @unchecked Sendable {
         waitsWatch = nil
         summariesWatch = nil
         decisionsWatch = nil
+        deliveriesWatch = nil
         queue.async { [self] in
             for feed in feeds.values { feed.watch?.stop() }
             feeds = [:]
@@ -180,13 +187,14 @@ public final class LiveBoards: @unchecked Sendable {
         let waits = usageWaits?.values[feed.root] ?? [:]
         let lines = summaries?.values[feed.root] ?? [:]
         let decided = decisions?.values[feed.root] ?? []
+        let delivered = deliveries?.values[feed.root]?["answers"]?.object ?? [:]
         feed.reads.async { [weak self] in
             let loaded = feed.file.load()
             // The workers its queue's forecast runs on: workflow.md's max_workers.
             let workers = LeadWorkflow.load(from: (feed.folder as NSString).appendingPathComponent("workflow.md")).maxWorkers
             let value = BoardValue.value(project: feed.project, root: feed.root, board: loaded.board, refusal: loaded.refusal, now: now(),
                                          usageWaits: waits, summaries: lines, decisions: decided, records: feed.records.load(), workers: workers,
-                                         goals: loaded.goals)
+                                         goals: loaded.goals, delivered: delivered)
             self?.queue.async { [weak self] in
                 guard let self else { return }
                 feed.reading = false

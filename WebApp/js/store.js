@@ -531,15 +531,24 @@ export function createStore(options = {}) {
       if (!offer) return;
       const said = (adding) => { state.passkeyAdding = adding; emit(new Map([['connection', [{ connection: state.connection }]]])); };
       said({ state: 'adding' });
+      // The challenge, asked by this tab alone on the click (`passkey.ask`): a second asker ends the offer as contested.
+      let full = offer;
+      if (!offer.challenge) {
+        const asked = await read('passkey.ask', { register: offer.register });
+        if (!asked.ok) return said({ state: 'refused', why: asked.error?.message || '' });
+        full = { ...asked.result, register: asked.result?.register || offer.register };
+      }
       let args;
       try {
-        args = await register(offer, credentials());
+        args = await register(full, credentials());
       } catch (error) {
         // An authenticator that can't make an ES256 key says NotSupportedError: said plainly, apart from a cancel.
         return said(error?.name === 'NotSupportedError' ? { state: 'unsupported' } : { state: 'cancelled', why: error?.message || '' });
       }
       const reply = await request('passkey.registered', args);
-      said(reply.ok ? { state: 'added', id: reply.result?.id || '' } : { state: 'refused', why: reply.error?.message || '' });
+      // What the terminal asks the user to type: the first 6 characters of the key this tab made, from its own
+      // create(), never from the node.
+      said(reply.ok ? { state: 'added', id: args.id.slice(0, 6) } : { state: 'refused', why: reply.error?.message || '' });
     },
     clearRecorded() { state.recorded = null; emit(new Map([['connection', [{ connection: state.connection }]]])); },
     setActsLost(why) {

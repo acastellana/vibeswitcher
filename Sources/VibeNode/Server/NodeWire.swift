@@ -293,6 +293,8 @@ public enum NodeWire {
         case assertionNeeded = "assertion-needed"
         /// Its passkey assertion didn't check: nothing was done.
         case passkey
+        /// The lead has it already: an answer or a tell taken back too late (`answer.replace`, `tell.retract`).
+        case delivered
         case `internal`
     }
 

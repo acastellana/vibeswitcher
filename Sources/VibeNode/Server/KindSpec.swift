@@ -181,6 +181,8 @@ public struct KindSpec: Sendable {
                  voiced: .notRecorded(phrase: nil)),
         KindSpec("answer", sender: .user, effect: .change, servedBy: .requests, page: .acts, wire: .typed(WireKinds.Answer.self),
                  voiced: .recorded(.init(arguments: .ofType, keepsResult: true, rerun: false, carded: true, batch: false, phrase: "answer a lead's question for you", dialog: .asArguments))),
+        KindSpec("answer.replace", sender: .user, effect: .change, servedBy: .requests, page: .acts, wire: .typed(WireKinds.AnswerReplace.self),
+                 voiced: .recorded(.init(arguments: .ofType, keepsResult: true, rerun: false, carded: true, batch: false, phrase: "change your answer before the lead has it", dialog: .asArguments))),
         KindSpec("hold", sender: .user, effect: .change, servedBy: .requests, page: .acts, wire: .typed(WireKinds.Hold.self),
                  voiced: .recorded(.init(arguments: .ofType, keepsResult: true, rerun: false, carded: true, batch: false, phrase: "hold a lead's question for you", dialog: .asArguments))),
         KindSpec("config.held", sender: .user, effect: .read, servedBy: .requests, page: .acts, wire: .typed(WireKinds.ConfigHeld.self),
@@ -238,6 +240,8 @@ public struct KindSpec: Sendable {
                  voiced: .notRecorded(phrase: nil)),
         KindSpec("tell", sender: .user, effect: .change, servedBy: .requests, page: .acts, wire: .typed(WireKinds.Tell.self),
                  voiced: .recorded(.init(arguments: .ofType, keepsResult: true, rerun: false, carded: false, batch: false, phrase: "tell a lead something for you", dialog: .asArguments))),
+        KindSpec("tell.retract", sender: .user, effect: .change, servedBy: .requests, page: .acts, wire: .typed(WireKinds.TellRetract.self),
+                 voiced: .recorded(.init(arguments: .ofType, keepsResult: true, rerun: false, carded: false, batch: false, phrase: "take back a message before the lead has it", dialog: .asArguments))),
         KindSpec("board", sender: .anyone, effect: .read, servedBy: .requests, page: .bySender, wire: .typed(WireKinds.Board.self),
                  voiced: .notRecorded(phrase: nil)),
         // A finished session seen (the parity gaps of 2026-11-19): it changes nothing but the seen mark, so no voice.

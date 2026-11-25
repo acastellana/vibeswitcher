@@ -217,15 +217,33 @@ extension WireKinds {
         public init(agents: [String]?) { self.agents = agents }
     }
 
+    /// `hooks install`'s: the agents, and `codex`, the Codex program the user was shown before the typed code (the link
+    /// `NodePreflight.codex` resolves): the server trusts the Codex hooks by running it, only when it still resolves so.
+    public struct HooksInstallArgs: WireArgs, Equatable {
+        public var agents: [String]?
+        public var codex: String?
+        public enum CodingKeys: String, CodingKey, CaseIterable { case agents, codex }
+        public init(agents: [String]?, codex: String? = nil) {
+            self.agents = agents
+            self.codex = codex
+        }
+    }
+
     public enum HooksInstall: WireChangeKind {
         public static let kind = "hooks.install"
-        public typealias Args = AgentsArgs
+        public typealias Args = HooksInstallArgs
+        /// `trusted`: the Codex hooks trusted (`NodeCodexTrust`), absent when none was tried; `trustNote`: why none was
+        /// (or what was refused).
         public struct Result: Codable, Sendable, Equatable {
             public var programs: [String]?
             public var configs: [String]?
-            public init(programs: [String], configs: [String]) {
+            public var trusted: Int?
+            public var trustNote: String?
+            public init(programs: [String], configs: [String], trusted: Int? = nil, trustNote: String? = nil) {
                 self.programs = programs
                 self.configs = configs
+                self.trusted = trusted
+                self.trustNote = trustNote
             }
         }
     }
@@ -417,6 +435,48 @@ extension WireKinds {
 
     // MARK: Leads
 
+    /// `answer.replace` (2026-11-24): the user's answer on `card` taken back before its lead had it, and `text` sent in
+    /// its place (`LeadEngine.replaceAnswer`); refused `delivered` when the lead has the first one.
+    public enum AnswerReplace: WireChangeKind {
+        public static let kind = "answer.replace"
+        public struct Args: WireArgs, Equatable {
+            public var card: String?
+            public var code: String?
+            public var text: String?
+            public var version: Int?
+            public enum CodingKeys: String, CodingKey, CaseIterable { case card, code, text, version }
+            public init(card: String?, code: String?, text: String?, version: Int? = nil) {
+                self.card = card
+                self.code = code
+                self.text = text
+                self.version = version
+            }
+        }
+        public struct Result: Codable, Sendable, Equatable {
+            public var outcome: String?
+            public var card: NodeWire.Value?
+            public init(outcome: String, card: NodeWire.Value?) {
+                self.outcome = outcome
+                self.card = card
+            }
+        }
+    }
+
+    /// `tell.retract` (2026-11-24): the user's tell under `action` taken back before its lead had it
+    /// (`LeadEngine.retractTell`); refused `delivered` when the lead has it.
+    public enum TellRetract: WireChangeKind {
+        public static let kind = "tell.retract"
+        public struct Args: WireArgs, Equatable {
+            public var action: String?
+            public enum CodingKeys: String, CodingKey, CaseIterable { case action }
+            public init(action: String?) { self.action = action }
+        }
+        public struct Result: Codable, Sendable, Equatable {
+            public var retracted: Bool?
+            public init(retracted: Bool) { self.retracted = retracted }
+        }
+    }
+
     public enum Tell: WireChangeKind {
         public static let kind = "tell"
         public struct Args: WireArgs, Equatable {
@@ -517,13 +577,17 @@ extension WireKinds {
             public var session: String?
             public var text: String?
             public var images: [String]?
+            /// An older page's and command line's `now: true`: taken as `when: now`.
             public var now: Bool?
-            public enum CodingKeys: String, CodingKey, CaseIterable { case session, text, images, now }
-            public init(session: String?, text: String?, images: [String]? = nil, now: Bool? = nil) {
+            /// When it reaches the agent (`SendWhen`): step, now, after, interrupt; absent: typed in as before.
+            public var when: String?
+            public enum CodingKeys: String, CodingKey, CaseIterable { case session, text, images, now, when }
+            public init(session: String?, text: String?, images: [String]? = nil, now: Bool? = nil, when: String? = nil) {
                 self.session = session
                 self.text = text
                 self.images = images
                 self.now = now
+                self.when = when
             }
         }
         /// What became of it: typed in now, opened, waiting (`waits`), steered in while working, or an answer to the
@@ -539,6 +603,9 @@ extension WireKinds {
             public var steered: Bool?
             public var answered: String?
             public var agent: String?
+            /// With `when`: what was done (`SendWhen`), and why when it isn't what was asked.
+            public var when: String?
+            public var said: String?
             public init(session: String, terminal: String, working: Bool, characters: Int, queued: Bool) {
                 self.session = session
                 self.terminal = terminal

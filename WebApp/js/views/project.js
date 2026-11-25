@@ -21,6 +21,8 @@ import { projectHref, routeHref } from '../ui.js';
 import { questionStack, pluginCard, copyLine, cardSheet } from './cards.js';
 import { tellLine, shellWord, leadLine } from '../actions.js';
 import { actsFor, doButton, cardArgs, refusalWords } from '../acting.js';
+import { waysFor, sendArgs, sentWords } from '../sendways.js';
+import { sendMenu } from './sendmenu.js';
 
 // The line marks: a diamond for a question (filled while open, an outline once answered), a check for a result, a
 // small dot for a status update.
@@ -74,7 +76,16 @@ export function projectView(app, { sheet }) {
   const waitBox = h('section', { class: 'wait-box', hidden: true, 'aria-label': t('cQuestionsForYou') });
   const toWho = h('span', { class: 'to' });
   const input = h('input', { class: 'say', type: 'text', placeholder: t('messageLead'), 'aria-label': t('messageLead'), autocomplete: 'off', maxlength: 4000 });
-  const composer = h('form', { class: 'composer-lead', onsubmit: (event) => { event.preventDefault(); note(); } }, toWho, input);
+  // With the `act` right, one Send and a menu of the ways the lead's agent takes a message (js/sendways.js): at its
+  // next step (Enter: `tell`, as the lead's mail), now (Ctrl+Enter), after this turn where it has one, or interrupt,
+  // then send (the others `send` to the lead's session with `when`).
+  const sender = sendMenu({ className: 'lead-send', send: (way) => note({ way }) });
+  input.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter' && (event.ctrlKey || event.metaKey) && !sender.el.hidden && waysNow().includes('now')) { event.preventDefault(); note({ way: 'now' }); }
+  });
+  const composer = h('form', { class: 'composer-lead', onsubmit: (event) => { event.preventDefault(); note(); } }, toWho, input, sender.el);
+  // While an answer is being changed here: its line's key, and what the node said if it refused.
+  const changing = new Map();
   // A project whose lead isn't running: how to start it again, plainly (the line, and New project's lead form).
   const quietWords = h('p', { class: 'quiet-words' });
   const quietLines = h('div', { class: 'quiet-lines' });
@@ -95,7 +106,7 @@ export function projectView(app, { sheet }) {
   // The waiting block's cards, one stack a project (it keeps what was typed in a card across updates).
   const stacks = new Map();
   const stackOf = (project) => {
-    if (!stacks.has(project)) stacks.set(project, questionStack(app, project));
+    if (!stacks.has(project)) stacks.set(project, questionStack(app, project, { onChange: () => { drawn = ''; render(); } }));
     return stacks.get(project);
   };
   // Notes drafted for a lead, this page's only: the line that tells it from a terminal.
@@ -106,22 +117,59 @@ export function projectView(app, { sheet }) {
   let sheetShown = null;
   let waitShown = false;
 
+  // The ways past the next step reach the lead's own session (`send`): that kind and a live lead session.
+  const sendsTo = (lead) => actsFor(app, 'send') && !!lead?.session && store.state.sessions.has(lead.session);
+  const waysNow = () => {
+    const lead = store.state.leads.get(ui.state.route.id);
+    return sendsTo(lead) ? waysFor(store.state.sessions.get(lead.session)) : ['step'];
+  };
+  // A message told at the lead's next step (`tell`): what the node says of it (`leads[…].told`, by its action): read
+  // by the lead, or not yet (then it can be taken back). Nothing when the node doesn't say.
+  const toldOf = (lead, entry) => (Array.isArray(lead?.told) ? lead.told.find((one) => one.action === entry.action) || null : undefined);
+  function noteState(lead, entry) {
+    if (entry.state === 'sending') return [t('acSending')];
+    if (entry.state === 'retracted') return [t('swTakenBack')];
+    if (entry.state !== 'sent') return [entry.why];
+    if (entry.way !== 'step') return [sentWords(entry.way, entry.result)];
+    const told = toldOf(lead, entry);
+    if (told?.delivered) return [t('swReadByLead')];
+    const back = told && actsFor(app, 'tell.retract')
+      ? h('button', { class: 'link take-back', type: 'button', onclick: () => takeBack(entry) }, t('swTakeBack')) : null;
+    return [entry.said || t('acToldLead'), back ? ' ' : null, back, entry.backWhy ? h('span', { class: 'refused' }, ' ', entry.backWhy) : null];
+  }
+  // Takes back a message the lead hasn't read (`tell.retract`); the node refuses once it has (`delivered`).
+  function takeBack(entry) {
+    store.request('tell.retract', { action: entry.action }).then((reply) => {
+      if (reply.ok) entry.state = 'retracted';
+      else entry.backWhy = reply.error?.code === 'delivered' ? t('swAlreadyRead') : refusalWords(reply.error);
+      drawn = '';
+      render();
+    });
+  }
+
   // A note for the lead: with the `act` right it is sent (`tell`), and said as sent or refused under it; else drafted,
   // with the line that sends it from a terminal.
-  function note() {
+  function note({ way = 'step' } = {}) {
     const route = ui.state.route;
     const text = input.value.trim();
     const lead = store.state.leads.get(route.id);
     if (!text || !lead?.root) return;
-    const entry = { text, state: actsFor(app, 'tell') ? 'sending' : 'draft', why: '' };
+    const sends = way !== 'step' && sendsTo(lead) && waysNow().includes(way);
+    const chosen = sends ? way : 'step';
+    const action = crypto.randomUUID();
+    const entry = { text, way: chosen, action, state: actsFor(app, 'tell') || sends ? 'sending' : 'draft', why: '' };
     notes.set(route.id, [...(notes.get(route.id) || []), entry]);
     input.value = '';
     if (entry.state === 'sending') {
       input.disabled = true;
-      store.request('tell', { folder: lead.root, text }).then((reply) => {
+      const asked = sends ? store.request('send', sendArgs(store.state.sessions.get(lead.session), text, chosen), action) : store.request('tell', { folder: lead.root, text }, action);
+      asked.then((reply) => {
         input.disabled = false;
         entry.state = reply.ok ? 'sent' : 'refused';
         entry.why = reply.ok ? '' : refusalWords(reply.error);
+        // What became of it, in the node's words where it gives them.
+        entry.result = reply.ok ? reply.result || {} : null;
+        entry.said = reply.ok ? reply.result?.said || null : null;
         if (!reply.ok) input.value = text;
         drawn = '';
         render();
@@ -132,13 +180,52 @@ export function projectView(app, { sheet }) {
     talk.scrollTop = talk.scrollHeight;
   }
 
+  // An answer's state under its pill, as the node says it (`delivered`): read by the lead, or not yet, when it can be
+  // changed (`answer.replace`, by its card and version); nothing when the node doesn't say.
+  function answerState(line) {
+    if (line.state !== 'answered' || line.delivered === undefined) return [];
+    // Read: and if a Change was open here meanwhile, it says the change can't be made (the node's refusal, or the mark).
+    if (line.delivered) {
+      return [h('p', { class: 'answer-state' }, t('swReadByLead')),
+        changing.has(line.key) ? h('p', { class: 'card-notice answer-state', role: 'alert' }, changing.get(line.key) || t('swAlreadyReadAnswer')) : null].filter(Boolean);
+    }
+    // Change only where the node says it would take it (`replaceable`), by the card it names.
+    const card = line.card ? store.state.cards.get(line.card) : null;
+    const cardId = line.card;
+    if (!cardId || !line.replaceable || !actsFor(app, 'answer.replace')) return [h('p', { class: 'answer-state' }, t('swNotReadYet'))];
+    const open = changing.has(line.key);
+    const why = changing.get(line.key) || '';
+    if (!open) {
+      return [h('p', { class: 'answer-state' }, t('swNotReadYet'), ' ',
+        h('button', { class: 'link', type: 'button', onclick: () => { changing.set(line.key, ''); drawn = ''; render(); } }, t('swChange')))];
+    }
+    const replace = (text) => {
+      if (!text.trim()) return;
+      store.request('answer.replace', { card: cardId, seen: card?.seen ?? null, version: line.version ?? card?.question?.version ?? null, text: text.trim() }).then((reply) => {
+        if (reply.ok) changing.delete(line.key);
+        else changing.set(line.key, reply.error?.code === 'delivered' ? t('swAlreadyReadAnswer') : refusalWords(reply.error));
+        drawn = '';
+        render();
+      });
+    };
+    const options = (card?.question?.options || []).filter((option) => option !== line.answer);
+    const own = h('input', { class: 'answer-input', type: 'text', placeholder: t('cOwnWords'), 'aria-label': t('yourAnswer'), autocomplete: 'off', maxlength: 4000 });
+    return [h('div', { class: 'answer-change' },
+      h('p', { class: 'answer-state' }, t('swChangeTo')),
+      options.length ? h('div', { class: 'options' }, options.map((option) => h('button', { class: 'option', type: 'button', onclick: () => replace(option) }, h('span', { class: 'option-text' }, option)))) : null,
+      h('form', { class: 'answer', onsubmit: (event) => { event.preventDefault(); replace(own.value); } }, own, h('button', { class: 'button', type: 'submit' }, t('cAnswer')),
+        h('button', { class: 'button quiet', type: 'button', onclick: () => { changing.delete(line.key); drawn = ''; render(); } }, t('swKeep'))),
+      why ? h('p', { class: 'card-notice', role: 'alert' }, why) : null)];
+  }
+
   function lineEl(line, route) {
     const answered = line.kind === 'ask';
     const button = h('a', { class: `line kind-${line.kind}${answered ? ' answered' : ''}`, href: routeHref(route, { sheet: line.key }) },
       lineMark(line.kind), h('span', { class: 'line-text' }, cut(shortHashes(line.head), 140)), h('time', null, clock(line.at)));
     if (!answered || !line.answer) return [button];
     const said = line.state === 'autoDecided' ? t('wentAhead', { x: cut(line.answer, 60) }) : cut(shortHashes(line.answer), 140);
-    return [button, h('p', { class: 'mine' + (line.state === 'autoDecided' ? ' auto' : '') }, said)];
+    const pill = h('p', { class: 'mine' + (line.state === 'autoDecided' ? ' auto' : '') }, said);
+    return [button, pill, ...answerState(line)];
   }
 
   // A held config change or a base move, as a card: what it holds and the lines that settle it.
@@ -177,9 +264,13 @@ export function projectView(app, { sheet }) {
       acts ? h('div', { class: 'card-acts' },
         doButton(app, { label: t(config ? 'acAccept' : 'acAcceptMove'), kind: config ? 'config.accept' : 'base.accept', args: () => cardArgs(card) }).el,
         !config && actsFor(app, 'base.keep') ? doButton(app, { label: t('acKeepBase'), kind: 'base.keep', quiet: true, args: () => cardArgs(card) }).el : null) : null,
-      h('div', { class: 'card-command' }, h('span', { class: 'card-command-label' }, acts ? t('acSeeFirst') : t('settleInTerminal')),
-        config ? copyLine(`vibeswitcher config held ${shellWord(root)}`, 'the command that shows it') : copyLine(`vibeswitcher base show ${shellWord(root)}`, 'the command that shows it'),
-        config && !acts ? copyLine('vibeswitcher approve', 'the command that accepts it') : null));
+      // The terminal's lines: beside the buttons when this tab acts; else one click away, never the pile of them.
+      acts ? h('div', { class: 'card-command' }, h('span', { class: 'card-command-label' }, t('acSeeFirst')),
+        config ? copyLine(`vibeswitcher config held ${shellWord(root)}`, 'the command that shows it') : copyLine(`vibeswitcher base show ${shellWord(root)}`, 'the command that shows it'))
+        : h('details', { class: 'card-terminal' }, h('summary', null, t('cUseTerminal')),
+          h('div', { class: 'card-command' }, h('span', { class: 'card-command-label' }, t('settleInTerminal')),
+            config ? copyLine(`vibeswitcher config held ${shellWord(root)}`, 'the command that shows it') : copyLine(`vibeswitcher base show ${shellWord(root)}`, 'the command that shows it'),
+            config ? copyLine('vibeswitcher approve', 'the command that accepts it') : null)));
   }
 
   function drawLead(route, board, lead) {
@@ -196,7 +287,8 @@ export function projectView(app, { sheet }) {
     stack.update();
     const extra = cards.filter((card) => !['question', 'approval'].includes(card.kind));
     const mine = notes.get(route.id) || [];
-    const key = JSON.stringify([route.id, route.show, lines.map((line) => [line.key, line.answer, line.state]), extra.map((card) => [card.id, card.seen]), mine, waiting, lang(), store.acts()]);
+    const key = JSON.stringify([route.id, route.show, lines.map((line) => [line.key, line.answer, line.state, line.delivered, line.replaceable]), extra.map((card) => [card.id, card.seen]), mine, waiting, lang(), store.acts(),
+      lead?.told || null, [...changing]]);
     if (key === drawn) return;
     const atEnd = talk.scrollHeight - talk.scrollTop - talk.clientHeight < 40;
     drawn = key;
@@ -231,7 +323,7 @@ export function projectView(app, { sheet }) {
         children.push(h('div', { class: 'note' }, h('p', { class: 'mine' }, entry.text), copyLine(tellLine(lead.root, entry.text), 'the command that tells the lead'), h('p', { class: 'confirm-note' }, t('tellNote'))));
       } else {
         children.push(h('div', { class: 'note' }, h('p', { class: 'mine' + (entry.state === 'refused' ? ' refused' : '') }, entry.text),
-          h('p', { class: 'confirm-note' + (entry.state === 'refused' ? ' refused' : '') }, entry.state === 'sending' ? t('acSending') : entry.state === 'sent' ? t('acToldLead') : entry.why)));
+          h('p', { class: 'confirm-note' + (entry.state === 'refused' ? ' refused' : '') }, noteState(lead, entry))));
       }
     }
     col.replaceChildren(...children);
@@ -457,6 +549,9 @@ export function projectView(app, { sheet }) {
     const live = !!lead?.session && state.sessions.has(lead.session);
     setText(toWho, lead?.root ? t('toLead', { p: lastPart(root) }) : t('noLeadToTell'));
     input.disabled = !lead?.root;
+    // The buttons only where the page sends: next step with `tell`; now with `send` to a live lead session.
+    sender.el.hidden = !lead?.root || (!actsFor(app, 'tell') && !sendsTo(lead));
+    sender.update(waysNow());
     setClass(el, 'quiet', !live);
     quiet.hidden = live || route.view !== 'lead' || !root;
     const quietKey = JSON.stringify([root, live, lang(), store.acts()]);

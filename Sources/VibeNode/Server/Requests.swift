@@ -70,6 +70,8 @@ public final class Requests: @unchecked Sendable {
     var heldRestored = false
     /// How a held message's action is spent in the vault (`spendHeld`): the vault's call; a test's that fails.
     lazy var spendUserActions: @Sendable ([String]) throws -> Void = { [client = link.vaultV2] actions in try client.spendUserActions(actions) }
+    /// The vault's roster of the teams' workers and verifiers (`send`'s interrupt and send-now ask it): the vault's; a test's.
+    var teamRoster: @Sendable (LeadVault) throws -> [LeadVault.RosterEntry] = { try $0.roster() }
     /// What sessions' composers complete (`session.complete`), kept a while.
     let completionIndex = SessionCompletions()
     /// Images web pages are sending in parts (`session.attach`). On `queue`.
@@ -466,6 +468,8 @@ public final class Requests: @unchecked Sendable {
         case "session.ports": sessionPorts(request, reply: reply)
         case "set": set(request, reply: reply)
         case "answer": answer(request, reply: reply)
+        case "answer.replace": answerReplace(request, reply: reply)
+        case "tell.retract": tellRetract(request, reply: reply)
         case "hold": hold(request, reply: reply)
         case "tell": tell(request, reply: reply)
         case "push", "push.decline": push(request, reply: reply)
@@ -723,7 +727,8 @@ public final class Requests: @unchecked Sendable {
     static func unknownCheck(_ kind: String) -> String {
         switch kind {
         case "send", "session.reply": return "the session's screen shows whether the text arrived"
-        case "tell": return "the lead's chat shows whether the message arrived"
+        case "tell", "tell.retract": return "the lead's chat shows whether the message arrived"
+        case "answer.replace": return "`vibeswitcher questions --all` shows the card's answer now"
         case "lead", "session.new", "session.reopen": return "`vibeswitcher status` lists the sessions running now"
         case "answer", "approve": return "`vibeswitcher questions` shows whether the card is still open (a shell request's session shows whether its command ran)"
         case "push": return "the repository's remote shows whether the push went"
@@ -965,6 +970,8 @@ public final class Requests: @unchecked Sendable {
         let questions = open.filter { $0.kind == .question || $0.kind == .approval }
         fields["questions"] = .object(["open": .int(questions.count), "blocking": .int(questions.filter(\.isBlocking).count)])
         fields["cards"] = .array(open.map { .string($0.id) })
+        // The user's tells to it and whether it took each (`UserDeliveries.swift`), never their words.
+        fields["told"] = engine?.deliveryMarks.values[lead.root]?["told"] ?? .array([])
         return .object(fields)
     }
 
@@ -1042,8 +1049,13 @@ public final class Requests: @unchecked Sendable {
         guard !install || nodeRoot != nil else {
             return reply(.init(re: request.id, error: .init(.refused, "this server has no build folder to install the hooks' programs from")))
         }
-        let (nodeRoot, home, vault, commit) = (self.nodeRoot ?? "", self.home, link.vault, self.commit)
-        let work = { (binaries: [String: String]?, hostBuild: String?) -> NodeWire.Reply in
+        let (nodeRoot, home, vault, commit, root) = (self.nodeRoot ?? "", self.home, link.vault, self.commit, self.root)
+        // The Codex the user was shown before the typed code (`hooks install`'s confirmation): trusted by only while the
+        // link still resolves to it.
+        let shownCodex = request.args?["codex"]?.string
+        // The reply, or (install with Codex) the step that trusts Codex's hooks and gives it: run off the board reads'
+        // queue, as it waits on `codex app-server` (`NodeCodexTrust.limit`).
+        let work = { (binaries: [String: String]?, hostBuild: String?) -> (reply: NodeWire.Reply, trusting: (() -> NodeWire.Reply)?) in
             var hooks = HooksRequest(nodeRoot: nodeRoot, home: home, binaries: binaries, vault: vault)
             // While the host runs another build than this server, a program that isn't its `binaries` entry is the
             // build switch not finished yet (the server restarts onto it once idle), said so.
@@ -1051,20 +1063,41 @@ public final class Requests: @unchecked Sendable {
             let configs = agents.map { hooks.configPath($0) }
             if install {
                 switch hooks.install(agents: agents) {
-                case .failure(let refusal): return .init(re: request.id, error: .init(.refused, refusal.text))
+                case .failure(let refusal): return (.init(re: request.id, error: .init(.refused, refusal.text)), nil)
                 case .success(let installed):
-                    return .init(re: request.id, typed: WireKinds.HooksInstall.Result(programs: installed.programs, configs: installed.configs))
+                    let result = WireKinds.HooksInstall.Result(programs: installed.programs, configs: installed.configs)
+                    guard agents.contains(.codex) else { return (.init(re: request.id, typed: result), nil) }
+                    return (.init(re: request.id, typed: result), { [hooks] in
+                        var trusted = result
+                        // The user's node, its systemd manager reachable: in a transient scope of its own (as update
+                        // runs install-node); a scratch node, or no manager: its own process group.
+                        let scope = NodeFolders.isUsersRoot(root, accountHome: VibePaths.accountHome) && SwitchSealCheck.userManagerRefusal() == nil
+                            ? "/usr/bin/systemd-run" : nil
+                        (trusted.trusted, trusted.trustNote) = hooks.trustCodex(shown: shownCodex, root: root, expected: installed.codexPositions, scope: scope)
+                        return .init(re: request.id, typed: trusted)
+                    })
                 }
             }
             switch hooks.remove(agents: agents) {
-            case .failure(let refusal): return .init(re: request.id, error: .init(.refused, refusal.text))
-            case .success: return .init(re: request.id, typed: WireKinds.HooksRemove.Result(configs: configs))
+            case .failure(let refusal): return (.init(re: request.id, error: .init(.refused, refusal.text)), nil)
+            case .success: return (.init(re: request.id, typed: WireKinds.HooksRemove.Result(configs: configs)), nil)
             }
         }
         let note = self.note
-        let said = { (answer: NodeWire.Reply) in
-            note("\(request.kind) \(names.joined(separator: ",")): \(answer.ok ? "done" : answer.error?.message ?? "refused")")
-            reply(answer)
+        let queue = self.queue
+        let said = { (done: (reply: NodeWire.Reply, trusting: (() -> NodeWire.Reply)?)) in
+            let (answer, trusting) = done
+            guard let trusting else {
+                note("\(request.kind) \(names.joined(separator: ",")): \(answer.ok ? "done" : answer.error?.message ?? "refused")")
+                return reply(answer)
+            }
+            DispatchQueue.global(qos: .userInitiated).async {
+                let trusted = trusting()
+                queue.async {
+                    note("\(request.kind) \(names.joined(separator: ",")): done")
+                    reply(trusted)
+                }
+            }
         }
         // On `queue`: the notes as last asked.
         let run = { [weak self] in

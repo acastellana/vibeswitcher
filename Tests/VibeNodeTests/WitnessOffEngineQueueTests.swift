@@ -38,7 +38,9 @@ struct WitnessOffEngineQueueTests {
     static let marker = "witness-off-engine-\(UUID().uuidString.prefix(8))"
 
     @Test func aRefreshBuildsNoWaitingWorkersQuoteOnTheEngineQueue() async throws {
-        let world = try await DeliveryWorld.make(scratch)
+        // The engine's notes, for a failure's message: a post that found no lead says so (`lead: holding a message…`).
+        let notes = Locked<[String]>([])
+        let world = try await DeliveryWorld.make(scratch, note: { line in notes.mutate { $0.append(line) } })
         defer { world.stop() }
         let lead = try await world.lead(idle: false)
         let root = world.repo
@@ -83,7 +85,15 @@ struct WitnessOffEngineQueueTests {
 
         // Each reaches the lead's inbox once, built off the engine's queue, its credential masked.
         func told() -> [SteerMessage] { world.pending(lead).filter { $0.text.contains(Self.marker) } }
-        #expect(await eventually(timeout: 120) { told().count == Self.workers }, "\(told().count)")
+        // Refreshed every 2 s meanwhile, as the node's clock does (on a starved CI runner, 2026-11-24, 14 of 30 were told
+        // in 120 s with nothing to try the rest again: HeldDeliveryStallTests). The witness tells each worker once.
+        let started = MacTime.real.awake()
+        while told().count < Self.workers, MacTime.real.awake() - started < 120 {
+            if await eventually(timeout: 2, { told().count == Self.workers }) { break }
+            world.queue.sync { world.engine.refreshed(roots: [root], loaded: [root: board], teams: [root: team], refusals: [:]) }
+        }
+        let leadNotes = notes.value.filter { $0.hasPrefix("lead:") }.suffix(12)
+        #expect(told().count == Self.workers, "\(told().count) told; the engine's last lead notes: \(Array(leadNotes))")
         await world.drained()
         #expect(told().count == Self.workers)
         #expect(quotes.count(onEngine: true) == 0)

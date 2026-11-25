@@ -1124,6 +1124,25 @@ struct SwitchTests {
         #expect(await eventually(timeout: 30) { node.said.contains(ended) }, "\(node.said)")
     }
 
+    /// A new build's server slower than the switch's wait (here the wait cut to a second, as a loaded machine stretches
+    /// the replacement past two minutes): the handover happened, so the switch exits 0, says so in a line, and its
+    /// follow-up still runs; the new server answers later. The wait polls until the hello (the switch's own test above
+    /// returns as soon as it comes).
+    @Test(NodeTraits.linuxOnly, .timeLimit(.minutes(10))) func aServerSlowerThanTheWaitIsSaidNotAFailure() async throws {
+        let builds = try twoBuilds(paddedServer: true)
+        let node = try await ScratchNode(scratch, build: builds.a, installRoot: builds.root)
+        defer { node.stop() }
+        let server = try #require(node.serverPID)
+        let switched = try await node.runOnTerminal(["switch", Self.b, "--test-server-wait", "1"])
+        #expect(switched.status == 0, "\(switched.output)\n\(node.said)")
+        #expect(switched.output.contains("handed over to \(Self.b); its server hasn't answered yet after")
+                && switched.output.contains("`vibeswitcher status` shows when it does"), "\(switched.output)")
+        #expect(switched.output.contains("scratch node: no unit to rewrite"), "the follow-up didn't run: \(switched.output)")
+        #expect(await eventually(timeout: ServerChild.idleLimit + ServerChild.reconnectGrace + 120) {
+            ((try? WireClient(node).hello).map { $0.server.pid != server && $0.server.commit == Self.b }) == true
+        }, "\(node.said)")
+    }
+
     /// No controlling terminal (`setsid --wait`, stdin /dev/null): refused before anything is asked; the server records
     /// no request, and the host's pid and build are unchanged.
     @Test(NodeTraits.linuxOnly, .timeLimit(.minutes(5))) func aSwitchWithNoTerminalIsRefused() async throws {
