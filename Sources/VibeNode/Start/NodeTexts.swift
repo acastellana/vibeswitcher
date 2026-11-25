@@ -179,6 +179,31 @@ public enum NodeTexts {
         return lines.joined(separator: "\n")
     }
 
+    /// `status --long`'s line for an accepted user's-voice request (`Requests.Accepted.value`), under the voice rule
+    /// `ruleMode` (`status`'s `rule.mode`): from the page (an acting page's: no pid), else where it came from, inert
+    /// (pid, cgroup, command line: the only way to see it wasn't the user's terminal), said to be the terminal's only
+    /// when the rule checks the terminal's cgroup (`systemd`), and said unchecked under the weaker rule (the automated
+    /// review of the text pass: "from your terminal" mustn't assert what the rule didn't check).
+    public static func acceptedLine(_ accepted: NodeWire.Value, ruleMode: String?) -> String {
+        let inert = { (text: String?) in ConfigSeal.inert(text ?? "?", limit: .max) }
+        let head = "accepted: \(inert(accepted["kind"]?.string)) at \(inert(accepted["at"]?.string)) "
+        if accepted["pid"]?.int == 0 { return head + "from the page" }
+        let source = "from pid \(accepted["pid"]?.int.map(String.init) ?? "?") in \(inert(accepted["cgroup"]?.string)): "
+            + inert(accepted["commandLine"]?.array?.compactMap(\.string).joined(separator: " "))
+        switch ruleMode {
+        case "systemd": return head + "from your terminal, " + source
+        case "weaker": return head + source + " (its terminal wasn't checked)"
+        default: return head + source
+        }
+    }
+
+    /// The default `status`'s "needs a look" item when an accepted request in the list came under the weaker rule (not
+    /// from the page): nil otherwise.
+    public static func uncheckedNotice(_ accepted: [NodeWire.Value], ruleMode: String?) -> String? {
+        guard ruleMode == "weaker", accepted.contains(where: { $0["pid"]?.int != 0 }) else { return nil }
+        return "an action was accepted without a terminal check: vibeswitcher status --long"
+    }
+
     /// What `status` says of a node started detached (ST-D6).
     public static let weakerRule = "no systemd: the weaker voice rule; the node's pid file is yours, and any worker's, to write"
 

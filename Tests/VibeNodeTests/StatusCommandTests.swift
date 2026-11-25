@@ -97,6 +97,26 @@ final class FakeAgent {
 /// `status` itself goes through the node's server (the engine's E1, `ServerTests.statusThroughTheServerListsWhatTheProbeLists`). Agents in other terminals on this machine (a real `claude` the user
 /// runs) are listed too, as the design says: each test reads only its own fake's terminal.
 struct StatusCommandTests {
+    /// `status --long`'s accepted lines (the automated review of the text pass): the page's said as such; a terminal's
+    /// with its pid, cgroup and command line, "from your terminal" only under the rule that checks it, and said unchecked
+    /// under the weaker one, which the default screen's "needs a look" names.
+    @Test func anAcceptedActionSaysWhereItCameFromAndWhatWasChecked() {
+        let page: NodeWire.Value = .object(["kind": .string("answer"), "at": .string("2026-11-25T16:00:00Z"), "pid": .int(0), "cgroup": .null,
+                                            "commandLine": .array([])])
+        let terminal: NodeWire.Value = .object(["kind": .string("answer"), "at": .string("2026-11-25T16:00:00Z"), "pid": .int(4242),
+                                                "cgroup": .string("/user.slice/session-3.scope"),
+                                                "commandLine": .array([.string("vibeswitcher"), .string("answer"), .string("\u{1B}[2J")])])
+        #expect(NodeTexts.acceptedLine(page, ruleMode: "systemd") == "accepted: answer at 2026-11-25T16:00:00Z from the page")
+        let checked = NodeTexts.acceptedLine(terminal, ruleMode: "systemd")
+        #expect(checked.hasPrefix("accepted: answer at 2026-11-25T16:00:00Z from your terminal, from pid 4242 in /user.slice/session-3.scope: vibeswitcher answer"),
+                "\(checked)")
+        #expect(!checked.contains("\u{1B}"), "inert: \(checked)")
+        let weaker = NodeTexts.acceptedLine(terminal, ruleMode: "weaker")
+        #expect(!weaker.contains("from your terminal") && weaker.contains("from pid 4242") && weaker.hasSuffix(" (its terminal wasn't checked)"), "\(weaker)")
+        #expect(NodeTexts.uncheckedNotice([terminal], ruleMode: "weaker") == "an action was accepted without a terminal check: vibeswitcher status --long")
+        #expect(NodeTexts.uncheckedNotice([terminal], ruleMode: "systemd") == nil && NodeTexts.uncheckedNotice([page], ruleMode: "weaker") == nil)
+    }
+
     private let scratch = Scratch()
 
     /// The parsed `status --probe --json`, and the one session on `tty` in it.
