@@ -267,15 +267,17 @@ or decided. Done on Linux, tested on both systems (`ApprovalJudgmentTests`, `App
    **Route:** this, not launchd's `Sockets` in `NodeAgent`: launchd binds at the job's load (shape (b), where H1 built
    (a): the port free before `web` and after a revoke, LW-D3), a plist names no kernel-picked port, plugin page or
    tailnet address, and a scratch host isn't a launchd job, so the real path couldn't be tested (launchd's own socket
-   options not measured). **What a real Mac proved** (2026-11-25, `MacWebHeldByHostTests` on a scratch host with its
-   server child; a C probe for the socket rules): a listening socket passes over an `AF_UNIX` stream pair and the
-   server accepts and serves the page on it; while the host holds 127.0.0.1:P (`SO_REUSEADDR`, never `SO_REUSEPORT`) no
-   bind of 127.0.0.1:P or `::ffff:127.0.0.1`:P succeeds with any of the two options, while the server runs, once it is
-   killed (before or as the host starts the next) and once the next runs; a page's request made between two servers
+   options not measured). **What a real Mac proved** (2026-11-25). `MacWebHeldByHostTests`, on a scratch host with its
+   server child: the server gets the host's socket over the stream connector and serves the page on it; a bind of
+   127.0.0.1:P with `SO_REUSEADDR` is refused while the server runs, once it is killed (before or as the host starts the
+   next) and once the next runs; a page's request made between two servers
    waits in the host's socket and the next server answers it on the same port; nothing reaches it on another address
    of the Mac; a port another process already holds (with `SO_REUSEPORT` or without) refuses the web with "127.0.0.1:P
    couldn't be bound: …" in `web.open`'s reply, `status` and the host's log, and nothing is bound elsewhere (item 32's
-   last line). The Mac's `AF_UNIX` has no `SOCK_SEQPACKET` (`EPROTONOSUPPORT`), and a stream read runs on past a
+   last line: the web's start fails, not the host's, which binds on demand). A C probe on the same Mac, against a
+   standalone holder of 127.0.0.1:P (`SO_REUSEADDR`, no `SO_REUSEPORT`): no bind of 127.0.0.1:P or
+   `::ffff:127.0.0.1`:P succeeds with `SO_REUSEADDR`, `SO_REUSEPORT`, both or neither; a holder with `SO_REUSEPORT` loses
+   127.0.0.1's connections to a squatter with it. The Mac's `AF_UNIX` has no `SOCK_SEQPACKET` (`EPROTONOSUPPORT`), and a stream read runs on past a
    descriptor's message, hence the framing. **The Mac's residual** (as Linux's `SO_REUSEADDR` one, item 32): a socket
    on the wildcard (`0.0.0.0` or `[::]`, with `SO_REUSEADDR` or `SO_REUSEPORT`) or on `[::1]` binds beside the host's
    (BSD's rule; the host dropping `SO_REUSEADDR` changes nothing), but a connection to 127.0.0.1, the page's one name,
@@ -283,9 +285,12 @@ or decided. Done on Linux, tested on both systems (`ApprovalJudgmentTests`, `App
    would lose its connections to a squatter, so it never sets it. **Unproven:** a handover on the Mac with the web on: its
    state carries the held sockets by the same code as Linux's (`State.webListeners`, `ServerChild.adopt`), and its
    server child isn't carried there (the new image starts the next, which asks again), but no Mac handover was run
-   here; the tailnet's place on the Mac; a user's node started by launchd (`web` stays refused until the Mac node starts: `NodeSystem.macUnbuilt`,
-   `HostImages.isCheckedMacNode` unchanged); Linux's run of this change (the connector calls are Linux's own, by
-   reading; CI's).
+   here; the tailnet's place on the Mac; the plugin page's place (it now goes through the host on the Mac too, and no Mac
+   test asks for it); a user's node started by launchd (`web` stays refused until the Mac node starts: `NodeSystem.macUnbuilt`,
+   `HostImages.isCheckedMacNode` unchanged); Linux's run of this change: the connector calls are Linux's own by
+   reading, but the new and changed cross-platform tests (`ConnectorMessagesTests`, `HostConnectorTests`' web asks, whose
+   stand-in host now sends a connection's answer with `sendDescriptor`, `HostWebListenTests`) were never compiled there
+   (CI's).
 
 10. **(BLOCKER before approvalMeasured, design; the review of 2026-11-21, its fifth finding)** A fake server passes the
    command line's server check on the Mac with no race. Every anchor the check uses is the user's to write: the job's
