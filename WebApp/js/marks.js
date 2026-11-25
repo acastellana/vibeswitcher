@@ -99,6 +99,8 @@ const ICONS = {
   // A window with its right column: the inspector's toggle (the Mac's sidebar.right).
   inspector: 'M2.5 3.5H13.5V12.5H2.5ZM10 3.5V12.5',
   menu: 'M2.5 4H13.5M2.5 8H13.5M2.5 12H13.5',
+  // Three dots: more (a phone's Actions…).
+  more: 'M3.5 8H3.6M8 8H8.1M12.5 8H12.6',
 };
 
 export function icon(name, size = 16) {

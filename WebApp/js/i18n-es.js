@@ -997,7 +997,7 @@ export const ES = {
   chTldr: "En resumen: {x}",
   chTurnDone: "Turno hecho · aún en marcha: {x}",
   chBackgroundWork: "trabajo en segundo plano",
-  chSteerShort: "Reconduce a {agent}…",
+  chSteerShort: "Guía a {agent}…",
   chMessageShort: "Escribe a {agent}…",
   chSteerLong: "Reconduce a {agent} mientras trabaja… (↩ deja un borrador para enviar ya, ⌥↩ uno para después de su turno)",
   chMessageLong: "Escribe a {agent}… (↩ deja un borrador)",

@@ -284,3 +284,86 @@ test('the keyboard on a phone: the page is the visible part’s height and place
   assert.match(source, /followKeyboard\(\{ root, phone: \(\) => phoneWidth\.matches \}\)/);
   assert.match(source, /matchMedia\('\(max-width: 760px\)'\)/);
 });
+
+// ---- A session (U13) ----
+// The session view on the stand-in DOM: a store that answers what the view's parts ask with nothing (an empty Map, a
+// function returning null) beyond what a test gives it.
+async function drawSession({ pane = 'chat', feed = null, can = () => true, hosted = true } = {}) {
+  globalThis.MutationObserver ??= class { observe() {} disconnect() {} };
+  globalThis.ResizeObserver ??= class { observe() {} disconnect() {} unobserve() {} };
+  globalThis.IntersectionObserver ??= class { observe() {} disconnect() {} unobserve() {} };
+  const { sessionView } = await import('../js/views/session.js');
+  const S = 'local:s1';
+  const session = { id: S, terminal: 'pts/3', agent: 'claude', cwd: '/home/dev/x', status: 'working', since: new Date().toISOString(), hosted, role: null, title: 'Retry the webhooks' };
+  const state = new Proxy({ node: null, connection: 'live', sessions: new Map([[S, session]]) }, { get: (o, k) => (k in o ? o[k] : (o[k] = new Map())) });
+  const known = { state, acts: () => true, can, follows: () => true, watches: () => true, subscribe() {}, request: () => Promise.resolve({ ok: true }), read: () => Promise.resolve({ ok: false }) };
+  const store = new Proxy(known, { get: (o, k) => (k in o ? o[k] : () => null) });
+  const panes = new Map([[S, pane]]);
+  const listeners = [];
+  const calls = [];
+  const ui = { state: { route: { name: 'session', id: S } }, subscribe(fn) { listeners.push(fn); }, pane: (id) => panes.get(id), inspectorShown: () => false, inspectorWide: () => true, toggleInspector() {},
+    setPane: (id, next) => { calls.push(next); } };
+  return { view: sessionView({ store, ui, feed }), calls };
+}
+const terminalFeed = { request: () => Promise.resolve({ ok: false }), sendBinary: () => true, onBinary: () => () => {}, onLink: () => () => {} };
+
+test('U13 phone: a session’s header is one row, its Actions… three dots, no tab where the node gives no terminal', async () => {
+  // The mock's node: no terminal. Its tab isn't offered on a phone, and a pane left at Terminal shows the chat.
+  const { view, calls } = await drawSession({ pane: 'terminal' });
+  assert.ok(view.el.classList.contains('no-terminal'));
+  const chat = find(view.el, byClass('chat'));
+  assert.ok(chat && !chat.hidden, 'the chat shows');
+  const toggle = find(view.el, byClass('pane-toggle'));
+  assert.ok(toggle, 'one button for Terminal | Chat on a phone');
+  assert.equal(under(PHONE, '.session .head .segmented').display, 'none');
+  assert.equal(under(PHONE, '.session:not(.no-terminal) .pane-toggle').display, 'inline-flex', 'shown only with a terminal');
+  assert.equal(under('', '.pane-toggle').display, 'none', 'wider: the segmented switch, as before');
+  assert.equal(under('', '.end-button > .icon').display, 'none', 'wider: Actions… in words, as before');
+  assert.equal(under(PHONE, '.session .head')['flex-wrap'], 'nowrap', 'one row');
+  const end = find(view.el, byClass('end-button'));
+  assert.equal(end.getAttribute('aria-label'), t('seActions'));
+  assert.ok(find(end, (node) => node.tag === 'svg'), 'its three dots');
+  assert.equal(under(PHONE, '.session .end-button > .end-words').display, 'none');
+  assert.equal(under(PHONE, '.session .end-button > .icon').display, 'block');
+  assert.deepEqual(calls, []);
+  // A node that opens this session's terminal: offered, and the one button goes to the other pane.
+  const live = await drawSession({ pane: 'chat', feed: terminalFeed });
+  assert.ok(!live.view.el.classList.contains('no-terminal'));
+  const other = find(live.view.el, byClass('pane-toggle'));
+  assert.equal(other.getAttribute('aria-label'), t('seTerminal'));
+  other.click();
+  assert.deepEqual(live.calls, ['terminal']);
+  // A session another terminal runs: none to offer.
+  const elsewhere = await drawSession({ feed: terminalFeed, hosted: false });
+  assert.ok(elsewhere.view.el.classList.contains('no-terminal'));
+});
+
+test('U13 phone: the message waiting to go in and the draft are a line each, a touch opens one (not on its buttons)', async () => {
+  const { view } = await drawSession();
+  const body = find(view.el, byClass('session-body'));
+  const draft = find(view.el, (node) => node.classList.contains('composer-draft') && !node.classList.contains('queued'));
+  assert.ok(draft, 'the draft over the box');
+  const send = find(draft, (node) => node.tag === 'button');
+  body.dispatch('click', { target: { closest: (selector) => (selector === '.composer-draft' ? draft : selector.startsWith('button') ? send : null) } });
+  assert.ok(!draft.classList.contains('open'), 'a button in it does its own thing');
+  body.dispatch('click', { target: { closest: (selector) => (selector === '.composer-draft' ? draft : null) } });
+  assert.ok(draft.classList.contains('open'));
+  body.dispatch('click', { target: { closest: (selector) => (selector === '.composer-draft' ? draft : null) } });
+  assert.ok(!draft.classList.contains('open'));
+  // Folded: one line, the words cut and its Send beside them; the message waiting, one line.
+  assert.equal(under(PHONE, '.composer-draft:not(.queued):not(.open):has(.session-send) > .confirm-text')['-webkit-line-clamp'], '1');
+  assert.equal(under(PHONE, '.composer-draft:not(.queued):not(.open):has(.session-send) > .confirm-head').display, 'none');
+  assert.equal(under(PHONE, '.composer-draft.queued:not(.open) > .queued-list > li')['white-space'], 'nowrap');
+  assert.equal(under(PHONE, '.composer-draft.queued:not(.open) > .queued-list > li + li').display, 'none');
+});
+
+test('U13 phone: a sent answer’s arrow stays beside “Sending… · Undo”; the Spanish steer fits where “Escribe a” does', () => {
+  // Undo keeps a fingertip's room (44 px, the touch block) around its line, not in it, so the line is one text line.
+  assert.equal(under(PHONE, '.card-closed .card-undo')['margin-block'], '-12px');
+  setLanguage('es');
+  for (const agent of ['Claude', 'Codex']) {
+    assert.ok(t('chSteerShort', { agent }).length <= t('chMessageShort', { agent }).length, t('chSteerShort', { agent }));
+  }
+  assert.equal(t('chSteerShort', { agent: 'Claude' }), 'Guía a Claude…');
+  setLanguage('en');
+});

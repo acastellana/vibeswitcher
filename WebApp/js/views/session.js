@@ -40,7 +40,22 @@ export function sessionView(app) {
   }, icon('inspector', 16));
   // Renaming, pausing, ending a session and the rest of the Mac's row menu: the line that does each, under the header.
   const acting = actionsStrip(app);
-  const end = h('button', { class: 'button quiet end-button', type: 'button', title: t('seRenamePauseOrEndThis'), onclick: () => acting.toggle() }, t('seActions'));
+  // On a phone (style.css's 760 px) its three dots, the words its name.
+  const end = h('button', { class: 'button quiet end-button', type: 'button', title: t('seRenamePauseOrEndThis'), 'aria-label': t('seActions'), onclick: () => acting.toggle() },
+    icon('more', 16), h('span', { class: 'end-words' }, t('seActions')));
+  // On a phone the header is one row: Terminal | Chat is this one button, the other pane's, and only where the node
+  // gives this session a terminal (a tab that says the terminal comes later leads nowhere there).
+  const paneToggle = h('button', { class: 'icon-button pane-toggle', type: 'button', onclick: () => {
+    const id = ui.state.route.id;
+    ui.setPane(id, ui.pane(id) === 'terminal' ? 'chat' : 'terminal');
+  } });
+  let toggleShows = null;
+  const phoneQuery = globalThis.matchMedia?.('(max-width: 760px)');
+  const phone = () => !!phoneQuery?.matches;
+  phoneQuery?.addEventListener?.('change', () => render());
+  // The node opens this session's terminal to this page: its kind, a session its host runs, a feed with frames.
+  const terminalOffered = (session) => session.hosted !== false && store.can('term.open') && store.watches?.() !== false
+    && typeof app.feed?.sendBinary === 'function' && typeof app.feed?.onBinary === 'function';
   // Back: to the project a team's session works for, else to Your own sessions (on a phone it opens the left column).
   const back = h('a', { class: 'back icon-button', href: '#/sessions', 'aria-label': t('seBack') }, icon('back', 16));
   const head = h('header', { class: 'head' },
@@ -49,6 +64,7 @@ export function sessionView(app) {
     h('div', { class: 'head-text' }, h('div', { class: 'head-line' }, title, state), place),
     end,
     h('div', { class: 'segmented', role: 'group', 'aria-label': t('seShow') }, tabs),
+    paneToggle,
     toggle);
 
   const strip = teamStrip(app);
@@ -82,6 +98,13 @@ export function sessionView(app) {
   // it the room (style.css), so the inspector itself never moves anything.
   const body = h('div', { class: 'session-body' }, h('div', { class: 'session-main' }, strip.el, chat.el, terminal), inspect.scrim, inspect.el);
   const el = h('section', { class: 'session', 'aria-label': t('seSession') }, head, acting.el, body, gone, loading);
+  // On a phone the messages waiting to go in and the draft over the box are a line each (style.css): a touch on one,
+  // not on its buttons, opens it whole, and again folds it.
+  body.addEventListener('click', (event) => {
+    const box = event.target.closest?.('.composer-draft');
+    if (!box || !phone() || event.target.closest?.('button, a, input, textarea, select')) return;
+    box.classList.toggle('open');
+  });
 
   let shownAgent = null;
   let shownPane = null;
@@ -149,7 +172,16 @@ export function sessionView(app) {
     const isLead = session.role === 'lead';
     // A lead's Team strip only where the feed follows boards: the node doesn't send them yet.
     const hasBoard = isLead && store.follows('boards');
-    const pane = ui.pane(id) === 'terminal' ? 'terminal' : 'chat';
+    const offered = terminalOffered(session);
+    setClass(el, 'no-terminal', !offered);
+    // On a phone with no terminal to show, the chat.
+    const pane = ui.pane(id) === 'terminal' && (offered || !phone()) ? 'terminal' : 'chat';
+    const other = pane === 'terminal' ? 'chat' : 'terminal';
+    if (toggleShows !== other) {
+      toggleShows = other;
+      paneToggle.replaceChildren(icon(other, 16));
+      paneToggle.setAttribute('aria-label', other === 'terminal' ? t('seTerminal') : t('seChat'));
+    }
     tabs.forEach((tab, index) => tab.setAttribute('aria-pressed', String(PANES[index].id === pane)));
     strip.el.hidden = !hasBoard;
     if (hasBoard) strip.update(session);

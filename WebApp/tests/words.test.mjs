@@ -62,8 +62,8 @@ test('U18: Spanish contracts “a el” and “de el” wherever a sentence is b
   const pricing = board.tasks.find((task) => task.slug === 'pricing-copy');
   assert.equal(landingWords(pricing.forecast, Date.parse('2026-11-25T12:00:00Z'), { task: pricing, board }).date, 'sin fecha: espera al líder');
   assert.equal(landingWords({ basis: 'blocked', waitsOn: 'the lead (it failed)' }, Date.now(), { task: {}, board }).date, 'sin fecha: espera al líder (falló)');
-  assert.equal(t('chSteerShort', { agent: t('drTheAgentLow') }), 'Reconduce al agente…');
-  assert.equal(t('chSteerShort', { agent: 'Claude' }), 'Reconduce a Claude…');
+  assert.equal(t('chSteerShort', { agent: t('drTheAgentLow') }), 'Guía al agente…');
+  assert.equal(t('chSteerShort', { agent: 'Claude' }), 'Guía a Claude…');
   assert.equal(t('mlFromLead', { other: 'el sitio' }), 'del líder del sitio');
   // Every word with a blank, filled with every Spanish value that starts with “el ”: never “a el” or “de el”, by t and
   // by tParts alike.
