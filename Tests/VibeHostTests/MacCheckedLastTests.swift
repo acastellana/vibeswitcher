@@ -56,28 +56,32 @@ struct MacCheckedLastTests {
     // MARK: Note 2: every descriptor given closed
 
     /// A checked node's reset at its start (`Platform.NodeReset.processState`) run in a child of this test binary (its
-    /// helper mode, `NodeResetHelper`), started by `sh` with its descriptor limit lowered to 64 and descriptor 150 open
-    /// above it: 150 is closed, the umask is 077, the working folder `/`, the core limit 0 soft and hard. Red before: the
-    /// loop stopped at the lowered limit and 150 stayed open.
+    /// helper mode, `NodeResetHelper`), started by `sh` with its soft descriptor limit lowered to 200 and descriptor 300
+    /// open above it: 300 is closed, the umask is 077, the working folder `/`, the core limit 0 soft and hard. Red before: the
+    /// loop stopped at the lowered limit and 300 stayed open.
     @Test(.enabled(if: Platform.CodeIdentity.isAvailable, "the Mac's checked node reset"))
     func theResetClosesWhatItWasGivenAboveALoweredLimit() throws {
         let results = scratch.url("vsnr").path
         let null = open("/dev/null", O_RDONLY)
-        #expect(null >= 0 && dup2(null, 150) == 150)
+        #expect(null >= 0 && dup2(null, 300) == 300)
         Sys.close(null)
-        defer { Sys.close(150) }
+        defer { Sys.close(300) }
         let binary = try #require(Bundle.main.executablePath)
-        var spawn = Platform.Spawn(executable: "/bin/sh", arguments: ["sh", "-c", "ulimit -n 64; exec \"$0\" \"$@\"", binary]
+        // `sh` is the system's, so the loader drops `DYLD_*` from its environment: the test bundle's own (its framework
+        // paths) are given back to the helper inside the command.
+        let loader = ProcessInfo.processInfo.environment.filter { $0.key.hasPrefix("DYLD_") && !$0.value.contains("'") }
+            .map { "export \($0.key)='\($0.value)'; " }.joined()
+        var spawn = Platform.Spawn(executable: "/bin/sh", arguments: ["sh", "-c", loader + "ulimit -Sn 200; exec \"$0\" \"$@\"", binary]
                                    + Array(ProcessInfo.processInfo.arguments.dropFirst()))
         spawn.environment = ProcessInfo.processInfo.environment.map { "\($0.key)=\($0.value)" } + ["\(NodeResetHelper.variable)=\(results)"]
         spawn.stdin = .path("/dev/null", flags: O_RDONLY)
-        spawn.keep = [150]
+        spawn.keep = [300]
         guard case .success(let pid) = spawn.start() else { Issue.record("the helper didn't start"); return }
         var status: Int32 = 0
         while waitpid(pid, &status, 0) < 0, errno == EINTR {}
         let said = (try? String(contentsOfFile: results, encoding: .utf8)) ?? "(nothing)"
-        #expect(said.contains("why=nil") && said.contains("limit=64"), "\(said)")
-        #expect(said.contains("open150=false"), "descriptor 150 survived the reset: \(said)")
+        #expect(said.contains("why=nil") && said.contains("limit=200"), "\(said)")
+        #expect(said.contains("open300=false"), "descriptor 300 survived the reset: \(said)")
         #expect(said.contains("umask=77 ") && said.contains("cwd=/ ") && said.contains("core=0,0"), "\(said)")
     }
 
@@ -153,7 +157,7 @@ struct MacCheckedLastTests {
 
 /// The test binary as a checked node's reset (`MacCheckedLastTests.theResetClosesWhatItWasGivenAboveALoweredLimit`):
 /// with `VIBE_NODE_RESET_TEST_HELPER=FILE` it runs `Platform.NodeReset.processState`, writes what it then sees to FILE
-/// (whether descriptor 150 is open, its umask, folder and core limit, as `sh` reads them, and its descriptor limit), and
+/// (whether descriptor 300 is open, its umask, folder and core limit, as `sh` reads them, and its descriptor limit), and
 /// exits before any test.
 enum NodeResetHelper {
     static let variable = "VIBE_NODE_RESET_TEST_HELPER"
@@ -163,7 +167,7 @@ enum NodeResetHelper {
         let results = String(cString: value)
         let limit = getdtablesize()
         let why = Platform.NodeReset.processState(keeping: [])
-        let open150 = fcntl(150, F_GETFD) != -1
+        let open300 = fcntl(300, F_GETFD) != -1
         let mask = umask(0)
         umask(mask)
         var folder = [CChar](repeating: 0, count: 1024)
@@ -179,7 +183,7 @@ enum NodeResetHelper {
             while waitpid(pid, &status, 0) < 0, errno == EINTR {}
             core = ((try? String(contentsOfFile: out, encoding: .utf8)) ?? "?").trimmingCharacters(in: .whitespacesAndNewlines)
         }
-        let text = "why=\(why ?? "nil") limit=\(limit) open150=\(open150) umask=\(String(mask, radix: 8)) cwd=\(cwd) core=\(core)\n"
+        let text = "why=\(why ?? "nil") limit=\(limit) open300=\(open300) umask=\(String(mask, radix: 8)) cwd=\(cwd) core=\(core)\n"
         FileManager.default.createFile(atPath: results, contents: Data(text.utf8))
         _exit(0)
     }
