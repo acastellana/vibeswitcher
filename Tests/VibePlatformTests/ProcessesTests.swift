@@ -288,10 +288,12 @@ struct ProcessesTests {
         return String(cString: resolved)
     }
 
-    /// A copy of /bin/cat under `name` in `folder`: a program whose name is the test's to choose.
+    /// A copy of /bin/cat under `name` in `folder`: a program whose name is the test's to choose (on the Mac signed as a
+    /// program of its own, `signedAsItsOwn`, or it's killed as it starts).
     static func cat(named name: String, in folder: URL) throws -> URL {
         let copy = folder.appendingPathComponent(name)
         try FileManager.default.copyItem(at: URL(fileURLWithPath: real("/bin/cat")), to: copy)
+        try signedAsItsOwn(copy.path)
         return copy
     }
 
