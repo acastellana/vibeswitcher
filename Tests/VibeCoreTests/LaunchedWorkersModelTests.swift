@@ -602,9 +602,41 @@ extension LeadAdvanceTests {
             Issue.record("a Codex session bound on a Claude grant")
             return
         }
-        #expect(WorkerLaunch.commandAgent("env FOO=1 '/home/u/.local/share/claude/versions/2.1.282' --model opus -- go") == .claude)
-        #expect(WorkerLaunch.commandAgent("/usr/bin/node /x/@openai/codex/bin/codex.js -m gpt-6") == .codex)
-        #expect(WorkerLaunch.commandAgent("bash -l") == nil)
+    }
+
+    /// The agent is judged by the program that runs: one simple command, `env` the only wrapper passed over, a path
+    /// resolved to Claude Code's or Codex's own; a shell, `sh -c`, a look-alike path, an argument that is only the word,
+    /// or a second command after the first isn't told apart, and holds no role under the floor.
+    @Test func theAgentIsTheProgramThatRuns() throws {
+        let versions = temp.url("share").appendingPathComponent("claude/versions")
+        try FileManager.default.createDirectory(at: versions, withIntermediateDirectories: true)
+        let real = versions.appendingPathComponent("2.1.282")
+        try installScript("#!/bin/sh\n", at: real)
+        let link = temp.url("bin-claude")
+        try FileManager.default.createSymbolicLink(at: link, withDestinationURL: real)
+        let codex = temp.url("pkg").appendingPathComponent("bin/codex.js")
+        try FileManager.default.createDirectory(at: codex.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try installScript("#!/usr/bin/env node\n", at: codex)
+        let lookAlike = temp.url("wrappers").appendingPathComponent("claude")
+        try FileManager.default.createDirectory(at: lookAlike.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try installScript("#!/bin/sh\nexec codex-evil\n", at: lookAlike)
+        #expect(WorkerLaunch.commandAgent("env -i FOO=1 '\(real.path)' --model opus -- go") == .claude)
+        #expect(WorkerLaunch.commandAgent("'\(link.path)' --model opus") == .claude)
+        #expect(WorkerLaunch.commandAgent("claude --model opus -- 'a; b | c'") == .claude)
+        #expect(WorkerLaunch.commandAgent("'\(codex.path)' -m gpt-6") == .codex)
+        for command in ["sh -c 'exec codex-evil' claude", "env X=claude real-program", "'\(lookAlike.path)' --model opus", "bash codex", "bash -l",
+                        "claude --model opus; claude --model fable", "exec -a claude fable", "env -S 'claude' x", "claude --model opus > out.txt"] {
+            #expect(WorkerLaunch.commandAgent(command) == nil, "\(command)")
+        }
+        // What the node's own link names counts as that agent (the node's roles start by its resolved path).
+        #expect(WorkerLaunch.commandAgent("'\(lookAlike.path)' --model opus", links: [.claude: [lookAlike.path]]) == .claude)
+        // Under the floor, such a session holds no role.
+        let (book, root, commit) = floorBook()
+        guard case .refused(let why) = bindVerifier(book, root: root, commit: commit, session: "sh", command: "sh -c 'exec claude --model fable' claude") else {
+            Issue.record("a shell bound as a verifier")
+            return
+        }
+        #expect(why.contains("can tell apart"), "\(why)")
     }
 
     /// A finder issued later under a panel's name that took the allowance isn't bound on it: one panel's worth, each

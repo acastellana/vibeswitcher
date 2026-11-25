@@ -1021,6 +1021,11 @@ extension LeadVault {
                 // The agent the host started, never only the one the lead declared at the issue: a worker or verifier whose
                 // command is another agent's isn't bound.
                 if member.role != .lead, let launch, launch.known {
+                    // Under the floor, a session whose program isn't told apart as Claude Code or Codex (a shell, a wrapper,
+                    // `sh -c`, another program) holds no role: what it runs can't be judged.
+                    if launch.agent == nil, team(root)?.floor?.verifierDifferent == true {
+                        return .refused("That session's command isn't one Claude Code or Codex command the vault can tell apart (a shell, a wrapper or another program): under the review floor it holds no role.")
+                    }
                     let declared = member.agent ?? .claude
                     if let observed = launch.agent, observed != declared {
                         return .refused("That session runs \(observed.rawValue), not the \(declared.rawValue) its grant was issued for: it holds no role.")

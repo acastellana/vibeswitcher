@@ -182,16 +182,84 @@ public enum WorkerLaunch {
         return found.flatMap { $0.isEmpty ? nil : $0 }
     }
 
-    /// The agent a launch command starts, by its argv (before `--`): the first program word whose name is Claude Code's
-    /// (`claude`, or its versioned binary, `VersionedClaude.isBinary`) or Codex's (`codex`, `codex.js`); nil when none is
-    /// (a plain shell, another program). Words before it (`env`, assignments, a wrapper) are passed over.
-    public static func commandAgent(_ command: String) -> Agent? {
-        for word in words(command).prefix(while: { $0 != "--" }) {
-            let name = (word as NSString).lastPathComponent
-            if name == "claude" || VersionedClaude.isBinary(word) { return .claude }
-            if name == "codex" || name == "codex.js" { return .codex }
+    /// The agent a launch command starts, judged by what runs, never by a scan of its words: the command must be one
+    /// simple command (no `;`, `&`, `|`, redirection, substitution or newline outside quotes: `controlled`), its program
+    /// the first word after assignments and `env` with its options (the one transparent wrapper; `sh -c`, `exec -a` or
+    /// any other wrapper isn't), and that program Claude Code's or Codex's: the bare name `claude` or `codex` (what the
+    /// session's shell finds), or a path that resolves to Claude Code's installed binary (`VersionedClaude.isBinary`, or
+    /// its npm package's) or Codex's (`codex`, `codex.js`, or its npm package's), or to what the node's own links name
+    /// (`nodeLinks`: the program the node's engine starts its roles with, `RoleProgram`). Anything else is nil (a shell,
+    /// a wrapper, another program), which a bind under the floor refuses.
+    public static func commandAgent(_ command: String, links: [Agent: [String]] = nodeLinks) -> Agent? {
+        guard !controlled(command) else { return nil }
+        var rest = words(command)[...]
+        func skipAssignments() { while let first = rest.first, isAssignment(first) { rest = rest.dropFirst() } }
+        skipAssignments()
+        if let first = rest.first, first == "env" || first == "/usr/bin/env" || first == "/bin/env" {
+            rest = rest.dropFirst()
+            while let option = rest.first, option.hasPrefix("-") {
+                rest = rest.dropFirst()
+                if option == "-u" || option == "--unset" { rest = rest.dropFirst() }
+                guard ["-i", "-", "--ignore-environment", "-u", "--unset"].contains(option) || option.hasPrefix("--unset=") else { return nil }
+            }
+            skipAssignments()
         }
+        guard let program = rest.first else { return nil }
+        if program == "claude" { return .claude }
+        if program == "codex" { return .codex }
+        guard program.hasPrefix("/"), let resolved = realpath(program, nil) else { return nil }
+        defer { free(resolved) }
+        let real = String(cString: resolved)
+        for (agent, paths) in links where paths.contains(where: { link in realPathOf(link) == real }) { return agent }
+        let name = (real as NSString).lastPathComponent
+        if VersionedClaude.isBinary(real) || real.contains("/@anthropic-ai/claude-code/") { return .claude }
+        if name == "codex" || name == "codex.js" || real.contains("/@openai/codex/") { return .codex }
         return nil
+    }
+
+    /// The links the node reads its programs by (`NodePreflight.claudeLink`/`codexLink`): `~/.local/bin/claude` and
+    /// `codex` in the account's home, and a scratch node's `<root>/v2/test/claude` and `codex`.
+    public static var nodeLinks: [Agent: [String]] {
+        let home = (VibePaths.accountHome as NSString).appendingPathComponent(".local/bin")
+        let test = VibePaths.root.appendingPathComponent("v2/test").path
+        return [.claude: [home + "/claude", test + "/claude"], .codex: [home + "/codex", test + "/codex"]]
+    }
+
+    static func realPathOf(_ path: String) -> String? {
+        guard let resolved = realpath(path, nil) else { return nil }
+        defer { free(resolved) }
+        return String(cString: resolved)
+    }
+
+    /// `NAME=value`, a shell assignment before a command.
+    static func isAssignment(_ word: String) -> Bool {
+        guard let equals = word.firstIndex(of: "="), equals != word.startIndex else { return false }
+        let name = word[..<equals]
+        return name.first.map { $0 == "_" || $0.isLetter } == true && name.allSatisfy { $0 == "_" || $0.isLetter || $0.isNumber }
+    }
+
+    /// Whether `command` holds more than one simple command's syntax outside quotes: a list (`;`, `&`, `|`), a
+    /// redirection, a substitution (`$(`, backquote), a subshell or a newline.
+    static func controlled(_ command: String) -> Bool {
+        var single = false, double = false, escaped = false
+        var previous: Character = " "
+        for character in command {
+            defer { previous = character }
+            if escaped { escaped = false; continue }
+            if single { if character == "'" { single = false }; continue }
+            if character == "\\" { escaped = true; continue }
+            if double {
+                if character == "\"" { double = false } else if character == "`" || (previous == "$" && character == "(") { return true }
+                continue
+            }
+            switch character {
+            case "'": single = true
+            case "\"": double = true
+            case ";", "&", "|", "<", ">", "`", "(", ")", "\n": return true
+            default: break
+            }
+        }
+        return false
     }
 
     /// `command`'s words as a POSIX shell splits them: single quotes literal, double quotes with `\` escaping `"`, `\`,
@@ -264,7 +332,7 @@ public enum WorkerLaunch {
         guard let seen else { return BindFacts() }
         var facts = BindFacts(known: true)
         facts.model = seen.command.flatMap(launchModel(command:)).flatMap { $0.lowercased() == "default" ? nil : $0 }
-        facts.agent = seen.command.flatMap(commandAgent)
+        facts.agent = seen.command.flatMap { commandAgent($0) }
         let done = DispatchSemaphore(value: 0)
         let result = Found()
         DispatchQueue.global(qos: .userInitiated).async {
