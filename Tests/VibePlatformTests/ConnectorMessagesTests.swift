@@ -104,4 +104,45 @@ struct ConnectorMessagesTests {
             #expect(!whole.cut && whole.bytes == Self.request, "\(whole)")
         }
     }
+
+    /// A flag two threads share.
+    final class Flag: @unchecked Sendable {
+        private let lock = NSLock()
+        private var on = false
+        var value: Bool { lock.withLock { on } }
+        func set() { lock.withLock { on = true } }
+    }
+
+    /// F2 (the review of v2-mac-web-port): the host's end gives a framed request's rest one patience in all, never one
+    /// for each byte. A sender dripping a byte every 0.25 s, 40 of them (10 s), never its end: the read fails (EBADMSG)
+    /// while the drip still runs, so it held the host's queue for the patience, not for the drip.
+    @Test(.enabled(if: Platform.Sockets.connectorType == Platform.Sockets.stream, "the Mac's framing"), .timeLimit(.minutes(1)))
+    func theHostsEndGivesAFramesRestOnePatienceInAll() throws {
+        let (child, host) = try #require(Platform.Sockets.pair(type: Platform.Sockets.connectorType))
+        defer { Sys.close(host) }
+        _ = fcntl(host, F_SETFL, fcntl(host, F_GETFL) | O_NONBLOCK)
+        var first = Platform.Sockets.framedStart
+        #expect(Platform.Sockets.send(child, &first, 1) == 1)
+        let readerDone = Flag(), dripEnded = Flag()
+        let ended = DispatchSemaphore(value: 0)
+        let drip = Thread {
+            for _ in 0..<40 where !readerDone.value {
+                var byte = UInt8(ascii: "x")
+                _ = Platform.Sockets.send(child, &byte, 1)
+                usleep(250_000)
+            }
+            dripEnded.set()
+            Sys.close(child)
+            ended.signal()
+        }
+        drip.start()
+        var buffer = [UInt8](repeating: 0, count: 256)
+        let (count, sender) = buffer.withUnsafeMutableBytes { Platform.Sockets.receiveConnectorRequest(host, into: $0) }
+        let code = errno
+        let dripping = !dripEnded.value
+        readerDone.set()
+        ended.wait()
+        #expect(count == -1 && code == EBADMSG && sender == nil, "count \(count), errno \(code)")
+        #expect(dripping, "the host's read waited for the whole drip: a patience for each byte")
+    }
 }
