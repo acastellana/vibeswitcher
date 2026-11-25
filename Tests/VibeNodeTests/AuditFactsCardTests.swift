@@ -29,7 +29,12 @@ struct AuditFactsCardTests {
         let facts = LeadEngine.auditFacts(question: asked, root: root, vault: app)
         #expect(facts.contains("the audit of held at \(commit.prefix(12)) asked it: an answer allows that model for that commit only, once"), "\(facts)")
         #expect(facts.contains("workers' model: opus, by your review floor") && facts.contains("its workers were launched on: fable (the host's record)"), "\(facts)")
+        #expect(facts.contains("models the vault's record leaves free: sonnet, mythos"), "\(facts)")
         #expect(LeadEngine.mayAskAuditModel(asked))
+        // A revision without the options allowing a model isn't one.
+        var revised = asked
+        revised.options = ["Wait"]
+        #expect(!LeadEngine.mayAskAuditModel(revised))
         // A worker can't file an offer.
         guard case .refused = book.answer(.offerAuditModels(root: root, task: "held", commit: commit, question: "q", digest: "d"), from: .session("w")) else {
             Issue.record("a worker filed an offer")

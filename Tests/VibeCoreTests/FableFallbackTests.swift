@@ -147,6 +147,8 @@ extension LeadAdvanceTests {
     func sensitiveAuditsFallBackAutomaticallyAndRespectTheFloor(workers: String, floor: Bool) throws {
         let (root, runtime, lead) = try fableTeam(["security_audit_model": "fable"])
         runtime.claude = "claude --model \(workers)"
+        // Claude Code's default where the vault reads it at a verifier's bind: the workers' (as on the node).
+        try writeVaultDefault(workers)
         if floor { try vault.setReviewFloor(LeadReviewFloor(), root: root) }
         _ = lead.call("add_task", ["title": "Touchy", "goal": "g", "acceptance": ["a"], "review": "audit"])
         #expect(!lead.call("start_worker", ["task": "touchy"]).isError)

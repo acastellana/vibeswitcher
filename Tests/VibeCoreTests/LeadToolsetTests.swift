@@ -263,6 +263,9 @@ extension LeadTeamFixture {
         let grant = try vault.startLead(root: root, branch: Worktrees.currentBranch(root: root) ?? "main")
         try vault.bind(grant, root: root, session: try #require(runtime.me.session))
         let lead = LeadToolset(root: root, runtime: runtime, vault: vault(for: runtime))
+        // The host's view of each session a role is bound to: the command this runtime spawned it with (the host
+        // passes its own; a verifier under the floor holds no role without one).
+        book.seenOf = { [runtime] session in runtime.hostSeen(session) }
         lead.testLock = testLock
         // The Mac-wide cap these tests' scenes were written for, and refusals kept in the vault's folder (removed with it).
         lead.macLimits = { MacLimits(maxSessions: 6) }

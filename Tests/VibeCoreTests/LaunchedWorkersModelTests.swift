@@ -288,8 +288,8 @@ extension LeadAdvanceTests {
         #expect(lead.auditChoice(lead.workflow, task: task) == "fable")
         let started = lead.call("audit", ["task": "held"])
         #expect(!started.isError, "\(started.text)")
-        // Used once: the next audit is held again.
-        #expect(vault.auditAllowance(root: root, task: "held") == nil && lead.auditChoice(lead.workflow, task: task) == nil)
+        // Taken by that audit's verifier at its bind: the next audit is held again.
+        #expect(vault.auditAllowance(root: root, task: "held")?.usedBy != nil && lead.auditChoice(lead.workflow, task: task) == nil)
     }
 
     /// A lead's own question that looks like the audit's (its options in the same words, about the task): no offer in
@@ -359,7 +359,10 @@ extension LeadAdvanceTests {
         try FileManager.default.createDirectory(at: home.appendingPathComponent(".claude"), withIntermediateDirectories: true)
         #expect(mkfifo(home.appendingPathComponent(".claude/settings.json").path, 0o600) == 0)
         let found = WorkerLaunch.families(seen: .init(command: "claude --model opus -- go", cwd: worktree.path), home: home.path, limit: hangGuard)
-        #expect(found.families == ["opus"] && found.notes.count == 1 && found.notes[0].contains("settings.local.json"), "\(found)")
+        // A link at the end is followed to a regular file (read: its model added); anything else adds nothing.
+        #expect(found.families == (kind == "link" ? ["fable", "opus"] : ["opus"]), "\(found)")
+        let worktreeNotes = found.notes.filter { $0.contains("settings.local.json") }
+        #expect(worktreeNotes.count == (kind == "link" ? 0 : 1) && found.notes.contains { $0.contains("home-") && $0.contains("settings.json") }, "\(found)")
         let unnamed = WorkerLaunch.families(seen: .init(command: "claude -- go", cwd: nil), home: home.path, limit: hangGuard)
         #expect(unnamed.families == ["opus"] && unnamed.notes.first?.contains("settings.json") == true, "\(unnamed)")
     }
@@ -471,5 +474,110 @@ extension LeadAdvanceTests {
         let said = try #require(answer(asked, "Audit held at \(head.prefix(12)) on fable", root: root))
         #expect(said.contains("isn't the one the audit"), "\(said)")
         #expect(lead.auditChoice(lead.workflow, task: task) == nil)
+    }
+
+    /// A vault with a lead, the floor (worker_model sonnet), and a worker of `t` the host saw launched on Fable: a
+    /// verifier's bind is judged there, whatever the lead's tool server chose.
+    func floorBook(floor: LeadReviewFloor = LeadReviewFloor().with(workerModel: "sonnet")) -> (book: LeadVault.Book, root: String, commit: String) {
+        let book = LeadVault.Book()
+        book.configHome = temp.url("vault-home").path
+        let root = "/repo"
+        guard case .grant(let lead) = book.answer(.issue(role: .lead, root: root, task: nil, auditing: nil), from: .app) else { return (book, root, "") }
+        _ = book.answer(.bind(grant: lead, root: root, session: "lead"), from: .app)
+        _ = book.answer(.setReviewFloor(root: root, floor: floor, onlyIfUnset: false), from: .app)
+        guard case .grant(let worker) = book.answer(.issue(role: .worker, root: root, task: "t", auditing: nil), from: .session("lead")) else { return (book, root, "") }
+        _ = book.answer(.bind(grant: worker, root: root, session: "w"), from: .session("lead"), bound: .init(command: "claude --model fable -- go"))
+        return (book, root, String(repeating: "c", count: 40))
+    }
+
+    /// A verifier (or finder) bound to a session launched with `command`; the bind's reply.
+    func bindVerifier(_ book: LeadVault.Book, root: String, commit: String, session: String, command: String?,
+                      finder: LeadVault.Finder? = nil, agent: Agent? = nil) -> LeadVault.Reply {
+        guard case .grant(let grant) = book.answer(.issue(role: .verifier, root: root, task: "t", auditing: commit, finder: finder, agent: agent),
+                                                   from: .session("lead")) else { return .refused("no grant") }
+        return book.answer(.bind(grant: grant, root: root, session: session), from: .session("lead"), bound: command.map { .init(command: $0) })
+    }
+
+    /// The user's allowance of `model` for `t` at `commit`, as the app records an answer to the audit's question.
+    func allow(_ book: LeadVault.Book, root: String, commit: String, model: String) {
+        #expect(book.answer(.offerAuditModels(root: root, task: "t", commit: commit, question: "q", digest: "d"), from: .session("lead")) == .ok)
+        #expect(book.answer(.allowAuditModel(root: root, task: "t", commit: commit, model: model, question: "q", digest: "d"), from: .app) == .ok)
+    }
+
+    /// F1: a verifier on a family the vault's record excludes (a worker's Fable, the floor's Sonnet) holds no role, and its
+    /// verdict counts for nothing; one on a free model is bound; none or an alias is refused.
+    @Test func aVerifierOnAnExcludedModelIsntBound() {
+        let (book, root, commit) = floorBook()
+        guard case .refused = bindVerifier(book, root: root, commit: commit, session: "v-fable", command: "claude --model 'claude-fable-5-2' -- go") else {
+            Issue.record("a verifier on Fable was bound")
+            return
+        }
+        guard case .refused = book.answer(.submitVerdict(root: root, completion: .complete, integrity: .clean, summary: "ok"), from: .session("v-fable")) else {
+            Issue.record("its verdict counted")
+            return
+        }
+        guard case .refused = bindVerifier(book, root: root, commit: commit, session: "v-sonnet", command: "claude --model sonnet -- go") else {
+            Issue.record("a verifier on the floor's worker_model was bound")
+            return
+        }
+        for command in ["claude -- go", "claude --model best -- go", "claude --model opusplan -- go"] {
+            guard case .refused = bindVerifier(book, root: root, commit: commit, session: "v-\(command.count)", command: command) else {
+                Issue.record("\(command) was bound")
+                return
+            }
+        }
+        #expect(bindVerifier(book, root: root, commit: commit, session: "v-opus", command: "claude --model 'claude-opus-5-5' -- go") == .ok)
+    }
+
+    /// With the user's allowance for that commit, one verifier on that model is bound, the vault taking the allowance;
+    /// a second is refused; another commit's audit isn't covered.
+    @Test func anAllowanceLetsOneVerifierBind() {
+        let (book, root, commit) = floorBook()
+        allow(book, root: root, commit: commit, model: "fable")
+        guard case .refused = bindVerifier(book, root: root, commit: String(repeating: "d", count: 40), session: "v-other", command: "claude --model fable -- go") else {
+            Issue.record("another commit's verifier used it")
+            return
+        }
+        #expect(bindVerifier(book, root: root, commit: commit, session: "v1", command: "claude --model fable -- go") == .ok)
+        guard case .allowance(let taken?) = book.answer(.auditAllowance(root: root, task: "t"), from: .app), taken.usedBy != nil else {
+            Issue.record("the allowance wasn't taken")
+            return
+        }
+        guard case .refused = bindVerifier(book, root: root, commit: commit, session: "v2", command: "claude --model fable -- go") else {
+            Issue.record("a second verifier used it")
+            return
+        }
+    }
+
+    /// A finders' panel shares the allowance: each of its finders binds; another panel's doesn't.
+    @Test func anAllowanceLetsOnePanelsFindersBind() {
+        let (book, root, commit) = floorBook()
+        allow(book, root: root, commit: commit, model: "fable")
+        func finder(_ panel: String, _ index: Int) -> LeadVault.Finder { .init(panel: panel, index: index, size: 2, focus: "f", nitCap: 3) }
+        #expect(bindVerifier(book, root: root, commit: commit, session: "f1", command: "claude --model fable -- go", finder: finder("p", 1)) == .ok)
+        #expect(bindVerifier(book, root: root, commit: commit, session: "f2", command: "claude --model fable -- go", finder: finder("p", 2)) == .ok)
+        guard case .refused = bindVerifier(book, root: root, commit: commit, session: "g1", command: "claude --model fable -- go", finder: finder("q", 1)) else {
+            Issue.record("another panel used it")
+            return
+        }
+    }
+
+    /// No floor keeping audits off the workers' model: binds as before, whatever the model.
+    @Test func withoutTheFloorAVerifierBindsAsBefore() {
+        let (book, root, commit) = floorBook(floor: LeadReviewFloor(verifierDifferent: false))
+        #expect(bindVerifier(book, root: root, commit: commit, session: "v", command: "claude --model fable -- go") == .ok)
+        #expect(bindVerifier(book, root: root, commit: commit, session: "v0", command: nil) == .ok)
+    }
+
+    /// A Codex verifier: bound unless a Codex worker worked on the task.
+    @Test func aCodexVerifierIsKeptOffACodexWorkersTask() {
+        let (book, root, commit) = floorBook()
+        #expect(bindVerifier(book, root: root, commit: commit, session: "c1", command: "codex -m gpt-6", agent: .codex) == .ok)
+        guard case .grant(let worker) = book.answer(.issue(role: .worker, root: root, task: "t", auditing: nil, agent: .codex), from: .session("lead")) else { return }
+        #expect(book.answer(.bind(grant: worker, root: root, session: "cw"), from: .session("lead"), bound: .init(command: "codex -m gpt-6")) == .ok)
+        guard case .refused = bindVerifier(book, root: root, commit: commit, session: "c2", command: "codex -m gpt-6", agent: .codex) else {
+            Issue.record("a Codex verifier on a Codex worker's task was bound")
+            return
+        }
     }
 }

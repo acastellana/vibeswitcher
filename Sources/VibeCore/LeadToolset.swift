@@ -3205,8 +3205,6 @@ public final class LeadToolset: MCPToolset {
             board.tasks[index].evidence = nil
         }
         launched = true
-        // The user's allowance for this commit is used by this audit, once.
-        if let allowance = pick.allowance { vault.consumeAuditAllowance(root: root, task: slug, commit: allowance.commit) }
         // The audit's line in the progress log says what the workers' model was judged by, as its reply does.
         if let basis { try? store.appendProgress("Audit of \(slug) on \(verifierModel): \(basis).") }
         // An update_task while it started went to no verifier yet (the board named none, or the one before): sent now.
@@ -3338,7 +3336,8 @@ public final class LeadToolset: MCPToolset {
     /// the floor left none: one for the task at exactly its branch's head now, used once (`audit` consumes it).
     func auditPick(_ workflow: LeadWorkflow, task: LeadTask? = nil, security: Bool = false) -> (model: String, allowance: AuditAllowance?)? {
         if let model = floorChoice(workflow, task: task, security: security) { return (model, nil) }
-        guard let task, let allowance = vault.auditAllowance(root: root, task: task.slug),
+        // The vault takes it at the verifier's bind (`AuditAllowance.usedBy`): one taken isn't offered again.
+        guard let task, let allowance = vault.auditAllowance(root: root, task: task.slug), allowance.usedBy == nil,
               branchHead(Worktrees.branch(task.slug)) == allowance.commit else { return nil }
         return (allowance.model, allowance)
     }

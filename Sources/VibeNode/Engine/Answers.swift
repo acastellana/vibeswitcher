@@ -136,6 +136,8 @@ extension LeadEngine {
         let rebuild = commit != nil && commit != card.approval?.commit
         card.kind = commit == nil ? .question : .approval
         if commit == nil { card.approval = nil } else if rebuild, let commit { card.approval = CardStore.ApprovalFacts(commit: commit) }
+        // A revision that drops the options allowing a model drops the vault's facts with them.
+        if !Self.mayAskAuditModel(question) { card.facts = nil }
         cards.put(card)
         cardsChanged()
         if rebuild, let commit { buildApproval(card: card.id, commit: commit, root: root) }
@@ -179,6 +181,12 @@ extension LeadEngine {
         }
         let launched = vault.launchedFamilies(root: root, task: task) ?? []
         facts.append("its workers were launched on: " + (launched.isEmpty ? "nothing recorded" : launched.joined(separator: ", ")) + " (the host's record)")
+        if vault.settingsUnread(root: root, task: task) { facts.append("a project settings file wasn't read when a worker was bound (what it names isn't recorded)") }
+        // What the vault's record leaves free (the workers' model and the launches): none means it agrees no model is left.
+        let workers = floor?.workerModel ?? (WorkerLaunch.settings(in: VibePaths.accountHome, [".claude", "settings.json"]).object?["model"] as? String)
+        let excluded = Set(launched + [LeadReviewFloor.workersModel(workers)].compactMap(WorkerLaunch.family(of:)))
+        let free = ["fable", "opus", "sonnet", "mythos"].filter { !excluded.contains($0) }
+        facts.append("models the vault's record leaves free: " + (free.isEmpty ? "none" : free.joined(separator: ", ")))
         return facts
     }
 
@@ -364,6 +372,10 @@ extension LeadEngine {
                 return then(.failure(.gone("no question card \(id)")))
             }
             if let why = Self.approvalRefusal(text, card: card) { return then(.failure(.refused(why))) }
+            // An answer allowing a model waits for the vault's facts on the card: the user answers what they were shown.
+            if Self.mayAskAuditModel(question), LeadVault.auditGrant(in: text) != nil, card.facts == nil {
+                return then(.failure(.refused("This card's facts from the vault aren't on it yet: nothing was answered. Answer again in a moment.")))
+            }
             let (root, vault, seen, note, stateFile) = (card.root, cardVault, min(version ?? question.version, question.version), self.note, observer.stateFile)
             var shown = LeadBoard()
             shown.questions = [question]

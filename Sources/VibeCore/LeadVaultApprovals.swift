@@ -84,11 +84,14 @@ extension LeadVault {
         let launched = vault.launchedFamilies(root: root, task: task) ?? []
         let board = BoardStore(root: root).load().task(task)
         let launchedModel = board.flatMap { task in task.worker.flatMap { task.launchedModels?[$0] } }.flatMap { $0.isEmpty || $0.hasPrefix("codex") ? nil : $0 }
+        // The vault's own record decides (the board, which the team can write, never takes the user's question away nor
+        // brings one): a model free by it means no allowance.
         for security in [false, true] {
-            if let free = workflow.auditModelChoice(workerModel: defaultModel, moreWorkers: launched, taskModel: board?.intendedModel,
-                                                    launchedModel: launchedModel, security: security) {
-                return "\(free) is free for its audit (by the vault's record), so the audit can run without an allowance."
-            }
+            guard let free = workflow.auditModelChoice(workerModel: defaultModel, moreWorkers: launched, security: security) else { continue }
+            let boardOnly = workflow.auditModelChoice(workerModel: defaultModel, moreWorkers: launched, taskModel: board?.intendedModel,
+                                                      launchedModel: launchedModel, security: security) == nil
+            return "\(free) is free for its audit by the vault's record, so the audit can run without an allowance"
+                + (boardOnly ? " (only the board's task or worker model keeps it off, which board.json says and the team can write: change the task's model to audit on it)." : ".")
         }
         return nil
     }
