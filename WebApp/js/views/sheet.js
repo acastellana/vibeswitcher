@@ -9,7 +9,45 @@ import { moment } from '../words.js';
 import { t } from '../i18n.js';
 import { shortHashes } from '../conversation.js';
 
+// Where the keyboard was when a sheet or the palette opened, put back when it closes: that element, or the link drawn in
+// its place since (closing a line's sheet changes the address, and the lines are drawn again for it: put back again then),
+// else the centre, never the page's body, where Tab starts again from the top.
+export function focusKeeper({ doc = globalThis.document, win = globalThis } = {}) {
+  let element = null;
+  let href = null;
+  let pending = null;
+  function back() {
+    let target = element?.isConnected && element !== doc.body && element.getClientRects?.().length ? element : null;
+    if (!target && href) target = [...doc.querySelectorAll('a[href]')].find((one) => one.getAttribute('href') === href && one.getClientRects().length) || null;
+    if (!target) {
+      target = doc.querySelector('main');
+      if (target && !target.hasAttribute('tabindex')) target.setAttribute('tabindex', '-1');
+    }
+    target?.focus?.({ preventScroll: true });
+  }
+  return {
+    remember() {
+      element = doc.activeElement;
+      href = element?.getAttribute?.('href') || null;
+    },
+    restore() {
+      if (!element && !href) return;
+      back();
+      // The address changes after this (a task later): once it has, and the view is drawn for it, again.
+      const token = {};
+      pending = token;
+      const again = () => { if (pending === token) back(); };
+      win.addEventListener?.('hashchange', again, { once: true });
+      win.setTimeout?.(() => {
+        win.removeEventListener?.('hashchange', again);
+        if (pending === token) { pending = null; element = null; href = null; }
+      }, 60);
+    },
+  };
+}
+
 export function sideSheet() {
+  const keeper = focusKeeper();
   const kicker = h('p', { class: 'sheet-kicker' });
   const title = h('h2', { class: 'sheet-title', id: 'sheet-title' });
   const when = h('p', { class: 'sheet-when' });
@@ -27,6 +65,7 @@ export function sideSheet() {
     const done = onClose;
     onClose = null;
     done?.();
+    keeper.restore();
   }
 
   // `parts`: { kicker, title, at, text (markdown), more: [nodes after it] }; `closed`: told when it closes.
@@ -41,7 +80,10 @@ export function sideSheet() {
     panel.hidden = false;
     scrim.hidden = false;
     onClose = closed;
-    if (wasHidden) panel.focus({ preventScroll: true });
+    if (wasHidden) {
+      keeper.remember();
+      panel.focus({ preventScroll: true });
+    }
     panel.scrollTop = 0;
   }
 

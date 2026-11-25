@@ -155,3 +155,95 @@ test('U6: the reconnecting line, the page not paired and the notifications’ of
   assert.equal(d.left, 'auto');
   assert.equal(d.transform, 'none');
 });
+
+// A page in miniature for the focus keeper: elements that take the focus, links found by href, a hashchange to fire.
+function focusPage() {
+  const doc = { activeElement: null, links: [], main: null };
+  const element = (tag, href = null) => {
+    const el = {
+      tag, connected: true, shown: true, attrs: href ? { href } : {},
+      get isConnected() { return this.connected; },
+      getAttribute(name) { return this.attrs[name] ?? null; },
+      hasAttribute(name) { return name in this.attrs; },
+      setAttribute(name, value) { this.attrs[name] = value; },
+      getClientRects() { return this.shown ? [{}] : []; },
+      focus() { if (this.connected && this.shown) doc.activeElement = this; },
+    };
+    if (href) doc.links.push(el);
+    return el;
+  };
+  doc.body = element('body');
+  doc.main = element('main');
+  doc.activeElement = doc.body;
+  doc.querySelectorAll = (selector) => (selector === 'a[href]' ? doc.links.filter((one) => one.connected) : []);
+  doc.querySelector = (selector) => (selector === 'main' ? doc.main : null);
+  const listeners = {};
+  const timers = [];
+  const win = {
+    addEventListener(name, fn) { (listeners[name] ||= []).push(fn); },
+    removeEventListener(name, fn) { listeners[name] = (listeners[name] || []).filter((one) => one !== fn); },
+    setTimeout(fn) { timers.push(fn); },
+    fire(name) { const now = listeners[name] || []; listeners[name] = []; now.forEach((fn) => fn()); },
+    runTimers() { timers.splice(0).forEach((fn) => fn()); },
+  };
+  return { doc, win, element };
+}
+
+test('U20: Esc on the side sheet or the palette puts the keyboard back on what opened it, or the link drawn in its place, else the centre', async () => {
+  const { focusKeeper } = await import('../js/views/sheet.js');
+  // The line stays: back on it.
+  {
+    const { doc, win, element } = focusPage();
+    const line = element('a', '#/p/x/lead?sheet=a');
+    line.focus();
+    const keeper = focusKeeper({ doc, win });
+    keeper.remember();
+    doc.activeElement = doc.body;
+    keeper.restore();
+    assert.equal(doc.activeElement, line);
+  }
+  // Closing the sheet changes the address and the lines are drawn again: back on the new one with the same address.
+  {
+    const { doc, win, element } = focusPage();
+    const line = element('a', '#/p/x/lead?sheet=a');
+    line.focus();
+    const keeper = focusKeeper({ doc, win });
+    keeper.remember();
+    doc.activeElement = doc.body;
+    keeper.restore();
+    line.connected = false;
+    doc.activeElement = doc.body;
+    const drawnAgain = element('a', '#/p/x/lead?sheet=a');
+    win.fire('hashchange');
+    assert.equal(doc.activeElement, drawnAgain);
+    // Later addresses are someone else's: nothing moves the keyboard then.
+    win.runTimers();
+    const other = element('a', '#/node');
+    other.focus();
+    win.fire('hashchange');
+    assert.equal(doc.activeElement, other);
+  }
+  // Closed with no change of address (the palette): a later address change, someone else's, doesn't move the keyboard.
+  {
+    const { doc, win, element } = focusPage();
+    const line = element('a', '#/p/x/lead');
+    line.focus();
+    const keeper = focusKeeper({ doc, win });
+    keeper.remember();
+    keeper.restore();
+    win.runTimers();
+    const other = element('a', '#/node');
+    other.focus();
+    win.fire('hashchange');
+    assert.equal(doc.activeElement, other);
+  }
+  // Opened from nowhere (the page's body), or what opened it is gone: the centre, focusable for it.
+  {
+    const { doc, win } = focusPage();
+    const keeper = focusKeeper({ doc, win });
+    keeper.remember();
+    keeper.restore();
+    assert.equal(doc.activeElement, doc.main);
+    assert.equal(doc.main.getAttribute('tabindex'), '-1');
+  }
+});

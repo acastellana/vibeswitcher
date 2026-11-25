@@ -1393,3 +1393,5 @@ mark.found { padding: 0 1px; border-radius: 3px; background: light-dark(rgb(255 
   .left-summary { gap: 0; }
   .tc-links { gap: 0 14px; }
 }
+/* The centre takes the keyboard back when what opened a sheet or the palette is gone (views/sheet.js): no ring round it. */
+main.centre-wrap[tabindex="-1"]:focus { outline: none; }
