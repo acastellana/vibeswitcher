@@ -526,7 +526,8 @@ public final class ServerChild {
     /// child from the copy, its token named, its end closed here. A copy whose mode can't be put back starts nothing:
     /// tried again after the wait. On `queue`.
     private func spawn() {
-        guard let server, !server.stopped, !lock.withLock({ stopped }) else { return }
+        // Never a second child beside one that runs (a restart queued before a switch that failed, the blind check's item 2).
+        guard let server, !server.stopped, !lock.withLock({ stopped || child != nil }) else { return }
         lock.withLock { restartPending = false }
         // What runs: Linux's sealed copy, its mode put back and kept across the spawn, named to the image; the Mac's file,
         // still the code the host loaded.

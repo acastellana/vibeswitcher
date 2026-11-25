@@ -12,12 +12,16 @@ extension HostServer {
     func keeperTarget(_ executable: String, pins: @autoclosure () -> Result<NodePins, NodePins.Refused> = NodePins.read(),
                       cdhashOf: (String) -> Data? = { Platform.CodeIdentity.cdhash(atPath: $0) }) -> Result<Data, MacHandoverKeeper.Refused>? {
         guard Platform.CodeIdentity.isAvailable else { return nil }
-        if isMacNodeHost {
-            if let why = HandoverTarget.macPinned(executable, pins: pins(), cdhashOf: cdhashOf) { return .failure(MacHandoverKeeper.Refused(why.description)) }
-            guard let cdhash = cdhashOf(executable) else {
-                return .failure(MacHandoverKeeper.Refused("\(executable) has no code signature to check it by"))
+        // A checked node host's, from its start on (not only once its server child is set: no window for the old exec).
+        if config.checkedNode != nil {
+            // The target's file read once: the cdhash the record is checked against is the one the keeper must run, never
+            // a second read of a path a session can rename over (the blind check's item 1).
+            var read: Data?
+            if let why = HandoverTarget.macPinned(executable, pins: pins(), cdhashOf: { read = cdhashOf($0); return read }) {
+                return .failure(MacHandoverKeeper.Refused(why.description))
             }
-            return .success(cdhash)
+            guard let read else { return .failure(MacHandoverKeeper.Refused("\(executable) has no code signature to check it by")) }
+            return .success(read)
         }
         guard let pinned = config.testKeeperHost, config.checkedNode == nil else { return nil }
         guard Platform.CodeIdentity.cdhash(atPath: executable) == pinned else {
