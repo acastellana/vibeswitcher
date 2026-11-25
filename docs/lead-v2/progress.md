@@ -700,3 +700,11 @@
 - 2026-11-25 13:34 Started a worker on on-wsl-no-box
 - 2026-11-25 13:34 Automatically (auto_advance): Started a worker on on-wsl-no-box (On WSL, no box starts when the machine's binfmt_misc entries can't be seen and the kernel gives a box none of its own), its after tasks done (measured-with-a-real).
 - 2026-11-25 13:34 Automatically (auto_advance): Overlap for on-wsl-no-box's start (a warning only: nothing was refused or reordered). Sources/VibeCore/V2/Sandbox/SandboxPlanner.swift: windows-access-is-a (planned: its boundaries name it).
+- 2026-11-25 13:48 Goal merges-are-fast-and added: Merges are fast and don't fail at random
+- 2026-11-25 13:48 Goal the-lead-s-own added: The lead's own machinery can be trusted on a Linux node
+- 2026-11-25 13:48 Goal vibeswitcher-2-covers added: VibeSwitcher 2 covers daily use as the Mac app does
+- 2026-11-25 13:48 Goal sessions-and-branch-code added: Sessions and branch code run confined: the sandbox's first slice is finished
+- 2026-11-25 13:52 Audit of sb5-the-host-confines at 17c4a239 by 2 finders (contract and acceptance; bugs, regressions and security); the shared run: the test command passed
+- 2026-11-25 13:52 Released sb5-the-host-confines's worker (idle since its done report on 17c4a239) while its audit runs
+- 2026-11-25 13:52 Automatically (auto_advance): Started the audit of sb5-the-host-confines at 17c4a239 (Its review is audit). Released its worker, idle since its done report, while the audit runs: its Mac slot and memory are free, its worktree and branch stay.
+- 2026-11-25 13:53 Audit of sb5-the-host-confines: finder 2 of 2 submitted (complete, clean, 0 findings)
