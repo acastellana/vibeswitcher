@@ -61,7 +61,8 @@ public enum MacHandoverKeeper {
     // MARK: The handshake's rules
 
     // Every pair is passed (`SCM_RIGHTS`) by the process that made it, which keeps its own copy of the end it passed
-    // open until the receiver has said, by a byte, that it holds that end; and nothing is written over a pair whose
+    // open until the receiver has said, by a byte over the socket it was passed on (whose far end the receiver alone
+    // holds, so a receiver that went is seen at once), that it holds that end; and nothing is written over a pair whose
     // other end is still in flight. A socket in flight whose sender had closed its copy was found broken under load (its
     // receiver read an end of file before the parcel was whole, or its peer's write failed: the re-check's flake, 8 of
     // 20 runs), as the kernel's collection of descriptors in flight would leave one it took for unreachable.
@@ -120,8 +121,9 @@ public enum MacHandoverKeeper {
             Sys.close(proven)
             return fail(why)
         }
-        // It may close its copy now: this end is held.
-        guard sayHolding(proven) else {
+        // It may close its copy now: this end is held (said over the socket it came on, whose far end the keeper alone
+        // holds, so a keeper that went is seen at once).
+        guard sayHolding(host) else {
             Sys.close(proven)
             return fail("the keeper has gone")
         }
@@ -140,7 +142,7 @@ public enum MacHandoverKeeper {
         defer { Sys.close(mine) }
         limitIO(mine, parkLimit)
         let passed = Platform.Sockets.sendDescriptor(theirs, over: keeper.proven)
-        let held = passed && awaitHolding(mine, parkLimit)
+        let held = passed && awaitHolding(keeper.proven, parkLimit)
         Sys.close(theirs)
         guard held else { return .failure(Refused("the keeper didn't take this host's pair (it refuses a parent it can't prove)")) }
         guard send(data, descriptors: state.descriptors, over: mine) else { return .failure(Refused("the state didn't reach the keeper (errno \(errno))")) }
@@ -198,13 +200,13 @@ public enum MacHandoverKeeper {
         guard let (mine, theirs) = Platform.Sockets.pair(type: Platform.Sockets.stream),
               Platform.Sockets.sendDescriptor(theirs, over: channel) else { quit("its pair didn't reach the host") }
         limitIO(mine, keeperLimit)
-        // `theirs` held until the host says it holds it.
-        guard awaitHolding(mine, keeperLimit) else { quit("the host didn't take its pair") }
+        // `theirs` held until the host says, over the channel, that it holds it.
+        guard awaitHolding(channel, keeperLimit) else { quit("the host didn't take its pair") }
         Sys.close(theirs)
         // The host's own pair: proved once the parcel says what it is.
         guard wait(readable: mine, for: keeperLimit), let parent = Platform.Sockets.receiveDescriptor(over: mine) else { quit("the host sent no pair of its own") }
         limitIO(parent, keeperLimit)
-        guard sayHolding(parent) else { quit("the host has gone") }
+        guard sayHolding(mine) else { quit("the host has gone") }
         guard wait(readable: parent, for: keeperLimit), let parcel = receive(over: parent) else { quit("no state came") }
         guard let offered = try? PropertyListDecoder().decode(HostHandover.State.self, from: parcel.data) else { quit("the state doesn't read") }
         if let why = parentRefusal(Platform.Sockets.peerToken(parent), parent: host, state: offered) { quit("refused the host: \(why); nothing taken") }
@@ -219,13 +221,13 @@ public enum MacHandoverKeeper {
         if let why = refusal(Platform.Sockets.peerToken(theirsNow), pid: host, cdhash: own, what: "the image at the host's pid") {
             quit("refused the new image: \(why); nothing handed over")
         }
-        guard sayHolding(theirsNow) else { quit("the new image has gone") }
+        guard sayHolding(channel) else { quit("the new image has gone") }
         // The new image proves this keeper in turn (the review's N2): a pair made here, now, one end given to it and held
         // until it says it holds it, the parcel over the other.
         guard let (keeps, gives) = Platform.Sockets.pair(type: Platform.Sockets.stream),
               Platform.Sockets.sendDescriptor(gives, over: theirsNow) else { quit("its own pair didn't reach the new image") }
         limitIO(keeps, keeperLimit)
-        guard awaitHolding(keeps, keeperLimit) else { quit("the new image didn't take its pair (it refuses a keeper it can't prove)") }
+        guard awaitHolding(theirsNow, keeperLimit) else { quit("the new image didn't take its pair (it refuses a keeper it can't prove)") }
         Sys.close(gives)
         guard send(parcel.data, descriptors: parcel.descriptors, over: keeps) else { quit("the state didn't reach the new image") }
         // Alive until the new image has read the parcel and closed its end, within the limit; then its copies close with
@@ -271,8 +273,9 @@ public enum MacHandoverKeeper {
         guard let (mine, theirs) = Platform.Sockets.pair(type: Platform.Sockets.stream) else { return .failure(Refused("no pair (errno \(errno))")) }
         defer { Sys.close(mine) }
         limitIO(mine, limit)
+        limitIO(channel, limit)
         let sent = Platform.Sockets.sendDescriptor(theirs, over: channel)
-        let held = sent && awaitHolding(mine, limit)
+        let held = sent && awaitHolding(channel, limit)
         Sys.close(theirs)
         guard held else { return .failure(Refused("the keeper didn't take this image's pair (errno \(errno))")) }
         guard wait(readable: mine, for: limit) else { return .failure(Refused("the keeper's pair didn't come within the limit (errno \(errno))")) }
@@ -282,7 +285,7 @@ public enum MacHandoverKeeper {
             Sys.close(kept)
             return .failure(Refused(why))
         }
-        guard sayHolding(kept) else {
+        guard sayHolding(mine) else {
             Sys.close(kept)
             return .failure(Refused("the keeper has gone"))
         }
