@@ -49,6 +49,15 @@ public struct ApprovalVoice: Sendable {
     /// Whether a peer runs with the Hardened Runtime (`Platform.CodeIdentity.isHardened`; unreadable is no; a test's own).
     public var hardened: @Sendable (Platform.PeerToken) -> Bool
 
+    /// The installed command line's cdhash the server holds for this rule, read once at its start (item 3's owed half,
+    /// the node on the Mac's design, "The anchor", check 3): today `<nodeRoot>/bin/vibeswitcher`'s (`cdhashOf`); nil
+    /// when it can't be read. `own` (the server's running cdhash, `Platform.CodeIdentity.ownCdhash`) and `pins` (the
+    /// node's record) are read by nothing yet.
+    public static func commandLineAnchor(nodeRoot: String?, own: Data?, pins: Result<NodePins, NodePins.Refused>,
+                                         cdhashOf: (String) -> Data? = { Platform.CodeIdentity.cdhash(atPath: $0) }) -> Data? {
+        nodeRoot.flatMap { cdhashOf(NodeFolders.join($0, "bin/\(NodeFolders.installedCLI)")) }
+    }
+
     public init(authenticator: any Authenticator, commandLine: Data?,
                 runs: @escaping @Sendable (Platform.PeerToken, Data) -> Bool = { Platform.CodeIdentity.runs($0, cdhash: $1) },
                 hardened: @escaping @Sendable (Platform.PeerToken) -> Bool = { Platform.CodeIdentity.isHardened($0) == true }) {

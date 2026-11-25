@@ -45,6 +45,10 @@ extension Platform {
         /// processes they start pass `isHardened`. nil when it can't be read, and on Linux.
         public static func isSignedHardened(atPath path: String) -> Bool? { System.isSignedHardened(atPath: path) }
 
+        /// The cdhash of the code this process runs, as it runs now (Security's `SecCodeCopySelf`: the running slice's
+        /// code directory hash, never read from a file); nil when it has none or can't be read. Linux: nil.
+        public static func ownCdhash() -> Data? { System.ownCdhash() }
+
         /// The architecture the process `pid` runs (the slice of a universal binary it was started from); nil when it
         /// can't be read. Linux: nil.
         public static func architecture(of pid: pid_t) -> Architecture? { System.architecture(of: pid) }

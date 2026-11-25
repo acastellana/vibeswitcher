@@ -238,6 +238,16 @@ public enum HostImages {
     /// host is a node host (`HostServer.isMacNodeHost`) and none but a scratch host runs a server child.
     public static let isCheckedMacNode = false
 
+    /// The Mac's node host's server child (the node on the Mac's design, "The anchor", check 2): the cdhash the child is
+    /// started and checked by, from `server` (its `--server` file, read by `cdhashOf`), or why not. Today: the file's
+    /// own cdhash, whatever it is. `own` (this host's running cdhash, `Platform.CodeIdentity.ownCdhash`) and `pins`
+    /// (the node's record) are read by nothing yet. Asked only by a checked Mac node start (`isCheckedMacNode`, never yet).
+    public static func macServerPin(server: String, own: Data?, pins: Result<NodePins, NodePins.Refused>,
+                                    cdhashOf: (String) -> Data? = { Platform.CodeIdentity.cdhash(atPath: $0) }) -> Result<Data, Refused> {
+        guard let cdhash = cdhashOf(server) else { return .failure(Refused("\(server) has no code signature to check it by (no cdhash)")) }
+        return .success(cdhash)
+    }
+
     /// The Mac: why this host may not run a `--server` child, or nil. Its child's connections through the connector
     /// are the app's (`.app`), so a host given `--server PATH` by anyone would make PATH the app: refused for the user's
     /// host (`ownsLaunchers`) and for any host on the account's own locks (the app's `~/.vibeswitcher/host.lock` and the

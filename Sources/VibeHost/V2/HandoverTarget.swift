@@ -89,6 +89,15 @@ public enum HandoverTarget {
         return .success(Build(info: info, folder: folder))
     }
 
+    /// The Mac's node host: why a switch or a rollback to the host image at `path` is refused, or nil (the node on the
+    /// Mac's design, "The anchor", check 4). Today: nil, any executable (the Mac's by-path handover). `pins` (the node's
+    /// record) and `cdhashOf` (the file's cdhash, this Mac's slice) are read by nothing yet. Asked only by a checked Mac
+    /// node host (`HostImages.isCheckedMacNode`, never yet).
+    public static func macPinned(_ path: String, pins: Result<NodePins, NodePins.Refused>,
+                                 cdhashOf: (String) -> Data? = { Platform.CodeIdentity.cdhash(atPath: $0) }) -> Refused? {
+        nil
+    }
+
     /// `build`'s `vibeswitcher-server`, loaded into a sealed copy and checked against the same `build-info`: the copy,
     /// or why not (nothing left open).
     public static func server(of build: Build) -> Result<Platform.ProcessSelf.SealedCopy, Refused> {

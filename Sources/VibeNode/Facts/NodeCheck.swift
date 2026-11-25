@@ -67,6 +67,8 @@ public enum NodeCheck {
         /// runs the installed build's server code (its cdhash, Security's dynamic check) with the Hardened Runtime; nil
         /// when it can't be told.
         public var code: Bool?
+        /// Why `code` is false or nil, when the check said (the node's record refused, or the code it names no build).
+        public var codeWhy: String?
 
         public init(pid: pid_t, dumpable: Bool?, parent: pid_t?, cgroup: [String]?, session: pid_t?, code: Bool? = nil) {
             self.pid = pid
@@ -96,6 +98,59 @@ public enum NodeCheck {
         return (parts.dropLast() + [BuildInfo.server]).joined(separator: "/")
     }
 
+    /// The Mac's answer about the listener's code (`macServerCode`).
+    public enum MacCode: Equatable, Sendable {
+        /// A server of an installed build, with the Hardened Runtime.
+        case runs
+        /// Not: why.
+        case other(String)
+        /// Can't be told: why.
+        case unknown(String)
+
+        /// As `Listener.code` holds it.
+        public var told: Bool? {
+            switch self {
+            case .runs: return true
+            case .other: return false
+            case .unknown: return nil
+            }
+        }
+
+        /// Why it isn't `.runs`.
+        public var why: String? {
+            switch self {
+            case .runs: return nil
+            case .other(let why), .unknown(let why): return why
+            }
+        }
+    }
+
+    /// The Mac: whether the process `token` names runs an installed build's server with the Hardened Runtime. Today's
+    /// anchor: the server beside the job's program (`job`, as `launchctl print` names it; `installedServer` under
+    /// `prefix`, both resolved by `resolve`), by the running slice's cdhash (`runsFile`). `pins` (the node's record,
+    /// `NodePins.read`), `runs` (a token against a cdhash) are read by nothing yet. Every reader is a parameter, the
+    /// system's by default.
+    public static func macServerCode(token: Platform.PeerToken, job: NodeAgent.Printed?, prefix: String?,
+                                     pins: Result<NodePins, NodePins.Refused>,
+                                     runs: (Platform.PeerToken, Data) -> Bool = { Platform.CodeIdentity.runs($0, cdhash: $1) },
+                                     runsFile: (Platform.PeerToken, String) -> Bool = { Platform.CodeIdentity.runs($0, executable: $1) },
+                                     hardened: (Platform.PeerToken) -> Bool? = Platform.CodeIdentity.isHardened,
+                                     resolve: (String) -> String? = NodeCheck.resolved) -> MacCode {
+        guard let program = job?.program, let prefix, let host = resolve(program) else { return .unknown("the job's program can't be read") }
+        guard let server = installedServer(host: host, prefix: prefix) else { return .other("the job's program isn't an installed build's host") }
+        // The server file itself, not a link elsewhere (the review of 2026-11-21).
+        guard resolve(server) == server else { return .other("the server beside the job's program is a link") }
+        guard runsFile(token, server) else { return .other("it doesn't run the server beside the job's program") }
+        return hardened(token) == true ? .runs : .other("it doesn't run with the Hardened Runtime")
+    }
+
+    /// `path` with its links resolved (`realpath`); nil when it can't be.
+    public static func resolved(_ path: String) -> String? {
+        guard let real = realpath(path, nil) else { return nil }
+        defer { free(real) }
+        return String(cString: real)
+    }
+
     /// `codeIdentity`: the Mac's form (`Platform.CodeIdentity.isAvailable`): the listener's code (`Listener.code`) in
     /// place of its dumpable state, and no cgroup (the Mac has none: the parent and the session hold it to the host).
     public static func refusal(_ listener: Listener, mode: Mode, expectedParent: pid_t?, parentSession: pid_t?,
@@ -104,7 +159,9 @@ public enum NodeCheck {
             switch listener.code {
             case true?: break
             case false?: return "the process listening on the server's socket (pid \(listener.pid)) doesn't run the installed build's server code with the Hardened Runtime: not the node's server"
+                + (listener.codeWhy.map { " (\($0))" } ?? "")
             case nil: return "whether the process listening on the server's socket (pid \(listener.pid)) runs the installed build's server code can't be told"
+                + (listener.codeWhy.map { ": \($0)" } ?? "")
             }
         } else {
             switch listener.dumpable {

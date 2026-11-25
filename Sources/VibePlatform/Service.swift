@@ -68,5 +68,11 @@ extension Platform {
         /// `VIBESWITCHER_HOME` unset (its root then follows `HOME`, the user database's), or a folder of its own (the
         /// Mac), which it names in `VIBESWITCHER_HOME`.
         public static var nodeRootIsTheAccountRoot: Bool { System.nodeRootFolder == ".vibeswitcher" }
+
+        /// Where the user's node's record of its builds' cdhashes lives, as the folders below `/` and the file's name,
+        /// for `Platform.Files.readRootRecord`: the Mac's `/Library/Application Support/VibeSwitcher/node-<uid>.pins`,
+        /// written by the install's administrator step alone (the node on the Mac's design, "The anchor"). nil on
+        /// Linux, which has no such record. Fixed here: no environment variable, flag or file chooses it.
+        public static func nodePinsRecord(uid: uid_t) -> [String]? { System.nodePinsRecord(uid: uid) }
     }
 }

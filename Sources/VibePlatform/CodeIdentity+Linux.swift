@@ -35,6 +35,8 @@ extension Platform.CodeIdentity {
         static func architecture(of pid: pid_t) -> Architecture? { nil }
 
         /// nil: no code signature, so no code directory and no hash of one.
+        static func ownCdhash() -> Data? { nil }
+
         static func cdhash(atPath path: String, architecture: Architecture? = nil) -> Data? { nil }
     }
 }

@@ -824,6 +824,11 @@ public final class HostServer {
         }
         // On Linux from the target's sealed copy, through sealed memory, writing no file (V2/HandoverMemory.swift).
         if !Platform.CodeIdentity.isAvailable { return handOverThroughMemory(to: executable, reply: reply) }
+        // The Mac's checked node host (never yet): only to a build the node's record pins; the new image's own start
+        // then finds its row by the code it runs (`HostImages.macServerPin`).
+        if isMacNodeHost, let why = HandoverTarget.macPinned(executable, pins: NodePins.read()) {
+            return reply(.error("Couldn't hand over: \(why.description)."))
+        }
         handingOver = true
         let path = config.handoverPath
         let fail: (Error) -> Void = { [weak self] error in

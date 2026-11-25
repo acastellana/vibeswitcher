@@ -371,9 +371,17 @@ public final class ServerChild {
     /// each start from the file once its cdhash is still that (`Image.checked`).
     public static func start(_ launch: Launch, server: HostServer, loaded: Platform.ProcessSelf.SealedCopy? = nil) -> ServerChild? {
         if Platform.CodeIdentity.isAvailable {
-            guard let cdhash = Platform.CodeIdentity.cdhash(atPath: launch.image) else {
-                say(server, "no server child: \(launch.image) has no code signature to check it by (no cdhash)")
+            // A checked Mac node start (never yet) takes the server's cdhash from the node's record, by its own build.
+            let pinned = HostImages.isCheckedMacNode
+                ? HostImages.macServerPin(server: launch.image, own: Platform.CodeIdentity.ownCdhash(), pins: NodePins.read())
+                : Platform.CodeIdentity.cdhash(atPath: launch.image).map { .success($0) }
+                    ?? .failure(HostImages.Refused("\(launch.image) has no code signature to check it by (no cdhash)"))
+            let cdhash: Data
+            switch pinned {
+            case .failure(let why):
+                say(server, "no server child: \(why.description)")
                 return nil
+            case .success(let read): cdhash = read
             }
             let child = ServerChild(server: server, image: .checked(path: launch.image, cdhash: cdhash), launch: launch)
             server.queue.async {
