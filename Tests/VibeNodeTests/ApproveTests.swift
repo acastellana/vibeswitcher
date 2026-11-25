@@ -304,7 +304,8 @@ extension ApproveTests {
         let subjects = (listed["items"]?.array ?? []).compactMap { $0["subject"]?.string }
         #expect(!subjects.contains(planted.path) && !subjects.contains(railed.path), "\(subjects)")
         let own = (listed["own"]?.array ?? []).map { "\($0["text"]?.string ?? "") \($0["command"]?.string ?? "")" }
-        #expect(own.contains { $0.contains("rules to record") && $0.contains("vibeswitcher config held \(railed.path)") }, "\(own)")
+        // Named with the card's own command (`CardStore.Card.settle`), as `status` and the page name it.
+        #expect(own.contains { $0.contains("rules to record") && $0.contains(railed.path) && $0.contains("vibeswitcher config accept local:card:") }, "\(own)")
         // Bases that didn't move list nothing.
         #expect(!(listed["items"]?.array ?? []).contains { $0["kind"]?.string == "base.accept" }, "\(listed)")
         let bases = try await list(world, only: ["base"])
@@ -359,9 +360,9 @@ extension ApproveTests {
         _ = await world.ask("config.held", ["folder": .string(floorless.path)], action: nil)
         let listed = try await list(world)
         let subjects = (listed["items"]?.array ?? []).compactMap { $0["subject"]?.string }
-        let own = (listed["own"]?.array ?? []).compactMap { $0["command"]?.string }
-        #expect(!subjects.contains(based.path) && own.contains("vibeswitcher config held \(based.path)"), "\(subjects) \(own)")
-        #expect(!subjects.contains(floorless.path) && own.contains("vibeswitcher config held \(floorless.path)"), "\(subjects) \(own)")
+        let own = (listed["own"]?.array ?? []).map { "\($0["text"]?.string ?? "") \($0["command"]?.string ?? "")" }
+        #expect(!subjects.contains(based.path) && own.contains { $0.contains(based.path) && $0.contains("vibeswitcher config accept local:card:") }, "\(subjects) \(own)")
+        #expect(!subjects.contains(floorless.path) && own.contains { $0.contains(floorless.path) && $0.contains("vibeswitcher config accept local:card:") }, "\(subjects) \(own)")
         #expect(subjects.contains(world.repo), "\(listed)")
 
         // Between the list and the code, the vault's record of the repo's rails changes (another accept, a newer

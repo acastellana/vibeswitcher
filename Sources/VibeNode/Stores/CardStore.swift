@@ -112,6 +112,27 @@ public final class CardStore: @unchecked Sendable {
 
         public var isOpen: Bool { closed == nil }
 
+        /// The one command that settles this card, for `status`, `approve`'s set-aside lines and the page alike: `vibeswitcher
+        /// approve` when its batch takes it (held config that records no rules; a base move from a recorded or given
+        /// commit), else the card's own accept, which prints the short card and asks one code (`config accept CARD`,
+        /// `base accept CARD`); a question, approval or plugin's card is answered (`answer CARD TEXT`, or one of its
+        /// words). Nil once closed.
+        public var settle: String? {
+            guard isOpen else { return nil }
+            switch kind {
+            case .configHeld:
+                return config?.recordsRules == true || config?.firstLook == true ? "vibeswitcher config accept \(id)" : "vibeswitcher approve"
+            case .baseMove:
+                guard let base else { return "vibeswitcher base show \(root)" }
+                return [.recorded, .given].contains(base.fromIs) && base.from != nil && base.from != base.to ? "vibeswitcher approve" : "vibeswitcher base accept \(id)"
+            case .plugin:
+                let words = plugin?.actions.map(\.word) ?? []
+                return "vibeswitcher answer \(id) " + (words.isEmpty ? "WORD" : words.joined(separator: "|"))
+            case .question, .approval:
+                return "vibeswitcher answer \(id) TEXT"
+            }
+        }
+
         /// As `cards.json` keeps it (`CardKeep`): every field but `code`, which is its id's (`NodeIds.code(card:)`, a
         /// digest of the id, no secret: the voice rule is what keeps a code from any sender but the user's terminal) and
         /// is made again from the id as it's read, never taken from the file.
@@ -144,7 +165,7 @@ public final class CardStore: @unchecked Sendable {
             case .approval, .baseMove: return true
             // Something held (its own, or the home folder's it leaves to that card): no worker, verifier or merge until
             // accepted. A card with nothing held (rails to record, a first look owed) holds nothing up.
-            case .configHeld: return config.map { !$0.items.isEmpty || $0.sharedHome != nil } ?? true
+            case .configHeld: return config.map { $0.holdsWork ?? (!$0.items.isEmpty || $0.sharedHome != nil) } ?? true
             // The agent waits on it, not the lead's work.
             case .plugin: return false
             }

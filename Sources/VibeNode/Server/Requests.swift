@@ -982,15 +982,13 @@ public final class Requests: @unchecked Sendable {
 
     /// Open cards counted by kind, as `status` gives them.
     static func counts(_ counts: [CardStore.Kind: Int], open: [CardStore.Card] = []) -> WireKinds.Status.CardCounts {
-        // What `vibeswitcher approve` sets aside (`ApproveRequest`): held config whose accept records the project's rules,
-        // and a base move from a commit the node hadn't recorded.
-        let configOwn = open.filter { $0.kind == .configHeld && $0.config?.recordsRules == true }.map(\.root)
-        let baseOwn = open.filter { card in
-            guard card.kind == .baseMove, let shown = card.base, shown.from != shown.to else { return false }
-            return !([.recorded, .given].contains(shown.fromIs) && shown.from != nil)
-        }.map(\.root)
+        // What `vibeswitcher approve` sets aside: held config and base moves whose settling command (`settle`) is their own.
+        let own = open.filter { [.configHeld, .baseMove].contains($0.kind) }.compactMap { card -> WireKinds.Status.CardCounts.Own? in
+            guard let settle = card.settle, settle != "vibeswitcher approve" else { return nil }
+            return .init(folder: card.root, kind: card.kind == .configHeld ? "config" : "base", settle: settle)
+        }.sorted { ($0.folder, $0.settle) < ($1.folder, $1.settle) }
         return .init(questions: counts[.question] ?? 0, approvals: counts[.approval] ?? 0, config: counts[.configHeld] ?? 0, base: counts[.baseMove] ?? 0,
-                     configOwn: configOwn.isEmpty ? nil : Array(Set(configOwn)).sorted(), baseOwn: baseOwn.isEmpty ? nil : Array(Set(baseOwn)).sorted())
+                     own: own.isEmpty ? nil : own)
     }
 
     static func word(_ state: HostLink.State) -> String {

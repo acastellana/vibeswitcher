@@ -432,6 +432,8 @@ extension CardStore.Card {
         fields["notice"] = text(notice)
         fields["at"] = .date(at)
         fields["blocking"] = .bool(isBlocking)
+        // The one command that settles it (`settle`): what the page, `status` and `approve` say alike.
+        if let settle { fields["settle"] = .string(settle) }
         // The user's own words, drafted on a page: shown as theirs, inert on the command line like every other field.
         fields["draft"] = draft.map(Self.draftValue) ?? .null
         if let question {

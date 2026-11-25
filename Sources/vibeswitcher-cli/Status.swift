@@ -221,12 +221,15 @@ enum StatusCommand {
     /// `base show FOLDER`), and the questions and approvals to answer. Nil when nothing waits.
     static func waitingLine(_ cards: WireKinds.Status.CardCounts?) -> String? {
         guard let cards else { return nil }
-        let ownConfig = cards.configOwn ?? [], ownBase = cards.baseOwn ?? []
+        let own = cards.own ?? []
         var parts: [String] = []
-        let batch = max(0, (cards.config ?? 0) - ownConfig.count) + max(0, (cards.base ?? 0) - ownBase.count)
+        let batch = max(0, (cards.config ?? 0) + (cards.base ?? 0) - own.count)
         if batch > 0 { parts.append("\(batch) to accept: `vibeswitcher approve`") }
-        for folder in ownConfig { parts.append("rules to confirm in \(inert((folder as NSString).lastPathComponent)): `vibeswitcher config held \(inert(folder))`") }
-        for folder in ownBase { parts.append("a base move in \(inert((folder as NSString).lastPathComponent)): `vibeswitcher base show \(inert(folder))`") }
+        // Each set aside with its card's own command (`CardStore.Card.settle`, the one the page and `approve` say too).
+        for card in own {
+            let what = card.kind == "config" ? "rules to confirm" : "a base move"
+            parts.append("\(what) in \(inert((card.folder as NSString).lastPathComponent)): `\(inert(card.settle))`")
+        }
         let answers = (cards.questions ?? 0) + (cards.approvals ?? 0)
         if answers > 0 { parts.append("\(answers) to answer: `vibeswitcher questions`") }
         return parts.isEmpty ? nil : "waiting on you: " + parts.joined(separator: "; ")

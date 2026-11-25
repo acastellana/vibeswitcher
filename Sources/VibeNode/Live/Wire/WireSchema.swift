@@ -308,8 +308,10 @@ public enum WireSchema {
                                                              field("scopes", strings)]),
             shape("node.cards", from: "Requests.counts", [field("questions", .int), field("approvals", .int), field("config", .int),
                                                          field("base", .int),
-                                                         // What `vibeswitcher approve` sets aside, by folder (each its own command).
-                                                         optional("configOwn", strings), optional("baseOwn", strings)]),
+                                                         // The cards `vibeswitcher approve` sets aside, each its folder and the one command
+                                                         // that settles it (`CardStore.Card.settle`).
+                                                         optional("own", .list(.shape("node.cards.own")))]),
+            shape("node.cards.own", from: "Requests.counts", [field("folder", .string), field("kind", .string), field("settle", .string)]),
             shape("node.accepted", from: "Requests.Accepted.value", [
                 field("kind", .string), field("action", Kind.string.orNull), field("subject", Kind.string.orNull), field("at", .date),
                 field("pid", .int), field("cgroup", Kind.string.orNull), field("commandLine", strings)]),
@@ -404,7 +406,9 @@ public enum WireSchema {
                 optional("facts", strings),
                 // What an acting page names to answer or accept it (`CardStore.Card.seen`); absent from a server before
                 // acting from the page (its cards are never acted on from a page: no `seen` to name).
-                optional("seen", .string)]),
+                optional("seen", .string),
+                // The one command that settles it, in a terminal (`CardStore.Card.settle`); none once closed.
+                optional("settle", .string)]),
             // A feature plugin's card (`PluginCard`, Plugins/PluginWire.swift, 2026-11-22): one shape for every plugin.
             shape("card.plugin", from: "PluginCard.value", [
                 field("plugin", .string), field("request", .string), field("session", .string), field("asker", .string),
