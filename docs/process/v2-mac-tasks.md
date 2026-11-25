@@ -374,9 +374,12 @@ or decided. Done on Linux, tested on both systems (`ApprovalJudgmentTests`, `App
    node's lock through its own descriptor, and only a checked node starts on the node's lock by file (I2); at its start
    a checked node takes its environment from a fixed list and closes the descriptors it was given (but the keeper's),
    umask 077, folder `/`, no core files; the handshake's flake (8 of 20 under load) found and fixed (the design's "The
-   handshake"). *Step 5 owes* (new): how the job gives the sessions `SSH_AUTH_SOCK` and the user's `PATH` (the reset
-   drops both, and a plist's environment is a wrapper's to replace); `NodeAgent` writes `SWIFT_BACKTRACE` into the plist,
-   which the reset drops (harmless, but the plist need not carry it). *What step 5 (the LaunchAgent, next) can rely on:* the job's program, started
+   handshake"). *Round 2's last changes:* the node's lock known by the descriptor a host opened too (another letter case,
+   a dangling link), every open descriptor closed at the start (not a range up to a lowered limit), the keeper's limit
+   while it holds the state tested end to end, the new image's wait for its keeper limited. *Step 5 owes* (new): what
+   the sessions on a checked node lose under the reset: `SSH_AUTH_SOCK`, the user's `PATH`, `LANG`, `LC_ALL`, `LC_CTYPE`,
+   `__CF_USER_TEXT_ENCODING`, and they inherit umask 077 and a hard `RLIMIT_CORE` 0 (a plist's environment is a
+   wrapper's to replace, so it is no answer); `NodeAgent` writes `SWIFT_BACKTRACE` into the plist, which the reset drops. *What step 5 (the LaunchAgent, next) can rely on:* the job's program, started
    as the unit's form, `<builds>/<commit>/bin/vibeswitcher-host --node --node-root <builds>/<commit> --server
    <builds>/<commit>/bin/vibeswitcher-server`, on the node's data root's lock (`<home>/.vibeswitcher/v2/node/host.lock`,
    its default), either refuses with one line on stderr (exit 1) or is the pinned host of its row with that row's server

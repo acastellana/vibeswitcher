@@ -389,13 +389,18 @@ anywhere is parsed once, by one strict parser (`HostImages.CheckedCommandLine.pa
 not filtered: `HOME`, `USER`, `LOGNAME` and `SHELL` from the user database, `VIBESWITCHER_HOME` the data root, the
 descriptor limit it carries across its own exec, `PATH` the system's (`/usr/bin:/bin:/usr/sbin:/sbin`) and `TMPDIR`
 the system's per-user folder (`confstr(_CS_DARWIN_USER_TEMP_DIR)`); every other variable is gone (`SSH_AUTH_SOCK`,
-`DYLD_*`, `SWIFT_*`, `Malloc*`, the locale, `XPC_*`). Every descriptor above 2 that isn't close-on-exec is closed but the
-keeper channel; `umask` 077; the working folder `/`; no core files (`RLIMIT_CORE` 0). What the reset can't undo:
+`DYLD_*`, `SWIFT_*`, `Malloc*`, the locale, `XPC_*`). Every open descriptor above 2 that isn't close-on-exec, as the
+kernel lists them (`PROC_PIDLISTFDS`, so one above a limit the starter lowered too), is closed but the keeper channel;
+`umask` 077; the working folder `/`; no core files (`RLIMIT_CORE` 0, soft and hard)
+(`MacCheckedLastTests/theResetClosesWhatItWasGivenAboveALoweredLimit`). What the reset can't undo:
 variables the loader, the Swift runtime and malloc read before `main` have already acted on this process (the
 Hardened Runtime refuses `DYLD_*`; the rest are debugging aids); the reset keeps them from its children. The other
-resource limits stay as given (one set low only ends the node). The sessions lose `SSH_AUTH_SOCK` and the user's
-`PATH` from the host's environment: step 5 owes how the job gives them (the plist's own environment is a wrapper's to
-replace, so it is no answer).
+resource limits stay as given (one set low only ends the node). What the sessions on a checked node lose under the
+reset, for step 5 and the switch-on review: `SSH_AUTH_SOCK`, the user's `PATH`, `LANG`, `LC_ALL`, `LC_CTYPE` and
+`__CF_USER_TEXT_ENCODING` from the host's environment; and they inherit its umask 077 and its hard `RLIMIT_CORE` 0 (no
+session can raise it). `NodeAgent` writes `SWIFT_BACKTRACE` into the plist, which the reset drops. Step 5 owes how the
+job gives the sessions what they need of these (the plist's own environment is a wrapper's to replace, so it is no
+answer).
 
 **The switch's proof, both ways and bound to the node (the re-check, I2).** A keeper that proves only its own code,
 and a new image that proves only that its keeper is its child running its code, let whoever starts the genuine image
@@ -413,9 +418,16 @@ park any state first. So:
   Anything else is refused with every descriptor closed (the image exits).
 - (c) **Only a checked node starts on the node's lock**, by file: a host that isn't one, whose lock is the data root's
   `host.lock` by device and inode (or, before it exists, whose folder is the data root's by device and inode and whose
-  name is `host.lock`), doesn't start. This is one check in place of refusing its test flags one by one.
-- What (b) proves is that the sender held the node's lock; who the sender was rests on (a) (pinned host code) and (c)
-  (no host but a checked node holds that lock). The scratch hosts' `--handover-test-checked-parcel` is gone from the
+  name is `host.lock`), doesn't start; and once its lock is open, the descriptor itself is compared with the node's
+  `host.lock` by device and inode (`HostImages.heldLockAllowed`, `HostServer.Config.heldLockIsAllowed`), so a lock that
+  made the node's by opening it (another letter case, a dangling link) is refused, the descriptor closed
+  (`MacCheckedLastTests/aHostOpeningTheNodesLockByAnotherNameIsRefused`). This is one check in place of refusing its
+  test flags one by one. What no check at the start covers: a data root renamed into place after a host started on a
+  lock in it (that host holds a lock that becomes the node's); this is inherent to a check made at the start.
+- What (b) proves is that the sender held the node's lock. Who the sender was rests on (a), the mark (only a checked
+  node's host writes `fromCheckedNode`, and the keeper takes a marked parcel only from a parent running a host the
+  record pins), and on (c): a host that isn't a checked node can't start on the node's lock as it is at its start,
+  by its path or by the descriptor it opened (a root renamed in later aside). The scratch hosts' `--handover-test-checked-parcel` is gone from the
   sources: it forged the mark on genuine code.
 - **The handshake (the flake's cause).** Every pair is passed by the process that made it, which keeps its own copy of
   the end it passed until the receiver says, by a byte over the socket it came on (whose far end the receiver alone
@@ -431,6 +443,17 @@ park any state first. So:
   against the installed record), so the re-check's route 2 (a scratch host of the pinned build given test flags) is
   tested only as far as the acceptance function (`mayTakeHandover`, `nodeLockRefusal`), and route 1 (a parent that is
   no host) end to end.
+- **Why no end-to-end test shows a marked parcel refused by an unchecked image, until a record exists.** A parcel is
+  marked only by a host holding a checked start (`HostServer.handoverState`: `fromCheckedNode` when `config.checkedNode`
+  is set), which only the installed record gives; and a keeper passes a marked parcel on only from a parent running a
+  host that record pins. With no record, no marked parcel reaches any image, so the refusal can't be reached end to end
+  without a seam that forges the mark on genuine code, which the re-check removed. The property is carried by
+  `HostImages.mayTakeHandover`'s first condition (a marked state and no checked start: refused), called for every Mac
+  handover that isn't a checked node's switch (`main.swift`, the `mayTakeHandover(state, viaKeeper: kept != nil, …)`
+  call), and tested by `MacCheckedFixRoundTests/aCheckedNodesStateGoesOnlyToACheckedStartThroughAKeeper`.
+- **N6 once the keeper holds the state**: a keeper whose new image never asks exits at its limit with everything it
+  held closed, and the session ends (`MacCheckedLastTests/aKeeperHoldingTheStateWithNoNewImageExitsByItsLimit`, a
+  scratch host's `--handover-test-keeper-limit 3`).
 
 What stays: a file swapped in the short window between the keeper's proof (2) and the exec runs at the job's pid. It
 gets nothing, but the old image is gone by then: the keeper closes everything and the sessions end. And a wrapper that
