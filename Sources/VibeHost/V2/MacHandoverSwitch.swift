@@ -30,6 +30,9 @@ extension HostServer {
         return .success(pinned)
     }
 
+    /// What the new image of a switch to `target` is started with, besides the handover's own flags (seam: as started).
+    static func keeperArguments(started: [String], target: String, checkedNode: Bool) -> [String] { started }
+
     /// Hands over to `executable` through a keeper proven to run `expected` (`MacHandoverKeeper`): the keeper started
     /// and proven off the queue (the sessions carry on meanwhile); then, on the queue, the server child ended, the state
     /// built and parked with the keeper, and the exec with only the channel to it. Anything failing before the exec
@@ -71,9 +74,9 @@ extension HostServer {
                     self.sessions.values.forEach { $0.suspendParser() }
                     parsersStopped = true
                     // No fallback: going back would be an unchecked exec by path. The state is the keeper's.
-                    let arguments = self.config.arguments + ["--handover", self.config.handoverPath,
-                                                             MacHandoverKeeper.channelFlag, String(keeper.channel),
-                                                             MacHandoverKeeper.pidFlag, String(keeper.pid)]
+                    let arguments = Self.keeperArguments(started: self.config.arguments, target: executable, checkedNode: self.config.checkedNode != nil)
+                        + ["--handover", self.config.handoverPath, MacHandoverKeeper.channelFlag, String(keeper.channel),
+                           MacHandoverKeeper.pidFlag, String(keeper.pid)]
                     throw HostHandover.exec(executable, arguments: arguments, inherit: [keeper.channel])
                 } catch {
                     if parsersStopped { self.sessions.values.forEach { $0.resumeParser() } }

@@ -168,3 +168,42 @@ struct MacKeeperTargetTests {
         #expect(reads == 1, "the target's file was read \(reads) times")
     }
 }
+
+/// The advisor's check: a checked node's switch to another build. The new image is started with the target build's
+/// `--node-root` and `--server` (its folder, `<folder>/bin/…`, as the unit and the agent start a build), so its own
+/// checked start finds its row and that row's server; the lock stays the node's data root's. Red before: the new image
+/// got the old build's `--server`, which isn't its row's, and refused: no switch to another build could pass.
+extension MacKeeperTargetTests {
+    @Test func aSwitchGivesTheNewImageItsOwnBuildsFolders() throws {
+        let scratch = Scratch()
+        let home = scratch.url("vskt").path
+        let builds = (Platform.Service.nodeRoot(accountHome: home) as NSString).deletingLastPathComponent + "/builds"
+        func folder(_ commit: String, server program: String) throws -> String {
+            let folder = builds + "/" + commit
+            try FileManager.default.createDirectory(atPath: folder + "/bin", withIntermediateDirectories: true)
+            try FileManager.default.copyItem(atPath: program, toPath: folder + "/bin/" + BuildInfo.server)
+            return folder
+        }
+        let old = try folder(String(repeating: "a", count: 40), server: "/usr/bin/true")
+        let new = try folder(String(repeating: "c", count: 40), server: "/bin/echo")
+        let oldHost = Data(repeating: 0x11, count: 20), newHost = Data(repeating: 0x22, count: 20)
+        func row(_ commit: Character, host: Data, folder: String) throws -> NodePins.Build {
+            NodePins.Build(commit: String(repeating: commit, count: 40), host: host,
+                           server: try #require(Platform.CodeIdentity.cdhash(atPath: folder + "/bin/" + BuildInfo.server)), cli: Data(repeating: 0xc1, count: 20))
+        }
+        let pins = Result<NodePins, NodePins.Refused>.success(NodePins(uid: getuid(), builds: [try row("a", host: oldHost, folder: old),
+                                                                                               try row("c", host: newHost, folder: new)]))
+        let lock = (Platform.Service.nodeRoot(accountHome: home) as NSString).appendingPathComponent("host.lock")
+        let started = ["--socket", "/s", "--lock", lock, HostImages.nodeFlag, HostImages.nodeRootFlag, old, "--server", old + "/bin/" + BuildInfo.server]
+        if case .failure(let why) = HostImages.macNodeStart(arguments: ["vibeswitcher-host"] + started, lockPath: lock, own: oldHost, pins: pins, accountHome: home) {
+            Issue.record("the old build's own start refused: \(why)")
+        }
+        let given = HostServer.keeperArguments(started: started, target: new + "/bin/vibeswitcher-host", checkedNode: true)
+        if case .failure(let why) = HostImages.macNodeStart(arguments: ["vibeswitcher-host"] + given, lockPath: lock, own: newHost, pins: pins, accountHome: home) {
+            Issue.record("the new image's start refused what the switch gave it: \(why)")
+        }
+        #expect(given.filter { $0 == "--server" }.count == 1 && given.filter { $0 == HostImages.nodeRootFlag }.count == 1, "\(given)")
+        // A scratch host's switch (no checked node) keeps what it was started with.
+        #expect(HostServer.keeperArguments(started: ["--server", "/x"], target: new + "/bin/vibeswitcher-host", checkedNode: false) == ["--server", "/x"])
+    }
+}
