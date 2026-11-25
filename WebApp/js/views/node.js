@@ -115,8 +115,10 @@ export function updatesGroup(update) {
 // part names the group that says why), `working` when only a limit holds work back, `calm` when nothing is wrong.
 export function nodeVerdict(node, { accept = 0, cards = 0 } = {}) {
   const asked = [];
+  // What one accept settles lists the held cards too (approve.list): counted there, never again as cards. A card no
+  // project holds and no group lists (a page that doesn't approve) is said without a link: no group here shows it.
   if (accept) asked.push({ words: t('nvAccept', { n: accept }), group: 'approve' });
-  if (cards) asked.push({ words: t('nvCards', { n: cards }), group: accept ? 'approve' : null });
+  else if (cards) asked.push({ words: t('nvCards', { n: cards }), group: null });
   const notices = node.notices?.length || 0;
   if (notices) asked.push({ words: t('placeNotices', { n: notices }), group: 'notices' });
   if (node.host && node.host.state !== 'connected') asked.push({ words: t('nvHost'), group: 'host' });

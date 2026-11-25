@@ -184,6 +184,8 @@ test('U15: something waiting on you makes the line ask, in the asking colour, wi
   const node = healthyNode();
   const state = { node, cards: new Map([['local:card:x', { id: 'local:card:x', kind: 'question', project: 'local:project:gone', open: true }]]) };
   assert.deepEqual(nodeVerdict(node, { cards: 1 }), { tone: 'asked', head: 'This node needs you:', parts: [{ words: '1 card for you', group: null }] });
+  // A held card the approve group lists is counted there once, not again as a card.
+  assert.deepEqual(nodeVerdict(node, { accept: 1, cards: 1 }).parts, [{ words: '1 thing to accept', group: 'approve' }]);
   const view = nodeView(fakeApp({ route: { name: 'node', group: 'server' }, state }));
   assert.equal(verdictOf(view).textContent, 'This node needs you: 1 card for you');
 });
