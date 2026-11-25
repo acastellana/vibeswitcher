@@ -462,7 +462,7 @@ test('B6: Save, Add and Remove for your presets send presets.edit with the chang
   assert.match(reads.el.textContent, /vibeswitcher preset remove Opus --folder/);
 });
 
-test('B7: Between leads, a project with more than its newest shown has Show all: Loading…, then every message; refused, the node’s words', async () => {
+test('B7: Between leads, a project with more than its newest shown has Show all: Loading…, then every message; refused, the node’s words', async (context) => {
   const { mailView } = await import('../js/views/mail.js');
   const SITE = '/home/dev/projects/example-site';
   const message = (n) => ({ at: '2026-11-25T08:00:00.000Z', from: 'example-api', to: 'example-site', received: true, kind: 'note', text: `note ${n}`, outcome: 'delivered', sent: true, detail: 'Delivered.' });
@@ -475,6 +475,8 @@ test('B7: Between leads, a project with more than its newest shown has Show all:
         : { ok: true, result: { projects: [{ root: SITE, project: 'example-site', total: 26, messages: args.all ? all : all.slice(0, 20) }] } }) });
     const view = mailView(app);
     app.goTo({ name: 'mail' });
+    // Left whatever happens, so its 15 s refresh stops with the test.
+    context.after(() => app.goTo({ name: 'home' }));
     await flush();
     assert.doesNotMatch(view.el.textContent, /vibeswitcher mail/, `${code}: no line where Show all does it (a read: a page that doesn’t act shows it too)`);
     assert.equal(findAll(view.el, byClass('mail-message')).length, 20);
