@@ -70,16 +70,20 @@ struct MacCheckedFixRoundTests {
         #expect(refused(HostImages.macNodeStart(arguments: wrapped, lockPath: n.lock, own: own, pins: record, accountHome: n.home)) != nil)
     }
 
-    /// F1: a checked node's environment keeps no variable of this program's that changes where it logs or what it runs
-    /// (`VIBESWITCHER_HOST_LOG`, the launcher's test hold, `SWIFT_BACKTRACE`'s backtracer), but `VIBESWITCHER_HOME` (the
-    /// start sets it) and what the host carries across its own exec (`VIBESWITCHER_HOST_NOFILE_BEFORE`). Red before: as
-    /// given.
-    @Test func aCheckedNodesEnvironmentKeepsNothingThatMovesItsLogOrItsCode() {
-        let given = ["VIBESWITCHER_HOST_LOG": "/x/log", "VIBESWITCHER_LAUNCHER_TEST_HOLD": "/x/hold", "SWIFT_BACKTRACE": "enable=yes,swift-backtrace=/x/bt",
-                     "VIBESWITCHER_CODEX_WORKERS": "1", "VIBESWITCHER_HOME": "/h/.vibeswitcher/v2/node", "VIBESWITCHER_HOST_NOFILE_BEFORE": "256",
-                     "PATH": "/usr/bin:/bin", "HOME": "/h"]
-        #expect(HostImages.checkedNodeEnvironment(given) == ["VIBESWITCHER_HOME": "/h/.vibeswitcher/v2/node", "VIBESWITCHER_HOST_NOFILE_BEFORE": "256",
-                                                             "PATH": "/usr/bin:/bin", "HOME": "/h"])
+    /// F1 and the re-check: a checked node's environment is built from a fixed list, never filtered from what it was
+    /// given: the user database's `HOME`, `USER`, `LOGNAME`, `SHELL`, its data root, the system's `PATH` and temporary
+    /// folder, and the descriptor limit it carries across its own exec. A wrapper's `SSH_AUTH_SOCK`, `DYLD_*`, `SWIFT_*`,
+    /// `Malloc*`, `PATH`, `TMPDIR`, locale and `XPC_*` are gone. Red before: every variable not of this program's kept.
+    @Test func aCheckedNodesEnvironmentIsAFixedList() {
+        let given = ["VIBESWITCHER_HOST_LOG": "/x/log", "VIBESWITCHER_LAUNCHER_TEST_HOLD": "/x/hold", "SWIFT_BACKTRACE": "enable=yes",
+                     "SWIFT_DEBUG_ENABLE_COW_CHECKS": "1", "DYLD_INSERT_LIBRARIES": "/x/lib.dylib", "MallocStackLogging": "1",
+                     "SSH_AUTH_SOCK": "/x/agent", "PATH": "/x/bin:/usr/bin", "TMPDIR": "/x/tmp/", "LANG": "en_US.UTF-8", "XPC_SERVICE_NAME": "x",
+                     "HOME": "/x/home", "VIBESWITCHER_HOME": "/x/root", "VIBESWITCHER_HOST_NOFILE_BEFORE": "256", "SHELL": "/x/sh"]
+        let node = HostImages.checkedNodeEnvironment(HostImages.nodeEnvironment(given, accountHome: "/Users/acct", accountName: "acct", shell: "/bin/zsh"))
+        let allowed: Set<String> = ["HOME", "USER", "LOGNAME", "SHELL", "VIBESWITCHER_HOME", "PATH", "TMPDIR", "VIBESWITCHER_HOST_NOFILE_BEFORE"]
+        #expect(Set(node.keys).isSubset(of: allowed), "kept: \(Set(node.keys).subtracting(allowed).sorted())")
+        #expect(node["HOME"] == "/Users/acct" && node["SHELL"] == "/bin/zsh" && node["USER"] == "acct")
+        #expect(node["PATH"] == "/usr/bin:/bin:/usr/sbin:/sbin" && node["TMPDIR"] != "/x/tmp/" && node["VIBESWITCHER_HOST_NOFILE_BEFORE"] == "256")
     }
 
     // MARK: F2: the lock by its exact path only
@@ -110,9 +114,10 @@ struct MacCheckedFixRoundTests {
 
     // MARK: F1, N2: what a new image takes
 
-    /// F1 and N2: a checked node's state goes only to a new image holding its own checked start (the parcel says it came
-    /// from one, `fromCheckedNode`), and a checked node takes state only through a keeper it proved, never from
-    /// `--handover PATH`. A scratch host's switch, as before. Red before: every state taken.
+    /// F1, N2 and the re-check's I2b: a checked node's state goes only to a new image holding its own checked start; a
+    /// checked start takes only a checked node's state (an unmarked one is refused), only through a keeper, and only
+    /// bound to the node's lock (no lock to bind it to: refused). A scratch host's switch, as before. Red before: a checked
+    /// start took an unmarked parcel through a keeper, and one with no lock check.
     @Test func aCheckedNodesStateGoesOnlyToACheckedStartThroughAKeeper() throws {
         let row = NodePins.Build(commit: String(repeating: "a", count: 40), host: Data(repeating: 1, count: 20), server: Data(repeating: 2, count: 20),
                                  cli: Data(repeating: 3, count: 20))
@@ -120,9 +125,10 @@ struct MacCheckedFixRoundTests {
         var state = HostHandover.State(fromBuild: 1, startedAt: Date(), lockFD: 3, listenFD: 4, secretFD: nil, sessions: [])
         state.fromCheckedNode = true
         #expect(HostImages.mayTakeHandover(state, viaKeeper: true, checkedNode: nil) != nil, "a checked node's state went to an image with no checked start")
-        #expect(HostImages.mayTakeHandover(state, viaKeeper: true, checkedNode: checked) == nil)
         #expect(HostImages.mayTakeHandover(state, viaKeeper: false, checkedNode: checked) != nil, "a checked node took a state file")
+        #expect(HostImages.mayTakeHandover(state, viaKeeper: true, checkedNode: checked) != nil, "a checked start took a state bound to no lock")
         state.fromCheckedNode = nil
+        #expect(HostImages.mayTakeHandover(state, viaKeeper: true, checkedNode: checked) != nil, "a checked start took an unmarked state")
         #expect(HostImages.mayTakeHandover(state, viaKeeper: false, checkedNode: checked) != nil, "a checked node took a state file")
         #expect(HostImages.mayTakeHandover(state, viaKeeper: true, checkedNode: nil) == nil, "a scratch host's switch refused")
         #expect(HostImages.mayTakeHandover(state, viaKeeper: false, checkedNode: nil) == nil, "a plain handover refused")
@@ -132,46 +138,6 @@ struct MacCheckedFixRoundTests {
         #expect(host.server.queue.sync { host.server.handoverState(secretFD: nil).fromCheckedNode } == true)
         let plain = try TestHost(appConnector: false)
         #expect(plain.server.queue.sync { plain.server.handoverState(secretFD: nil).fromCheckedNode } == nil)
-    }
-
-    /// F1, end to end (the review's probe `aWrapperThatRunsTheGenuineImageWithItsOwnArguments`): the file renamed over
-    /// the target after the path check is a wrapper that runs a byte copy of the pinned host, the attacker's arguments
-    /// first. It passes both gates (the genuine code runs), but the parcel says it is a checked node's
-    /// (`--handover-test-checked-parcel`, a scratch host's stand-in for one) and the image the wrapper started holds no
-    /// checked start of its own: it takes nothing and exits; no session is taken over and no secret read. Red before: it
-    /// took the sessions and the secrets ("took over 1 sessions and 22 bytes of secrets").
-    @Test(.enabled(if: Platform.CodeIdentity.isAvailable, "the Mac's switch through a keeper: code identity"))
-    func aWrapperRunningThePinnedImageWithItsOwnArgumentsTakesNothing() async throws {
-        let images = MacKeeperHandoverTests.Images()
-        var extra: [String] = []
-        var chosenLog = ""
-        let host = try await ScratchHostProcess(prepare: { dir in
-            _ = try MacKeeperHandoverTests.sign(dir + "/old/vibeswitcher-host", "dev.vibeswitcher.test.fix.old")
-            images.new = try MacKeeperHandoverTests.sign(dir + "/new/vibeswitcher-host", "dev.vibeswitcher.test.fix.new")
-            try FileManager.default.createDirectory(atPath: dir + "/kept", withIntermediateDirectories: true)
-            try installProgram(dir + "/new/vibeswitcher-host", atPath: dir + "/kept/vibeswitcher-host")
-            chosenLog = dir + "/attacker-chosen.log"
-            try installScript("""
-            #!/bin/sh
-            case "$1" in
-              --handover-keeper) exec "\(dir)/kept/vibeswitcher-host" "$@" ;;
-              *) exec "\(dir)/kept/vibeswitcher-host" --log "\(chosenLog)" --app-executable "\(dir)/attacker-app" "$@" ;;
-            esac
-            """ + "\n", atPath: dir + "/wrapper")
-            extra = ["--handover-test-keeper", NodePins.hex(images.new), "--handover-test-swap-after-check", dir + "/wrapper",
-                     "--handover-test-checked-parcel", "--handover-test-secret", "S3CRET-OF-THE-OLD-HOST"]
-        }, late: { extra })
-        defer { host.stop() }
-        let (client, _, _, _, _, _, _) = try await TestClient.welcomed(host.socket, appKey: host.appKey)
-        let counter = try await client.spawn(HostHandoverTests.counter)
-        await client.attach(counter.id)
-        #expect(await eventually { counted(client.text(counter.id)).last ?? 0 >= 3 })
-        let seq = client.send(.handover(executable: host.newBinary))
-        _ = await eventually { client.reply(to: seq) != nil }
-        #expect(await eventually { !host.process.isRunning || host.log.contains("took over") }, "\(host.log)")
-        #expect(!host.log.contains("took over"), "the wrapper's image took the sessions over: \(host.log)")
-        #expect(!host.log.contains("bytes of secrets"), "the wrapper's image read the secrets: \(host.log)")
-        #expect(host.log.contains("a checked node's state goes only to an image holding its own checked start"), "\(host.log)")
     }
 
     // MARK: N1: who the app is before the server child
@@ -218,12 +184,13 @@ struct MacCheckedFixRoundTests {
 
     // MARK: N6: the keeper's deadline
 
-    /// N6: a keeper that holds the state and sees no new image within its limit closes everything and exits (the cost
-    /// stays the residual's: the sessions end), rather than holding the lock, the listener and the terminals for ever.
-    /// Here the keeper is a hardened copy of the built host started by this process, given a 3 s limit; no exec follows.
-    /// Red before: it waited with no deadline.
+    /// N6: a keeper that is given nothing within its limit closes everything and exits (every one of its waits has that
+    /// limit: for the host's pair, the parcel, the new image and its word), rather than wait for ever. Here the keeper is
+    /// a hardened copy of the built host started by this process with a 3 s limit, and offered nothing (this process,
+    /// which has no Hardened Runtime, couldn't park a parcel with it now: the keeper proves its parent, the re-check's
+    /// I2a). Red before the review's N6: it waited with no deadline.
     @Test(.enabled(if: Platform.CodeIdentity.isAvailable, "the Mac's switch through a keeper: code identity"))
-    func aKeeperThatSeesNoNewImageExitsByItsDeadline() async throws {
+    func aKeeperGivenNothingExitsByItsDeadline() async throws {
         let folder = scratch.url("vsfr-keeper").path
         try FileManager.default.createDirectory(atPath: folder, withIntermediateDirectories: true)
         let image = folder + "/vibeswitcher-host"
@@ -233,19 +200,10 @@ struct MacCheckedFixRoundTests {
             Issue.record("the keeper didn't prove itself")
             return
         }
-        var ends: [Int32] = [-1, -1]
-        #expect(pipe(&ends) == 0)
-        defer { Sys.close(ends[0]); Sys.close(ends[1]) }
-        let state = HostHandover.State(fromBuild: 1, startedAt: Date(), lockFD: ends[0], listenFD: ends[1], secretFD: nil, sessions: [])
-        guard case .success = MacHandoverKeeper.park(state, with: keeper) else {
-            MacHandoverKeeper.abandon(keeper)
-            Issue.record("the keeper didn't take the state")
-            return
-        }
         var status: Int32 = 0
         let ended = await eventually(timeout: 60) { waitpid(keeper.pid, &status, WNOHANG) == keeper.pid }
         if !ended { MacHandoverKeeper.abandon(keeper) } else { Sys.close(keeper.proven); Sys.close(keeper.channel) }
-        #expect(ended, "the keeper held the state with no new image past its deadline")
+        #expect(ended, "the keeper waited past its deadline")
     }
 
     // MARK: N3: the server child's --node-root

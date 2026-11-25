@@ -98,9 +98,10 @@ extension HostServer {
                     self.sessions.values.forEach { $0.suspendParser() }
                     parsersStopped = true
                     // No fallback: going back would be an unchecked exec by path. The state is the keeper's.
+                    // A checked node's next image takes no state file (its grammar has none): only the keeper's two.
                     let arguments = Self.keeperArguments(started: self.config.arguments, target: executable, checkedNode: self.config.checkedNode != nil)
-                        + ["--handover", self.config.handoverPath, MacHandoverKeeper.channelFlag, String(keeper.channel),
-                           MacHandoverKeeper.pidFlag, String(keeper.pid)]
+                        + (self.config.checkedNode == nil ? ["--handover", self.config.handoverPath] : [])
+                        + [MacHandoverKeeper.channelFlag, String(keeper.channel), MacHandoverKeeper.pidFlag, String(keeper.pid)]
                     throw HostHandover.exec(executable, arguments: arguments, inherit: [keeper.channel])
                 } catch {
                     if parsersStopped { self.sessions.values.forEach { $0.resumeParser() } }

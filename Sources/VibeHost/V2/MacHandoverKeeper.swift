@@ -58,6 +58,35 @@ public enum MacHandoverKeeper {
         return nil
     }
 
+    // MARK: The handshake's rules
+
+    // Every pair is passed (`SCM_RIGHTS`) by the process that made it, which keeps its own copy of the end it passed
+    // open until the receiver has said, by a byte, that it holds that end; and nothing is written over a pair whose
+    // other end is still in flight. A socket in flight whose sender had closed its copy was found broken under load (its
+    // receiver read an end of file before the parcel was whole, or its peer's write failed: the re-check's flake, 8 of
+    // 20 runs), as the kernel's collection of descriptors in flight would leave one it took for unreachable.
+
+    /// The byte that says "I hold the end you passed, go on".
+    static let holding: UInt8 = 0x67
+
+    /// Reads and writes on `socket` fail after `seconds` (`SO_RCVTIMEO`, `SO_SNDTIMEO`) rather than wait for ever.
+    static func limitIO(_ socket: Int32, _ seconds: TimeInterval) {
+        var time = timeval(tv_sec: Int(max(1, seconds)), tv_usec: 0)
+        _ = setsockopt(socket, SOL_SOCKET, SO_RCVTIMEO, &time, socklen_t(MemoryLayout<timeval>.size))
+        _ = setsockopt(socket, SOL_SOCKET, SO_SNDTIMEO, &time, socklen_t(MemoryLayout<timeval>.size))
+    }
+
+    /// Writes the `holding` byte on `socket`.
+    static func sayHolding(_ socket: Int32) -> Bool {
+        var byte = holding
+        return Sys.write(socket, &byte, 1) == 1
+    }
+
+    /// Waits (within `seconds`) for the `holding` byte on `socket`.
+    static func awaitHolding(_ socket: Int32, _ seconds: TimeInterval) -> Bool {
+        wait(readable: socket, for: seconds) && readByte(socket) == holding
+    }
+
     // MARK: The old host's side
 
     /// `executable` started as a keeper (a child of this process, its own process group), proven: its fresh pair's token
@@ -78,6 +107,7 @@ public enum MacHandoverKeeper {
             return .failure(Refused("the keeper didn't start: \(String(cString: strerror(error.code)))"))
         case .success(let spawned): pid = spawned
         }
+        limitIO(host, limit)
         let fail = { (why: String) -> Result<Keeper, Refused> in
             Sys.close(host)
             end(pid)
@@ -85,21 +115,36 @@ public enum MacHandoverKeeper {
         }
         guard wait(readable: host, for: limit) else { return fail("the keeper didn't prove itself in \(Int(limit)) s") }
         guard let proven = Platform.Sockets.receiveDescriptor(over: host) else { return fail("the keeper sent no pair of its own") }
+        limitIO(proven, parkLimit)
         if let why = refusal(Platform.Sockets.peerToken(proven), pid: pid, cdhash: expected, what: "the keeper") {
             Sys.close(proven)
             return fail(why)
+        }
+        // It may close its copy now: this end is held.
+        guard sayHolding(proven) else {
+            Sys.close(proven)
+            return fail("the keeper has gone")
         }
         return .success(Keeper(pid: pid, channel: host, proven: proven))
     }
 
     /// `state` and every descriptor it names given to `keeper`, and its word that it read them whole; false otherwise
-    /// (then `abandon` it). On the host's queue, in the handover's last turn.
+    /// (then `abandon` it). The host proves itself to the keeper first (the re-check's I2a): a pair made now, one end
+    /// passed, its own copy held until the keeper says it holds it, the parcel over the other. On the host's queue, in
+    /// the handover's last turn.
     static func park(_ state: HostHandover.State, with keeper: Keeper) -> Result<Void, Refused> {
         let encoder = PropertyListEncoder()
         encoder.outputFormat = .binary
         guard let data = try? encoder.encode(state) else { return .failure(Refused("the state couldn't be encoded")) }
-        guard send(data, descriptors: state.descriptors, over: keeper.proven) else { return .failure(Refused("the state didn't reach the keeper (errno \(errno))")) }
-        guard wait(readable: keeper.proven, for: parkLimit), readByte(keeper.proven) == parked else {
+        guard let (mine, theirs) = Platform.Sockets.pair(type: Platform.Sockets.stream) else { return .failure(Refused("no pair (errno \(errno))")) }
+        defer { Sys.close(mine) }
+        limitIO(mine, parkLimit)
+        let passed = Platform.Sockets.sendDescriptor(theirs, over: keeper.proven)
+        let held = passed && awaitHolding(mine, parkLimit)
+        Sys.close(theirs)
+        guard held else { return .failure(Refused("the keeper didn't take this host's pair (it refuses a parent it can't prove)")) }
+        guard send(data, descriptors: state.descriptors, over: mine) else { return .failure(Refused("the state didn't reach the keeper (errno \(errno))")) }
+        guard wait(readable: mine, for: parkLimit), readByte(mine) == parked else {
             return .failure(Refused("the keeper didn't take the state"))
         }
         return .success(())
@@ -114,45 +159,78 @@ public enum MacHandoverKeeper {
 
     // MARK: The keeper
 
-    /// `main`'s first act after the probe's: with `--handover-keeper FD`, this process is a keeper and never returns.
-    /// It proves itself to the host (a pair it makes, one end sent over FD), takes the parcel over that pair, says so,
-    /// then gives it back only to the host's new image: a pair that image made, its token the host's pid (this process's
-    /// parent), running this process's own code, hardened. Anything else: it closes everything and exits.
+    /// What a keeper requires of its parent's code, from the parcel it is offered: none for a scratch host's (its pid
+    /// and the Hardened Runtime only); for a checked node's (`fromCheckedNode`), a host the root record pins (`pins`,
+    /// the installed record, never a value of the keeper's arguments). Why not, or nil.
+    static func parentRefusal(_ token: Platform.PeerToken?, parent: pid_t, state: HostHandover.State,
+                              pins: () -> Result<NodePins, NodePins.Refused> = { NodePins.read() },
+                              runs: (Platform.PeerToken, Data) -> Bool = { Platform.CodeIdentity.runs($0, cdhash: $1) },
+                              hardened: (Platform.PeerToken) -> Bool? = Platform.CodeIdentity.isHardened) -> String? {
+        guard let token else { return "its parent's token can't be read" }
+        guard token.pid == parent else { return "its parent is pid \(parent), not \(token.pid)" }
+        guard hardened(token) == true else { return "its parent (pid \(parent)) doesn't run with the Hardened Runtime" }
+        guard state.fromCheckedNode == true else { return nil }
+        guard case .success(let record) = pins() else { return "a checked node's state, and no record of the node's builds to prove its parent by" }
+        guard record.builds.contains(where: { runs(token, $0.host) }) else {
+            return "a checked node's state from a parent (pid \(parent)) that runs no host the node's record pins"
+        }
+        return nil
+    }
+
+    /// `main`'s first act after the probe's: with `--handover-keeper FD` as its first argument, this process is a keeper
+    /// and never returns. It proves itself to the host (a pair it makes, one end sent over FD), takes the host's own pair
+    /// over it and proves the host (`parentRefusal`), takes the parcel, says so, then gives it back only to the host's new
+    /// image: a pair that image made, its token the host's pid (this process's parent), running this process's own code,
+    /// hardened. Anything else, or any step past its limit: it closes everything and exits.
     public static func keepIfAsked(_ arguments: [String], isAvailable: Bool = Platform.CodeIdentity.isAvailable) {
         // Linux has no keeper: the flag means nothing there, as before (the review's N7).
         guard isAvailable else { return }
-        guard let at = arguments.firstIndex(of: keeperFlag) else { return }
+        guard arguments.count >= 3, arguments[1] == keeperFlag else { return }
         // Before it writes anything (its pairs are SO_NOSIGPIPE already; its stderr isn't).
         signal(SIGPIPE, SIG_IGN)
-        guard arguments.indices.contains(at + 1), let channel = Int32(arguments[at + 1]), channel > STDERR_FILENO else { quit("no channel") }
+        guard let channel = Int32(arguments[2]), channel > STDERR_FILENO else { quit("no channel") }
         _ = fcntl(channel, F_SETFD, FD_CLOEXEC)
+        let wanted = arguments.firstIndex(of: limitFlag).flatMap { arguments.indices.contains($0 + 1) ? TimeInterval(arguments[$0 + 1]) : nil }
+        let keeperLimit = min(limit, max(1, wanted ?? limit))
+        limitIO(channel, keeperLimit)
         let host = getppid()
         guard let own = Platform.CodeIdentity.ownCdhash() else { quit("its own code can't be read") }
         guard let (mine, theirs) = Platform.Sockets.pair(type: Platform.Sockets.stream),
               Platform.Sockets.sendDescriptor(theirs, over: channel) else { quit("its pair didn't reach the host") }
+        limitIO(mine, keeperLimit)
+        // `theirs` held until the host says it holds it.
+        guard awaitHolding(mine, keeperLimit) else { quit("the host didn't take its pair") }
         Sys.close(theirs)
-        guard wait(readable: mine, for: limit), let parcel = receive(over: mine) else { quit("no state came") }
-        guard (try? PropertyListDecoder().decode(HostHandover.State.self, from: parcel.data)) != nil else { quit("the state doesn't read") }
+        // The host's own pair: proved once the parcel says what it is.
+        guard wait(readable: mine, for: keeperLimit), let parent = Platform.Sockets.receiveDescriptor(over: mine) else { quit("the host sent no pair of its own") }
+        limitIO(parent, keeperLimit)
+        guard sayHolding(parent) else { quit("the host has gone") }
+        guard wait(readable: parent, for: keeperLimit), let parcel = receive(over: parent) else { quit("no state came") }
+        guard let offered = try? PropertyListDecoder().decode(HostHandover.State.self, from: parcel.data) else { quit("the state doesn't read") }
+        if let why = parentRefusal(Platform.Sockets.peerToken(parent), parent: host, state: offered) { quit("refused the host: \(why); nothing taken") }
         var byte = parked
-        guard Sys.write(mine, &byte, 1) == 1 else { quit("the host has gone") }
-        // The host's exec closes `mine`'s other end; the new image's pair arrives on the channel (or the channel ends:
-        // the handover failed before the exec, or the host went), within the limit: past it, everything held is closed
-        // with this process (the review's N6; the sessions end, as in the residual).
-        let wanted = arguments.firstIndex(of: limitFlag).flatMap { arguments.indices.contains($0 + 1) ? TimeInterval(arguments[$0 + 1]) : nil }
-        guard wait(readable: channel, for: min(limit, max(1, wanted ?? limit))) else { quit("no new image came within its limit: everything held closed") }
+        guard Sys.write(parent, &byte, 1) == 1 else { quit("the host has gone") }
+        // The host's exec closes its ends; the new image's pair arrives on the channel (or the channel ends: the handover
+        // failed before the exec, or the host went), within the limit: past it, everything held is closed with this
+        // process (the review's N6; the sessions end, as in the residual).
+        guard wait(readable: channel, for: keeperLimit) else { quit("no new image came within its limit: everything held closed") }
         guard let theirsNow = Platform.Sockets.receiveDescriptor(over: channel) else { quit("no new image came (the handover ended before its exec)") }
+        limitIO(theirsNow, keeperLimit)
         if let why = refusal(Platform.Sockets.peerToken(theirsNow), pid: host, cdhash: own, what: "the image at the host's pid") {
             quit("refused the new image: \(why); nothing handed over")
         }
-        // The new image proves this keeper in turn (the review's N2): a pair made here, now, one end given to it, the
-        // parcel over the other.
+        guard sayHolding(theirsNow) else { quit("the new image has gone") }
+        // The new image proves this keeper in turn (the review's N2): a pair made here, now, one end given to it and held
+        // until it says it holds it, the parcel over the other.
         guard let (keeps, gives) = Platform.Sockets.pair(type: Platform.Sockets.stream),
               Platform.Sockets.sendDescriptor(gives, over: theirsNow) else { quit("its own pair didn't reach the new image") }
+        limitIO(keeps, keeperLimit)
+        guard awaitHolding(keeps, keeperLimit) else { quit("the new image didn't take its pair (it refuses a keeper it can't prove)") }
         Sys.close(gives)
         guard send(parcel.data, descriptors: parcel.descriptors, over: keeps) else { quit("the state didn't reach the new image") }
-        // Alive until the new image has read its token and the parcel and closed its end (a token's peer that has gone
-        // can't be read), within the limit; then its copies close with it, and the new image's are the only ones left.
-        let closed = wait(readable: keeps, for: limit)
+        // Alive until the new image has read the parcel and closed its end, within the limit; then its copies close with
+        // it, and the new image's are the only ones left.
+        let closed = wait(readable: keeps, for: keeperLimit)
         if closed { _ = readByte(keeps) }
         Platform.Stdio.error("vibeswitcher-host: handover keeper: gave the state to the new image (pid \(host))"
                              + (closed ? "" : ", which didn't close its end within the limit") + "\n")
@@ -166,9 +244,8 @@ public enum MacHandoverKeeper {
 
     // MARK: The new image's side
 
-    /// With `--handover-keeper-channel FD` in `arguments`: the state the keeper held, its descriptors renumbered to the
-    /// ones received, once this image proved itself to it (a pair made now, one end sent over FD); nil without the
-    /// flag. A failure is a refusal: nothing was given.
+    /// With `--handover-keeper-channel FD` and `--handover-keeper-pid PID` in `arguments` (a scratch host's switch): the
+    /// state its keeper held (`take`); nil without the flag. A checked node's `main` calls `take` with its parsed values.
     public static func takeIfAsked(_ arguments: [String], isAvailable: Bool = Platform.CodeIdentity.isAvailable) -> Result<HostHandover.State, Refused>? {
         // Linux has no keeper: the state is read as before (the review's N7).
         guard isAvailable else { return nil }
@@ -176,24 +253,38 @@ public enum MacHandoverKeeper {
         guard arguments.indices.contains(at + 1), let channel = Int32(arguments[at + 1]), channel > STDERR_FILENO else {
             return .failure(Refused("\(channelFlag) needs a descriptor"))
         }
+        guard let pidAt = arguments.firstIndex(of: pidFlag), arguments.indices.contains(pidAt + 1), let keeper = pid_t(arguments[pidAt + 1]), keeper > 1 else {
+            Sys.close(channel)
+            return .failure(Refused("\(pidFlag) names no keeper"))
+        }
+        return take(channel: channel, keeper: keeper)
+    }
+
+    /// The state the keeper `keeper` held, its descriptors renumbered to the ones received, once this image proved its
+    /// code to it (a pair made now, one end sent over `channel`, held until the keeper says it holds it) and the keeper
+    /// proved its own to this image (a pair it made then, its token `keeper`'s pid, a child of this process, running this
+    /// image's own code, hardened). A failure is a refusal: nothing was given.
+    public static func take(channel: Int32, keeper: pid_t) -> Result<HostHandover.State, Refused> {
         defer { Sys.close(channel) }
+        guard keeper > 1, Platform.Processes.link(keeper)?.parent == getpid() else { return .failure(Refused("\(pidFlag) names no keeper of this process")) }
+        guard let own = Platform.CodeIdentity.ownCdhash() else { return .failure(Refused("this image's own code can't be read")) }
         guard let (mine, theirs) = Platform.Sockets.pair(type: Platform.Sockets.stream) else { return .failure(Refused("no pair (errno \(errno))")) }
         defer { Sys.close(mine) }
+        limitIO(mine, limit)
         let sent = Platform.Sockets.sendDescriptor(theirs, over: channel)
+        let held = sent && awaitHolding(mine, limit)
         Sys.close(theirs)
-        guard sent else { return .failure(Refused("the keeper has gone")) }
-        // The keeper proves itself to this image (the review's N2): a pair it made after this image's proof, its token
-        // the keeper's pid (`--handover-keeper-pid`, a child of this process), running this image's own code, hardened.
-        guard let at = arguments.firstIndex(of: pidFlag), arguments.indices.contains(at + 1), let keeper = pid_t(arguments[at + 1]), keeper > 1,
-              Platform.Processes.link(keeper)?.parent == getpid() else {
-            return .failure(Refused("\(pidFlag) names no keeper of this process"))
-        }
-        guard let own = Platform.CodeIdentity.ownCdhash() else { return .failure(Refused("this image's own code can't be read")) }
+        guard held else { return .failure(Refused("the keeper didn't take this image's pair (errno \(errno))")) }
         guard wait(readable: mine, for: limit) else { return .failure(Refused("the keeper's pair didn't come within the limit (errno \(errno))")) }
         guard let kept = Platform.Sockets.receiveDescriptor(over: mine) else { return .failure(Refused("the keeper's pair didn't arrive (errno \(errno))")) }
+        limitIO(kept, limit)
         if let why = refusal(Platform.Sockets.peerToken(kept), pid: keeper, cdhash: own, what: "the keeper") {
             Sys.close(kept)
             return .failure(Refused(why))
+        }
+        guard sayHolding(kept) else {
+            Sys.close(kept)
+            return .failure(Refused("the keeper has gone"))
         }
         let ready = wait(readable: kept, for: limit)
         let readyErrno = errno
@@ -214,8 +305,7 @@ public enum MacHandoverKeeper {
             parcel.descriptors.forEach { Sys.close($0) }
             return .failure(Refused("the state names descriptors the keeper didn't give, or what no Mac handover carries"))
         }
-        state = renumbered
-        return .success(state)
+        return .success(renumbered)
     }
 
     /// `state` with each descriptor it names replaced by the one received in its place (`received`, in the order of
@@ -308,7 +398,8 @@ public enum MacHandoverKeeper {
         while true {
             let left = Int32(max(0, min(Double(Int32.max), deadline.timeIntervalSince(Platform.Clock.steadyDate()) * 1000)))
             let ready = poll(&waiting, 1, left)
-            if ready < 0, errno == EINTR { continue }
+            // A poll that couldn't be made (EAGAIN: no room for its records) is tried again, as an interrupted one is.
+            if ready < 0, errno == EINTR || errno == EAGAIN { continue }
             return ready > 0
         }
     }
