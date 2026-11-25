@@ -4536,3 +4536,5 @@ Turn what's a real bug into a task (one already on the board needs nothing); the
 - 2026-11-25 13:16 Started a worker on launch-v2-s-mac
 - 2026-11-25 13:31 Kept launch-v2-s-mac unmerged: Report only, by design: nothing of it merges into main. Its worktree holds the v2 clone and build (.vibeswitcher/v2-app) and the screenshots, which the user's next step with v2 uses; no cleanup until the user is finished with v2 on this Mac.
 - 2026-11-25 13:31 Update: v2's Mac app builds and runs here; two things break that main gets right — **Result:** `v2` (at `v2-mac-fixes`, `b9df9949`) builds on this Mac with no errors and its sandbox app launched first try, with no fixes needed. A worker drove about 60 screens in light and dark: the …
+- 2026-11-25 13:41 Planned a-side-by-side: A side-by-side v2 app: its own name, bundle id, state folder and host, so the user can run it next to the installed app (in a clone; nothing merges)
+- 2026-11-25 13:41 Started a worker on a-side-by-side

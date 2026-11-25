@@ -411,3 +411,7 @@ The user's answer to 99E29A76 (2026-11-18 12:17) is the standing rule: workers a
 
 The user, 2026-11-25: "fix whatever u see in v2". Most of the 13 failures are Mac-only and can only be reproduced on a Mac, which the Linux machine where v2 is developed can't do. Workers can't push, and pushing is outward-facing, so delivery stays the user's choice.
 
+## 2026-11-25 13:41:28 The user tries v2's Mac app through a side-by-side build (their answer to 648E8D12, 2026-11-25): "VibeSwitcher v2.app" with its own name, bundle id, state root, host and Keychain names, built in a scratch clone of v2-mac-fixes (task a-side-by-side-v2). Whatever would write into a folder the installed app uses and can't be pointed elsewhere (hooks in ~/.claude) is switched off in it. Nothing merges into main and nothing is pushed. v2's real app is never launched or installed over the installed one on this Mac without the user's explicit say. The earlier task launch-v2-s-mac is kept (its worktree holds the first clone and the screenshots) until the user is finished with v2 here.
+
+launch-v2-s-mac found that v2's real app shares the installed app's bundle id, would take over or replace its running session host, rewrites ~/.vibeswitcher/bin/vibeswitcher-hook at launch, and that the two builds drop each other's fields in board.json and vault.sealed. The sandbox is invisible by design, so it can't be used by hand.
+
