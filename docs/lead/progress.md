@@ -4531,3 +4531,4 @@ Turn what's a real bug into a task (one already on the board needs nothing); the
 - 2026-11-25 07:56 Planned fix-v2-s-13: Fix v2's 13 failing tests on this Mac, in a separate clone, as commits ready to hand over (nothing merges into main)
 - 2026-11-25 07:56 Started a worker on fix-v2-s-13
 - 2026-11-25 10:52 Abandoned fix-v2-s-13: Delivered outside main, by design: its 7 commits (b255a941..b9df9949 on top of v2 at 98e3fb88) were pushed to GitHub as the new branch v2-mac-fixes on 2026-11-25 10:52, at the user's choice (B9F0BFF1); git ls-remote shows v2-mac-fixes at b9df9949. v2's full suite passed on this Mac with them (6768 tests, 0 failed). Nothing of it belongs in main, so nothing merges here.
+- 2026-11-25 12:44 Handed the lead over to a fresh session: the last one had been idle 63 minutes with 167k tokens of context, past handover_idle_min 50 and handover_tokens 150k; its prompt cache had expired, so VibeSwitcher wrote the note
