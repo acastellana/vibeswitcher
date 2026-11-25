@@ -130,6 +130,19 @@ test('Settings: a search lists only the sections with a match and their counts, 
   app.leave();
 });
 
+test('Settings: a project known by its board alone (its lead not running) still has its sections, asked with its folder', async () => {
+  setLanguage('en');
+  const result = settingsReply();
+  const board = { project: 'local:project:acme', root: result.project.root, tasks: [] };
+  const app = fakeApp({ route: { name: 'settings', id: board.project }, state: { boards: new Map([[board.project, board]]) },
+    reply: (kind, args) => ({ ok: true, result: { ...result, project: args.folder ? result.project : null } }) });
+  const view = settingsView(app);
+  await settle();
+  assert.ok(app.sent.some((one) => one.kind === 'settings' && one.args.folder === board.root), 'asked with the board’s folder');
+  assert.equal(chosenRow(view).getAttribute('href'), '#/settings/local%3Aproject%3Aacme/models');
+  app.leave();
+});
+
 test('a found word is marked as an element, never as markup', () => {
   const parts = marked('Workers at once, at most', ['at', 'work']);
   assert.deepEqual(parts.map((part) => (typeof part === 'string' ? part : `[${part.textContent}]`)).join(''), '[Work]ers [at] once, [at] most');
@@ -232,6 +245,24 @@ test('Your own sessions: #/s/<session> shows the session beside the list with it
   const head = find(view.columns.list, byClass('tc-head'));
   assert.deepEqual(findAll(head, (node) => node.tag === 'a').map((link) => link.getAttribute('href')), ['#/sessions/new', '#/new']);
   assert.deepEqual(parseRoute('#/sessions/new'), { name: 'sessions', start: true });
+});
+
+test('Your own sessions: a snapshot leaves the start form where it is, so a field being typed in keeps its focus', () => {
+  setLanguage('en');
+  const state = ownState();
+  const app = fakeApp({ route: { name: 'sessions' }, state });
+  const view = ownSessionsView(app, { session: { el: installDomNode('section', 'session') } });
+  view.render();
+  const body = view.columns.detailBody;
+  const form = body.children[0];
+  let moved = 0;
+  const replace = body.replaceChildren.bind(body);
+  body.replaceChildren = (...nodes) => { moved += 1; replace(...nodes); };
+  state.sessions.get('local:work').status = 'idle';
+  app.changed('sessions');
+  app.changed('node');
+  assert.equal(moved, 0, 'never taken out and put back');
+  assert.equal(body.children[0], form);
 });
 
 test('Your own sessions: with none, the list says what to do', () => {
