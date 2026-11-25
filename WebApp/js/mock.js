@@ -610,7 +610,10 @@ const ago = (seconds) => new Date(now() - seconds * 1000).toISOString();
   function answered(sid) {
     const items = chats.get(sid) || [];
     const pending = items.find((item) => item.kind === 'tool' && item.result === null);
-    emit(setSession(sid, { prompt: null, status: 'working', since: new Date().toISOString(), detail: sid === ASKING ? 'Running the payout tests' : null,
+    // The messages `send` held behind the question are typed in once it closes, in their order.
+    const held = sessions.get(sid)?.queued || [];
+    for (const one of held) chatPut(sid, { id: next('m'), kind: 'prompt', text: one.text, at: new Date().toISOString(), action: one.action });
+    emit({ in: 'chat', session: sid }, setSession(sid, { queued: [], prompt: null, status: 'working', since: new Date().toISOString(), detail: sid === ASKING ? 'Running the payout tests' : null,
       activity: sid === ASKING ? 'pytest tests/test_payouts.py' : null, activitySince: new Date().toISOString() }));
     if (sid !== ASKING || options.still) return;
     later(2400, () => {
