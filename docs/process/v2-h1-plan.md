@@ -143,11 +143,11 @@ Each says what it still waits on; none is designed here.
 On the Mac, the acting page on loopback opens with one Touch ID for 12 hours (the user's choice of 2026-11-25, in the
 Mac lead's record of 2026-11-25 16:27:52; see [the Mac node's spec: the user's voice on the Mac](../superpowers/specs/2026-11-19-v2-node-on-macos.md#the-users-voice-on-the-mac)).
 
-**Still open for the user:** the [remote access note's](../superpowers/specs/2026-11-20-v2-remote-access.md#decisions-for-the-user)
+**Was open for the user** *(answered 2026-11-25, the lead's calls at the user's word: the next paragraph)*: the [remote access note's](../superpowers/specs/2026-11-20-v2-remote-access.md#decisions-for-the-user)
 decisions 2 to 5: the remote token's life (8 hours built, or another); masking credentials on remote pages; a second
 lock on who is asking (`tailscale whois`, B's login header, or the tailnet ACL alone); getting the address to the phone
 (a QR code in the terminal, or typing it). Its decisions 6 (a watched terminal on the remote page) and 7 (the port) weren't
-asked either, so a terminal on the phone (item 3 above) still meets decision 6.
+asked either, so a terminal on the phone (item 3 above) met decision 6.
 
 **Answered, 2026-11-25** (the lead's calls at the user's word): the remote access note's decisions 2 to 7, each beside
 its question there: a device paired once with its own key until removed, unlocked by Face ID or Touch ID for 12 hours;
