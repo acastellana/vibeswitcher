@@ -57,7 +57,7 @@ public enum MacHandoverKeeper {
 
     /// `executable` started as a keeper (a child of this process, its own process group), proven: its fresh pair's token
     /// is its pid, runs `expected`, hardened. Otherwise it is ended and reaped, and why. Blocks (not on the host's queue).
-    static func start(_ executable: String, expected: Data) -> Result<Keeper, Refused> {
+    static func start(_ executable: String, expected: Data, limit keeperLimit: TimeInterval = limit) -> Result<Keeper, Refused> {
         guard let (host, keeper) = Platform.Sockets.pair(type: Platform.Sockets.stream) else { return .failure(Refused("no channel (errno \(errno))")) }
         var spawn = Platform.Spawn(executable: executable, arguments: [executable, keeperFlag, String(keeper)])
         spawn.stdin = .path("/dev/null", flags: O_RDONLY)
@@ -113,7 +113,7 @@ public enum MacHandoverKeeper {
     /// It proves itself to the host (a pair it makes, one end sent over FD), takes the parcel over that pair, says so,
     /// then gives it back only to the host's new image: a pair that image made, its token the host's pid (this process's
     /// parent), running this process's own code, hardened. Anything else: it closes everything and exits.
-    public static func keepIfAsked(_ arguments: [String]) {
+    public static func keepIfAsked(_ arguments: [String], isAvailable: Bool = Platform.CodeIdentity.isAvailable) {
         guard let at = arguments.firstIndex(of: keeperFlag) else { return }
         // Before it writes anything (its pairs are SO_NOSIGPIPE already; its stderr isn't).
         signal(SIGPIPE, SIG_IGN)
@@ -149,7 +149,7 @@ public enum MacHandoverKeeper {
     /// With `--handover-keeper-channel FD` in `arguments`: the state the keeper held, its descriptors renumbered to the
     /// ones received, once this image proved itself to it (a pair made now, one end sent over FD); nil without the
     /// flag. A failure is a refusal: nothing was given.
-    public static func takeIfAsked(_ arguments: [String]) -> Result<HostHandover.State, Refused>? {
+    public static func takeIfAsked(_ arguments: [String], isAvailable: Bool = Platform.CodeIdentity.isAvailable) -> Result<HostHandover.State, Refused>? {
         guard let at = arguments.firstIndex(of: channelFlag) else { return nil }
         guard arguments.indices.contains(at + 1), let channel = Int32(arguments[at + 1]), channel > STDERR_FILENO else {
             return .failure(Refused("\(channelFlag) needs a descriptor"))

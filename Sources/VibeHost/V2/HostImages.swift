@@ -325,6 +325,16 @@ public enum HostImages {
         return .success(CheckedNode(build: build, serverPath: server, server: cdhash))
     }
 
+    /// Why `main` refuses a checked start (`checked`) it doesn't take for the user's host (`ownsLaunchers`), or nil
+    /// (seam: nil).
+    public static func checkedNodeRefusal(_ checked: CheckedNode?, ownsLaunchers: Bool) -> String? { nil }
+
+    /// Why this image doesn't take `state` (seam: nil).
+    public static func mayTakeHandover(_ state: HostHandover.State, viaKeeper: Bool, checkedNode: CheckedNode?) -> String? { nil }
+
+    /// A checked node's environment from `environment` (seam: as given).
+    public static func checkedNodeEnvironment(_ environment: [String: String]) -> [String: String] { environment }
+
     /// The checked start `startAsNode` made on the Mac (behind `isCheckedMacNode`), held until `main` puts it in the
     /// host's config (`takeCheckedMacNode`).
     nonisolated(unsafe) private static var checkedMacNode: CheckedNode?

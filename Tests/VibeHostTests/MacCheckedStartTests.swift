@@ -31,7 +31,7 @@ struct MacCheckedStartTests {
     static let elsewhere = Data(repeating: 0x0f, count: 20)
 
     func arguments(_ node: (home: String, root: String, server: String, lock: String), server: String? = nil) -> [String] {
-        ["vibeswitcher-host", "--node", "--node-root", node.root, "--server", server ?? node.server, "--lock", node.lock]
+        ["vibeswitcher-host", "--node", "--node-root", node.root, "--server", server ?? node.server]
     }
 
     func record(_ builds: [NodePins.Build]) -> Result<NodePins, NodePins.Refused> { .success(NodePins(uid: getuid(), builds: builds)) }
@@ -69,31 +69,31 @@ struct MacCheckedStartTests {
     @Test func aHostWhoseCodeIsntPinnedGetsNoServerChildNoVaultAndNoHooks() throws {
         let node = try nodeRoot()
         let own = try #require(Platform.CodeIdentity.ownCdhash())
-        let arguments = arguments(node)
+        let given = arguments(node)
 
-        let notPinned = HostImages.macNodeStart(arguments: arguments, lockPath: node.lock, own: own,
+        let notPinned = HostImages.macNodeStart(arguments: given, lockPath: node.lock, own: own,
                                                 pins: record([try row(host: Self.elsewhere, server: node.server)]), accountHome: node.home)
         let why = try #require(refusal(notPinned), "a host the record doesn't pin passed its start")
         #expect(why.contains("is no host the node's record pins") && why.contains(NodePins.hex(own)), "\(why)")
-        #expect(refusal(HostImages.macNodeStart(arguments: arguments, lockPath: node.lock, own: nil,
+        #expect(refusal(HostImages.macNodeStart(arguments: given, lockPath: node.lock, own: nil,
                                                 pins: record([try row(host: own, server: node.server)]), accountHome: node.home)) != nil,
                 "a host whose own code can't be read passed")
-        #expect(refusal(HostImages.macNodeStart(arguments: arguments, lockPath: node.lock, own: own,
+        #expect(refusal(HostImages.macNodeStart(arguments: given, lockPath: node.lock, own: own,
                                                 pins: .failure(NodePins.Refused("the record is missing")), accountHome: node.home))?
                     .contains("the record is missing") == true)
 
-        let refused = try host(checked: nil, arguments: arguments)
+        let refused = try host(checked: nil, arguments: given)
         defer { refused.child?.stop() }
         #expect(refused.child == nil, "a --node host with no checked start ran a server child")
         #expect(refused.host.server.queue.sync { refused.host.server.serverChild == nil && !refused.host.server.isMacNodeHost })
         #expect(!refused.host.server.welcomeCapabilities.contains(HostProtocol.Capability.vaultV2))
         #expect(!refused.book.recordsActions, "a host that isn't a node host keeps the record of the user's actions")
 
-        let checked = HostImages.macNodeStart(arguments: arguments, lockPath: node.lock, own: own,
+        let checked = HostImages.macNodeStart(arguments: given, lockPath: node.lock, own: own,
                                               pins: record([try row(host: own, server: node.server)]), accountHome: node.home)
         guard case .success(let start) = checked else { Issue.record("a pinned host refused: \(refusal(checked) ?? "")"); return }
         #expect(start.server == Platform.CodeIdentity.cdhash(atPath: node.server) && start.build.host == own && start.serverPath == node.server)
-        let made = try host(checked: start, arguments: arguments)
+        let made = try host(checked: start, arguments: given)
         defer { made.child?.stop() }
         #expect(made.child != nil, "a checked node host ran no server child")
         #expect(made.host.server.queue.sync { made.host.server.isMacNodeHost }, "a checked node host isn't a node host")
@@ -194,7 +194,7 @@ extension MacKeeperTargetTests {
         let pins = Result<NodePins, NodePins.Refused>.success(NodePins(uid: getuid(), builds: [try row("a", host: oldHost, folder: old),
                                                                                                try row("c", host: newHost, folder: new)]))
         let lock = (Platform.Service.nodeRoot(accountHome: home) as NSString).appendingPathComponent("host.lock")
-        let started = ["--socket", "/s", "--lock", lock, HostImages.nodeFlag, HostImages.nodeRootFlag, old, "--server", old + "/bin/" + BuildInfo.server]
+        let started = [HostImages.nodeFlag, HostImages.nodeRootFlag, old, "--server", old + "/bin/" + BuildInfo.server]
         if case .failure(let why) = HostImages.macNodeStart(arguments: ["vibeswitcher-host"] + started, lockPath: lock, own: oldHost, pins: pins, accountHome: home) {
             Issue.record("the old build's own start refused: \(why)")
         }

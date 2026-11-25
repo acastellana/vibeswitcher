@@ -88,6 +88,10 @@ public enum HostHandover {
         /// The web's listening sockets the host holds (H1, see V2/HostWebListeners.swift), carried so the port is never
         /// free between two images. Nil: none (the Mac's always), and from builds before it.
         public var webListeners: [WebListenerRecord]?
+        /// The Mac: the image that wrote this state was a checked node host (`HostServer.Config.checkedNode`), so only a
+        /// new image holding its own checked start takes it (`HostImages.mayTakeHandover`). Nil: not one, and from
+        /// builds before it.
+        public var fromCheckedNode: Bool?
 
         /// Every descriptor the new image must inherit.
         var descriptors: [Int32] {
