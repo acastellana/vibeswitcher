@@ -13,7 +13,7 @@
 
 import { h, s, setText, setClass, framed } from '../dom.js';
 import { icon } from '../marks.js';
-import { clock, moment, tilde, lastPart, taskLine } from '../words.js';
+import { clock, moment, tilde, lastPart, taskLine, since } from '../words.js';
 import { t, listed, lang, nodeWords } from '../i18n.js';
 import { hasDates, dated, timeAxis, axisPoints, landingWords, basisWords } from '../forecast.js';
 import { leadLines, shownLines, dialCounts, waitingCards, waitingCount, cut, shortHashes, dayOf, teamCounts, standing, taskTone, taskStep, waitsOn, goalRows, lineKey } from '../conversation.js';
@@ -22,6 +22,7 @@ import { questionStack, pluginCard, copyLine, cardSheet } from './cards.js';
 import { tellLine, shellWord, leadLine } from '../actions.js';
 import { actsFor, doButton, cardArgs, refusalWords } from '../acting.js';
 import { waysFor, sendArgs, sentWords } from '../sendways.js';
+import { heldSummary, itemLabel } from '../heldconfig.js';
 import { sendMenu } from './sendmenu.js';
 
 // The line marks: a diamond for a question (filled while open, an outline once answered), a check for a result, a
@@ -250,8 +251,72 @@ export function projectView(app, { sheet }) {
     return null;
   }
 
+  // A held-config card, four lines at most before a click (the Mac's economy): what changed, what it holds back, the
+  // guard rails that changed (only those), Accept and Show details; the terminal's line instead of Accept when the
+  // node would refuse a page's accept (a rail changed or can't be compared). The rest behind Show details.
+  function configCard(card) {
+    const root = card.root || '';
+    const summary = heldSummary(card.config);
+    // Blocking unless the node says it isn't (a card with nothing held holds nothing back).
+    const head = h('header', { class: 'card-head' }, card.blocking === false ? h('span', { class: 'priority important' }, t('cImportant')) : h('span', { class: 'priority blocking' }, t('blocking')),
+      h('time', { class: 'asked' }, t('askedAt', { who: t('vibeswitcher'), time: clock(card.at) })));
+    const terminalLine = (words, command = 'vibeswitcher approve') => h('div', { class: 'hc-terminal' }, h('span', null, words), copyLine(command, 'the command that accepts it'));
+    // Nothing held and no sealed accept (`firstLook`): the node only wants this project's rules confirmed once; the
+    // command shows them and takes the accept (`approve` doesn't list such a card).
+    if (summary.confirmOnly) {
+      return h('article', { class: 'card held-config confirm-only' }, head,
+        terminalLine(t('hcConfirmOnly'), `vibeswitcher config held ${shellWord(root)}`),
+        h('details', { class: 'hc-details' }, h('summary', null, t('hcShowRules')), heldDetails(card, summary)));
+    }
+    const details = h('details', { class: 'hc-details' }, h('summary', null, t('hcShowDetails')), heldDetails(card, summary));
+    const acts = actsFor(app, 'config.accept') && !summary.terminal;
+    const shown = summary.changed.slice(0, 5);
+    const more = summary.changed.length - shown.length;
+    return h('article', { class: 'card held-config' }, head,
+      h('h3', { class: 'card-question' }, summary.title),
+      summary.line ? h('p', { class: 'hc-line' }, summary.line) : null,
+      h('p', { class: 'card-why' }, card.config?.sharedHome ? t('hcHoldsAll') : t('hcHolds', { project: lastPart(root) || root })),
+      // The rules that would change: five at most, the rest one click away.
+      shown.length ? h('div', { class: 'hc-rules' }, h('p', { class: 'hc-rules-label' }, t('hcRulesChange')),
+        shown.map((rail) => h('p', { class: 'hc-rail' }, h('code', null, rail.key), ': ',
+          rail.state === 'new' ? [rail.value, ' ', t('hcNew')] : [rail.before ?? '?', ' → ', rail.value])),
+        more > 0 ? h('p', { class: 'hc-quiet' }, t('hcMoreRules', { n: more }), ' ', h('button', { class: 'link', type: 'button', onclick: () => { details.open = true; } }, t('hcShowThem'))) : null) : null,
+      summary.unknown ? h('p', { class: 'hc-quiet' }, t('hcUnknown', { n: summary.unknown }), ' ',
+        h('button', { class: 'link', type: 'button', onclick: () => { details.open = true; } }, t('hcShowThem'))) : null,
+      acts ? h('div', { class: 'card-acts' },
+        doButton(app, { label: t('acAccept'), kind: 'config.accept', args: () => cardArgs(card), done: () => receipt(t('hcAccepted', { what: summary.line || summary.title })) }).el)
+        : terminalLine(summary.changed.length ? t('hcNeedsTerminal') : t('hcNeedsTerminalUnknown')),
+      details);
+  }
+
+  // Behind Show details: each held thing with when it changed, the rails as a table; hashes only under Technical details.
+  function heldDetails(card, summary) {
+    const items = card.config?.items || [];
+    const stateWord = (rail) => t({ same: 'hcSame', changed: 'hcChangedWord', new: 'hcNewWord', unknown: 'hcUnknownWord' }[rail.state] || 'hcNoAccept');
+    return [
+      h('ul', { class: 'hc-items' }, items.map((item) => h('li', null, h('strong', null, itemLabel(item)), ' ', h('code', null, item.name),
+        item.changedAt ? h('small', null, ' · ', t('hcWhen', { time: since(item.changedAt) })) : null,
+        item.files?.length ? h('ul', { class: 'files' }, item.files.map((file) => h('li', null, h('code', null, file)))) : null))),
+      summary.rails.length ? h('table', { class: 'hc-rails' }, h('tbody', null, summary.rails.map((rail) => h('tr', { class: rail.state === 'changed' || rail.state === 'new' ? 'changed' : null },
+        h('th', null, rail.key), h('td', null, h('code', null, rail.value)), h('td', { class: 'hc-state' }, stateWord(rail)))))) : null,
+      h('details', { class: 'hc-technical' }, h('summary', null, t('hcTechnical')),
+        h('ul', { class: 'files' }, items.map((item) => h('li', null, h('code', null, `${item.name}  ${item.hash || ''}`), item.sinceAccept ? ` (${item.sinceAccept})` : '')),
+          summary.rails.map((rail) => (rail.sinceAccept ? h('li', null, h('code', null, rail.key), ` ${rail.sinceAccept}`) : null))),
+        card.config?.lastAccept ? h('p', null, t('hcLastAccept', { time: since(card.config.lastAccept) })) : null),
+    ];
+  }
+
+  // A one-line record of what was done from the page, kept in the conversation (this page's).
+  function receipt(text) {
+    const project = ui.state.route.id;
+    notes.set(project, [...(notes.get(project) || []), { text, state: 'receipt' }]);
+    drawn = '';
+    render();
+  }
+
   function otherCard(card) {
     if (card.kind === 'plugin') return pluginCard(card, app);
+    if (card.kind === 'config' && card.config) return configCard(card);
     const root = card.root || '';
     const config = card.kind === 'config';
     // With the `act` right: accept the held config, or accept or keep the base, from here (the card and its seen).
@@ -319,6 +384,7 @@ export function projectView(app, { sheet }) {
     waitShown = !!waiting || !stack.el.hidden || extra.length > 0;
     waitBox.hidden = !waitShown;
     for (const entry of mine) {
+      if (entry.state === 'receipt') { children.push(h('p', { class: 'receipt' }, icon('check', 12), ' ', entry.text)); continue; }
       if (entry.state === 'draft') {
         children.push(h('div', { class: 'note' }, h('p', { class: 'mine' }, entry.text), copyLine(tellLine(lead.root, entry.text), 'the command that tells the lead'), h('p', { class: 'confirm-note' }, t('tellNote'))));
       } else {

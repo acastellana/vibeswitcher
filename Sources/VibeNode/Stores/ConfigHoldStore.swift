@@ -95,6 +95,9 @@ public enum ConfigHoldStore {
         /// The accept records every guard rail (the vault holds none of them as they are: a fresh vault, or it couldn't be
         /// asked): said once for the card, each rail's `records` then nil.
         public var recordsAll: Bool?
+        /// Nothing held, and no guard rail recorded for the folder: the vault's first look is owed (a host restart
+        /// since): accepting confirms the project's rules once. Such a card is no hold (not blocking).
+        public var firstLook: Bool?
 
         public init(items: [Item] = [], hashes: [String: String] = [:], floor: LeadReviewFloor? = nil, rails: [String: String] = [:],
                     baseBranch: String? = nil, guarded: [Rail] = [], lastAccept: Date? = nil) {
@@ -208,12 +211,12 @@ public enum ConfigHoldStore {
         let byName = Dictionary(hashes.map { (ConfigSeal.name(ofKey: $0.key), (key: $0.key, hash: $0.value)) }) { first, _ in first }
         // "The same" only from a snapshot this host's vault sealed at the last accept (the security follow-ups' item 18;
         // the close-out review: the record now is that accept's).
-        let vouched = AcceptedSnapshot.vouches(snapshot, root: root, vault: vault, record: record)
+        let vouched = AcceptedSnapshot.vouch(snapshot, root: root, vault: vault, record: record)
         let facts = names.isEmpty ? HeldWhat.Facts() : HeldWhat.facts(home: home)
         let items = names.map { name in
             var item = Item(name: name, changedAt: times[name], size: sizes[name], hash: String((byName[name]?.hash ?? "").prefix(12)), change: changes[name],
                             outside: outside.contains(name), files: details[name]?.files ?? [],
-                            sinceAccept: byName[name].flatMap { AcceptedSnapshot.since(key: $0.key, hash: $0.hash, in: snapshot, vouched: vouched) })
+                            sinceAccept: byName[name].flatMap { AcceptedSnapshot.since(key: $0.key, hash: $0.hash, in: snapshot, vouched: vouched.item($0.key)) })
             item.about = HeldWhat.describe(item, facts: facts)
             return item
         }
@@ -222,8 +225,8 @@ public enum ConfigHoldStore {
         let recorded: [String: String]? = (try? vault.guardedSettings(root: root)) ?? nil
         let proposed = recordedHashes(workflow)
         let guarded = guardedValues(workflow).map { rail -> Rail in
-            var shown = Rail(key: rail.key, value: rail.value, sinceAccept: AcceptedSnapshot.since(rail: rail.key, value: rail.value, in: snapshot, vouched: vouched))
-            (shown.changed, shown.old) = changed(rail: rail.key, value: rail.value, in: snapshot, vouched: vouched)
+            var shown = Rail(key: rail.key, value: rail.value, sinceAccept: AcceptedSnapshot.since(rail: rail.key, value: rail.value, in: snapshot, vouched: vouched.rail(rail.key)))
+            (shown.changed, shown.old) = changed(rail: rail.key, value: rail.value, in: snapshot, vouched: vouched.rail(rail.key))
             // None recorded (a fresh vault, or it couldn't be asked): every rail is, said once for the card (`recordsAll`).
             shown.records = recorded.map { $0[rail.key] != proposed[rail.key] }
             return shown

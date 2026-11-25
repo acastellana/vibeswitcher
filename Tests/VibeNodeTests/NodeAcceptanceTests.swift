@@ -50,7 +50,7 @@ struct NodeAcceptanceTests {
         #expect(said.contains("accepted: nothing held") || said.contains { $0.hasPrefix("accepted: ") && $0.hasSuffix("it holds \(repo.lastPathComponent) no more") },
                 "\(accepted.output)")
         let after = try await node.run(["config", "held", repo.path])
-        #expect(after.status == 0 && after.output.contains("nothing held"), "\(after.output)\(after.errors)")
+        #expect(after.status == 0 && (after.output.contains("nothing held") || after.output.contains("Nothing is held")), "\(after.output)\(after.errors)")
     }
 
     // MARK: A3, the page

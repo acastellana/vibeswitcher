@@ -498,6 +498,7 @@ extension CardStore.Card {
             if let every = config.holdsEvery { c["holdsEvery"] = .bool(every) }
             if let all = config.recordsAll { c["recordsAll"] = .bool(all) }
             c["lastAccept"] = config.lastAccept.map(NodeWire.Value.date) ?? .null
+            if config.firstLook == true { c["firstLook"] = .bool(true) }
             c["sharedHome"] = config.sharedHome.map { shared in
                 .object(["names": texts(shared.names), "card": .string(shared.card), "folder": .string(shared.folder)])
             } ?? .null

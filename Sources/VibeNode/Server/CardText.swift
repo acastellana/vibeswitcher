@@ -65,6 +65,8 @@ public enum CardText {
         guard let config = card["config"], config != .null else { return [] }
         let items = config["items"]?.array ?? []
         let shared = config["sharedHome"]?["names"]?.array?.compactMap(\.string) ?? []
+        // Shown, not kept: nothing held and nothing to record (the command says so in its own line).
+        if card["open"]?.bool == false, items.isEmpty, shared.isEmpty { return [] }
         // The held things the snapshot lists as they are now, its seal not this host's vault's: counted, not listed.
         let uncompared = items.filter { !HeldWhat.changedSinceAccept($0["sinceAccept"]?.string) && !($0["sinceAccept"]?.string ?? "").hasPrefix("the same as") }.count
         var lines: [String] = []
@@ -75,7 +77,8 @@ public enum CardText {
             let names = items.filter { HeldWhat.changedSinceAccept($0["sinceAccept"]?.string) }.compactMap { $0["name"]?.string }.map(inert)
             lines.append(names.prefix(3).joined(separator: "; ") + (names.count > 3 ? "; and \(names.count - 3) more" : ""))
         } else if items.isEmpty, shared.isEmpty {
-            lines.append("nothing held: accepting records what workflow.md proposes")
+            lines.append(config["firstLook"]?.bool == true ? "nothing held: the node restarted (or this project's rules were never accepted): confirm them once"
+                         : "nothing held: accepting records what workflow.md proposes")
         }
         if uncompared > 0 {
             let things = uncompared == 1 ? "1 held thing" : "\(uncompared) held things"
@@ -204,7 +207,10 @@ public enum CardText {
             let items = config["items"]?.array ?? []
             // What the card leaves to the home folder's card (`sharedHome`: not among its items): one line.
             let shared = config["sharedHome"]?["names"]?.array?.compactMap(\.string) ?? []
-            lines.append(items.isEmpty && shared.isEmpty ? "  nothing held: accepting records what workflow.md proposes and ends a fresh vault's first look"
+            let firstLook = config["firstLook"]?.bool == true
+            lines.append(items.isEmpty && shared.isEmpty && firstLook
+                         ? "  nothing held: the node restarted (or this project's rules were never accepted): confirm them once, accepting records what workflow.md proposes"
+                         : items.isEmpty && shared.isEmpty ? "  nothing held: accepting records the guard rails or review floor workflow.md proposes"
                          : items.isEmpty ? "  held (no worker, verifier or merge until accepted), none of it this folder's own:"
                          : "  held (no worker, verifier or merge until accepted):")
             // The folder, never the other card's id: that card may be superseded or accepted since this one was drawn.
