@@ -92,7 +92,7 @@ public struct NodePins: Equatable, Sendable {
         var hashes = Set<Data>()
         for row in rows {
             let words = row.split(separator: " ", omittingEmptySubsequences: false).map(String.init)
-            guard words.count == 9, words[0] == "build", words[2] == "host", words[4] == "server", words[6] == "cli",
+            guard words.count == 8, words[0] == "build", words[2] == "host", words[4] == "server", words[6] == "cli",
                   isHex(words[1]), let host = bytes(words[3]), let server = bytes(words[5]), let cli = bytes(words[7]) else {
                 return .failure(Refused("has a line that isn't a build's: \(row.prefix(200))"))
             }
