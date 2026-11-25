@@ -162,3 +162,7 @@ A lead after the next rotation must know this one checked its build and the audi
 
 The hold's cause was checked once so a later lead doesn't redo the comparison; the account switch changes what starts by itself; and the missing variable in the lead's own environment is evidence for or against team-sessions-start that would be lost otherwise.
 
+## 2026-11-25 13:36:18 Nov 25: the user answered BE6B3E86 (version 4) "Run them on Sonnet after all". The four held audits run on whatever the floor leaves (Sonnet while Claude Code's default model is Fable and the workers ran on Opus), one at a time: sb5-the-host-confines (17c4a239) first, hold_audit lifted and audit started (its shared build and test run was under way when this was written); then tests-that-write-a (86db64dd), the-config-card-says (42eee715), sandbox-env-hygiene-no (4b0a7eb2): for each, update_task(hold_audit: false) only when the one before has its verdict, so auto_advance doesn't start them together. After every verdict the lead reads .vibeswitcher/audit/<task>/<merged commit>/run.txt before asking the user to approve the exact commit (SB5's question carries the install warning of 2026-11-23 15:52). Because the finders are Sonnet, a clean verdict is taken to the user with that said in the approval question. BE6B3E86 is settled and not asked again.
+
+The user's answer supersedes "do fable" of Nov 24; a later lead must know the order, that the other three holds are lifted one by one on purpose, and that the run's own result is read before any approval question.
+
