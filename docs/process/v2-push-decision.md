@@ -54,7 +54,7 @@ this (`WebPush`), to an allow-list of push hosts (`fcm.googleapis.com`, `push.se
    does. The user chose this over kind-only, accepting that whoever holds the phone reads that line. (The default
    proposed above, no words, is not what was chosen.)
 
-Once 1 to 4 are answered (they are, 2026-11-25), the build is: the subscription kept per device token (subscribe and unsubscribe as page
-requests in the draft class, never the user's voice), `WebPush` (VibeCore, shared) used for the encryption and the
-signature, a service worker that shows only what the push carries, and the same triggers as the page's notifications
+Once 1 to 4 are answered (they are, 2026-11-25), the build is: the subscription kept per device token (subscribe and
+unsubscribe as page requests in the draft class, never the user's voice), `WebPush` (VibeCore, shared) used for the
+encryption and the signature, a service worker that shows only what the push carries, and the same triggers as the page's notifications
 (`WebApp/js/notify.js`: a card, a prompt waiting, a lead that stopped, a freeze), sent from the server.
