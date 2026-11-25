@@ -84,6 +84,9 @@ public enum SessionParser {
                 switch String(decoding: payload, as: UTF8.self) {
                 case "stall": while true { sleep(3600) }
                 case "trap": fatalError("test hook: a trap while parsing")
+                // A slow parser: it parses on once `pause:MS` milliseconds (at most 10 s) have passed.
+                case let text where text.hasPrefix("pause:"):
+                    if let ms = UInt32(text.dropFirst("pause:".count)), ms <= 10_000 { usleep(ms * 1_000) }
                 default: if !quiet, let hook = ParserReplies.testFrame(payload) { send(hook.frame, hook.bytes) }
                 }
             }
@@ -204,7 +207,11 @@ public struct ParserOptions: Sendable {
 /// session waiting for a view (`viewNow`) never waits on its own queue. Used on the session's queue, except where said.
 final class ParserLink {
     let pid: pid_t
-    var onReply: ((Data) -> Void)?
+    /// A reply, and whether it may be typed: whether the output it answers was fed while it might be (`feed`'s
+    /// `typable`: while no view was attached). A view attached then answered it already, though the parser's own
+    /// answer may come only after that view has gone (a slow parser; the v2 macos host job of a0353742, where a cursor
+    /// report the app had answered was typed again once it detached).
+    var onReply: ((Data, Bool) -> Void)?
     var onTitle: ((String) -> Void)?
     var onBell: (() -> Void)?
     var onProgramStatus: ((String) -> Void)?
@@ -236,6 +243,9 @@ final class ParserLink {
     private let lock = NSLock()
     private var sent = 0
     private var parsed = 0
+    /// The output fed and not yet parsed, by where each piece ends (`sent` after it) and whether a reply to it may be
+    /// typed. A reply comes while its piece is parsed, before the parser's count passes the piece's end.
+    private var typable: [(end: Int, typable: Bool)] = []
     /// Seconds awake (`MacTime.awake`).
     private var lastProgress: TimeInterval
     private var nextRequest: UInt32 = 0
@@ -320,14 +330,20 @@ final class ParserLink {
         switch SessionParser.FromParser(rawValue: kind) {
         case .parsed?:
             let count = Int(SessionParser.Wire.uint64(payload))
-            locked { parsed = count }
+            locked {
+                parsed = count
+                typable.removeFirst(typable.prefix { $0.end <= count }.count)
+            }
             queue.async { [weak self] in self?.onParsed?() }
         case .view?:
             guard payload.count >= 4 else { return }
             let number = UInt32(bitPattern: SessionParser.Wire.int32(payload, at: 0))
             let view = try? JSONDecoder().decode(ParserView.self, from: payload.dropFirst(4))
             answer(number, view)
-        case .reply?: queue.async { [weak self] in self?.onReply?(payload) }
+        case .reply?:
+            // The piece being parsed: the first not parsed yet.
+            let may = locked { typable.first { $0.end > parsed }?.typable ?? false }
+            queue.async { [weak self] in self?.onReply?(payload, may) }
         case .title?: queue.async { [weak self] in self?.onTitle?(String(decoding: payload, as: UTF8.self)) }
         case .bell?: queue.async { [weak self] in self?.onBell?() }
         case .programStatus?: queue.async { [weak self] in self?.onProgramStatus?(String(decoding: payload, as: UTF8.self)) }
@@ -360,13 +376,17 @@ final class ParserLink {
         locked { sent > parsed || !pending.isEmpty ? time.awake() - lastProgress : nil }
     }
 
-    func feed(_ bytes: Data, quietly: Bool = false) {
+    /// `typable`: whether a reply to this output may be typed (no view is attached now); never one fed `quietly`.
+    func feed(_ bytes: Data, quietly: Bool = false, typable: Bool = true) {
         guard !bytes.isEmpty, !stopped else { return }
         var offset = 0
         // In pieces: each is answered with progress, so a long replay never looks stalled.
         while offset < bytes.count {
             let piece = bytes[(bytes.startIndex + offset)..<(bytes.startIndex + min(bytes.count, offset + 65_536))]
-            beginWork { sent += piece.count }
+            beginWork {
+                sent += piece.count
+                self.typable.append((sent, typable && !quietly))
+            }
             send(quietly ? .feedQuietly : .feed, Data(piece))
             offset += piece.count
         }
