@@ -14,8 +14,9 @@ decisions 1, 2 and 4 below still wait on the user. The text below is the plan as
 because a restarted server found no token alive; each answer repeats its request and the server checks where the
 socket listens; a handover's sockets are held again on the host's queue before its server child is taken again; the web
 ask's 5 s bound covers the connector's lock; a state carrying the sockets is handover format 2 (a build before H1
-refuses it at its probe; one without stays 1, so switches with the web off are as before); the Mac's server binds its
-own until its H1 step (`WebBind.forServer`).
+refuses it at its probe; one without stays 1, so switches with the web off are as before); the Mac's server bound its
+own until its H1 step (`WebBind.forServer`), built 2026-11-25: the Mac's host holds it too, handed over its stream
+connector (docs/process/v2-mac-tasks.md item 9).
 
 2026-11-21, `v2-usage-summaries`. H1 is the gate before any input from a page reaches a real session: typing into a
 terminal, a one-click answer, a reply from a phone (the live plan's LW-D1 and LW-D12 as amended on 2026-11-20, the
