@@ -110,6 +110,36 @@ test('U3: with nothing Blocking the oldest of the rest shows whole and the other
   assert.deepEqual(cardsOf(box).map((card) => head(card).slice(0, 18)), ['Changed settings f', 'Question important', 'Question whenever:']);
 });
 
+// U4 ---------------------------------------------------------------------------------------------------------------
+
+test('U4: at “What waits on me” the conversation pane is hidden and the waiting block takes the centre with no height of its own', async () => {
+  setLanguage('en');
+  const { projectView } = await import('../js/views/project.js');
+  const asks = { name: 'project', id: P, view: 'lead', show: 'asks' };
+  const state = { cards: new Map([[question('q', 'blocking', ago(5)).id, question('q', 'blocking', ago(5))]]), leads: new Map([[P, leadWithPush()]]) };
+  const app = fakeApp({ kinds: ['answer'], state, route: asks });
+  const view = projectView(app, { sheet: { open() {}, close() {} } });
+  view.render();
+  assert.equal(view.el.classList.contains('show-asks'), true);
+  assert.equal(find(view.el, byClass('wait-box')).hidden, false);
+  // The other levels keep the conversation.
+  app.ui.state.route = { ...asks, show: 'decisions' };
+  view.render();
+  assert.equal(view.el.classList.contains('show-asks'), false);
+  // Nothing waiting: the block still holds the centre, and says so.
+  const calm = fakeApp({ state: { leads: new Map([[P, { ...leadWithPush(), push: null }]]) }, route: asks });
+  const empty = projectView(calm, { sheet: { open() {}, close() {} } });
+  empty.render();
+  const box = find(empty.el, byClass('wait-box'));
+  assert.equal(box.hidden, false);
+  assert.match(box.textContent, /\S/);
+  assert.equal(find(empty.el, byClass('talk')).textContent, '', 'nothing in the hidden pane');
+  // The rules: the pane gone, the block the one thing that scrolls (no cap of its own), at every width.
+  const css = readFileSync(join(here, '..', 'style.css'), 'utf8');
+  assert.match(css, /\.project-view\.show-asks \.talk \{ display: none; \}/);
+  assert.match(css, /\.project-view\.show-asks \.wait-box \{ flex: 1; min-height: 0; max-height: none;/);
+});
+
 // U16 --------------------------------------------------------------------------------------------------------------
 
 test('U16: the Approve option says what it approves in words with 8 characters of the commit; the whole one on hover and in what is sent', () => {

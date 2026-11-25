@@ -73,7 +73,8 @@ export function projectView(app, { sheet }) {
   const col = h('div', { class: 'col' });
   const talk = h('div', { class: 'talk' }, col);
   // What waits on the user, at the bottom above the message box: never more than about 60% of the centre's height
-  // (it scrolls inside itself beyond that), so the conversation stays in sight above it.
+  // (it scrolls inside itself beyond that), so the conversation stays in sight above it. At "What waits on me"
+  // (`show=asks`, the class `show-asks`) there is no conversation: it takes the centre, the one thing that scrolls.
   const waitBox = h('section', { class: 'wait-box', hidden: true, 'aria-label': t('cQuestionsForYou') });
   const toWho = h('span', { class: 'to' });
   const input = h('input', { class: 'say', type: 'text', placeholder: t('messageLead'), 'aria-label': t('messageLead'), autocomplete: 'off', maxlength: 4000 });
@@ -303,10 +304,12 @@ export function projectView(app, { sheet }) {
     const extra = cards.filter((card) => !['question', 'approval'].includes(card.kind));
     const mine = notes.get(route.id) || [];
     const key = JSON.stringify([route.id, route.show, lines.map((line) => [line.key, line.answer, line.state, line.delivered, line.replaceable]), extra.map((card) => [card.id, card.seen]), mine, waiting, lang(), store.acts(),
-      lead?.told || null, [...changing]]);
+      lead?.told || null, [...changing], stack.el.hidden]);
     if (key === drawn) return;
     const atEnd = talk.scrollHeight - talk.scrollTop - talk.clientHeight < 40;
     drawn = key;
+    const asks = route.show === 'asks';
+    setClass(el, 'show-asks', asks);
     const shown = shownLines(lines, route.show);
     const children = [];
     let day = null;
@@ -321,9 +324,9 @@ export function projectView(app, { sheet }) {
       children.unshift(h('a', { class: 'latest-said', href: routeHref(route, { sheet: latest.key }) }, h('small', null, t('leadSaid', { time: moment(latest.at) })), cut(shortHashes(latest.head), 220)),
         h('span', { class: 'col-gap' }));
     }
-    if (!shown.length && route.show !== 'asks') children.push(h('p', { class: 'empty-line' }, t('emptyTalk')));
-    if (route.show === 'asks' && !waiting) children.push(h('p', { class: 'empty-line' }, t('emptyAsks')));
+    if (!shown.length && !asks) children.push(h('p', { class: 'empty-line' }, t('emptyTalk')));
     const waits = [];
+    if (asks && !waiting) waits.push(h('p', { class: 'empty-line' }, t('emptyAsks')));
     if (waiting) {
       const push = lead?.push ? 1 : 0;
       waits.push(h('h2', { class: 'asked-title' }, push && waiting === 1 ? t('pushWaits') : t('questionsForYou', { n: waiting - push }) + (push ? t('andAPush') : '')));
@@ -331,7 +334,7 @@ export function projectView(app, { sheet }) {
     waits.push(stack.el);
     const inner = h('div', { class: 'wait-col' }, waits);
     waitBox.replaceChildren(inner);
-    waitShown = !!waiting || !stack.el.hidden;
+    waitShown = asks || !!waiting || !stack.el.hidden;
     waitBox.hidden = !waitShown;
     for (const entry of mine) {
       if (entry.state === 'draft') {
@@ -582,7 +585,7 @@ export function projectView(app, { sheet }) {
       copyLine(leadLine(root), 'the command that starts a new lead there')].filter(Boolean));
       quietForm.onclick = (event) => { event.preventDefault(); app.startLead?.(root); };
     }
-    if (route.view === 'roadmap') { lastProject = null; drawRoadmap(route, board); } else drawLead(route, board, lead);
+    if (route.view === 'roadmap') { lastProject = null; setClass(el, 'show-asks', false); drawRoadmap(route, board); } else drawLead(route, board, lead);
     drawSheet(route, board);
   }
 
