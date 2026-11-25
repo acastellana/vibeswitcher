@@ -521,6 +521,137 @@ nil and nothing on Linux calls them), the checks above in `NodeCheck` (the comma
 off, as the rest of the Mac node is, until items 5 and 13 and the switch-on (`HostImages.isCheckedMacNode`,
 `NodeSystem.approvalMeasured`, `macUnbuilt` and `macServerRefusal` unchanged).
 
+## The LaunchAgent: start, stop and status (step 5)
+
+Written 2026-11-26 on the same Mac, before the code, on top of the checked start and the web port hold. What it
+builds: `vibeswitcher start`, `stop` and `status` on the Mac as the user's LaunchAgent. All of it stays refused for the
+user's node by `NodeSystem.macUnbuilt` (unchanged): the command line's Mac arm sits behind that refusal, and the tests
+reach it with a scratch label, plist folder and data root (`NodeAgent.Place`) and a scratch record.
+
+**Measured first (this Mac, 2026-11-26, from an agent's session in `Aqua`; scratch labels `dev.vibeswitcher.node.test-*`,
+plists in the clone's `.build`, never `~/Library/LaunchAgents`).**
+
+- *What the user sees.* A `launchctl bootstrap gui/501` of a scratch-path plist (`/bin/sleep 30`, `RunAtLoad`) and its
+  `bootout`: the unified log for those seconds (`log show`, no sudo) has no line of Background Task Management's about
+  the job (only its routine store saves and monitor updates, the same as before any load) and no notification
+  (`usernoted`: another app's only). A plist in `~/Library/LaunchAgents` was not tried: that is the folder BTM watches,
+  and the install (step 7) is where it is written.
+- *`launchctl print`'s lines* (one tab in, as M11): before a run `state = not running`, `runs = 0`,
+  `last exit code = (never exited)`; running, `state = running`, `pid = N`, `runs = 1`; after its process was killed,
+  `state = not running`, no `pid`, `runs = 1`, `last terminating signal = Killed: 9` (and on a plain exit
+  `last exit code = N`). With `ProcessType` Interactive launchd shows `exit timeout = 5`.
+- *What `bootout` ends* (the measurement AG-1 asked for; its own script still is the user's): a job running
+  `sh -c 'sleep 302 & perl -e "fork or (setsid, exec sleep 303)"; exec sleep 300'`: `bootout` returned once the job's
+  process (`sleep 300`, pid N, group N) and the child in its group (`sleep 302`, group N) had ended; the child in a
+  session of its own (`sleep 303`, parent pid 1) ran on. A process of the job killed by a signal took its group with it
+  too (`sleep 302` gone, `sleep 303` running). So launchd ends the job's process group and nothing outside it: the host's
+  sessions (each in a session of its own, `PTYSpawn`) and its server child (a group of its own) are the node's to end.
+
+**The plist** (`NodeAgent.Job`, written by `NodeAgent.plist`, the same function `agent-plist` prints for the install):
+
+| Key | Value | Why |
+| --- | --- | --- |
+| `Label` | `dev.vibeswitcher.node` (a test's scratch label) | the job's name in `gui/<uid>`; one job |
+| `ProgramArguments` | `<builds>/<commit>/bin/vibeswitcher-host --node --node-root <builds>/<commit> --server <builds>/<commit>/bin/vibeswitcher-server` | exactly `HostImages.CheckedCommandLine`'s rendering for that build (a test parses it back to the same value): nothing a checked start refuses, nothing it doesn't read |
+| `EnvironmentVariables` | `SWIFT_BACKTRACE` = `enable=no` | the only variable that acts: the Swift runtime reads it at load, before `main` and so before the reset; `HOME` and `PATH` are gone from the plist (the reset rebuilds both from the user database and the system) |
+| `KeepAlive` | false | as the unit's `Restart=no`. A crash leaves the job loaded, not running (`last terminating signal`), and launchd starts nothing again: no loop of any speed, the sessions' terminals gone with the host (they get a hangup), and `status` says it with the signal. `start` again unloads the dead job and loads it afresh. A `KeepAlive` true would restart a host that dies at its start every 10 s for good (launchd's throttle), each time on the node's lock, and would bring back a host the user's `stop` through the server ended |
+| `RunAtLoad` | true only with `--at-login` | the unit's `WantedBy=default.target`; without it `start` loads and then `kickstart`s the job |
+| `ProcessType` | `Interactive` | the user's own work: not throttled as a background job; its LocalAuthentication dialog (step 4) is drawn in the session |
+| `LimitLoadToSessionType` | `Aqua` | only the GUI login's domain takes it (an ssh login's `Background` doesn't) |
+| `StandardErrorPath` | `<data root>/node.log` | where the checked start's one-line refusals and the host's stderr go: read, trusted for nothing |
+| `StandardOutPath` | `/dev/null` | nothing is written there |
+
+No `Sockets` (the host holds the web port, item 9), no `WatchPaths`, `KeepAlive` dictionary, `AbandonProcessGroup`,
+`UserName` or `Program`: any key start doesn't write is a refusal (`NodeAgent.check`).
+
+**Who writes it, and a changed or planted one.** `start` writes it when there is none: the bytes made for this build
+into a new file in the plist's folder (`O_EXCL`, the user's, `0644` as LaunchAgents' are) renamed over nothing, then
+read back and checked. When there is one, `start` reads it (`O_NOFOLLOW`, a regular file, at most 64 KiB) and it must
+be exactly what `start` would write for this build (`NodeAgent.check`: every key and value, nothing added); otherwise
+it refuses, naming the key, and loads nothing, the file left as it is (the install of another build writes its own,
+step 7). Between the check and `bootstrap` the path is read again by launchd: a file swapped in that gap is a program
+launchd starts, and the check after the load (below) is what catches it: it is refused and booted out.
+
+**How `start` knows the host is the one it meant: by audit token and code, never launchctl's text** (M11: `program` is
+the configured program, any path's text a session can give). The build is chosen by code first: the command line finds
+its own row in the root's record by its running code (`Platform.CodeIdentity.ownCdhash`, the row whose `cli` it is),
+and that row's folder `<builds>/<commit>` must hold a host and a server with that row's cdhashes (read by path; the
+host checks its own running code again at its checked start). A record that is missing, or a command line it doesn't
+pin, refuses before anything is written. After the load `start` waits for the host's socket (`<data root>/host.sock`)
+to take a connection, and takes the connection's `LOCAL_PEERTOKEN`: its pid must be launchd's `pid` for the job (the
+one word of `launchctl print` used, as item 12 does), its running code (Security's dynamic check) the host the record
+pins for that build, with the Hardened Runtime, and the process the same before and after those reads
+(`Link.isProcess(of:)`); then the host's welcome, whose pid must be the token's. Only then "the node runs". While it
+waits, a job whose process ended (`state = not running`) refuses at once with the end of `node.log`; at the limit
+(30 s) it refuses; and every refusal after the load boots out what `start` loaded, so it leaves no job behind.
+
+**A job of that label already there.** Running: the host at the socket is checked as above against any build the record
+pins; it passes, and `start` says the node runs already (nothing loaded or written); it doesn't, and `start` refuses
+("a job labelled … runs pid N, which isn't the node's host: …") and leaves it alone. Loaded and not running (a crash, an
+exit): nothing of it runs, so `start` boots it out and loads its own checked plist.
+
+**`stop`: what it ends and what the user is told first.** The job's host checked as above (a job running another program
+is refused and left alone, as `start` does). Then it says what ends: "the node's host (pid N, build C), its server and
+its K sessions end, and the job is unloaded" (K from the host's welcome), and asks for the typed code (`TypedWord`). It
+then asks the server to stop when one answers (it ends the leads and every session, and the host shuts down, as on
+Linux), takes a snapshot of the host's children (pid and start), and boots the job out: launchd ends the host's group;
+the sessions and the server child are outside it (measured above), and end with the host (the server's connector
+closes, each session's terminal hangs up). `stop` waits, within a limit (30 s), until launchd has no such job, the
+host's pid and every child of the snapshot have gone and the socket takes no connection, and removes the socket's
+file once the host's lock is free. A process still there at the limit is named, and `stop` fails. Not loaded: "the
+node isn't running" (69).
+
+**`status`: from the host itself.** Not loaded: not running. Loaded, no pid: not running, with launchd's last exit or
+signal. A pid: the host at the socket checked as above against every build the record pins, then its welcome: "the node
+runs: build C (the record's row its running code is), host pid N since T, K sessions". A host that fails the check is
+said with why ("a job labelled … runs pid N, which isn't the node's host").
+
+**Sessions' environment** (step 5's debt from the checked start's reset). A session's program on the Mac runs as
+`$SHELL -l -i -c COMMAND` (`Platform.Tools.sessionShellArguments`), so the user's own login shell builds most of the
+environment, as in Terminal and in the app's sessions: `PATH` (`/etc/zprofile`'s `path_helper`, then the user's
+`.zprofile` and `.zshrc`: Homebrew, nvm), and whatever locale or variable the user's startup files export. What a
+Terminal session gets from launchd and not from the shell, a checked node's host gives its sessions itself, never from
+its starter (whose environment the reset dropped), and on the session's spawn alone, never in the base environment the
+server child is started with:
+
+- `SSH_AUTH_SOCK`: launchd's own value for the user's domain, `launchctl getenv SSH_AUTH_SOCK`, read by the host at its
+  start (`/bin/launchctl`, `Platform.Service.launchctl`): taken only when it is an absolute path to a socket the user
+  owns, not a link; else the sessions have none. *Residual:* the domain's value is any process of the user's to set
+  (`launchctl setenv`), as for every Terminal opened after it; the Mac seal list (step 8) watches launchctl's user
+  environment.
+- `__CF_USER_TEXT_ENCODING`: `0x<uid>:<encoding>:<region>` as launchd gives it, from the user's
+  `~/.CFUserTextEncoding` (home from the user database; two hex or decimal numbers), `0x<uid>:0x0:0x0` without one.
+- `LANG`: `en_US.UTF-8` when nothing sets it, as the app's sessions get it (`HostedSession.environment`, unchanged): a
+  GUI job has no locale from launchd either. `LC_ALL` and `LC_CTYPE` are the user's startup files' to set.
+- `umask`: 022 for the session's program, set by the launcher (`--pty-exec`'s child, before it execs the program); the
+  host itself keeps 077.
+- The core limit: the reset's hard `RLIMIT_CORE` 0 stays (three reviews passed it); sessions inherit soft 0, which is
+  launchd's own default (`launchctl limit core`: `0 unlimited`), so a session's crash writes no core file, as in
+  Terminal, but `ulimit -c unlimited` is refused in it. For the reviewer: making the reset's hard limit the one given and
+  only the soft one 0 would give it back (no process can change another's limits on the Mac, so soft 0 is what keeps the
+  node from dumping).
+- A variable the starter planted (the plist's, `launchctl setenv`'s, a wrapper's) never reaches a session: the reset
+  dropped it from the host, and a session's environment is taken from the host's by name.
+
+The same is given to the sessions of a scratch host started with `--test-checked-shape HOME` (a scratch host's test
+flag, refused for the user's host and a checked node, and refused by the checked grammar): it resets itself as a checked
+node does, with `HOME` the given scratch home in place of the user database's, so its tests run the login shell on a
+scratch `.zprofile`, never the user's.
+
+**`SWIFT_BACKTRACE`, which the reset drops.** The plist keeps `enable=no`: the Swift runtime reads it at load, so it acts
+on the host itself before the reset. For the host's children a checked node puts `SWIFT_BACKTRACE=enable=no` in its base
+environment as a fixed value (the server child, the launchers and the parsers get it, as Linux's
+`sessionEnvironmentFixed` gives it): no Swift child of the node starts the backtracer, which reads the crashed process's
+memory into its stderr (the server's is `node.log`). A crash of any of them still goes to the system's crash reporter
+(`~/Library/Logs/DiagnosticReports`), as every process's does.
+
+**Where it is built.** `NodeAgent` (the plist as data: `Job`, `Place`, `check`, the `launchctl` lines and `print`'s
+lines), `MacAgent` (VibeNode: `start`, `stop`, `status` with every step injected, and the host check by token and
+code), the command line's Mac arm (`vibeswitcher-cli`, behind `usersNodeRefusal`), `CheckedSessions` (VibeHost: what a
+checked node's sessions are given) and the launcher's umask flag. No `#if os(macOS)` in the node's targets: the Mac's
+facts come through `Platform.Service`, `Platform.Sockets` and `Platform.CodeIdentity`; Linux's systemd path is
+unchanged.
+
 ## The seal's Mac list
 
 `LinuxSealList` stays empty on the Mac; a `MacSealList` beside it, by the same rules (a change waits for the user's
