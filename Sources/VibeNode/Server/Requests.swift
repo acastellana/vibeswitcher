@@ -151,6 +151,11 @@ public final class Requests: @unchecked Sendable {
     var passkeyChallenges: [String: PasskeyChallenge] = [:]
     var passkeyRegistrations: [String: PasskeyRegistration] = [:]
     var approvedLines: [String: String] = [:]
+    /// The line each page act's passkey approved, by action, once recorded (at most `repliesKept`): a repeat of that act
+    /// (its reply lost, sent again after a reconnect) is answered with it too, so the page says what was recorded (the
+    /// browser check's flake on CI, 2026-11-25: the repeat's kept reply carried none). On `queue`.
+    var recordedLines: [String: String] = [:]
+    var recordedOrder: [String] = []
     /// The challenges used already (a second use is said so: `passkey`, not `assertion-needed`). On `queue`.
     var usedChallenges: Set<String> = []
     /// Each action an acting page made: that page's token (its digest), and its kind and arguments as the page sent

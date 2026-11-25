@@ -100,14 +100,28 @@ async function run() {
 
     // Act: the first question answered by clicking its option, the passkey asked and given.
     await page.go(expect.projectHref);
-    // The recorded line is said for 8 s (the pill): kept as it shows, so a slow look after the card closed still sees it.
-    await page.until(`(() => { window.__recordedSeen = ''; setInterval(() => { const l = document.querySelector('.passkey-pill:not([hidden]) .passkey-line'); if (l && l.innerText) window.__recordedSeen = l.innerText; }, 50); return true; })()`, WAIT);
+    // Every line the passkey pill shows (`.passkey-line`, while the browser asks and after, the vault's), kept as it is
+    // drawn (a MutationObserver: no sampling, and nothing hangs on the pill's 8 s), so the check waits on the event.
+    await page.until(`(() => {
+      window.__passkeyLines = [];
+      const keep = () => document.querySelectorAll('.passkey-pill .passkey-line').forEach((l) => {
+        const lines = window.__passkeyLines;
+        if (l.textContent && lines[lines.length - 1] !== l.textContent) lines.push(l.textContent);
+      });
+      new MutationObserver(keep).observe(document.body, { childList: true, subtree: true, characterData: true });
+      return true;
+    })()`, WAIT);
     const clicked = await page.until(clickOption(expect.first, expect.firstOption), WAIT);
     const pill = clicked && await page.until(`(() => { const p = document.querySelector('.passkey-pill'); return p && p.innerText.trim() ? p.innerText.replace(/\\s+/g, ' ').slice(0, 120) : null; })()`, WAIT);
     const answered = clicked && await page.until(`(() => { const c = ${card(expect.first)}; return c && c.classList.contains('closed') ? c.innerText.replace(/\\s+/g, ' ').slice(0, 80) : null; })()`, WAIT);
-    const shown = answered && recorded && await page.until(`(() => { const line = ${JSON.stringify((recorded || '').slice(0, 40))}; return document.body.innerText.includes(line) || (window.__recordedSeen || '').includes(line) ? true : null; })()`, WAIT);
+    // The reply's line (its frame may come after the card's close): waited for, then looked for among the pill's lines.
+    const replied = answered && await (async () => { const end = Date.now() + WAIT; while (!recorded && Date.now() < end) await new Promise((r) => setTimeout(r, 100)); return recorded; })();
+    const observed = await page.evaluate('Array.isArray(window.__passkeyLines)').catch(() => false);
+    const shown = replied && await page.until(`(() => (window.__passkeyLines || []).some((l) => l.includes(${JSON.stringify(recorded.slice(0, 40))})) ? true : null)()`, WAIT);
     await page.shot('passkey-act');
-    record('Act', answered && recorded && shown, !clicked ? 'the option couldn’t be clicked' : !answered ? `the act wasn’t done (${pill || 'no pill'})` : !recorded ? 'no recorded line in the reply' : !shown ? 'the recorded line isn’t shown' : `done; recorded “${recorded}”`);
+    record('Act', Boolean(answered && replied && shown), !clicked ? 'the option couldn’t be clicked' : !answered ? `the act wasn’t done (${pill || 'no pill'})`
+      : !replied ? 'no recorded line in the reply' : !observed ? 'the page was loaded again during the act (its pill lines weren’t kept)'
+      : !shown ? `the recorded line isn’t shown (the pill showed: ${JSON.stringify(await page.evaluate('window.__passkeyLines').catch(() => null))})` : `done; recorded “${recorded}”`);
   } catch (error) {
     record('run', false, error.message);
   } finally {
