@@ -115,9 +115,10 @@ public enum MacHandoverKeeper {
     /// parent), running this process's own code, hardened. Anything else: it closes everything and exits.
     public static func keepIfAsked(_ arguments: [String]) {
         guard let at = arguments.firstIndex(of: keeperFlag) else { return }
+        // Before it writes anything (its pairs are SO_NOSIGPIPE already; its stderr isn't).
+        signal(SIGPIPE, SIG_IGN)
         guard arguments.indices.contains(at + 1), let channel = Int32(arguments[at + 1]), channel > STDERR_FILENO else { quit("no channel") }
         _ = fcntl(channel, F_SETFD, FD_CLOEXEC)
-        signal(SIGPIPE, SIG_IGN)
         let host = getppid()
         guard let own = Platform.CodeIdentity.ownCdhash() else { quit("its own code can't be read") }
         guard let (mine, theirs) = Platform.Sockets.pair(type: Platform.Sockets.stream),
