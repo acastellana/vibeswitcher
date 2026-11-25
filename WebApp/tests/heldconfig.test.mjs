@@ -55,3 +55,15 @@ test('the node’s `firstLook`: nothing held, no sealed accept: confirm the rule
   const first = heldSummary({ items: [], guarded: [{ key: 'test_command', value: 'true', sinceAccept: null }], firstLook: true });
   assert.deepEqual([first.confirmOnly, first.terminal], [true, false]);
 });
+
+test('the node’s plain fields: each item’s `what`, the rules’ `changed`/`old`/`records`, `holds`, `recordsAll`, `summary`', () => {
+  assert.equal(itemLabel({ name: '~/.local/bin/claude', kind: 'claude-update', what: 'Claude Code’s link moved to 2.1.332', from: '2.1.331', to: '2.1.332' }), 'Claude Code’s link moved to 2.1.332');
+  assert.equal(itemLabel({ name: 'x', what: 'the plugin genlayernode updated', from: '0.4.0', to: '0.4.1' }), 'the plugin genlayernode updated (0.4.0 → 0.4.1)');
+  assert.deepEqual(railState({ changed: 'changed', old: 'true', value: 'false' }), { state: 'changed', before: 'true' });
+  assert.deepEqual(railState({ changed: 'changed', value: 'x' }), { state: 'new', before: null }, 'not set at the last accept');
+  assert.deepEqual(railState({ changed: 'same' }), { state: 'same', before: null });
+  assert.deepEqual(railState({ changed: 'unknown', records: true }), { state: 'records', before: null });
+  const card = heldSummary({ items: [{ name: 'a', what: 'one' }, { name: 'b', what: 'two', sinceAccept: 'not known to be the same as at your last accept (x)' }],
+    guarded: [{ key: 'k', value: 'v', changed: 'same' }], holds: 'example-app', summary: 'one; two', recordsAll: true });
+  assert.deepEqual([card.title, card.line, card.holds, card.summary, card.itemsUnknown, card.recordsAll, card.terminal], ['2 things changed', 'one, two', 'example-app', 'one; two', 1, 1, true]);
+});

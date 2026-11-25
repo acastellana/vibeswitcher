@@ -275,16 +275,19 @@ export function projectView(app, { sheet }) {
     return h('article', { class: 'card held-config' }, head,
       h('h3', { class: 'card-question' }, summary.title),
       summary.line ? h('p', { class: 'hc-line' }, summary.line) : null,
-      h('p', { class: 'card-why' }, card.config?.sharedHome ? t('hcHoldsAll') : t('hcHolds', { project: lastPart(root) || root })),
+      h('p', { class: 'card-why' }, summary.holdsEvery || (!summary.holds && card.config?.sharedHome) ? t('hcHoldsAll') : t('hcHolds', { project: summary.holds || lastPart(root) || root })),
+      summary.itemsUnknown ? h('p', { class: 'hc-quiet' }, t('hcItemsUnknown', { n: summary.itemsUnknown })) : null,
+      summary.recordsAll ? h('p', { class: 'hc-quiet' }, t('hcRecordsAll', { n: summary.recordsAll })) : null,
       // The rules that would change: five at most, the rest one click away.
       shown.length ? h('div', { class: 'hc-rules' }, h('p', { class: 'hc-rules-label' }, t('hcRulesChange')),
         shown.map((rail) => h('p', { class: 'hc-rail' }, h('code', null, rail.key), ': ',
-          rail.state === 'new' ? [rail.value, ' ', t('hcNew')] : [rail.before ?? '?', ' → ', rail.value])),
+          rail.state === 'new' ? [rail.value, ' ', t('hcNew')] : rail.state === 'records' ? [rail.value, ' ', t('hcRecords')] : [rail.before ?? '?', ' → ', rail.value])),
         more > 0 ? h('p', { class: 'hc-quiet' }, t('hcMoreRules', { n: more }), ' ', h('button', { class: 'link', type: 'button', onclick: () => { details.open = true; } }, t('hcShowThem'))) : null) : null,
       summary.unknown ? h('p', { class: 'hc-quiet' }, t('hcUnknown', { n: summary.unknown }), ' ',
         h('button', { class: 'link', type: 'button', onclick: () => { details.open = true; } }, t('hcShowThem'))) : null,
       acts ? h('div', { class: 'card-acts' },
-        doButton(app, { label: t('acAccept'), kind: 'config.accept', args: () => cardArgs(card), done: () => receipt(t('hcAccepted', { what: summary.line || summary.title })) }).el)
+        doButton(app, { label: t('acAccept'), kind: 'config.accept', args: () => cardArgs(card), done: () => receipt(summary.holdsEvery ? t('hcAcceptedAll', { what: summary.summary || summary.line || summary.title })
+          : t('hcAccepted', { what: summary.summary || summary.line || summary.title, project: summary.holds || lastPart(root) || root })) }).el)
         : terminalLine(summary.changed.length ? t('hcNeedsTerminal') : t('hcNeedsTerminalUnknown')),
       details);
   }
@@ -292,12 +295,12 @@ export function projectView(app, { sheet }) {
   // Behind Show details: each held thing with when it changed, the rails as a table; hashes only under Technical details.
   function heldDetails(card, summary) {
     const items = card.config?.items || [];
-    const stateWord = (rail) => t({ same: 'hcSame', changed: 'hcChangedWord', new: 'hcNewWord', unknown: 'hcUnknownWord' }[rail.state] || 'hcNoAccept');
+    const stateWord = (rail) => t({ same: 'hcSame', changed: 'hcChangedWord', new: 'hcNewWord', unknown: 'hcUnknownWord', records: 'hcRecordsWord' }[rail.state] || 'hcNoAccept');
     return [
       h('ul', { class: 'hc-items' }, items.map((item) => h('li', null, h('strong', null, itemLabel(item)), ' ', h('code', null, item.name),
         item.changedAt ? h('small', null, ' · ', t('hcWhen', { time: since(item.changedAt) })) : null,
         item.files?.length ? h('ul', { class: 'files' }, item.files.map((file) => h('li', null, h('code', null, file)))) : null))),
-      summary.rails.length ? h('table', { class: 'hc-rails' }, h('tbody', null, summary.rails.map((rail) => h('tr', { class: rail.state === 'changed' || rail.state === 'new' ? 'changed' : null },
+      summary.rails.length ? h('table', { class: 'hc-rails' }, h('tbody', null, summary.rails.map((rail) => h('tr', { class: ['changed', 'new', 'records'].includes(rail.state) ? 'changed' : null },
         h('th', null, rail.key), h('td', null, h('code', null, rail.value)), h('td', { class: 'hc-state' }, stateWord(rail)))))) : null,
       h('details', { class: 'hc-technical' }, h('summary', null, t('hcTechnical')),
         h('ul', { class: 'files' }, items.map((item) => h('li', null, h('code', null, `${item.name}  ${item.hash || ''}`), item.sinceAccept ? ` (${item.sinceAccept})` : '')),
