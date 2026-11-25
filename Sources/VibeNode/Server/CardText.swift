@@ -118,7 +118,10 @@ public enum CardText {
             let items = config["items"]?.array ?? []
             // What the card leaves to the home folder's card (`sharedHome`: not among its items): one line.
             let shared = config["sharedHome"]?["names"]?.array?.compactMap(\.string) ?? []
-            lines.append(items.isEmpty && shared.isEmpty ? "  nothing held: accepting records what workflow.md proposes and ends a fresh vault's first look"
+            let firstLook = config["firstLook"]?.bool == true
+            lines.append(items.isEmpty && shared.isEmpty && firstLook
+                         ? "  nothing held: the node restarted (or this project's rules were never accepted): confirm them once, accepting records what workflow.md proposes"
+                         : items.isEmpty && shared.isEmpty ? "  nothing held: accepting records the guard rails or review floor workflow.md proposes"
                          : items.isEmpty ? "  held (no worker, verifier or merge until accepted), none of it this folder's own:"
                          : "  held (no worker, verifier or merge until accepted):")
             // The folder, never the other card's id: that card may be superseded or accepted since this one was drawn.
