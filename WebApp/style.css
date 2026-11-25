@@ -1696,8 +1696,8 @@ main.centre-wrap[tabindex="-1"]:focus { outline: none; }
    as the inks' contrast lets it go). */
 :is(.icon-button, .copy-button, .dial-fold):not(:disabled):active { transform: scale(0.97); }
 :is(.tc-row, .own-row):active { --ring: var(--fill-3); }
-:is(.button:not(.quiet), .send):not(:disabled):active { background-color: var(--accent-press); transform: scale(0.97); }
-.button.confirming:not(:disabled):active { background-color: var(--needs-you); }
+:is(.button:not(.quiet):not(.confirming), .send):not(:disabled):active { background-color: var(--accent-press); transform: scale(0.97); }
+.button.confirming:not(:disabled):active { background-color: var(--needs-you); transform: scale(0.97); }
 .button.quiet:not(:disabled):active { transform: scale(0.97); }
 /* A field pressed: its ring at once. */
 :is(.answer-input, .say, .setting-input, .setting-search, .look-input, .find-input, .left-filter, .setting-picker):not(:disabled):active,

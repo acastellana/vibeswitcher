@@ -227,6 +227,9 @@ test('states: pressed is --fill-3 under a quiet control and the accent pressed (
   const active = RULES.filter((block) => /:active\b/.test(block.selector));
   assert.ok(active.some((block) => block.declarations.some((d) => d.property === 'background-color' && d.value === 'var(--fill-3)')));
   const solid = active.find((block) => /\.button:not\(\.quiet\)/.test(block.selector));
+  // As specific as the solid hover (which leaves out .confirming), so a mouse press shows the pressed accent, not the hover's.
+  const hover = RULES.find((block) => /\(hover: hover\)/.test(block.media) && /\.button:not\(\.quiet\)/.test(block.selector) && /:hover$/.test(block.selector));
+  assert.equal(solid.selector.replace(/:active$/, ''), hover.selector.replace(/:hover$/, ''), 'the solid press and hover name the same buttons, alike');
   assert.ok(solid, 'a pressed rule for the solid button');
   const looks = Object.fromEntries(solid.declarations.map((d) => [d.property, d.value]));
   assert.equal(looks['background-color'], 'var(--accent-press)');
