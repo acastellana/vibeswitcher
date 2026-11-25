@@ -1193,6 +1193,10 @@ kbd { padding: 1px 6px; border-radius: 5px; box-shadow: inset 0 0 0 1px var(--li
 }
 .tdet-basis { display: block; color: var(--ink-3); }
 .tdet-lands.late { color: var(--needs-you); }
+/* Now on a line of its own above the hours, so its word never sits on an hour's number ("Ahora21"). */
+.axis { height: 38px; }
+.axis-tick { top: 19px; }
+.axis-tick.now { top: 0; }
 
 /* Your own sessions, New project */
 .screen-body { flex: 1; min-height: 0; overflow-y: auto; }

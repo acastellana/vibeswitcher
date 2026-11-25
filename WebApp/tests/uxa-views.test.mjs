@@ -32,3 +32,11 @@ test('U21: the team strip wraps to a second line where it doesn’t fit, each co
   assert.notEqual(strip['overflow-x'], 'auto');
   assert.equal(computed('.team-strip > *')['white-space'], 'nowrap');
 });
+
+test('U18: “Now” sits on a line of its own above the hours, the axis tall enough for both', () => {
+  const now = parseFloat(computed('.axis-tick.now').top);
+  const hour = parseFloat(computed('.axis-tick').top);
+  // A line of the small size on a phone (12.5 px at 1.4): the hours start under it.
+  assert.ok(hour - now >= 12.5 * 1.4, `now at ${now}px, the hours at ${hour}px`);
+  assert.ok(parseFloat(computed('.axis').height) >= hour + 12.5 * 1.4, 'the axis holds both lines');
+});
