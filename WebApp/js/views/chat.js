@@ -38,6 +38,8 @@ import { talkButton } from '../dictate.js';
 import { pluginCardsOf, pluginsOn } from '../plugincard.js';
 import { pluginCard } from './cards.js';
 import { t } from '../i18n.js';
+import { actsFor, doButton } from '../acting.js';
+import { sendArgs, sentWords } from '../sendways.js';
 
 // How close to the end counts as being at the end.
 const NEAR = 48;
@@ -371,11 +373,12 @@ export function chatView(app) {
   const nodePath = h('input', { class: 'find-input node-image-path', type: 'text', placeholder: '/path/on/the/node/screenshot.png', 'aria-label': t('chImagePathOnTheNode'),
     autocomplete: 'off', spellcheck: 'false' });
   const nodeLine = h('div', { class: 'node-image-line' });
+  const nodeNote = h('p', { class: 'confirm-note' }, t('chRunItInATerminal'));
   const nodeImage = h('div', { class: 'node-image', hidden: true },
     h('div', { class: 'node-image-head' }, nodePath,
       h('button', { class: 'icon-button', type: 'button', title: t('chClose'), 'aria-label': t('chClose'), onclick: () => { nodeImage.hidden = true; input.focus(); } }, icon('close', 12))),
     nodeLine,
-    h('p', { class: 'confirm-note' }, t('chRunItInATerminal')));
+    nodeNote);
   // Push-to-talk dictation into the box (js/dictate.js): only where the browser recognises speech and you turned it on.
   const talk = talkButton(input);
   const form = h('form', { class: 'composer' }, attachButton, input, talk, sendButton, pick);
@@ -984,12 +987,26 @@ export function chatView(app) {
     drawNodeLine();
     nodePath.focus();
   });
-  // The line for the path typed, with what the box holds as its text (several paths: separated by commas).
+  // The line for the path typed, with what the box holds as its text (several paths: separated by commas). Where the
+  // page acts and the node lists `send`, Send sends them from here instead (`send` with `images`, `~/` the node's home;
+  // the node checks each is an image file there), the way the line would (now to a working Claude, else at its next
+  // step), and says what became of it; the box and the path empty once it went.
   function drawNodeLine() {
     if (nodeImage.hidden) return;
     const session = store.state.sessions.get(view.session);
     const paths = nodePath.value.split(',').map((path) => path.trim()).filter(Boolean);
     const now = stateOf(session) === 'working' && session?.agent === 'claude';
+    const acts = !!session && drivable(session) && actsFor(app, 'send');
+    nodeNote.hidden = acts;
+    if (acts && paths.length) {
+      const home = store.state.node?.home;
+      const images = paths.map((path) => (home && (path === '~' || path.startsWith('~/')) ? home + path.slice(1) : path));
+      const way = now ? 'now' : 'step';
+      const send = doButton(app, { label: t('acSend'), kind: 'send', busy: t('chSendingImage'), args: () => sendArgs(session, input.value.trim(), way, images),
+        receipt: (result) => sentWords(way, result), done: () => { input.value = ''; nodePath.value = ''; send.button.disabled = true; } });
+      nodeLine.replaceChildren(send.el);
+      return;
+    }
     const line = session ? imageSendLine(session, input.value, paths, now) : null;
     nodeLine.replaceChildren(line ? copyLine(line, 'the command that sends the message with the image') : h('p', { class: 'confirm-note' }, t('chTypeTheImageSPath')));
   }

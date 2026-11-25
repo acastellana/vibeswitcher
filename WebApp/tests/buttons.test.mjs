@@ -336,3 +336,56 @@ test('B1: refused, the node’s words and the button back; none finished, no but
     assert.match(c.el.textContent, /vibeswitcher close-shells/);
   }
 });
+
+test('B5: an image on the node, given by its path: Send sends it with the box’s words, says what became of it; refused, the node’s words', async () => {
+  globalThis.MutationObserver ??= class { observe() {} disconnect() {} };
+  globalThis.ResizeObserver ??= class { observe() {} unobserve() {} disconnect() {} };
+  const { chatView } = await import('../js/views/chat.js');
+  const SID = 'local:e91d05a3-4f6a-4c1e-9b7d-2e5a8c0d1f3b';
+  const session = { id: SID, terminal: 'pts/7', agent: 'claude', cwd: '/home/dev/projects/example-api', status: 'idle', hosted: true, sendWays: ['step', 'now'] };
+  for (const code of ['es', 'en']) {
+    setLanguage(code);
+    // The real store, over a feed that records each request (`answer` settles the one out).
+    const { createStore } = await import('../js/store.js');
+    const store = createStore();
+    const sent = [];
+    let answer = null;
+    store.connect({ request(message) { sent.push({ kind: message.kind, args: message.args }); return new Promise((resolve) => { answer = resolve; }); },
+      subscribeChat() {}, unsubscribeChat() {}, resync() {} });
+    store.setKinds(['send', 'chat.page'], null, ['read', 'draft', 'watch', 'act']);
+    store.reconcile('sessions', [session]);
+    store.apply?.({ v: 1, kind: 'snapshot', epoch: 'e', seq: 0, state: { node: { home: '/home/dev', ended: [] }, sessions: [session], leads: [], cards: [], boards: [] } });
+    const app = { store, ui: { state: { route: { name: 'session', id: SID } }, subscribe() {}, go() {} }, sent };
+    let chat;
+    try { chat = chatView(app); } catch (error) { assert.fail(`the chat view: ${error.stack}`); }
+    chat.show(SID);
+    const fromNode = find(chat.el, (node) => node.tag === 'button' && node.textContent === t('chAnImageOnTheNode'));
+    fromNode.click();
+    const path = find(chat.el, byClass('node-image-path'));
+    const box = find(chat.el, (node) => node.tag === 'textarea');
+    box.value = 'Here is the broken layout';
+    path.value = '~/shots/layout.png';
+    path.dispatch('input');
+    const image = find(chat.el, byClass('node-image'));
+    assert.doesNotMatch(image.textContent, /vibeswitcher send/, `${code}: no line where Send does it`);
+    const send = buttonNamed(image, t('acSend'));
+    assert.ok(send, code);
+    send.click();
+    assert.equal(send.textContent, t('chSendingImage'));
+    assert.deepEqual(app.sent.at(-1), { kind: 'send', args: { session: SID, text: 'Here is the broken layout', when: 'step', images: ['/home/dev/shots/layout.png'] } });
+    answer({ ok: true, result: { session: SID, when: 'step' } });
+    await flush();
+    assert.match(image.textContent, new RegExp(t('swSentStep').slice(0, 10)));
+    assert.equal(box.value, '', 'the box empties once it went');
+    // Refused: the node's words beside it, the button back.
+    path.value = '/home/dev/shots/missing.png';
+    path.dispatch('input');
+    const again = buttonNamed(image, t('acSend'));
+    again.click();
+    answer({ ok: false, error: { code: 'refused', message: 'no image file /home/dev/shots/missing.png' } });
+    await flush();
+    assert.match(find(image, byClass('refused')).textContent, /no image file/);
+    assert.equal(again.disabled, false);
+  }
+  setLanguage('en');
+});

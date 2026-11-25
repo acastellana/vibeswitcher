@@ -1187,6 +1187,7 @@ export const ES = {
   drClosing: "Cerrando…",
   drShellsClosed: { one: "Hecho: 1 shell cerrado.", other: "Hecho: {n} shells cerrados." },
   drShellsLeft: { one: "1 se quedó: volvía a ejecutar algo.", other: "{n} se quedaron: volvían a ejecutar algo." },
+  chSendingImage: "Enviando…",
   // END buttons
   // The two columns of Your own sessions, This node and Settings (views/twocol.js).
   tcBackToList: "Volver a la lista",

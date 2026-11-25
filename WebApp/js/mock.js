@@ -862,7 +862,17 @@ const ago = (seconds) => new Date(now() - seconds * 1000).toISOString();
       const target = sessions.get(args.session);
       if (!target) return { ok: false, error: { code: 'gone', message: 'That session has ended.' } };
       if (!target.hosted) return refused('It runs in another terminal: it can be read here, not typed into.');
-      emit(chatPut(args.session, { id: next('m'), kind: 'prompt', text: args.text, at: new Date().toISOString(), action: message.action }),
+      // Images by their paths on the node, checked as `SessionSend` checks them: absolute, an image Claude Code reads,
+      // a file there (this machine's are under its folders, and none is called missing).
+      const images = Array.isArray(args.images) ? args.images : [];
+      if (!String(args.text || '').trim() && !images.length) return badArgs('send needs text or images');
+      if (images.length > 10) return badArgs('at most 10 images a message');
+      for (const path of images) {
+        if (!String(path).startsWith('/')) return badArgs(`an image is given by its absolute path, not ${path}`);
+        if (!/\.(png|jpe?g|gif|webp)$/i.test(path)) return badArgs(`${path} isn’t an image Claude Code reads (png, jpg, jpeg, gif, webp)`);
+        if (!path.startsWith(HOME + '/') || /missing/i.test(path)) return refused(`no image file ${path}`);
+      }
+      emit(chatPut(args.session, { id: next('m'), kind: 'prompt', text: [args.text, ...images.map((path) => `[${path.split('/').pop()}]`)].filter(Boolean).join('\n'), at: new Date().toISOString(), action: message.action }),
         setSession(args.session, { status: 'working', since: new Date().toISOString() }));
       later(900, () => stream(args.session, 'On it. (This is the mock node: a real session’s reply would stream in here from its transcript.)', () => {
         if (args.session === LEAD) emit(...refreshLead('done'));

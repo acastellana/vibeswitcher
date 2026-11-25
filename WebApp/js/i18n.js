@@ -1198,6 +1198,7 @@ const EN = {
   drClosing: "Closing…",
   drShellsClosed: { one: "Done: 1 shell closed.", other: "Done: {n} shells closed." },
   drShellsLeft: { one: "1 was left: it was running something again.", other: "{n} were left: they were running something again." },
+  chSendingImage: "Sending…",
   // END buttons
   // The two columns of Your own sessions, This node and Settings (views/twocol.js).
   tcBackToList: "Back to the list",
