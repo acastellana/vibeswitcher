@@ -561,6 +561,14 @@ const ago = (seconds) => new Date(now() - seconds * 1000).toISOString();
   const refused = (message) => ({ ok: false, error: { code: 'refused', message } });
   const badArgs = (message) => ({ ok: false, error: { code: 'bad-args', message } });
 
+  // The node's shells (a shell session the host started, `Requests.isNodeShell`): two back at their prompt in
+  // example-site and below, one still running a server.
+  let shells = [
+    { session: id('5e11a001'), folder: SITE, terminal: 'pts/31', finished: true },
+    { session: id('5e11a002'), folder: `${SITE}/web`, terminal: 'pts/32', finished: true },
+    { session: id('5e11a003'), folder: SITE, terminal: 'pts/33', finished: false },
+  ];
+
   // The folders this invented machine has, and which of them are git repositories (notes has no commit yet).
   const NOTES = `${HOME}/projects/notes`;
   const REPOSITORIES = [SITE, API, PAYOUTS, DOCS, NOTES];
@@ -1025,6 +1033,20 @@ const ago = (seconds) => new Date(now() - seconds * 1000).toISOString();
       later(400, () => feed.restart());
       return { ok: true, result: { sessionsEnded: sessions.size, host: 'stopped' } };
     }
+    // The node's shells in a folder (`shells`, `Requests.shells`): each with its terminal and whether it is finished.
+    if (message.kind === 'shells') {
+      const folder = typeof args.folder === 'string' ? args.folder.replace(/\/+$/, '') : null;
+      return { ok: true, result: { shells: shells.filter((shell) => !folder || shell.folder === folder || shell.folder.startsWith(folder + '/')).map((shell) => ({ ...shell })) } };
+    }
+    // Those of them still finished ended (`session.close-shells`, `Requests.closeShells`); any other left, and said.
+    if (message.kind === 'session.close-shells') {
+      const wanted = Array.isArray(args.sessions) ? args.sessions.filter((one) => typeof one === 'string') : [];
+      if (!wanted.length) return badArgs('session.close-shells needs sessions, the shells shown');
+      const ending = shells.filter((shell) => wanted.includes(shell.session) && shell.finished);
+      if (!ending.length) return refused('none of them is a finished shell now (back at its prompt): nothing ended');
+      shells = shells.filter((shell) => !ending.includes(shell));
+      return { ok: true, result: { ended: ending.map((shell) => shell.session), left: wanted.filter((one) => !ending.some((shell) => shell.session === one)) } };
+    }
     // Check for Updates now (`update.check`, `Requests.updateCheck`): the watch looks at once; here it finds a newer
     // build, its record in the `node` value too.
     if (message.kind === 'update.check') {
@@ -1051,7 +1073,7 @@ const ago = (seconds) => new Date(now() - seconds * 1000).toISOString();
   // `?older` lists none of the buttons' kinds either (BUTTONS: what an acting page sends a node in place of the lines
   // it showed before, docs/process/v2-no-terminal.md's table B and A5), so their lines can be seen.
   const STARTS = ['lead', 'session.new', 'session.reply', 'session.resume'];
-  const BUTTONS = ['update.check', 'web.revoke'];
+  const BUTTONS = ['shells', 'session.close-shells', 'update.check', 'web.revoke'];
   const KINDS = ['chat.page',
     'answer', 'answer.replace', 'tell', 'tell.retract', 'hold', 'send', 'session.draft', 'session.draft.clear', 'session.complete',
     'session.attach', 'session.usage', 'stats', 'session.ports', 'board.task', 'board.image', 'chat.image', 'session.presets', 'brief', 'recent',
@@ -1061,6 +1083,7 @@ const ago = (seconds) => new Date(now() - seconds * 1000).toISOString();
   const REFUSALS = {
     'update.check': 'this server doesn’t check for updates (a scratch node asks GitHub nothing)',
     'web.revoke': 'the web tokens weren’t dropped: the token file couldn’t be written',
+    'session.close-shells': 'none of them is a finished shell now (back at its prompt): nothing ended',
   };
 
   // ---- The feed's interface (what the WebSocket feed will offer too) ----

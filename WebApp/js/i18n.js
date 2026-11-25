@@ -1187,6 +1187,17 @@ const EN = {
   drReplacing: "Replacing…",
   drTakeBaseWhat: "{branch} moved since its lead last left it, outside its merges. Take the base as it is: the lead starts on {branch} as it is now ({to}), and the move isn’t asked again. Started the other way, its merges wait until you accept the move.",
   drTakeBase: "Take the base as it is",
+  drShellsLooking: "Looking for this node’s shells in this folder…",
+  drShellFinished: "finished: back at its prompt",
+  drShellRunning: "still running something: stays",
+  drNoShellsHere: "This node runs no shell in this folder.",
+  drNoFinishedShells: "None of them is finished: each is still running something, so none is closed.",
+  drShellsListed: { one: "1 finished shell, back at its prompt: Close ends it, with whatever it left running.", other: "{n} finished shells, back at their prompt: Close ends them, with whatever they left running." },
+  drCloseNShells: { one: "Close 1 finished shell", other: "Close {n} finished shells" },
+  drCloseShellsSure: { one: "Click again to close it", other: "Click again to close all {n}" },
+  drClosing: "Closing…",
+  drShellsClosed: { one: "Done: 1 shell closed.", other: "Done: {n} shells closed." },
+  drShellsLeft: { one: "1 was left: it was running something again.", other: "{n} were left: they were running something again." },
   // END buttons
   // The two columns of Your own sessions, This node and Settings (views/twocol.js).
   tcBackToList: "Back to the list",

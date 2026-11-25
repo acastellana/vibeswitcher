@@ -388,6 +388,9 @@ export function actionsStrip(app = null) {
     }
     if (tab === 'end') return line(endLine(session), t('drTheCommandThatEndsIt'), t('drItsAgentStopsWithEverything'), 'session.end', { session: session.id });
     if (tab === 'shells') {
+      // Where the page acts and the node lists `shells` and `session.close-shells`: the folder's shells listed first,
+      // then Close N finished shells for those the node says are finished (a second click asks first).
+      if (app && actsFor(app, 'shells') && actsFor(app, 'session.close-shells')) return [shellsPanel(app, session.cwd)];
       return line(closeShellsLine(session.cwd), t('drTheCommandThatClosesThe'),
         t('drEndsThisNodeSShells'));
     }
@@ -431,6 +434,39 @@ export function actionsStrip(app = null) {
       return can;
     },
   };
+}
+
+// The node's shells in `folder` (the `shells` read: each with its terminal and whether it is finished, back at its
+// prompt with nothing running), and Close N finished shells (`session.close-shells` with the ids listed: the node ends
+// only those still finished then, and says which it left). Returns the panel.
+export function shellsPanel(app, folder) {
+  const list = h('ul', { class: 'shell-list' });
+  const slot = h('div', { class: 'shell-acts' });
+  const said = h('p', { class: 'confirm-note', role: 'status' }, t('drShellsLooking'));
+  const el = h('div', { class: 'shells-panel' }, said, list, slot);
+  const home = app.store.state.node?.home;
+  const where = (path) => (home && path?.startsWith(home + '/') ? '~' + path.slice(home.length) : path || '');
+  function draw(shells) {
+    const finished = shells.filter((shell) => shell.finished === true && typeof shell.session === 'string');
+    list.replaceChildren(...shells.map((shell) => h('li', { class: shell.finished ? 'shell finished' : 'shell' },
+      h('span', { class: 'shell-where' }, where(shell.folder)), ' · ', h('span', null, shell.terminal || ''), ' · ',
+      h('span', { class: shell.finished ? 'tone-text-done' : 'tone-text-working' }, shell.finished ? t('drShellFinished') : t('drShellRunning')))));
+    setText(said, !shells.length ? t('drNoShellsHere') : finished.length ? t('drShellsListed', { n: finished.length }) : t('drNoFinishedShells'));
+    if (!finished.length) { slot.replaceChildren(); return; }
+    const ids = finished.map((shell) => shell.session);
+    const close = doButton(app, { label: t('drCloseNShells', { n: ids.length }), kind: 'session.close-shells', danger: true, confirm: t('drCloseShellsSure', { n: ids.length }),
+      busy: t('drClosing'), args: () => ({ sessions: ids }),
+      receipt: (result) => [t('drShellsClosed', { n: (result.ended || []).length }), (result.left || []).length ? t('drShellsLeft', { n: result.left.length }) : ''].filter(Boolean).join(' '),
+      done: () => { close.button.disabled = true; } });
+    slot.replaceChildren(close.el);
+  }
+  app.store.read('shells', { folder }).then((reply) => {
+    if (reply?.ok && Array.isArray(reply.result?.shells)) { draw(reply.result.shells); return; }
+    // An odd answer or a refusal: the node's words, and the line that does it from a terminal.
+    setText(said, refusalWords(reply?.error, t('drCloseShells')));
+    slot.replaceChildren(copyLine(closeShellsLine(folder), t('drTheCommandThatClosesThe')));
+  });
+  return el;
 }
 
 // Starting a session or a project's lead from the page, where it acts and the node lists the kind: the primary button

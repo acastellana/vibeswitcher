@@ -1176,6 +1176,17 @@ export const ES = {
   drReplacing: "Reemplazando…",
   drTakeBaseWhat: "{branch} se movió desde la última vez que el líder la dejó, fuera de sus fusiones. Tomar la base tal como está: el líder arranca sobre {branch} tal como está ahora ({to}) y el cambio no se vuelve a preguntar. Arrancado de la otra forma, sus fusiones esperan a que aceptes el cambio.",
   drTakeBase: "Tomar la base tal como está",
+  drShellsLooking: "Buscando los shells de este nodo en esta carpeta…",
+  drShellFinished: "terminado: de vuelta en su prompt",
+  drShellRunning: "aún ejecuta algo: se queda",
+  drNoShellsHere: "Este nodo no ejecuta ningún shell en esta carpeta.",
+  drNoFinishedShells: "Ninguno ha terminado: cada uno aún ejecuta algo, así que no se cierra ninguno.",
+  drShellsListed: { one: "1 shell terminado, de vuelta en su prompt: Cerrar lo termina, con lo que haya dejado en marcha.", other: "{n} shells terminados, de vuelta en su prompt: Cerrar los termina, con lo que hayan dejado en marcha." },
+  drCloseNShells: { one: "Cerrar 1 shell terminado", other: "Cerrar {n} shells terminados" },
+  drCloseShellsSure: { one: "Pulsa otra vez para cerrarlo", other: "Pulsa otra vez para cerrar los {n}" },
+  drClosing: "Cerrando…",
+  drShellsClosed: { one: "Hecho: 1 shell cerrado.", other: "Hecho: {n} shells cerrados." },
+  drShellsLeft: { one: "1 se quedó: volvía a ejecutar algo.", other: "{n} se quedaron: volvían a ejecutar algo." },
   // END buttons
   // The two columns of Your own sessions, This node and Settings (views/twocol.js).
   tcBackToList: "Volver a la lista",

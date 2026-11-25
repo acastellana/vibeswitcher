@@ -263,3 +263,76 @@ test('B2: Recent projects get New session and Start the lead; each starts from h
   assert.match(recent.textContent, /vibeswitcher lead/);
   assert.match(recent.textContent, /doesn’t act for you here/);
 });
+
+test('B1: the Shells tab lists the folder’s shells first, then Close N finished shells, asked twice; the receipt says what ended and what was left', async () => {
+  const { actionsStrip } = await import('../js/views/drive.js');
+  const SITE = '/home/dev/projects/example-site';
+  const shells = [
+    { session: 'local:5e11a001-4f6a-4c1e-9b7d-2e5a8c0d1f3b', folder: SITE, terminal: 'pts/31', finished: true },
+    { session: 'local:5e11a002-4f6a-4c1e-9b7d-2e5a8c0d1f3b', folder: `${SITE}/web`, terminal: 'pts/32', finished: true },
+    { session: 'local:5e11a003-4f6a-4c1e-9b7d-2e5a8c0d1f3b', folder: SITE, terminal: 'pts/33', finished: false },
+  ];
+  const session = { id: 'local:e91d05a3-4f6a-4c1e-9b7d-2e5a8c0d1f3b', hosted: true, cwd: SITE, agent: 'claude', status: 'idle' };
+  for (const code of ['es', 'en']) {
+    setLanguage(code);
+    const app = fakeApp({ kinds: ['shells', 'session.close-shells'], state: { node: { home: '/home/dev', ended: [] } },
+      reply: (kind) => (kind === 'shells' ? { ok: true, result: { shells } } : { ok: true, result: { ended: [shells[0].session], left: [shells[1].session] } }) });
+    const strip = actionsStrip(app);
+    strip.update(session, app.store.state.node);
+    strip.open('shells');
+    await flush();
+    assert.deepEqual(app.sent[0], { kind: 'shells', args: { folder: SITE } }, 'the shells listed first');
+    assert.doesNotMatch(strip.el.textContent, /vibeswitcher close-shells/, `${code}: no line where the button does it`);
+    assert.match(strip.el.textContent, /~\/projects\/example-site\/web · pts\/32/);
+    assert.match(strip.el.textContent, new RegExp(t('drShellRunning')));
+    const close = buttonNamed(strip.el, t('drCloseNShells', { n: 2 }));
+    assert.ok(close, code);
+    close.click();
+    assert.equal(app.sent.length, 1, 'the first click only asks');
+    assert.equal(close.textContent, t('drCloseShellsSure', { n: 2 }));
+    close.click();
+    assert.equal(close.textContent, t('drClosing'));
+    await flush();
+    assert.deepEqual(app.sent[1], { kind: 'session.close-shells', args: { sessions: [shells[0].session, shells[1].session] } }, 'the finished ones listed, not the running one');
+    assert.match(strip.el.textContent, new RegExp(t('drShellsClosed', { n: 1 })));
+    assert.match(strip.el.textContent, new RegExp(t('drShellsLeft', { n: 1 })));
+  }
+  setLanguage('en');
+});
+
+test('B1: refused, the node’s words and the button back; none finished, no button; where the page doesn’t act, the line', async () => {
+  const { actionsStrip } = await import('../js/views/drive.js');
+  setLanguage('en');
+  const SITE = '/home/dev/projects/example-site';
+  const session = { id: 'local:e91d05a3-4f6a-4c1e-9b7d-2e5a8c0d1f3b', hosted: true, cwd: SITE, agent: 'claude', status: 'idle' };
+  const finished = [{ session: 'local:5e11a001-4f6a-4c1e-9b7d-2e5a8c0d1f3b', folder: SITE, terminal: 'pts/31', finished: true }];
+  const refusing = fakeApp({ kinds: ['shells', 'session.close-shells'], state: { node: { ended: [] } },
+    reply: (kind) => (kind === 'shells' ? { ok: true, result: { shells: finished } } : { ok: false, error: { code: 'refused', message: 'none of them is a finished shell now (back at its prompt): nothing ended' } }) });
+  const a = actionsStrip(refusing);
+  a.update(session, refusing.store.state.node);
+  a.open('shells');
+  await flush();
+  const close = buttonNamed(a.el, 'Close 1 finished shell');
+  close.click();
+  close.click();
+  await flush();
+  assert.match(find(a.el, byClass('refused')).textContent, /nothing ended/);
+  assert.equal(close.disabled, false);
+  const running = fakeApp({ kinds: ['shells', 'session.close-shells'], state: { node: { ended: [] } },
+    reply: () => ({ ok: true, result: { shells: [{ ...finished[0], finished: false }] } }) });
+  const b = actionsStrip(running);
+  b.update(session, running.store.state.node);
+  b.open('shells');
+  await flush();
+  assert.equal(find(b.el, (node) => node.tag === 'button' && /finished shell/.test(node.textContent)), null);
+  assert.match(b.el.textContent, /None of them is finished/);
+  for (const options of [{ acts: false, kinds: ['shells', 'session.close-shells'] }, { acts: true, kinds: ['session.close-shells'] }]) {
+    const app = fakeApp({ ...options, state: { node: { ended: [] } } });
+    const c = actionsStrip(app);
+    c.update(session, app.store.state.node);
+    c.open('shells');
+    await flush();
+    assert.equal(app.sent.length, 0, 'nothing asked of a node that doesn’t take it');
+    assert.match(c.el.textContent, /vibeswitcher close-shells/);
+  }
+});
