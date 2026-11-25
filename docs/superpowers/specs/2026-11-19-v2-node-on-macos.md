@@ -270,7 +270,7 @@ no start, no switch.
    Mac's slice, checked by path before the handover), and the new image, once running, finds its row by its own
    running code (2) before it starts a server. A rollback goes only to a build the record still holds: one dropped
    from it is refused. The check is by path, then the Mac's handover execs that path: a file swapped between the two
-   runs the session's code, which asks nothing (below, "What it doesn't cover").
+   runs the session's code, which asks nothing (below, "What it doesn't cover", F6).
 
 **When it isn't right**, each refused with one plain line naming the record's path and what to do: install a newer
 commit (`install-node-mac.sh`, whose administrator step writes the record from the build it checked). Never values by
@@ -282,22 +282,34 @@ not a regular file, too large; not parseable, another format, another uid; and a
 unknown build). A second hard link isn't one of them (the review of 2026-11-25, F2: any process of the user's can add
 one to a root-owned file, so refusing it let a session make every check refuse).
 
-**What it doesn't cover.** A session that re-bootstraps the job with a host of its own that runs the genuine pinned
-server: the server check (1) passes, as the listener is the genuine server, the child of the job's process. Closing it
-from the command line would mean a pid looked up through launchd and then checked, the racy shape this design avoids.
-The other side closes it without a pid: the genuine server refuses to serve unless its connector's peer (the stream
-pair's audit token, which names the last sender on the host's end) runs a host pinned in the same record. Not built
-here (the lead's call, 2026-11-25): it needs the server to read the record before its first request, a test that starts
-a pinned server from an unpinned host, and an answer on whether a fake host can make a genuine host the last sender on
-its end; it goes with item 13 (the checked start) and its review. Nor is a switch's window: the target is checked by its file's cdhash, then the Mac's handover execs the path, so a
-host image swapped in between runs, with the sessions' descriptors and the handover's secrets, and asks no record
-(what closes it: an exec from the checked descriptor, or the new image proving its code to the old one before the
-state is handed over; with item 13). Nor is the install's own window: a
-session that rewrites the staged build between its check and the administrator step is the install's S9, as on Linux.
+**The fake host (closed at the server's start, the review of 2026-11-25, F7).** A session that re-bootstraps the job
+with a host of its own that runs the genuine pinned server passes the command line's check (1): the listener is the
+genuine server, the child of the job's process. Closing it from the command line would mean a pid looked up through
+launchd and then checked, the racy shape this design avoids. The server closes it instead: at its start, before it
+serves or writes anything, a Mac node server finds its own row by its running code and requires its connector's peer
+token to run that row's host, hardened (`NodeCheck.macConnectorRefusal`, in `ServerStart`; off with the rest, since no
+Mac host starts a `--node` server yet). Measured by the reviewer (`pair.c`): a stream pair's `LOCAL_PEERTOKEN` names
+the process that made the pair (its pid and pidversion), fixed at creation: not "the last sender", as this section said
+before. Two things for item 13: after an in-place exec handover that token is stale (Security refuses a token whose
+process exec'd), so a server carried across a handover needs a new connector or a restart; and the test is at the
+function, with a real pair's token (a node server's record path isn't a test's to choose).
+
+**What it doesn't cover** (open, in the reviewer's words where they are the reviewer's):
+
+- **A switch's target swapped between check and exec (F6)** "is reliable, not a tight race: `HostServer.handOver`
+  checks the path, then probes the new build off the queue" before the exec, so a host image swapped in that window
+  runs, with the sessions' descriptors and the handover's secrets, and asks no record. "What closes it is the new image
+  proving its code by token before the state is handed over, with item 13."
+- **Every pinned build passes for good (F8).** "Every pinned build up to 16 back passes every check for good, so a
+  session can re-bootstrap an old pinned build whole": an older build's host, server and command line are each the
+  record's. The lever is the administrator step: on a security update, install with `--fresh` (or run
+  `node-pins-mac.sh --keep 1` afterwards), so no older build stays pinned.
+- **The install's own window**: a session that rewrites the staged build between its check and the administrator step
+  is the install's S9, as on Linux.
 
 **Where it is built.** `NodePins` (VibeCore: the format, the walk's rules, the lookups), `Platform.Files.readRootRecord`
 and `hasExtendedACL`, `Platform.CodeIdentity.ownCdhash`, `Platform.Service.nodePinsRecord` (the seam; Linux's arms answer
-nil and nothing on Linux calls them), the checks above in `NodeCheck`, `HostImages`, `HandoverTarget` and `ApprovalVoice`;
+nil and nothing on Linux calls them), the checks above in `NodeCheck` (the command line's and the server's connector check), `HostImages`, `HandoverTarget` and `ApprovalVoice`;
 off, as the rest of the Mac node is, until items 5 and 13 and the switch-on (`HostImages.isCheckedMacNode`,
 `NodeSystem.approvalMeasured`, `macUnbuilt` and `macServerRefusal` unchanged).
 

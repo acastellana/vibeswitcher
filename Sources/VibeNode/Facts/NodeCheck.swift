@@ -150,12 +150,28 @@ public enum NodeCheck {
     }
 
     /// The Mac's node server at its start: why the host at the other end of its connector isn't its own build's, or nil
-    /// (the review of 2026-11-25, F7: the fake host running the genuine server). `token` is the connector's peer token.
-    /// Not checked yet: nil.
+    /// (the review of 2026-11-25, F7: the fake host running the genuine server). `token` is the connector's peer token: a
+    /// stream pair's names the process that made the pair (the host that started this server), fixed at creation. The
+    /// server finds its own row by the code it runs (`own`, the kernel's cdhash), and the token's process must run that
+    /// row's host, by Security's dynamic check (`runs`), hardened. No pid is looked up. A token taken after the host
+    /// exec'd (a handover) names no code any more and refuses: a carried server needs a new connector or a restart.
     public static func macConnectorRefusal(token: Platform.PeerToken?, own: Data?, pins: Result<NodePins, NodePins.Refused>,
                                            runs: (Platform.PeerToken, Data) -> Bool = { Platform.CodeIdentity.runs($0, cdhash: $1) },
                                            hardened: (Platform.PeerToken) -> Bool? = Platform.CodeIdentity.isHardened) -> String? {
-        nil
+        let record: NodePins
+        switch pins {
+        case .failure(let why): return why.description
+        case .success(let read): record = read
+        }
+        guard let own, let build = record.build(server: own) else {
+            return "this server's code is no server the node's record pins: not an installed build's server"
+        }
+        guard let token else { return "the host at the other end of the connector can't be read" }
+        guard runs(token, build.host) else {
+            return "the process at the other end of the connector (pid \(token.pid)) doesn't run the host the node's record pins for build \(build.commit)"
+        }
+        guard hardened(token) == true else { return "the host at the other end of the connector (pid \(token.pid)) doesn't run with the Hardened Runtime" }
+        return nil
     }
 
     /// `path` with its links resolved (`realpath`); nil when it can't be.

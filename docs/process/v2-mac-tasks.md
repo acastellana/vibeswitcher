@@ -299,9 +299,15 @@ or decided. Done on Linux, tested on both systems (`ApprovalJudgmentTests`, `App
    another uid, unparseable or (by an injected owner fact) the user's, refused, and the same scratch record refused with
    the node's own facts. **Unproven**: the record written for real by `sudo` (the user's trial: the step on a throwaway
    path, its owner, mode and parents, an unprivileged write refused); a mount over a folder on the path (refused to a
-   user by macOS, not measured); the checks against a real running node (none runs: items 5, 9, 13). **Not covered**: a
-   re-bootstrapped job whose own host runs the genuine pinned server; what closes it (the server checking its
-   connector's peer against the pinned hosts) goes with item 13. **The first upgrade** from a build older than this
+   user by macOS, not measured); the checks against a real running node (none runs: items 5, 9, 13). **The review of
+   2026-11-25** ("ready for v2 with fixes"), fixed on `v2-mac-anchor`: the own cdhash read from the kernel, not the
+   file at the path (F1, `OwnCdhashTests`); a second hard link no longer refuses (F2); the administrator step's mend
+   takes no values (`--keep N`), drops imported functions, writes only the node's or a trial's record and checks every
+   line as root, under `env -i` (F2 to F5); a re-bootstrapped job whose own host runs the genuine pinned server is
+   refused by the server at its start, its connector's peer checked against its row's host (F7,
+   `ConnectorPeerTests`; off with the rest). **Open** (the design's "What it doesn't cover"): a switch's target swapped
+   between check and exec (F6), and every pinned build passing for good (F8: `--fresh` or `--keep 1` on a security
+   update). **The first upgrade** from a build older than this
    branch writes no record (the install runs the installed commit's own script, which has no administrator step): the
    record starts with the first install made by a build that has it, and a rollback to an older build is refused.
 11. **(BLOCKER before approvalMeasured; the review's sixth finding; built 2026-11-22, `v2-small-rows`, needs a real
