@@ -327,3 +327,26 @@ test('U16: the Approve option says what it approves in words with 8 characters o
   assert.equal(app.sent.at(-1).args.text, 'Not yet', 'the node’s own option');
   setLanguage('en');
 });
+
+test('U16: an approval answered in the conversation reads as its button did, not as the bare option', async () => {
+  const { projectView } = await import('../js/views/project.js');
+  const card = { ...approval(ago(30)), open: false, closed: 'answered', question: { ...approval(ago(30)).question, state: 'answered', answer: `Approve ${COMMIT}` } };
+  const said = (state, code) => {
+    setLanguage(code);
+    const app = fakeApp({ state: { leads: new Map([[P, { ...leadWithPush(), push: null }]]), ...state } });
+    const view = projectView(app, { sheet: { open() {}, close() {} } });
+    view.render();
+    return find(find(view.el, byClass('talk')), byClass('mine'))?.textContent;
+  };
+  const board = (answer) => new Map([[P, { project: P, root: ROOT, tasks: [], answered: [{ id: 'appr', card: card.id, version: 1, state: 'answered', text: card.question.text, answer,
+    proposal: null, why: null, reworded: false, task: 'cleanup', at: ago(20), delivered: null, replaceable: false }] }]]);
+  const withCard = { boards: board(`Approve ${COMMIT}`), cards: new Map([[card.id, card]]) };
+  assert.equal(said(withCard, 'en'), 'Approve merging 4e1c9a7b into landing-base');
+  assert.equal(said(withCard, 'es'), 'Aprobar la fusión de 4e1c9a7b en landing-base');
+  assert.equal(said({ ...withCard, boards: board('Not yet') }, 'es'), 'Todavía no');
+  // The card gone from the snapshot: the answer that names a commit to approve is still said in words.
+  assert.equal(said({ boards: board(`Approve ${COMMIT}`) }, 'en'), 'Approve merging 4e1c9a7b');
+  // Any other answer as it was.
+  assert.equal(said({ boards: board('A year, with hashed names') }, 'en'), 'A year, with hashed names');
+  setLanguage('en');
+});

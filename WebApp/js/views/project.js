@@ -18,7 +18,7 @@ import { t, listed, lang, nodeWords } from '../i18n.js';
 import { hasDates, dated, timeAxis, axisPoints, landingWords, basisWords } from '../forecast.js';
 import { leadLines, shownLines, dialCounts, waitingCards, waitingCount, withPushLines, cut, shortHashes, dayOf, teamCounts, standing, taskTone, taskStep, waitsOn, goalRows, lineKey } from '../conversation.js';
 import { projectHref, routeHref } from '../ui.js';
-import { questionStack, pluginCard, copyLine, cardSheet } from './cards.js';
+import { questionStack, pluginCard, copyLine, cardSheet, optionWords } from './cards.js';
 import { tellLine, shellWord, leadLine } from '../actions.js';
 import { pushReceipt } from '../push.js';
 import { pluginFacts } from '../plugincard.js';
@@ -242,7 +242,12 @@ export function projectView(app, { sheet }) {
     // A question the lead withdrew: nobody answers it now, and the line under it says so, with the lead's reason.
     if (answered && line.state === 'withdrawn') return [button, h('p', { class: 'withdrawn-note' }, t('withdrawn') + (line.why ? `: ${cut(shortHashes(line.why), 160)}` : ''))];
     if (!answered || !line.answer) return [button];
-    const said = line.state === 'autoDecided' ? t('wentAhead', { x: cut(line.answer, 60) }) : cut(shortHashes(line.answer), 140);
+    // An approval's answer as its button said it (Approve merging 4e1c9a7b into landing-base, Not yet), by its card;
+    // with the card gone, an answer that names a whole commit to approve still says it in words.
+    const answerCard = (line.card ? store.state.cards.get(line.card) : null)
+      || (/^Approve ([0-9a-f]{40}|[0-9a-f]{64})$/i.test(String(line.answer || '').trim()) ? { kind: 'approval' } : null);
+    const answer = optionWords(answerCard, line.answer);
+    const said = line.state === 'autoDecided' ? t('wentAhead', { x: cut(answer, 60) }) : cut(shortHashes(answer), 140);
     const pill = h('p', { class: 'mine' + (line.state === 'autoDecided' ? ' auto' : '') }, said);
     return [button, pill, ...answerState(line)];
   }
