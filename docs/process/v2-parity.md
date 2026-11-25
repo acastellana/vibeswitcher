@@ -9,7 +9,8 @@ Checked again against `v2-web-fixes` at `932aeb99` (2026-11-25), which sits on v
 by reading the node's code, the command line, `WebApp/` and their tests, not their plans; first checked at `5b6eccd9`
 (2026-11-19). V1 is `main` as of 2026-11-25: v2 last merged main on 2026-11-19 (`cd6c4ae9`), so none of main's 48
 commits since are in v2. Work on other branches isn't counted. A feature that works through shared code counts only if
-the node actually calls it. Anything not checked end to end says **unverified**.
+the node actually calls it. Anything not checked end to end says **unverified**. The user flows, step by step in both, are
+in [V1 and V2: the user flows](v2-user-flows.md).
 
 ## Summary
 
