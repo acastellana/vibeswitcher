@@ -159,4 +159,33 @@ struct ConnectorMessagesTests {
         let got = try #require(Platform.Sockets.receiveConnectorMessage(over: child, count: 512, room: 1))
         #expect(got.cut && got.descriptors.isEmpty, "\(got)")
     }
+
+    /// F4 (the review of v2-mac-web-port): a message carrying more descriptors than a message may (`room`, and past the 8
+    /// a reader once had control room for, when the kernel cut what it reported but installed every one): each that
+    /// arrived is closed, none left open in the reader, the message `cut` and carrying none. Each descriptor sent is a
+    /// pipe's write end: once this side's copies and the pair are closed, its read end hangs up only when no copy is open.
+    @Test(.enabled(if: Platform.Sockets.connectorType == Platform.Sockets.stream, "the Mac's framing"), arguments: [9, 60])
+    func descriptorsPastTheRoomAreAllClosed(count: Int) throws {
+        let (host, child) = try #require(Platform.Sockets.pair(type: Platform.Sockets.connectorType))
+        var reads: [Int32] = [], writes: [Int32] = []
+        for _ in 0..<count {
+            var ends: [Int32] = [-1, -1]
+            try #require(pipe(&ends) == 0)
+            reads.append(ends[0])
+            writes.append(ends[1])
+        }
+        defer { reads.forEach { Sys.close($0) } }
+        #expect(Platform.Sockets.sendDescriptors(writes, over: host))
+        writes.forEach { Sys.close($0) }
+        let got = try #require(Platform.Sockets.receiveConnectorMessage(over: child, count: 512, room: 1))
+        #expect(got.cut && got.descriptors.isEmpty, "\(got)")
+        // The pair closed first, so nothing still in flight on it holds a write end: only the reader could.
+        Sys.close(host)
+        Sys.close(child)
+        for read in reads {
+            var waiting = pollfd(fd: read, events: Int16(POLLIN), revents: 0)
+            #expect(poll(&waiting, 1, 10_000) == 1 && waiting.revents & Int16(POLLHUP) != 0, "a write end left open in the reader")
+        }
+    }
 }
+

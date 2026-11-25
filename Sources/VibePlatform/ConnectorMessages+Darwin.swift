@@ -89,9 +89,11 @@ extension Platform.Sockets {
     /// The next message on the stream connector `socket` and what rode on it (each descriptor close-on-exec at once):
     /// a byte other than `framedStart` alone (a connection's answer, its descriptor with it), or a framed message's bytes
     /// without its end. `cut` when the message ran past `count` bytes (its rest read and dropped up to its end), when
-    /// its rest didn't all come within `framedRestPatience` (on a socket that blocks too), or when a descriptor rode on a byte after its first (closed); more than `room` descriptors
-    /// are all closed, and `cut`. At the stream's end, no bytes and no descriptors (the caller asks `peerHasGone`).
-    /// nil and `errno` when the first read fails (EAGAIN: nothing yet on a socket that doesn't block).
+    /// its rest didn't all come within `framedRestPatience` (on a socket that blocks too), when a descriptor rode on a
+    /// byte after its first, or when more rode on it than `room` or than the kernel had room for (`controlRoom`,
+    /// `MSG_CTRUNC`); a message cut carries no descriptor, every one that arrived closed. At the stream's end, no bytes
+    /// and no descriptors (the caller asks `peerHasGone`). nil and `errno` when the first read fails (EAGAIN: nothing yet
+    /// on a socket that doesn't block).
     public static func receiveConnectorMessage(over socket: Int32, count: Int, room: Int) -> Received? {
         guard let first = receiveByte(over: socket) else { return nil }
         guard let byte = first.byte else { return Received(bytes: [], descriptors: first.fds, cut: false) }
@@ -116,10 +118,11 @@ extension Platform.Sockets {
                 if bytes.count < max(count, 1) { bytes.append(more) } else { cut = true }
             }
         }
-        if fds.count > room {
+        // A message cut carries nothing: what rode on it is closed (more than `room`, or the kernel's room, too).
+        if fds.count > room { cut = true }
+        if cut {
             fds.forEach { close($0) }
             fds = []
-            cut = true
         }
         return Received(bytes: bytes, descriptors: fds, cut: cut)
     }
@@ -127,7 +130,7 @@ extension Platform.Sockets {
     /// One byte read from `socket` with what rides on it, each descriptor made close-on-exec: `byte` nil at the stream's
     /// end. nil and `errno` when the read fails.
     private static func receiveByte(over socket: Int32) -> (byte: UInt8?, fds: [Int32], cut: Bool)? {
-        let room = controlAligned(controlDataOffset + descriptorRoom * MemoryLayout<Int32>.size)
+        let room = controlRoom
         var control = [UInt8](repeating: 0, count: room)
         var byte: UInt8 = 0
         var got = -1
