@@ -4576,3 +4576,11 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-25 20:53 Kept v2-s-web-page-3 unmerged: Report only, delivered: 23 ranked UX findings (U1–U23) and 17 proposed fix tasks in its worktree's evidence folder (report.md, shots/). Nothing merges; its report and screenshots feed the fix tasks, so no cleanup until those are delivered.
 - 2026-11-25 20:57 Kept v2-on-the-mac-4 unmerged: By design nothing of it merges into main: its 13 commits are on the local branch v2-mac-checked-start in its clone (.vibeswitcher/v2-start), awaiting an independent review (task planned) and then delivery as a branch for v2 at the user's say. No merge and no cleanup until then (decision 2026-11-25 16:27).
 - 2026-11-25 20:58 Planned review-v2-s-checked: Review v2's checked Mac node start (branch v2-mac-checked-start) as an independent security reviewer: report only
+- 2026-11-25 20:58 Started a worker on review-v2-s-checked
+- 2026-11-25 21:00 Kept v2-s-web-page-2 unmerged: By design nothing of it merges into main: its 5 commits are on the local branch v2-web-two-columns in its clone (.vibeswitcher/v2-web2); the UX fix tasks build on it, and it is pushed as a branch for v2 at the user's say. No merge and no cleanup until then.
+- 2026-11-25 21:01 Planned v2-web-ux-a: v2 web UX A: readable greys, finger-sized controls on a phone, banners off the header, small states (U6, U7, U8, U20–U23; in a clone)
+- 2026-11-25 21:02 Planned v2-web-ux-b: v2 web UX B: what blocks comes first and open, push and decline say what happened with an undo, a readable Approve (U3, U4, U5, U16; in a clone)
+- 2026-11-25 21:02 Planned v2-web-ux-c: v2 web UX C: one name per thing, natural Spanish, Settings' controls and This node's one-line health (U11, U14, U15, U17–U19; in a clone)
+- 2026-11-25 21:02 Planned v2-web-ux-d: v2 web UX D: answer a session's own question, start a session and a project from the page when it acts for you (U1, U12; in a clone)
+- 2026-11-25 21:03 Started a worker on v2-web-ux-a
+- 2026-11-25 21:03 Started a worker on v2-web-ux-b
