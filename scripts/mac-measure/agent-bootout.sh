@@ -12,7 +12,7 @@ mm_users_terminal
 mm_build
 mm_new_label agent-bootout
 f=$mm_bin/facts d=$mm_bin/detach o=$mm_out
-mm_write_plist /bin/sh -c "'$d' '$f' --sleep 600 > '$o/setsid.pid'; '$f' --sleep 600 & echo \$! > '$o/group.pid'; echo \$\$ > '$o/main.pid'; exec '$f' --sleep 600"
+mm_write_plist /bin/sh -c "'$d' '$f' --sleep 120 > '$o/setsid.pid'; '$f' --sleep 120 & echo \$! > '$o/group.pid'; echo \$\$ > '$o/main.pid'; exec '$f' --sleep 120"
 mm_say ""
 mm_say "What happens next: job $mm_label starts three sleeping probes, is printed, then booted out; nothing on screen."
 mm_go "Ready?"

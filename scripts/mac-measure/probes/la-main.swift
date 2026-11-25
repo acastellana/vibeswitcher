@@ -32,6 +32,8 @@ func can() {
 @main
 enum LA {
     static func main() {
+        // Line by line: a job's stdout is a file, where print is block-buffered and the script waits on these lines.
+        setvbuf(stdout, nil, _IOLBF, 0)
         let arguments = Array(CommandLine.arguments.dropFirst())
         print("la: pid=\(getpid()) ppid=\(getppid()) at=\(stamp())")
         switch arguments.first {

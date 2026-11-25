@@ -86,7 +86,8 @@ mm_new_label() {
 
 # A LaunchAgent property list in the scratch folder (never ~/Library/LaunchAgents) for mm_label: the node's own shape
 # (NodeAgent: ProcessType Interactive, LimitLoadToSessionType Aqua, KeepAlive false, RunAtLoad false), its program
-# and arguments the given ones, stdout and stderr to the scratch folder. Checked with plutil.
+# and arguments the given ones, stdout and stderr to the scratch folder, MEASURE_ASK=yes in its environment (a job
+# inherits nothing from this shell, and `la ask` refuses without it). Checked with plutil.
 mm_write_plist() {
     [[ -n $mm_label ]] || mm_stop "no label"
     mm_plist=$tool_scratch/$mm_label.plist
@@ -103,6 +104,7 @@ mm_write_plist() {
     <key>KeepAlive</key><false/>
     <key>ProcessType</key><string>Interactive</string>
     <key>LimitLoadToSessionType</key><string>Aqua</string>
+    <key>EnvironmentVariables</key><dict><key>MEASURE_ASK</key><string>yes</string></dict>
     <key>StandardOutPath</key><string>$mm_out/$mm_label.out</string>
     <key>StandardErrorPath</key><string>$mm_out/$mm_label.err</string>
 </dict>
