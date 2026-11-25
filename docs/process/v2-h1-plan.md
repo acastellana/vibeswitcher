@@ -146,7 +146,8 @@ Mac lead's record of 2026-11-25 16:27:52; see [the Mac node's spec: the user's v
 **Still open for the user:** the [remote access note's](../superpowers/specs/2026-11-20-v2-remote-access.md#decisions-for-the-user)
 decisions 2 to 5: the remote token's life (8 hours built, or another); masking credentials on remote pages; a second
 lock on who is asking (`tailscale whois`, B's login header, or the tailnet ACL alone); getting the address to the phone
-(a QR code in the terminal, or typing it).
+(a QR code in the terminal, or typing it). Its decisions 6 (a watched terminal on the remote page) and 7 (the port) weren't
+asked either, so a terminal on the phone (item 3 above) still meets decision 6.
 
 ### Where the answers meet what v2 already decided or built
 
