@@ -205,6 +205,18 @@ struct SwitchTests {
 
     /// `rollback`'s confirmation names where it goes and the `installs` line it read, which any worker can edit, so
     /// the user reads it before typing the code; the rest is the switch's.
+    /// The short prompts: a forward switch in two lines; a rollback always with its target whole and the installs line
+    /// it came from (the automated review of 324d0997: the short form had dropped them).
+    @Test func theShortPromptsSayWhatTheCodeIsFor() {
+        let forward = NodeTexts.switchShort(from: Self.a, to: Self.b, rewrites: .nothing("a scratch node"), parks: [])
+        #expect(forward.split(separator: "\n").count == 2 && forward.contains(String(Self.b.prefix(12))), "\(forward)")
+        let line = "\(Self.a) 2026-11-16T10:00:00Z from v2 4f0c1a2"
+        let back = NodeTexts.switchShort(from: Self.b, to: Self.a, rewrites: .unitAndCurrent, parks: [], rollbackLine: line)
+        #expect(back.contains(Self.a) && back.contains("installed as: \(line)") && back.contains("any worker can write that record"), "\(back)")
+        let odd = NodeTexts.switchShort(from: Self.b, to: Self.a, rewrites: .unitAndCurrent, parks: [], rollbackLine: "\(Self.a) \u{1b}[2Jx")
+        #expect(!odd.contains("\u{1b}"), "\(odd)")
+    }
+
     @Test func aRollbackSaysWhereItGoes() {
         let line = "\(Self.a) 2026-11-16T10:00:00Z"
         let text = NodeTexts.rollback(from: Self.b, to: Self.a, line: line, rewrites: .unitAndCurrent)

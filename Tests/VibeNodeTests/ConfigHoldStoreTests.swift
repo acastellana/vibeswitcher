@@ -363,7 +363,7 @@ struct ConfigHoldStoreTests {
 
         let long = CardText.lines(card.value, long: true)
         #expect(long.contains("    merge_policy: ask_all; " + same), "\(long)")
-        #expect(long.contains("    ~/.claude/settings.json, hash abc123: env; " + unknown), "\(long)")
+        #expect(long.contains("    ~/.claude/settings.json, hash abc123: env; " + unknown + " " + AcceptedSnapshot.unvouchedWhy), "\(long)")
         #expect(long.filter { $0.contains(AcceptedSnapshot.unvouchedPrefix) }.count == 2, "\(long)")
         #expect(!long.contains { $0.contains("marks a line") }, "\(long)")
 

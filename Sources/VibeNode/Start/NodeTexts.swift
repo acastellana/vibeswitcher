@@ -85,9 +85,12 @@ public enum NodeTexts {
     /// parks first. `rollbackLine`: a rollback's `installs` line (any worker can write that record).
     public static func switchShort(from: String, to: String, rewrites: SwitchRewrites, parks: [String], rollbackLine: String? = nil) -> String {
         let (old, new) = (ConfigSeal.inert(String(from.prefix(12)), limit: 64), ConfigSeal.inert(String(to.prefix(12)), limit: 64))
-        let first = rollbackLine == nil
-            ? "This switches the node from build \(old) to build \(new); every session stays."
-            : "This rolls the node back from build \(old) to build \(new), the one installed before it (check it's one you installed); every session stays."
+        // A rollback names its target whole and where it came from: the installs record's line (when and from what that
+        // build was installed), which any worker can write (the automated review of 324d0997).
+        let first = rollbackLine.map { line in
+            "This rolls the node back from build \(old) to build \(ConfigSeal.inert(to, limit: 64)), the one installed before it; every session stays.\n"
+                + "  installed as: \(ConfigSeal.inert(line, limit: .max)) (any worker can write that record: check it's a build you installed)"
+        } ?? "This switches the node from build \(old) to build \(new); every session stays."
         let when = parks.isEmpty ? "It runs now" : "It parks the idle workers first (\(parks.joined(separator: ", "))), then runs"
         let after: String
         switch rewrites {

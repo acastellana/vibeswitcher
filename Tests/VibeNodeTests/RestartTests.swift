@@ -636,6 +636,9 @@ struct RestartTests {
         let unknown = longLines.filter { $0.hasPrefix("    ") && $0.contains("can't be compared with your last accept") }
         #expect(unknown.count > 1, "\(long.output)")
         #expect(longLines.contains { $0.hasPrefix("    merge_policy: ask_all; can't be compared with your last accept") }, "\(long.output)")
+        // The cause, with --long only, and both: a restart or a rewrite of the record (the default line names none).
+        #expect(longLines.contains { $0.hasPrefix("    merge_policy: ask_all; can't be compared") && $0.hasSuffix(AcceptedSnapshot.unvouchedWhy) }, "\(long.output)")
+        #expect(!held.output.contains("restarted since"), "\(held.output)")
         #expect(long.output.contains("compared with your last accept"), "\(long.output)")
         // The short lines show every hash and value the long ones do: all the card is bound to.
         for line in longLines where line.hasPrefix("    ") {

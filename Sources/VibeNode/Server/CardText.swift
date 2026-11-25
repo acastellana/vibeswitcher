@@ -141,7 +141,7 @@ public enum CardText {
                 line += ", hash " + inert(item["hash"]?.string)
                 if let change = item["change"]?.string { line += ": " + inert(change) }
                 if item["outside"]?.bool == true { line += " (changed outside a team session)" }
-                if long { line += item["sinceAccept"]?.string.map { "; " + inert($0) } ?? "" }
+                if long { line += item["sinceAccept"]?.string.map { "; " + inert(AcceptedSnapshot.longSince($0)) } ?? "" }
                 else { line += shortSince(item["sinceAccept"]?.string, legend: &legend) }
                 lines.append(line)
                 for file in item["files"]?.array?.compactMap(\.string) ?? [] { lines.append("      " + inert(file)) }
@@ -162,7 +162,7 @@ public enum CardText {
             if !rails.isEmpty { lines.append("  workflow.md's guard rails (read each value: the accept records them):") }
             for rail in rails {
                 var line = "    \(inert(rail["key"]?.string)): \(inert(rail["value"]?.string))"
-                if long { line += rail["sinceAccept"]?.string.map { "; " + inert($0) } ?? "" }
+                if long { line += rail["sinceAccept"]?.string.map { "; " + inert(AcceptedSnapshot.longSince($0)) } ?? "" }
                 else { line += shortSince(rail["sinceAccept"]?.string, legend: &legend) }
                 lines.append(line)
             }

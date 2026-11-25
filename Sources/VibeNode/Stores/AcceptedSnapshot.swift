@@ -163,7 +163,16 @@ public struct AcceptedSnapshot: Codable, Equatable, Sendable {
     /// What a held thing or rail the snapshot lists as it is now is said to be when the vault didn't seal the snapshot:
     /// nothing reassuring (the security follow-ups' item 18).
     static func unvouched(_ when: String) -> String {
-        unvouchedPrefix + " (\(when)): the node restarted since"
+        unvouchedPrefix + " (\(when))"
+    }
+
+    /// Why a line can't be compared, said with `--long` after `unvouched`'s words: the cause isn't known, a restart or a
+    /// rewrite of the record (the review of the text pass: a worker can rewrite it).
+    public static let unvouchedWhy = "(the node restarted since, or its record of that accept was changed: read the values)"
+
+    /// `since`'s words for a long line: `unvouched`'s with `unvouchedWhy` after, any other as it is.
+    public static func longSince(_ since: String) -> String {
+        since.hasPrefix(unvouchedPrefix) ? since + " " + unvouchedWhy : since
     }
 
     /// How `unvouched`'s words begin: `CardText` says them once for every line they're on, not on each line.

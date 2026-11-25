@@ -12,9 +12,10 @@ import VibeNode
 /// with the request's text, never with whatever the card holds by then. A page only leaves the draft; this is the
 /// user's voice, as every answer is.
 enum AnswerCommand {
-    static let usage = "usage: vibeswitcher answer CARD [TEXT]  (no TEXT: the answer drafted on the card's web page; a plugin's card: one of its words, as it lists them)"
+    static let usage = "usage: vibeswitcher answer CARD [TEXT] [--long]  (no TEXT: the answer drafted on the card's web page; a plugin's card: one of its words, as it lists them)"
 
     static func run(_ arguments: [String]) -> Int32 {
+        let arguments = Say.takingLong(arguments)
         if arguments.count == 1 { return takeDraft(arguments[0]) }
         guard arguments.count == 2, !arguments[1].trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return Say.usage(usage) }
         let text = arguments[1]
@@ -38,8 +39,8 @@ enum AnswerCommand {
                 let action = (plugin["actions"]?.array ?? []).first { $0["word"]?.string == word }
                 return "This " + ConfigSeal.inert(action?["does"]?.string ?? "answers card \(id) with \(word)", limit: .max) + "."
             }
-            // The question in one line, then the answer (2026-11-25, the text walk: no card reprinted).
-            return questionLine(card) + "\nThis answers it with: \(ConfigSeal.inert(text, limit: 400))"
+            // The question whole (or its first lines and how many more), then the answer: no card header reprinted.
+            return questionLines(card) + "\nThis answers it with: \(ConfigSeal.inert(text, limit: 400))"
         }, say: said)
     }
 
@@ -49,11 +50,9 @@ enum AnswerCommand {
         (card["question"] ?? .null) == .null || (card["approval"] ?? .null) != .null
     }
 
-    /// The lead's question in one line (its first, inert), marked as the lead's words; the card's id for a card with none.
-    static func questionLine(_ card: NodeWire.Value) -> String {
-        guard let text = card["question"]?["text"]?.string else { return "Card \(ConfigSeal.inert(card["id"]?.string ?? "", limit: 80))" }
-        let first = text.split(whereSeparator: \.isNewline).first.map(String.init) ?? text
-        return "The lead asks: \(ConfigSeal.inert(first, limit: 200))"
+    /// The lead's question as the prompt shows it (`AnswerPrompt`): whole up to its 8 lines, else how many more.
+    static func questionLines(_ card: NodeWire.Value) -> String {
+        AnswerPrompt.lines(card, long: Say.long).joined(separator: "\n")
     }
 
     /// The card's draft, if it has one: its text and the question's version it was drafted for.
@@ -72,7 +71,7 @@ enum AnswerCommand {
             return .init(card: id, code: code, text: taken?.text ?? "", version: taken?.version.int)
         }, what: { card in
             // Whole: this is what the lead will be told as the user's.
-            questionLine(card) + "\nThis answers it with the answer drafted on its web page: " + ConfigSeal.inert(draft(of: card)?.text ?? "", limit: .max)
+            questionLines(card) + "\nThis answers it with the answer drafted on its web page: " + ConfigSeal.inert(draft(of: card)?.text ?? "", limit: .max)
         }, say: said)
     }
 

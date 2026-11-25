@@ -6,7 +6,7 @@ import { itemLabel, heldTitle, railState, heldSummary } from '../js/heldconfig.j
 import { setLanguage } from '../js/i18n.js';
 
 setLanguage('en');
-const unvouched = "can't be compared with your last accept (2026-11-24T13:28:34.630Z): the node restarted since";
+const unvouched = "can't be compared with your last accept (2026-11-24T13:28:34.630Z)";
 
 test('each held thing in a few words: the node’s own label first, else read off its name', () => {
   assert.equal(itemLabel({ name: 'x', what: { label: 'Claude Code updated itself', from: '2.1.331', to: '2.1.332' } }), 'Claude Code updated itself (2.1.331 → 2.1.332)');
