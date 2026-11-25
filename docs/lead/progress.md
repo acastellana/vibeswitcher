@@ -4563,3 +4563,5 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-25 17:33 Started a worker on review-v2-s-mac-2
 - 2026-11-25 17:46 Kept review-v2-s-mac-2 unmerged: Report only, delivered: verdict 'ready for v2 with fixes' (F1, F2 Important). Its worktree holds the review copy and probes (.vibeswitcher/v2-anchor-review/probes) that the fix round and its re-check use. Nothing merges; clean up once v2-mac-anchor is delivered.
 - 2026-11-25 18:07 Kept review-v2-s-mac unmerged: Report only, delivered: verdict 'ready for v2 with one fix' (F1, a Linux compile break in a test file). Its worktree holds the review copy and probes that the fix round may use. Nothing merges; clean up once v2-mac-web-port is delivered.
+- 2026-11-25 18:31 Planned v2-on-the-mac-4: v2 on the Mac, item 13: the checked Mac node start, on top of the anchor (in a clone; a branch for v2)
+- 2026-11-25 18:31 Started a worker on v2-on-the-mac-4
