@@ -315,7 +315,7 @@ export function actionsStrip(app = null) {
 // Starting a project lead in a folder (the Mac's Start Project Lead…, and the palette's "Start Project Lead in …"): the
 // folder and the goal, and the line that starts it, a click to copy. Returns { el, choose(folder), update() }.
 export function newLeadForm(app) {
-  const path = h('input', { class: 'answer-input', type: 'text', placeholder: '/path/to/project', 'aria-label': t('drProjectFolder'), spellcheck: 'false', autocomplete: 'off' });
+  const path = h('input', { class: 'answer-input', type: 'text', placeholder: t('drPathPlaceholder'), 'aria-label': t('drProjectFolder'), spellcheck: 'false', autocomplete: 'off' });
   const goal = h('textarea', { class: 'answer-input lead-goal', rows: 2, placeholder: t('drTheGoalOptionalWithoutOne'), 'aria-label': t('drGoal') });
   const lineSlot = h('div', { class: 'prompt-line' });
   const el = h('section', { class: 'new-session new-lead', 'aria-label': t('drStartAProjectLead') },
@@ -384,7 +384,7 @@ export function newSessionForm(app, { folder }) {
   let picked = false;
   let asked = null;
   let timer = null;
-  const path = h('input', { class: 'answer-input', type: 'text', placeholder: '/path/to/project', 'aria-label': t('drFolder'), spellcheck: 'false', autocomplete: 'off' });
+  const path = h('input', { class: 'answer-input', type: 'text', placeholder: t('drPathPlaceholder'), 'aria-label': t('drFolder'), spellcheck: 'false', autocomplete: 'off' });
   const model = h('input', { class: 'answer-input model-input', type: 'text', placeholder: t('drModelOptional'), 'aria-label': t('drModel'), spellcheck: 'false', autocomplete: 'off' });
   const kinds = h('div', { class: 'segmented presets', role: 'group', 'aria-label': t('drPreset') });
   const about = h('p', { class: 'confirm-note preset-about', hidden: true });

@@ -90,7 +90,7 @@ export function healthGroup(health) {
     h('dl', { class: 'facts-list' }, facts.rows.map(([name, value], index) => index === 0
       ? row(name, h('span', { class: facts.tone === 'done' ? 'dot tone-done' : 'dot tone-needs-you', 'aria-hidden': 'true' }), value)
       : row(name, value))),
-    facts.lines.length ? h('ul', { class: 'lines' }, facts.lines.map((line) => h('li', null, line.at ? [ago(line.at), ' · '] : null, line.text))) : null);
+    facts.lines.length ? h('ul', { class: 'lines' }, facts.lines.map((line) => h('li', null, line.at ? [...tParts('noAgo', { d: ago(line.at) }), ' · '] : null, line.text))) : null);
 }
 
 // Check for Updates (the node's `update`): up to date or a newer build, the last look's time, why a look failed, and

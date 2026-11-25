@@ -138,3 +138,11 @@ test('U19: a project that is gone says so and offers the start page, as a gone s
   }
   setLanguage('en');
 });
+
+test('the page leaves no English of its own in Spanish: the folder field’s placeholder is a word of the table', async () => {
+  const { readFileSync } = await import('node:fs');
+  const drive = readFileSync(new URL('../js/views/drive.js', import.meta.url), 'utf8');
+  assert.doesNotMatch(drive, /placeholder: '\//, 'no placeholder written in the view');
+  assert.equal(TABLES.es.drPathPlaceholder, '/ruta/al/proyecto');
+  assert.equal(TABLES.en.drPathPlaceholder, '/path/to/project');
+});
