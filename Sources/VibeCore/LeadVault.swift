@@ -224,6 +224,10 @@ public struct LeadVault: Sendable {
         /// The model families the host recorded at each bind of the task's workers and its team members'
         /// (`Reply.families`; see `WorkerLaunch`).
         case launchedFamilies(root: String, task: String)
+        /// The app only: the user answered that `model` may audit `task` when the floor leaves no other (`Reply.ok`).
+        case allowAuditModel(root: String, task: String, model: String)
+        /// The models the user allowed to audit `task` (`Reply.families`).
+        case allowedAuditModels(root: String, task: String)
         /// The repository's lead only: notes on a task small_task_min judges it by (`LeadVault.SmallTaskNote`).
         case noteSmallTask(root: String, task: String, note: SmallTaskNote)
         /// The app only: the sessions its witness sees at work now (`at`, its clock); each worker's task counts the time
@@ -593,6 +597,9 @@ extension LeadVault {
             /// The model families each task's workers were launched on, as the host saw each session it bound a worker's
             /// role to (`WorkerLaunch`), by the task the grant names; only ever added to (optional: older vaults have none).
             var launchedFamilies: [String: [String]]?
+            /// The models the user allowed to audit a task when the floor left none, newest last, by task (optional:
+            /// older vaults have none).
+            var auditModelsAllowed: [String: [String]]?
 
             /// Takes the members `drop` picks out; the sessions the workers and verifiers among them were bound to
             /// become `former`, with the role and task each held.
@@ -999,6 +1006,7 @@ extension LeadVault {
                     team.reported?[task] = nil
                     team.evidence?[task] = nil
                     // Not the launched families: they only add to what an audit is kept off, and the branch may outlive it.
+                    team.auditModelsAllowed?[task] = nil
                 }
                 return .ok
             case .whoami(let root):
@@ -1163,8 +1171,12 @@ extension LeadVault {
                     heldNotes.append("vault: \(LeadMail.project(of: root))'s first look is held: no review floor recorded from workflow.md until the user's accept")
                     return .reviewFloor(nil)
                 }
-                change(root, &changed) { $0.floor = floor }
-                return .reviewFloor(floor)
+                // A floor that says nothing of worker_model (the Mac's Settings sheet, an older client) keeps the recorded one.
+                var floor = floor
+                if !floor.workerModelGiven { floor.setWorkerModel(team(root)?.floor?.workerModel) }
+                let kept = floor
+                change(root, &changed) { $0.floor = kept }
+                return .reviewFloor(kept)
             case .approve(let root, let task, let commit):
                 // Only your answer in the app approves a merge: not the lead that asks for it, nor a worker whose
                 // work it is, whatever they write on the board.
@@ -1225,6 +1237,18 @@ extension LeadVault {
                 return .ok
             case .smallTaskFacts(let root, let task):
                 return .smallTask(team(root)?.smallTasks?[task])
+            case .allowAuditModel(let root, let task, let model):
+                // Only your answer, recorded by the app: never the lead the floor holds, nor a worker.
+                guard caller == .app else { return .refused("Only VibeSwitcher records which model may audit a task, when you answer.") }
+                guard let family = WorkerLaunch.family(of: model), !task.isEmpty else { return .refused("Name a task and a model: fable, opus, sonnet, mythos or haiku.") }
+                change(root, &changed) { team in
+                    var all = team.auditModelsAllowed ?? [:]
+                    all[task] = Array(((all[task] ?? []).filter { $0 != family } + [family]).suffix(5))
+                    team.auditModelsAllowed = all
+                }
+                return .ok
+            case .allowedAuditModels(let root, let task):
+                return .families(team(root)?.auditModelsAllowed?[task])
             case .launchedFamilies(let root, let task):
                 // Read by the repository's lead (its tool server) and the app only.
                 guard caller == .app || isLead(caller, root) else { return .refused("Only the repository's lead or VibeSwitcher reads its launches.") }

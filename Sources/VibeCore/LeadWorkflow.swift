@@ -472,16 +472,31 @@ public struct LeadWorkflow: Equatable, Sendable {
     /// it's audited on security_audit_model (`securityAuditModel`, Mythos unless set), whatever verifier_model says,
     /// where the floor allows that model (not the workers', the task's or its worker's under a different-model floor,
     /// and a name that says which model it is); else as any other audit.
+    ///
+    /// For showing (status, the usage waits): when the floor excludes every model, `noneLeft`; an audit starts by
+    /// `auditModelChoice`, which says nil then and never names an excluded model.
     public func auditModel(workerModel: String?, moreWorkers: [String?] = [], taskModel: String? = nil, launchedModel: String? = nil,
                            heldBack: String? = nil, security: Bool = false) -> String {
+        auditModelChoice(workerModel: workerModel, moreWorkers: moreWorkers, taskModel: taskModel, launchedModel: launchedModel,
+                         heldBack: heldBack, security: security) ?? Self.noneLeft
+    }
+
+    /// What `auditModel` shows when the floor leaves no model: the audit is held and the user asked.
+    public static let noneLeft = "none (every model is one the workers ran on: the user is asked)"
+
+    /// `auditModel`'s choice; nil when a different-model floor excludes every model (`byCapability` and
+    /// `lastResortAuditModel`, and the held-back one): never one it excludes.
+    public func auditModelChoice(workerModel: String?, moreWorkers: [String?] = [], taskModel: String? = nil, launchedModel: String? = nil,
+                                 heldBack: String? = nil, security: Bool = false) -> String? {
         let workers = ([workerModel] + moreWorkers).map(LeadReviewFloor.workersModel)
         let chosen = security && securityAllowed(workers: workers, taskModel: taskModel, launchedModel: launchedModel)
             ? securityAuditModel : unheldAuditModel(workerModel: workerModel, workers: workers, taskModel: taskModel, launchedModel: launchedModel)
+        guard let chosen else { return nil }
         guard let heldBack, LeadReviewFloor.sameModel(chosen, heldBack) else { return chosen }
         let different = floor?.verifierDifferent == true
         return (Self.byCapability + [Self.lastResortAuditModel]).first { model in
             !LeadReviewFloor.sameModel(model, heldBack) && (!different || !Self.excluded(model, workers: workers, taskModel: taskModel, launchedModel: launchedModel))
-        } ?? "sonnet"
+        }
     }
 
     /// One of the workers', the task's or its worker's models, which a different-model floor keeps an audit off.
@@ -498,7 +513,8 @@ public struct LeadWorkflow: Equatable, Sendable {
     /// only (`securityAuditModel`), and Fable's place at its limit goes to Opus (the user's answer of 2026-11-12).
     static let byCapability = ["fable", "opus", "sonnet"]
     /// Where a search under a different-model floor goes once the workers', the task's and its worker's models took
-    /// all of `byCapability`: a model none of them is, never one the floor excludes.
+    /// all of `byCapability`. When it's excluded as well, there's no model left: the audit is held and the user asked
+    /// (`LeadToolset.auditChoice`), never run on an excluded one.
     static let lastResortAuditModel = "mythos"
 
     /// Whether the floor lets a sensitive audit run on `securityAuditModel`: always, unless it keeps audits off the
@@ -510,7 +526,7 @@ public struct LeadWorkflow: Equatable, Sendable {
         return !Self.excluded(model, workers: workers, taskModel: taskModel, launchedModel: launchedModel)
     }
 
-    private func unheldAuditModel(workerModel: String?, workers: [String], taskModel: String?, launchedModel: String?) -> String {
+    private func unheldAuditModel(workerModel: String?, workers: [String], taskModel: String?, launchedModel: String?) -> String? {
         let different = floor?.verifierDifferent == true
         if let verifierModel, !verifierModel.isEmpty {
             if !different { return verifierModel }
@@ -520,7 +536,7 @@ public struct LeadWorkflow: Equatable, Sendable {
         guard different else { return Self.otherModel(than: workerModel) }
         return (Self.byCapability + [Self.lastResortAuditModel]).first {
             !Self.excluded($0, workers: workers, taskModel: taskModel, launchedModel: launchedModel)
-        } ?? "sonnet"
+        }
     }
 
     /// A model at least as capable as `worker` and not it: fable, or opus for a worker on fable.

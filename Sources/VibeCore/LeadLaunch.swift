@@ -1083,7 +1083,10 @@ public enum LeadLaunch {
                                  fableHeldBack: Bool) -> Run {
         let effort = task.effort ?? (task.hard ? hardEffort : nil)
         if codex { return Run(model: routed ? nil : task.model, effort: effort) }
-        return run(model: task.intendedModel ?? workflow.floor?.workerModel, advisor: task.advisor ?? workflow.workerAdvisor, effort: effort,
+        // Under a floor that keeps audits off the workers' model, never a word it can't name (`default`, `best`, a
+        // custom id): the worker then starts on worker_model, or Claude Code's default.
+        let named = workflow.floor?.verifierDifferent == true ? task.intendedModel.flatMap { WorkerLaunch.namesOne($0) ? $0 : nil } : task.intendedModel
+        return run(model: named ?? workflow.floor?.workerModel, advisor: task.advisor ?? workflow.workerAdvisor, effort: effort,
                    defaultModel: defaultModel, fableHeldBack: fableHeldBack)
     }
 

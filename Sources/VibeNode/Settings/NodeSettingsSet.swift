@@ -105,7 +105,7 @@ extension NodeSettings {
                 throw Refusal("nothing was changed: the session host couldn't say what the review rules' floor is (\(error)), "
                               + "so verifier_model can't be checked against it: try again")
             }
-            if let why = floor?.refusal(key: key, value: given, workerModel: workerModel) {
+            if let why = floor?.refusal(key: key, value: given, workerModel: floor?.workerModel ?? workerModel) {
                 throw Refusal("nothing was changed: \(why). `vibeswitcher set FOLDER floor_verifier_different off` lowers the floor first")
             }
         }
@@ -186,13 +186,14 @@ extension NodeSettings {
         case "floor_risk_model": floor.riskModel = value.map { $0 == "on" } ?? none.riskModel
         case "floor_audit_sample_percent": floor.auditSamplePercent = value.flatMap(Int.init) ?? none.auditSamplePercent
         case "floor_verifier_different": floor.verifierDifferent = value.map { $0 == "on" } ?? none.verifierDifferent
-        case "floor_worker_model": floor.workerModel = value
+        case "floor_worker_model": floor.setWorkerModel(value)
         default: throw Refusal("\(setting.key) isn't a rule of the floor")
         }
         // Kept as the vault keeps it (`LeadReviewFloor`'s own bounds).
         floor = LeadReviewFloor(sensitivePaths: floor.sensitivePaths, strictPaths: floor.strictPaths, auditFinders: floor.auditFinders,
                                 mergePolicy: floor.mergePolicy, riskLines: floor.riskLines, riskModel: floor.riskModel,
-                                verifierDifferent: floor.verifierDifferent, auditSamplePercent: floor.auditSamplePercent, workerModel: floor.workerModel)
+                                verifierDifferent: floor.verifierDifferent, auditSamplePercent: floor.auditSamplePercent)
+            .with(workerModel: floor.workerModel)
         let recordedNow: LeadReviewFloor?
         do { recordedNow = try vault.setReviewFloor(floor, root: root) } catch {
             throw Refusal("the session host didn't record the floor (\(error)): nothing was changed")

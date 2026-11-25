@@ -652,7 +652,7 @@ public final class HostServer {
             // (`WorkerLaunch`; the host's own record, never the request's word).
             var bound: WorkerLaunch.Seen?
             if case .bind(_, _, let target) = request, let id = UUID(uuidString: target), let session = sessions[id] {
-                bound = WorkerLaunch.Seen(command: session.info.command)
+                bound = WorkerLaunch.Seen(command: session.info.command, cwd: session.info.cwd)
             }
             var answer = vault.answer(request, from: from, userOpened: opened, agentSession: agentSession, liveSessions: live, bound: bound)
             // A verifier that gave its verdict has no job left: it ends once its grace is over (see `endSubmitted`).

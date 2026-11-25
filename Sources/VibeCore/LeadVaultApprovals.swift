@@ -19,6 +19,12 @@ extension LeadVault {
         (commit.count == 40 || commit.count == 64) && commit.allSatisfy { $0.isHexDigit }
     }
 
+    /// The models the user allowed to audit `task` when the floor left none, newest last; [] for none.
+    public func allowedAuditModels(root: String, task: String) -> [String] {
+        guard case .families(let families)? = try? call(.allowedAuditModels(root: root, task: task)) else { return [] }
+        return families ?? []
+    }
+
     /// The user approved merging `task` at `commit` (the app only).
     public func approve(root: String, task: String, commit: String) throws {
         _ = try call(.approve(root: root, task: task, commit: commit))
@@ -34,8 +40,23 @@ extension LeadVault {
     /// when it approves a commit, the approval goes to the vault for each task whose branch (agent/<slug>) is at that
     /// commit now (the one merge holds back is). The tasks it was recorded for; nil when the answer approves nothing.
     @discardableResult
+    /// An answer allowing a model to audit a task the floor left none for (`LeadToolset.askWhichModelAudits`'s options):
+    /// "Audit <task> on <model>", the task and the model in the user's own words; nil otherwise.
+    public static func auditGrant(in answer: String) -> (task: String, model: String)? {
+        let words = answer.trimmingCharacters(in: .whitespacesAndNewlines).split(whereSeparator: \.isWhitespace).map(String.init)
+        guard words.count == 4, words[0].caseInsensitiveCompare("Audit") == .orderedSame, words[2].lowercased() == "on",
+              let family = WorkerLaunch.family(of: words[3]) else { return nil }
+        return (words[1], family)
+    }
+
     public func recordApproval(_ answer: String, of question: LeadQuestion, root: String) throws -> [String]? {
-        guard question.state == .answered, let commit = Self.approvedCommit(in: answer) else { return nil }
+        guard question.state == .answered else { return nil }
+        // Which model may audit a task the floor left none for: the user's answer names both.
+        if let grant = Self.auditGrant(in: answer) {
+            _ = try call(.allowAuditModel(root: root, task: grant.task, model: grant.model))
+            return nil
+        }
+        guard let commit = Self.approvedCommit(in: answer) else { return nil }
         let refs = Git.run(["for-each-ref", "--points-at", commit, "--format=%(refname:short)", "refs/heads/agent/"], in: root)
         guard refs.ok else { throw Refused("Couldn't tell which task's branch is at \(commit.prefix(8)) (\(refs.error)).") }
         let tasks = refs.output.split(whereSeparator: \.isNewline).map { String($0.dropFirst("agent/".count)) }.filter { !$0.isEmpty }

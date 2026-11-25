@@ -423,7 +423,7 @@ public enum NodeSettings {
                 return .failure(Refusal("\(setting.key) is one word, a model's name as claude --model takes it (fable, opus, sonnet, claude-opus-5-5)"))
             }
             let model = setting.key == "verifier_model" ? text : text.lowercased()
-            if ["security_audit_model", "floor_worker_model"].contains(setting.key), !LeadReviewFloor.knownModel(model) {
+            if setting.key == "security_audit_model" ? !LeadReviewFloor.knownModel(model) : setting.key == "floor_worker_model" && !WorkerLaunch.namesOne(model) {
                 return .failure(Refusal("\(setting.key) \(model) doesn't say which model it is (name one: mythos, fable, opus, sonnet, haiku, or its claude-… id)"))
             }
             return .success(model)

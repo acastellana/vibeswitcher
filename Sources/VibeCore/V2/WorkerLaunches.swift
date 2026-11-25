@@ -14,10 +14,15 @@ import Foundation
 /// adds nothing and removes nothing. The lead's own model was never part of the rule and isn't here (the security
 /// architecture's open list: a lead that writes a task's code itself, and `--advisor`).
 public enum WorkerLaunch {
-    /// What the host saw of a session it binds a role to: the command it started it with (nil: a plain shell).
+    /// What the host saw of a session it binds a role to: the command it started it with (nil: a plain shell), and the
+    /// folder it started in (its project settings' model and `env` are read there: they only add).
     public struct Seen: Equatable, Sendable {
         public var command: String?
-        public init(command: String?) { self.command = command }
+        public var cwd: String?
+        public init(command: String?, cwd: String? = nil) {
+            self.command = command
+            self.cwd = cwd
+        }
     }
 
     static let families = ["mythos", "fable", "opus", "sonnet", "haiku"]
@@ -26,6 +31,37 @@ public enum WorkerLaunch {
     public static func family(of model: String?) -> String? {
         guard let name = model?.lowercased() else { return nil }
         return families.first { name.contains($0) }
+    }
+
+    /// A name that says which one model it is: a family's or its claude-… id (`opusplan` is two, `best` none).
+    public static func namesOne(_ model: String) -> Bool { LeadReviewFloor.knownModel(model) && runsOn(model).count == 1 }
+
+    /// The families a model name a launch passed may run on: its own, `best` Opus, `opusplan` Opus and Sonnet (Claude
+    /// Code's aliases); none for anything else (`default` is read as no `--model` by the caller).
+    static func runsOn(_ model: String) -> [String] {
+        switch model.lowercased() {
+        case "best": return ["opus"]
+        case "opusplan": return ["opus", "sonnet"]
+        default: return family(of: model).map { [$0] } ?? []
+        }
+    }
+
+    /// The model names a session's project settings in `cwd` give Claude Code (their "model", and their `env`'s
+    /// ANTHROPIC_MODEL and ANTHROPIC_DEFAULT_*_MODEL): branch content, read only to add.
+    static func projectModels(cwd: String?) -> [String] {
+        guard let cwd else { return [] }
+        var found: [String] = []
+        for file in [".claude/settings.json", ".claude/settings.local.json"] {
+            let path = (cwd as NSString).appendingPathComponent(file)
+            guard let data = FileManager.default.contents(atPath: path), data.count < 1 << 20,
+                  let object = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else { continue }
+            if let model = object["model"] as? String { found.append(model) }
+            for (key, value) in object["env"] as? [String: Any] ?? [:]
+            where key == "ANTHROPIC_MODEL" || (key.hasPrefix("ANTHROPIC_DEFAULT_") && key.hasSuffix("_MODEL")) {
+                if let value = value as? String { found.append(value) }
+            }
+        }
+        return found
     }
 
     /// The `--model` (or `--model=`) a launch command passes before its `--` (what follows is the start message: the
@@ -78,12 +114,15 @@ public enum WorkerLaunch {
         return words
     }
 
-    /// The family a launch adds (`seen` nil: the host didn't know the session, none): its `--model`'s, or with none,
-    /// Claude Code's default's as `home` holds it now. An unknown name adds nothing.
+    /// The families a launch adds (`seen` nil: the host didn't know the session, none): its `--model`'s (`runsOn`), or
+    /// with none (or `default`), Claude Code's default's as `home` holds it now, and with no default set either, Claude's
+    /// own, which the floor counts as Opus (`LeadReviewFloor.workersModel`); and whatever its project settings name
+    /// (`projectModels`). An unknown name adds nothing.
     public static func families(seen: Seen?, home: String) -> [String] {
         guard let seen else { return [] }
-        let model = seen.command.flatMap(launchModel(command:)) ?? LeadWorkflow.claudeModel(command: "", home: home)
-        return family(of: model).map { [$0] } ?? []
+        let passed = seen.command.flatMap(launchModel(command:)).flatMap { $0.lowercased() == "default" ? nil : $0 }
+        let ran = passed.map(runsOn) ?? [LeadReviewFloor.workersModel(LeadWorkflow.claudeModel(command: "", home: home))].flatMap(runsOn)
+        return Array(Set(ran + projectModels(cwd: seen.cwd).flatMap(runsOn))).sorted()
     }
 
     /// What a task's audit is kept off under the floor, and the line that says so: the workers' model (`floorModel`,

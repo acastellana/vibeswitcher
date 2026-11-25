@@ -1130,6 +1130,11 @@ public final class LeadToolset: MCPToolset {
         guard text.count <= 100, text.unicodeScalars.allSatisfy({ $0.isASCII && allowed.contains($0) }) else {
             throw Problem(text: "\(key) is one word, a model's name as claude --model takes it (sonnet, opus, fable, claude-sonnet-5-5), not “\(Self.clip(text, 60))”. Nothing was changed.")
         }
+        // Under a floor that keeps audits off the workers' model, a name it can't tell the model of (an alias such as
+        // default or best, a custom id) would put a worker on a model the rule can't keep its audit off.
+        if !text.isEmpty, workflow.floor?.verifierDifferent == true, !WorkerLaunch.namesOne(text) {
+            throw Problem(text: "\(key) \(Self.clip(text, 60)) doesn't say which model it is, and the review floor keeps audits off the workers' model: name a model: fable, opus, sonnet, haiku or mythos, or its claude-… id. Nothing was changed.")
+        }
         return text
     }
 
@@ -3028,7 +3033,12 @@ public final class LeadToolset: MCPToolset {
         _ = accountUsage(sessions: sessions)
         // A sensitive or security branch is audited on security_audit_model (where the floor allows it).
         let security = Self.securityReason(root: root, head: head, workflow: workflow, raised: task.riskRaised)
-        let verifierModel = auditModel(workflow, task: task, security: security != nil)
+        guard let verifierModel = auditChoice(workflow, task: task, security: security != nil) else {
+            // Every model is one the floor keeps this audit off: held, and the user asked, never run on one of those.
+            let why = workersBasis(task, projectDefault: runtime.workerModel(root: root), workflow: workflow).text
+            throw Problem(text: "Not audited, no verifier started: \(why), with the task's own model, and no model is left. " + askWhichModelAudits(task, why: why)
+                          + " Once they answer, audit again.")
+        }
         let fallback = security != nil && LeadReviewFloor.sameModel(workflow.securityAuditModel, AccountUsage.heldBackFamily)
             && !LeadReviewFloor.sameModel(verifierModel, workflow.securityAuditModel)
             ? fableFallback()?.fableHeldBack(now: usageClock()) : nil
@@ -3221,8 +3231,10 @@ public final class LeadToolset: MCPToolset {
 
     /// The model this project's audits run on: verifier_model, or another than the workers' (see `LeadWorkflow.auditModel`).
     /// `task`: the task audited, whose own model (add_task's model) counts as the workers' under the floor. The workers'
-    /// models are the project's default (Claude Code's model: `LeadRuntime.workerModel`), the lead's, and every family
-    /// the host recorded for the task's launches (`workersBasis`): the record only ever adds.
+    /// models are the floor's worker_model when the user set one, else the project's default (Claude Code's model:
+    /// `LeadRuntime.workerModel`), and every family the host recorded for the task's and its members' launches
+    /// (`workersBasis`): the record only ever adds. The lead's own model isn't one of them (the security architecture's
+    /// open list). When they leave no model, the audit is held and the user asked (`auditChoice`).
     /// While Fable is held back (`AccountUsage.fableHeldBack`), the workers' model and the task's are the ones their
     /// sessions start on (opus in Fable's place), and the audit goes on the most capable model that isn't Fable and that
     /// the floor allows.
@@ -3233,22 +3245,48 @@ public final class LeadToolset: MCPToolset {
     /// the same automatic fallback as other audits: the most capable other model the floor allows, even with no
     /// verifier_model set. At the reset the ordinary Fable preference applies again.
     func auditModel(_ workflow: LeadWorkflow, task: LeadTask? = nil, security: Bool = false) -> String {
+        auditChoice(workflow, task: task, security: security) ?? LeadWorkflow.noneLeft
+    }
+
+    /// `auditModel`'s choice for an audit to start on: nil when the floor excludes every model and the user allowed
+    /// none for the task (`LeadVault.allowedAuditModels`, their answer to `askWhichModelAudits`): the audit is held.
+    func auditChoice(_ workflow: LeadWorkflow, task: LeadTask? = nil, security: Bool = false) -> String? {
         let launched = task.flatMap { task in task.worker.flatMap { task.launchedModels?[$0] } }
             .flatMap { $0.isEmpty || $0.hasPrefix("codex") ? nil : $0 }
         // A re-rolled task's Fable counts as its own model (`LeadTask.intendedModel`).
         let taskModel = task?.intendedModel
         let usage = fableFallback()
         let now = usageClock()
-        // The project's default (as a worker would start on it now: Opus in Fable's place while Fable is held back), the
-        // lead's model, and what the host recorded for the task's launches.
+        // worker_model, else the project's default (as a worker would start on it now: Opus in Fable's place while Fable
+        // is held back), and what the host recorded for the task's launches.
         let projectDefault = runtime.workerModel(root: root)
         let workers = workersBasis(task, projectDefault: usage?.startModel(projectDefault, now: now) ?? projectDefault, workflow: workflow).workers
         guard let usage else {
-            return workflow.auditModel(workerModel: workers.first ?? nil, moreWorkers: Array(workers.dropFirst()), taskModel: taskModel,
-                                       launchedModel: launched, security: security)
+            return workflow.auditModelChoice(workerModel: workers.first ?? nil, moreWorkers: Array(workers.dropFirst()), taskModel: taskModel,
+                                             launchedModel: launched, security: security) ?? userAllowed(task)
         }
-        return workflow.auditModel(workerModel: workers.first ?? nil, moreWorkers: Array(workers.dropFirst()), taskModel: usage.startModel(taskModel, now: now),
-                                   launchedModel: launched, heldBack: AccountUsage.heldBackFamily, security: security)
+        return workflow.auditModelChoice(workerModel: workers.first ?? nil, moreWorkers: Array(workers.dropFirst()), taskModel: usage.startModel(taskModel, now: now),
+                                         launchedModel: launched, heldBack: AccountUsage.heldBackFamily, security: security) ?? userAllowed(task)
+    }
+
+    /// The model the user allowed last for `task` when the floor left none (their answer, recorded by the app).
+    private func userAllowed(_ task: LeadTask?) -> String? {
+        task.flatMap { vault.allowedAuditModels(root: root, task: $0.slug).last }
+    }
+
+    /// The floor left no model for `task`'s audit: the user is asked which may audit it (once while the question is
+    /// open), each option "Audit <task> on <model>", which the app records as theirs when they answer it. What to say.
+    func askWhichModelAudits(_ task: LeadTask, why: String) -> String {
+        let question = "Audit \(task.slug): every model is one this task's workers ran on (\(why)), and the review floor keeps audits off those. Which may audit it?"
+        let options = (LeadWorkflow.byCapability + [LeadWorkflow.lastResortAuditModel]).map { "Audit \(task.slug) on \($0)" }
+        if let open = store.load().questions.first(where: { $0.state == .open && $0.text == question }) {
+            return "The user was asked which model may audit it (\(open.short)): the audit waits for their answer."
+        }
+        guard let asked = try? store.update({ board in
+            board.ask(question, options: options, priority: .important, whyNow: nil, proposal: nil, decideIn: nil, task: task.slug)
+        }) else { return "Ask the user which model may audit it (options: \(options.joined(separator: " | ")))." }
+        NodeQuestionPost.post(asked, op: .post, root: root, vault: vault)
+        return "The user is asked which model may audit it (\(asked.short)): the audit waits for their answer."
     }
 
     /// The model `task`'s audit at `head` runs on, as `audit` picks it: security_audit_model for a sensitive or security branch where

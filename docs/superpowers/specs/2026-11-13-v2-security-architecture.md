@@ -2437,6 +2437,13 @@ Nor does it cover a worker's `--advisor`: an advisor on the audit's model shapes
 would keep audits off Fable on every project whose lead (or advisors) run on Fable, the user's set-up today, so it is
 the user's call: keep it as is, add the lead's model, add advisors, or both.
 
+What the rule still can't see of a worker's model (the review of 97a8758a), each only narrowing it, none an unlock:
+(a) an alias remapped by a worktree's settings `env` (ANTHROPIC_DEFAULT_OPUS_MODEL makes `--model opus` run another
+model): what those settings name is added to the task's record at the bind, but workers are still launched by alias,
+not the family's full id (the node has no map it can vouch for from family to the current id); (b) `/model` typed in
+a worker's session; (c) a `claude -p` child the worker starts with a `--model` of its own; (d) subagents' own models
+(an agent definition's `model`); (e) `--fallback-model`, or Claude Code's own fallback when a model is overloaded.
+
 ### The author's calls the user doesn't need to confirm
 
 From the plan: S2-D2 (the Mac-only bodies move into `VibePlatform`), S2-D4 (per-message credentials), S2-D5

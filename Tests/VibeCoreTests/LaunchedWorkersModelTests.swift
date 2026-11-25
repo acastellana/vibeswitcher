@@ -21,7 +21,7 @@ extension LeadAdvanceTests {
         book.seenOf = { [runtime] session in runtime.hostSeen(session) }
         let reads = FloorReads()
         lead.floorClock = { reads.next() }
-        try vault.setReviewFloor(LeadReviewFloor(workerModel: workerModel), root: root)
+        try vault.setReviewFloor(LeadReviewFloor().with(workerModel: workerModel), root: root)
         for (key, value) in ["security_audit_model": "fable", "lead_model": leadModel] {
             let set = lead.call("configure", [key: value])
             #expect(!set.isError, "\(set.text)")
@@ -89,11 +89,12 @@ extension LeadAdvanceTests {
         #expect(lead.auditModel(lead.workflow, task: try #require(task("plain", root)), security: true) == "sonnet")
     }
 
-    /// An alias or unknown id adds nothing and takes nothing off; the last --model of a command counts.
+    /// An unknown id adds nothing and takes nothing off; Claude Code's aliases add what they run on (`best` Opus,
+    /// `opusplan` Opus and Sonnet); the last --model of a command counts.
     @Test func anAliasAddsNothingAndEveryModelOfACommandCounts() throws {
         let (root, _, lead) = try floorTeam(defaultModel: "opus", leadModel: "opus")
         _ = lead.call("add_task", ["title": "Alias", "goal": "g", "acceptance": ["a"], "review": "audit"])
-        bindWorker("alias", root: root, session: "best", command: "claude --model best -- 'go'")
+        bindWorker("alias", root: root, session: "custom", command: "claude --model my-own-model -- 'go'")
         #expect(vault.launchedFamilies(root: root, task: "alias") == nil)
         let alias = try #require(task("alias", root))
         #expect(lead.auditModel(lead.workflow, task: alias, security: true) == "fable")
@@ -207,10 +208,10 @@ extension LeadAdvanceTests {
 
     /// The floor keeps a known model only; parse takes one and refuses an alias.
     @Test func theFloorsWorkerModelIsAKnownModel() throws {
-        #expect(LeadReviewFloor(workerModel: "Opus").workerModel == "opus")
-        #expect(LeadReviewFloor(workerModel: "best").workerModel == nil)
-        let coded = try JSONDecoder().decode(LeadReviewFloor.self, from: JSONEncoder().encode(LeadReviewFloor(workerModel: "claude-opus-5-5")))
-        #expect(coded.workerModel == "claude-opus-5-5")
+        #expect(LeadReviewFloor().with(workerModel: "Opus").workerModel == "opus")
+        #expect(LeadReviewFloor().with(workerModel: "best").workerModel == nil)
+        let coded = try JSONDecoder().decode(LeadReviewFloor.self, from: JSONEncoder().encode(LeadReviewFloor().with(workerModel: "claude-opus-5-5")))
+        #expect(coded.workerModel == "claude-opus-5-5" && coded.workerModelGiven)
         let older = try JSONDecoder().decode(LeadReviewFloor.self, from: Data(#"{"sensitivePaths":[],"strictPaths":[],"auditFinders":1,"mergePolicy":"auto","riskLines":0,"riskModel":false,"verifierDifferent":true}"#.utf8))
         #expect(older.workerModel == nil)
     }
@@ -219,5 +220,93 @@ extension LeadAdvanceTests {
         #expect(WorkerLaunch.words("claude --name 'it'\\''s --model fable' --model \"op\\\"us\" -- go") == ["claude", "--name", "it's --model fable", "--model", "op\"us", "--", "go"])
         #expect(WorkerLaunch.launchModel(command: "claude --name 'it'\\''s --model fable' -- go") == nil)
         #expect(WorkerLaunch.launchModel(command: "claude --model opus --model 'sonnet' -- go") == "sonnet")
+    }
+
+    @Test func aliasesAddWhatTheyRunOnAndNoModelCountsAsOpus() {
+        let home = temp.url("no-settings").path
+        #expect(WorkerLaunch.families(seen: .init(command: "claude --model best -- go"), home: home) == ["opus"])
+        #expect(WorkerLaunch.families(seen: .init(command: "claude --model opusplan -- go"), home: home) == ["opus", "sonnet"])
+        // No --model (or `default`) and no settings model: Claude's own default, which the floor counts as Opus.
+        #expect(WorkerLaunch.families(seen: .init(command: "claude -- go"), home: home) == ["opus"])
+        #expect(WorkerLaunch.families(seen: .init(command: "claude --model default -- go"), home: home) == ["opus"])
+    }
+
+    /// The worktree's project settings (branch content) add what they name: their model and their env's
+    /// ANTHROPIC_MODEL and ANTHROPIC_DEFAULT_*_MODEL (an alias remapped).
+    @Test func aWorktreesSettingsAddWhatTheyName() throws {
+        let worktree = temp.url("worktree")
+        try FileManager.default.createDirectory(at: worktree.appendingPathComponent(".claude"), withIntermediateDirectories: true)
+        try Data(#"{"env": {"ANTHROPIC_DEFAULT_OPUS_MODEL": "claude-fable-5-2", "ANTHROPIC_MODEL": "haiku", "OTHER": "sonnet"}}"#.utf8)
+            .write(to: worktree.appendingPathComponent(".claude/settings.json"))
+        try Data(#"{"model": "mythos"}"#.utf8).write(to: worktree.appendingPathComponent(".claude/settings.local.json"))
+        #expect(WorkerLaunch.families(seen: .init(command: "claude --model opus -- go", cwd: worktree.path), home: temp.url("h").path)
+                == ["fable", "haiku", "mythos", "opus"])
+    }
+
+    /// The floor's every model taken (the workers' default Opus, the task on Sonnet, decoys bound on Fable and
+    /// Mythos): the audit is held and the user asked, never run on an excluded model; their answer, recorded by the
+    /// app, lets that model audit it. A worker can't record one.
+    @Test func noModelLeftHoldsTheAuditAndAsksTheUser() throws {
+        let (root, _, lead) = try floorTeam(defaultModel: "opus", leadModel: "opus")
+        _ = lead.call("add_task", ["title": "Held", "goal": "g", "acceptance": ["a"], "review": "audit", "model": "sonnet"])
+        #expect(!lead.call("start_worker", ["task": "held"]).isError)
+        bindWorker("held", root: root, session: "decoy-fable", command: "claude --model fable -- go")
+        bindWorker("held", root: root, session: "decoy-mythos", command: "claude --model mythos -- go")
+        let task = try #require(task("held", root))
+        #expect(lead.auditChoice(lead.workflow, task: task) == nil && lead.auditChoice(lead.workflow, task: task, security: true) == nil)
+        #expect(lead.auditModel(lead.workflow, task: task) == LeadWorkflow.noneLeft)
+        try commit("held.txt", "x\n", in: Worktrees.path(root: root, slug: "held"))
+        let audited = lead.call("audit", ["task": "held"])
+        #expect(audited.isError && audited.text.contains("no model is left") && audited.text.contains("The user is asked"), "\(audited.text)")
+        let asked = try #require(BoardStore(root: root).load().questions.last)
+        #expect(asked.options.contains("Audit held on fable") && asked.isOpen)
+        // Asked once while it's open.
+        _ = lead.call("audit", ["task": "held"])
+        #expect(BoardStore(root: root).load().questions.filter { $0.text == asked.text }.count == 1)
+        let worker = try #require(task.worker)
+        guard case .refused = book.answer(.allowAuditModel(root: root, task: "held", model: "fable"), from: .session(worker)) else {
+            Issue.record("a worker allowed a model")
+            return
+        }
+        var answered = asked
+        answered.answer = "Audit held on fable"
+        #expect(answered.state == .answered)
+        #expect(try vault.recordApproval("Audit held on fable", of: answered, root: root) == nil)
+        #expect(lead.auditChoice(lead.workflow, task: task) == "fable")
+    }
+
+    /// Under the floor, a task's model must name one: an alias or custom id is refused, and one already on the board
+    /// never reaches a launch (the worker starts on worker_model). Without the floor, as before.
+    @Test func underTheFloorATasksModelNamesOne() throws {
+        let (root, runtime, lead) = try floorTeam(defaultModel: Self.fableDefault, leadModel: "fable", workerModel: "opus")
+        for word in ["best", "default", "opusplan", "my-model"] {
+            let refused = lead.call("add_task", ["title": "T \(word)", "goal": "g", "acceptance": ["a"], "model": word])
+            #expect(refused.isError && refused.text.contains("name a model"), "\(word): \(refused.text)")
+        }
+        _ = lead.call("add_task", ["title": "Plain", "goal": "g", "acceptance": ["a"], "review": "audit"])
+        #expect(lead.call("update_task", ["task": "plain", "model": "best"]).isError)
+        try BoardStore(root: root).update { board in
+            if let index = board.taskIndex("plain") { board.tasks[index].model = "best" }
+        }
+        #expect(!lead.call("start_worker", ["task": "plain"]).isError)
+        let launched = try #require(command("plain", runtime))
+        #expect(launched.contains("--model 'opus'") && !launched.contains("best"), "\(launched)")
+    }
+
+    /// The Mac's Settings sheet builds its floor without worker_model: recording it keeps the one recorded; an explicit
+    /// null (the node's `set … default`) clears it.
+    @Test func aFloorThatSaysNothingOfWorkerModelKeepsIt() throws {
+        let root = try repo()
+        try vault.setReviewFloor(LeadReviewFloor().with(workerModel: "opus"), root: root)
+        try vault.setReviewFloor(LeadReviewFloor(auditFinders: 2), root: root)
+        #expect(try vault.reviewFloor(root: root)?.workerModel == "opus" && vault.reviewFloor(root: root)?.auditFinders == 2)
+        let older = try JSONDecoder().decode(LeadReviewFloor.self, from: Data(#"{"sensitivePaths":[],"strictPaths":[],"auditFinders":3,"mergePolicy":"auto","riskLines":0,"riskModel":false,"verifierDifferent":true,"auditSamplePercent":0}"#.utf8))
+        #expect(!older.workerModelGiven)
+        try vault.setReviewFloor(older, root: root)
+        #expect(try vault.reviewFloor(root: root)?.workerModel == "opus")
+        let cleared = try JSONDecoder().decode(LeadReviewFloor.self, from: JSONEncoder().encode(LeadReviewFloor().with(workerModel: nil)))
+        #expect(cleared.workerModelGiven)
+        try vault.setReviewFloor(cleared, root: root)
+        #expect(try vault.reviewFloor(root: root)?.workerModel == nil)
     }
 }
