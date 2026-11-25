@@ -4573,3 +4573,6 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-25 20:29 Started a worker on v2-s-web-page-3
 - 2026-11-25 20:40 Planned v1-against-v2-refresh: v1 against v2: refresh the feature table and add the user flows, each checked in v2's code (a doc branch for v2, in a clone)
 - 2026-11-25 20:40 Started a worker on v1-against-v2-refresh
+- 2026-11-25 20:53 Kept v2-s-web-page-3 unmerged: Report only, delivered: 23 ranked UX findings (U1–U23) and 17 proposed fix tasks in its worktree's evidence folder (report.md, shots/). Nothing merges; its report and screenshots feed the fix tasks, so no cleanup until those are delivered.
+- 2026-11-25 20:57 Kept v2-on-the-mac-4 unmerged: By design nothing of it merges into main: its 13 commits are on the local branch v2-mac-checked-start in its clone (.vibeswitcher/v2-start), awaiting an independent review (task planned) and then delivery as a branch for v2 at the user's say. No merge and no cleanup until then (decision 2026-11-25 16:27).
+- 2026-11-25 20:58 Planned review-v2-s-checked: Review v2's checked Mac node start (branch v2-mac-checked-start) as an independent security reviewer: report only
