@@ -270,8 +270,8 @@ no start, no switch.
 4. **A switch or a rollback.** The target's host image must be a host pinned in the record (its file's cdhash for this
    Mac's slice, checked by path before the handover), and the new image, once running, finds its row by its own
    running code (2) before it starts a server. A rollback goes only to a build the record still holds: one dropped
-   from it is refused. The check is by path, then the Mac's handover execs that path: a file swapped between the two
-   runs the session's code, which asks nothing (below, "What it doesn't cover", F6).
+   from it is refused. The check is by path, then the switch goes through a keeper proven to run the cdhash that check
+   read ("The checked node start", "A switch"); what a swapped file can still do is in "What it doesn't cover", F6.
 
 **When it isn't right**, each refused with one plain line naming the record's path and what to do: install a newer
 commit (`install-node-mac.sh`, whose administrator step writes the record from the build it checked). Never values by
@@ -331,7 +331,7 @@ vault keeps the record (item 14, below). No checked start, no node host: the ref
 (`macServerRefusal`) stay as they are. Tests reach the same function with an injected record, own cdhash and home;
 nothing in the node lets a flag, file or variable choose them.
 
-**A switch (F6 closed).** macOS has no exec from a descriptor, so whatever is checked before the in-place exec, the
+**A switch (F6 narrowed; the fix round's re-check pending).** macOS has no exec from a descriptor, so whatever is checked before the in-place exec, the
 exec runs what the path names then. A checked node host's switch goes through a keeper (`MacHandoverKeeper`):
 
 1. The path check as before (`HandoverTarget.macPinned`): the target's file, read once, is a pinned host; that read's
@@ -348,14 +348,30 @@ exec runs what the path names then. A checked node host's switch goes through a 
    failing before the exec closes the keeper and leaves the host as it was (its server child started again).
 4. The new image, first thing (`MacHandoverKeeper.takeIfAsked`), makes a fresh pair of its own and sends one end to the
    keeper, which requires: the token's pid its parent (the job's pid), the token running the keeper's own cdhash (the
-   code proven in 2), hardened. Only then does it send the state and descriptors back, over that pair, and exit.
-   Otherwise it closes every descriptor and exits: the image at the job's pid gets nothing (no state, no secret, no
-   terminal, no lock, no listener).
-5. The new image restores from what it was given, renumbered, and runs its own checked start (1 to 4 above) before it
-   starts a server: a genuine pinned host started with a scratch lock or another `--server` is refused there.
+   code proven in 2), hardened. Only then does it make a pair of its own, give one end to the new image, and send the
+   state and descriptors over the other, and exit; the new image requires that pair's token to be the keeper's pid
+   (`--handover-keeper-pid`, its child), running its own code, hardened (the review's N2). Otherwise the keeper closes
+   every descriptor and exits: the image at the job's pid gets nothing (no state, no secret, no terminal, no lock, no
+   listener). A keeper that sees no new image within its limit does the same (N6).
+5. The new image has run its own checked start (1 to 4 above, and its arguments and environment, below) before it
+   takes anything: a checked node's parcel says so (`fromCheckedNode`), and an image holding no checked start of its
+   own takes nothing from it and exits; a checked start takes state only from a keeper it proved, never from
+   `--handover PATH` (the review's F1 and N2). Then it restores from what it was given, renumbered, and starts a new
+   server child.
+
+**A checked node's arguments and environment (the review's F1, N5).** Its gates prove code, not mode: a wrapper renamed
+over the target can run the genuine pinned image with arguments of its own. So a checked node takes only its own
+arguments, each once (`HostImages.checkedNodeArguments`: `--node`, `--node-root`, `--server`, and a switch's
+`--handover`, `--handover-keeper-channel`, `--handover-keeper-pid`), refusing every other at its start, and its
+environment keeps no variable of this program's but `VIBESWITCHER_HOME` (set by the start) and the descriptor limit it
+carries across its own exec, and no `SWIFT_BACKTRACE` (`checkedNodeEnvironment`). Its lock, socket, log and vault are
+the data root's defaults; `--node-root` names only the folder its `--server` must be in (by device and inode: a link
+to the build's folder, or a folder holding a byte copy of the pinned server, passes, since the row is found by code).
 
 What stays: a file swapped in the short window between the keeper's proof (2) and the exec runs at the job's pid. It
-gets nothing, but the old image is gone by then: the keeper closes everything and the sessions end. "The old host keeps
+gets nothing, but the old image is gone by then: the keeper closes everything and the sessions end. And a wrapper that
+runs the genuine pinned image passes both gates at any point (they check code): what bounds it is that image's own
+start, above. "The old host keeps
 running" holds for every refusal before the exec, not for that one; closing it too needs an exec bound to the checked
 code (an open question for the reviewer: `LightweightCodeRequirements`' launch constraint, untested with an in-place
 exec and ad-hoc signatures). A proven new image that can't restore doesn't go back (its fallback would be an unchecked
@@ -382,12 +398,24 @@ take the keeper's switch end to end.
 
 **What it doesn't cover** (open, in the reviewer's words where they are the reviewer's):
 
-- **A switch's target swapped between check and exec (F6): closed by the keeper (2026-11-25, item 13), but for one
-  window.** The reviewer: it "is reliable, not a tight race: `HostServer.handOver` checks the path, then probes the new
-  build off the queue". Now a checked node host's switch hands nothing over the exec: a swap before the keeper's proof
-  is refused with the old host as it was (`MacKeeperHandoverTests/aTargetSwappedAfterThePathCheckHandsOverNothing`), and
-  a swap after it gets no state, secret, terminal, lock or listener
-  (`aTargetSwappedJustBeforeTheExecGetsNothing`); in that last window the old image is gone and the sessions end.
+- **A switch's target swapped between check and exec (F6): narrowed, not closed (the fix round of 2026-11-25; the
+  review's re-check of F1 is pending).** The reviewer first: it "is reliable, not a tight race: `HostServer.handOver`
+  checks the path, then probes the new build off the queue". With the keeper, what the probes show:
+  - A file of other code renamed over the target after the path check: refused at the keeper's proof, the old host and
+    its sessions as they were (`MacKeeperHandoverTests/aTargetSwappedAfterThePathCheckHandsOverNothing`).
+  - The same in the window between the proof and the exec: the image at the job's pid gets no state, secret,
+    terminal, lock or listener (`aTargetSwappedJustBeforeTheExecGetsNothing`), but the old image is gone and the
+    sessions end.
+  - A wrapper that runs a byte copy of the genuine pinned host with arguments of its own (the review's probe,
+    `aWrapperThatRunsTheGenuineImageWithItsOwnArguments`) passes both gates: they prove code, not mode. Before the fix
+    round its image "took over 1 sessions and 22 bytes of secrets" with the attacker's `--log` and `--app-executable`.
+    Now the parcel goes only to an image holding its own checked start, which takes no argument but its own and keeps
+    no variable of this program's (`MacCheckedFixRoundTests/aWrapperRunningThePinnedImageWithItsOwnArgumentsTakesNothing`,
+    with a scratch host standing in for the checked node): the wrapper's image takes nothing and exits, and the sessions
+    end. A wrapper that runs it with the node's own arguments is the node: what it still chooses is the values of
+    `--node-root` and `--server` (bounded by the start: the row's server, by cdhash, in that folder) and every variable
+    of the environment outside this program's (`PATH`, `TMPDIR`, the locale), which the sessions inherit as before:
+    for the switch-on review.
 - **The stale connector check after a handover: closed (item 13).** No Mac handover carries a server child: the node
   host ends and reaps it before the exec, and the new image starts one whose connector it made
   (`afterASwitchTheServerChildIsANewProcess`).

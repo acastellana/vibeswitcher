@@ -349,14 +349,25 @@ or decided. Done on Linux, tested on both systems (`ApprovalJudgmentTests`, `App
    cdhash) as a row's host, and its `--server` (opened once, the node root's own file) as that row's server; only a host
    holding that result (`Config.checkedNode`) is a node host (a server child by the row's cdhash, `vaultV2`, the book's
    record and hooks), and a `--node` host without one runs no server child (`MacCheckedStartTests`, red on the seam
-   `80358389`, green from `783e585d`). F6: a checked node host's switch goes through a keeper whose fresh token runs the
+   `80358389`, green from `783e585d`). F6, narrowed and not closed (the fix round's re-check of the review's F1 pending;
+   the design's "What it doesn't cover" says what a swapped file and a wrapper running the genuine image still do): a
+   checked node host's switch goes through a keeper whose fresh token runs the
    pinned target's code, and the state, secrets and every descriptor cross the exec only to a new image whose fresh
    token runs the keeper's code; the server child is ended and reaped before the exec and started again by the new
    image (`MacKeeperHandoverTests`, scratch hosts with `--handover-test-keeper`); the keeper is proven against the cdhash
    the record was checked against, read once (`MacKeeperTargetTests`), and a switch gives the new image the target
    build's `--node-root` and `--server` (`aSwitchGivesTheNewImageItsOwnBuildsFolders`). *A real Mac proved:* all of it with
-   this Mac's real hardened images, tokens and in-place exec. *Still open:* a file swapped between the keeper's proof
-   and the exec runs at the job's pid with nothing, and the sessions end; a proven new image that can't restore exits
+   this Mac's real hardened images, tokens and in-place exec. *The fix round (the review of 2026-11-25):* a checked node
+   takes only its own arguments, each once, and none of this program's variables (F1, N5); the lock by its exact path,
+   and `main` refuses a checked start it doesn't take for the user's host (F2); a checked node's parcel goes only to an
+   image holding its own checked start, and a checked start takes state only from a keeper it proved (F1, N2); who the
+   app is keys on the checked start, not on the server child (N1); the target's server is checked against its row
+   before the keeper starts (N4); the keeper's wait has a limit (N6); the server child is told the build's folder (N3)
+   (`MacCheckedFixRoundTests`). *Still open:* a file swapped between the keeper's proof and the exec runs at the job's
+   pid with nothing, and the sessions end; a wrapper running the genuine pinned image with other arguments takes nothing
+   and the sessions end, and one running it with the node's own arguments is the node, with the environment outside
+   this program's variables (`PATH`, `TMPDIR`, the locale) of its choosing, which the sessions inherit (for the switch-on
+   review); a proven new image that can't restore exits
    (no unchecked fallback); F8 as above. *What step 5 (the LaunchAgent, next) can rely on:* the job's program, started
    as the unit's form, `<builds>/<commit>/bin/vibeswitcher-host --node --node-root <builds>/<commit> --server
    <builds>/<commit>/bin/vibeswitcher-server`, on the node's data root's lock (`<home>/.vibeswitcher/v2/node/host.lock`,

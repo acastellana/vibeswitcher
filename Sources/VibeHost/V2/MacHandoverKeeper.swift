@@ -150,7 +150,9 @@ public enum MacHandoverKeeper {
               Platform.Sockets.sendDescriptor(gives, over: theirsNow) else { quit("its own pair didn't reach the new image") }
         Sys.close(gives)
         guard send(parcel.data, descriptors: parcel.descriptors, over: keeps) else { quit("the state didn't reach the new image") }
-        // Its copies close with it: the new image's are the only ones left.
+        // Alive until the new image has read its token and the parcel and closed its end (a token's peer that has gone
+        // can't be read), within the limit; then its copies close with it, and the new image's are the only ones left.
+        if wait(readable: keeps, for: limit) { _ = readByte(keeps) }
         exit(0)
     }
 
@@ -185,9 +187,14 @@ public enum MacHandoverKeeper {
         }
         guard let own = Platform.CodeIdentity.ownCdhash() else { return .failure(Refused("this image's own code can't be read")) }
         guard wait(readable: mine, for: limit), let kept = Platform.Sockets.receiveDescriptor(over: mine) else { return .failure(Refused("the keeper gave nothing")) }
-        defer { Sys.close(kept) }
-        if let why = refusal(Platform.Sockets.peerToken(kept), pid: keeper, cdhash: own, what: "the keeper") { return .failure(Refused(why)) }
-        guard wait(readable: kept, for: limit), let parcel = receive(over: kept) else { return .failure(Refused("the keeper gave nothing")) }
+        if let why = refusal(Platform.Sockets.peerToken(kept), pid: keeper, cdhash: own, what: "the keeper") {
+            Sys.close(kept)
+            return .failure(Refused(why))
+        }
+        let received = wait(readable: kept, for: limit) ? receive(over: kept) : nil
+        // Closed before the keeper is reaped: it waits for this end to close.
+        Sys.close(kept)
+        guard let parcel = received else { return .failure(Refused("the keeper gave nothing")) }
         // The keeper exits once it gave the parcel: reaped here, the proven keeper's pid alone (never a session's).
         var status: Int32 = 0
         while waitpid(keeper, &status, 0) < 0, errno == EINTR {}

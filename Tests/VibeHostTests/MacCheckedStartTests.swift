@@ -158,7 +158,9 @@ struct MacKeeperTargetTests {
         try #require(host.server.queue.sync { host.server.isMacNodeHost })
         var reads = 0
         let target = host.server.queue.sync {
-            host.server.keeperTarget("/target", pins: .success(NodePins(uid: getuid(), builds: [row, next])), cdhashOf: { _ in
+            host.server.keeperTarget("/b/c/bin/vibeswitcher-host", pins: .success(NodePins(uid: getuid(), builds: [row, next])), cdhashOf: { path in
+                // The target's build's server answers as its row's (the review's N4 reads it too).
+                if path.hasSuffix(BuildInfo.server) { return next.server }
                 reads += 1
                 return reads == 1 ? genuine : swapped
             })
