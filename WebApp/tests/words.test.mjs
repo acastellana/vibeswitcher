@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 import { installDom } from './fakedom.mjs';
 
 installDom();
-const { TABLES, t, setLanguage } = await import('../js/i18n.js');
+const { TABLES, t, tParts, setLanguage } = await import('../js/i18n.js');
 
 const text = (word) => (typeof word === 'string' ? word : Object.values(word).join(' | '));
 const holding = (table, pattern) => Object.entries(table).filter(([, word]) => pattern.test(text(word))).map(([key]) => key);
@@ -51,4 +51,38 @@ test('U11: one name for each thing, the same in every place, English and Spanish
 
 test('U11: a session’s state words agree with “sesión” in Spanish', () => {
   for (const key of ['wDone', 'wIdle', 'wEnded', 'wUnknown', 'wDoneOne', 'wIdleOne', 'wEndedOne']) assert.match(TABLES.es[key], /a$/, key);
+});
+
+test('U18: Spanish contracts “a el” and “de el” wherever a sentence is built, from any of its words and values', async () => {
+  setLanguage('es');
+  // The roadmap's undated task, as the review saw it: “sin fecha: espera a el líder”.
+  const vectors = JSON.parse((await import('node:fs')).readFileSync(new URL('../wire/vectors.json', import.meta.url), 'utf8'));
+  const board = structuredClone(vectors.board[1].result.boards[0]);
+  const { landingWords } = await import('../js/forecast.js');
+  const pricing = board.tasks.find((task) => task.slug === 'pricing-copy');
+  assert.equal(landingWords(pricing.forecast, Date.parse('2026-11-25T12:00:00Z'), { task: pricing, board }).date, 'sin fecha: espera al líder');
+  assert.equal(landingWords({ basis: 'blocked', waitsOn: 'the lead (it failed)' }, Date.now(), { task: {}, board }).date, 'sin fecha: espera al líder (falló)');
+  assert.equal(t('chSteerShort', { agent: t('drTheAgentLow') }), 'Reconduce al agente…');
+  assert.equal(t('chSteerShort', { agent: 'Claude' }), 'Reconduce a Claude…');
+  assert.equal(t('mlFromLead', { other: 'el sitio' }), 'del líder del sitio');
+  // Every word with a blank, filled with every Spanish value that starts with “el ”: never “a el” or “de el”, by t and
+  // by tParts alike.
+  const els = [...new Set(Object.values(TABLES.es).flatMap((word) => (typeof word === 'string' ? [word] : Object.values(word))).filter((word) => /^el /.test(word)))];
+  assert.ok(els.includes('el líder') && els.includes('el agente'), els.join(' | '));
+  let checked = 0;
+  for (const [key, word] of Object.entries(TABLES.es)) {
+    const names = [...new Set([...text(word).matchAll(/\{(\w+)\}/g)].map((found) => found[1]))];
+    for (const value of names.length ? els : []) {
+      const values = Object.fromEntries(names.map((name) => [name, name === 'n' ? 2 : value]));
+      for (const said of [t(key, values), tParts(key, values).join('')]) {
+        assert.doesNotMatch(said, /(?<!\p{L})(a|de) el(?!\p{L})/iu, `${key}: ${said}`);
+        checked += 1;
+      }
+    }
+  }
+  assert.ok(checked > 200, String(checked));
+  // A name's capital “El” isn't contracted; nor is anything in English.
+  assert.equal(t('toLead', { p: 'El Prat' }), 'Al líder de El Prat');
+  setLanguage('en');
+  assert.equal(t('chSteerShort', { agent: 'el agente' }), 'Steer el agente…');
 });

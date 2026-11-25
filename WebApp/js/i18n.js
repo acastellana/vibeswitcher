@@ -1170,21 +1170,51 @@ export const lang = () => language;
 // For the tests.
 export function setLanguage(code) { language = TABLES[code] ? code : 'en'; }
 
+// Spanish contracts "a el" to "al" and "de el" to "del". A word and the value filling its blank meet only when the
+// sentence is built ("espera a {who}" with "el líder"), so the contraction is made there, whatever the two are: a
+// preposition standing alone just before the blank, and a value starting with a lower-case "el " (a capital "El" is a
+// name's, which Spanish doesn't contract). Returns [the text before, the value], each as it is to be written.
+const PREPOSITION = /(?<!\p{L})(a|A|de|De) $/u;
+function contracted(before, value) {
+  if (language !== 'es' || typeof value !== 'string' || !value.startsWith('el ')) return [before, value];
+  const found = PREPOSITION.exec(before);
+  if (!found) return [before, value];
+  const joined = { a: 'al', A: 'Al', de: 'del', De: 'Del' }[found[1]];
+  return [before.slice(0, found.index) + joined + ' ', value.slice(3)];
+}
+
 // `t` for a value that is a node (a <time> that keeps counting): the word's parts in order, each blank its value as
 // given, for `h` to append. A node given to `t` would be written as its name ("[object HTMLTimeElement]").
 export function tParts(key, values = {}) {
   let word = TABLES[language][key] ?? EN[key] ?? key;
   if (typeof word === 'object') word = values.n === 1 ? word.one : word.other;
-  return word.split(/(\{\w+\})/).filter((part) => part !== '').map((part) => {
+  const parts = word.split(/(\{\w+\})/).filter((part) => part !== '').map((part) => {
     const name = part.match(/^\{(\w+)\}$/)?.[1];
-    return name && name in values ? values[name] : part;
+    return name && name in values ? { value: values[name] } : part;
   });
+  return parts.map((part, index) => {
+    if (typeof part === 'string') {
+      const next = parts[index + 1];
+      return next && typeof next === 'object' ? contracted(part, next.value)[0] : part;
+    }
+    const before = parts[index - 1];
+    return typeof before === 'string' ? contracted(before, part.value)[1] : part.value;
+  }).filter((part) => part !== '');
 }
 
 export function t(key, values = {}) {
   let word = TABLES[language][key] ?? EN[key] ?? key;
   if (typeof word === 'object') word = values.n === 1 ? word.one : word.other;
-  return word.replace(/\{(\w+)\}/g, (all, name) => (values[name] ?? all));
+  let out = '';
+  let at = 0;
+  for (const found of word.matchAll(/\{(\w+)\}/g)) {
+    const value = values[found[1]];
+    // Only the word's own text before the blank is looked at, never a value filled before it.
+    const literal = word.slice(at, found.index);
+    if (value == null) { out += literal + found[0]; } else { const [text, filled] = contracted(literal, String(value)); out += text + filled; }
+    at = found.index + found[0].length;
+  }
+  return out + word.slice(at);
 }
 
 // The node's own words for a task (BoardValue: its state in the Mac's Team words, and the few fixed lines under it),
