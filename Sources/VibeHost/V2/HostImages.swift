@@ -464,6 +464,9 @@ public enum HostImages {
         return nil
     }
 
+    /// Whether a host that isn't a checked node may hold the lock it opened, `fd` (seam: yes).
+    public static func heldLockAllowed(_ fd: Int32, accountHome: String?) -> Bool { true }
+
     /// Whether `lockPath` is the node's lock by file (the re-check's I2c): the data root's `host.lock` (device and
     /// inode), or, while that doesn't exist, a `host.lock` in a folder that is the data root by device and inode. Only a
     /// checked node starts on it (`main`). False on Linux and with no home.

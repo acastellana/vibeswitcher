@@ -44,7 +44,7 @@ struct MacCheckedReCheckTests {
     static let refused: Set<String> = [
         "--app-executable", "--app-key-stdin", "--control", "--end-orphaned-tool-servers", "--exit-with", "--handover", "--handover-fail-restore",
         "--handover-fallback", "--handover-fallback-app", "--handover-fallback-image", "--handover-fallback-node-root", "--handover-fallback-server",
-        "--handover-keeper-limit", "--handover-test-fail-next", "--handover-test-hold", "--handover-test-hold-check", "--handover-test-keeper",
+        "--handover-keeper-limit", "--handover-test-fail-next", "--handover-test-hold", "--handover-test-hold-check", "--handover-test-keeper", "--handover-test-keeper-limit",
         "--handover-test-secret", "--handover-test-secret-file", "--handover-test-swap-after-check", "--handover-test-swap-before-exec",
         "--handover-test-traced", "--hold-first-look", "--host-connector", "--host-pid", "--host-socket", "--housekeeping", "--idle-exit",
         "--image-path", "--install-root", "--launcher-test-hold", "--log", "--parser-stall-limit", "--parser-test-hooks", "--root",

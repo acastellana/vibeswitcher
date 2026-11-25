@@ -407,6 +407,12 @@ public enum MacHandoverKeeper {
         }
     }
 
+    /// `pid` (a child of this process) reaped once it exits (seam: waits as long as it takes).
+    static func reap(_ pid: pid_t, within seconds: TimeInterval) {
+        var status: Int32 = 0
+        while waitpid(pid, &status, 0) < 0, errno == EINTR {}
+    }
+
     /// `pid` ended (SIGKILL) and reaped.
     static func end(_ pid: pid_t) {
         kill(pid, SIGKILL)
