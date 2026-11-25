@@ -34,7 +34,7 @@ final class TestHost {
          capabilities: [String] = HostServer.capabilities, inputUnitHold: TimeInterval = InputOrder.holdLimit,
          maxSessions: Int = 256, spawnNeedsLead: Bool = false, appConnector: Bool = true, removing: String? = nil,
          launcherTestDelay: TimeInterval? = nil, watchesItsPath: Bool = false, projectAllowList: URL? = nil,
-         socket: String = scratchSocketPath()) throws {
+         checkedNode: HostImages.CheckedNode? = nil, socket: String = scratchSocketPath()) throws {
         self.socket = socket
         lock = socket + ".lock"
         self.removing = removing
@@ -58,6 +58,7 @@ final class TestHost {
         config.launcherTestDelay = launcherTestDelay
         config.watchesItsPath = watchesItsPath
         config.projectAllowList = projectAllowList
+        config.checkedNode = checkedNode
         server = HostServer(config: config)
         try server.start()
         // The Mac opens none (`openAppConnector` is nil there): its app proves itself by its code and key, as always.

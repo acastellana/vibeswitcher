@@ -75,6 +75,9 @@ public final class HostServer {
         /// handover goes only to an installed build checked on its sealed copy (see V2/HandoverTarget.swift). Nil: any
         /// target, as always (the Mac's and every scratch host's).
         public var installRoot: URL?
+        /// The Mac: what this host's checked node start found (`HostImages.macNodeStart`), made by `main` only behind
+        /// `HostImages.isCheckedMacNode`, by tests through the function. Nil: no node host (every host today).
+        public var checkedNode: HostImages.CheckedNode?
         /// The project allow-list (`~/.vibeswitcher/v2/projects` for the node's host on Linux): a spawn whose working
         /// folder isn't inside a repository it names is refused, saying why (see V2/ProjectAllowList.swift). Nil: any
         /// folder, as always (the Mac's and every scratch host's).

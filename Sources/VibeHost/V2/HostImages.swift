@@ -238,6 +238,26 @@ public enum HostImages {
     /// host is a node host (`HostServer.isMacNodeHost`) and none but a scratch host runs a server child.
     public static let isCheckedMacNode = false
 
+    /// What a checked Mac node start found (the node on the Mac's design, "The checked node start"): its own build's row
+    /// in the node's record, and its `--server` file's cdhash, that row's server. Only a host holding one is a node host
+    /// (`HostServer.isMacNodeHost`); `main` makes one only behind `isCheckedMacNode`, tests through `macNodeStart`.
+    public struct CheckedNode: Equatable, Sendable {
+        public var build: NodePins.Build
+        /// The `--server` path checked, and its cdhash (the row's server): what every start of the child is checked by.
+        public var serverPath: String
+        public var server: Data
+    }
+
+    /// The Mac's checked node start (seam: not checked yet).
+    public static func macNodeStart(arguments: [String], lockPath: String, own: Data?, pins: Result<NodePins, NodePins.Refused>,
+                                    accountHome: String?,
+                                    cdhashOf: (String) -> Data? = { Platform.CodeIdentity.cdhash(atPath: $0) }) -> Result<CheckedNode, Refused> {
+        guard case .success(let record) = pins, let build = record.builds.first, let server = value(after: "--server", in: arguments) else {
+            return .failure(Refused("no record"))
+        }
+        return .success(CheckedNode(build: build, serverPath: server, server: build.server))
+    }
+
     /// The Mac's node host's server child (the node on the Mac's design, "The anchor", check 2): the cdhash the child is
     /// started and checked by, or why not. The host finds its own build by the code it runs (`own`,
     /// `Platform.CodeIdentity.ownCdhash`), in the node's record (`pins`, root's to write): no row, no child. Its
