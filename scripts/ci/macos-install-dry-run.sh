@@ -5,7 +5,8 @@
 # built for real (a release build, signed). Then what the install made is checked, and the refusals a dry run can reach:
 #   1. installed: exit 0; current names HEAD; build-info records HEAD and five programs; the server and the command line
 #      signed with the Hardened Runtime; no run path left but /usr/lib/swift (the toolchain's deleted); no LaunchAgent
-#      written (a test install never writes one)
+#      written (a test install never writes one); the administrator step (node-pins-mac.sh) dry: the record it prints
+#      pins the installed host's, server's and command line's cdhashes, and nothing is written
 #   2. again: refused (1), installed already
 #   3. a red CI answer, on a fresh prefix: refused (67) before any build
 #   4. the test flags with the account's builds folder: refused (64)
@@ -71,6 +72,17 @@ else
         [[ -z $left ]] && pass_case "$program keeps no run path but /usr/lib/swift" || fail_case "$program keeps the run paths $left"
     done
     grep -q "no LaunchAgent written" "$work/out" && pass_case "no LaunchAgent written" || fail_case "the install didn't say it wrote no LaunchAgent"
+    # The administrator step (node-pins-mac.sh), dry: the record it would write pins the signed copies' cdhashes.
+    pins=""
+    for program in vibeswitcher-host vibeswitcher-server vibeswitcher; do
+        pins+=" $(codesign -d -a "$(uname -m)" --verbose=3 "$builds/$commit/bin/$program" 2>&1 | sed -n 's/^CDHash=//p')"
+    done
+    read -r pin_host pin_server pin_cli <<< "$pins"
+    grep -qx "    build $commit host $pin_host server $pin_server cli $pin_cli" "$work/out" \
+        && pass_case "the administrator step would pin $commit's host, server and command line" || fail_case "the administrator step's record doesn't pin the installed cdhashes"
+    grep -q "node-pins-mac: --dry-run: nothing written, no password asked" "$work/out" && pass_case "the administrator step wrote nothing (a test install)" \
+        || fail_case "the administrator step didn't say it wrote nothing"
+    [[ -x $builds/$commit/Resources/node-pins-mac.sh ]] && pass_case "the build keeps its administrator step" || fail_case "no Resources/node-pins-mac.sh in the build"
     [[ ! -e $builds/dev.vibeswitcher.node.plist ]] || fail_case "a LaunchAgent was written into $builds"
     echo "the installed products' load commands (for the record):"
     for program in vibeswitcher-server vibeswitcher; do otool -L "$builds/$commit/bin/$program" | sed 's/^/  /'; done

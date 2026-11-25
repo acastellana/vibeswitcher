@@ -359,7 +359,7 @@ install_node_mac_main() {
     fi
 
     # --- 5. Provenance: this script and its libraries are the expected commit's, byte for byte -----------------------
-    local expected=${current_commit:-$commit} self here blob scratch_lib="" sign_lib=""
+    local expected=${current_commit:-$commit} self here blob scratch_lib="" sign_lib="" pins_step=""
     self=$(/bin/realpath -- "${BASH_SOURCE[0]}") || fail 66 "can't resolve this script's path"
     here=${self%/*}
     read_blob() {
@@ -378,6 +378,12 @@ install_node_mac_main() {
             mac-sign.sh) sign_lib=$blob ;;
         esac
     done
+    # The administrator step (node-pins-mac.sh, beside this script): run from the verified blob, never from the file, so
+    # what sudo runs isn't a file a session could have edited before the password is typed.
+    read_blob scripts/node-pins-mac.sh || fail 66 "$expected has no scripts/node-pins-mac.sh"
+    /usr/bin/cmp -s -- "$here/node-pins-mac.sh" <(printf '%s' "$blob") \
+        || fail 66 "$here/node-pins-mac.sh isn't $expected's scripts/node-pins-mac.sh: run the copy that commit holds"
+    pins_step=$blob
     # The verified blobs, from memory: evaluated, not sourced, since /bin/bash 3.2's `source <(…)` reads nothing from a
     # process substitution (the first dry run, 2026-11-22: neither library's functions were defined).
     eval "$scratch_lib" || fail 1 "can't read $expected's scripts/lib/scratch.sh"
@@ -474,7 +480,7 @@ install_node_mac_main() {
     install_partial=$partial
     on_exit install_node_mac_drop_partial
     /bin/mkdir -m 700 -- "$partial" "$partial/bin" || fail 1 "can't make $partial"
-    local machine product file installed archs arch libs rpaths seen i=0
+    local machine product file installed archs arch libs rpaths seen i=0 pin_host="" pin_server="" pin_cli=""
     local product_sha=()
     machine=$(/usr/bin/uname -m)
     for product in $products; do
@@ -501,6 +507,17 @@ install_node_mac_main() {
         mac_sign_hardened "$file" 2>&1 | /usr/bin/sed 's/^/install-node-mac: /' >&2
         (( PIPESTATUS[0] == 0 )) || fail 69 "$product: its copy $file couldn't be signed with the Hardened Runtime"
         product_sha[i]=$(sha_of "$file") || fail 1 "$product: can't hash $file"
+        # The cdhash the node's record pins (node-pins-mac.sh): this Mac's slice, read from the copy just signed and hashed.
+        case $installed in
+            vibeswitcher-host|vibeswitcher-server|vibeswitcher)
+                line=$(/usr/bin/codesign -d -a "$machine" --verbose=3 -- "$file" 2>&1 | /usr/bin/sed -n 's/^CDHash=//p')
+                [[ $line =~ ^[0-9a-f]{40}$ ]] || fail 69 "$product: codesign gives no cdhash for its $machine slice, in $file"
+                case $installed in
+                    vibeswitcher-host) pin_host=$line ;;
+                    vibeswitcher-server) pin_server=$line ;;
+                    vibeswitcher) pin_cli=$line ;;
+                esac ;;
+        esac
         # Mach-O, each slice arm64 or x86_64, this Mac's among them, each an executable.
         archs=$(/usr/bin/lipo -archs "$file" 2> /dev/null) || fail 69 "$product: $file isn't a Mach-O file"
         seen=0
@@ -559,6 +576,8 @@ install_node_mac_main() {
     done
     /bin/cp -- "$src/scripts/install-node-mac.sh" "$partial/Resources/install-node-mac.sh" \
         && /bin/chmod 0755 "$partial/Resources/install-node-mac.sh" \
+        && /bin/cp -- "$src/scripts/node-pins-mac.sh" "$partial/Resources/node-pins-mac.sh" \
+        && /bin/chmod 0755 "$partial/Resources/node-pins-mac.sh" \
         && /bin/cp -- "$src/scripts/lib/scratch.sh" "$src/scripts/lib/swift-jobs.sh" "$src/scripts/lib/mac-sign.sh" "$partial/Resources/lib/" \
         || fail 1 "can't copy the install script and its libraries into $partial"
     i=0
@@ -598,6 +617,15 @@ install_node_mac_main() {
     /bin/mv -- "$partial" "$final" || fail 1 "can't rename $partial to $final"
     [[ -f $final/build-info && ! -e $final/${partial##*/} ]] || fail 1 "the rename of $partial to $final didn't make $final the build"
     install_partial=""
+
+    # --- 10b. The node's record of its builds: the one administrator step (node-pins-mac.sh, from the verified blob) ----
+    # It pins this build's cdhashes (read above from the signed copies, never from the builds folder again) and carries the
+    # record's rows forward; it asks for the password itself. A test install only prints what it would write.
+    [[ -n $pin_host && -n $pin_server && -n $pin_cli ]] || fail 1 "the cdhashes to pin weren't read"
+    local pins_args=(--build "$commit" "$pin_host" "$pin_server" "$pin_cli")
+    (( testing )) && pins_args=(--dry-run "${pins_args[@]}")
+    /bin/bash -c "$pins_step" node-pins-mac.sh "${pins_args[@]}" \
+        || fail 1 "the node's record wasn't written, so the node refuses this build until it is: run $final/Resources/node-pins-mac.sh ${pins_args[*]}"
 
     # --- 11. installs, then current by a link renamed over it ---------------------------------------------------------
     printf '%s %s\n' "$commit" "$(/bin/date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$prefix/installs" \
