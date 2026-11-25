@@ -14,45 +14,54 @@ in [V1 and V2: the user flows](v2-user-flows.md).
 
 ## Summary
 
-Of 101 features: **75 has it**, **8 partly**, **3 missing** (two of them on purpose: Codex workers, and Codex's trust of the hooks), **9 not needed on
-Linux**, **6 Linux-only new**, **0 unverified** (counted again from the table on 2026-11-20, `v2-stability`, after the
-settings, composer, push and rotation lanes' merges and that lane's rows: reopening your own sessions after a restart, the prompt-audit reminder,
-reminders about waiting or stuck sessions, New Project…, the sound, the "New since you looked" line, Between leads, the
-all-done mark, rename and pause, ended sessions resumed, and Close Finished Shells; launch presets edited on the node since the page-actions lane; and on 2026-11-21, `v2-small-rows`: Check for Updates, the developer tools notice, the projects folder, and shell requests; Codex's trust of the hooks left out on purpose; the inspector, chat images and the chat's copy, export and find since `v2-web-detail`; usage shown and AI summaries since `v2-usage-summaries`; and the small rows' second round: a code block's Run, the health digest, phone access rechecked, and dev servers; and 2026-11-22's feature review of the lead, usage, hooks and diagnostics (`docs/process/v2-review-lead.md`): fetch and merge from the remote verified (A40), `lead --init`, the page's New project, `send` as the lead's input (its `!` git lines still a card, on purpose), the push reply's words, `logs`, and how the server last ended).
+**For the user, in short.** 149 features: V2 **has 71**, **partly 24**, **misses 33**, **4 aren't needed**, and
+**17 are V2's alone** (counted from the table below on 2026-11-25:
+`sed 's/\\|/~/g' docs/process/v2-parity.md | awk -F'|' '/^\| / && $2 !~ /^ (Feature|---)/ {s=$4; gsub(/^ +| +$/,"",s); n[s]++} END {for (k in n) print n[k], k}'`).
+Of the 33 missing, 10 are Mac pieces (menu bar, keep-awake, Terminal.app…) and 23 are missing in V2 everywhere. Of the
+23 [user flows](v2-user-flows.md), 7 work the same, 2 work better, 4 about the same in another way, 8 worse, and 2
+can't be done.
 
-The gaps that matter most for daily use, worst first:
+**What would stop daily use of V2 in place of V1**, worst first:
 
-1. ~~**You can't type to a session.**~~ Closed 2026-11-20: `vibeswitcher send SESSION [TEXT]` types into a session the
-   node's host started, as the composer does; the page's composer leaves the message as a draft beside the session and
-   shows the line that sends it. Since the composer's lane (2026-11-20): a message sent while a question is open is
-   held and typed once it closes, `/` and `@` complete on the page, and images go by path (`--image`) or pasted on
-   the page. Steering a working agent through its hook since 2026-11-20 (`send --now`), and held messages kept across a
-   server restart or a switch (`Server/HeldSendStore.swift`, vault-vouched).
-2. **No live terminal** on your node. The web terminal exists only on a scratch test server.
-3. ~~**You can't start or end an ordinary session.**~~ Closed 2026-11-20: `vibeswitcher new FOLDER [--agent claude|shell]
-   [--model M]` and `vibeswitcher end SESSION`; the page shows each as a line to run. Launch presets since the
-   composer's lane (2026-11-20): `vibeswitcher presets FOLDER`, `new FOLDER --preset NAME`, and the page's form lists them.
-4. **No board view.** A lead's tasks, decisions, scorecard and messages between leads aren't shown anywhere (no
-   command and no web tab). You'd have to read `board.json` yourself.
-5. **Notifications only while the page is open** (2026-11-20). The page notifies through the browser when a card opens, a
-   session's prompt waits or a lead stops, and counts what needs you in its title; `vibeswitcher questions --wait`
-   blocks until a card needs you. No sound, no reminders, nothing with the page closed (stage 7's push).
-6. ~~**You can't answer a session's own prompt.**~~ Closed 2026-11-20: the node reads the question on a session's
-   screen into its `prompt`, `vibeswitcher reply SESSION CHOICE [TEXT]` answers it, and the page shows it as a card
-   with the line that answers it. A multi-select is still answered in the session's terminal.
-7. ~~**The lead ignores `lead_model` and `lead_advisor`**~~: closed 2026-11-19, the node starts its lead as the app does.
-8. ~~**`push_remote` does nothing on a node.**~~ Closed 2026-11-20: `vibeswitcher push FOLDER` and
-   `vibeswitcher decline-push FOLDER` settle the request; the page shows it in the lead's chat with both lines to run.
-9. ~~**No settings.**~~ Closed 2026-11-20: `vibeswitcher settings [FOLDER]` shows the node's settings and a project's,
-   each with its value, default, where it lives and whether it is a guard rail; `vibeswitcher set [FOLDER] KEY VALUE`
-   changes one in the user's voice (typed code, recorded in the vault); the page's Settings drafts the line. Running
-   leads are told when the policy changes, and a project's lead when its settings do.
-10. ~~**Restarts lose work.**~~ Closed 2026-11-20: after a host restart `vibeswitcher lead FOLDER --resume` reopens a
-    project's lead in its conversation, and `vibeswitcher reopen` the user's own Claude sessions in theirs. A lead's
-    workers are its to start again (told which). Rotation is on the node since 2026-11-20 (workflow.md's `lead_rotation:`).
-11. **Remote access reads and drafts only.** `vibeswitcher web --tailnet` (2026-11-20) opens the page on the tailnet for
-    a phone, read and draft as on loopback; replies and key presses from the phone wait for H1 (what H1 needs and the
-    decisions page input waits on: `docs/process/v2-h1-plan.md`, 2026-11-21).
+1. **V2 doesn't run on this Mac yet** (L). Every flow waits on it. On plan: [the node on macOS](../superpowers/specs/2026-11-19-v2-node-on-macos.md#the-order-of-work),
+   steps 2 to 9, and the Mac's tasks being built today; the voice by Touch ID (step 4) is built and off until measured.
+2. **Nothing tells you anything once the page is closed** (M): no banner, no sound, no phone push. On plan only as the
+   [push decision note](v2-push-decision.md), waiting on four of your decisions; a Mac notifier isn't planned.
+3. **The page acts only after terminal steps, and the phone never does** (M). Pairing confirmed in a terminal, then
+   `set web_acts trust`, lost on a reload or after 12 hours; the tailnet page only reads and drafts, by rule. On plan:
+   the redesign's "Acting from the page" (the passkey level isn't built); acting from a phone isn't planned.
+4. **No typing into a terminal from the page**, and no find in it (L). On plan: [H1](v2-h1-plan.md) is built; page
+   input waits on your decisions 1 and 2 there.
+5. **The redesign lost the switcher's keys** (S): ⌘N, ⌘1–9, next and previous, the filter and grouping by attention
+   are gone, and ⌘J skips your own sessions. Not on plan (a regression of `3ff1455b`).
+6. **A session's own prompt is answered only by a terminal line** (S): the node would take a page's answer, no button
+   sends it. Not on plan.
+7. **The Mac's own pieces** (M each): keep the Mac awake and the battery hold, the menu bar, a hot key, Open in
+   Terminal, presence (Boost's Automatic, reminders). On plan as milestone 5 of
+   [the V2 design](../superpowers/specs/2026-11-12-vibeswitcher-2-design.md#milestones) (the native app as the node's
+   client), not in the Mac node's steps.
+8. **Main's lead changes since 2026-11-19 aren't in V2** (M): review rules with ids, bugs that got past review,
+   first-flake fix tasks, findings sent whole, the disk headroom gate, audits capped at the heavy slots, Codex audits,
+   GitHub pushers, the lead's chat across handovers. On plan as the port map's merge from main, with no date; V2's copy
+   of `LeadToolset.swift` has drifted, so it is a merge by hand.
+9. **Wallet Manager and Passage** (L): only browser signing exists, as a plugin. Not on plan for V2.
+10. **Dictation is the browser's only** (M): no OpenAI or Claude /voice, no project words, none from the phone. On
+    plan: "the browser's microphone, then the existing transcription" (the design's later list).
+
+Smaller: the all-done mark never clears (S, a regression), first install is five terminal steps (S), reopening after
+a restart is terminal lines (S), no changelog on the update (S).
+
+**What V2 already does better**: switch builds and roll back while sessions keep running (`switch`, `rollback`,
+`update` with one code); goals, estimated landing dates and a roadmap the lead keeps; the dial over the lead's
+conversation; five seconds of Undo on a Blocking answer; `approve` settles every plain accept with one code; every
+change is typed or clicked as you and recorded; held messages survive a restart; ways to send (now, next step,
+interrupt); Codex's hooks trusted without a seal bypass; plugins; the page in Spanish; any browser on any machine.
+
+**What couldn't be verified**: anything on a running node (the node side was read, not run; the page was driven
+against its mock, which acts for you as a node's page does only under trust); the wallet plugin's code (another
+repository); whether the tailnet page masks cards and the board as it masks the chat; whether a Mac node and the app
+share limits and test slots; the page's session buttons (Start, End, Rename, Pause, Resume), which no test clicks;
+Option-drag in the watched terminal; `WitnessWork` and `TeamSummaryWatch` beyond their files and tests.
 
 ## The table
 
@@ -64,7 +73,8 @@ States: **has it**, **partly**, **missing**, **not needed**, **v2-only** (V2 has
 steps 2 to 5 of [the node on macOS](../superpowers/specs/2026-11-19-v2-node-on-macos.md#the-order-of-work)), **step N**
 (the step it depends on specifically: 3 the server child, 4 the voice by Touch ID, which every change waits on, 5 the
 LaunchAgent, 6 the unified log, 7 the install script, 8 the seal list, 9 living beside the app), **missing everywhere**
-(not in V2 on any system), **Mac piece owed** (not needed on Linux, needed on a Mac node, and in none of those steps),
+(not in V2 on any system), **Mac piece owed** (not needed on Linux, needed on a Mac node, and in none of those steps: milestone 5 of the V2
+design gives them to the native app as the node's client),
 **n/a**.
 
 "Under trust" means a page on this machine's loopback, paired and its pairing confirmed in a terminal, with
@@ -281,7 +291,9 @@ LaunchAgent, 6 the unified log, 7 the install script, 8 the seal list, 9 living 
 
 **On purpose** (security or platform decisions; keep them):
 
-- A web page is never the user's voice. It drafts, and a typed code in a terminal confirms (LW-D6, EN-D5).
+- A web page is the user's voice only under trust: on this machine's loopback, its pairing confirmed in a terminal,
+  `web_acts trust` raised from a terminal (2026-11-24, `Web/ActingPages.swift`). Every other page drafts, and a typed
+  code in a terminal confirms (LW-D6, EN-D5, as amended by the redesign's "Acting from the page").
 - Every change from the command line needs a typed code, and is recorded in the vault and journal. V1 takes
   `--lead --goal` from any process and marks it "not vouched for".
 - Codex workers are off on the node (security decision 15), so `agent: auto` stays on Claude.
@@ -289,9 +301,11 @@ LaunchAgent, 6 the unified log, 7 the install script, 8 the seal list, 9 living 
   alerts also read the board.
 - The node delivers to the board's lead only when the vault binds that session to the role and the host lists it live.
   V1 trusts whatever the board names: a Mac fix owed in `docs/process/v2-mac-tasks.md`.
-- `lead` refuses a folder with no repository or no commit, and installs nothing. V1 offers to make one.
+- `lead` refuses a folder in a repository with no commit, and installs nothing; a folder in no repository gets
+  `lead FOLDER --init` (2026-11-22), from a terminal only. V1 offers both from its window.
 - The web page listens on `127.0.0.1`, and on the tailnet only after `vibeswitcher web --tailnet`, each with a pairing code good
-  for 120 s. A phone reads and drafts; its own input waits for H1.
+  for 120 s. A phone reads and drafts, and never acts: acting is the loopback page's only (`Web/WebAccess.swift`). H1
+  (the host owns the listener) is built.
 - The host always hands over to a new build. V1 can also replace an outdated host and end its sessions.
 - The review floor comes from workflow.md and is accepted with `config accept`; each rule is changed with
   `vibeswitcher set FOLDER floor_… VALUE`, not in a settings window.
@@ -310,7 +324,16 @@ LaunchAgent, 6 the unified log, 7 the install script, 8 the seal list, 9 living 
 - ~~Running leads aren't told when `policy.md` changes.~~ Closed 2026-11-20: the policy watch.
 - ~~`push_remote` tells the lead it recorded a request that only you can push, but no client offers the push.~~ Closed
   2026-11-20: `vibeswitcher push` and `decline-push`.
-- The node's restart ends every session, and nothing records or reopens them.
+- ~~The node's restart ends every session, and nothing records or reopens them.~~ Closed 2026-11-20: `vibeswitcher
+  reopen` and `lead FOLDER --resume`.
+- The redesign of 2026-11-23 (`3ff1455b`) dropped the session list's grouping and filter, ⌘1–9 and next/previous, and
+  the board's all-done card with the `seen` that cleared a project's "All done" (found 2026-11-25).
+- The page shows a Set button for `lead_mail`, `verifier_model`, `security_audit_model` and `max_workers`, which the
+  node refuses from a page (`js/acting.js` `pageMaySet` knows only the policy, the floors and `web_acts`).
+- The page draws the passkey level (`confirm`) and names `vibeswitcher web --localhost` and `web --passkey`, which the
+  node doesn't have yet (`ActingPages.confirmBuilt` is false).
+- The node takes `session.reply`, `session.reopen`, `session.close-shells`, `presets.edit`, `prompt-audit`,
+  `hooks.remove` and `update.check` from an acting page, but no page control sends them.
 
 ## Keeping it current
 
