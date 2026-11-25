@@ -96,3 +96,13 @@ test('a first accept: the rules set away from their defaults (sandbox_ first, ei
   const card = heldSummary({ items: [{ kind: 'settings', what: 'x' }], guarded, recordsAll: true, pageMayAccept: false });
   assert.deepEqual([card.first.shown[0].key, card.first.shown.length, card.first.more, card.first.defaults, card.unknown, card.terminal], ['sandbox_read', 8, 2, 5, 0, true]);
 });
+
+test('an unknown rule this accept would record stays on the card with its value; an unknown one the node holds is not shown', () => {
+  const card = heldSummary({ items: [{ kind: 'settings', what: 'x' }], guarded: [
+    { key: 'auto_advance', value: 'false', changed: 'unknown', records: true },
+    { key: 'test_command', value: 'true', changed: 'unknown' },
+    { key: 'merge_policy', value: 'ask_all', changed: 'unknown', records: false },
+  ] });
+  assert.deepEqual(card.changed.map((rail) => [rail.key, rail.value, rail.state]), [['auto_advance', 'false', 'records']]);
+  assert.equal(card.unknown, 0, 'the held ones not even counted');
+});
