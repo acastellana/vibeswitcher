@@ -1083,7 +1083,7 @@ export const ES = {
   pkOffer: "Tu terminal pide añadir una llave de acceso para actuar desde esta página: comprueba que nombra estas palabras.",
   pkAdd: "Añadir una llave de acceso (pedida desde tu terminal)",
   pkAdding: "Tu navegador pide la nueva llave de acceso…",
-  pkAdded: "Añadida: ahora confírmala en tu terminal (llave {id}).",
+  pkAdded: "Tu nueva llave de acceso: {id}. Escribe estos 6 caracteres en la terminal.",
   pkCancelled: "Cancelado: no se añadió ninguna llave. Añade una de nuevo, o deja que la oferta de la terminal caduque.",
   pkUnsupported: "Este autenticador no puede crear una llave de acceso ES256: no se añadió nada. Prueba con otro (una llave de seguridad, o tu teléfono).",
   pkThisPage: "Esta página:",

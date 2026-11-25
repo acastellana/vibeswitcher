@@ -1091,7 +1091,7 @@ const EN = {
   pkOffer: "Your terminal asks to add a passkey for acting from this page: check it names these words.",
   pkAdd: "Add a passkey (asked from your terminal)",
   pkAdding: "Your browser asks for the new passkey…",
-  pkAdded: "Added: now confirm it in your terminal (passkey {id}).",
+  pkAdded: "Your new passkey: {id}. Type these 6 characters in the terminal.",
   pkCancelled: "Cancelled: no passkey was added. Add one again, or let the terminal’s offer run out.",
   pkUnsupported: "This authenticator can’t make an ES256 passkey: nothing was added. Try another one (a security key, or your phone).",
   pkThisPage: "This page:",
