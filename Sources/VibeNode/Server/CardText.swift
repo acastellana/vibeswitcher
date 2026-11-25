@@ -119,9 +119,13 @@ public enum CardText {
             // What the card leaves to the home folder's card (`sharedHome`: not among its items): one line.
             let shared = config["sharedHome"]?["names"]?.array?.compactMap(\.string) ?? []
             let firstLook = config["firstLook"]?.bool == true
-            lines.append(items.isEmpty && shared.isEmpty && firstLook
+            // A card shown, never kept (nothing held, nothing to record): it says so, never what an accept would do.
+            let shownOnly = card["open"]?.bool == false && card["closed"]?.string == "nothing to accept"
+            lines.append(items.isEmpty && shared.isEmpty && shownOnly
+                         ? "  nothing held, and nothing waits to be accepted"
+                         : items.isEmpty && shared.isEmpty && firstLook
                          ? "  nothing held: the node restarted (or this project's rules were never accepted): confirm them once, accepting records what workflow.md proposes"
-                         : items.isEmpty && shared.isEmpty ? "  nothing held: accepting records the guard rails or review floor workflow.md proposes"
+                         : items.isEmpty && shared.isEmpty ? "  nothing held: accepting records the rules workflow.md proposes"
                          : items.isEmpty ? "  held (no worker, verifier or merge until accepted), none of it this folder's own:"
                          : "  held (no worker, verifier or merge until accepted):")
             // The folder, never the other card's id: that card may be superseded or accepted since this one was drawn.
@@ -163,7 +167,8 @@ public enum CardText {
                 lines.append(line)
             }
             for mark in ["*", "?"] {
-                if let word = legend[mark] { lines.append("  \(mark) marks a line that is " + inert(word)) }
+                // "can't be compared …" reads after "that", "the same …" after "that is".
+                if let word = legend[mark] { lines.append("  \(mark) marks a line that " + (mark == "?" ? "" : "is ") + inert(word)) }
             }
             if let at = config["lastAccept"]?.string {
                 lines.append("  compared with your last accept (\(inert(at))), from an unsealed snapshot a worker could rewrite: read the values")

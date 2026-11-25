@@ -356,7 +356,7 @@ struct ConfigHoldStoreTests {
         #expect(short.contains("    test_command: make test; " + changed), "\(short)")
         #expect(short.contains("    base_branch: main; no earlier accept known"), "\(short)")
         #expect(short.contains("  * marks a line that is " + same), "\(short)")
-        #expect(short.contains("  ? marks a line that is " + unknown), "\(short)")
+        #expect(short.contains("  ? marks a line that " + unknown), "\(short)")
         #expect(short.filter { $0.contains(AcceptedSnapshot.unvouchedPrefix) }.count == 1, "\(short)")
         #expect(short.filter { $0.contains(same) && !$0.contains(AcceptedSnapshot.unvouchedPrefix) }.count == 1, "\(short)")
         #expect(short.contains { $0.hasPrefix("  compared with your last accept") && $0.contains("unsealed snapshot") }, "\(short)")

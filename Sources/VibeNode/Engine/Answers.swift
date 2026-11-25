@@ -622,6 +622,11 @@ extension LeadEngine {
             // vault's first look is owed, a host restart since, or the project never accepted). Nothing owed: the card is
             // shown, never kept open (the real node, 2026-11-25, drew one with nothing held, shown as blocking, that a
             // page couldn't accept).
+            // Whether its accept records the project's rules (`approve` sets such a card aside): `status` says so.
+            let recordsRules: Bool = {
+                guard case .success(let shown) = held else { return false }
+                return !((try? ConfigHoldStore.wouldRecord(shown, root: root, vault: vault)) ?? []).isEmpty
+            }()
             let owed: (record: Bool, firstLook: Bool)? = {
                 guard case .success(let shown) = held, shown.items.isEmpty else { return nil }
                 let pending = (try? ConfigHoldStore.wouldRecord(shown, root: root, vault: vault)) ?? ["?"]
@@ -641,6 +646,7 @@ extension LeadEngine {
                 case .failure(let error): then(.failure(.refused("the vault can't be asked what it holds for \(root): \(error)")))
                 case .success(let held):
                     var shown = self.sharingHome(held, root: root, homeNames: homeNames)
+                    shown.recordsRules = recordsRules ? true : nil
                     let project = NodeIds.project(root: root)
                     let open = self.cards.list(project: project).filter { $0.kind == .configHeld }
                     if let owed, shown.sharedHome == nil {
@@ -692,8 +698,11 @@ extension LeadEngine {
             let snapshot = AcceptedSnapshot.load(root: node)
             let homeNames = Set(ConfigSeal.homeWatched(home: home).map(\.name))
             let found = roots.sorted().reduce(into: [String: ConfigHoldStore.Shown]()) { found, root in
-                if case .success(let shown) = ConfigHoldStore.held(root: root, vault: vault, home: home, look: false,
-                                                                   snapshot: snapshot.projects[root]) { found[root] = shown }
+                if case .success(var shown) = ConfigHoldStore.held(root: root, vault: vault, home: home, look: false,
+                                                                   snapshot: snapshot.projects[root]) {
+                    shown.recordsRules = ((try? ConfigHoldStore.wouldRecord(shown, root: root, vault: vault)) ?? []).isEmpty ? nil : true
+                    found[root] = shown
+                }
             }
             guard let self else { return }
             self.queue.async {

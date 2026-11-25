@@ -168,6 +168,15 @@ final class Once<Value> {
 /// What the command line prints, and its exit codes: 0, 64 usage, 65 bad input, 69 no node, 77 refused, 1 other.
 enum Say {
     static func out(_ line: String) { Platform.Stdio.output(line + "\n") }
+    /// Whether this command was run with `--long`: its detail lines are said (`detail`), else left out.
+    nonisolated(unsafe) static var long = false
+    /// A line said only with `--long` (2026-11-25: a default screen says what happened and what to do, in a few lines).
+    static func detail(_ line: String) { if long { out(line) } }
+    /// `arguments` without `--long`, noting whether it was there.
+    static func takingLong(_ arguments: [String]) -> [String] {
+        long = arguments.contains("--long")
+        return arguments.filter { $0 != "--long" }
+    }
     static func err(_ line: String) { Platform.Stdio.error(line + "\n") }
     static func usage(_ text: String) -> Int32 { err(text); return 64 }
     static func refused(_ why: String) -> Int32 { err("vibeswitcher: refused: \(why)"); return 77 }

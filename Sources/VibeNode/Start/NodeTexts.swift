@@ -80,6 +80,23 @@ public enum NodeTexts {
             + switchConsequences(to: to, rewrites: rewrites)).joined(separator: "\n")
     }
 
+    /// The switch's prompt in two lines (2026-11-25, the text walk): from which build to which, and when it runs and what
+    /// the user does after. `long`'s full text (`switch`, `rollback`) follows it with `--long`. `parks`: the idle workers it
+    /// parks first. `rollbackLine`: a rollback's `installs` line (any worker can write that record).
+    public static func switchShort(from: String, to: String, rewrites: SwitchRewrites, parks: [String], rollbackLine: String? = nil) -> String {
+        let (old, new) = (ConfigSeal.inert(String(from.prefix(12)), limit: 64), ConfigSeal.inert(String(to.prefix(12)), limit: 64))
+        let first = rollbackLine == nil
+            ? "This switches the node from build \(old) to build \(new); every session stays."
+            : "This rolls the node back from build \(old) to build \(new), the one installed before it (check it's one you installed); every session stays."
+        let when = parks.isEmpty ? "It runs now" : "It parks the idle workers first (\(parks.joined(separator: ", "))), then runs"
+        let after: String
+        switch rewrites {
+        case .unitAndCurrent, .currentOnly: after = "; then teams wait until you accept the new build: `vibeswitcher approve`."
+        case .nothing: after = "."
+        }
+        return first + "\n" + when + after
+    }
+
     /// `rollback`'s (S8a, ST-D14): the switch's, going back to `to`, the commit installed before the running build,
     /// with the `installs` line it was read from (`line`: the file is any worker's to edit, so the user reads it here).
     public static func rollback(from: String, to: String, line: String, rewrites: SwitchRewrites) -> String {
@@ -107,12 +124,12 @@ public enum NodeTexts {
         case .unitAndCurrent:
             written = [
                 "  your unit's ExecStart is rewritten to \(commit) and `current` names it, so the next start runs it",
-                "  the seal holds every team until `vs config accept`, since the builds folder and the unit change (`vs config held` shows them)",
+                "  every team waits until you accept the new build and the unit's change (`vibeswitcher approve`)",
             ]
         case .currentOnly:
             written = [
                 "  `current` is moved to \(commit), so the next `vs start` runs it (no systemd: there is no unit)",
-                "  the seal holds every team until `vs config accept`, since the builds folder changes (`vs config held` shows it)",
+                "  every team waits until you accept the new build (`vibeswitcher approve`)",
             ]
         case .nothing(let why):
             written = ["  no unit is rewritten and `current` isn't moved (\(ConfigSeal.inert(why, limit: 200)))"]
@@ -121,6 +138,21 @@ public enum NodeTexts {
             "  the host hands over to \(commit)'s host, which keeps every session",
             "  a running team keeps its build until its lead restarts: a lead started before the switch keeps starting its workers with the old build's tool server",
         ] + written
+    }
+
+    /// `update`'s prompt in two lines (2026-11-25, the text walk): from which build to which, how far, how long; and what
+    /// the one code accepts with it, and what stays for `approve`. `update`'s full text follows it with `--long`.
+    public static func updateShort(from: String, to: String, aheadBy: Int?, rewrites: SwitchRewrites, held: [String]) -> String {
+        let (old, new) = (ConfigSeal.inert(String(from.prefix(12)), limit: 64), ConfigSeal.inert(String(to.prefix(12)), limit: 64))
+        let ahead = aheadBy.map { " (\($0) commit\($0 == 1 ? "" : "s") ahead)" } ?? ""
+        let accepts: String
+        switch rewrites {
+        case .unitAndCurrent: accepts = "the new build and the node's start line"
+        case .currentOnly, .nothing: accepts = "the new build"
+        }
+        let others = held.filter { $0 != SwitchSeal.buildsName && $0 != SwitchSeal.unitFolderName }.count
+        return "This updates the node from build \(old) to \(new)\(ahead): it builds \(new) (often ten minutes or more), then switches; every session stays.\n"
+            + "This code also accepts \(accepts), nothing else" + (others > 0 ? "; \(others) other change\(others == 1 ? "" : "s") wait for `vibeswitcher approve` after." : ".")
     }
 
     /// `vibeswitcher update`'s confirmation (2026-11-24): from and to, how far, what it runs, and what its one code

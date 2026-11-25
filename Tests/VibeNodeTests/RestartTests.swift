@@ -467,12 +467,12 @@ struct RestartTests {
         #expect(await eventually(timeout: 60) { !EngineState.load(root: node.root).state.held.contains { $0.text.contains(oldNews) } })
         let status = try await node.statusJSON()
         let notices = (status["notices"] as? [String]) ?? []
-        #expect(notices.contains { $0.contains("the lead and team of repo (\(repo.path)) ended with the host before it") }, "\(notices)")
+        #expect(notices.contains { $0.contains("the lead and team of repo (\(repo.path)) ended with it") }, "\(notices)")
         let restart = try #require(status["restart"] as? [String: Any], "\(status)")
         #expect((restart["gone"] as? [String]) == [repo.path], "\(restart)")
         #expect((status["leads"] as? [[String: Any]])?.contains { $0["session"] is String } != true, "\(status)")
-        let plain = try await node.run(["status"])
-        #expect(plain.output.contains("restart: the session host restarted at"), "\(plain.output)")
+        let plain = try await node.run(["status", "--long"])
+        #expect(plain.output.contains("restart: the node restarted at"), "\(plain.output)")
         let refused = try await node.runOnTerminal(["lead", repo.path])
         #expect(refused.status == 77 && refused.output.contains("config held"), "\(refused.output)")
 
@@ -484,7 +484,7 @@ struct RestartTests {
         let started = try await node.runOnTerminal(["lead", repo.path, "--goal", "plan the work"])
         #expect(started.status == 0 && started.output.contains("the lead started"), "\(started.output)\n\(node.said)")
         let after = try await node.statusJSON()
-        #expect(!((after["notices"] as? [String]) ?? []).contains { $0.contains("ended with the host before it") }, "\(after)")
+        #expect(!((after["notices"] as? [String]) ?? []).contains { $0.contains("ended with it") }, "\(after)")
         #expect(((after["restart"] as? [String: Any])?["gone"] as? [String]) == [], "\(after)")
         let lead = try #require(try node.sessions().first { $0.isLive && $0.label.hasPrefix("Lead · ") })
         try await node.looks(1, at: repo)
@@ -531,13 +531,13 @@ struct RestartTests {
         let started = Date()
         node.recorder?.append(["USER_UNIT": VoiceRule.nodeUnit, "JOB_TYPE": "start", "JOB_RESULT": "done", "MESSAGE": "Started the node.",
                                "__REALTIME_TIMESTAMP": String(Int64(started.timeIntervalSince1970 * 1_000_000))])
-        let shown = try await node.run(["status"])
+        let shown = try await node.run(["status", "--long"])
         #expect(shown.output.contains("journal: a start at \(NodeWire.dateText(started).prefix(16))"), "\(shown.output)")
-        #expect(shown.output.contains("restart: the session host restarted at") && shown.output.contains("no `vibeswitcher start` or `stop` entry"),
+        #expect(shown.output.contains("restart: the node restarted at") && shown.output.contains("no `vibeswitcher start` or `stop` entry"),
                 "\(shown.output)")
         let acked = try await node.runOnTerminal(["status", "--ack"])
         #expect(acked.status == 0 && acked.output.contains("acknowledged"), "\(acked.output)")
-        let after = try await node.run(["status"])
+        let after = try await node.run(["status", "--long"])
         #expect(!after.output.contains("journal: a start at") && !after.output.contains("restart: "), "\(after.output)")
     }
 
@@ -622,9 +622,9 @@ struct RestartTests {
         #expect(!lines.contains { $0.contains("; the same as at your last accept") }, "\(held.output)")
         // Short: a guard rail is its key and value, marked `?` where the word is "not known to be the same", the word
         // said once, at the end, with the unsealed snapshot's warning.
-        #expect(!lines.contains { $0.hasPrefix("    ") && $0.contains("not known to be the same as at your last accept") }, "\(held.output)")
-        #expect(lines.filter { $0.contains("not known to be the same as at your last accept") }.count == 1, "\(held.output)")
-        #expect(lines.contains { $0.hasPrefix("  ? marks a line that is not known to be the same") }, "\(held.output)")
+        #expect(!lines.contains { $0.hasPrefix("    ") && $0.contains("can't be compared with your last accept") }, "\(held.output)")
+        #expect(lines.filter { $0.contains("can't be compared with your last accept") }.count == 1, "\(held.output)")
+        #expect(lines.contains { $0.hasPrefix("  ? marks a line that can't be compared with your last accept") }, "\(held.output)")
         #expect(held.output.contains("compared with your last accept"), "\(held.output)")
         #expect(lines.contains { $0.hasPrefix("    test_command: make test; changed since your last accept") && $0.contains("from “make check”") },
                 "\(held.output)")
@@ -633,9 +633,9 @@ struct RestartTests {
         // `--long` says it on every line, as before.
         let long = try await node.run(["config", "held", repo.path, "--long"])
         let longLines = long.output.components(separatedBy: "\n")
-        let unknown = longLines.filter { $0.hasPrefix("    ") && $0.contains("not known to be the same as at your last accept") }
+        let unknown = longLines.filter { $0.hasPrefix("    ") && $0.contains("can't be compared with your last accept") }
         #expect(unknown.count > 1, "\(long.output)")
-        #expect(longLines.contains { $0.hasPrefix("    merge_policy: ask_all; not known to be the same as at your last accept") }, "\(long.output)")
+        #expect(longLines.contains { $0.hasPrefix("    merge_policy: ask_all; can't be compared with your last accept") }, "\(long.output)")
         #expect(long.output.contains("compared with your last accept"), "\(long.output)")
         // The short lines show every hash and value the long ones do: all the card is bound to.
         for line in longLines where line.hasPrefix("    ") {
@@ -650,7 +650,7 @@ struct RestartTests {
         let (node, repo) = try await hostRestarted(leadBefore: false)
         defer { node.stop() }
         #expect(node.floor(repo.path) == .some(nil))
-        try await node.acceptConfig(repo, says: "the review floor is recorded")
+        try await node.acceptConfig(repo, says: "the review rules are recorded")
         let floor = try #require(node.floor(repo.path) ?? nil)
         let proposed = LeadReviewFloor.starting(from: LeadWorkflow.load(from: ConfigHoldStore.workflowPath(root: repo.path)))
         #expect(floor == proposed, "\(floor)")
@@ -665,14 +665,14 @@ struct RestartTests {
                 .write(to: node.testFolder.appendingPathComponent("unit-state"), atomically: true, encoding: .utf8)
         }
         defer { node.stop() }
-        let status = try await node.run(["status"])
+        let status = try await node.run(["status", "--long"])
         let line = try #require(status.output.components(separatedBy: "\n").first { $0.hasPrefix("restart: ") }, "\(status.output)")
         #expect(line.contains("it last ended oom-kill, status 9"), "\(line)")
         #expect(line.contains("no `vibeswitcher start` or `stop` entry in the journal explains it"), "\(line)")
         for reset in ["roles and grants", "verdicts", "the recorded heads", "the review floor", "the config seal"] {
             #expect(line.contains(reset), "\(reset): \(line)")
         }
-        #expect(status.output.contains("notice: the session host restarted at") && status.output.contains("the lead and team of repo (\(repo.path))"),
+        #expect(status.output.contains("notice: the node restarted at") && status.output.contains("the lead and team of repo (\(repo.path))"),
                 "\(status.output)")
     }
 
@@ -703,7 +703,7 @@ struct RestartTests {
         }, "\(node.said)")
         #expect(try node.sessions().contains { $0.id == session.id && $0.isLive })
         // The same host, welcomed again: not a host restart.
-        #expect(!node.said.contains("the session host restarted"), "\(node.said)")
+        #expect(!node.said.contains("the node restarted at"), "\(node.said)")
         let status = try await node.statusJSON()
         #expect(status["restart"] == nil || status["restart"] is NSNull, "\(status)")
     }
@@ -723,7 +723,7 @@ struct RestartTests {
         #expect(Set(try node.sessions().map(\.id)) == ids)
         // Through the connector again: a second welcome of the same host, and no restart of it seen.
         #expect(await eventually(timeout: 60) { node.said.components(separatedBy: "vibeswitcher-server: host link: welcome").count >= 3 }, "\(node.said)")
-        #expect(!node.said.contains("the session host restarted"), "\(node.said)")
+        #expect(!node.said.contains("the node restarted at"), "\(node.said)")
         // The lead still holds its role: the vault (carried over) binds it to its session, and the server's list has it.
         #expect(node.currentLead(lead.repo.path)?.hasSuffix(" " + lead.session.id.uuidString) == true, "\(String(describing: node.currentLead(lead.repo.path)))")
         #expect(await node.eventuallyLead(lead.repo) { $0["session"] as? String == NodeIds.session(host: lead.session.id) }, "\(node.said)")

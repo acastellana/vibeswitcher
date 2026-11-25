@@ -26,7 +26,7 @@ import VibeNode
 ///    pass (`SwitchSealCheck`, a). Then what `switch` does after a handover: the server that stays and a paired page's
 ///    listener waited for (`SwitchSettle`), the follow-up (the unit and `current`), and, on a node under systemd,
 ///    `build.seal` with the same action and code: the unit folder sealed when only its unit's `ExecStart` moved (b).
-/// 6. What still waits, in one line (`CardText.waitingLine`), and what stays held.
+/// 6. What still waits, in one line (`StatusCommand.waitingLine`), and what stays held.
 ///
 /// A scratch node takes `--test-installer PROGRAM` in place of install-node (run as `PROGRAM COMMIT PREFIX`, none of the
 /// checks of 4), or `--test-build FOLDER` for the build its command line "runs from" (every check of 4, its script run
@@ -37,7 +37,7 @@ import VibeNode
 /// bytes against the commit's blob): the layout check after it (`SwitchSealCheck.layoutRefusal`) compares the build
 /// with its own `build-info`, so it says the folder is whole, not that it is the commit's.
 enum UpdateCommand {
-    static let usage = "usage: vibeswitcher update [COMMIT]"
+    static let usage = "usage: vibeswitcher update [COMMIT] [--long]"
 
     /// How long the install is waited for at most.
     static let installWait: TimeInterval = 3 * 60 * 60
@@ -49,7 +49,7 @@ enum UpdateCommand {
         var testScope: String?
         var testHold: String?
         var serverWait = SwitchSettle.serverWait
-        var words = arguments[...]
+        var words = Say.takingLong(arguments)[...]
         while let word = words.popFirst() {
             if word == "--test-installer", let program = words.popFirst() { installer = program; continue }
             if word == "--test-build", let folder = words.popFirst() { testBuild = folder; continue }
@@ -136,15 +136,17 @@ enum UpdateCommand {
         if case .success(let result, _) = client.read(WireKinds.ConfigHeld.self, .init(folder: home, diff: nil), timeout: 60) {
             held = (result.card?["config"]?["items"]?.array ?? []).compactMap { $0["name"]?.string }
         }
-        guard let held else { return Say.refused("update: the server couldn't say what the seal holds: nothing was asked or run") }
+        guard let held else { return Say.refused("update: the server couldn't say which changes wait for your accept: nothing was asked or run") }
         if installer == nil {
             guard !held.contains(SwitchSeal.buildsName), SwitchSeal.listingLines(prefix) == looked else {
                 return Say.refused("update: the builds folder has a change you haven't accepted (`vibeswitcher config held`): nothing was asked or run, "
                                    + "as its install script may not be the one you accepted")
             }
         }
-        let what = NodeTexts.update(from: running, to: target, aheadBy: target == offered ? status.update?["aheadBy"]?.int : nil,
-                                    rewrites: rewrites, held: held)
+        // Two lines; the whole of it with --long.
+        let aheadBy = target == offered ? status.update?["aheadBy"]?.int : nil
+        let what = NodeTexts.updateShort(from: running, to: target, aheadBy: aheadBy, rewrites: rewrites, held: held)
+            + (Say.long ? "\n" + NodeTexts.update(from: running, to: target, aheadBy: aheadBy, rewrites: rewrites, held: held) : "")
         let action = UUID().uuidString.lowercased()
         let said = TypedWord.said(approval: client.approvalRule, action: action, what: what)
         guard case .success(let typed) = said else { return Say.refused(said.refusal) }
@@ -215,8 +217,8 @@ enum UpdateCommand {
             }
         case .refused(let reply): return Say.replyError(reply)
         case .success(let result, _):
-            for line in sealLines(sealed: result.sealed, refusals: result.sealRefusals) { Say.out(line) }
-            Say.out(ConfigSeal.inert(result.said ?? "switched", limit: 400))
+            sayAccepted(sealed: result.sealed, refusals: result.sealRefusals)
+            Say.detail(ConfigSeal.inert(result.said ?? "switched", limit: 400))
             guard result.outcome == "handed-over" || result.outcome == "already" else {
                 Say.err("vibeswitcher: the server's reply names no outcome: \(ConfigSeal.inert(result.outcome ?? "none", limit: 64))")
                 return 1
@@ -237,24 +239,32 @@ enum UpdateCommand {
             // The server that stays, asked as the follow-up asks the host (one on its way out is asked again).
             switch SwitchCommand.connectSettled(context) {
             case .failure(let failure):
-                Say.out("the unit's change stays held (the server couldn't be asked to seal it: \(ConfigSeal.inert(failure.message, limit: 400))): `vibeswitcher approve` accepts it")
+                Say.out("the node's new start line isn't accepted yet (the server couldn't be asked: \(ConfigSeal.inert(failure.message, limit: 400))): `vibeswitcher approve`")
             case .success(let fresh):
                 // An action of its own, naming the switch's (the code typed for this update covers it).
                 let seal = WireKinds.BuildSeal.Args(commit: target, from: running, switchAction: action)
                 switch fresh.change(WireKinds.BuildSeal.self, seal, action: UUID().uuidString.lowercased(), typed: typed, timeout: 60) {
-                case .success(let result, _): sealLines(sealed: result.sealed, refusals: result.sealRefusals).forEach(Say.out)
-                case .refused(let reply): Say.out("the unit's change stays held: \(ConfigSeal.inert(reply.error?.message ?? "refused", limit: 400))")
-                case .failure(let failure): Say.out("the unit's change stays held: \(ConfigSeal.inert(failure.message, limit: 400))")
+                case .success(let result, _): sayAccepted(sealed: result.sealed, refusals: result.sealRefusals)
+                case .refused(let reply): Say.out("the node's new start line isn't accepted yet (\(ConfigSeal.inert(reply.error?.message ?? "refused", limit: 400))): `vibeswitcher approve`")
+                case .failure(let failure): Say.out("the node's new start line isn't accepted yet (\(ConfigSeal.inert(failure.message, limit: 400))): `vibeswitcher approve`")
                 }
             }
         }
-        Say.out(SwitchCommand.startLine(context, commit: target, hostPid: hostPid))
-        // What still waits, from the server that stays.
+        Say.detail(SwitchCommand.startLine(context, commit: target, hostPid: hostPid))
+        // Updated, the page's address, and what still waits (each kind with its command), from the server that stays.
+        Say.out("updated to build \(ConfigSeal.inert(String(target.prefix(12)), limit: 64))")
         if case .success(let fresh) = NodeClient.connect(context), case .success(let now, _) = fresh.read(WireKinds.Status.self, WireNoArgs()) {
-            Say.out(CardText.waitingLine(now.cards) ?? "nothing else waits on you")
+            Say.out(StatusCommand.shortWebLine(now.web, tailnet: now.webTailnet))
+            Say.out(StatusCommand.waitingLine(now.cards) ?? "nothing else waits on you")
             for notice in (now.notices ?? []) where notice.hasPrefix("the hooks are out of date") { Say.out(ConfigSeal.inert(notice, limit: 600)) }
         }
         return 0
+    }
+
+    /// What this code accepted (with `--long`), and why something wasn't (always), each a line.
+    static func sayAccepted(sealed: [String]?, refusals: [String]?) {
+        (sealed ?? []).forEach { Say.detail("accepted with this code: \(ConfigSeal.inert($0, limit: 200))") }
+        (refusals ?? []).forEach { Say.out(ConfigSeal.inert($0, limit: 400)) }
     }
 
     /// What the server said of a seal: what it sealed, and why not, each a line.

@@ -27,7 +27,7 @@ enum AnswerCommand {
                 return Say.usage("usage: vibeswitcher answer CARD \(words.map { ConfigSeal.inert($0, limit: 20) }.joined(separator: "|"))  (a \(ConfigSeal.inert(plugin["noun"]?.string ?? "plugin", limit: 40))'s card)")
             }
             return nil
-        }, args: { card, id, code in
+        }, shows: showsCard, args: { card, id, code in
             // Bound to the wording shown: a revision after it is said to the lead with the answer.
             let plugin = card["plugin"].map { $0 != .null } ?? false
             return .init(card: id, code: code, text: plugin ? word : text, version: card["question"]?["version"]?.int)
@@ -38,8 +38,22 @@ enum AnswerCommand {
                 let action = (plugin["actions"]?.array ?? []).first { $0["word"]?.string == word }
                 return "This " + ConfigSeal.inert(action?["does"]?.string ?? "answers card \(id) with \(word)", limit: .max) + "."
             }
-            return "This answers card \(id) with: \(ConfigSeal.inert(text, limit: 400))"
+            // The question in one line, then the answer (2026-11-25, the text walk: no card reprinted).
+            return questionLine(card) + "\nThis answers it with: \(ConfigSeal.inert(text, limit: 400))"
         }, say: said)
+    }
+
+    /// Whether the card is printed before the code: a question's isn't (its one line is in the prompt); an approval's
+    /// is (what is approved: its commit and files), and so is a plugin's.
+    static func showsCard(_ card: NodeWire.Value) -> Bool {
+        (card["question"] ?? .null) == .null || (card["approval"] ?? .null) != .null
+    }
+
+    /// The lead's question in one line (its first, inert), marked as the lead's words; the card's id for a card with none.
+    static func questionLine(_ card: NodeWire.Value) -> String {
+        guard let text = card["question"]?["text"]?.string else { return "Card \(ConfigSeal.inert(card["id"]?.string ?? "", limit: 80))" }
+        let first = text.split(whereSeparator: \.isNewline).first.map(String.init) ?? text
+        return "The lead asks: \(ConfigSeal.inert(first, limit: 200))"
     }
 
     /// The card's draft, if it has one: its text and the question's version it was drafted for.
@@ -53,13 +67,12 @@ enum AnswerCommand {
             guard draft(of: card) == nil else { return nil }
             let id = ConfigSeal.inert(card["id"]?.string ?? wanted, limit: 80)
             return Say.usage("\(usage)\ncard \(id) has no draft: pick an answer on its web page, or give TEXT")
-        }, args: { card, id, code in
+        }, shows: showsCard, args: { card, id, code in
             let taken = draft(of: card)
             return .init(card: id, code: code, text: taken?.text ?? "", version: taken?.version.int)
         }, what: { card in
             // Whole: this is what the lead will be told as the user's.
-            "This answers card \(ConfigSeal.inert(card["id"]?.string ?? "", limit: 80)) with the answer drafted on its web page: "
-                + ConfigSeal.inert(draft(of: card)?.text ?? "", limit: .max)
+            questionLine(card) + "\nThis answers it with the answer drafted on its web page: " + ConfigSeal.inert(draft(of: card)?.text ?? "", limit: .max)
         }, say: said)
     }
 

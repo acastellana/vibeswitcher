@@ -13,14 +13,14 @@ import VibeNode
 /// out (the user's own handlers stay). Nothing is written here, and `CLAUDE_CONFIG_DIR` and `CODEX_HOME` play no part.
 /// The accepted request is written to the journal (ids only).
 enum HooksCommand {
-    static let usage = "usage: vibeswitcher hooks install|remove [--agent claude|codex]..."
+    static let usage = "usage: vibeswitcher hooks install|remove [--agent claude|codex]... [--long]"
 
     static func run(_ arguments: [String]) -> Int32 {
         guard let action = arguments.first, ["install", "remove"].contains(action) else { return Say.usage(usage) }
         // `--agent` once or more (each agent once, in the order given: `approve` and `status` print it once per agent);
         // none is both.
         var agents: [Agent] = []
-        var words = Array(arguments.dropFirst())[...]
+        var words = Array(Say.takingLong(Array(arguments.dropFirst())))[...]
         while let flag = words.popFirst() {
             guard flag == "--agent", let name = words.popFirst(), let agent = Agent(rawValue: name) else { return Say.usage(usage) }
             if !agents.contains(agent) { agents.append(agent) }
@@ -35,10 +35,11 @@ enum HooksCommand {
         }
         let kind = "hooks." + action
         let named = agents.map(\.displayName).joined(separator: " and ")
+        // One line (2026-11-25, the text walk); what it copies where with --long.
         var what = action == "install"
-            ? "This installs VibeSwitcher's hooks for \(named) in the node's home, copying vibeswitcher-hook and vibeswitcher-mcp "
-                + "from the node's build into ~/.vibeswitcher/bin, written as VibeSwitcher's own (sealed)."
-            : "This removes VibeSwitcher's hooks for \(named) from the node's home (your own hooks stay), written as VibeSwitcher's own (sealed)."
+            ? "This installs VibeSwitcher's hooks for \(named) from the node's build: nothing for you to accept after."
+                + (Say.long ? "\nIt copies vibeswitcher-hook and vibeswitcher-mcp from the node's build into ~/.vibeswitcher/bin, and adds the hooks to the agents' settings." : "")
+            : "This removes VibeSwitcher's hooks for \(named) (your own hooks stay): nothing for you to accept after."
         let environment = ProcessInfo.processInfo.environment
         // The Codex the trust is asked of (`NodeCodexTrust`): the one the node's own Codex sessions run, said before the
         // code; the server runs only this one.
@@ -74,11 +75,12 @@ enum HooksCommand {
         case .refused(let reply): return Say.replyError(reply)
         case .success(let result, _):
             for program in result.programs {
-                Say.out("installed \(ConfigSeal.inert(program, limit: 400))")
+                Say.detail("installed \(ConfigSeal.inert(program, limit: 400))")
             }
             let configs = result.configs.map { ConfigSeal.inert($0, limit: 400) }
             for (agent, config) in zip(agents, configs) {
-                Say.out(kind == "hooks.install" ? "\(agent.displayName): hooks installed in \(config)" : "\(agent.displayName): hooks removed from \(config)")
+                Say.out(kind == "hooks.install" ? "\(agent.displayName): hooks installed" : "\(agent.displayName): hooks removed")
+                Say.detail("  in \(config)")
                 if kind == "hooks.install", agent == .codex {
                     if let trusted = result.trusted, trusted > 0 {
                         Say.out("  Codex trusts them (\(trusted) hook\(trusted == 1 ? "" : "s")).")
