@@ -108,7 +108,7 @@ function px(value, sizes) {
 
 const INKS = ['--ink', '--ink-2', '--ink-3', '--accent', '--needs-you', '--working', '--background', '--done', '--idle', '--blocked', '--kept'];
 const BASES = ['--bg', '--side', '--side-hover', '--side-selected', '--raised'];
-const FILLS = ['--fill', '--fill-2', '--accent-fill'];
+const FILLS = ['--fill', '--fill-2', '--fill-3', '--accent-fill'];
 // Where a fill is laid: the centre, the left column, a card or a panel.
 const UNDER_FILLS = ['--bg', '--side', '--raised'];
 

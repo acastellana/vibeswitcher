@@ -1,7 +1,37 @@
 /* VibeSwitcher's web client. The Mac app is the reference: its status colours (StatusPalette, at least 4.5:1 on
    these backgrounds in light and dark), its words, its layout. Where the two pull apart this leans calmer: one
-   accent, status as a small mark or a word, hairlines only where spacing can't do the job.
-   Three type sizes (small, text, large); weight before colour. Motion is opacity and transform only, 120–180 ms. */
+   accent, status as a small mark or a word, hairlines only where spacing can't do the job. Weight before colour.
+
+   One scale, as tokens on :root (the design review of 2026-11-25, section 2). Every rule below uses them for type,
+   control height, corners, shadow, motion and colour; a literal value carries its reason on its own line
+   (tests/design.test.mjs holds this). Spacing is not on the scale yet.
+
+   Type       --t-caption 12/16       times, counts, helper lines
+              --t-body    13/18       every control, row and label (the body's)
+              --t-read    15/22       replies, bubbles, the lead's lines, the side sheet
+              --t-title   15/20 600   column heads, a card's question, a block's title
+              --t-heading 17/22 600   a heading inside a reply or the sheet
+              --t-large   20/24 600   the sheet's title, a tile's number
+              --t-code    12.5/18     every kind of code: inline, fenced, output, diffs, command lines
+              Line heights --lh-* go with their size; weights --w-regular 400, --w-medium 500, --w-strong 600.
+              A phone (760 px) reads larger: caption 12.5, body 15, read and title 16 (reading on 24), code 13;
+              a touch screen's text boxes --t-field-touch 16, under which its browser zooms on focus.
+   Controls   --ctl-s 24 a small button, a tab · --ctl-m 30 a button, a field · --ctl-l 36 the message box ·
+              --ctl-touch 44 every control on a touch screen. Rows (a project, a session, an option) are rows.
+   Corners    --r-1 4 chips and marks · --r-2 8 controls, rows, fields · --r-3 12 cards, panels, menus, the
+              message box · --r-4 16 bubbles and sheets · --r-pill pills and round buttons; 50% is a circle.
+   Elevation  --e-1 a hairline (cards; --e-1-in inside a field) · --e-2 what floats (menus, suggestions, a
+              row's actions, tooltips) · --e-3 over everything (the palette, sheets, drawers) · --e-thumb a
+              switch's chosen part · --e-focus, --e-focus-in a field's ring · --e-hover-in a field pointed at.
+   Motion     --dur-1 120 ms hover, press, colour · --dur-2 180 ms entering, leaving, opening · --ease-out
+              entering and every state · --ease-in leaving · --loop 1.2 s working marks, skeletons, busy.
+              Opacity and transform only, never a bounce; reduced motion turns all of it off.
+   Colour     surfaces --bg --side --raised · inks --ink --ink-2 --ink-3 · the one hairline --line · fills
+              --fill hover, --fill-2 selected or a track, --fill-3 pressed · --accent with -fill, -hover,
+              -press and --on-accent · the status inks, one meaning each · --danger · --scrim · --highlight.
+   States     every control: hover (pointers only), pressed (:active), focus (the one ring), busy
+              ([aria-busy]: its look kept, a slow pulse), disabled (greyed, no reaction); one transition,
+              --state-transition. */
 
 :root {
   color-scheme: light dark;
@@ -17,10 +47,23 @@
   --line: light-dark(rgb(0 0 0 / 0.09), rgb(255 255 255 / 0.1));
   --fill: light-dark(rgb(0 0 0 / 0.04), rgb(255 255 255 / 0.055));
   --fill-2: light-dark(rgb(0 0 0 / 0.075), rgb(255 255 255 / 0.1));
+  /* Pressed. Light: the most a fill can darken and keep every ink at 4.5:1 (11% would not). Dark: it darkens too, as
+     a lighter fill past --fill-2 would cost the inks their contrast. */
+  --fill-3: light-dark(rgb(0 0 0 / 0.085), rgb(0 0 0 / 0.2));
   --accent: light-dark(#0a5fc8, #62adff);
   --accent-fill: light-dark(rgb(10 95 200 / 0.09), rgb(98 173 255 / 0.14));
+  /* The accent pointed at and pressed: mixed toward the ink, darker in light and lighter in dark, so its words only
+     gain contrast. */
+  --accent-hover: color-mix(in srgb, var(--accent) 92%, var(--ink));
+  --accent-press: color-mix(in srgb, var(--accent) 84%, var(--ink));
   --on-accent: light-dark(#ffffff, #10151c);
   --shadow: light-dark(rgb(0 0 0 / 0.14), rgb(0 0 0 / 0.5));
+  /* Behind the palette, the side sheet, the inspector as a sheet and the drawers; a small control over a picture. */
+  --scrim: light-dark(rgb(0 0 0 / 0.16), rgb(0 0 0 / 0.4));
+  --scrim-strong: rgb(0 0 0 / 0.55);
+  --on-scrim: #ffffff;
+  /* Find: the words found in a chat, a list's match. */
+  --highlight: light-dark(rgb(255 214 0 / 0.5), rgb(255 200 0 / 0.32));
 
   /* Status inks: StatusPalette.ink, and the Team view's purple and teal. */
   --needs-you: light-dark(#c4001a, #ff8a82);
@@ -34,10 +77,12 @@
   --added: light-dark(rgb(26 115 48 / 0.11), rgb(48 209 88 / 0.13));
   --removed: light-dark(rgb(196 0 26 / 0.09), rgb(255 122 114 / 0.13));
 
-  /* The agents' badges: AgentMark's. */
+  /* The agents' badges: AgentMark's, their glyph white on each; Boost's mark. */
   --claude: #d97857;
   --codex: #5c6bdb;
   --shell: #737373;
+  --on-badge: #ffffff;
+  --boost: #e8890c;
 
   --sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
   --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
@@ -45,6 +90,59 @@
   --text: 13px;
   --large: 14.5px;
   --ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+
+  /* Type: a size, its line (as a ratio, so a child of another size keeps its own), the three weights. */
+  --t-caption: 12px;
+  --t-body: 13px;
+  --t-read: 15px;
+  --t-title: 15px;
+  --t-heading: 17px;
+  --t-large: 20px;
+  --t-code: 12.5px;
+  --t-field-touch: 16px;
+  --lh-caption: 1.3333;
+  --lh-body: 1.3846;
+  --lh-read: 1.4667;
+  --lh-title: 1.3333;
+  --lh-heading: 1.2941;
+  --lh-large: 1.2;
+  --lh-code: 1.44;
+  --w-regular: 400;
+  --w-medium: 500;
+  --w-strong: 600;
+
+  /* Controls: three heights, and a fingertip. */
+  --ctl-s: 24px;
+  --ctl-m: 30px;
+  --ctl-l: 36px;
+  --ctl-touch: 44px;
+
+  /* Corners. */
+  --r-1: 4px;
+  --r-2: 8px;
+  --r-3: 12px;
+  --r-4: 16px;
+  --r-pill: 999px;
+
+  /* Elevation, and a field's edges. */
+  --e-1: 0 0 0 1px var(--line);
+  --e-1-in: inset 0 0 0 1px var(--line);
+  --e-2: 0 0 0 1px var(--line), 0 6px 20px var(--shadow);
+  --e-3: 0 0 0 1px var(--line), 0 24px 60px var(--shadow);
+  --e-thumb: 0 0 0 0.5px var(--line), 0 1px 2px var(--shadow);
+  --e-focus: 0 0 0 2px var(--accent);
+  --e-focus-in: inset 0 0 0 2px var(--accent);
+  --e-hover-in: inset 0 0 0 1px var(--ink-3);
+
+  /* Motion. */
+  --dur-1: 120ms;
+  --dur-2: 180ms;
+  --ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --ease-in: cubic-bezier(0.4, 0, 1, 1);
+  --loop: 1.2s;
+  --state-transition: background-color var(--dur-1) var(--ease-out), color var(--dur-1) var(--ease-out),
+    box-shadow var(--dur-1) var(--ease-out), transform var(--dur-1) var(--ease-out), opacity var(--dur-1) var(--ease-out);
+
   --inspector: 320px;
   --head: 56px;
 
@@ -54,6 +152,8 @@
   --review: var(--background);
   --ready: var(--done);
   --queued: var(--idle);
+  /* Something failed: the asking colour today, a name of its own so the two can part. */
+  --danger: var(--needs-you);
 }
 :root[data-theme="dark"] { color-scheme: dark; }
 :root[data-theme="light"] { color-scheme: light; }
@@ -672,7 +772,11 @@ kbd { padding: 1px 6px; border-radius: 5px; box-shadow: inset 0 0 0 1px var(--li
 /* ---- Phone: the session view's own (the columns' are at the end) ---- */
 
 @media (max-width: 760px) {
-  :root { --small: 12.5px; --text: 15px; --large: 16px; }
+  :root {
+    --small: 12.5px; --text: 15px; --large: 16px;
+    --t-caption: 12.5px; --t-body: 15px; --t-read: 16px; --t-title: 16px; --t-heading: 18px; --t-code: 13px;
+    --lh-read: 1.5;
+  }
   .segmented button { padding: 5px 18px; }
 
   .head { gap: 8px; padding: calc(8px + env(safe-area-inset-top)) 12px 8px; flex-wrap: wrap; }
