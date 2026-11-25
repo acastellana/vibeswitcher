@@ -352,12 +352,15 @@ or decided. Done on Linux, tested on both systems (`ApprovalJudgmentTests`, `App
    `80358389`, green from `783e585d`). F6: a checked node host's switch goes through a keeper whose fresh token runs the
    pinned target's code, and the state, secrets and every descriptor cross the exec only to a new image whose fresh
    token runs the keeper's code; the server child is ended and reaped before the exec and started again by the new
-   image (`MacKeeperHandoverTests`, scratch hosts with `--handover-test-keeper`). *A real Mac proved:* all of it with
+   image (`MacKeeperHandoverTests`, scratch hosts with `--handover-test-keeper`); the keeper is proven against the cdhash
+   the record was checked against, read once (`MacKeeperTargetTests`), and a switch gives the new image the target
+   build's `--node-root` and `--server` (`aSwitchGivesTheNewImageItsOwnBuildsFolders`). *A real Mac proved:* all of it with
    this Mac's real hardened images, tokens and in-place exec. *Still open:* a file swapped between the keeper's proof
    and the exec runs at the job's pid with nothing, and the sessions end; a proven new image that can't restore exits
    (no unchecked fallback); F8 as above. *What step 5 (the LaunchAgent, next) can rely on:* the job's program, started
-   with `--node --node-root <home>/.vibeswitcher/v2/node --server <that root>/bin/vibeswitcher-server` on the node root's
-   `host.lock`, either refuses with one line on stderr (exit 1) or is the pinned host of its row with that row's server
+   as the unit's form, `<builds>/<commit>/bin/vibeswitcher-host --node --node-root <builds>/<commit> --server
+   <builds>/<commit>/bin/vibeswitcher-server`, on the node's data root's lock (`<home>/.vibeswitcher/v2/node/host.lock`,
+   its default), either refuses with one line on stderr (exit 1) or is the pinned host of its row with that row's server
    as its child, on the job's pid across every switch; a switch never changes the pid; and the job's stderr is where
    each refusal is said. Step 5 still owes the plist, `launchctl`, the command line's start and stop, and the switch-on
    review with the user's go-ahead.

@@ -311,14 +311,15 @@ section is what makes it safe to turn on, and a later review turns it on.
 opened from disk or anything is served), in this order, each failure a refusal that starts nothing (`notStarted`, exit
 78, one plain line naming the record and the remedy):
 
-1. `--node-root` and `--server` given, and the lock the host takes is the node root's own (`<accountHome>/.vibeswitcher/
-   v2/node/host.lock`, the home from the user database, compared by path and by file): any other lock is refused, as
-   Linux's `mayStart` refuses it (the Mac's `mayStart` says nothing).
+1. `--node-root` (its build's absolute folder, `<builds>/<commit>`, as the unit and the agent start it; the row is
+   found by code, never by this path) and `--server` given, and the lock the host takes is the node's data root's own
+   (`<accountHome>/.vibeswitcher/v2/node/host.lock`, the home from the user database, compared by path and by file):
+   any other lock is refused, as Linux's `mayStart` refuses it (the Mac's `mayStart` says nothing).
 2. The record, read once (`NodePins.read()`, the walk from `/`): missing, unreadable, not root's alone, unparseable or
    another uid's refuses.
 3. The host's own running code, from the kernel (`Platform.CodeIdentity.ownCdhash`, `SecCodeCopySelf`'s dynamic
    cdhash): unreadable, or no row's host, refuses ("this host's code is no host the node's record pins").
-4. The `--server` file, opened once (`O_NOFOLLOW`, a regular file, the node root's own `bin/vibeswitcher-server` by
+4. The `--server` file, opened once (`O_NOFOLLOW`, a regular file, the build folder's own `bin/vibeswitcher-server` by
    device and inode, as Linux's `openServer`), and its cdhash for this Mac's slice, read by path while the path still
    names the file opened (device and inode after the read), must be the row's server: another build's server, an
    unsigned or unreadable file, a link, a copy elsewhere refuses.
@@ -333,7 +334,8 @@ nothing in the node lets a flag, file or variable choose them.
 **A switch (F6 closed).** macOS has no exec from a descriptor, so whatever is checked before the in-place exec, the
 exec runs what the path names then. A checked node host's switch goes through a keeper (`MacHandoverKeeper`):
 
-1. The path check as before (`HandoverTarget.macPinned`): the target's file is a pinned host; its cdhash is *expected*.
+1. The path check as before (`HandoverTarget.macPinned`): the target's file, read once, is a pinned host; that read's
+   cdhash is *expected* (never a second read of the path).
 2. The target is started from the path as the keeper (`--handover-keeper FD`), a child of the host. Its first act is
    to make a fresh stream pair and send one end over the inherited channel; that end's `LOCAL_PEERTOKEN` names the
    keeper's own image, made after its exec. The old host requires that token to be its spawned pid, to run *expected*
@@ -341,7 +343,8 @@ exec runs what the path names then. A checked node host's switch goes through a 
    and its sessions are as they were (a file swapped before this point is caught here, the long window F6 named).
 3. On the old host's queue: the server child is ended and reaped (below), the state built, and the state's bytes and
    every descriptor it names (the lock, the listener, the secrets' channel, each session's terminal) sent to the
-   proven keeper over the pair it made. Then the host execs the target with only its end of the channel. Anything
+   proven keeper over the pair it made. Then the host execs the target with only its end of the channel, and with the
+   target build's `--node-root` and `--server` in place of its own. Anything
    failing before the exec closes the keeper and leaves the host as it was (its server child started again).
 4. The new image, first thing (`MacHandoverKeeper.takeIfAsked`), makes a fresh pair of its own and sends one end to the
    keeper, which requires: the token's pid its parent (the job's pid), the token running the keeper's own cdhash (the
