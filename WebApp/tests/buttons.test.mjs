@@ -582,3 +582,77 @@ test('B8: where the node doesn’t list config.held or base.show for this page, 
     assert.match(box.textContent, /vibeswitcher base show/);
   }
 });
+
+const ROLELESS = { happened: 'shown', session: 'local:7d3c9a10-4f6a-4c1e-9b7d-2e5a8c0d1f3b', program: null,
+  notes: ['the lead of example-site runs (session 7d3c9a10) without its role, so its tools are off: nothing was started; `vibeswitcher lead /home/dev/projects/example-site --replace` starts a new lead, which takes the role, reads its last turns and gets what waited for it'] };
+
+test('B9: what a lead’s start answered is read only by the engine’s own words: a lead without its role asks to replace it', async () => {
+  const { leadNeeds } = await import('../js/views/drive.js');
+  assert.equal(leadNeeds(ROLELESS), 'replace');
+  assert.equal(leadNeeds({ happened: 'started', notes: [] }), null);
+  assert.equal(leadNeeds({ happened: 'shown', notes: ['the goal is held for the running lead until it can be delivered'] }), null);
+  assert.equal(leadNeeds({ happened: 'started', notes: ROLELESS.notes }), null, 'only when nothing started');
+  assert.equal(leadNeeds(null), null);
+});
+
+test('B9: a lead running without its role: the start says so, then Replace it, its consequence said, asked again in place, sends replace', async () => {
+  const { newLeadForm } = await import('../js/views/drive.js');
+  for (const code of ['es', 'en']) {
+    setLanguage(code);
+    const fresh = 'local:1ead0002-4f6a-4c1e-9b7d-2e5a8c0d1f3b';
+    const app = fakeApp({ route: { name: 'new' }, kinds: ['lead'], state: { node: { home: '/home/dev' } },
+      reply: (kind, args) => (args.replace ? { ok: true, result: { happened: 'started', session: fresh, program: '/usr/bin/claude', notes: [] } } : { ok: true, result: ROLELESS }) });
+    const form = newLeadForm(app);
+    form.choose(SITE_ROOT);
+    buttonNamed(form.el, t('acStartLead')).click();
+    await flush();
+    assert.deepEqual(app.sent.at(-1), { kind: 'lead', args: { folder: SITE_ROOT } });
+    assert.match(form.el.textContent, new RegExp(t('drLeadNoRole').slice(0, 20)));
+    assert.match(form.el.textContent, new RegExp(t('drReplaceWhat').slice(0, 30)), 'its consequence, in a line');
+    const replace = buttonNamed(form.el, t('drReplaceLead'));
+    replace.click();
+    assert.equal(app.sent.length, 1, 'the first click only asks');
+    assert.equal(replace.textContent, t('drReplaceSure'));
+    replace.click();
+    assert.equal(replace.textContent, t('drReplacing'));
+    await flush();
+    assert.deepEqual(app.sent.at(-1), { kind: 'lead', args: { folder: SITE_ROOT, replace: true } });
+    // The new lead's project opens once the node lists it.
+    app.store.state.leads.set(P, { ...quietLead, session: fresh });
+    app.store.notify('leads');
+    const { projectHref } = await import('../js/ui.js');
+    assert.deepEqual(app.went, [projectHref(P)]);
+  }
+  setLanguage('en');
+});
+
+test('B9: a quiet project whose base moved: Take the base as it is, its consequence said, starts the lead with takeHead; else the lines', async () => {
+  const { projectView } = await import('../js/views/project.js');
+  for (const code of ['es', 'en']) {
+    setLanguage(code);
+    const app = fakeApp({ route: { name: 'project', id: P, view: 'lead' }, kinds: ['lead', 'base.show', 'base.accept'],
+      state: { cards: new Map([[MOVED.id, MOVED]]), leads: new Map([[P, quietLead]]) },
+      reply: () => ({ ok: true, result: { happened: 'started', session: 'local:1ead0003-4f6a-4c1e-9b7d-2e5a8c0d1f3b', program: '/usr/bin/claude', notes: [] } }) });
+    const view = projectView(app, { sheet: { open() {}, close() {}, shown: () => false } });
+    view.render();
+    const quiet = find(view.el, byClass('quiet-starts'));
+    assert.ok(quiet, code);
+    assert.doesNotMatch(quiet.textContent, /vibeswitcher lead/, 'no lines where the buttons start it');
+    assert.match(quiet.textContent, new RegExp(t('drTakeBaseWhat', { branch: 'landing-base', to: 'e5a90b1c' }).slice(0, 40)));
+    buttonNamed(quiet, t('drTakeBase')).click();
+    await flush();
+    assert.deepEqual(app.sent.at(-1), { kind: 'lead', args: { folder: SITE_ROOT, resume: true, takeHead: true } });
+  }
+  setLanguage('en');
+  // No moved base: the two starts alone. A page that doesn't act: the lines.
+  const calm = fakeApp({ route: { name: 'project', id: P, view: 'lead' }, kinds: ['lead'], state: { leads: new Map([[P, quietLead]]) } });
+  const a = projectView(calm, { sheet: { open() {}, close() {}, shown: () => false } });
+  a.render();
+  assert.equal(buttonNamed(a.el, 'Take the base as it is'), null);
+  assert.ok(buttonNamed(a.el, 'Start a fresh one'));
+  const reads = fakeApp({ route: { name: 'project', id: P, view: 'lead' }, acts: false, kinds: ['lead'], state: { cards: new Map([[MOVED.id, MOVED]]), leads: new Map([[P, quietLead]]) } });
+  const b = projectView(reads, { sheet: { open() {}, close() {}, shown: () => false } });
+  b.render();
+  assert.equal(buttonNamed(b.el, 'Take the base as it is'), null);
+  assert.match(b.el.textContent, /vibeswitcher lead \/home\/dev\/projects\/example-site --resume/);
+});

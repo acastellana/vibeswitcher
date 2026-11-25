@@ -20,6 +20,7 @@ import { leadLines, shownLines, dialCounts, waitingCards, waitingCount, withPush
 import { projectHref, routeHref } from '../ui.js';
 import { questionStack, pluginCard, copyLine, cardSheet, optionWords } from './cards.js';
 import { heldParts } from './sheet.js';
+import { leadStartOrLine, baseMoveOf } from './drive.js';
 import { tellLine, shellWord, leadLine } from '../actions.js';
 import { pushReceipt } from '../push.js';
 import { pluginFacts } from '../plugincard.js';
@@ -673,17 +674,18 @@ export function projectView(app, { sheet }) {
     sender.update(waysNow());
     setClass(el, 'quiet', !live);
     quiet.hidden = live || route.view !== 'lead' || !root;
-    const quietKey = JSON.stringify([root, live, lang(), store.acts()]);
+    const quietKey = JSON.stringify([root, live, lang(), store.acts(), store.can('lead'), baseMoveOf(app, root)?.id ?? null]);
     if (!quiet.hidden && quietKey !== quietDrawn) {
       quietDrawn = quietKey;
       setText(quietWords, t('quietWords'));
-      // With the `act` right, the two starts are buttons (`lead`, back in its conversation or fresh), the lines beside.
+      // With the `act` right, the two starts are buttons (`lead`, back in its conversation or fresh), and where its base
+      // moved, Take the base as it is with what it does (views/drive.js); the lines where the page doesn't start it.
       const acts = actsFor(app, 'lead');
-      quietLines.replaceChildren(...[acts ? h('div', { class: 'card-acts' },
-        doButton(app, { label: t('acResumeLead'), kind: 'lead', args: () => ({ folder: root, resume: true }) }).el,
-        doButton(app, { label: t('acFreshLead'), kind: 'lead', quiet: true, args: () => ({ folder: root }) }).el) : null,
-      copyLine(`${leadLine(root)} --resume`, 'the command that starts its lead again in its conversation'),
-      copyLine(leadLine(root), 'the command that starts a new lead there')].filter(Boolean));
+      quietLines.replaceChildren(...(acts ? [h('div', { class: 'card-acts quiet-starts' },
+        ...leadStartOrLine(app, { folder: root, extra: () => ({ resume: true }), label: t('acResumeLead') }),
+        ...leadStartOrLine(app, { folder: root, label: t('acFreshLead'), quiet: true, baseChoice: false }))]
+        : [copyLine(`${leadLine(root)} --resume`, 'the command that starts its lead again in its conversation'),
+          copyLine(leadLine(root), 'the command that starts a new lead there')]));
       quietForm.onclick = (event) => { event.preventDefault(); app.startLead?.(root); };
     }
     if (route.view === 'roadmap') { lastProject = null; setClass(el, 'show-asks', false); drawRoadmap(route, board); } else drawLead(route, board, lead);

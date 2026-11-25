@@ -903,23 +903,44 @@ const ago = (seconds) => new Date(now() - seconds * 1000).toISOString();
     if (message.kind === 'lead') {
       const folder = typeof args.folder === 'string' ? args.folder.replace(/\/+$/, '') : '';
       if (!folder.startsWith('/')) return badArgs('lead needs folder, an absolute path');
-      const running = [...leads.values()].find((lead) => folder === lead.root || folder.startsWith(lead.root + '/'));
-      if (running) {
-        return { ok: true, result: { happened: 'shown', session: running.session, program: null, notes: args.goal ? ['your goal is held for the running lead: it reads it at its next step'] : [] } };
+      const known = [...leads.values()].find((lead) => folder === lead.root || folder.startsWith(lead.root + '/'));
+      const running = known && sessions.has(known.session) ? known : null;
+      // A lead that runs without its role (`LeadStart.decide`'s askToReplace): shown, nothing started, unless asked to
+      // replace it.
+      if (running && running.bound !== running.session && !args.replace) {
+        const notes = [`the lead of ${running.root.split('/').pop()} runs (session ${running.session.slice(6, 14)}) without its role, so its tools are off: nothing was started; \`vibeswitcher lead ${running.root} --replace\` starts a new lead, which takes the role, reads its last turns and gets what waited for it`];
+        if (args.goal) notes.push('the goal wasn’t held: a lead without its role gets nothing; give it again with --replace');
+        return { ok: true, result: { happened: 'shown', session: running.session, program: null, notes } };
       }
-      const root = REPOSITORIES.find((repo) => folder === repo || folder.startsWith(repo + '/'));
+      if (running && running.bound === running.session) {
+        const notes = args.goal ? ['the goal is held for the running lead until it can be delivered'] : [];
+        if (args.takeHead) notes.push('--take-head takes the base branch as it is only when a lead starts: the running lead’s stays as recorded (`vibeswitcher base accept` takes it)');
+        return { ok: true, result: { happened: 'shown', session: running.session, program: null, notes } };
+      }
+      const root = known?.root || REPOSITORIES.find((repo) => folder === repo || folder.startsWith(repo + '/'));
       if (!root) return refused(`${folder} isn’t in a git repository: a lead needs one (git init, and a first commit; \`vibeswitcher lead FOLDER --init\` makes them)`);
       if (root === NOTES) return refused(`${root} has no commits yet: workers branch from a commit; make one (git add, git commit), then start the lead`);
+      // A moved base: taken as it is with takeHead (its card settled), else kept checked and said.
+      const moved = [...cards.values()].find((card) => card.kind === 'base' && card.open && card.root === root);
+      const notes = [];
+      if (moved && args.takeHead) {
+        moved.open = false;
+        moved.closed = new Date().toISOString();
+        later(150, () => emit(put('cards', cards, moved.id)));
+      } else if (moved) {
+        notes.push(`${moved.base.branch} moved since the lead last left it (${moved.base.from.slice(0, 8)} to ${moved.base.to.slice(0, 8)}), not through its merges: kept checked, so merges stay refused until \`vibeswitcher base accept\`; \`--take-head\` takes it as it is`);
+      }
       const sid = id(Math.random().toString(16).slice(2, 10).padEnd(8, '0'));
-      const project = `local:project:${Math.random().toString(36).slice(2, 14)}`;
+      const project = known?.project || `local:project:${Math.random().toString(36).slice(2, 14)}`;
       later(200, () => {
+        if (running) emit(setSession(running.session, { role: null, lead: null }));
         add(sid, { cwd: root, role: 'lead', lead: project, status: 'working', since: new Date().toISOString(), startedAt: new Date().toISOString(),
           title: args.goal || null, detail: 'Reading the project’s records', project });
-        leads.set(project, { project, root, session: sid, named: null, bound: sid, replaced: [], held: 0, reportsWaiting: 0, notice: null,
-          starting: false, lastStart: 'started', lastStartAt: new Date().toISOString(), looks: 0, questions: { open: 0, blocking: 0 }, cards: [], told: [], push: null });
+        leads.set(project, { ...(known || { named: null, held: 0, reportsWaiting: 0, notice: null, looks: 0, questions: { open: 0, blocking: 0 }, cards: [], told: [], push: null }),
+          project, root, session: sid, bound: sid, replaced: running ? [running.session] : [], starting: false, lastStart: 'started', lastStartAt: new Date().toISOString() });
         emit(put('sessions', sessions, sid), put('leads', leads, project));
       });
-      return { ok: true, result: { happened: 'started', session: sid, program: `${HOME}/.local/bin/claude`, notes: [] } };
+      return { ok: true, result: { happened: 'started', session: sid, program: `${HOME}/.local/bin/claude`, notes } };
     }
     if (message.kind === 'send') {
       const target = sessions.get(args.session);
