@@ -90,11 +90,12 @@ async function run() {
     const offered = await page.until(`(() => { const b = document.querySelector('.passkey-offer:not([hidden]) button'); if (!b || b.disabled) return null; b.click(); return true; })()`, WAIT);
     // The new key's id as the page shows it, from its own browser's answer (the node never says it): what the user
     // types in the terminal (`web.passkey.add`'s `typed`).
-    const shownID = offered && await page.until(`(() => { const e = document.querySelector('.passkey-id'); const t = e && e.innerText.trim(); return t && /^[A-Za-z0-9_-]{6}$/.test(t) ? t : null; })()`, WAIT);
+    // (The banner's sentence, i18n's pkAdded: "Your new passkey: <6>. Type these 6 characters in the terminal.")
+    const shownID = offered && await page.until(`(() => { const e = document.querySelector('.passkey-offer:not([hidden])'); const m = e && e.innerText.match(/Your new passkey: ([A-Za-z0-9_-]{6})\\./); return m ? m[1] : null; })()`, WAIT);
     await page.shot('passkey-offer');
     if (shownID) fs.writeFileSync(path.join(out, 'passkey.typed'), shownID);
     const kept = shownID && await waitFile(path.join(out, 'passkey.done'), WAIT * 2);
-    record('Register', Boolean(offered && shownID && kept), !offered ? 'no passkey offer on the page' : !shownID ? 'the page showed no id of its new key (.passkey-id)'
+    record('Register', Boolean(offered && shownID && kept), !offered ? 'no passkey offer on the page' : !shownID ? 'the page showed no id of its new key (pkAdded)'
       : !kept ? 'the terminal never kept a key' : `made by the authenticator, its id ${shownID} typed, kept by the terminal, the level confirm`);
     if (!kept) return;
 
