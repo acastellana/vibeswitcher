@@ -180,6 +180,18 @@ public enum WorkerLaunch {
         return found.flatMap { $0.isEmpty ? nil : $0 }
     }
 
+    /// The agent a launch command starts, by its argv (before `--`): the first program word whose name is Claude Code's
+    /// (`claude`, or its versioned binary, `VersionedClaude.isBinary`) or Codex's (`codex`, `codex.js`); nil when none is
+    /// (a plain shell, another program). Words before it (`env`, assignments, a wrapper) are passed over.
+    public static func commandAgent(_ command: String) -> Agent? {
+        for word in words(command).prefix(while: { $0 != "--" }) {
+            let name = (word as NSString).lastPathComponent
+            if name == "claude" || VersionedClaude.isBinary(word) { return .claude }
+            if name == "codex" || name == "codex.js" { return .codex }
+        }
+        return nil
+    }
+
     /// `command`'s words as a POSIX shell splits them: single quotes literal, double quotes with `\` escaping `"`, `\`,
     /// `$` and `` ` ``, a bare `\` escaping the next character (`RecentProjects.shellQuote`'s `'\''` among them).
     static func words(_ command: String) -> [String] {
@@ -229,6 +241,9 @@ public enum WorkerLaunch {
         public var known = false
         /// The `--model` passed (`default` read as none).
         public var model: String?
+        /// The agent the command starts, as its argv says (`commandAgent`); nil: none told apart (a plain shell, an
+        /// unknown program).
+        public var agent: Agent?
         /// Claude Code's default as the vault's home held it (nil: none set, or not read).
         public var defaultModel: String?
         /// The families a worker's launch adds (`families`).
@@ -244,6 +259,7 @@ public enum WorkerLaunch {
         guard let seen else { return BindFacts() }
         var facts = BindFacts(known: true)
         facts.model = seen.command.flatMap(launchModel(command:)).flatMap { $0.lowercased() == "default" ? nil : $0 }
+        facts.agent = seen.command.flatMap(commandAgent)
         let done = DispatchSemaphore(value: 0)
         let result = Found()
         DispatchQueue.global(qos: .userInitiated).async {
@@ -330,6 +346,10 @@ public struct AuditAllowance: Codable, Equatable, Sendable {
     public var model: String
     public var at: Double
     public var usedBy: String?
+    /// A finders' panel that took it: its size then, and the finders (by index) bound on it, each once: never more
+    /// than one panel's worth, whatever grants come later under that panel's name.
+    public var panelSize: Int?
+    public var takenIndices: [Int]?
 }
 
 extension LeadVault {

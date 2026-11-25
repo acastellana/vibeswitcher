@@ -1009,17 +1009,35 @@ extension LeadVault {
                 }
                 // A verifier (or a finder) under a floor that keeps audits off the workers' model: the model its command
                 // passes, never one the vault's record excludes for the task, unless the user allowed it for this audit.
-                var allowanceUse: (task: String, by: String)?
+                // The agent the host started, never only the one the lead declared at the issue: a worker or verifier whose
+                // command is another agent's isn't bound.
+                if member.role != .lead, let launch, launch.known {
+                    let declared = member.agent ?? .claude
+                    if let observed = launch.agent, observed != declared {
+                        return .refused("That session runs \(observed.rawValue), not the \(declared.rawValue) its grant was issued for: it holds no role.")
+                    }
+                    if declared == .codex, launch.agent != .codex {
+                        return .refused("That session doesn't run Codex, which its grant was issued for: it holds no role.")
+                    }
+                }
+                var allowanceUse: (task: String, by: String, finder: Finder?)?
                 if member.role == .verifier, member.session == nil, let task = member.task,
                    let check = verifierBindRefusal(member, task: task, root: root, launch: launch) {
                     guard case .use(let by) = check else {
                         if case .refused(let why) = check { return .refused(why) }
                         return .refused("That verifier can't be bound.")
                     }
-                    allowanceUse = (task, by)
+                    allowanceUse = (task, by, member.finder)
                 }
                 change(root, &changed) { team in
-                    if let allowanceUse { team.auditAllowances?[allowanceUse.task]?.usedBy = allowanceUse.by }
+                    if let allowanceUse, var allowance = team.auditAllowances?[allowanceUse.task] {
+                        allowance.usedBy = allowanceUse.by
+                        if let finder = allowanceUse.finder {
+                            allowance.panelSize = allowance.panelSize ?? finder.size
+                            allowance.takenIndices = (allowance.takenIndices ?? []) + [finder.index]
+                        }
+                        team.auditAllowances?[allowanceUse.task] = allowance
+                    }
                     guard let index = team.members.firstIndex(where: { $0.id == grant }) else { return }
                     if team.members[index].session == nil { team.members[index].boundAt = Date().timeIntervalSince1970 }
                     // A worker's or verifier's commands run from now on (`ConfigSeal`).
@@ -1028,8 +1046,9 @@ extension LeadVault {
                     // A worker's launch, as the host saw its session (`WorkerLaunch`): its families added to the task's.
                     if team.members[index].role == .worker, let task = team.members[index].task, let launch, !launch.families.isEmpty {
                         var all = team.launchedFamilies ?? [:]
-                        // A Codex worker: recorded as Codex (its models aren't Claude's families).
-                        let families = team.members[index].agent == .codex ? [WorkerLaunch.codexFamily] : launch.families
+                        // A Codex worker (its command Codex's, as the host started it): recorded as Codex; a Claude one by its
+                        // models, never Codex in their place.
+                        let families = launch.agent == .codex ? [WorkerLaunch.codexFamily] : launch.families
                         all[task] = Array(Set((all[task] ?? []) + families)).sorted()
                         team.launchedFamilies = all
                         if launch.unread { team.unreadSettings = Array(Set((team.unreadSettings ?? []) + [task])).sorted() }
@@ -1908,8 +1927,8 @@ extension LeadVault {
         private func verifierBindRefusal(_ member: Member, task: String, root: String, launch: WorkerLaunch.BindFacts?) -> VerifierBind? {
             guard let team = team(root), let floor = team.floor, floor.verifierDifferent else { return nil }
             let recorded = Set(team.launchedFamilies?.filter { $0.key == task || $0.key.hasPrefix(task + LeadTeam.joiner) }.values.flatMap { $0 } ?? [])
-            // A Codex verifier: never on a task a Codex worker worked on (its models aren't Claude's families).
-            if member.agent == .codex {
+            // A Codex verifier (its command Codex's: checked at the bind): never on a task a Codex worker worked on.
+            if member.agent == .codex, launch?.agent == .codex {
                 return recorded.contains(WorkerLaunch.codexFamily)
                     ? .refused("Under the review floor a task a Codex worker worked on isn't audited by Codex: this verifier holds no role.") : nil
             }
@@ -1920,13 +1939,19 @@ extension LeadVault {
             if let workers = WorkerLaunch.family(of: floor.workerModel ?? LeadReviewFloor.workersModel(launch.defaultModel)) { excluded.insert(workers) }
             guard excluded.contains(family) else { return nil }
             let by = member.finder.map { "panel:" + $0.panel } ?? "grant:" + member.id
+            // A panel's finders: one panel's worth, each index once, at the size the panel had when it first took it.
+            let panelFits = member.finder.map { finder in
+                (allowance(team, task)?.panelSize ?? finder.size) == finder.size && !(allowance(team, task)?.takenIndices ?? []).contains(finder.index)
+            } ?? true
             guard let allowance = team.auditAllowances?[task], allowance.model == family, let auditing = member.auditing,
-                  allowance.commit == auditing.lowercased(), allowance.usedBy == nil || allowance.usedBy == by else {
+                  allowance.commit == auditing.lowercased(), allowance.usedBy == nil || allowance.usedBy == by, panelFits else {
                 return .refused("Under the review floor an audit of \(task) never runs on \(family), a model its workers ran on (by the vault's record), "
                                 + "unless the user allowed it for this commit: this verifier holds no role.")
             }
             return .use(by)
         }
+
+        private func allowance(_ team: Team, _ task: String) -> AuditAllowance? { team.auditAllowances?[task] }
 
         private func isLead(_ caller: Caller, _ root: String) -> Bool {
             guard case .session(let session) = caller else { return false }

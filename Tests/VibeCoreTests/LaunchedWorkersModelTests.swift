@@ -580,4 +580,43 @@ extension LeadAdvanceTests {
             return
         }
     }
+
+    /// The agent is the host's, not the lead's word: a worker declared Codex whose command is `claude --model fable`, and
+    /// a verifier declared Codex with a Claude command, hold no role; the task's record stays the true one.
+    @Test func aDeclaredAgentTheCommandBeliesIsntBound() {
+        let (book, root, commit) = floorBook()
+        guard case .grant(let worker) = book.answer(.issue(role: .worker, root: root, task: "t", auditing: nil, agent: .codex), from: .session("lead")) else { return }
+        guard case .refused = book.answer(.bind(grant: worker, root: root, session: "fake-codex"), from: .session("lead"),
+                                          bound: .init(command: "claude --model fable -- go")) else {
+            Issue.record("a Claude worker declared Codex was bound")
+            return
+        }
+        #expect(book.answer(.launchedFamilies(root: root, task: "t"), from: .app) == .families(["fable"]))
+        guard case .refused = bindVerifier(book, root: root, commit: commit, session: "fake-codex-v", command: "claude --model fable -- go", agent: .codex) else {
+            Issue.record("a Claude verifier declared Codex was bound")
+            return
+        }
+        // A Claude grant whose session runs Codex isn't bound either.
+        guard case .refused = bindVerifier(book, root: root, commit: commit, session: "codex-as-claude", command: "codex -m gpt-6") else {
+            Issue.record("a Codex session bound on a Claude grant")
+            return
+        }
+        #expect(WorkerLaunch.commandAgent("env FOO=1 '/home/u/.local/share/claude/versions/2.1.282' --model opus -- go") == .claude)
+        #expect(WorkerLaunch.commandAgent("/usr/bin/node /x/@openai/codex/bin/codex.js -m gpt-6") == .codex)
+        #expect(WorkerLaunch.commandAgent("bash -l") == nil)
+    }
+
+    /// A finder issued later under a panel's name that took the allowance isn't bound on it: one panel's worth, each
+    /// index once.
+    @Test func aFinderIssuedLaterUnderTheSamePanelIsntBound() {
+        let (book, root, commit) = floorBook()
+        allow(book, root: root, commit: commit, model: "fable")
+        func finder(_ index: Int) -> LeadVault.Finder { .init(panel: "p", index: index, size: 2, focus: "f", nitCap: 3) }
+        #expect(bindVerifier(book, root: root, commit: commit, session: "f1", command: "claude --model fable -- go", finder: finder(1)) == .ok)
+        #expect(bindVerifier(book, root: root, commit: commit, session: "f2", command: "claude --model fable -- go", finder: finder(2)) == .ok)
+        guard case .refused = bindVerifier(book, root: root, commit: commit, session: "f1-again", command: "claude --model fable -- go", finder: finder(1)) else {
+            Issue.record("a later finder under the panel's name used it")
+            return
+        }
+    }
 }
