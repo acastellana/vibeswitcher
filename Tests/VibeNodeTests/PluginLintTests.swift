@@ -145,8 +145,9 @@ struct PluginLintTests {
     @Test func noNewCardKindOrFieldOutsideTheRegistry() {
         #expect(CardStore.Kind.allCases.map(\.rawValue) == ["question", "approval", "config", "base", "plugin"])
         let fields = Mirror(reflecting: CardStore.Card(root: "/r", kind: .plugin)).children.compactMap(\.label)
-        #expect(fields == ["id", "code", "project", "root", "kind", "question", "approval", "config", "base", "plugin", "notice", "closed", "at",
-                           "closedAt", "draft"], "\(fields)")
+        // `facts`: the vault's facts on a question the lead's audit asked (the review of 6a610ed8, A1: reviewed there).
+        #expect(fields == ["id", "code", "project", "root", "kind", "question", "approval", "config", "base", "plugin", "notice", "facts", "closed",
+                           "at", "closedAt", "draft"], "\(fields)")
     }
 
     /// A plugin's own code (`Plugins/<Name>/`) reaches the node through its desk only: no card store, no host link, no

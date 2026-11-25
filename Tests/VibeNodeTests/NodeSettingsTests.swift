@@ -77,8 +77,9 @@ struct NodeSettingsTests {
             #expect(LeadWorkflow.configurable.contains(setting.key), "\(setting.key)")
         }
         #expect(Set(NodeSettings.all.filter(\.guardRail).map(\.key)) == ["security_audit_model", "max_workers"])
-        // Each floor rule is one of the app's floor editor's rows.
-        #expect(NodeSettings.all.filter { $0.home == .floor }.count == 8)
+        // Each floor rule is one of the app's floor editor's rows, and worker_model (the node's: the Mac's editor has
+        // no row for it, so a Mac save leaves it unset).
+        #expect(NodeSettings.all.filter { $0.home == .floor }.count == 9)
         // The machine-wide keys configure refuses (`LeadWorkflow.macKeys`) are the node's, never a project's.
         for key in LeadWorkflow.macKeys { #expect(NodeSettings.setting(key)?.scope != .project, "\(key)") }
     }

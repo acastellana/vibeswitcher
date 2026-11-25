@@ -26,8 +26,9 @@ struct CodexWorkerTests: LeadTeamFixture {
 
     /// A stand-in for Codex: writes each argument it was given, NUL-separated, to `log`, and exits.
     func fakeCodex(log: String) throws -> String {
-        // In a folder of the scratch's own (removed with it).
-        let folder = temp.url("bin").path
+        // In a folder of the scratch's own (removed with it), laid out as Codex's npm package is (the vault tells Codex
+        // from what a session's command runs: `WorkerLaunch.commandAgent`).
+        let folder = temp.url("prefix").appendingPathComponent("lib/node_modules/@openai/codex/bin").path
         try FileManager.default.createDirectory(atPath: folder, withIntermediateDirectories: true)
         let path = folder + "/codex"
         try installScript("#!/bin/sh\nprintf '%s\\0' \"$@\" > '\(log)'\n", atPath: path)

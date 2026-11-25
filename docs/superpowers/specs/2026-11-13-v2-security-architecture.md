@@ -2428,6 +2428,43 @@ the bootstrap path's [Decisions awaiting the user](../plans/2026-11-13-v2-bootst
 with what only the user can do on the machine beside them. "Decision N" in this document is that list's tag DN. The
 answers go into the design's Decided section before stage 2's Task 2.
 
+**Open, for the user (2026-11-25): the lead and the workers'-model rule.** The review floor's "audits never run on
+the workers' model" keeps an audit off the workers' model (the floor's `worker_model` when the user set it, else
+Claude Code's default), the task's own and launched models, and every model family the host recorded for the task's
+worker launches (`WorkerLaunch`, only ever added to). It doesn't cover a lead that writes a task's code itself: the
+lead's own model (lead_model, Fable by default) isn't in the set, so such code can be audited on the lead's model.
+Nor does it cover a worker's `--advisor`: an advisor on the audit's model shapes the work it judges. Adding either
+would keep audits off Fable on every project whose lead (or advisors) run on Fable, the user's set-up today, so it is
+the user's call: keep it as is, add the lead's model, add advisors, or both.
+
+What the rule still can't see of a worker's model (the review of 97a8758a), each only narrowing it, none an unlock:
+(a) an alias remapped by a worktree's settings `env` (ANTHROPIC_DEFAULT_OPUS_MODEL makes `--model opus` run another
+model). Narrowed: under the floor a worker launches by the family's full id (`WorkerLaunch.fullID`, the ids this build
+knows, `currentIDs`), every team session's `--settings` pins ANTHROPIC_DEFAULT_<FAMILY>_MODEL to those ids and
+ANTHROPIC_MODEL to its own model (`WorkerLaunch.pins`), and what a worktree's settings name is added to the task's
+record at the bind. **Unverified:** that `--settings` (which Claude Code's docs rank above project and local settings)
+wins key by key inside `env`, rather than one `env` block replacing or losing to another. The one check that settles
+it, under the test rules (a scratch home and a scratch repository, never the user's; after the test account's limit
+resets): a repository whose `.claude/settings.local.json` has `"env": {"ANTHROPIC_DEFAULT_OPUS_MODEL":
+"claude-sonnet-5-5"}`, then `claude -p "hi" --model opus --settings '{"env": {"ANTHROPIC_DEFAULT_OPUS_MODEL":
+"claude-opus-5-5"}}'` in it, and the transcript's `message.model` read: `claude-opus-5-5` means the pin wins.
+Not checked after the bind (the review of 45c62592, V3): a verifier's or finder's session keeps its role for its
+life, so a process in it that ends its agent and starts `claude --model <excluded>` in the same session gives its
+verdict with the bind's judgement. The two ways to close it: the host drops the role when the session's first agent
+process exits (a new verdict then needs a new, judged bind), or the vault checks, at `submitVerdict` and a ballot, that
+the caller's agent process is the one that was running at the bind. Only that check of the running agent's executable
+also closes what a bind's reading of the command can't: a same-uid writer putting a program under Claude Code's or
+Codex's install folders (`~/.local/share/claude/versions/`, a `lib/node_modules` package) or behind the node's links, a
+PATH in the session's inherited environment that a bare `claude` or `codex` is found by, and a file swapped after the
+bind looked at it.
+Also not seen, with (a): a race on the worktree's settings, written before the worker starts (it reads them), then
+deleted before the bind reads them (the host's read at the bind finds nothing to add).
+(b) `/model` typed in a worker's session; (c) a `claude -p` child the worker starts with a `--model` of its own;
+(d) subagents' own models (an agent definition's `model`, the Agent tool's `model`): workers keep the project's hooks
+and MCP servers, so nothing stops one. The known way to cover it, the user's call: a VibeSwitcher `PreToolUse` hook
+on the Agent tool that refuses (or records, to add to the task's launches) a `model` other than the session's own;
+(e) `--fallback-model`, or Claude Code's own fallback when a model is overloaded.
+
 ### The author's calls the user doesn't need to confirm
 
 From the plan: S2-D2 (the Mac-only bodies move into `VibePlatform`), S2-D4 (per-message credentials), S2-D5

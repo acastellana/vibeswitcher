@@ -1151,6 +1151,11 @@ public final class LeadToolset: MCPToolset {
         guard text.count <= 100, text.unicodeScalars.allSatisfy({ $0.isASCII && allowed.contains($0) }) else {
             throw Problem(text: "\(key) is one word, a model's name as claude --model takes it (sonnet, opus, fable, claude-sonnet-5-5), not “\(Self.clip(text, 60))”. Nothing was changed.")
         }
+        // Under a floor that keeps audits off the workers' model, a name it can't tell the model of (an alias such as
+        // default or best, a custom id) would put a worker on a model the rule can't keep its audit off.
+        if !text.isEmpty, workflow.floor?.verifierDifferent == true, !WorkerLaunch.namesOne(text) {
+            throw Problem(text: "\(key) \(Self.clip(text, 60)) doesn't say which model it is, and the review floor keeps audits off the workers' model: name a model: fable, opus, sonnet, haiku or mythos, or its claude-… id. Nothing was changed.")
+        }
         return text
     }
 
@@ -2301,7 +2306,7 @@ public final class LeadToolset: MCPToolset {
     // MARK: The account's usage (see `AccountUsage`)
 
     /// The model a task's worker runs on: its own (add_task's `model`), else the project's Claude command's.
-    func workerModel(for task: LeadTask) -> String? { task.intendedModel ?? runtime.workerModel(root: root) }
+    func workerModel(for task: LeadTask) -> String? { task.intendedModel ?? workflow.floor?.workerModel ?? runtime.workerModel(root: root) }
 
     /// The model a session of the team was started on, as its task noted at its start (`LeadTask.launchedModels`); nil
     /// for Claude's default or a session no task names: not known. Never the task's model or verifier_model as they are
@@ -3099,11 +3104,21 @@ public final class LeadToolset: MCPToolset {
         // The team's refusals kept first: one at the Fable limit moves the audit to another model (`auditModel`).
         _ = accountUsage(sessions: sessions)
         // A sensitive or security branch is audited on security_audit_model (where the floor allows it).
-        let verifierModel = auditModel(workflow, task: task, security: security != nil)
+        guard let pick = auditPick(workflow, task: task, security: security != nil) else {
+            // Every model is one the floor keeps this audit off: held, and the user asked, never run on one of those.
+            let why = workersBasis(task, projectDefault: runtime.workerModel(root: root), workflow: workflow).text
+            throw Problem(text: "Not audited, no verifier started: \(why), with the task's own model, and no model is left. "
+                          + askWhichModelAudits(task, head: head, why: why) + " Once they answer, audit again.")
+        }
+        let verifierModel = pick.model
         let fallback = security != nil && LeadReviewFloor.sameModel(workflow.securityAuditModel, AccountUsage.heldBackFamily)
             && !LeadReviewFloor.sameModel(verifierModel, workflow.securityAuditModel)
             ? fableFallback()?.fableHeldBack(now: usageClock()) : nil
-        let modelNotice = fallback.map { " on \(verifierModel) in Fable's place: Fable held back until \(UsageLimit.resetText(AccountUsage.ends($0)))" } ?? ""
+        // Under a floor that keeps audits off the workers' model, what their model was judged by (`WorkerLaunch.basis`):
+        // in the audit's reply and its progress line, so why a model was passed over can be seen.
+        let basis = workflow.floor?.verifierDifferent == true ? workersBasis(task, projectDefault: runtime.workerModel(root: root), workflow: workflow).text : nil
+        let modelNotice = (fallback.map { " on \(verifierModel) in Fable's place: Fable held back until \(UsageLimit.resetText(AccountUsage.ends($0)))" } ?? "")
+            + (basis.map { " (on \(verifierModel): \($0))" } ?? "")
         // Near one of the account's usage limits on the audits' model: a verifier started now would stop mid-audit at it.
         let instead = security == nil ? "audit on another model (configure verifier_model, e.g. opus)"
             : "let it wait: this sensitive or security audit runs on \(verifierModel) under the review floor"
@@ -3190,6 +3205,8 @@ public final class LeadToolset: MCPToolset {
             board.tasks[index].evidence = nil
         }
         launched = true
+        // The audit's line in the progress log says what the workers' model was judged by, as its reply does.
+        if let basis { try? store.appendProgress("Audit of \(slug) on \(verifierModel): \(basis).") }
         // An update_task while it started went to no verifier yet (the board named none, or the one before): sent now.
         let amended = sendContractChange(slug).map { " " + $0 } ?? ""
         // The verifier is up: its worker, idle since its done report, needn't hold a Mac slot through the audit.
@@ -3291,7 +3308,11 @@ public final class LeadToolset: MCPToolset {
     }
 
     /// The model this project's audits run on: verifier_model, or another than the workers' (see `LeadWorkflow.auditModel`).
-    /// `task`: the task audited, whose own model (add_task's model) counts as the workers' under the floor.
+    /// `task`: the task audited, whose own model (add_task's model) counts as the workers' under the floor. The workers'
+    /// models are the floor's worker_model when the user set one, else the project's default (Claude Code's model:
+    /// `LeadRuntime.workerModel`), and every family the host recorded for the task's and its members' launches
+    /// (`workersBasis`): the record only ever adds. The lead's own model isn't one of them (the security architecture's
+    /// open list). When they leave no model, the audit is held and the user asked (`auditChoice`).
     /// While Fable is held back (`AccountUsage.fableHeldBack`), the workers' model and the task's are the ones their
     /// sessions start on (opus in Fable's place), and the audit goes on the most capable model that isn't Fable and that
     /// the floor allows.
@@ -3302,26 +3323,82 @@ public final class LeadToolset: MCPToolset {
     /// the same automatic fallback as other audits: the most capable other model the floor allows, even with no
     /// verifier_model set. At the reset the ordinary Fable preference applies again.
     func auditModel(_ workflow: LeadWorkflow, task: LeadTask? = nil, security: Bool = false) -> String {
-        let workers = runtime.workerModel(root: root)
+        auditChoice(workflow, task: task, security: security) ?? LeadWorkflow.noneLeft
+    }
+
+    /// `auditModel`'s choice for an audit to start on: nil when the floor excludes every model and the user allowed
+    /// none for the task at its branch's head (`auditPick`): the audit is held.
+    func auditChoice(_ workflow: LeadWorkflow, task: LeadTask? = nil, security: Bool = false) -> String? {
+        auditPick(workflow, task: task, security: security)?.model
+    }
+
+    /// The model, and the user's allowance it came from (`AuditAllowance`, their answer to `askWhichModelAudits`) when
+    /// the floor left none: one for the task at exactly its branch's head now, used once (`audit` consumes it).
+    func auditPick(_ workflow: LeadWorkflow, task: LeadTask? = nil, security: Bool = false) -> (model: String, allowance: AuditAllowance?)? {
+        if let model = floorChoice(workflow, task: task, security: security) { return (model, nil) }
+        // The vault takes it at the verifier's bind (`AuditAllowance.usedBy`): one taken isn't offered again.
+        guard let task, let allowance = vault.auditAllowance(root: root, task: task.slug), allowance.usedBy == nil,
+              branchHead(Worktrees.branch(task.slug)) == allowance.commit else { return nil }
+        return (allowance.model, allowance)
+    }
+
+    private func floorChoice(_ workflow: LeadWorkflow, task: LeadTask?, security: Bool) -> String? {
         let launched = task.flatMap { task in task.worker.flatMap { task.launchedModels?[$0] } }
             .flatMap { $0.isEmpty || $0.hasPrefix("codex") ? nil : $0 }
         // A re-rolled task's Fable counts as its own model (`LeadTask.intendedModel`).
         let taskModel = task?.intendedModel
         let usage = fableFallback()
         let now = usageClock()
-        let effectiveWorkers = usage?.startModel(workers, now: now) ?? workers
+        // worker_model, else the project's default (as a worker would start on it now: Opus in Fable's place while Fable
+        // is held back), and what the host recorded for the task's launches.
+        let projectDefault = runtime.workerModel(root: root)
+        let workers = workersBasis(task, projectDefault: usage?.startModel(projectDefault, now: now) ?? projectDefault, workflow: workflow).workers
         let effectiveTask = usage?.startModel(taskModel, now: now) ?? taskModel
-        let chosen = workflow.auditModel(workerModel: effectiveWorkers, taskModel: effectiveTask,
-                                         launchedModel: launched, heldBack: usage == nil ? nil : AccountUsage.heldBackFamily, security: security)
-        guard workflow.codexVerifier == .fallback, usageHold(model: chosen, sessions: nil) != nil else { return chosen }
+        let chosen = workflow.auditModelChoice(workerModel: workers.first ?? nil, moreWorkers: Array(workers.dropFirst()), taskModel: effectiveTask,
+                                               launchedModel: launched, heldBack: usage == nil ? nil : AccountUsage.heldBackFamily, security: security)
+        guard let chosen, workflow.codexVerifier == .fallback, usageHold(model: chosen, sessions: nil) != nil else { return chosen }
         // Preserve verifier_model while it has room. At a limit, try the remaining Claude models in capability
-        // order before Codex, keeping the same worker-model exclusions as the existing Fable fallback.
+        // order before Codex, keeping the same exclusions as the choice (every workers' model, the task's, its worker's).
         let different = workflow.floor?.verifierDifferent == true
+        let excluded = workers.map(LeadReviewFloor.workersModel)
         return ["fable", "opus", "sonnet"].first { model in
-            (!different || (![LeadReviewFloor.workersModel(effectiveWorkers), effectiveTask, launched].contains {
-                LeadReviewFloor.sameModel(model, $0)
-            })) && usageHold(model: model, sessions: nil) == nil
+            (!different || !LeadWorkflow.excluded(model, workers: excluded, taskModel: effectiveTask, launchedModel: launched))
+                && usageHold(model: model, sessions: nil) == nil
         } ?? chosen
+    }
+
+    /// The floor left no model for `task`'s audit at `head`: the user is asked which may audit it (once while the
+    /// question is open), each option "Audit <task> at <head's 12> on <model>", and the vault told the question is the
+    /// audit's (`AuditOffer`): only an answer to it, recorded by the app, allows a model, for that commit, once. What to
+    /// say.
+    func askWhichModelAudits(_ task: LeadTask, head: String, why: String) -> String {
+        let short = String(head.prefix(12))
+        let question = "Audit \(task.slug) at \(short): every model is one this task's workers ran on (\(why)), and the review floor keeps audits off those. Which may audit it at this commit?"
+        let options = (LeadWorkflow.byCapability + [LeadWorkflow.lastResortAuditModel]).map { "Audit \(task.slug) at \(short) on \($0)" }
+        let digest = AuditOffer.questionDigest(text: question, options: options)
+        let asked: LeadQuestion
+        var new = false
+        // Asked once while open: only a question this audit made and the vault holds its offer for, at this commit, as
+        // asked (never one found by its words: a lead could have written those first).
+        if let open = store.load().questions.first(where: { question in
+            question.isOpen && question.task == task.slug
+                && vault.auditOffer(root: root, question: question.id).map { $0.commit == head && $0.digest == digest } == true
+                && AuditOffer.questionDigest(text: question.text, options: question.options) == digest
+        }) {
+            asked = open
+        } else {
+            new = true
+            guard let made = try? store.update({ board in
+                board.ask(question, options: options, priority: .important, whyNow: nil, proposal: nil, decideIn: nil, task: task.slug)
+            }) else { return "The question couldn't be put on the board: ask again by auditing again." }
+            asked = made
+        }
+        // The vault told first, so the card the node draws for it finds the offer (its facts).
+        do { try vault.offerAuditModels(root: root, task: task.slug, commit: head, question: asked.id, digest: digest) } catch {
+            return "The user is asked (\(asked.short)), but the vault didn't take the question as the audit's (\(error)): their answer won't allow a model. Audit again."
+        }
+        if new { NodeQuestionPost.post(asked, op: .post, root: root, vault: vault) }
+        return "The user is asked which model may audit it (\(asked.short)): the audit waits for their answer."
     }
 
     /// The model `task`'s audit at `head` runs on, as `audit` picks it: security_audit_model for a sensitive or security branch where
@@ -3364,12 +3441,10 @@ public final class LeadToolset: MCPToolset {
         guard !sensitive.isEmpty || codexWorked else { return }
         let baseline = Git.run(["merge-base", onto, head], in: root)
         // Both are known commits of a successfully tested merge. An unreadable baseline keeps the obligation.
-        let launched = task.worker.flatMap { task.launchedModels?[$0] }.flatMap { $0.isEmpty || $0.hasPrefix("codex") ? nil : $0 }
         // A Codex-worked branch touching no sensitive_paths can still be a security one (`securityReason`).
         let security = Self.securityReason(root: root, head: head, workflow: before, raised: task.riskRaised, sensitive: sensitive) != nil
         task.claudeReaudit = LeadClaudeReaudit(head: head, base: baseline.ok ? baseline.output : onto,
-                                             model: workflow.auditModel(workerModel: runtime.workerModel(root: root), taskModel: task.intendedModel,
-                                                                        launchedModel: launched, security: security), sensitive: sensitive,
+                                             model: auditModel(workflow, task: task, security: security), sensitive: sensitive,
                                              codexWorked: codexWorked ? true : nil)
     }
 
@@ -3388,7 +3463,21 @@ public final class LeadToolset: MCPToolset {
                let info = sessions.first(where: { $0.id == session }), info.live, info.usageLimit == nil, runtime.agentEnding(info) == nil {
                 return MCPToolResult(text: "Post-merge Claude re-audit of \(slug) is already running (session \(session)).")
             }
-            if let refusal = usageRefusal(model: followup.model, sessions: sessions, not: "No post-merge Claude verifier started",
+            // Whether it's a security audit, decided once, as the merge noted it (`noteCodexMerge`: sensitive paths, or
+            // `securityReason` on the pinned baseline: a raised risk, the risk model): its model and its prompt both by it.
+            var pinned = workflow
+            pinned.baseBranch = followup.base
+            let security = followup.sensitive.isEmpty
+                ? Self.securityReason(root: root, head: followup.head, workflow: pinned, raised: task.riskRaised, sensitive: [])
+                : "it merged over sensitive_paths: " + followup.sensitive.joined(separator: ", ")
+            // Chosen now, as every audit is (`auditPick`: the vault's exclusions and the board's): never the noted text of a
+            // choice that found none, nor a model the verifier's bind would refuse.
+            guard let model = auditPick(workflow, task: task, security: security != nil)?.model else {
+                let why = workersBasis(task, projectDefault: runtime.workerModel(root: root), workflow: workflow).text
+                throw Problem(text: "No post-merge Claude verifier started: \(why), with the task's own model, and no model is left. "
+                              + askWhichModelAudits(task, head: followup.head, why: why) + " Once they answer, start it again.")
+            }
+            if let refusal = usageRefusal(model: model, sessions: sessions, not: "No post-merge Claude verifier started",
                                           what: "audit(\(slug))", instead: "wait for Claude's reset") { throw Problem(text: refusal) }
             // One of this project's audits too: within heavy_slots (`claimAuditStart`).
             try claimAuditStart(slug, workflow: workflow, sessions: sessions, override: overrideSlots, not: "No post-merge Claude verifier started")
@@ -3400,8 +3489,6 @@ public final class LeadToolset: MCPToolset {
             }
             let opened = try openAudit(slug, head: followup.head, not: "No post-merge Claude verifier started")
             _ = try endEarlierVerifiers(task, not: "No post-merge Claude verifier started")
-            var pinned = workflow
-            pinned.baseBranch = followup.base
             let ledger = vault.audits(root: root, task: slug)
             let known = ledger.map { ledger in
                 "\nEarlier findings (give every open one its id and status in submit_audit; closed ones stay closed):\n"
@@ -3409,9 +3496,7 @@ public final class LeadToolset: MCPToolset {
             } ?? ""
             let prompt = LeadPrompts.verifier(task: task, root: root, workflow: pinned, notes: leadNotes(opened),
                                               report: doneReport(task, head: followup.head), guide: LeadRisk.reviewGuide(root: root, base: workflow.base),
-                                              security: followup.sensitive.isEmpty
-                                                ? Self.securityReason(root: root, head: followup.head, workflow: pinned, raised: task.riskRaised, sensitive: [])
-                                                : "it merged over sensitive_paths: " + followup.sensitive.joined(separator: ", "))
+                                              security: security)
                 + "\nThis is the independent post-merge Claude re-audit required after a Codex fallback verdict"
                 + (followup.codexWorked == true ? " on a task Codex worked on" : "") + ". Review the whole change against the pinned baseline "
                 + followup.base + ", not only the earlier findings. It is already merged: report Important findings to the lead through submit_audit; don't merge or change it." + known
@@ -3419,7 +3504,7 @@ public final class LeadToolset: MCPToolset {
                                      label: "Verifier: \(task.title) (post-merge Claude re-audit)",
                                      trust: Worktrees.committedAgentConfig(root: root, slug: slug, base: followup.base).isEmpty
                                         && Worktrees.localAgentConfig(root: root, slug: slug).isEmpty,
-                                     prompt: prompt, start: "Audit the merged task independently now, then call submit_audit.", model: followup.model, auditing: followup.head)
+                                     prompt: prompt, start: "Audit the merged task independently now, then call submit_audit.", model: model, auditing: followup.head)
             try store.update { board in
                 guard let index = board.taskIndex(slug) else { return }
                 board.tasks[index].verifier = session
@@ -3430,7 +3515,7 @@ public final class LeadToolset: MCPToolset {
                 board.tasks[index].claudeReaudit?.limitedUntil = nil
                 // Only the lead starts one that stopped after its endings (auto_advance leaves it): its count starts over.
                 if followup.stopped { board.tasks[index].claudeReaudit?.endings = nil }
-                board.tasks[index].launched([session], on: followup.model)
+                board.tasks[index].launched([session], on: model)
             }
             // auto_advance stopped watching it at its endings: it looks again (merged tasks get no verifier-death notice).
             if followup.stopped { LeadAdvance.nudge(root: root) }
@@ -6161,7 +6246,7 @@ public final class LeadToolset: MCPToolset {
             throw Problem(text: "Nothing was changed: the session host couldn't say what floor the user set for the review rules (\(error)), so \(rules.map(\.key).joined(separator: ", ")) can't be checked against it. Try again.")
         }
         guard let floor else { return }
-        let model = runtime.workerModel(root: root)
+        let model = floor.workerModel ?? runtime.workerModel(root: root)
         let refused = rules.compactMap { floor.refusal(key: $0.key, value: $0.value, workerModel: model) }
         guard !refused.isEmpty else { return }
         throw Problem(text: "Nothing was changed: \(refused.joined(separator: "; ")). The user set that floor in \(LeadReviewFloor.place); "
@@ -7265,7 +7350,7 @@ public final class LeadToolset: MCPToolset {
         if let line = sleepCost().statusLine(root: root, now: Date()) { lines.append(line) }
         // One line, only where the floor holds a rule above workflow.md: status stays bounded on a big board;
         // configure() shows every rule.
-        if let line = workflow.floor?.statusLine(workflow, workerModel: runtime.workerModel(root: root)) { lines.append(Self.clip(line, 600)) }
+        if let line = workflow.floor?.statusLine(workflow, workerModel: workflow.floor?.workerModel ?? runtime.workerModel(root: root)) { lines.append(Self.clip(line, 600)) }
         if let line = teamPluginsStatusLine(workflow) { lines.append(Self.clip(line, 600)) }
         if let line = heavyLockLine(board) { lines.append(line) }
         lines += usageLines(sessions: listing)

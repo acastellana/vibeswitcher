@@ -230,6 +230,11 @@ export function questionCard(app, first, { expand = null } = {}) {
     // "Read it all" when there is more than those lines show: a long text, its markdown, or an approval's files.
     if (context.length > 200 || /\n|\*\*|`/.test(question.text || '') || card.kind === 'approval') el.append(h('p', { class: 'card-whole' }, readAll()));
     if (card.kind === 'approval' && card.approval) el.append(keyFacts(card.approval));
+    // What the vault says beside the lead's words, on a question the lead's audit asked (which model may audit a task).
+    if (Array.isArray(card.facts) && card.facts.length) {
+      el.append(h('div', { class: 'facts' }, h('div', { class: 'facts-head' }, t('cVaultFacts')),
+        h('ul', null, card.facts.map((fact) => h('li', null, fact)))));
+    }
     if (question.whyNow) el.append(h('p', { class: 'card-why' }, question.whyNow));
     if (question.revisionNote) el.append(h('p', { class: 'card-revised' }, `${t('cUpdated')}: ${question.revisionNote}`));
 

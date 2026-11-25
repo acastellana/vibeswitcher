@@ -191,6 +191,10 @@ public enum NodeSettings {
             Setting(key: "floor_verifier_different", title: "Verifier never on the workers' model",
                     about: "Keeps audits on a different model from the one the workers use.",
                     section: "Review rules floor", scope: .project, form: .flag, home: .floor, page: .terminalOnly("a review rule's floor: a page's token would lower what holds its own merge")),
+            Setting(key: "floor_worker_model", title: "Workers' model",
+                    about: "The model every worker starts on, unless its task names one; audits are then kept off it in place of Claude Code's default.",
+                    section: "Review rules floor", scope: .project, form: .model, home: .floor,
+                    page: .terminalOnly("a review rule's floor: a page's token would choose the model its own audits are kept off")),
         ]
     }
 
@@ -351,11 +355,22 @@ public enum NodeSettings {
         case "floor_risk_model": return (flag(floor.riskModel), flag(none.riskModel))
         case "floor_audit_sample_percent": return (String(floor.auditSamplePercent), String(none.auditSamplePercent))
         case "floor_verifier_different": return (flag(floor.verifierDifferent), flag(none.verifierDifferent))
+        case "floor_worker_model": return (floor.workerModel ?? "Claude Code's default", "Claude Code's default")
         default: return ("", "")
         }
     }
 
     static func flag(_ on: Bool) -> String { on ? "on" : "off" }
+
+    /// What setting the floor's worker_model to `model` (nil: cleared) changes, said before the code.
+    public static func workerModelEffect(_ model: String?) -> String {
+        guard let model else {
+            return "Cleared: workers start on Claude Code's default again, and under the floor audits are kept off it, as before."
+        }
+        return "Every worker of the project then starts with --model \(model) unless its task names a model, and under the floor audits are "
+            + "kept off \(model) (and off every model a worker of the task was launched on) in place of Claude Code's default. "
+            + "Workers already running keep their model."
+    }
 
     static func boostMode(_ store: (any SettingsStore)?) -> BoostMode {
         BoostMode(rawValue: store?.string(forKey: "boostMode") ?? "") ?? .off
@@ -408,8 +423,8 @@ public enum NodeSettings {
                 return .failure(Refusal("\(setting.key) is one word, a model's name as claude --model takes it (fable, opus, sonnet, claude-opus-5-5)"))
             }
             let model = setting.key == "verifier_model" ? text : text.lowercased()
-            if setting.key == "security_audit_model", !LeadReviewFloor.knownModel(model) {
-                return .failure(Refusal("security_audit_model \(model) doesn't say which model it is (name one: mythos, fable, opus, sonnet, haiku, or its claude-… id)"))
+            if setting.key == "security_audit_model" ? !LeadReviewFloor.knownModel(model) : setting.key == "floor_worker_model" && !WorkerLaunch.namesOne(model) {
+                return .failure(Refusal("\(setting.key) \(model) doesn't say which model it is (name one: mythos, fable, opus, sonnet, haiku, or its claude-… id)"))
             }
             return .success(model)
         case .paths:

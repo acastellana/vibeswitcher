@@ -98,6 +98,10 @@ public enum CardText {
             }
             if let reason = question["withdrawReason"]?.string { lines.append("  withdrawn (the lead's reason): " + inert(reason)) }
         }
+        if let facts = card["facts"]?.array?.compactMap(\.string), !facts.isEmpty {
+            lines.append("  from the vault, not the lead's words:")
+            for fact in facts { lines.append("    " + inert(fact)) }
+        }
         if let approval = card["approval"], approval != .null {
             lines.append("  approval of commit \(inert(approval["commit"]?.string)), from git: " + inert(approval["subject"]?.string ?? "(no subject)"))
             let tasks = approval["tasks"]?.array?.compactMap(\.string) ?? []

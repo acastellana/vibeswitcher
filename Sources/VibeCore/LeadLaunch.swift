@@ -646,6 +646,9 @@ public enum LeadLaunch {
                                                            + auditLogReads(role, root: root, task: task, logs: auditLogs),
                                                        "deny": rules]]
         var env = environment(role)
+        // The aliases pinned to their ids, and ANTHROPIC_MODEL to this session's model (`WorkerLaunch.pins`): a
+        // worktree's settings `env` remapping one would otherwise run another model than the one recorded.
+        env.merge(WorkerLaunch.pins(model: model)) { mine, _ in mine }
         if role == .verifier {
             // Never started with its commands as itself (see `verifierEnvironment`).
             guard BranchCode.prefixable(server) else { throw VerifierUnsafe(server: server) }
@@ -1119,15 +1122,21 @@ public enum LeadLaunch {
     }
 
     /// A worker's run on `task`. Claude: the task's model, else Fable once it's been re-rolled (`rerollModel`), else the
-    /// command's; its advisor (none: no advisor), else worker_advisor; its effort, else high for a hard task. Codex: no
+    /// review floor's worker_model (the user's: an explicit `--model` on every launch), else the command's; its advisor (none: no advisor), else worker_advisor; its effort, else high for a hard task. Codex: no
     /// advisor (a Claude flag), the task's model unless an auto task was routed there (`routed`: Claude's model names
     /// mean nothing to Codex), and the effort as Codex's model_reasoning_effort.
     public static func workerRun(_ task: LeadTask, workflow: LeadWorkflow, codex: Bool, routed: Bool = false, defaultModel: String?,
                                  fableHeldBack: Bool) -> Run {
         let effort = task.effort ?? (task.hard ? hardEffort : nil)
         if codex { return Run(model: routed ? nil : task.model, effort: effort) }
-        return run(model: task.intendedModel, advisor: task.advisor ?? workflow.workerAdvisor, effort: effort, defaultModel: defaultModel,
-                   fableHeldBack: fableHeldBack)
+        // Under a floor that keeps audits off the workers' model, never a word it can't name (`default`, `best`, a
+        // custom id): the worker then starts on worker_model, or Claude Code's default.
+        let named = workflow.floor?.verifierDifferent == true ? task.intendedModel.flatMap { WorkerLaunch.namesOne($0) ? $0 : nil } : task.intendedModel
+        var chosen = run(model: named ?? workflow.floor?.workerModel, advisor: task.advisor ?? workflow.workerAdvisor, effort: effort,
+                         defaultModel: defaultModel, fableHeldBack: fableHeldBack)
+        // Under the floor, by the family's full id, not its alias (an alias a settings `env` could remap).
+        if workflow.floor?.verifierDifferent == true { chosen.model = chosen.model.map(WorkerLaunch.fullID) }
+        return chosen
     }
 
     /// Where a new lead finds the last turns of the lead it replaces: in the project's `.vibeswitcher` folder (kept out
