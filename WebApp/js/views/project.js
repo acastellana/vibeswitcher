@@ -138,6 +138,15 @@ export function projectView(app, { sheet }) {
     if (name.textContent && name.clientWidth < 56 && name.scrollWidth > name.clientWidth) name.classList.add('squeezed');
   };
   if (typeof ResizeObserver === 'function') new ResizeObserver(fitName).observe(head);
+  // The strip's fold only where a count is past its first line (or it is open): measured while the strip has a
+  // layout (not while the keyboard hides it, nor before the view is placed), and again as its width changes.
+  function fitStrip() {
+    if (stripOpen) { stripFold.hidden = false; return; }
+    if (!phone()) { stripFold.hidden = true; return; }
+    if (!strip.clientHeight) return;
+    stripFold.hidden = !(strip.scrollHeight > strip.clientHeight + 1);
+  }
+  if (typeof ResizeObserver === 'function') new ResizeObserver(() => fitStrip()).observe(strip);
 
   // The waiting block's cards, one stack a project (it keeps what was typed in a card across updates).
   const stacks = new Map();
@@ -164,6 +173,7 @@ export function projectView(app, { sheet }) {
   let lastLevel = null;
   let sheetShown = null;
   let waitShown = false;
+  let lastWaiting = 0;
 
   // The ways past the next step reach the lead's own session (`send`): that kind and a live lead session.
   const sendsTo = (lead) => actsFor(app, 'send') && !!lead?.session && store.state.sessions.has(lead.session);
@@ -396,8 +406,11 @@ export function projectView(app, { sheet }) {
     lastProject = route.id;
     lastLevel = route.show;
     // Opened on a phone with something waiting: its top, where the waiting comes first; else the conversation's end.
+    // The last thing waiting answered there: the conversation's end, the lead's latest words, not its oldest lines.
     const top = changedView && phone() && waitShown && !asks;
-    if (changedView || atEnd) requestAnimationFrame(() => { box.scrollTop = top ? 0 : box.scrollHeight; });
+    const settled = !changedView && phone() && !asks && lastWaiting > 0 && !waiting;
+    lastWaiting = waiting;
+    if (changedView || atEnd || settled) requestAnimationFrame(() => { box.scrollTop = top ? 0 : box.scrollHeight; });
   }
 
   // The date column: the landing as the node says it, its range under it, and where it comes from on hover and focus
@@ -620,7 +633,7 @@ export function projectView(app, { sheet }) {
     waitBox.hidden = route.view !== 'lead' || !waitShown;
     strip.replaceChildren(h('b', null, t('team')), ...stripCounts(board), stripFold);
     // Its fold only where a count is past the first line (or it is open).
-    stripFold.hidden = !stripOpen && !(phone() && strip.scrollHeight > strip.clientHeight + 1);
+    fitStrip();
     const live = !!lead?.session && state.sessions.has(lead.session);
     setText(toWho, lead?.root ? t('toLead', { p: lastPart(root) }) : t('noLeadToTell'));
     // On a phone the header names the project: the line over the box shows only when there is no lead to tell.

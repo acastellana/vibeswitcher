@@ -183,6 +183,47 @@ test('U2 phone: one scroll, what waits first and the conversation under it; no b
   assert.equal(waits.overflow, 'visible');
 });
 
+test('U2 phone: opened with something waiting, the scroll starts there; the last of it answered, it goes to the conversation’s end', async () => {
+  const { projectView } = await import('../js/views/project.js');
+  const cards = new Map([[baseCard.id, baseCard]]);
+  const app = fakeApp({ route: { name: 'project', id: P, view: 'lead', show: 'decisions' }, cards: [baseCard] });
+  app.store.state.cards = cards;
+  const view = projectView(app, { sheet });
+  const scroll = find(view.el, byClass('centre-scroll'));
+  scroll.scrollHeight = 900;
+  scroll.clientHeight = 600;
+  view.render();
+  assert.equal(scroll.scrollTop, 0, 'what waits first');
+  // The card answered and gone, the reader still at the top: the lead's latest words, not its first.
+  cards.delete(baseCard.id);
+  view.render();
+  assert.equal(scroll.scrollTop, 900);
+});
+
+test('U2 phone: the strip’s fold is measured only while the strip has a layout (the keyboard hides it), never lost', async () => {
+  const { projectView } = await import('../js/views/project.js');
+  const view = projectView(fakeApp({ route: { name: 'project', id: P, view: 'lead', show: 'decisions' } }), { sheet });
+  const strip = find(view.el, byClass('team-strip'));
+  strip.clientHeight = 44;
+  strip.scrollHeight = 88;
+  view.render();
+  const fold = find(strip, byClass('strip-fold'));
+  assert.ok(!fold.hidden, 'a count past the first line: the fold');
+  // Hidden (no layout): the fold keeps what it was, and a touch on the strip still opens it.
+  strip.clientHeight = 0;
+  strip.scrollHeight = 0;
+  view.render();
+  assert.ok(!fold.hidden);
+  strip.click();
+  assert.ok(strip.classList.contains('open'));
+  // Everything on one line: no fold.
+  strip.click();
+  strip.clientHeight = 44;
+  strip.scrollHeight = 44;
+  view.render();
+  assert.ok(fold.hidden);
+});
+
 test('U2 phone: the message box is one row, its "To the lead of…" only when there is no lead to tell', async () => {
   const { projectView } = await import('../js/views/project.js');
   const view = projectView(fakeApp({ route: { name: 'project', id: P, view: 'lead', show: 'decisions' } }), { sheet });
@@ -339,7 +380,7 @@ test('U13 phone: a session’s header is one row, its Actions… three dots, no 
   assert.ok(elsewhere.view.el.classList.contains('no-terminal'));
 });
 
-test('U13 phone: the message waiting to go in and the draft are a line each, a touch opens one (not on its buttons)', async () => {
+test('U13 phone: the message waiting to go in is one line, the draft its label over one line; a touch opens one (not on its buttons)', async () => {
   const { view } = await drawSession();
   const body = find(view.el, byClass('session-body'));
   const draft = find(view.el, (node) => node.classList.contains('composer-draft') && !node.classList.contains('queued'));
@@ -353,7 +394,10 @@ test('U13 phone: the message waiting to go in and the draft are a line each, a t
   assert.ok(!draft.classList.contains('open'));
   // Folded: one line, the words cut and its Send beside them; the message waiting, one line.
   assert.equal(under(PHONE, '.composer-draft:not(.queued):not(.open):has(.session-send) > .confirm-text')['-webkit-line-clamp'], '1');
-  assert.equal(under(PHONE, '.composer-draft:not(.queued):not(.open):has(.session-send) > .confirm-head').display, 'none');
+  // Its label (what Send will do: answer the question above, steer…) and Edit and Discard stay in sight, folded too.
+  const head = under(PHONE, '.composer-draft:not(.queued):not(.open):has(.session-send) > .confirm-head');
+  assert.notEqual(head.display, 'none');
+  assert.equal(head['grid-column'], '1 / -1');
   assert.equal(under(PHONE, '.composer-draft.queued:not(.open) > .queued-list > li')['white-space'], 'nowrap');
   assert.equal(under(PHONE, '.composer-draft.queued:not(.open) > .queued-list > li + li').display, 'none');
 });

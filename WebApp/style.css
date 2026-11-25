@@ -466,8 +466,6 @@ small { font-size: var(--small); }
 .session-prompt .answer-input { width: 100%; }
 .prompt-line { min-height: 20px; }
 .end-button { flex: none; }
-/* A phone's own (the session's 760 px block): Actions… as three dots, Terminal | Chat as one button. Hidden wider. */
-.end-button > .icon, .pane-toggle { display: none; }
 .end-strip { flex: none; display: flex; align-items: center; gap: 12px; padding: 8px 20px; border-bottom: 1px solid var(--line); background: var(--fill); animation: enter 0.16s var(--ease); }
 .end-strip > div:nth-child(2) { flex: 1; min-width: 0; }
 /* The session's actions (rename, pause, end, close shells, resume): the choice, then what it takes and its line. */
@@ -718,6 +716,9 @@ kbd { padding: 1px 6px; border-radius: 5px; box-shadow: inset 0 0 0 1px var(--li
   .palette { padding-top: calc(10px + env(safe-area-inset-top)); }
 }
 
+/* A phone's own (the session's 760 px block under this): Actions… as three dots, Terminal | Chat as one button. Hidden wider. */
+.end-button > .icon, .pane-toggle { display: none; }
+
 /* ---- A phone: a session (views/session.js). The header one row (back, the title over its state, Terminal | Chat as one
    button only where the node gives a terminal, Actions… as three dots, the inspector); the messages waiting to go in
    and the draft over the box a line each, opening at a touch; the chat gets the rest. ---- */
@@ -735,10 +736,12 @@ kbd { padding: 1px 6px; border-radius: 5px; box-shadow: inset 0 0 0 1px var(--li
   .composer-draft.queued:not(.open) > .queued-list { flex: 1; min-width: 0; padding-left: 0; list-style: none; }
   .composer-draft.queued:not(.open) > .queued-list > li { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .composer-draft.queued:not(.open) > .queued-list > li + li { display: none; }
-  .composer-draft:not(.queued):not(.open):has(.session-send) { grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 10px; padding: 4px 4px 4px 12px; cursor: pointer; }
-  .composer-draft:not(.queued):not(.open):has(.session-send) > .confirm-head { display: none; }
-  .composer-draft:not(.queued):not(.open):has(.session-send) > .confirm-text { grid-row: 1; grid-column: 1; -webkit-line-clamp: 1; }
-  .composer-draft:not(.queued):not(.open):has(.session-send) > div:not(.confirm-head) { grid-row: 1; grid-column: 2; }
+  /* The draft folded: its label with Edit and Discard over its words (what Send will do stays said), the words one line
+     with Send beside them. */
+  .composer-draft:not(.queued):not(.open):has(.session-send) { grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 0 10px; padding: 2px 4px 4px 12px; cursor: pointer; }
+  .composer-draft:not(.queued):not(.open):has(.session-send) > .confirm-head { grid-row: 1; grid-column: 1 / -1; }
+  .composer-draft:not(.queued):not(.open):has(.session-send) > .confirm-text { grid-row: 2; grid-column: 1; -webkit-line-clamp: 1; }
+  .composer-draft:not(.queued):not(.open):has(.session-send) > div:not(.confirm-head) { grid-row: 2; grid-column: 2; }
   .composer-draft.open { cursor: pointer; }
   .composer-draft.open .confirm-text { -webkit-line-clamp: 8; }
   /* A session's sent answer: its arrow beside its words, the Undo's touch room around the line, not in it. */
