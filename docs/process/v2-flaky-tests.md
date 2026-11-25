@@ -44,6 +44,7 @@ Taken off the list above (or never on it) once their cause was found and fixed; 
 
 | Test | Cause | Fix |
 | --- | --- | --- |
+| `HostWatchTests.aWatcherBesideTheAppLeavesTheRepliesToTheApp` (:91, the Mac's CI host job on `a0353742`: `[1;1R033` before "second") | a product race. The session's parser (its own process) answered the first cursor query only after the app, which had answered it, detached. The host typed a parser's reply whenever no view was attached when the reply arrived, so the late `ESC [ 1 ; 1 R` went to the program, and its second read took that reply's ESC as its key | a reply is typed only to output the host fed while no view was attached (`ParserLink.feed`'s `typable`, by where each piece ends), and only while none is: `ParserReplyTests.aReplyToOutputAViewAnsweredIsNotTypedOnceItDetaches` (a parser slowed by the `pause` test hook) failed without it, "033" read where its key was |
 | `TailnetWebTests.aPeerOutsideTailscalesRangesIsClosedAtAccept` | the web listener closed a refused peer's connection before writing its note, so the test read the notes in the gap (a product ordering bug) | `c40c13de`: the note before the close |
 | `HostWebListenersTests.aHandoversSocketIsHeldAgainOnlyWhenItIsOne` | the closed socket's number checked with `fcntl`, which another test's open in the process can take in between | `3430ad3c`: checked by device and inode |
 | `DroppedHostTests.aHostThatClosesBeforeItsWelcomeIsAnErrorNotNoSessions` | the test's dropping host counted a connection after closing it | `48710ea0`: counted before the close |

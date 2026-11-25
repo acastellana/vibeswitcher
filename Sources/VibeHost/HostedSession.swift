@@ -258,8 +258,10 @@ public final class HostedSession {
             onParserTrouble?("couldn't start a parser: its screen is the last one shown")
             return
         }
-        link.onReply = { [weak self, pid = link.pid] data in
-            guard let self, let data = self.parserReplies.admit(data, from: pid, clientsAttached: self.clientsAttached, log: self.onParserTrouble) else { return }
+        // A reply is typed only while no view is attached, and only to output fed while none was (`ParserLink.feed`).
+        link.onReply = { [weak self, pid = link.pid] data, typable in
+            guard let self, let data = self.parserReplies.admit(data, from: pid, clientsAttached: self.clientsAttached || !typable,
+                                                                log: self.onParserTrouble) else { return }
             self.write(data)
         }
         link.onTitle = { [weak self] title in
@@ -407,7 +409,7 @@ public final class HostedSession {
                 focus.feed(chunk)
                 parserReplies.noteQueries(in: chunk)
                 captureOutput(chunk)
-                parser?.feed(chunk)
+                parser?.feed(chunk, typable: !clientsAttached)
                 onOutput?(chunk)
                 if pausing, !exiting, let parser, parser.unparsed > Self.maxUnparsed { return pauseReading() }
                 continue
@@ -540,6 +542,9 @@ public final class HostedSession {
 
     /// Its parsers' process ids: the parser's and those of its history reads under way.
     var parserPIDs: [pid_t] { (parser.map { [$0.pid] } ?? []) + historyReads.map(\.pid) }
+
+    /// Output handed to the session's parser that it hasn't parsed yet, in bytes (0 with none). On the session's queue.
+    var parserUnparsed: Int { parser?.unparsed ?? 0 }
 
     /// Replays at most 1 MB: the program redraws its screen on attach anyway (see `OutputRing.replay`). An ended
     /// session's replay draws its last screen (see `drawing`).

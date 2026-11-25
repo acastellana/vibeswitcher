@@ -36,6 +36,38 @@ import Testing
     /// Whether `od -An -c` printed a cursor report in `text` (the login shell's greeting may have moved the cursor).
     static func hasCursorReport(_ text: String) -> Bool { odBytes(text).range(of: #"033\[[0-9]+;[0-9]+R"#, options: .regularExpression) != nil }
 
+    // MARK: Sessions (both systems)
+
+    /// A program asks where its cursor is while a view is attached, the view answers, and the view detaches before the
+    /// host's parser (slowed by the test hook `pause`) has answered: that late answer is never typed, so the program's
+    /// next read is the key typed after it (the v2 macos host job of a0353742: HostWatchTests' second read got the late
+    /// `ESC [ 1 ; 1 R` first, the app having answered `ESC [ 5 ; 1 R`).
+    @Test func aReplyToOutputAViewAnsweredIsNotTypedOnceItDetaches() async throws {
+        let probe = SessionProbe(), lines = Lines()
+        let session = try start("stty raw -echo; echo WAITING; dd bs=1 count=1 >/dev/null 2>&1; "
+            + "printf '\\033]7599;pause:1500\\007\\033[6n'; dd bs=1 count=6 2>/dev/null | od -An -c; echo first; "
+            + "dd bs=1 count=1 2>/dev/null | od -An -c; echo second; stty sane; \(keepRunning)", probe: probe, lines: lines)
+        defer { probe.end(session) }
+        #expect(await eventually { probe.text.contains("WAITING") }, "\(probe.diagnosis(session))")
+        probe.queue.sync {
+            session.clientsAttached = true
+            _ = session.write(Data("g".utf8))
+        }
+        // The view sees the query and answers it, then goes, while the parser still pauses before the query.
+        #expect(await eventually { probe.text.contains("\u{1b}[6n") }, "\(probe.diagnosis(session))")
+        probe.queue.sync {
+            _ = session.write(Data("\u{1b}[5;1R".utf8))
+            session.clientsAttached = false
+        }
+        #expect(await eventually { probe.text.contains("first") }, "\(probe.diagnosis(session))")
+        // The parser has parsed the query (its answer comes before it says so), and that answer has been handled.
+        #expect(await eventually(timeout: 30) { probe.queue.sync { session.parserUnparsed == 0 } })
+        probe.queue.sync { _ = session.write(Data("Z".utf8)) }
+        #expect(await eventually { probe.text.contains("second") }, "\(probe.diagnosis(session))")
+        let after = Self.odBytes(probe.text.components(separatedBy: "first").last ?? "")
+        #expect(after.contains("Z") && !after.contains("033"), "the parser's late answer was typed: \(after.debugDescription)")
+    }
+
     // MARK: Sessions (Linux)
 
     /// A session's program asks where its cursor is and reads the report on its stdin, with no view attached.
