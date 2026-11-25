@@ -298,6 +298,77 @@ server child checks its connector's peer once, at its start, so after a handover
 image; on the Mac the server child is ended and started again after every handover, so the check runs against the new
 image (to build with item 13, not here).
 
+## The checked node start (the Mac's tasks, item 13)
+
+Written 2026-11-25 on the same Mac, before the code, on top of the anchor. What `HostImages.isCheckedMacNode` being true
+will mean, in one sentence: **a `--node` host on the Mac runs a server child on the account's node lock, keeps the
+vault's record of the user's actions (`vaultV2`) and its hooks only after it found its own running code in the
+root-owned record and that row's server in its `--server` file, and it hands its state over only to an image whose
+running code proved, by a fresh audit token, to be the pinned host it checked.** The constant stays false here: this
+section is what makes it safe to turn on, and a later review turns it on.
+
+**At a node start** (`HostImages.macNodeStart`, called by `main` behind `isCheckedMacNode`, before the vault is
+opened from disk or anything is served), in this order, each failure a refusal that starts nothing (`notStarted`, exit
+78, one plain line naming the record and the remedy):
+
+1. `--node-root` and `--server` given, and the lock the host takes is the node root's own (`<accountHome>/.vibeswitcher/
+   v2/node/host.lock`, the home from the user database, compared by path and by file): any other lock is refused, as
+   Linux's `mayStart` refuses it (the Mac's `mayStart` says nothing).
+2. The record, read once (`NodePins.read()`, the walk from `/`): missing, unreadable, not root's alone, unparseable or
+   another uid's refuses.
+3. The host's own running code, from the kernel (`Platform.CodeIdentity.ownCdhash`, `SecCodeCopySelf`'s dynamic
+   cdhash): unreadable, or no row's host, refuses ("this host's code is no host the node's record pins").
+4. The `--server` file, opened once (`O_NOFOLLOW`, a regular file, the node root's own `bin/vibeswitcher-server` by
+   device and inode, as Linux's `openServer`), and the cdhash of that opened file for this Mac's slice must be the
+   row's server: another build's server, an unsigned or unreadable file refuses.
+
+The result (`HostImages.CheckedNode`: the row, the server's cdhash) goes in the host's config, and only a host holding
+one is a node host (`HostServer.isMacNodeHost`): it runs the server child by the row's server cdhash (each start
+checks the file still has it, and the connector answers only a child whose token runs it), answers `vaultV2`, and its
+vault keeps the record (item 14, below). No checked start, no node host: the refusals at the account's locks
+(`macServerRefusal`) stay as they are. Tests reach the same function with an injected record, own cdhash and home;
+nothing in the node lets a flag, file or variable choose them.
+
+**A switch (F6 closed).** macOS has no exec from a descriptor, so whatever is checked before the in-place exec, the
+exec runs what the path names then. A checked node host's switch goes through a keeper (`MacHandoverKeeper`):
+
+1. The path check as before (`HandoverTarget.macPinned`): the target's file is a pinned host; its cdhash is *expected*.
+2. The target is started from the path as the keeper (`--handover-keeper FD`), a child of the host. Its first act is
+   to make a fresh stream pair and send one end over the inherited channel; that end's `LOCAL_PEERTOKEN` names the
+   keeper's own image, made after its exec. The old host requires that token to be its spawned pid, to run *expected*
+   by Security's dynamic check, and to be hardened. Otherwise the keeper is ended and the switch refused: the old host
+   and its sessions are as they were (a file swapped before this point is caught here, the long window F6 named).
+3. On the old host's queue: the server child is ended and reaped (below), the state built, and the state's bytes and
+   every descriptor it names (the lock, the listener, the secrets' channel, each session's terminal) sent to the
+   proven keeper over the pair it made. Then the host execs the target with only its end of the channel. Anything
+   failing before the exec closes the keeper and leaves the host as it was (its server child started again).
+4. The new image, first thing (`MacHandoverKeeper.takeIfAsked`), makes a fresh pair of its own and sends one end to the
+   keeper, which requires: the token's pid its parent (the job's pid), the token running the keeper's own cdhash (the
+   code proven in 2), hardened. Only then does it send the state and descriptors back, over that pair, and exit.
+   Otherwise it closes every descriptor and exits: the image at the job's pid gets nothing (no state, no secret, no
+   terminal, no lock, no listener).
+5. The new image restores from what it was given, renumbered, and runs its own checked start (1 to 4 above) before it
+   starts a server: a genuine pinned host started with a scratch lock or another `--server` is refused there.
+
+What stays: a file swapped in the short window between the keeper's proof (2) and the exec runs at the job's pid. It
+gets nothing, but the old image is gone by then: the keeper closes everything and the sessions end. "The old host keeps
+running" holds for every refusal before the exec, not for that one; closing it too needs an exec bound to the checked
+code (an open question for the reviewer: `LightweightCodeRequirements`' launch constraint, untested with an in-place
+exec and ad-hoc signatures). A proven new image that can't restore doesn't go back by an unchecked exec: it goes back
+through the same keeper to the old image's code, by its cdhash.
+
+**The server child after a handover.** On the Mac a server child checks its connector's peer once, at its start, and
+a token taken before an exec is refused after it. So the checked node host ends its server child (SIGTERM, then
+SIGKILL after `replaceLimit`, reaped) before it parks the state, and the new image starts a new one from its own checked
+start: its connector is a pair the new image made, so the server's check (`NodeCheck.macConnectorRefusal`) runs
+against the new image's code. No Mac handover carries a server child.
+
+**What no test reaches while `macUnbuilt`, `approvalMeasured` and `isCheckedMacNode` are off:** a real `--node` host
+process reading the installed record (the record's path isn't a test's to choose in a node process), a real node
+server's connector check end to end, and a real job's pid. The tests drive the same functions with a scratch record
+and this Mac's real signed images and tokens, and scratch hosts (`--handover-test-keeper`, a scratch host's test flag)
+take the keeper's switch end to end.
+
 **What it doesn't cover** (open, in the reviewer's words where they are the reviewer's):
 
 - **A switch's target swapped between check and exec (F6)** "is reliable, not a tight race: `HostServer.handOver`
