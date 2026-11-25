@@ -57,7 +57,7 @@ public enum WireSchema {
     public static let entities = ["node", "session", "lead", "card", "chat.item", "board"]
     /// The messages: the envelopes, and each live kind's `args` and `result` (`<kind>.args`, `<kind>.result`).
     public static let messages = ["request", "reply", "failure", "hello", "bye", "event", "snapshot", "delta", "paired", "passkey", "auth.args",
-                                  "act.challenge.args", "act.challenge.result", "passkey.registered.args", "passkey.registered.result",
+                                  "act.challenge.args", "act.challenge.result", "passkey.ask.args", "passkey.ask.result", "passkey.registered.args", "passkey.registered.result",
                                   "subscribe.args", "subscribe.result", "unsubscribe.args", "chat.page.args", "chat.page.result",
                                   "draft.args", "draft.result", "draft.clear.args",
                                   "board.args", "board.result", "seen.args",
@@ -102,12 +102,15 @@ public enum WireSchema {
                                                     optional("error", .shape("failure")),
                                                     // What the vault recorded an act at `confirm` with: what its passkey approved.
                                                     optional("recorded", .string)]),
-            // The terminal's `web --passkey`, to each confirmed page at http://localhost: a passkey to make.
-            // `register`: a passkey to make (its offer's end, `expires`); `ended`: the offer is over (answered, run out).
-            shape("passkey", from: "Requests.webPasskey", [field("v", .int), field("kind", .words(["passkey"])), field("op", .words(["register", "ended"])),
-                                                           field("register", .string), optional("expires", .date), optional("challenge", .string),
-                                                           optional("rp", .shape("passkey.rp")), optional("user", .shape("passkey.user")),
-                                                           optional("exclude", .list(.string))]),
+            // The terminal's `web --passkey`, to the tabs of the confirmed page at http://localhost it named.
+            // `waiting`: a registration waits (its end, `expires`): the tab clicked asks for its offer (`passkey.ask`);
+            // `ended`: it is over (kept, contested, run out).
+            shape("passkey", from: "Requests.webPasskey", [field("v", .int), field("kind", .words(["passkey"])), field("op", .words(["waiting", "ended"])),
+                                                           field("register", .string), optional("expires", .date)]),
+            shape("passkey.ask.args", from: "Requests.passkeyAsk", [field("register", .string)]),
+            shape("passkey.ask.result", from: "Requests.webPasskey", [field("register", .string), field("expires", .date), field("challenge", .string),
+                                                                      field("rp", .shape("passkey.rp")), field("user", .shape("passkey.user")),
+                                                                      field("exclude", .list(.string))]),
             shape("passkey.rp", from: "Requests.webPasskey", [field("id", .string), field("name", .string)]),
             shape("passkey.user", from: "Requests.webPasskey", [field("id", .string), field("name", .string), field("displayName", .string)]),
             shape("act.challenge.args", from: "Requests.actChallenge", [field("kind", .string), field("args", .map(.any)), field("action", .string)]),
@@ -115,7 +118,8 @@ public enum WireSchema {
                                                                           field("rpId", .string), field("timeout", .int), field("line", .string)]),
             shape("passkey.registered.args", from: "Requests.passkeyRegistered", [field("register", .string), field("id", .string),
                                                                                   field("clientDataJSON", .string), field("attestationObject", .string)]),
-            shape("passkey.registered.result", from: "Requests.passkeyRegistered", [field("id", .string)]),
+            // No id: the page shows its own credential's, from its own navigator.credentials.create.
+            shape("passkey.registered.result", from: "Requests.passkeyRegistered", [field("state", .words(["received"]))]),
             shape("failure", from: "NodeWire.Failure", [field("code", .words(NodeWire.Code.allCases.map(\.rawValue))), field("message", .string)]),
             shape("hello", from: "NodeWire.Hello", [
                 field("v", .int), field("kind", .words(["hello"])), field("node", .string), field("epoch", .string),

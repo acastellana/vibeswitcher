@@ -336,13 +336,18 @@ extension WireKinds {
     }
 
     /// `web.passkey.add` (the user's voice, recorded): the passkey a confirmed page registered for `register` (the
-    /// terminal's `web.passkey`), kept in the vault for the level `confirm`.
+    /// terminal's `web.passkey`), kept in the vault for the level `confirm`, once `typed` is its id's first characters
+    /// as the user read them off the page that made it.
     public enum WebPasskeyAdd: WireChangeKind {
         public static let kind = "web.passkey.add"
         public struct Args: WireArgs, Equatable {
             public var register: String?
-            public enum CodingKeys: String, CodingKey, CaseIterable { case register }
-            public init(register: String) { self.register = register }
+            public var typed: String?
+            public enum CodingKeys: String, CodingKey, CaseIterable { case register, typed }
+            public init(register: String, typed: String) {
+                self.register = register
+                self.typed = typed
+            }
         }
         public struct Result: Codable, Sendable, Equatable {
             public var id: String?

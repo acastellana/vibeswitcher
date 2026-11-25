@@ -39,7 +39,7 @@ public enum Principal: Sendable, Equatable {
         /// A user's kind from an acting page (`LiveRights.act`): `PageVoice` confirms it, then `Requests.voiced`, recorded
         /// as the user's, marked as the page's.
         case pageVoice
-        /// A confirmed pairing's passkey request (`act.challenge`, `passkey.registered`): `Requests.pagePaired`.
+        /// A confirmed pairing's passkey request (`act.challenge`, `passkey.ask`, `passkey.registered`): `Requests.pagePaired`.
         case pagePaired
     }
 

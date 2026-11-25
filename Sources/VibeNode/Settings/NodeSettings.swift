@@ -99,7 +99,7 @@ public enum NodeSettings {
                     about: "Where `vibeswitcher new-project` makes a project when --in names no other place.",
                     section: "General", scope: .node, form: .folder, home: .preferences, page: .sets),
             Setting(key: "web_acts", title: "Act from the page",
-                    about: "How far a page on this machine, its pairing confirmed in a terminal, may act as you: off (it reads and drafts), confirm (each act asks for your passkey; not built yet), trust (each click acts as you). "
+                    about: "How far a page on this machine, its pairing confirmed in a terminal, may act as you: off (it reads and drafts), confirm (each act asks for your passkey: no silent acting, though where sessions can run Windows programs a touch can approve what you didn't read), trust (each click acts as you). "
                         + "Trust risks this: whatever holds the page's two secrets while it is open acts as you, a team's own session included. Raised from a terminal only.",
                     section: "General", scope: .node, form: .choice, home: .acting, page: .lowersOnly("acting from the page is raised from a terminal"),
                     choices: ActingPages.levels),

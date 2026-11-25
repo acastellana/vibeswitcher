@@ -202,7 +202,7 @@ struct RequestsTests {
                                   "web.pairing",
                                   // The level `confirm`'s passkeys: the terminal's registration asked, a page's challenge
                                   // and its registration's answer (2026-11-24).
-                                  "web.passkey", "act.challenge", "passkey.registered",
+                                  "web.passkey", "act.challenge", "passkey.ask", "passkey.registered",
                                   "subscribe", "unsubscribe", "chat.page", "board",
                                   // It changes nothing but a session's seen mark (done or idle), so it needs no voice.
                                   "seen",

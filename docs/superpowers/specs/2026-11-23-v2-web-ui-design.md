@@ -193,10 +193,17 @@ As built (the node's side, after its security reviews):
     belongs to the one it was made on. `vibeswitcher web` prints the localhost address at `confirm`, or with
     `--localhost`. At `confirm`, a page at 127.0.0.1 watches but doesn't act.
   - **Registration.** `vibeswitcher web --passkey` asks you to type the three words of the one page to register on.
-    Each confirmed page shows its words on This node. The offer goes to that page alone. If another page answers, or it
-    answers twice, the terminal says so and nothing is kept. Your device asks you (Windows Hello, a security key). The
-    terminal then shows the page's words and the key's id and asks your code. The vault keeps the public key and its
-    count, at most 5 keys, one registration at a time.
+    Each confirmed page shows its words on This node.
+    - That page's tabs show "Add a passkey". The tab you click asks the node for the offer; one connection holds it.
+    - Your device asks you (Windows Hello, a security key). The tab then shows the first 6 characters of the new key's
+      id, read from its own browser's answer, never from the node.
+    - The terminal shows no id. It asks you to type those 6 characters, then your code. Typed, not compared: a key
+      another client slipped in can't be kept by a glance at a matching screen.
+    - The offer stays open until you keep the key or it runs out (5 minutes). Another page or tab asking or answering,
+      a second answer, or characters that aren't the received key's: the terminal says so, with `web --revoke`, and
+      nothing is kept. (The second review's K1: a client holding the token and secret answered first with its own
+      software key, and the offer closed before your tab could contest it.)
+    - The vault keeps the public key and its count, at most 5 keys, one registration at a time.
     - `status` and This node list the keys, with when each was added and last used.
     - A key added in the last week is said there too.
     - `vibeswitcher web --passkey --forget ID` drops one.
@@ -220,6 +227,12 @@ As built (the node's side, after its security reviews):
       (WSL's interop: the second review's finding B), a process that passes as the terminal can register its own key
       or change the level. So `confirm` protects against a stolen token or a driven browser. It does not protect
       against a process that passes as your terminal.
+    - On a machine where sessions can run Windows programs (WSL's interop), a process holding the token and secret
+      can ask a challenge for its own request and call Windows' own WebAuthn API with the relying party "localhost"
+      and client data it writes itself. Windows Hello then shows "localhost", not the action. So `confirm` buys "no
+      silent acting", not "no acting": nothing acts without your touch, but a touch can approve what you didn't
+      read. For approving, pushing, building and plugins the terminal stays the stronger voice (the second review's
+      K2).
 
 ## Constraints
 

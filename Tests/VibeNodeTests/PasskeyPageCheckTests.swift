@@ -7,8 +7,9 @@ import Testing
 /// is) opened at http://localhost:PORT with a fresh code and confirmed by its words; then scripts/e2e/passkey-page-check.cjs,
 /// in headless Chrome with DevTools' virtual authenticator (CTAP2, internal, user verification on and given), must:
 /// - Pair: show its three words until the terminal confirms them (the test types them into `web.confirm`);
-/// - Register: show the passkey offer the terminal sent it by its words (`web.passkey`), make the key on a click, and,
-///   once the terminal kept it (`web.passkey.add`) and set `web_acts confirm`, go on;
+/// - Register: show the button for the registration the terminal asked of it by its words (`web.passkey`), ask for
+///   the offer and make the key on a click (`passkey.ask`), show the new key's id from its own browser's answer, and,
+///   once the terminal kept it with that id typed (`web.passkey.add`) and set `web_acts confirm`, go on;
 /// - Act: answer the question by clicking its option: a challenge, the authenticator's assertion, the act done and the
 ///   line the node recorded shown;
 /// - Console: no error.
@@ -79,7 +80,14 @@ struct PasskeyPageCheckTests {
                         if !received { try await Task.sleep(nanoseconds: 200_000_000) }
                     }
                     try #require(received, "the page made no passkey\n\(node.said)")
-                    let added = try #require(WireClient.reply(WireClient(node).request("web.passkey.add", args: ["register": .string(register)])))
+                    // The id the page shows of its own new key, typed as the user would (the node never says it).
+                    var typed: String?
+                    while typed == nil, MacTime.real.awake() < by {
+                        typed = try? String(contentsOf: out.appendingPathComponent("passkey.typed"), encoding: .utf8)
+                        if typed == nil { try await Task.sleep(nanoseconds: 150_000_000) }
+                    }
+                    let id = try #require(typed, "the page showed no id of its new key")
+                    let added = try #require(WireClient.reply(WireClient(node).request("web.passkey.add", args: ["register": .string(register), "typed": .string(id)])))
                     try #require(added.ok, "web.passkey.add: \(added)")
                     let level = try await node.runOnTerminal(["set", "web_acts", "confirm"])
                     try #require(level.status == 0, "set web_acts confirm: \(level.output)")

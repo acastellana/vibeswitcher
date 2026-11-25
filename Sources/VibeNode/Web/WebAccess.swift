@@ -408,10 +408,13 @@ public struct PageCredentials: Sendable, Equatable {
     public var act: String?
     /// The name it came on (`localhost:PORT` is the one a passkey works on).
     public var origin: String?
-    public init(token: String, act: String?, origin: String? = nil) {
+    /// Which connection, one number per connection the screen opened (a passkey's registration is one connection's).
+    public var connection: UInt64
+    public init(token: String, act: String?, origin: String? = nil, connection: UInt64 = 0) {
         self.token = token
         self.act = act
         self.origin = origin
+        self.connection = connection
     }
 }
 
@@ -428,6 +431,7 @@ public final class WebRequestScreen: WebSocketHandler, @unchecked Sendable {
     /// Each connection's peer, resolved at its open (`Principal.page`), with its token and acting secret (an acting
     /// page's requests are judged and marked with them) and the connection (an acting one is closed when acting ends).
     private var opens: [ObjectIdentifier: Open] = [:]
+    private var connections: UInt64 = 0
     private var actingHandler: (@Sendable (NodeWire.Request, PageCredentials, LiveTransport) -> Void)?
     private var actingPages: ActingPages?
 
@@ -496,8 +500,9 @@ public final class WebRequestScreen: WebSocketHandler, @unchecked Sendable {
 
     public func opened(_ transport: LiveTransport, rights: LiveRights) {
         let admission = admissionOf(transport)
-        let credentials = admission.map { PageCredentials(token: $0.token, act: $0.act, origin: $0.origin) }
         lock.withLock {
+            connections &+= 1
+            let credentials = admission.map { [connections] in PageCredentials(token: $0.token, act: $0.act, origin: $0.origin, connection: connections) }
             opens[ObjectIdentifier(transport)] = Open(principal: .page(rights, terminals: terminals), credentials: credentials,
                                                       pairing: admission?.pairing, transport: transport)
         }

@@ -199,7 +199,7 @@ enum PasskeyCommand {
             Say.err("Asked the page showing “\(ConfigSeal.inert(phrase, limit: 80))”: press \"Add a passkey\" there and follow your device (Ctrl-C stops)…")
         }
         let started = MacTime.real.awake()
-        var credential: String?
+        var received = false
         while MacTime.real.awake() - started < Requests.registrationWait {
             switch client.read(WireKinds.WebPasskey.self, .init(register: register), timeout: 30) {
             case .failure(let failure): return Say.failed(failure)
@@ -209,22 +209,28 @@ enum PasskeyCommand {
                 if state.state == "contested" {
                     return Say.refused("Not kept: \(ConfigSeal.inert(state.why ?? "another page answered", limit: 120)). If that wasn't you, run `vibeswitcher web --revoke`.")
                 }
-                credential = state.id
+                received = state.state == "received"
             }
-            if credential != nil { break }
+            if received { break }
             usleep(500_000)
         }
-        guard let credential else { return Say.refused("The page registered no passkey in time.") }
+        guard received else { return Say.refused("The page registered no passkey in time.") }
+        // The passkey's id as the page that made it shows it (from its own browser's answer), typed: the terminal never
+        // shows the node's, so a key another client slipped in can't be confirmed by comparing.
+        guard let typedID = TypedWord.line("Type the first \(Requests.typedIDLength) characters of the new passkey's id, as your page shows them "
+            + "(a page that made none shows none): "), !typedID.isEmpty else {
+            return Say.refused("No id typed: nothing was kept.")
+        }
         let action = UUID().uuidString.lowercased()
-        let what = "This keeps the passkey \(ConfigSeal.inert(credential, limit: 20))… made on the page showing “\(ConfigSeal.inert(phrase, limit: 80))”: "
-            + "at `web_acts confirm` each act from a page needs a touch of it. Keep it only if YOUR device just asked you to make one there."
+        let what = "This keeps the passkey your page showing “\(ConfigSeal.inert(phrase, limit: 80))” just made: at `web_acts confirm` each act from "
+            + "a page needs a touch of it. Keep it only if YOUR device just asked you to make one there."
         let said = TypedWord.said(approval: client.approvalRule, action: action, what: what)
         guard case .success(let typed) = said else { return Say.refused(said.refusal) }
-        switch client.change(WireKinds.WebPasskeyAdd.self, .init(register: register), action: action, typed: typed, timeout: 30) {
+        switch client.change(WireKinds.WebPasskeyAdd.self, .init(register: register, typed: typedID), action: action, typed: typed, timeout: 30) {
         case .failure(let failure): return Say.failed(failure)
         case .refused(let reply): return Say.replyError(reply)
         case .success(let result, _):
-            Say.out("Passkey \(result.id ?? credential) kept (\(result.keys ?? 1) in all). `vibeswitcher set web_acts confirm` asks for it at each act.")
+            Say.out("Passkey \(result.id ?? typedID) kept (\(result.keys ?? 1) in all). `vibeswitcher set web_acts confirm` asks for it at each act.")
             return 0
         }
     }

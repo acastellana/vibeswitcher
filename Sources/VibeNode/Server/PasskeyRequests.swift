@@ -15,14 +15,20 @@ struct PasskeyChallenge: Sendable {
 }
 
 /// A registration the terminal asked (`web.passkey`) of one page, named by its pairing's phrase: its challenge and user
-/// handle, that page's token (its digest), and what it answered; `contested`, another page answered it or it was
-/// answered twice (nothing is kept then).
+/// handle, that page's token (its digest), the one connection that asked for its offer (`passkey.ask`, the tab whose
+/// button was clicked), and what it answered; `contested`, another page or tab asked or answered, or it was answered
+/// twice (nothing is kept then). It stays open after the answer, until `web.passkey.add` or its end, so a second answer
+/// is seen.
 struct PasskeyRegistration: Sendable {
     var challenge: [UInt8]
     var user: [UInt8]
     var until: Date
     var page: String
     var phrase: String
+    /// What `passkey.ask` gives the connection that holds it: navigator.credentials.create's options.
+    var offer: NodeWire.Value
+    /// The connection that asked for the offer (`PageCredentials.connection`).
+    var holder: UInt64?
     /// The credential the page registered (id and X9.63 key, base64url).
     var received: (id: String, publicKey: String)?
     var contested: String?
@@ -38,7 +44,9 @@ struct PasskeyRegistration: Sendable {
 extension Requests {
     /// How long a challenge or a registration waits.
     public static let passkeyWait: TimeInterval = 60
-    public static let registrationWait: TimeInterval = 120
+    public static let registrationWait: TimeInterval = 300
+    /// How many of a passkey's id's first characters the user types in the terminal, read off the page that made it.
+    public static let typedIDLength = 6
 
     /// The origin a passkey's assertion names: the page's, which must be `http://localhost:PORT`.
     static func passkeyOrigin(_ credentials: PageCredentials) -> String? {
@@ -50,6 +58,7 @@ extension Requests {
     func pagePaired(_ request: NodeWire.Request, credentials: PageCredentials, reply: @escaping (NodeWire.Reply) -> Void) {
         switch request.kind {
         case "act.challenge": actChallenge(request, credentials: credentials, reply: reply)
+        case "passkey.ask": passkeyAsk(request, credentials: credentials, reply: reply)
         case "passkey.registered": passkeyRegistered(request, credentials: credentials, reply: reply)
         default: reply(.init(re: request.id, error: .init(.unknownKind, "this server doesn't take \(ConfigSeal.inert(request.kind, limit: 80))")))
         }
@@ -178,8 +187,9 @@ extension Requests {
 
     // MARK: Registration
 
-    /// `web.passkey` (the terminal's): with no `register`, a registration asked of every confirmed page on
-    /// `http://localhost:PORT` (the `passkey` message); with one, where it stands. On `queue`.
+    /// `web.passkey` (the terminal's): with no `register`, a registration asked of the confirmed page on
+    /// `http://localhost:PORT` that shows `phrase` (the `passkey` message `waiting`: its tabs show the button); with
+    /// one, where it stands, never the credential's id (the user types it off the page: `web.passkey.add`). On `queue`.
     func webPasskey(_ request: NodeWire.Request, reply: @escaping (NodeWire.Reply) -> Void) {
         let now = Platform.Clock.steadyDate()
         passkeyRegistrations = passkeyRegistrations.filter { $0.value.until > now }
@@ -190,9 +200,8 @@ extension Requests {
             if let why = registration.contested {
                 return reply(.init(re: request.id, typed: WireKinds.WebPasskey.Result(register: id, state: "contested", id: nil, why: why)))
             }
-            let received = registration.received.map { String($0.id.prefix(12)) }
-            return reply(.init(re: request.id, typed: WireKinds.WebPasskey.Result(register: id, state: received == nil ? "waiting" : "received", id: received,
-                                                                                   phrase: registration.phrase)))
+            let state = registration.received != nil ? "received" : registration.holder != nil ? "asked" : "waiting"
+            return reply(.init(re: request.id, typed: WireKinds.WebPasskey.Result(register: id, state: state, phrase: registration.phrase)))
         }
         guard let acting = actingPages, let seat = pairings else { return reply(.init(re: request.id, error: .init(.refused, "this server has no web page"))) }
         guard (acting.state?.keys.count ?? 0) < LeadVaultV2.passkeysKept else {
@@ -210,22 +219,26 @@ extension Requests {
         let user = Array(SHA256.hash(data: Data("vibeswitcher:\(root.path)".utf8)))
         // The page's clock's date it is shown as (no guard: the node ends the offer on its own steady clock, below).
         let expires = Date(timeIntervalSinceNow: Self.registrationWait)
-        let message = NodeWire.Value.object([
-            "v": .int(NodeWire.version), "kind": .string("passkey"), "op": .string("register"), "register": .string(id), "expires": .date(expires),
-            "challenge": .string(WebAuthn.base64url(challenge)),
+        // The offer itself goes to the one connection that asks for it (`passkey.ask`): every tab of the page is told
+        // only that one waits.
+        let offer = NodeWire.Value.object([
+            "register": .string(id), "expires": .date(expires), "challenge": .string(WebAuthn.base64url(challenge)),
             "rp": .object(["id": .string(WebAuthn.rpID), "name": .string("VibeSwitcher")]),
             "user": .object(["id": .string(WebAuthn.base64url(user)), "name": .string("vibeswitcher"), "displayName": .string("VibeSwitcher on this machine")]),
             "exclude": .array((acting.state?.keys.keys.sorted() ?? []).map(NodeWire.Value.string)),
+        ])
+        let message = NodeWire.Value.object([
+            "v": .int(NodeWire.version), "kind": .string("passkey"), "op": .string("waiting"), "register": .string(id), "expires": .date(expires),
         ])
         guard let page = seat.toPasskeyPage(phrase, NodeWire.message(message)) else {
             return reply(.init(re: request.id, error: .init(.gone, "no page showing those words is open at http://localhost and confirmed: open it there "
                 + "(`vibeswitcher web --localhost`, confirmed by its words), then this again")))
         }
         passkeyRegistrations[id] = PasskeyRegistration(challenge: challenge, user: user, until: now.addingTimeInterval(Self.registrationWait), page: page,
-                                                       phrase: phrase)
-        // Run out: the page holding the offer told it ended (unless it answered first: told then).
+                                                       phrase: phrase, offer: offer)
+        // Run out (answered or not, while the terminal hasn't kept it): dropped, and the page's tabs told.
         queue.asyncAfter(deadline: .now() + Self.registrationWait) { [weak self] in
-            guard let self, let left = self.passkeyRegistrations[id], left.received == nil else { return }
+            guard let self, self.passkeyRegistrations[id] != nil else { return }
             self.passkeyRegistrations[id] = nil
             self.endOffer(id)
         }
@@ -241,18 +254,15 @@ extension Requests {
         guard let id = request.args?["register"]?.string, var registration = passkeyRegistrations[id], registration.until > Platform.Clock.steadyDate() else {
             return refuse("no registration of that id waits: run `vibeswitcher web --passkey` again")
         }
-        // Only the page the terminal named, and once: anything else is said in the terminal, and nothing is kept.
-        guard ActingPages.digest(credentials.token) == registration.page else {
-            registration.contested = "another page answered the registration"
-            registration.received = nil
-            passkeyRegistrations[id] = registration
-            endOffer(id)
-            return refuse("this registration was asked of another page")
+        // Only the connection that asked for the offer (of the page the terminal named), and once: anything else is
+        // said in the terminal, and nothing is kept.
+        guard registration.contested == nil else { return refuse("that registration was contested: nothing is kept") }
+        guard ActingPages.digest(credentials.token) == registration.page, registration.holder == credentials.connection else {
+            contest(id, "another page or tab answered the registration")
+            return refuse("this registration's offer is another connection's")
         }
-        guard registration.received == nil, registration.contested == nil else {
-            registration.contested = registration.contested ?? "the page answered the registration twice"
-            registration.received = nil
-            passkeyRegistrations[id] = registration
+        guard registration.received == nil else {
+            contest(id, "the registration was answered twice")
             return refuse("that registration was answered already")
         }
         guard let credential = request.args?["id"]?.string, let clientData = request.args?["clientDataJSON"]?.string.flatMap(WebAuthn.bytes(base64url:)),
@@ -264,31 +274,71 @@ extension Requests {
             guard WebAuthn.base64url(made.id) == credential else { return refuse("the credential's id isn't its own") }
             registration.received = (credential, WebAuthn.base64url(made.publicKey))
             passkeyRegistrations[id] = registration
-            // Answered: the offer ends on every page that holds it.
-            endOffer(id)
-            note("a page registered a passkey (\(credential.prefix(12))): the terminal confirms it")
-            reply(.init(re: request.id, result: .object(["id": .string(String(credential.prefix(12)))])))
+            // Answered, and still open: a second answer contests it until the terminal keeps it. The page shows its own
+            // credential's id (never the node's word for it), which the user types in the terminal.
+            note("a page registered a passkey: the terminal confirms it with its id's first characters, typed off the page")
+            reply(.init(re: request.id, result: .object(["state": .string("received")])))
         } catch {
             refuse("the passkey's registration didn't check: \(error)")
         }
     }
 
-    /// The registration offer `id` ended (answered, run out): every page holding it told, so its button goes.
+    /// `passkey.ask` `{register}`: the tab whose button was clicked asks for the offer (navigator.credentials.create's
+    /// options). One connection of the page the terminal named holds it; another's ask contests it (nothing is kept, the
+    /// terminal says so). On `queue`.
+    func passkeyAsk(_ request: NodeWire.Request, credentials: PageCredentials, reply: @escaping (NodeWire.Reply) -> Void) {
+        let refuse = { (why: String) in reply(.init(re: request.id, error: .init(.voice, why))) }
+        guard Self.passkeyOrigin(credentials) != nil else { return refuse("a passkey is registered from http://localhost only") }
+        guard actingPages?.watches(token: credentials.token, secret: credentials.act) == true else { return refuse(WebRequestScreen.notActing) }
+        guard let id = request.args?["register"]?.string, var registration = passkeyRegistrations[id], registration.until > Platform.Clock.steadyDate() else {
+            return refuse("no registration of that id waits: run `vibeswitcher web --passkey` again")
+        }
+        guard registration.contested == nil else { return refuse("that registration was contested: nothing is kept") }
+        guard ActingPages.digest(credentials.token) == registration.page, registration.holder ?? credentials.connection == credentials.connection else {
+            contest(id, "another page or tab asked for the registration")
+            return refuse("another page or tab asked for this registration: nothing is kept")
+        }
+        registration.holder = credentials.connection
+        passkeyRegistrations[id] = registration
+        reply(.init(re: request.id, result: registration.offer))
+    }
+
+    /// The registration `id` contested (`why`): nothing it received is kept, and the page's tabs told it ended.
+    func contest(_ id: String, _ why: String) {
+        guard var registration = passkeyRegistrations[id] else { return }
+        registration.contested = registration.contested ?? why
+        registration.received = nil
+        passkeyRegistrations[id] = registration
+        note("a passkey's registration contested: \(why)")
+        endOffer(id)
+    }
+
+    /// The registration offer `id` ended (kept, contested, run out): every page holding it told, so its button goes.
     func endOffer(_ id: String) {
         let message = NodeWire.Value.object(["v": .int(NodeWire.version), "kind": .string("passkey"), "op": .string("ended"), "register": .string(id)])
         _ = pairings?.toPasskeyPages(NodeWire.message(message))
     }
 
-    /// `web.passkey.add` `{register}` (the user's voice, recorded): the passkey a page registered kept in the vault.
+    /// `web.passkey.add` `{register, typed}` (the user's voice, recorded): the passkey a page registered kept in the
+    /// vault, once `typed` is its id's first characters as the user read them off their page (the page shows its own
+    /// credential's; the terminal never does: typed, not compared). Anything else ends the registration, nothing kept.
     func webPasskeyAdd(_ request: NodeWire.Request, reply: @escaping (NodeWire.Reply) -> Void) {
+        let revoke = "If that wasn't you, run `vibeswitcher web --revoke`"
         if let id = request.args?["register"]?.string, let why = passkeyRegistrations[id]?.contested {
             passkeyRegistrations[id] = nil
-            return reply(.init(re: request.id, error: .init(.refused, "not kept: \(why). If that wasn't you, run `vibeswitcher web --revoke`")))
+            return reply(.init(re: request.id, error: .init(.refused, "not kept: \(why). \(revoke)")))
         }
         guard let acting = actingPages, let id = request.args?["register"]?.string, let received = passkeyRegistrations[id]?.received else {
             return reply(.init(re: request.id, error: .init(.gone, "no page registered a passkey for that: run `vibeswitcher web --passkey` again")))
         }
         passkeyRegistrations[id] = nil
+        endOffer(id)
+        let typed = (request.args?["typed"]?.string ?? "").trimmingCharacters(in: .whitespaces)
+        guard typed.count == Self.typedIDLength, received.id.prefix(Self.typedIDLength).lowercased() == typed.lowercased() else {
+            note("a passkey's registration ended: the id typed isn't the registered passkey's")
+            return reply(.init(re: request.id, error: .init(.refused, "not kept: those aren't the first \(Self.typedIDLength) characters of the passkey the node "
+                + "received. If you typed them as your page shows them, another page answered: \(revoke)")))
+        }
         let queue = self.queue, note = self.note
         DispatchQueue.global(qos: .userInitiated).async {
             let kept = Result { try acting.addPasskey(id: received.id, publicKey: received.publicKey) }

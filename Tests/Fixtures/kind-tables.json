@@ -158,7 +158,8 @@
       "tailnet"
     ],
     "web.passkey.add" : [
-      "register"
+      "register",
+      "typed"
     ],
     "web.passkey.forget" : [
       "id"
@@ -193,6 +194,7 @@
     "lead" : "start a project's lead for you",
     "mail" : "do mail for you",
     "no.such.kind" : "do no.such.kind for you",
+    "passkey.ask" : "do passkey.ask for you",
     "passkey.registered" : "do passkey.registered for you",
     "plugin.add" : "add a program as a plugin of this node",
     "plugin.file" : "do plugin.file for you",
@@ -406,7 +408,8 @@
       "tailnet"
     ],
     "web.passkey.add" : [
-      "register"
+      "register",
+      "typed"
     ],
     "web.passkey.forget" : [
       "id"
@@ -459,6 +462,7 @@
     "lead" : true,
     "mail" : false,
     "no.such.kind" : true,
+    "passkey.ask" : false,
     "passkey.registered" : false,
     "plugin.add" : true,
     "plugin.file" : false,
@@ -815,6 +819,7 @@
     "hooks.remove" : "user",
     "lead" : "user",
     "mail" : "webRead",
+    "passkey.ask" : "webPaired",
     "passkey.registered" : "webPaired",
     "plugin.add" : "user",
     "plugin.file" : "anyone",

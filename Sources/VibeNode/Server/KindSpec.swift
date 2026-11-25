@@ -226,6 +226,7 @@ public struct KindSpec: Sendable {
                  wire: .typed(WireKinds.WebPasskeyForget.self),
                  voiced: .recorded(.init(arguments: .ofType, keepsResult: true, rerun: true, carded: false, batch: false, phrase: "forget a passkey for acting from the page", dialog: .asArguments))),
         KindSpec("act.challenge", sender: .webPaired, effect: .read, servedBy: .requests, page: .bySender, wire: page, voiced: .notRecorded(phrase: nil)),
+        KindSpec("passkey.ask", sender: .webPaired, effect: .read, servedBy: .requests, page: .bySender, wire: page, voiced: .notRecorded(phrase: nil)),
         KindSpec("passkey.registered", sender: .webPaired, effect: .read, servedBy: .requests, page: .bySender, wire: page, voiced: .notRecorded(phrase: nil)),
         // A page's pairing, confirmed in the terminal that made its address (the acting review's fix A): never a page's.
         KindSpec("web.pairing", sender: .user, effect: .read, servedBy: .requests, page: .terminalOnly("it is the terminal's side of a pairing"),

@@ -40,9 +40,7 @@ Mac's rule Touch ID or the login password stands for the typed code; under the c
 On the command line, `TypedWord.said` shows what the request will do and asks for its code. Only that prompt makes
 the `Typed` token. `NodeClient.change`, the one way the command line sends a state change, takes the token, sends the
 request with a new action id, and writes the journal entry once the server has accepted it. `NodeClient.request`
-refuses a state-changing kind (CLIChangeLint).
-
-On the server:
+refuses a state-changing kind (CLIChangeLint). On the server:
 
 1. **Envelope** (`NodeWire.unwrap`, the same on both transports). The message must be a JSON object, a request
    (`v`, `id`, `kind`), at no newer a version. Otherwise the connection gets a `bye` with its code. A kind the server
@@ -191,6 +189,7 @@ first": the vault records it before it is done. "Card code": its code is checked
 | `hooks.remove` | the user's terminal | yes | yes |  | `Requests.act` | `agents` | `WireKinds.HooksRemove` | its result; done again |  | yes |
 | `lead` | the user's terminal | yes | yes |  | `Requests.act` | `folder`, `goal`, `initialized`, `replace`, `resume`, `takeHead` | `WireKinds.Lead` | its result |  | yes |
 | `mail` | the user's terminal, or a page that reads |  |  |  | `Requests.act` |  | `WireKinds.Mail` |  |  |  |
+| `passkey.ask` | a confirmed page (its passkey) (a page only) |  |  |  | `Requests.act` |  | the page's (WireSchema) |  |  |  |
 | `passkey.registered` | a confirmed page (its passkey) (a page only) |  |  |  | `Requests.act` |  | the page's (WireSchema) |  |  |  |
 | `plugin.add` | the user's terminal | yes | yes |  | `Requests.act` | `folder`, `manifest`, `program` | not yet | its result |  | the terminal's alone |
 | `plugin.file` | anyone of the uid |  |  |  | `Requests.act` |  | not yet |  |  |  |
@@ -242,7 +241,7 @@ first": the vault records it before it is done. "Card code": its code is checked
 | `web.open` | the user's terminal | yes | yes |  | `Requests.act` | `localhost`, `tailnet` | `WireKinds.WebOpen` | done, no result |  | the terminal's alone |
 | `web.pairing` | the user's terminal |  |  |  | `Requests.act` |  | `WireKinds.WebPairing` |  |  | the terminal's alone |
 | `web.passkey` | the user's terminal |  |  |  | `Requests.act` |  | `WireKinds.WebPasskey` |  |  | the terminal's alone |
-| `web.passkey.add` | the user's terminal | yes | yes |  | `Requests.act` | `register` | `WireKinds.WebPasskeyAdd` | its result |  | the terminal's alone |
+| `web.passkey.add` | the user's terminal | yes | yes |  | `Requests.act` | `register`, `typed` | `WireKinds.WebPasskeyAdd` | its result |  | the terminal's alone |
 | `web.passkey.forget` | the user's terminal | yes | yes |  | `Requests.act` | `id` | `WireKinds.WebPasskeyForget` | its result; done again |  | the terminal's alone |
 | `web.revoke` | the user's terminal | yes | yes |  | `Requests.act` | none | `WireKinds.WebRevoke` | its result; done again |  | yes |
 <!-- kinds-table end -->

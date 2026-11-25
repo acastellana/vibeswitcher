@@ -108,7 +108,8 @@ extension Requests {
             return
         }
         // The level chooses the check: `trust` none, `confirm` a passkey per request.
-        let voice = actingPages?.level == "trust" ? pageVoice : confirmVoice
+        let level = actingPages?.level
+        let voice = level == "trust" ? pageVoice : confirmVoice
         // The request as the page sent it (a passkey's challenge was bound to exactly that).
         voice.confirm(request, page: PageAct(via: via, credentials: credentials)) { [weak self] notConfirmed in
             guard let self else { return }
@@ -117,6 +118,10 @@ extension Requests {
                 if let notConfirmed { return refused(.init(re: request.id, error: notConfirmed)) }
                 guard self.actingPages?.acts(token: credentials.token, secret: credentials.act, origin: credentials.origin) == true else {
                     return refused(.init(re: request.id, error: .init(.actsEnded, WebRequestScreen.notActing)))
+                }
+                // Passed at `trust` while the level rose to `confirm`: it needs its passkey now (the review's Low).
+                if level == "trust", self.actingPages?.level != "trust" {
+                    return refused(.init(re: request.id, error: .init(.assertionNeeded, "web_acts is confirm now: send it again with your passkey")))
                 }
                 switch self.pageChecks(request) {
                 case .refused(let refusal): refused(refusal)

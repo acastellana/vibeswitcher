@@ -264,10 +264,15 @@ struct PasskeyTests {
         #expect(acting.watches(token: "t", secret: secret))
     }
 
-    /// A passkey's registration is bound to the one page the terminal names by its words: none showing them is refused;
-    /// one at a time; another page's answer is refused and makes the registration contested (nothing kept, the terminal
-    /// told); the named page's second answer too; the named page's one answer is kept by the typed code.
-    @Test func aRegistrationIsTheNamedPagesAlone() async throws {
+    /// A passkey's registration is bound to the one page the terminal names by its words, and to the one connection
+    /// (tab) whose button was clicked: none showing the words is refused; one at a time; another page's ask or answer,
+    /// another tab's, or a second answer makes it contested (nothing kept, the terminal told); the offer stays open after
+    /// the answer; and it is kept only when the id the user types is the first characters of the one received.
+    ///
+    /// The review's K1 (the hijack): a client holding the page's token and acting secret (any connection, any Origin it
+    /// writes) asks and answers first with its own software key. Once the user's own tab asks, it is contested; if the
+    /// user's tab never asks, the user's page shows no id, and nothing the user types keeps the key.
+    @Test func aRegistrationIsTheNamedPagesClickedTabAlone() async throws {
         let world = try await CardWorld.make(scratch)
         defer { world.stop() }
         let acting = ActingPages(vault: MemoryVaultV2().client)
@@ -277,62 +282,161 @@ struct PasskeyTests {
         acting.settled()
         let phraseA = PagePairing.phrase(token: tokenA)
         let offered = Locked<[String]>([])
+        let ended = Locked<Int>(0)
         world.queue.sync {
             world.requests.actingPages = acting
             world.requests.pairings = PairingSeat(holds: { _ in true }, confirm: { _, _, _ in true },
-                                                  toPasskeyPages: { _ in 0 },
-                                                  toPasskeyPage: { phrase, _ in
+                                                  toPasskeyPages: { message in
+                                                      if String(decoding: message, as: UTF8.self).contains("\"ended\"") { ended.mutate { $0 += 1 } }
+                                                      return 1
+                                                  },
+                                                  toPasskeyPage: { phrase, message in
                                                       offered.mutate { $0.append(phrase) }
+                                                      #expect(!String(decoding: message, as: UTF8.self).contains("challenge"), "the tabs are told one waits, no more")
                                                       return phrase == phraseA ? ActingPages.digest(tokenA) : nil
                                                   })
         }
-        let pageA = PageCredentials(token: tokenA, act: secretA, origin: "localhost:8765")
-        let pageB = PageCredentials(token: tokenB, act: secretB, origin: "localhost:8765")
-        func registered(_ page: PageCredentials, _ register: String, _ soft: SoftAuthenticator) throws -> NodeWire.Reply {
-            let challenge = try #require(world.queue.sync { world.requests.passkeyRegistrations[register]?.challenge })
-            let made = soft.registration(challenge: challenge)
+        // The user's tab, a second tab of theirs, the hijacker's raw client on the same token and secret, another page.
+        let tab = PageCredentials(token: tokenA, act: secretA, origin: "localhost:8765", connection: 1)
+        let sibling = PageCredentials(token: tokenA, act: secretA, origin: "localhost:8765", connection: 2)
+        let raw = PageCredentials(token: tokenA, act: secretA, origin: "localhost:8765", connection: 3)
+        let pageB = PageCredentials(token: tokenB, act: secretB, origin: "localhost:8765", connection: 4)
+        func paired(_ page: PageCredentials, _ kind: String, _ args: [String: NodeWire.Value]) throws -> NodeWire.Reply {
             let got = Locked<NodeWire.Reply?>(nil)
             world.queue.sync {
-                world.requests.pagePaired(NodeWire.Request(id: "r", kind: "passkey.registered", args: [
-                    "register": .string(register), "id": .string(soft.idText), "clientDataJSON": .string(WebAuthn.base64url(made.clientData)),
-                    "attestationObject": .string(WebAuthn.base64url(made.attestation)),
-                ], action: UUID().uuidString), credentials: page) { got.value = $0 }
+                world.requests.pagePaired(NodeWire.Request(id: "r", kind: kind, args: args, action: UUID().uuidString), credentials: page) { got.value = $0 }
             }
             return try #require(got.value)
         }
+        func ask(_ page: PageCredentials, _ register: String) throws -> NodeWire.Reply { try paired(page, "passkey.ask", ["register": .string(register)]) }
+        /// `page` answers with `soft`'s key, to the challenge its own ask gave (or, when it asked nothing, the offer's).
+        func registered(_ page: PageCredentials, _ register: String, _ soft: SoftAuthenticator, asked: NodeWire.Reply? = nil) throws -> NodeWire.Reply {
+            let text = try asked?.result?["challenge"]?.string ?? #require(world.queue.sync { world.requests.passkeyRegistrations[register]?.offer["challenge"]?.string })
+            let made = soft.registration(challenge: try #require(WebAuthn.bytes(base64url: text)))
+            return try paired(page, "passkey.registered", [
+                "register": .string(register), "id": .string(soft.idText), "clientDataJSON": .string(WebAuthn.base64url(made.clientData)),
+                "attestationObject": .string(WebAuthn.base64url(made.attestation)),
+            ])
+        }
         func begin(_ phrase: String) async throws -> NodeWire.Reply { try #require(await world.ask("web.passkey", ["phrase": .string(phrase)], action: nil)) }
-        func state(_ register: String) async throws -> String? {
-            try #require(await world.ask("web.passkey", ["register": .string(register)], action: nil)).result?["state"]?.string
+        func state(_ register: String) async throws -> NodeWire.Reply {
+            try #require(await world.ask("web.passkey", ["register": .string(register)], action: nil))
+        }
+        func add(_ register: String, typed: String) async throws -> NodeWire.Reply {
+            try #require(await world.ask("web.passkey.add", ["register": .string(register), "typed": .string(typed)]))
         }
         func clear() { world.queue.sync { world.requests.passkeyRegistrations = [:] } }
+        let typedLength = Requests.typedIDLength
 
         // No page shows those words.
         #expect(try await begin("acorn acorn acorn").error?.code == "gone")
-        // Another page answers the offer made to the named one: refused, contested, not kept.
+        // Another page asks for the offer made to the named one: refused, contested, not kept.
         let first = try #require(try await begin(phraseA.uppercased()).result?["register"]?.string)
         #expect(try await begin(phraseA).error?.message.contains("waits already") == true, "one at a time")
-        #expect(try registered(pageB, first, SoftAuthenticator()).error?.code == "voice")
-        #expect(try await state(first) == "contested")
-        let refusedAdd = try #require(await world.ask("web.passkey.add", ["register": .string(first)]))
-        #expect(refusedAdd.error?.message.contains("another page answered") == true, "\(refusedAdd)")
+        #expect(try await state(first).result?["state"]?.string == "waiting")
+        #expect(try ask(pageB, first).error?.code == "voice")
+        #expect(try await state(first).result?["state"]?.string == "contested")
+        #expect(try await add(first, typed: "abcdef").error?.message.contains("another page or tab asked") == true)
         #expect(acting.state?.keys.isEmpty == true)
         clear()
-        // The named page answers twice: the second is refused, and nothing is kept.
-        let twice = try #require(try await begin(phraseA).result?["register"]?.string)
-        #expect(try registered(pageA, twice, SoftAuthenticator()).ok)
-        #expect(try registered(pageA, twice, SoftAuthenticator()).error?.code == "voice")
-        #expect(try await state(twice) == "contested")
+
+        // K1, the hijacker first: its raw client asks and answers with its own key; the user's tab then asks: contested.
+        let hijacked = try #require(try await begin(phraseA).result?["register"]?.string)
+        let rogue = SoftAuthenticator()
+        let rogueAsked = try ask(raw, hijacked)
+        #expect(rogueAsked.ok && rogueAsked.result?["challenge"]?.string != nil)
+        #expect(try registered(raw, hijacked, rogue, asked: rogueAsked).ok)
+        let received = try await state(hijacked)
+        #expect(received.result?["state"]?.string == "received" && received.result?["id"] == nil, "the terminal never shows an id: \(received)")
+        #expect(try ask(tab, hijacked).error?.code == "voice", "the user's click after the hijacker's answer")
+        #expect(try await state(hijacked).result?["state"]?.string == "contested")
+        let refused = try await add(hijacked, typed: String(rogue.idText.prefix(typedLength)))
+        #expect(refused.error?.message.contains("If that wasn't you, run `vibeswitcher web --revoke`") == true, "\(refused)")
+        #expect(acting.state?.keys.isEmpty == true)
         clear()
-        // The named page answers once: kept by the typed code (the user's voice), its id said.
+
+        // K1, the user never clicks: their page shows no id; whatever they type (not the hijacker's id) keeps nothing.
+        let unclicked = try #require(try await begin(phraseA).result?["register"]?.string)
+        let silent = SoftAuthenticator()
+        let silentAsked = try ask(raw, unclicked)
+        #expect(try registered(raw, unclicked, silent, asked: silentAsked).ok)
+        let guessed = try await add(unclicked, typed: "abcdef")
+        #expect(guessed.error?.message.contains("aren't the first \(typedLength) characters") == true, "\(guessed)")
+        #expect(acting.state?.keys.isEmpty == true)
+        #expect(try await state(unclicked).result?["state"]?.string == "gone", "a wrong id ends it")
+        clear()
+
+        // The user's tab first, and the hijacker answers after (to the same offer): the offer is still open, so contested.
+        let after = try #require(try await begin(phraseA).result?["register"]?.string)
+        let mine = SoftAuthenticator()
+        let tabAsked = try ask(tab, after)
+        #expect(try registered(tab, after, mine, asked: tabAsked).ok)
+        #expect(try registered(raw, after, SoftAuthenticator(), asked: tabAsked).error?.code == "voice")
+        #expect(try await state(after).result?["state"]?.string == "contested")
+        #expect(try await add(after, typed: String(mine.idText.prefix(typedLength))).error?.message.contains("another page or tab answered") == true)
+        #expect(acting.state?.keys.isEmpty == true)
+        clear()
+
+        // A second tab of the user's clicks too: one tab at a time, contested.
+        let twoTabs = try #require(try await begin(phraseA).result?["register"]?.string)
+        #expect(try ask(tab, twoTabs).ok && ask(tab, twoTabs).ok, "the same tab asking again")
+        #expect(try ask(sibling, twoTabs).error?.code == "voice")
+        #expect(try await state(twoTabs).result?["state"]?.string == "contested")
+        clear()
+
+        // The clicked tab answers twice: contested.
+        let twice = try #require(try await begin(phraseA).result?["register"]?.string)
+        let twiceAsked = try ask(tab, twice)
+        #expect(try registered(tab, twice, SoftAuthenticator(), asked: twiceAsked).ok)
+        #expect(try registered(tab, twice, SoftAuthenticator(), asked: twiceAsked).error?.code == "voice")
+        #expect(try await state(twice).result?["state"]?.string == "contested")
+        clear()
+
+        // The clicked tab answers once, the user types its id's first characters (any case) off their page: kept, and
+        // the offer ended on the page's tabs.
         let soft = SoftAuthenticator()
         let once = try #require(try await begin(phraseA).result?["register"]?.string)
-        #expect(try registered(pageA, once, soft).ok)
-        let waiting = try #require(await world.ask("web.passkey", ["register": .string(once)], action: nil))
-        #expect(waiting.result?["state"]?.string == "received" && waiting.result?["phrase"]?.string == phraseA, "\(waiting)")
-        let added = try #require(await world.ask("web.passkey.add", ["register": .string(once)]))
+        let onceAsked = try ask(tab, once)
+        let answer = try registered(tab, once, soft, asked: onceAsked)
+        #expect(answer.ok && answer.result?["state"]?.string == "received" && answer.result?["id"] == nil, "\(answer)")
+        let endedBefore = ended.value
+        let added = try await add(once, typed: String(soft.idText.prefix(typedLength)).uppercased())
         #expect(added.ok, "\(added)")
         #expect(acting.state?.keys[soft.idText] != nil)
+        #expect(ended.value == endedBefore + 1)
         #expect(offered.value.allSatisfy { $0 == phraseA || $0 == "acorn acorn acorn" })
+    }
+
+    /// The review's Low: a request that passed at `trust` while the level rose to `confirm` meanwhile is refused (it
+    /// needs its passkey now), and nothing is recorded.
+    @Test func aRequestPassedAtTrustAsTheLevelRisesNeedsItsPasskey() async throws {
+        let world = try await CardWorld.make(scratch)
+        defer { world.stop() }
+        let acting = ActingPages(vault: MemoryVaultV2().client)
+        _ = try acting.set(level: "trust")
+        let page = PageCredentials(token: "page-one", act: acting.confirmed(token: "page-one", tokenEnds: Date().addingTimeInterval(3_600)), origin: "localhost:8765")
+        acting.settled()
+        /// The level raised to `confirm` while the request is confirmed at `trust`.
+        struct RisingVoice: PageVoice {
+            let acting: ActingPages
+            func confirm(_ request: NodeWire.Request, page: PageAct, done: @escaping @Sendable (NodeWire.Failure?) -> Void) {
+                _ = try? acting.set(level: "confirm")
+                acting.settled()
+                done(nil)
+            }
+        }
+        world.queue.sync {
+            world.requests.actingPages = acting
+            world.requests.pageVoice = RisingVoice(acting: acting)
+        }
+        let lead = try await world.sleepingLead()
+        let asked = try await world.asked("Ship it?", options: ["Yes", "No"], lead: lead)
+        let card = try #require(world.card(asked.card.id))
+        let action = UUID().uuidString.lowercased()
+        let reply = try #require(await act(world, page, kind: "answer", args: ["card": .string(card.id), "seen": .string(card.seen), "text": .string("Yes")],
+                                           action: action, assertion: nil))
+        #expect(reply.error?.code == "assertion-needed", "\(reply)")
+        #expect(await world.actions().filter { $0.action == action }.isEmpty)
     }
 
     /// At `trust` too, a known action id is only the same page's very same request: another page's, another kind, other
