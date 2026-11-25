@@ -389,7 +389,8 @@ struct OwnCdhashTests {
     /// own path while it runs, then reads its own cdhash: still the one it started from. Before, Security's static
     /// signing information described the file found by path, and the probe took the swapped image for itself.
     @Test func theOwnCdhashIsTheRunningCodesNotTheFileNowAtItsPath() throws {
-        let folder = try Scratch().shortFolder("vsoc")
+        let scratch = Scratch()
+        let folder = try scratch.shortFolder("vsoc")
         let main = folder.appendingPathComponent("main.swift")
         try Data("""
             import Foundation
