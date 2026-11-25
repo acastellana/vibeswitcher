@@ -359,14 +359,66 @@ exec runs what the path names then. A checked node host's switch goes through a 
    `--handover PATH` (the review's F1 and N2). Then it restores from what it was given, renumbered, and starts a new
    server child.
 
-**A checked node's arguments and environment (the review's F1, N5).** Its gates prove code, not mode: a wrapper renamed
-over the target can run the genuine pinned image with arguments of its own. So a checked node takes only its own
-arguments, each once (`HostImages.checkedNodeArguments`: `--node`, `--node-root`, `--server`, and a switch's
-`--handover`, `--handover-keeper-channel`, `--handover-keeper-pid`), refusing every other at its start, and its
-environment keeps no variable of this program's but `VIBESWITCHER_HOME` (set by the start) and the descriptor limit it
-carries across its own exec, and no `SWIFT_BACKTRACE` (`checkedNodeEnvironment`). Its lock, socket, log and vault are
-the data root's defaults; `--node-root` names only the folder its `--server` must be in (by device and inode: a link
-to the build's folder, or a folder holding a byte copy of the pinned server, passes, since the row is found by code).
+**A checked node's command line: one parser, one value (the re-check of 2026-11-25, I1).** The gates prove code, not
+mode: a wrapper renamed over the target can run the genuine pinned image with arguments of its own, and two readings
+of one command line can disagree (a check that skipped each value unread, while `main` took each flag at its first
+occurrence anywhere, let `--handover --log …` move the log). So on the Mac, a host whose arguments hold `--node`
+anywhere is parsed once, by one strict parser (`HostImages.CheckedCommandLine.parse`), into a value, or refused:
+
+- The grammar is closed: `--node`, `--node-root DIR`, `--server FILE`, and on a switch both of
+  `--handover-keeper-channel FD` and `--handover-keeper-pid PID`, or neither. Each flag once; each value present, not
+  starting with `-`, absolute where it is a path, a decimal number where it is a descriptor (above 2) or a pid (above
+  1). Nothing else: no other flag, no `--x=v` form, no `--`, no positional word. `--handover PATH` is not in it: a
+  checked node takes state only through a keeper, so there is no state file to read, decode, go back with or unlink.
+- `main` then reads nothing more of the raw command line: for a checked node its `arguments` are the executable
+  alone, so every `value(after:)` and `contains` that main or a helper does sees "absent" and takes its default (a
+  reader added later fails closed the same way). What needs the node's values takes them from the value: the checked
+  start (`macNodeStart(_:…)`), the server child (`ServerChild.adopt`'s arguments, rendered by the value), the build's
+  folders, and what the next image of a switch is started with (`CheckedCommandLine.rendered`, which parses back to
+  the same value).
+- Read before the parser, and so in a class of their own: the mode dispatches at the top of `main` (each recognises
+  its mode by its first argument, but the probe, `--handover-probe` anywhere, which only reads and prints a state
+  file's format and exits, and the keeper, now its first argument too) and `HostHardening.refusal` (which reads
+  `--handover` only when the start is refused, never on the Mac). None of them takes a node's state; a dispatch holding
+  an inherited keeper channel never writes the handshake's byte the keeper waits for, so the keeper gives it nothing.
+- A test scans the sources of `main` and of every helper it hands the arguments to (their `"--…"` literals and their
+  flag constants, `HostHardening.testFlags` among them) and requires each flag found to be classified, in the grammar or
+  refused, in a flag's place and in every value's place: a flag added later fails it until it is classified.
+
+**What a checked node resets at its start** (before the record is read): its environment is built from a fixed list,
+not filtered: `HOME`, `USER`, `LOGNAME` and `SHELL` from the user database, `VIBESWITCHER_HOME` the data root, the
+descriptor limit it carries across its own exec, `PATH` the system's (`/usr/bin:/bin:/usr/sbin:/sbin`) and `TMPDIR`
+the system's per-user folder (`confstr(_CS_DARWIN_USER_TEMP_DIR)`); every other variable is gone (`SSH_AUTH_SOCK`,
+`DYLD_*`, `SWIFT_*`, `Malloc*`, the locale, `XPC_*`). Every descriptor above 2 that isn't close-on-exec is closed but the
+keeper channel; `umask` 077; the working folder `/`; no core files (`RLIMIT_CORE` 0). What the reset can't undo:
+variables the loader, the Swift runtime and malloc read before `main` have already acted on this process (the
+Hardened Runtime refuses `DYLD_*`; the rest are debugging aids); the reset keeps them from its children. The other
+resource limits stay as given (one set low only ends the node). The sessions lose `SSH_AUTH_SOCK` and the user's
+`PATH` from the host's environment: step 5 owes how the job gives them (the plist's own environment is a wrapper's to
+replace, so it is no answer).
+
+**The switch's proof, both ways and bound to the node (the re-check, I2).** A keeper that proves only its own code,
+and a new image that proves only that its keeper is its child running its code, let whoever starts the genuine image
+park any state first. So:
+
+- (a) **The keeper proves its parent** before it takes anything. The old host makes a pair after the keeper's proof,
+  gives the keeper one end and sends the parcel over the other once the keeper has said it took that end. The keeper
+  requires that end's token to be its parent's pid, hardened; and the parcel, when it says it is a checked node's
+  (`fromCheckedNode`), only from a parent whose code is a host the root record pins (`NodePins.read`, never a value
+  from its arguments). A keeper that finds no record, or a parent the record doesn't pin, takes nothing and exits.
+- (b) **A checked start takes a parcel only when it is the node's**: the parcel says it is a checked node's (an
+  unmarked one is refused), it came through a keeper the image proved, and its lock descriptor is the node's own
+  `host.lock` held through that open file: the data root's lock opened afresh can't be locked (someone holds it),
+  then the given descriptor can (so it is the holder), compared by device and inode, before the secrets are read.
+  Anything else is refused with every descriptor closed (the image exits).
+- (c) **Only a checked node starts on the node's lock**, by file: a host that isn't one, whose lock is the data root's
+  `host.lock` by device and inode (or, before it exists, whose folder is the data root's by device and inode and whose
+  name is `host.lock`), doesn't start. This is one check in place of refusing its test flags one by one.
+- What (b) proves is that the sender held the node's lock; who the sender was rests on (a) (pinned host code) and (c)
+  (no host but a checked node holds that lock). The scratch hosts' `--handover-test-checked-parcel` is gone from the
+  sources: it forged the mark on genuine code.
+- The handshake waits for the other side's byte before data goes over a pair just passed, and every keeper read and
+  write has the keeper's limit.
 
 What stays: a file swapped in the short window between the keeper's proof (2) and the exec runs at the job's pid. It
 gets nothing, but the old image is gone by then: the keeper closes everything and the sessions end. And a wrapper that
