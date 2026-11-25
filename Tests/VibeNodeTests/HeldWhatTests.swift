@@ -306,4 +306,14 @@ struct HeldWhatTests {
         // No keys: the card says the file changed, nothing more.
         #expect(Self.item(".git/config (main checkout)", change: "branch.x, core.hookspath.remote added").about?.what == ".git/config (main checkout) changed")
     }
+
+    /// The one command that settles a held-config card from a terminal, as the node gives it to the page: the card's
+    /// own accept; none once it is closed.
+    @Test func aCardCarriesTheCommandThatSettlesIt() {
+        var card = CardStore.Card(root: "/r", kind: .configHeld)
+        card.config = ConfigHoldStore.Shown(items: [Self.item("~/.zshrc")])
+        #expect(card.value["config"]?["settle"]?.string == "vibeswitcher config accept \(card.id)")
+        card.closed = "accepted"
+        #expect(card.value["config"]?["settle"] == nil)
+    }
 }
