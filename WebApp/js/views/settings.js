@@ -157,7 +157,12 @@ export function settingsView(app) {
   let asking = 0;
   let timer = null;
 
-  const leads = () => [...store.state.leads.values()].filter((lead) => lead.root).sort((a, b) => lastPart(a.root).localeCompare(lastPart(b.root)));
+  // Every project the page knows a folder for: its lead's, else its board's (a project whose lead isn't running).
+  const leads = () => {
+    const known = new Map();
+    for (const one of [...store.state.leads.values(), ...store.state.boards.values()]) if (one.project && one.root && !known.has(one.project)) known.set(one.project, { project: one.project, root: one.root });
+    return [...known.values()].sort((a, b) => lastPart(a.root).localeCompare(lastPart(b.root)));
+  };
 
   // The node's settings (asked without a folder) and each project's (asked with its folder), all again at each look.
   function load() {
@@ -178,7 +183,8 @@ export function settingsView(app) {
         if (one && reply.ok && reply.result.project) { one.result = reply.result.project; render(); }
       });
     }
-    for (const id of [...projects.keys()]) if (!store.state.leads.get(id)?.root) projects.delete(id);
+    const still = new Set(leads().map((lead) => lead.project));
+    for (const id of [...projects.keys()]) if (!still.has(id)) projects.delete(id);
   }
 
   function toggle(scope, setting) {
@@ -238,13 +244,15 @@ export function settingsView(app) {
 
   const schedule = framed(render);
   let leadsAsked = '';
-  store.subscribe('leads', () => {
+  const projectsChanged = () => {
     if (ui.state.route.name !== 'settings') return;
     // A project came or went, or its folder came with the leads: its settings asked for.
     const key = JSON.stringify(leads().map((lead) => [lead.project, lead.root]));
     if (key !== leadsAsked) { leadsAsked = key; load(); }
     schedule();
-  });
+  };
+  store.subscribe('leads', projectsChanged);
+  store.subscribe('boards', projectsChanged);
   store.subscribe('node', schedule);
   store.subscribe('connection', () => { if (ui.state.route.name === 'settings' && store.state.connection === 'live') load(); });
   let inside = false;

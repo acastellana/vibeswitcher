@@ -72,7 +72,7 @@ export function twoColumns(app, { label, title, searchLabel, placeholder = searc
   const list = h('nav', { class: 'tc-list', 'aria-label': label },
     h('header', { class: 'tc-head' }, menu, h('h1', { class: 'tc-title' }, title), h('span', { class: 'grow' }), ...head),
     h('div', { class: 'tc-find' }, icon('search', 13), search, searchKey),
-    rows, none, foot ? h('div', { class: 'tc-foot' }, foot) : null);
+    none, rows, foot ? h('div', { class: 'tc-foot' }, foot) : null);
   const detail = h('div', { class: 'tc-detail' });
   const el = h('section', { class: 'twocol', 'aria-label': label, data: { pane: 'list' } }, list, detail);
   const drawn = new Map();
@@ -195,7 +195,9 @@ export function twoColumns(app, { label, title, searchLabel, placeholder = searc
       setText(detailTitle, heading);
       setText(detailSub, sub);
       detailSub.hidden = !sub;
-      if (body) detailBody.replaceChildren(...body);
+      // The same parts already there stay where they are (a field being typed in keeps its focus through a snapshot).
+      const same = body && body.length === detailBody.childNodes.length && body.every((part, index) => detailBody.childNodes[index] === part);
+      if (body && !same) detailBody.replaceChildren(...body);
     },
     own(node) { if (detail.firstChild !== node || detail.childNodes.length !== 1) detail.replaceChildren(node); },
     focusSearch() { search.focus(); search.select?.(); },

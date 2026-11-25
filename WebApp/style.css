@@ -1345,4 +1345,5 @@ mark.found { padding: 0 1px; border-radius: 3px; background: light-dark(rgb(255 
   /* A fact's name over its value: the value gets the screen's width, its mark beside its words. */
   .tc-dbody .fact { grid-template-columns: minmax(0, 1fr); gap: 0; padding: 5px 0; }
   .tc-dbody .fact dt { font-size: var(--small); }
+  .tc-dbody .fact dd { flex-wrap: nowrap; align-items: baseline; }
 }
