@@ -406,7 +406,6 @@ export function cardSheet(card) {
   };
 }
 
-// The stack under a lead's chat: "2 questions for you", then the cards, open ones first.
 // The push the lead asks for, while it's open: what goes where, from git and the vault, and the two lines that settle
 // it in a terminal. Nothing on the page pushes.
 export function pushCard(lead, app = null) {
@@ -433,6 +432,108 @@ export function pushCard(lead, app = null) {
     h('p', { class: 'card-foot' }, app && actsFor(app, 'push') ? t('acPushNote') : t('cPushNote')));
 }
 
+// How a card's priority ranks in the waiting block: Blocking first, then Important, then Whenever.
+const RANK = { blocking: 0, important: 1, whenever: 2 };
+export const rankOf = (card) => RANK[card.question?.priority] ?? (card.blocking ? 0 : 1);
+
+// How long an answered card stays in the waiting block, saying it was answered: the conversation is the record.
+export const ANSWERED_SHOWN = 4000;
+
+// The waiting block's cards: Blocking first (oldest first), then Important, then Whenever, then the lead's push. Every
+// Blocking card is shown whole; with several open, the others fold to their question line (one the user opens shows
+// whole), and with none Blocking the first shows whole. `others()`: the project's other cards, drawn by the caller
+// ({ key, at, priority, el }: held config, a base move, a plugin's request), placed among them by their priority.
+// `onChange`: an answered card left (its few seconds over), so whoever holds the stack may draw again.
+export function questionStack(app, project, { onChange = () => {}, now = () => Date.now(), others = () => [] } = {}) {
+  const count = h('h2', { class: 'stack-title' });
+  const order = h('span', { class: 'stack-note' }, t('anyOrder'));
+  const list = h('div', { class: 'stack-cards' });
+  const pushSlot = h('div', { class: 'stack-cards push-slot' });
+  const el = h('section', { class: 'stack', 'aria-label': t('cQuestionsForYou') }, h('header', { class: 'stack-head' }, count, order), list, pushSlot);
+  let shownPush = null;
+  const rows = new Map();
+  // Each card's place: keyed by its first id and ordered by when that card was first asked, so a question the node
+  // posts again after a restart (a new card id, the same question) keeps its row, its place and what was typed in it.
+  const keyOf = (card) => app.store.cardKey(card.id);
+  const firstAt = new Map();
+  // The one the user opened, shown whole among folded ones.
+  let chosen = null;
+  const expand = (card) => { chosen = keyOf(card); update(); };
+  // When each card closed here (answered, decided, withdrawn): shown that long, then gone. One already closed when
+  // first seen is never shown.
+  const closedAt = new Map();
+  let leaving = null;
+  let shownOthers = [];
+
+  function update() {
+    const cards = [...app.store.state.cards.values()].filter((card) => card.project === project && (card.kind === 'question' || card.kind === 'approval'));
+    for (const card of cards) if (!firstAt.has(keyOf(card))) firstAt.set(keyOf(card), Date.parse(card.at));
+    const isOpen = (card) => card.open && app.store.state.acting.get(card.id)?.kind !== 'answer';
+    const open = cards.filter(isOpen);
+    const at = now();
+    for (const card of cards) {
+      const key = keyOf(card);
+      if (isOpen(card)) closedAt.delete(key);
+      else if (!closedAt.has(key)) closedAt.set(key, rows.has(key) ? at : 0);
+    }
+    const stays = (card) => isOpen(card) || at - (closedAt.get(keyOf(card)) || 0) < ANSWERED_SHOWN;
+    cards.splice(0, cards.length, ...cards.filter(stays));
+    // The next answered card to leave: drawn again then, and the holder told.
+    const soonest = Math.min(...cards.filter((card) => !isOpen(card)).map((card) => closedAt.get(keyOf(card)) + ANSWERED_SHOWN));
+    clearTimeout(leaving);
+    if (Number.isFinite(soonest)) leaving = setTimeout(() => { update(); onChange(); }, Math.max(0, soonest - at) + 20);
+    // Open before answered; then by priority; then oldest first. The caller's other cards (always open) among them.
+    const extra = others();
+    const items = [...cards.map((card) => ({ card, open: isOpen(card), rank: rankOf(card), at: firstAt.get(keyOf(card)) })),
+      ...extra.map((other) => ({ other, open: true, rank: RANK[other.priority] ?? 1, at: Date.parse(other.at) || 0 }))];
+    items.sort((a, b) => (b.open - a.open) || (a.rank - b.rank) || (a.at - b.at));
+    const lead = app.store.state.leads.get(project);
+    const push = lead?.push && lead.root ? lead : null;
+    // Drawn again only when the request changed: a newer one replaces it, a settled one leaves.
+    const pushKey = push ? `${push.push.id}:${push.root}:${app.store.acts()}` : null;
+    if (pushKey !== shownPush) {
+      shownPush = pushKey;
+      pushSlot.replaceChildren(...(push ? [pushCard(push, app)] : []));
+    }
+    const pushShown = !!push;
+    el.hidden = items.length === 0 && !pushShown;
+    const asking = open.length + extra.length;
+    setText(count, asking ? t('questionsForYou', { n: asking }) + (pushShown ? t('andAPush') : '') : pushShown ? t('pushWaits') : t('cNoQuestions'));
+    setClass(count, 'blocking', open.some((card) => card.blocking));
+    order.hidden = asking < 2;
+    const before = rows.size;
+    const whole = open.some((card) => keyOf(card) === chosen) ? chosen : null;
+    const firstWhole = open.some((card) => rankOf(card) === 0) ? null : items.find((item) => item.card && item.open)?.card;
+    // Built by hand rather than with `keyed`'s slide: a card that closes shrinks in place.
+    const next = new Map();
+    let cursor = list.firstChild;
+    for (const item of items) {
+      let node;
+      if (item.other) node = item.other.el;
+      else {
+        const card = item.card;
+        let row = rows.get(keyOf(card));
+        const fresh = !row;
+        const fold = item.open && open.length > 1 && item.rank !== 0 && keyOf(card) !== whole && card !== firstWhole;
+        if (fresh) row = questionCard(app, card, { expand });
+        row.update(card, fold);
+        next.set(keyOf(card), row);
+        if (fresh && before > 0) row.el.classList.add('enter');
+        node = row.el;
+      }
+      if (node === cursor) cursor = cursor.nextSibling; else list.insertBefore(node, cursor);
+    }
+    for (const [id, row] of rows) if (!next.has(id)) row.el.remove();
+    for (const node of shownOthers) if (!extra.some((other) => other.el === node)) node.remove();
+    shownOthers = extra.map((other) => other.el);
+    rows.clear();
+    for (const [id, row] of next) rows.set(id, row);
+    return asking + (pushShown ? 1 : 0);
+  }
+
+  return { el, update, focusLast() { const cards = el.querySelectorAll('.card:not(.closed)'); cards[cards.length - 1]?.querySelector('.option, .answer-input')?.focus(); } };
+}
+
 // A feature plugin's card (js/plugincard.js): who asks, the node's facts, what it asks whole, the agent's own words,
 // and the lines that settle it. Never acts.
 export function pluginCard(card, app = null) {
@@ -457,83 +558,6 @@ export function pluginCard(card, app = null) {
         f.actions.map((action) => copyLine(action.line, action.says)))
       : h('p', { class: 'card-notice' }, f.outcome || f.state),
     card.notice ? h('p', { class: 'card-notice' }, card.notice) : null);
-}
-
-// How long an answered card stays in the waiting block, saying it was answered: the conversation is the record.
-export const ANSWERED_SHOWN = 4000;
-
-// `onChange`: an answered card left (its few seconds over), so whoever holds the stack may draw again.
-export function questionStack(app, project, { onChange = () => {}, now = () => Date.now() } = {}) {
-  const count = h('h2', { class: 'stack-title' });
-  const order = h('span', { class: 'stack-note' }, t('anyOrder'));
-  const pushSlot = h('div', { class: 'stack-cards' });
-  const list = h('div', { class: 'stack-cards' });
-  const el = h('section', { class: 'stack', 'aria-label': t('cQuestionsForYou') }, h('header', { class: 'stack-head' }, count, order), pushSlot, list);
-  let shownPush = null;
-  const rows = new Map();
-  // Each card's place: keyed by its first id and ordered by when that card was first asked, so a question the node
-  // posts again after a restart (a new card id, the same question) keeps its row, its place and what was typed in it.
-  const keyOf = (card) => app.store.cardKey(card.id);
-  const firstAt = new Map();
-  // With several open, one shows whole (the first, or the one the user opened) and the others their question line.
-  let chosen = null;
-  const expand = (card) => { chosen = keyOf(card); update(); };
-  // When each card closed here (answered, decided, withdrawn): shown that long, then gone. One already closed when
-  // first seen is never shown.
-  const closedAt = new Map();
-  let leaving = null;
-
-  function update() {
-    const cards = [...app.store.state.cards.values()].filter((card) => card.project === project && (card.kind === 'question' || card.kind === 'approval'));
-    for (const card of cards) if (!firstAt.has(keyOf(card))) firstAt.set(keyOf(card), Date.parse(card.at));
-    const isOpen = (card) => card.open && app.store.state.acting.get(card.id)?.kind !== 'answer';
-    const open = cards.filter(isOpen);
-    const at = now();
-    for (const card of cards) {
-      const key = keyOf(card);
-      if (isOpen(card)) closedAt.delete(key);
-      else if (!closedAt.has(key)) closedAt.set(key, rows.has(key) ? at : 0);
-    }
-    const stays = (card) => isOpen(card) || at - (closedAt.get(keyOf(card)) || 0) < ANSWERED_SHOWN;
-    cards.splice(0, cards.length, ...cards.filter(stays));
-    // The next answered card to leave: drawn again then, and the holder told.
-    const soonest = Math.min(...cards.filter((card) => !isOpen(card)).map((card) => closedAt.get(keyOf(card)) + ANSWERED_SHOWN));
-    clearTimeout(leaving);
-    if (Number.isFinite(soonest)) leaving = setTimeout(() => { update(); onChange(); }, Math.max(0, soonest - at) + 20);
-    cards.sort((a, b) => (isOpen(b) - isOpen(a)) || (firstAt.get(keyOf(a)) - firstAt.get(keyOf(b))));
-    const lead = app.store.state.leads.get(project);
-    const push = lead?.push && lead.root ? lead : null;
-    // Drawn again only when the request changed: a newer one replaces it, a settled one leaves.
-    const pushKey = push ? `${push.push.id}:${push.root}:${app.store.acts()}` : null;
-    if (pushKey !== shownPush) {
-      shownPush = pushKey;
-      pushSlot.replaceChildren(...(push ? [pushCard(push, app)] : []));
-    }
-    el.hidden = cards.length === 0 && !push;
-    setText(count, open.length ? t('questionsForYou', { n: open.length }) + (push ? t('andAPush') : '') : push ? t('pushWaits') : t('cNoQuestions'));
-    setClass(count, 'blocking', open.some((card) => card.blocking));
-    order.hidden = open.length < 2;
-    const before = rows.size;
-    const whole = open.some((card) => keyOf(card) === chosen) ? chosen : open[0] ? keyOf(open[0]) : null;
-    // Built by hand rather than with `keyed`'s slide: a card that closes shrinks in place.
-    const next = new Map();
-    let cursor = list.firstChild;
-    for (const card of cards) {
-      let row = rows.get(keyOf(card));
-      const fresh = !row;
-      const fold = isOpen(card) && open.length > 1 && keyOf(card) !== whole;
-      if (fresh) { row = questionCard(app, card, { expand }); row.update(card, fold); } else row.update(card, fold);
-      next.set(keyOf(card), row);
-      if (row.el === cursor) cursor = cursor.nextSibling; else list.insertBefore(row.el, cursor);
-      if (fresh && before > 0) row.el.classList.add('enter');
-    }
-    for (const [id, row] of rows) if (!next.has(id)) row.el.remove();
-    rows.clear();
-    for (const [id, row] of next) rows.set(id, row);
-    return open.length + (push ? 1 : 0);
-  }
-
-  return { el, update, focusLast() { const cards = el.querySelectorAll('.card:not(.closed)'); cards[cards.length - 1]?.querySelector('.option, .answer-input')?.focus(); } };
 }
 
 // An agent's own question on its screen (a permission prompt, a plan to approve), as a row of its chat: the Mac's

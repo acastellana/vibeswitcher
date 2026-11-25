@@ -64,6 +64,52 @@ function leadWithPush(id = 'p1', extra = {}) {
 const cardsOf = (el) => findAll(el, (node) => node.tag === 'article');
 const head = (card) => find(card, byClass('card-question'))?.textContent || find(card, byClass('card-closed'))?.textContent || '';
 
+// U3 ---------------------------------------------------------------------------------------------------------------
+
+test('U3: the waiting block puts Blocking first (oldest first), then Important, then Whenever, then the push; Blocking cards are open, only the rest fold', () => {
+  setLanguage('en');
+  const all = [question('whenever', 'whenever', ago(30)), question('important', 'important', ago(20)), question('block-new', 'blocking', ago(5)), approval(ago(1)), question('block-old', 'blocking', ago(15))];
+  const app = fakeApp({ kinds: ['answer', 'push', 'push.decline'], state: { cards: new Map(all.map((card) => [card.id, card])), leads: new Map([[P, leadWithPush()]]) } });
+  // A held config change the project view draws, placed by its priority (Blocking) and its time.
+  const config = { key: 'local:card:config', at: ago(10), priority: 'blocking', el: (() => { const el = document.createElement('article'); el.className = 'card'; el.append('Held config'); return el; })() };
+  const stack = cards.questionStack(app, P, { others: () => [config] });
+  assert.equal(stack.update(), 7, 'five questions, the held config and the push');
+  const shown = cardsOf(stack.el);
+  assert.deepEqual(shown.map((card) => (card.classList.contains('push-card') ? 'push' : card === config.el ? 'config' : head(card).replace(/^Question (\S+):.*/, '$1').replace(/^The clean-up.*/, 'appr'))),
+    ['block-old', 'config', 'block-new', 'appr', 'important', 'whenever', 'push']);
+  const folded = (name) => shown.find((card) => head(card).startsWith(`Question ${name}`))?.classList.contains('folded');
+  assert.equal(folded('block-old'), false);
+  assert.equal(folded('block-new'), false);
+  assert.equal(shown[3].classList.contains('folded'), false, 'the blocking approval arrives open');
+  assert.ok(find(shown[3], button('Not yet')), 'with its options');
+  assert.equal(folded('important'), true);
+  assert.equal(folded('whenever'), true);
+  // Every option of the first blocking question is there to press.
+  assert.ok(find(shown[0], button('Thursday')) && find(shown[0], button('Wait')));
+  // Opening a folded one opens it in place; the order holds.
+  find(shown[5], byClass('card-unfold')).click();
+  assert.equal(cardsOf(stack.el)[5].classList.contains('folded'), false);
+  assert.equal(cardsOf(stack.el)[4].classList.contains('folded'), true);
+  assert.equal(cardsOf(stack.el).at(-1).classList.contains('push-card'), true);
+});
+
+test('U3: with nothing Blocking the oldest of the rest shows whole and the others fold; a held config the project draws sits among the Blocking cards', async () => {
+  setLanguage('en');
+  const all = [question('important', 'important', ago(20)), question('whenever', 'whenever', ago(30))];
+  const app = fakeApp({ kinds: ['answer'], state: { cards: new Map(all.map((card) => [card.id, card])) } });
+  const stack = cards.questionStack(app, P);
+  stack.update();
+  assert.deepEqual(cardsOf(stack.el).map((card) => [head(card).slice(9, 18), card.classList.contains('folded')]), [['important', false], ['whenever:', true]]);
+  // The project view: its held config card in the stack, before an Important question though asked after it.
+  const { projectView } = await import('../js/views/project.js');
+  const held = { id: 'local:card:config', kind: 'config', project: P, root: ROOT, open: true, at: ago(5), seen: 's', config: { items: [{ name: 'lead.md', change: 'edited', files: [] }], guarded: [] } };
+  const state = { cards: new Map([...all, held].map((card) => [card.id, card])), leads: new Map([[P, { ...leadWithPush(), push: null }]]) };
+  const view = projectView(fakeApp({ kinds: ['answer'], state }), { sheet: { open() {}, close() {} } });
+  view.render();
+  const box = find(view.el, byClass('wait-box'));
+  assert.deepEqual(cardsOf(box).map((card) => head(card).slice(0, 18)), ['Changed settings f', 'Question important', 'Question whenever:']);
+});
+
 // U16 --------------------------------------------------------------------------------------------------------------
 
 test('U16: the Approve option says what it approves in words with 8 characters of the commit; the whole one on hover and in what is sent', () => {

@@ -20,6 +20,7 @@ import { leadLines, shownLines, dialCounts, waitingCards, waitingCount, cut, sho
 import { projectHref, routeHref } from '../ui.js';
 import { questionStack, pluginCard, copyLine, cardSheet } from './cards.js';
 import { tellLine, shellWord, leadLine } from '../actions.js';
+import { pluginFacts } from '../plugincard.js';
 import { actsFor, doButton, cardArgs, refusalWords } from '../acting.js';
 import { waysFor, sendArgs, sentWords } from '../sendways.js';
 import { sendMenu } from './sendmenu.js';
@@ -106,8 +107,20 @@ export function projectView(app, { sheet }) {
   // The waiting block's cards, one stack a project (it keeps what was typed in a card across updates).
   const stacks = new Map();
   const stackOf = (project) => {
-    if (!stacks.has(project)) stacks.set(project, questionStack(app, project, { onChange: () => { drawn = ''; render(); } }));
+    if (!stacks.has(project)) stacks.set(project, questionStack(app, project, { onChange: () => { drawn = ''; render(); }, others: () => othersOf(project) }));
     return stacks.get(project);
+  };
+  // The project's other cards (held config, a base move, a plugin's request) for the stack to place by priority: each
+  // drawn again only when it or what the page may do changed, so a button's refusal under it stays.
+  const others = new Map();
+  const othersOf = (project) => {
+    const cards = waitingCards(store.state.cards.values(), project).filter((card) => !['question', 'approval'].includes(card.kind));
+    for (const id of others.keys()) if (!cards.some((card) => card.id === id)) others.delete(id);
+    return cards.map((card) => {
+      const shape = JSON.stringify([card, store.acts(), lang()]);
+      if (others.get(card.id)?.shape !== shape) others.set(card.id, { shape, el: otherCard(card) });
+      return { key: card.id, at: card.at, priority: card.kind === 'plugin' ? pluginFacts(card).severity : 'blocking', el: others.get(card.id).el };
+    });
   };
   // Notes drafted for a lead, this page's only: the line that tells it from a terminal.
   const notes = new Map();
@@ -315,10 +328,10 @@ export function projectView(app, { sheet }) {
       const push = lead?.push ? 1 : 0;
       waits.push(h('h2', { class: 'asked-title' }, push && waiting === 1 ? t('pushWaits') : t('questionsForYou', { n: waiting - push }) + (push ? t('andAPush') : '')));
     }
-    waits.push(stack.el, ...extra.map(otherCard));
+    waits.push(stack.el);
     const inner = h('div', { class: 'wait-col' }, waits);
     waitBox.replaceChildren(inner);
-    waitShown = !!waiting || !stack.el.hidden || extra.length > 0;
+    waitShown = !!waiting || !stack.el.hidden;
     waitBox.hidden = !waitShown;
     for (const entry of mine) {
       if (entry.state === 'draft') {
