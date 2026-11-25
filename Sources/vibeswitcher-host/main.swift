@@ -124,6 +124,7 @@ if Platform.CodeIdentity.isAvailable, !ownsLaunchers, config.checkedNode == nil 
     config.testKeeperHost = value(after: "--handover-test-keeper").flatMap(NodePins.bytes)
     config.testSwapAfterCheck = value(after: "--handover-test-swap-after-check")
     config.testSwapBeforeExec = value(after: "--handover-test-swap-before-exec")
+    config.testKeeperLimit = value(after: "--handover-test-keeper-limit").flatMap(TimeInterval.init)
 }
 config.idleExit = value(after: "--idle-exit").flatMap(TimeInterval.init) ?? 600
 // A bench's host: it ends, sessions and all, with the bench (see `HostServer.Config.owner`). Kept through a handover.
@@ -147,6 +148,9 @@ config.spawnNeedsLead = ownsLaunchers && !Platform.CodeIdentity.isAvailable
 config.watchesItsPath = ownsLaunchers && !Platform.CodeIdentity.isAvailable
 // On Linux a host that took itself for a scratch host never holds the user's lock (see `HostHardening`).
 config.heldLockIsAllowed = HostHardening.heldLockIsAllowed(ownsLaunchers: ownsLaunchers, usersLock: VibePaths.hostLock.path)
+// The Mac: a host that isn't a checked node holds no lock that is the node's own once opened, by its descriptor (another
+// letter case, a dangling link: the re-check's round 2, note 1).
+if Platform.CodeIdentity.isAvailable, checkedStart == nil { config.heldLockIsAllowed = { HostImages.heldLockAllowed($0, accountHome: HostImages.accountHome) } }
 // On Linux the node's host hands over only to a build installed under ~/.vibeswitcher/v2/builds that it checked; a
 // scratch host to one under its --install-root; any other to any build, as before (see V2/HandoverTarget.swift).
 config.installRoot = HandoverTarget.installRoot(arguments: arguments, ownsLaunchers: ownsLaunchers, accountHome: HostImages.accountHome)

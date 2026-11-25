@@ -234,6 +234,9 @@ public enum MacHandoverKeeper {
         // it, and the new image's are the only ones left.
         let closed = wait(readable: keeps, for: keeperLimit)
         if closed { _ = readByte(keeps) }
+        // Everything it held closed before its last line, which a full stderr could hold up: then nothing is held meanwhile.
+        parcel.descriptors.forEach { Sys.close($0) }
+        [keeps, theirsNow, parent, mine, channel].forEach { Sys.close($0) }
         Platform.Stdio.error("vibeswitcher-host: handover keeper: gave the state to the new image (pid \(host))"
                              + (closed ? "" : ", which didn't close its end within the limit") + "\n")
         exit(0)
@@ -297,9 +300,9 @@ public enum MacHandoverKeeper {
         Sys.close(kept)
         guard ready else { return .failure(Refused("the keeper's state didn't come within the limit (errno \(readyErrno))")) }
         guard let parcel = received else { return .failure(Refused("the keeper's state didn't arrive whole (errno \(receiveErrno))")) }
-        // The keeper exits once it gave the parcel: reaped here, the proven keeper's pid alone (never a session's).
-        var status: Int32 = 0
-        while waitpid(keeper, &status, 0) < 0, errno == EINTR {}
+        // The keeper exits once it gave the parcel: reaped here, the proven keeper's pid alone (never a session's), within
+        // its limit.
+        reap(keeper, within: limit)
         guard var state = try? PropertyListDecoder().decode(HostHandover.State.self, from: parcel.data) else {
             parcel.descriptors.forEach { Sys.close($0) }
             return .failure(Refused("the state doesn't read"))
@@ -407,10 +410,17 @@ public enum MacHandoverKeeper {
         }
     }
 
-    /// `pid` (a child of this process) reaped once it exits (seam: waits as long as it takes).
+    /// `pid` (a child of this process) reaped once it exits, within `seconds`: past them it is ended (SIGKILL) and reaped
+    /// then (the re-check's round 2: the new image's wait for its keeper).
     static func reap(_ pid: pid_t, within seconds: TimeInterval) {
+        let deadline = Platform.Clock.steadyDate().addingTimeInterval(seconds)
         var status: Int32 = 0
-        while waitpid(pid, &status, 0) < 0, errno == EINTR {}
+        while true {
+            let got = waitpid(pid, &status, WNOHANG)
+            if got == pid || (got < 0 && errno != EINTR) { return }
+            if Platform.Clock.steadyDate() >= deadline { return end(pid) }
+            usleep(10_000)
+        }
     }
 
     /// `pid` ended (SIGKILL) and reaped.

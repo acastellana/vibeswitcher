@@ -85,6 +85,8 @@ public final class HostServer {
         public var testKeeperHost: Data?
         public var testSwapAfterCheck: String?
         public var testSwapBeforeExec: String?
+        /// A scratch host's test: its keeper's limit, shorter than the keeper's own (`--handover-test-keeper-limit S`).
+        public var testKeeperLimit: TimeInterval?
         /// The project allow-list (`~/.vibeswitcher/v2/projects` for the node's host on Linux): a spawn whose working
         /// folder isn't inside a repository it names is refused, saying why (see V2/ProjectAllowList.swift). Nil: any
         /// folder, as always (the Mac's and every scratch host's).

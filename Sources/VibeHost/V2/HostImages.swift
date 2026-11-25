@@ -464,8 +464,18 @@ public enum HostImages {
         return nil
     }
 
-    /// Whether a host that isn't a checked node may hold the lock it opened, `fd` (seam: yes).
-    public static func heldLockAllowed(_ fd: Int32, accountHome: String?) -> Bool { true }
+    /// Whether a host that isn't a checked node may hold the lock it opened, `fd` (the re-check's round 2, note 1): not
+    /// when it is the node's own `host.lock`, by the opened descriptor's device and inode, so another letter case or a
+    /// dangling link that made the node's lock by opening it is refused too (`HostServer.Config.heldLockIsAllowed`: the
+    /// descriptor closed, the start refused). Any other lock, and with no home: yes.
+    public static func heldLockAllowed(_ fd: Int32, accountHome: String?) -> Bool {
+        guard Platform.CodeIdentity.isAvailable, let accountHome else { return true }
+        var held = stat(), node = stat()
+        let lock = (Platform.Service.nodeRoot(accountHome: accountHome) as NSString).appendingPathComponent("host.lock")
+        guard fstat(fd, &held) == 0 else { return false }
+        guard stat(lock, &node) == 0 else { return true }
+        return !(held.st_dev == node.st_dev && held.st_ino == node.st_ino)
+    }
 
     /// Whether `lockPath` is the node's lock by file (the re-check's I2c): the data root's `host.lock` (device and
     /// inode), or, while that doesn't exist, a `host.lock` in a folder that is the data root by device and inode. Only a

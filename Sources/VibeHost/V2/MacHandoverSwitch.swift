@@ -70,9 +70,12 @@ extension HostServer {
         }
         // A scratch host's test: the target swapped after the path check (never a checked node's).
         if config.checkedNode == nil, let swap = config.testSwapAfterCheck { _ = rename(swap, executable) }
+        // A scratch host's test may shorten its keeper's limit; a checked node's keeper has its own.
+        let shorter = config.checkedNode == nil ? config.testKeeperLimit : nil
+        let keeperLimit = shorter.map { min(max(1, $0), MacHandoverKeeper.limit) } ?? MacHandoverKeeper.limit
         log("handing over to \(executable) through a keeper")
         DispatchQueue.global().async { [weak self] in
-            let started = MacHandoverKeeper.start(executable, expected: expected)
+            let started = MacHandoverKeeper.start(executable, expected: expected, limit: keeperLimit)
             self?.queue.async {
                 guard let self else { return }
                 let keeper: MacHandoverKeeper.Keeper
