@@ -82,7 +82,7 @@ struct RestartResumeTests {
         let head = Git.run(["rev-parse", "agent/write-the-parser"], in: repo.path).output
 
         let status = try await node.statusJSON()
-        let notice = try #require(((status["notices"] as? [String]) ?? []).first { $0.contains("ended with the host before it") }, "\(status)")
+        let notice = try #require(((status["notices"] as? [String]) ?? []).first { $0.contains("the lead and team of") && $0.contains("ended with it") }, "\(status)")
         #expect(notice.contains("`vibeswitcher lead \(repo.path) --resume`") && notice.contains(conversation), "\(notice)")
         #expect(notice.contains("write-the-parser (agent/write-the-parser)"), "\(notice)")
 
@@ -107,7 +107,7 @@ struct RestartResumeTests {
         #expect(prompt.contains("write-the-parser (Write the parser) on branch agent/write-the-parser at \(head.prefix(12))"), "\(prompt)")
         #expect(prompt.contains("start_worker"), "\(prompt)")
         let after = try await node.statusJSON()
-        #expect(!((after["notices"] as? [String]) ?? []).contains { $0.contains("ended with the host before it") }, "\(after)")
+        #expect(!((after["notices"] as? [String]) ?? []).contains { $0.contains("the lead and team of") && $0.contains("ended with it") }, "\(after)")
     }
 
     /// A message waiting for the lead when the user stopped and started the node: the lead `lead --resume` reopens in its
