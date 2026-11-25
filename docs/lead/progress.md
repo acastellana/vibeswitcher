@@ -4534,3 +4534,5 @@ Turn what's a real bug into a task (one already on the board needs nothing); the
 - 2026-11-25 12:44 Handed the lead over to a fresh session: the last one had been idle 63 minutes with 167k tokens of context, past handover_idle_min 50 and handover_tokens 150k; its prompt cache had expired, so VibeSwitcher wrote the note
 - 2026-11-25 13:15 Planned launch-v2-s-mac: Launch v2's Mac app in the sandbox on this Mac and use it: what works, what breaks (report only, nothing merges)
 - 2026-11-25 13:16 Started a worker on launch-v2-s-mac
+- 2026-11-25 13:31 Kept launch-v2-s-mac unmerged: Report only, by design: nothing of it merges into main. Its worktree holds the v2 clone and build (.vibeswitcher/v2-app) and the screenshots, which the user's next step with v2 uses; no cleanup until the user is finished with v2 on this Mac.
+- 2026-11-25 13:31 Update: v2's Mac app builds and runs here; two things break that main gets right — **Result:** `v2` (at `v2-mac-fixes`, `b9df9949`) builds on this Mac with no errors and its sandbox app launched first try, with no fixes needed. A worker drove about 60 screens in light and dark: the …
