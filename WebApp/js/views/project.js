@@ -330,11 +330,13 @@ export function projectView(app, { sheet }) {
     const said = h('span', { class: 'act-said', role: 'status' });
     const button = h('button', { class: 'button quiet', type: 'button', onclick: () => {
       button.disabled = true;
+      button.setAttribute('aria-busy', 'true');
       button.textContent = t('shReading');
       said.classList.remove('refused');
       setText(said, '');
       store.read(kind, { folder: card.root }).then((reply) => {
         button.disabled = false;
+        button.removeAttribute('aria-busy');
         button.textContent = t('shShowWhole');
         const result = reply?.ok ? reply.result : null;
         if (result?.card) { sheet.open(heldParts(result.card, { root: card.root, kicker: lastPart(card.root), read: store.read, kind })); return; }

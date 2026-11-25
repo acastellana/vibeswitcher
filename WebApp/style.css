@@ -22,7 +22,7 @@
               message box · --r-4 16 bubbles and sheets · --r-pill pills and round buttons; 50% is a circle.
    Elevation  --e-1 a hairline (cards; --e-1-in inside a field) · --e-2 what floats (menus, suggestions, a
               row's actions, tooltips) · --e-3 over everything (the palette, sheets, drawers) · --e-thumb a
-              switch's chosen part · --e-focus, --e-focus-in a field's ring · --e-hover-in a field pointed at.
+              switch's chosen part · --e-focus, --e-focus-in a field's ring · --e-hover, --e-hover-in an edge pointed at.
    Motion     --dur-1 120 ms hover, press, colour · --dur-2 180 ms entering, leaving, opening · --ease-out
               entering and every state · --ease-in leaving · --loop 1.2 s working marks, skeletons, busy.
               Opacity and transform only, never a bounce; reduced motion turns all of it off.
@@ -132,6 +132,7 @@
   --e-focus: 0 0 0 2px var(--accent);
   --e-focus-in: inset 0 0 0 2px var(--accent);
   --e-hover-in: inset 0 0 0 1px var(--ink-3);
+  --e-hover: 0 0 0 1px var(--ink-3);
 
   /* Motion. */
   --dur-1: 120ms;
@@ -183,7 +184,7 @@
 html, body { height: 100%; margin: 0; }
 /* The page never scrolls sideways: whatever runs past the window is clipped, never scrolled to (app.js puts a stray
    sideways scroll back too). */
-html { overflow: clip; }
+html { overflow: clip; -webkit-tap-highlight-color: transparent; } /* a tap's own grey flash: the controls' pressed state answers instead */
 body {
   background: var(--bg);
   color: var(--ink);
@@ -239,19 +240,16 @@ small { font-size: var(--small); }
 
 .segmented { display: inline-flex; padding: 2px; border-radius: var(--r-2); background: var(--fill-2); }
 .segmented button { padding: 3px 14px; border-radius: calc(var(--r-2) - 2px); color: var(--ink-2); font-weight: 500; transition: color var(--dur-1) var(--ease-out); }
-.segmented button:hover { color: var(--ink); }
 .segmented button[aria-pressed="true"] { background: var(--raised); color: var(--ink); box-shadow: var(--e-thumb); }
 
 .icon-button { position: relative; display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; border-radius: var(--r-2); color: var(--ink-2); }
-.icon-button:hover, .icon-button[aria-current] { background: var(--fill-2); color: var(--ink); }
+.icon-button[aria-current] { background: var(--fill-2); color: var(--ink); }
 .icon-button[aria-expanded="true"] { color: var(--ink); }
 
 .button { display: inline-flex; align-items: center; gap: 6px; padding: 6px 14px; border-radius: var(--r-2); background: var(--accent); color: var(--on-accent); font-weight: 500; white-space: nowrap; transition: opacity var(--dur-1) var(--ease-out); }
-.button:hover { opacity: 0.9; }
 .button:disabled { background: var(--fill-2); color: var(--ink-3); cursor: default; opacity: 1; }
 .button.quiet { padding: 4px 10px; background: var(--raised); color: var(--ink); box-shadow: var(--e-1); }
 .link { color: var(--accent); font-size: var(--small); justify-self: start; }
-.link:hover { text-decoration: underline; }
 
 .section-title { margin-bottom: 8px; color: var(--ink-2); font-size: var(--small); font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; }
 
@@ -366,12 +364,11 @@ small { font-size: var(--small); }
 .code { border-radius: var(--r-2); background: var(--fill); overflow: hidden; }
 .code figcaption { padding: 5px 12px 0; color: var(--ink-3); font-size: var(--small); display: flex; align-items: center; gap: 8px; }
 .code-run { margin-left: auto; display: inline-flex; align-items: center; gap: 4px; padding: 1px 8px; border: 1px solid var(--line); border-radius: var(--r-2); background: transparent; color: var(--ink-2); font: inherit; cursor: pointer; }
-.code-run:hover, .code-run:focus-visible { color: var(--ink); border-color: var(--ink-3); }
+.code-run:focus-visible { color: var(--ink); border-color: var(--ink-3); }
 .code pre { padding: 8px 12px 10px; overflow-x: auto; font-size: 12px; line-height: 1.5; }
 .code pre code { padding: 0; background: none; font-size: inherit; }
 
 .fold { display: inline-flex; align-items: center; gap: 8px; max-width: 100%; padding: 2px 0; color: var(--ink-2); font-size: 12px; font-weight: 500; text-align: left; }
-.fold:hover { color: var(--ink); }
 .fold.failed { color: var(--danger); }
 .fold > .icon { color: var(--ink-3); transition: transform var(--dur-2) var(--ease-out); }
 .fold[aria-expanded="true"] > .icon { transform: rotate(90deg); }
@@ -499,7 +496,6 @@ small { font-size: var(--small); }
 .timer.held { padding: 7px 12px; background: var(--fill); color: var(--ink-2); }
 .options { display: grid; gap: 5px; }
 .option { display: flex; align-items: center; gap: 10px; width: 100%; padding: 8px 12px; border-radius: var(--r-2); background: var(--fill); text-align: left; transition: background-color var(--dur-1) var(--ease-out); }
-.option:hover { background: var(--fill-2); }
 .option:focus-visible { outline-offset: -2px; border-radius: var(--r-2); }
 .option.proposed { background: var(--accent-fill); font-weight: 600; }
 .option-text { flex: 1; min-width: 0; overflow-wrap: anywhere; }
@@ -545,14 +541,12 @@ small { font-size: var(--small); }
 .confirm-label { color: var(--ink-2); font-size: var(--small); font-weight: 600; transition: color var(--dur-1) var(--ease-out); }
 .confirm.sending .confirm-label { color: var(--ink-3); }
 .confirm-clear { color: var(--ink-3); font-size: var(--small); }
-.confirm-clear:hover { color: var(--ink); }
 .confirm-text { font-weight: 500; white-space: pre-wrap; overflow-wrap: anywhere; }
 .confirm-note { color: var(--ink-3); font-size: var(--small); }
 .copy-line { display: flex; align-items: center; gap: 8px; min-width: 0; padding: 4px 4px 4px 11px; border-radius: var(--r-2); background: var(--bg); box-shadow: var(--e-1-in); }
 .copy-prompt { flex: none; color: var(--ink-3); font-family: var(--mono); font-size: 12px; user-select: none; }
 .card .copy-line .copy-text { flex: 1; min-width: 0; padding: 0; overflow: hidden; background: none; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; user-select: all; }
 .copy-button { flex: none; display: inline-flex; align-items: center; gap: 5px; padding: 4px 9px; border-radius: var(--r-2); color: var(--ink-2); font-size: var(--small); font-weight: 500; transition: background-color var(--dur-1) var(--ease-out), color var(--dur-1) var(--ease-out); }
-.copy-button:hover { background: var(--fill-2); color: var(--ink); }
 .copy-button.done { color: var(--done); }
 .confirm.sending .copy-line { opacity: 0.8; transition: opacity var(--dur-1) var(--ease-out); }
 /* Driving a session (views/drive.js): the message left for it over the box, its own question, End, and New session.
@@ -679,7 +673,6 @@ small { font-size: var(--small); }
 /* As tall empty as said: a whole line (its 1.4 line and its 1px), so what follows never moves by a fraction. */
 .inspect-says { height: calc(1.4em + 1px); padding: 1px 18px 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-2); font-size: var(--small); }
 .inspect-link { color: var(--accent); }
-.inspect-link:hover { text-decoration: underline; }
 .inspect-ports { margin: 0; padding: 3px 18px 0; list-style: none; display: grid; gap: 4px; font-size: var(--small); }
 .inspect-port-about { color: var(--ink-3); }
 .inspect-note { padding: 12px 18px 0; color: var(--ink-2); }
@@ -690,7 +683,7 @@ small { font-size: var(--small); }
 /* The Team tab's tasks. */
 .tasks { padding: 0 8px; }
 .task-link { display: block; padding: 6px 10px; border-radius: var(--r-2); transition: background-color var(--dur-1) var(--ease-out); }
-.task-link[href]:hover, .task.current .task-link { background: var(--fill); }
+.task.current .task-link { background: var(--fill); }
 .task-line { display: flex; align-items: baseline; gap: 8px; }
 .task-line .dot { align-self: center; }
 .task-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
@@ -859,7 +852,6 @@ kbd { padding: 1px 6px; border-radius: var(--r-1); box-shadow: var(--e-1-in); co
 
 .options.read-only { list-style: none; }
 .options.read-only .option { padding: 6px 12px; background: transparent; box-shadow: var(--e-1-in); cursor: default; }
-.options.read-only .option:hover { background: transparent; }
 .card-command { display: grid; gap: 4px; padding: 8px 12px; border-radius: var(--r-2); box-shadow: var(--e-1-in); }
 .card-command-label { color: var(--ink-3); font-size: var(--small); }
 .card-command code { overflow-wrap: anywhere; user-select: all; }
@@ -886,7 +878,6 @@ kbd { padding: 1px 6px; border-radius: var(--r-1); box-shadow: var(--e-1-in); co
 .offer span { flex: 1 1 auto; min-width: 0; }
 .offline.offer::before { background: var(--accent); animation: none; }
 .offer button { flex: none; white-space: nowrap; padding: 2px 10px; border: 0; border-radius: var(--r-pill); background: transparent; color: var(--accent); font: inherit; cursor: pointer; }
-.offer button:hover { background: var(--side-hover); }
 .offer .offer-yes { font-weight: 600; }
 .notify-line { display: flex; align-items: center; gap: 8px; color: var(--ink); }
 .notify-said { display: block; margin-top: 4px; color: var(--ink-3); font-size: var(--small); }
@@ -903,7 +894,6 @@ kbd { padding: 1px 6px; border-radius: var(--r-1); box-shadow: var(--e-1-in); co
 /* ---- The session's team strip (views/lead.js) ---- */
 
 .strip-board { flex: none; margin-left: auto; color: var(--accent); font-weight: 500; }
-.strip-board:hover { text-decoration: underline; }
 
 /* The Team tab's records (views/records.js): the scorecard, decisions, answered questions, files. */
 .records-section { padding-bottom: 4px; }
@@ -920,7 +910,6 @@ kbd { padding: 1px 6px; border-radius: var(--r-1); box-shadow: var(--e-1-in); co
 .records-row > summary, .records-earlier > summary { display: flex; align-items: baseline; gap: 6px; padding: 4px 8px; border-radius: var(--r-2); cursor: pointer; list-style: none; font-size: 12px; }
 .records-row > summary::-webkit-details-marker, .records-earlier > summary::-webkit-details-marker { display: none; }
 .records-row[open] { background: var(--accent-fill); border-radius: var(--r-2); }
-.records-row > summary:hover, .records-earlier > summary:hover { background: var(--fill); }
 .records-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .records-text.quiet { color: var(--ink-3); }
 .records-row[open] .records-text { white-space: normal; overflow-wrap: anywhere; }
@@ -1034,7 +1023,7 @@ kbd { padding: 1px 6px; border-radius: var(--r-1); box-shadow: var(--e-1-in); co
 .composer-attach { flex: none; width: 34px; height: 34px; margin-bottom: 2px; border-radius: 50%; }
 .attach-menu { display: flex; flex-direction: column; align-self: flex-start; gap: 2px; width: min(320px, calc(100% - 48px)); margin: 0 0 4px max(24px, calc((100% - 800px) / 2 + 24px)); padding: 4px; border-radius: var(--r-3); background: var(--raised); box-shadow: var(--e-2); }
 .attach-choice { padding: 7px 10px; border-radius: var(--r-2); text-align: left; font-size: var(--small); }
-.attach-choice:hover:not(:disabled), .attach-choice:focus-visible { background: var(--fill); }
+.attach-choice:focus-visible { background: var(--fill); }
 .attach-choice:disabled { color: var(--ink-3); }
 .node-image { display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; box-sizing: border-box; width: 100%; max-width: 800px; margin: 0 auto; padding: 6px 24px 0; }
 .node-image-line { min-width: 0; overflow-x: auto; }
@@ -1088,7 +1077,6 @@ kbd { padding: 1px 6px; border-radius: var(--r-1); box-shadow: var(--e-1-in); co
 /* The left column */
 .projects { display: flex; flex-direction: column; gap: 2px; }
 .project { display: grid; grid-template-columns: 28px minmax(0, 1fr); gap: 10px; align-items: center; padding: 7px 8px; border-radius: var(--r-2); }
-.project:hover { background: var(--side-hover); }
 .project[aria-current] { background: var(--raised); box-shadow: var(--e-1); }
 .project.dim:not([aria-current]) .project-ring { opacity: 0.7; }
 .project.dim:not([aria-current]) .project-name { color: var(--ink-2); }
@@ -1101,15 +1089,12 @@ kbd { padding: 1px 6px; border-radius: var(--r-1); box-shadow: var(--e-1-in); co
 .left-empty { margin: 4px 8px; color: var(--ink-2); font-size: var(--small); }
 .left-gap { flex: 1; min-height: 16px; }
 .place { display: flex; flex-wrap: wrap; align-items: center; gap: 0 9px; padding: 7px 8px; border-radius: var(--r-2); color: var(--ink-2); }
-.place:hover { background: var(--side-hover); color: var(--ink); }
 .place[aria-current] { background: var(--raised); color: var(--ink); box-shadow: var(--e-1); }
 .place-count { margin-left: auto; color: var(--ink-3); font-size: var(--small); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .left-summary { flex: none; display: grid; justify-items: start; gap: 2px; padding: 10px 16px calc(10px + env(safe-area-inset-bottom)); border-top: 1px solid var(--line); color: var(--ink-2); font-size: var(--small); }
 .summary-words { min-width: 0; }
-.summary-count[href]:hover { text-decoration: underline; }
 .summary-count.asked { color: var(--asked); font-weight: 600; }
 .summary-brief { flex: none; color: var(--ink-2); }
-.summary-brief:hover { color: var(--ink); text-decoration: underline; }
 .place.asked { color: var(--asked); }
 /* The left column's filter (js/keys.js): its field over the projects, then its rows under what needs you and the rest. */
 .left-filter { margin: 0 4px 6px; padding: 6px 10px; border: 0; border-radius: var(--r-2); background: var(--fill-2); color: var(--ink); font: inherit; }
@@ -1124,7 +1109,6 @@ kbd { padding: 1px 6px; border-radius: var(--r-1); box-shadow: var(--e-1-in); co
 .place > span:not(.place-count):not(.place-waiting) { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* Brief me: a quiet button with its mark, not a caption among the status lines. */
 .summary-brief { display: inline-flex; align-items: center; gap: 6px; margin: 4px 0 2px; padding: 3px 10px 3px 8px; border-radius: var(--r-2); background: var(--raised); box-shadow: var(--e-1); color: var(--ink); font-weight: 500; }
-.summary-brief:hover { background: var(--side-hover); color: var(--ink); text-decoration: none; }
 .summary-brief .icon { color: var(--ink-2); }
 
 /* The centre's header, the switches and the strip */
@@ -1140,7 +1124,6 @@ kbd { padding: 1px 6px; border-radius: var(--r-1); box-shadow: var(--e-1-in); co
 .grow { flex: 1; }
 .switch { flex: none; display: inline-flex; gap: 2px; padding: 3px; border-radius: var(--r-pill); background: var(--fill-2); font-size: 12.5px; }
 .switch-link { padding: 3px 11px; border-radius: var(--r-pill); color: var(--ink-2); white-space: nowrap; }
-.switch-link:hover { color: var(--ink); }
 .switch-link[aria-current], .switch-link[aria-selected="true"] { background: var(--raised); color: var(--ink); box-shadow: var(--e-thumb); }
 .switch-link small { margin-left: 5px; color: var(--ink-3); font-size: var(--small); font-variant-numeric: tabular-nums; }
 .right-tabs { flex: none; padding: 12px 16px 0; }
@@ -1163,7 +1146,6 @@ kbd { padding: 1px 6px; border-radius: var(--r-1); box-shadow: var(--e-1-in); co
 .day { display: flex; align-items: center; gap: 10px; margin-top: 10px; color: var(--ink-3); font-size: var(--small); }
 .day::after { content: ""; flex: 1; height: 1px; background: var(--line); }
 .line { display: grid; grid-template-columns: 18px minmax(0, 1fr) auto; gap: 9px; align-items: start; padding: 4px 0; font-size: var(--large); line-height: 1.4; }
-.line:hover .line-text { text-decoration: underline; text-decoration-color: var(--ink-3); }
 .line time { padding-top: 2px; color: var(--ink-3); font-size: var(--small); white-space: nowrap; }
 .line.kind-update { color: var(--ink-2); font-size: var(--text); }
 .line.answered { color: var(--ink-2); }
@@ -1177,7 +1159,6 @@ kbd { padding: 1px 6px; border-radius: var(--r-1); box-shadow: var(--e-1-in); co
 .mine.auto { color: var(--ink-2); font-style: italic; }
 .latest-said { display: grid; gap: 2px; padding: 4px 0 18px; color: var(--ink-2); }
 .latest-said small { color: var(--ink-3); font-size: var(--small); }
-.latest-said:hover { color: var(--ink); }
 .col-gap { flex: 1; }
 .empty-line { padding: 48px 0; color: var(--ink-2); text-align: center; }
 .asked-title { margin: 18px 0 2px; font-size: var(--large); font-weight: 700; }
@@ -1196,16 +1177,13 @@ kbd { padding: 1px 6px; border-radius: var(--r-1); box-shadow: var(--e-1-in); co
 .line.kind-push { color: var(--ink-2); font-size: var(--text); }
 .line.kind-push svg { margin-top: 3px; color: var(--ready); }
 .line.kind-push.declined svg { color: var(--ink-3); }
-.line.kind-push:hover .line-text { text-decoration: none; }
 /* Agent text in a card: body size, a few lines at most; the whole in the side sheet. */
 .card-question { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
 .card-lines { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; color: var(--ink-2); font-size: var(--text); line-height: 1.45; overflow-wrap: anywhere; }
 .card-whole { margin-top: -4px; font-size: var(--small); }
 .card-whole .link { color: var(--accent); }
-.card-whole .link:hover { text-decoration: underline; }
 .card.folded { padding-top: 10px; padding-bottom: 10px; }
 .card-unfold { display: -webkit-box; text-align: left; width: 100%; color: var(--ink); -webkit-line-clamp: 2; }
-.card-unfold:hover { text-decoration: underline; text-decoration-color: var(--ink-3); }
 .key-facts dl { font-size: var(--text); }
 .key-facts dd { min-width: 0; overflow-wrap: anywhere; }
 .sensitive-yes { color: var(--needs-you); font-weight: 600; }
@@ -1227,7 +1205,7 @@ kbd { padding: 1px 6px; border-radius: var(--r-1); box-shadow: var(--e-1-in); co
 .send-menu { position: relative; flex: none; display: inline-flex; gap: 2px; }
 .send-ways { position: absolute; right: 0; bottom: calc(100% + 6px); z-index: 6; display: grid; width: min(340px, 80vw); padding: 6px; border-radius: var(--r-3); background: var(--raised); box-shadow: var(--e-2); }
 .send-way { display: grid; gap: 1px; padding: 7px 10px; border-radius: var(--r-2); text-align: left; }
-.send-way:hover, .send-way:focus-visible { background: var(--fill-2); }
+.send-way:focus-visible { background: var(--fill-2); }
 .send-way small { color: var(--ink-2); font-size: var(--small); }
 .answer-state { align-self: flex-end; color: var(--ink-3); font-size: var(--small); }
 .answer-state .link, .take-back { color: var(--accent); }
@@ -1254,7 +1232,6 @@ kbd { padding: 1px 6px; border-radius: var(--r-1); box-shadow: var(--e-1-in); co
 .task-row2 { display: grid; grid-template-columns: 62px minmax(0, 1fr); gap: 10px; align-items: start; padding: 6px 0; }
 .task-words { display: grid; min-width: 0; }
 .task-name { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; font-size: 13px; line-height: 1.3; }
-.task-row2:hover .task-name { text-decoration: underline; text-decoration-color: var(--ink-3); }
 .task-row2.open .task-name { -webkit-line-clamp: 6; font-weight: 600; }
 .task-state { color: var(--ink-2); font-size: var(--small); }
 .tdet { display: grid; gap: 8px; margin: 2px 0 10px 72px; padding: 9px 11px; border-radius: var(--r-3); background: var(--fill); font-size: var(--small); overflow-wrap: anywhere; }
@@ -1264,7 +1241,6 @@ kbd { padding: 1px 6px; border-radius: var(--r-1); box-shadow: var(--e-1-in); co
 /* The lead's latest statement shows once: in the right column while it is shown, else above a short conversation. */
 @media (min-width: 901px) { .app.with-right .project-view .latest-said { display: none; } }
 .now-text { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
-.now:hover .now-text { text-decoration: underline; text-decoration-color: var(--ink-3); }
 .now small { display: block; margin-bottom: 2px; color: var(--ink-3); font-size: var(--small); }
 .tiles { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 .tile { display: grid; padding: 9px 10px; border-radius: var(--r-3); background: var(--fill); }
@@ -1288,7 +1264,6 @@ kbd { padding: 1px 6px; border-radius: var(--r-1); box-shadow: var(--e-1-in); co
 .road-note:empty { display: none; }
 .road-note { color: var(--ink-2); font-size: var(--small); overflow-wrap: anywhere; }
 .road-band { display: flex; align-items: center; gap: 14px; width: 100%; padding: 11px 14px; border-radius: var(--r-3); background: var(--fill); text-align: left; }
-.road-band:hover { background: var(--fill-2); }
 .road-band-toggle { display: inline-flex; align-items: center; gap: 6px; margin-left: auto; color: var(--ink-2); font-size: var(--small); }
 .road-band-toggle .icon { transition: transform var(--dur-2) var(--ease-out); }
 .road-band[aria-expanded="true"] .road-band-toggle .icon { transform: rotate(90deg); }
@@ -1301,7 +1276,6 @@ kbd { padding: 1px 6px; border-radius: var(--r-1); box-shadow: var(--e-1-in); co
 .goal-row::before { content: ""; position: absolute; left: 4px; top: 19px; width: 10px; height: 10px; background: var(--ink); transform: rotate(45deg); }
 .goal-row.unsorted::before { background: none; box-shadow: inset 0 0 0 2px var(--ink-3); } /* a mark drawn with a shadow (a ring, a stroke, an edge), not an elevation */
 .goal-row.done::before { background: var(--ready); }
-.goal-title:hover b { text-decoration: underline; text-decoration-color: var(--ink-3); }
 .goal-title { display: grid; gap: 2px; min-width: 0; text-align: left; }
 .goal-title b { font-size: var(--large); font-weight: 650; }
 .goal-title small { color: var(--ink-2); font-size: var(--small); overflow-wrap: anywhere; }
@@ -1354,10 +1328,12 @@ kbd { padding: 1px 6px; border-radius: var(--r-1); box-shadow: var(--e-1-in); co
 .road-when.late b { color: var(--needs-you); }
 .road-when.nodate b { color: var(--ink-2); font-weight: 400; }
 .road-when[data-basis] { position: relative; cursor: help; outline-offset: 2px; }
-.road-when[data-basis]:hover::after, .road-when[data-basis]:focus-visible::after {
-  content: attr(data-basis); position: absolute; right: 0; top: calc(100% + 4px); z-index: 3; width: 260px; padding: 8px 10px; border-radius: var(--r-2);
+.road-when[data-basis]::after {
+  display: none; content: attr(data-basis); position: absolute; right: 0; top: calc(100% + 4px); z-index: 3; width: 260px; padding: 8px 10px; border-radius: var(--r-2);
   background: var(--raised); box-shadow: var(--e-2); color: var(--ink); font-size: var(--small); font-weight: 400; white-space: normal;
 }
+.road-when[data-basis]:focus-visible::after { display: block; }
+@media (hover: hover) { .road-when[data-basis]:hover::after { display: block; } }
 .tdet-basis { display: block; color: var(--ink-3); }
 .tdet-lands.late { color: var(--needs-you); }
 /* Now on a line of its own above the hours, so its word never sits on an hour's number ("Ahora21"). */
@@ -1370,7 +1346,6 @@ kbd { padding: 1px 6px; border-radius: var(--r-1); box-shadow: var(--e-1-in); co
 .screen-col { max-width: 720px; margin: 0 auto; padding: 18px 24px 48px; }
 .own-list { display: grid; gap: 2px; }
 .own-row { display: grid; grid-template-columns: 20px minmax(0, 1fr) auto; gap: 10px; align-items: start; padding: 8px 10px; border-radius: var(--r-2); --ring: var(--bg); }
-.own-row:hover { background: var(--fill); --ring: var(--fill); }
 .own-words { display: grid; min-width: 0; }
 .own-line { display: flex; align-items: baseline; gap: 6px; min-width: 0; }
 .own-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
@@ -1562,7 +1537,6 @@ code.dim { color: var(--ink-3); }
 .tc-group { margin: 12px 8px 4px; color: var(--ink-3); font-size: var(--small); font-weight: 600; }
 .tc-group:first-child { margin-top: 6px; }
 .tc-row { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 9px; min-height: 34px; padding: 6px 8px; border-radius: var(--r-2); color: var(--ink); --ring: var(--bg); }
-.tc-row:hover { background: var(--fill); --ring: var(--fill); }
 .tc-row[aria-current] { background: var(--accent-fill); --ring: var(--accent-fill); }
 .tc-row:focus-visible { outline-offset: -2px; border-radius: var(--r-2); }
 .tc-mark { display: inline-flex; line-height: 0; }
@@ -1657,3 +1631,79 @@ main.centre-wrap[tabindex="-1"]:focus { outline: none; }
   .left-summary { gap: 0; }
   .tc-links { gap: 0 14px; }
 }
+
+/* ---- States: every kind of control answers the hand the same way (D1) ----
+   One transition (--state-transition: background, colour, edge, scale and opacity over --dur-1, eased out), so a
+   change starts the instant it is asked for and settles in 120 ms. Hover only where there is a pointer (a tap leaves
+   nothing lit behind it); pressed (:active) everywhere: --fill-3 under a quiet control, the accent darkened and a
+   0.97 scale for a solid one; focus is the one ring (:focus-visible at the top). Busy ([aria-busy], while the node
+   answers) keeps the control's own look and pulses it; disabled is greyed and answers nothing. What is chosen (the
+   current row, the chosen tab or option) keeps its look under the pointer. Kept last: it decides over the rules above
+   (the touch block only sizes things). */
+
+:is(.button, .send, .icon-button, .segmented button, .switch-link, .option, .copy-button, .code-run, .fold, .confirm-clear, .link, .inspect-link,
+  .strip-board, .summary-count, .summary-brief, .offer button, .attach-choice, .send-way, .suggestion, .palette-row, .project, .place, .tc-row, .own-row,
+  .task-link, .task-row2, .line, .now, .latest-said, .latest, .goal-title, .road-band, .card-unfold, .records-row > summary, .records-earlier > summary,
+  .facts-files summary, .card-terminal > summary, .all-done-tasks > summary, .chat-image-button, .dial-fold, .strip-fold, .look-colour, .brand,
+  .strip-team, .attached-remove) {
+  transition: var(--state-transition);
+}
+/* Words that are a control: their pressed fill needs a corner. */
+:is(.fold, .confirm-clear, .link, .inspect-link, .strip-board, .summary-count, .task-row2, .line, .now, .latest-said, .goal-title, .card-unfold,
+  .facts-files summary, .card-terminal > summary, .all-done-tasks > summary, .brand, .strip-team) {
+  border-radius: var(--r-1);
+}
+
+@media (hover: hover) {
+  /* Quiet surfaces: the hover fill. */
+  :is(.task-link[href], .records-row > summary, .records-earlier > summary, .attach-choice, .suggestion, .palette-row, .tc-row, .own-row, .button.quiet):not(:where([aria-current], [aria-selected="true"], .chosen, .current .task-link, :disabled)):hover { background-color: var(--fill); }
+  :is(.tc-row, .own-row):not(:where([aria-current])):hover { --ring: var(--fill); }
+  /* On a fill already, or a quiet button with an icon: one step up. */
+  :is(.icon-button, .copy-button, .option, .road-band, .send-way, .dial-fold, .latest):not(:where([aria-current], [aria-selected="true"], [aria-pressed="true"], .chosen, .proposed, .read-only > *, :disabled)):hover { background-color: var(--fill-2); color: var(--ink); }
+  /* The left column's own hover. */
+  :is(.project, .place, .summary-brief, .offer button):not(:where([aria-current], .active, :disabled)):hover { background-color: var(--side-hover); }
+  :is(.place, .summary-brief):not(:where([aria-current])):hover { color: var(--ink); }
+  /* Words that darken. */
+  :is(.segmented button, .switch-link, .fold, .confirm-clear, .latest-said, .code-run, .strip-fold, .tab-banner-close, .strip-team, .brand,
+    .facts-files summary, .card-terminal > summary, .all-done-tasks > summary):not(:where([aria-current], [aria-selected="true"], [aria-pressed="true"], :disabled)):hover { color: var(--ink); }
+  .code-run:hover { border-color: var(--ink-3); }
+  /* Links: underlined. */
+  :is(.link, .inspect-link, .strip-board, .summary-count[href]):hover { text-decoration: underline; }
+  :is(.line, .task-row2, .now, .card-unfold):hover :is(.line-text, .task-name, .now-text), .card-unfold:hover, .goal-title:hover b {
+    text-decoration: underline; text-decoration-color: var(--ink-3);
+  }
+  .line.kind-push:hover .line-text { text-decoration: none; }
+  /* The × over a picture: the dark disc takes the accent. */
+  .attached-remove:hover { background-color: var(--accent); color: var(--on-accent); }
+  /* Solid: the accent a step toward the ink. */
+  :is(.button:not(.quiet):not(.confirming), .send):not(:disabled):hover { background-color: var(--accent-hover); }
+  /* Fields: a firmer edge. */
+  :is(.answer-input, .say, .setting-input, .setting-search, .look-input, .find-input, .left-filter, .setting-picker, .look-colour):not(:focus):not(:disabled):not(:active):hover,
+  .tc-find:not(:focus-within):not(:active):hover { box-shadow: var(--e-hover-in); }
+  .composer-input:not(:focus):not(:active):hover, .chat-image-button:hover { box-shadow: var(--e-hover); }
+}
+
+/* Pressed: everywhere, a tap included. */
+:is(.icon-button, .segmented button, .switch-link, .option, .copy-button, .code-run, .fold, .confirm-clear, .link, .inspect-link, .strip-board,
+  .summary-count, .summary-brief, .offer button, .attach-choice, .send-way, .suggestion, .palette-row, .project, .place, .tc-row, .own-row, .task-link,
+  .task-row2, .line, .now, .latest-said, .latest, .goal-title, .road-band, .card-unfold, .records-row > summary, .records-earlier > summary,
+  .facts-files summary, .card-terminal > summary, .all-done-tasks > summary, .chat-image-button, .dial-fold, .strip-fold, .button.quiet, .brand, .look-colour,
+  .strip-team):not(:where(:disabled, .read-only > *)):active { background-color: var(--fill-3); }
+.attached-remove:active { transform: scale(0.9); }
+:is(.tc-row, .own-row):active { --ring: var(--fill-3); }
+:is(.button:not(.quiet), .send):not(:disabled):active { background-color: var(--accent-press); transform: scale(0.97); }
+.button.confirming:not(:disabled):active { background-color: var(--needs-you); }
+.button.quiet:not(:disabled):active { transform: scale(0.97); }
+/* A field pressed: its ring at once. */
+:is(.answer-input, .say, .setting-input, .setting-search, .look-input, .find-input, .left-filter, .setting-picker):not(:disabled):active,
+.tc-find:active, .composer-input:active { box-shadow: var(--e-focus-in); }
+
+/* Busy: the node hasn't answered yet. Its own look (not the disabled grey), a slow pulse, the wait cursor; with
+   reduced motion, still and a little dimmed. */
+.button[aria-busy="true"] { cursor: progress; opacity: 0.85; animation: busy var(--loop) ease-in-out infinite alternate; }
+.button:not(.quiet)[aria-busy="true"]:disabled { background: var(--accent); color: var(--on-accent); }
+.button.quiet[aria-busy="true"]:disabled { background: var(--raised); color: var(--ink); }
+@keyframes busy { to { opacity: 1; } }
+
+/* Disabled: answers nothing. */
+:is(.button, .send, .icon-button, .option, .copy-button, .attach-choice, .send-way, .link, .confirm-clear):disabled { cursor: default; }

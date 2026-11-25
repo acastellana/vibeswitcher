@@ -67,11 +67,13 @@ export function mailView(app) {
     const said = h('span', { class: 'act-said', role: 'status' });
     const button = h('button', { class: 'button quiet small', type: 'button', onclick: () => {
       button.disabled = true;
+      button.setAttribute('aria-busy', 'true');
       button.textContent = t('mvLoading');
       said.classList.remove('refused');
       setText(said, '');
       readWhole(entry.root).then((reply) => {
         button.disabled = false;
+        button.removeAttribute('aria-busy');
         button.textContent = t('mvShowAll', { n: entry.total });
         if (!reply.ok) { setText(said, refusalWords(reply.error, t('mvShowAll', { n: entry.total }))); said.classList.add('refused'); }
       });

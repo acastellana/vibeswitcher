@@ -123,9 +123,11 @@ export function heldParts(card, { root, kicker = '', read = null, kind = 'config
     const changes = !!(one.change || (one.files || []).length);
     const show = changes && read ? h('button', { class: 'button quiet small', type: 'button', onclick: () => {
       show.disabled = true;
+      show.setAttribute('aria-busy', 'true');
       show.textContent = t('shReading');
       read(kind, { folder: root, diff: one.name }).then((reply) => {
         show.disabled = false;
+        show.removeAttribute('aria-busy');
         show.textContent = t('shShowChanges');
         const lines = reply?.ok ? reply.result?.difference : null;
         if (Array.isArray(lines)) slot.replaceChildren(lines.length ? h('pre', { class: 'held-diff' }, lines.join('\n')) : h('p', { class: 'confirm-note' }, t('shNoDifference')));

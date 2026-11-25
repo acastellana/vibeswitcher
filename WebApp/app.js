@@ -222,6 +222,9 @@ const unscroll = () => {
 addEventListener('scroll', unscroll, { passive: true });
 addEventListener('resize', unscroll);
 document.addEventListener('focusin', () => requestAnimationFrame(unscroll));
+// A touch screen's browser shows a press (style.css's :active) only where the page listens for touches; this listener does
+// nothing else.
+document.addEventListener('touchstart', () => {}, { passive: true });
 // What the centre says before there is anything to show: connecting, or not paired.
 const waitingWords = h('h1', { class: 'big' });
 const waitingSub = h('p');

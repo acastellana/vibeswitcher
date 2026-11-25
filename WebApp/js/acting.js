@@ -73,11 +73,13 @@ export function doButton(app, { label, kind, args, done = () => {}, quiet = fals
     }
     reset();
     button.disabled = true;
+    button.setAttribute('aria-busy', 'true');
     if (busy) button.textContent = busy;
     setText(said, '');
     said.classList.remove('refused', 'receipt');
     app.store.request(kind, args()).then((reply) => {
       button.disabled = false;
+      button.removeAttribute('aria-busy');
       if (busy) button.textContent = label;
       if (reply.ok) {
         const words = receipt ? receipt(reply.result || {}) : '';
