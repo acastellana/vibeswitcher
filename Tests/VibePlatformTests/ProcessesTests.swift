@@ -1234,7 +1234,7 @@ extension ProcessesTests {
         guard fields.count > 2 else { return false }
         let numbers = fields[2].split(separator: ":").compactMap { UInt64($0) }
         guard numbers.count == 2 else { return false }
-        let device = UInt64(info.st_dev)
+        let device = Platform.Files.device(info)
         let major = ((device >> 8) & 0xfff) | ((device >> 32) & ~UInt64(0xfff))
         let minor = (device & 0xff) | ((device >> 12) & ~UInt64(0xff))
         return major != numbers[0] || minor != numbers[1]

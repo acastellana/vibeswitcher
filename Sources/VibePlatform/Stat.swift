@@ -46,6 +46,12 @@ extension Platform.Files {
     /// The file's number on its volume.
     public static func inode(_ info: stat) -> UInt64 { UInt64(info.st_ino) }
 
+    /// The device the file is on, as 64 bits: its bits as they are. The Mac's `dev_t` is a signed 32-bit number, and a
+    /// Unix socket's (or a pipe's) is NODEV, -1, which `UInt64(info.st_dev)` traps on ("Negative value is not
+    /// representable": the v2 macos host job of b7ef0ca3, a test's descriptor number taken by another test's socket);
+    /// Linux's is unsigned already.
+    public static func device(_ info: stat) -> UInt64 { UInt64(truncatingIfNeeded: info.st_dev) }
+
     /// Whether the open descriptor `fd` and the path `path` are the same file: the same device and inode, the path
     /// read with `lstat` (a symbolic link is itself, never the file it names, so a link is never the same file as
     /// what `fd` opened through it). False when either can't be read. How a session host tells the user's lock

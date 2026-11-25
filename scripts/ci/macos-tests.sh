@@ -101,6 +101,8 @@ margin=${WATCHDOG_MARGIN:-300}
 (( timeout > 2 * margin )) && after=$(( timeout - margin )) || after=$(( timeout / 2 ))
 # Where the workflow keeps them from.
 export WATCHDOG_REPORTS=$PWD/.build/crash-reports
+# What the crash reporter writes from here on is kept below, when the run fails.
+started_mark=$(mktemp "${RUNNER_TEMP:-.build}/macos-tests-start.XXXXXX")
 echo "macos-tests $(date -u +%H:%M:%SZ): scripts/test.sh starts (vs-heavy stops it after $timeout s)"
 ( bash scripts/test.sh ${arguments[@]+"${arguments[@]}"} 2>&1 | tee "$log"; exit "${PIPESTATUS[0]}" ) &
 run=$!
@@ -112,4 +114,14 @@ echo "macos-tests $(date -u +%H:%M:%SZ): scripts/test.sh ended, exit $status"
 # It ends with the run, after its report when it is giving one.
 wait "$watchdog"
 (( status == 0 )) && exit 0
+# A test process that died (a trap, "Fatal error: …") names no test and no line: the crash reporter's report does, with
+# every thread's backtrace. Kept with the watchdog's, which the workflow uploads (the host job of b7ef0ca3 had none).
+reports=$HOME/Library/Logs/DiagnosticReports
+if [[ -d $reports ]]; then
+    sleep 5  # The crash reporter takes some seconds to write a report.
+    while IFS= read -r file; do
+        [[ -n $file ]] || continue
+        mkdir -p "$WATCHDOG_REPORTS" && cp "$file" "$WATCHDOG_REPORTS/" && echo "crash report kept: ${file##*/}"
+    done <<< "$(find "$reports" -maxdepth 1 -name '*.ips' -newer "$started_mark" 2>/dev/null)"
+fi
 only_listed_failed "$log"
