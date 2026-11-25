@@ -30,8 +30,22 @@ extension HostServer {
         return .success(pinned)
     }
 
-    /// What the new image of a switch to `target` is started with, besides the handover's own flags (seam: as started).
-    static func keeperArguments(started: [String], target: String, checkedNode: Bool) -> [String] { started }
+    /// What the new image of a switch to `target` is started with, besides the handover's own flags: as this image was,
+    /// and for a checked node, the target build's folders in place of this build's (`--node-root <folder>`, `--server
+    /// <folder>/bin/vibeswitcher-server`, `target` being `<folder>/bin/vibeswitcher-host`), so its own checked start
+    /// finds its row's server; a scratch host's as started.
+    static func keeperArguments(started: [String], target: String, checkedNode: Bool) -> [String] {
+        guard checkedNode else { return started }
+        var kept: [String] = []
+        var index = started.startIndex
+        while index < started.endIndex {
+            if [HostImages.nodeRootFlag, "--server"].contains(started[index]) { index += 2; continue }
+            kept.append(started[index])
+            index += 1
+        }
+        let folder = ((target as NSString).deletingLastPathComponent as NSString).deletingLastPathComponent
+        return kept + [HostImages.nodeRootFlag, folder, "--server", (folder as NSString).appendingPathComponent("bin/" + BuildInfo.server)]
+    }
 
     /// Hands over to `executable` through a keeper proven to run `expected` (`MacHandoverKeeper`): the keeper started
     /// and proven off the queue (the sessions carry on meanwhile); then, on the queue, the server child ended, the state

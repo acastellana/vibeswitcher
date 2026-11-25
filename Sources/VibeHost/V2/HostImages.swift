@@ -267,8 +267,10 @@ public enum HostImages {
     }
 
     /// The Mac's checked node start (the node on the Mac's design, "The checked node start"): what this `--node` host
-    /// is, or why it may not start, checked in this order: its `--node-root` is the node's root by the user database's
-    /// home (`accountHome`), and `lockPath` that root's own `host.lock` (by path or by file; a link refused); the record
+    /// is, or why it may not start, checked in this order: its `--node-root` an absolute folder (its build's,
+    /// `<folder>/bin/…`, as the unit and the agent start it: the row is found by code, never by that path), and `lockPath`
+    /// the node's data root's own `host.lock` (`Platform.Service.nodeRoot` of the user database's home, `accountHome`; by
+    /// path or by file; a link refused); the record
     /// (`pins`, read once by the caller) taken; its own running code (`own`, the kernel's cdhash) a row's host; its
     /// `--server` opened once as the node root's own `bin/vibeswitcher-server` (`openServer`: no link, a regular file, by
     /// device and inode), and that file's cdhash (`cdhashOf`, this Mac's slice, read while the path still names the file
@@ -279,14 +281,14 @@ public enum HostImages {
                                     cdhashOf: (String) -> Data? = { Platform.CodeIdentity.cdhash(atPath: $0) }) -> Result<CheckedNode, Refused> {
         func refused(_ why: String) -> Result<CheckedNode, Refused> { .failure(Refused(why)) }
         guard let accountHome else { return refused("the account has no home in the user database, so the node's root can't be found") }
-        let nodeRoot = Platform.Service.nodeRoot(accountHome: accountHome)
+        let dataRoot = Platform.Service.nodeRoot(accountHome: accountHome)
         let standard = { (path: String) in (path as NSString).standardizingPath }
-        guard let given = value(after: nodeRootFlag, in: arguments), given.hasPrefix("/"), standard(given) == standard(nodeRoot) else {
-            return refused("\(nodeFlag) needs \(nodeRootFlag) \(nodeRoot), the node's own root")
+        guard let nodeRoot = value(after: nodeRootFlag, in: arguments), nodeRoot.hasPrefix("/") else {
+            return refused("\(nodeFlag) needs \(nodeRootFlag) and its build's absolute folder after it")
         }
         guard let server = value(after: "--server", in: arguments) else { return refused("\(nodeFlag) needs --server") }
         // 1. The lock: the node root's own, and only it.
-        let ownLock = (nodeRoot as NSString).appendingPathComponent("host.lock")
+        let ownLock = (dataRoot as NSString).appendingPathComponent("host.lock")
         var held = stat(), node = stat()
         if lstat(lockPath, &held) == 0, held.st_mode & S_IFMT == S_IFLNK { return refused("the lock \(lockPath) is a symbolic link") }
         let sameFile = stat(lockPath, &held) == 0 && stat(ownLock, &node) == 0 && held.st_dev == node.st_dev && held.st_ino == node.st_ino
