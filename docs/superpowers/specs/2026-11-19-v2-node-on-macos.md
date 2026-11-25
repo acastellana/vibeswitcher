@@ -197,8 +197,10 @@ resolved path:
   Measured here: `/` and `/Library` `root:wheel 755`, `/Library/Application Support` `root:admin 755`. The group test
   carries weight: the user is in `admin`, so a `775` there would be the user's to write. The administrator step makes
   `VibeSwitcher` `root:wheel 755`.
-- **The file** is owned by root, a regular file with one link, `0644` (readable by the user's processes, written by root
-  alone), at most 64 KiB.
+- **The file** is owned by root, a regular file, `0644` (readable by the user's processes, written by root
+  alone), at most 64 KiB. Its link count isn't asked (the review of 2026-11-25, F2): macOS lets a user
+  hard-link a root-owned file it can't write, a second name gives no write, and refusing it would let any process of
+  the user's make every check refuse.
 - **No link is followed.** The reader opens `/` and then each component with `openat(…, O_NOFOLLOW)` from the folder it
   holds, checks what it opened by `fstat` on that descriptor, and reads the record from the descriptor it checked: a
   link anywhere on the path is refused, not followed, and nothing is checked by one name and read by another.
@@ -269,7 +271,7 @@ no check, no start, no switch.
 runs `scripts/node-pins-mac.sh` from a checkout of the installed commit for that build, with `--fresh` when the record
 there can't be carried; the install itself refuses a commit already installed, so there is no recovery short of that
 step or a newer install): the record missing; unreadable; a link anywhere on its path; any folder on it or the file
-not root's, or writable by its group or others, or carrying an ACL; not a regular file, more than one link, too large;
+not root's, or writable by its group or others, or carrying an ACL; not a regular file, too large;
 not parseable, another format, another uid; and a running code that names no row (an unknown build).
 
 **What it doesn't cover.** A session that re-bootstraps the job with a host of its own that runs the genuine pinned

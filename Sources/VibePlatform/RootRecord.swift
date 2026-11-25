@@ -14,7 +14,9 @@ extension Platform.Files {
     /// each step is checked by `fstat` on the descriptor it opened and the record read from the one it checked. Every
     /// folder (from `base` down) and the file must be owned by root (uid 0, as `owner` reports a uid: the file's own by
     /// default, a test's fact otherwise), writable by neither its group nor others, and carry no extended ACL
-    /// (`hasExtendedACL`; unreadable is a refusal); the file a regular one with one link and at most `maxBytes` bytes.
+    /// (`hasExtendedACL`; unreadable is a refusal); the file a regular one of at most `maxBytes` bytes. Its link count
+    /// isn't asked: a user can hard-link a root-owned file it can't write, and a second name gives no write (the review
+    /// of 2026-11-25, F2: refusing it let any process of the user's make every check refuse).
     /// Anything unusual about a component's name (empty, `.`, `..`, a `/` or a NUL) is refused too.
     public static func readRootRecord(_ components: [String], base: String = "/", maxBytes: Int,
                                       owner: (String, uid_t) -> uid_t = { $1 }) -> Result<Data, RootRecordRefusal> {
@@ -39,7 +41,6 @@ extension Platform.Files {
         }
         var info = stat()
         guard fstat(held, &info) == 0 else { return .failure(RootRecordRefusal("\(path): can't be read (\(String(cString: strerror(errno))))")) }
-        guard Int(info.st_nlink) == 1 else { return .failure(RootRecordRefusal("\(path): has \(info.st_nlink) links, not one")) }
         guard Int64(info.st_size) <= Int64(maxBytes) else { return .failure(RootRecordRefusal("\(path): larger than \(maxBytes) bytes")) }
         var data = Data()
         var buffer = [UInt8](repeating: 0, count: 4096)
