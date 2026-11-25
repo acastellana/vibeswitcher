@@ -105,3 +105,18 @@ test('the scale is tokens on :root: type with its lines and weights, control hei
   assert.match(ROOT['--state-transition'] || '', /background-color var\(--dur-1\) var\(--ease-out\)/);
   assert.deepEqual(wrong, []);
 });
+
+test('colour: no hex, rgb or named colour outside the token and theme blocks, unless the line says why', () => {
+  const literal = /#[0-9a-f]{3,8}\b|\b(rgba?|hsla?|hwb|lab|lch|oklab|oklch)\(|(^|[\s,(])(white|black|red|green|blue|yellow|orange|gray|grey)(?=$|[\s,)])/i;
+  const found = [];
+  for (const block of RULES) for (const d of block.declarations) if (literal.test(d.value) && !reasoned(d)) found.push(where(block, d));
+  assert.deepEqual(found, []);
+});
+
+test('colour: a failure is drawn in its own role (--danger), the scrims in one (--scrim), find in one (--highlight)', () => {
+  const value = (selector, property) => RULES.filter((block) => listed(block.selector).includes(selector)).flatMap((block) => block.declarations).filter((d) => d.property === property).at(-1)?.value;
+  for (const selector of ['.inspect-scrim', '.palette', '.sheet-scrim', '.app[data-drawer="left"] .drawer-scrim']) assert.equal(value(selector, 'background'), 'var(--scrim)', selector);
+  assert.equal(value('::highlight(chat-find)', 'background'), 'var(--highlight)');
+  assert.equal(value('mark.found', 'background'), 'var(--highlight)');
+  for (const selector of ['.fold.failed', '.output.failed', '.task-failure', '.act-said.refused']) assert.equal(value(selector, 'color'), 'var(--danger)', selector);
+});
