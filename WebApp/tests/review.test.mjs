@@ -31,7 +31,11 @@ function fakeApp({ route = { name: 'node' }, state = {}, kinds = null, acts = tr
     cardKey: (id) => id,
     draftOf: () => null,
   };
-  return { store, sent, ui: { state: { route }, subscribe() {}, go() {} } };
+  // The route's listeners, so a test can leave a view (`app.leave()`), which stops its timers.
+  const listeners = [];
+  const ui = { state: { route }, subscribe(fn) { listeners.push(fn); }, go() {} };
+  const leave = () => { ui.state.route = { name: 'home' }; for (const fn of listeners) fn('route'); };
+  return { store, sent, ui, leave };
 }
 
 test('This node: a request it took as yours says how long ago as the other rows do, never an element’s name', async () => {
@@ -247,4 +251,35 @@ test('Stop the node is a plain button in the danger colour, never the primary bl
   assert.deepEqual(app.sent.map((one) => one.kind), ['stop']);
   const css = readFileSync(join(here, '..', 'style.css'), 'utf8');
   assert.match(css, /\.button\.danger \{ color: var\(--needs-you\); \}/);
+});
+
+test('the smaller ones: New project’s Where fits its box with its hint below, a page not paired says nothing needs you nor offers Brief me, a settings search hides the terminal section', async () => {
+  setLanguage('en');
+  const { newProjectForm } = await import('../js/views/drive.js');
+  const form = newProjectForm(fakeApp({ route: { name: 'new' } }));
+  const where = find(form.el, (node) => node.tag === 'input' && node.attrs['aria-label'] === 'Where');
+  assert.equal(where.attrs.placeholder, 'Where (optional)');
+  assert.match(find(form.el, byClass('where-hint')).textContent, /node’s projects folder/);
+  const { leftColumn } = await import('../js/views/left.js');
+  for (const connection of ['unpaired', 'revoked']) {
+    const left = leftColumn(fakeApp({ route: { name: 'home' }, state: { connection } }), { brief() {} });
+    left.render();
+    assert.equal(left.el.shownText.includes('Nothing needs you'), false, connection);
+    assert.equal(find(left.el, byClass('summary-brief')).hidden, true, connection);
+  }
+  const live = leftColumn(fakeApp({ route: { name: 'home' } }), { brief() {} });
+  live.render();
+  assert.ok(live.el.shownText.includes('Nothing needs you'));
+  const { settingsView } = await import('../js/views/settings.js');
+  const app = fakeApp({ route: { name: 'settings' }, reply: () => ({ ok: true, result: { node: { root: '/home/u/.vibeswitcher', settings: [] }, project: null, leftOut: [], usage: null } }) });
+  const view = settingsView(app);
+  const search = find(view.el, byClass('setting-search'));
+  assert.ok(view.el.shownText.includes('Terminal'), 'the terminal section, before a search');
+  search.value = 'no such setting';
+  search.dispatch('input');
+  assert.ok(!view.el.shownText.includes('Terminal · this browser'), view.el.shownText);
+  search.value = '';
+  search.dispatch('input');
+  assert.ok(view.el.shownText.includes('Terminal · this browser'));
+  app.leave();
 });

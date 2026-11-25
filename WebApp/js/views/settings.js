@@ -96,15 +96,17 @@ export function settingsView(app) {
   // The app's search: the settings whose words hold every word typed.
   let query = '';
   const search = h('input', { class: 'setting-search', type: 'search', placeholder: t('svSearchSettings'), 'aria-label': t('svSearchSettings'),
-    spellcheck: 'false', autocomplete: 'off', oninput: (event) => { query = event.target.value; drawn = ''; render(true); } });
+    spellcheck: 'false', autocomplete: 'off', oninput: (event) => { query = event.target.value; lookColumn.hidden = !!query.trim(); drawn = ''; render(true); } });
   const body = h('div', { class: 'node-column settings-column' });
   // This browser's own: the terminal's look (views/termlook.js), drawn apart from the node's settings.
   const terminalLook = terminalLookSection();
+  // Hidden while a search is typed: it isn't among what the search looks through.
+  const lookColumn = h('div', { class: 'node-column settings-column' }, terminalLook.el);
   const el = h('section', { class: 'node settings', 'aria-label': t('svSettings') },
     h('header', { class: 'head' },
       h('a', { class: 'back icon-button', href: '#/node', 'aria-label': t('svThisNode') }, icon('back', 16)),
       h('div', { class: 'head-text' }, h('div', { class: 'head-line' }, h('h1', { class: 'head-title' }, t('svSettings')), picker))),
-    h('div', { class: 'pane node-pane' }, search, body, h('div', { class: 'node-column settings-column' }, terminalLook.el)));
+    h('div', { class: 'pane node-pane' }, search, body, lookColumn));
   // Per key: the value being drafted (its field open). Kept while the page reads the settings again.
   const editing = new Map();
   let result = null;

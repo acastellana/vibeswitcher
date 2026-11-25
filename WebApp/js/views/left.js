@@ -132,7 +132,11 @@ export function leftColumn(app, { brief }) {
     } else { summaryCount.removeAttribute('href'); summaryCount.title = ''; }
     setClass(summaryCount, 'asked', needs > 0);
     setText(summaryRest, moving ? ` · ${t('inMotion', { n: moving })}` : '');
-    briefButton.hidden = !store.can?.('brief');
+    // A page the node doesn't know (not paired, or its access taken back) knows nothing to count or brief.
+    const off = state.connection === 'unpaired' || state.connection === 'revoked';
+    summaryCount.hidden = off;
+    summaryRest.hidden = off;
+    briefButton.hidden = off || !store.can?.('brief');
     // Whether this page acts for the user, and since when, with the switch that turns it off.
     const actsKey = JSON.stringify([state.node?.web?.acts, store.acts(), state.phrase, lang()]);
     if (actsKey !== actsDrawn) { actsDrawn = actsKey; actsSlot.replaceChildren(...[actsLine(app, { compact: true })].filter(Boolean)); }

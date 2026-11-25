@@ -360,6 +360,7 @@ export function newProjectForm(app) {
   const el = h('section', { class: 'new-session new-project', 'aria-label': t('drNewProject') },
     h('div', { class: 'new-head' }, h('h2', { class: 'new-title' }, t('drNewProject'))),
     h('div', { class: 'new-fields' }, name, location, goal),
+    h('p', { class: 'confirm-note where-hint' }, t('drWhereHint')),
     folderNote,
     lineSlot,
     h('p', { class: 'confirm-note' }, t('drMakesTheProjectSFolder')));

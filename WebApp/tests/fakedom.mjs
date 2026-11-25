@@ -99,7 +99,7 @@ export function installDom() {
   globalThis.Node = FakeNode;
   globalThis.document = {
     createElement: (tag) => new FakeNode(tag), createElementNS: (_, tag) => new FakeNode(tag), createTextNode: (text) => new FakeNode('#text', text),
-    activeElement: null, visibilityState: 'visible', hidden: false, addEventListener() {}, body: new FakeNode('body'),
+    activeElement: null, visibilityState: 'visible', hidden: false, addEventListener() {}, body: new FakeNode('body'), documentElement: new FakeNode('html'),
   };
   // A frame runs at once: what a delta asks for is drawn before the test reads it.
   globalThis.requestAnimationFrame = (fn) => { fn(); return 0; };
