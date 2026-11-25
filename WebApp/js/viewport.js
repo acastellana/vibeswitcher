@@ -3,7 +3,7 @@
 // a text box has the focus and the visual viewport is well short of the tallest it has been at this width, the root
 // gets `keyboard` and the visible part's height and top (`--vv-height`, `--vv-top`), which style.css's phone block
 // gives the page, and the box that has the focus is brought back into sight: the lead's message box with the
-// conversation's end above it, any other box (a card's answer, a session's) where it is.
+// conversation's end above it, any other box (a card's answer) in the middle of what shows, what it answers above it.
 //
 // followKeyboard({ root, win, doc, phone }) → { fit } (fit: measure now, for a test or a caller that knows better)
 
@@ -35,13 +35,13 @@ export function followKeyboard({ root, win = globalThis, doc = globalThis.docume
     if (keyboard && !up) win.requestAnimationFrame(() => reveal(active));
     up = keyboard;
   }
-  // The lead's box: the conversation's last line just above it. Any other box: into sight where it is.
+  // The lead's box: the conversation's last line just above it. Any other box: into the middle of what shows.
   function reveal(active) {
     if (doc.activeElement !== active) return;
     const lead = active.closest?.('.composer-lead');
     const scroll = lead ? lead.parentNode?.querySelector?.('.centre-scroll') : null;
     if (scroll) scroll.scrollTop = scroll.scrollHeight;
-    else active.scrollIntoView?.({ block: 'nearest' });
+    else active.scrollIntoView?.({ block: 'center' });
   }
   vv.addEventListener('resize', fit);
   vv.addEventListener('scroll', fit);

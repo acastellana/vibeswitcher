@@ -219,7 +219,7 @@ const box = (classes, { inLead = false } = {}) => {
   const el = new FakeNode('input');
   el.matches = (selector) => selector.startsWith('input');
   el.scrolledIntoView = 0;
-  el.scrollIntoView = () => { el.scrolledIntoView++; };
+  el.scrollIntoView = (how) => { el.scrolledIntoView++; el.scrolledHow = how; };
   const scroll = { scrollTop: 0, scrollHeight: 1200 };
   el.closest = (selector) => (inLead && selector === '.composer-lead' ? { parentNode: { querySelector: (s) => (s === '.centre-scroll' ? scroll : null) } } : null);
   el.attrs.class = classes;
@@ -258,6 +258,7 @@ test('the keyboard: with a box focused and the visible part well short of its ta
   page.fire('resize');
   page.run();
   assert.equal(answer.scrolledIntoView, 1);
+  assert.deepEqual(answer.scrolledHow, { block: 'center' }, 'in the middle, what it answers above it');
   // A toolbar hiding (a little shorter) is no keyboard; nor is anything on a wide window.
   const calm = keyboardPage();
   followKeyboard({ root: calm.root, win: calm.win, doc: calm.doc, phone: () => true });
