@@ -72,6 +72,49 @@ public enum SwitchSettle {
         return pid != before && commit == target
     }
 
+    /// One look at the node's server while the switch waits for the one that stays.
+    public enum Look: Equatable, Sendable {
+        /// A server that passed the node's check, by its hello.
+        case server(pid: Int32, commit: String)
+        /// No answer yet: no server listens, the connection failed, or the listener is on its way out (gone, or its
+        /// facts couldn't be read: `NodeCheck.unsettled`). Looked at again.
+        case notYet(String)
+        /// A listener whose facts were read fails the node's check.
+        case refused(String)
+    }
+
+    /// How the wait for the server ended.
+    public enum Waited: Equatable, Sendable {
+        case answered(pid: Int32, commit: String)
+        /// Nothing settled in the wait: the line to say.
+        case slow(String)
+        /// A listener failed the node's check: the line to say. The follow-up runs all the same (it checks the host again
+        /// and says what is owed).
+        case refused(String)
+    }
+
+    /// Polls `look` until the server that stays answers (`serverSettled`), at most `wait`; whatever it ends with, the
+    /// handover happened, so the switch goes on to its follow-up.
+    public static func waitForServer(before: Int32, target: String, due: Bool?, wait: TimeInterval, look: () -> Look,
+                                     now: () -> Date = Platform.Clock.steadyDate, pause: () -> Void = { usleep(250_000) }) -> Waited {
+        let started = now()
+        var why = "no server answered"
+        while true {
+            switch look() {
+            case .server(let pid, let commit):
+                if serverSettled(pid: pid, commit: commit, before: before, target: target, due: due) { return .answered(pid: pid, commit: commit) }
+                why = "the server that answers is pid \(pid), build \(ConfigSeal.inert(commit, limit: 64))"
+            case .notYet(let reason): why = reason
+            case .refused(let reason):
+                return .refused("handed over to \(target), but the server that answers fails the node's check (\(ConfigSeal.inert(reason, limit: 400))): "
+                                + "the follow-up checks the host again")
+            }
+            let waited = now().timeIntervalSince(started)
+            guard waited < wait else { return .slow(slowServer(target: target, after: Int(waited), why: why)) }
+            pause()
+        }
+    }
+
     /// Whether `now` is the listener a page held before the switch (`before`), back.
     public static func webSettled(before: Web?, now: Web?) -> Bool {
         guard let before, before.awaited else { return true }

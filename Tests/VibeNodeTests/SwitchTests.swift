@@ -32,6 +32,58 @@ struct SwitchTests {
 
     /// The app's `theBundledBuildIsUsed` and `noRestartIsOfferedWithoutAnOutdatedHost`: the build that runs is the one
     /// asked for, so nothing is switched (asked of a host already on it, with live teams or none).
+    /// The real node's switch of 2026-11-25: mid-wait, the outgoing server's /proc entry was read as it exited ("whether
+    /// … is dumpable can't be told"), and that ended the switch before its follow-up. A stand-in: the old server answers,
+    /// then exits mid-poll (its listener gone, its facts unreadable), then the new one answers. A listener gone or
+    /// unreadable is no answer (`NodeCheck.unsettled`); only one whose facts were read and fail is a refusal, and even
+    /// then the wait ends with a line and the follow-up runs.
+    @Test func theOutgoingServerExitingMidPollIsNoAnswer() {
+        let unit = ["0::/user.slice/user-1000.slice/user@1000.service/app.slice/vibeswitcher-node.service"]
+        let good = NodeCheck.Listener(pid: 50, dumpable: false, parent: 40, cgroup: unit, session: 40)
+        var exiting = good
+        exiting.dumpable = nil
+        #expect(NodeCheck.unsettled(exiting, alive: true, mode: .node), "a fact unreadable")
+        #expect(NodeCheck.unsettled(good, alive: false, mode: .node), "gone")
+        var noCgroup = good
+        noCgroup.cgroup = nil
+        #expect(NodeCheck.unsettled(noCgroup, alive: true, mode: .node) && !NodeCheck.unsettled(noCgroup, alive: true, mode: .scratch(root: "/srv/x")))
+        var dumpable = good
+        dumpable.dumpable = true
+        #expect(!NodeCheck.unsettled(dumpable, alive: true, mode: .node), "read, and failing: a refusal")
+        var stranger = good
+        stranger.parent = 1
+        #expect(!NodeCheck.unsettled(stranger, alive: true, mode: .node))
+
+        // The poll, through the same rules the command line's look applies (`SwitchCommand.lookAtServer`).
+        let target = String(repeating: "c", count: 40)
+        func look(_ listener: NodeCheck.Listener, alive: Bool, hello: (Int32, String)) -> SwitchSettle.Look {
+            guard let why = NodeCheck.refusal(listener, mode: .node, expectedParent: 40, parentSession: 40) else { return .server(pid: hello.0, commit: hello.1) }
+            return NodeCheck.unsettled(listener, alive: alive, mode: .node) ? .notYet(why) : .refused(why)
+        }
+        var replaced = good
+        replaced.pid = 51
+        let looks = [look(good, alive: true, hello: (50, Self.a)), look(exiting, alive: false, hello: (50, Self.a)),
+                     look(replaced, alive: true, hello: (51, target))]
+        var index = 0
+        let clock = Date(timeIntervalSince1970: 1_000)
+        let waited = SwitchSettle.waitForServer(before: 50, target: target, due: true, wait: 120, look: {
+            defer { index += 1 }
+            return looks[min(index, looks.count - 1)]
+        }, now: { clock }, pause: {})
+        #expect(waited == .answered(pid: 51, commit: target) && index == 3, "\(waited)")
+
+        // Never settling: a line once the wait is past; a listener that fails the check: a line at once.
+        var seconds: TimeInterval = 0
+        let slow = SwitchSettle.waitForServer(before: 50, target: target, due: true, wait: 5, look: { look(exiting, alive: false, hello: (50, Self.a)) },
+                                              now: { clock.addingTimeInterval(seconds) }, pause: { seconds += 1 })
+        guard case .slow(let line) = slow else { Issue.record("\(slow)"); return }
+        #expect(line.contains("handed over to \(target)") && line.contains("dumpable can't be told"), "\(line)")
+        let refused = SwitchSettle.waitForServer(before: 50, target: target, due: true, wait: 120, look: { look(dumpable, alive: true, hello: (50, Self.a)) },
+                                                 now: { clock }, pause: {})
+        guard case .refused(let said) = refused else { Issue.record("\(refused)"); return }
+        #expect(said.contains("fails the node's check") && said.contains("the follow-up checks the host again"), "\(said)")
+    }
+
     /// What `vs switch` waits for once handed over (`SwitchSettle`): a replacement is due only when the two builds'
     /// records give their servers other bytes; unknown when a record can't be read (not waited for); the server that
     /// stays is the target's under another pid; a page's listener only when it held a token, on the same port.

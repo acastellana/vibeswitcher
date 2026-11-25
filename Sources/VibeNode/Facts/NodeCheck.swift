@@ -139,6 +139,18 @@ public enum NodeCheck {
         return nil
     }
 
+    /// Whether a refusal of `listener` may be a server on its way out rather than an answer (2026-11-25, the user's
+    /// switch on the real node: the old server's /proc entry read just as it exited, "whether … is dumpable can't be
+    /// told", ended the switch before its follow-up): it has gone (`alive` false), or a fact the check needs couldn't be
+    /// read. A wait for the server that stays looks again (`SwitchSettle.waitForServer`); nothing it said is trusted.
+    /// A listener whose facts were read and fail stays a refusal.
+    public static func unsettled(_ listener: Listener, alive: Bool, mode: Mode, codeIdentity: Bool = false) -> Bool {
+        guard alive else { return true }
+        if listener.parent == nil || listener.session == nil { return true }
+        if codeIdentity { return listener.code == nil }
+        return listener.dumpable == nil || (mode == .node && listener.cgroup == nil)
+    }
+
     /// The process `pid` as the command line reads it (`ServerCheck`): whether it is dumpable, its parent, its cgroup
     /// lines and its session.
     public static func listener(pid: pid_t, patience: TimeInterval = dumpablePatience) -> Listener {
