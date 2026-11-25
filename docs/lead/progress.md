@@ -4571,3 +4571,5 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-25 20:21 Started a worker on v2-s-web-page-2
 - 2026-11-25 20:29 Planned v2-s-web-page-3: v2's web page: a UX review of every screen, with a ranked list of what to change (report only, in a clone)
 - 2026-11-25 20:29 Started a worker on v2-s-web-page-3
+- 2026-11-25 20:40 Planned v1-against-v2-refresh: v1 against v2: refresh the feature table and add the user flows, each checked in v2's code (a doc branch for v2, in a clone)
+- 2026-11-25 20:40 Started a worker on v1-against-v2-refresh
