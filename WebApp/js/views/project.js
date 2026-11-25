@@ -82,7 +82,6 @@ export function projectView(app, { sheet }) {
     dialOpen = open;
     setClass(dial, 'open', open);
     dialFold.setAttribute('aria-expanded', String(open));
-    if (open) dial.querySelector('[aria-current]')?.focus({ preventScroll: true });
   }
   // A link chosen, Esc, or a touch outside it closes it.
   dial.addEventListener('click', (event) => { if (dialOpen && event.target.closest?.('a')) foldDial(false); });
