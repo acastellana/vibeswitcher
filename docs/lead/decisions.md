@@ -455,3 +455,7 @@ The user wants v2 to do everything v1 does and more, without a terminal and at t
 
 The inventory found 42 terminal steps in v2 against none in v1, and that 'nothing day to day' is reachable only if guarded changes can be approved with biometrics on the page. A per-change biometric with the change shown is the pattern a person already knows from their phone and is stronger than a typed code a session could read; keeping these out of the 12-hour unlock keeps the day's one accepted exposure from reaching the root of trust. N1 is the choice that most deserves the user's eye; it was reported to them as such.
 
+## 2026-11-25 22:20:45 v2 is not shipped as a signed app for now (the user's answer to ADE896BB, 2026-11-25): it keeps being built from source on each machine; setup keeps a few terminal lines, and day-to-day use has none. No Apple Developer ID, no published binaries. This answers the no-terminal inventory's N4; revisit when day-to-day use is terminal-free and setup is what's left.
+
+The user chose 'Later'. Setup happens once per machine; the day-to-day steps are where the cost is.
+

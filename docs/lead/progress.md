@@ -4606,3 +4606,10 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-25 22:09 Planned v2-s-page-against: v2's page against a top-tier app's bar: a design review of the chat and every other section, with a design system audit and ranked changes (report only, in a clone)
 - 2026-11-25 22:11 Kept re-check-v2-s unmerged: Report only, delivered: verdict 'not yet' (I1 a flag in a value slot gets past the checked start's argument check; I2 the keeper proves nothing about its parent). Its worktree holds the re-check copy and probes (ReCheckTests.swift) that the next fix round's check uses. Nothing merges; clean up once v2-mac-checked-start is delivered.
 - 2026-11-25 22:19 Kept v2-every-step-that unmerged: By design nothing of it merges into main: its 3 commits (docs/process/v2-no-terminal.md and the lead's decisions recorded in v2's notes) are on the local branch v2-no-terminal in its clone (.vibeswitcher/v2-noterm), on top of v2-user-decisions; pushed as a branch for v2 at the user's say. No merge and no cleanup until then.
+- 2026-11-25 22:21 Kept v2-web-ux-join unmerged: By design nothing of it merges into main: its 33 commits are on the local branch v2-web-ux in its clone (.vibeswitcher/v2-ux-join), on top of v2-web-two-columns; the next page tasks build on it and it is pushed as a branch for v2 at the user's say. No merge and no cleanup until then.
+- 2026-11-25 22:22 Planned v2-web-the-lead: v2 web: the lead view and a session on a phone (U2, U13, the clipped composer; in a clone)
+- 2026-11-25 22:22 Planned v2-web-eleven-lines: v2 web: eleven lines to paste become buttons, and the keyboard shortcuts come back (the no-terminal list's page-only items and the redesign's regression; in a clone)
+- 2026-11-25 22:22 Started a worker on v2-s-page-against
+- 2026-11-25 22:22 Started a worker on v2-web-the-lead
+- 2026-11-25 22:23 Started a worker on v2-web-eleven-lines
+- 2026-11-25 22:23 Update: v2: los arreglos de UX, unidos en una sola rama — **Qué cambió:** los cuatro arreglos de la revisión de UX están unidos en una rama, `v2-web-ux` (33 commits sobre las dos columnas).
