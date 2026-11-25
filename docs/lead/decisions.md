@@ -427,3 +427,15 @@ v2's design puts building on Linux and checking on the Mac, but every remaining 
 
 The anchor gates the checked start, the service wiring and two smaller checks; a root-owned record needs no paid identity and no Keychain rewriting. The user asked to authorize once rather than per command, and accepted the stated cost: during the 12 hours anything that can read the open page's secrets, a team's session included, could act as them.
 
+## 2026-11-25 21:19:58 v2 page input (the user's answer to B4C0D428, 2026-11-25): a page may send input into every session, the user's own unconfined Claude and shell sessions included, as v1 does, on condition that each device holds its own key made at pairing (Touch ID / passkey) and every input message is checked against it. This answers the H1 plan's decision 1 (amending the design's "reply rights type only into confined sessions") and, by the lead's call, its decision 2 (device keys, as stage 4 plans, not a bearer token with a third right). The signing key for phone push lives in the host's vault (the lead's call). These are node pieces built on the Linux side: the lead writes the answers into v2's decision documents on a branch for v2.
+
+The v1-against-v2 list (2026-11-25) ranks 'can't type into a terminal from the page' and 'the phone never acts' among the gaps that stop daily use of v2 in place of v1; the user wants v2 to do all v1 does and said to ask what's needed and go ahead. Device keys are the stronger of the two rights v2's own plan offers and match the user's choice of one Touch ID for the acting page.
+
+## 2026-11-25 21:20:04 v2's phone page moves to HTTPS through `tailscale serve` (the user's answer to 223BB776, 2026-11-25): way B of the remote access note's decision 1, and the H1 plan's decision 4 and the push note's decision 1. The user accepted that turning on HTTPS certificates puts the machine's and the tailnet's names in public certificate logs. Built on the Linux side; written into v2's decision documents with the other answers.
+
+Without a secure context the phone can have neither push with the page closed nor device keys, so it could never answer or type: gaps 2 and 3 of the v1-against-v2 list.
+
+## 2026-11-25 21:20:29 v2 gets phone push with the page closed (the user's answer to 7E3F8A88, 2026-11-25): the node may post encrypted pushes to the browser vendors' push services (the app's allow-list), and the lock screen shows the first line of the card or prompt, as the open page's notification does. The user chose this over the kind-only text the lead recommended, accepting that whoever holds the phone reads that line. With B4C0D428 and 223BB776 this answers every decision the push note and the H1 plan left to the user.
+
+Nothing telling the user anything once the page is closed is gap 2 of the v1-against-v2 list; v1 already pushes through the same vendors with content.
+
