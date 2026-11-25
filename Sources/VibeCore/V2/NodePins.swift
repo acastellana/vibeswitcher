@@ -53,7 +53,7 @@ public struct NodePins: Equatable, Sendable {
     public static let maxBytes = 64 * 1024
     public static let maxBuilds = 16
     /// What to do about a refused record.
-    public static let remedy = "install the build again with scripts/install-node-mac.sh, whose administrator step (node-pins-mac.sh, run from the commit's checked copy) writes the record and asks for an administrator's password"
+    public static let remedy = "an administrator writes it: scripts/node-pins-mac.sh, from a checkout of the installed commit, for that build (--fresh when the record there can't be carried; install-node-mac.sh runs it on each new install)"
 
     /// The installed record's place for this account: `/` and `Platform.Service.nodePinsRecord`'s folders. nil where
     /// there is none (Linux).

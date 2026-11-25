@@ -371,3 +371,16 @@ struct NodePinsFormatTests {
 private extension Optional where Wrapped == Bool {
     var isTrue: Bool { self == true }
 }
+
+/// `Platform.CodeIdentity.ownCdhash`, which the host's and the server's checks (2 and 3) find their build by: this test
+/// process's own, 20 bytes, the cdhash of its executable's running slice. Mac only.
+@Suite(.enabled(if: Platform.CodeIdentity.isAvailable, "the Mac's code identity"))
+struct OwnCdhashTests {
+    @Test func aProcessReadsItsOwnRunningCode() throws {
+        let own = try #require(Platform.CodeIdentity.ownCdhash())
+        #expect(own.count == 20)
+        let executable = try #require(Bundle.main.executablePath)
+        let architecture = try #require(Platform.CodeIdentity.architecture(of: getpid()))
+        #expect(own == Platform.CodeIdentity.cdhash(atPath: executable, architecture: architecture), "\(executable)")
+    }
+}

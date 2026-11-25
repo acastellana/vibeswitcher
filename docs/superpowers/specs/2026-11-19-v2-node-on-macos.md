@@ -260,12 +260,15 @@ no check, no start, no switch.
    row whose server is its own running code, read once at its start: never from `<root>/bin/vibeswitcher`, so a
    command line swapped there after the start is not the installed one.
 4. **A switch or a rollback.** The target's host image must be a host pinned in the record (its file's cdhash for this
-   Mac's slice, checked before the handover), and the new image, once running, passes 2 by its own running code, which
-   is decisive (a file swapped between the check and the exec runs other code and finds no row). A rollback goes only
-   to a build the record still holds: one dropped from it is refused ("not in the record: install it again").
+   Mac's slice, checked by path before the handover), and the new image, once running, finds its row by its own
+   running code (2) before it starts a server. A rollback goes only to a build the record still holds: one dropped
+   from it is refused. The check is by path, then the Mac's handover execs that path: a file swapped between the two
+   runs the session's code, which asks nothing (below, "What it doesn't cover").
 
-**When it isn't right**, each refused with one plain line naming the record's path and what to do (run the install's
-administrator step again): the record missing; unreadable; a link anywhere on its path; any folder on it or the file
+**When it isn't right**, each refused with one plain line naming the record's path and what to do (an administrator
+runs `scripts/node-pins-mac.sh` from a checkout of the installed commit for that build, with `--fresh` when the record
+there can't be carried; the install itself refuses a commit already installed, so there is no recovery short of that
+step or a newer install): the record missing; unreadable; a link anywhere on its path; any folder on it or the file
 not root's, or writable by its group or others, or carrying an ACL; not a regular file, more than one link, too large;
 not parseable, another format, another uid; and a running code that names no row (an unknown build).
 
@@ -276,7 +279,10 @@ The other side closes it without a pid: the genuine server refuses to serve unle
 pair's audit token, which names the last sender on the host's end) runs a host pinned in the same record. Not built
 here (the lead's call, 2026-11-25): it needs the server to read the record before its first request, a test that starts
 a pinned server from an unpinned host, and an answer on whether a fake host can make a genuine host the last sender on
-its end; it goes with item 13 (the checked start) and its review. Nor is the install's own window: a
+its end; it goes with item 13 (the checked start) and its review. Nor is a switch's window: the target is checked by its file's cdhash, then the Mac's handover execs the path, so a
+host image swapped in between runs, with the sessions' descriptors and the handover's secrets, and asks no record
+(what closes it: an exec from the checked descriptor, or the new image proving its code to the old one before the
+state is handed over; with item 13). Nor is the install's own window: a
 session that rewrites the staged build between its check and the administrator step is the install's S9, as on Linux.
 
 **Where it is built.** `NodePins` (VibeCore: the format, the walk's rules, the lookups), `Platform.Files.readRootRecord`

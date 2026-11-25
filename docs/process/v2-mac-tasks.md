@@ -292,7 +292,8 @@ or decided. Done on Linux, tested on both systems (`ApprovalJudgmentTests`, `App
    `install-node-mac.sh` from the commit's verified blob, `--dry-run`). The command line takes only a listener whose
    running code is a pinned server (`NodeCheck.macServerCode`); the host finds its own build by its running code and
    starts only that row's server (`HostImages.macServerPin`); a switch goes only to a pinned host
-   (`HandoverTarget.macPinned`). Proved on this Mac by `NodePinsAnchorTests` (red on the old anchor, green now): the
+   (`HandoverTarget.macPinned`, by path before the exec: a file swapped between the two isn't caught, listed in the
+   design's "What it doesn't cover"). Proved on this Mac by `NodePinsAnchorTests` (red on the old anchor, green now): the
    fake server of this item (a genuine host, another server image in the builds folder, the job's program rewritten)
    refused; a record missing, a link, writable by its group or others, under such a folder, with an ACL, a second link,
    another uid, unparseable or (by an injected owner fact) the user's, refused, and the same scratch record refused with
@@ -333,7 +334,9 @@ or decided. Done on Linux, tested on both systems (`ApprovalJudgmentTests`, `App
    review: a `--node` host on the Mac that refuses to start unless its own running code is a pinned host
    (`HostImages.macServerPin` asks it, wired only behind `isCheckedMacNode`), the LaunchAgent wired (step 5, item 9's
    row), the server refusing a connector peer that runs no pinned host (the fake-host case above), and a real run of
-   the administrator step by the user.
+   the administrator step by the user, and a switch that execs the checked file (not its path) or has the new image
+   prove its code before the state is handed over. A record that can't be taken has no recovery short of the
+   administrator step run by hand (`--fresh`) or a newer install: the install refuses an installed commit.
 
 14. **(Answered, the re-review questions of 2026-11-22)**
    - *Is `HostImages.macServerRefusal`'s set of the account's locks complete?* It names the app's
