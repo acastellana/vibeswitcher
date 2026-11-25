@@ -190,9 +190,15 @@ or decided. Done on Linux, tested on both systems (`ApprovalJudgmentTests`, `App
    word reads first in the dialog as drawn (the system's title precedes the reason).
 3. **(MEDIUM-HIGH)** The caller check: the Hardened Runtime is required of the peer (done, `6f367200`:
    `ApprovalVoice.hardened`, `Platform.CodeIdentity.isHardened`). **Owed**: the node's command line signed with
-   `--options runtime` (the install's signing decision, step 7); its cdhash anchored where the host anchors the
-   server's (read at the host's start from the build it checked, handed over with its notes), not re-read from the
-   writable `<root>/bin` at each server start. **Real Mac**: `DYLD_INSERT_LIBRARIES` into the command line refused;
+   `--options runtime` (the install's signing decision, step 7). **Built 2026-11-25 (`v2-mac-anchor`, off with the rule,
+   needs a review)**: its cdhash is anchored in the node's root-owned record (item 10), not re-read from the writable
+   `<root>/bin`: the server takes the command line of the record's row whose server is its own running code
+   (`ApprovalVoice.commandLineAnchor`, `Platform.CodeIdentity.ownCdhash`), read once at its start.
+   `NodePinsAnchorTests/aCommandLineSwappedInTheBuildAfterTheStartIsRefused` (red on the old anchor, green now; real
+   signed images and audit tokens on this Mac): a command line renamed over `<root>/bin/vibeswitcher` after the start is
+   refused, the genuine one taken. Unproven: a real server started by a node host reading the installed record (no Mac
+   node host runs yet, item 13). **Real Mac**: `DYLD_INSERT_LIBRARIES` into the command line refused (measured
+   2026-11-25, branch `v2-mac-step4`'s M6: refused with `--options runtime`);
    the connect-write-exec race (a process connects, the command line's code then execs in its place: Security's dynamic
    check on a token after exec); Accessibility driving the password fallback (synthetic typing into the dialog).
 4. **(MEDIUM, done in `6f367200`)** Values per kind: send's words cut only saying how many there are, presets' env
@@ -278,6 +284,23 @@ or decided. Done on Linux, tested on both systems (`ApprovalJudgmentTests`, `App
    - **A Developer ID team identifier**: check the server against a requirement on a team the user can't sign as.
      Needs a paid signing identity; then the requirement is fixed and no pin is needed.
    Until one is built, the Mac's server check proves only "a hardened binary the user's account could have placed".
+   **Built 2026-11-25 (`v2-mac-anchor`; the user chose the root-owned record; needs a review)**, as the node on the Mac's
+   design's "The anchor" says: `/Library/Application Support/VibeSwitcher/node-<uid>.pins`, every folder from `/` root's
+   and writable by neither group nor others, no link followed (walked by `openat(O_NOFOLLOW)`, checked by `fstat` on the
+   descriptor read), no ACL (`Platform.Files.readRootRecord`); it pins each build's host, server and command line by
+   cdhash (`NodePins`), written only by the install's administrator step (`scripts/node-pins-mac.sh`, one `sudo`, run by
+   `install-node-mac.sh` from the commit's verified blob, `--dry-run`). The command line takes only a listener whose
+   running code is a pinned server (`NodeCheck.macServerCode`); the host finds its own build by its running code and
+   starts only that row's server (`HostImages.macServerPin`); a switch goes only to a pinned host
+   (`HandoverTarget.macPinned`). Proved on this Mac by `NodePinsAnchorTests` (red on the old anchor, green now): the
+   fake server of this item (a genuine host, another server image in the builds folder, the job's program rewritten)
+   refused; a record missing, a link, writable by its group or others, under such a folder, with an ACL, a second link,
+   another uid, unparseable or (by an injected owner fact) the user's, refused, and the same scratch record refused with
+   the node's own facts. **Unproven**: the record written for real by `sudo` (the user's trial: the step on a throwaway
+   path, its owner, mode and parents, an unprivileged write refused); a mount over a folder on the path (refused to a
+   user by macOS, not measured); the checks against a real running node (none runs: items 5, 9, 13). **Not covered**: a
+   re-bootstrapped job whose own host runs the genuine pinned server; what closes it (the server checking its
+   connector's peer against the pinned hosts) goes with item 13.
 11. **(BLOCKER before approvalMeasured; the review's sixth finding; built 2026-11-22, `v2-small-rows`, needs a real
    Mac and a review)** Built: `Platform.Processes.link` falls back to the kernel's record (sysctl `KERN_PROC_PID`, any
    user's) where `PROC_PIDTBSDINFO` refuses; `PeerFacts.runner` takes a root-owned ancestor with unreadable arguments
@@ -293,11 +316,22 @@ or decided. Done on Linux, tested on both systems (`ApprovalJudgmentTests`, `App
    over to the next build) the check would compare the genuine server against the next build and refuse it. And
    `launchctl print`'s output isn't an API (its format changes between releases). Options: the host reports its own
    build to the command line over a channel the check already trusts, or the check reads the host's executable by
-   its pid and token (`proc_pidpath` bound to the token) instead of the job's line.
+   its pid and token (`proc_pidpath` bound to the token) instead of the job's line. **Built 2026-11-25
+   (`v2-mac-anchor`, with item 10's record)**: neither: the check reads the running image of the process bound to the
+   listener's audit token (Security's dynamic check of its cdhash) against the servers the record pins, so no path is
+   read at all and the job's `program` line drops out; only `pid` is taken from `launchctl print` (whose format
+   `NodeAgent.printed` parses, measured on macOS 27.2: `v2-mac-step4`'s M11). Proved by
+   `NodePinsAnchorTests/aSwitchToAPinnedBuildPassesAndToAnotherIsRefused`: with the job's program naming the next build
+   while this build's server runs, the server passes (red on the old check). Unproven: a real in-place switch.
 13. **(Owed, the review of 2026-11-21)** The Mac's checked node start (`HostImages.isCheckedMacNode`, false): until it
    exists no Mac host runs a `--server` child on the account's locks, none is a node host, and the record of the
    user's actions, its hooks and the vaultV2 capability stay off on the Mac (fixes `6e0798d9`, `a0a596d8`,
-   `b45bb7b0`). It depends on item 10's anchor: a check against the user's own files proves nothing.
+   `b45bb7b0`). It depends on item 10's anchor: a check against the user's own files proves nothing. **Still off
+   (2026-11-25)**: item 10's record is built (`v2-mac-anchor`), so the checked start now waits on its own build and
+   review: a `--node` host on the Mac that refuses to start unless its own running code is a pinned host
+   (`HostImages.macServerPin` asks it, wired only behind `isCheckedMacNode`), the LaunchAgent wired (step 5, item 9's
+   row), the server refusing a connector peer that runs no pinned host (the fake-host case above), and a real run of
+   the administrator step by the user.
 
 14. **(Answered, the re-review questions of 2026-11-22)**
    - *Is `HostImages.macServerRefusal`'s set of the account's locks complete?* It names the app's
