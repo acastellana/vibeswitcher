@@ -32,8 +32,8 @@ struct MacWebHeldByHostTests {
             let home = root.appendingPathComponent("home").path
             try FileManager.default.createDirectory(atPath: home, withIntermediateDirectories: true)
             let host = builtProducts.appendingPathComponent("vibeswitcher-host").path
-            var arguments = [host, "--socket", root.appendingPathComponent("host.sock").path,
-                             "--lock", root.appendingPathComponent("scratch-host.lock").path,
+            let socket = root.appendingPathComponent("host.sock").path, lock = root.appendingPathComponent("scratch-host.lock").path
+            var arguments = [host, "--socket", socket, "--lock", lock,
                              "--log", root.appendingPathComponent("host.log").path, "--idle-exit", "120", "--server", server,
                              "--exit-with", String(getpid())]
             for argument in serverArguments { arguments += ["--server-arg", argument] }
