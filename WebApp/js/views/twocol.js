@@ -180,18 +180,22 @@ export function twoColumns(app, { label, title, searchLabel, placeholder = searc
   const detailSub = h('span', { class: 'tc-dsub' });
   const detailHead = h('header', { class: 'tc-dhead' }, back, h('div', { class: 'tc-dwords' }, detailTitle, detailSub));
   const detailBody = h('div', { class: 'tc-dbody' });
-  const page = h('div', { class: 'tc-page' }, detailHead, detailBody);
+  // A line between the header and the body that a page keeps over every row's detail (This node's health), when it has one.
+  const detailTop = h('div', { class: 'tc-dtop', hidden: true });
+  const page = h('div', { class: 'tc-page' }, detailHead, detailTop, detailBody);
 
   return {
-    el, list, rows, detail, search, detailBody,
+    el, list, rows, detail, search, detailBody, detailTop,
     query: () => query,
     onSearch(fn) { onSearch = fn; },
     setItems,
     // On a phone: the list (nothing chosen in the address) or the detail.
     fold(chosen) { el.dataset.pane = chosen ? 'detail' : 'list'; },
-    // The detail as a header and a body; `own` puts an element of its own there instead (a session's view).
-    show({ title: heading = '', sub = '', body = null } = {}) {
+    // The detail as a header and a body; `own` puts an element of its own there instead (a session's view). `top`: the
+    // line over the body (null: none; left out: the one there stays).
+    show({ title: heading = '', sub = '', body = null, top } = {}) {
       if (detail.firstChild !== page || detail.childNodes.length !== 1) detail.replaceChildren(page);
+      if (top !== undefined && detailTop.firstChild !== top) { detailTop.replaceChildren(...(top ? [top] : [])); detailTop.hidden = !top; }
       setText(detailTitle, heading);
       setText(detailSub, sub);
       detailSub.hidden = !sub;

@@ -13,6 +13,7 @@ import { t, tParts, nodeWords } from '../i18n.js';
 import { actsLine, actsFor, doButton } from '../acting.js';
 import { twoColumns, queryWords, holdsAll, marked } from './twocol.js';
 import { settingsHref } from './settings.js';
+import { waitingPlaces } from '../conversation.js';
 
 // A group's address: `#/node/<group>`; `#/node` opens the one that needs you, else the first.
 export const nodeHref = (key) => '#/node' + (key ? '/' + key : '');
@@ -106,6 +107,34 @@ export function updatesGroup(update) {
       facts.problem ? row(t('noLastTry'), t('noCouldntLook', { why: facts.problem })) : null),
     h('div', { class: 'card-command' }, h('span', { class: 'card-command-label' }, t('noInATerminal')),
       facts.lines.map((line) => copyLine(line.text, line.label))));
+}
+
+// Whether the node is healthy, in one line, from what it already sends: what waits on you here (`waiting`: what one
+// accept settles, and the cards no project holds), its notices, the session host, its health digest and the usage
+// limits. { tone: 'calm' | 'asked' | 'working', head, parts: [{ words, group }] }: `asked` when something needs you (each
+// part names the group that says why), `working` when only a limit holds work back, `calm` when nothing is wrong.
+export function nodeVerdict(node, { accept = 0, cards = 0 } = {}) {
+  const asked = [];
+  if (accept) asked.push({ words: t('nvAccept', { n: accept }), group: 'approve' });
+  if (cards) asked.push({ words: t('nvCards', { n: cards }), group: accept ? 'approve' : null });
+  const notices = node.notices?.length || 0;
+  if (notices) asked.push({ words: t('placeNotices', { n: notices }), group: 'notices' });
+  if (node.host && node.host.state !== 'connected') asked.push({ words: t('nvHost'), group: 'host' });
+  const health = healthFacts(node.health);
+  if (health && health.tone !== 'done') asked.push({ words: t('nvHealth'), group: 'health' });
+  const limits = usageFacts(node.usage)?.limits?.some((limit) => limit.holds) ? [{ words: t('nvLimits'), group: 'usage' }] : [];
+  if (asked.length) return { tone: 'asked', head: t('nvNeedsYou'), parts: [...asked, ...limits] };
+  if (limits.length) return { tone: 'working', head: t('nvFineBut'), parts: limits };
+  return { tone: 'calm', head: t('nvHealthy'), parts: [] };
+}
+
+// The verdict as the detail's first line: a dot, the words, each part a link to its group.
+function verdictLine(verdict) {
+  const parts = verdict.parts.flatMap((part, index) => [index ? ' · ' : '',
+    part.group ? h('a', { class: 'link', href: nodeHref(part.group) }, part.words) : part.words]).filter((part) => part !== '');
+  return h('p', { class: `node-verdict ${verdict.tone}`, role: 'status' },
+    h('span', { class: verdict.tone === 'calm' ? 'dot tone-done' : verdict.tone === 'asked' ? 'dot tone-needs-you' : 'dot tone-working', 'aria-hidden': 'true' }),
+    h('span', { class: 'node-verdict-words' }, h('span', { class: 'node-verdict-head' }, verdict.head), parts.length ? ' ' : null, parts));
 }
 
 // The node's passkeys for acting at `confirm` (`node.web.acts.keys`), and its notice when one was added lately.
@@ -249,6 +278,17 @@ export function nodeView(app) {
   const chosenOf = (listed, route) => listed.find((one) => one.key === route.group) || listed.find((one) => one.tone === 'asked') || listed[0] || null;
 
   let groups = [];
+  // The verdict over every group's detail, drawn again only when it says something else.
+  let verdictKey = '';
+  let verdictEl = null;
+  function verdictOf(node) {
+    const approving = actsFor(app, 'approve') && store.can('approve.list') && !approveActs.el.hidden;
+    const cards = waitingPlaces(store.state, () => false).find((place) => place.kind === 'node')?.count || 0;
+    const verdict = nodeVerdict(node, { accept: approving ? approveActs.count : 0, cards });
+    const key = JSON.stringify(verdict);
+    if (key !== verdictKey) { verdictKey = key; verdictEl = verdictLine(verdict); }
+    return verdictEl;
+  }
   function render() {
     if (app.ui.state.route.name !== 'node') return;
     const node = store.state.node;
@@ -272,12 +312,13 @@ export function nodeView(app) {
     columns.setItems(listed.map((one) => ({ ...one, meta: words.length ? String(one.found) : one.meta, metaTone: words.length ? '' : one.metaTone })), chosen?.key,
       { empty: node && words.length ? t('noNoMatch', { query: query.trim() }) : '' });
     if (!node) {
-      columns.show({ title: t('noThisNode'), body: [h('div', { class: 'head-skeleton', 'aria-hidden': 'true' }, h('span', { class: 'bone wide' }), h('span', { class: 'bone' }), h('span', { class: 'bone short' }))] });
+      columns.show({ title: t('noThisNode'), top: null, body: [h('div', { class: 'head-skeleton', 'aria-hidden': 'true' }, h('span', { class: 'bone wide' }), h('span', { class: 'bone' }), h('span', { class: 'bone short' }))] });
       return;
     }
+    const top = verdictOf(node);
     for (const one of groups) { unmarkWords(one.el); if (!words.length) showRows(one.el, null); }
     if (!chosen) {
-      columns.show({ title: t('noThisNode'), body: [h('p', { class: 'tc-empty' }, t('noNoMatchLong', { query: query.trim() }))] });
+      columns.show({ title: t('noThisNode'), top, body: [h('p', { class: 'tc-empty' }, t('noNoMatchLong', { query: query.trim() }))] });
       return;
     }
     if (words.length) {
@@ -285,13 +326,15 @@ export function nodeView(app) {
       // The words found, marked (the groups are drawn again for each search, so nothing marked stays).
       for (const row of rowsOf(chosen.el)) if (!row.hidden) markWords(row, words);
     }
-    if (columns.detailBody.firstChild !== chosen.el || columns.detailBody.childNodes.length !== 1) columns.show({ title: chosen.title, sub: chosen.group, body: [chosen.el] });
-    else columns.show({ title: chosen.title, sub: chosen.group });
+    if (columns.detailBody.firstChild !== chosen.el || columns.detailBody.childNodes.length !== 1) columns.show({ title: chosen.title, sub: chosen.group, top, body: [chosen.el] });
+    else columns.show({ title: chosen.title, sub: chosen.group, top });
   }
 
   const schedule = framed(render);
   store.subscribe('node', schedule);
   store.subscribe('connection', schedule);
+  // A card no project holds waits here: the verdict counts it.
+  store.subscribe('cards', schedule);
   app.ui.subscribe((what) => { if (what === 'route') render(); });
   render();
   return { el, focusSearch: () => columns.focusSearch(), columns };

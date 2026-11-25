@@ -130,3 +130,97 @@ test('U14: a value out of range says so as before, with nothing to set or copy; 
     app.leave();
   }
 });
+
+// ---- U15: This node ----
+
+const { nodeView, nodeVerdict } = await import('../js/views/node.js');
+// A node with nothing wrong: connected, no notice, a calm health digest, no limit holding work back.
+function healthyNode() {
+  const node = nodeValue();
+  node.notices = [];
+  node.health = { freezes: [], errors: [], waiting: [], slowRefreshes: 0, serverRestarts: 0 };
+  for (const limit of node.usage.limits) { limit.holds = false; limit.reached = false; }
+  return node;
+}
+const verdictOf = (view) => find(view.columns.detail, byClass('node-verdict'));
+const linksOf = (el) => findAll(el, (node) => node.tag === 'a').map((link) => [link.textContent, link.getAttribute('href')]);
+
+test('U15: a healthy node’s detail opens with one calm line, whichever group is chosen, in English and in Spanish', () => {
+  for (const [code, words] of [['en', 'This node is healthy.'], ['es', 'El nodo está bien.']]) {
+    setLanguage(code);
+    const app = fakeApp({ route: { name: 'node', group: 'server' }, state: { node: healthyNode() } });
+    const view = nodeView(app);
+    const line = verdictOf(view);
+    assert.ok(line, 'the line is there');
+    assert.equal(line.textContent, words);
+    assert.ok(line.classList.contains('calm') && !line.classList.contains('asked'));
+    assert.deepEqual(linksOf(line), []);
+    // Over the group's detail: the first thing under its header, before its body.
+    const page = find(view.columns.detail, byClass('tc-page'));
+    assert.deepEqual(page.children.map((one) => one.className), ['tc-dhead', 'tc-dtop', 'tc-dbody']);
+    app.goTo({ name: 'node', group: 'host' });
+    assert.equal(verdictOf(view).textContent, words, 'the same line over another group');
+  }
+  setLanguage('en');
+});
+
+test('U15: something waiting on you makes the line ask, in the asking colour, with a link to the group that says why', async () => {
+  for (const [code, words] of [['en', 'This node needs you: 1 thing to accept'], ['es', 'El nodo te necesita: 1 cosa que aceptar']]) {
+    setLanguage(code);
+    const read = (kind) => Promise.resolve(kind === 'approve.list' ? { ok: true, result: { batch: 'b1', items: [{ kind: 'config', subject: 'max_workers 3 → 5', seen: 1, reasons: [] }], own: [] } } : { ok: false, error: { code: 'unknown-kind' } });
+    const app = fakeApp({ route: { name: 'node', group: 'server' }, state: { node: healthyNode() }, kinds: ['approve', 'approve.list'], acts: true, read });
+    const view = nodeView(app);
+    await settle();
+    const line = verdictOf(view);
+    assert.equal(line.textContent, words);
+    assert.ok(line.classList.contains('asked'));
+    assert.deepEqual(linksOf(line), [[words.split(': ')[1], '#/node/approve']]);
+  }
+  // A card no project holds waits on This node too.
+  setLanguage('en');
+  const node = healthyNode();
+  const state = { node, cards: new Map([['local:card:x', { id: 'local:card:x', kind: 'question', project: 'local:project:gone', open: true }]]) };
+  assert.deepEqual(nodeVerdict(node, { cards: 1 }), { tone: 'asked', head: 'This node needs you:', parts: [{ words: '1 card for you', group: null }] });
+  const view = nodeView(fakeApp({ route: { name: 'node', group: 'server' }, state }));
+  assert.equal(verdictOf(view).textContent, 'This node needs you: 1 card for you');
+});
+
+test('U15: a notice, the health digest, the host and the usage limits each say so, and link to their group', () => {
+  for (const [code, notice, health, both] of [
+    ['en', 'This node needs you: 1 notice', 'This node needs you: a look at its health', 'This node is healthy, but a usage limit holds work back'],
+    ['es', 'El nodo te necesita: 1 aviso', 'El nodo te necesita: un vistazo a su salud', 'El nodo está bien, pero un límite de uso frena el trabajo'],
+  ]) {
+    setLanguage(code);
+    const node = healthyNode();
+    node.notices = ['example-site: landing-base moved'];
+    const view = nodeView(fakeApp({ route: { name: 'node', group: 'server' }, state: { node } }));
+    const line = verdictOf(view);
+    assert.equal(line.textContent, notice);
+    assert.ok(line.classList.contains('asked'));
+    assert.deepEqual(linksOf(line).map(([, href]) => href), ['#/node/notices']);
+    assert.doesNotMatch(line.textContent, /landing-base/, 'the node’s own sentence stays in its group');
+    const frozen = healthyNode();
+    frozen.health.freezes = [{ at: '2026-11-25T10:00:00Z', seconds: 14 }];
+    assert.equal(verdictOf(nodeView(fakeApp({ route: { name: 'node', group: 'server' }, state: { node: frozen } }))).textContent, health);
+    const limited = healthyNode();
+    limited.usage.limits[1].holds = true;
+    const calmish = verdictOf(nodeView(fakeApp({ route: { name: 'node', group: 'server' }, state: { node: limited } })));
+    assert.equal(calmish.textContent, both);
+    assert.ok(calmish.classList.contains('working') && !calmish.classList.contains('asked'), 'a limit is no question for you');
+    assert.deepEqual(linksOf(calmish).map(([, href]) => href), ['#/node/usage']);
+    const down = healthyNode();
+    down.host.state = 'disconnected';
+    assert.deepEqual(nodeVerdict(down).parts.map((part) => part.group), ['host']);
+  }
+  setLanguage('en');
+});
+
+test('U15: the health digest’s lines say how long ago, in the page’s language', () => {
+  setLanguage('es');
+  const node = healthyNode();
+  node.health.freezes = [{ at: new Date(Date.now() - 90 * 60000).toISOString(), seconds: 14 }];
+  const view = nodeView(fakeApp({ route: { name: 'node', group: 'health' }, state: { node } }));
+  const lines = findAll(view.columns.detail, (one) => one.tag === 'li').map((one) => one.textContent);
+  assert.ok(lines.some((one) => /^hace 1h 30m · /.test(one)), lines.join(' | '));
+  setLanguage('en');
+});
