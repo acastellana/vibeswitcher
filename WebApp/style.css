@@ -974,6 +974,10 @@ kbd { padding: 1px 6px; border-radius: 5px; box-shadow: inset 0 0 0 1px var(--li
 .place-waiting { margin-left: auto; color: var(--asked); font-size: var(--small); font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .place-waiting:not([hidden]) + .place-count { margin-left: 6px; font-weight: 400; }
 .place > span:not(.place-count):not(.place-waiting) { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Brief me: a quiet button with its mark, not a caption among the status lines. */
+.summary-brief { display: inline-flex; align-items: center; gap: 6px; margin: 4px 0 2px; padding: 3px 10px 3px 8px; border-radius: 7px; background: var(--raised); box-shadow: 0 0 0 1px var(--line); color: var(--ink); font-weight: 500; }
+.summary-brief:hover { background: var(--side-hover); color: var(--ink); text-decoration: none; }
+.summary-brief .icon { color: var(--ink-2); }
 
 /* The centre's header, the switches and the strip */
 .centre-head { flex: none; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; min-height: var(--head); padding: 8px 24px; border-bottom: 1px solid var(--line); }

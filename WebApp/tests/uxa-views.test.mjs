@@ -66,6 +66,25 @@ test('U22: a question the lead withdrew has a muted line under it, with the lead
   setLanguage('en');
 });
 
+test('U23: Brief me is a button with its mark; the drawer’s head opens the palette, which a phone has no ⌘K for', async () => {
+  const { leftColumn } = await import('../js/views/left.js');
+  const app = fakeApp({ route: { name: 'home' } });
+  const left = leftColumn(app, { brief() {} });
+  left.render();
+  const brief = find(left.el, byClass('summary-brief'));
+  assert.ok(find(brief, (node) => node.tag === 'svg'), 'Brief me has its mark');
+  const open = find(find(left.el, byClass('colhead')), byClass('palette-open'));
+  assert.ok(open && open.tag === 'button', 'a button in the drawer’s head');
+  assert.ok(open.classList.contains('phone-only'), 'where there is no ⌘K: a phone or a narrow window');
+  open.click();
+  assert.deepEqual(app.calls, [['drawer', null], ['palette', true]]);
+  // It looks like a button: a surface and an edge, not a grey caption.
+  const looks = Object.assign({}, ...rules().filter((rule) => rule.media === '' && rule.selector === '.summary-brief').map((rule) => declarations(rule.body)));
+  assert.equal(looks.background, 'var(--raised)');
+  assert.match(looks['box-shadow'] || '', /var\(--line\)/);
+  assert.equal(looks.color, 'var(--ink)');
+});
+
 // The cascade's result for `selector` among the rules outside any @media: the last declaration wins.
 const computed = (selector) => Object.assign({}, ...rules().filter((rule) => rule.media === '' && rule.selector === selector).map((rule) => declarations(rule.body)));
 

@@ -62,12 +62,15 @@ export function leftColumn(app, { brief }) {
   // node); what moves; and Brief me.
   const summaryCount = h('a', { class: 'summary-count' });
   const summaryRest = h('span', { class: 'summary-rest' });
-  const briefButton = h('button', { class: 'summary-brief', type: 'button', onclick: () => brief() }, t('briefMe'));
+  const briefButton = h('button', { class: 'summary-brief', type: 'button', onclick: () => brief() }, icon('note', 14), t('briefMe'));
   const actsSlot = h('div', { class: 'acts-slot' });
   const summary = h('div', { class: 'left-summary' }, h('span', { class: 'summary-words' }, summaryCount, summaryRest), briefButton, actsSlot);
   let actsDrawn = '';
   const el = h('nav', { class: 'left', 'aria-label': t('projects') },
-    h('div', { class: 'colhead' }, h('a', { class: 'brand', href: '#/' }, 'VibeSwitcher'), h('span', { class: 'grow' }), boost),
+    h('div', { class: 'colhead' }, h('a', { class: 'brand', href: '#/' }, 'VibeSwitcher'), h('span', { class: 'grow' }), boost,
+      // A phone has no ⌘K: the palette from the drawer's head.
+      h('button', { class: 'icon-button phone-only palette-open', type: 'button', 'aria-label': t('paGoToASessionOr'), title: t('paGoToASessionOr'),
+        onclick: () => { app.drawer?.(null); app.ui.setPalette(true); } }, icon('search', 16))),
     h('div', { class: 'colbody' }, h('h2', { class: 'col-title' }, t('projects')), list, empty, newProject, h('span', { class: 'left-gap' }), ...places.slice(1)),
     summary);
   const rows = new Map();
