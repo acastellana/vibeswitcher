@@ -73,7 +73,7 @@ struct HeldWhatTests {
         #expect(say(Self.item(".git/config (main checkout)", change: "core.hookspath added")) == "git-config: .git/config (main checkout): core.hookspath added")
         // A tracking entry beside another key is no tracking entry: every key named, the risky ones first.
         #expect(say(Self.item(".git/config (main checkout)", change: "branch.v2.merge added, core.hookspath added, user.name changed"))
-                == "git-config: .git/config (main checkout): core.hookspath added, branch.v2.merge added, user.name changed")
+                == "git-config: .git/config (main checkout): core.hookspath added, and 2 others")
         #expect(say(Self.item(Self.startup)) == "startup: \(Self.startup): VibeSwitcher node.lnk not on your list of known shortcuts")
         #expect(say(Self.item("~/.claude/settings.json", change: "model changed")) == "settings: ~/.claude/settings.json: model changed")
         #expect(say(Self.item("~/.zshrc")) == "other: ~/.zshrc changed")
@@ -242,5 +242,25 @@ struct HeldWhatTests {
         // Each is named on the default screen, beside whatever does look like an update.
         let lines = CardText.plainConfig(Self.card(root: "/home/someone", items: Self.claude + [dropIn, hooks, inside], project: nil))
         #expect(lines.filter { !$0.hasPrefix("holds") }.count == 4 && lines.contains("and 2 more that look like updates (--long lists them)"), "\(lines)")
+    }
+
+    /// Only who commits and a branch's tracking entry are harmless git keys; every other key may run a command and is
+    /// named first, each whole, whatever stands beside it; more than six are counted (the review of 2026-11-25).
+    @Test func everyGitKeyThatMayRunACommandIsNamed() {
+        let what = { (change: String) in Self.item(".git/config (main checkout)", change: change).about?.what ?? "" }
+        // The vault lists a git config's every key (`changedKeys` unbounded for it): a risky one after twenty harmless.
+        let before = "[core]\n\tbare = false\n"
+        let after = "[core]\n\tbare = false\n\thooksPath = ~/hooks\n" + (0..<20).map { "[branch \"b\($0)\"]\n\tmerge = refs/heads/b\($0)\n" }.joined()
+        let change = ConfigSeal.changedKeys(from: ConfigSeal.encode(ConfigSeal.gitKeys(before) ?? [:]), to: ConfigSeal.encode(ConfigSeal.gitKeys(after) ?? [:]),
+                                            shown: .max) ?? ""
+        #expect(!change.contains(" more") && change.hasSuffix("core.hookspath added"), "\(change)")
+        #expect(what(change) == ".git/config (main checkout): core.hookspath added, and 20 others", "\(what(change))")
+        #expect(what("diff.x.textconv changed, user.name changed") == ".git/config (main checkout): diff.x.textconv changed, and 1 other")
+        #expect(what("user.email changed, user.name changed") == ".git/config (main checkout): user.email changed, user.name changed")
+        let eight = (0..<8).map { "alias.a\($0) added" }.joined(separator: ", ") + ", user.name changed"
+        #expect(what(eight) == ".git/config (main checkout): 8 git settings that can run commands changed (--long lists them), and 1 other", "\(what(eight))")
+        // A long key is never cut by its neighbours.
+        let long = (0..<6).map { "remote.origin.uploadpack\(String(repeating: "x", count: 30))\($0) changed" }.joined(separator: ", ")
+        #expect(what(long).components(separatedBy: ", ").count == 6 && what(long).hasSuffix("5 changed"), "\(what(long))")
     }
 }

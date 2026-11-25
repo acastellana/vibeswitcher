@@ -1778,7 +1778,9 @@ extension LeadVault {
                     changes[key] = files.said
                     times[key] = files.at
                 } else {
-                    changes[key] = ConfigSeal.changedKeys(from: recorded[keys], to: hashes[keys])
+                    // A git config's keys all (the card names each that may run a command, `HeldWhat`); others' first 8.
+                    let all = ConfigSeal.gitConfigNames.contains(ConfigSeal.name(ofKey: key))
+                    changes[key] = ConfigSeal.changedKeys(from: recorded[keys], to: hashes[keys], shown: all ? Int.max : 8)
                 }
                 // Held as it was: what was seen then stays what the card says (which sessions ran then).
                 details[key] = before[key]?.hash == holding[key] ? before[key]?.detail : nil

@@ -127,13 +127,14 @@ public enum HeldWhat {
         }
         if name.hasPrefix(".git/config") || name == "~/.gitconfig" || name == "~/.config/git/config" {
             // Its keys only when the node read the whole file (`ConfigSeal.gitKeys`); a branch's tracking entry the
-            // plain phrase only when that is every key that changed; any other key named, the riskiest first.
+            // plain phrase only when that is every key that changed; else every key that may run a command named first
+            // (`gitKeysSaid`).
             guard let keys = item.change else { return Described(kind: .gitConfig, what: "\(inert(name)) changed") }
             let branches = tracking(keys)
             if !branches.isEmpty {
                 return Described(kind: .gitConfig, what: "\(inert(name)): the tracking entry of branch \(branches.map(inert).joined(separator: ", ")) (\(change ?? ""))")
             }
-            return Described(kind: .gitConfig, what: "\(inert(name)): \(inert(riskiestFirst(keys)))")
+            return Described(kind: .gitConfig, what: "\(inert(name)): " + gitKeysSaid(keys))
         }
         if name.contains("/Start Menu/Programs/Startup") {
             let names = facts.unknownStartup
@@ -153,19 +154,49 @@ public enum HeldWhat {
     /// write, nothing that runs.
     static let trackingFields: Set<String> = ["remote", "merge", "rebase", "pushremote", "vscode-merge-base"]
 
-    /// The key prefixes that run something or pull in other config: named first.
-    static let riskyKeys = ["include.", "includeif.", "core.", "alias.", "url.", "filter.", "credential."]
+    /// The git keys that run nothing: who commits, and a branch's tracking entry (`trackingFields`). Every other key
+    /// may run a command (git has many: `core.*`, `alias.*`, `diff.*.textconv`, `merge.*.driver`, `pager.*`,
+    /// `gpg.program`, `remote.*.uploadpack`, `include.path` …): an allowlist, so a key not listed here is never taken
+    /// as harmless (the review of 2026-11-25).
+    static func isBenignGitKey(_ key: String) -> Bool {
+        let lower = key.lowercased()
+        if lower == "user.name" || lower == "user.email" { return true }
+        guard lower.hasPrefix("branch."), let dot = lower.lastIndex(of: "."), lower.index(lower.startIndex, offsetBy: "branch.".count) < dot else { return false }
+        return trackingFields.contains(String(lower[lower.index(after: dot)...]))
+    }
 
-    /// `ConfigSeal.changedKeys`' words reordered: the risky keys first, the rest as they came, any "and N more" last.
-    static func riskiestFirst(_ change: String) -> String {
+    /// Git settings that may run a command named on the card at most; past it, counted.
+    static let gitKeysNamed = 6
+
+    /// `ConfigSeal.changedKeys`' words for a git config, said for the card: every key that may run a command first,
+    /// each made inert on its own and never cut ("core.hookspath added, diff.x.textconv changed"), more than
+    /// `gitKeysNamed` of them counted instead; the harmless ones after them counted ("and 3 others"), or, when they
+    /// are all there is, named. A list the vault cut ("and N more") is said as cut.
+    static func gitKeysSaid(_ change: String) -> String {
         var parts = change.components(separatedBy: ", ")
-        var tail = ""
-        if let last = parts.last, let and = last.range(of: " and ", options: .backwards), last.hasSuffix(" more") {
-            tail = String(last[and.lowerBound...])
+        var cut = 0
+        if let last = parts.last, let and = last.range(of: " and ", options: .backwards), last.hasSuffix(" more"),
+           let count = Int(last[and.upperBound...].dropLast(" more".count)) {
+            cut = count
             parts[parts.count - 1] = String(last[..<and.lowerBound])
         }
-        let risky = parts.filter { part in riskyKeys.contains { part.lowercased().hasPrefix($0) } }
-        return (risky + parts.filter { !risky.contains($0) }).joined(separator: ", ") + tail
+        let key = { (part: String) in String(part.split(separator: " ").first ?? "") }
+        let mayRun = parts.filter { !isBenignGitKey(key($0)) }
+        let benign = parts.filter { isBenignGitKey(key($0)) }
+        var said: [String] = []
+        if mayRun.count > gitKeysNamed {
+            said.append("\(mayRun.count) git settings that can run commands changed (--long lists them)")
+        } else {
+            said += mayRun.map { ConfigSeal.inert($0, limit: 200) }
+        }
+        if mayRun.isEmpty {
+            said += benign.prefix(gitKeysNamed).map { ConfigSeal.inert($0, limit: 200) }
+            if benign.count > gitKeysNamed { said.append("and \(benign.count - gitKeysNamed) more") }
+        } else if !benign.isEmpty {
+            said.append("and \(benign.count) other\(benign.count == 1 ? "" : "s")")
+        }
+        if cut > 0 { said.append("and \(cut) more not named here (--long lists them)") }
+        return said.joined(separator: ", ")
     }
 
     /// The branches whose tracking entry (`trackingFields`) is all that changed, from `ConfigSeal.changedKeys`' words
