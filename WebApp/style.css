@@ -65,7 +65,7 @@
     --background: light-dark(#004795, #7bbeff);
     --done: light-dark(#135524, #38d35f);
     --idle: light-dark(#49494b, #b9b9bc);
-    --ink-2: light-dark(#49494c, #b9b9bc);
+    --ink-2: light-dark(#49494c, #d1d1d6);
     --ink-3: light-dark(#49494c, #b9b9bc);
     --line: light-dark(rgb(0 0 0 / 0.4), rgb(255 255 255 / 0.45));
   }

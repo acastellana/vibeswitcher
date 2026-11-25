@@ -1,10 +1,9 @@
 // The UX review's small states (2026-11-25), drawn on tests/fakedom.mjs's stand-in DOM: U19 a project that is gone,
-// U22 a question the lead withdrew, U23 Brief me and the palette from a phone's drawer; and the stylesheet's U18 and
-// U21. Run: node --test WebApp/tests/
+// U22 a question the lead withdrew, U23 Brief me and the palette from a phone's drawer (their stylesheet's part, and
+// U18's and U21's, in tests/uxa.test.mjs). Run: node --test WebApp/tests/
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { installDom, find, findAll, byClass } from './fakedom.mjs';
-import { rules, declarations } from './cssread.mjs';
 
 process.env.TZ = 'UTC';
 installDom();
@@ -78,27 +77,4 @@ test('U23: Brief me is a button with its mark; the drawer’s head opens the pal
   assert.ok(open.classList.contains('phone-only'), 'where there is no ⌘K: a phone or a narrow window');
   open.click();
   assert.deepEqual(app.calls, [['drawer', null], ['palette', true]]);
-  // It looks like a button: a surface and an edge, not a grey caption.
-  const looks = Object.assign({}, ...rules().filter((rule) => rule.media === '' && rule.selector === '.summary-brief').map((rule) => declarations(rule.body)));
-  assert.equal(looks.background, 'var(--raised)');
-  assert.match(looks['box-shadow'] || '', /var\(--line\)/);
-  assert.equal(looks.color, 'var(--ink)');
-});
-
-// The cascade's result for `selector` among the rules outside any @media: the last declaration wins.
-const computed = (selector) => Object.assign({}, ...rules().filter((rule) => rule.media === '' && rule.selector === selector).map((rule) => declarations(rule.body)));
-
-test('U21: the team strip wraps to a second line where it doesn’t fit, each count whole; never scrolled out of sight', () => {
-  const strip = computed('.team-strip');
-  assert.equal(strip['flex-wrap'], 'wrap');
-  assert.notEqual(strip['overflow-x'], 'auto');
-  assert.equal(computed('.team-strip > *')['white-space'], 'nowrap');
-});
-
-test('U18: “Now” sits on a line of its own above the hours, the axis tall enough for both', () => {
-  const now = parseFloat(computed('.axis-tick.now').top);
-  const hour = parseFloat(computed('.axis-tick').top);
-  // A line of the small size on a phone (12.5 px at 1.4): the hours start under it.
-  assert.ok(hour - now >= 12.5 * 1.4, `now at ${now}px, the hours at ${hour}px`);
-  assert.ok(parseFloat(computed('.axis').height) >= hour + 12.5 * 1.4, 'the axis holds both lines');
 });

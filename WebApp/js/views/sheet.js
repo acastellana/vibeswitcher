@@ -36,7 +36,10 @@ export function focusKeeper({ doc = globalThis.document, win = globalThis } = {}
       // The address changes after this (a task later): once it has, and the view is drawn for it, again.
       const token = {};
       pending = token;
-      const again = () => { if (pending === token) back(); };
+      // Only if the keyboard was lost on the way (the element it was put on drawn again): what the new address gave it
+      // (a session's terminal) keeps it.
+      const lost = () => !doc.activeElement || doc.activeElement === doc.body || !doc.activeElement.isConnected;
+      const again = () => { if (pending === token && lost()) back(); };
       win.addEventListener?.('hashchange', again, { once: true });
       win.setTimeout?.(() => {
         win.removeEventListener?.('hashchange', again);
