@@ -3463,9 +3463,16 @@ public final class LeadToolset: MCPToolset {
                let info = sessions.first(where: { $0.id == session }), info.live, info.usageLimit == nil, runtime.agentEnding(info) == nil {
                 return MCPToolResult(text: "Post-merge Claude re-audit of \(slug) is already running (session \(session)).")
             }
+            // Whether it's a security audit, decided once, as the merge noted it (`noteCodexMerge`: sensitive paths, or
+            // `securityReason` on the pinned baseline: a raised risk, the risk model): its model and its prompt both by it.
+            var pinned = workflow
+            pinned.baseBranch = followup.base
+            let security = followup.sensitive.isEmpty
+                ? Self.securityReason(root: root, head: followup.head, workflow: pinned, raised: task.riskRaised, sensitive: [])
+                : "it merged over sensitive_paths: " + followup.sensitive.joined(separator: ", ")
             // Chosen now, as every audit is (`auditPick`: the vault's exclusions and the board's): never the noted text of a
             // choice that found none, nor a model the verifier's bind would refuse.
-            guard let model = auditPick(workflow, task: task, security: !followup.sensitive.isEmpty)?.model else {
+            guard let model = auditPick(workflow, task: task, security: security != nil)?.model else {
                 let why = workersBasis(task, projectDefault: runtime.workerModel(root: root), workflow: workflow).text
                 throw Problem(text: "No post-merge Claude verifier started: \(why), with the task's own model, and no model is left. "
                               + askWhichModelAudits(task, head: followup.head, why: why) + " Once they answer, start it again.")
@@ -3482,8 +3489,6 @@ public final class LeadToolset: MCPToolset {
             }
             let opened = try openAudit(slug, head: followup.head, not: "No post-merge Claude verifier started")
             _ = try endEarlierVerifiers(task, not: "No post-merge Claude verifier started")
-            var pinned = workflow
-            pinned.baseBranch = followup.base
             let ledger = vault.audits(root: root, task: slug)
             let known = ledger.map { ledger in
                 "\nEarlier findings (give every open one its id and status in submit_audit; closed ones stay closed):\n"
@@ -3491,9 +3496,7 @@ public final class LeadToolset: MCPToolset {
             } ?? ""
             let prompt = LeadPrompts.verifier(task: task, root: root, workflow: pinned, notes: leadNotes(opened),
                                               report: doneReport(task, head: followup.head), guide: LeadRisk.reviewGuide(root: root, base: workflow.base),
-                                              security: followup.sensitive.isEmpty
-                                                ? Self.securityReason(root: root, head: followup.head, workflow: pinned, raised: task.riskRaised, sensitive: [])
-                                                : "it merged over sensitive_paths: " + followup.sensitive.joined(separator: ", "))
+                                              security: security)
                 + "\nThis is the independent post-merge Claude re-audit required after a Codex fallback verdict"
                 + (followup.codexWorked == true ? " on a task Codex worked on" : "") + ". Review the whole change against the pinned baseline "
                 + followup.base + ", not only the earlier findings. It is already merged: report Important findings to the lead through submit_audit; don't merge or change it." + known

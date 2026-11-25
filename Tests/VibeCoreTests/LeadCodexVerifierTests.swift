@@ -227,6 +227,25 @@ struct LeadCodexVerifierTests: LeadTeamFixture {
         #expect(!lead.call("cleanup", ["task": "fix"]).isError)
     }
 
+    /// A Codex merge that touched no sensitive path but is a security change by `securityReason` (here the risk model's
+    /// word on a `Process()`): its post-merge Claude re-audit is a security audit, on security_audit_model, as its prompt
+    /// says: the model and the prompt are decided together, never the ordinary audit model.
+    @Test func aPostMergeReauditOfASecurityChangeRunsOnTheSecurityModel() throws {
+        let (root, runtime, lead) = try team(worker: "codex", security: true)
+        #expect(!lead.call("configure", ["auto_advance": false, "security_audit_model": "mythos"]).isError)
+        hold(lead)
+        #expect(!lead.call("audit", ["task": "fix"]).isError)
+        #expect(!(try verifier(root, runtime)).call("submit_audit", ["completion": "complete", "integrity": "clean", "summary": "Codex checked"]).isError)
+        #expect(!lead.call("merge", ["task": "fix"]).isError)
+        #expect((followup(root)["sensitive"] as? [String])?.isEmpty == true, "\(followup(root))")
+        clearClaude(Self.now.timeIntervalSince1970 + 1)
+        let started = try lead.startClaudeReaudit("fix")
+        #expect(!started.isError, "\(started.text)")
+        let command = try #require(runtime.spawned.last { $0.command.contains("--name 'verify-fix'") }?.command)
+        #expect(LeadWorkflow.claudeModel(command: command) == "mythos", "\(command)")
+        #expect(try LaunchArguments.prompt(of: "verify-fix", runtime).contains("## Security checklist"))
+    }
+
     @Test(arguments: [false, true]) func autoAdvanceStartsCodexAuditsAtTheLimit(sensitive: Bool) async throws {
         let (root, runtime, lead) = try team(sensitive: sensitive)
         hold(lead)
