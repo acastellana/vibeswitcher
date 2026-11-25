@@ -152,7 +152,10 @@ public enum MacHandoverKeeper {
         guard send(parcel.data, descriptors: parcel.descriptors, over: keeps) else { quit("the state didn't reach the new image") }
         // Alive until the new image has read its token and the parcel and closed its end (a token's peer that has gone
         // can't be read), within the limit; then its copies close with it, and the new image's are the only ones left.
-        if wait(readable: keeps, for: limit) { _ = readByte(keeps) }
+        let closed = wait(readable: keeps, for: limit)
+        if closed { _ = readByte(keeps) }
+        Platform.Stdio.error("vibeswitcher-host: handover keeper: gave the state to the new image (pid \(host))"
+                             + (closed ? "" : ", which didn't close its end within the limit") + "\n")
         exit(0)
     }
 
@@ -186,15 +189,20 @@ public enum MacHandoverKeeper {
             return .failure(Refused("\(pidFlag) names no keeper of this process"))
         }
         guard let own = Platform.CodeIdentity.ownCdhash() else { return .failure(Refused("this image's own code can't be read")) }
-        guard wait(readable: mine, for: limit), let kept = Platform.Sockets.receiveDescriptor(over: mine) else { return .failure(Refused("the keeper gave nothing")) }
+        guard wait(readable: mine, for: limit) else { return .failure(Refused("the keeper's pair didn't come within the limit (errno \(errno))")) }
+        guard let kept = Platform.Sockets.receiveDescriptor(over: mine) else { return .failure(Refused("the keeper's pair didn't arrive (errno \(errno))")) }
         if let why = refusal(Platform.Sockets.peerToken(kept), pid: keeper, cdhash: own, what: "the keeper") {
             Sys.close(kept)
             return .failure(Refused(why))
         }
-        let received = wait(readable: kept, for: limit) ? receive(over: kept) : nil
+        let ready = wait(readable: kept, for: limit)
+        let readyErrno = errno
+        let received = ready ? receive(over: kept) : nil
+        let receiveErrno = errno
         // Closed before the keeper is reaped: it waits for this end to close.
         Sys.close(kept)
-        guard let parcel = received else { return .failure(Refused("the keeper gave nothing")) }
+        guard ready else { return .failure(Refused("the keeper's state didn't come within the limit (errno \(readyErrno))")) }
+        guard let parcel = received else { return .failure(Refused("the keeper's state didn't arrive whole (errno \(receiveErrno))")) }
         // The keeper exits once it gave the parcel: reaped here, the proven keeper's pid alone (never a session's).
         var status: Int32 = 0
         while waitpid(keeper, &status, 0) < 0, errno == EINTR {}
