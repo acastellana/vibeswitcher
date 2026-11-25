@@ -351,8 +351,20 @@ public enum HostImages {
         return "a checked node start on a lock this host doesn't take for the user's: refused"
     }
 
-    /// Why this image doesn't take `state` (seam: nil).
-    public static func mayTakeHandover(_ state: HostHandover.State, viaKeeper: Bool, checkedNode: CheckedNode?) -> String? { nil }
+    /// Why this image doesn't take `state`, or nil (the review's F1 and N2): a checked node's state (`fromCheckedNode`)
+    /// goes only to an image holding its own checked start (`checkedNode`: so a wrapper that runs the pinned code
+    /// without `--node`, or with another argument, gets nothing), and a checked node takes state only through a keeper it
+    /// proved (`viaKeeper`), never from `--handover PATH` and the descriptors whoever started it left open. `main` then
+    /// exits, which closes every descriptor it was given.
+    public static func mayTakeHandover(_ state: HostHandover.State, viaKeeper: Bool, checkedNode: CheckedNode?) -> String? {
+        if state.fromCheckedNode == true, checkedNode == nil {
+            return "a checked node's state goes only to an image holding its own checked start: nothing taken"
+        }
+        if checkedNode != nil, !viaKeeper {
+            return "a checked node takes state only through a keeper it proved, never from --handover PATH: nothing taken"
+        }
+        return nil
+    }
 
     /// A checked node's environment from `environment` (the review's F1): no variable of this program's but
     /// `VIBESWITCHER_HOME` (the start sets it) and the descriptor limit the host carries across its own exec

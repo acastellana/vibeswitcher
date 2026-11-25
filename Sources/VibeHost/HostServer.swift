@@ -85,6 +85,8 @@ public final class HostServer {
         public var testKeeperHost: Data?
         public var testSwapAfterCheck: String?
         public var testSwapBeforeExec: String?
+        /// A scratch host's test: the state its switch parks says it is a checked node's (`--handover-test-checked-parcel`).
+        public var testCheckedParcel = false
         /// The project allow-list (`~/.vibeswitcher/v2/projects` for the node's host on Linux): a spawn whose working
         /// folder isn't inside a repository it names is refused, saying why (see V2/ProjectAllowList.swift). Nil: any
         /// folder, as always (the Mac's and every scratch host's).
@@ -898,6 +900,14 @@ public final class HostServer {
     }
 
     func handoverState(secretFD: Int32?) -> HostHandover.State {
+        var state = handoverStateParts(secretFD: secretFD)
+        // A checked node's state goes only to an image holding its own checked start (`HostImages.mayTakeHandover`); a
+        // scratch host's test stands in for one (`Config.testCheckedParcel`).
+        if config.checkedNode != nil || config.testCheckedParcel { state.fromCheckedNode = true }
+        return state
+    }
+
+    private func handoverStateParts(secretFD: Int32?) -> HostHandover.State {
         HostHandover.State(fromBuild: config.hostBuild, startedAt: startedAt, lockFD: pathWatch?.lockToCarry ?? lockFD, listenFD: listenFD, secretFD: secretFD,
                            sessions: order.compactMap { id in
                                sessions[id].map { session in

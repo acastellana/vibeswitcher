@@ -136,7 +136,12 @@ public enum MacHandoverKeeper {
         if let why = refusal(Platform.Sockets.peerToken(theirsNow), pid: host, cdhash: own, what: "the image at the host's pid") {
             quit("refused the new image: \(why); nothing handed over")
         }
-        guard send(parcel.data, descriptors: parcel.descriptors, over: theirsNow) else { quit("the state didn't reach the new image") }
+        // The new image proves this keeper in turn (the review's N2): a pair made here, now, one end given to it, the
+        // parcel over the other.
+        guard let (keeps, gives) = Platform.Sockets.pair(type: Platform.Sockets.stream),
+              Platform.Sockets.sendDescriptor(gives, over: theirsNow) else { quit("its own pair didn't reach the new image") }
+        Sys.close(gives)
+        guard send(parcel.data, descriptors: parcel.descriptors, over: keeps) else { quit("the state didn't reach the new image") }
         // Its copies close with it: the new image's are the only ones left.
         exit(0)
     }
@@ -164,12 +169,20 @@ public enum MacHandoverKeeper {
         let sent = Platform.Sockets.sendDescriptor(theirs, over: channel)
         Sys.close(theirs)
         guard sent else { return .failure(Refused("the keeper has gone")) }
-        guard wait(readable: mine, for: limit), let parcel = receive(over: mine) else { return .failure(Refused("the keeper gave nothing")) }
-        // The keeper exits once it gave the parcel: reaped here, by its pid alone (never a session's).
-        if let at = arguments.firstIndex(of: pidFlag), arguments.indices.contains(at + 1), let pid = pid_t(arguments[at + 1]), pid > 1 {
-            var status: Int32 = 0
-            while waitpid(pid, &status, 0) < 0, errno == EINTR {}
+        // The keeper proves itself to this image (the review's N2): a pair it made after this image's proof, its token
+        // the keeper's pid (`--handover-keeper-pid`, a child of this process), running this image's own code, hardened.
+        guard let at = arguments.firstIndex(of: pidFlag), arguments.indices.contains(at + 1), let keeper = pid_t(arguments[at + 1]), keeper > 1,
+              Platform.Processes.link(keeper)?.parent == getpid() else {
+            return .failure(Refused("\(pidFlag) names no keeper of this process"))
         }
+        guard let own = Platform.CodeIdentity.ownCdhash() else { return .failure(Refused("this image's own code can't be read")) }
+        guard wait(readable: mine, for: limit), let kept = Platform.Sockets.receiveDescriptor(over: mine) else { return .failure(Refused("the keeper gave nothing")) }
+        defer { Sys.close(kept) }
+        if let why = refusal(Platform.Sockets.peerToken(kept), pid: keeper, cdhash: own, what: "the keeper") { return .failure(Refused(why)) }
+        guard wait(readable: kept, for: limit), let parcel = receive(over: kept) else { return .failure(Refused("the keeper gave nothing")) }
+        // The keeper exits once it gave the parcel: reaped here, the proven keeper's pid alone (never a session's).
+        var status: Int32 = 0
+        while waitpid(keeper, &status, 0) < 0, errno == EINTR {}
         guard var state = try? PropertyListDecoder().decode(HostHandover.State.self, from: parcel.data) else {
             parcel.descriptors.forEach { Sys.close($0) }
             return .failure(Refused("the state doesn't read"))

@@ -110,6 +110,7 @@ if Platform.CodeIdentity.isAvailable, !ownsLaunchers, config.checkedNode == nil 
     config.testKeeperHost = value(after: "--handover-test-keeper").flatMap(NodePins.bytes)
     config.testSwapAfterCheck = value(after: "--handover-test-swap-after-check")
     config.testSwapBeforeExec = value(after: "--handover-test-swap-before-exec")
+    config.testCheckedParcel = arguments.contains("--handover-test-checked-parcel")
 }
 config.idleExit = value(after: "--idle-exit").flatMap(TimeInterval.init) ?? 600
 // A bench's host: it ends, sessions and all, with the bench (see `HostServer.Config.owner`). Kept through a handover.
@@ -194,7 +195,11 @@ if let handoverPath {
         // secrets, below: V2/HandoverMemory.swift).
         if arguments.contains("--handover-fail-restore"), !HandoverMemory.failsRestoreLate { throw HostHandover.Failure.unreadable("--handover-fail-restore") }
         // A Mac switch through a keeper: the state it held, given only once this image proved its code to it.
-        var state = try MacHandoverKeeper.takeIfAsked(arguments)?.get() ?? HostHandover.read(from: handoverPath)
+        let kept = MacHandoverKeeper.takeIfAsked(arguments)
+        var state = try kept?.get() ?? HostHandover.read(from: handoverPath)
+        // A checked node's state only to a checked start, and a checked start's only from a proven keeper: otherwise
+        // nothing is taken, and the exit closes every descriptor this image was given (the review's F1, N2).
+        if let why = HostImages.mayTakeHandover(state, viaKeeper: kept != nil, checkedNode: config.checkedNode) { notStarted(why) }
         handedOver = state
         restoredSecrets = HostHandover.takeSecrets(from: &state)
         restoring = state
