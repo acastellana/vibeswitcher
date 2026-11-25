@@ -175,7 +175,7 @@ struct ConnectorMessagesTests {
             writes.append(ends[1])
         }
         defer { reads.forEach { Sys.close($0) } }
-        #expect(Platform.Sockets.sendDescriptors(writes, over: host))
+        #expect(SocketsTests.sendSeveral(writes, over: host))
         writes.forEach { Sys.close($0) }
         let got = try #require(Platform.Sockets.receiveConnectorMessage(over: child, count: 512, room: 1))
         #expect(got.cut && got.descriptors.isEmpty, "\(got)")
