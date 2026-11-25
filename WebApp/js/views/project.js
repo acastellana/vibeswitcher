@@ -222,6 +222,8 @@ export function projectView(app, { sheet }) {
     const answered = line.kind === 'ask';
     const button = h('a', { class: `line kind-${line.kind}${answered ? ' answered' : ''}`, href: routeHref(route, { sheet: line.key }) },
       lineMark(line.kind), h('span', { class: 'line-text' }, cut(shortHashes(line.head), 140)), h('time', null, clock(line.at)));
+    // A question the lead withdrew: nobody answers it now, and the line under it says so, with the lead's reason.
+    if (answered && line.state === 'withdrawn') return [button, h('p', { class: 'withdrawn-note' }, t('withdrawn') + (line.why ? `: ${cut(shortHashes(line.why), 160)}` : ''))];
     if (!answered || !line.answer) return [button];
     const said = line.state === 'autoDecided' ? t('wentAhead', { x: cut(line.answer, 60) }) : cut(shortHashes(line.answer), 140);
     const pill = h('p', { class: 'mine' + (line.state === 'autoDecided' ? ' auto' : '') }, said);

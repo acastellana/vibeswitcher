@@ -38,6 +38,34 @@ test('U19: a project that is gone says so and offers the start page', async () =
   setLanguage('en');
 });
 
+test('U22: a question the lead withdrew has a muted line under it, with the lead’s reason, never an empty answer', async () => {
+  const { projectView } = await import('../js/views/project.js');
+  const at = new Date(Date.now() - 3600_000).toISOString();
+  const lead = { project: P, root: '/home/dev/projects/example-site', session: 'local:lead', named: null, bound: 'local:lead', replaced: [], held: 0, reportsWaiting: 0,
+    notice: null, starting: false, looks: 1, questions: { open: 0, blocking: 0 }, cards: [], told: [] };
+  const board = { project: P, root: lead.root, baseBranch: 'main', counts: { attention: 0, running: 0, waiting: 0, done: 0 }, more: 0, unreadable: null, tasks: [],
+    answered: [
+      { id: 'q-footer', state: 'withdrawn', text: 'Should the footer link to the old blog?', answer: null, proposal: null, why: 'The blog moved; the link goes to the new one.', at },
+      { id: 'q-cache', state: 'answered', text: 'Cache for a day or a year?', answer: 'A year', proposal: null, why: null, at },
+    ] };
+  for (const [code, words] of [['en', 'Withdrawn by the lead: The blog moved; the link goes to the new one.'], ['es', 'Retirada por el líder: The blog moved; the link goes to the new one.']]) {
+    setLanguage(code);
+    const app = fakeApp({ route: { name: 'project', id: P, view: 'lead', show: 'all' }, boards: new Map([[P, board]]), leads: new Map([[P, lead]]) });
+    const view = projectView(app, { sheet: { open() {}, close() {}, shown: () => false } });
+    view.render();
+    const lines = findAll(view.el, byClass('line'));
+    const asked = lines.find((line) => line.textContent.includes('old blog'));
+    assert.ok(asked, 'the withdrawn question’s line');
+    const siblings = asked.parentNode.children;
+    const next = siblings[siblings.indexOf(asked) + 1];
+    assert.ok(next?.classList.contains('withdrawn-note'), `under it: ${next?.attrs.class}`);
+    assert.equal(next.textContent, words);
+    // Only the withdrawn one: an answered question keeps its answer, no such line.
+    assert.equal(findAll(view.el, byClass('withdrawn-note')).length, 1);
+  }
+  setLanguage('en');
+});
+
 // The cascade's result for `selector` among the rules outside any @media: the last declaration wins.
 const computed = (selector) => Object.assign({}, ...rules().filter((rule) => rule.media === '' && rule.selector === selector).map((rule) => declarations(rule.body)));
 

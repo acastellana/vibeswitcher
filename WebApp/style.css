@@ -1079,6 +1079,8 @@ kbd { padding: 1px 6px; border-radius: 5px; box-shadow: inset 0 0 0 1px var(--li
 .quiet-words { color: var(--ink-2); }
 .quiet-lines { display: grid; gap: 6px; }
 .quiet-lines .copy-text { white-space: normal; overflow-wrap: anywhere; }
+/* A question the lead withdrew: a muted line under it says so and why, so it never looks unanswered. */
+.withdrawn-note { margin: -4px 0 2px 27px; color: var(--ink-3); font-size: var(--small); font-style: italic; overflow-wrap: anywhere; }
 
 /* A task: five steps in its colour, and its details in place */
 .steps { display: flex; gap: 3px; width: 62px; margin-top: 6px; }
