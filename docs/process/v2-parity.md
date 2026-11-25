@@ -7,17 +7,19 @@ This table compares them feature by feature, so gaps get found on purpose and no
 
 Checked again against `v2-web-fixes` at `932aeb99` (2026-11-25), which sits on v2's merge `8bc36606` of 2026-11-24,
 by reading the node's code, the command line, `WebApp/` and their tests, not their plans; first checked at `5b6eccd9`
-(2026-11-19). V1 is `main` as of 2026-11-25: v2 last merged main on 2026-11-19 (`cd6c4ae9`), so none of main's 48
-commits since are in v2. Work on other branches isn't counted. A feature that works through shared code counts only if
+(2026-11-19). V1 is `main` as of 2026-11-25: v2 last merged main on 2026-11-19 (`cd6c4ae9`), so none of main's 84 commits
+since (`git log cd6c4ae9..main`, the lead's own records left out) are in v2. Their user-visible changes have rows below;
+lead fixes among them that change no screen or tool (the records committed before every merge, a refused report's text
+masked) weren't checked one by one: **unverified**. Work on other branches isn't counted. A feature that works through shared code counts only if
 the node actually calls it. Anything not checked end to end says **unverified**. The user flows, step by step in both, are
 in [V1 and V2: the user flows](v2-user-flows.md).
 
 ## Summary
 
-**For the user, in short.** 149 features: V2 **has 71**, **partly 24**, **misses 33**, **4 aren't needed**, and
+**For the user, in short.** 151 features: V2 **has 70**, **partly 25**, **misses 35**, **4 aren't needed**, and
 **17 are V2's alone** (counted from the table below on 2026-11-25:
 `sed 's/\\|/~/g' docs/process/v2-parity.md | awk -F'|' '/^\| / && $2 !~ /^ (Feature|---)/ {s=$4; gsub(/^ +| +$/,"",s); n[s]++} END {for (k in n) print n[k], k}'`).
-Of the 33 missing, 10 are Mac pieces (menu bar, keep-awake, Terminal.app…) and 23 are missing in V2 everywhere. Of the
+Of the 35 missing, 10 are Mac pieces (menu bar, keep-awake, Terminal.app…) and 25 are missing in V2 everywhere. Of the
 23 [user flows](v2-user-flows.md), 7 work the same, 2 work better, 4 about the same in another way, 8 worse, and 2
 can't be done.
 
@@ -25,11 +27,13 @@ can't be done.
 
 1. **V2 doesn't run on this Mac yet** (L). Every flow waits on it. On plan: [the node on macOS](../superpowers/specs/2026-11-19-v2-node-on-macos.md#the-order-of-work),
    steps 2 to 9, and the Mac's tasks being built today; the voice by Touch ID (step 4) is built and off until measured.
-2. **Nothing tells you anything once the page is closed** (M): no banner, no sound, no phone push. On plan only as the
-   [push decision note](v2-push-decision.md), waiting on four of your decisions; a Mac notifier isn't planned.
+2. **Nothing tells you anything once the page is closed** (M): no banner, no sound, no phone push. On plan: push in
+   the V2 design's stage 7, waiting on four of your decisions ([the push decision note](v2-push-decision.md)); a Mac
+   notifier isn't planned.
 3. **The page acts only after terminal steps, and the phone never does** (M). Pairing confirmed in a terminal, then
    `set web_acts trust`, lost on a reload or after 12 hours; the tailnet page only reads and drafts, by rule. On plan:
-   the redesign's "Acting from the page" (the passkey level isn't built); acting from a phone isn't planned.
+   the redesign's "Acting from the page" (the passkey level isn't built), and replies from a phone in the V2 design's
+   stage 7 (milestone 2), waiting on your decision 4 in [H1](v2-h1-plan.md) (the tailnet page's input).
 4. **No typing into a terminal from the page**, and no find in it (L). On plan: [H1](v2-h1-plan.md) is built
    (2026-11-21); page input waits on your decisions 1 and 2 there.
 5. **The redesign lost the switcher's keys** (S): ⌘1–9, next and previous, the filter and grouping by attention are
@@ -48,8 +52,11 @@ can't be done.
 10. **Dictation is the browser's only** (M): no OpenAI or Claude /voice, no project words, none from the phone. On
     plan: "the browser's microphone, then the existing transcription" (the design's later list).
 
-Smaller: the all-done mark never clears (S, a regression), first install is five terminal steps (S), reopening after
+Smaller: the all-done mark can't be dismissed (S, a regression), Run in New Shell and Run on a one-line command (S), first install is five terminal steps (S), reopening after
 a restart is terminal lines (S), no changelog on the update (S).
+
+The gap list of 2026-11-19 is replaced: its numbers, still cited elsewhere ("gap 9", "gap 10" in
+`v2-port-map.md` and `Engine/RestartResume.swift`), were settings and restarts, both closed on 2026-11-20.
 
 **What V2 already does better**: switch builds and roll back while sessions keep running (`switch`, `rollback`,
 `update` with one code); goals, estimated landing dates and a roadmap the lead keeps; the dial over the lead's
@@ -136,13 +143,14 @@ design gives them to the native app as the node's client),
 | Answer a session's own permission prompt or question (⌘1–9 card) | `MainWindow/Chat/ChatView.swift` | partly | `vibeswitcher reply SESSION CHOICE [TEXT]` (`session.reply`) answers it; the page shows it as a card under the chat (`drive.js` `promptCard`). **Missing**: the page can't answer it even under trust (no page sends `session.reply`, though the node allows it), no 1–9 or ↩ keys; a multi-select only in its terminal | S | step 4 (voice) | was has it: re-judged now that the page acts elsewhere |
 | Find in the chat, Export Chat, Copy as Markdown, Edit in Composer, Send Again | `MainWindow/Chat/ChatView.swift` | has it | `chat.js` (⌘F / Ctrl+F, ↩ ⇧↩; Export Chat; Copy as Markdown; a prompt's Copy, Edit in Composer, Send Again as a draft), `chatops.js`, palette. Over what the page has paged in | | node start | |
 | "New since you looked" marker and summary | `MainWindow/Chat/ChatView.swift` | has it | `chat.js` `newSince`/`sinceSummary`, `openingPlace`, the Latest button with its unseen count | | node start | what was seen is per browser |
-| Run a code block (type it into the session after you confirm) | `MainWindow/Chat/ChatRunner.swift` | has it | `WebApp/js/runnable.js` (the app's `RunnableCommand` rules): Run leaves `! command` as the draft; `vibeswitcher send` types it, or the draft's Send under trust | | step 4 (voice) | a block whose lines only mean something together gets no Run |
-| The all-done card (a batch's summary and receipts) | `MainWindow/Lead/AllDoneWatch.swift`, `Chat/AllDoneCard.swift` | partly | `Engine/AllDoneLook.swift`; `vibeswitcher status` and `board` show it; the page shows it in the lead's chat (`views/alldone.js`) and "All done" in the left column. **Missing**: nothing marks it seen any more (the redesign removed the board card and its `seen {project}`; no caller on the page or the command line), so "All done" stays | S | missing everywhere | was has it: a regression of `3ff1455b` |
+| Run a code block (type it into the session after you confirm) | `MainWindow/Chat/ChatRunner.swift` | partly | `WebApp/js/runnable.js` (`RunnableCommand`'s rules as of 2026-11-19): Run leaves `! command` as the draft; `vibeswitcher send` types it, or the draft's Send under trust. **Missing**: Run for an untagged block whose only line reads as a command (main `aa652c58`), and Run in New Shell (a new row) | S | step 4 (voice) | was has it: main moved on 2026-11-18 |
+| The all-done card (a batch's summary and receipts) | `MainWindow/Lead/AllDoneWatch.swift`, `Chat/AllDoneCard.swift` | partly | `Engine/AllDoneLook.swift`; `vibeswitcher status` and `board` show it; the page shows it in the lead's chat (`views/alldone.js`) and "All done" in the left column. **Missing**: nothing marks it seen any more (the redesign removed the board card and its `seen {project}`; no caller on the page or the command line), so "All done" can't be dismissed and stays for its whole day (`BoardValue.doneFor`) | S | missing everywhere | was has it: a regression of `3ff1455b` |
 | Push-to-talk dictation | `Dictation/` | partly | `WebApp/js/dictate.js`: hold the mic beside the session's composer and the lead cards' answer boxes; the browser's own speech service (Chrome: Google's), only on a secure page, off until turned on on This node. **Missing**: V1's OpenAI transcription with the project's words, Claude Code's own /voice, Hold Space, silencing the Mac (new rows below); no mic on the lead's message box | M | node start | was has it: re-judged against V1's whole dictation |
 | Chat text size (⌘+ ⌘− ⌘0) | `MainWindow/Chat/MarkdownView.swift` | not needed | the browser zooms | | n/a | |
 | ↑ / ↓ walk earlier prompts in the composer | `MainWindow/Chat/ComposerView.swift` | missing | ↑ in an empty box goes to the open card instead | S | missing everywhere | new row |
 | The to-do list or plan steps pinned above the conversation | `MainWindow/Chat/ChatView.swift` | missing | to-dos only inside their folded tool call | S | missing everywhere | new row |
 | A code block's Copy | `MainWindow/Chat/ChatMessageText.swift` | missing | a code block's caption has its language and Run only (`js/text.js`) | S | missing everywhere | new row |
+| Run in New Shell: a code block's command started in a new shell session after you confirm | `MainWindow/Chat/ChatRunner.swift`, `Shell/ShellDesk.swift` (main `0a7ed6e1`, 2026-11-18) | missing | nothing on the page offers a new shell for a block | S | missing everywhere | new row |
 | Selecting across messages and copying it | `MainWindow/Chat/ChatMessageText.swift` | not needed | the browser's own selection; Copy Chat as Markdown for the whole chat (rows not drawn yet can't be selected) | | n/a | new row |
 | Dictation through Claude Code's own /voice | `Dictation/ClaudeVoice.swift` (main `21727278`, 2026-11-21) | missing | nothing drives a session's /voice | L | Mac piece owed | new row |
 | Dictation by OpenAI with a key in the Keychain, its model, the project's words | `Dictation/OpenAITranscription.swift`, `DictationVocabulary.swift` | missing | the page uses the browser's recognition only | M | missing everywhere | new row |
@@ -200,7 +208,8 @@ design gives them to the native app as the node's client),
 | GitHub pushers named on the update card and in fetch_remote / merge_remote | `Sources/VibeCore/GitHubPushers.swift` (main `cd52e331`, 2026-11-24) | missing | no `GitHubPushers` | M | missing everywhere | new row |
 | A project's audits capped at its heavy slots (`audit override_heavy_slots`) | `Sources/VibeCore/LeadToolset.swift`, `LeadAdvance.swift` | missing | V2's heavy slots count merges and `vs-heavy` jobs only | S | missing everywhere | new row |
 | New workers wait while the disk can't hold the tasks in flight (`configure disk_headroom_gb`) | `Sources/VibeCore/LeadToolset.swift`, `LeadWitness.swift` | missing | V2 has the disk watch's warning, no gate | S | missing everywhere | new row |
-| Codex audits while Claude is at its limit (`configure codex_verifier`) | `Sources/VibeCore/LeadToolset.swift` | missing | not in V2's tools (Codex workers are off on purpose) | S | missing everywhere | new row |
+| Codex audits while Claude is at its limit (`configure codex_verifier`) | `Sources/VibeCore/LeadToolset.swift` (main `c46c61e4`, `64e64c72`) | missing | not in V2's tools, nor the Claude re-audit after a Codex-worked merge (Codex workers are off on purpose) | S | missing everywhere | new row |
+| The lead's agents told to start servers and previews through `vs-shell run` | the lead's texts (main `1ea12675`, 2026-11-18) | missing | V2's lead texts don't say it | S | missing everywhere | new row |
 ### Hooks, status line, config seal and git guards
 
 | Feature | V1 (where) | V2 state | Where in V2 / what's missing | Size | On the Mac | Note |
@@ -320,8 +329,8 @@ design gives them to the native app as the node's client),
 - ~~The limits run on defaults (10 team sessions, test and build slots at a sixth of the cores) with no way to change
   them except by hand, and the defaults aren't shown.~~ Closed 2026-11-20: `vibeswitcher settings` shows them,
   `vibeswitcher set` changes them.
-- ~~The battery hold never applies on the node, because no one writes the power state.~~ Now on purpose (2026-11-19):
-  not needed on a server or WSL on mains; recorded in the table and in `Engine/Refresh.swift`.
+- ~~The battery hold never applies on the node, because no one writes the power state.~~ On purpose (2026-11-19) for a
+  server or WSL on mains; owed again for a Mac node (2026-11-25: the table's battery row, a Mac piece).
 - ~~Running leads aren't told when `policy.md` changes.~~ Closed 2026-11-20: the policy watch.
 - ~~`push_remote` tells the lead it recorded a request that only you can push, but no client offers the push.~~ Closed
   2026-11-20: `vibeswitcher push` and `decline-push`.

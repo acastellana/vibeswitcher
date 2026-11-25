@@ -122,7 +122,8 @@ Pause ›, Resume Notifications. 4. End Session… (asks first). 5. The start pa
 trust), or `vibeswitcher new FOLDER [--agent] [--preset]`; the palette's New PRESET in FOLDER. 2. Find it: Your own
 sessions lists yours; team sessions only under their project; ⌘K searches. 3. The session's Actions… (driven: it opened
 on Rename, Pause, End, Close shells): Rename, the four pauses, Resume Notifications, each "Do it" under trust, or `vibeswitcher rename`/`pause`.
-4. Actions › End, then Do it, with no "are you sure"; or `vibeswitcher end SESSION`. 5. Ended lately (driven) with Resume and
+4. Actions › End, then Do it, with no "are you sure"; or `vibeswitcher end SESSION`. 5. Ended lately (driven: the list and its lines; the mock takes no `session.resume`, so its
+Resume button is read, not seen) with Resume and
 its `vibeswitcher resume ID` line.
 
 **Verdict**: works differently, worse: no ⌘N (never a page key), and the redesign removed ⌘1–9, next/previous and the
@@ -208,10 +209,10 @@ scorecard, between leads. 3. The all-done card. 4. Window › Statistics….
 driven), Files (where the lead's files are, driven) on the right; a task opens in place (driven: blocked, waits on,
 goal, attempt). 3. The roadmap: goals with estimated landings (driven). 4. Result screenshots and a task's whole
 details in a team session's inspector. 5. Statistics (`#/stats`, driven: load, usage, merges, quality, cost, by agent,
-8 weeks). 6. The all-done card shows in the lead's chat, but nothing marks it seen any more.
+8 weeks). 6. The all-done card shows in the lead's chat, but nothing marks it seen any more: "All done" stays its whole day.
 
-**Verdict**: works differently, better (goals, landing dates, the dial), with two losses: the all-done mark never
-clears, and a task's full details are only in a team session's inspector. **On the Mac**: waits for the Mac node.
+**Verdict**: works differently, better (goals, landing dates, the dial), with two losses: the all-done mark can't be
+dismissed, and a task's full details are only in a team session's inspector. **On the Mac**: waits for the Mac node.
 **Checked**: driven.
 
 ## 12. Get notified when the page or app is closed
@@ -234,7 +235,8 @@ away.
 
 **V2**: 1. `vibeswitcher web --tailnet` in a terminal; open its MagicDNS address on the phone; pair with the code it
 prints. 2. The phone's layout (driven at 390 px: the lead page and a session with its prompt): read everything, draft
-answers and messages, each to be run from a terminal. 3. The tailnet page never acts, by rule; no terminal there, no
+answers and messages, each to be run from a terminal. 3. The tailnet page never acts, by rule (replies from a phone are planned for the V2 design's stage 7,
+waiting on your decision 4 in [H1](v2-h1-plan.md)); no terminal there, no
 dictation (not a secure page), no dev pages, no push.
 
 **Verdict**: works differently, worse: from the phone you read and draft only. **On the Mac**: acting from the phone,
