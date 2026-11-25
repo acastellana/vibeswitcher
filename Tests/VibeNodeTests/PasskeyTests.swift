@@ -217,7 +217,8 @@ struct PasskeyTests {
         // A repeat after a lost reply (the same action and assertion, sent again after a reconnect): the earlier reply,
         // not a refusal for a used challenge; done once.
         let again = try #require(await act(world, credentials, kind: "answer", args: args, action: action, assertion: assertion))
-        #expect(again.ok, "\(again)")
+        // With the line it was recorded with, as the first reply (the page says it after a reconnect too).
+        #expect(again.ok && again.recorded == line, "\(again)")
         #expect(await world.actions().filter { $0.action == action && $0.kind == "answer" }.count == 1)
         // A known action id with anything else isn't a repeat: another kind, other arguments, another page's token each
         // need the assertion, and nothing more is done.

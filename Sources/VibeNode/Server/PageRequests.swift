@@ -131,14 +131,25 @@ extension Requests {
                     // and words may be more than one byte each).
                     let mark = approved.map { Self.cut(via + "; passkey approved: " + $0, bytes: 200) } ?? via
                     self.notePageAction(request, token: credentials.token)
-                    self.voiced(now, from: NodeLive.webPeer, via: mark) { answer in
+                    let action = request.action?.lowercased()
+                    self.voiced(now, from: NodeLive.webPeer, via: mark) { [weak self] answer in
                         var answer = answer
-                        if answer.ok, let approved { answer.recorded = approved }
+                        // This act's line, or, for a repeat of it, the line it was recorded with.
+                        if answer.ok, let line = approved ?? action.flatMap({ self?.recordedLines[$0] }) {
+                            answer.recorded = line
+                            if approved != nil, let action, let self { self.keepRecorded(line, action: action) }
+                        }
                         reply(answer)
                     }
                 }
             }
         }
+    }
+
+    /// `line` kept as `action`'s recorded line, for its repeats (`recordedLines`, the oldest dropped past `repliesKept`).
+    func keepRecorded(_ line: String, action: String) {
+        if recordedLines.updateValue(line, forKey: action) == nil { recordedOrder.append(action) }
+        while recordedOrder.count > Self.repliesKept { recordedLines[recordedOrder.removeFirst()] = nil }
     }
 
     /// `text` cut to at most `bytes` of UTF-8, at a character's end.
