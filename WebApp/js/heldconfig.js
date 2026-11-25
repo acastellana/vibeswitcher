@@ -81,19 +81,44 @@ export function railState(rail) {
 
 // What the card's face says: its title, the rails that changed (key, before, now), how many can't be compared, and
 // whether accepting is the terminal's (a rail changed, new or not comparable: the node refuses a page's accept then).
+// The kinds the node reads as updates (named only while the card has room; the rest counted).
+const UPDATES = ['claude-update', 'plugin-update', 'build-switch'];
+const UNVOUCHED = /^(not known to be the same|can.t be compared)/;
+
+// The held things as the node names them (its `kind` and `what`): every one that isn't an update, then updates while
+// fewer than three lines are shown, the rest "and N more that look like updates"; one the node can't vouch for says so.
+export function itemLines(items = []) {
+  const named = (item) => itemLabel(item) + (UNVOUCHED.test(item.sinceAccept || '') ? ' ' + t('hcCantCompare') : '');
+  const lines = items.filter((item) => !UPDATES.includes(item.kind)).map(named);
+  const updates = items.filter((item) => UPDATES.includes(item.kind));
+  let shown = 0;
+  for (const item of updates) {
+    if (lines.length >= 3) break;
+    lines.push(named(item));
+    shown += 1;
+  }
+  return { lines, moreUpdates: updates.length - shown };
+}
+
 export function heldSummary(config = {}) {
   const rails = (config.guarded || []).map((rail) => ({ ...rail, ...railState(rail) }));
   const changed = rails.filter((rail) => rail.state === 'changed' || rail.state === 'new' || rail.state === 'records');
-  const unknown = rails.filter((rail) => rail.state === 'unknown').length;
+  // The node's own reading (`changed` on each rule) never shows the ones it can't compare; an older node's, counted.
+  const nodeReads = rails.some((rail) => 'changed' in rail);
+  const unknown = nodeReads ? 0 : rails.filter((rail) => rail.state === 'unknown').length;
   const items = config.items || [];
   const { title, line } = heldTitle(items);
-  // Held things the node can't compare (no sealed snapshot since a restart).
-  const itemsUnknown = items.filter((item) => /^(not known to be the same|can.t be compared)/.test(item.sinceAccept || '')).length;
+  // With the node's kinds, the lines it names; without, the one line naming three.
+  const kinds = items.some((item) => item.kind);
+  const named = kinds ? itemLines(items) : null;
   // Nothing held and no sealed last accept (the node's `firstLook`: it restarted, or the rules were never accepted), or
   // from a node before that field, nothing held and no rule changed: it only wants this project's rules confirmed once.
   const confirmOnly = config.firstLook === true || (!items.length && !changed.length && unknown > 0);
-  // A page's accept is refused where any rule would be recorded anew, can't be compared, or none is recorded yet.
-  return { title, line, changed, unknown, rails, confirmOnly, itemsUnknown, summary: config.summary || null, holds: config.holds || null, holdsEvery: config.holdsEvery === true,
-    recordsAll: config.recordsAll === true ? rails.length : 0,
-    terminal: config.pageMayAccept === false || config.recordsAll === true || changed.length > 0 || unknown > 0 };
+  // A first accept (`recordsAll`): the rules set away from their defaults (sandbox_ first, eight shown), the rest counted.
+  const set = config.recordsAll === true ? rails.filter((rail) => rail.atDefault === false).sort((a, b) => /^sandbox_/.test(b.key) - /^sandbox_/.test(a.key)) : [];
+  const first = config.recordsAll === true ? { shown: set.slice(0, 8), more: Math.max(0, set.length - 8), defaults: rails.filter((rail) => rail.atDefault !== false).length } : null;
+  // Whether a page may accept: the node's own judgement where it gives one, else read off the rules.
+  const terminal = 'pageMayAccept' in config ? config.pageMayAccept !== true : (config.recordsAll === true || changed.length > 0 || unknown > 0);
+  return { title, line: named ? null : line, lines: named?.lines || null, moreUpdates: named?.moreUpdates || 0, changed, unknown, rails, confirmOnly, first,
+    summary: config.summary || null, holds: config.holds || null, holdsEvery: config.holdsEvery === true, terminal };
 }

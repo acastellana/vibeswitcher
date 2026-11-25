@@ -275,9 +275,15 @@ export function projectView(app, { sheet }) {
     return h('article', { class: 'card held-config' }, head,
       h('h3', { class: 'card-question' }, summary.title),
       summary.line ? h('p', { class: 'hc-line' }, summary.line) : null,
+      // The node's names for what changed: each its own line, the updates past three counted.
+      summary.lines?.length > 1 || summary.moreUpdates ? h('ul', { class: 'hc-things' }, summary.lines.map((line) => h('li', null, line)),
+        summary.moreUpdates ? h('li', { class: 'hc-quiet' }, t('hcMoreUpdates', { n: summary.moreUpdates })) : null) : null,
       h('p', { class: 'card-why' }, summary.holdsEvery || (!summary.holds && card.config?.sharedHome) ? t('hcHoldsAll') : t('hcHolds', { project: summary.holds || lastPart(root) || root })),
-      summary.itemsUnknown ? h('p', { class: 'hc-quiet' }, t('hcItemsUnknown', { n: summary.itemsUnknown })) : null,
-      summary.recordsAll ? h('p', { class: 'hc-quiet' }, t('hcRecordsAll', { n: summary.recordsAll })) : null,
+      // A first accept records the rules: those set away from their defaults listed, the defaults counted.
+      summary.first ? h('div', { class: 'hc-rules' }, h('p', { class: 'hc-rules-label' }, t('hcFirstRules')),
+        summary.first.shown.map((rail) => h('p', { class: 'hc-rail' }, h('code', null, rail.key), ': ', rail.value)),
+        summary.first.more ? h('p', { class: 'hc-quiet' }, t('hcMoreSet', { n: summary.first.more })) : null,
+        summary.first.defaults ? h('p', { class: 'hc-quiet' }, t('hcAtDefaults', { n: summary.first.defaults })) : null) : null,
       // The rules that would change: five at most, the rest one click away.
       shown.length ? h('div', { class: 'hc-rules' }, h('p', { class: 'hc-rules-label' }, t('hcRulesChange')),
         shown.map((rail) => h('p', { class: 'hc-rail' }, h('code', null, rail.key), ': ',
@@ -286,8 +292,7 @@ export function projectView(app, { sheet }) {
       summary.unknown ? h('p', { class: 'hc-quiet' }, t('hcUnknown', { n: summary.unknown }), ' ',
         h('button', { class: 'link', type: 'button', onclick: () => { details.open = true; } }, t('hcShowThem'))) : null,
       acts ? h('div', { class: 'card-acts' },
-        doButton(app, { label: t('acAccept'), kind: 'config.accept', args: () => cardArgs(card), done: () => receipt(summary.holdsEvery ? t('hcAcceptedAll', { what: summary.summary || summary.line || summary.title })
-          : t('hcAccepted', { what: summary.summary || summary.line || summary.title, project: summary.holds || lastPart(root) || root })) }).el)
+        doButton(app, { label: t('acAccept'), kind: 'config.accept', args: () => cardArgs(card), done: () => receipt(t('hcAcceptedN', { what: summary.holdsEvery ? t('hcHomeConfig') : summary.holds || lastPart(root) || root, n: (card.config?.items || []).length + summary.changed.length })) }).el)
         : terminalLine(summary.changed.length ? t('hcNeedsTerminal') : t('hcNeedsTerminalUnknown')),
       details);
   }
