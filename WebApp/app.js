@@ -316,7 +316,7 @@ store.subscribe('connection', () => {
 // ---- Commands (the palette's, and the keys') ----
 
 // ⌘J / ⌥J (Alt+J): the next place with something waiting on you (js/keys.js); ⌥F or / the left column's filter (in its
-// drawer on a phone); ⌥1–9 (Ctrl+Shift+1–9) its nth, ⌥↓ ⌥↑ (Alt+↓ ↑) the next or previous in it.
+// drawer on a phone); ⌥1–9 (Ctrl+Shift+1–9) its nth, ⌥] ⌥[ (Alt+↓ ↑) the next or previous in it.
 const goTo = (href) => { if (href) ui.go(href); return !!href; };
 const nextNeedingYou = () => goTo(needingHref(store.state, ui.state.route, ownSession));
 function leftFilter() {

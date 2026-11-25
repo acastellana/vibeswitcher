@@ -5,7 +5,7 @@
 // | Does | macOS | Linux, Windows | Why not the other |
 // | --- | --- | --- | --- |
 // | The left column's 1st–9th | ⌥1–9 | Ctrl+Shift+1–9 | ⌘1–9 and Ctrl+1–9 are every browser's tabs; Alt+1–9 Chrome's and Firefox's on Linux |
-// | Next, previous in it | ⌥↓ ⌥↑ | Alt+↓ Alt+↑ | Alt+← → are Back and Forward |
+// | Next, previous in it | ⌥] ⌥[ | Alt+↓ Alt+↑ | ⌥↓ ⌥↑ scroll a screen in Safari and Chrome on a Mac; ⌘[ ] and Alt+← → are Back and Forward |
 // | Next needing you | ⌘J, ⌥J | Alt+J | Ctrl+J is the browser's Downloads (Chrome, Edge, Firefox on Windows); ⌥⌘J Chrome's console |
 // | Filter it | ⌥F, or / | / | Alt+F opens the browser's menu (Chrome, Edge, Firefox) |
 //
@@ -34,7 +34,7 @@ export function shortcut(event, { mac }) {
   const altOnly = alt && !meta && !ctrl && !shift;
   if (mac) {
     if (altOnly && digit) return { do: 'nth', n: digit };
-    if (altOnly && arrow) return { do: 'step', by: arrow };
+    if (altOnly && (event.code === 'BracketRight' || event.code === 'BracketLeft')) return { do: 'step', by: event.code === 'BracketRight' ? 1 : -1 };
     if (altOnly && event.code === 'KeyF') return { do: 'filter' };
     if (event.code === 'KeyJ' && !ctrl && !shift && (meta !== alt)) return { do: 'needing' };
   } else {
@@ -48,7 +48,7 @@ export function shortcut(event, { mac }) {
 // The keys' names as the palette and the README show them.
 export function keyNames(mac) {
   return mac
-    ? { nth: (n) => `⌥${n}`, next: '⌥↓', previous: '⌥↑', needing: '⌘J', filter: '⌥F' }
+    ? { nth: (n) => `⌥${n}`, next: '⌥]', previous: '⌥[', needing: '⌘J', filter: '⌥F' }
     : { nth: (n) => `Ctrl+Shift+${n}`, next: 'Alt+↓', previous: 'Alt+↑', needing: 'Alt+J', filter: '/' };
 }
 

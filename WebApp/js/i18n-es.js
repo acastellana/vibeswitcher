@@ -1232,7 +1232,6 @@ export const ES = {
   apFilterLeftAbout: "Por nombre o carpeta; primero lo que te necesita",
   shSame: "igual",
   shNew: "nuevo",
-  // END buttons
   // The two columns of Your own sessions, This node and Settings (views/twocol.js).
   tcBackToList: "Volver a la lista",
   svProjectGroup: "Proyecto {name}",

@@ -18,13 +18,16 @@ const key = (code, mods = {}, target = null) => ({ code, key: mods.key ?? (code.
   altKey: false, metaKey: false, ctrlKey: false, shiftKey: false, target, getModifierState: (name) => name === 'AltGraph' && !!mods.altGraph, ...mods });
 const field = (tag) => ({ closest: (selector) => (selector.includes(tag) ? {} : null) });
 
-test('the keys: ⌥1–9, ⌥↓ ⌥↑, ⌘J or ⌥J and ⌥F on a Mac; Ctrl+Shift+1–9, Alt+↓ ↑ and Alt+J elsewhere, and none the browser keeps', () => {
+test('the keys: ⌥1–9, ⌥] ⌥[, ⌘J or ⌥J and ⌥F on a Mac; Ctrl+Shift+1–9, Alt+↓ ↑ and Alt+J elsewhere, and none the browser keeps', () => {
   const mac = (event) => shortcut(event, { mac: true });
   const pc = (event) => shortcut(event, { mac: false });
   assert.deepEqual(mac(key('Digit1', { altKey: true })), { do: 'nth', n: 1 });
   assert.deepEqual(mac(key('Digit9', { altKey: true })), { do: 'nth', n: 9 });
-  assert.deepEqual(mac(key('ArrowDown', { altKey: true, key: 'ArrowDown' })), { do: 'step', by: 1 });
-  assert.deepEqual(mac(key('ArrowUp', { altKey: true, key: 'ArrowUp' })), { do: 'step', by: -1 });
+  assert.deepEqual(mac(key('BracketRight', { altKey: true, key: '‘' })), { do: 'step', by: 1 });
+  assert.deepEqual(mac(key('BracketLeft', { altKey: true, key: '“' })), { do: 'step', by: -1 });
+  // ⌥↓ ⌥↑ scroll a screen in Safari and Chrome on a Mac: the browser's.
+  assert.equal(mac(key('ArrowDown', { altKey: true, key: 'ArrowDown' })), null);
+  assert.equal(mac(key('ArrowUp', { altKey: true, key: 'ArrowUp' })), null);
   assert.deepEqual(mac(key('KeyJ', { metaKey: true })), { do: 'needing' });
   assert.deepEqual(mac(key('KeyJ', { altKey: true })), { do: 'needing' });
   assert.deepEqual(mac(key('KeyF', { altKey: true })), { do: 'filter' });
@@ -44,7 +47,7 @@ test('the keys: ⌥1–9, ⌥↓ ⌥↑, ⌘J or ⌥J and ⌥F on a Mac; Ctrl+Sh
 test('the keys never fire while typing in a field, a text box or a terminal', () => {
   for (const tag of ['input', 'textarea', 'select', 'contenteditable', '.terminal-screen']) {
     assert.equal(typing(field(tag)), true, tag);
-    for (const event of [key('Digit1', { altKey: true }), key('KeyJ', { metaKey: true }), key('KeyF', { altKey: true }), key('ArrowDown', { altKey: true, key: 'ArrowDown' })]) {
+    for (const event of [key('Digit1', { altKey: true }), key('KeyJ', { metaKey: true }), key('KeyF', { altKey: true }), key('BracketRight', { altKey: true })]) {
       assert.equal(shortcut({ ...event, target: field(tag) }, { mac: true }), null, `${tag} ${event.code}`);
     }
     assert.equal(shortcut(key('Digit1', { ctrlKey: true, shiftKey: true }, field(tag)), { mac: false }), null);
@@ -118,14 +121,14 @@ test('the palette lists each key beside its command, and the first nine projects
     entries[3].run();
     assert.deepEqual(went, [projectHref(API), 'filter']);
   }
-  assert.deepEqual([keyNames(true).next, keyNames(true).needing, keyNames(true).filter, keyNames(true).nth(1)], ['⌥↓', '⌘J', '⌥F', '⌥1']);
+  assert.deepEqual([keyNames(true).next, keyNames(true).previous, keyNames(true).needing, keyNames(true).filter, keyNames(true).nth(1)], ['⌥]', '⌥[', '⌘J', '⌥F', '⌥1']);
   assert.equal(keyNames(false).nth(4), 'Ctrl+Shift+4');
 });
 
 test('the README’s key table lists every one of them, on both', () => {
   const readme = readFileSync(new URL('../README.md', import.meta.url), 'utf8');
   const table = readme.slice(readme.indexOf('## Keys'), readme.indexOf('## The inspector'));
-  for (const words of ['⌥1–9', 'Ctrl+Shift+1–9', '⌥↓ ⌥↑', 'Alt+↓ Alt+↑', '⌘J', '⌥J', 'Alt+J', '⌥F']) assert.ok(table.includes(words), words);
+  for (const words of ['⌥1–9', 'Ctrl+Shift+1–9', '⌥] ⌥[', 'Alt+↓ Alt+↑', '⌘J', '⌥J', 'Alt+J', '⌥F']) assert.ok(table.includes(words), words);
   // Each row's keys, its first cell: Ctrl+J (the browser's Downloads) is none of them.
   const cells = table.split('\n').filter((line) => line.startsWith('| ')).map((line) => line.split('|')[1]);
   assert.ok(cells.some((cell) => cell.includes('⌘J')));
@@ -176,12 +179,15 @@ test('the left column’s filter: a letter typed in it starts it; what needs you
   setLanguage('en');
 });
 
-test('the filter by typing doesn’t take a letter typed in a field, nor one with a modifier', () => {
+test('the filter by typing doesn’t take a letter typed in a field, nor one with a modifier, nor /', () => {
   const { view } = column(state());
   const filter = find(view.el, byClass('left-filter'));
   view.el.dispatch('keydown', { key: 'p', target: field('input') });
   view.el.dispatch('keydown', { key: 'p', metaKey: true, target: { closest: () => null } });
   view.el.dispatch('keydown', { key: 'ArrowDown', target: { closest: () => null } });
+  // / on a link of the column is the page's search key (the screen's list, else this filter, opened empty): not a letter.
+  view.el.dispatch('keydown', { key: '/', target: { closest: () => null } });
   assert.equal(filter.hidden, true);
+  assert.equal(filter.value, '');
   assert.deepEqual(filterItems(state(), ''), []);
 });

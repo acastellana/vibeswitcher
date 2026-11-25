@@ -83,7 +83,7 @@ Screenshots of each main state, light and dark, wide and at 390 px, are in `shot
 | ⌘K / Ctrl+K | Go to a session or run a command |
 | ⌘J or ⌥J / Alt+J | Next with something waiting on you: a project, a session of your own, This node (Ctrl+J stays the browser's Downloads, ⌥⌘J Chrome's console) |
 | ⌥1–9 / Ctrl+Shift+1–9 | The left column's first nine, in its order (⌘1–9, Ctrl+1–9 and, on Linux, Alt+1–9 are the browser's tabs) |
-| ⌥↓ ⌥↑ / Alt+↓ Alt+↑ | The next or previous in the left column |
+| ⌥] ⌥[ / Alt+↓ Alt+↑ | The next or previous in the left column (on a Mac ⌥↓ ⌥↑ stay the browser's scroll by a screen) |
 | ⌥F, or / | The left column's filter, also a letter typed while the keyboard is in the column: the projects and your own sessions by name or folder, what needs you first (↑ ↓ move, ↩ opens, Esc clears). Off a Mac only / (Alt+F is the browser's menu) |
 | Esc | Closes the side sheet, a drawer, the inspector where it is a sheet; clears a list's search |
 | / | Your own sessions, This node, Settings: the list's search (↑ ↓ move in the list, ↩ opens); elsewhere the left column's filter |

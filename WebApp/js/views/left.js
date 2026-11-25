@@ -132,9 +132,10 @@ export function leftColumn(app, { brief }) {
       list.querySelector?.('a')?.focus?.();
     }
   });
-  // A letter typed while the keyboard is in the column (on a project, a place) starts the filter with it.
+  // A letter typed while the keyboard is in the column (on a project, a place) starts the filter with it; / stays the
+  // page's (the screen's own list search, else this filter, app.js).
   el.addEventListener('keydown', (event) => {
-    if (typing(event.target) || event.ctrlKey || event.metaKey || event.altKey || event.key?.length !== 1 || !/\S/.test(event.key)) return;
+    if (typing(event.target) || event.ctrlKey || event.metaKey || event.altKey || event.key?.length !== 1 || !/\S/.test(event.key) || event.key === '/') return;
     event.preventDefault();
     focusFilter(event.key);
   });
