@@ -77,6 +77,14 @@ public enum ServerStart {
             exit(69)
         }
         if let child = parsed.testChild { startTestChild(child) }
+        // The Mac's node server (never started yet: the host refuses `--node` there): its connector's peer must run the
+        // host of its own row in the node's record, before anything is served or written (the review's F7).
+        if parsed.node, Platform.CodeIdentity.isAvailable,
+           let why = NodeCheck.macConnectorRefusal(token: Platform.Sockets.peerToken(parsed.connector), own: Platform.CodeIdentity.ownCdhash(),
+                                                   pins: NodePins.read()) {
+            say("not started: \(why)")
+            exit(77)
+        }
 
         HostConnection.register(connector: parsed.connector, for: parsed.hostSocket)
         watchConnector(parsed.connector)

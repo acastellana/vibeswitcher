@@ -331,6 +331,33 @@ struct NodePinsAnchorTests {
     }
 }
 
+/// The review of 2026-11-25, F7: the genuine server started by a host of the session's own. The Mac node server checks,
+/// at its start, that its connector's peer (a stream pair's `LOCAL_PEERTOKEN` names the process that made the pair: the
+/// host that started it, fixed at creation) runs the host of its own row, hardened. Here the pair is made by this test
+/// process, so its token is this process's, with its real code: pinned as the row's host it passes, any other host's
+/// row refuses, and so do no record, no row for the server, no token and no Hardened Runtime. A server process can't be
+/// shown refusing end to end: the record's path isn't the test's to choose in a node server. Mac only.
+@Suite(.enabled(if: Platform.CodeIdentity.isAvailable, "the Mac's code identity"))
+struct ConnectorPeerTests {
+    @Test func aServerRefusesAHostTheRecordDoesntPinForItsBuild() throws {
+        let (one, other) = try #require(Platform.Sockets.pair(type: Platform.Sockets.stream))
+        defer { close(one); close(other) }
+        let token = try #require(Platform.Sockets.peerToken(other))
+        let me = try #require(Platform.CodeIdentity.ownCdhash())
+        let server = Data(repeating: 0x5e, count: 20), cli = Data(repeating: 0xc1, count: 20)
+        let mine = NodePins.Build(commit: String(repeating: "a", count: 40), host: me, server: server, cli: cli)
+        let fake = NodePins.Build(commit: String(repeating: "a", count: 40), host: Data(repeating: 0x0f, count: 20), server: server, cli: cli)
+        let hardened: (Platform.PeerToken) -> Bool? = { _ in true }
+        #expect(NodeCheck.macConnectorRefusal(token: token, own: server, pins: .success(NodePins(uid: getuid(), builds: [mine])), hardened: hardened) == nil)
+        let refused = NodeCheck.macConnectorRefusal(token: token, own: server, pins: .success(NodePins(uid: getuid(), builds: [fake])), hardened: hardened)
+        #expect(refused?.contains("doesn't run the host the node's record pins") == true, "\(String(describing: refused))")
+        #expect(NodeCheck.macConnectorRefusal(token: token, own: server, pins: .failure(NodePins.Refused("missing")), hardened: hardened) != nil)
+        #expect(NodeCheck.macConnectorRefusal(token: token, own: Data(repeating: 0x77, count: 20), pins: .success(NodePins(uid: getuid(), builds: [mine])), hardened: hardened) != nil)
+        #expect(NodeCheck.macConnectorRefusal(token: nil, own: server, pins: .success(NodePins(uid: getuid(), builds: [mine])), hardened: hardened) != nil)
+        #expect(NodeCheck.macConnectorRefusal(token: token, own: server, pins: .success(NodePins(uid: getuid(), builds: [mine])), hardened: { _ in false }) != nil)
+    }
+}
+
 /// The record's text (`NodePins.parse`): the format, the uid, the builds, refused whole on anything else. Both systems.
 struct NodePinsFormatTests {
     let a = Data(repeating: 0xaa, count: 20), b = Data(repeating: 0xbb, count: 20), c = Data(repeating: 0xcc, count: 20)
