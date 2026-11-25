@@ -48,7 +48,7 @@ function ownBuild() {
 }
 const feed = mocked
   ? await import('./js/mock.js').then(
-    ({ createMock }) => createMock(store, { rows: Number(params.get('rows')) || 0, still: params.has('still'), empty: params.has('empty'), older: params.has('older'), toggle: params.has('toggle'),
+    ({ createMock }) => createMock(store, { rows: Number(params.get('rows')) || 0, still: params.has('still'), empty: params.has('empty'), older: params.has('older'), toggle: params.has('toggle'), held: params.has('held'), norole: params.has('norole'),
       refuse: (params.get('refuse') || '').split(',').filter(Boolean) }),
     (error) => {
       document.body.textContent = 'The mock (?mock) couldn\u2019t be loaded: the node\u2019s own page leaves it out; WebApp/serve.sh serves it.';

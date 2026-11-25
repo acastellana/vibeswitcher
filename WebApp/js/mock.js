@@ -91,8 +91,11 @@ const ago = (seconds) => new Date(now() - seconds * 1000).toISOString();
     add('local:pts/9', { cwd: DOCS, status: 'idle', since: ago(5400), startedAt: ago(5600), hosted: false, terminal: 'pts/9', pid: 40312, title: 'Tidy the README' });
   }
 
+  // `?held`: the site's lead has ended (its project quiet), its settings files are held and its base moved, each a
+  // card; `?norole`: its lead runs without its role (a start shows it and offers to replace it).
+  const leadSession = options.held ? id('dead0001') : LEAD;
   const leads = new Map(options.empty ? [] : [[SITE_PROJECT, {
-    project: SITE_PROJECT, root: SITE, session: LEAD, named: null, bound: LEAD, replaced: [], held: 0, reportsWaiting: 0, notice: null,
+    project: SITE_PROJECT, root: SITE, session: leadSession, named: null, bound: options.norole ? null : leadSession, replaced: [], held: 0, reportsWaiting: 0, notice: null,
     starting: false, lastStart: null, lastStartAt: ago(5400), looks: 14, questions: { open: 1, blocking: 1 }, cards: [CARD_LAUNCH],
     // What the user told the lead (by action), and whether it has read it (the node's `delivered`).
     told: [],
@@ -165,6 +168,22 @@ const ago = (seconds) => new Date(now() - seconds * 1000).toISOString();
       proposal: null, decideBy: null, state: 'open', answer: null, answeredVersion: null, withdrawReason: null, task: null,
     },
   }]]);
+
+  const CARD_HELD = 'local:card:c0f1a2b3-0000-4000-8000-00000000c0f1';
+  const CARD_BASE = 'local:card:ba5e0000-0000-4000-8000-00000000ba5e';
+  if (options.held) {
+    cards.set(CARD_HELD, { id: CARD_HELD, kind: 'config', project: SITE_PROJECT, root: SITE, open: true, closed: null, notice: null, at: ago(1500), blocking: true, seen: 'held-1',
+      config: { baseBranch: 'landing-base', lastAccept: ago(3 * 86400), floor: null,
+        items: [
+          { name: '.claude/settings.json', changedAt: ago(1600), size: 1480, hash: '3b7f0e21a9c4', change: 'hooks.PostToolUse added', outside: true, files: [], sinceAccept: 'changed' },
+          { name: '.vibeswitcher/workflow.md', changedAt: ago(1700), size: 920, hash: '9e1d4c70b2a5', change: 'test_command changed', outside: false, files: [], sinceAccept: 'changed' },
+          { name: '.claude/agents', changedAt: ago(1650), size: null, hash: 'a40c2f9d7e13', change: null, outside: true, files: [{ path: 'reviewer.md', change: 'added', at: 0 }, { path: 'tester.md', change: 'changed', at: 0 }], sinceAccept: 'changed' },
+        ],
+        guarded: [{ key: 'test_command', value: 'npm test -- --runInBand', sinceAccept: 'changed' }, { key: 'merge_policy', value: 'audit', sinceAccept: 'same' }] } });
+    cards.set(CARD_BASE, { id: CARD_BASE, kind: 'base', project: SITE_PROJECT, root: SITE, open: true, closed: null, notice: null, at: ago(1400), blocking: true, seen: 'base-1',
+      base: { branch: 'landing-base', from: '4be1c0d97a3f', fromIs: 'recorded', to: 'e5a90b1c2d34', reason: 'a commit no session of yours was seen making',
+        commits: [{ sha: 'e5a90b1c2d34f', subject: 'Hotfix: the hero image path' }, { sha: '71c3d2e0a9b8f', subject: 'Bump the analytics snippet' }] } });
+  }
 
   // The account's usage (`NodeUsage.value`): the weekly limit past the threshold, the 5-hour well under it.
   const usage = {
@@ -1097,6 +1116,34 @@ const ago = (seconds) => new Date(now() - seconds * 1000).toISOString();
       return { ok: true, result: { sessionsEnded: sessions.size, host: 'stopped' } };
     }
     if (message.kind === 'presets.edit') return editPreset(args);
+    // A held config or a moved base, read whole (`config.held`, `base.show`; `CardRequests`): the project's card as it is
+    // now, and with `diff` the difference of one held thing; a base that didn't move says so.
+    if (message.kind === 'config.held' || message.kind === 'base.show') {
+      if (typeof args.folder !== 'string' || !args.folder.startsWith('/')) return badArgs(`${message.kind} needs folder, an absolute path`);
+      const kind = message.kind === 'config.held' ? 'config' : 'base';
+      const card = [...cards.values()].find((one) => one.kind === kind && one.open && (args.folder === one.root || args.folder.startsWith(one.root + '/')));
+      if (kind === 'base' && !card) return { ok: true, result: { branch: 'landing-base', unmoved: 'e5a90b1c2d34' } };
+      if (!card) return { ok: false, error: { code: 'gone', message: `nothing is held for ${args.folder}` } };
+      if (args.diff != null) {
+        const item = card.config.items.find((one) => one.name === args.diff);
+        const difference = !item ? `nothing held is named ${args.diff}` : item.name === '.claude/settings.json'
+          ? ['--- accepted', '+++ now', '   "hooks": {', '+    "PostToolUse": [{ "matcher": "Bash", "hooks": [{ "type": "command", "command": "./scripts/after-bash.sh" }] }],', '     "SessionStart": [ … ]']
+          : item.name === '.vibeswitcher/workflow.md' ? ['--- accepted', '+++ now', '-test_command: npm test', '+test_command: npm test -- --runInBand'] : ['+ reviewer.md (added)', '~ tester.md (changed)'];
+        return { ok: true, result: { card: structuredClone(card), difference } };
+      }
+      return { ok: true, result: { card: structuredClone(card) } };
+    }
+    // Accepting the held files, or the move, or keeping the old base (`config.accept`, `base.accept`, `base.keep`): the
+    // card as the page drew it (its `seen`), then settled.
+    if (message.kind === 'config.accept' || message.kind === 'base.accept' || message.kind === 'base.keep') {
+      const card = cards.get(args.card);
+      if (!card || !card.open) return { ok: false, error: { code: 'gone', message: 'no such card' } };
+      if (args.seen !== card.seen) return { ok: false, error: { code: 'changed', message: `card ${card.id} changed since the page drew it: look again` } };
+      card.open = false;
+      card.closed = new Date().toISOString();
+      emit(put('cards', cards, card.id));
+      return { ok: true, result: { card: card.id, settled: message.kind } };
+    }
     // The node's shells in a folder (`shells`, `Requests.shells`): each with its terminal and whether it is finished.
     if (message.kind === 'shells') {
       const folder = typeof args.folder === 'string' ? args.folder.replace(/\/+$/, '') : null;
@@ -1137,7 +1184,7 @@ const ago = (seconds) => new Date(now() - seconds * 1000).toISOString();
   // `?older` lists none of the buttons' kinds either (BUTTONS: what an acting page sends a node in place of the lines
   // it showed before, docs/process/v2-no-terminal.md's table B and A5), so their lines can be seen.
   const STARTS = ['lead', 'session.new', 'session.reply', 'session.resume'];
-  const BUTTONS = ['shells', 'session.close-shells', 'presets.edit', 'update.check', 'web.revoke'];
+  const BUTTONS = ['config.held', 'config.accept', 'base.show', 'base.accept', 'base.keep', 'shells', 'session.close-shells', 'presets.edit', 'update.check', 'web.revoke'];
   const KINDS = ['chat.page',
     'answer', 'answer.replace', 'tell', 'tell.retract', 'hold', 'send', 'session.draft', 'session.draft.clear', 'session.complete',
     'session.attach', 'session.usage', 'stats', 'session.ports', 'board.task', 'board.image', 'chat.image', 'session.presets', 'brief', 'recent',
@@ -1149,6 +1196,8 @@ const ago = (seconds) => new Date(now() - seconds * 1000).toISOString();
     'web.revoke': 'the web tokens weren’t dropped: the token file couldn’t be written',
     'session.close-shells': 'none of them is a finished shell now (back at its prompt): nothing ended',
     'mail': 'this server keeps no leads',
+    'config.held': 'this server keeps no cards',
+    'base.show': 'this server keeps no cards',
     'presets.edit': 'presets.json has changes you haven’t accepted: review with `vibeswitcher config held`, then `config accept` (it changed since your accept); nothing changed',
   };
 

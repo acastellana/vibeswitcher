@@ -19,6 +19,7 @@ import { hasDates, dated, timeAxis, axisPoints, landingWords, basisWords } from 
 import { leadLines, shownLines, dialCounts, waitingCards, waitingCount, withPushLines, cut, shortHashes, dayOf, teamCounts, standing, taskTone, taskStep, waitsOn, goalRows, lineKey } from '../conversation.js';
 import { projectHref, routeHref } from '../ui.js';
 import { questionStack, pluginCard, copyLine, cardSheet, optionWords } from './cards.js';
+import { heldParts } from './sheet.js';
 import { tellLine, shellWord, leadLine } from '../actions.js';
 import { pushReceipt } from '../push.js';
 import { pluginFacts } from '../plugincard.js';
@@ -318,22 +319,50 @@ export function projectView(app, { sheet }) {
     return null;
   }
 
+  // Show it whole: the node asked for the card as it is now (`config.held` or `base.show`, the project's folder), and the
+  // side sheet opens with it whole; Reading… meanwhile, the node's refusal beside the button.
+  function showWhole(card) {
+    const config = card.kind === 'config';
+    const kind = config ? 'config.held' : 'base.show';
+    const said = h('span', { class: 'act-said', role: 'status' });
+    const button = h('button', { class: 'button quiet', type: 'button', onclick: () => {
+      button.disabled = true;
+      button.textContent = t('shReading');
+      said.classList.remove('refused');
+      setText(said, '');
+      store.read(kind, { folder: card.root }).then((reply) => {
+        button.disabled = false;
+        button.textContent = t('shShowWhole');
+        const result = reply?.ok ? reply.result : null;
+        if (result?.card) { sheet.open(heldParts(result.card, { root: card.root, kicker: lastPart(card.root), read: store.read, kind })); return; }
+        // The base hasn't moved since (`unmoved`), or an answer without its card: said, nothing opened.
+        setText(said, result?.unmoved ? t('shUnmoved', { branch: result.branch || '' }) : refusalWords(reply?.error, t('shShowWhole')));
+        if (!result?.unmoved) said.classList.add('refused');
+      });
+    } }, t('shShowWhole'));
+    return h('div', { class: 'card-acts show-whole' }, h('span', { class: 'act' }, button, said));
+  }
+
   function otherCard(card) {
     if (card.kind === 'plugin') return pluginCard(card, app);
     const root = card.root || '';
     const config = card.kind === 'config';
     // With the `act` right: accept the held config, or accept or keep the base, from here (the card and its seen).
     const acts = config ? actsFor(app, 'config.accept') : actsFor(app, 'base.accept');
+    const whole = actsFor(app, config ? 'config.held' : 'base.show');
     return h('article', { class: 'card' },
       h('header', { class: 'card-head' }, h('span', { class: 'priority blocking' }, t('blocking')), h('time', { class: 'asked' }, t('askedAt', { who: t('vibeswitcher'), time: clock(card.at) }))),
       h('h3', { class: 'card-question' }, t(config ? 'heldConfig' : 'baseMove')),
       h('p', { class: 'card-why' }, t(config ? 'heldConfigWhy' : 'baseMoveWhy')),
       heldFacts(card),
+      // To see it whole first: Show it whole where the node lists the read (`config.held`, `base.show`), in the side
+      // sheet; else the terminal's line beside the buttons when this tab acts, or one click away, never the pile of them.
+      whole ? showWhole(card) : null,
       acts ? h('div', { class: 'card-acts' },
         doButton(app, { label: t(config ? 'acAccept' : 'acAcceptMove'), kind: config ? 'config.accept' : 'base.accept', args: () => cardArgs(card) }).el,
         !config && actsFor(app, 'base.keep') ? doButton(app, { label: t('acKeepBase'), kind: 'base.keep', quiet: true, args: () => cardArgs(card) }).el : null) : null,
-      // The terminal's lines: beside the buttons when this tab acts; else one click away, never the pile of them.
-      acts ? h('div', { class: 'card-command' }, h('span', { class: 'card-command-label' }, t('acSeeFirst')),
+      acts && whole ? null
+      : acts ? h('div', { class: 'card-command' }, h('span', { class: 'card-command-label' }, t('acSeeFirst')),
         config ? copyLine(`vibeswitcher config held ${shellWord(root)}`, 'the command that shows it') : copyLine(`vibeswitcher base show ${shellWord(root)}`, 'the command that shows it'))
         : h('details', { class: 'card-terminal' }, h('summary', null, t('cUseTerminal')),
           h('div', { class: 'card-command' }, h('span', { class: 'card-command-label' }, t('settleInTerminal')),

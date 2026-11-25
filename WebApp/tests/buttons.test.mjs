@@ -499,3 +499,86 @@ test('B7: Between leads, a project with more than its newest shown has Show all:
   const { mailCommand } = await import('../js/mail.js');
   assert.match(mailCommand('~/projects/example-site'), /vibeswitcher mail .* --all/);
 });
+
+// A project whose settings files are held and whose base moved (each a card), its lead quiet.
+const P = 'local:project:Zx3kQ0aVtLmN';
+const SITE_ROOT = '/home/dev/projects/example-site';
+const HELD = { id: 'local:card:held', kind: 'config', project: P, root: SITE_ROOT, open: true, at: '2026-11-25T08:00:00.000Z', seen: 'held-1',
+  config: { lastAccept: '2026-11-22T08:00:00.000Z', items: [
+    { name: '.claude/settings.json', changedAt: '2026-11-25T07:50:00.000Z', hash: '3b7f0e21a9c4', change: 'hooks.PostToolUse added', outside: true, files: [], sinceAccept: 'changed' },
+    { name: '.claude/agents', hash: 'a40c2f9d7e13', change: null, outside: true, files: [{ path: 'reviewer.md', change: 'added' }], sinceAccept: 'changed' }],
+  guarded: [{ key: 'test_command', value: 'npm test -- --runInBand', sinceAccept: 'changed' }] } };
+const MOVED = { id: 'local:card:base', kind: 'base', project: P, root: SITE_ROOT, open: true, at: '2026-11-25T08:05:00.000Z', seen: 'base-1',
+  base: { branch: 'landing-base', from: '4be1c0d97a3f', fromIs: 'recorded', to: 'e5a90b1c2d34', reason: 'a commit no session of yours was seen making',
+    commits: [{ sha: 'e5a90b1c2d34f', subject: 'Hotfix: the hero image path' }] } };
+const quietLead = { project: P, root: SITE_ROOT, session: 'local:dead0001-4f6a-4c1e-9b7d-2e5a8c0d1f3b', named: null, bound: null, replaced: [], held: 0, reportsWaiting: 0,
+  notice: null, starting: false, lastStart: null, lastStartAt: '2026-11-25T06:00:00.000Z', looks: 3, questions: { open: 0, blocking: 0 }, cards: [], told: [], push: null };
+
+test('B8: a held config or a moved base: Show it whole reads it from the node and opens it whole in the side sheet; refused, the node’s words', async () => {
+  const { projectView } = await import('../js/views/project.js');
+  for (const code of ['es', 'en']) {
+    setLanguage(code);
+    const opened = [];
+    let refuse = false;
+    const app = fakeApp({ route: { name: 'project', id: P, view: 'lead', show: 'asks' }, kinds: ['config.held', 'config.accept', 'base.show', 'base.accept', 'base.keep', 'lead'],
+      state: { cards: new Map([[HELD.id, HELD], [MOVED.id, MOVED]]), leads: new Map([[P, quietLead]]) },
+      reply: (kind, args) => (refuse ? { ok: false, error: { code: 'refused', message: 'this server keeps no cards' } }
+        : kind === 'config.held' ? { ok: true, result: { card: HELD, ...(args.diff ? { difference: ['--- accepted', '+++ now', '+    "PostToolUse": []'] } : {}) } }
+          : kind === 'base.show' ? { ok: true, result: { card: MOVED } } : { ok: true, result: {} }) });
+    const view = projectView(app, { sheet: { open(parts) { opened.push(parts); }, close() {}, shown: () => false } });
+    view.render();
+    const box = find(view.el, byClass('wait-box'));
+    assert.doesNotMatch(box.textContent, /vibeswitcher config held|vibeswitcher base show/, `${code}: no line where Show it whole does it`);
+    const [config, base] = findAll(box, (node) => node.tag === 'button' && node.textContent === t('shShowWhole'));
+    assert.ok(config && base, code);
+    config.click();
+    assert.equal(config.textContent, t('shReading'));
+    await flush();
+    assert.deepEqual(app.sent.at(-1), { kind: 'config.held', args: { folder: SITE_ROOT } });
+    const sheet = document.createElement('div');
+    sheet.append(...opened.at(-1).more);
+    assert.equal(opened.at(-1).title, t('heldConfig'));
+    assert.match(sheet.textContent, /\.claude\/settings\.json/);
+    assert.match(sheet.textContent, /hooks\.PostToolUse added/);
+    assert.match(sheet.textContent, new RegExp(t('shOutside')));
+    assert.match(sheet.textContent, /reviewer\.md/);
+    assert.match(sheet.textContent, /test_command/);
+    assert.doesNotMatch(sheet.textContent, /3b7f0e21a9c4/, 'no hash where a person reads');
+    // One held thing's difference, asked in the sheet.
+    buttonNamed(sheet, t('shShowChanges')).click();
+    await flush();
+    assert.deepEqual(app.sent.at(-1), { kind: 'config.held', args: { folder: SITE_ROOT, diff: '.claude/settings.json' } });
+    assert.match(find(sheet, byClass('held-diff')).textContent, /PostToolUse/);
+    base.click();
+    await flush();
+    assert.deepEqual(app.sent.at(-1), { kind: 'base.show', args: { folder: SITE_ROOT } });
+    const moved = document.createElement('div');
+    moved.append(...opened.at(-1).more);
+    assert.equal(opened.at(-1).title, t('baseMove'));
+    assert.match(moved.textContent, /Hotfix: the hero image path/);
+    assert.match(moved.textContent, /landing-base/);
+    // Refused: the node's words beside it, the button back, nothing opened.
+    refuse = true;
+    const count = opened.length;
+    config.click();
+    await flush();
+    assert.equal(opened.length, count);
+    assert.match(find(box, byClass('refused')).textContent, /keeps no cards/);
+    assert.equal(config.disabled, false);
+  }
+  setLanguage('en');
+});
+
+test('B8: where the node doesn’t list config.held or base.show for this page, their lines and no Show it whole', async () => {
+  const { projectView } = await import('../js/views/project.js');
+  setLanguage('en');
+  for (const options of [{ acts: true, kinds: ['config.accept', 'base.accept'] }, { acts: false, kinds: ['config.held', 'base.show'] }]) {
+    const app = fakeApp({ route: { name: 'project', id: P, view: 'lead', show: 'asks' }, ...options, state: { cards: new Map([[HELD.id, HELD], [MOVED.id, MOVED]]), leads: new Map([[P, quietLead]]) } });
+    const view = projectView(app, { sheet: { open() {}, close() {}, shown: () => false } });
+    view.render();
+    const box = find(view.el, byClass('wait-box'));
+    assert.equal(buttonNamed(box, 'Show it whole'), null);
+    assert.match(box.textContent, /vibeswitcher config held/);
+    assert.match(box.textContent, /vibeswitcher base show/);
+  }
+});
