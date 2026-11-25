@@ -503,6 +503,9 @@ extension CardStore.Card {
             if let every = config.holdsEvery { c["holdsEvery"] = .bool(every) }
             if let all = config.recordsAll { c["recordsAll"] = .bool(all) }
             if let may = config.pageMayAccept { c["pageMayAccept"] = .bool(may) }
+            // The one command that settles this card from a terminal (it shows the card, asks its code, accepts it):
+            // the page shows it as given, never composes one. None for a card that is closed.
+            if let settle { c["settle"] = .string(settle) }
             c["lastAccept"] = config.lastAccept.map(NodeWire.Value.date) ?? .null
             if config.firstLook == true { c["firstLook"] = .bool(true) }
             c["sharedHome"] = config.sharedHome.map { shared in

@@ -23,9 +23,10 @@ struct HeldWhatTests {
         ConfigSeal.HeldFile(path: path, change: change, at: 1_795_600_000, kind: "f", before: nil, after: nil)
     }
 
-    static func item(_ name: String, change: String? = nil, files: [ConfigSeal.HeldFile] = [], since: String? = "changed since your last accept (\(when))")
-        -> ConfigHoldStore.Item {
+    static func item(_ name: String, change: String? = nil, files: [ConfigSeal.HeldFile] = [], since: String? = "changed since your last accept (\(when))",
+                     keys: [ConfigSeal.KeyChange]? = nil) -> ConfigHoldStore.Item {
         var item = ConfigHoldStore.Item(name: name, hash: "abcdef012345", change: change, outside: true, files: files, sinceAccept: since)
+        item.keys = keys
         item.about = HeldWhat.describe(item, facts: facts)
         return item
     }
@@ -48,6 +49,18 @@ struct HeldWhatTests {
 
     static func plain(_ card: NodeWire.Value) -> String { CardText.lines(card).joined(separator: "\n") }
 
+    /// The main checkout's .git/config with these changed keys, as the vault keeps them (data, and the joined words).
+    static func git(_ keys: [ConfigSeal.KeyChange]) -> ConfigHoldStore.Item {
+        item(".git/config (main checkout)", change: keys.map { "\($0.key) \($0.change.rawValue)" }.joined(separator: ", "), keys: keys)
+    }
+
+    static func git(_ words: String) -> ConfigHoldStore.Item {
+        git(words.components(separatedBy: ", ").map { part in
+            let bits = part.split(separator: " ")
+            return ConfigSeal.KeyChange(key: String(bits[0]), change: ConfigSeal.HeldFile.Change(rawValue: String(bits[1])) ?? .changed)
+        })
+    }
+
     static let install = item("~/.vibeswitcher/v2/builds", files: [file(commit + "/bin/vibeswitcher", .added), file(commit + "/build-info", .added)])
 
     static let claude = [item("~/.local/share/claude/versions", files: [file("2.1.332", .added)]), item("~/.local/bin", files: [file("claude")])]
@@ -68,12 +81,12 @@ struct HeldWhatTests {
                 == "build-switch: ~/.config/systemd/user/vibeswitcher-node.service now starts build 3e9df41a (looks like VibeSwitcher's own switch)")
         #expect(say(Self.install)
                 == "build-switch: ~/.vibeswitcher/v2/builds: build 3e9df41a added (looks like VibeSwitcher's own install)")
-        #expect(say(Self.item(".git/config (main checkout)", change: "branch.v2-usage.merge added, branch.v2-usage.remote added"))
+        #expect(say(Self.git("branch.v2-usage.merge added, branch.v2-usage.remote added"))
                 == "git-config: .git/config (main checkout): the tracking entry of branch v2-usage (branch.v2-usage.merge added, branch.v2-usage.remote added)")
-        #expect(say(Self.item(".git/config (main checkout)", change: "core.hookspath added")) == "git-config: .git/config (main checkout): core.hookspath added")
+        #expect(say(Self.git("core.hookspath added")) == "git-config: .git/config (main checkout): core.hookspath added")
         // A tracking entry beside another key is no tracking entry: every key named, the risky ones first.
-        #expect(say(Self.item(".git/config (main checkout)", change: "branch.v2.merge added, core.hookspath added, user.name changed"))
-                == "git-config: .git/config (main checkout): core.hookspath added, branch.v2.merge added, user.name changed")
+        #expect(say(Self.git("branch.v2.merge added, core.hookspath added, user.name changed"))
+                == "git-config: .git/config (main checkout): core.hookspath added, and 2 others")
         #expect(say(Self.item(Self.startup)) == "startup: \(Self.startup): VibeSwitcher node.lnk not on your list of known shortcuts")
         #expect(say(Self.item("~/.claude/settings.json", change: "model changed")) == "settings: ~/.claude/settings.json: model changed")
         #expect(say(Self.item("~/.zshrc")) == "other: ~/.zshrc changed")
@@ -85,11 +98,12 @@ struct HeldWhatTests {
         let after = before + "[branch \"v2-usage\"]\n\tremote = origin\n\tmerge = refs/heads/v2-usage\n"
         let change = ConfigSeal.changedKeys(from: ConfigSeal.encode(ConfigSeal.gitKeys(before) ?? [:]), to: ConfigSeal.encode(ConfigSeal.gitKeys(after) ?? [:]))
         #expect(change == "branch.v2-usage.merge added, branch.v2-usage.remote added", "\(String(describing: change))")
-        #expect(HeldWhat.tracking(change ?? "") == ["v2-usage"])
+        #expect(HeldWhat.tracking(ConfigSeal.keyChanges(from: ConfigSeal.encode(ConfigSeal.gitKeys(before) ?? [:]), to: ConfigSeal.encode(ConfigSeal.gitKeys(after) ?? [:])) ?? [])
+                == ["v2-usage"])
         #expect(!(change ?? "").contains("refs/heads"), "no value")
         let moved = before.replacingOccurrences(of: "x/y.git", with: "x/z.git")
         #expect(ConfigSeal.changedKeys(from: ConfigSeal.encode(ConfigSeal.gitKeys(before) ?? [:]), to: ConfigSeal.encode(ConfigSeal.gitKeys(moved) ?? [:]))
-                == "remote.origin.url changed")
+                == "remote.\(ConfigSeal.subsectionLabel("origin")).url changed", "a remote's name is a label too")
     }
 
     /// Five things that look like updates and one settings change: the settings change is named first, whatever the count.
@@ -158,7 +172,7 @@ struct HeldWhatTests {
         var rails = [Self.rail("auto_advance", "true", changed: .changed, old: "false", records: true),
                      Self.rail("max_workers", "3", changed: .same), Self.rail("risk_lines", "400"),
                      Self.rail("heavy_slots", "1", changed: .changed, records: true)]
-        let card = Self.card(root: "/home/someone/projects/vibeswitcher", items: [Self.item(".git/config (main checkout)", change: "branch.v2.merge added")],
+        let card = Self.card(root: "/home/someone/projects/vibeswitcher", items: [Self.git("branch.v2.merge added")],
                              rails: rails, project: "vibeswitcher")
         #expect(CardText.plainConfig(card) == [
             ".git/config (main checkout): the tracking entry of branch v2 (branch.v2.merge added)",
@@ -242,5 +256,64 @@ struct HeldWhatTests {
         // Each is named on the default screen, beside whatever does look like an update.
         let lines = CardText.plainConfig(Self.card(root: "/home/someone", items: Self.claude + [dropIn, hooks, inside], project: nil))
         #expect(lines.filter { !$0.hasPrefix("holds") }.count == 4 && lines.contains("and 2 more that look like updates (--long lists them)"), "\(lines)")
+    }
+
+    /// Only who commits and a branch's tracking entry are harmless git keys; every other key may run a command and is
+    /// named first, each whole, whatever stands beside it; more than six are counted (the review of 2026-11-25).
+    @Test func everyGitKeyThatMayRunACommandIsNamed() {
+        let what = { (change: String) in Self.git(change).about?.what ?? "" }
+        let whatKeys = { (keys: [ConfigSeal.KeyChange]) in Self.git(keys).about?.what ?? "" }
+        // The vault lists a git config's every key (`changedKeys` unbounded for it): a risky one after twenty harmless.
+        let before = "[core]\n\tbare = false\n"
+        let after = "[core]\n\tbare = false\n\thooksPath = ~/hooks\n" + (0..<20).map { "[branch \"b\($0)\"]\n\tmerge = refs/heads/b\($0)\n" }.joined()
+        let changes = ConfigSeal.keyChanges(from: ConfigSeal.encode(ConfigSeal.gitKeys(before) ?? [:]), to: ConfigSeal.encode(ConfigSeal.gitKeys(after) ?? [:])) ?? []
+        let change = ConfigSeal.changedKeys(from: ConfigSeal.encode(ConfigSeal.gitKeys(before) ?? [:]), to: ConfigSeal.encode(ConfigSeal.gitKeys(after) ?? [:]),
+                                            shown: .max) ?? ""
+        #expect(!change.contains(" more") && change.hasSuffix("core.hookspath added"), "\(change)")
+        #expect(whatKeys(changes) == ".git/config (main checkout): core.hookspath added, and 20 others", "\(whatKeys(changes))")
+        #expect(what("diff.x.textconv changed, user.name changed") == ".git/config (main checkout): diff.x.textconv changed, and 1 other")
+        #expect(what("user.email changed, user.name changed") == ".git/config (main checkout): user.email changed, user.name changed")
+        let eight = (0..<8).map { "alias.a\($0) added" }.joined(separator: ", ") + ", user.name changed"
+        #expect(what(eight) == ".git/config (main checkout): 8 git settings that can run commands changed (--long lists them), and 1 other", "\(what(eight))")
+        // A long key is never cut by its neighbours.
+        let long = (0..<6).map { "remote.origin.uploadpack\(String(repeating: "x", count: 30))\($0) changed" }.joined(separator: ", ")
+        #expect(what(long).components(separatedBy: ", ").count == 6 && what(long).hasSuffix("5 changed"), "\(what(long))")
+    }
+
+    /// A subsection's text reaches a key's name only for a plain branch name: a URL (a token in it) is a stable label,
+    /// on the card's words and its wire value alike; a branch whose name holds a comma or a space gives no keys at all.
+    @Test func aSubsectionsURLIsALabelAndAnOddBranchNameGivesNoKeys() throws {
+        let before = "[core]\n\tbare = false\n"
+        let after = before + "[url \"https://user:sekrit-token@git.example.com/\"]\n\tinsteadOf = gh:\n[branch \"v2-usage\"]\n\tremote = origin\n"
+        let keys = try #require(ConfigSeal.gitKeys(after))
+        let label = ConfigSeal.subsectionLabel("https://user:sekrit-token@git.example.com/")
+        #expect(label.count == 10 && label.hasPrefix("<") && label.hasSuffix(">"), "\(label)")
+        #expect(keys.keys.sorted() == ["branch.v2-usage.remote", "core.bare", "url.\(label).insteadof"], "\(keys.keys.sorted())")
+        #expect(!keys.keys.contains { $0.contains("sekrit") || $0.contains("://") || $0.contains("@") })
+        // The same entry changed again compares under its label.
+        let moved = after.replacingOccurrences(of: "insteadOf = gh:", with: "insteadOf = hub:")
+        #expect(ConfigSeal.changedKeys(from: ConfigSeal.encode(keys), to: ConfigSeal.encode(ConfigSeal.gitKeys(moved) ?? [:])) == "url.\(label).insteadof changed")
+        let changes = try #require(ConfigSeal.keyChanges(from: ConfigSeal.encode(ConfigSeal.gitKeys(before) ?? [:]), to: ConfigSeal.encode(keys)))
+        let card = Self.card(root: "/r", items: [Self.git(changes)], project: "r")
+        let text = CardText.lines(card).joined(separator: "\n") + CardText.lines(card, long: true).joined(separator: "\n")
+        let wire = String(decoding: NodeWire.line(card), as: UTF8.self)
+        #expect(text.contains("url.\(label).insteadof added") && !text.contains("sekrit") && !wire.contains("sekrit"), "\(text)")
+        // A branch's own name still shows.
+        #expect(Self.git(changes.filter { $0.key.hasPrefix("branch.") }).about?.what.contains("branch v2-usage") == true)
+        for odd in ["x, core.hookspath", "two words", "a\u{7}b", "me@host"] {
+            #expect(ConfigSeal.gitKeys("[branch \"\(odd)\"]\n\tremote = origin\n") == nil, "\(odd)")
+        }
+        // No keys: the card says the file changed, nothing more.
+        #expect(Self.item(".git/config (main checkout)", change: "branch.x, core.hookspath.remote added").about?.what == ".git/config (main checkout) changed")
+    }
+
+    /// The one command that settles a held-config card from a terminal, as the node gives it to the page: the card's
+    /// own accept; none once it is closed.
+    @Test func aCardCarriesTheCommandThatSettlesIt() {
+        var card = CardStore.Card(root: "/r", kind: .configHeld)
+        card.config = ConfigHoldStore.Shown(items: [Self.item("~/.zshrc")])
+        #expect(card.value["config"]?["settle"]?.string == "vibeswitcher config accept \(card.id)")
+        card.closed = "accepted"
+        #expect(card.value["config"]?["settle"] == nil)
     }
 }

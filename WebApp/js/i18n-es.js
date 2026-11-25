@@ -1034,6 +1034,7 @@ export const ES = {
   hcConfirmOnly: "Confirma una vez las reglas de este proyecto, en una terminal: no hay ninguna aceptación con la que compararlas.",
   hcUnknown: "Las {n} reglas del proyecto no se pueden comparar con tu última aceptación:",
   hcUnknownWhy: "El nodo se reinició desde entonces, o su registro de esa aceptación cambió: lee los valores.",
+  hcRulesOnly: "Cambiaron las reglas de este proyecto",
   hcPlugin: "Se actualizó un plugin: {name}",
   hcBuild: "VibeSwitcher cambió a una compilación nueva",
   hcGitConfig: "Cambió la configuración de git de este checkout",

@@ -260,12 +260,15 @@ export function projectView(app, { sheet }) {
     // Blocking unless the node says it isn't (a card with nothing held holds nothing back).
     const head = h('header', { class: 'card-head' }, card.blocking === false ? h('span', { class: 'priority important' }, t('cImportant')) : h('span', { class: 'priority blocking' }, t('blocking')),
       h('time', { class: 'asked' }, t('askedAt', { who: t('vibeswitcher'), time: clock(card.at) })));
-    const terminalLine = (words, command = 'vibeswitcher approve') => h('div', { class: 'hc-terminal' }, h('span', null, words), copyLine(command, 'the command that accepts it'));
+    // The command that settles this card in one step, as the node says it (`settle`); until it does, the one that shows
+    // the card and how to accept it. Never `approve`: it sets aside a card with rules to record.
+    const settle = card.config?.settle || card.settle || `vibeswitcher config held ${shellWord(root)}`;
+    const terminalLine = (words) => h('div', { class: 'hc-terminal' }, h('span', null, words), copyLine(settle, 'the command that settles it'));
     // Nothing held and no sealed accept (`firstLook`): the node only wants this project's rules confirmed once; the
     // command shows them and takes the accept (`approve` doesn't list such a card).
     if (summary.confirmOnly) {
       return h('article', { class: 'card held-config confirm-only' }, head,
-        terminalLine(t('hcConfirmOnly'), `vibeswitcher config held ${shellWord(root)}`),
+        terminalLine(t('hcConfirmOnly')),
         h('details', { class: 'hc-details' }, h('summary', null, t('hcShowRules')), heldDetails(card, summary)));
     }
     const details = h('details', { class: 'hc-details' }, h('summary', null, t('hcShowDetails')), heldDetails(card, summary));
@@ -273,11 +276,13 @@ export function projectView(app, { sheet }) {
     const shown = summary.changed.slice(0, 5);
     const more = summary.changed.length - shown.length;
     return h('article', { class: 'card held-config' }, head,
-      h('h3', { class: 'card-question' }, summary.title),
-      summary.line ? h('p', { class: 'hc-line' }, summary.line) : null,
-      // The node's names for what changed: each its own line, the updates past three counted.
-      summary.lines?.length > 1 || summary.moreUpdates ? h('ul', { class: 'hc-things' }, summary.lines.map((line) => h('li', null, line)),
-        summary.moreUpdates ? h('li', { class: 'hc-quiet' }, t('hcMoreUpdates', { n: summary.moreUpdates })) : null) : null,
+      // The title block: the count with the things named under it (each its own line, the updates past three counted),
+      // or a single thing as the title.
+      h('div', { class: 'hc-title' },
+        h('h3', { class: 'card-question' }, summary.title),
+        summary.line ? h('p', { class: 'hc-line' }, summary.line) : null,
+        summary.lines?.length > 1 || summary.moreUpdates ? h('ul', { class: 'hc-things' }, summary.lines.map((line) => h('li', null, line)),
+          summary.moreUpdates ? h('li', { class: 'hc-quiet' }, t('hcMoreUpdates', { n: summary.moreUpdates })) : null) : null),
       h('p', { class: 'card-why' }, summary.holdsEvery || (!summary.holds && card.config?.sharedHome) ? t('hcHoldsAll') : t('hcHolds', { project: summary.holds || lastPart(root) || root })),
       // A first accept records the rules: those set away from their defaults listed, the defaults counted.
       summary.first ? h('div', { class: 'hc-rules' }, h('p', { class: 'hc-rules-label' }, t('hcFirstRules')),

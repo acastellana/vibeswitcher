@@ -25,10 +25,13 @@
 // - Level off: This node's Turn off (set web_acts off); the page reconnects reading and drafting: the line that
 //   turns acting on, the open card drafts, and the banner at the top says this tab no longer acts (turned off).
 // - Reloaded: the tab reloaded says it no longer acts (its pairing was in its memory) and to pair again.
-// - Held config: the long held-config card in four lines before any click, no technical words on its face.
+// - Rules only: a project whose rules changed and nothing else: its title says so.
+// - Held config: the long held-config card in four blocks before any click (rules at five, updates at three), no
+//   technical words on its face.
 // - Two tabs: a second tab opened by hand acts with the first one's pairing, held in memory only.
 // - Can't act yet: acting on again (OUT/trust.want) with no tab paired: one plain banner with the command; a pick is
 //   one line, "Not sent", the terminal's way behind a disclosure.
+// - Settle from the card: the command on each held-config card, run in the scratch terminal with its code, closes it.
 // - Console: no error over the whole run.
 //
 // Usage: node acting-page-check.cjs URL EXPECT-JSON OUT-FOLDER CHROME   (exit 1 on any fail; a table and report.json in OUT)
@@ -138,12 +141,18 @@ async function run() {
       if (!card) return null;
       const details = card.querySelector('.hc-details');
       const face = [...card.children].filter((el) => el !== details && el.tagName !== 'HEADER');
-      const words = face.map((el) => el.innerText).join(' ');
-      // Four lines: the title, what it holds back, the rules that would change (a block of five at most), the buttons
-      // or the terminal's line; the line naming the things and the quiet line beside them.
-      const main = face.filter((el) => !el.classList.contains('hc-line') && !el.classList.contains('hc-quiet'));
-      const why = details?.open ? 'details open' : main.length > 4 ? 'more than four lines: ' + face.map((el) => el.className).join(', ')
-        : card.querySelectorAll('.hc-rail').length > 5 ? 'more than five rules on its face'
+      // The command that settles it names its card by id (a uuid): a command to copy, not words to read.
+      const command = card.querySelector('.hc-terminal .copy-line')?.innerText || '';
+      const all = face.map((el) => el.innerText).join(' ');
+      const words = command ? all.split(command).join(' ') : all;
+      // Four blocks: the title (with the things named under it), what it holds back, the rules that would change, the
+      // action (Accept, or the terminal's line); quiet lines beside them. Every thing that isn't an update is named, so
+      // blocks are counted, not lines; what may be capped is: rules at five, updates at three.
+      const main = face.filter((el) => !el.classList.contains('hc-quiet'));
+      const updatesNamed = [...card.querySelectorAll('.hc-things li')].filter((li) => /looks like .*update|update/i.test(li.innerText) && !li.classList.contains('hc-quiet')).length;
+      const why = details?.open ? 'details open' : main.length > 4 ? 'more than four blocks: ' + face.map((el) => el.className).join(', ')
+        : card.querySelectorAll('.hc-rules .hc-rail').length > 5 ? 'more than five rules on its face'
+        : updatesNamed > 3 ? 'more than three updates named'
         : /snapshot|sealed|vault|[0-9a-f]{12}/i.test(words) ? 'technical words on its face: ' + words.slice(0, 120)
         : !(card.querySelector('.card-acts button') || card.querySelector('.hc-terminal .copy-line')) ? 'neither Accept nor the terminal’s line'
         : null;
@@ -165,6 +174,15 @@ async function run() {
     await page.send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 900, deviceScaleFactor: 1, mobile: false });
     await page.send('Emulation.setEmulatedMedia', { features: [] });
     record('Held config', held && !held.startsWith('FAIL'), held || 'no held-config card in the waiting block');
+
+    // Rules only (a second project whose rules were written after its accept, nothing else changed): the title says the
+    // project's rules changed, never "the agents' config"; the rules that would change under it.
+    await page.go(expect.rulesHref);
+    const rulesOnly = await page.until(`(() => { const card = document.querySelector('.wait-box .card.held-config'); if (!card) return null; const title = card.querySelector('.card-question')?.innerText || ''; return /rules changed/.test(title) && card.querySelectorAll('.hc-rules .hc-rail').length ? title + ' / ' + [...card.querySelectorAll('.hc-rail')].map((el) => el.innerText).join(', ') : 'FAIL ' + title; })()`, WAIT);
+    await page.evaluate(`document.querySelector('.wait-box .card.held-config')?.scrollIntoView({ block: 'center' })`);
+    await page.shot('held-config-rules-only');
+    record('Rules only', rulesOnly && !rulesOnly.startsWith('FAIL'), rulesOnly || 'no card in the second project');
+    await page.go(expect.projectHref);
 
     // Two tabs: a second tab of the same origin, opened by hand (no code, no token), acts too: it asks its sibling over
     // the origin's channel and connects with the pairing it holds.
@@ -310,6 +328,22 @@ async function run() {
     await page.shot('held-config-spanish-dark');
     await page.send('Emulation.setEmulatedMedia', { features: [] });
     record('Can’t act yet', cant && oneLine, !trusted ? 'the test never turned acting on again' : !cant ? 'no banner saying this tab can’t act yet, with the command' : !oneLine ? 'a pick isn’t one line with the terminal behind a disclosure' : cant + '; ' + oneLine);
+
+    // Settle from the card: the command on each held-config card's face (the main project's, then the rules-only one's),
+    // run in the scratch node's terminal with its code (OUT/settle-N.want, answered by OUT/settle-N.done, which says
+    // how many steps it took); the card closes.
+    const settled = [];
+    for (const [index, href] of [[1, expect.projectHref], [2, expect.rulesHref]]) {
+      await page.send('Page.navigate', { url: `${new URL(url).origin}/${href}` });
+      const command = await page.until(`document.querySelector('.wait-box .card.held-config .hc-terminal .copy-text')?.innerText.trim() || null`, WAIT);
+      if (!command) { settled.push(`${index}: no command on the card`); continue; }
+      fs.writeFileSync(path.join(out, `settle-${index}.want`), command);
+      const done = await waitFile(path.join(out, `settle-${index}.done`), 90000);
+      const how = done ? fs.readFileSync(path.join(out, `settle-${index}.done`), 'utf8') : 'never run';
+      const closed = done && await page.until(`!document.querySelector('.wait-box .card.held-config') ? true : null`, WAIT);
+      settled.push(`${index}: ${command} → ${how}${closed ? ', the card closed' : ', the card stayed'}`);
+    }
+    record('Settle from the card', settled.every((line) => line.endsWith('the card closed')), settled.join('; '));
   } catch (error) {
     record('run', false, error.message);
   } finally {

@@ -112,19 +112,32 @@ public final class CardStore: @unchecked Sendable {
 
         public var isOpen: Bool { closed == nil }
 
-        /// The one command that settles this card, for `status`, `approve`'s set-aside lines and the page alike: `vibeswitcher
-        /// approve` when its batch takes it (held config that records no rules; a base move from a recorded or given
-        /// commit), else the card's own accept, which prints the short card and asks one code (`config accept CARD`,
-        /// `base accept CARD`); a question, approval or plugin's card is answered (`answer CARD TEXT`, or one of its
-        /// words). Nil once closed.
+        /// Whether `vibeswitcher approve`'s batch takes it (`ApproveRequest`): held config that records no rules and owes
+        /// no first look; a base move from a recorded or given commit to another. The rest it sets aside, each named with
+        /// its `settle`.
+        public var approveTakes: Bool {
+            guard isOpen else { return false }
+            switch kind {
+            case .configHeld:
+                guard let config else { return false }
+                return (!config.items.isEmpty || config.sharedHome != nil) && config.recordsRules != true && config.firstLook != true
+            case .baseMove:
+                guard let base else { return false }
+                return [.recorded, .given].contains(base.fromIs) && base.from != nil && base.from != base.to
+            default: return false
+            }
+        }
+
+        /// The one command that settles this card in one step, for `status`, `approve`'s set-aside lines and the page alike
+        /// (the held-config card's `config.settle` is this): its own accept, which prints the short card and asks one code
+        /// (`config accept CARD`, `base accept CARD`); a question, approval or plugin's card is answered (`answer CARD
+        /// TEXT`, or one of its words). Nil once closed. (`vibeswitcher approve` settles those its batch takes too:
+        /// `approveTakes`.)
         public var settle: String? {
             guard isOpen else { return nil }
             switch kind {
-            case .configHeld:
-                return config?.recordsRules == true || config?.firstLook == true ? "vibeswitcher config accept \(id)" : "vibeswitcher approve"
-            case .baseMove:
-                guard let base else { return "vibeswitcher base show \(root)" }
-                return [.recorded, .given].contains(base.fromIs) && base.from != nil && base.from != base.to ? "vibeswitcher approve" : "vibeswitcher base accept \(id)"
+            case .configHeld: return "vibeswitcher config accept \(id)"
+            case .baseMove: return "vibeswitcher base accept \(id)"
             case .plugin:
                 let words = plugin?.actions.map(\.word) ?? []
                 return "vibeswitcher answer \(id) " + (words.isEmpty ? "WORD" : words.joined(separator: "|"))

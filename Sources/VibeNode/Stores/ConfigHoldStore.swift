@@ -32,6 +32,8 @@ public enum ConfigHoldStore {
         public var sinceAccept: String?
         /// What it is in plain words (`HeldWhat`): its kind, a short phrase, and where known what it went from and to.
         public var about: HeldWhat.Described?
+        /// A git config's changed keys as data (`ConfigSeal.HeldDetail.keys`), which `HeldWhat` classifies by.
+        public var keys: [ConfigSeal.KeyChange]?
 
         public init(name: String, changedAt: Date? = nil, size: Int? = nil, hash: String = "", change: String? = nil, outside: Bool = false,
                     files: [ConfigSeal.HeldFile] = [], sinceAccept: String? = nil) {
@@ -232,6 +234,7 @@ public enum ConfigHoldStore {
             var item = Item(name: name, changedAt: times[name], size: sizes[name], hash: String((byName[name]?.hash ?? "").prefix(12)), change: changes[name],
                             outside: outside.contains(name), files: details[name]?.files ?? [],
                             sinceAccept: byName[name].flatMap { AcceptedSnapshot.since(key: $0.key, hash: $0.hash, in: snapshot, vouched: vouched.item($0.key)) })
+            item.keys = details[name]?.keys
             item.about = HeldWhat.describe(item, facts: facts)
             return item
         }

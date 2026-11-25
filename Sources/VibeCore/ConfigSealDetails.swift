@@ -48,6 +48,8 @@ extension ConfigSeal {
         public var sessions: [String] = []
         /// False when the host couldn't say which sessions run: `sessions` is then the team's, not the running ones.
         public var sessionsKnown = true
+        /// A git config's changed keys, each with what became of it (`keyChanges`): what the card classifies by.
+        public var keys: [KeyChange]?
 
         public init(files: [HeldFile] = [], more: Int = 0, sessions: [String] = [], sessionsKnown: Bool = true) {
             self.files = files
@@ -62,6 +64,17 @@ extension ConfigSeal {
         static func read(_ text: String) -> HeldDetail? {
             guard !text.isEmpty else { return nil }
             return try? JSONDecoder().decode(HeldDetail.self, from: Data(text.utf8))
+        }
+    }
+
+    /// One key of a watched file that changed (`keyChanges`): its name, and whether it was added, changed or removed.
+    public struct KeyChange: Codable, Equatable, Sendable {
+        public var key: String
+        public var change: HeldFile.Change
+
+        public init(key: String, change: HeldFile.Change) {
+            self.key = key
+            self.change = change
         }
     }
 

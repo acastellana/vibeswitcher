@@ -1778,13 +1778,19 @@ extension LeadVault {
                     changes[key] = files.said
                     times[key] = files.at
                 } else {
-                    changes[key] = ConfigSeal.changedKeys(from: recorded[keys], to: hashes[keys])
+                    // A git config's keys all (the card names each that may run a command, `HeldWhat`); others' first 8.
+                    let all = ConfigSeal.gitConfigNames.contains(ConfigSeal.name(ofKey: key))
+                    changes[key] = ConfigSeal.changedKeys(from: recorded[keys], to: hashes[keys], shown: all ? Int.max : 8)
                 }
                 // Held as it was: what was seen then stays what the card says (which sessions ran then).
                 details[key] = before[key]?.hash == holding[key] ? before[key]?.detail : nil
                 if details[key] == nil {
                     details[key] = ConfigSeal.heldDetail(name: ConfigSeal.name(ofKey: key), from: folder ? recorded[keys] : nil, to: folder ? hashes[keys] : nil,
                                                          sessions: sessions, known: sessionsKnown)
+                    // A git config's changed keys as data: the card classifies by them, never by the joined words.
+                    if !folder, ConfigSeal.gitConfigNames.contains(ConfigSeal.name(ofKey: key)) {
+                        details[key]?.keys = ConfigSeal.keyChanges(from: recorded[keys], to: hashes[keys])
+                    }
                 }
             }
             seal(sealed.keys, from: hashes, into: &recorded)

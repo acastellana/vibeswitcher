@@ -983,8 +983,8 @@ public final class Requests: @unchecked Sendable {
     /// Open cards counted by kind, as `status` gives them.
     static func counts(_ counts: [CardStore.Kind: Int], open: [CardStore.Card] = []) -> WireKinds.Status.CardCounts {
         // What `vibeswitcher approve` sets aside: held config and base moves whose settling command (`settle`) is their own.
-        let own = open.filter { [.configHeld, .baseMove].contains($0.kind) }.compactMap { card -> WireKinds.Status.CardCounts.Own? in
-            guard let settle = card.settle, settle != "vibeswitcher approve" else { return nil }
+        let own = open.filter { [.configHeld, .baseMove].contains($0.kind) && !$0.approveTakes }.compactMap { card -> WireKinds.Status.CardCounts.Own? in
+            guard let settle = card.settle else { return nil }
             return .init(folder: card.root, kind: card.kind == .configHeld ? "config" : "base", settle: settle)
         }.sorted { ($0.folder, $0.settle) < ($1.folder, $1.settle) }
         return .init(questions: counts[.question] ?? 0, approvals: counts[.approval] ?? 0, config: counts[.configHeld] ?? 0, base: counts[.baseMove] ?? 0,

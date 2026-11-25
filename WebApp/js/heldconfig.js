@@ -107,7 +107,8 @@ export function heldSummary(config = {}) {
   const nodeReads = rails.some((rail) => 'changed' in rail);
   const unknown = nodeReads ? 0 : rails.filter((rail) => rail.state === 'unknown').length;
   const items = config.items || [];
-  const { title, line } = heldTitle(items);
+  // Nothing held but rules that would change: the title says the rules changed, not "the agents' config".
+  const { title, line } = !items.length && changed.length ? { title: t('hcRulesOnly'), line: null } : heldTitle(items);
   // With the node's kinds, the lines it names; without, the one line naming three.
   const kinds = items.some((item) => item.kind);
   const named = kinds ? itemLines(items) : null;

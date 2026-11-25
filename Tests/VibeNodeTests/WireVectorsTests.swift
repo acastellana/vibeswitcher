@@ -391,6 +391,10 @@ enum Samples {
         bareConfig.config = .init()
         // Nothing held and no sealed last accept: the node restarted, the project's rules confirmed once.
         bareConfig.config?.firstLook = true
+        // Closed (shown, not kept): no command settles it.
+        var closedConfig = CardStore.Card(id: "local:card:00000000-0000-4000-8000-000000000099", root: root, kind: .configHeld, at: at)
+        closedConfig.config = .init()
+        closedConfig.closed = "nothing to accept"
 
         var base = CardStore.Card(id: "local:card:00000000-0000-4000-8000-000000000008", root: root, kind: .baseMove, at: at)
         base.base = .init(branch: "main", from: "1111111", fromIs: .recorded, to: "2222222", commits: [.init(sha: "2222222", subject: "Move")],
@@ -430,7 +434,7 @@ enum Samples {
                                           facts: [], body: .init(name: "command", label: "running", text: "true"), expiresAt: nil,
                                           actions: [run], state: PluginCard.withdrawnState, outcome: "Withdrawn")
         settledPlugin.closed = "withdrawn"
-        return [asked, timed, plain, approval, vouchless, config, bareConfig, base, bareBase, shell, startedShell, failedShell, plugin, settledPlugin]
+        return [asked, timed, plain, approval, vouchless, config, bareConfig, closedConfig, base, bareBase, shell, startedShell, failedShell, plugin, settledPlugin]
     }
 
     static var leads: [LeadStore.Lead] {

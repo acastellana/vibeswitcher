@@ -128,11 +128,11 @@ extension Requests {
                         let something = !shown.items.isEmpty || shown.sharedHome != nil
                         // Of the card actually drawn: what its accept would record besides its seals (as `accept` would).
                         engine.reads.async({ _ in try? ConfigHoldStore.wouldRecord(shown, root: root, vault: vault) }) { pending in
-                            if something, settle == "vibeswitcher approve", pending?.isEmpty == true {
+                            if something, kept.approveTakes, pending?.isEmpty == true {
                                 items.append(ApproveItem(kind: "config.accept", args: ["card": .string(id), "batch": .bool(true)], subject: root, card: card))
                             } else {
                                 own.append(ApproveOwn(text: "held config in \(root), with rules to record (a first accept, or workflow.md changed them)",
-                                                      command: settle == "vibeswitcher approve" ? "vibeswitcher config accept \(id)" : settle))
+                                                      command: settle))
                             }
                             configs(Array(left.dropFirst()), then: then)
                         }

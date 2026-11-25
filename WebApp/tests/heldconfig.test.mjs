@@ -106,3 +106,7 @@ test('an unknown rule this accept would record stays on the card with its value;
   assert.deepEqual(card.changed.map((rail) => [rail.key, rail.value, rail.state]), [['auto_advance', 'false', 'records']]);
   assert.equal(card.unknown, 0, 'the held ones not even counted');
 });
+
+test('nothing held but rules that would change: the title says the project’s rules changed', () => {
+  assert.equal(heldSummary({ items: [], guarded: [{ key: 'audit_finders', value: '2', changed: 'changed', old: '1' }] }).title, 'This project’s rules changed');
+});

@@ -57,7 +57,12 @@ struct CardSettleTests {
         try #"{"env":{"SETTLE":"1"}}"#.write(to: repo.appendingPathComponent(".claude/settings.json"), atomically: true, encoding: .utf8)
         _ = try await node.run(["config", "held", root])
         let held = try await card(node) { $0["kind"] as? String == "config" && $0["root"] as? String == root }
-        #expect(held["settle"] as? String == "vibeswitcher approve" && held["blocking"] as? Bool == true, "\(held)")
+        // Its own one step (`config accept CARD`), though approve takes it too.
+        let heldID = try #require(held["id"] as? String)
+        #expect(held["settle"] as? String == "vibeswitcher config accept \(heldID)" && held["blocking"] as? Bool == true, "\(held)")
+        #expect((held["config"] as? [String: Any])?["settle"] as? String == held["settle"] as? String, "one source: \(held)")
+        let batched = try await node.run(["status"])
+        #expect(batched.output.contains("1 to accept: `vibeswitcher approve`"), "approve takes it: \(batched.output)")
         try await settles(node, held)
 
         // A rule changed in workflow.md (start_worker and merge refuse on it), nothing held: its own accept, blocking.
@@ -82,7 +87,7 @@ struct CardSettleTests {
         _ = Git.run(["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "moved outside a team session"], in: root)
         _ = try await node.run(["base", "show", root])
         let base = try await card(node) { $0["kind"] as? String == "base" && $0["root"] as? String == root }
-        #expect(base["settle"] as? String == "vibeswitcher approve", "\(base)")
+        #expect(base["settle"] as? String == "vibeswitcher base accept \(try #require(base["id"] as? String))", "\(base)")
         try await settles(node, base)
 
         // A question and an approval: answered.
@@ -107,7 +112,10 @@ struct CardSettleTests {
         #expect(card.isBlocking, "a changed rule or a first look owed")
         card.config?.holdsWork = false
         card.config?.recordsRules = true
-        #expect(!card.isBlocking && card.settle == "vibeswitcher config accept \(card.id)")
+        #expect(!card.isBlocking && card.settle == "vibeswitcher config accept \(card.id)" && !card.approveTakes)
+        card.config?.recordsRules = nil
+        card.config?.items = [.init(name: "~/.claude/skills", hash: "abc")]
+        #expect(card.approveTakes, "held, no rules to record: approve's batch takes it")
         card.closed = "accepted"
         #expect(card.settle == nil)
     }
