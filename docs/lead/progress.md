@@ -4603,3 +4603,5 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-25 21:44 Started a worker on re-check-v2-s
 - 2026-11-25 21:56 Planned v2-every-step-that: v2: every step that sends the user to a terminal, listed with what replaces it by a click (a doc branch for v2, in a clone)
 - 2026-11-25 21:57 Started a worker on v2-every-step-that
+- 2026-11-25 22:09 Planned v2-s-page-against: v2's page against a top-tier app's bar: a design review of the chat and every other section, with a design system audit and ranked changes (report only, in a clone)
+- 2026-11-25 22:11 Kept re-check-v2-s unmerged: Report only, delivered: verdict 'not yet' (I1 a flag in a value slot gets past the checked start's argument check; I2 the keeper proves nothing about its parent). Its worktree holds the re-check copy and probes (ReCheckTests.swift) that the next fix round's check uses. Nothing merges; clean up once v2-mac-checked-start is delivered.
