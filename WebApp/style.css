@@ -1265,3 +1265,81 @@ kbd { padding: 1px 6px; border-radius: 5px; box-shadow: inset 0 0 0 1px var(--li
 .mine.refused { opacity: 0.6; }
 .acts-line { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 10px; color: var(--ink-2); }
 .acts-line.compact { margin-top: 4px; color: var(--working); font-size: var(--small); font-weight: 500; }
+
+/* ---- Two columns inside the centre: Your own sessions, This node, Settings (views/twocol.js) ----
+   A narrow list (its title and buttons, a search box, the rows under their headings, links at its foot) and the chosen
+   row's detail beside it, their headers one row. Under 760 px one column: the list, or the detail with a way back. */
+.twocol { flex: 1; display: grid; grid-template-columns: minmax(232px, 272px) minmax(0, 1fr); min-width: 0; min-height: 0; }
+.tc-list { display: flex; flex-direction: column; min-width: 0; min-height: 0; border-right: 1px solid var(--line); }
+.tc-head { flex: none; display: flex; align-items: center; gap: 4px; min-height: var(--head); padding: 8px 10px 8px 16px; border-bottom: 1px solid var(--line); }
+.tc-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--large); font-weight: 700; }
+.tc-head .icon-button[aria-current] { background: var(--fill-2); color: var(--ink); }
+.tc-find { flex: none; display: flex; align-items: center; gap: 7px; margin: 10px 10px 4px; padding: 0 8px 0 9px; border-radius: 8px; background: var(--fill); color: var(--ink-3); transition: box-shadow 0.12s; }
+.tc-find:focus-within { box-shadow: inset 0 0 0 2px var(--accent); }
+.tc-search { flex: 1; min-width: 0; padding: 6px 0; border: 0; background: none; color: var(--ink); outline: none; }
+.tc-search::placeholder { color: var(--ink-3); text-overflow: ellipsis; }
+.tc-search:focus-visible { outline: none; }
+.tc-find:focus-within .tc-key, .tc-find:has(.tc-search:not(:placeholder-shown)) .tc-key { display: none; }
+.tc-key { flex: none; padding: 0 5px; font-size: 10.5px; line-height: 16px; }
+.tc-rows { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 1px; padding: 4px 8px 12px; overscroll-behavior: contain; }
+.tc-group { margin: 12px 8px 4px; color: var(--ink-3); font-size: var(--small); font-weight: 600; }
+.tc-group:first-child { margin-top: 6px; }
+.tc-row { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 9px; min-height: 34px; padding: 6px 8px; border-radius: 8px; color: var(--ink); --ring: var(--bg); }
+.tc-row:hover { background: var(--fill); --ring: var(--fill); }
+.tc-row[aria-current] { background: var(--accent-fill); --ring: var(--accent-fill); }
+.tc-row:focus-visible { outline-offset: -2px; border-radius: 8px; }
+.tc-mark { display: inline-flex; line-height: 0; }
+.tc-mark[hidden] + .tc-words { grid-column: 1 / 3; }
+.tc-words { display: grid; min-width: 0; }
+.tc-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
+.tc-row[aria-current] .tc-name { font-weight: 600; }
+.tc-sub { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-2); font-size: var(--small); }
+.tc-sub.tone-text-needs-you { color: var(--asked); font-weight: 500; }
+.tc-meta { flex: none; justify-self: end; padding: 0 6px; border-radius: 8px; color: var(--ink-3); font-size: var(--small); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.tc-meta.tone-text-asked { background: color-mix(in srgb, var(--asked) 12%, transparent); color: var(--asked); }
+.tc-meta.tone-text-working { color: var(--working); font-weight: 600; }
+.tc-meta.tone-text-mono { font-family: var(--mono); font-size: 11px; }
+.tc-row.asked .tc-name { color: var(--asked); }
+.tc-row.dim .tc-name { color: var(--ink-2); font-weight: 400; }
+.tc-none { margin: 10px 16px; color: var(--ink-2); font-size: var(--small); line-height: 1.45; }
+.tc-foot { flex: none; padding: 10px 16px calc(12px + env(safe-area-inset-bottom)); border-top: 1px solid var(--line); }
+.tc-links { display: flex; flex-wrap: wrap; gap: 4px 14px; }
+.tc-note { color: var(--ink-3); font-size: var(--small); line-height: 1.45; }
+.tc-detail { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.tc-page { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+.tc-dhead { flex: none; display: flex; align-items: center; gap: 10px; min-height: var(--head); padding: 8px 28px; border-bottom: 1px solid var(--line); }
+.tc-back { display: none; margin-left: -8px; }
+.tc-dwords { display: flex; align-items: baseline; gap: 10px; min-width: 0; }
+.tc-dtitle { flex: none; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--large); font-weight: 600; }
+.tc-dsub { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-3); font-size: var(--small); }
+.tc-dbody { flex: 1; min-height: 0; overflow-y: auto; padding: 20px 28px 48px; }
+.tc-dbody > * { max-width: 720px; }
+/* The detail's head names the group: the group's own title under it would say it twice. */
+.tc-dbody > .node-group > .section-title:first-child { display: none; }
+.tc-dbody > .node-group { margin-bottom: 0; }
+.tc-dbody > .node-group + .setting-section, .tc-dbody > .node-group + .node-group { margin-top: 28px; }
+.tc-dbody .setting:first-child { border-top: 0; padding-top: 0; }
+.tc-empty { padding: 32px 0; color: var(--ink-2); }
+.tc-lede { margin-bottom: 4px; color: var(--ink-2); }
+.tc-start { margin: 0; padding: 0; }
+.tc-start .new-session { margin-top: 14px; }
+mark.found { padding: 0 1px; border-radius: 3px; background: light-dark(rgb(255 214 0 / 0.5), rgb(255 200 0 / 0.32)); color: inherit; }
+/* A team's session (a lead's, a worker's): alone, as before, without Your own sessions' list. */
+.twocol.alone { grid-template-columns: minmax(0, 1fr); }
+.twocol.alone > .tc-list { display: none; }
+@media (max-width: 760px) {
+  .twocol { grid-template-columns: minmax(0, 1fr); }
+  .twocol[data-pane="list"] > .tc-detail, .twocol[data-pane="detail"] > .tc-list { display: none; }
+  .tc-list { border-right: 0; }
+  .tc-head { padding: calc(8px + env(safe-area-inset-top)) 8px 8px 12px; gap: 6px; }
+  .tc-head .phone-only { margin-right: 2px; }
+  .tc-find { margin: 10px 12px 4px; }
+  .tc-find .tc-key { display: none; }
+  .tc-search { padding: 8px 0; }
+  .tc-rows { padding: 4px 6px 16px; }
+  .tc-row { min-height: 44px; }
+  .tc-back { display: inline-flex; }
+  .tc-dhead { padding: calc(8px + env(safe-area-inset-top)) 12px 8px; }
+  .tc-dwords { flex-direction: column; gap: 0; }
+  .tc-dbody { padding: 16px 14px 40px; }
+}

@@ -23,6 +23,7 @@ import { settingsView, settingsHref } from './js/views/settings.js';
 import { statsView, statsHref } from './js/views/stats.js';
 import { mailView, mailHref } from './js/views/mail.js';
 import { palette } from './js/views/palette.js';
+import { wantsSearch } from './js/views/twocol.js';
 import { notifications } from './js/notify.js';
 import { recentFolders, newEntries, endable, leadFolders } from './js/actions.js';
 import { briefFoot, speech, speak } from './js/brief.js';
@@ -119,7 +120,8 @@ const left = leftColumn(app, { brief });
 const project = projectView(app, { sheet });
 const right = rightColumn(app);
 const session = sessionView(app);
-const own = ownSessionsView(app);
+// Your own sessions holds the session view in its detail column (beside its list, or alone for a team's session).
+const own = ownSessionsView(app, { session });
 const newProject = newProjectView(app);
 const node = nodeView(app);
 const settings = settingsView(app);
@@ -221,7 +223,7 @@ document.addEventListener('focusin', () => requestAnimationFrame(unscroll));
 const waitingWords = h('h1', { class: 'big' });
 const waitingSub = h('p');
 const waiting = h('section', { class: 'centre screen status-screen', hidden: true }, h('div', { class: 'empty-state' }, waitingWords, waitingSub));
-const centre = h('main', { class: 'centre-wrap' }, tabBanner, passkeyOffer, project.el, own.el, newProject.el, session.el, node.el, settings.el, stats.el, mail.el, waiting);
+const centre = h('main', { class: 'centre-wrap' }, tabBanner, passkeyOffer, project.el, own.el, newProject.el, node.el, settings.el, stats.el, mail.el, waiting);
 const root = document.getElementById('app');
 const commandPalette = palette(app);
 const scrim = h('div', { class: 'drawer-scrim', onclick: () => app.drawer(null) });
@@ -248,8 +250,8 @@ function route() {
   root.dataset.route = name;
   const connection = store.state.connection;
   const blank = name === 'home';
-  const shown = { project: project.el, sessions: own.el, new: newProject.el, session: session.el, node: node.el, settings: settings.el, stats: stats.el, mail: mail.el };
-  for (const [key, el] of Object.entries(shown)) el.hidden = key !== name;
+  const shown = { project: project.el, sessions: own.el, new: newProject.el, session: own.el, node: node.el, settings: settings.el, stats: stats.el, mail: mail.el };
+  for (const el of new Set(Object.values(shown))) el.hidden = el !== shown[name];
   waiting.hidden = !blank;
   if (blank) {
     const off = connection === 'unpaired' || connection === 'revoked';
@@ -265,7 +267,9 @@ function route() {
   if (!(name === 'project' && r.sheet)) sheet.close();
   left.render();
   if (name === 'project') { project.render(); right.render(); }
-  if (name === 'sessions') own.render();
+  if (name === 'sessions' || name === 'session') own.render();
+  // A session beside the list leaves the inspector less room: a column only on a wider window (ui.js).
+  ui.setBesideList(name === 'session' && !own.alone());
   if (name === 'new') newProject.render();
   const lead = name === 'project' ? store.state.leads.get(r.id) || store.state.boards.get(r.id) : null;
   const one = store.state.sessions.get(r.id);
@@ -277,11 +281,14 @@ function route() {
 ui.subscribe((what) => { if (what === 'route') route(); });
 for (const topic of ['sessions', 'leads', 'boards', 'cards', 'connection', 'node']) store.subscribe(topic, () => { if (ui.state.route.name === 'home' || (ui.state.route.name === 'project' && !root.classList.contains('with-right') && ui.state.route.view === 'lead')) route(); else left.render(); });
 store.subscribe('sessions', () => { if (ui.state.route.name === 'session') route(); });
+// The screens with a list and a search box: `/` focuses it (views/twocol.js).
+const searchable = () => ({ sessions: own, session: own.alone() ? null : own, node, settings })[ui.state.route.name] || null;
 route();
 
-// On a phone, a screen's back arrow opens the left column, where every place is.
+// On a phone, a screen's back arrow opens the left column, where every place is; but for a session beside Your own
+// sessions' list, whose back is to that list.
 root.addEventListener('click', (event) => {
-  if (narrow.matches && event.target.closest?.('.head .back')) { event.preventDefault(); app.drawer('left'); }
+  if (narrow.matches && event.target.closest?.('.head .back') && !event.target.closest?.('.twocol:not(.alone)')) { event.preventDefault(); app.drawer('left'); }
 });
 
 // Said only while it's true: nothing marks a working connection.
@@ -391,7 +398,7 @@ function commands() {
     // The node's settings, and each lead's project's (views/settings.js).
     { title: t('apSettings'), about: t('apLimitsBoostTheWorkingPolicy'), icon: 'settings', run: () => ui.go(settingsHref(null)) },
     // This browser's terminal look (Settings › Terminal, views/termlook.js): the Mac's Appearance.
-    { title: t('apTerminalLook'), about: t('apThemeFontSizeCursorAnd'), icon: 'terminal', run: () => ui.go(settingsHref(null)) },
+    { title: t('apTerminalLook'), about: t('apThemeFontSizeCursorAnd'), icon: 'terminal', run: () => ui.go(settingsHref(null, 'terminal')) },
     // The Mac's Statistics window (views/stats.js).
     ...(store.can('stats') ? [{ title: t('apStatistics'), about: t('apLoadUsageMergesQualityAnd'), icon: 'node', run: () => ui.go(statsHref('week')) }] : []),
     // What the projects' leads told each other (views/mail.js).
@@ -434,6 +441,9 @@ addEventListener('keydown', (event) => {
   } else if ((mod || event.altKey) && !event.shiftKey && event.code === 'KeyJ') {
     event.preventDefault();
     nextNeedingYou();
+  } else if (wantsSearch(event) && searchable()) {
+    event.preventDefault();
+    searchable().focusSearch();
   } else if (event.key === 'Escape' && root.dataset.drawer) {
     app.drawer(null);
   }

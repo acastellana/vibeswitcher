@@ -35,7 +35,20 @@ function fakeApp({ route = { name: 'node' }, state = {}, kinds = null, acts = tr
   const listeners = [];
   const ui = { state: { route }, subscribe(fn) { listeners.push(fn); }, go() {} };
   const leave = () => { ui.state.route = { name: 'home' }; for (const fn of listeners) fn('route'); };
-  return { store, sent, ui, leave };
+  return { store, sent, ui, leave, listeners };
+}
+
+// This node shows one group at a time beside its list (views/node.js): the text of every group, each chosen in turn.
+function everyGroup(nodeView, app) {
+  const view = nodeView(app);
+  const keys = findAll(view.columns.rows, byClass('tc-row')).map((row) => row.dataset.key);
+  let text = '';
+  for (const group of keys) {
+    app.ui.state.route = { name: 'node', group };
+    for (const fn of app.listeners) fn('route');
+    text += view.columns.detail.textContent;
+  }
+  return text;
 }
 
 test('This node: a request it took as yours says how long ago as the other rows do, never an element’s name', async () => {
@@ -44,7 +57,7 @@ test('This node: a request it took as yours says how long ago as the other rows 
   const node = nodeValue();
   node.accepted = [{ kind: 'lead', action: 'b7e0c2d4-5a61-4f38-9c0b-1e2d3f4a5b6c', at: new Date(Date.now() - 90 * 60000).toISOString(), pid: 51022, cgroup: '/init.scope',
     commandLine: ['vibeswitcher', 'lead', '/home/dev/projects/example-site'] }];
-  const app = fakeApp({ state: { node } });
+  const app = fakeApp({ route: { name: 'node', group: 'accepted' }, state: { node } });
   const text = nodeView(app).el.textContent;
   assert.doesNotMatch(text, /\[object /);
   assert.match(text, /vibeswitcher lead \/home\/dev\/projects\/example-site · 1h 30m ago · \/init\.scope/);
@@ -175,7 +188,7 @@ test('in Spanish the page’s own words are Spanish, its dates the page’s lang
   node.usage.limits.push({ name: 'seven_day', label: 'the weekly limit', model: null, usedPercent: 84, reached: false, resetsAt: '2026-11-27T14:54:08.000Z', holds: true, text: 'the weekly limit (every model): 84% used' },
     { name: 'five_hour', label: 'the 5-hour limit', model: null, usedPercent: 31, reached: false, resetsAt: '2026-11-25T13:54:00.000Z', holds: false, text: 'the 5-hour limit (every model): 31% used' });
   node.web = { state: 'listening', port: 8765, tokens: 1, connections: 1, acts: { on: true, level: 'trust', since: '2026-11-25T13:54:00.000Z', pages: 1, keys: [{ id: 'k1', added: '2026-11-25T13:54:00.000Z', lastUsed: null }] } };
-  const text = nodeView(fakeApp({ state: { node } })).el.textContent;
+  const text = everyGroup(nodeView, fakeApp({ state: { node } }));
   for (const english of ['The weekly limit', 'The 5-hour limit', '(every model)', 'on in Settings', 'ModoOn', 'Modoon', ' AM', ' PM', '11/27/2026', 'Nov ']) {
     assert.ok(!text.includes(english), `${english} in: ${text}`);
   }
@@ -251,7 +264,7 @@ test('Stop the node is a plain button in the danger colour, never the primary bl
   setLanguage('en');
   const { nodeView } = await import('../js/views/node.js');
   const timers = [];
-  const app = fakeApp({ kinds: ['stop'], state: { node: nodeValue() } });
+  const app = fakeApp({ route: { name: 'node', group: 'stop' }, kinds: ['stop'], state: { node: nodeValue() } });
   app.later = (fn) => { timers.push(fn); return () => {}; };
   const el = nodeView(app).el;
   const stop = find(el, (node) => node.tag === 'button' && node.textContent === 'Stop the node');
@@ -291,7 +304,9 @@ test('the smaller ones: New project’s Where fits its box with its hint below, 
   const { settingsView } = await import('../js/views/settings.js');
   const app = fakeApp({ route: { name: 'settings' }, reply: () => ({ ok: true, result: { node: { root: '/home/u/.vibeswitcher', settings: [] }, project: null, leftOut: [], usage: null } }) });
   const view = settingsView(app);
-  const search = find(view.el, byClass('setting-search'));
+  // The node's settings answered (each section of the list is the node's, or this browser's terminal).
+  await new Promise((resolve) => setImmediate(resolve));
+  const search = find(view.el, byClass('tc-search'));
   assert.ok(view.el.shownText.includes('Terminal'), 'the terminal section, before a search');
   search.value = 'no such setting';
   search.dispatch('input');

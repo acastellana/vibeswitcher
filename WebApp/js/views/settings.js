@@ -13,14 +13,24 @@ import { terminalLookSection } from './termlook.js';
 import { settingSections, setLine, draftProblem, shownValue, settingMatches } from '../settings.js';
 import { t } from '../i18n.js';
 import { actsFor, doButton, pageMaySet } from '../acting.js';
+import { twoColumns, marked, queryWords } from './twocol.js';
 
 // How often the open page reads the settings again (a `set` from a terminal shows by then).
 const REFRESH = 15000;
 
-export const settingsHref = (project) => '#/settings' + (project ? '/' + encodeURIComponent(project) : '');
+// `#/settings`, a project's (`#/settings/<project>`, its first section), a section of the node's or a project's
+// (`#/settings/node/<section>`, `#/settings/<project>/<section>`), and this browser's terminal (`#/settings/terminal`).
+export function settingsHref(project, section = null) {
+  if (section === 'terminal' && !project) return '#/settings/terminal';
+  const scope = project ? '/' + encodeURIComponent(project) : section ? '/node' : '';
+  return '#/settings' + scope + (section ? '/' + encodeURIComponent(section) : '');
+}
+// A section's part of the address: its title, lower-cased, a dash for anything not a letter or a digit.
+export const sectionSlug = (title) => String(title || '').toLowerCase().normalize('NFKD').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'section';
 
 // One setting's row: its title and value, what it does, where it lives; Change opens its field and the drafted line.
-function settingRow(setting, { folder, home, editing, toggle, app = null }) {
+// With `words` (a search's), each one is marked where it is found: in the title, what it does, or its key.
+function settingRow(setting, { folder, home, editing, toggle, app = null, words = [] }) {
   const drafted = editing.get(setting.key);
   const value = h('code', { class: 'setting-value', title: setting.value }, shownValue(setting) || t('svEmpty'));
   const marks = [
@@ -35,9 +45,9 @@ function settingRow(setting, { folder, home, editing, toggle, app = null }) {
   if (setting.limits) where.push(setting.limits);
   return h('div', { class: 'setting', data: { key: setting.key } },
     h('div', { class: 'setting-head' },
-      h('span', { class: 'setting-title' }, setting.title), marks, h('span', { class: 'setting-spacer' }), value, change),
-    h('p', { class: 'setting-about' }, setting.about),
-    h('p', { class: 'setting-where' }, where.join(' · ')),
+      h('span', { class: 'setting-title' }, marked(setting.title, words)), marks, h('span', { class: 'setting-spacer' }), value, change),
+    h('p', { class: 'setting-about' }, marked(setting.about, words)),
+    h('p', { class: 'setting-where' }, words.some((word) => String(setting.key).toLowerCase().includes(word)) ? [h('code', null, marked(setting.key, words)), ' · '] : null, where.join(' · ')),
     setting.note ? h('p', { class: 'setting-note' }, icon('warning', 12), setting.note) : null,
     drafted != null ? editor(setting, folder, editing, app) : null);
 }
@@ -90,133 +100,169 @@ export function editor(setting, folder, editing, app = null) {
       : t('svRunItInATerminal2')));
 }
 
+
+// The settings' sections, as the list shows them: the node's, then each project's (its folder's name), then this
+// browser's terminal, each with how many settings it holds; with a search, only the sections holding a match, with
+// how many match. Each: { key, href, title, group, settings, matches, scope, project, folder, kind }.
+export function settingsList(results, query, { projects = [], leftOut = [] } = {}) {
+  const words = queryWords(query);
+  const items = [];
+  const add = (group, scope, project, folder, settings) => {
+    for (const section of settingSections(settings)) {
+      const slug = sectionSlug(section.title);
+      const matches = section.settings.filter((setting) => settingMatches(setting, query));
+      if (words.length && !matches.length) continue;
+      items.push({ key: `${scope}/${slug}`, href: settingsHref(project, slug), title: section.title, group, scope, project, folder, kind: 'settings',
+        settings: section.settings, matches, meta: String(words.length ? matches.length : section.settings.length) });
+    }
+  };
+  if (results?.node) {
+    add(t('svThisNodeEveryProject'), 'node', null, null, results.node.settings);
+    if (!words.length && leftOut.length) {
+      items.push({ key: 'node/not-on-a-node', href: settingsHref(null, 'not-on-a-node'), title: t('svNotOnANode'), group: t('svThisNodeEveryProject'), scope: 'node', kind: 'left-out', meta: String(leftOut.length), tone: 'dim' });
+    }
+  }
+  for (const one of projects) {
+    if (one.result?.settings) add(t('svProjectGroup', { name: lastPart(one.result.root || one.root) }), one.project, one.project, one.result.root || one.root, one.result.settings);
+  }
+  // This browser's own, not among what the search looks through (none of its words are settings').
+  if (!words.length) items.push({ key: 'terminal', href: settingsHref(null, 'terminal'), title: t('svTerminal'), group: t('svThisBrowser'), scope: 'terminal', kind: 'terminal' });
+  return items;
+}
+
+// Which section the detail shows: the one the address names when it is listed, else (an address naming none, or one
+// the search left out) the first of the project the address names, else the first listed.
+export function chosenSection(items, route) {
+  const scope = route.id || (route.section === 'terminal' ? 'terminal' : 'node');
+  const key = route.section === 'terminal' ? 'terminal' : route.section ? `${scope}/${route.section}` : null;
+  return items.find((item) => item.key === key) || (route.id ? items.find((item) => item.scope === route.id) : null) || items[0] || null;
+}
+
 export function settingsView(app) {
   const { store, ui } = app;
-  const picker = h('select', { class: 'setting-picker', 'aria-label': t('svWhoseSettings'), onchange: (event) => ui.go(settingsHref(event.target.value)) });
-  // The app's search: the settings whose words hold every word typed.
-  let query = '';
-  const search = h('input', { class: 'setting-search', type: 'search', placeholder: t('svSearchSettings'), 'aria-label': t('svSearchSettings'),
-    spellcheck: 'false', autocomplete: 'off', oninput: (event) => { query = event.target.value; lookColumn.hidden = !!query.trim(); drawn = ''; render(true); } });
-  const body = h('div', { class: 'node-column settings-column' });
-  // This browser's own: the terminal's look (views/termlook.js), drawn apart from the node's settings.
+  const columns = twoColumns(app, { label: t('svSettings'), title: t('svSettings'), searchLabel: t('svSearchSettings'), listHref: '#/settings',
+    foot: h('p', { class: 'tc-note' }, t('svWhatTheLeadsAndTheir')) });
+  columns.onSearch(() => { drawn = ''; render(true); });
+  // This browser's own: the terminal's look (views/termlook.js).
   const terminalLook = terminalLookSection();
-  // Hidden while a search is typed: it isn't among what the search looks through.
-  const lookColumn = h('div', { class: 'node-column settings-column' }, terminalLook.el);
-  const el = h('section', { class: 'node settings', 'aria-label': t('svSettings') },
-    h('header', { class: 'head' },
-      h('a', { class: 'back icon-button', href: '#/node', 'aria-label': t('svThisNode') }, icon('back', 16)),
-      h('div', { class: 'head-text' }, h('div', { class: 'head-line' }, h('h1', { class: 'head-title' }, t('svSettings')), picker))),
-    h('div', { class: 'pane node-pane' }, search, body, lookColumn));
-  // Per key: the value being drafted (its field open). Kept while the page reads the settings again.
+  // Per section's scope (the node's, each project's) and key: the value being drafted (its field open). Kept while the
+  // page reads the settings again.
   const editing = new Map();
+  const editingOf = (scope) => { if (!editing.has(scope)) editing.set(scope, new Map()); return editing.get(scope); };
   let result = null;
   let failed = null;
-  let shownFor = undefined;
+  // Each project's settings, by its id: { project, root, result, asked }.
+  const projects = new Map();
   let drawn = '';
   let asking = 0;
-  let askedFolder = undefined;
   let timer = null;
 
-  const project = () => (ui.state.route.name === 'settings' ? ui.state.route.id || null : null);
   const leads = () => [...store.state.leads.values()].filter((lead) => lead.root).sort((a, b) => lastPart(a.root).localeCompare(lastPart(b.root)));
-  const folderOf = (id) => (id ? store.state.leads.get(id)?.root || store.state.boards.get(id)?.root || null : null);
 
+  // The node's settings (asked without a folder) and each project's (asked with its folder), all again at each look.
   function load() {
-    const id = project();
-    const folder = folderOf(id);
-    askedFolder = folder;
     const mine = ++asking;
-    store.request('settings', folder ? { folder } : {}).then((reply) => {
+    store.request('settings', {}).then((reply) => {
       if (mine !== asking) return;
       if (reply.ok) { result = reply.result; failed = null; } else {
-        failed = reply.error?.code === 'unknown-kind'
-          ? t('svThisNodeHasNoSettings')
-          : reply.error?.message || t('svTheNodeCouldnTRead');
+        failed = reply.error?.code === 'unknown-kind' ? t('svThisNodeHasNoSettings') : reply.error?.message || t('svTheNodeCouldnTRead');
       }
       render();
     });
+    for (const lead of leads()) {
+      const known = projects.get(lead.project);
+      if (!known || known.root !== lead.root) projects.set(lead.project, { project: lead.project, root: lead.root, result: null });
+      store.request('settings', { folder: lead.root }).then((reply) => {
+        if (mine !== asking) return;
+        const one = projects.get(lead.project);
+        if (one && reply.ok && reply.result.project) { one.result = reply.result.project; render(); }
+      });
+    }
+    for (const id of [...projects.keys()]) if (!store.state.leads.get(id)?.root) projects.delete(id);
   }
 
-  function toggle(setting) {
-    if (editing.has(setting.key)) editing.delete(setting.key);
-    else editing.set(setting.key, setting.value);
+  function toggle(scope, setting) {
+    const mine = editingOf(scope);
+    if (mine.has(setting.key)) mine.delete(setting.key);
+    else mine.set(setting.key, setting.value);
     drawn = '';
     render();
   }
 
-  function group(title, all, folder, home) {
-    const settings = all.filter((setting) => settingMatches(setting, query));
-    if (query && settings.length === 0) return null;
-    return h('section', { class: 'node-group' }, h('h2', { class: 'section-title' }, title),
-      settingSections(settings).map((section) => h('div', { class: 'setting-section' },
-        h('h3', { class: 'setting-section-title' }, section.title),
-        section.settings.map((setting) => settingRow(setting, { folder, home, editing, toggle, app })))));
+  function sectionBody(item, words) {
+    const home = store.state.node?.home;
+    if (item.kind === 'terminal') return [terminalLook.el];
+    if (item.kind === 'left-out') return [h('ul', { class: 'lines' }, (result.leftOut || []).map((one) => h('li', null, `${one.title}: ${one.why}`)))];
+    const shown = words.length ? item.matches : item.settings;
+    const scope = item.scope;
+    const usage = !words.length && scope === 'node' && item.settings.some((setting) => /usage/.test(setting.key)) ? usageGroup(result.usage) : null;
+    return [
+      usage,
+      h('div', { class: 'setting-section' }, shown.map((setting) => settingRow(setting, {
+        folder: item.folder, home, editing: editingOf(scope), toggle: (one) => toggle(scope, one), app, words }))),
+    ].filter(Boolean);
   }
 
   function render(typing = false) {
     if (ui.state.route.name !== 'settings') return;
-    const id = project();
-    // The project's folder came with the leads after the page asked without it: asked again with it.
-    if (id && folderOf(id) && askedFolder === null) load();
-    const choices = leads();
-    const key = JSON.stringify([id, choices.map((lead) => [lead.project, lead.root])]);
-    if (picker.dataset.drawn !== key) {
-      picker.dataset.drawn = key;
-      picker.replaceChildren(h('option', { value: '' }, t('svThisNode')),
-        ...choices.map((lead) => h('option', { value: lead.project, selected: lead.project === id }, lastPart(lead.root))));
-      picker.value = id && choices.some((lead) => lead.project === id) ? id : '';
-      picker.hidden = choices.length === 0;
-    }
+    const route = ui.state.route;
+    const query = columns.query();
+    const words = queryWords(query);
+    const listed = [...projects.values()];
+    const items = settingsList(result, query, { projects: listed, leftOut: result?.leftOut || [] });
+    const chosen = chosenSection(items, route);
+    columns.fold(!!(route.id || route.section));
+    columns.setItems(items, chosen?.key, { empty: result && words.length ? t('svNoMatch', { query: query.trim() }) : '' });
     // Someone typing in a field keeps it: the page draws again once they leave it.
-    if (!typing && body.contains(document.activeElement) && document.activeElement.matches('input, textarea, select')) return;
-    const now = JSON.stringify([result, failed, [...editing.keys()], query]);
+    const active = document.activeElement;
+    if (!typing && active && columns.detail.contains(active) && active.matches?.('input, textarea, select')) return;
+    const now = JSON.stringify([result && chosen ? [chosen.key, chosen.settings, result.usage, result.leftOut] : null, failed, chosen?.kind,
+      [...(editing.get(chosen?.scope) || new Map()).keys()], query, store.acts(), store.state.node?.home]);
     if (now === drawn) return;
     drawn = now;
-    const home = store.state.node?.home;
     if (failed) {
-      body.replaceChildren(h('p', { class: 'card-notice', role: 'alert' }, failed));
+      columns.show({ title: t('svSettings'), body: [h('p', { class: 'card-notice', role: 'alert' }, failed)] });
       return;
     }
     if (!result) {
-      body.replaceChildren(h('div', { class: 'head-skeleton', 'aria-hidden': 'true' }, h('span', { class: 'bone wide' }), h('span', { class: 'bone' }), h('span', { class: 'bone short' })));
+      columns.show({ title: t('svSettings'), body: [h('div', { class: 'head-skeleton', 'aria-hidden': 'true' }, h('span', { class: 'bone wide' }), h('span', { class: 'bone' }), h('span', { class: 'bone short' }))] });
       return;
     }
-    const projectPart = result.project
-      ? group(t('svProject', { name: lastPart(result.project.root) }), result.project.settings, result.project.root, home) : null;
-    body.replaceChildren(...[
-      h('p', { class: 'settings-intro' }, t('svWhatTheLeadsAndTheir')),
-      projectPart,
-      group(t('svThisNodeEveryProject'), result.node.settings, null, home),
-      query && ![...(result.project?.settings || []), ...result.node.settings].some((setting) => settingMatches(setting, query))
-        ? h('p', { class: 'node-says' }, t('svNoMatch', { query })) : null,
-      query ? null : usageGroup(result.usage),
-      !query && result.leftOut?.length ? h('section', { class: 'node-group' }, h('h2', { class: 'section-title' }, t('svNotOnANode')),
-        h('ul', { class: 'lines' }, result.leftOut.map((item) => h('li', null, `${item.title}: ${item.why}`)))) : null,
-    ].filter(Boolean));
+    if (!chosen) {
+      columns.show({ title: t('svSettings'), body: [h('p', { class: 'tc-empty' }, words.length ? t('svNoMatchLong', { query: query.trim() }) : t('svNoneHere'))] });
+      return;
+    }
+    const counted = chosen.kind === 'settings' ? (words.length ? t('svMatchCount', { n: chosen.matches.length }) : t('svCount', { n: chosen.settings.length })) : '';
+    columns.show({ title: chosen.title, sub: [chosen.group, counted].filter(Boolean).join(' · '), body: sectionBody(chosen, words) });
   }
 
   const schedule = framed(render);
-  store.subscribe('leads', schedule);
+  let leadsAsked = '';
+  store.subscribe('leads', () => {
+    if (ui.state.route.name !== 'settings') return;
+    // A project came or went, or its folder came with the leads: its settings asked for.
+    const key = JSON.stringify(leads().map((lead) => [lead.project, lead.root]));
+    if (key !== leadsAsked) { leadsAsked = key; load(); }
+    schedule();
+  });
   store.subscribe('node', schedule);
   store.subscribe('connection', () => { if (ui.state.route.name === 'settings' && store.state.connection === 'live') load(); });
+  let inside = false;
   function entered() {
+    const here = ui.state.route.name === 'settings';
+    if (here) terminalLook.update();
+    if (here === inside) { if (here) render(); return; }
+    inside = here;
     clearInterval(timer);
-    if (ui.state.route.name === 'settings') terminalLook.update();
     timer = null;
-    if (ui.state.route.name !== 'settings') return;
-    const id = project();
-    if (id !== shownFor) {
-      shownFor = id;
-      result = null;
-      failed = null;
-      editing.clear();
-      drawn = '';
-    }
+    if (!here) return;
+    leadsAsked = JSON.stringify(leads().map((lead) => [lead.project, lead.root]));
+    drawn = '';
     render();
     load();
     timer = setInterval(() => { if (!document.hidden) load(); }, REFRESH);
   }
   ui.subscribe((what) => { if (what === 'route') entered(); });
   entered();
-  return { el };
+  return { el: columns.el, focusSearch: () => columns.focusSearch(), columns };
 }

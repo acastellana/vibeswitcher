@@ -14,7 +14,8 @@ function remember(key, value) {
 // The address says what is on screen (the redesign's "Deep links"), and back and forward walk it:
 //   #/p/<project>/lead?show=asks|all&tab=stats|files&task=<slug>&sheet=<line>   a project's lead conversation
 //   #/p/<project>/roadmap?open=<band>,…                                          its roadmap
-//   #/sessions, #/s/<session>, #/node, #/settings[/<project>], #/stats[/<range>], #/mail, #/new
+//   #/sessions[/new], #/s/<session>, #/node[/<group>], #/settings[/<project>|node|terminal][/<section>], #/stats[/<range>],
+//   #/mail, #/new
 // The old addresses still work: #/p/<project> (the board page) is its lead conversation, #/s/<session> a session.
 const decode = (text) => { try { return decodeURIComponent(text); } catch { return null; } };
 const SHOWS = ['asks', 'all'];
@@ -42,12 +43,23 @@ export function parseRoute(hash) {
       sheet: query.get('sheet') || null,
     };
   }
-  // Settings: the node's, and a project's with its id (views/settings.js).
-  const settings = path.match(/^#\/settings(?:\/(.+))?$/);
-  if (settings) return { name: 'settings', id: settings[1] ? decode(settings[1]) : null };
+  // Settings (views/settings.js): the node's and every project's, a section chosen: `#/settings/node/<section>`,
+  // `#/settings/<project>/<section>`, `#/settings/terminal`; `#/settings/<project>` alone is that project's first.
+  const settings = path.match(/^#\/settings(?:\/([^/]+)(?:\/([^/]+))?)?\/?$/);
+  if (settings) {
+    const [scope, section] = [settings[1], settings[2]].map((part) => (part ? decode(part) : null));
+    if (scope === 'terminal') return { name: 'settings', id: null, section: 'terminal' };
+    const id = scope === 'node' ? null : scope;
+    return section ? { name: 'settings', id, section } : { name: 'settings', id };
+  }
   // Statistics, for a range (views/stats.js).
   const stats = path.match(/^#\/stats(?:\/([a-z]+))?$/);
   if (stats) return { name: 'stats', id: stats[1] || null };
+  // This node, a group chosen (views/node.js).
+  const node = path.match(/^#\/node\/([a-z-]+)$/);
+  if (node) return { name: 'node', group: node[1] };
+  // Your own sessions, its start form chosen (views/own.js).
+  if (path === '#/sessions/new') return { name: 'sessions', start: true };
   const named = { '#/mail': 'mail', '#/node': 'node', '#/sessions': 'sessions', '#/new': 'new' }[path];
   return named ? { name: named } : { name: 'home' };
 }
@@ -81,6 +93,8 @@ export function routeHref(route, changes) {
 // The inspector is a column beside the chat from this width up; under it the chat would get cramped, so it is a sheet
 // over the chat, opened when asked and closed again by itself.
 const WIDE = '(min-width: 1180px)';
+// Beside Your own sessions' list (views/own.js), the session's column is that list narrower: the column from here up.
+const WIDE_BESIDE_LIST = '(min-width: 1500px)';
 const TABS = ['team', 'overview', 'activity'];
 
 // The inspector's tab for the one remembered (the Mac's `InspectorView.effectiveTab`): Team on a session with no team
@@ -113,7 +127,11 @@ export function createUI() {
   };
   const listeners = new Set();
   const changed = (what) => { for (const fn of listeners) fn(what); };
-  const wide = typeof matchMedia === 'function' ? matchMedia(WIDE) : { matches: true, addEventListener() {} };
+  const media = (query) => (typeof matchMedia === 'function' ? matchMedia(query) : { matches: true, addEventListener() {} });
+  const wide = media(WIDE);
+  const wider = media(WIDE_BESIDE_LIST);
+  // Room for the inspector as a column: the window's width, more of it beside a list.
+  const roomy = () => wide.matches && (!state.besideList || wider.matches);
 
   addEventListener('hashchange', () => {
     state.route = parseRoute(location.hash);
@@ -122,10 +140,12 @@ export function createUI() {
     changed('route');
   });
   // The window crossed the width: a sheet doesn't become a column (the column has its own remembered state).
-  wide.addEventListener('change', () => {
-    state.inspector.sheet = false;
-    changed('inspector');
-  });
+  for (const query of [wide, wider]) {
+    query.addEventListener('change', () => {
+      state.inspector.sheet = false;
+      changed('inspector');
+    });
+  }
 
   return {
     state,
@@ -144,11 +164,18 @@ export function createUI() {
       changed('palette');
     },
     // Whether the window has room for the inspector as a column; else it's a sheet.
-    inspectorWide: () => wide.matches,
-    inspectorShown: () => (wide.matches ? state.inspector.open : state.inspector.sheet),
+    inspectorWide: () => roomy(),
+    inspectorShown: () => (roomy() ? state.inspector.open : state.inspector.sheet),
+    // Whether the session shown sits beside Your own sessions' list (app.js): its column has less room.
+    setBesideList(on) {
+      if (!!state.besideList === !!on) return;
+      state.besideList = !!on;
+      state.inspector.sheet = false;
+      changed('inspector');
+    },
     setInspector(shown) {
       if (this.inspectorShown() === shown) return;
-      if (wide.matches) {
+      if (roomy()) {
         state.inspector.open = shown;
         remember('vs.inspector', shown ? 'open' : 'closed');
       } else state.inspector.sheet = shown;
