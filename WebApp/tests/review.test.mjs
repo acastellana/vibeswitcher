@@ -86,3 +86,50 @@ test('the counts say what they count: the project’s things against everything 
   assert.doesNotMatch(css, /\.place\.asked \.place-count/);
   assert.match(css, /\.place-waiting \{[^}]*color: var\(--asked\)/);
 });
+
+test('the mock lists the kinds it answers, as a node’s hello does, and answers each: push, its decline, set and stop among them', async () => {
+  const { createMock } = await import('../js/mock.js');
+  let kinds = null;
+  const store = { apply() {}, setConnection() {}, chatSnapshot() {}, chatOps() {}, setKinds(list) { kinds = list; } };
+  const mock = createMock(store, { still: true });
+  mock.start();
+  await new Promise((resolve) => { const wait = () => (kinds ? resolve() : setImmediate(wait)); wait(); });
+  for (const kind of ['push', 'push.decline', 'set', 'stop', 'answer', 'settings']) assert.ok(kinds.includes(kind), kind);
+  for (const kind of ['lead', 'session.new', 'plugin.on', 'approve', 'term.open', 'draft']) assert.ok(!kinds.includes(kind), `${kind}: the mock doesn’t answer it, so it isn’t listed`);
+  const push = await mock.request({ kind: 'push', args: { folder: '/home/dev/projects/example-site', request: '3c9e1f20' } });
+  assert.equal(push.ok, true, JSON.stringify(push));
+  assert.equal(push.result.settled, 'pushed');
+  const set = await mock.request({ kind: 'set', args: { key: 'web_acts', value: 'off' } });
+  assert.equal(set.ok, true, JSON.stringify(set));
+  const slots = await mock.request({ kind: 'set', args: { key: 'node_heavy_slots', value: '4' } });
+  assert.equal(slots.ok, true, JSON.stringify(slots));
+  const settings = await mock.request({ kind: 'settings', args: {} });
+  assert.equal(settings.result.node.settings.find((one) => one.key === 'node_heavy_slots').value, '4', 'read back as set');
+  for (const kind of kinds.filter((one) => one !== 'chat.page' && one !== 'stop')) {
+    const reply = await mock.request({ kind, args: {} });
+    assert.notEqual(reply.error?.code, 'unknown-kind', `${kind} is listed and refused as unknown`);
+  }
+  mock.stop();
+});
+
+test('the push card offers Push only where the node lists it, else its terminal lines; a refusal of an unknown kind is plain words', async () => {
+  const { pushCard } = await import('../js/views/cards.js');
+  const { refusalWords } = await import('../js/acting.js');
+  setLanguage('en');
+  const lead = waitingState().state.leads.get('local:project:site');
+  const without = pushCard(lead, fakeApp({ kinds: ['answer', 'settings'] }));
+  assert.equal(find(without, button('Push')), null);
+  assert.match(without.textContent, /vibeswitcher push/);
+  const app = fakeApp({ kinds: ['push', 'push.decline'], reply: () => ({ ok: false, error: { code: 'unknown-kind', message: 'This node doesn’t take push.' } }) });
+  const offered = pushCard(lead, app);
+  find(offered, (node) => node.tag === 'button' && node.textContent === 'Push').click();
+  assert.deepEqual(app.sent, [{ kind: 'push', args: { folder: lead.root, request: 'p1' } }]);
+  await Promise.resolve();
+  const said = find(offered, byClass('act-said')).textContent;
+  assert.equal(said, 'This node doesn’t take “Push” from a page: use its line in a terminal. Nothing was done.');
+  assert.equal(refusalWords({ code: 'unknown-kind', message: 'This node doesn’t take set.' }, 'Turn off'), 'This node doesn’t take “Turn off” from a page: use its line in a terminal. Nothing was done.');
+  setLanguage('es');
+  assert.equal(refusalWords({ code: 'unknown-kind', message: 'This node doesn’t take set.' }, 'Desactivar'), 'Este nodo no acepta «Desactivar» desde una página: usa su línea en una terminal. No se hizo nada.');
+  assert.doesNotMatch(refusalWords({ code: 'unknown-kind' }), /take/);
+  setLanguage('en');
+});

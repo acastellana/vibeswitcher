@@ -369,7 +369,7 @@ export function cardSheet(card) {
 // The stack under a lead's chat: "2 questions for you", then the cards, open ones first.
 // The push the lead asks for, while it's open: what goes where, from git and the vault, and the two lines that settle
 // it in a terminal. Nothing on the page pushes.
-function pushCard(lead, app = null) {
+export function pushCard(lead, app = null) {
   const said = pushLines(lead.push, lead.root);
   const fact = (name, ...value) => [h('dt', null, name), h('dd', null, value)];
   return h('article', { class: 'card push-card', 'aria-label': t('cPushAsk') },

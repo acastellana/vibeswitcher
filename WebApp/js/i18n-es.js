@@ -1030,6 +1030,8 @@ export const ES = {
   acApproveTitle: "Lo que resuelve una aceptación",
   acOwnDecision: "Decisión tuya, cada una en su sitio:",
   acApproveAll: { one: "Aceptarlo", other: "Aceptar los {n}" },
+  acUnknownKind: "Este nodo no acepta «{what}» desde una página: usa su línea en una terminal. No se hizo nada.",
+  acUnknownKindBare: "Este nodo no acepta eso desde una página: hazlo en una terminal. No se hizo nada.",
   acRefused: "El nodo lo rechazó.",
   acChanged: "Esto cambió desde que la página lo dibujó: vuelve a mirarlo. No se hizo nada.",
   acNotYet: "El nodo aún no responde: inténtalo de nuevo en un momento.",

@@ -10,9 +10,11 @@
 import { h, setText } from './dom.js';
 import { t } from './i18n.js';
 
-// What the node's refusal says, in the page's words where the page knows the code.
-export function refusalWords(error) {
+// What the node's refusal says, in the page's words where the page knows the code. `what`: the control's own label,
+// for a kind the node doesn't take from a page (a page shows no button for one, so this is a node that changed).
+export function refusalWords(error, what = '') {
   if (!error) return t('acRefused');
+  if (error.code === 'unknown-kind') return what ? t('acUnknownKind', { what }) : t('acUnknownKindBare');
   if (error.code === 'changed') return t('acChanged');
   if (error.code === 'voice') return t('acVoice');
   if (error.code === 'acts-ended') return t('acEnded');
@@ -63,7 +65,7 @@ export function doButton(app, { label, kind, args, done = () => {}, quiet = fals
     app.store.request(kind, args()).then((reply) => {
       button.disabled = false;
       if (reply.ok) { done(reply); return; }
-      setText(said, refusalWords(reply.error));
+      setText(said, refusalWords(reply.error, label));
       said.classList.add('refused');
     });
   });

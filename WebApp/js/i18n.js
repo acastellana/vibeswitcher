@@ -1039,6 +1039,8 @@ const EN = {
   acApproveTitle: "What one accept settles",
   acOwnDecision: "Your own decision, each in its place:",
   acApproveAll: { one: "Accept it", other: "Accept all {n}" },
+  acUnknownKind: "This node doesn’t take “{what}” from a page: use its line in a terminal. Nothing was done.",
+  acUnknownKindBare: "This node doesn’t take that from a page: do it in a terminal. Nothing was done.",
   acRefused: "The node refused it.",
   acChanged: "This changed since the page drew it: look again. Nothing was done.",
   acNotYet: "The node isn’t answering yet: try again in a moment.",

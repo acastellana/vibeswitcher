@@ -7,7 +7,7 @@
 //   store.request(kind, args)   an action; resolves with the feed's reply ({ ok, result } or { ok: false, error })
 //   store.reconcile(name, list)  a live feed's snapshot of one collection, by id (socket.js)
 //   store.change(name, changes)  a live feed's delta of one collection: [{ id, value }], value null for gone
-//   store.can(kind)              whether this connection may send `kind` (`hello.kinds`; the mock may send anything)
+//   store.can(kind)              whether this connection may send `kind` (`hello.kinds`; the mock lists what it answers)
 //   store.acts()                 whether it acts for the user (`hello.auth.rights` holds `act`; the mock does)
 //   store.chatSnapshot(id, s)    a chat's snapshot ({ items, after, more }): the newest items, or a tail from `after` on
 //   store.chatOps(id, ops)       a chat delta's ops; 'gap' when they don't fit what it holds (nothing applied)
@@ -39,7 +39,7 @@ export function createStore(options = {}) {
     // unpaired: the node doesn't know this page (no code or token, or it refused them), revoked: its access was
     // dropped. Neither retries: the user runs `vibeswitcher web` again.
     connection: 'connecting',
-    // What this connection may send (`hello.kinds`); null: anything (the mock).
+    // What this connection may send (`hello.kinds`, the mock's list too); null: anything, until a hello says.
     kinds: null,
     // This connection's rights (`hello.auth.rights`): read, draft, and act once the node lets a page act (`web_acts`);
     // null: the mock's, which may do anything.
