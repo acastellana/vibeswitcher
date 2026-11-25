@@ -453,6 +453,8 @@ extension CardStore.Card {
             q["task"] = text(question.task)
             fields["question"] = .object(q)
         }
+        // The vault's facts beside the lead's words (`facts`), on a question the lead's audit asked.
+        if let facts { fields["facts"] = texts(facts) }
         if let approval {
             var a: [String: NodeWire.Value] = [:]
             a["commit"] = .string(approval.commit)

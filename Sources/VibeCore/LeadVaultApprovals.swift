@@ -19,12 +19,6 @@ extension LeadVault {
         (commit.count == 40 || commit.count == 64) && commit.allSatisfy { $0.isHexDigit }
     }
 
-    /// The models the user allowed to audit `task` when the floor left none, newest last; [] for none.
-    public func allowedAuditModels(root: String, task: String) -> [String] {
-        guard case .families(let families)? = try? call(.allowedAuditModels(root: root, task: task)) else { return [] }
-        return families ?? []
-    }
-
     /// The user approved merging `task` at `commit` (the app only).
     public func approve(root: String, task: String, commit: String) throws {
         _ = try call(.approve(root: root, task: task, commit: commit))
@@ -36,24 +30,43 @@ extension LeadVault {
         return approved
     }
 
+    /// An answer allowing a model to audit a task at one commit, the floor having left none (`LeadToolset
+    /// .askWhichModelAudits`'s options): "Audit <task> at <commit> on <model>"; nil otherwise.
+    public static func auditGrant(in answer: String) -> (task: String, commit: String, model: String)? {
+        let words = answer.trimmingCharacters(in: .whitespacesAndNewlines).split(whereSeparator: \.isWhitespace).map(String.init)
+        guard words.count == 6, words[0].caseInsensitiveCompare("Audit") == .orderedSame, words[2].lowercased() == "at", words[4].lowercased() == "on",
+              words[3].count >= 7, words[3].allSatisfy(\.isHexDigit), let family = WorkerLaunch.family(of: words[5]) else { return nil }
+        return (words[1], words[3].lowercased(), family)
+    }
+
+    /// Your answer to `question` when it allows a model to audit a task (`auditGrant`), recorded in the vault by the app
+    /// (a merge approval's way), only when the answer is one of the question's options, names the task the question is
+    /// about, and the question is one the lead's audit asked (the vault's `AuditOffer` for it, at that commit). What to
+    /// tell the user ("recorded: …"), or why it wasn't; nil when the answer allows nothing.
+    public func recordAuditGrant(_ answer: String, of question: LeadQuestion, root: String) -> String? {
+        guard question.state == .answered, let grant = Self.auditGrant(in: answer) else { return nil }
+        let refused = "No model was allowed to audit \(grant.task): "
+        guard question.options.contains(where: { $0.trimmingCharacters(in: .whitespaces).caseInsensitiveCompare(answer.trimmingCharacters(in: .whitespacesAndNewlines)) == .orderedSame }) else {
+            return refused + "the answer isn't one of the question's options."
+        }
+        guard question.task == grant.task else { return refused + "the question isn't about \(grant.task)." }
+        do {
+            _ = try call(.allowAuditModel(root: root, task: grant.task, commit: grant.commit, model: grant.model, question: question.id))
+        } catch {
+            return refused + "\(error)"
+        }
+        return "Recorded: \(grant.task) may be audited on \(grant.model) at \(grant.commit.prefix(12)), by its next audit only."
+    }
+
     /// Your answer to `question`, as the app records it after the board took it (`LeadBoard.answer` said `.answered`):
     /// when it approves a commit, the approval goes to the vault for each task whose branch (agent/<slug>) is at that
     /// commit now (the one merge holds back is). The tasks it was recorded for; nil when the answer approves nothing.
+    /// An answer allowing a model to audit a task is recorded too (`recordAuditGrant`, which says what it recorded).
     @discardableResult
-    /// An answer allowing a model to audit a task the floor left none for (`LeadToolset.askWhichModelAudits`'s options):
-    /// "Audit <task> on <model>", the task and the model in the user's own words; nil otherwise.
-    public static func auditGrant(in answer: String) -> (task: String, model: String)? {
-        let words = answer.trimmingCharacters(in: .whitespacesAndNewlines).split(whereSeparator: \.isWhitespace).map(String.init)
-        guard words.count == 4, words[0].caseInsensitiveCompare("Audit") == .orderedSame, words[2].lowercased() == "on",
-              let family = WorkerLaunch.family(of: words[3]) else { return nil }
-        return (words[1], family)
-    }
-
     public func recordApproval(_ answer: String, of question: LeadQuestion, root: String) throws -> [String]? {
         guard question.state == .answered else { return nil }
-        // Which model may audit a task the floor left none for: the user's answer names both.
-        if let grant = Self.auditGrant(in: answer) {
-            _ = try call(.allowAuditModel(root: root, task: grant.task, model: grant.model))
+        if Self.auditGrant(in: answer) != nil {
+            _ = recordAuditGrant(answer, of: question, root: root)
             return nil
         }
         guard let commit = Self.approvedCommit(in: answer) else { return nil }

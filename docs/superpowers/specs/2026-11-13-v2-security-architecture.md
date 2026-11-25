@@ -2448,6 +2448,8 @@ it, under the test rules (a scratch home and a scratch repository, never the use
 resets): a repository whose `.claude/settings.local.json` has `"env": {"ANTHROPIC_DEFAULT_OPUS_MODEL":
 "claude-sonnet-5-5"}`, then `claude -p "hi" --model opus --settings '{"env": {"ANTHROPIC_DEFAULT_OPUS_MODEL":
 "claude-opus-5-5"}}'` in it, and the transcript's `message.model` read: `claude-opus-5-5` means the pin wins.
+Also not seen, with (a): a race on the worktree's settings, written before the worker starts (it reads them), then
+deleted before the bind reads them (the host's read at the bind finds nothing to add).
 (b) `/model` typed in a worker's session; (c) a `claude -p` child the worker starts with a `--model` of its own;
 (d) subagents' own models (an agent definition's `model`, the Agent tool's `model`): workers keep the project's hooks
 and MCP servers, so nothing stops one. The known way to cover it, the user's call: a VibeSwitcher `PreToolUse` hook

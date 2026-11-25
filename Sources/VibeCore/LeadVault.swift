@@ -224,10 +224,18 @@ public struct LeadVault: Sendable {
         /// The model families the host recorded at each bind of the task's workers and its team members'
         /// (`Reply.families`; see `WorkerLaunch`).
         case launchedFamilies(root: String, task: String)
-        /// The app only: the user answered that `model` may audit `task` when the floor leaves no other (`Reply.ok`).
-        case allowAuditModel(root: String, task: String, model: String)
-        /// The models the user allowed to audit `task` (`Reply.families`).
-        case allowedAuditModels(root: String, task: String)
+        /// The repository's lead only: its audit of `task` at `commit` found no model the floor leaves, and asked the
+        /// user `question` (the question's id) which may audit it (`AuditOffer`; `Reply.ok`).
+        case offerAuditModels(root: String, task: String, commit: String, question: String)
+        /// The offer behind `question`, if the lead's audit made one (`Reply.offer`): what a card shows beside its words.
+        case auditOffer(root: String, question: String)
+        /// The app only: the user answered `question`, an offer's, that `model` may audit `task` at `commit` (the
+        /// commit as the answer names it, a prefix of the offer's) (`Reply.ok`).
+        case allowAuditModel(root: String, task: String, commit: String, model: String, question: String)
+        /// The allowance the user gave for `task` (`Reply.allowance`).
+        case auditAllowance(root: String, task: String)
+        /// The lead or the app: the audit that used the allowance for `task` at `commit` started; it's gone.
+        case consumeAuditAllowance(root: String, task: String, commit: String)
         /// The repository's lead only: notes on a task small_task_min judges it by (`LeadVault.SmallTaskNote`).
         case noteSmallTask(root: String, task: String, note: SmallTaskNote)
         /// The app only: the sessions its witness sees at work now (`at`, its clock); each worker's task counts the time
@@ -272,6 +280,10 @@ public struct LeadVault: Sendable {
         case smallTask(SmallTaskFacts?)
         /// `Request.launchedFamilies`: none while nothing is kept for the task.
         case families([String]?)
+        /// `Request.auditOffer`.
+        case offer(AuditOffer?)
+        /// `Request.auditAllowance`.
+        case allowance(AuditAllowance?)
     }
 
     /// The host said no, or couldn't be asked.
@@ -597,9 +609,12 @@ extension LeadVault {
             /// The model families each task's workers were launched on, as the host saw each session it bound a worker's
             /// role to (`WorkerLaunch`), by the task the grant names; only ever added to (optional: older vaults have none).
             var launchedFamilies: [String: [String]]?
-            /// The models the user allowed to audit a task when the floor left none, newest last, by task (optional:
+            /// The lead's audits that found no model left and asked the user, by the question's id (optional: older
+            /// vaults have none); the newest 20.
+            var auditOffers: [String: AuditOffer]?
+            /// The model the user allowed to audit a task at one commit, by task, until an audit uses it (optional:
             /// older vaults have none).
-            var auditModelsAllowed: [String: [String]]?
+            var auditAllowances: [String: AuditAllowance]?
 
             /// Takes the members `drop` picks out; the sessions the workers and verifiers among them were bound to
             /// become `former`, with the role and task each held.
@@ -818,7 +833,12 @@ extension LeadVault {
             }
             // A worker's launch, Claude Code's default read here (outside the lock: it reads a file).
             var launch: [String] = []
-            if case .bind(_, _, let session) = request { launch = WorkerLaunch.families(seen: bound ?? seenOf?(session), home: configHome) }
+            if case .bind(_, _, let session) = request {
+                // Read the careful way, off this queue, bounded (`WorkerLaunch.families(seen:home:limit:)`).
+                let found = WorkerLaunch.families(seen: bound ?? seenOf?(session), home: configHome, limit: WorkerLaunch.bindLimit)
+                launch = found.families
+                if let onHeld { found.notes.forEach { onHeld("vault: " + $0) } }
+            }
             var held: [String] = []
             let (reply, skills): (Reply, (hash: String, entries: String)?) = {
                 lock.lock()
@@ -1006,7 +1026,8 @@ extension LeadVault {
                     team.reported?[task] = nil
                     team.evidence?[task] = nil
                     // Not the launched families: they only add to what an audit is kept off, and the branch may outlive it.
-                    team.auditModelsAllowed?[task] = nil
+                    team.auditAllowances?[task] = nil
+                    team.auditOffers = team.auditOffers?.filter { $0.value.task != task }
                 }
                 return .ok
             case .whoami(let root):
@@ -1237,18 +1258,43 @@ extension LeadVault {
                 return .ok
             case .smallTaskFacts(let root, let task):
                 return .smallTask(team(root)?.smallTasks?[task])
-            case .allowAuditModel(let root, let task, let model):
-                // Only your answer, recorded by the app: never the lead the floor holds, nor a worker.
-                guard caller == .app else { return .refused("Only VibeSwitcher records which model may audit a task, when you answer.") }
-                guard let family = WorkerLaunch.family(of: model), !task.isEmpty else { return .refused("Name a task and a model: fable, opus, sonnet, mythos or haiku.") }
+            case .offerAuditModels(let root, let task, let commit, let question):
+                // The lead's audit (its tool server): an offer only lets the user's answer to that question count.
+                guard isLead(caller, root) else { return .refused("Only the repository's lead's audit asks which model may audit a task.") }
+                let commit = commit.lowercased()
+                guard LeadVault.isFullCommit(commit), !task.isEmpty, !question.isEmpty else { return .refused("An offer names a task, a whole commit and a question.") }
                 change(root, &changed) { team in
-                    var all = team.auditModelsAllowed ?? [:]
-                    all[task] = Array(((all[task] ?? []).filter { $0 != family } + [family]).suffix(5))
-                    team.auditModelsAllowed = all
+                    var all = team.auditOffers ?? [:]
+                    all[question] = AuditOffer(task: task, commit: commit, at: Date().timeIntervalSince1970)
+                    team.auditOffers = all.count > 20 ? Dictionary(uniqueKeysWithValues: all.sorted { $0.value.at > $1.value.at }.prefix(20).map { ($0.key, $0.value) }) : all
                 }
                 return .ok
-            case .allowedAuditModels(let root, let task):
-                return .families(team(root)?.auditModelsAllowed?[task])
+            case .auditOffer(let root, let question):
+                return .offer(team(root)?.auditOffers?[question])
+            case .allowAuditModel(let root, let task, let commit, let model, let question):
+                // Only your answer, recorded by the app, to the question the lead's audit asked for this task at this
+                // commit: never the lead the floor holds, nor a worker, nor an answer to a question of the lead's own.
+                guard caller == .app else { return .refused("Only VibeSwitcher records which model may audit a task, when you answer.") }
+                guard let offer = team(root)?.auditOffers?[question], offer.task == task, commit.count >= 7,
+                      offer.commit.hasPrefix(commit.lowercased()) else {
+                    return .refused("That question isn't the one the audit of \(task) at \(commit) asked: nothing was recorded.")
+                }
+                guard let family = WorkerLaunch.family(of: model) else { return .refused("Name a model: fable, opus, sonnet, mythos or haiku.") }
+                change(root, &changed) { team in
+                    var all = team.auditAllowances ?? [:]
+                    all[task] = AuditAllowance(task: task, commit: offer.commit, model: family, at: Date().timeIntervalSince1970)
+                    team.auditAllowances = all
+                    team.auditOffers?[question] = nil
+                }
+                return .ok
+            case .auditAllowance(let root, let task):
+                return .allowance(team(root)?.auditAllowances?[task])
+            case .consumeAuditAllowance(let root, let task, let commit):
+                guard caller == .app || isLead(caller, root) else { return .refused("Only the repository's lead or VibeSwitcher uses an allowance.") }
+                change(root, &changed) { team in
+                    if team.auditAllowances?[task]?.commit == commit.lowercased() { team.auditAllowances?[task] = nil }
+                }
+                return .ok
             case .launchedFamilies(let root, let task):
                 // Read by the repository's lead (its tool server) and the app only.
                 guard caller == .app || isLead(caller, root) else { return .refused("Only the repository's lead or VibeSwitcher reads its launches.") }

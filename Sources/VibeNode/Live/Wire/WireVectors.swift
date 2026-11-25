@@ -365,6 +365,8 @@ public enum WireVectors {
     static var draftedCard: NodeWire.Value {
         guard case .object(var fields) = questionCard else { return questionCard }
         fields["draft"] = CardStore.Card.draftValue(.init(text: "Yes, merge it", version: 2, at: date("2026-11-17T09:15:11.898Z"), action: draftAction))
+        // The vault's facts beside the lead's words (`LeadEngine.auditFacts`): this sample carries some, to hold their shape.
+        fields["facts"] = .array([.string("no audit of login-fix asked this question (the vault has no record of it): an answer to it allows no model")])
         return .object(fields)
     }
 

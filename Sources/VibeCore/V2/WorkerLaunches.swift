@@ -73,22 +73,62 @@ public enum WorkerLaunch {
         }
     }
 
+    /// The most of a settings file read at a bind, and the deepest its JSON may nest.
+    static let settingsLimit = 1 << 20
+    static let depthLimit = 64
+
+    /// A settings file under `root` (`components`), read the careful way (`Platform.Files.readRegular`: no link below
+    /// `root`, a regular file only, opened without waiting, at most `settingsLimit` bytes) and parsed only when its JSON
+    /// nests no deeper than `depthLimit`; with why not, when it isn't read (none: no such file).
+    public static func settings(in root: String, _ components: [String]) -> (object: [String: Any]?, note: String?) {
+        let name = components.joined(separator: "/")
+        switch Platform.Files.readRegular(in: root, path: components, limit: settingsLimit) {
+        case .absent: return (nil, nil)
+        case .refused(let why): return (nil, "\(name) in \(root) not read: \(why)")
+        case .data(let data):
+            guard nests(data, within: depthLimit) else { return (nil, "\(name) in \(root) not read: its JSON nests deeper than \(depthLimit)") }
+            guard let object = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else { return (nil, nil) }
+            return (object, nil)
+        }
+    }
+
+    /// Whether `data`'s JSON nests at most `limit` deep (brackets outside strings counted), before a parser sees it.
+    static func nests(_ data: Data, within limit: Int) -> Bool {
+        var depth = 0, inString = false, escaped = false
+        for byte in data {
+            if inString {
+                if escaped { escaped = false } else if byte == 0x5C { escaped = true } else if byte == 0x22 { inString = false }
+                continue
+            }
+            switch byte {
+            case 0x22: inString = true
+            case 0x5B, 0x7B:
+                depth += 1
+                if depth > limit { return false }
+            case 0x5D, 0x7D: depth -= 1
+            default: break
+            }
+        }
+        return true
+    }
+
     /// The model names a session's project settings in `cwd` give Claude Code (their "model", and their `env`'s
-    /// ANTHROPIC_MODEL and ANTHROPIC_DEFAULT_*_MODEL): branch content, read only to add.
-    static func projectModels(cwd: String?) -> [String] {
-        guard let cwd else { return [] }
-        var found: [String] = []
-        for file in [".claude/settings.json", ".claude/settings.local.json"] {
-            let path = (cwd as NSString).appendingPathComponent(file)
-            guard let data = FileManager.default.contents(atPath: path), data.count < 1 << 20,
-                  let object = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else { continue }
+    /// ANTHROPIC_MODEL and ANTHROPIC_DEFAULT_*_MODEL): branch content, read the careful way (`settings`) only to add;
+    /// with why a file wasn't read.
+    static func projectModels(cwd: String?) -> (models: [String], notes: [String]) {
+        guard let cwd else { return ([], []) }
+        var found: [String] = [], notes: [String] = []
+        for file in ["settings.json", "settings.local.json"] {
+            let read = settings(in: cwd, [".claude", file])
+            if let note = read.note { notes.append(note) }
+            guard let object = read.object else { continue }
             if let model = object["model"] as? String { found.append(model) }
             for (key, value) in object["env"] as? [String: Any] ?? [:]
             where key == "ANTHROPIC_MODEL" || (key.hasPrefix("ANTHROPIC_DEFAULT_") && key.hasSuffix("_MODEL")) {
                 if let value = value as? String { found.append(value) }
             }
         }
-        return found
+        return (found, notes)
     }
 
     /// The `--model` (or `--model=`) a launch command passes before its `--` (what follows is the start message: the
@@ -145,11 +185,48 @@ public enum WorkerLaunch {
     /// with none (or `default`), Claude Code's default's as `home` holds it now, and with no default set either, Claude's
     /// own, which the floor counts as Opus (`LeadReviewFloor.workersModel`); and whatever its project settings name
     /// (`projectModels`). An unknown name adds nothing.
-    public static func families(seen: Seen?, home: String) -> [String] {
-        guard let seen else { return [] }
+    /// Every file is read the careful way (`settings`); one that isn't adds nothing and is named in `notes`.
+    public static func families(seen: Seen?, home: String) -> (families: [String], notes: [String]) {
+        guard let seen else { return ([], []) }
+        var notes: [String] = []
         let passed = seen.command.flatMap(launchModel(command:)).flatMap { $0.lowercased() == "default" ? nil : $0 }
-        let ran = passed.map(runsOn) ?? [LeadReviewFloor.workersModel(LeadWorkflow.claudeModel(command: "", home: home))].flatMap(runsOn)
-        return Array(Set(ran + projectModels(cwd: seen.cwd).flatMap(runsOn))).sorted()
+        let ran: [String]
+        if let passed {
+            ran = runsOn(passed)
+        } else {
+            let home = settings(in: home, [".claude", "settings.json"])
+            if let note = home.note { notes.append(note) }
+            ran = runsOn(LeadReviewFloor.workersModel(home.object?["model"] as? String))
+        }
+        let project = projectModels(cwd: seen.cwd)
+        return (Array(Set(ran + project.models.flatMap(runsOn))).sorted(), notes + project.notes)
+    }
+
+    /// `families`, run off the caller's queue (the host's) and waited for at most `limit`: past it, nothing is added
+    /// and that's said (a read held up on a slow file system).
+    public static func families(seen: Seen?, home: String, limit: TimeInterval) -> (families: [String], notes: [String]) {
+        guard seen != nil else { return ([], []) }
+        let done = DispatchSemaphore(value: 0)
+        let result = Found()
+        DispatchQueue.global(qos: .userInitiated).async {
+            result.set(families(seen: seen, home: home))
+            done.signal()
+        }
+        guard done.wait(timeout: .now() + limit) == .success, let found = result.get() else {
+            return ([], ["a worker's launch wasn't recorded: reading its settings took more than \(Int(limit)) s"])
+        }
+        return found
+    }
+
+    /// How long a bind waits for its reads.
+    public static let bindLimit: TimeInterval = 2
+
+    /// `families`' result, handed between two queues.
+    private final class Found: @unchecked Sendable {
+        private let lock = NSLock()
+        private var value: (families: [String], notes: [String])?
+        func set(_ found: (families: [String], notes: [String])) { lock.withLock { value = found } }
+        func get() -> (families: [String], notes: [String])? { lock.withLock { value } }
     }
 
     /// What a task's audit is kept off under the floor, and the line that says so: the workers' model (`floorModel`,
@@ -167,7 +244,46 @@ public enum WorkerLaunch {
     static func shown(_ model: String) -> String { family(of: model) ?? model }
 }
 
+/// The lead's audit of `task` at `commit` found no model the floor leaves and asked the user (`LeadVault.Request
+/// .offerAuditModels`): only an answer to that question, naming that task and commit, records an allowance.
+public struct AuditOffer: Codable, Equatable, Sendable {
+    public var task: String
+    public var commit: String
+    public var at: Double
+}
+
+/// The user allowed `model` to audit `task` at `commit` (their answer to an `AuditOffer`'s question): used by the one
+/// audit that starts while the task's branch is at that commit, then gone.
+public struct AuditAllowance: Codable, Equatable, Sendable {
+    public var task: String
+    public var commit: String
+    public var model: String
+    public var at: Double
+}
+
 extension LeadVault {
+    /// The offer behind a question, nil for a question no audit asked (or a vault that can't be asked).
+    public func auditOffer(root: String, question: String) -> AuditOffer? {
+        guard case .offer(let offer)? = try? call(.auditOffer(root: root, question: question)) else { return nil }
+        return offer
+    }
+
+    /// The lead's audit of `task` at `commit` asked `question` (its id): the user's answer to it may then allow a model.
+    public func offerAuditModels(root: String, task: String, commit: String, question: String) throws {
+        _ = try call(.offerAuditModels(root: root, task: task, commit: commit, question: question))
+    }
+
+    /// The audit that used `task`'s allowance at `commit` started: the allowance is gone.
+    public func consumeAuditAllowance(root: String, task: String, commit: String) {
+        _ = try? call(.consumeAuditAllowance(root: root, task: task, commit: commit))
+    }
+
+    /// The allowance the user gave for `task`, if any.
+    public func auditAllowance(root: String, task: String) -> AuditAllowance? {
+        guard case .allowance(let allowance)? = try? call(.auditAllowance(root: root, task: task)) else { return nil }
+        return allowance
+    }
+
     /// The families the host recorded for `task`'s worker launches and its team members' (`WorkerLaunch`); nil: none
     /// kept, or the vault couldn't be asked (an older host).
     public func launchedFamilies(root: String, task: String) -> [String]? {

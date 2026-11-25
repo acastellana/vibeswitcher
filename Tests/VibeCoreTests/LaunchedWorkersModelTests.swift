@@ -224,11 +224,11 @@ extension LeadAdvanceTests {
 
     @Test func aliasesAddWhatTheyRunOnAndNoModelCountsAsOpus() {
         let home = temp.url("no-settings").path
-        #expect(WorkerLaunch.families(seen: .init(command: "claude --model best -- go"), home: home) == ["opus"])
-        #expect(WorkerLaunch.families(seen: .init(command: "claude --model opusplan -- go"), home: home) == ["opus", "sonnet"])
+        #expect(WorkerLaunch.families(seen: .init(command: "claude --model best -- go"), home: home).families == ["opus"])
+        #expect(WorkerLaunch.families(seen: .init(command: "claude --model opusplan -- go"), home: home).families == ["opus", "sonnet"])
         // No --model (or `default`) and no settings model: Claude's own default, which the floor counts as Opus.
-        #expect(WorkerLaunch.families(seen: .init(command: "claude -- go"), home: home) == ["opus"])
-        #expect(WorkerLaunch.families(seen: .init(command: "claude --model default -- go"), home: home) == ["opus"])
+        #expect(WorkerLaunch.families(seen: .init(command: "claude -- go"), home: home).families == ["opus"])
+        #expect(WorkerLaunch.families(seen: .init(command: "claude --model default -- go"), home: home).families == ["opus"])
     }
 
     /// The worktree's project settings (branch content) add what they name: their model and their env's
@@ -239,40 +239,125 @@ extension LeadAdvanceTests {
         try Data(#"{"env": {"ANTHROPIC_DEFAULT_OPUS_MODEL": "claude-fable-5-2", "ANTHROPIC_MODEL": "haiku", "OTHER": "sonnet"}}"#.utf8)
             .write(to: worktree.appendingPathComponent(".claude/settings.json"))
         try Data(#"{"model": "mythos"}"#.utf8).write(to: worktree.appendingPathComponent(".claude/settings.local.json"))
-        #expect(WorkerLaunch.families(seen: .init(command: "claude --model opus -- go", cwd: worktree.path), home: temp.url("h").path)
+        #expect(WorkerLaunch.families(seen: .init(command: "claude --model opus -- go", cwd: worktree.path), home: temp.url("h").path).families
                 == ["fable", "haiku", "mythos", "opus"])
     }
 
-    /// The floor's every model taken (the workers' default Opus, the task on Sonnet, decoys bound on Fable and
-    /// Mythos): the audit is held and the user asked, never run on an excluded model; their answer, recorded by the
-    /// app, lets that model audit it. A worker can't record one.
-    @Test func noModelLeftHoldsTheAuditAndAsksTheUser() throws {
+    /// A task the floor leaves no model for: the workers' default Opus, the task on Sonnet, decoys bound on Fable and
+    /// Mythos.
+    func exhausted() throws -> (root: String, lead: LeadToolset, task: LeadTask, head: String) {
         let (root, _, lead) = try floorTeam(defaultModel: "opus", leadModel: "opus")
         _ = lead.call("add_task", ["title": "Held", "goal": "g", "acceptance": ["a"], "review": "audit", "model": "sonnet"])
         #expect(!lead.call("start_worker", ["task": "held"]).isError)
         bindWorker("held", root: root, session: "decoy-fable", command: "claude --model fable -- go")
         bindWorker("held", root: root, session: "decoy-mythos", command: "claude --model mythos -- go")
-        let task = try #require(task("held", root))
+        try commit("held.txt", "x\n", in: Worktrees.path(root: root, slug: "held"))
+        let head = Git.run(["rev-parse", "agent/held"], in: root).output
+        return (root, lead, try #require(task("held", root)), head)
+    }
+
+    /// The user's answer, as the app records it once the board took it.
+    func answer(_ question: LeadQuestion, _ text: String, root: String) -> String? {
+        var answered = question
+        answered.answer = text
+        return vault.recordAuditGrant(text, of: answered, root: root)
+    }
+
+    /// No model left: the audit is held and the user asked, never run on an excluded model; their answer to that
+    /// question, recorded by the app, lets that model audit the task at that commit, once. A worker can't record one.
+    @Test func noModelLeftHoldsTheAuditAndAsksTheUser() throws {
+        let (root, lead, task, head) = try exhausted()
         #expect(lead.auditChoice(lead.workflow, task: task) == nil && lead.auditChoice(lead.workflow, task: task, security: true) == nil)
         #expect(lead.auditModel(lead.workflow, task: task) == LeadWorkflow.noneLeft)
-        try commit("held.txt", "x\n", in: Worktrees.path(root: root, slug: "held"))
         let audited = lead.call("audit", ["task": "held"])
         #expect(audited.isError && audited.text.contains("no model is left") && audited.text.contains("The user is asked"), "\(audited.text)")
         let asked = try #require(BoardStore(root: root).load().questions.last)
-        #expect(asked.options.contains("Audit held on fable") && asked.isOpen)
+        let option = "Audit held at \(head.prefix(12)) on fable"
+        #expect(asked.options.contains(option) && asked.isOpen && asked.task == "held")
+        #expect(vault.auditOffer(root: root, question: asked.id)?.commit == head)
         // Asked once while it's open.
         _ = lead.call("audit", ["task": "held"])
         #expect(BoardStore(root: root).load().questions.filter { $0.text == asked.text }.count == 1)
         let worker = try #require(task.worker)
-        guard case .refused = book.answer(.allowAuditModel(root: root, task: "held", model: "fable"), from: .session(worker)) else {
+        guard case .refused = book.answer(.allowAuditModel(root: root, task: "held", commit: head, model: "fable", question: asked.id), from: .session(worker)) else {
             Issue.record("a worker allowed a model")
             return
         }
-        var answered = asked
-        answered.answer = "Audit held on fable"
-        #expect(answered.state == .answered)
-        #expect(try vault.recordApproval("Audit held on fable", of: answered, root: root) == nil)
+        #expect(answer(asked, option, root: root) == "Recorded: held may be audited on fable at \(head.prefix(12)), by its next audit only.")
         #expect(lead.auditChoice(lead.workflow, task: task) == "fable")
+        let started = lead.call("audit", ["task": "held"])
+        #expect(!started.isError, "\(started.text)")
+        // Used once: the next audit is held again.
+        #expect(vault.auditAllowance(root: root, task: "held") == nil && lead.auditChoice(lead.workflow, task: task) == nil)
+    }
+
+    /// A lead's own question that looks like the audit's (its options in the same words, about the task): no offer in
+    /// the vault, so the answer allows nothing.
+    @Test func aLeadsLookAlikeQuestionAllowsNothing() throws {
+        let (root, lead, task, head) = try exhausted()
+        let option = "Audit held at \(head.prefix(12)) on fable"
+        let asked = lead.call("ask_user", ["question": "Pick a reviewer for held", "options": [option, "Audit held at \(head.prefix(12)) on opus"], "task": "held"])
+        #expect(!asked.isError, "\(asked.text)")
+        let question = try #require(BoardStore(root: root).load().questions.last)
+        let said = try #require(answer(question, option, root: root))
+        #expect(said.hasPrefix("No model was allowed") && said.contains("isn't the one the audit"), "\(said)")
+        #expect(lead.auditChoice(lead.workflow, task: task) == nil)
+    }
+
+    /// An answer naming another task than the question's, or not one of its options, allows nothing.
+    @Test func anAnswerForAnotherTaskOrOffTheOptionsAllowsNothing() throws {
+        let (root, lead, task, head) = try exhausted()
+        _ = lead.call("audit", ["task": "held"])
+        let asked = try #require(BoardStore(root: root).load().questions.last)
+        // Another task's name, as an option the lead's revision added.
+        var revised = asked
+        revised.options.append("Audit other at \(head.prefix(12)) on fable")
+        #expect(try #require(answer(revised, "Audit other at \(head.prefix(12)) on fable", root: root)).contains("isn't about other"))
+        #expect(try #require(answer(asked, "Audit held at \(head.prefix(12)) on haiku", root: root)).contains("isn't one of the question's options"))
+        #expect(lead.auditChoice(lead.workflow, task: task) == nil)
+    }
+
+    /// An allowance is for the commit it was given at: new commits on the branch and it isn't used.
+    @Test func anAllowanceIsntUsedAfterNewCommits() throws {
+        let (root, lead, task, head) = try exhausted()
+        _ = lead.call("audit", ["task": "held"])
+        let asked = try #require(BoardStore(root: root).load().questions.last)
+        #expect(try #require(answer(asked, "Audit held at \(head.prefix(12)) on fable", root: root)).hasPrefix("Recorded"))
+        try commit("more.txt", "y\n", in: Worktrees.path(root: root, slug: "held"))
+        #expect(lead.auditChoice(lead.workflow, task: task) == nil)
+        let audited = lead.call("audit", ["task": "held"])
+        #expect(audited.isError && audited.text.contains("no model is left"), "\(audited.text)")
+    }
+
+    /// The worktree's settings and the home's are read the careful way at the bind: a link, a FIFO, a file over the
+    /// bound, JSON nested too deep: the bind returns at once, records only the launch's own model, and says why.
+    @Test(arguments: ["link", "fifo", "big", "deep"])
+    func aBindReadsSettingsCarefully(_ kind: String) throws {
+        let worktree = temp.url("worktree-\(kind)")
+        let folder = worktree.appendingPathComponent(".claude")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let file = folder.appendingPathComponent("settings.local.json")
+        switch kind {
+        case "link":
+            let target = temp.url("elsewhere.json")
+            try Data(#"{"model": "fable"}"#.utf8).write(to: target)
+            try FileManager.default.createSymbolicLink(at: file, withDestinationURL: target)
+        case "fifo":
+            #expect(mkfifo(file.path, 0o600) == 0)
+        case "big":
+            #expect(FileManager.default.createFile(atPath: file.path, contents: nil))
+            #expect(truncate(file.path, off_t(300 << 20)) == 0)
+        default:
+            try Data((String(repeating: "[", count: 5_000) + "\"fable\"" + String(repeating: "]", count: 5_000)).utf8).write(to: file)
+        }
+        // The home's settings a FIFO too: the default isn't read either.
+        let home = temp.url("home-\(kind)")
+        try FileManager.default.createDirectory(at: home.appendingPathComponent(".claude"), withIntermediateDirectories: true)
+        #expect(mkfifo(home.appendingPathComponent(".claude/settings.json").path, 0o600) == 0)
+        let found = WorkerLaunch.families(seen: .init(command: "claude --model opus -- go", cwd: worktree.path), home: home.path, limit: hangGuard)
+        #expect(found.families == ["opus"] && found.notes.count == 1 && found.notes[0].contains("settings.local.json"), "\(found)")
+        let unnamed = WorkerLaunch.families(seen: .init(command: "claude -- go", cwd: nil), home: home.path, limit: hangGuard)
+        #expect(unnamed.families == ["opus"] && unnamed.notes.first?.contains("settings.json") == true, "\(unnamed)")
     }
 
     /// Under the floor, a task's model must name one: an alias or custom id is refused, and one already on the board

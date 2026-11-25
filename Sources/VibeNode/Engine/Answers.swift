@@ -139,7 +139,47 @@ extension LeadEngine {
         cards.put(card)
         cardsChanged()
         if rebuild, let commit { buildApproval(card: card.id, commit: commit, root: root) }
+        if Self.mayAskAuditModel(question) { buildAuditFacts(card: card.id, question: question, root: root) }
         return card
+    }
+
+    /// A question whose options allow a model to audit a task (`LeadVault.auditGrant`): its facts come from the vault.
+    static func mayAskAuditModel(_ question: LeadQuestion) -> Bool {
+        question.task != nil && question.options.contains { LeadVault.auditGrant(in: $0) != nil }
+    }
+
+    /// The vault's facts for `question` (`auditFacts`), put on its card.
+    func buildAuditFacts(card id: String, question: LeadQuestion, root: String) {
+        let vault = cardVault
+        work.async { [weak self] in
+            let facts = Self.auditFacts(question: question, root: root, vault: vault)
+            guard let self else { return }
+            self.queue.async { self.cards.change(id) { card in card.facts = facts } }
+        }
+    }
+
+    /// What the vault and git say of a question allowing a model to audit a task, beside the lead's words: whether the
+    /// lead's audit asked it (the vault's `AuditOffer`), at which commit and where the branch is now, the workers' model
+    /// the floor keeps audits off (worker_model, else Claude Code's default) and the families the host recorded for the
+    /// task's launches. Reads the vault and git.
+    public static func auditFacts(question: LeadQuestion, root: String, vault: LeadVault) -> [String] {
+        guard let task = question.task else { return [] }
+        guard let offer = vault.auditOffer(root: root, question: question.id) else {
+            return ["no audit of \(task) asked this question (the vault has no record of it): an answer to it allows no model"]
+        }
+        var facts = ["the audit of \(task) at \(offer.commit.prefix(12)) asked it: an answer allows that model for that commit only, once"]
+        let head = Git.run(["rev-parse", "--verify", "--quiet", "refs/heads/" + Worktrees.branch(task)], in: root)
+        if head.ok, !head.output.hasPrefix(offer.commit) { facts.append("the branch has moved since: it's at \(head.output.prefix(12)) now, so an allowance wouldn't be used") }
+        let floor = (try? vault.reviewFloor(root: root)) ?? nil
+        if let model = floor?.workerModel {
+            facts.append("workers' model: \(model), by your review floor")
+        } else {
+            let model = WorkerLaunch.settings(in: VibePaths.accountHome, [".claude", "settings.json"]).object?["model"] as? String
+            facts.append("workers' model: Claude Code's default, \(model ?? "not set (counted as opus)")")
+        }
+        let launched = vault.launchedFamilies(root: root, task: task) ?? []
+        facts.append("its workers were launched on: " + (launched.isEmpty ? "nothing recorded" : launched.joined(separator: ", ")) + " (the host's record)")
+        return facts
     }
 
     /// The card's question `card` reworded as the lead's revision `change` says, as `LeadBoard.revise` rewords the
@@ -351,6 +391,8 @@ extension LeadEngine {
                     note("lead: the user's answer to question \(question.short) wasn't written to the board of \(LeadMail.project(of: root)) (\(error)); the lead is told it")
                 }
                 guard case .answered(let answered, _) = outcome else { return (nil, lead) }
+                // A model allowed to audit a task at a commit (the lead's audit asked): what was recorded, said.
+                if let recorded = vault.recordAuditGrant(text, of: answered, root: root) { return (recorded, lead) }
                 do {
                     guard let tasks = try vault.recordApproval(text, of: answered, root: root) else { return (nil, lead) }
                     return (tasks.isEmpty ? "No task's branch is at that commit now, so the approval wasn't recorded: merge won't take it." : nil, lead)

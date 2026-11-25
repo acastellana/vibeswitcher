@@ -90,6 +90,9 @@ public final class CardStore: @unchecked Sendable {
         /// What became of the user's answer, when it wasn't simply taken (`withdrawn`, `afterAutoDecision`,
         /// `alreadyAnswered`, `missing`, an approval not recorded), or of an accept.
         public var notice: String?
+        /// What the node adds from the vault beside the lead's words, for a question the lead's audit asked (which model
+        /// may audit a task the floor left none for: `Answers.auditFacts`); nil for every other card.
+        public var facts: [String]?
         /// Closed: answered, withdrawn, decided by its timer, accepted, kept refused, or gone.
         public var closed: String?
         public var at: Date
@@ -112,7 +115,7 @@ public final class CardStore: @unchecked Sendable {
         /// As `cards.json` keeps it (`CardKeep`): every field but `code`, which is its id's (`NodeIds.code(card:)`, a
         /// digest of the id, no secret: the voice rule is what keeps a code from any sender but the user's terminal) and
         /// is made again from the id as it's read, never taken from the file.
-        enum CodingKeys: String, CodingKey { case id, project, root, kind, question, approval, config, base, plugin, notice, closed, at, closedAt, draft }
+        enum CodingKeys: String, CodingKey { case id, project, root, kind, question, approval, config, base, plugin, notice, facts, closed, at, closedAt, draft }
 
         public init(from decoder: Decoder) throws {
             let keys = try decoder.container(keyedBy: CodingKeys.self)
@@ -127,6 +130,7 @@ public final class CardStore: @unchecked Sendable {
             base = try keys.decodeIfPresent(BaseMoveStore.Shown.self, forKey: .base)
             plugin = try keys.decodeIfPresent(PluginCard.self, forKey: .plugin)
             notice = try keys.decodeIfPresent(String.self, forKey: .notice)
+            facts = try keys.decodeIfPresent([String].self, forKey: .facts)
             closed = try keys.decodeIfPresent(String.self, forKey: .closed)
             at = try keys.decode(Date.self, forKey: .at)
             closedAt = try keys.decodeIfPresent(Date.self, forKey: .closedAt)

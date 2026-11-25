@@ -3033,12 +3033,13 @@ public final class LeadToolset: MCPToolset {
         _ = accountUsage(sessions: sessions)
         // A sensitive or security branch is audited on security_audit_model (where the floor allows it).
         let security = Self.securityReason(root: root, head: head, workflow: workflow, raised: task.riskRaised)
-        guard let verifierModel = auditChoice(workflow, task: task, security: security != nil) else {
+        guard let pick = auditPick(workflow, task: task, security: security != nil) else {
             // Every model is one the floor keeps this audit off: held, and the user asked, never run on one of those.
             let why = workersBasis(task, projectDefault: runtime.workerModel(root: root), workflow: workflow).text
-            throw Problem(text: "Not audited, no verifier started: \(why), with the task's own model, and no model is left. " + askWhichModelAudits(task, why: why)
-                          + " Once they answer, audit again.")
+            throw Problem(text: "Not audited, no verifier started: \(why), with the task's own model, and no model is left. "
+                          + askWhichModelAudits(task, head: head, why: why) + " Once they answer, audit again.")
         }
+        let verifierModel = pick.model
         let fallback = security != nil && LeadReviewFloor.sameModel(workflow.securityAuditModel, AccountUsage.heldBackFamily)
             && !LeadReviewFloor.sameModel(verifierModel, workflow.securityAuditModel)
             ? fableFallback()?.fableHeldBack(now: usageClock()) : nil
@@ -3129,6 +3130,8 @@ public final class LeadToolset: MCPToolset {
             board.tasks[index].evidence = nil
         }
         launched = true
+        // The user's allowance for this commit is used by this audit, once.
+        if let allowance = pick.allowance { vault.consumeAuditAllowance(root: root, task: slug, commit: allowance.commit) }
         // The audit's line in the progress log says what the workers' model was judged by, as its reply does.
         if let basis { try? store.appendProgress("Audit of \(slug) on \(verifierModel): \(basis).") }
         // An update_task while it started went to no verifier yet (the board named none, or the one before): sent now.
@@ -3249,8 +3252,21 @@ public final class LeadToolset: MCPToolset {
     }
 
     /// `auditModel`'s choice for an audit to start on: nil when the floor excludes every model and the user allowed
-    /// none for the task (`LeadVault.allowedAuditModels`, their answer to `askWhichModelAudits`): the audit is held.
+    /// none for the task at its branch's head (`auditPick`): the audit is held.
     func auditChoice(_ workflow: LeadWorkflow, task: LeadTask? = nil, security: Bool = false) -> String? {
+        auditPick(workflow, task: task, security: security)?.model
+    }
+
+    /// The model, and the user's allowance it came from (`AuditAllowance`, their answer to `askWhichModelAudits`) when
+    /// the floor left none: one for the task at exactly its branch's head now, used once (`audit` consumes it).
+    func auditPick(_ workflow: LeadWorkflow, task: LeadTask? = nil, security: Bool = false) -> (model: String, allowance: AuditAllowance?)? {
+        if let model = floorChoice(workflow, task: task, security: security) { return (model, nil) }
+        guard let task, let allowance = vault.auditAllowance(root: root, task: task.slug),
+              branchHead(Worktrees.branch(task.slug)) == allowance.commit else { return nil }
+        return (allowance.model, allowance)
+    }
+
+    private func floorChoice(_ workflow: LeadWorkflow, task: LeadTask?, security: Bool) -> String? {
         let launched = task.flatMap { task in task.worker.flatMap { task.launchedModels?[$0] } }
             .flatMap { $0.isEmpty || $0.hasPrefix("codex") ? nil : $0 }
         // A re-rolled task's Fable counts as its own model (`LeadTask.intendedModel`).
@@ -3263,29 +3279,36 @@ public final class LeadToolset: MCPToolset {
         let workers = workersBasis(task, projectDefault: usage?.startModel(projectDefault, now: now) ?? projectDefault, workflow: workflow).workers
         guard let usage else {
             return workflow.auditModelChoice(workerModel: workers.first ?? nil, moreWorkers: Array(workers.dropFirst()), taskModel: taskModel,
-                                             launchedModel: launched, security: security) ?? userAllowed(task)
+                                             launchedModel: launched, security: security)
         }
         return workflow.auditModelChoice(workerModel: workers.first ?? nil, moreWorkers: Array(workers.dropFirst()), taskModel: usage.startModel(taskModel, now: now),
-                                         launchedModel: launched, heldBack: AccountUsage.heldBackFamily, security: security) ?? userAllowed(task)
+                                         launchedModel: launched, heldBack: AccountUsage.heldBackFamily, security: security)
     }
 
-    /// The model the user allowed last for `task` when the floor left none (their answer, recorded by the app).
-    private func userAllowed(_ task: LeadTask?) -> String? {
-        task.flatMap { vault.allowedAuditModels(root: root, task: $0.slug).last }
-    }
-
-    /// The floor left no model for `task`'s audit: the user is asked which may audit it (once while the question is
-    /// open), each option "Audit <task> on <model>", which the app records as theirs when they answer it. What to say.
-    func askWhichModelAudits(_ task: LeadTask, why: String) -> String {
-        let question = "Audit \(task.slug): every model is one this task's workers ran on (\(why)), and the review floor keeps audits off those. Which may audit it?"
-        let options = (LeadWorkflow.byCapability + [LeadWorkflow.lastResortAuditModel]).map { "Audit \(task.slug) on \($0)" }
-        if let open = store.load().questions.first(where: { $0.state == .open && $0.text == question }) {
-            return "The user was asked which model may audit it (\(open.short)): the audit waits for their answer."
+    /// The floor left no model for `task`'s audit at `head`: the user is asked which may audit it (once while the
+    /// question is open), each option "Audit <task> at <head's 12> on <model>", and the vault told the question is the
+    /// audit's (`AuditOffer`): only an answer to it, recorded by the app, allows a model, for that commit, once. What to
+    /// say.
+    func askWhichModelAudits(_ task: LeadTask, head: String, why: String) -> String {
+        let short = String(head.prefix(12))
+        let question = "Audit \(task.slug) at \(short): every model is one this task's workers ran on (\(why)), and the review floor keeps audits off those. Which may audit it at this commit?"
+        let options = (LeadWorkflow.byCapability + [LeadWorkflow.lastResortAuditModel]).map { "Audit \(task.slug) at \(short) on \($0)" }
+        let asked: LeadQuestion
+        var new = false
+        if let open = store.load().questions.first(where: { $0.state == .open && $0.text == question && $0.task == task.slug }) {
+            asked = open
+        } else {
+            new = true
+            guard let made = try? store.update({ board in
+                board.ask(question, options: options, priority: .important, whyNow: nil, proposal: nil, decideIn: nil, task: task.slug)
+            }) else { return "The question couldn't be put on the board: ask again by auditing again." }
+            asked = made
         }
-        guard let asked = try? store.update({ board in
-            board.ask(question, options: options, priority: .important, whyNow: nil, proposal: nil, decideIn: nil, task: task.slug)
-        }) else { return "Ask the user which model may audit it (options: \(options.joined(separator: " | ")))." }
-        NodeQuestionPost.post(asked, op: .post, root: root, vault: vault)
+        // The vault told first, so the card the node draws for it finds the offer (its facts).
+        do { try vault.offerAuditModels(root: root, task: task.slug, commit: head, question: asked.id) } catch {
+            return "The user is asked (\(asked.short)), but the vault didn't take the question as the audit's (\(error)): their answer won't allow a model. Audit again."
+        }
+        if new { NodeQuestionPost.post(asked, op: .post, root: root, vault: vault) }
         return "The user is asked which model may audit it (\(asked.short)): the audit waits for their answer."
     }
 

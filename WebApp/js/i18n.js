@@ -211,6 +211,7 @@ const EN = {
   cConfirmNote: "Run it in a terminal: it shows the card and your answer, and asks for the card’s code. Nothing reaches the lead before that.",
   cAnswerInTerminal: "Answer in a terminal",
   cFacts: "From git and the vault",
+  cVaultFacts: "From the vault, not the lead’s words",
   cCommit: "Commit",
   cSubject: "Subject",
   cInto: "Into",
