@@ -920,6 +920,7 @@ export const ES = {
   drOrInATerminal: "O en una terminal:",
   drStarting: "Arrancando…",
   drStartedWaiting: "Arrancada: se abre aquí en cuanto el nodo la liste.",
+  drLeadStartedWaiting: "Arrancado: su proyecto se abre aquí en cuanto el nodo liste su líder.",
   drStartedNoName: "El nodo dice que arrancó, pero no dice qué sesión: búscala en Tus sesiones.",
   drLeadShown: "Su líder ya está en marcha: abriendo el proyecto.",
   drLeadWaiting: "El nodo lo arranca en cuanto su anfitrión de sesiones esté listo: entonces aparece en Proyectos.",

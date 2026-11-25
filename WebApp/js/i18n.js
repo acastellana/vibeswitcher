@@ -931,6 +931,7 @@ const EN = {
   drOrInATerminal: "Or in a terminal:",
   drStarting: "Starting…",
   drStartedWaiting: "Started: it opens here as soon as the node lists it.",
+  drLeadStartedWaiting: "Started: its project opens here as soon as the node lists its lead.",
   drStartedNoName: "The node said it started, but didn’t say which session: find it in Your own sessions.",
   drLeadShown: "Its lead already runs: opening the project.",
   drLeadWaiting: "The node starts it as soon as its session host is ready: it shows under Projects then.",

@@ -303,6 +303,7 @@ test('U12: Start the lead starts it and opens its project; a lead that waits for
   assert.deepEqual(r.sent.at(-1).args, { folder: '/home/dev/projects/example-api', goal: 'Ship the payouts fix' });
   await flush();
   assert.deepEqual(r.went, []);
+  assert.match(form.el.shownText, /Started: its project opens here as soon as the node lists its lead/);
   r.store.change('leads', [{ id: 'local:project:Ab12', value: { project: 'local:project:Ab12', root: '/home/dev/projects/example-api', session: LEAD } }]);
   assert.equal(r.went.length, 1);
   assert.match(r.went[0], /^#\/p\/local%3Aproject%3AAb12/);
@@ -310,6 +311,16 @@ test('U12: Start the lead starts it and opens its project; a lead that waits for
   find(form.el, button('Start the lead')).click();
   await flush();
   assert.match(form.el.shownText, /as soon as its session host is ready/);
+  // In Spanish the lead is “él”: Arrancado, never the session's Arrancada.
+  setLanguage('es');
+  const es = rig({ sessions: [], replies: { lead: () => ({ ok: true, result: { happened: 'started', session: LEAD, program: '/usr/bin/claude', notes: [] } }) } });
+  const formEs = newLeadForm(es.app);
+  typed(formEs, '/home/dev/projects/example-api');
+  find(formEs.el, button('Arrancar el líder')).click();
+  await flush();
+  assert.match(formEs.el.shownText, /Arrancado: su proyecto se abre aquí en cuanto el nodo liste su líder/);
+  assert.doesNotMatch(formEs.el.shownText, /Arrancada/);
+  setLanguage('en');
 });
 
 test('U12: where the node doesn’t list session.new or lead, or the page doesn’t act, the line stays and says why; New project’s folder is a terminal’s', () => {

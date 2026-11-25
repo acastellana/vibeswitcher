@@ -465,7 +465,7 @@ function startOrLine(app, { kind, label, args, line, lineLabel, terminalOnly, ta
     if (!wanted.session && !wanted.lead) { button.say(t('drStartedNoName')); return; }
     const now = place();
     if (now) { app.ui.go(now); return; }
-    button.say(t('drStartedWaiting'));
+    button.say(t(wanted.lead ? 'drLeadStartedWaiting' : 'drStartedWaiting'));
     const topic = wanted.lead ? 'leads' : 'sessions';
     const off = app.store.subscribe(topic, () => {
       // The user went elsewhere meanwhile: nothing pulls them away; it stops listening.
