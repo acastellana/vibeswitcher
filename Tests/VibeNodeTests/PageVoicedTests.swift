@@ -37,7 +37,7 @@ struct PageVoicedTests {
 
     /// A refusing confirmation.
     struct Refusing: PageVoice {
-        func confirm(_ request: NodeWire.Request, page: String, done: @escaping @Sendable (String?) -> Void) { done("no touch") }
+        func confirm(_ request: NodeWire.Request, page: PageAct, done: @escaping @Sendable (NodeWire.Failure?) -> Void) { done(.init(.voice, "not confirmed: no touch")) }
     }
 
     @Test func aPagesAnswerNamesTheCardAsDrawnAndIsRecordedAsThePages() async throws {
@@ -233,7 +233,7 @@ struct PageVoicedTests {
         let card = try #require(world.card(asked.card.id))
         struct During: PageVoice {
             let meanwhile: @Sendable () -> Void
-            func confirm(_ request: NodeWire.Request, page: String, done: @escaping @Sendable (String?) -> Void) {
+            func confirm(_ request: NodeWire.Request, page: PageAct, done: @escaping @Sendable (NodeWire.Failure?) -> Void) {
                 meanwhile()
                 done(nil)
             }
@@ -270,17 +270,13 @@ struct PageVoicedTests {
         let shown = settings.result?["node"]?["settings"]?.array?.first { $0["key"]?.string == "web_acts" }
         #expect(shown?["value"]?.string == "trust", "\(String(describing: shown))")
         let confirm = try #require(await world.ask("set", ["key": .string("web_acts"), "value": .string("confirm")]))
-        #expect(confirm.error?.code == "refused" && confirm.error?.message.contains("isn't built yet") == true, "\(confirm)")
+        #expect(confirm.error?.code == "refused" && confirm.error?.message.contains("needs a passkey first") == true, "\(confirm)")
         let on = try #require(await world.ask("set", ["key": .string("web_acts"), "value": .string("on")]))
         #expect(!on.ok, "\(on)")
         let off = try #require(await world.ask("set", ["key": .string("web_acts"), "value": .string("off")]))
         #expect(off.ok && off.result?["value"]?.string == "off", "\(off)")
         #expect(lowered.value == ["off"])
         #expect(try vault.client.pageActs().level == "off")
-        // The passkey seam the level `confirm` uses refuses every request until it is built.
-        let refused = Locked<String?>(nil)
-        PasskeyNotBuilt().confirm(NodeWire.Request(id: "1", kind: "stop"), page: "p") { refused.value = $0 }
-        #expect(refused.value?.contains("isn't built yet") == true)
     }
 
     // MARK: A held config from a page

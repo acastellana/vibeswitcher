@@ -296,8 +296,11 @@ export function connectSocket(store, options) {
   }
 
   // The terminal asks to add a passkey (`vibeswitcher web --passkey`): its offer, until it ends here or elsewhere.
+  // `waiting`: the offer, with no challenge (the tab clicked asks for it, `passkey.ask`); `register` (a node before
+  // the review's K1) carried it.
   function passkey(message) {
-    if (message.op === 'register' && typeof message.register === 'string' && message.challenge && message.user?.id) store.setPasskeyOffer(message);
+    if (message.op === 'waiting' && typeof message.register === 'string') store.setPasskeyOffer({ register: message.register, expires: message.expires || null });
+    else if (message.op === 'register' && typeof message.register === 'string' && message.challenge && message.user?.id) store.setPasskeyOffer(message);
     else if (message.op === 'ended' && (!message.register || store.state.passkeyOffer?.register === message.register)) store.setPasskeyOffer(null);
   }
 

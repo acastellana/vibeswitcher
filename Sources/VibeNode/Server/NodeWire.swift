@@ -93,15 +93,19 @@ public enum NodeWire {
         public var args: [String: Value]?
         public var action: String?
         public var must: Bool?
+        /// An acting page's passkey assertion for this request, at the level `confirm` (`PasskeyVoice`): its credential's
+        /// id, client data, authenticator data and signature, base64url. Beside `args`, never in them.
+        public var assertion: Value?
 
         public init(v: Int = NodeWire.version, id: String, kind: String, args: [String: Value]? = nil, action: String? = nil,
-                    must: Bool? = nil) {
+                    must: Bool? = nil, assertion: Value? = nil) {
             self.v = v
             self.id = id
             self.kind = kind
             self.args = args
             self.action = action
             self.must = must
+            self.assertion = assertion
         }
     }
 
@@ -123,6 +127,8 @@ public enum NodeWire {
         public var ok: Bool
         public var result: Value?
         public var error: Failure?
+        /// An acting page's act at the level `confirm`: the line the vault recorded it with (what the passkey approved).
+        public var recorded: String?
 
         public init(re: String, result: Value) {
             v = NodeWire.version
@@ -282,6 +288,11 @@ public enum NodeWire {
         /// This page no longer acts or watches (its pairing ran out or was dropped, the level was lowered, a revoke):
         /// it drops its pairing secret, reads and drafts, and is paired again to act.
         case actsEnded = "acts-ended"
+        /// An act at the level `confirm` came without a passkey assertion, or with one whose challenge ran out: ask
+        /// `act.challenge` and send it again with one. Nothing was done or kept.
+        case assertionNeeded = "assertion-needed"
+        /// Its passkey assertion didn't check: nothing was done.
+        case passkey
         /// The lead has it already: an answer or a tell taken back too late (`answer.replace`, `tell.retract`).
         case delivered
         case `internal`
@@ -308,6 +319,9 @@ public enum NodeWire {
         /// A web client's terminal: watched on the user's node, typed into on a scratch node only (LW-D12, amended
         /// 2026-11-20).
         case webTerminal
+        /// A page whose pairing the user confirmed in a terminal (`LiveRights.watch`): its passkey's part of the level
+        /// `confirm` (a challenge for an act, a registration the terminal asked). Never the socket's.
+        case webPaired
     }
 
     /// Every kind the protocol names, with the voice it needs: a view of `KindSpec.all` (who may send each, and why, is
@@ -334,7 +348,7 @@ public enum NodeWire {
     /// from driving sessions, 2026-11-20; `settings` and `set` from the settings, 2026-11-20; `push` and `push.decline`
     /// from the push row, 2026-11-20; `session.presets`, `session.complete` and `session.attach` from the composer's lane,
     /// 2026-11-20): every kind `kinds` names but the live protocol's later ones (the terminal from I4).
-    public static let taken: [String] = KindSpec.all.filter { $0.servedBy != .terminalRelay }.map(\.name)
+    public static let taken: [String] = KindSpec.all.filter { $0.servedBy != .terminalRelay && $0.sender != .webPaired }.map(\.name)
 
     // MARK: Lines
 

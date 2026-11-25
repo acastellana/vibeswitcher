@@ -139,14 +139,25 @@ public final class Requests: @unchecked Sendable {
     public var actingPages: ActingPages?
     /// The confirmation an acting page's request passes at the level `trust` (`PageVoice`): none.
     public var pageVoice: PageVoice = NoPageVoice()
-    /// The confirmation at the level `confirm`: a passkey per request, not built yet (it refuses every request, and
-    /// `set web_acts confirm` is refused meanwhile).
-    public var confirmVoice: PageVoice = PasskeyNotBuilt()
+    /// The confirmation at the level `confirm`: a passkey per request (`PasskeyVoice`, set at init).
+    public lazy var confirmVoice: PageVoice = PasskeyVoice(requests: self)
     /// The loopback screen's pairings (`NodeLive`): whether a pairing's connection is open, and its confirmation.
     public var pairings: PairingSeat?
     /// The page mark of each action an acting page asked, while it is done (`approve`'s items are recorded with it). On
     /// `queue`.
     var pageMarks: [String: String] = [:]
+    /// The level `confirm`'s challenges issued for acts, by challenge (base64url), and its registrations asked, by id;
+    /// the line each act's passkey approved, by action, while it is done. On `queue`.
+    var passkeyChallenges: [String: PasskeyChallenge] = [:]
+    var passkeyRegistrations: [String: PasskeyRegistration] = [:]
+    var approvedLines: [String: String] = [:]
+    /// The challenges used already (a second use is said so: `passkey`, not `assertion-needed`). On `queue`.
+    var usedChallenges: Set<String> = []
+    /// Each action an acting page made: that page's token (its digest), and its kind and arguments as the page sent
+    /// them (their digest): only that page's very same request is a repeat of it. Newest last, `actionPagesKept`. On
+    /// `queue`.
+    var actionPages: [(action: String, token: String, kind: String, args: String)] = []
+    static let actionPagesKept = 512
     /// `status`'s `web`: the listener's state (`NodeLive.webValue`); none: off.
     public var webValue: (() -> NodeWire.Value)?
     /// The `seq` a live stream is at, by collection (`LiveHub.seq(of:)`, set by `NodeLive`): a draft's `applied`. On
@@ -350,8 +361,9 @@ public final class Requests: @unchecked Sendable {
             return reply(.init(re: request.id, error: .init(code, why)))
         }
         // A scratch server's form (--test-web-pair, refused on the user's node): a test pairs its page, and confirms it
-        // (`web.pairing`, `web.confirm`), from its own socket, as it opens the web.
-        if ["web.open", "web.pairing", "web.confirm"].contains(request.kind), openWebForAnyone, request.args?["tailnet"] == nil {
+        // (`web.pairing`, `web.confirm`) and registers its passkey (`web.passkey`, `web.passkey.add`), from its own
+        // socket, as it opens the web.
+        if ["web.open", "web.pairing", "web.confirm", "web.passkey", "web.passkey.add"].contains(request.kind), openWebForAnyone, request.args?["tailnet"] == nil {
             note("web.open from pid \(facts.pid), in a scratch server's form (--test-web-pair): no voice asked")
             return act(request, from: facts, reply: reply)
         }
@@ -443,6 +455,9 @@ public final class Requests: @unchecked Sendable {
         case "approve.list": approveList(request, reply: reply)
         case "web.pairing": webPairing(request, reply: reply)
         case "web.confirm": webConfirm(request, reply: reply)
+        case "web.passkey": webPasskey(request, reply: reply)
+        case "web.passkey.add": webPasskeyAdd(request, reply: reply)
+        case "web.passkey.forget": webPasskeyForget(request, reply: reply)
         case "approve": approve(request, from: facts, reply: reply)
         case "plugin.list": pluginList(request, page: facts.pid == NodeLive.webPeer.pid, reply: reply)
         case "plugin.on", "plugin.off": pluginSet(request, reply: reply)

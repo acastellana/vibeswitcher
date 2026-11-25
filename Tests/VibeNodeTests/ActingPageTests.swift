@@ -201,7 +201,7 @@ struct ActingPageTests {
         #expect(access.admit(["token": .string(again.admission.token)]) == nil, "a revoke drops every page token")
         acting.settled()
         #expect(try vault.client.pageActs().tokens.isEmpty && vault.client.pageActs().pages.isEmpty)
-        #expect(!ActingPages.confirmBuilt)
+        #expect(ActingPages.confirmBuilt)
     }
 
     /// A page's auth never waits on the host: with the vault stalled, a token's auth and a pairing's answer at once.
@@ -234,7 +234,8 @@ struct ActingPageTests {
     /// An acting page sends every user's kind its entry lets it, and none it doesn't; a page without the right sends
     /// none; the right changes nothing for any other kind; a terminal needs the watch right, never reading alone.
     @Test func anActingPageRoutesTheUsersKindsItsEntryLets() {
-        let terminalOnly: Set<String> = ["start", "web.open", "build.switch", "build.seal", "hooks.install", "plugin.add", "plugin.inspect", "web.pairing", "web.confirm"]
+        let terminalOnly: Set<String> = ["start", "web.open", "build.switch", "build.seal", "hooks.install", "plugin.add", "plugin.inspect", "web.pairing", "web.confirm",
+                                         "web.passkey", "web.passkey.add", "web.passkey.forget"]
         for spec in KindSpec.all {
             switch (spec.sender, spec.page) {
             case (.user, .acts): #expect(!terminalOnly.contains(spec.name), "\(spec.name)")
@@ -374,6 +375,33 @@ struct ActingPageTests {
         #expect(second.closes == ["acts-off"])
     }
 
+    /// Tabs of one browser sharing a pairing: each connection that comes with the token and its acting secret is
+    /// admitted as the pairing is (it watches and acts), at once and in any number; an off ends every one of them.
+    @Test func tabsSharingAPairingAreEachAdmitted() throws {
+        let vault = MemoryVaultV2()
+        let access = pageGate(vault, root: scratch.url("web-root"))
+        let acting = try #require(access.acting)
+        _ = try acting.set(level: "trust")
+        let (paired, code) = try pagePairs(access)
+        let secret = try pageConfirmed(access, code)
+        let admissions = Locked<[ObjectIdentifier: WebAdmission]>([:])
+        let screen = WebRequestScreen(Inner(), terminals: true, admissionOf: { admissions.value[ObjectIdentifier($0)] })
+        screen.acting = acting
+        let tabs = try (0..<3).map { _ -> Recorder in
+            let admission = try #require(access.admit(["token": .string(paired.token), "act": .string(secret)]))
+            #expect(admission.rights == [.read, .draft, .watch, .act])
+            let tab = Recorder()
+            admissions.value[ObjectIdentifier(tab)] = admission
+            screen.opened(tab, rights: admission.rights)
+            return tab
+        }
+        #expect(tabs.allSatisfy { screen.watching($0) })
+        let queue = DispatchQueue(label: "closes")
+        screen.endActing(code: "acts-off", reason: "off", closeOn: queue)
+        queue.sync {}
+        #expect(tabs.allSatisfy { $0.closes == ["acts-off"] })
+    }
+
     /// The re-read's R1: a refresh queued just before the level is lowered never puts the higher level back: the lower
     /// level counts at once, and the refresh's answer (asked before) is turned away when it comes.
     @Test func aRefreshQueuedBeforeALowerLevelNeverRaisesItAgain() async throws {
@@ -419,5 +447,44 @@ struct ActingPageTests {
         await offPool { done.wait() }
         acting.settled()
         #expect(acting.level == "off", "the refresh asked before put trust back")
+    }
+
+    /// A level raised while a confirmed page is open: the page is told its rights at it on its open connection (a
+    /// `paired` message with its secret as it holds it, its rights and kinds), the hub too; at `confirm`, only a page at
+    /// localhost gets `act` (the browser check found a page confirmed at off never learning it acts).
+    @Test func aNewLevelReachesTheOpenConfirmedPages() throws {
+        let vault = MemoryVaultV2()
+        let access = pageGate(vault, root: scratch.url("web-root"))
+        let acting = try #require(access.acting)
+        let admissions = Locked<[ObjectIdentifier: WebAdmission]>([:])
+        let inner = Inner()
+        let screen = WebRequestScreen(inner, admissionOf: { admissions.value[ObjectIdentifier($0)] })
+        screen.acting = acting
+        var pages: [(Recorder, String)] = []
+        for origin in ["localhost:8765", "127.0.0.1:8765"] {
+            var (admission, code) = try pagePairs(access)
+            admission.origin = origin
+            let page = Recorder()
+            admissions.value[ObjectIdentifier(page)] = admission
+            screen.opened(page, rights: admission.rights)
+            let pairing = try #require(access.takePairing(code: code))
+            let secret = acting.confirmed(token: pairing.token, tokenEnds: pairing.tokenEnds)
+            #expect(screen.confirmPairing(code, secret: secret, rights: [.read, .draft, .watch]))
+            pages.append((page, secret))
+        }
+        let queue = DispatchQueue(label: "relevel")
+        acting.onLevel = { _ in screen.relevel(on: queue) }
+        _ = try acting.addPasskey(id: "a2V5", publicKey: "cHVi")
+        _ = try acting.set(level: "confirm")
+        queue.sync {}
+        let local = try #require(pages[0].0.messages.last), loopback = pages[1].0.messages.last
+        #expect(local["kind"]?.string == "paired" && local["act"]?.string == pages[0].1, "\(local)")
+        #expect(local["rights"]?.array?.compactMap(\.string) == ["read", "draft", "watch", "act"])
+        #expect(local["kinds"]?.array?.contains(.string("answer")) == true)
+        #expect(loopback?["rights"]?.array?.contains(.string("act")) != true, "127.0.0.1 doesn't act at confirm")
+        _ = try acting.set(level: "trust")
+        queue.sync {}
+        #expect(pages[1].0.messages.last?["rights"]?.array?.contains(.string("act")) == true, "at trust it does")
+        #expect(inner.rights.value.last?.contains(.act) == true, "the hub told")
     }
 }

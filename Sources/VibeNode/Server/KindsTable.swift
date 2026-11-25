@@ -15,6 +15,7 @@ public enum KindsTable {
         case .webRead: return "the user's terminal, or a page that reads"
         case .webDraft: return "a page that drafts"
         case .webTerminal: return "a page's terminal"
+        case .webPaired: return "a confirmed page (its passkey)"
         }
     }
 

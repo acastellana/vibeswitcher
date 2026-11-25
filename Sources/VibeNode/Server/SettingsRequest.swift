@@ -154,6 +154,10 @@ extension Requests {
             return refuse(.refused, "web_acts confirm asks for your passkey at each act, and that check isn't built yet: off or trust for now")
         }
         guard let acting = actingPages else { return refuse(.refused, "this server has no web page") }
+        // `confirm` needs a passkey to confirm with.
+        guard level != "confirm" || !(acting.state?.keys.isEmpty ?? true) else {
+            return refuse(.refused, "web_acts confirm needs a passkey first: pair a page at http://localhost (`vibeswitcher web --localhost`), then `vibeswitcher web --passkey`")
+        }
         let queue = self.queue, note = self.note
         let was = acting.level
         DispatchQueue.global(qos: .userInitiated).async {
@@ -183,7 +187,11 @@ extension Requests {
             "included (it could approve its own merge). A page over the tailnet still only reads and drafts. `vibeswitcher set web_acts off` ends it.",
         ],
         "confirm": [
-            "Acting from the page: confirm. Each act from a paired page asks for your passkey first.",
+            "Acting from the page: confirm. Each act from a paired page asks for your passkey first: nothing acts without your touch.",
+            "What it doesn't stop: where sessions can run Windows programs (WSL), a process holding the page's token and secret can ask",
+            "Windows Hello itself for a request of its own. Its prompt says \"localhost\", not the action, so a touch can approve what you",
+            "didn't read. confirm means no silent acting, not no acting: for approving, pushing, building and plugins the terminal stays",
+            "the stronger voice.",
         ],
         "off": [
             "Acting from the page is off: every page's pairing was dropped and its acting connection closed; pages read and draft.",

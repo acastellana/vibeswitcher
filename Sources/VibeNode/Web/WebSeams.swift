@@ -55,6 +55,8 @@ public struct WebAdmission: Sendable {
     public var act: String?
     /// A pairing just taken that waits for the terminal's confirmation (`PagePairing`): its code id.
     public var pairing: String?
+    /// The name it came on (`127.0.0.1:PORT`, `localhost:PORT`, the tailnet's): a different origin each.
+    public var origin: String?
 
     public init(rights: LiveRights, auth: NodeWire.Value, token: String, act: String? = nil, pairing: String? = nil) {
         self.rights = rights

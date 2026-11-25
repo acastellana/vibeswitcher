@@ -56,7 +56,8 @@ public enum WireSchema {
     /// The entities: one per keyed collection's value, and a chat's item.
     public static let entities = ["node", "session", "lead", "card", "chat.item", "board"]
     /// The messages: the envelopes, and each live kind's `args` and `result` (`<kind>.args`, `<kind>.result`).
-    public static let messages = ["request", "reply", "failure", "hello", "bye", "event", "snapshot", "delta", "paired", "auth.args",
+    public static let messages = ["request", "reply", "failure", "hello", "bye", "event", "snapshot", "delta", "paired", "passkey", "auth.args",
+                                  "act.challenge.args", "act.challenge.result", "passkey.ask.args", "passkey.ask.result", "passkey.registered.args", "passkey.registered.result",
                                   "subscribe.args", "subscribe.result", "unsubscribe.args", "chat.page.args", "chat.page.result",
                                   "draft.args", "draft.result", "draft.clear.args",
                                   "board.args", "board.result", "seen.args",
@@ -92,9 +93,33 @@ public enum WireSchema {
         // Messages (NodeWire's, the contract's §1, §2 and §10).
         shapes += [
             shape("request", from: "NodeWire.Request", [field("v", .int), field("id", .string), field("kind", .string),
-                                                        optional("args", .map(.any)), optional("action", .string), optional("must", .bool)]),
+                                                        optional("args", .map(.any)), optional("action", .string), optional("must", .bool),
+                                                        // An acting page's passkey assertion, at the level `confirm`.
+                                                        optional("assertion", .shape("assertion"))]),
+            shape("assertion", from: "PasskeyVoice", [field("id", .string), field("clientDataJSON", .string), field("authenticatorData", .string),
+                                                      field("signature", .string)]),
             shape("reply", from: "NodeWire.Reply", [field("v", .int), field("re", .string), field("ok", .bool), optional("result", .any),
-                                                    optional("error", .shape("failure"))]),
+                                                    optional("error", .shape("failure")),
+                                                    // What the vault recorded an act at `confirm` with: what its passkey approved.
+                                                    optional("recorded", .string)]),
+            // The terminal's `web --passkey`, to the tabs of the confirmed page at http://localhost it named.
+            // `waiting`: a registration waits (its end, `expires`): the tab clicked asks for its offer (`passkey.ask`);
+            // `ended`: it is over (kept, contested, run out).
+            shape("passkey", from: "Requests.webPasskey", [field("v", .int), field("kind", .words(["passkey"])), field("op", .words(["waiting", "ended"])),
+                                                           field("register", .string), optional("expires", .date)]),
+            shape("passkey.ask.args", from: "Requests.passkeyAsk", [field("register", .string)]),
+            shape("passkey.ask.result", from: "Requests.webPasskey", [field("register", .string), field("expires", .date), field("challenge", .string),
+                                                                      field("rp", .shape("passkey.rp")), field("user", .shape("passkey.user")),
+                                                                      field("exclude", .list(.string))]),
+            shape("passkey.rp", from: "Requests.webPasskey", [field("id", .string), field("name", .string)]),
+            shape("passkey.user", from: "Requests.webPasskey", [field("id", .string), field("name", .string), field("displayName", .string)]),
+            shape("act.challenge.args", from: "Requests.actChallenge", [field("kind", .string), field("args", .map(.any)), field("action", .string)]),
+            shape("act.challenge.result", from: "Requests.actChallenge", [field("challenge", .string), field("allow", .list(.string)),
+                                                                          field("rpId", .string), field("timeout", .int), field("line", .string)]),
+            shape("passkey.registered.args", from: "Requests.passkeyRegistered", [field("register", .string), field("id", .string),
+                                                                                  field("clientDataJSON", .string), field("attestationObject", .string)]),
+            // No id: the page shows its own credential's, from its own navigator.credentials.create.
+            shape("passkey.registered.result", from: "Requests.passkeyRegistered", [field("state", .words(["received"]))]),
             shape("failure", from: "NodeWire.Failure", [field("code", .words(NodeWire.Code.allCases.map(\.rawValue))), field("message", .string)]),
             shape("hello", from: "NodeWire.Hello", [
                 field("v", .int), field("kind", .words(["hello"])), field("node", .string), field("epoch", .string),
@@ -117,7 +142,9 @@ public enum WireSchema {
             // connection's rights now.
             shape("paired", from: "WebRequestScreen.confirmPairing", [field("v", .int), field("kind", .words(["paired"])), field("act", .string),
                                                                       field("rights", .list(.words(["read", "draft", "watch", "act"]))),
-                                                                      field("kinds", .list(.string))]),
+                                                                      field("kinds", .list(.string)),
+                                                                      // Its pairing's words, shown on This node from here on.
+                                                                      optional("phrase", Kind.string.orNull)]),
             shape("bye", from: "NodeWire.Bye", [field("v", .int), field("kind", .words(["bye"])), field("reason", .string),
                                                 optional("code", .words(["auth", "revoked", "version", "too-long", "not-object",
                                                                          "not-request", "must", "stopping", "busy", "acts-off"]))]),
@@ -302,7 +329,11 @@ public enum WireSchema {
             // Acting from the page (the web UI design's step 2): on, since when, the acting pages open now.
             // `level` absent from a node before levels (its `on` says on or off).
             shape("node.web.acts", from: "ActingPages.value", [optional("level", .words(ActingPages.levels)), field("on", .bool),
-                                                               field("since", Kind.date.orNull), field("pages", .int)]),
+                                                               field("since", Kind.date.orNull), field("pages", .int),
+                                                               // The level `confirm`'s passkeys, where they work, and a recent one said.
+                                                               optional("keys", .list(.shape("node.web.acts.key"))),
+                                                               optional("passkeyOrigin", Kind.string.orNull), optional("notice", Kind.string.orNull)]),
+            shape("node.web.acts.key", from: "ActingPages.value", [field("id", .string), field("added", .date), field("lastUsed", Kind.date.orNull)]),
             // The account's usage (the parity table's "Usage shown to you", 2026-11-21): null until the engine's first refresh.
             shape("node.usage", from: "NodeUsage.value", [
                 field("account", Kind.string.orNull), field("limits", .list(.shape("node.usage.limit"))), field("ignored", .bool),
@@ -706,7 +737,7 @@ public enum WireSchema {
             if fields["re"] != nil { return "reply" }
             if fields["id"] != nil { return "request" }
             let kind = fields["kind"]?.string ?? ""
-            return ["hello", "bye", "snapshot", "delta", "paired"].contains(kind) ? kind : "event"
+            return ["hello", "bye", "snapshot", "delta", "paired", "passkey"].contains(kind) ? kind : "event"
         }
 
         private func at(_ path: String, _ key: String) -> String { path.isEmpty ? key : "\(path).\(key)" }

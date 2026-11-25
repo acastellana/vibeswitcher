@@ -178,16 +178,17 @@ public final class NodeWebListener: @unchecked Sendable {
         let assets = assets
         let beyond = !Platform.TCP.isLoopback(family: .ipv4, address: address)
         let made = WebListener(queue: queue, clock: clock, limits: limits, policy: { host, origin, path, headers in
-            guard let name = own.name, let origin else { return false }
-            // Compared byte for byte: String's == is canonical equivalence, and these are one exact string each.
-            return path == "/ws" && host.utf8.elementsEqual(name.utf8) && origin.utf8.elementsEqual(("http://" + name).utf8)
+            guard let origin else { return false }
+            // Compared byte for byte: String's == is canonical equivalence, and these are one exact string each. One of
+            // this listener's names, its Origin the same name's.
+            return path == "/ws" && own.names.contains { host.utf8.elementsEqual($0.utf8) } && origin.utf8.elementsEqual(("http://" + host).utf8)
                 && headers.all("sec-fetch-site").allSatisfy { $0 == "same-origin" }
         }, address: address, port: requestedPort, allowBeyondLoopback: beyond, note: note)
         let (bind, place) = (bind, place)
         made.bindWith = { _, address, port, backlog in bind.listen(place, address, port, backlog) }
         made.admitPeer = admitPeer
         made.refuse = { request in
-            guard let name = own.name, let host = request.headers["host"], host.utf8.elementsEqual(name.utf8) else {
+            guard let host = request.headers["host"], own.names.contains(where: { host.utf8.elementsEqual($0.utf8) }) else {
                 return WebResponse(status: 421)
             }
             if WebSocketHandshake.isAsked(by: request), request.path != "/ws" { return .plain(404) }
@@ -204,7 +205,9 @@ public final class NodeWebListener: @unchecked Sendable {
         made.onSocket = { [weak self] socket in self?.opened(socket) }
         do {
             let port = try made.start()
-            own.set("\(name):\(port)")
+            // The loopback page's second name, `localhost` (WebAuthn takes no IP address as its relying party: the
+            // `confirm` level's passkeys), a different origin for the browser: a pairing belongs to the one it was made on.
+            own.set(["\(name):\(port)"] + (place == .loopback && name == "127.0.0.1" ? ["localhost:\(port)"] : []))
             lock.withLock {
                 listener = made
                 current = .on(port: port)
@@ -289,9 +292,9 @@ public final class NodeWebListener: @unchecked Sendable {
     /// This listener's one name, known once it is bound: read by its checks, on the queue.
     private final class OwnName: @unchecked Sendable {
         private let lock = NSLock()
-        private var held: String?
-        var name: String? { lock.withLock { held } }
-        func set(_ name: String) { lock.withLock { held = name } }
+        private var held: [String] = []
+        var names: [String] { lock.withLock { held } }
+        func set(_ names: [String]) { lock.withLock { held = names } }
     }
 
     // MARK: A connection, on `queue`
@@ -345,7 +348,10 @@ public final class NodeWebListener: @unchecked Sendable {
         guard request.v <= NodeWire.version else {
             return transport.close(code: "version", reason: "this server speaks version \(NodeWire.version)")
         }
-        guard let admission = gate.admit(request.args ?? [:]) else {
+        // The name the page came on (its Origin's, checked at the upgrade): this listener's, never what the page says.
+        var args = request.args ?? [:]
+        args[WebAccess.originArg] = .string(transport.host)
+        guard let admission = gate.admit(args) else {
             return transport.close(code: "auth", reason: authRefusal)
         }
         // A revoke may have landed since the gate said yes: nothing is said to a connection whose token is gone.
@@ -403,6 +409,9 @@ final class NodeWebTransport: LiveTransport, @unchecked Sendable {
     init(socket: WebSocketConnection) {
         self.socket = socket
     }
+
+    /// The Host it came on (one of the listener's names, checked at the upgrade).
+    var host: String { socket.request.host }
 
     /// One message, as a text frame. Never dropped while the hub sends only when `writable`: past that, a queue that
     /// reaches its limit closes the connection.

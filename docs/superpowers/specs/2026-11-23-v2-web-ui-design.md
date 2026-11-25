@@ -150,7 +150,7 @@ As built (the node's side, after its security reviews):
 
 - `web_acts` is a level, kept in the host's vault, never a file:
   - `off` is the default: pages read and draft.
-  - `confirm` asks for a passkey at each act. That check isn't built yet, so the node refuses this level for now.
+  - `confirm` asks for a passkey at each act (see below). It can't be set until a passkey is registered.
   - `trust` lets each click act as you.
 
   Only a terminal raises the level. A page may lower it.
@@ -192,8 +192,53 @@ As built (the node's side, after its security reviews):
   - stop the node.
 
   So at `trust`, whatever holds a page's two secrets while it is open acts as you there. That is the cost the user
-  accepted ("for now trust the page completely"). `confirm`, a passkey touch per request (`PageVoice`), is the
-  planned next step.
+  accepted ("for now trust the page completely").
+- `confirm`: one passkey touch per act.
+  - **Where it works.** A passkey works at `http://localhost:PORT`, not at `http://127.0.0.1`: WebAuthn takes no IP
+    address as its relying party. The page answers on both names. They are two origins to the browser, so a pairing
+    belongs to the one it was made on. `vibeswitcher web` prints the localhost address at `confirm`, or with
+    `--localhost`. At `confirm`, a page at 127.0.0.1 watches but doesn't act.
+  - **Registration.** `vibeswitcher web --passkey` asks you to type the three words of the one page to register on.
+    Each confirmed page shows its words on This node.
+    - That page's tabs show "Add a passkey". The tab you click asks the node for the offer; one connection holds it.
+    - Your device asks you (Windows Hello, a security key). The tab then shows the first 6 characters of the new key's
+      id, read from its own browser's answer, never from the node.
+    - The terminal shows no id. It asks you to type those 6 characters, then your code. Typed, not compared: a key
+      another client slipped in can't be kept by a glance at a matching screen.
+    - The offer stays open until you keep the key or it runs out (5 minutes). Another page or tab asking or answering,
+      a second answer, or characters that aren't the received key's: the terminal says so, with `web --revoke`, and
+      nothing is kept. (The second review's K1: a client holding the token and secret answered first with its own
+      software key, and the offer closed before your tab could contest it.)
+    - The vault keeps the public key and its count, at most 5 keys, one registration at a time.
+    - `status` and This node list the keys, with when each was added and last used.
+    - A key added in the last week is said there too.
+    - `vibeswitcher web --passkey --forget ID` drops one.
+  - **Each act.**
+    - The page first asks a challenge. It is bound to exactly that request: its kind, action, arguments (`seen`
+      included), the page's token, the relying party and the origin.
+    - The page shows the line naming what is approved. Your device signs it with your PIN or biometric.
+    - The node checks, before anything is recorded: the origin (`http://localhost:PORT`, not cross-origin), the relying
+      party, presence and verification, the ES256 signature, the challenge (live, unused, for this request), and the
+      count.
+    - The act is recorded with the line, and the reply gives the line back.
+  - **What it doesn't protect against.**
+    - A process that drives the browser (the DevTools protocol, an extension, a compromised profile) can't act or
+      replay without your touch. But it can change what the page shows and ask a challenge for another request. Your
+      device's prompt doesn't name the request, so a touch proves you were there and meant to approve something, not
+      what you read. The vault's record shows what was approved, so a mismatch can be seen afterwards; nothing stops
+      it before.
+    - The attestation is "none": the node makes no claim about the device that made a key (a software key in a
+      browser profile passes as well as a security key). The page you named and your code are what vouch for it.
+    - Registration and the level itself rest on the user's-voice rule. On a machine where that rule can be passed
+      (WSL's interop: the second review's finding B), a process that passes as the terminal can register its own key
+      or change the level. So `confirm` protects against a stolen token or a driven browser. It does not protect
+      against a process that passes as your terminal.
+    - On a machine where sessions can run Windows programs (WSL's interop), a process holding the token and secret
+      can ask a challenge for its own request and call Windows' own WebAuthn API with the relying party "localhost"
+      and client data it writes itself. Windows Hello then shows "localhost", not the action. So `confirm` buys "no
+      silent acting", not "no acting": nothing acts without your touch, but a touch can approve what you didn't
+      read. For approving, pushing, building and plugins the terminal stays the stronger voice (the second review's
+      K2).
 
 ## Constraints
 

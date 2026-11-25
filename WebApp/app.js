@@ -203,7 +203,12 @@ function drawPasskeyOffer() {
   if (offer.expires) setTimeout(drawPasskeyOffer, Math.max(0, Date.parse(offer.expires) - Date.now()) + 50);
   const add = h('button', { class: 'button small', type: 'button', disabled: adding?.state === 'adding' || adding?.state === 'added', onclick: () => store.addPasskey(registerPasskey) }, t('pkAdd'));
   const named = store.state.pageWords ? h('span', { class: 'page-words' }, t('pkThisPage'), ' ', h('strong', null, store.state.pageWords)) : null;
-  const said = !adding ? t('pkOffer') : adding.state === 'adding' ? t('pkAdding') : adding.state === 'added' ? t('pkAdded', { id: adding.id })
+  // Added: the 6 characters of this tab's own new key in an element of their own (`.passkey-id`), the words beside.
+  if (adding?.state === 'added') {
+    passkeyOffer.replaceChildren(h('span', null, t('pkAddedLead')), ' ', h('code', { class: 'passkey-id' }, adding.id), ' ', h('span', null, t('pkAddedTail')), named);
+    return;
+  }
+  const said = !adding ? t('pkOffer') : adding.state === 'adding' ? t('pkAdding')
     : adding.state === 'cancelled' ? t('pkCancelled') : adding.state === 'unsupported' ? t('pkUnsupported') : t('pkRefused', { why: adding.why });
   passkeyOffer.replaceChildren(h('span', null, said), named, adding?.state === 'added' ? null : add);
 }

@@ -330,8 +330,13 @@ extension WireKinds {
         public static let kind = "web.open"
         public struct Args: WireArgs, Equatable {
             public var tailnet: Bool?
-            public enum CodingKeys: String, CodingKey, CaseIterable { case tailnet }
-            public init(tailnet: Bool? = nil) { self.tailnet = tailnet }
+            /// The address at `http://localhost:PORT` (the origin a passkey works on); the level `confirm` gives it anyway.
+            public var localhost: Bool?
+            public enum CodingKeys: String, CodingKey, CaseIterable { case tailnet, localhost }
+            public init(tailnet: Bool? = nil, localhost: Bool? = nil) {
+                self.tailnet = tailnet
+                self.localhost = localhost
+            }
         }
         public struct Result: Codable, Sendable, Equatable {
             public var url: String?
@@ -344,6 +349,48 @@ extension WireKinds {
                 self.expiresIn = expiresIn
                 self.tailnet = tailnet
                 self.code = code
+            }
+        }
+    }
+
+    /// `web.passkey.add` (the user's voice, recorded): the passkey a confirmed page registered for `register` (the
+    /// terminal's `web.passkey`), kept in the vault for the level `confirm`, once `typed` is its id's first characters
+    /// as the user read them off the page that made it.
+    public enum WebPasskeyAdd: WireChangeKind {
+        public static let kind = "web.passkey.add"
+        public struct Args: WireArgs, Equatable {
+            public var register: String?
+            public var typed: String?
+            public enum CodingKeys: String, CodingKey, CaseIterable { case register, typed }
+            public init(register: String, typed: String) {
+                self.register = register
+                self.typed = typed
+            }
+        }
+        public struct Result: Codable, Sendable, Equatable {
+            public var id: String?
+            public var keys: Int?
+            public init(id: String, keys: Int) {
+                self.id = id
+                self.keys = keys
+            }
+        }
+    }
+
+    /// `web.passkey.forget` (the user's voice, recorded): the passkeys whose id starts with `id` dropped (`all`: every one).
+    public enum WebPasskeyForget: WireChangeKind {
+        public static let kind = "web.passkey.forget"
+        public struct Args: WireArgs, Equatable {
+            public var id: String?
+            public enum CodingKeys: String, CodingKey, CaseIterable { case id }
+            public init(id: String) { self.id = id }
+        }
+        public struct Result: Codable, Sendable, Equatable {
+            public var forgotten: [String]?
+            public var keys: Int?
+            public init(forgotten: [String], keys: Int) {
+                self.forgotten = forgotten
+                self.keys = keys
             }
         }
     }

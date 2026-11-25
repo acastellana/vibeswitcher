@@ -14,8 +14,12 @@ extension Requests {
         case .failure(let refusal):
             reply(.init(re: request.id, error: .init(.refused, "the web isn't open: \(refusal.description)")))
         case .success(let opened):
+            // At `http://localhost:PORT` when asked, or at the level `confirm` (the origin a passkey works on): the page's
+            // second name, a different origin, its pairing its own.
+            let localhost = request.args?["localhost"]?.bool == true || actingPages?.level == "confirm"
+            let url = localhost ? opened.url.replacingOccurrences(of: "http://127.0.0.1:", with: "http://localhost:") : opened.url
             // The code's id when the page that takes it waits for this terminal's confirmation (the loopback gate's).
-            reply(.init(re: request.id, typed: WireKinds.WebOpen.Result(url: opened.url, expiresIn: opened.expiresIn,
+            reply(.init(re: request.id, typed: WireKinds.WebOpen.Result(url: url, expiresIn: opened.expiresIn,
                                                                          code: web.acting == nil ? nil : opened.code)))
         }
     }

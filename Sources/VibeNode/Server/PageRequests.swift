@@ -6,20 +6,35 @@ import VibeCore
 /// completely"); a passkey touch per request slots in here, with no change to the kinds or the page's requests. `done`
 /// with nil when it passes, else why not; on any thread (`Requests` goes back to its queue).
 public protocol PageVoice: Sendable {
-    func confirm(_ request: NodeWire.Request, page: String, done: @escaping @Sendable (String?) -> Void)
+    /// `done` with nil when it passes, else the refusal (its code and why).
+    func confirm(_ request: NodeWire.Request, page: PageAct, done: @escaping @Sendable (NodeWire.Failure?) -> Void)
+}
+
+/// The page an acting request came from: its mark (`via`) and its credentials (the token a challenge was bound to, the
+/// origin its assertion must name).
+public struct PageAct: Sendable {
+    public var via: String
+    public var credentials: PageCredentials
+    public init(via: String, credentials: PageCredentials) {
+        self.via = via
+        self.credentials = credentials
+    }
 }
 
 /// No confirmation: the click is the user's (the level `trust`).
 public struct NoPageVoice: PageVoice {
     public init() {}
-    public func confirm(_ request: NodeWire.Request, page: String, done: @escaping @Sendable (String?) -> Void) { done(nil) }
+    public func confirm(_ request: NodeWire.Request, page: PageAct, done: @escaping @Sendable (NodeWire.Failure?) -> Void) { done(nil) }
 }
 
-/// The level `confirm`'s check before it exists: every request refused, saying so.
-public struct PasskeyNotBuilt: PageVoice {
-    public init() {}
-    public func confirm(_ request: NodeWire.Request, page: String, done: @escaping @Sendable (String?) -> Void) {
-        done("the passkey check of web_acts confirm isn't built yet")
+/// The level `confirm`'s check: the request's passkey assertion, for a challenge this node issued for exactly it
+/// (`Requests.passkeyCheck`).
+public final class PasskeyVoice: PageVoice, @unchecked Sendable {
+    weak var requests: Requests?
+    public init(requests: Requests? = nil) { self.requests = requests }
+    public func confirm(_ request: NodeWire.Request, page: PageAct, done: @escaping @Sendable (NodeWire.Failure?) -> Void) {
+        guard let requests else { return done(.init(.passkey, "this server checks no passkey")) }
+        requests.queue.async { requests.passkeyCheck(request, page: page, done: done) }
     }
 }
 
@@ -28,9 +43,16 @@ public struct PasskeyNotBuilt: PageVoice {
 public struct PairingSeat: Sendable {
     public var holds: @Sendable (String) -> Bool
     public var confirm: @Sendable (String, String, LiveRights) -> Bool
-    public init(holds: @escaping @Sendable (String) -> Bool, confirm: @escaping @Sendable (String, String, LiveRights) -> Bool) {
+    /// One message to every confirmed pairing's connection on the origin a passkey works on: how many.
+    public var toPasskeyPages: @Sendable (Data) -> Int
+    /// One message to the confirmed page at localhost whose pairing shows `phrase`: its token's digest, or nil for none.
+    public var toPasskeyPage: @Sendable (String, Data) -> String?
+    public init(holds: @escaping @Sendable (String) -> Bool, confirm: @escaping @Sendable (String, String, LiveRights) -> Bool,
+                toPasskeyPages: @escaping @Sendable (Data) -> Int = { _ in 0 }, toPasskeyPage: @escaping @Sendable (String, Data) -> String? = { _, _ in nil }) {
         self.holds = holds
         self.confirm = confirm
+        self.toPasskeyPages = toPasskeyPages
+        self.toPasskeyPage = toPasskeyPage
     }
 }
 
@@ -74,25 +96,73 @@ extension Requests {
             self?.note("refused \(request.kind) from \(via): \(refusal.error?.message ?? "")")
             reply(refusal)
         }
+        // An action id this server knows (answered, or being done) is only this page's very same request again: else
+        // refused here at `trust` (another page's action, a terminal's, another kind or other arguments); at `confirm` it
+        // needs its passkey's assertion like any act (`passkeyCheck`), and `kept` refuses other arguments after it.
+        if actingPages?.level != "confirm", let action = request.action?.lowercased(), replies[action] != nil || doing[action] != nil,
+           !isPageRepeat(request, token: credentials.token) {
+            return refused(.init(re: request.id, error: .init(.voice, "that action id is another request's: send it with a new one")))
+        }
         guard case .go(let shown) = pageChecks(request) else {
             if case .refused(let refusal) = pageChecks(request) { refused(refusal) }
             return
         }
         // The level chooses the check: `trust` none, `confirm` a passkey per request.
-        let voice = actingPages?.level == "trust" ? pageVoice : confirmVoice
-        voice.confirm(shown, page: via) { [weak self] notConfirmed in
+        let level = actingPages?.level
+        let voice = level == "trust" ? pageVoice : confirmVoice
+        // The request as the page sent it (a passkey's challenge was bound to exactly that).
+        voice.confirm(request, page: PageAct(via: via, credentials: credentials)) { [weak self] notConfirmed in
             guard let self else { return }
             self.queue.async {
-                if let notConfirmed { return refused(.init(re: request.id, error: .init(.voice, "not confirmed: \(notConfirmed)"))) }
-                guard self.actingPages?.acts(token: credentials.token, secret: credentials.act) == true else {
+                let approved = request.action.flatMap { self.approvedLines.removeValue(forKey: $0.lowercased()) }
+                if let notConfirmed { return refused(.init(re: request.id, error: notConfirmed)) }
+                guard self.actingPages?.acts(token: credentials.token, secret: credentials.act, origin: credentials.origin) == true else {
                     return refused(.init(re: request.id, error: .init(.actsEnded, WebRequestScreen.notActing)))
+                }
+                // Passed at `trust` while the level rose to `confirm`: it needs its passkey now (the review's Low).
+                if level == "trust", self.actingPages?.level != "trust" {
+                    return refused(.init(re: request.id, error: .init(.assertionNeeded, "web_acts is confirm now: send it again with your passkey")))
                 }
                 switch self.pageChecks(request) {
                 case .refused(let refusal): refused(refusal)
-                case .go(let now): self.voiced(now, from: NodeLive.webPeer, via: via, reply: reply)
+                case .go(let now):
+                    // At `confirm`, recorded with what the passkey approved, and that line given back.
+                    // The vault keeps a mark of 200 bytes at most: cut there, at a character's end (the line's quotes
+                    // and words may be more than one byte each).
+                    let mark = approved.map { Self.cut(via + "; passkey approved: " + $0, bytes: 200) } ?? via
+                    self.notePageAction(request, token: credentials.token)
+                    self.voiced(now, from: NodeLive.webPeer, via: mark) { answer in
+                        var answer = answer
+                        if answer.ok, let approved { answer.recorded = approved }
+                        reply(answer)
+                    }
                 }
             }
         }
+    }
+
+    /// `text` cut to at most `bytes` of UTF-8, at a character's end.
+    static func cut(_ text: String, bytes: Int) -> String {
+        var kept = ""
+        for character in text {
+            guard kept.utf8.count + character.utf8.count <= bytes else { break }
+            kept.append(character)
+        }
+        return kept
+    }
+
+    /// Whether `request` repeats an action this page made: the same page's token, kind and arguments (as it sent them).
+    func isPageRepeat(_ request: NodeWire.Request, token: String) -> Bool {
+        guard let action = request.action?.lowercased(), Self.recorded.contains(request.kind),
+              let first = actionPages.last(where: { $0.action == action }) else { return false }
+        return first.token == ActingPages.digest(token) && first.kind == request.kind && first.args == Self.argumentsDigest(request.args ?? [:])
+    }
+
+    /// An acting page's action, kept for its repeats (`isPageRepeat`).
+    func notePageAction(_ request: NodeWire.Request, token: String) {
+        guard let action = request.action?.lowercased(), !actionPages.contains(where: { $0.action == action }) else { return }
+        actionPages.append((action, ActingPages.digest(token), request.kind, Self.argumentsDigest(request.args ?? [:])))
+        if actionPages.count > Self.actionPagesKept { actionPages.removeFirst(actionPages.count - Self.actionPagesKept) }
     }
 
     /// An acting page's request as `voiced` takes it, or why not: a setting a page never sets; on a card or a batch,
