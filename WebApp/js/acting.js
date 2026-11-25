@@ -42,24 +42,28 @@ export function pageMaySet(key, value) {
 }
 
 // A button that sends `kind` with `args()` (a function, read at the click), disabled while it is out; `done(reply)` on
-// success; the refusal said under it. Returns { el, button, say(text) }. `confirm`: a second click asked first
-// ("Stop the node?"), for what can't be taken back.
-export function doButton(app, { label, kind, args, done = () => {}, quiet = false, confirm = null, className = '' }) {
+// success; the refusal said under it. Returns { el, button, say(text) }. `confirm`: a second click asked first, in
+// place ("Click again to stop the node", with Cancel beside it), for what can't be taken back; `danger`: drawn as
+// what ends something, never as the page's primary button.
+export function doButton(app, { label, kind, args, done = () => {}, quiet = false, confirm = null, danger = false, className = '' }) {
   const said = h('span', { class: 'act-said', role: 'status' });
   let asking = false;
-  const button = h('button', { class: (quiet ? 'button quiet ' : 'button ') + className, type: 'button' }, label);
-  const el = h('span', { class: 'act' }, button, said);
+  let stopAsking = () => {};
+  const button = h('button', { class: (quiet || danger ? 'button quiet ' : 'button ') + (danger ? 'danger ' : '') + className, type: 'button' }, label);
+  const reset = () => { asking = false; stopAsking(); button.textContent = label; button.classList.remove('confirming'); cancel.hidden = true; };
+  const cancel = h('button', { class: 'button quiet', type: 'button', hidden: true, onclick: () => { reset(); button.focus?.(); } }, t('acCancel'));
+  const el = h('span', { class: 'act' }, button, cancel, said);
+  const later = app.later || ((fn, ms) => { const timer = setTimeout(fn, ms); return () => clearTimeout(timer); });
   button.addEventListener('click', () => {
     if (confirm && !asking) {
       asking = true;
       button.textContent = confirm;
       button.classList.add('confirming');
-      setTimeout(() => { if (asking) { asking = false; button.textContent = label; button.classList.remove('confirming'); } }, 6000);
+      cancel.hidden = false;
+      stopAsking = later(() => { if (asking) reset(); }, 6000);
       return;
     }
-    asking = false;
-    button.classList.remove('confirming');
-    button.textContent = label;
+    reset();
     button.disabled = true;
     setText(said, '');
     said.classList.remove('refused');

@@ -160,6 +160,9 @@ export function tooLargeCard(card) {
     copyLine(command, 'the command that shows it whole'));
 }
 
+// How long a Blocking card's answer waits to be taken back before it goes.
+export const UNDO_MS = 5000;
+
 // A lead's question or approval. Returns { el, update(card) }; `el` keeps its text field and its focus across updates.
 export function questionCard(app, first, { expand = null } = {}) {
   const el = h('article', { class: 'card', tabindex: -1 });
@@ -171,7 +174,20 @@ export function questionCard(app, first, { expand = null } = {}) {
   let keys = { buttons: [], hold: null };
 
   // With the `act` right the click is the answer: the card, the `seen` it was drawn with, the words and the version.
-  const choose = (answer) => { if (answer.trim()) app.store.act(card.id, 'answer', { text: answer.trim(), ...(card.question?.version != null ? { version: card.question.version } : {}), seen: card.seen ?? null }); };
+  const send = (text) => app.store.act(card.id, 'answer', { text, ...(card.question?.version != null ? { version: card.question.version } : {}), seen: card.seen ?? null });
+  // A Blocking card's answer waits a few seconds first, "Sending … · Undo" on the card, so a slip of one click can be
+  // taken back; then it goes as it would have. `app.later(fn, ms)` (the tests' clock) returns what cancels it.
+  let sending = null;
+  const later = app.later || ((fn, ms) => { const timer = setTimeout(fn, ms); return () => clearTimeout(timer); });
+  const choose = (answer) => {
+    const text = answer.trim();
+    if (!text || sending) return;
+    if (card.question?.priority !== 'blocking') { send(text); return; }
+    sending = { text, cancel: later(() => { const going = sending; sending = null; shape = ''; send(going.text); build(); }, UNDO_MS) };
+    shape = '';
+    build();
+  };
+  const undo = () => { sending?.cancel(); sending = null; shape = ''; build(); el.focus?.(); };
   const hold = () => app.store.act(card.id, 'hold', { seen: card.seen ?? null });
 
   function closedLine(mark, ...text) {
@@ -192,6 +208,16 @@ export function questionCard(app, first, { expand = null } = {}) {
     el.replaceChildren();
     el.className = 'card';
 
+    // Answered elsewhere while one waited to go: it doesn't go.
+    if (sending && !card.open) { sending.cancel(); sending = null; }
+    if (sending) {
+      el.classList.add('closed', 'sending');
+      el.append(h('div', { class: 'card-closed', role: 'status' }, icon('send', 13), h('div', null,
+        h('p', null, t('cSending', { x: sending.text }), ' · ', h('button', { class: 'link card-undo', type: 'button', onclick: undo }, t('cUndo'))),
+        h('p', { class: 'card-about' }, shortHashes(questionHead(question.text))))));
+      keys = { buttons: [], hold: null };
+      return;
+    }
     // Answered (here, a moment ago, or by the node's word), decided by its timer, or withdrawn: one quiet line.
     if (pendingAnswer || !card.open) {
       el.classList.add('closed');

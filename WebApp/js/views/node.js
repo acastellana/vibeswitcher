@@ -174,7 +174,7 @@ export function nodeView(app) {
       actsFor(app, 'approve') && store.can('approve.list') ? approveActs.el : null,
       // With the `act` right: stop the node (every session ends), asked twice.
       actsFor(app, 'stop') ? group(t('acStopTitle'), h('p', { class: 'node-says' }, t('acStopWords')),
-        doButton(app, { label: t('acStopNode'), kind: 'stop', confirm: t('acStopSure'), args: () => ({}) }).el) : null,
+        doButton(app, { label: t('acStopNode'), kind: 'stop', danger: true, confirm: t('acStopSure'), args: () => ({}) }).el) : null,
       updatesGroup(node.update),
       group(t('noBuild'),
         h('dl', { class: 'facts-list' },

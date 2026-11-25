@@ -190,3 +190,61 @@ test('every word the page asks for is in the tables, and the Spanish says líder
     assert.deepEqual(english.map(([key]) => key), []);
   });
 });
+
+test('a Blocking card’s answer shows “Sending … · Undo” for a few seconds before it goes; Undo takes it back; a card not Blocking goes at once', async () => {
+  setLanguage('en');
+  const { questionCard, UNDO_MS } = await import('../js/views/cards.js');
+  const timers = [];
+  const app = fakeApp({ kinds: ['answer', 'hold'] });
+  app.later = (fn, ms) => { const timer = { fn, ms, cancelled: false }; timers.push(timer); return () => { timer.cancelled = true; }; };
+  const card = waitingState().state.cards.get('local:card:q1');
+  const view = questionCard(app, card);
+  view.update(card);
+  find(view.el, button('Thursday')).click();
+  assert.deepEqual(app.sent, [], 'not sent yet');
+  assert.match(view.el.textContent, /Sending “Thursday”… · Undo/);
+  assert.equal(timers.length, 1);
+  assert.ok(UNDO_MS >= 3000 && UNDO_MS <= 8000, `a few seconds: ${UNDO_MS}`);
+  find(view.el, byClass('card-undo')).click();
+  assert.equal(timers[0].cancelled, true);
+  assert.ok(find(view.el, button('Thursday')), 'its options again');
+  find(view.el, button('Wait')).click();
+  timers[1].fn();
+  assert.deepEqual(app.sent.map((one) => [one.kind, one.args.text]), [['answer', 'Wait']]);
+  // Not Blocking: the click is the answer, as before.
+  const calm = { ...card, id: 'local:card:q2', blocking: false, question: { ...card.question, priority: 'important' } };
+  const other = questionCard(app, calm);
+  other.update(calm);
+  find(other.el, button('Thursday')).click();
+  assert.deepEqual(app.sent.map((one) => one.args.text), ['Wait', 'Thursday']);
+  setLanguage('es');
+  const es = questionCard(app, { ...card, id: 'local:card:q3' });
+  es.update({ ...card, id: 'local:card:q3' });
+  find(es.el, button('Thursday')).click();
+  assert.match(es.el.textContent, /Enviando «Thursday»… · Deshacer/);
+  setLanguage('en');
+});
+
+test('Stop the node is a plain button in the danger colour, never the primary blue, and asks in place before it sends', async () => {
+  setLanguage('en');
+  const { nodeView } = await import('../js/views/node.js');
+  const timers = [];
+  const app = fakeApp({ kinds: ['stop'], state: { node: nodeValue() } });
+  app.later = (fn) => { timers.push(fn); return () => {}; };
+  const el = nodeView(app).el;
+  const stop = find(el, (node) => node.tag === 'button' && node.textContent === 'Stop the node');
+  assert.ok(stop.classList.contains('quiet') && stop.classList.contains('danger'), stop.className);
+  stop.click();
+  assert.deepEqual(app.sent, []);
+  assert.equal(stop.textContent, 'Click again to stop the node');
+  const cancel = find(el, button('Cancel'));
+  assert.equal(cancel.hidden, false);
+  cancel.click();
+  assert.equal(stop.textContent, 'Stop the node');
+  assert.equal(cancel.hidden, true);
+  stop.click();
+  stop.click();
+  assert.deepEqual(app.sent.map((one) => one.kind), ['stop']);
+  const css = readFileSync(join(here, '..', 'style.css'), 'utf8');
+  assert.match(css, /\.button\.danger \{ color: var\(--needs-you\); \}/);
+});

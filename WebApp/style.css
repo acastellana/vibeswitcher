@@ -1257,7 +1257,8 @@ kbd { padding: 1px 6px; border-radius: 5px; box-shadow: inset 0 0 0 1px var(--li
 .act-said { color: var(--ink-2); font-size: var(--small); }
 .act-said:empty { display: none; }
 .act-said.refused, .confirm-note.refused { color: var(--needs-you); }
-.button.confirming { background: var(--needs-you); color: var(--on-status); }
+.button.danger { color: var(--needs-you); }
+.button.confirming { background: var(--needs-you); color: var(--on-status); box-shadow: none; }
 .button.small { padding: 2px 8px; font-size: var(--small); }
 .card-acts { display: flex; flex-wrap: wrap; gap: 8px; }
 .mine.refused { opacity: 0.6; }
