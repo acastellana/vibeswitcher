@@ -606,6 +606,9 @@ public enum LeadLaunch {
         var settings: [String: Any] = ["permissions": ["allow": allow(role, base: branch) + evidenceReads(role, root: root, task: task),
                                                        "deny": rules]]
         var env = environment(role)
+        // The aliases pinned to their ids, and ANTHROPIC_MODEL to this session's model (`WorkerLaunch.pins`): a
+        // worktree's settings `env` remapping one would otherwise run another model than the one recorded.
+        env.merge(WorkerLaunch.pins(model: model)) { mine, _ in mine }
         if role == .verifier {
             // Never started with its commands as itself (see `verifierEnvironment`).
             guard BranchCode.prefixable(server) else { throw VerifierUnsafe(server: server) }
@@ -1086,8 +1089,11 @@ public enum LeadLaunch {
         // Under a floor that keeps audits off the workers' model, never a word it can't name (`default`, `best`, a
         // custom id): the worker then starts on worker_model, or Claude Code's default.
         let named = workflow.floor?.verifierDifferent == true ? task.intendedModel.flatMap { WorkerLaunch.namesOne($0) ? $0 : nil } : task.intendedModel
-        return run(model: named ?? workflow.floor?.workerModel, advisor: task.advisor ?? workflow.workerAdvisor, effort: effort,
-                   defaultModel: defaultModel, fableHeldBack: fableHeldBack)
+        var chosen = run(model: named ?? workflow.floor?.workerModel, advisor: task.advisor ?? workflow.workerAdvisor, effort: effort,
+                         defaultModel: defaultModel, fableHeldBack: fableHeldBack)
+        // Under the floor, by the family's full id, not its alias (an alias a settings `env` could remap).
+        if workflow.floor?.verifierDifferent == true { chosen.model = chosen.model.map(WorkerLaunch.fullID) }
+        return chosen
     }
 
     /// Where a new lead finds the last turns of the lead it replaces: in the project's `.vibeswitcher` folder (kept out

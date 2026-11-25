@@ -48,7 +48,7 @@ extension LeadAdvanceTests {
         let started = lead.call("start_worker", ["task": "plain"])
         #expect(!started.isError && started.text.contains("on opus in Fable's place: Fable held back until"), "\(started.text)")
         let plain = try #require(command("plain", runtime))
-        #expect(plain.contains("--model 'opus'") && !plain.contains("fable"), "\(plain)")
+        #expect(plain.contains("--model 'opus'") && !launchedOn(plain).contains { $0.contains("fable") }, "\(plain)")
         // Noted as started on Opus; the task's own model stays unset, so after the reset it's on Fable again.
         let worker = try #require(task("plain", root)?.worker)
         #expect(task("plain", root)?.launchedModels?[worker] == "opus" && task("plain", root)?.model == nil)
@@ -57,7 +57,7 @@ extension LeadAdvanceTests {
         #expect(try #require(command("mechanical", runtime)).contains("--model 'sonnet'"))
         #expect(!lead.call("start_worker", ["task": "pinned"]).isError)
         let pinned = try #require(command("pinned", runtime))
-        #expect(pinned.contains("--model 'opus'") && !pinned.contains("fable"), "\(pinned)")
+        #expect(pinned.contains("--model 'opus'") && !launchedOn(pinned).contains { $0.contains("fable") }, "\(pinned)")
         #expect(task("pinned", root)?.model == "claude-fable-5-2")
         // status says so.
         let status = lead.call("status", [:]).text
@@ -99,7 +99,8 @@ extension LeadAdvanceTests {
         #expect(lead.auditModel(lead.workflow) == "opus")
         // But "one"'s worker ran on Opus: under the floor its audit stays off Opus after the reset too.
         let one = try #require(task("one", root))
-        #expect(one.launchedModels?[try #require(one.worker)] == "opus")
+        // Under the floor, by Opus's full id (`WorkerLaunch.fullID`).
+        #expect(LeadReviewFloor.sameModel(one.launchedModels?[try #require(one.worker)], "opus"))
         #expect(lead.auditModel(lead.workflow, task: one) == "sonnet")
     }
 
@@ -171,7 +172,7 @@ extension LeadAdvanceTests {
         loop.trigger()
         #expect(task("planned", root)?.status == .running, "\(reports(runtime))")
         let planned = try #require(command("planned", runtime))
-        #expect(planned.contains("--model 'opus'") && !planned.contains("fable"), "\(planned)")
+        #expect(planned.contains("--model 'opus'") && !launchedOn(planned).contains { $0.contains("fable") }, "\(planned)")
     }
 
     @Test func aHaltTheLoopCantActOnIsLeftToTheLeadOrToTheNextPass() throws {

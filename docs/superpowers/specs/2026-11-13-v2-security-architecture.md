@@ -2439,10 +2439,20 @@ the user's call: keep it as is, add the lead's model, add advisors, or both.
 
 What the rule still can't see of a worker's model (the review of 97a8758a), each only narrowing it, none an unlock:
 (a) an alias remapped by a worktree's settings `env` (ANTHROPIC_DEFAULT_OPUS_MODEL makes `--model opus` run another
-model): what those settings name is added to the task's record at the bind, but workers are still launched by alias,
-not the family's full id (the node has no map it can vouch for from family to the current id); (b) `/model` typed in
-a worker's session; (c) a `claude -p` child the worker starts with a `--model` of its own; (d) subagents' own models
-(an agent definition's `model`); (e) `--fallback-model`, or Claude Code's own fallback when a model is overloaded.
+model). Narrowed: under the floor a worker launches by the family's full id (`WorkerLaunch.fullID`, the ids this build
+knows, `currentIDs`), every team session's `--settings` pins ANTHROPIC_DEFAULT_<FAMILY>_MODEL to those ids and
+ANTHROPIC_MODEL to its own model (`WorkerLaunch.pins`), and what a worktree's settings name is added to the task's
+record at the bind. **Unverified:** that `--settings` (which Claude Code's docs rank above project and local settings)
+wins key by key inside `env`, rather than one `env` block replacing or losing to another. The one check that settles
+it, under the test rules (a scratch home and a scratch repository, never the user's; after the test account's limit
+resets): a repository whose `.claude/settings.local.json` has `"env": {"ANTHROPIC_DEFAULT_OPUS_MODEL":
+"claude-sonnet-5-5"}`, then `claude -p "hi" --model opus --settings '{"env": {"ANTHROPIC_DEFAULT_OPUS_MODEL":
+"claude-opus-5-5"}}'` in it, and the transcript's `message.model` read: `claude-opus-5-5` means the pin wins.
+(b) `/model` typed in a worker's session; (c) a `claude -p` child the worker starts with a `--model` of its own;
+(d) subagents' own models (an agent definition's `model`, the Agent tool's `model`): workers keep the project's hooks
+and MCP servers, so nothing stops one. The known way to cover it, the user's call: a VibeSwitcher `PreToolUse` hook
+on the Agent tool that refuses (or records, to add to the task's launches) a `model` other than the session's own;
+(e) `--fallback-model`, or Claude Code's own fallback when a model is overloaded.
 
 ### The author's calls the user doesn't need to confirm
 

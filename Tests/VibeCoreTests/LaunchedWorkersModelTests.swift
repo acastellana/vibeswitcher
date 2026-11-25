@@ -52,7 +52,7 @@ extension LeadAdvanceTests {
         let (root, runtime, lead) = try floorTeam(defaultModel: Self.fableDefault, leadModel: "fable")
         _ = lead.call("add_task", ["title": "Opus", "goal": "g", "acceptance": ["a"], "review": "audit", "model": "opus"])
         #expect(!lead.call("start_worker", ["task": "opus"]).isError)
-        #expect(try #require(command("opus", runtime)).contains("--model 'opus'"))
+        #expect(try #require(command("opus", runtime)).contains("--model 'claude-opus-5-5'"))
         #expect(vault.launchedFamilies(root: root, task: "opus") == ["opus"])
         #expect(lead.auditModel(lead.workflow, task: try #require(task("opus", root)), security: true) == "sonnet")
         try commit("opus.txt", "x\n", in: Worktrees.path(root: root, slug: "opus"))
@@ -157,7 +157,7 @@ extension LeadAdvanceTests {
         _ = lead.call("add_task", ["title": "Opus", "goal": "g", "acceptance": ["a"], "review": "audit", "model": "opus"])
         _ = lead.call("add_task", ["title": "Plain", "goal": "g", "acceptance": ["a"], "review": "audit"])
         for slug in ["opus", "plain"] { #expect(!lead.call("start_worker", ["task": slug]).isError) }
-        #expect(try #require(command("plain", runtime)).contains("--model 'opus'"))
+        #expect(try #require(command("plain", runtime)).contains("--model 'claude-opus-5-5'"))
         for slug in ["opus", "plain"] {
             #expect(lead.auditModel(lead.workflow, task: try #require(task(slug, root)), security: true) == "fable", "\(slug)")
         }
@@ -174,7 +174,7 @@ extension LeadAdvanceTests {
         let (root, runtime, lead) = try floorTeam(defaultModel: Self.fableDefault, leadModel: "fable", workerModel: "opus")
         _ = lead.call("add_task", ["title": "Hard", "goal": "g", "acceptance": ["a"], "review": "audit", "model": "fable"])
         #expect(!lead.call("start_worker", ["task": "hard"]).isError)
-        #expect(try #require(command("hard", runtime)).contains("--model 'fable'"))
+        #expect(try #require(command("hard", runtime)).contains("--model 'claude-fable-5-2'"))
         var hard = try #require(task("hard", root))
         hard.model = nil
         hard.launchedModels = nil
@@ -189,7 +189,7 @@ extension LeadAdvanceTests {
         _ = lead.call("add_task", ["title": "Plain", "goal": "g", "acceptance": ["a"], "review": "audit"])
         #expect(!lead.call("start_worker", ["task": "plain"]).isError)
         let launched = try #require(command("plain", runtime))
-        #expect(launched.contains("--model 'opus'") && !launched.contains("fable'"), "\(launched)")
+        #expect(launched.contains("--model 'claude-opus-5-5'") && launchedOn(launched) == ["claude-opus-5-5"], "\(launched)")
         #expect(vault.launchedFamilies(root: root, task: "plain") == ["opus"])
     }
 
@@ -290,7 +290,7 @@ extension LeadAdvanceTests {
         }
         #expect(!lead.call("start_worker", ["task": "plain"]).isError)
         let launched = try #require(command("plain", runtime))
-        #expect(launched.contains("--model 'opus'") && !launched.contains("best"), "\(launched)")
+        #expect(launched.contains("--model 'claude-opus-5-5'") && !launchedOn(launched).contains("best"), "\(launched)")
     }
 
     /// The Mac's Settings sheet builds its floor without worker_model: recording it keeps the one recorded; an explicit
@@ -308,5 +308,31 @@ extension LeadAdvanceTests {
         #expect(cleared.workerModelGiven)
         try vault.setReviewFloor(cleared, root: root)
         #expect(try vault.reviewFloor(root: root)?.workerModel == nil)
+    }
+
+    /// The --model and --advisor values a launch command passes (before its `--`).
+    func launchedOn(_ command: String) -> [String] {
+        let words = WorkerLaunch.words(command).prefix { $0 != "--" }
+        return words.indices.compactMap { index in
+            ["--model", "--advisor"].contains(words[index]) && index + 1 < words.endIndex ? words[index + 1] : nil
+        }
+    }
+
+    /// Under the floor a worker launches by its model's full id, and every team session's --settings pins each
+    /// family's alias to its id and ANTHROPIC_MODEL to the session's own model.
+    @Test func aWorkerLaunchesByFullIDWithTheAliasesPinned() throws {
+        let (_, runtime, lead) = try floorTeam(defaultModel: Self.fableDefault, leadModel: "fable", workerModel: "opus")
+        _ = lead.call("add_task", ["title": "Plain", "goal": "g", "acceptance": ["a"], "review": "audit"])
+        #expect(!lead.call("start_worker", ["task": "plain"]).isError)
+        let launched = try #require(command("plain", runtime))
+        #expect(launchedOn(launched).first == "claude-opus-5-5", "\(launched)")
+        let settings = try #require(try LaunchArguments.json("--settings", in: launched) as [String: Any]?)
+        let env = try #require(settings["env"] as? [String: String])
+        #expect(env["ANTHROPIC_MODEL"] == "claude-opus-5-5")
+        for (family, id) in WorkerLaunch.currentIDs { #expect(env["ANTHROPIC_DEFAULT_\(family.uppercased())_MODEL"] == id, "\(family)") }
+        // Every id this build pins is one it prices (kept in step with `LeadPrices.table`).
+        for id in WorkerLaunch.currentIDs.values { #expect(LeadPrices.table[id] != nil, "\(id)") }
+        #expect(WorkerLaunch.fullID("Opus") == "claude-opus-5-5" && WorkerLaunch.fullID("fable[1m]") == "claude-fable-5-2[1m]")
+        #expect(WorkerLaunch.fullID("claude-sonnet-4-6") == "claude-sonnet-4-6" && WorkerLaunch.fullID("my-model") == "my-model")
     }
 }

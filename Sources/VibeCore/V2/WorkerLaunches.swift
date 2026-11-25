@@ -33,6 +33,33 @@ public enum WorkerLaunch {
         return families.first { name.contains($0) }
     }
 
+    /// Each family's current model id, as this build knows it (kept in step with `LeadPrices.table`'s newest): what a
+    /// worker under the floor is launched with in place of the family's alias, and what every team session's
+    /// `--settings` pins the aliases to (`pins`), so a worktree's settings `env` can't remap one.
+    public static let currentIDs: [String: String] = [
+        "fable": "claude-fable-5-2", "mythos": "claude-mythos-5-2", "opus": "claude-opus-5-5", "sonnet": "claude-sonnet-5-5",
+        "haiku": "claude-haiku-5-5",
+    ]
+
+    /// `model` as its full id when it is a family's bare alias (`opus`, `Fable`, `opus[1m]` keeps its `[1m]`); any other
+    /// name (an id already, or a name this doesn't know) as it is.
+    public static func fullID(_ model: String) -> String {
+        let lowered = model.lowercased()
+        let bare = lowered.hasSuffix("[1m]") ? String(lowered.dropLast(4)) : lowered
+        guard let id = currentIDs[bare] else { return model }
+        return id + (bare == lowered ? "" : "[1m]")
+    }
+
+    /// The `env` every team session's `--settings` carries: each family's alias pinned to its id
+    /// (ANTHROPIC_DEFAULT_<FAMILY>_MODEL), and ANTHROPIC_MODEL to the model the session is launched with (`model`, as
+    /// its id; none without one). Whether a project's or a worktree's settings `env` can still win key by key is
+    /// unverified (the security architecture's open list).
+    public static func pins(model: String?) -> [String: String] {
+        var pins = Dictionary(uniqueKeysWithValues: currentIDs.map { ("ANTHROPIC_DEFAULT_\($0.key.uppercased())_MODEL", $0.value) })
+        if let model { pins["ANTHROPIC_MODEL"] = fullID(model) }
+        return pins
+    }
+
     /// A name that says which one model it is: a family's or its claude-… id (`opusplan` is two, `best` none).
     public static func namesOne(_ model: String) -> Bool { LeadReviewFloor.knownModel(model) && runsOn(model).count == 1 }
 
