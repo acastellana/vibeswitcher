@@ -14,10 +14,6 @@
 // that rides on another message than the one read. Anything else (a message too long, cut, or a descriptor on a byte
 // that isn't a message's first) fails: never taken as a message.
 extension Platform.Sockets {
-    /// The first byte of a framed message: `w`, as every web message's (`HostWebListen.word`) starts.
-    public static let framedStart = UInt8(ascii: "w")
-    /// The byte that ends a framed message, not part of it.
-    public static let framedEnd = UInt8(ascii: "\n")
     /// How long a framed message's rest may take to come once its first byte has: its sender wrote it in one call, so it
     /// is there at once unless the sender is broken.
     static let framedRestPatience: Int32 = 1_000
