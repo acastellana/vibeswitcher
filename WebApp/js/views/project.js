@@ -534,7 +534,7 @@ export function projectView(app, { sheet }) {
     if (!known) return;
     const root = lead?.root || board?.root || '';
     const waiting = waitingCount(state, route.id);
-    setText(big, waiting ? t('thingsNeedYou', { n: waiting }) : t('nothingNeedsYou'));
+    setText(big, waiting ? t('thingsHereNeedYou', { n: waiting }) : t('nothingHereNeedsYou'));
     setClass(big, 'asked', waiting > 0);
     setText(name, lastPart(root));
     fitName();

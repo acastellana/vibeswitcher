@@ -45,3 +45,44 @@ test('This node: a request it took as yours says how long ago as the other rows 
   assert.doesNotMatch(text, /\[object /);
   assert.match(text, /vibeswitcher lead \/home\/dev\/projects\/example-site · 1h 30m ago · \/init\.scope/);
 });
+
+// A project whose lead asks two things (a question and its push), and five sessions of the user's own of which one
+// needs them: three things wait in all.
+function waitingState() {
+  const P = 'local:project:site';
+  const lead = { project: P, root: '/home/dev/projects/example-site', session: 'local:lead', named: null, bound: 'local:lead', replaced: [], held: 0, reportsWaiting: 0,
+    notice: null, starting: false, looks: 1, questions: { open: 1, blocking: 1 }, cards: ['local:card:q1'], told: [],
+    push: { id: 'p1', commit: 'c41d7e09b2a65f38d1e0c7b94a2f6e1d3b8c5a70', short: 'c41d7e09', branch: 'landing-base', remote: 'origin', target: 'origin/landing-base', url: 'git@example.invalid:x.git', ahead: 2, subjects: ['c41d7e0 Landing copy'], askedAt: new Date().toISOString() } };
+  const card = { id: 'local:card:q1', kind: 'question', project: P, root: lead.root, open: true, closed: null, notice: null, at: new Date().toISOString(), blocking: true,
+    question: { id: 'q1', short: 'ship', text: 'Ship the hero on Thursday?', options: ['Thursday', 'Wait'], priority: 'blocking', whyNow: null, version: 1, revisionNote: null, proposal: null, decideBy: null, state: 'open', answer: null, task: null } };
+  const sessions = new Map([['local:lead', { id: 'local:lead', role: 'lead', lead: P, status: 'needs-you', cwd: lead.root }]]);
+  for (let i = 0; i < 5; i += 1) sessions.set(`local:own${i}`, { id: `local:own${i}`, role: null, status: i === 0 ? 'needs-you' : 'idle', cwd: '/home/dev' });
+  return { P, state: { leads: new Map([[P, lead]]), cards: new Map([[card.id, card]]), sessions } };
+}
+
+test('the counts say what they count: the project’s things against everything that needs you; the sessions row coloured by what waits', async () => {
+  for (const [code, project, all] of [['en', '2 things in this project need you', '3 need you in all'], ['es', '2 cosas de este proyecto te necesitan', '3 te necesitan en total']]) {
+    setLanguage(code);
+    const { P, state } = waitingState();
+    const { leftColumn } = await import('../js/views/left.js');
+    const app = fakeApp({ route: { name: 'project', id: P, view: 'lead' }, state });
+    const left = leftColumn(app, { brief() {} });
+    left.render();
+    assert.equal(find(left.el, byClass('summary-count')).textContent, all);
+    // Your own sessions: how many there are, plain; what waits among them, apart and in the asking colour.
+    const own = find(left.el, (node) => node.dataset.place === 'ownSessions');
+    assert.equal(find(own, byClass('place-count')).textContent, '5');
+    const waits = find(own, byClass('place-waiting'));
+    assert.equal(waits.textContent, '1');
+    assert.equal(waits.title, code === 'en' ? '1 needs you' : '1 te necesita');
+    const { projectView } = await import('../js/views/project.js');
+    const view = projectView(app, { sheet: { open() {}, close() {} } });
+    view.render();
+    assert.equal(find(view.el, byClass('big')).textContent, project);
+  }
+  setLanguage('en');
+  // The count of sessions is never in the asking colour; only what waits is.
+  const css = readFileSync(join(here, '..', 'style.css'), 'utf8');
+  assert.doesNotMatch(css, /\.place\.asked \.place-count/);
+  assert.match(css, /\.place-waiting \{[^}]*color: var\(--asked\)/);
+});

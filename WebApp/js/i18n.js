@@ -24,6 +24,11 @@ const EN = {
   noLead: 'quiet: no lead running',
   thingsNeedYou: { one: '1 thing needs you', other: '{n} things need you' },
   nothingNeedsYou: 'Nothing needs you',
+  // The project's header counts its own; the left column's summary (and the tab's title) counts every place.
+  thingsHereNeedYou: { one: '1 thing in this project needs you', other: '{n} things in this project need you' },
+  nothingHereNeedsYou: 'Nothing in this project needs you',
+  needYouInAll: { one: '{n} needs you in all', other: '{n} need you in all' },
+  ownWaiting: { one: '{n} needs you', other: '{n} need you' },
   briefMe: 'Brief me',
   nextWaiting: 'Go to the next thing that waits on you',
   briefTitle: 'What happened, and what’s asked of you',
