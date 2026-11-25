@@ -300,7 +300,9 @@ or decided. Done on Linux, tested on both systems (`ApprovalJudgmentTests`, `App
    path, its owner, mode and parents, an unprivileged write refused); a mount over a folder on the path (refused to a
    user by macOS, not measured); the checks against a real running node (none runs: items 5, 9, 13). **Not covered**: a
    re-bootstrapped job whose own host runs the genuine pinned server; what closes it (the server checking its
-   connector's peer against the pinned hosts) goes with item 13.
+   connector's peer against the pinned hosts) goes with item 13. **The first upgrade** from a build older than this
+   branch writes no record (the install runs the installed commit's own script, which has no administrator step): the
+   record starts with the first install made by a build that has it, and a rollback to an older build is refused.
 11. **(BLOCKER before approvalMeasured; the review's sixth finding; built 2026-11-22, `v2-small-rows`, needs a real
    Mac and a review)** Built: `Platform.Processes.link` falls back to the kernel's record (sysctl `KERN_PROC_PID`, any
    user's) where `PROC_PIDTBSDINFO` refuses; `PeerFacts.runner` takes a root-owned ancestor with unreadable arguments

@@ -63,7 +63,8 @@ enum ServerCheck {
         guard let launchctl = Platform.Service.launchctl,
               let run = context.runTool(launchctl, ["print", NodeAgent.target(uid: getuid())]), run.status == 0 else { return nil }
         let printed = NodeAgent.printed(run.output)
-        return printed.pid.map { $0 > 0 } == true && printed.program != nil ? printed : nil
+        // Only the pid is taken (item 12): the program line chooses nothing, so its absence refuses nothing.
+        return printed.pid.map { $0 > 0 } == true ? printed : nil
     }
 
     /// `pid`'s POSIX session (`getsid`, which Linux answers for any process); nil when it can't be read.

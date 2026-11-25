@@ -79,7 +79,7 @@ struct NodePinsAnchorTests {
     func connection(_ path: String) async -> Int32? {
         var made: Int32?
         _ = await eventually(timeout: 120) {
-            let fd = socket(AF_UNIX, SOCK_STREAM, 0)
+            let fd = socket(AF_UNIX, Platform.Sockets.stream, 0)
             guard fd >= 0, var address = Platform.Sockets.unixAddress(path) else { return false }
             let joined = withUnsafePointer(to: &address) { $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
                 connect(fd, $0, socklen_t(MemoryLayout<sockaddr_un>.size)) } }

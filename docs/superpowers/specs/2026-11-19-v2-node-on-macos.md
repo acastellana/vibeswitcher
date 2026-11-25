@@ -232,7 +232,8 @@ file (Rosetta's x86_64) has another cdhash and is refused. One to sixteen builds
 builds a rollback may go to. No commit and no cdhash twice; every other line, case, length or byte refused.
 
 **Who writes it, and when.** Only the install's administrator step, `scripts/node-pins-mac.sh`, called by
-`install-node-mac.sh` once the build is checked and in place, before `current` names it. It takes values, not paths:
+`install-node-mac.sh` once the build is checked, before it is renamed into place (a step refused or cancelled leaves no
+build installed: the install runs again whole). It takes values, not paths:
 the new build's commit and three cdhashes, which the install read from the copies it signed and hashed (never read
 again from the builds folder), and it carries the existing record's rows forward verbatim, after reading that record
 with the same checks (never recomputed from files a session can write). It prints exactly what it will write and

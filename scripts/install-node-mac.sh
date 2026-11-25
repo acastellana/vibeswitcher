@@ -611,21 +611,21 @@ install_node_mac_main() {
         [[ $sha == "${product_sha[i]}" ]] || fail 1 "$partial/build-info records $installed as ${sha:-nothing}, not the checked ${product_sha[i]}"
         i=$((i + 1))
     done
-    # BSD mv has no -T: the target is checked absent here, under the lock (a folder there would take the build in).
-    [[ ! -e $final && ! -L $final ]] || fail 1 "$final is there already: $commit is installed"
-    /bin/chmod 0755 "$partial" "$partial/bin" || fail 1 "can't make $partial 0755"
-    /bin/mv -- "$partial" "$final" || fail 1 "can't rename $partial to $final"
-    [[ -f $final/build-info && ! -e $final/${partial##*/} ]] || fail 1 "the rename of $partial to $final didn't make $final the build"
-    install_partial=""
-
-    # --- 10b. The node's record of its builds: the one administrator step (node-pins-mac.sh, from the verified blob) ----
+    # The node's record of its builds: the one administrator step (node-pins-mac.sh, from the verified blob), before the
+    # rename, so a step refused or cancelled leaves no build in place (the partial folder goes on exit) and the install runs again whole.
     # It pins this build's cdhashes (read above from the signed copies, never from the builds folder again) and carries the
     # record's rows forward; it asks for the password itself. A test install only prints what it would write.
     [[ -n $pin_host && -n $pin_server && -n $pin_cli ]] || fail 1 "the cdhashes to pin weren't read"
     local pins_args=(--build "$commit" "$pin_host" "$pin_server" "$pin_cli")
     (( testing )) && pins_args=(--dry-run "${pins_args[@]}")
     /bin/bash -c "$pins_step" node-pins-mac.sh "${pins_args[@]}" \
-        || fail 1 "the node's record wasn't written, so the node refuses this build until it is: run $final/Resources/node-pins-mac.sh ${pins_args[*]}"
+        || fail 1 "the node's record wasn't written, so nothing was installed: run the install again"
+    # BSD mv has no -T: the target is checked absent here, under the lock (a folder there would take the build in).
+    [[ ! -e $final && ! -L $final ]] || fail 1 "$final is there already: $commit is installed"
+    /bin/chmod 0755 "$partial" "$partial/bin" || fail 1 "can't make $partial 0755"
+    /bin/mv -- "$partial" "$final" || fail 1 "can't rename $partial to $final"
+    [[ -f $final/build-info && ! -e $final/${partial##*/} ]] || fail 1 "the rename of $partial to $final didn't make $final the build"
+    install_partial=""
 
     # --- 11. installs, then current by a link renamed over it ---------------------------------------------------------
     printf '%s %s\n' "$commit" "$(/bin/date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$prefix/installs" \
