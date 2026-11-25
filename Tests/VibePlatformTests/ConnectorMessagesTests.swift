@@ -145,4 +145,18 @@ struct ConnectorMessagesTests {
         #expect(count == -1 && code == EBADMSG && sender == nil, "count \(count), errno \(code)")
         #expect(dripping, "the host's read waited for the whole drip: a patience for each byte")
     }
+
+    /// F3 (the review's `childEndACutFrameOnABlockingSocket`): on a socket that blocks, as the server's end of its
+    /// connector does, a framed answer cut short while its sender is still there is read as cut once its rest doesn't
+    /// come within the patience, not waited for for good.
+    @Test(.enabled(if: Platform.Sockets.connectorType == Platform.Sockets.stream, "the Mac's framing"), .timeLimit(.minutes(1)))
+    func aCutFrameOnABlockingSocketIsCut() throws {
+        let (host, child) = try #require(Platform.Sockets.pair(type: Platform.Sockets.connectorType))
+        defer { Sys.close(host); Sys.close(child) }
+        #expect(fcntl(child, F_GETFL) & O_NONBLOCK == 0, "a socket that blocks")
+        let answer = Array("web ok listen loopback 127.0.0.1 0".utf8)
+        #expect(answer.prefix(10).withUnsafeBytes { Platform.Sockets.send(host, $0.baseAddress, $0.count) } == 10)
+        let got = try #require(Platform.Sockets.receiveConnectorMessage(over: child, count: 512, room: 1))
+        #expect(got.cut && got.descriptors.isEmpty, "\(got)")
+    }
 }
