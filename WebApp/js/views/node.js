@@ -3,17 +3,17 @@
 
 import { h, framed } from '../dom.js';
 import { icon } from '../marks.js';
-import { since, plural, tilde } from '../words.js';
+import { since, plural, tilde, dateTime } from '../words.js';
 import { usageFacts } from '../settings.js';
 import { dictationGroup } from '../dictate.js';
 import { healthFacts } from '../health.js';
 import { updateFacts } from '../updates.js';
 import { copyLine } from './cards.js';
-import { t, tParts } from '../i18n.js';
+import { t, tParts, nodeWords } from '../i18n.js';
 import { actsLine, actsFor, doButton } from '../acting.js';
 
 const row = (name, ...value) => h('div', { class: 'fact' }, h('dt', null, name), h('dd', null, value));
-const ago = (iso) => (iso ? h('time', { data: { since: iso }, title: new Date(iso).toLocaleString() }, since(iso)) : 'unknown');
+const ago = (iso) => (iso ? h('time', { data: { since: iso }, title: dateTime(iso) }, since(iso)) : 'unknown');
 const group = (title, ...children) => h('section', { class: 'node-group' }, h('h2', { class: 'section-title' }, title), children);
 
 // The account's usage (the node's `usage`): each limit known, the ones holding work back marked; null before the
@@ -59,7 +59,7 @@ export function updatesGroup(update) {
 function passkeysPart(acts) {
   const keys = acts.keys || [];
   if (!keys.length && !acts.notice) return null;
-  const when = (iso) => (iso ? new Date(iso).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' }) : t('pkNeverUsed'));
+  const when = (iso) => (iso ? dateTime(iso) : t('pkNeverUsed'));
   return h('div', { class: 'passkeys' },
     acts.notice ? h('p', { class: 'node-says passkey-notice' }, acts.notice) : null,
     keys.length ? h('p', { class: 'col-title' }, t('pkKeys', { n: keys.length })) : null,
@@ -147,8 +147,8 @@ export function nodeView(app) {
       // Boost (the node's `boost`): on or off, why, and the limits it raises to.
       node.boost ? group(t('noBoost'),
         h('dl', { class: 'facts-list' },
-          row(t('noState'), h('span', { class: node.boost.on ? 'dot tone-working' : 'dot', 'aria-hidden': 'true' }), node.boost.on ? t('noBoostOnWhy', { why: node.boost.why }) : t('noBoostOffWhy', { why: node.boost.why })),
-          row(t('noMode'), node.boost.mode),
+          row(t('noState'), h('span', { class: node.boost.on ? 'dot tone-working' : 'dot', 'aria-hidden': 'true' }), node.boost.on ? t('noBoostOnWhy', { why: nodeWords(node.boost.why) }) : t('noBoostOffWhy', { why: nodeWords(node.boost.why) })),
+          row(t('noMode'), { on: t('noOn'), off: t('noOff'), automatic: t('noAutomatic') }[node.boost.mode] || node.boost.mode),
           node.boost.on ? row(t('noRaisedLimits'), t('noBoostLimits', { load: node.boost.limits.loadThreshold, sessions: node.boost.limits.maxSessions, workers: node.boost.limits.maxWorkers, slots: node.boost.limits.heavySlots })) : null),
         h('a', { class: 'link', href: '#/settings' }, t('noChangeItInSettings'))) : null,
       healthGroup(node.health),
@@ -157,7 +157,7 @@ export function nodeView(app) {
         h('dl', { class: 'facts-list' }, node.plugins.length ? node.plugins.map((plugin) => row(plugin.title, h('span', { class: 'dot tone-done', 'aria-hidden': 'true' }), t('noOn')))
           : row(t('noOn'), t('noNone'))),
         actsFor(app, 'plugin.on') && store.can('plugin.list') ? pluginActs.el
-          : h('p', { class: 'node-says' }, 'vibeswitcher plugin list shows every plugin; plugin on NAME and plugin off NAME, in your terminal, change them.')) : null,
+          : h('p', { class: 'node-says' }, t('noPluginsInATerminal'))) : null,
       group(t('noServer'),
         h('dl', { class: 'facts-list' },
           row(t('noRunningFor'), ago(server.startedAt)),

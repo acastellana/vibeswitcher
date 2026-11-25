@@ -4,7 +4,8 @@
 // are the parts with no page in them, so the tests can read them.
 
 import { shellWord } from './views/drive.js';
-import { t } from './i18n.js';
+import { t, nodeWords } from './i18n.js';
+import { dateTime } from './words.js';
 
 // `settings` rows grouped as the page shows them: by section, in the node's order.
 export function settingSections(settings) {
@@ -76,10 +77,10 @@ export function shownValue(setting) {
 // The account's usage as the page shows it (the node's `usage`, `NodeUsage.value`): one line per limit still holding
 // on the account Claude Code is logged in to, the most used first ("The weekly limit: 84% used, resets Nov 3, 01:00"),
 // marked when it holds work back; and until when Fable is held back. Null while the node hasn't read it yet.
-export function usageFacts(usage, when = (iso) => new Date(iso).toLocaleString()) {
+export function usageFacts(usage, when = (iso) => dateTime(iso)) {
   if (!usage) return null;
   const limits = (usage.limits || []).map((limit) => ({
-    title: limit.label.charAt(0).toUpperCase() + limit.label.slice(1) + (limit.model ? '' : t('slEveryModel')),
+    title: capital(nodeWords(limit.label)) + (limit.model ? '' : t('slEveryModel')),
     value: (limit.reached ? t('slReached') : t('slUsed', { n: limit.usedPercent })) + (limit.resetsAt ? t('slResets', { when: when(limit.resetsAt) }) : ''),
     holds: !!limit.holds,
     percent: limit.reached ? 100 : Math.max(0, Math.min(100, limit.usedPercent)),
@@ -90,6 +91,8 @@ export function usageFacts(usage, when = (iso) => new Date(iso).toLocaleString()
   if (usage.fableHeldBack) notes.push(t('slFable', { when: when(usage.fableHeldBack) }));
   return { account: usage.account || null, limits, notes };
 }
+
+const capital = (text) => String(text || '').charAt(0).toUpperCase() + String(text || '').slice(1);
 
 // The app's Settings search: whether every word of `query` is in the setting's key, title, description or section
 // (case aside). An empty query keeps every setting.

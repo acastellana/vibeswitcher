@@ -9,6 +9,7 @@
 
 import { h, setText } from './dom.js';
 import { t } from './i18n.js';
+import { dateTime } from './words.js';
 
 // What the node's refusal says, in the page's words where the page knows the code. `what`: the control's own label,
 // for a kind the node doesn't take from a page (a page shows no button for one, so this is a node that changed).
@@ -85,7 +86,7 @@ export function actsLine(app, { compact = false } = {}) {
   // The node's level: off, confirm (a passkey per request), trust; `on` from a node before levels.
   const level = acts.level ?? (acts.on ? 'trust' : 'off');
   if (level === 'off') return compact ? null : h('p', { class: 'acts-line' }, t('acOffWords'), ' ', h('code', null, 'vibeswitcher set web_acts trust'), t('acOffWords2'));
-  const since = acts.since ? new Date(acts.since).toLocaleString(undefined, { dateStyle: compact ? undefined : 'medium', timeStyle: 'short' }) : '';
+  const since = acts.since ? dateTime(acts.since, { date: compact ? null : 'medium' }) : '';
   // A page waiting for the terminal's confirmation says so in its own banner (the phrase): nothing here meanwhile.
   if (!here && app.store.state.phrase) return null;
   // At confirm on another origin than the passkeys' (127.0.0.1): acting needs the localhost address.

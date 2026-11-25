@@ -2,7 +2,7 @@
 // with the node's own shapes (wire/vectors.json), in English and in Spanish. Run: node --test WebApp/tests/
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { installDom, find, findAll, byClass, button } from './fakedom.mjs';
@@ -157,4 +157,36 @@ test('a setting’s value out of its range, or not a number, says the range besi
   editing.set(slots.key, '4');
   const fine = editor(slots, null, editing, app);
   assert.match(fine.textContent, /vibeswitcher set node_heavy_slots 4/);
+});
+
+test('in Spanish the page’s own words are Spanish, its dates the page’s language without seconds; the node’s own sentences stay as sent', async () => {
+  setLanguage('es');
+  const { nodeView } = await import('../js/views/node.js');
+  const { dateTime } = await import('../js/words.js');
+  const node = nodeValue();
+  node.usage.limits.push({ name: 'seven_day', label: 'the weekly limit', model: null, usedPercent: 84, reached: false, resetsAt: '2026-11-27T14:54:08.000Z', holds: true, text: 'the weekly limit (every model): 84% used' },
+    { name: 'five_hour', label: 'the 5-hour limit', model: null, usedPercent: 31, reached: false, resetsAt: '2026-11-25T13:54:00.000Z', holds: false, text: 'the 5-hour limit (every model): 31% used' });
+  node.web = { state: 'listening', port: 8765, tokens: 1, connections: 1, acts: { on: true, level: 'trust', since: '2026-11-25T13:54:00.000Z', pages: 1, keys: [{ id: 'k1', added: '2026-11-25T13:54:00.000Z', lastUsed: null }] } };
+  const text = nodeView(fakeApp({ state: { node } })).el.textContent;
+  for (const english of ['The weekly limit', 'The 5-hour limit', '(every model)', 'on in Settings', 'ModoOn', 'Modoon', ' AM', ' PM', '11/27/2026', 'Nov ']) {
+    assert.ok(!text.includes(english), `${english} in: ${text}`);
+  }
+  for (const spanish of ['El límite semanal (todos los modelos)', 'El límite de 5 horas (todos los modelos)', 'Activado: activado en Ajustes', 'ModoActivado', dateTime('2026-11-27T14:54:08.000Z')]) {
+    assert.ok(text.includes(spanish), `${spanish} not in: ${text}`);
+  }
+  assert.equal(dateTime('2026-11-27T14:54:08.000Z'), '27 nov 2026, 14:54');
+  setLanguage('en');
+  assert.equal(dateTime('2026-11-27T14:54:08.000Z'), 'Nov 27, 2026, 2:54 PM');
+});
+
+test('every word the page asks for is in the tables, and the Spanish says líder where the English says lead', () => {
+  const root = join(here, '..');
+  const files = ['app.js', ...readdirSync(join(root, 'js'), { recursive: true }).filter((name) => name.endsWith('.js') && name !== 'mock.js').map((name) => join('js', name))];
+  const asked = new Set();
+  for (const name of files) for (const found of readFileSync(join(root, name), 'utf8').matchAll(/\bt(?:Parts)?\('([A-Za-z0-9]+)'/g)) asked.add(found[1]);
+  return import('../js/i18n.js').then(({ TABLES }) => {
+    assert.deepEqual([...asked].filter((key) => !(key in TABLES.en)).sort(), []);
+    const english = Object.entries(TABLES.es).filter(([, word]) => /\blead\b/.test(JSON.stringify(word).replace(/vibeswitcher lead|`lead`|lead_[a-z]+/g, '')));
+    assert.deepEqual(english.map(([key]) => key), []);
+  });
 });

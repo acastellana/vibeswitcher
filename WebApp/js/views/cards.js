@@ -11,7 +11,7 @@
 
 import { h, setText, setClass } from '../dom.js';
 import { icon } from '../marks.js';
-import { since, until, clock, plural } from '../words.js';
+import { since, until, clock } from '../words.js';
 import { pushLines } from '../push.js';
 import { talkButton } from '../dictate.js';
 import { pluginFacts } from '../plugincard.js';
@@ -382,7 +382,7 @@ export function pushCard(lead, app = null) {
         fact(t('cPush'), said.what),
         fact(t('cTo'), h('code', null, said.url)),
         fact(t('cCommits'), h('ul', { class: 'files' }, said.subjects.map((subject) => h('li', null, h('code', null, subject))),
-          said.more ? h('li', null, `and ${plural(said.more, 'more')}`) : null)))),
+          said.more ? h('li', null, t('cAndMore', { n: said.more })) : null)))),
     app && actsFor(app, 'push') ? h('div', { class: 'card-acts' },
       doButton(app, { label: t('acPush'), kind: 'push', args: () => ({ folder: lead.root, request: lead.push.id }) }).el,
       actsFor(app, 'push.decline') ? doButton(app, { label: t('acDecline'), kind: 'push.decline', quiet: true, args: () => ({ folder: lead.root, request: lead.push.id }) }).el : null)

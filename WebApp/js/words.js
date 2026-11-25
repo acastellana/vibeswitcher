@@ -2,7 +2,7 @@
 // Sources/VibeCore/Models.swift), the attention groups (WindowGroups.swift), durations (Durations, BackgroundJobs.swift)
 // and a board task's words (LeadTask.Status, LeadViews.swift). Colours are the same names in style.css.
 
-import { t } from './i18n.js';
+import { t, lang } from './i18n.js';
 
 // The node writes a status in kebab case (`Requests.statusWord`): needs-you, working, background, done, idle, unknown.
 // A session can also be paused or ended, which aren't statuses of its agent.
@@ -52,12 +52,19 @@ export function clock(iso) {
   return `${String(at.getHours()).padStart(2, '0')}:${String(at.getMinutes()).padStart(2, '0')}`;
 }
 
+// A date and time in the page's language, to the minute: "Nov 27, 2026, 2:54 PM", "27 nov 2026, 14:54".
+export function dateTime(iso, { date = 'medium' } = {}) {
+  const at = new Date(iso);
+  if (Number.isNaN(at.getTime())) return '';
+  return new Intl.DateTimeFormat(lang(), { ...(date ? { dateStyle: date } : {}), timeStyle: 'short' }).format(at);
+}
+
 // 14:03 for a moment of today, "Nov 16, 14:03" for one of another day.
 export function moment(iso, now = Date.now()) {
   const at = new Date(iso);
   if (Number.isNaN(at.getTime())) return '';
   if (at.toDateString() === new Date(now).toDateString()) return clock(iso);
-  return `${at.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}, ${clock(iso)}`;
+  return `${at.toLocaleDateString(lang(), { month: 'short', day: 'numeric' })}, ${clock(iso)}`;
 }
 
 // "in 8 min", "in 45 s", "now": how long a question's timer has left (the Mac's question card).

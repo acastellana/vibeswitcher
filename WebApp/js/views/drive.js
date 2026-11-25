@@ -366,7 +366,7 @@ export function newProjectForm(app) {
   function draw() {
     const folder = projectFolderName(name.value);
     folderNote.hidden = !folder;
-    folderNote.textContent = folder ? `Its folder: ${folder}` : '';
+    folderNote.textContent = folder ? t('drItsFolder', { folder }) : '';
     lineSlot.replaceChildren(folder ? copyLine(newProjectLine(name.value, location.value, goal.value), t('drTheCommandThatMakesThe'))
       : h('p', { class: 'confirm-note' }, t('drGiveItANameThe')));
   }

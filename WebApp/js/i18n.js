@@ -245,6 +245,7 @@ const EN = {
   cPush: "Push",
   cTo: "To",
   cCommits: "Commits",
+  cAndMore: "and {n} more",
   cSettle: "Settle it in a terminal",
   cPushNote: "Either shows the request and asks for its code. Push pushes that commit itself, as a fast-forward only; nothing is pushed before you type the code.",
   cExactly: "Exactly what it asks",
@@ -410,6 +411,8 @@ const EN = {
   noStateFolder: "State folder",
   noWebPage: "Web page",
   noOff: "Off",
+  noPluginsInATerminal: "vibeswitcher plugin list shows every plugin; plugin on NAME and plugin off NAME, in your terminal, change them.",
+  noAutomatic: "Automatic",
   noPagesPaired: "Pages paired",
   noOpenNow: "Open now",
   noBuild: "Build",
@@ -615,6 +618,7 @@ const EN = {
   rcWithdrawnByTheLead: "Withdrawn by the lead.",
   rcItWasRewordedAfterYou: "It was reworded after you answered.",
   rcScorecard: "Scorecard",
+  scorecard: "Scorecard",
   rcDecisions: "Decisions",
   rcAnsweredAndWithdrawn: "Answered and withdrawn",
   rcResults: "Results",
@@ -837,6 +841,7 @@ const EN = {
   drTheGoalOptional: "The goal (optional)",
   drNewProject: "New project",
   drMakesTheProjectSFolder: "Makes the project’s folder with a git repository and a first commit (README.md, .gitignore), then starts its lead. Run the line in a terminal on this node: it asks for the lead’s code.",
+  drItsFolder: "Its folder: {folder}",
   drGiveItANameThe: "Give it a name: the line that makes it shows here.",
   drFolder: "Folder",
   drModelOptional: "Model (optional)",
@@ -1157,6 +1162,10 @@ const NODE_WORDS = {
     Reverted: 'Revertida', Reconsider: 'Replantear', Stalled: 'Atascada', 'Waiting for the audit': 'Esperando la auditoría',
     'Checking the work': 'Revisando el trabajo', 'Waits on lead': 'Espera al líder', 'It failed; the lead decides what next.': 'Falló; el líder decide qué sigue.',
     'The worker asked the lead something.': 'El trabajador le preguntó algo al líder.',
+    // Usage limits' names and Boost's reasons, as the node words them (NodeUsage, SettingsWatch.boostDecision).
+    'the weekly limit': 'el límite semanal', 'the 5-hour limit': 'el límite de 5 horas', 'the weekly Opus limit': 'el límite semanal de Opus',
+    'the weekly Sonnet limit': 'el límite semanal de Sonnet', 'the spend limit': 'el límite de gasto', 'on in Settings': 'activado en Ajustes', 'off in Settings': 'desactivado en Ajustes',
+    "automatic acts as off on a node: it can't tell whether you're away": 'automático equivale a desactivado en un nodo: no puede saber si estás ausente',
   },
 };
 export function nodeWords(text) {
