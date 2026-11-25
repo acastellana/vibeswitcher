@@ -126,13 +126,14 @@ public enum HeldWhat {
                              to: to)
         }
         if name.hasPrefix(".git/config") || name == "~/.gitconfig" || name == "~/.config/git/config" {
-            // Its keys only when the node read the whole file (`ConfigSeal.gitKeys`); a branch's tracking entry the
-            // plain phrase only when that is every key that changed; else every key that may run a command named first
-            // (`gitKeysSaid`).
-            guard let keys = item.change else { return Described(kind: .gitConfig, what: "\(inert(name)) changed") }
+            // Its keys only as data the vault kept (`ConfigSeal.keyChanges`, from a strict parse: `gitKeys`), never read
+            // back out of the joined words; none kept: it changed, nothing more. A branch's tracking entry the plain
+            // phrase only when that is every key that changed; else every key that may run a command named first.
+            guard let keys = item.keys, !keys.isEmpty else { return Described(kind: .gitConfig, what: "\(inert(name)) changed") }
             let branches = tracking(keys)
             if !branches.isEmpty {
-                return Described(kind: .gitConfig, what: "\(inert(name)): the tracking entry of branch \(branches.map(inert).joined(separator: ", ")) (\(change ?? ""))")
+                return Described(kind: .gitConfig, what: "\(inert(name)): the tracking entry of branch \(branches.map(inert).joined(separator: ", ")) ("
+                                 + keys.map { ConfigSeal.inert("\($0.key) \($0.change.rawValue)", limit: 200) }.joined(separator: ", ") + ")")
             }
             return Described(kind: .gitConfig, what: "\(inert(name)): " + gitKeysSaid(keys))
         }
@@ -168,50 +169,35 @@ public enum HeldWhat {
     /// Git settings that may run a command named on the card at most; past it, counted.
     static let gitKeysNamed = 6
 
-    /// `ConfigSeal.changedKeys`' words for a git config, said for the card: every key that may run a command first,
-    /// each made inert on its own and never cut ("core.hookspath added, diff.x.textconv changed"), more than
-    /// `gitKeysNamed` of them counted instead; the harmless ones after them counted ("and 3 others"), or, when they
-    /// are all there is, named. A list the vault cut ("and N more") is said as cut.
-    static func gitKeysSaid(_ change: String) -> String {
-        var parts = change.components(separatedBy: ", ")
-        var cut = 0
-        if let last = parts.last, let and = last.range(of: " and ", options: .backwards), last.hasSuffix(" more"),
-           let count = Int(last[and.upperBound...].dropLast(" more".count)) {
-            cut = count
-            parts[parts.count - 1] = String(last[..<and.lowerBound])
-        }
-        let key = { (part: String) in String(part.split(separator: " ").first ?? "") }
-        let mayRun = parts.filter { !isBenignGitKey(key($0)) }
-        let benign = parts.filter { isBenignGitKey(key($0)) }
+    /// A git config's changed keys said for the card: every key that may run a command first, each made inert on its
+    /// own and never cut ("core.hookspath added, diff.x.textconv changed"), more than `gitKeysNamed` of them counted
+    /// instead; the harmless ones after them counted ("and 3 others"), or, when they are all there is, named.
+    static func gitKeysSaid(_ keys: [ConfigSeal.KeyChange]) -> String {
+        let word = { (key: ConfigSeal.KeyChange) in ConfigSeal.inert("\(key.key) \(key.change.rawValue)", limit: 200) }
+        let mayRun = keys.filter { !isBenignGitKey($0.key) }
+        let benign = keys.filter { isBenignGitKey($0.key) }
         var said: [String] = []
         if mayRun.count > gitKeysNamed {
             said.append("\(mayRun.count) git settings that can run commands changed (--long lists them)")
         } else {
-            said += mayRun.map { ConfigSeal.inert($0, limit: 200) }
+            said += mayRun.map(word)
         }
         if mayRun.isEmpty {
-            said += benign.prefix(gitKeysNamed).map { ConfigSeal.inert($0, limit: 200) }
+            said += benign.prefix(gitKeysNamed).map(word)
             if benign.count > gitKeysNamed { said.append("and \(benign.count - gitKeysNamed) more") }
         } else if !benign.isEmpty {
             said.append("and \(benign.count) other\(benign.count == 1 ? "" : "s")")
         }
-        if cut > 0 { said.append("and \(cut) more not named here (--long lists them)") }
         return said.joined(separator: ", ")
     }
 
-    /// The branches whose tracking entry (`trackingFields`) is all that changed, from `ConfigSeal.changedKeys`' words
-    /// ("branch.v2.merge added, branch.v2.remote added"); empty when anything else changed, or more were cut.
-    static func tracking(_ change: String) -> [String] {
-        guard !change.contains(" and ") || !change.hasSuffix(" more") else { return [] }
+    /// The branches whose tracking entry (`trackingFields`) is all that changed; empty when any other key did.
+    static func tracking(_ keys: [ConfigSeal.KeyChange]) -> [String] {
         var branches: [String] = []
-        for part in change.components(separatedBy: ", ") {
-            let words = part.split(separator: " ")
-            guard words.count == 2, ["added", "changed", "removed"].contains(words[1]) else { return [] }
-            let key = String(words[0])
-            guard key.hasPrefix("branch."), let dot = key.lastIndex(of: "."), key.index(after: key.startIndex) < dot else { return [] }
-            let field = key[key.index(after: dot)...].lowercased()
-            guard trackingFields.contains(field) else { return [] }
-            let branch = String(key[key.index(key.startIndex, offsetBy: "branch.".count)..<dot])
+        for key in keys {
+            let lower = key.key.lowercased()
+            guard lower.hasPrefix("branch."), isBenignGitKey(key.key), let dot = key.key.lastIndex(of: ".") else { return [] }
+            let branch = String(key.key[key.key.index(key.key.startIndex, offsetBy: "branch.".count)..<dot])
             if !branches.contains(branch) { branches.append(branch) }
         }
         return branches

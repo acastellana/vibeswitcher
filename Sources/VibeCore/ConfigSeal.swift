@@ -620,6 +620,9 @@ public enum ConfigSeal {
         return keys
     }
 
+    /// A git subsection's stable label in a key's name (`gitKeys`): the first 8 hex of its SHA-256, in angle brackets.
+    static func subsectionLabel(_ sub: String) -> String { "<" + String(hex(SHA256.hash(data: Data(sub.utf8))).prefix(8)) + ">" }
+
     /// The git config files whose keys are hashed one by one (`gitKeys`).
     static var gitConfigNames: Set<String> { [".git/config (main checkout)", "~/.gitconfig", "~/.config/git/config"] }
 
@@ -628,9 +631,13 @@ public enum ConfigSeal {
     /// so a change it would misread is never named (the review of 2026-11-25: a second parser of git's config hides what
     /// it misses): text after a section header's `]`, a header other than `[section]` or `[section "sub"]` exactly, a
     /// line continued with a trailing `\`, a line that is neither a header, a comment, `name` nor `name = value`, a name
-    /// outside `[A-Za-z][A-Za-z0-9-]*`, a key before any section, and any `include` or `includeIf` (it pulls in another
-    /// file). Names only reach the card, never a value. These hashes only describe: what is held rests on the whole
-    /// file's hash (`fingerprint`), as for every file; nothing reads them to decide a hold.
+    /// outside `[A-Za-z][A-Za-z0-9-]*`, a key before any section, any `include` or `includeIf` (it pulls in another
+    /// file), and a branch's name with anything but `[A-Za-z0-9._/+-]` in it (a comma, a space, a control character,
+    /// `@`, `:`). Names only reach the card, never a value; and a subsection's text only for a branch: any other's
+    /// (`[url "https://user:token@host/"]`, `[credential "…"]`, `[remote "…"]`) is a stable label, the first 8 hex of
+    /// its SHA-256 in angle brackets (`url.<3fa9c1d2>.insteadof`), so a URL or a credential never reaches a key's name,
+    /// the vault's record, the card or the wire, and two changes to one entry still compare. These hashes only describe:
+    /// what is held rests on the whole file's hash (`fingerprint`), as for every file; nothing reads them to decide a hold.
     static func gitKeys(_ text: String) -> [String: String]? {
         var values: [String: [String]] = [:]
         var section: String?
@@ -648,7 +655,13 @@ public enum ConfigSeal {
                     let head = String(inside[..<space]), rest = String(inside[inside.index(after: space)...])
                     guard head.range(of: name, options: .regularExpression) != nil, rest.count >= 2, rest.hasPrefix("\""), rest.hasSuffix("\""),
                           !rest.dropFirst().dropLast().contains(where: { $0 == "\"" || $0 == "\\" }) else { return nil }
-                    section = head.lowercased() + "." + String(rest.dropFirst().dropLast())
+                    let sub = String(rest.dropFirst().dropLast()), base = head.lowercased()
+                    if base == "branch" {
+                        guard !sub.isEmpty, sub.range(of: #"^[A-Za-z0-9._/+-]+$"#, options: .regularExpression) != nil else { return nil }
+                        section = base + "." + sub
+                    } else {
+                        section = base + "." + subsectionLabel(sub)
+                    }
                 } else {
                     guard inside.range(of: name, options: .regularExpression) != nil else { return nil }
                     section = inside.lowercased()
@@ -701,20 +714,27 @@ public enum ConfigSeal {
     /// What changed between two per-key hashes (`encode`'s): "hooks.SessionStart added, env changed, model
     /// removed", the first `shown` of them and how many more. Names only, never a value. nil when either isn't known.
     static func changedKeys(from old: String?, to new: String?, shown: Int = 8) -> String? {
+        guard let changes = keyChanges(from: old, to: new), !changes.isEmpty else { return nil }
+        let said = changes.map { "\($0.key) \($0.change.rawValue)" }
+        return said.prefix(shown).joined(separator: ", ") + (said.count > shown ? " and \(said.count - shown) more" : "")
+    }
+
+    /// `changedKeys`' list as data, each key with what became of it, in its order: what a card classifies by (a key is
+    /// never read back out of the joined words). nil when either side isn't known.
+    static func keyChanges(from old: String?, to new: String?) -> [KeyChange]? {
         guard let old, let new else { return nil }
         let before = decode(old), after = decode(new)
-        var said: [String] = []
+        var changes: [KeyChange] = []
         // A plugin's version folder first: an update says so before what moved with it.
         for key in Set(before.keys).union(after.keys).sorted(by: { $0 == versionKey || ($1 != versionKey && $0 < $1) }) {
             switch (before[key], after[key]) {
-            case (nil, _?): said.append("\(key) added")
-            case (_?, nil): said.append("\(key) removed")
-            case let (was?, now?) where was != now: said.append("\(key) changed")
+            case (nil, _?): changes.append(KeyChange(key: key, change: .added))
+            case (_?, nil): changes.append(KeyChange(key: key, change: .removed))
+            case let (was?, now?) where was != now: changes.append(KeyChange(key: key, change: .changed))
             default: break
             }
         }
-        guard !said.isEmpty else { return nil }
-        return said.prefix(shown).joined(separator: ", ") + (said.count > shown ? " and \(said.count - shown) more" : "")
+        return changes
     }
 
     /// What changed in a held folder, between its per-path hashes as sealed and as they are (`FolderRead.entries`):

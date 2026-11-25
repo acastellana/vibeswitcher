@@ -1787,6 +1787,10 @@ extension LeadVault {
                 if details[key] == nil {
                     details[key] = ConfigSeal.heldDetail(name: ConfigSeal.name(ofKey: key), from: folder ? recorded[keys] : nil, to: folder ? hashes[keys] : nil,
                                                          sessions: sessions, known: sessionsKnown)
+                    // A git config's changed keys as data: the card classifies by them, never by the joined words.
+                    if !folder, ConfigSeal.gitConfigNames.contains(ConfigSeal.name(ofKey: key)) {
+                        details[key]?.keys = ConfigSeal.keyChanges(from: recorded[keys], to: hashes[keys])
+                    }
                 }
             }
             seal(sealed.keys, from: hashes, into: &recorded)
