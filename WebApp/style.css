@@ -407,9 +407,10 @@ code, pre, kbd { font-family: var(--mono); }
 .card-context { font-size: var(--small); margin: 6px 0 0; overflow-wrap: anywhere; }
 .card-context-label { color: var(--ink-2); }
 .card > .card-foot { grid-column: 1; color: var(--ink-3); font-size: var(--small); }
-.hc-things { display: grid; gap: 1px; color: var(--ink-2); font-size: var(--text); list-style: disc; padding-left: 18px; margin-top: -4px; }
+.hc-title { display: grid; gap: 4px; }
+.hc-things { display: grid; gap: 1px; color: var(--ink-2); font-size: var(--text); list-style: disc; padding-left: 18px; }
 .hc-things .hc-quiet { list-style: none; margin-left: -18px; }
-.hc-line { color: var(--ink-2); font-size: var(--text); margin-top: -4px; }
+.hc-line { color: var(--ink-2); font-size: var(--text); }
 .hc-rules { display: grid; gap: 2px; }
 .hc-rules-label { color: var(--needs-you); font-size: var(--small); font-weight: 600; }
 .hc-rail { color: var(--ink); font-size: var(--text); }

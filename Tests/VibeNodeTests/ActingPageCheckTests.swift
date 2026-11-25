@@ -61,6 +61,20 @@ struct ActingPageCheckTests {
         let leadPID = try #require((EngineEndToEndTests.state(tools)["pid"] as? Int).map(Int32.init))
         try hook(node, ["hook_event_name": "Stop"], tty: lead.tty, pid: leadPID)
 
+        // A second project whose rules were written after its accept and nothing else changed: its card says the
+        // project's rules changed, never "the agents' config".
+        let rules = node.root.appendingPathComponent("example-rules")
+        try await scratchRepository(rules)
+        try EngineEndToEndTests.workflow(rules)
+        let rulesHead = Git.run(["rev-parse", "main"], in: rules.path).output
+        try await node.acceptConfig(rules)
+        try await node.acceptBase(rules, from: rulesHead)
+        let rulesLead = try await node.runOnTerminal(["lead", rules.path, "--goal", "Keep the rules"])
+        try #require(rulesLead.status == 0, "the second lead didn't start: \(rulesLead.output)\n\(node.said)")
+        try "---\ntest_command: true\nmerge_policy: ask_all\naudit_finders: 2\nauto_advance: false\n---\n"
+            .write(toFile: ConfigHoldStore.workflowPath(root: rules.path), atomically: true, encoding: .utf8)
+        // Drawn now (the engine's next look keeps it): nothing held, the rules that would change.
+        _ = try await node.run(["config", "held", rules.path])
         let first = "Launch the onboarding page to the testers on Thursday, or wait for the copy review?"
         try tools.call("ask_user", ["question": first, "options": ["Thursday", "Wait for the review"]])
         try #require(await eventually(timeout: 120) { tools.calls().count == 1 }, "\(node.said)")
@@ -192,6 +206,7 @@ struct ActingPageCheckTests {
             "projectHref": "#/p/" + NodeIds.project(root: repo.path).addingPercentEncoding(withAllowedCharacters: .alphanumerics)! + "/lead",
             "first": "Launch the onboarding page", "firstOption": "Thursday", "approval": "Merge the upload retry task", "approve": "Approve \(approved)",
             "second": "Keep the old pricing table", "secondOption": "Keep it until Friday",
+            "rulesHref": "#/p/" + NodeIds.project(root: rules.path).addingPercentEncoding(withAllowedCharacters: .alphanumerics)! + "/lead",
             "third": "Name the release Aurora", "thirdFirst": "Aurora", "thirdSecond": "Borealis", "fourth": "Run the migration tonight", "fourthFirst": "Tonight",
         ]
         let expectFile = scratch.url("acting-page-check-expect.json")
@@ -206,7 +221,7 @@ struct ActingPageCheckTests {
                          output: .path(said.path, flags: O_WRONLY | O_TRUNC), limit: 240)
         }
         let table = (try? String(contentsOf: said, encoding: .utf8)) ?? ""
-        for row in ["Pair", "Held config", "Two tabs", "Answer by click", "Approve", "Changed", "Told and taken back", "Change while unread", "Read by the lead", "Send menu", "Older build", "Level off", "Reloaded", "Can’t act yet", "Console"] {
+        for row in ["Pair", "Held config", "Rules only", "Two tabs", "Answer by click", "Approve", "Changed", "Told and taken back", "Change while unread", "Read by the lead", "Send menu", "Older build", "Level off", "Reloaded", "Can’t act yet", "Console"] {
             #expect(table.split(separator: "\n").contains { $0.hasPrefix(row + " ") && $0.contains(" pass ") }, "\(row):\n\(table)")
         }
         #expect(status == 0, "\(table)\n\(node.said)")

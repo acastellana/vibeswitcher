@@ -1042,6 +1042,7 @@ const EN = {
   hcConfirmOnly: "Confirm this project’s rules once, in a terminal: there is no accept of them to compare with.",
   hcUnknown: "The project’s {n} rules can’t be compared with your last accept:",
   hcUnknownWhy: "The node restarted since, or its record of that accept was changed: read the values.",
+  hcRulesOnly: "This project’s rules changed",
   hcPlugin: "A plugin updated: {name}",
   hcBuild: "VibeSwitcher switched to a new build",
   hcGitConfig: "This checkout’s git config changed",
