@@ -1395,6 +1395,9 @@ mark.found { padding: 0 1px; border-radius: 3px; background: light-dark(rgb(255 
   .tc-dbody .fact dd { flex-wrap: nowrap; align-items: baseline; }
 }
 
+/* The centre takes the keyboard back when what opened a sheet or the palette is gone (views/sheet.js): no ring round it. */
+main.centre-wrap[tabindex="-1"]:focus { outline: none; }
+
 /* ---- A touch screen: every control a fingertip (44 px) both ways, by its padding, not a bigger glyph; checkboxes 24 px
    with their words tappable; text boxes at 16 px, under which a phone's browser zooms the page on focus. ---- */
 @media (hover: none) and (pointer: coarse) {
@@ -1416,5 +1419,3 @@ mark.found { padding: 0 1px; border-radius: 3px; background: light-dark(rgb(255 
   .left-summary { gap: 0; }
   .tc-links { gap: 0 14px; }
 }
-/* The centre takes the keyboard back when what opened a sheet or the palette is gone (views/sheet.js): no ring round it. */
-main.centre-wrap[tabindex="-1"]:focus { outline: none; }
