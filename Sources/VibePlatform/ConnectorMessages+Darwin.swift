@@ -89,7 +89,7 @@ extension Platform.Sockets {
     /// The next message on the stream connector `socket` and what rode on it (each descriptor close-on-exec at once):
     /// a byte other than `framedStart` alone (a connection's answer, its descriptor with it), or a framed message's bytes
     /// without its end. `cut` when the message ran past `count` bytes (its rest read and dropped up to its end), when
-    /// its rest didn't come, or when a descriptor rode on a byte after its first (closed); more than `room` descriptors
+    /// its rest didn't all come within `framedRestPatience` (on a socket that blocks too), or when a descriptor rode on a byte after its first (closed); more than `room` descriptors
     /// are all closed, and `cut`. At the stream's end, no bytes and no descriptors (the caller asks `peerHasGone`).
     /// nil and `errno` when the first read fails (EAGAIN: nothing yet on a socket that doesn't block).
     public static func receiveConnectorMessage(over socket: Int32, count: Int, room: Int) -> Received? {
@@ -99,10 +99,12 @@ extension Platform.Sockets {
         var fds = first.fds
         var cut = first.cut
         if byte == framedStart {
+            // A poll before each byte, against one deadline for the rest: the server's end of its connector blocks, where
+            // a read would wait for good on a rest its live sender never sends (and `HostConnector.web`'s bound with it).
+            let deadline = Platform.Clock.awakeSeconds() + framedRestPatience
             while true {
-                guard let next = receiveByte(over: socket) ?? (errno == EAGAIN && waitFor(socket, Int16(POLLIN), until: Platform.Clock.awakeSeconds() + framedRestPatience) ? receiveByte(over: socket) : nil),
-                      let more = next.byte else {
-                    // Its end, a failed read, or its rest never came.
+                guard waitFor(socket, Int16(POLLIN), until: deadline), let next = receiveByte(over: socket), let more = next.byte else {
+                    // Its end, a failed read, or not all of its rest within the patience.
                     cut = true
                     break
                 }
