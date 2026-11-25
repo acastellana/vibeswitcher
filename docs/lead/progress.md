@@ -4584,3 +4584,6 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-25 21:02 Planned v2-web-ux-d: v2 web UX D: answer a session's own question, start a session and a project from the page when it acts for you (U1, U12; in a clone)
 - 2026-11-25 21:03 Started a worker on v2-web-ux-a
 - 2026-11-25 21:03 Started a worker on v2-web-ux-b
+- 2026-11-25 21:03 Started a worker on v2-web-ux-c
+- 2026-11-25 21:03 Started a worker on v2-web-ux-d
+- 2026-11-25 21:03 Update: v2: Tus sesiones, Este nodo y Ajustes ya son dos columnas con buscador — **Qué cambió:** las tres secciones del pie de la columna izquierda se abren ahora en dos columnas: una lista con buscador a la izquierda y el detalle de lo elegido a la derecha. Usan un único componen…
