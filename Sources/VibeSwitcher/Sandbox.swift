@@ -2472,8 +2472,10 @@ private final class Driver: NSObject, NSApplicationDelegate {
                         "Lead: merge_remote tests GitHub's commits before main moves",
                         "Settings: the battery limit steps by 5 %",
                         "Fix the composer losing a draft when the window closes"]
+        // Waiting, the two GitHub alone has name who pushed them, one from each Mac (made-up handles).
+        let pushers = ready ? [:] : [0: "studio-mac", 1: "laptop-dev"]
         let changes = subjects.enumerated().map { index, subject in
-            AppUpdate.Change(id: String(repeating: String(index, radix: 16), count: 40), subject: subject)
+            AppUpdate.Change(id: String(repeating: String(index, radix: 16), count: 40), subject: subject, pusher: pushers[index])
         }
         let offer = AppUpdate.Offer(installed: "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678", head: changes[ready ? 0 : 2].id,
                                     tip: changes[0].id, newest: changes[0].id, changes: changes, waiting: ready ? 0 : 2,

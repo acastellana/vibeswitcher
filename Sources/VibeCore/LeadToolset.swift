@@ -239,6 +239,9 @@ public final class LeadToolset: MCPToolset {
     var advancing: LeadAdvance?
     /// Pinned-remote fetches, started with the lead server's background record lifecycle.
     var remotePolling: LeadRemotePoller?
+    /// Who pushed the remote's commits, for fetch_remote's and merge_remote's lists (`GitHubPushers`): the user's gh;
+    /// tests inject theirs.
+    var pushers: GitHubPushers.Lookup = GitHubPushers.shared
     /// The risk check's model pass (see `LeadRisk`): a prompt in, the answer out, or nil (no Claude, an error, out of
     /// time). The lead's tool server sets headless Claude (`ClaudeHeadless.risk`); nil (tests that don't fake it):
     /// the deterministic triggers only.

@@ -110,4 +110,14 @@ struct UpdateCardTests {
         #expect(UpdateCardView.shortSubject("Lead: merge_remote tests first", area: "Lead") == "merge_remote tests first")
         #expect(UpdateCardView.shortSubject("Fix it: now", area: "Other") == "Fix it: now")
     }
+
+    /// A GitHub change names who pushed it; a card kept from before handles (no `pusher` in its JSON) reads as one
+    /// without them.
+    @Test func aGitHubChangeNamesItsPusher() throws {
+        #expect(UpdateCardView.pushedBy("laptop-dev") == "pushed by @laptop-dev")
+        let old = try JSONDecoder().decode(AppUpdate.Change.self, from: Data(#"{"id":"abc","subject":"Chat: faster"}"#.utf8))
+        #expect(old == AppUpdate.Change(id: "abc", subject: "Chat: faster") && old.pusher == nil)
+        let named = AppUpdate.Change(id: "abc", subject: "Chat: faster", pusher: "laptop-dev")
+        #expect(try JSONDecoder().decode(AppUpdate.Change.self, from: JSONEncoder().encode(named)) == named)
+    }
 }

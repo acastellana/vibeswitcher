@@ -4497,3 +4497,20 @@ Turn what's a real bug into a task (one already on the board needs nothing); the
 - 2026-11-24 03:32 Automatically (auto_advance): Merged fix-the-flaky-test-26 (Fix the flaky test afterARunHeardAFlatOneSaysClaudeDidntCatchAnything()) into main at 64a599ce, on its passing audit and the full test run.
 - 2026-11-24 03:32 Automatically (auto_advance): Cleaned up fix-the-flaky-test-26 (freed 1.8 GB of build output and temporary folders). It stays done.
 - 2026-11-24 04:22 Handed the lead over to a fresh session: the last one had been idle 50 minutes with 150k tokens of context, past handover_idle_min 50 and handover_tokens 150k
+- 2026-11-24 09:05 Fetched origin/main at 0f444b6d: main is 69 commits ahead of origin/main and 0 commits behind it
+- 2026-11-24 09:05 Asked the user to push main at b1f24f0a (69 commits) to origin/main
+- 2026-11-24 09:05 Pushed main at b1f24f0a (69 commits) to origin/main, on the user's click
+- 2026-11-24 10:36 Automatically fetched origin/main at b1f24f0a: 0 commits from the other Mac at origin/main (b1f24f0a83ae0d491d43352eac76d4d7ef497af2): merge_remote would do nothing: main has everything origin/main has.
+- 2026-11-24 14:05 Planned github-commits-name-the: GitHub commits name the handle that pushed them, on the update card and in fetch_remote/merge_remote reports (review audit, for security)
+- 2026-11-24 14:05 Automatically (auto_advance): Planned tasks wait to start: the Mac has only 21.3 GB of disk free, under the 22.1 GB a new worker waits for: the load runs' floor (floor_gb=15 in scripts/test-under-load.sh, in GiB: 16.1 GB) plus disk_headroom_gb (6 GB in workflow.md), the room the tasks in flight still need to run their load check. They start by themselves once there's room again; meanwhile merge and cleanup finished tasks (cleanup frees their worktrees). Freeing other space on the disk is the user's call: tell them if it stays this full.
+- 2026-11-24 14:20 Started a worker on github-commits-name-the
+- 2026-11-24 14:20 Automatically (auto_advance): Started a worker on github-commits-name-the (GitHub commits name the handle that pushed them, on the update card and in fetch_remote/merge_remote reports).
+- 2026-11-24 14:42 Automatically (auto_advance): Started the audit of github-commits-name-the at 9a11f39c (Its review is audit).
+- 2026-11-24 14:42 Exception on github-commits-name-the by lead of vibeswitcher: edits to Sources/VibeCore/LeadToolset.swift accepted. Reason: A 3-line injectable `var pushers` on LeadToolset, so tests can give fetch_remote and merge_remote a fake lookup. The lead accepts it: the contract asked for an injected lookup in tests, and LeadRemote…
+- 2026-11-24 14:42 Released github-commits-name-the's worker (idle since its done report on 9a11f39c) while its audit runs
+- 2026-11-24 14:42 Automatically (auto_advance): Released github-commits-name-the's worker, idle since its done report on 9a11f39c, while its audit runs (ended pid 49059 (Worker: GitHub commits name the handle that pushed them, on the update card and in fetch_remote/merge_remote reports)): its Mac slot and memory are free. Its worktree and branch stay; findings the verdict sends back go to a fresh worker there, and a clean verdict merges with none.
+- 2026-11-24 14:46 Audit of github-commits-name-the: complete, clean, round 1: 3 Nit open
+- 2026-11-24 15:05 Merged github-commits-name-the: GitHub commits name the handle that pushed them, on the update card and in fetch_remote/merge_remote reports (build 629a5b790b40)
+- 2026-11-24 15:05 Automatically (auto_advance): Merged github-commits-name-the (GitHub commits name the handle that pushed them, on the update card and in fetch_remote/merge_remote reports) into main at 89cdbd32, on its passing audit and the full test run.
+- 2026-11-24 15:05 Automatically (auto_advance): Cleaned up github-commits-name-the (freed 2.5 GB of build output and temporary folders). It stays done.
+- 2026-11-24 15:06 Update: GitHub commits now show who pushed them — **What changed:** a commit that comes from GitHub now names the GitHub handle that pushed it.

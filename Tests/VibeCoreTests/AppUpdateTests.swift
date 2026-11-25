@@ -219,7 +219,7 @@ struct AppUpdateTests {
         var summaries = 0
     }
 
-    func watch(_ scene: Scene, _ world: World, launched: Date, file: URL? = nil) -> AppUpdateWatch {
+    func watch(_ scene: Scene, _ world: World, launched: Date, file: URL? = nil, pushers: GitHubPushers.Lookup = .none) -> AppUpdateWatch {
         let file = file ?? temp.url("update-state").appendingPathComponent("update-check.json")
         try? FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
         let scratch = temp.url("update-git")
@@ -232,6 +232,9 @@ struct AppUpdateTests {
                               },
                               power: { world.power }, batteryLimit: { 30 },
                               summarize: { _ in world.summaries += 1; return "What's new." },
+                              pushers: { checkout, tip, commits in
+                                  pushers.pushers(root: checkout.root, url: scene.origin, branch: checkout.base, tip: tip, commits: commits)
+                              },
                               tellLead: { world.reports.append(($0, $1)) }, log: { world.logs.append($0) })
     }
 
@@ -411,6 +414,65 @@ struct AppUpdateTests {
         let text = try #require(world.reports.first?.text)
         #expect(text.contains("has 1 commit for the app") && text.contains("Remote: from the other Mac"), "\(text)")
         #expect(!text.contains("Local:"), "\(text)")
+    }
+
+    // MARK: Who pushed GitHub's changes
+
+    /// The other clone's two pushes, by two handles, and a commit on this Mac's main; GitHub's activity for them.
+    func twoPushes(_ scene: Scene) throws -> (first: String, second: String, local: String, activity: Data) {
+        let start = git(["rev-parse", "HEAD"], in: scene.other).output
+        let first = try pushed(scene, "Sources/App/one.swift", "1\n", message: "Chat: from the studio Mac")
+        let second = try pushed(scene, "Sources/App/two.swift", "2\n", message: "Lead: from the laptop")
+        try commit("Sources/App/main.swift", "print(3)\n", in: scene.root, message: "Local: here")
+        let local = git(["rev-parse", "HEAD"], in: scene.root).output
+        return (first, second, local, activityJSON([("laptop-dev", first, second), ("studio-mac", start, first)]))
+    }
+
+    @Test func githubsChangesOnTheCardNameWhoPushedThemAskingOncePerTip() throws {
+        let scene = try makeScene()
+        let world = World()
+        let t0 = Date(timeIntervalSince1970: 1_000_000)
+        let pushes = try twoPushes(scene)
+        let lookup = fakePushers { pushes.activity }
+        let watch = watch(scene, world, launched: t0, pushers: lookup)
+        guard case .checked(let offer?, show: true) = watch.tick(now: t0.addingTimeInterval(120)) else {
+            Issue.record("no offer from GitHub's commits")
+            return
+        }
+        #expect(offer.waiting == 2)
+        let named = Dictionary(uniqueKeysWithValues: offer.changes.map { ($0.id, $0.pusher ?? "-") })
+        // Each GitHub change its own push's handle; this Mac's own, none.
+        #expect(named == [pushes.second: "laptop-dev", pushes.first: "studio-mac", pushes.local: "-"], "\(named)")
+        #expect(lookup.asked == 1)
+        // The minute looks while it waits, and Check for Updates… on the same tip: GitHub isn't asked again, and the
+        // handles stay.
+        guard case .checked(let again?, _) = watch.tick(now: t0.addingTimeInterval(180)) else { Issue.record("no look"); return }
+        #expect(again.changes == offer.changes)
+        _ = watch.checkNow(now: t0.addingTimeInterval(600))
+        #expect(lookup.asked == 1 && world.fetches == 2)
+        // A new tip: asked once for it.
+        _ = try pushed(scene, "Sources/App/three.swift", "3\n", message: "Chat: one more")
+        _ = watch.checkNow(now: t0.addingTimeInterval(900))
+        #expect(lookup.asked == 2)
+    }
+
+    /// No answer from GitHub (gh missing, signed out, out of time, nothing matching): the card is as it was, without
+    /// handles, and the check succeeds.
+    @Test func withoutGitHubsAnswerTheCardHasNoHandles() throws {
+        let scene = try makeScene()
+        let t0 = Date(timeIntervalSince1970: 1_000_000)
+        let pushes = try twoPushes(scene)
+        let other = String(repeating: "a", count: 40)
+        for lookup in [fakePushers { nil }, fakePushers { Data("not json".utf8) },
+                       fakePushers { activityJSON([("someone", other, other)]) }, GitHubPushers.Lookup(fetch: { _, _ in pushes.activity })] {
+            let world = World()
+            guard case .checked(let offer?, show: true) = watch(scene, world, launched: t0, pushers: lookup).checkNow(now: t0) else {
+                Issue.record("no offer without GitHub's answer")
+                continue
+            }
+            #expect(offer.waiting == 2 && offer.changes.count == 3 && offer.changes.allSatisfy { $0.pusher == nil })
+            #expect(world.reports.count == 1)
+        }
     }
 
     @Test func noCheckoutOrNoBuildIsLoggedOnce() throws {

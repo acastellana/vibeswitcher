@@ -34,6 +34,7 @@ before it is called the sanitizer's slowness. First seen in the first local run,
 | `HandoverLinuxTests.aHandoverImageIsNotDumpableFromItsExec` (host) | the reads of the new image weren't all refused EACCES | not read yet; the sanitizer's runtime reads /proc/self at its start |
 | `ServerChildTests.aSocketRenamedOverThePathIsNotTheHostsAtOnce` (host) | the host's socket was gone ("isn't running") before the rename was noted | not read yet: a host that died (exit 66 from a race, or slowness) to be told apart |
 | `SandboxFactsTests.aWindowsStubDoesntStartWithoutInit` (platform) | the stub's status was 1, WSL's interop answering inside the box | WSL's binfmt interop, not a race; this machine only |
+| `LeadAuditReleaseTests.aWorkerMidTurnAtTheAuditsStartIsReleasedOnlyOnceItsTurnEnds` | local, VibeCoreTests whole on the main merge (`0b21db01`, 2026-11-24), 1 run; passed on the next head | :108: the "Released add-b's worker, idle since its done report" report not among the lead's reports. Read, not chased: the test's wait (:106) ends once the worker is killed and the board says released, and the report is sent later in that same pass, so the check can come between the two; waiting on the report itself (`until`) would close it | 2026-11-25 |
 
 ## Fixed
 
