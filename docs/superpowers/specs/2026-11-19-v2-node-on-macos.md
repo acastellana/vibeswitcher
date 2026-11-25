@@ -476,10 +476,12 @@ take the keeper's switch end to end.
     Now the parcel goes only to an image holding its own checked start, which takes no argument but its own and keeps
     no variable of this program's (`MacCheckedFixRoundTests/aWrapperRunningThePinnedImageWithItsOwnArgumentsTakesNothing`,
     with a scratch host standing in for the checked node): the wrapper's image takes nothing and exits, and the sessions
-    end. A wrapper that runs it with the node's own arguments is the node: what it still chooses is the values of
-    `--node-root` and `--server` (bounded by the start: the row's server, by cdhash, in that folder) and every variable
-    of the environment outside this program's (`PATH`, `TMPDIR`, the locale), which the sessions inherit as before:
-    for the switch-on review.
+    end. A wrapper that runs it with the node's own arguments is the node, and since the re-check it chooses only the
+    values of `--node-root` and `--server` (bounded by the start: the row's server, by cdhash, in that folder): its
+    environment is rebuilt from a fixed list and its descriptors, umask, folder and core limit reset at its start. What
+    stays the wrapper's: what the loader, the Swift runtime and malloc read from the environment before `main` (the
+    Hardened Runtime refuses `DYLD_*`; the rest are debugging aids, kept from its children), and its other resource
+    limits (one set low only ends the node): for the switch-on review.
 - **The stale connector check after a handover: closed (item 13).** No Mac handover carries a server child: the node
   host ends and reaps it before the exec, and the new image starts one whose connector it made
   (`afterASwitchTheServerChildIsANewProcess`).
