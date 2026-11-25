@@ -31,6 +31,7 @@
 // - Two tabs: a second tab opened by hand acts with the first one's pairing, held in memory only.
 // - Can't act yet: acting on again (OUT/trust.want) with no tab paired: one plain banner with the command; a pick is
 //   one line, "Not sent", the terminal's way behind a disclosure.
+// - Settle from the card: the command on each held-config card, run in the scratch terminal with its code, closes it.
 // - Console: no error over the whole run.
 //
 // Usage: node acting-page-check.cjs URL EXPECT-JSON OUT-FOLDER CHROME   (exit 1 on any fail; a table and report.json in OUT)
@@ -324,6 +325,22 @@ async function run() {
     await page.shot('held-config-spanish-dark');
     await page.send('Emulation.setEmulatedMedia', { features: [] });
     record('Can’t act yet', cant && oneLine, !trusted ? 'the test never turned acting on again' : !cant ? 'no banner saying this tab can’t act yet, with the command' : !oneLine ? 'a pick isn’t one line with the terminal behind a disclosure' : cant + '; ' + oneLine);
+
+    // Settle from the card: the command on each held-config card's face (the main project's, then the rules-only one's),
+    // run in the scratch node's terminal with its code (OUT/settle-N.want, answered by OUT/settle-N.done, which says
+    // how many steps it took); the card closes.
+    const settled = [];
+    for (const [index, href] of [[1, expect.projectHref], [2, expect.rulesHref]]) {
+      await page.send('Page.navigate', { url: `${new URL(url).origin}/${href}` });
+      const command = await page.until(`document.querySelector('.wait-box .card.held-config .hc-terminal .copy-text')?.innerText.trim() || null`, WAIT);
+      if (!command) { settled.push(`${index}: no command on the card`); continue; }
+      fs.writeFileSync(path.join(out, `settle-${index}.want`), command);
+      const done = await waitFile(path.join(out, `settle-${index}.done`), 90000);
+      const how = done ? fs.readFileSync(path.join(out, `settle-${index}.done`), 'utf8') : 'never run';
+      const closed = done && await page.until(`!document.querySelector('.wait-box .card.held-config') ? true : null`, WAIT);
+      settled.push(`${index}: ${command} → ${how}${closed ? ', the card closed' : ', the card stayed'}`);
+    }
+    record('Settle from the card', settled.every((line) => line.endsWith('the card closed')), settled.join('; '));
   } catch (error) {
     record('run', false, error.message);
   } finally {

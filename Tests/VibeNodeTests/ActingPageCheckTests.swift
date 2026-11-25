@@ -21,6 +21,7 @@ import Testing
 /// - Reloaded: reloaded, the tab says it no longer acts (its pairing lived in its memory) and to pair again;
 /// - Two tabs: a second tab opened by hand acts with the first one's pairing, held in memory only;
 /// - Can't act yet: acting on again with no tab paired: one plain banner with the command, a pick one line, not sent;
+/// - Settle from the card: each held-config card's command, run in the scratch terminal with its code, closes it;
 /// - Console: no error.
 /// The node's record must then hold the two answers and the setting, each the page's.
 @Suite(NodeTraits.linuxOnly, .timeLimit(.minutes(5)),
@@ -155,8 +156,28 @@ struct ActingPageCheckTests {
             var switched = false
             var trusted = false
             var taken = false
-            let end = MacTime.real.awake() + 200
-            while !(confirmed && revised && switched && trusted && taken), MacTime.real.awake() < end, !Task.isCancelled {
+            var settled: Set<Int> = []
+            let end = MacTime.real.awake() + 240
+            while !(confirmed && revised && switched && trusted && taken && settled.count == 2), MacTime.real.awake() < end, !Task.isCancelled {
+                for index in [1, 2] where !settled.contains(index) {
+                    guard let line = try? String(contentsOf: out.appendingPathComponent("settle-\(index).want"), encoding: .utf8) else { continue }
+                    // The card's command as the user would paste it: its words after `vibeswitcher`, run in a terminal
+                    // (the typed code answered). `config held` only shows the card: then the accept it prints.
+                    let words = line.trimmingCharacters(in: .whitespacesAndNewlines).split(separator: " ").map(String.init).dropFirst()
+                    let held = words.prefix(2) == ["config", "held"]
+                    let ran = held ? try await node.run(Array(words)) : try await node.runOnTerminal(Array(words))
+                    var how = "one step"
+                    if held, let card = ScratchNode.card(ran.output, "config accept") {
+                        let accepted = try await node.runOnTerminal(["config", "accept", card])
+                        how = accepted.status == 0 ? "two steps (config held, then the accept it printed)" : "the accept refused: \(accepted.output.suffix(200))"
+                    } else if held {
+                        how = "config held printed no accept: \(ran.output.suffix(300))"
+                    } else if ran.status != 0 {
+                        how = "refused: \(ran.output.suffix(200))"
+                    }
+                    try how.write(to: out.appendingPathComponent("settle-\(index).done"), atomically: true, encoding: .utf8)
+                    settled.insert(index)
+                }
                 if !taken, FileManager.default.fileExists(atPath: out.appendingPathComponent("take.want").path) {
                     // The lead's step: its hook takes what waits in its inbox (the answers and the message the user sent).
                     let handed = leadsHookTakes(node, event: "PostToolUse", tty: lead.tty, pid: leadPID)
@@ -221,7 +242,7 @@ struct ActingPageCheckTests {
                          output: .path(said.path, flags: O_WRONLY | O_TRUNC), limit: 240)
         }
         let table = (try? String(contentsOf: said, encoding: .utf8)) ?? ""
-        for row in ["Pair", "Held config", "Rules only", "Two tabs", "Answer by click", "Approve", "Changed", "Told and taken back", "Change while unread", "Read by the lead", "Send menu", "Older build", "Level off", "Reloaded", "Can’t act yet", "Console"] {
+        for row in ["Pair", "Held config", "Rules only", "Two tabs", "Answer by click", "Approve", "Changed", "Told and taken back", "Change while unread", "Read by the lead", "Send menu", "Older build", "Level off", "Reloaded", "Can’t act yet", "Settle from the card", "Console"] {
             #expect(table.split(separator: "\n").contains { $0.hasPrefix(row + " ") && $0.contains(" pass ") }, "\(row):\n\(table)")
         }
         #expect(status == 0, "\(table)\n\(node.said)")

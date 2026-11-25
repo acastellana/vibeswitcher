@@ -260,12 +260,15 @@ export function projectView(app, { sheet }) {
     // Blocking unless the node says it isn't (a card with nothing held holds nothing back).
     const head = h('header', { class: 'card-head' }, card.blocking === false ? h('span', { class: 'priority important' }, t('cImportant')) : h('span', { class: 'priority blocking' }, t('blocking')),
       h('time', { class: 'asked' }, t('askedAt', { who: t('vibeswitcher'), time: clock(card.at) })));
-    const terminalLine = (words, command = 'vibeswitcher approve') => h('div', { class: 'hc-terminal' }, h('span', null, words), copyLine(command, 'the command that accepts it'));
+    // The command that settles this card in one step, as the node says it (`settle`); until it does, the one that shows
+    // the card and how to accept it. Never `approve`: it sets aside a card with rules to record.
+    const settle = card.config?.settle || card.settle || `vibeswitcher config held ${shellWord(root)}`;
+    const terminalLine = (words) => h('div', { class: 'hc-terminal' }, h('span', null, words), copyLine(settle, 'the command that settles it'));
     // Nothing held and no sealed accept (`firstLook`): the node only wants this project's rules confirmed once; the
     // command shows them and takes the accept (`approve` doesn't list such a card).
     if (summary.confirmOnly) {
       return h('article', { class: 'card held-config confirm-only' }, head,
-        terminalLine(t('hcConfirmOnly'), `vibeswitcher config held ${shellWord(root)}`),
+        terminalLine(t('hcConfirmOnly')),
         h('details', { class: 'hc-details' }, h('summary', null, t('hcShowRules')), heldDetails(card, summary)));
     }
     const details = h('details', { class: 'hc-details' }, h('summary', null, t('hcShowDetails')), heldDetails(card, summary));
