@@ -50,3 +50,8 @@ test('the face: only the rails that changed; the ones that can’t be compared c
   const restarted = heldSummary({ items: [], guarded: Array.from({ length: 19 }, (_, i) => ({ key: `k${i}`, value: 'v', sinceAccept: unvouched })) });
   assert.deepEqual([restarted.changed.length, restarted.unknown, restarted.terminal], [0, 19, true]);
 });
+
+test('the node’s `firstLook`: nothing held, no sealed accept: confirm the rules once, whatever the rules say', () => {
+  const first = heldSummary({ items: [], guarded: [{ key: 'test_command', value: 'true', sinceAccept: null }], firstLook: true });
+  assert.deepEqual([first.confirmOnly, first.terminal], [true, false]);
+});

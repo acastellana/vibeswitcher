@@ -257,12 +257,15 @@ export function projectView(app, { sheet }) {
   function configCard(card) {
     const root = card.root || '';
     const summary = heldSummary(card.config);
-    const head = h('header', { class: 'card-head' }, h('span', { class: 'priority blocking' }, t('blocking')), h('time', { class: 'asked' }, t('askedAt', { who: t('vibeswitcher'), time: clock(card.at) })));
-    const terminalLine = (words) => h('div', { class: 'hc-terminal' }, h('span', null, words), copyLine('vibeswitcher approve', 'the command that accepts it'));
-    // Nothing held and nothing changed: the node only wants this project's rules confirmed once, after a restart.
+    // Blocking unless the node says it isn't (a card with nothing held holds nothing back).
+    const head = h('header', { class: 'card-head' }, card.blocking === false ? h('span', { class: 'priority important' }, t('cImportant')) : h('span', { class: 'priority blocking' }, t('blocking')),
+      h('time', { class: 'asked' }, t('askedAt', { who: t('vibeswitcher'), time: clock(card.at) })));
+    const terminalLine = (words, command = 'vibeswitcher approve') => h('div', { class: 'hc-terminal' }, h('span', null, words), copyLine(command, 'the command that accepts it'));
+    // Nothing held and no sealed accept (`firstLook`): the node only wants this project's rules confirmed once; the
+    // command shows them and takes the accept (`approve` doesn't list such a card).
     if (summary.confirmOnly) {
       return h('article', { class: 'card held-config confirm-only' }, head,
-        terminalLine(t('hcConfirmOnly')),
+        terminalLine(t('hcConfirmOnly'), `vibeswitcher config held ${shellWord(root)}`),
         h('details', { class: 'hc-details' }, h('summary', null, t('hcShowRules')), heldDetails(card, summary)));
     }
     const details = h('details', { class: 'hc-details' }, h('summary', null, t('hcShowDetails')), heldDetails(card, summary));
