@@ -189,8 +189,8 @@ public enum ServerStart {
                             // The tailnet's page (`web --tailnet`) on the user's node only: a scratch server never binds it.
                             tailnet: parsed.node ? TailnetWeb.Options() : nil,
                             // H1: the web's sockets are the session host's, asked for over the connector and held by it
-                            // across this server's restarts and its handovers; this server never binds one itself (the
-                            // Mac's, until its own H1 step, does: `WebBind.forServer`).
+                            // across this server's restarts and its handovers; this server never binds one itself, on
+                            // Linux or the Mac (`WebBind.forServer`).
                             bind: .forServer(connector: parsed.connector, note: say), note: say)
         requests.openWebForAnyone = parsed.testWebPair
         server.hub = live.hub

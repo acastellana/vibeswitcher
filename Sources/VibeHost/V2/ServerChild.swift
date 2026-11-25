@@ -421,6 +421,10 @@ public final class ServerChild {
     /// The child running now; nil between a child's end and its start again.
     public var pid: pid_t? { lock.withLock { child?.pid } }
 
+    /// The connector of the child running now, by the number the host's end is registered under (`openServerChildConnector`);
+    /// nil between a child's end and its start again.
+    public var connector: Int32? { lock.withLock { child?.connector } }
+
     /// The token of the child running now (`Platform.Processes.token`: pid, uid, start ticks), recorded in the spawn's
     /// turn and named as its connector's sender; nil between a child's end and its start again.
     public var token: Platform.PeerToken? { lock.withLock { child?.token } }

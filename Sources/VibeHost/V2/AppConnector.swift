@@ -245,11 +245,11 @@ extension HostServer {
     /// `queue`.
     private func answer(_ connector: AppConnector, _ number: Int32) {
         guard !connector.closed else { return }
-        // A connection's request is one byte; a web request (H1, `HostWebListen`) a few words, one message on Linux's
-        // `SOCK_SEQPACKET` connector. The Mac's is a stream, where messages have no edges: one byte a request there, as
-        // before, and no web request (the Mac node's H1 is its own step).
-        var message = [UInt8](repeating: 0, count: Platform.Sockets.connectorType == Platform.Sockets.seqpacket ? 256 : 1)
-        let (count, from) = message.withUnsafeMutableBytes { Platform.Sockets.receive(connector.fd, into: $0) }
+        // A connection's request is one byte; a web request (H1, `HostWebListen`) a few words: one message on Linux's
+        // `SOCK_SEQPACKET` connector, one framed message on the Mac's stream, where messages have no edges (the Mac's H1,
+        // `Platform.Sockets.receiveConnectorRequest`: a message it can't read whole fails the read, which ends the connector).
+        var message = [UInt8](repeating: 0, count: 256)
+        let (count, from) = message.withUnsafeMutableBytes { Platform.Sockets.receiveConnectorRequest(connector.fd, into: $0) }
         if count < 0 {
             guard errno != EAGAIN, errno != EINTR else { return }
             return closeConnector(connector, number, why: "its read failed (errno \(errno))")
@@ -309,14 +309,17 @@ extension HostServer {
     /// app, or any connector with no server child, is refused.
     private func answerWeb(_ request: [UInt8], _ connector: AppConnector, _ number: Int32, from: Platform.PeerToken) {
         let send = { (bytes: [UInt8], fd: Int32?) in
-            if Platform.Sockets.send(bytes, with: fd.map { [$0] } ?? [], over: connector.fd) != bytes.count {
+            if Platform.Sockets.sendConnectorMessage(bytes, with: fd.map { [$0] } ?? [], over: connector.fd) != bytes.count {
                 self.note("host: a web answer through connector \(number) couldn't be sent (errno \(errno))")
             }
         }
         guard let parsed = HostWebListen.parse(request) else { return send(HostWebListen.unasked("not a web request"), nil) }
         // Each answer repeats its request's words: its asker takes no other.
         let reply = { (refusal: String?, fd: Int32?) in send(HostWebListen.answer(parsed, refusal: refusal), fd) }
-        guard let child = serverChild, child.token.map({ from.sameImage(as: $0) }) == true else {
+        // The child's token, taken at its spawn (Linux). The Mac reads none there: the child's own connector, whose sender
+        // its first request named, from the child's pid running the code the host loaded (`answer`, `setAppConnectorChild`).
+        guard let child = serverChild,
+              child.token.map({ from.sameImage(as: $0) }) ?? (child.connector == number && connector.child?.pid == from.pid) else {
             note("host: refused a web request through connector \(number): not the server child's")
             return reply("only the server child holds the web's listeners", nil)
         }
