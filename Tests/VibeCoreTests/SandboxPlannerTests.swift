@@ -35,7 +35,7 @@ struct SandboxPlannerTests {
                                                "AWS_SECRET_ACCESS_KEY=decoy", "SSH_AUTH_SOCK=/run/user/1000/ssh", "VIBESWITCHER_HEAVY_SLOTS=2",
                                                "HOME=/somewhere/else"],
                                  agentConfig: Data(#"{"userID":"u","projects":{"/other":{"hasTrustDialogAccepted":true}},"mcpServers":{"s":{"command":"x"}}}"#.utf8),
-                                 gitIdentity: .init(name: "T", email: "t@t"))
+                                 gitIdentity: .init(name: "T", email: "t@t"), binfmt: .own)
         }
     }
 
@@ -172,21 +172,81 @@ struct SandboxPlannerTests {
     }
 
     /// Every role's box hides the machine's binfmt_misc entries (WSL's interop among them) behind an empty one of its
-    /// own, over its own /proc's, where the kernel gives a user namespace one; where it can't, the plan has none.
-    @Test func aBoxHasABinfmtMiscOfItsOwnWhereTheKernelGivesOne() throws {
+    /// own, over its own /proc's, where the kernel gives a user namespace one, and where the probe failed before the
+    /// kernel answered (the shim then fails the box closed if the kernel refuses it: the-node-s-gate:F2); only where the
+    /// kernel answered that it gives none does the plan have none.
+    @Test func aBoxHasABinfmtMiscOfItsOwnUnlessTheKernelGivesNone() throws {
         let world = try world()
         for role in [SandboxRole.lead, .worker, .verifier, .branchRun] {
-            for kernel in [true, false] {
+            for kernel in [Platform.Sandbox.Binfmt.own, .unknown, .none] {
                 var inputs = world.inputs(role)
                 inputs.binfmt = kernel
-                #expect(SandboxPlanner.hidesInterpreters(inputs) == kernel)
-                let mounts = try plan(inputs).mounts
+                #expect(SandboxPlanner.hidesInterpreters(inputs) == (kernel != .none), "\(role) \(kernel)")
+                let mounts = try SandboxPlanner.plan(inputs, binfmtEntries: { [:] }).get().mounts
                 let own = mounts.firstIndex { $0.target == SandboxPlanner.interpreters }
-                #expect((own != nil) == kernel, "\(role)")
+                #expect((own != nil) == (kernel != .none), "\(role) \(kernel)")
                 if let own {
                     #expect(mounts[own].kind == .binfmt, "\(role)")
                     #expect(mounts.firstIndex { $0.target == "/proc" && $0.kind == .proc }.map { $0 < own } == true, "\(role): after /proc")
                 }
+            }
+        }
+    }
+
+    /// The machine's binfmt_misc entries as this node had them on 2026-11-21 (WSL 2, kernel 6.18): WSL's interop entry
+    /// with F, `flags` as the kernel writes it.
+    static func interop(_ name: String = "WSLInterop", state: String = "enabled", flags: String = "PF", interpreter: String = "/init") -> [String: String] {
+        [name: "\(state)\ninterpreter \(interpreter)\nflags: \(flags)\noffset 0\nmagic 4d5a\n", "status": "enabled\n"]
+    }
+
+    /// The user's choice (2026-11-21): where the kernel gives a box no binfmt_misc of its own, so the box would try the
+    /// machine's entries, no box starts while an enabled WSL interop entry carries F (its interpreter, /init, held
+    /// open by the kernel: the box's missing /init wouldn't stop a Windows program), the refusal naming the entry and
+    /// its flags. Every role; WSLInterop, WSLInterop-late, or an entry of any name whose interpreter is /init.
+    @Test func noBoxStartsWhereTheKernelGivesNoneAndAnEnabledInteropEntryCarriesF() throws {
+        let world = try world()
+        for role in SandboxRole.allCases {
+            var inputs = world.inputs(role)
+            inputs.binfmt = .none
+            for (entries, name, flags) in [(Self.interop(), "WSLInterop", "PF"), (Self.interop("WSLInterop-late", flags: "F"), "WSLInterop-late", "F"),
+                                           (Self.interop("windows", flags: "POCF"), "windows", "POCF")] {
+                switch SandboxPlanner.plan(inputs, binfmtEntries: { entries }) {
+                case .success: Issue.record("\(role): a box was planned with \(name) enabled with F")
+                case .failure(let refusal):
+                    #expect(refusal.value == SandboxPlanner.interpreters + "/" + name, "\(role): \(refusal)")
+                    #expect(refusal.reason.contains("F flag (flags: \(flags))"), "\(role): \(refusal)")
+                }
+            }
+            // An interop entry whose text can't be read can't be told from one with F.
+            #expect(throws: SandboxRefusal.self, "\(role)") { try SandboxPlanner.plan(inputs, binfmtEntries: { ["WSLInterop": "", "status": "enabled"] }).get() }
+        }
+    }
+
+    /// Without an enabled interop entry carrying F, a box where the kernel gives none of its own starts as before (no
+    /// binfmt_misc of its own planned); and where it gives one, or the probe failed (`.unknown`), it plans its own,
+    /// F entry or not, and is never refused for it.
+    @Test func aBoxStartsAsBeforeWithoutAnEnabledInteropEntryWithF() throws {
+        let world = try world()
+        let starting: [(String, [String: String]?)] = [
+            ("no binfmt_misc", nil),
+            ("no entry", ["status": "enabled\n"]),
+            ("interop without F", Self.interop(flags: "P")),
+            ("interop with F, disabled", Self.interop(state: "disabled")),
+            ("binfmt_misc disabled", Self.interop().merging(["status": "disabled\n"]) { $1 }),
+            ("another interpreter with F", Self.interop("qemu-aarch64", interpreter: "/usr/libexec/qemu-binfmt/aarch64-binfmt-P").filter { $0.key != "status" }),
+        ]
+        for role in SandboxRole.allCases {
+            var inputs = world.inputs(role)
+            inputs.binfmt = .none
+            for (what, entries) in starting {
+                let plan = try? SandboxPlanner.plan(inputs, binfmtEntries: { entries }).get()
+                #expect(plan != nil, "\(role): \(what)")
+                #expect(plan?.mounts.contains { $0.target == SandboxPlanner.interpreters } == false, "\(role): \(what)")
+            }
+            for kernel in [Platform.Sandbox.Binfmt.own, .unknown] {
+                inputs.binfmt = kernel
+                let plan = try? SandboxPlanner.plan(inputs, binfmtEntries: { Self.interop() }).get()
+                #expect(plan?.mounts.contains { $0.target == SandboxPlanner.interpreters && $0.kind == .binfmt } == true, "\(role): \(kernel)")
             }
         }
     }
@@ -427,6 +487,36 @@ struct SandboxPlannerTests {
         #expect((try? SandboxPlanner.plan(inputs).get()) != nil)
         inputs.policy = SandboxPolicy(read: ["/run/user/1000/bus"])
         #expect(throws: SandboxRefusal.self) { try SandboxPlanner.plan(inputs).get() }
+    }
+
+    /// WSL's ways to the Windows side are in no box, on a machine where each is there: `/init` (interop's interpreter),
+    /// `/run/WSL` (its sockets), `/mnt/c` (the Windows drive) are neither a mount's target nor its source, whatever the
+    /// PATH or the project names, and `WSL_INTEROP` (the socket's path), `WSLENV` and `WSL_DISTRO_NAME` never reach the
+    /// box's environment. Every role; the machine as the planner sees it (`exists`) has all of them.
+    @Test func noBoxPlansWSLsWaysToWindowsWhereTheMachineHasThem() throws {
+        let world = try world()
+        let windows = ["/init", "/run/WSL", "/mnt/c"]
+        let present = ["/init", "/run/WSL", "/run/WSL/1_interop", "/mnt/c", "/mnt/c/Windows", "/mnt/c/Windows/System32", "/mnt/c/Users"]
+        let exists: (String) -> Bool = { present.contains($0) || FileManager.default.fileExists(atPath: $0) }
+        for role in SandboxRole.allCases {
+            var inputs = world.inputs(role)
+            inputs.pathFolders += ["/mnt/c/Windows/System32", "/run/WSL", "/init"]
+            inputs.environment += ["WSL_INTEROP=/run/WSL/1_interop", "WSLENV=WT_SESSION:WT_PROFILE_ID", "WSL_DISTRO_NAME=Ubuntu"]
+            let plan = try SandboxPlanner.plan(inputs, exists: exists, binfmtEntries: { [:] }).get()
+            for path in plan.mounts.map(\.target) + Self.sources(plan) {
+                for way in windows { #expect(!Self.within(path, way), "\(role): \(path)") }
+            }
+            for name in ["WSL_INTEROP", "WSLENV", "WSL_DISTRO_NAME"] {
+                #expect(!plan.environment.contains { $0.hasPrefix(name + "=") }, "\(role): \(name) in \(plan.environment)")
+            }
+            #expect(!plan.environment.contains { $0.contains("/mnt/c") || $0.contains("/run/WSL") }, "\(role): \(plan.environment)")
+            // What a project names there is refused, not left out.
+            for way in windows + ["/run/WSL/1_interop", "/mnt/c/Users"] {
+                var named = inputs
+                named.policy = SandboxPolicy(read: [way])
+                #expect(throws: SandboxRefusal.self, "\(role): \(way)") { try SandboxPlanner.plan(named, exists: exists, binfmtEntries: { [:] }).get() }
+            }
+        }
     }
 
     @Test func everyUserWritableFolderOnThePathIsReadOnly() throws {

@@ -766,6 +766,21 @@ struct LeadToolsetTests: LeadTeamFixture {
         #expect(call(lead, "merge", ["task": "fix"]).isError)
     }
 
+    /// A worker's and a verifier's session are spawned with Claude Code's updater off: the variable `prepare` sets
+    /// reaches the spawn's environment (LeadLaunchTests' everyClaudeRoleStartsWithItsUpdaterOff).
+    @Test func aWorkerAndAVerifierAreSpawnedWithTheUpdaterOff() throws {
+        let root = try repo()
+        let runtime = FakeRuntime()
+        let lead = try lead(root, runtime)
+        _ = call(lead, "add_task", ["title": "Fix", "goal": "g", "acceptance": ["a"]])
+        #expect(!call(lead, "start_worker", ["task": "fix"]).isError)
+        #expect(!call(lead, "audit", ["task": "fix"]).isError)
+        let worker = try #require(runtime.spawned.first { $0.command.contains("--name 'worker-fix'") })
+        let verifier = try #require(runtime.spawned.first { $0.command.contains("--name 'verify-fix'") })
+        #expect(runtime.environments[worker.id]?["DISABLE_AUTOUPDATER"] == "1", "\(runtime.environments[worker.id] ?? [:])")
+        #expect(runtime.environments[verifier.id]?["DISABLE_AUTOUPDATER"] == "1", "\(runtime.environments[verifier.id] ?? [:])")
+    }
+
     @Test func statusSummarizesTheBoard() throws {
         let root = try repo()
         let runtime = FakeRuntime()

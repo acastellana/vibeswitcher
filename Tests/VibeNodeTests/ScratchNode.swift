@@ -38,7 +38,9 @@ import VibeNode
 /// `installRoot`: the install folder `build.switch` switches in (S8b): the server's `--server-arg --test-install-root=`,
 /// and the host's `--install-root`, so the host checks each handover's target as the node's host does
 /// (`HandoverTarget`); builds go there with `ScratchBuilds.install(commit:into:)`. `claudeProgram`: the name the fake
-/// Claude runs by (`FakeClaude.install(in:program:)`).
+/// Claude runs by (`FakeClaude.install(in:program:)`). `programs`: products whose bytes `<root>/build` holds in place of
+/// the built ones' (`install(into:programs:standIns:)`, in `programsFolder`), for a case that copies a program and never
+/// runs it.
 ///
 /// `reusing`: the root of a node stopped before (its host ended), for a host restart (E8): its files are kept (its
 /// `engine.json`, its snapshot, its journal's record, its repositories), its links and stand-ins made again where missing.
@@ -98,7 +100,8 @@ final class ScratchNode: @unchecked Sendable {
          path: String = "/usr/bin:/bin", holdFirstLook: Bool = false, serverKnowsFirstLook: Bool = true, testChild: String? = nil,
          socketName: String = "host.sock", sealLife: Int? = nil, owner: pid_t = getpid(), reusing: URL? = nil, waitForServer: Bool = true,
          build: URL? = nil, hostArguments: [String] = [], installRoot: URL? = nil, claudeProgram: String = "claude",
-         hostPrefix: [String] = [], hostBacktrace: Bool = false, noInotify: Bool = false, listsUnhosted: Bool = false) async throws {
+         hostPrefix: [String] = [], hostBacktrace: Bool = false, noInotify: Bool = false, listsUnhosted: Bool = false,
+         programs: [String: Data] = [:]) async throws {
         root = try reusing ?? scratch.shortFolder("vsn")
         home = root.appendingPathComponent("home", isDirectory: true)
         nodeRoot = build ?? root.appendingPathComponent("build", isDirectory: true)
@@ -120,7 +123,7 @@ final class ScratchNode: @unchecked Sendable {
         }
         let fakeFolder = testFolder.appendingPathComponent("fake-claude", isDirectory: true)
         if reusing == nil {
-            if build == nil { try Self.install(into: nodeRoot) }
+            if build == nil { try Self.install(into: nodeRoot, programs: programs, standIns: testFolder.appendingPathComponent("programs")) }
             try Self.standIns(in: testFolder, scopes: userScopes)
             // The node's `claude` (EN-D13): a link a test puts there, to the fake's launcher.
             fake = try FakeClaude.install(in: fakeFolder, program: claudeProgram)
@@ -222,6 +225,9 @@ final class ScratchNode: @unchecked Sendable {
     }
 
     var hostPID: pid_t { process.processIdentifier }
+
+    /// Where the stand-ins of `programs` are, which `<root>/build/bin` links to.
+    var programsFolder: URL { testFolder.appendingPathComponent("programs", isDirectory: true) }
 
     /// The server's socket.
     var serverSocket: String { root.appendingPathComponent("v2/server.sock").path }
@@ -417,13 +423,25 @@ final class ScratchNode: @unchecked Sendable {
         return hashes
     }()
 
-    /// `<folder>/bin/<product>` linked to each built product, and `<folder>/build-info` recording them.
-    static func install(into folder: URL) throws {
+    /// `<folder>/bin/<product>` linked to each built product, and `<folder>/build-info` recording them. `programs`: a
+    /// product's bytes instead, written to `<standIns>/<name>` (0755), linked to and recorded so. A debug build's products
+    /// are tens of MB each: a case that only copies one (`hooks install`) needn't push those through the disk, where
+    /// each flush of them waits behind every other test's writes (HooksCommandTests' installs took minutes in a full run).
+    static func install(into folder: URL, programs: [String: Data] = [:], standIns: URL? = nil) throws {
+        var recorded = hashes
         for name in products {
+            var product = builtProducts.appendingPathComponent(name)
+            if let bytes = programs[name], let standIns {
+                try FileManager.default.createDirectory(at: standIns, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+                product = standIns.appendingPathComponent(name)
+                try bytes.write(to: product, options: .withoutOverwriting)
+                try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: product.path)
+                recorded[name] = BuildInfo.sha256(of: bytes)
+            }
             try FileManager.default.createSymbolicLink(atPath: folder.appendingPathComponent("bin/" + name).path,
-                                                       withDestinationPath: builtProducts.appendingPathComponent(name).path)
+                                                       withDestinationPath: product.path)
         }
-        let info = BuildInfo(commit: commit, binaries: hashes, swift: "test", resolved: String(repeating: "0", count: 64))
+        let info = BuildInfo(commit: commit, binaries: recorded, swift: "test", resolved: String(repeating: "0", count: 64))
         try info.encoded.write(to: folder.appendingPathComponent(BuildInfo.fileName))
     }
 

@@ -2952,11 +2952,12 @@ public final class LeadToolset: MCPToolset {
     /// as that's started, before its trust question is answered (with `trust`): Claude Code can start the session's tool
     /// server at once (2.1.311 asks no trust question in a worktree), and one that asks before the bind waits for its
     /// role. Then, with `toolsWait`, waits for its tools to connect: a session that never gets them is ended and the call
-    /// fails, rather than leave a worker that can't report. Its launch files go in the vault's folder.
+    /// fails, rather than leave a worker that can't report. Its launch files go in the vault's folder. `auditLogs`: the
+    /// files of the audit's shared run a verifier's brief names, which it reads without a prompt (`LeadLaunch.auditLogReads`).
     func launch(_ role: LeadLaunch.Role, task slug: String, name: String, in folder: String, label: String, trust: Bool,
                         prompt: String, start: String, model: String? = nil, advisor: String? = nil, effort: String? = nil,
                         branch: String? = nil, auditing: String? = nil,
-                        finder: LeadVault.Finder? = nil, agent: LeadTask.WorkerAgent = .claude) throws -> String {
+                        finder: LeadVault.Finder? = nil, agent: LeadTask.WorkerAgent = .claude, auditLogs: [String] = []) throws -> String {
         // Codex implements tasks and, at Claude's quota limit, verifies them. Leads stay Claude.
         let codex = agent == .codex && role != .lead
         // Before a grant or a session: one started without its agent's CLI (or git) would only end, or wait out
@@ -2979,7 +2980,8 @@ public final class LeadToolset: MCPToolset {
                                          records: workflow.recordsDir, folder: vault.runFolder(root: root, name: name),
                                          cwd: folder, temporary: sessionTempRoot, home: claudeHome, teamPlugins: workflow.teamPlugins,
                                          listedPlugins: listPlugins(command: command, role: role),
-                                         box: role == .verifier ? vault.sandboxPolicy(workflow, root: root, home: BranchRun.accountHome) : .success(.standard))
+                                         box: role == .verifier ? vault.sandboxPolicy(workflow, root: root, home: BranchRun.accountHome) : .success(.standard),
+                                         auditLogs: auditLogs)
             // The project's heavy_slots for its sessions' vs-heavy too.
             var environment = launch.environment
             if let slots = workflow.heavySlots { environment[TestLock.slotsVariable] = String(slots) }
@@ -3173,7 +3175,7 @@ public final class LeadToolset: MCPToolset {
                                                               guide: LeadRisk.reviewGuide(root: root, base: workflow.base),
                                                               security: security, codexRun: hostRun),
                                  start: "Verify the task now, then call submit_audit.", model: codex ? nil : verifierModel, auditing: head,
-                                 agent: codex ? .codex : .claude)
+                                 agent: codex ? .codex : .claude, auditLogs: merged?.logs ?? [])
         }
         try store.update { board in
             guard let index = board.taskIndex(slug) else { return }
@@ -3538,7 +3540,8 @@ public final class LeadToolset: MCPToolset {
                                                                                       merged: merged, notes: notes, report: report, guide: guide,
                                                                                       security: security, codexRun: codex ? run : nil),
                                            start: "Look for findings in your focus now, then call submit_audit.", model: codex ? nil : model, auditing: head,
-                                           finder: LeadVault.Finder(panel: id, index: index, size: count, focus: focus.rawValue, nitCap: workflow.auditNitCap), agent: codex ? .codex : .claude))
+                                           finder: LeadVault.Finder(panel: id, index: index, size: count, focus: focus.rawValue, nitCap: workflow.auditNitCap), agent: codex ? .codex : .claude,
+                                           auditLogs: run.logs))
             } catch {
                 for started in sessions { try? runtime.kill(started) }
                 throw Problem(text: "Not audited: finder \(index) of \(count) couldn't start (\(error))" + (sessions.isEmpty ? "." : "; the \(sessions.count) started before it were ended."))
