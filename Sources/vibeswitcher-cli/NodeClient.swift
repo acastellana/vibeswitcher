@@ -248,18 +248,29 @@ final class NodeClient {
     /// Connects to `context`'s server, checks it, and reads its hello. `warn`: say, once, when the server runs another
     /// build (a reconnect leaves it out: its request goes right after the hello).
     static func connect(_ context: NodeContext, timeout: TimeInterval = 15, warn: Bool = true) -> Result<NodeClient, Failure> {
-        if let unbuilt = context.usersNodeRefusal { return .failure(.notRunning(unbuilt)) }
+        connectChecked(context, timeout: timeout, warn: warn).mapError(\.failure)
+    }
+
+    /// `connect`'s failure, and whether a refusal may be a server on its way out (`ServerCheck.Refusal.unsettled`).
+    struct Checked: Error {
+        var failure: Failure
+        var unsettled = false
+    }
+
+    /// `connect`, telling a server on its way out (`unsettled`) from a refusal: a switch's waits look again at it.
+    static func connectChecked(_ context: NodeContext, timeout: TimeInterval = 15, warn: Bool = true) -> Result<NodeClient, Checked> {
+        if let unbuilt = context.usersNodeRefusal { return .failure(Checked(failure: .notRunning(unbuilt))) }
         let fd: Int32
         do {
             fd = try UnixSocket.connect(path: context.socketPath, patience: 1)
         } catch UnixSocket.Failure.system("connect", let code) where code == ENOENT || code == ECONNREFUSED {
-            return .failure(.notRunning("the node isn't running: no server answers at \(context.socketPath)"))
+            return .failure(Checked(failure: .notRunning("the node isn't running: no server answers at \(context.socketPath)")))
         } catch {
-            return .failure(.broken("the node's server couldn't be reached: \(error)"))
+            return .failure(Checked(failure: .broken("the node's server couldn't be reached: \(error)")))
         }
-        if let refusal = ServerCheck.refusal(fd: fd, context: context) {
+        if let refusal = ServerCheck.verdict(fd: fd, context: context) {
             Sys.close(fd)
-            return .failure(.refused(refusal))
+            return .failure(Checked(failure: .refused(refusal.text), unsettled: refusal.unsettled))
         }
         var lines = NodeWire.Lines()
         var ready: [Data] = []
@@ -269,7 +280,7 @@ final class NodeClient {
         case .success(let given): hello = given
         case .failure(let why):
             Sys.close(fd)
-            return .failure(.broken(ConfigSeal.inert(why.description, limit: 500)))
+            return .failure(Checked(failure: .broken(ConfigSeal.inert(why.description, limit: 500))))
         }
         if warn { warnOfBuild(server: hello.server.commit) }
         return .success(NodeClient(fd: fd, hello: hello, context: context, lines: lines, ready: ready))

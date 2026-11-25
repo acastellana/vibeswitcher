@@ -18,7 +18,8 @@ import VibeNode
 ///    the host (`SwitchFollowUp.afterLostReply`): on the target with its pid unchanged it is handed over; otherwise the
 ///    refusal says the host may have switched and how to finish.
 /// 4. Once handed over, the server that stays and a paired page's listener waited for (`SwitchSettle`): a command run
-///    right after the switch never reaches the outgoing server (2026-11-24).
+///    right after the switch never reaches the outgoing server (2026-11-24). The outgoing server, gone or unreadable as
+///    it exits, is no answer (2026-11-25); whatever the wait ends with, the follow-up runs.
 /// 5. The follow-up (`SwitchFollowUp`), once the host handed over, or when it runs the target already and the unit or
 ///    `current` lag behind it (a follow-up a failure left unfinished: `vs switch <target>` again finishes it): on a node
 ///    under systemd `apply` (the unit's `ExecStart`, `daemon-reload`, `current`); on a node started detached
@@ -144,11 +145,9 @@ enum SwitchCommand {
             handedOver = result.outcome == "handed-over"
         }
         if handedOver {
+            // Whatever the wait ends with, the follow-up runs: it checks the host again and says what is owed.
             let due = SwitchSettle.serverDue(installRoot: buildsRoot(context, prefix: prefix, status: status), running: serverBefore.commit, target: target)
-            if let refused = settle(context, serverBefore: serverBefore, due: due, web: webBefore, target: target, serverWait: serverWait) {
-                Say.err("vibeswitcher: \(ConfigSeal.inert(refused.text, limit: .max))")
-                return refused.exitCode
-            }
+            settle(context, serverBefore: serverBefore, due: due, web: webBefore, target: target, serverWait: serverWait)
         }
         if let refused = followUp(context, prefix: prefix, accountHome: home, commit: target, handedOver: handedOver, hostPid: hostPid) {
             Say.err("vibeswitcher: \(ConfigSeal.inert(refused.text, limit: .max))")
@@ -161,9 +160,11 @@ enum SwitchCommand {
     /// Waits, after a handover, for the server that stays and, when a page held a token, its web listener on the same
     /// port (`SwitchSettle`), polling until each answers, each said as it comes. One that doesn't come in `serverWait`
     /// (or a listener in `webWait`) is said in a line, and the switch goes on: the handover happened, so it is no
-    /// failure (2026-11-24, a loaded machine). Only a server that fails the node's check is a refusal.
+    /// failure (2026-11-24, a loaded machine). The outgoing server, gone or unreadable as it exits, is no answer: looked
+    /// at again (2026-11-25, `NodeCheck.unsettled`). A listener that fails the node's check is said, and the follow-up
+    /// still runs (it checks the host again, and says what is owed).
     static func settle(_ context: NodeContext, serverBefore: NodeWire.Hello.Server, due: Bool?, web: SwitchSettle.Web?,
-                       target: String, serverWait: TimeInterval = SwitchSettle.serverWait) -> StartRefusal? {
+                       target: String, serverWait: TimeInterval = SwitchSettle.serverWait) {
         switch due {
         case .some(true):
             Say.out("the new build's server starts in place of pid \(serverBefore.pid) once the old one is idle (up to \(Int(serverWait)) s): waiting for it")
@@ -171,32 +172,15 @@ enum SwitchCommand {
         case .none:
             Say.out("whether the server is replaced isn't known (its build's record or the target's can't be read): not waited for")
         }
-        let started = Platform.Clock.steadyDate()
-        var answered: NodeWire.Hello.Server?
-        var why = "no server answered"
-        while answered == nil {
-            switch NodeClient.connect(context, warn: false) {
-            case .failure(.refused(let refusal)): return StartRefusal(refusal, exitCode: 77)
-            case .failure(let failure): why = failure.message
-            case .success(let client):
-                let server = client.hello.server
-                if SwitchSettle.serverSettled(pid: server.pid, commit: server.commit, before: serverBefore.pid, target: target, due: due) {
-                    answered = server
-                } else {
-                    why = "the server that answers is pid \(server.pid), build \(ConfigSeal.inert(server.commit, limit: 64))"
-                }
-            }
-            if answered != nil { break }
-            // The handover happened: a server slow to come (a loaded machine) is said, never a failure, and the
-            // follow-up goes on.
-            guard Platform.Clock.steadyDate().timeIntervalSince(started) < serverWait else {
-                Say.out(SwitchSettle.slowServer(target: target, after: Int(Platform.Clock.steadyDate().timeIntervalSince(started)), why: why))
-                return nil
-            }
-            usleep(250_000)
+        let server = SwitchSettle.waitForServer(before: serverBefore.pid, target: target, due: due, wait: serverWait, look: { lookAtServer(context) })
+        switch server {
+        case .answered(let pid, let commit):
+            if due == true { Say.out("the new build's server answers: pid \(pid), build \(ConfigSeal.inert(commit, limit: 64))") }
+        case .slow(let line), .refused(let line):
+            Say.out(line)
+            return
         }
-        if let answered, due == true { Say.out("the new build's server answers: pid \(answered.pid), build \(ConfigSeal.inert(answered.commit, limit: 64))") }
-        guard let web, web.awaited else { return nil }
+        guard let web, web.awaited else { return }
         let waited = Platform.Clock.steadyDate()
         var now: SwitchSettle.Web?
         while true {
@@ -208,12 +192,36 @@ enum SwitchCommand {
             guard Platform.Clock.steadyDate().timeIntervalSince(waited) < SwitchSettle.webWait else {
                 let seen = now.map { $0.listening ? "listening on port \($0.port.map(String.init) ?? "none")" : "not listening" } ?? "not known"
                 Say.out("handed over to \(target); the web listener isn't back on port \(web.port ?? 0) yet (\(seen)): `vibeswitcher web` opens it again if it doesn't come")
-                return nil
+                return
             }
             usleep(250_000)
         }
         Say.out("the web listener is back on port \(web.port ?? 0): a page paired before the switch reconnects by itself")
-        return nil
+    }
+
+    /// A connection to the server that stays after a handover: one on its way out, or none answering, is asked again for
+    /// `hostCheckPatience`; a listener that fails the node's check is a failure at once.
+    static func connectSettled(_ context: NodeContext) -> Result<NodeClient, NodeClient.Failure> {
+        let deadline = Platform.Clock.steadyDate().addingTimeInterval(hostCheckPatience)
+        while true {
+            switch NodeClient.connectChecked(context, warn: false) {
+            case .success(let client): return .success(client)
+            case .failure(let checked):
+                if case .refused = checked.failure, !checked.unsettled { return .failure(checked.failure) }
+                guard Platform.Clock.steadyDate() < deadline else { return .failure(checked.failure) }
+            }
+            usleep(500_000)
+        }
+    }
+
+    /// One look at the node's server for `SwitchSettle.waitForServer`.
+    static func lookAtServer(_ context: NodeContext) -> SwitchSettle.Look {
+        switch NodeClient.connectChecked(context, warn: false) {
+        case .success(let client): return .server(pid: client.hello.server.pid, commit: client.hello.server.commit)
+        case .failure(let checked):
+            if case .refused(let why) = checked.failure, !checked.unsettled { return .refused(why) }
+            return .notYet(checked.failure.message)
+        }
     }
 
     /// What the follow-up writes on this node (`NodeTexts.SwitchRewrites`), for the confirmation.
@@ -278,9 +286,12 @@ enum SwitchCommand {
         let deadline = Platform.Clock.steadyDate().addingTimeInterval(hostCheckPatience)
         var why = "no server answered"
         while true {
-            switch NodeClient.connect(context) {
-            case .failure(.refused(let refusal)): return .failure(StartRefusal(refusal, exitCode: 77))
-            case .failure(let failure): why = failure.message
+            switch NodeClient.connectChecked(context) {
+            // A server on its way out (the one a switch replaces, exiting) is asked again, as no server is.
+            case .failure(let checked) where !checked.unsettled:
+                guard case .refused(let refusal) = checked.failure else { why = checked.failure.message; break }
+                return .failure(StartRefusal(refusal, exitCode: 77))
+            case .failure(let checked): why = checked.failure.message
             case .success(let client):
                 switch client.read(WireKinds.Status.self, WireNoArgs()) {
                 case .failure(let failure): why = failure.message

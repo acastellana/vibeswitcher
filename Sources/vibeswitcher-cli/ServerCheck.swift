@@ -13,8 +13,18 @@ import VibeNode
 /// LaunchAgent job runs (by its audit token's cdhash, hardened), the job's child in its session; else refused.
 enum ServerCheck {
     /// Why the server at the other end of `fd` isn't the node's, or nil when it passes.
-    static func refusal(fd: Int32, context: NodeContext) -> String? {
-        guard let pid = Platform.Sockets.peerPID(fd) else { return "the process listening on the server's socket can't be read" }
+    static func refusal(fd: Int32, context: NodeContext) -> String? { verdict(fd: fd, context: context)?.text }
+
+    /// A refusal, and whether it may be a server on its way out (`NodeCheck.unsettled`: gone, or a fact unreadable).
+    struct Refusal {
+        var text: String
+        var unsettled: Bool
+    }
+
+    /// Why the server at the other end of `fd` isn't the node's, and whether that may be a server on its way out; nil
+    /// when it passes.
+    static func verdict(fd: Int32, context: NodeContext) -> Refusal? {
+        guard let pid = Platform.Sockets.peerPID(fd) else { return Refusal(text: "the process listening on the server's socket can't be read", unsettled: true) }
         // The Mac (the review of 2026-11-21): no dumpable state to read, so the listener's code instead, before anything
         // it says (its hello's rule) is trusted: the server of the build the job runs; the parent, the session and the
         // code all bound to the one audit token the socket gave (`NodeCheck.macListener`).
@@ -41,11 +51,14 @@ enum ServerCheck {
             let lock = NodeFolders.hostLock(root: NodeFolders.nodeRoot(accountHome: VibePaths.accountHome))
             switch NodeCheck.recordedHost(record, isHost: { NodeCheck.isInstalledHost($0, prefix: prefix) }, lock: lock) {
             case .host(let host): expected = host
-            case .none(let why), .other(let why): return "the node's record doesn't name its host (\(why)), so the server can't be checked against it"
+            case .none(let why), .other(let why):
+                return Refusal(text: "the node's record doesn't name its host (\(why)), so the server can't be checked against it", unsettled: false)
             }
         }
-        return NodeCheck.refusal(listener, mode: context.mode, expectedParent: expected, parentSession: expected.flatMap(session(of:)),
-                                 codeIdentity: codeIdentity)
+        guard let text = NodeCheck.refusal(listener, mode: context.mode, expectedParent: expected, parentSession: expected.flatMap(session(of:)),
+                                           codeIdentity: codeIdentity) else { return nil }
+        let alive = kill(pid, 0) == 0 || errno == EPERM
+        return Refusal(text: text, unsettled: NodeCheck.unsettled(listener, alive: alive, mode: context.mode, codeIdentity: codeIdentity))
     }
 
     /// The Mac's node job as launchd prints it (`launchctl print gui/<uid>/<label>`, by its absolute path): its pid

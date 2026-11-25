@@ -224,11 +224,9 @@ enum UpdateCommand {
             handedOver = result.outcome == "handed-over"
         }
         if handedOver {
+            // Whatever the wait ends with, the follow-up runs: it checks the host again and says what is owed.
             let due = SwitchSettle.serverDue(installRoot: prefix, running: serverBefore.commit, target: target)
-            if let refused = SwitchCommand.settle(context, serverBefore: serverBefore, due: due, web: webBefore, target: target, serverWait: serverWait) {
-                Say.err("vibeswitcher: \(ConfigSeal.inert(refused.text, limit: .max))")
-                return refused.exitCode
-            }
+            SwitchCommand.settle(context, serverBefore: serverBefore, due: due, web: webBefore, target: target, serverWait: serverWait)
         }
         if let refused = SwitchCommand.followUp(context, prefix: prefix, accountHome: accountHome, commit: target, handedOver: handedOver, hostPid: hostPid) {
             Say.err("vibeswitcher: \(ConfigSeal.inert(refused.text, limit: .max))")
@@ -236,7 +234,11 @@ enum UpdateCommand {
         }
         // The unit's ExecStart move, sealed with the same code, on a node whose follow-up writes the unit.
         if case .unitAndCurrent = rewrites {
-            if case .success(let fresh) = NodeClient.connect(context) {
+            // The server that stays, asked as the follow-up asks the host (one on its way out is asked again).
+            switch SwitchCommand.connectSettled(context) {
+            case .failure(let failure):
+                Say.out("the unit's change stays held (the server couldn't be asked to seal it: \(ConfigSeal.inert(failure.message, limit: 400))): `vibeswitcher approve` accepts it")
+            case .success(let fresh):
                 // An action of its own, naming the switch's (the code typed for this update covers it).
                 let seal = WireKinds.BuildSeal.Args(commit: target, from: running, switchAction: action)
                 switch fresh.change(WireKinds.BuildSeal.self, seal, action: UUID().uuidString.lowercased(), typed: typed, timeout: 60) {
