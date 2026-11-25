@@ -55,9 +55,15 @@ extension Platform.Sockets {
         return sent == 1
     }
 
-    /// The most descriptors one message is read with: room for more than one, so that a message carrying several is
-    /// read whole, each closed, and refused (EBADMSG), rather than cut by the kernel.
+    /// The most descriptors one message is sent with here (`sendConnectorMessage`'s limit); a message carrying more than
+    /// one is refused by every reader here.
     static let descriptorRoom = 8
+
+    /// The control room every read here gives a message's descriptors: more than the kernel takes on one message (254
+    /// descriptors, 1,028 bytes of control, EINVAL past it: measured on this Mac, macOS 27), so it never cuts what it
+    /// hands over. A cut one installs every descriptor in the reader yet reports only those that fit, which then stay
+    /// open unseen (the review of v2-mac-web-port, F4); read whole, a message carrying several is refused and each closed.
+    static let controlRoom = 4_096
 
     /// The descriptor the next message on `socket` carries, close-on-exec right after its arrival (the Mac has no
     /// `MSG_CMSG_CLOEXEC`: a spawn on another thread in between that doesn't start with `POSIX_SPAWN_CLOEXEC_DEFAULT`,
@@ -67,7 +73,7 @@ extension Platform.Sockets {
     /// EAGAIN on a socket that doesn't block and has nothing yet). Waits for a message as the socket's reads do.
     public static func receiveDescriptor(over socket: Int32) -> Int32? {
         let offset = controlDataOffset
-        let room = controlAligned(offset + descriptorRoom * MemoryLayout<Int32>.size)
+        let room = controlRoom
         var control = [UInt8](repeating: 0, count: room)
         var byte: UInt8 = 0
         var got = -1
@@ -104,7 +110,9 @@ extension Platform.Sockets {
         return carried[0]
     }
 
-    /// The descriptors the `SCM_RIGHTS` messages in `control` (its first `length` bytes) carry, in order.
+    /// The descriptors the `SCM_RIGHTS` messages in `control` (its first `length` bytes) carry, in order: also those
+    /// under a header the kernel cut (`MSG_CTRUNC`, more than the room given), whose length says more than arrived, so
+    /// that every descriptor this process now holds is found and its caller can close it.
     static func descriptors(in control: [UInt8], length: Int) -> [Int32] {
         let headerSize = MemoryLayout<cmsghdr>.size
         let offset = controlDataOffset
@@ -114,14 +122,16 @@ extension Platform.Sockets {
             while at + headerSize <= length {
                 let header = raw.loadUnaligned(fromByteOffset: at, as: cmsghdr.self)
                 let size = Int(header.cmsg_len)
-                guard size >= offset, at + size <= length else { break }
+                guard size >= offset else { break }
+                let end = min(at + size, length)
                 if header.cmsg_level == SOL_SOCKET, header.cmsg_type == SCM_RIGHTS {
                     var data = at + offset
-                    while data + MemoryLayout<Int32>.size <= at + size {
+                    while data + MemoryLayout<Int32>.size <= end {
                         found.append(raw.loadUnaligned(fromByteOffset: data, as: Int32.self))
                         data += MemoryLayout<Int32>.size
                     }
                 }
+                guard at + size <= length else { break }
                 at += controlAligned(size)
             }
         }
