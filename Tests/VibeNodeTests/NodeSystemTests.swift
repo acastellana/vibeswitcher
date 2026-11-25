@@ -51,8 +51,12 @@ struct NodeSystemTests {
             #expect(lines[context + 1] == gate, "\(file): \(lines[context + 1])")
         }
         let client = try code("NodeClient.swift")
+        // `connect` is `connectChecked` with its failure alone (2026-11-25, the switch's waits): the gate is that one's
+        // first line, before anything is read or connected to.
         let connect = try #require(client.firstIndex { $0.hasPrefix("static func connect(_ context: NodeContext") })
-        #expect(client[connect + 1] == "if let unbuilt = context.usersNodeRefusal { return .failure(.notRunning(unbuilt)) }", "\(client[connect + 1])")
+        #expect(client[connect + 1] == "connectChecked(context, timeout: timeout, warn: warn).mapError(\\.failure)", "\(client[connect + 1])")
+        let checked = try #require(client.firstIndex { $0.hasPrefix("static func connectChecked(_ context: NodeContext") })
+        #expect(client[checked + 1] == "if let unbuilt = context.usersNodeRefusal { return .failure(Checked(failure: .notRunning(unbuilt))) }", "\(client[checked + 1])")
         #expect(client.contains("var usersNodeRefusal: String? { isScratch ? nil : NodeSystem.usersNodeRefusal() }"))
     }
 
