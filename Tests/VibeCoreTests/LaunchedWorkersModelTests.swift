@@ -44,6 +44,41 @@ extension LeadAdvanceTests {
         let audited = lead.call("audit", ["task": "opus"])
         #expect(!audited.isError, "\(audited.text)")
         #expect(audited.text.contains("(on fable: workers ran on opus by the host's record)"), "\(audited.text)")
+        let progress = try String(contentsOfFile: BoardStore(root: root).recordPath("progress.md"), encoding: .utf8)
+        #expect(progress.contains("Audit of opus on fable: workers ran on opus by the host's record."), "\(progress.suffix(600))")
+    }
+
+    /// The task's sessions are the vault's, bound at each start, never the board's: a task whose board entry names
+    /// another task's Opus-launched session as its worker is still judged by its own launch (on the Fable default).
+    @Test func aBoardThatNamesAnotherTasksSessionUnlocksNothing() throws {
+        let (root, _, lead) = try fableDefaultTeam()
+        _ = lead.call("add_task", ["title": "Plain", "goal": "g", "acceptance": ["a"], "review": "audit"])
+        _ = lead.call("add_task", ["title": "Opus", "goal": "g", "acceptance": ["a"], "review": "audit", "model": "opus"])
+        for slug in ["plain", "opus"] { #expect(!lead.call("start_worker", ["task": slug]).isError) }
+        var plain = try #require(task("plain", root))
+        plain.worker = try #require(task("opus", root)?.worker)
+        plain.team = nil
+        #expect(!LeadReviewFloor.sameModel(lead.auditModel(lead.workflow, task: plain, security: true), "fable"))
+        #expect(lead.workersBasis(plain, projectDefault: Self.fableDefault).text == "workers ran on fable by the host's record")
+    }
+
+    /// A handover carries the vault whole (`Book.serialized`): the launches with it. A host that starts again with no
+    /// vault to restore (the node's, kept in memory only) has none: the fallback, said.
+    @Test func theRecordSurvivesAHandoverAndAHostRestartFallsBack() throws {
+        let (root, _, lead) = try fableDefaultTeam()
+        _ = lead.call("add_task", ["title": "Opus", "goal": "g", "acceptance": ["a"], "review": "audit", "model": "opus"])
+        #expect(!lead.call("start_worker", ["task": "opus"]).isError)
+        let carried = LeadVault.Book(restoring: book.serialized)
+        guard case .launches(let launches) = carried.answer(.launches(root: root, task: "opus"), from: .app) else {
+            Issue.record("no launches")
+            return
+        }
+        #expect(launches?.map(\.model) == ["opus"])
+        #expect(WorkerLaunch.basis(launches, projectDefault: Self.fableDefault).text == "workers ran on opus by the host's record")
+        let restarted = LeadVault.Book()
+        #expect(restarted.answer(.launches(root: root, task: "opus"), from: .app) == .launches(nil))
+        let fallback = WorkerLaunch.basis(nil, projectDefault: Self.fableDefault)
+        #expect(fallback.workers == [Self.fableDefault] && fallback.text == "no launch record: Claude Code's default counts as the workers' model")
     }
 
     @Test func workersOnTheFableDefaultStillKeepTheirAuditOffFable() throws {

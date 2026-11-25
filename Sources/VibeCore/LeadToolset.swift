@@ -3033,7 +3033,7 @@ public final class LeadToolset: MCPToolset {
             && !LeadReviewFloor.sameModel(verifierModel, workflow.securityAuditModel)
             ? fableFallback()?.fableHeldBack(now: usageClock()) : nil
         // Under a floor that keeps audits off the workers' model, what their model was judged by (`WorkerLaunch.basis`):
-        // in the audit's reply, so why a model was passed over can be seen.
+        // in the audit's reply and its progress line, so why a model was passed over can be seen.
         let basis = workflow.floor?.verifierDifferent == true ? workersBasis(task, projectDefault: runtime.workerModel(root: root)).text : nil
         let modelNotice = (fallback.map { " on \(verifierModel) in Fable's place: Fable held back until \(UsageLimit.resetText(AccountUsage.ends($0)))" } ?? "")
             + (basis.map { " (on \(verifierModel): \($0))" } ?? "")
@@ -3119,6 +3119,8 @@ public final class LeadToolset: MCPToolset {
             board.tasks[index].evidence = nil
         }
         launched = true
+        // The audit's line in the progress log says what the workers' model was judged by, as its reply does.
+        if let basis { try? store.appendProgress("Audit of \(slug) on \(verifierModel): \(basis).") }
         // An update_task while it started went to no verifier yet (the board named none, or the one before): sent now.
         let amended = sendContractChange(slug).map { " " + $0 } ?? ""
         // The verifier is up: its worker, idle since its done report, needn't hold a Mac slot through the audit.
