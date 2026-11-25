@@ -143,3 +143,18 @@ test('motion: every duration is --dur-1, --dur-2 or --loop, every curve named (n
   assert.ok(reduced, 'a reduced-motion block for everything');
   assert.match(reduced.declarations.map((d) => `${d.property}: ${d.value}`).join('; '), /animation: none !important; transition: none !important/);
 });
+
+test('elevation: a shadow is --e-1, --e-2 or --e-3 (or a field’s edge, ring or a switch’s chosen part), unless the line says why', () => {
+  const found = [];
+  for (const block of RULES) {
+    for (const d of block.declarations) {
+      if (d.property !== 'box-shadow' || reasoned(d) || d.value === 'none') continue;
+      const parts = d.value.split(/,(?![^(]*\))/).map((one) => one.trim());
+      if (!parts.every((part) => /^var\(--e-[a-z0-9-]+\)$/.test(part))) found.push(where(block, d));
+    }
+  }
+  assert.deepEqual(found, []);
+  // Every --e-* a rule names is one of the scale's.
+  const names = new Set(RULES.flatMap((block) => block.declarations).filter((d) => d.property === 'box-shadow').flatMap((d) => [...d.value.matchAll(/var\((--e-[a-z0-9-]+)\)/g)].map((m) => m[1])));
+  for (const name of names) assert.ok(ROOT[name], `${name} is no token`);
+});

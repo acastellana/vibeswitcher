@@ -384,7 +384,9 @@ test('U18: “Now” sits on a line of its own above the hours, the axis tall en
 test('U23: Brief me looks like a button: a surface and an edge, not a grey caption', () => {
   const looks = Object.assign({}, ...rules().filter((rule) => rule.media === '' && rule.selector === '.summary-brief').map((rule) => declarations(rule.body)));
   assert.equal(looks.background, 'var(--raised)');
-  assert.match(looks['box-shadow'] || '', /var\(--line\)/);
+  // An edge: the hairline itself, or the elevation token that is the hairline (--e-1).
+  const edge = looks['box-shadow'] === 'var(--e-1)' ? tokens()['--e-1'].light : looks['box-shadow'] || '';
+  assert.match(edge, /var\(--line\)/);
   assert.equal(looks.color, 'var(--ink)');
 });
 
