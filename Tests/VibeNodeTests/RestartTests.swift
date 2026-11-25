@@ -613,18 +613,18 @@ struct RestartTests {
             try ScratchNode.workflow(repo, testCommand: "make test")
         }
         defer { node.stop() }
-        // Plain (2026-11-25): what changed, whom it holds, the rule that changed as old → new, and one line for the rules
-        // that can't be compared (the snapshot's seal was the old host's vault's). No hash, mark or seal's words.
+        // Plain (2026-11-25): each held thing named (those the node can't compare with the last accept say so, never a
+        // count), whom it holds, and the rules a first accept records (the restarted node holds none), the changed one as
+        // old → new. No hash, mark or the node's words for its record.
         let held = try await node.run(["config", "held", repo.path])
         let lines = held.output.components(separatedBy: "\n")
         #expect(lines.contains("  ~/.claude/settings.json changed"), "\(held.output)")
-        #expect(lines.contains { $0.contains("held things that can't be compared since the node restarted (--long lists them)") }, "\(held.output)")
+        #expect(lines.contains { $0.hasSuffix("(can't be compared with your last accept)") }, "\(held.output)")
         #expect(lines.contains { $0.hasPrefix("  holds ") }, "\(held.output)")
-        #expect(lines.contains("  test_command: make check → make test"), "\(held.output)")
-        // The restarted vault holds none of the rules: the accept records them all, said once.
-        #expect(lines.contains { $0.hasPrefix("  this accept records workflow.md's ") && $0.hasSuffix("rules as they are (--long shows them)") }, "\(held.output)")
-        #expect(!lines.contains { $0.contains("(this accept records it)") }, "\(held.output)")
-        #expect(!held.output.contains("not known to be the same") && !held.output.contains("hash ") && !held.output.contains("snapshot"), "\(held.output)")
+        #expect(lines.contains("  rules this accept records:") && lines.contains("    test_command: make check → make test"), "\(held.output)")
+        // (A held folder may be named so: `~/.claude/shell-snapshots`.)
+        let words = held.output.lowercased().replacingOccurrences(of: "shell-snapshots", with: "")
+        for word in ["snapshot", "vault", "hash", "seal", "guard rail"] { #expect(!words.contains(word), "\(word): \(held.output)") }
         #expect(held.output.contains("accept it with: vibeswitcher config accept"), "\(held.output)")
 
         // `--long` says it on every line, as before.
@@ -644,7 +644,7 @@ struct RestartTests {
         let (node, repo) = try await hostRestarted(leadBefore: false)
         defer { node.stop() }
         #expect(node.floor(repo.path) == .some(nil))
-        try await node.acceptConfig(repo, says: "the review floor is recorded")
+        try await node.acceptConfig(repo, says: "its review rules are recorded")
         let floor = try #require(node.floor(repo.path) ?? nil)
         let proposed = LeadReviewFloor.starting(from: LeadWorkflow.load(from: ConfigHoldStore.workflowPath(root: repo.path)))
         #expect(floor == proposed, "\(floor)")

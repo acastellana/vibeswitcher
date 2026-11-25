@@ -304,7 +304,7 @@ extension ApproveTests {
         let subjects = (listed["items"]?.array ?? []).compactMap { $0["subject"]?.string }
         #expect(!subjects.contains(planted.path) && !subjects.contains(railed.path), "\(subjects)")
         let own = (listed["own"]?.array ?? []).map { "\($0["text"]?.string ?? "") \($0["command"]?.string ?? "")" }
-        #expect(own.contains { $0.contains("guard rails or a review floor to record") && $0.contains("vibeswitcher config held \(railed.path)") }, "\(own)")
+        #expect(own.contains { $0.contains("rules to record") && $0.contains("vibeswitcher config held \(railed.path)") }, "\(own)")
         // Bases that didn't move list nothing.
         #expect(!(listed["items"]?.array ?? []).contains { $0["kind"]?.string == "base.accept" }, "\(listed)")
         let bases = try await list(world, only: ["base"])

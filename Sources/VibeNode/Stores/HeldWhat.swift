@@ -66,72 +66,74 @@ public enum HeldWhat {
     /// The paths a held item's files name (`ConfigSeal.HeldFile.path`), changed, added or removed.
     static func paths(_ item: ConfigHoldStore.Item) -> [String] { item.files.map(\.path) }
 
-    /// `item` described.
+    /// `item` described: always its path, in neutral words. What the disk says now (a link's target, a plugin's record,
+    /// the unit's build) is any process's to write, so a likeness to an update is said as one ("looks like …"), never as
+    /// a fact, and nothing here is ever why a thing is left out, folded unread or accepted (the review of 2026-11-25).
     public static func describe(_ item: ConfigHoldStore.Item, facts: Facts) -> Described {
         let name = item.name
         let files = paths(item)
         let change = item.change.map(inert)
         switch name {
         case versions:
-            let added = files.filter { isVersion(($0 as NSString).lastPathComponent) }.map { ($0 as NSString).lastPathComponent }
-            let to = facts.claudeVersion ?? added.max(by: { $0.compare($1, options: .numeric) == .orderedAscending })
-            return Described(kind: .claudeUpdate, what: to.map { "Claude Code's update to \(inert($0)), it looks like" } ?? "a new file in Claude Code's versions folder",
-                             to: to.map(inert))
-        case bin:
-            // Only the claude link moved, to a version in its own folder: Claude Code's.
-            if let version = facts.claudeVersion, files.allSatisfy({ $0 == "claude" }) {
-                return Described(kind: .claudeUpdate, what: "Claude Code's link moved to \(inert(version))", to: inert(version))
+            let added = item.files.filter { $0.change == .added }.map { ($0.path as NSString).lastPathComponent }
+            guard !added.isEmpty, added.allSatisfy(isVersion) else {
+                return Described(kind: .other, what: versions + (files.isEmpty ? " changed" : ": \(listed(files)) changed"))
             }
-            let entries = files.isEmpty ? "an entry" : listed(files)
-            return Described(kind: .other, what: "~/.local/bin: \(entries) changed")
+            let to = added.max { $0.compare($1, options: .numeric) == .orderedAscending }.map(inert)
+            return Described(kind: .claudeUpdate, what: "\(versions): \(listed(added)) added (looks like Claude Code's own update)", to: to)
+        case bin:
+            // Only the claude link, now naming a version in Claude Code's own folder: looks like its update.
+            if let version = facts.claudeVersion, !files.isEmpty, files.allSatisfy({ $0 == "claude" }) {
+                return Described(kind: .claudeUpdate, what: "~/.local/bin/claude now points to \(inert(version)) (looks like Claude Code's own update)",
+                                 to: inert(version))
+            }
+            return Described(kind: .other, what: bin + (files.isEmpty ? " changed" : ": \(listed(files)) changed"))
         case builds:
             let commits = files.map { String($0.split(separator: "/").first ?? "") }.filter(NodeUnit.isCommit)
-            let to = commits.first.map { String($0.prefix(8)) }
-            return Described(kind: .buildSwitch, what: "VibeSwitcher's builds folder: " + (to.map { "build \($0) installed" } ?? "a build installed or removed"),
-                             to: to)
+            guard let first = commits.first else { return Described(kind: .other, what: builds + " changed") }
+            let short = String(first.prefix(8))
+            return Described(kind: .buildSwitch, what: "\(builds): build \(short) added (looks like VibeSwitcher's own install)", to: short)
         case units:
-            guard files.allSatisfy({ $0.hasPrefix(unitFile) }) else {
-                return Described(kind: .other, what: "~/.config/systemd/user: \(listed(files)) changed")
+            guard !files.isEmpty, files.allSatisfy({ $0.hasPrefix(unitFile) }), let build = facts.unitBuild else {
+                return Described(kind: .other, what: units + (files.isEmpty ? " changed" : ": \(listed(files)) changed"))
             }
-            let to = facts.unitBuild.map { String($0.prefix(8)) }
-            return Described(kind: .buildSwitch, what: "VibeSwitcher's unit: " + (to.map { "it starts build \($0) now" } ?? "it changed"), to: to)
+            let short = String(build.prefix(8))
+            return Described(kind: .buildSwitch, what: "\(units)/\(unitFile) now starts build \(short) (looks like VibeSwitcher's own switch)", to: short)
         case StartupShortcuts.listFile.withHome:
-            return Described(kind: .startup, what: "your list of known Windows Startup shortcuts")
+            return Described(kind: .startup, what: "~/\(StartupShortcuts.listFile) (your list of known Windows Startup shortcuts) changed")
         default: break
         }
         if name.hasPrefix(pluginPrefix) || (name.hasPrefix(checkoutPluginPrefix) && name.hasSuffix(" (main checkout)")) {
             var id = name.hasPrefix(pluginPrefix) ? String(name.dropFirst(pluginPrefix.count)) : String(name.dropFirst(checkoutPluginPrefix.count))
             if let checkout = id.range(of: " (main checkout)") { id = String(id[..<checkout.lowerBound]) }
-            let parts = id.split(separator: "@", maxSplits: 1).map(String.init)
-            let plugin = inert(parts.first ?? id), marketplace = parts.count > 1 ? inert(parts[1]) : nil
-            let updated = item.change?.contains("version folder") == true || item.change?.contains("install folder") == true
+            // Moved to a new version folder and nothing else said: looks like the plugin's update; anything else, said.
+            let updated = item.change.map { $0 == "version folder changed" || $0.hasPrefix("version folder changed, ") } ?? false
             let to = facts.pluginVersions[id].map(inert)
-            let from = marketplace.map { " from \($0)" } ?? ""
-            return Described(kind: .pluginUpdate, what: "the plugin \(plugin)\(from) " + (updated ? "updated" + (to.map { " to \($0)" } ?? "") : "changed"),
-                             to: updated ? to : nil)
+            guard updated else { return Described(kind: .other, what: inert(name) + (change.map { ": \($0)" } ?? " changed")) }
+            return Described(kind: .pluginUpdate, what: inert(name) + (to.map { ": now version \($0)" } ?? ": a new version folder") + " (looks like the plugin's own update)",
+                             to: to)
         }
         if name.hasPrefix(".git/config") || name == "~/.gitconfig" || name == "~/.config/git/config" {
-            let file = name.hasPrefix(".git/config") ? ".git/config" : name
-            guard let keys = item.change else { return Described(kind: .gitConfig, what: "\(inert(file)) changed") }
+            guard let keys = item.change else { return Described(kind: .gitConfig, what: "\(inert(name)) changed") }
             let branches = tracking(keys)
             if !branches.isEmpty {
-                let named = branches.map(inert).joined(separator: ", ")
-                return Described(kind: .gitConfig, what: "\(inert(file)): the tracking entry of branch \(named)")
+                return Described(kind: .gitConfig, what: "\(inert(name)): the tracking entry of branch \(branches.map(inert).joined(separator: ", ")) (\(change ?? ""))")
             }
-            return Described(kind: .gitConfig, what: "\(inert(file)): \(change ?? "changed")")
+            return Described(kind: .gitConfig, what: "\(inert(name)): \(change ?? "changed")")
         }
         if name.contains("/Start Menu/Programs/Startup") {
-            let user = name.split(separator: "/").dropFirst(3).first.map(String.init)
             let names = facts.unknownStartup
-            let whose = user.map { " (\(inert($0)))" } ?? ""
-            return Described(kind: .startup, what: names.isEmpty ? "the Windows Startup folder\(whose) changed"
-                                                  : "the Windows Startup folder\(whose): \(listed(names)) added")
+            return Described(kind: .startup, what: inert(name) + (names.isEmpty ? " changed" : ": \(listed(names)) not on your list of known shortcuts"))
         }
         if name.contains("settings.json") || name.contains("settings.local.json") {
             return Described(kind: .settings, what: inert(name) + (change.map { ": \($0)" } ?? " changed"))
         }
-        return Described(kind: .other, what: inert(name) + (change.map { ": \($0)" } ?? ""))
+        return Described(kind: .other, what: inert(name) + (change.map { ": \($0)" } ?? " changed"))
     }
+
+    /// Whether `kind` is one of what the node recognises as an update (Claude Code's, a plugin's, VibeSwitcher's own):
+    /// only those may be counted instead of named on a default screen; everything else is always named.
+    public static func looksLikeUpdate(_ kind: Kind) -> Bool { [.claudeUpdate, .pluginUpdate, .buildSwitch].contains(kind) }
 
     /// The branches whose tracking entry (`branch.<name>.remote`, `.merge`, `.rebase`, `.pushRemote`) is all that
     /// changed, from `ConfigSeal.changedKeys`' words ("branch.v2.merge added, branch.v2.remote added"); empty when
@@ -158,34 +160,34 @@ public enum HeldWhat {
         return shown + (names.count > 3 ? " and \(names.count - 3) more" : "")
     }
 
-    /// Whether a held item is known to have changed since the last accept (or no accept is known): not one the snapshot
-    /// lists as it is now, sealed or not (`AcceptedSnapshot.since`).
-    public static func changedSinceAccept(_ sinceAccept: String?) -> Bool {
-        guard let since = sinceAccept else { return true }
-        return !since.hasPrefix(AcceptedSnapshot.unvouchedPrefix) && !since.hasPrefix("the same as at your last accept")
-    }
-
-    /// The card's line of what changed: its items that changed since the last accept, described; nil when none did.
-    public static func summary(items: [ConfigHoldStore.Item]) -> String? {
-        let changed = items.filter { changedSinceAccept($0.sinceAccept) }.compactMap(\.about)
-        return changed.isEmpty ? nil : summary(changed)
-    }
-
-    /// The card's own line (what changed, the items' `what`s): Claude Code's two halves of one update said once.
-    public static func summary(_ described: [Described]) -> String {
-        var said: [String] = []
-        var claude = false
-        for item in described {
-            if item.kind == .claudeUpdate {
-                guard !claude else { continue }
-                claude = true
-                said.append(item.to.map { "Claude Code's update to \($0), it looks like" } ?? item.what)
-                continue
-            }
-            if !said.contains(item.what) { said.append(item.what) }
+    /// What a card names by default, in order: everything that isn't a recognised update (settings, git config, shell
+    /// files, anything unknown), each named, never capped; then the updates, named while fewer than `named` lines are
+    /// said, the rest counted (`folded`). Each named with what it is against the last accept when it can't be compared.
+    public static func shown(_ items: [ConfigHoldStore.Item], named: Int = 3) -> (lines: [String], folded: Int) {
+        let described = items.map { item -> (what: String, update: Bool) in
+            let about = item.about ?? Described(kind: .other, what: inert(item.name))
+            let uncompared = (item.sinceAccept ?? "").hasPrefix(AcceptedSnapshot.unvouchedPrefix)
+            return (about.what + (uncompared ? " (can't be compared with your last accept)" : ""), looksLikeUpdate(about.kind))
         }
-        guard !said.isEmpty else { return "nothing held" }
-        return said.prefix(4).joined(separator: "; ") + (said.count > 4 ? "; and \(said.count - 4) more" : "")
+        return self.named(described, room: named)
+    }
+
+    /// The rule both a card's lines and the page follow: every entry that isn't an update named, in order; then the
+    /// updates while fewer than `room` lines are said; the rest counted.
+    public static func named(_ entries: [(what: String, update: Bool)], room: Int = 3) -> (lines: [String], folded: Int) {
+        var lines = entries.filter { !$0.update }.map(\.what)
+        let updates = entries.filter(\.update).map(\.what)
+        let left = max(0, room - lines.count)
+        lines += updates.prefix(left)
+        return (lines, max(0, updates.count - left))
+    }
+
+    /// The card's line for a receipt or a title: the first thing named, and how many more.
+    public static func summary(items: [ConfigHoldStore.Item]) -> String? {
+        let said = shown(items, named: 1)
+        guard let first = said.lines.first else { return nil }
+        let more = items.count - 1
+        return first + (more > 0 ? "; and \(more) more" : "")
     }
 
     /// The disk read for `home`: Claude Code's link, the plugins' record, VibeSwitcher's unit, the Startup folders.

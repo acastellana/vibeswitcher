@@ -58,79 +58,106 @@ public enum CardText {
         lines(card, detail: long ? .long : .short, home: home)
     }
 
-    /// A held-config card in plain words, at most: what changed (the node's own reading, `HeldWhat`), whom it holds,
-    /// the guard rails that changed since the last accept (`name: old → new`) or that this accept records, and one line
-    /// counting those that can't be compared. Everything else (each path, hash, the snapshot's words) is `long`'s.
+    /// A held-config card in plain words (2026-11-25; the review the same day: "collapse only what is safe to not
+    /// read"): every held thing named, its path first (`HeldWhat`), but for those the node recognises as updates,
+    /// counted past three lines; whom it holds; the rules that would change (old → new, at most `railsShown`), or on a
+    /// first accept every rule not at its default (at most `firstShown`), the rest counted. Never a hash, a mark, the
+    /// node's record or its words for itself; `--long` says all of that.
     public static func plainConfig(_ card: NodeWire.Value) -> [String] {
         guard let config = card["config"], config != .null else { return [] }
         let items = config["items"]?.array ?? []
         let shared = config["sharedHome"]?["names"]?.array?.compactMap(\.string) ?? []
         // Shown, not kept: nothing held and nothing to record (the command says so in its own line).
         if card["open"]?.bool == false, items.isEmpty, shared.isEmpty { return [] }
-        // The held things the snapshot lists as they are now, its seal not this host's vault's: counted, not listed.
-        let uncompared = items.filter { !HeldWhat.changedSinceAccept($0["sinceAccept"]?.string) && !($0["sinceAccept"]?.string ?? "").hasPrefix("the same as") }.count
         var lines: [String] = []
-        if let summary = config["summary"]?.string {
-            lines.append(inert(summary))
-        } else if items.count > uncompared {
-            // A card drawn before the plain fields: its names.
-            let names = items.filter { HeldWhat.changedSinceAccept($0["sinceAccept"]?.string) }.compactMap { $0["name"]?.string }.map(inert)
-            lines.append(names.prefix(3).joined(separator: "; ") + (names.count > 3 ? "; and \(names.count - 3) more" : ""))
-        } else if items.isEmpty, shared.isEmpty {
+        let named = namedItems(items)
+        lines += named.lines
+        if named.folded > 0 { lines.append("and \(named.folded) more that look like updates (--long lists them)") }
+        if items.isEmpty, shared.isEmpty {
             lines.append(config["firstLook"]?.bool == true ? "nothing held: the node restarted (or this project's rules were never accepted): confirm them once"
-                         : "nothing held: accepting records what workflow.md proposes")
-        }
-        if uncompared > 0 {
-            let things = uncompared == 1 ? "1 held thing" : "\(uncompared) held things"
-            lines.append((lines.isEmpty ? things : "and \(things)") + " that can't be compared since the node restarted (--long lists them)")
+                         : "nothing held: accepting records the rules workflow.md proposes")
         }
         if !shared.isEmpty {
             let folder = inert(config["sharedHome"]?["folder"]?.string ?? "~")
-            lines.append("and \(shared.count) of your home folder's config: \(folder)'s card seals \(shared.count == 1 ? "it" : "them") for every project")
+            lines.append("and \(shared.count) of your home folder's config: its own card accepts \(shared.count == 1 ? "it" : "them") for every project "
+                         + "(vibeswitcher config held \(folder))")
         }
         if !items.isEmpty || !shared.isEmpty {
             let project = config["holds"]?.string.map(inert) ?? inert(((card["root"]?.string ?? "") as NSString).lastPathComponent)
-            lines.append(config["holdsEvery"]?.bool == true ? "holds every project (no new worker, verifier or merge until accepted)"
-                         : "holds \(project) (no new worker, verifier or merge until accepted)")
+            lines.append(config["holdsEvery"]?.bool == true ? "holds every project (no new worker, verifier or merge until you accept)"
+                         : "holds \(project) (no new worker, verifier or merge until you accept)")
         }
         let rails = config["guarded"]?.array ?? []
-        var unknown = 0, recorded = 0
-        for rail in rails {
-            let key = inert(rail["key"]?.string), value = inert(rail["value"]?.string)
-            let changed = rail["changed"]?.string
-            if changed == "changed" {
-                lines.append("\(key): " + (rail["old"]?.string.map { "\(inert($0)) → " } ?? "(not set) → ") + value)
-            } else if rail["records"]?.bool == true {
-                lines.append("\(key): \(value) (this accept records it)")
-            } else if config["recordsAll"]?.bool == true {
-                recorded += 1
-            } else if changed != "same" {
-                unknown += 1
+        if config["recordsAll"]?.bool == true {
+            // A first accept records every rule: those not at their default named (the sandbox's first), the rest counted.
+            let set = rails.filter { $0["atDefault"]?.bool != true }
+                .sorted { ($0["key"]?.string ?? "").hasPrefix("sandbox_") && !($1["key"]?.string ?? "").hasPrefix("sandbox_") }
+            if !set.isEmpty { lines.append("rules this accept records:") }
+            for rail in set.prefix(firstShown) {
+                let old = rail["changed"]?.string == "changed" ? (rail["old"]?.string.map { inert($0) + " → " } ?? "(not set) → ") : ""
+                lines.append("  \(inert(rail["key"]?.string)): \(old)\(inert(rail["value"]?.string))")
             }
+            if set.count > firstShown { lines.append("  and \(set.count - firstShown) more (--long shows them)") }
+            let defaults = rails.count - set.count
+            if defaults > 0 { lines.append((set.isEmpty ? "it records " : "and ") + "\(defaults) rule\(defaults == 1 ? "" : "s") at \(defaults == 1 ? "its default" : "their defaults")") }
+        } else {
+            let changing = rails.filter { $0["changed"]?.string == "changed" || $0["records"]?.bool == true }
+            for rail in changing.prefix(railsShown) {
+                let key = inert(rail["key"]?.string), value = inert(rail["value"]?.string)
+                if rail["changed"]?.string == "changed" {
+                    lines.append("\(key): " + (rail["old"]?.string.map { "\(inert($0)) → " } ?? "(not set) → ") + value)
+                } else {
+                    lines.append("\(key): \(value) (this accept records it)")
+                }
+            }
+            if changing.count > railsShown { lines.append("and \(changing.count - railsShown) more rules that would change (--long shows them)") }
         }
-        if recorded > 0 {
-            lines.append("this accept records workflow.md's \(recorded == 1 ? "1 rule" : "\(recorded) rules") as they are (--long shows them)")
-        }
-        if unknown > 0 {
-            let rules = unknown == 1 ? "1 rule" : "\(unknown) rules"
-            lines.append(config["lastAccept"]?.string == nil ? "\(rules) with no earlier accept to compare with (--long shows them)"
-                         : "\(rules) can't be compared since the node restarted (--long shows them)")
-        }
-        // A first accept records the review floor too: said.
+        // A first accept records the review rules too: said.
         if config["lastAccept"]?.string == nil, let floor = config["floor"]?.object {
-            lines.append("the review floor it records: merge policy \(inert(floor["mergePolicy"]?.string)), \(floor["auditFinders"]?.int ?? 1) finder(s)")
+            lines.append("the review rules it records: merge policy \(inert(floor["mergePolicy"]?.string)), \(floor["auditFinders"]?.int ?? 1) finder(s)")
         }
         return lines
     }
 
-    /// The receipt of an accepted held-config card, a line: what it was, and that it holds nobody now (or, `waits`, that
-    /// the home folder's card still holds the project).
-    public static func acceptedLine(_ card: NodeWire.Value?, waits: Bool = false) -> String {
+    /// Rules that would change shown by default; on a first accept, those not at their default.
+    static let railsShown = 5
+    static let firstShown = 8
+
+    /// The held things a card names by default (`HeldWhat.shown`'s rule, on the wire's fields): what isn't a recognised
+    /// update always, the updates while fewer than three lines are said; the rest counted.
+    public static func namedItems(_ items: [NodeWire.Value]) -> (lines: [String], folded: Int) {
+        let entries = items.map { item -> (what: String, update: Bool) in
+            let what = item["what"]?.string.map(inert) ?? (inert(item["name"]?.string) + (item["change"]?.string.map { ": " + inert($0) } ?? " changed"))
+            let uncompared = (item["sinceAccept"]?.string ?? "").hasPrefix(AcceptedSnapshot.unvouchedPrefix)
+            let update = item["kind"]?.string.flatMap(HeldWhat.Kind.init(rawValue:)).map(HeldWhat.looksLikeUpdate) ?? false
+            return (what + (uncompared ? " (can't be compared with your last accept)" : ""), update)
+        }
+        return HeldWhat.named(entries)
+    }
+
+    /// The card's name in a list or a receipt: its project, or the home folder's.
+    public static func cardName(_ card: NodeWire.Value?) -> String {
         let config = card?["config"]
-        let what = config?["summary"]?.string.map(inert) ?? "the held config of \(inert(((card?["root"]?.string ?? "") as NSString).lastPathComponent))"
-        if waits { return "accepted: \(what); \(inert(config?["holds"]?.string ?? "the project")) still waits on your home folder's card" }
-        if config?["holdsEvery"]?.bool == true { return "accepted: \(what); it holds no project now" }
-        return "accepted: \(what); it holds \(inert(config?["holds"]?.string ?? "the project")) no more"
+        if config?["holdsEvery"]?.bool == true { return "your home folder's config" }
+        return config?["holds"]?.string.map(inert) ?? inert(((card?["root"]?.string ?? "") as NSString).lastPathComponent)
+    }
+
+    /// The receipt of an accepted held-config card, a line: whose, and how many changes (`count`: what the accept
+    /// sealed, else the card's items); `waits`: the home folder's card still holds the project.
+    public static func acceptedLine(_ card: NodeWire.Value?, count: Int? = nil, waits: Bool = false) -> String {
+        let changes = count ?? card?["config"]?["items"]?.array?.count ?? 0
+        let line = "accepted: \(cardName(card)), \(changes) change\(changes == 1 ? "" : "s")"
+        return waits ? line + "; it still waits on your home folder's card" : line
+    }
+
+    /// A held-config card in one line for `approve`'s list: whose, then what it names (`namedItems`), joined.
+    public static func listLine(_ card: NodeWire.Value) -> String {
+        let named = namedItems(card["config"]?["items"]?.array ?? [])
+        let shared = card["config"]?["sharedHome"]?["names"]?.array?.count ?? 0
+        var parts = named.lines
+        if named.folded > 0 { parts.append("and \(named.folded) more that look like updates") }
+        if shared > 0 { parts.append("and \(shared) of your home folder's config") }
+        return "\(cardName(card)): " + (parts.isEmpty ? "nothing held, its rules to record" : parts.joined(separator: "; "))
     }
 
     /// The mark a short line carries in place of its word on the last accept (`sinceAccept`) when that word only says

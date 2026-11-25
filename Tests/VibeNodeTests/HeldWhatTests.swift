@@ -4,69 +4,74 @@ import Testing
 @testable import VibeNode
 
 /// The plain held-config card (2026-11-25, the user after `vibeswitcher approve`: "I don't understand why all this
-/// notice has so much text … I just accepted them but I have no idea what I did"): per card what changed in the node's
-/// own words (`HeldWhat`), whom it holds, only the rules that changed, one line for those that can't be compared; every
-/// path, hash and the snapshot's words behind `--long`. Today's real cases, as the node's cards held them.
+/// notice has so much text … I just accepted them but I have no idea what I did"; and the review the same day: "collapse
+/// only what is safe to not read"). Every held thing named by its path in neutral words (`HeldWhat`), only what the node
+/// recognises as an update counted past three lines; whom it holds; the rules that would change, or on a first accept
+/// those not at their default; never a hash, a mark or the node's words for its record. Today's real cases.
 @Suite
 struct HeldWhatTests {
+    private let scratch = Scratch()
     static let commit = "3e9df41a" + String(repeating: "0", count: 32)
-    static let facts = HeldWhat.Facts(claudeVersion: "2.1.332", pluginVersions: ["genlayernode@genlayerlabs": "0.4.1"], unitBuild: commit,
-                                      unknownStartup: ["VibeSwitcher node.lnk"])
+    static let facts = HeldWhat.Facts(claudeVersion: "2.1.332", pluginVersions: ["genlayernode@genlayerlabs": "0.4.1", "context7@claude-plugins-official": "1.0.2"],
+                                      unitBuild: commit, unknownStartup: ["VibeSwitcher node.lnk"])
     static let startup = "/mnt/c/Users/kstel/AppData/Roaming/Microsoft/Windows/Start Menu/Programs/Startup"
     static let when = "2026-11-25T14:49:07Z"
+    /// Words a default screen never says (the user's terms: accepted, the node, your last accept, rules, review rules).
+    static let jargon = ["snapshot", "seal", "vault", "hash", "guard rail", "review floor"]
 
     static func file(_ path: String, _ change: ConfigSeal.HeldFile.Change = .changed) -> ConfigSeal.HeldFile {
         ConfigSeal.HeldFile(path: path, change: change, at: 1_795_600_000, kind: "f", before: nil, after: nil)
     }
 
-    static func item(_ name: String, change: String? = nil, files: [ConfigSeal.HeldFile] = []) -> ConfigHoldStore.Item {
-        var item = ConfigHoldStore.Item(name: name, hash: "abcdef012345", change: change, outside: true, files: files,
-                                        sinceAccept: "changed since your last accept (\(when))")
+    static func item(_ name: String, change: String? = nil, files: [ConfigSeal.HeldFile] = [], since: String? = "changed since your last accept (\(when))")
+        -> ConfigHoldStore.Item {
+        var item = ConfigHoldStore.Item(name: name, hash: "abcdef012345", change: change, outside: true, files: files, sinceAccept: since)
         item.about = HeldWhat.describe(item, facts: facts)
         return item
     }
 
-    /// After a restart: every rule's snapshot unsealed, so none can be compared.
-    static func unknownRails(_ count: Int) -> [ConfigHoldStore.Rail] {
-        (0..<count).map { index in
-            var rail = ConfigHoldStore.Rail(key: LeadVault.guardedKeys[index % LeadVault.guardedKeys.count] + "\(index)", value: "\(index)",
-                                            sinceAccept: AcceptedSnapshot.unvouched(when))
-            rail.changed = .unknown
-            rail.records = false
-            return rail
-        }
+    static func rail(_ key: String, _ value: String, changed: ConfigHoldStore.Rail.Changed = .unknown, old: String? = nil, records: Bool? = false,
+                     atDefault: Bool? = nil) -> ConfigHoldStore.Rail {
+        var rail = ConfigHoldStore.Rail(key: key, value: value, sinceAccept: AcceptedSnapshot.unvouched(when))
+        (rail.changed, rail.old, rail.records, rail.atDefault) = (changed, old, records, atDefault)
+        return rail
     }
 
-    static func card(root: String, items: [ConfigHoldStore.Item], rails: [ConfigHoldStore.Rail], every: Bool, project: String? = nil) -> NodeWire.Value {
+    static func card(root: String, items: [ConfigHoldStore.Item], rails: [ConfigHoldStore.Rail] = [], project: String?, recordsAll: Bool = false) -> NodeWire.Value {
         var card = CardStore.Card(root: root, kind: .configHeld)
         var shown = ConfigHoldStore.Shown(items: items, guarded: rails, lastAccept: Date(timeIntervalSince1970: 1_795_600_000))
         shown.summary = HeldWhat.summary(items: items)
-        shown.holdsEvery = every
-        shown.holds = project
+        (shown.holds, shown.holdsEvery, shown.recordsAll) = (project, project == nil, recordsAll)
         card.config = shown
         return card.value
     }
 
-    @Test func eachKindTheNodeSeesIsSaidPlainly() {
+    static func plain(_ card: NodeWire.Value) -> String { CardText.lines(card).joined(separator: "\n") }
+
+    static let claude = [item("~/.local/share/claude/versions", files: [file("2.1.332", .added)]), item("~/.local/bin", files: [file("claude")])]
+
+    @Test func eachIsItsPathInNeutralWords() {
         let say = { (item: ConfigHoldStore.Item) in item.about.map { "\($0.kind.rawValue): \($0.what)" } ?? "" }
-        #expect(say(Self.item("~/.local/share/claude/versions", files: [Self.file("2.1.332", .added)])) == "claude-update: Claude Code's update to 2.1.332, it looks like")
-        #expect(say(Self.item("~/.local/bin", files: [Self.file("claude")])) == "claude-update: Claude Code's link moved to 2.1.332")
-        #expect(say(Self.item("~/.local/bin", files: [Self.file("passage")])) == "other: ~/.local/bin: passage changed")
-        #expect(say(Self.item("~/.claude/plugins: genlayernode@genlayerlabs", change: "version folder changed, hooks/hooks.json changed"))
-                == "plugin-update: the plugin genlayernode from genlayerlabs updated to 0.4.1")
-        #expect(say(Self.item("~/.config/systemd/user", files: [Self.file("vibeswitcher-node.service")])) == "build-switch: VibeSwitcher's unit: it starts build 3e9df41a now")
+        #expect(say(Self.claude[0]) == "claude-update: ~/.local/share/claude/versions: 2.1.332 added (looks like Claude Code's own update)")
+        #expect(say(Self.claude[1]) == "claude-update: ~/.local/bin/claude now points to 2.1.332 (looks like Claude Code's own update)")
+        // The link's likeness needs the link among the files: no file list is no likeness.
+        #expect(say(Self.item("~/.local/bin")) == "other: ~/.local/bin changed")
+        #expect(say(Self.item("~/.local/bin", files: [Self.file("claude"), Self.file("passage")])) == "other: ~/.local/bin: claude, passage changed")
+        #expect(say(Self.item("~/.claude/plugins: genlayernode@genlayerlabs", change: "version folder changed"))
+                == "plugin-update: ~/.claude/plugins: genlayernode@genlayerlabs: now version 0.4.1 (looks like the plugin's own update)")
+        // A plugin whose hooks changed without a new version isn't an update: said whole, named.
+        #expect(say(Self.item("~/.claude/plugins: genlayernode@genlayerlabs", change: "hooks/hooks.json changed"))
+                == "other: ~/.claude/plugins: genlayernode@genlayerlabs: hooks/hooks.json changed")
+        #expect(say(Self.item("~/.config/systemd/user", files: [Self.file("vibeswitcher-node.service")]))
+                == "build-switch: ~/.config/systemd/user/vibeswitcher-node.service now starts build 3e9df41a (looks like VibeSwitcher's own switch)")
         #expect(say(Self.item("~/.vibeswitcher/v2/builds", files: [Self.file(Self.commit + "/bin/vibeswitcher", .added)]))
-                == "build-switch: VibeSwitcher's builds folder: build 3e9df41a installed")
+                == "build-switch: ~/.vibeswitcher/v2/builds: build 3e9df41a added (looks like VibeSwitcher's own install)")
         #expect(say(Self.item(".git/config (main checkout)", change: "branch.v2-usage.merge added, branch.v2-usage.remote added"))
-                == "git-config: .git/config: the tracking entry of branch v2-usage")
-        #expect(say(Self.item(".git/config (main checkout)", change: "core.hookspath added")) == "git-config: .git/config: core.hookspath added")
-        #expect(say(Self.item(".git/config (main checkout)")) == "git-config: .git/config changed")
-        #expect(say(Self.item(Self.startup)) == "startup: the Windows Startup folder (kstel): VibeSwitcher node.lnk added")
+                == "git-config: .git/config (main checkout): the tracking entry of branch v2-usage (branch.v2-usage.merge added, branch.v2-usage.remote added)")
+        #expect(say(Self.item(".git/config (main checkout)", change: "core.hookspath added")) == "git-config: .git/config (main checkout): core.hookspath added")
+        #expect(say(Self.item(Self.startup)) == "startup: \(Self.startup): VibeSwitcher node.lnk not on your list of known shortcuts")
         #expect(say(Self.item("~/.claude/settings.json", change: "model changed")) == "settings: ~/.claude/settings.json: model changed")
-        #expect(say(Self.item("~/.zshrc")) == "other: ~/.zshrc")
-        // From and to where known.
-        #expect(Self.item("~/.claude/plugins: genlayernode@genlayerlabs", change: "version folder changed").about?.to == "0.4.1")
-        #expect(Self.item("~/.local/share/claude/versions").about?.to == "2.1.332")
+        #expect(say(Self.item("~/.zshrc")) == "other: ~/.zshrc changed")
     }
 
     /// A git config's keys, so a branch's tracking entry is named (`ConfigSeal.gitKeys`; names, never values).
@@ -82,92 +87,120 @@ struct HeldWhatTests {
                 == "remote.origin.url changed")
     }
 
-    /// The home folder's card after Claude Code updated itself, a plugin updated, VibeSwitcher switched and installed
-    /// its Startup shortcut, and the model changed (seven paths), with eleven rules after a restart: a few lines.
-    @Test func theSevenPathCardIsAFewPlainLines() {
-        let items = [Self.item("~/.local/share/claude/versions", files: [Self.file("2.1.332", .added)]),
-                     Self.item("~/.local/bin", files: [Self.file("claude")]),
-                     Self.item("~/.claude/plugins: genlayernode@genlayerlabs", change: "version folder changed"),
-                     Self.item(Self.startup),
-                     Self.item("~/.claude/settings.json", change: "model changed"),
-                     Self.item("~/.config/systemd/user", files: [Self.file("vibeswitcher-node.service")]),
-                     Self.item("~/.vibeswitcher/v2/builds", files: [Self.file(Self.commit + "/bin/vibeswitcher", .added)])]
-        let card = Self.card(root: "/home/someone", items: items, rails: Self.unknownRails(11), every: true)
-        let plain = CardText.plainConfig(card)
-        #expect(plain == [
-            "Claude Code's update to 2.1.332, it looks like; the plugin genlayernode from genlayerlabs updated to 0.4.1; "
-                + "the Windows Startup folder (kstel): VibeSwitcher node.lnk added; ~/.claude/settings.json: model changed; and 2 more",
-            "holds every project (no new worker, verifier or merge until accepted)",
-            "11 rules can't be compared since the node restarted (--long shows them)",
-        ], "\(plain)")
-        let text = CardText.lines(card).joined(separator: "\n")
-        #expect(!text.contains("hash") && !text.contains("?") && !text.contains("sealed by this host's vault") && !text.contains("snapshot"), "\(text)")
-        // `--long` is today's whole card: every path, hash and rule, each with its word.
-        let long = CardText.lines(card, long: true)
-        #expect(long.filter { $0.contains("hash abcdef012345") }.count == 7, "\(long)")
-        #expect(long.filter { $0.contains(AcceptedSnapshot.unvouchedPrefix) }.count == 11, "\(long)")
-        // The receipt.
-        #expect(CardText.acceptedLine(card).hasPrefix("accepted: Claude Code's update to 2.1.332, it looks like;")
-                && CardText.acceptedLine(card).hasSuffix("; it holds no project now"))
+    /// Five things that look like updates and one settings change: the settings change is named first, whatever the count.
+    @Test func aSettingsChangeIsNeverFoldedBehindUpdates() {
+        let items = Self.claude + [Self.item("~/.claude/plugins: genlayernode@genlayerlabs", change: "version folder changed"),
+                                   Self.item("~/.claude/plugins: context7@claude-plugins-official", change: "version folder changed"),
+                                   Self.item("~/.vibeswitcher/v2/builds", files: [Self.file(Self.commit + "/bin/vibeswitcher", .added)]),
+                                   Self.item("~/.claude/settings.json", change: "model changed")]
+        let lines = CardText.plainConfig(Self.card(root: "/home/someone", items: items, project: nil))
+        #expect(lines.first == "~/.claude/settings.json: model changed", "\(lines)")
+        #expect(lines.contains("and 3 more that look like updates (--long lists them)"), "\(lines)")
+        #expect(lines.filter { $0.contains("looks like") }.count == 2, "\(lines)")
     }
 
-    /// VibeSwitcher's own switch: its unit and its builds folder, holding the project.
-    @Test func theSwitchsTwoAreVibeSwitchersOwn() {
+    /// A held thing that can't be compared with the last accept (its record not one this node vouches for) is named like
+    /// any other, saying so; never counted, never blamed on a restart.
+    @Test func aThingThatCantBeComparedIsNamed() {
+        let unknown = Self.item("~/.zshrc", since: AcceptedSnapshot.unvouched(Self.when))
+        let lines = CardText.plainConfig(Self.card(root: "/home/someone/projects/repo", items: [unknown], project: "repo"))
+        #expect(lines == ["~/.zshrc changed (can't be compared with your last accept)", "holds repo (no new worker, verifier or merge until you accept)"], "\(lines)")
+    }
+
+    /// Today's home folder card: Claude Code updated itself, a plugin updated, the Startup folder, the model changed,
+    /// VibeSwitcher switched (seven paths), eleven rules the node already holds: three things named, four counted.
+    @Test func theSevenPathCard() {
+        let items = Self.claude + [Self.item("~/.claude/plugins: genlayernode@genlayerlabs", change: "version folder changed"),
+                                   Self.item(Self.startup),
+                                   Self.item("~/.claude/settings.json", change: "model changed"),
+                                   Self.item("~/.config/systemd/user", files: [Self.file("vibeswitcher-node.service")]),
+                                   Self.item("~/.vibeswitcher/v2/builds", files: [Self.file(Self.commit + "/bin/vibeswitcher", .added)])]
+        let rails = (0..<11).map { Self.rail("rule\($0)", "\($0)") }
+        let card = Self.card(root: "/home/someone", items: items, rails: rails, project: nil)
+        #expect(CardText.plainConfig(card) == [
+            "\(Self.startup): VibeSwitcher node.lnk not on your list of known shortcuts",
+            "~/.claude/settings.json: model changed",
+            "~/.local/share/claude/versions: 2.1.332 added (looks like Claude Code's own update)",
+            "and 4 more that look like updates (--long lists them)",
+            "holds every project (no new worker, verifier or merge until you accept)",
+        ], "\(CardText.plainConfig(card))")
+        let text = Self.plain(card).lowercased()
+        for word in Self.jargon { #expect(!text.contains(word), "\(word): \(text)") }
+        // `--long` is today's whole card: every path, hash and rule.
+        let long = CardText.lines(card, long: true)
+        #expect(long.filter { $0.contains("hash abcdef012345") }.count == 7 && long.filter { $0.hasPrefix("    rule") }.count == 11, "\(long)")
+        #expect(CardText.acceptedLine(card, count: 7) == "accepted: your home folder's config, 7 changes")
+        #expect(CardText.listLine(card).hasPrefix("your home folder's config: \(Self.startup): VibeSwitcher node.lnk"))
+    }
+
+    /// VibeSwitcher's own switch: its unit and its builds folder, holding the project; a line in `approve`'s list.
+    @Test func theSwitchsTwo() {
         let items = [Self.item("~/.config/systemd/user", files: [Self.file("vibeswitcher-node.service")]),
                      Self.item("~/.vibeswitcher/v2/builds", files: [Self.file(Self.commit + "/bin/vibeswitcher", .added)])]
-        let card = Self.card(root: "/home/someone/projects/vibeswitcher-v2-lead", items: items, rails: [], every: false, project: "vibeswitcher-v2-lead")
+        let card = Self.card(root: "/home/someone/projects/vibeswitcher-v2-lead", items: items, project: "vibeswitcher-v2-lead")
         #expect(CardText.plainConfig(card) == [
-            "VibeSwitcher's unit: it starts build 3e9df41a now; VibeSwitcher's builds folder: build 3e9df41a installed",
-            "holds vibeswitcher-v2-lead (no new worker, verifier or merge until accepted)",
+            "~/.config/systemd/user/vibeswitcher-node.service now starts build 3e9df41a (looks like VibeSwitcher's own switch)",
+            "~/.vibeswitcher/v2/builds: build 3e9df41a added (looks like VibeSwitcher's own install)",
+            "holds vibeswitcher-v2-lead (no new worker, verifier or merge until you accept)",
         ], "\(CardText.plainConfig(card))")
-        #expect(CardText.acceptedLine(card) == "accepted: VibeSwitcher's unit: it starts build 3e9df41a now; VibeSwitcher's builds folder: build 3e9df41a installed; "
-                + "it holds vibeswitcher-v2-lead no more")
-        #expect(CardText.acceptedLine(card, waits: true).hasSuffix("vibeswitcher-v2-lead still waits on your home folder's card"))
+        #expect(CardText.acceptedLine(card, count: 2) == "accepted: vibeswitcher-v2-lead, 2 changes")
+        #expect(CardText.acceptedLine(card, count: 1, waits: true) == "accepted: vibeswitcher-v2-lead, 1 change; it still waits on your home folder's card")
     }
 
-    /// A rule that changed since the last accept is its name, old → new; one the accept records is said with its value;
-    /// the same ones say nothing.
-    @Test func aChangedRuleIsOldToNew() {
-        var advance = ConfigHoldStore.Rail(key: "auto_advance", value: "true", sinceAccept: "changed since your last accept (\(Self.when)), from “false”")
-        (advance.changed, advance.old, advance.records) = (.changed, "false", true)
-        var same = ConfigHoldStore.Rail(key: "max_workers", value: "3", sinceAccept: "the same as at your last accept (\(Self.when))")
-        (same.changed, same.records) = (.same, false)
-        var fresh = ConfigHoldStore.Rail(key: "heavy_slots", value: "1")
-        (fresh.changed, fresh.records) = (.changed, true)
+    /// A rule that changed is its name, old → new; one the accept records anew is said with its value; at most five,
+    /// the rest counted; the same and the uncomparable ones the node already holds say nothing.
+    @Test func aChangedAutoAdvance() {
+        var rails = [Self.rail("auto_advance", "true", changed: .changed, old: "false", records: true),
+                     Self.rail("max_workers", "3", changed: .same), Self.rail("risk_lines", "400"),
+                     Self.rail("heavy_slots", "1", changed: .changed, records: true)]
         let card = Self.card(root: "/home/someone/projects/vibeswitcher", items: [Self.item(".git/config (main checkout)", change: "branch.v2.merge added")],
-                             rails: [advance, same, fresh], every: false, project: "vibeswitcher")
+                             rails: rails, project: "vibeswitcher")
         #expect(CardText.plainConfig(card) == [
-            ".git/config: the tracking entry of branch v2",
-            "holds vibeswitcher (no new worker, verifier or merge until accepted)",
+            ".git/config (main checkout): the tracking entry of branch v2 (branch.v2.merge added)",
+            "holds vibeswitcher (no new worker, verifier or merge until you accept)",
             "auto_advance: false → true",
             "heavy_slots: (not set) → 1",
         ], "\(CardText.plainConfig(card))")
-        // The same ones as before the review: what the vault and the card are bound to is unchanged.
-        let value = card["config"]?["guarded"]?.array?.first
-        #expect(value?["changed"]?.string == "changed" && value?["old"]?.string == "false" && value?["records"]?.bool == true)
         #expect(WireSchema.check(card, as: "card") == nil, "\(WireSchema.check(card, as: "card") ?? "")")
         let item = card["config"]?["items"]?.array?.first
-        #expect(item?["kind"]?.string == "git-config" && item?["what"]?.string == ".git/config: the tracking entry of branch v2")
+        #expect(item?["kind"]?.string == "git-config" && item?["what"]?.string?.hasPrefix(".git/config (main checkout)") == true)
+        rails += (0..<4).map { Self.rail("changed\($0)", "x", changed: .changed, old: "y", records: true) }
+        let many = CardText.plainConfig(Self.card(root: "/r", items: [], rails: rails, project: "r"))
+        #expect(many.filter { $0.contains(" → ") }.count == 5 && many.contains("and 1 more rules that would change (--long shows them)"), "\(many)")
     }
 
-    /// After a restart on a fresh vault: what the snapshot lists as it is now is counted, not listed; the rules the
-    /// accept records (the vault holds none) are counted too, `--long` showing each.
-    @Test func whatCantBeComparedIsCountedInALine() {
-        var same = ConfigHoldStore.Item(name: "~/.zshrc", hash: "abcdef012345", sinceAccept: AcceptedSnapshot.unvouched(Self.when))
-        same.about = HeldWhat.describe(same, facts: Self.facts)
-        let changed = Self.item("~/.claude/settings.json", change: "env changed")
-        var rails = Self.unknownRails(3)
-        for index in rails.indices { rails[index].records = nil }
-        var card = CardStore.Card(root: "/home/someone/projects/repo", kind: .configHeld)
-        var shown = ConfigHoldStore.Shown(items: [same, changed, same], guarded: rails, lastAccept: Date(timeIntervalSince1970: 1_795_600_000))
-        shown.summary = HeldWhat.summary(items: shown.items)
-        (shown.holds, shown.holdsEvery, shown.recordsAll) = ("repo", false, true)
-        card.config = shown
-        #expect(CardText.plainConfig(card.value) == [
-            "~/.claude/settings.json: env changed",
-            "and 2 held things that can't be compared since the node restarted (--long lists them)",
-            "holds repo (no new worker, verifier or merge until accepted)",
-            "this accept records workflow.md's 3 rules as they are (--long shows them)",
-        ], "\(CardText.plainConfig(card.value))")
+    /// A first accept (no rules recorded yet) names every rule not at its default, the sandbox's first, at most eight,
+    /// and counts the ones at their defaults.
+    @Test func aFirstAcceptNamesTheRulesNotAtTheirDefaults() {
+        let rails = [Self.rail("test_command", "make test", records: nil, atDefault: false), Self.rail("max_workers", "3", records: nil, atDefault: true),
+                     Self.rail("sandbox_read", "~/.local/share/swiftly", records: nil, atDefault: false),
+                     Self.rail("audit_finders", "1", records: nil, atDefault: true)]
+        let card = Self.card(root: "/r", items: [], rails: rails, project: "r", recordsAll: true)
+        #expect(CardText.plainConfig(card) == [
+            "nothing held: accepting records the rules workflow.md proposes",
+            "rules this accept records:",
+            "  sandbox_read: ~/.local/share/swiftly",
+            "  test_command: make test",
+            "and 2 rules at their defaults",
+        ], "\(CardText.plainConfig(card))")
+        let many = (0..<10).map { Self.rail("rule\($0)", "v", records: nil, atDefault: false) }
+        let lines = CardText.plainConfig(Self.card(root: "/r", items: [], rails: many, project: "r", recordsAll: true))
+        #expect(lines.filter { $0.hasPrefix("  rule") }.count == 8 && lines.contains("  and 2 more (--long shows them)"), "\(lines)")
+    }
+
+    /// The node couldn't say which rules it holds: no card is drawn (what the accept would record can't be told).
+    @Test func aVaultThatCantBeAskedDrawsNoCard() throws {
+        let asked = Locked(0)
+        let vault = LeadVault(folder: scratch.url("vault")) { request in
+            guard case .guarded = request else { throw LeadVault.Refused("not this") }
+            asked.mutate { $0 += 1 }
+            // The record first (what's held), then the rules: that one doesn't answer.
+            if asked.value == 1 { return .guarded([:]) }
+            throw LeadVault.Refused("the host didn't answer")
+        }
+        let held = ConfigHoldStore.held(root: scratch.url("repo").path, vault: vault, home: scratch.url("home").path, look: false)
+        guard case .failure(let error) = held else { Issue.record("a card was drawn: \(held)"); return }
+        #expect("\(error)".contains("didn't answer"), "\(error)")
+        #expect(asked.value == 2)
     }
 }

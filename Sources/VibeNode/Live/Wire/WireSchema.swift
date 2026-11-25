@@ -434,7 +434,7 @@ public enum WireSchema {
                 field("lastAccept", Kind.date.orNull), field("floor", Kind.shape("card.config.floor").orNull),
                 field("baseBranch", Kind.string.orNull), field("sharedHome", Kind.shape("card.config.shared").orNull),
                 // The plain card (2026-11-25): what changed in a line, and whom it holds (a project; every one for the home's).
-                optional("summary", .string), optional("holds", .string), optional("holdsEvery", .bool), optional("recordsAll", .bool),
+                optional("summary", .string), optional("holds", .string), optional("holdsEvery", .bool), optional("recordsAll", .bool), optional("pageMayAccept", .bool),
                 // Nothing held and no guard rail recorded: the node restarted, the project's rules confirmed once.
                 optional("firstLook", .bool)]),
             shape("card.config.shared", from: "CardStore.Card.value", [field("names", strings), field("card", .string), field("folder", .string)]),
@@ -447,7 +447,8 @@ public enum WireSchema {
             shape("card.config.rail", from: "CardStore.Card.value", [field("key", .string), field("value", .string),
                                                                     field("sinceAccept", Kind.string.orNull),
                                                                     optional("changed", .words(["changed", "same", "unknown"])),
-                                                                    optional("old", .string), optional("records", .bool)]),
+                                                                    optional("old", .string), optional("records", .bool),
+                                                                    optional("atDefault", .bool)]),
             shape("card.config.floor", from: "CardStore.Card.value", [
                 field("mergePolicy", .words(["auto", "ask_sensitive", "ask_all"])), field("auditFinders", .int),
                 field("sensitivePaths", strings), field("strictPaths", strings), field("riskLines", .int), field("riskModel", .bool),

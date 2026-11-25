@@ -60,6 +60,8 @@ public enum ConfigHoldStore {
         /// Whether the accept records this value: the vault holds another, or none for it (`wouldRecord`'s rails); nil
         /// when it holds no rails at all for the project (`Shown.recordsAll`).
         public var records: Bool?
+        /// Its value is what workflow.md gives when it doesn't set it (a first accept names the others).
+        public var atDefault: Bool?
 
         public enum Changed: String, Codable, Sendable { case changed, same, unknown }
 
@@ -92,9 +94,12 @@ public enum ConfigHoldStore {
         public var summary: String?
         public var holds: String?
         public var holdsEvery: Bool?
-        /// The accept records every guard rail (the vault holds none of them as they are: a fresh vault, or it couldn't be
-        /// asked): said once for the card, each rail's `records` then nil.
+        /// No rules are recorded for the project yet (a first accept, or a fresh vault): the accept records them all.
+        /// The default screen names every one not at its default (`Rail.atDefault`) and counts the rest.
         public var recordsAll: Bool?
+        /// Whether a page may accept this card, as `pageRefusal` judges it when the card is drawn (nil: it couldn't be
+        /// told, so no).
+        public var pageMayAccept: Bool?
         /// Nothing held, and no guard rail recorded for the folder: the vault's first look is owed (a host restart
         /// since): accepting confirms the project's rules once. Such a card is no hold (not blocking).
         public var firstLook: Bool?
@@ -221,24 +226,28 @@ public enum ConfigHoldStore {
             return item
         }
         let workflow = LeadWorkflow.load(from: workflowPath(root: root))
-        // What the vault recorded of the rails (none, or it couldn't be asked: every rail is shown as recorded anew).
-        let recorded: [String: String]? = (try? vault.guardedSettings(root: root)) ?? nil
+        // What the vault recorded of the rails: none yet is a first accept; a vault that couldn't be asked draws no card
+        // (what it would record can't be told).
+        let recorded: [String: String]?
+        do { recorded = try vault.guardedSettings(root: root) } catch { return .failure(error) }
         let proposed = recordedHashes(workflow)
+        let defaults = LeadWorkflow()
         let guarded = guardedValues(workflow).map { rail -> Rail in
             var shown = Rail(key: rail.key, value: rail.value, sinceAccept: AcceptedSnapshot.since(rail: rail.key, value: rail.value, in: snapshot, vouched: vouched.rail(rail.key)))
             (shown.changed, shown.old) = changed(rail: rail.key, value: rail.value, in: snapshot, vouched: vouched.rail(rail.key))
-            // None recorded (a fresh vault, or it couldn't be asked): every rail is, said once for the card (`recordsAll`).
             shown.records = recorded.map { $0[rail.key] != proposed[rail.key] }
+            shown.atDefault = rail.value == LeadVault.guardedValue(rail.key, in: defaults)
             return shown
         }
         var shown = Shown(items: items, hashes: hashes, floor: LeadReviewFloor.starting(from: workflow), rails: proposed,
                           baseBranch: workflow.baseBranch, guarded: guarded,
                           lastAccept: snapshot?.configAt.map { Date(timeIntervalSince1970: $0) })
         shown.summary = HeldWhat.summary(items: items)
-        // Every rule recorded anew (a fresh vault's, or one restarted with none of them): said once, not rule by rule.
-        let all = !guarded.isEmpty && guarded.allSatisfy { $0.records ?? true }
-        shown.recordsAll = all
-        if all { for index in shown.guarded.indices { shown.guarded[index].records = nil } }
+        // No rule recorded yet: a first accept records them all (each rail's `records` then nil).
+        let none = recorded.map { recorded in !LeadVault.guardedKeys.contains { recorded[$0] != nil } } ?? true
+        shown.recordsAll = none && !guarded.isEmpty
+        if none { for index in shown.guarded.indices { shown.guarded[index].records = nil } }
+        shown.pageMayAccept = (try? pageRefusal(shown, root: root, vault: vault)).map(\.isEmpty) ?? false
         let every = (root as NSString).standardizingPath == (home as NSString).standardizingPath
         shown.holdsEvery = every
         shown.holds = every ? nil : LeadMail.project(of: root)

@@ -383,6 +383,8 @@ enum Samples {
         config.config?.holds = "repo"
         config.config?.holdsEvery = false
         config.config?.recordsAll = false
+        config.config?.pageMayAccept = false
+        config.config?.guarded[0].atDefault = false
         var bareConfig = CardStore.Card(id: "local:card:00000000-0000-4000-8000-000000000007", root: root, kind: .configHeld, at: at)
         bareConfig.config = .init()
         // Nothing held and no sealed last accept: the node restarted, the project's rules confirmed once.

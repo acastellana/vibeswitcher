@@ -45,10 +45,9 @@ enum ApproveCommand {
         sayDecide(listed)
         for (number, item) in items.enumerated() {
             // Plain (2026-11-25): a held-config card as what changed, whom it holds and the rules that changed.
+            // Plain (2026-11-25): one line a card, whose and what it names (`config held` shows the rest).
             if !long, item.kind == "config.accept", let card = item.card, card != .null {
-                let plain = CardText.plainConfig(card)
-                Say.out("\(number + 1). " + (plain.first ?? heading(item)))
-                plain.dropFirst().forEach { Say.out("   " + $0) }
+                Say.out("\(number + 1). " + CardText.listLine(card))
                 continue
             }
             Say.out("\(number + 1). " + heading(item))
@@ -65,7 +64,7 @@ enum ApproveCommand {
             let recap = items.enumerated().map { "  \($0.offset + 1). " + recapLine($0.element) }.joined(separator: "\n")
             what = "The batch, in this order (each recorded as its own action; it stops at the first refusal):\n" + recap
         } else {
-            what = "One code accepts \(items.count == 1 ? "it" : "these \(items.count), in order") (each recorded on its own; it stops at the first refusal; --long shows every path and rule)."
+            what = "One code accepts \(items.count == 1 ? "it" : "these \(items.count), in order") (vibeswitcher config held FOLDER shows one whole; --long, every path and rule)."
         }
         let said = TypedWord.said(approval: client.approvalRule, action: action, code: code, what: what)
         guard case .success(let typed) = said else { return Say.refused(said.refusal) }
@@ -118,19 +117,19 @@ enum ApproveCommand {
         guard done.kind == "config.accept" else { return "done: " + summary(done) }
         let card = items.first { $0.kind == done.kind && $0.subject == done.subject }?.card
         let accepted = try? done.result?.wire(WireKinds.ConfigAccept.Result.self)
-        return CardText.acceptedLine(card, waits: !(accepted?.homeWaits ?? []).isEmpty)
+        return CardText.acceptedLine(card, count: accepted?.sealed?.count, waits: !(accepted?.homeWaits ?? []).isEmpty)
     }
 
     /// What needs your own decision, counted, each with the command that settles it: questions, merge approvals and shell
     /// requests (`vibeswitcher questions` shows them), a push asked for, and what the batch leaves to you (a config card
-    /// with guard rails or a review floor to record, a base moved from a head the vault can't vouch for, the hooks beside
+    /// with rules to record, a base moved from a commit the node can't confirm, the hooks beside
     /// a config accept).
     static func sayDecide(_ listed: WireKinds.ApproveList.Result) {
         let decide = listed.decide ?? []
         let pushes = (listed.pushes ?? []).compactMap(\.string)
         let own = listed.own ?? []
         guard !decide.isEmpty || !pushes.isEmpty || !own.isEmpty else { return }
-        Say.out("Waiting on your own decision (not in the batch; each with its own command and code):")
+        Say.out("Not in this batch (each your own decision, with its own command):")
         let count = { (kind: String) in decide.filter { $0["kind"]?.string == kind }.count }
         // A feature plugin's cards, counted by what one is called (`PluginCard.noun`).
         var nouns: [String] = []

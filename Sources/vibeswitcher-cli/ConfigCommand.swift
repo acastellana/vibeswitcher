@@ -33,8 +33,8 @@ enum ConfigCommand {
                 guard long else {
                     // Plain (2026-11-25): one receipt line, what it was and whom it no longer holds.
                     let waits = !(result.homeWaits ?? []).isEmpty
-                    Say.out((result.sealed ?? []).isEmpty && !waits ? "accepted: nothing held" : CardText.acceptedLine(shown, waits: waits))
-                    if result.floorRecorded == true { Say.out("the review floor is recorded") }
+                    Say.out((result.sealed ?? []).isEmpty && !waits ? "accepted: nothing held" : CardText.acceptedLine(shown, count: result.sealed?.count, waits: waits))
+                    if result.floorRecorded == true { Say.out("its review rules are recorded") }
                     if waits {
                         let folder = ConfigSeal.inert(result.homeFolder ?? "~", limit: 300)
                         Say.out("next: accept \(folder)'s card (`vibeswitcher config held \(folder)`), then this folder's again")

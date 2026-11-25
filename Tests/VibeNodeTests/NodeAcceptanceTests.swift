@@ -47,7 +47,7 @@ struct NodeAcceptanceTests {
         #expect(accepted.status == 0 && accepted.output.contains("accepted"), "\(accepted.output)\(accepted.errors)")
         // A receipt line (2026-11-25): what it was and whom it holds no more.
         let said = accepted.output.split(whereSeparator: \.isNewline).map { String($0).replacingOccurrences(of: "\r", with: "") }
-        #expect(said.contains("accepted: nothing held") || said.contains { $0.hasPrefix("accepted: ") && $0.hasSuffix("it holds \(repo.lastPathComponent) no more") },
+        #expect(said.contains("accepted: nothing held") || said.contains { $0.hasPrefix("accepted: \(repo.lastPathComponent), ") && ($0.hasSuffix(" change") || $0.hasSuffix(" changes")) },
                 "\(accepted.output)")
         let after = try await node.run(["config", "held", repo.path])
         #expect(after.status == 0 && (after.output.contains("nothing held") || after.output.contains("Nothing is held")), "\(after.output)\(after.errors)")
@@ -958,7 +958,7 @@ struct NodeAcceptanceTests {
         defer { node.stop() }
         // A fresh node: the home's accept would record its guard rails, so it is the user's own, named with its command.
         let first = try await node.runOnTerminal(["approve", "--only", "config"])
-        #expect(first.status == 0 && first.output.contains("guard rails or a review floor to record")
+        #expect(first.status == 0 && first.output.contains("rules to record")
                 && first.output.contains("vibeswitcher config held \(node.home.path)") && first.output.contains("Nothing a plain accept settles"),
                 "\(first.output)\(first.errors)\n\(node.said)")
         let held = try await node.run(["config", "held", node.home.path])
@@ -970,10 +970,10 @@ struct NodeAcceptanceTests {
         try FileManager.default.createDirectory(at: settings.deletingLastPathComponent(), withIntermediateDirectories: true)
         try #"{"env":{"A39":"1"}}"#.write(to: settings, atomically: true, encoding: .utf8)
         let approved = try await node.runOnTerminal(["approve", "--only", "config"])
-        // Plain (2026-11-25): what changed and whom it holds, one line for the batch, a receipt line per card.
-        #expect(approved.status == 0 && approved.output.contains("1. ") && approved.output.contains("~/.claude/settings.json: env added") && approved.output.contains("holds every project")
+        // Plain (2026-11-25): a line a card (whose, what it names), one line for the batch, a receipt line per card.
+        #expect(approved.status == 0 && approved.output.contains("1. your home folder's config: ") && approved.output.contains("~/.claude/settings.json: env added")
                 && approved.output.contains("One code accepts it") && !approved.output.contains("hash ")
-                && approved.output.split(whereSeparator: \.isNewline).contains { $0.hasPrefix("accepted: ") && $0.hasSuffix("~/.claude/settings.json: env added; it holds no project now") }
+                && approved.output.split(whereSeparator: \.isNewline).contains { $0.hasPrefix("accepted: your home folder's config, ") }
                 && approved.output.contains("all 1 done"), "\(approved.output)\(approved.errors)\n\(node.said)")
         // Nothing left, and every accepted request (the batch's, its item's) is in the journal.
         let again = try await node.runOnTerminal(["approve", "--only", "config"])

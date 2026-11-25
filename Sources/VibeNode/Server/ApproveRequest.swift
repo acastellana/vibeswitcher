@@ -128,7 +128,7 @@ extension Requests {
                             if pending?.isEmpty == true {
                                 items.append(ApproveItem(kind: "config.accept", args: ["card": .string(id), "batch": .bool(true)], subject: root, card: card))
                             } else {
-                                own.append(ApproveOwn(text: "held config in \(root), with guard rails or a review floor to record",
+                                own.append(ApproveOwn(text: "held config in \(root), with rules to record (a first accept, or workflow.md changed them)",
                                                       command: "vibeswitcher config held \(root)"))
                             }
                             configs(Array(left.dropFirst()), then: then)
@@ -146,7 +146,7 @@ extension Requests {
                             if [.recorded, .given].contains(shown.fromIs), let from = shown.from, from != shown.to {
                                 items.append(ApproveItem(kind: "base.accept", args: ["card": .string(card.id)], subject: root, card: card.value))
                             } else if shown.from != shown.to {
-                                own.append(ApproveOwn(text: "the base of \(root) moved from a head the vault can't vouch for (\(shown.fromIs.rawValue))",
+                                own.append(ApproveOwn(text: "the base of \(root) moved from a commit the node can't confirm (\(shown.fromIs.rawValue))",
                                                       command: "vibeswitcher base show \(root)"))
                             }
                         }
