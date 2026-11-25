@@ -1007,6 +1007,8 @@ kbd { padding: 1px 6px; border-radius: 5px; box-shadow: inset 0 0 0 1px var(--li
 /* The team strip wraps to a second line where it doesn't fit (1024, a phone), never cut or scrolled out of sight. */
 .team-strip { flex-wrap: wrap; row-gap: 4px; overflow-x: visible; white-space: normal; }
 .team-strip > * { white-space: nowrap; }
+/* A phone's own parts of the header and the strip (the 760 px block at the columns' end shows them): hidden wider. */
+.head-count, .dial-fold, .strip-fold { display: none; }
 
 /* The lead conversation */
 .talk { flex: 1; min-height: 0; overflow-y: auto; padding: 18px 24px 28px; }
@@ -1095,6 +1097,9 @@ kbd { padding: 1px 6px; border-radius: 5px; box-shadow: inset 0 0 0 1px var(--li
 .quiet-lines .copy-text { white-space: normal; overflow-wrap: anywhere; }
 /* A question the lead withdrew: a muted line under it says so and why, so it never looks unanswered. */
 .withdrawn-note { margin: -4px 0 2px 27px; color: var(--ink-3); font-size: var(--small); font-style: italic; overflow-wrap: anywhere; }
+/* The conversation and the waiting block share a box that is no box wider (each scrolls in itself) and the one scroll
+   on a phone (the 760 px block at the columns' end). */
+.centre-scroll { display: contents; }
 
 /* A task: five steps in its colour, and its details in place */
 .steps { display: flex; gap: 3px; width: 62px; margin-top: 6px; }
@@ -1290,6 +1295,66 @@ kbd { padding: 1px 6px; border-radius: 5px; box-shadow: inset 0 0 0 1px var(--li
   /* A banner over the header takes the screen's top inset; the header under it doesn't take it twice. */
   .centre-wrap > .offline { padding-top: calc(7px + env(safe-area-inset-top)); }
   .centre-wrap:has(> .offline:not([hidden])) :is(.centre-head, .head, .tc-head, .tc-dhead) { padding-top: 8px; }
+}
+
+/* ---- A phone: the lead view (views/project.js). The header one row (the menu, the project's name, what needs you as a
+   count, the team), Lead | Roadmap and the dial folded behind one button in a row under it; the team strip one line of
+   whole counts that opens; one scroll, what waits first and open, the conversation under it; the message box pinned
+   above the screen's foot, one row. With the keyboard up (app.js's `keyboard`) only the header, the scroll and the box. */
+@media (max-width: 760px) {
+  .project-view .centre-head {
+    position: relative; display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto; align-items: center; gap: 4px 6px;
+    padding: calc(4px + env(safe-area-inset-top)) 6px 8px 4px;
+  }
+  .project-view .centre-head > :first-child { grid-row: 1; grid-column: 1; }
+  .project-view .centre-head .big { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+  .project-view .centre-head .pname { grid-row: 1; grid-column: 2; color: var(--ink); font-size: var(--large); font-weight: 700; }
+  .project-view .centre-head .pname.squeezed { display: block; }
+  .project-view .head-count:not([hidden]) {
+    grid-row: 1; grid-column: 3; justify-self: end; display: inline-flex; align-items: center; justify-content: center; min-width: 24px; height: 24px; padding: 0 7px;
+    border-radius: 12px; background: var(--asked); color: var(--on-status); font-size: 13px; font-weight: 700; font-variant-numeric: tabular-nums;
+  }
+  .project-view .centre-head .team-button { grid-row: 1; grid-column: 4; justify-self: end; }
+  .project-view .centre-head .grow { display: none; }
+  .project-view .centre-head > .switch:not(.dial) { grid-row: 2; grid-column: 1 / 3; justify-self: start; width: auto; margin-left: 8px; padding: 2px; border-radius: 99px; font-size: 13px; }
+  .project-view .centre-head > .switch:not(.dial) .switch-link { flex: none; padding: 0 14px; border-radius: 99px; white-space: nowrap; }
+  .project-view .dial-fold:not([hidden]) {
+    grid-row: 2; grid-column: 3 / 5; justify-self: end; display: inline-flex; align-items: center; gap: 6px; min-height: 44px; padding: 0 12px 0 14px;
+    border-radius: 99px; background: var(--fill-2); color: var(--ink); font-size: 13px; font-weight: 500; white-space: nowrap;
+  }
+  .dial-fold small { color: var(--ink-2); font-size: 13px; font-variant-numeric: tabular-nums; }
+  .dial-fold .icon { color: var(--ink-2); transform: rotate(90deg); transition: transform 0.16s var(--ease); }
+  .dial-fold[aria-expanded="true"] .icon { transform: rotate(-90deg); }
+  .project-view .centre-head > .dial {
+    position: absolute; top: calc(100% - 2px); right: 6px; z-index: 6; display: none; flex-direction: column; gap: 2px; width: max-content;
+    min-width: 230px; max-width: calc(100% - 12px); padding: 6px; border-radius: 14px; background: var(--raised);
+    box-shadow: 0 0 0 1px var(--line), 0 12px 30px var(--shadow); font-size: var(--text);
+  }
+  .project-view .centre-head > .dial.open:not([hidden]) { display: flex; }
+  .project-view .centre-head > .dial .switch-link { display: flex; align-items: center; justify-content: space-between; gap: 16px; min-height: 44px; padding: 0 12px; border-radius: 10px; text-align: left; white-space: nowrap; }
+  .project-view .centre-head > .dial .switch-link[aria-current] { background: var(--accent-fill); box-shadow: none; }
+  .project-view .team-strip { position: relative; flex-wrap: wrap; align-content: flex-start; gap: 0 14px; max-height: 44px; padding: 0 44px 0 14px; overflow: hidden; cursor: pointer; }
+  .project-view .team-strip > :not(.strip-fold) { display: inline-flex; align-items: center; height: 44px; }
+  .project-view .team-strip.open { max-height: none; padding-bottom: 8px; }
+  .project-view .team-strip.open > :not(.strip-fold) { height: 30px; }
+  .project-view .strip-fold:not([hidden]) { position: absolute; top: 0; right: 0; display: inline-flex; align-items: center; justify-content: center; width: 44px; height: 44px; color: var(--ink-2); }
+  .strip-fold .icon { transform: rotate(90deg); transition: transform 0.16s var(--ease); }
+  .team-strip.open .strip-fold .icon { transform: rotate(-90deg); }
+  .project-view .centre-scroll { flex: 1; display: flex; flex-direction: column; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+  .project-view .centre-scroll > .talk { flex: 1 0 auto; display: flex; flex-direction: column; min-height: auto; overflow: visible; padding: 12px 14px 16px; }
+  .project-view .centre-scroll .col { flex: 1 0 auto; width: 100%; min-height: 0; }
+  .project-view .centre-scroll > .wait-box { order: -1; flex: none; max-height: none; overflow: visible; padding: 0 14px 14px; border-top: 0; border-bottom: 1px solid var(--line); }
+  .project-view.show-asks .centre-scroll > .wait-box { flex: 1 0 auto; border-bottom: 0; }
+  .project-view .composer-lead { flex-wrap: nowrap; gap: 8px; padding: 8px 12px calc(8px + env(safe-area-inset-bottom)); }
+  .project-view .composer-lead:has(> .to.no-lead) { flex-wrap: wrap; }
+  .project-view .composer-lead > .to:not(.no-lead) { display: none; }
+  /* The notifications' offer: one row, its question in two short lines at most beside its two answers. */
+  .centre-wrap > .offline.offer { flex-wrap: nowrap; justify-content: flex-start; gap: 4px; min-height: 44px; padding: 0 4px 0 14px; }
+  .centre-wrap > .offline.offer > span { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; line-height: 1.3; }
+  .centre-wrap > .offline.offer button { padding: 2px 8px; }
+  /* The keyboard up: the header, what scrolls and the box; the rows that choose what shows wait for it to go down. */
+  .app.keyboard { height: var(--vv-height, 100dvh); transform: translateY(var(--vv-top, 0px)); }
+  .app.keyboard .project-view :is(.team-strip, .dial-fold, .centre-head > .switch), .app.keyboard .centre-wrap > .offer { display: none; }
 }
 
 /* Acting from the page: a request's button, what the node said under it, and whether this page acts */

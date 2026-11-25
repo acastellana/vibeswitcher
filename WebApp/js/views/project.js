@@ -67,10 +67,40 @@ export function projectView(app, { sheet }) {
     return { level, count, el: h('a', { class: 'switch-link' }, t({ asks: 'dialAsks', decisions: 'dialDecisions', all: 'dialAll' }[level]), count) };
   });
   const dial = h('nav', { class: 'switch dial', 'aria-label': t('dialLabel') }, dialLinks.map((link) => link.el));
+  // On a phone (style.css's 760 px) the header is one row (the menu, the project's name, what needs you as a count, the
+  // team), with Lead | Roadmap under it and the dial folded behind one button there: the level shown and its count,
+  // opening the same three links as a menu. Wider, neither the count nor the fold shows and the dial stays as it is.
+  const phoneQuery = globalThis.matchMedia?.('(max-width: 760px)');
+  const phone = () => !!phoneQuery?.matches;
+  const count = h('span', { class: 'head-count', hidden: true, 'aria-hidden': 'true' });
+  const foldWords = h('span');
+  const foldCount = h('small');
+  const dialFold = h('button', { class: 'dial-fold', type: 'button', 'aria-haspopup': 'true', 'aria-expanded': 'false', onclick: () => foldDial(!dialOpen) },
+    foldWords, foldCount, icon('chevron', 12));
+  let dialOpen = false;
+  function foldDial(open) {
+    dialOpen = open;
+    setClass(dial, 'open', open);
+    dialFold.setAttribute('aria-expanded', String(open));
+    if (open) dial.querySelector('[aria-current]')?.focus({ preventScroll: true });
+  }
+  // A link chosen, Esc, or a touch outside it closes it.
+  dial.addEventListener('click', (event) => { if (dialOpen && event.target.closest?.('a')) foldDial(false); });
+  dial.addEventListener('keydown', (event) => { if (dialOpen && event.key === 'Escape') { event.stopPropagation(); foldDial(false); dialFold.focus(); } });
+  globalThis.document?.addEventListener?.('click', (event) => { if (dialOpen && !dial.contains(event.target) && !dialFold.contains(event.target)) foldDial(false); });
   const menuButton = h('button', { class: 'icon-button phone-only', type: 'button', 'aria-label': t('menu'), onclick: () => app.drawer('left') }, icon('menu', 16));
   const teamButton = h('button', { class: 'icon-button phone-only team-button', type: 'button', 'aria-label': t('showTeam'), onclick: () => app.drawer('right') }, icon('team', 16));
-  const head = h('header', { class: 'centre-head' }, menuButton, h('div', { class: 'head-words' }, big, name), switcher, h('span', { class: 'grow' }), dial, teamButton);
+  const head = h('header', { class: 'centre-head' }, menuButton, h('div', { class: 'head-words' }, big, name), count, switcher, h('span', { class: 'grow' }), dialFold, dial, teamButton);
   const strip = h('div', { class: 'team-strip' });
+  // On a phone the team strip is one line, whole counts only, that opens to all of them at a touch.
+  const stripFold = h('button', { class: 'strip-fold', type: 'button', 'aria-expanded': 'false', 'aria-label': t('stripAll') }, icon('chevron', 12));
+  let stripOpen = false;
+  strip.addEventListener('click', () => {
+    if (!phone() || stripFold.hidden) return;
+    stripOpen = !stripOpen;
+    setClass(strip, 'open', stripOpen);
+    stripFold.setAttribute('aria-expanded', String(stripOpen));
+  });
   const col = h('div', { class: 'col' });
   const talk = h('div', { class: 'talk' }, col);
   // What waits on the user, at the bottom above the message box: never more than about 60% of the centre's height
@@ -97,7 +127,11 @@ export function projectView(app, { sheet }) {
     h('h2', { class: 'quiet-title' }, t('quietProject')), quietWords, quietLines, h('p', { class: 'confirm-note' }, t('quietNote'), ' ', quietForm));
   let quietDrawn = '';
   const gone = h('div', { class: 'empty-state', hidden: true }, h('h2', null, t('goneProject')), h('p', null, t('goneProjectSub')), h('a', { class: 'button quiet', href: '#/' }, t('seStartPage')));
-  const el = h('section', { class: 'centre project-view', 'aria-label': t('lead') }, head, strip, quiet, talk, waitBox, composer, gone);
+  // The conversation and what waits on the user: two panes wide (the waiting block under the conversation, scrolling
+  // in itself), one scroll on a phone (what waits first, the conversation under it): style.css's `.centre-scroll`.
+  const scroller = h('div', { class: 'centre-scroll' }, talk, waitBox);
+  const scrollBox = () => (phone() ? scroller : talk);
+  const el = h('section', { class: 'centre project-view', 'aria-label': t('lead') }, head, strip, quiet, scroller, composer, gone);
   // The project's name beside "N things need you" shrinks to an ellipsis; squeezed to a mark, it goes (the right
   // column's head names the project).
   const fitName = () => {
@@ -192,7 +226,8 @@ export function projectView(app, { sheet }) {
     }
     drawn = '';
     render();
-    talk.scrollTop = talk.scrollHeight;
+    const box = scrollBox();
+    box.scrollTop = box.scrollHeight;
   }
 
   // An answer's state under its pill, as the node says it (`delivered`): read by the lead, or not yet, when it can be
@@ -307,6 +342,9 @@ export function projectView(app, { sheet }) {
       if (link.level === route.show) link.el.setAttribute('aria-current', 'true'); else link.el.removeAttribute('aria-current');
       setText(link.count, String(counts[link.level]));
     }
+    setText(foldWords, t({ asks: 'dialAsks', decisions: 'dialDecisionsShort', all: 'dialAll' }[route.show] || 'dialDecisionsShort'));
+    setText(foldCount, String(counts[route.show] ?? ''));
+    dialFold.setAttribute('aria-label', `${t('dialLabel')}: ${t({ asks: 'dialAsks', decisions: 'dialDecisions', all: 'dialAll' }[route.show] || 'dialDecisions')}`);
     const stack = stackOf(route.id);
     stack.update();
     const extra = cards.filter((card) => !['question', 'approval'].includes(card.kind));
@@ -315,7 +353,8 @@ export function projectView(app, { sheet }) {
     const key = JSON.stringify([route.id, route.show, lines.map((line) => [line.key, line.answer, line.state, line.delivered, line.replaceable]), extra.map((card) => [card.id, card.seen]), mine, waiting, lang(), store.acts(),
       lead?.told || null, [...changing], pushes, stack.el.hidden]);
     if (key === drawn) return;
-    const atEnd = talk.scrollHeight - talk.scrollTop - talk.clientHeight < 40;
+    const box = scrollBox();
+    const atEnd = box.scrollHeight - box.scrollTop - box.clientHeight < 40;
     drawn = key;
     const asks = route.show === 'asks';
     setClass(el, 'show-asks', asks);
@@ -357,7 +396,9 @@ export function projectView(app, { sheet }) {
     const changedView = lastProject !== route.id || lastLevel !== route.show;
     lastProject = route.id;
     lastLevel = route.show;
-    if (changedView || atEnd) requestAnimationFrame(() => { talk.scrollTop = talk.scrollHeight; });
+    // Opened on a phone with something waiting: its top, where the waiting comes first; else the conversation's end.
+    const top = changedView && phone() && waitShown && !asks;
+    if (changedView || atEnd) requestAnimationFrame(() => { box.scrollTop = top ? 0 : box.scrollHeight; });
   }
 
   // The date column: the landing as the node says it, its range under it, and where it comes from on hover and focus
@@ -476,6 +517,7 @@ export function projectView(app, { sheet }) {
     col.replaceChildren(...children);
     setClass(col, 'dated', !!axis);
     talk.scrollTop = 0;
+    scroller.scrollTop = 0;
   }
 
   function drawRoadmap(route, board) {
@@ -507,6 +549,7 @@ export function projectView(app, { sheet }) {
     col.replaceChildren(...children);
     setClass(col, 'dated', !!axis);
     talk.scrollTop = 0;
+    scroller.scrollTop = 0;
   }
 
   // The queue's band says when its last dated task lands ("all by …").
@@ -563,6 +606,8 @@ export function projectView(app, { sheet }) {
     const waiting = waitingCount(state, route.id);
     setText(big, waiting ? t('thingsHereNeedYou', { n: waiting }) : t('nothingHereNeedsYou'));
     setClass(big, 'asked', waiting > 0);
+    setText(count, String(waiting));
+    count.hidden = !waiting;
     setText(name, lastPart(root));
     fitName();
     name.title = tilde(root, state.node?.home);
@@ -570,11 +615,17 @@ export function projectView(app, { sheet }) {
     roadLink.setAttribute('href', projectHref(route.id, { view: 'roadmap' }));
     if (route.view === 'roadmap') { roadLink.setAttribute('aria-current', 'page'); leadLink.removeAttribute('aria-current'); } else { leadLink.setAttribute('aria-current', 'page'); roadLink.removeAttribute('aria-current'); }
     dial.hidden = route.view !== 'lead';
+    dialFold.hidden = dial.hidden;
+    if (dial.hidden && dialOpen) foldDial(false);
     composer.hidden = route.view !== 'lead';
     waitBox.hidden = route.view !== 'lead' || !waitShown;
-    strip.replaceChildren(h('b', null, t('team')), ...stripCounts(board));
+    strip.replaceChildren(h('b', null, t('team')), ...stripCounts(board), stripFold);
+    // Its fold only where a count is past the first line (or it is open).
+    stripFold.hidden = !stripOpen && !(phone() && strip.scrollHeight > strip.clientHeight + 1);
     const live = !!lead?.session && state.sessions.has(lead.session);
     setText(toWho, lead?.root ? t('toLead', { p: lastPart(root) }) : t('noLeadToTell'));
+    // On a phone the header names the project: the line over the box shows only when there is no lead to tell.
+    setClass(toWho, 'no-lead', !lead?.root);
     input.disabled = !lead?.root;
     // The buttons only where the page sends: next step with `tell`; now with `send` to a live lead session.
     sender.el.hidden = !lead?.root || (!actsFor(app, 'tell') && !sendsTo(lead));

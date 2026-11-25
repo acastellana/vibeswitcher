@@ -27,6 +27,7 @@ import { wantsSearch } from './js/views/twocol.js';
 import { notifications } from './js/notify.js';
 import { recentFolders, newEntries, endable, leadFolders } from './js/actions.js';
 import { briefFoot, speech, speak } from './js/brief.js';
+import { followKeyboard } from './js/viewport.js';
 const params = new URLSearchParams(location.search);
 const store = createStore();
 const ui = createUI();
@@ -230,6 +231,9 @@ const root = document.getElementById('app');
 const commandPalette = palette(app);
 const scrim = h('div', { class: 'drawer-scrim', onclick: () => app.drawer(null) });
 root.replaceChildren(left.el, centre, right.el, scrim, sheet.scrim, sheet.el, commandPalette.el, confirming, passkeyPill);
+// A phone's keyboard: the page keeps to what is visible above it, the box being typed in in sight (js/viewport.js).
+const phoneWidth = typeof matchMedia === 'function' ? matchMedia('(max-width: 760px)') : { matches: false };
+followKeyboard({ root, phone: () => phoneWidth.matches });
 
 // `#/` opens the project with the most waiting on you, else the most active one, else Your own sessions; it takes
 // the address's place (no history entry), so back doesn't land on it again.
