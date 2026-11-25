@@ -4601,3 +4601,5 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-25 21:41 Kept v2-on-the-mac-4 unmerged: By design nothing of it merges into main: its 20 commits are on the local branch v2-mac-checked-start in its clone (.vibeswitcher/v2-start), fix round done (tip 1b6b67f9), awaiting the reviewer's re-check and then delivery as a branch for v2 at the user's say. No merge and no cleanup until then (decision 2026-11-25 16:27).
 - 2026-11-25 21:44 Planned re-check-v2-s: Re-check v2's checked Mac node start after its fix round (branch v2-mac-checked-start, 8 commits): report only
 - 2026-11-25 21:44 Started a worker on re-check-v2-s
+- 2026-11-25 21:56 Planned v2-every-step-that: v2: every step that sends the user to a terminal, listed with what replaces it by a click (a doc branch for v2, in a clone)
+- 2026-11-25 21:57 Started a worker on v2-every-step-that

@@ -439,3 +439,7 @@ Without a secure context the phone can have neither push with the page closed no
 
 Nothing telling the user anything once the page is closed is gap 2 of the v1-against-v2 list; v1 already pushes through the same vendors with content.
 
+## 2026-11-25 21:56:27 v2 direction from the user (2026-11-25): having to go to a terminal is bad UX. In v2 nothing the user does day to day needs a terminal: every action the page shows as a `vibeswitcher …` line to paste becomes a button on the page, on the desktop and on the phone, authorised by the device's key (Touch ID on the Mac, a passkey elsewhere), not by a typed code in a shell. The command line stays as a second way in, never the only one. The terminal may be needed at most once, for the install and the first pairing, and the lead looks for a way to drop that too. The lead inventories every terminal-only step (task v2-every-step) and turns it into tasks: page-only ones built by this Mac's team, node-side ones written up for the Linux side.
+
+The user's words: "in general i think having to go to the terminal is a shit UX". The v1-against-v2 list ranks 'the page acts only after terminal steps, and the phone never acts' among the gaps that stop daily use; v1 needs no terminal for any of it. This extends the same day's answers (page input into every session with a device key, HTTPS for the phone, push).
+
