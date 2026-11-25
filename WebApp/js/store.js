@@ -31,6 +31,8 @@ import { parts as imageParts } from './composing.js';
 import { assert as passkeyAssert } from './passkey.js';
 
 const KEYS = { sessions: 'id', cards: 'id', leads: 'project', boards: 'project' };
+// How long a session's answered question is shown closed while the node's value still shows it.
+export const REPLIED_MS = 8000;
 const COLLECTIONS = Object.keys(KEYS);
 
 // `options.credentials`: the browser's WebAuthn (navigator.credentials), asked for a passkey at the `confirm` level.
@@ -96,9 +98,10 @@ export function createStore(options = {}) {
     // refused the last one.
     sessionDrafts: new Map(),
     sessionDraftRefused: new Map(),
-    // A session's question this page answered, by session id: the question's identity (`promptKey`). While the node's
-    // value still shows that question (its screen not read again yet), the session is shown working, the question
-    // closed; another question, or none, ends it.
+    // A session's question this page answered, by session id: { key (the question's identity, `promptKey`), value (the
+    // node's own value, kept) }. For a few seconds (REPLIED_MS) while the node's value still shows that question (its
+    // screen not read again yet), the session is shown working, the question closed; another question, none, a
+    // snapshot, or those seconds over end it: a question still open then shows again (it fails closed).
     replied: new Map(),
   };
 
@@ -179,12 +182,14 @@ export function createStore(options = {}) {
   function replied(session) {
     const answered = session && state.replied.get(session.id);
     if (!answered) return session;
-    if (!session.prompt || promptKey(session.prompt) !== answered) {
+    if (!session.prompt || promptKey(session.prompt) !== answered.key) {
       state.replied.delete(session.id);
       return session;
     }
+    answered.value = session;
     return { ...session, prompt: null, status: session.status === 'needs-you' ? 'working' : session.status };
   }
+  const later = options.later || ((fn, ms) => { const timer = setTimeout(fn, ms); return () => clearTimeout(timer); });
 
   function applyChange(change, touched) {
     if (change.in === 'node') {
@@ -247,7 +252,8 @@ export function createStore(options = {}) {
         for (const id of state.drafts.keys()) if (!next.get(id)?.open) state.drafts.delete(id);
         for (const id of state.draftRefused.keys()) if (!next.has(id)) state.draftRefused.delete(id);
       } else {
-        for (const entry of list) next.set(entry[key], name === 'sessions' ? replied(entry) : entry);
+        if (name === 'sessions') state.replied.clear();
+        for (const entry of list) next.set(entry[key], entry);
       }
       state[name] = next;
       touch(touched, name, { type: 'reset' });
@@ -272,10 +278,11 @@ export function createStore(options = {}) {
       state.seq = message.seq;
       state.node = message.state.node || null;
       for (const name of COLLECTIONS) {
-        state[name] = new Map((message.state[name] || []).map((entry) => [entry[KEYS[name]], name === 'sessions' ? replied(entry) : entry]));
+        state[name] = new Map((message.state[name] || []).map((entry) => [entry[KEYS[name]], entry]));
         touch(touched, name, { type: 'reset' });
       }
       state.acting.clear();
+      state.replied.clear();
       touch(touched, 'node', { type: 'reset' });
       // A chat subscription doesn't outlive the server that took it: each is asked for again.
       if (restarted) {
@@ -594,8 +601,17 @@ export function createStore(options = {}) {
     sessionReplied(id, key) {
       const session = state.sessions.get(id);
       if (!session?.prompt || promptKey(session.prompt) !== key) return;
-      state.replied.set(id, key);
+      const answered = { key, value: session };
+      state.replied.set(id, answered);
       state.sessions.set(id, replied(session));
+      // Those seconds over and the node still showing that question: it shows again, as the node says it is.
+      later(() => {
+        if (state.replied.get(id) !== answered) return;
+        state.replied.delete(id);
+        if (!state.sessions.has(id)) return;
+        state.sessions.set(id, answered.value);
+        emit(new Map([['sessions', [{ in: 'sessions', id, value: answered.value }]]]));
+      }, REPLIED_MS);
       emit(new Map([['sessions', [{ in: 'sessions', id, value: state.sessions.get(id) }]]]));
     },
     setConnection: (connection) => setConnection(connection),

@@ -9,7 +9,7 @@ import { installDom, find, findAll, byClass, button } from './fakedom.mjs';
 
 installDom();
 const { setLanguage } = await import('../js/i18n.js');
-const { createStore } = await import('../js/store.js');
+const { createStore, REPLIED_MS } = await import('../js/store.js');
 const { promptCard, newSessionForm, newLeadForm, newProjectForm } = await import('../js/views/drive.js');
 const { UNDO_MS } = await import('../js/views/cards.js');
 const { createMock } = await import('../js/mock.js');
@@ -27,7 +27,9 @@ const asking = (fields = {}) => ({ id: SID, terminal: 'pts/7', agent: 'claude', 
 // The real store over a feed that records each request and answers it with `replies[kind](args)` (a promise or a
 // value); `later` the tests' clock: `fire()` runs what waits on it.
 function rig({ kinds = ['session.reply', 'session.new', 'session.presets', 'lead'], rights = ['read', 'draft', 'watch', 'act'], replies = {}, sessions = [asking()] } = {}) {
-  const store = createStore();
+  const waiting = [];
+  const later = (fn, ms) => { const timer = { fn, ms, on: true }; waiting.push(timer); return () => { timer.on = false; }; };
+  const store = createStore({ later });
   const sent = [];
   store.connect({
     request(message) {
@@ -41,12 +43,11 @@ function rig({ kinds = ['session.reply', 'session.new', 'session.presets', 'lead
   store.setKinds(kinds, null, rights);
   store.reconcile('sessions', sessions);
   store.reconcile('leads', []);
-  const waiting = [];
   const went = [];
   const app = {
     store,
     ui: { state: { route: { name: 'sessions' } }, go(hash) { went.push(hash); }, subscribe() {} },
-    later(fn, ms) { const timer = { fn, ms, on: true }; waiting.push(timer); return () => { timer.on = false; }; },
+    later,
   };
   const fire = () => { for (const timer of waiting.splice(0)) if (timer.on) timer.fn(); };
   return { store, app, sent, went, waiting, fire };
@@ -89,6 +90,44 @@ test('U1: a click on a choice waits as a Blocking answer does, Undo shown, then 
   assert.equal(r.store.state.sessions.get(SID).status, 'needs-you', 'another question needs you again');
   assert.match(view.el.shownText, /Do you want to make this edit\?/);
   assert.doesNotMatch(view.el.shownText, /You answered/);
+});
+
+test('U1: answered, but the node still shows that question once its seconds are over: it shows again, needing you, and says the answer may not have gone in', async () => {
+  setLanguage('en');
+  const r = rig();
+  const view = card(r);
+  optionButton(view.el, 'Yes').click();
+  r.fire();
+  await flush();
+  assert.equal(r.store.state.sessions.get(SID).status, 'working');
+  assert.deepEqual(r.waiting.filter((timer) => timer.on).map((timer) => timer.ms), [REPLIED_MS], 'the store hides it only for its seconds');
+  r.fire();
+  assert.equal(r.store.state.sessions.get(SID).status, 'needs-you', 'fails closed: the node’s value again');
+  assert.match(view.el.shownText, /It still asks: your answer may not have gone in/);
+  assert.ok(optionButton(view.el, 'Yes'), 'the choices back');
+  // A snapshot (a reconnect) shows what the node says, never this page's hiding.
+  const again = rig();
+  const other = card(again);
+  optionButton(other.el, 'Yes').click();
+  again.fire();
+  await flush();
+  again.store.reconcile('sessions', [asking()]);
+  assert.equal(again.store.state.sessions.get(SID).status, 'needs-you');
+});
+
+test('U1: Undo then another choice: only the second goes, after its own seconds', () => {
+  setLanguage('en');
+  const r = rig();
+  const view = card(r);
+  optionButton(view.el, 'Yes').click();
+  const first = r.waiting.at(-1);
+  find(view.el, button('Undo')).click();
+  optionButton(view.el, 'don’t ask again').click();
+  first.fn();
+  assert.equal(r.sent.length, 0, 'the undone timer sends nothing, even if its cancel didn’t hold');
+  r.fire();
+  assert.equal(r.sent.length, 1);
+  assert.equal(r.sent[0].args.choice, 2);
 });
 
 test('U1: Undo takes it back, and nothing is sent', () => {
@@ -213,8 +252,22 @@ test('U12: Start starts the session from the page, “Starting…” while it go
   await flush();
   assert.match(form.el.shownText, /Started: it opens here as soon as the node lists it/);
   assert.deepEqual(r.went, [], 'not before the node lists it');
+  assert.equal(start.disabled, true, 'started: no second start from this button');
   r.store.change('sessions', [{ id: NEW, value: asking({ id: NEW, prompt: null, status: 'working' }) }]);
   assert.deepEqual(r.went, ['#/s/' + encodeURIComponent(NEW)]);
+});
+
+test('U12: a start that the node lists only after the user went elsewhere doesn’t pull them back', async () => {
+  setLanguage('en');
+  const NEW = 'local:0badc0de-4f6a-4c1e-9b7d-2e5a8c0d1f3b';
+  const r = rig({ sessions: [], replies: { 'session.new': () => ({ ok: true, result: { session: NEW, terminal: 'pts/30', agent: 'claude', folder: '/home/dev', model: null, preset: null } }) } });
+  const form = newSessionForm(r.app, { folder: () => '' });
+  typed(form, '/home/dev');
+  find(form.el, button('Start')).click();
+  await flush();
+  r.app.ui.state.route = { name: 'session', id: SID };
+  r.store.change('sessions', [{ id: NEW, value: asking({ id: NEW, prompt: null, status: 'working' }) }]);
+  assert.deepEqual(r.went, []);
 });
 
 test('U12: a preset the node listed goes with its digest; a refusal is said under the button', async () => {

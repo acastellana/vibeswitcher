@@ -164,9 +164,10 @@ export function promptCard(app) {
   function answer(session, index, text = null) {
     const prompt = session.prompt;
     if (!prompt || mine?.phase === 'waiting' || mine?.phase === 'sending') return;
-    mine = { phase: 'waiting', session: session.id, key: promptKey(prompt), question: prompt.question, options: [...prompt.options], choice: index + 1,
+    const waiting = { phase: 'waiting', session: session.id, key: promptKey(prompt), question: prompt.question, options: [...prompt.options], choice: index + 1,
       option: prompt.options[index], text };
-    mine.cancel = later(() => go(mine), UNDO_MS);
+    mine = waiting;
+    waiting.cancel = later(() => go(waiting), UNDO_MS);
     draw(session);
   }
 
@@ -224,7 +225,7 @@ export function promptCard(app) {
       return closedCard(session, icon('send', 13), h('div', null, h('p', null, t('cSending', { x: mine.text ? `${mine.option}: ${mine.text}` : mine.option })),
         h('p', { class: 'card-about' }, mine.question.split('\n').at(-1))));
     }
-    if (mine?.phase === 'answered' && (!prompt || promptKey(prompt) === mine.key)) {
+    if (mine?.phase === 'answered' && !prompt) {
       el.classList.add('closed');
       el.classList.remove('sending');
       return closedCard(session, icon('check', 13), h('div', null, h('p', null, t('cYouAnswered'), said(mine.option, mine.text)),
@@ -265,6 +266,7 @@ export function promptCard(app) {
       }
       if (mine?.phase === 'refused' && mine.key === promptKey(prompt)) parts.push(h('p', { class: 'card-notice', role: 'alert' }, t('drReplyRefused', { why: mine.why })));
       if (mine?.phase === 'dropped') parts.push(h('p', { class: 'card-notice', role: 'status' }, t('drReplyChanged')));
+      if (mine?.phase === 'still' && mine.key === promptKey(prompt)) parts.push(h('p', { class: 'card-notice', role: 'alert' }, t('drReplyStillOpen')));
     } else {
       parts.push(h('div', { class: 'options' }, buttons));
       if (chosen !== null && takes.has(chosen)) {
@@ -300,6 +302,8 @@ export function promptCard(app) {
         mine.cancel?.();
         mine = { ...mine, phase: 'dropped', key: prompt ? promptKey(prompt) : null };
       }
+      // Answered, and the node still shows that question once the store stopped hiding it: it is still open; say so.
+      if (prompt && mine?.phase === 'answered' && promptKey(prompt) === mine.key) mine = { ...mine, phase: 'still' };
       // A new question: what was said of the last one goes.
       if (prompt && mine && mine.phase !== 'waiting' && mine.phase !== 'sending' && promptKey(prompt) !== mine.key) mine = null;
       const keeps = mine?.phase === 'sending' || mine?.phase === 'answered';
@@ -439,8 +443,14 @@ function startOrLine(app, { kind, label, args, line, lineLabel, terminalOnly, ta
     return [line ? copyLine(line, lineLabel) : null, h('p', { class: 'confirm-note start-why' }, app.store.acts() ? t(terminalOnly) : t('drStartPageReads'))].filter(Boolean);
   }
   let stop = () => {};
+  // Where the user was when it started: the page goes to what started only while they are still there.
+  const here = () => JSON.stringify(app.ui.state?.route ?? null);
+  let from = null;
   const button = doButton(app, { label, kind, args, className: 'start-button', busy: t('drStarting'), done: (reply) => {
     stop();
+    // Started: the button doesn't start a second one (the form drawn again for another folder or preset gives a new one).
+    button.button.disabled = true;
+    from = here();
     const said = note(reply.result || {});
     if (said) { button.say(said); return; }
     const wanted = target(reply.result || {});
@@ -453,11 +463,13 @@ function startOrLine(app, { kind, label, args, line, lineLabel, terminalOnly, ta
       return null;
     };
     if (!wanted.session && !wanted.lead) { button.say(t('drStartedNoName')); return; }
-    const here = place();
-    if (here) { app.ui.go(here); return; }
+    const now = place();
+    if (now) { app.ui.go(now); return; }
     button.say(t('drStartedWaiting'));
     const topic = wanted.lead ? 'leads' : 'sessions';
     const off = app.store.subscribe(topic, () => {
+      // The user went elsewhere meanwhile: nothing pulls them away; it stops listening.
+      if (here() !== from) { stop(); return; }
       const found = place();
       if (!found) return;
       stop();

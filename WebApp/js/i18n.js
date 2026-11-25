@@ -919,6 +919,7 @@ const EN = {
   drFolderDefault: "this folder’s default",
   // A session's question answered from the page, and starting a session or a lead from it (views/drive.js).
   drReplySend: "Send",
+  drReplyStillOpen: "It still asks: your answer may not have gone in. Answer again, or in its terminal.",
   drReplyRefused: "Not answered: {why}",
   drReplyChanged: "The question changed before your answer went: nothing was sent. Answer this one.",
   drReplyPageReads: "This page doesn’t act for you here, so it can’t answer: run the line in a terminal.",

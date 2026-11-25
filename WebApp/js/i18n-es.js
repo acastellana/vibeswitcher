@@ -908,6 +908,7 @@ export const ES = {
   drFolderDefault: "por defecto en esta carpeta",
   // La respuesta a la pregunta de una sesión desde la página, y arrancar una sesión o un líder desde ella (views/drive.js).
   drReplySend: "Enviar",
+  drReplyStillOpen: "Aún pregunta: puede que tu respuesta no entrara. Responde de nuevo, o en su terminal.",
   drReplyRefused: "No se respondió: {why}",
   drReplyChanged: "La pregunta cambió antes de que saliera tu respuesta: no se envió nada. Responde esta.",
   drReplyPageReads: "Aquí esta página no actúa por ti, así que no puede responder: ejecuta la línea en una terminal.",
