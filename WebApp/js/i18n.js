@@ -1199,6 +1199,17 @@ const EN = {
   drShellsClosed: { one: "Done: 1 shell closed.", other: "Done: {n} shells closed." },
   drShellsLeft: { one: "1 was left: it was running something again.", other: "{n} were left: they were running something again." },
   chSendingImage: "Sending…",
+  drSaving: "Saving…",
+  drRemoving: "Removing…",
+  drAddPreset: "Add it",
+  drSavePreset: "Save",
+  drRemovePreset: "Remove {name}",
+  drRemovePresetSure: "Click again to remove it",
+  drChangeSomethingToSave: "Change something, then Save.",
+  drPresetAdded: "Added {name}.",
+  drPresetSaved: "Saved {name}.",
+  drPresetRemoved: "Removed {name}.",
+  drPresetHeld: "The presets file changed, so it waits for your accept (its card shows what changed) before its presets start.",
   // END buttons
   // The two columns of Your own sessions, This node and Settings (views/twocol.js).
   tcBackToList: "Back to the list",

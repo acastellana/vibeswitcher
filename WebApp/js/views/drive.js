@@ -660,7 +660,7 @@ export function newSessionForm(app, { folder }) {
   const about = h('p', { class: 'confirm-note preset-about', hidden: true });
   const lineSlot = h('div', { class: 'prompt-line' });
   // Adding, changing and removing the folder's presets: the `vibeswitcher preset` line for each.
-  const editor = presetEditor({ folder: () => where() });
+  const editor = presetEditor({ folder: () => where(), app, saved: () => { asked = null; ask(); } });
   const editing = h('button', { class: 'confirm-clear preset-edit-toggle', type: 'button', 'aria-expanded': 'false', onclick: () => {
     const open = editor.el.hidden;
     editor.el.hidden = !open;
@@ -762,12 +762,52 @@ export function newSessionForm(app, { folder }) {
 // changes one: the `vibeswitcher preset` line it makes, after the checks the node makes too (`presetProblem`). The page
 // never sees a variable's value (the node sends their names only), so a change names only what it sets or takes off.
 // Returns { el, update(presets, force) }.
-export function presetEditor({ folder }) {
+// The `presets.edit` arguments for the form's change: what `presetLine` puts on the command line, as the node takes it
+// (an edit or a remove with the digest of the preset as listed, so the node changes it only while it is as shown).
+export function presetEditArgs(op, state, { folder = null, original = null } = {}) {
+  const name = String(state.name || '').trim();
+  const words = String(state.args || '').split(/\s+/).filter(Boolean).join(' ');
+  const env = Object.fromEntries((state.env || []).filter(([variable, value]) => variable && value));
+  const args = { op, name: original?.name || name, ...(folder ? { folder } : {}), ...(original ? { digest: original.digest } : {}) };
+  if (op === 'remove') return args;
+  if (op === 'add') {
+    Object.assign(args, { kind: state.kind === 'shell' ? 'shell' : 'claude' });
+    if (state.kind !== 'shell' && words) args.args = words;
+    if (state.keepShell) args.keepShell = true;
+  } else {
+    const kind = state.kind === 'shell' ? 'shell' : 'claude';
+    if (name && name !== original.name) args.rename = name;
+    if (kind !== original.kind) args.kind = kind;
+    if (kind === 'claude' && (words !== presetArgs(original) || kind !== original.kind)) args.args = words;
+    if (!!state.keepShell !== !!original.keepShell) args.keepShell = !!state.keepShell;
+    if ((state.unset || []).length) args.unset = [...state.unset];
+  }
+  if (Object.keys(env).length) args.env = env;
+  if (state.isDefault && folder) args.default = true;
+  return args;
+}
+
+// Where the page acts and the node lists `presets.edit`, Save and Remove do it from here (Remove asked twice); what the
+// node did is said under the list once the form closes, its refusal beside the button. `saved()`: the list asked again.
+export function presetEditor({ folder, app = null, saved = () => {} }) {
   const list = h('div', { class: 'preset-list' });
   const formSlot = h('div', { class: 'preset-form-slot' });
+  const said = h('p', { class: 'act-said receipt preset-said', role: 'status', hidden: true });
+  const acts = () => !!app && actsFor(app, 'presets.edit');
+  const note = h('p', { class: 'confirm-note' }, t('drAChangedPresetsFileWaits'));
   const el = h('div', { class: 'preset-editor', hidden: true },
-    h('p', { class: 'new-title' }, t('drYourPresets')), list, formSlot,
-    h('p', { class: 'confirm-note' }, t('drAChangedPresetsFileWaits')));
+    h('p', { class: 'new-title' }, t('drYourPresets')), list, said, formSlot, note);
+  // The button that saves or removes it from here; once the node did it, the form closes and what it did is said.
+  const doneWith = (op, label, args, confirm = null) => doButton(app, { label, kind: 'presets.edit', args, busy: op === 'remove' ? t('drRemoving') : t('drSaving'),
+    danger: op === 'remove', confirm, done: (reply) => {
+      const result = reply.result || {};
+      said.hidden = false;
+      setText(said, t(op === 'remove' ? 'drPresetRemoved' : op === 'add' ? 'drPresetAdded' : 'drPresetSaved', { name: result.name || args().name })
+        + (result.held ? ' ' + t('drPresetHeld') : ''));
+      open = null;
+      formSlot.replaceChildren();
+      saved();
+    } }).el;
   let drawn = '';
   // What the form edits: null (closed), { op: 'add' }, { op: 'edit', original } or { op: 'remove', original }.
   let open = null;
@@ -776,8 +816,10 @@ export function presetEditor({ folder }) {
     const where = folder();
     if (open.op === 'remove') {
       const scoped = open.original.project ? where : null;
-      return h('div', { class: 'preset-form' }, h('p', { class: 'confirm-note' }, t(scoped ? 'drRemovesHere' : 'drRemovesAll', { name: open.original.name })),
-        copyLine(presetLine('remove', { name: open.original.name }, { folder: scoped, original: open.original }), t('drTheCommandThatRemovesIt')));
+      const original = open.original;
+      return h('div', { class: 'preset-form' }, h('p', { class: 'confirm-note' }, t(scoped ? 'drRemovesHere' : 'drRemovesAll', { name: original.name })),
+        acts() ? doneWith('remove', t('drRemovePreset', { name: original.name }), () => presetEditArgs('remove', { name: original.name }, { folder: scoped, original }), t('drRemovePresetSure'))
+          : copyLine(presetLine('remove', { name: original.name }, { folder: scoped, original }), t('drTheCommandThatRemovesIt')));
     }
     const original = open.original || null;
     const state = {
@@ -826,9 +868,11 @@ export function presetEditor({ folder }) {
       const line = presetLine(open.op, state, { folder: scoped, original });
       // An edit that changes nothing yet: the line with no change in it.
       const unchanged = original && presetLine('edit', { name: original.name, kind: original.kind, args: presetArgs(original), keepShell: original.keepShell }, { folder: scoped, original });
-      lineSlot.replaceChildren(open.op === 'edit' && line === unchanged
-        ? h('p', { class: 'confirm-note' }, t('drChangeSomethingTheLineThat'))
-        : copyLine(line, open.op === 'add' ? 'the command that adds it' : 'the command that changes it'));
+      const op = open.op;
+      lineSlot.replaceChildren(op === 'edit' && line === unchanged
+        ? h('p', { class: 'confirm-note' }, acts() ? t('drChangeSomethingToSave') : t('drChangeSomethingTheLineThat'))
+        : acts() ? doneWith(op, op === 'add' ? t('drAddPreset') : t('drSavePreset'), () => presetEditArgs(op, state, { folder: scoped, original }))
+          : copyLine(line, op === 'add' ? 'the command that adds it' : 'the command that changes it'));
     }
 
     kinds.replaceChildren(...[['claude', 'Claude'], ['shell', 'Shell']].map(([kind, label]) => h('button', {

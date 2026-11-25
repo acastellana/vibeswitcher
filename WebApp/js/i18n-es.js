@@ -1188,6 +1188,17 @@ export const ES = {
   drShellsClosed: { one: "Hecho: 1 shell cerrado.", other: "Hecho: {n} shells cerrados." },
   drShellsLeft: { one: "1 se quedó: volvía a ejecutar algo.", other: "{n} se quedaron: volvían a ejecutar algo." },
   chSendingImage: "Enviando…",
+  drSaving: "Guardando…",
+  drRemoving: "Quitando…",
+  drAddPreset: "Añadirlo",
+  drSavePreset: "Guardar",
+  drRemovePreset: "Quitar {name}",
+  drRemovePresetSure: "Pulsa otra vez para quitarlo",
+  drChangeSomethingToSave: "Cambia algo y luego Guardar.",
+  drPresetAdded: "{name} añadido.",
+  drPresetSaved: "{name} guardado.",
+  drPresetRemoved: "{name} quitado.",
+  drPresetHeld: "El archivo de preajustes cambió, así que espera a que lo aceptes (su tarjeta muestra qué cambió) antes de que sus preajustes arranquen.",
   // END buttons
   // The two columns of Your own sessions, This node and Settings (views/twocol.js).
   tcBackToList: "Volver a la lista",

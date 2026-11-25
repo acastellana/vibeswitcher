@@ -592,14 +592,58 @@ const ago = (seconds) => new Date(now() - seconds * 1000).toISOString();
   }
 
   // The launch presets for a folder (`session.presets`): a project's own and its default first, then the built-ins.
+  // Yours (`presets.edit` changes them): each a folder's or every folder's, with the digest it is listed with.
+  let ownPresets = [
+    { name: 'Opus', kind: 'claude', command: 'claude --model opus', env: ['MAX_THINKING_TOKENS'], keepShell: false, project: true, default: true, builtIn: false, digest: 'mock-opus', refused: null },
+  ];
+  let presetEdits = 0;
   function presetsFor(folder) {
     const presets = [
-      { name: 'Opus', kind: 'claude', command: 'claude --model opus', env: ['MAX_THINKING_TOKENS'], keepShell: false, project: true, default: true, builtIn: false, digest: 'mock-opus', refused: null },
+      ...ownPresets,
       { name: 'Claude', kind: 'claude', command: 'claude', env: [], keepShell: false, project: false, default: false, builtIn: true, digest: 'mock-claude', refused: null },
       { name: 'Codex', kind: 'codex', command: 'codex', env: [], keepShell: false, project: false, default: false, builtIn: true, digest: 'mock-codex', refused: 'Codex doesn’t run on this node yet' },
       { name: 'Shell', kind: 'shell', command: '', env: [], keepShell: false, project: false, default: false, builtIn: true, digest: 'mock-shell', refused: null },
     ];
-    return folder ? presets : presets.slice(1);
+    return folder ? presets : presets.filter((one) => !one.project);
+  }
+
+  // A preset added, changed or removed (`presets.edit`, `PresetEdit`): checked as the node checks it, in its words.
+  function editPreset(args) {
+    const op = args.op;
+    if (!['add', 'edit', 'remove'].includes(op)) return badArgs('presets.edit’s op is add, edit or remove');
+    const name = typeof args.name === 'string' ? args.name : '';
+    if (!name) return badArgs('presets.edit needs name');
+    if (args.folder != null && !String(args.folder).startsWith('/')) return badArgs('presets.edit’s folder is an absolute path');
+    if (op !== 'add' && !args.digest) return badArgs(`presets.edit’s ${op} needs the digest of the preset shown`);
+    if (args.kind != null && !['claude', 'shell'].includes(args.kind)) return badArgs('a preset’s kind here is claude or shell');
+    if (args.default && !args.folder) return badArgs('a default is a folder’s: give the folder');
+    if (op === 'remove' && Object.keys(args).some((key) => !['op', 'name', 'folder', 'digest'].includes(key))) return badArgs('a remove takes only the name and folder');
+    const place = args.folder ? `for ${args.folder}` : 'for every folder';
+    const scoped = !!args.folder;
+    const found = ownPresets.find((one) => one.project === scoped && one.name.toLowerCase() === name.toLowerCase());
+    const builtIn = ['claude', 'codex', 'shell'].includes(name.toLowerCase());
+    if (op === 'add') {
+      if (name.startsWith('-') || name.trim() !== name) return refused('a preset’s name doesn’t start with - or a space');
+      if (found || builtIn) return refused(`there is a preset ${name} ${place} already: \`vibeswitcher preset edit\` changes it`);
+      const kind = args.kind || 'claude';
+      ownPresets.push({ name, kind, command: kind === 'shell' ? '' : ['claude', args.args].filter(Boolean).join(' '), env: Object.keys(args.env || {}).sort(),
+        keepShell: !!args.keepShell, project: scoped, default: !!args.default, builtIn: false, digest: `mock-${++presetEdits}`, refused: null });
+      return { ok: true, result: { op, name, folder: args.folder || null, env: Object.keys(args.env || {}).sort(), held: true } };
+    }
+    if (builtIn) return refused(`${name} is a built-in preset, which comes from VibeSwitcher itself and isn’t edited here`);
+    if (!found) return refused(`there is no preset ${name} of yours ${place} (\`vibeswitcher presets\` lists them)`);
+    if (found.digest !== args.digest) return refused(`preset ${name} changed since it was shown (or the node’s server restarted since): nothing changed; run the command again to see it as it is now`);
+    if (op === 'remove') {
+      ownPresets = ownPresets.filter((one) => one !== found);
+      return { ok: true, result: { op, name: found.name, folder: args.folder || null, env: null, held: true } };
+    }
+    const kind = args.kind || found.kind;
+    if (args.args != null && kind === 'shell') return refused('a shell preset takes no arguments');
+    for (const variable of args.unset || []) if (!found.env.includes(variable)) return refused(`preset ${found.name} sets no ${variable}`);
+    Object.assign(found, { name: args.rename || found.name, kind, command: kind === 'shell' ? '' : args.args != null ? ['claude', args.args].filter(Boolean).join(' ') : found.command,
+      env: [...new Set([...found.env.filter((one) => !(args.unset || []).includes(one)), ...Object.keys(args.env || {})])].sort(),
+      keepShell: args.keepShell ?? found.keepShell, default: args.default ?? found.default, digest: `mock-${++presetEdits}` });
+    return { ok: true, result: { op, name: found.name, folder: args.folder || null, env: found.env, held: true } };
   }
 
   // A session the host starts in `folder`: listed a moment after the reply that names it, as the host tells the node.
@@ -1043,6 +1087,7 @@ const ago = (seconds) => new Date(now() - seconds * 1000).toISOString();
       later(400, () => feed.restart());
       return { ok: true, result: { sessionsEnded: sessions.size, host: 'stopped' } };
     }
+    if (message.kind === 'presets.edit') return editPreset(args);
     // The node's shells in a folder (`shells`, `Requests.shells`): each with its terminal and whether it is finished.
     if (message.kind === 'shells') {
       const folder = typeof args.folder === 'string' ? args.folder.replace(/\/+$/, '') : null;
@@ -1083,7 +1128,7 @@ const ago = (seconds) => new Date(now() - seconds * 1000).toISOString();
   // `?older` lists none of the buttons' kinds either (BUTTONS: what an acting page sends a node in place of the lines
   // it showed before, docs/process/v2-no-terminal.md's table B and A5), so their lines can be seen.
   const STARTS = ['lead', 'session.new', 'session.reply', 'session.resume'];
-  const BUTTONS = ['shells', 'session.close-shells', 'update.check', 'web.revoke'];
+  const BUTTONS = ['shells', 'session.close-shells', 'presets.edit', 'update.check', 'web.revoke'];
   const KINDS = ['chat.page',
     'answer', 'answer.replace', 'tell', 'tell.retract', 'hold', 'send', 'session.draft', 'session.draft.clear', 'session.complete',
     'session.attach', 'session.usage', 'stats', 'session.ports', 'board.task', 'board.image', 'chat.image', 'session.presets', 'brief', 'recent',
@@ -1094,6 +1139,7 @@ const ago = (seconds) => new Date(now() - seconds * 1000).toISOString();
     'update.check': 'this server doesn’t check for updates (a scratch node asks GitHub nothing)',
     'web.revoke': 'the web tokens weren’t dropped: the token file couldn’t be written',
     'session.close-shells': 'none of them is a finished shell now (back at its prompt): nothing ended',
+    'presets.edit': 'presets.json has changes you haven’t accepted: review with `vibeswitcher config held`, then `config accept` (it changed since your accept); nothing changed',
   };
 
   // ---- The feed's interface (what the WebSocket feed will offer too) ----

@@ -389,3 +389,73 @@ test('B5: an image on the node, given by its path: Send sends it with the box’
   }
   setLanguage('en');
 });
+
+test('B6: Save, Add and Remove for your presets send presets.edit with the change the line carries; refused, the node’s words', async () => {
+  const { presetEditor } = await import('../js/views/drive.js');
+  const SITE = '/home/dev/projects/example-site';
+  const opus = { name: 'Opus', kind: 'claude', command: 'claude --model opus', env: ['MAX_THINKING_TOKENS'], keepShell: false, project: true, default: true, builtIn: false, digest: 'mock-opus', refused: null };
+  const presets = [opus, { name: 'Claude', kind: 'claude', builtIn: true, digest: 'mock-claude' }];
+  for (const code of ['es', 'en']) {
+    setLanguage(code);
+    let saved = 0;
+    let answer = () => ({ ok: true, result: { op: 'edit', name: 'Opus', folder: SITE, env: ['MAX_THINKING_TOKENS'], held: true } });
+    const app = fakeApp({ kinds: ['presets.edit'], reply: (kind, args) => answer(args) });
+    const editor = presetEditor({ folder: () => SITE, app, saved: () => { saved += 1; } });
+    editor.el.hidden = false;
+    editor.update(presets, true);
+    // Edit: the arguments changed, then Save.
+    buttonNamed(editor.el, t('drEdit')).click();
+    const args = findAll(editor.el, (node) => node.tag === 'input' && node.attrs['aria-label'] === t('drClaudeSArguments'))[0];
+    assert.doesNotMatch(editor.el.textContent, /vibeswitcher preset/, `${code}: no line where Save does it`);
+    args.value = '--model sonnet';
+    args.dispatch('input');
+    const save = buttonNamed(editor.el, t('drSavePreset'));
+    save.click();
+    assert.equal(save.textContent, t('drSaving'));
+    await flush();
+    assert.deepEqual(app.sent.at(-1), { kind: 'presets.edit', args: { op: 'edit', name: 'Opus', folder: SITE, digest: 'mock-opus', args: '--model sonnet' } });
+    assert.match(editor.el.textContent, new RegExp(t('drPresetSaved', { name: 'Opus' })));
+    assert.match(editor.el.textContent, new RegExp(t('drPresetHeld').slice(0, 20)));
+    assert.equal(saved, 1, 'the node’s list asked again');
+    // Remove: asked twice.
+    answer = () => ({ ok: true, result: { op: 'remove', name: 'Opus', folder: SITE, env: null, held: true } });
+    buttonNamed(editor.el, t('drRemove')).click();
+    const remove = buttonNamed(editor.el, t('drRemovePreset', { name: 'Opus' }));
+    remove.click();
+    assert.equal(remove.textContent, t('drRemovePresetSure'));
+    const before = app.sent.length;
+    remove.click();
+    await flush();
+    assert.equal(app.sent.length, before + 1);
+    assert.deepEqual(app.sent.at(-1), { kind: 'presets.edit', args: { op: 'remove', name: 'Opus', folder: SITE, digest: 'mock-opus' } });
+    assert.match(editor.el.textContent, new RegExp(t('drPresetRemoved', { name: 'Opus' })));
+    // Add: a name and its arguments, for this folder.
+    answer = () => ({ ok: true, result: { op: 'add', name: 'Fast', folder: SITE, env: [], held: true } });
+    buttonNamed(editor.el, t('drAddAPreset')).click();
+    const [name, words] = findAll(editor.el, (node) => node.tag === 'input' && node.attrs.type === 'text').slice(0, 2);
+    name.value = 'Fast';
+    name.dispatch('input');
+    words.value = '--model haiku';
+    words.dispatch('input');
+    buttonNamed(editor.el, t('drAddPreset')).click();
+    await flush();
+    assert.deepEqual(app.sent.at(-1), { kind: 'presets.edit', args: { op: 'add', name: 'Fast', folder: SITE, kind: 'claude', args: '--model haiku' } });
+    // Refused: the node's words beside the button, the button back.
+    answer = () => ({ ok: false, error: { code: 'refused', message: 'preset Opus changed since it was shown (or the node’s server restarted since): nothing changed' } });
+    buttonNamed(editor.el, t('drEdit')).click();
+    const again = findAll(editor.el, (node) => node.tag === 'input' && node.attrs['aria-label'] === t('drClaudeSArguments'))[0];
+    again.value = '--model opus --verbose';
+    again.dispatch('input');
+    const retry = buttonNamed(editor.el, t('drSavePreset'));
+    retry.click();
+    await flush();
+    assert.match(find(editor.el, byClass('refused')).textContent, /changed since it was shown/);
+    assert.equal(retry.disabled, false);
+  }
+  setLanguage('en');
+  // Where the page doesn't act: the lines.
+  const reads = presetEditor({ folder: () => SITE, app: fakeApp({ acts: false, kinds: ['presets.edit'] }) });
+  reads.update(presets, true);
+  buttonNamed(reads.el, 'Remove').click();
+  assert.match(reads.el.textContent, /vibeswitcher preset remove Opus --folder/);
+});
