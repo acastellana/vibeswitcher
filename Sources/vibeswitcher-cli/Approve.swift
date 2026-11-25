@@ -9,12 +9,18 @@ import VibeNode
 /// the one voiced request (`Requests.approve`). What needs your own decision (questions, merge approvals, shell
 /// requests, a push) is listed only, with its own answer lines, never in the batch.
 enum ApproveCommand {
-    static let usage = "usage: vibeswitcher approve [--only config,base,hooks]"
+    static let usage = "usage: vibeswitcher approve [--only config,base,hooks] [--long]"
 
     static func run(_ arguments: [String]) -> Int32 {
         var only: [String]?
+        var long = false
         var index = 0
         while index < arguments.count {
+            if arguments[index] == "--long" {
+                long = true
+                index += 1
+                continue
+            }
             guard arguments[index] == "--only", index + 1 < arguments.count else { return Say.usage(usage) }
             let groups = arguments[index + 1].split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }
             guard !groups.isEmpty, groups.allSatisfy(["config", "base", "hooks"].contains) else { return Say.usage(usage) }
@@ -38,17 +44,29 @@ enum ApproveCommand {
         // What needs your own decision first: never in the batch, and never scrolled past by it.
         sayDecide(listed)
         for (number, item) in items.enumerated() {
+            // Plain (2026-11-25): a held-config card as what changed, whom it holds and the rules that changed.
+            if !long, item.kind == "config.accept", let card = item.card, card != .null {
+                let plain = CardText.plainConfig(card)
+                Say.out("\(number + 1). " + (plain.first ?? heading(item)))
+                plain.dropFirst().forEach { Say.out("   " + $0) }
+                continue
+            }
             Say.out("\(number + 1). " + heading(item))
-            lines(item).forEach { Say.out("   " + $0) }
+            lines(item, long: long).forEach { Say.out("   " + $0) }
         }
         guard !items.isEmpty, let batch = listed.batch, let code = listed.code else {
             Say.out("Nothing a plain accept settles is waiting on you.")
             return 0
         }
         let action = UUID().uuidString.lowercased()
-        // Directly above the code: one line per item, what it does.
-        let recap = items.enumerated().map { "  \($0.offset + 1). " + recapLine($0.element) }.joined(separator: "\n")
-        let what = "The batch, in this order (each recorded as its own action; it stops at the first refusal):\n" + recap
+        // Directly above the code: the batch in a line (`--long`: a line per item, what it does).
+        let what: String
+        if long {
+            let recap = items.enumerated().map { "  \($0.offset + 1). " + recapLine($0.element) }.joined(separator: "\n")
+            what = "The batch, in this order (each recorded as its own action; it stops at the first refusal):\n" + recap
+        } else {
+            what = "One code accepts \(items.count == 1 ? "it" : "these \(items.count), in order") (each recorded on its own; it stops at the first refusal; --long shows every path and rule)."
+        }
         let said = TypedWord.said(approval: client.approvalRule, action: action, code: code, what: what)
         guard case .success(let typed) = said else { return Say.refused(said.refusal) }
         let result: WireKinds.Approve.Result
@@ -60,7 +78,7 @@ enum ApproveCommand {
         // Each item recorded in the vault as its own action: each journaled, so `status` finds them all accounted for.
         for done in result.done ?? [] {
             if let itemAction = done.action { client.journal(done.kind ?? "", action: itemAction, typed: typed) }
-            Say.out("done: " + summary(done))
+            Say.out(long ? "done: " + summary(done) : receipt(done, items: items))
         }
         guard let refused = result.refused else {
             Say.out("all \(items.count) done")
@@ -90,9 +108,17 @@ enum ApproveCommand {
     }
 
     /// The item as its own command shows it: its card (`config held`, `base show`), or why the hooks are out of date.
-    static func lines(_ item: Item) -> [String] {
-        if let card = item.card, card != .null { return CardText.lines(card) }
+    static func lines(_ item: Item, long: Bool = false) -> [String] {
+        if let card = item.card, card != .null { return CardText.lines(card, detail: long ? .long : .plain) }
         return (item.reasons ?? []).map { inert($0) }
+    }
+
+    /// A done item's receipt in plain words: a held-config card's what and whom it no longer holds (`CardText.acceptedLine`).
+    static func receipt(_ done: WireKinds.Approve.Done, items: [Item]) -> String {
+        guard done.kind == "config.accept" else { return "done: " + summary(done) }
+        let card = items.first { $0.kind == done.kind && $0.subject == done.subject }?.card
+        let accepted = try? done.result?.wire(WireKinds.ConfigAccept.Result.self)
+        return CardText.acceptedLine(card, waits: !(accepted?.homeWaits ?? []).isEmpty)
     }
 
     /// What needs your own decision, counted, each with the command that settles it: questions, merge approvals and shell

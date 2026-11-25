@@ -597,6 +597,12 @@ public enum ConfigSeal {
     /// doesn't read as JSON now.
     static func keyHashes(_ watched: Watched) -> [String: String]? {
         if let parts = parts(watched) { return Dictionary(parts, uniquingKeysWith: { first, _ in first }) }
+        // A git config's keys (2026-11-25: the card names a branch's tracking entry that changed, not just the file).
+        if watched.kind == .file, gitConfigNames.contains(watched.name) {
+            var info = stat()
+            guard stat(watched.path, &info) == 0 else { return [:] }
+            return regularContents(watched.path, limit: jsonLimit).map { gitKeys(String(decoding: $0, as: UTF8.self)) }
+        }
         guard watched.kind == .mcpServers || (watched.kind == .file && watched.path.hasSuffix(".json")) else { return nil }
         var info = stat()
         guard stat(watched.path, &info) == 0 else { return [:] }
@@ -611,6 +617,36 @@ public enum ConfigSeal {
             }
         }
         return keys
+    }
+
+    /// The git config files whose keys are hashed one by one (`gitKeys`).
+    static var gitConfigNames: Set<String> { [".git/config (main checkout)", "~/.gitconfig", "~/.config/git/config"] }
+
+    /// A git config's keys, each "section[.subsection].name" (section and name lowercased, as git compares them) with
+    /// its values hashed (a key set more than once, all of them in order). Names only reach the card, never a value.
+    static func gitKeys(_ text: String) -> [String: String] {
+        var values: [String: [String]] = [:]
+        var section = ""
+        for raw in text.split(whereSeparator: \.isNewline) {
+            let line = raw.trimmingCharacters(in: .whitespaces)
+            guard !line.isEmpty, !line.hasPrefix("#"), !line.hasPrefix(";") else { continue }
+            if line.hasPrefix("["), let close = line.firstIndex(of: "]") {
+                let inside = line[line.index(after: line.startIndex)..<close].trimmingCharacters(in: .whitespaces)
+                if let quote = inside.firstIndex(of: "\"") {
+                    let name = inside[..<quote].trimmingCharacters(in: .whitespaces).lowercased()
+                    let sub = inside[inside.index(after: quote)...].trimmingCharacters(in: CharacterSet(charactersIn: "\" "))
+                    section = name + "." + sub
+                } else {
+                    section = inside.lowercased()
+                }
+                continue
+            }
+            let parts = line.split(separator: "=", maxSplits: 1)
+            let name = parts[0].trimmingCharacters(in: .whitespaces).lowercased()
+            guard !name.isEmpty else { continue }
+            values[section + "." + name, default: []].append(parts.count > 1 ? parts[1].trimmingCharacters(in: .whitespaces) : "true")
+        }
+        return values.mapValues { valueHash($0) }
     }
 
     /// `object`'s keys, hashed: a hook event or MCP server each its own.

@@ -551,7 +551,7 @@ struct RestartTests {
         try #"{"env":{"CHANGED":"after the card"}}"#.write(to: node.homeSettings, atomically: true, encoding: .utf8)
         let accepted = try await node.runOnTerminal(["config", "accept", card])
         #expect(accepted.status == 77 && accepted.output.contains("changed again after the card was drawn"), "\(accepted.output)")
-        let again = try await node.run(["config", "held", repo.path])
+        let again = try await node.run(["config", "held", repo.path, "--long"])
         #expect(again.output.contains("~/.claude/settings.json"), "\(again.output)")
         let second = try #require(ScratchNode.card(again.output, "config accept"))
         let sealed = try await node.runOnTerminal(["config", "accept", second])
@@ -566,7 +566,7 @@ struct RestartTests {
         let before = Date()
         try FileManager.default.setAttributes([.modificationDate: Date(timeIntervalSince1970: 978_307_200)], ofItemAtPath: node.homeSettings.path)
         let size = try #require(try FileManager.default.attributesOfItem(atPath: node.homeSettings.path)[.size] as? NSNumber).intValue
-        let held = try await node.run(["config", "held", repo.path])
+        let held = try await node.run(["config", "held", repo.path, "--long"])
         #expect(held.status == 0, "\(held.output)\(held.errors)")
         let line = try #require(held.output.components(separatedBy: "\n").first { $0.hasPrefix("    ~/.claude/settings.json, ") }, "\(held.output)")
         let at = try #require(line.range(of: #"changed [0-9T:.\-Z]+"#, options: .regularExpression).map { String(line[$0].dropFirst(8)) } as String?, "\(line)")
@@ -605,30 +605,27 @@ struct RestartTests {
 
     /// The snapshot of the last accept turns "everything is new" into what changed: after the restart the held list
     /// says of each thing whether it changed since the last accept, and of a guard rail what it was; what the snapshot
-    /// lists as it is now is said to be not known to be the same (the old host's vault sealed the snapshot): once, after
-    /// the lines it applies to, and on each of them with `--long` (2026-11-19).
+    /// lists as it is now is said to be not known to be the same (the old host's vault sealed the snapshot) on each line
+    /// with `--long` (2026-11-19); the plain card (2026-11-25) counts those rules in a line and shows the one that changed.
     @Test func theSnapshotTurnsEverythingNewIntoWhatChanged() async throws {
         let (node, repo) = try await hostRestarted(leadBefore: false) { node, repo in
             try #"{"env":{"CHANGED":"between the hosts"}}"#.write(to: node.homeSettings, atomically: true, encoding: .utf8)
             try ScratchNode.workflow(repo, testCommand: "make test")
         }
         defer { node.stop() }
+        // Plain (2026-11-25): what changed, whom it holds, the rule that changed as old → new, and one line for the rules
+        // that can't be compared (the snapshot's seal was the old host's vault's). No hash, mark or seal's words.
         let held = try await node.run(["config", "held", repo.path])
         let lines = held.output.components(separatedBy: "\n")
-        let settings = try #require(lines.first { $0.hasPrefix("    ~/.claude/settings.json, ") }, "\(held.output)")
-        #expect(settings.contains("changed since your last accept"), "\(settings)")
-        // The snapshot's seal is the old host's vault's: nothing is said to be the same, only not known to be (the
-        // security follow-ups' item 18).
-        #expect(!lines.contains { $0.contains("; the same as at your last accept") }, "\(held.output)")
-        // Short: a guard rail is its key and value, marked `?` where the word is "not known to be the same", the word
-        // said once, at the end, with the unsealed snapshot's warning.
-        #expect(!lines.contains { $0.hasPrefix("    ") && $0.contains("not known to be the same as at your last accept") }, "\(held.output)")
-        #expect(lines.filter { $0.contains("not known to be the same as at your last accept") }.count == 1, "\(held.output)")
-        #expect(lines.contains { $0.hasPrefix("  ? marks a line that is not known to be the same") }, "\(held.output)")
-        #expect(held.output.contains("compared with your last accept"), "\(held.output)")
-        #expect(lines.contains { $0.hasPrefix("    test_command: make test; changed since your last accept") && $0.contains("from “make check”") },
-                "\(held.output)")
-        #expect(lines.contains("    merge_policy: ask_all ?"), "\(held.output)")
+        #expect(lines.contains("  ~/.claude/settings.json changed"), "\(held.output)")
+        #expect(lines.contains { $0.contains("held things that can't be compared since the node restarted (--long lists them)") }, "\(held.output)")
+        #expect(lines.contains { $0.hasPrefix("  holds ") }, "\(held.output)")
+        #expect(lines.contains("  test_command: make check → make test"), "\(held.output)")
+        // The restarted vault holds none of the rules: the accept records them all, said once.
+        #expect(lines.contains { $0.hasPrefix("  this accept records workflow.md's ") && $0.hasSuffix("rules as they are (--long shows them)") }, "\(held.output)")
+        #expect(!lines.contains { $0.contains("(this accept records it)") }, "\(held.output)")
+        #expect(!held.output.contains("not known to be the same") && !held.output.contains("hash ") && !held.output.contains("snapshot"), "\(held.output)")
+        #expect(held.output.contains("accept it with: vibeswitcher config accept"), "\(held.output)")
 
         // `--long` says it on every line, as before.
         let long = try await node.run(["config", "held", repo.path, "--long"])
@@ -637,11 +634,8 @@ struct RestartTests {
         #expect(unknown.count > 1, "\(long.output)")
         #expect(longLines.contains { $0.hasPrefix("    merge_policy: ask_all; not known to be the same as at your last accept") }, "\(long.output)")
         #expect(long.output.contains("compared with your last accept"), "\(long.output)")
-        // The short lines show every hash and value the long ones do: all the card is bound to.
-        for line in longLines where line.hasPrefix("    ") {
-            let bound = line.components(separatedBy: "; ").first ?? line
-            #expect(lines.contains { $0.hasPrefix(bound) }, "\(bound) not in the short lines:\n\(held.output)")
-        }
+        #expect(longLines.contains { $0.hasPrefix("    ~/.claude/settings.json, ") && $0.contains("hash ") && $0.contains("changed since your last accept") },
+                "\(long.output)")
     }
 
     /// `config accept` records the floor workflow.md proposes, after the seal (EN-D7's order: the vault refuses the

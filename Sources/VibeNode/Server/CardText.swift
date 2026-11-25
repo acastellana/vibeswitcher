@@ -45,8 +45,90 @@ public enum CardText {
         return parts.isEmpty ? nil : "waiting on you: " + parts.joined(separator: "; ")
     }
 
-    /// The lines for `card` (`CardStore.Card.value`), short (`lines(_:long:)`).
-    public static func lines(_ card: NodeWire.Value) -> [String] { lines(card, long: false) }
+    /// How much of a card the lines say. `plain` (the default since 2026-11-25, the user: "I just accepted them but I
+    /// have no idea what I did"): a held-config card as what changed, whom it holds, and only the guard rails that
+    /// changed or that the accept records; `short` and `long` as before (`config held --long` is `long`).
+    public enum Detail: Sendable { case plain, short, long }
+
+    /// The lines for `card` (`CardStore.Card.value`), plain.
+    public static func lines(_ card: NodeWire.Value) -> [String] { lines(card, detail: .plain) }
+
+    /// The lines for `card`, short or long (`lines(_:detail:home:)`).
+    public static func lines(_ card: NodeWire.Value, long: Bool, home: String? = nil) -> [String] {
+        lines(card, detail: long ? .long : .short, home: home)
+    }
+
+    /// A held-config card in plain words, at most: what changed (the node's own reading, `HeldWhat`), whom it holds,
+    /// the guard rails that changed since the last accept (`name: old → new`) or that this accept records, and one line
+    /// counting those that can't be compared. Everything else (each path, hash, the snapshot's words) is `long`'s.
+    public static func plainConfig(_ card: NodeWire.Value) -> [String] {
+        guard let config = card["config"], config != .null else { return [] }
+        let items = config["items"]?.array ?? []
+        let shared = config["sharedHome"]?["names"]?.array?.compactMap(\.string) ?? []
+        // The held things the snapshot lists as they are now, its seal not this host's vault's: counted, not listed.
+        let uncompared = items.filter { !HeldWhat.changedSinceAccept($0["sinceAccept"]?.string) && !($0["sinceAccept"]?.string ?? "").hasPrefix("the same as") }.count
+        var lines: [String] = []
+        if let summary = config["summary"]?.string {
+            lines.append(inert(summary))
+        } else if items.count > uncompared {
+            // A card drawn before the plain fields: its names.
+            let names = items.filter { HeldWhat.changedSinceAccept($0["sinceAccept"]?.string) }.compactMap { $0["name"]?.string }.map(inert)
+            lines.append(names.prefix(3).joined(separator: "; ") + (names.count > 3 ? "; and \(names.count - 3) more" : ""))
+        } else if items.isEmpty, shared.isEmpty {
+            lines.append("nothing held: accepting records what workflow.md proposes")
+        }
+        if uncompared > 0 {
+            let things = uncompared == 1 ? "1 held thing" : "\(uncompared) held things"
+            lines.append((lines.isEmpty ? things : "and \(things)") + " that can't be compared since the node restarted (--long lists them)")
+        }
+        if !shared.isEmpty {
+            let folder = inert(config["sharedHome"]?["folder"]?.string ?? "~")
+            lines.append("and \(shared.count) of your home folder's config: \(folder)'s card seals \(shared.count == 1 ? "it" : "them") for every project")
+        }
+        if !items.isEmpty || !shared.isEmpty {
+            let project = config["holds"]?.string.map(inert) ?? inert(((card["root"]?.string ?? "") as NSString).lastPathComponent)
+            lines.append(config["holdsEvery"]?.bool == true ? "holds every project (no new worker, verifier or merge until accepted)"
+                         : "holds \(project) (no new worker, verifier or merge until accepted)")
+        }
+        let rails = config["guarded"]?.array ?? []
+        var unknown = 0, recorded = 0
+        for rail in rails {
+            let key = inert(rail["key"]?.string), value = inert(rail["value"]?.string)
+            let changed = rail["changed"]?.string
+            if changed == "changed" {
+                lines.append("\(key): " + (rail["old"]?.string.map { "\(inert($0)) → " } ?? "(not set) → ") + value)
+            } else if rail["records"]?.bool == true {
+                lines.append("\(key): \(value) (this accept records it)")
+            } else if config["recordsAll"]?.bool == true {
+                recorded += 1
+            } else if changed != "same" {
+                unknown += 1
+            }
+        }
+        if recorded > 0 {
+            lines.append("this accept records workflow.md's \(recorded == 1 ? "1 rule" : "\(recorded) rules") as they are (--long shows them)")
+        }
+        if unknown > 0 {
+            let rules = unknown == 1 ? "1 rule" : "\(unknown) rules"
+            lines.append(config["lastAccept"]?.string == nil ? "\(rules) with no earlier accept to compare with (--long shows them)"
+                         : "\(rules) can't be compared since the node restarted (--long shows them)")
+        }
+        // A first accept records the review floor too: said.
+        if config["lastAccept"]?.string == nil, let floor = config["floor"]?.object {
+            lines.append("the review floor it records: merge policy \(inert(floor["mergePolicy"]?.string)), \(floor["auditFinders"]?.int ?? 1) finder(s)")
+        }
+        return lines
+    }
+
+    /// The receipt of an accepted held-config card, a line: what it was, and that it holds nobody now (or, `waits`, that
+    /// the home folder's card still holds the project).
+    public static func acceptedLine(_ card: NodeWire.Value?, waits: Bool = false) -> String {
+        let config = card?["config"]
+        let what = config?["summary"]?.string.map(inert) ?? "the held config of \(inert(((card?["root"]?.string ?? "") as NSString).lastPathComponent))"
+        if waits { return "accepted: \(what); \(inert(config?["holds"]?.string ?? "the project")) still waits on your home folder's card" }
+        if config?["holdsEvery"]?.bool == true { return "accepted: \(what); it holds no project now" }
+        return "accepted: \(what); it holds \(inert(config?["holds"]?.string ?? "the project")) no more"
+    }
 
     /// The mark a short line carries in place of its word on the last accept (`sinceAccept`) when that word only says
     /// it's as it was: `*` the same (the vault sealed the snapshot), `?` not known to be (`AcceptedSnapshot.unvouched`).
@@ -73,7 +155,11 @@ public enum CardText {
     /// a word that only says it's as it was as a mark (`sameMark`), said once at the end for the lines marked; `long` puts
     /// that word on every line it applies to, as before (`config held --long`).
     /// `home`: whose Claude Code link a held card's update hint reads (`ClaudeUpdateHint`; nil: this process's).
-    public static func lines(_ card: NodeWire.Value, long: Bool, home: String? = nil) -> [String] {
+    public static func lines(_ card: NodeWire.Value, detail: Detail, home: String? = nil) -> [String] {
+        let long = detail == .long
+        if detail == .plain, let config = card["config"], config != .null {
+            return plainConfig(card).map { "  " + $0 } + (card["notice"]?.string.map { ["  notice: " + inert($0)] } ?? [])
+        }
         let id = inert(card["id"]?.string)
         // A plugin's card says its plugin where another says its kind.
         let kind = card["plugin"]?["plugin"]?.string.map(inert) ?? card["kind"]?.string ?? "?"

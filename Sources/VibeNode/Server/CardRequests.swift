@@ -478,11 +478,25 @@ extension CardStore.Card {
                 i["outside"] = .bool(item.outside)
                 i["files"] = texts(item.files.map { ConfigSeal.fileLabel($0, in: item.name) })
                 i["sinceAccept"] = text(item.sinceAccept)
+                if let about = item.about {
+                    i["kind"] = .string(about.kind.rawValue)
+                    i["what"] = .string(about.what)
+                    if let from = about.from { i["from"] = .string(from) }
+                    if let to = about.to { i["to"] = .string(to) }
+                }
                 return .object(i)
             })
             c["guarded"] = .array(config.guarded.map { rail in
-                .object(["key": .string(rail.key), "value": .string(rail.value), "sinceAccept": text(rail.sinceAccept)])
+                var r: [String: NodeWire.Value] = ["key": .string(rail.key), "value": .string(rail.value), "sinceAccept": text(rail.sinceAccept)]
+                if let changed = rail.changed { r["changed"] = .string(changed.rawValue) }
+                if let old = rail.old { r["old"] = .string(old) }
+                if let records = rail.records { r["records"] = .bool(records) }
+                return .object(r)
             })
+            if let summary = config.summary { c["summary"] = .string(summary) }
+            if let holds = config.holds { c["holds"] = .string(holds) }
+            if let every = config.holdsEvery { c["holdsEvery"] = .bool(every) }
+            if let all = config.recordsAll { c["recordsAll"] = .bool(all) }
             c["lastAccept"] = config.lastAccept.map(NodeWire.Value.date) ?? .null
             c["sharedHome"] = config.sharedHome.map { shared in
                 .object(["names": texts(shared.names), "card": .string(shared.card), "folder": .string(shared.folder)])

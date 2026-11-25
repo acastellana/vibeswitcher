@@ -103,7 +103,8 @@ enum CardCommand {
     /// `refuse`, given the card found, says the exit status when the request can't go on (nil: it can), before the card
     /// is printed or the code asked.
     /// `args`: the request's, from the card found, its id and its code.
-    static func act<K: WireChangeKind>(_ kind: K.Type, card wanted: String, refuse: (NodeWire.Value) -> Int32? = { _ in nil },
+    /// `detail`: how the card is shown (`CardText.Detail`: a held-config card plain unless `--long`).
+    static func act<K: WireChangeKind>(_ kind: K.Type, card wanted: String, detail: CardText.Detail = .plain, refuse: (NodeWire.Value) -> Int32? = { _ in nil },
                                        args: (_ card: NodeWire.Value, _ id: String, _ code: String) -> K.Args,
                                        what: (NodeWire.Value) -> String,
                                        say: (K.Result) -> Void) -> Int32 {
@@ -121,7 +122,7 @@ enum CardCommand {
         }
         guard let id = card["id"]?.string else { return Say.refused("the server's card has no id") }
         if let status = refuse(card) { return status }
-        CardText.lines(card).forEach(Say.out)
+        CardText.lines(card, detail: detail).forEach(Say.out)
         let code = NodeIds.code(card: id)
         let action = UUID().uuidString.lowercased()
         // Under the Mac's rule the dialog carries this request's word (its action id's), not the card's code.

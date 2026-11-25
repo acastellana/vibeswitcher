@@ -35,7 +35,7 @@ struct NodeAcceptanceTests {
         for field in ["node", "server", "host", "sessions", "leads", "cards"] { #expect(status[field] != nil, "\(field): \(status.keys.sorted())") }
     }
 
-    @Test("A2: config held shows a short card, and config accept with the code clears it")
+    @Test("A2: config held shows a plain card, and config accept with the code clears it")
     func a2ConfigHeldAndAccept() async throws {
         let node = try await ScratchNode(scratch, holdFirstLook: true)
         defer { node.stop() }
@@ -45,15 +45,10 @@ struct NodeAcceptanceTests {
         let card = try #require(ScratchNode.card(held.output, "config accept"), "\(held.output)")
         let accepted = try await node.runOnTerminal(["config", "accept", card])
         #expect(accepted.status == 0 && accepted.output.contains("accepted"), "\(accepted.output)\(accepted.errors)")
-        // One line per path sealed, under a count (the follow-up of 2026-11-21: no comma-joined line).
-        let said = accepted.output.split(whereSeparator: \.isNewline).map { $0.trimmingCharacters(in: .whitespaces.union(.controlCharacters)) == "" ? "" : String($0).replacingOccurrences(of: "\r", with: "") }
-        if let head = said.firstIndex(where: { $0.hasPrefix("accepted ") && $0.hasSuffix(":") }) {
-            let count = Int(said[head].split(separator: " ")[1]) ?? -1
-            #expect(said.count > head + count && said[(head + 1)...(head + count)].allSatisfy { $0.hasPrefix("  ") && !$0.contains(", ~") && !$0.contains(", .") },
-                    "\(accepted.output)")
-        } else {
-            #expect(said.contains("accepted: nothing held"), "\(accepted.output)")
-        }
+        // A receipt line (2026-11-25): what it was and whom it holds no more.
+        let said = accepted.output.split(whereSeparator: \.isNewline).map { String($0).replacingOccurrences(of: "\r", with: "") }
+        #expect(said.contains("accepted: nothing held") || said.contains { $0.hasPrefix("accepted: ") && $0.hasSuffix("it holds \(repo.lastPathComponent) no more") },
+                "\(accepted.output)")
         let after = try await node.run(["config", "held", repo.path])
         #expect(after.status == 0 && after.output.contains("nothing held"), "\(after.output)\(after.errors)")
     }
@@ -957,7 +952,7 @@ struct NodeAcceptanceTests {
         #expect(await eventually(timeout: 120) { node.inbox(lead.session.tty).contains { $0.text.contains("start_worker continues there") } }, "\(node.said)")
     }
 
-    @Test("A39: vs approve leaves rails to record to you, then shows held config whole, asks one code, accepts it, recorded and journaled")
+    @Test("A39: vs approve leaves rails to record to you, then shows held config plainly, asks one code, accepts it, recorded and journaled")
     func a39Approve() async throws {
         let node = try await ScratchNode(scratch, holdFirstLook: true)
         defer { node.stop() }
@@ -975,9 +970,11 @@ struct NodeAcceptanceTests {
         try FileManager.default.createDirectory(at: settings.deletingLastPathComponent(), withIntermediateDirectories: true)
         try #"{"env":{"A39":"1"}}"#.write(to: settings, atomically: true, encoding: .utf8)
         let approved = try await node.runOnTerminal(["approve", "--only", "config"])
-        #expect(approved.status == 0 && approved.output.contains("1. Held config,") && approved.output.contains("The batch, in this order")
-                && approved.output.contains("1. config accept, \(node.home.path): seals")
-                && approved.output.contains("done: config accepted") && approved.output.contains("all 1 done"), "\(approved.output)\(approved.errors)\n\(node.said)")
+        // Plain (2026-11-25): what changed and whom it holds, one line for the batch, a receipt line per card.
+        #expect(approved.status == 0 && approved.output.contains("1. ") && approved.output.contains("~/.claude/settings.json: env added") && approved.output.contains("holds every project")
+                && approved.output.contains("One code accepts it") && !approved.output.contains("hash ")
+                && approved.output.split(whereSeparator: \.isNewline).contains { $0.hasPrefix("accepted: ") && $0.hasSuffix("~/.claude/settings.json: env added; it holds no project now") }
+                && approved.output.contains("all 1 done"), "\(approved.output)\(approved.errors)\n\(node.said)")
         // Nothing left, and every accepted request (the batch's, its item's) is in the journal.
         let again = try await node.runOnTerminal(["approve", "--only", "config"])
         #expect(again.status == 0 && again.output.contains("Nothing a plain accept settles is waiting on you."), "\(again.output)\(again.errors)")

@@ -30,6 +30,8 @@ public enum ConfigHoldStore {
         /// What it is against the last accept the snapshot knows (`AcceptedSnapshot.since`: the same, changed, new),
         /// when one is known (E8). A diff aid: the snapshot is unsealed.
         public var sinceAccept: String?
+        /// What it is in plain words (`HeldWhat`): its kind, a short phrase, and where known what it went from and to.
+        public var about: HeldWhat.Described?
 
         public init(name: String, changedAt: Date? = nil, size: Int? = nil, hash: String = "", change: String? = nil, outside: Bool = false,
                     files: [ConfigSeal.HeldFile] = [], sinceAccept: String? = nil) {
@@ -50,6 +52,16 @@ public enum ConfigHoldStore {
         public var key: String
         public var value: String
         public var sinceAccept: String?
+        /// Against the last accept (2026-11-25, the plain card): `changed` (its value then is `old`, nil when it wasn't
+        /// set), `same` (only from a snapshot this host's vault sealed), or `unknown` (no accept known, or a snapshot the
+        /// vault didn't seal: after a restart).
+        public var changed: Changed?
+        public var old: String?
+        /// Whether the accept records this value: the vault holds another, or none for it (`wouldRecord`'s rails); nil
+        /// when it holds no rails at all for the project (`Shown.recordsAll`).
+        public var records: Bool?
+
+        public enum Changed: String, Codable, Sendable { case changed, same, unknown }
 
         public init(key: String, value: String, sinceAccept: String? = nil) {
             self.key = key
@@ -75,6 +87,14 @@ public enum ConfigHoldStore {
         /// (`SharedHome`): not in `items` nor `hashes`. Set by the engine as it draws the card; nil on the home's own
         /// card and when none is shared.
         public var sharedHome: SharedHome?
+        /// The card's plain line of what changed (`HeldWhat.summary`), and who it holds: a project's name, or nil for the
+        /// home folder's card, which holds every project.
+        public var summary: String?
+        public var holds: String?
+        public var holdsEvery: Bool?
+        /// The accept records every guard rail (the vault holds none of them as they are: a fresh vault, or it couldn't be
+        /// asked): said once for the card, each rail's `records` then nil.
+        public var recordsAll: Bool?
 
         public init(items: [Item] = [], hashes: [String: String] = [:], floor: LeadReviewFloor? = nil, rails: [String: String] = [:],
                     baseBranch: String? = nil, guarded: [Rail] = [], lastAccept: Date? = nil) {
@@ -189,18 +209,47 @@ public enum ConfigHoldStore {
         // "The same" only from a snapshot this host's vault sealed at the last accept (the security follow-ups' item 18;
         // the close-out review: the record now is that accept's).
         let vouched = AcceptedSnapshot.vouches(snapshot, root: root, vault: vault, record: record)
+        let facts = names.isEmpty ? HeldWhat.Facts() : HeldWhat.facts(home: home)
         let items = names.map { name in
-            Item(name: name, changedAt: times[name], size: sizes[name], hash: String((byName[name]?.hash ?? "").prefix(12)), change: changes[name],
-                 outside: outside.contains(name), files: details[name]?.files ?? [],
-                 sinceAccept: byName[name].flatMap { AcceptedSnapshot.since(key: $0.key, hash: $0.hash, in: snapshot, vouched: vouched) })
+            var item = Item(name: name, changedAt: times[name], size: sizes[name], hash: String((byName[name]?.hash ?? "").prefix(12)), change: changes[name],
+                            outside: outside.contains(name), files: details[name]?.files ?? [],
+                            sinceAccept: byName[name].flatMap { AcceptedSnapshot.since(key: $0.key, hash: $0.hash, in: snapshot, vouched: vouched) })
+            item.about = HeldWhat.describe(item, facts: facts)
+            return item
         }
         let workflow = LeadWorkflow.load(from: workflowPath(root: root))
-        let guarded = guardedValues(workflow).map {
-            Rail(key: $0.key, value: $0.value, sinceAccept: AcceptedSnapshot.since(rail: $0.key, value: $0.value, in: snapshot, vouched: vouched))
+        // What the vault recorded of the rails (none, or it couldn't be asked: every rail is shown as recorded anew).
+        let recorded: [String: String]? = (try? vault.guardedSettings(root: root)) ?? nil
+        let proposed = recordedHashes(workflow)
+        let guarded = guardedValues(workflow).map { rail -> Rail in
+            var shown = Rail(key: rail.key, value: rail.value, sinceAccept: AcceptedSnapshot.since(rail: rail.key, value: rail.value, in: snapshot, vouched: vouched))
+            (shown.changed, shown.old) = changed(rail: rail.key, value: rail.value, in: snapshot, vouched: vouched)
+            // None recorded (a fresh vault, or it couldn't be asked): every rail is, said once for the card (`recordsAll`).
+            shown.records = recorded.map { $0[rail.key] != proposed[rail.key] }
+            return shown
         }
-        return .success(Shown(items: items, hashes: hashes, floor: LeadReviewFloor.starting(from: workflow), rails: recordedHashes(workflow),
-                              baseBranch: workflow.baseBranch, guarded: guarded,
-                              lastAccept: snapshot?.configAt.map { Date(timeIntervalSince1970: $0) }))
+        var shown = Shown(items: items, hashes: hashes, floor: LeadReviewFloor.starting(from: workflow), rails: proposed,
+                          baseBranch: workflow.baseBranch, guarded: guarded,
+                          lastAccept: snapshot?.configAt.map { Date(timeIntervalSince1970: $0) })
+        shown.summary = HeldWhat.summary(items: items)
+        // Every rule recorded anew (a fresh vault's, or one restarted with none of them): said once, not rule by rule.
+        let all = !guarded.isEmpty && guarded.allSatisfy { $0.records ?? true }
+        shown.recordsAll = all
+        if all { for index in shown.guarded.indices { shown.guarded[index].records = nil } }
+        let every = (root as NSString).standardizingPath == (home as NSString).standardizingPath
+        shown.holdsEvery = every
+        shown.holds = every ? nil : LeadMail.project(of: root)
+        return .success(shown)
+    }
+
+    /// A guard rail against the last accept: changed (with its value then), the same (only `vouched`), or unknown.
+    static func changed(rail key: String, value: String, in snapshot: AcceptedSnapshot.Project?, vouched: Bool) -> (Rail.Changed, String?) {
+        guard let snapshot, snapshot.configAt != nil else { return (.unknown, nil) }
+        switch snapshot.guarded[key] {
+        case value?: return (vouched ? .same : .unknown, nil)
+        case .some(let before): return (.changed, before)
+        case nil: return (.changed, nil)
+        }
     }
 
     /// workflow.md's guard rails that are set (`LeadVault.guardedValue` isn't empty), in `LeadVault.guardedKeys`' order.

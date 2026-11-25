@@ -699,6 +699,8 @@ extension LeadEngine {
         marked.items.removeAll { left.contains($0.name) }
         marked.hashes = marked.hashes.filter { !left.contains(ConfigSeal.name(ofKey: $0.key)) }
         marked.sharedHome = ConfigHoldStore.SharedHome(names: best.names, card: best.card.id, folder: best.card.root)
+        // Its plain line says what is its own (the rest is said as the home folder's).
+        marked.summary = HeldWhat.summary(items: marked.items)
         return marked
     }
 
