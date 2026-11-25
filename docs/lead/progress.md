@@ -4540,3 +4540,4 @@ Turn what's a real bug into a task (one already on the board needs nothing); the
 - 2026-11-25 13:41 Started a worker on a-side-by-side
 - 2026-11-25 14:39 Handed the lead over to a fresh session: the last one had been idle 50 minutes with 164k tokens of context, past handover_idle_min 50 and handover_tokens 150k
 - 2026-11-25 15:07 Kept a-side-by-side unmerged: By design nothing of it merges into main: the side-by-side app, its clone and its build live in this worktree (.vibeswitcher/v2-side), and the user's trial of v2 on this Mac uses them. No merge and no cleanup until the user is finished with v2 here (decision 2026-11-25 13:41).
+- 2026-11-25 15:42 Planned v2-on-the-mac: v2 on the Mac, step 4: measure on this real Mac what the Mac's approval rule depends on (in a clone; report and local commits, nothing merges)
