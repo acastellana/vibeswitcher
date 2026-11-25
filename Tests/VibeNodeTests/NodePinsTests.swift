@@ -383,4 +383,46 @@ struct OwnCdhashTests {
         let architecture = try #require(Platform.CodeIdentity.architecture(of: getpid()))
         #expect(own == Platform.CodeIdentity.cdhash(atPath: executable, architecture: architecture), "\(executable)")
     }
+
+    /// The review of 2026-11-25 (F1): the cdhash is the running code's, not the file's now at the process's path. A probe
+    /// built from `OwnCode+Darwin.swift` itself renames another image (another identifier, so another cdhash) over its
+    /// own path while it runs, then reads its own cdhash: still the one it started from. Before, Security's static
+    /// signing information described the file found by path, and the probe took the swapped image for itself.
+    @Test func theOwnCdhashIsTheRunningCodesNotTheFileNowAtItsPath() throws {
+        let folder = try Scratch().shortFolder("vsoc")
+        let main = folder.appendingPathComponent("main.swift")
+        try Data("""
+            import Foundation
+            let me = CommandLine.arguments[0]
+            if CommandLine.arguments.count > 1, rename(CommandLine.arguments[1], me) != 0 { print("rename failed"); exit(1) }
+            print(OwnCode.cdhash().map { $0.map { String(format: "%02x", $0) }.joined() } ?? "nil")
+            """.utf8).write(to: main)
+        let source = packageFolder.appendingPathComponent("Sources/VibePlatform/OwnCode+Darwin.swift").path
+        let probe = folder.appendingPathComponent("probe").path
+        let built = folder.appendingPathComponent("built.txt").path
+        try #require(try runToEnd("/usr/bin/xcrun", ["swiftc", "-module-name", "OwnProbe", "-o", probe, main.path, source],
+                                  output: .path(built, flags: O_WRONLY | O_CREAT | O_TRUNC, mode: 0o600), limit: 300) == 0,
+                     "\((try? String(contentsOfFile: built, encoding: .utf8)) ?? "")")
+        let other = folder.appendingPathComponent("other").path
+        try #require(try runToEnd("/bin/cp", [probe, other]) == 0)
+        try #require(try runToEnd("/usr/bin/codesign", ["--force", "-s", "-", "-i", "dev.vibeswitcher.test.other", other]) == 0)
+        let started = try #require(Platform.CodeIdentity.cdhash(atPath: probe))
+        let swapped = try #require(Platform.CodeIdentity.cdhash(atPath: other))
+        try #require(started != swapped)
+        func run(_ arguments: [String]) throws -> String {
+            let out = folder.appendingPathComponent("out.txt").path
+            var spawn = Platform.Spawn(executable: probe, arguments: [probe] + arguments)
+            spawn.environment = ["PATH=/usr/bin:/bin"]
+            spawn.stdin = .path("/dev/null", flags: O_RDONLY)
+            spawn.stdout = .path(out, flags: O_WRONLY | O_CREAT | O_TRUNC, mode: 0o600)
+            spawn.stderr = .path(out, flags: O_WRONLY | O_CREAT | O_APPEND, mode: 0o600)
+            guard case .success(let pid) = spawn.start() else { throw CancellationError() }
+            var status: Int32 = 0
+            while waitpid(pid, &status, 0) < 0, errno == EINTR {}
+            return (try String(contentsOfFile: out, encoding: .utf8)).trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        #expect(try run([]) == NodePins.hex(started))
+        let read = try run([other])
+        #expect(read == NodePins.hex(started), "after the swap the probe read \(read); started \(NodePins.hex(started)), the swapped file \(NodePins.hex(swapped))")
+    }
 }

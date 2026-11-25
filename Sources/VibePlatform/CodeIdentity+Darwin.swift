@@ -96,14 +96,7 @@ extension Platform.CodeIdentity {
             return flags & signatureRuntimeFlag != 0 && (entitlements["com.apple.security.get-task-allow"] as? Bool) != true
         }
 
-        static func ownCdhash() -> Data? {
-            var me: SecCode?
-            guard SecCodeCopySelf([], &me) == errSecSuccess, let me else { return nil }
-            var information: CFDictionary?
-            guard SecCodeCopySigningInformation(unsafeBitCast(me, to: SecStaticCode.self), [], &information) == errSecSuccess,
-                  let information = information as? [String: Any] else { return nil }
-            return information[kSecCodeInfoUnique as String] as? Data
-        }
+        static func ownCdhash() -> Data? { OwnCode.cdhash() }
 
         static func cdhash(atPath path: String, architecture: Architecture? = nil) -> Data? {
             var code: SecStaticCode?
