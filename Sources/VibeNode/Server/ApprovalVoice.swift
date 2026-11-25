@@ -50,12 +50,14 @@ public struct ApprovalVoice: Sendable {
     public var hardened: @Sendable (Platform.PeerToken) -> Bool
 
     /// The installed command line's cdhash the server holds for this rule, read once at its start (item 3's owed half,
-    /// the node on the Mac's design, "The anchor", check 3): today `<nodeRoot>/bin/vibeswitcher`'s (`cdhashOf`); nil
-    /// when it can't be read. `own` (the server's running cdhash, `Platform.CodeIdentity.ownCdhash`) and `pins` (the
-    /// node's record) are read by nothing yet.
-    public static func commandLineAnchor(nodeRoot: String?, own: Data?, pins: Result<NodePins, NodePins.Refused>,
-                                         cdhashOf: (String) -> Data? = { Platform.CodeIdentity.cdhash(atPath: $0) }) -> Data? {
-        nodeRoot.flatMap { cdhashOf(NodeFolders.join($0, "bin/\(NodeFolders.installedCLI)")) }
+    /// the node on the Mac's design, "The anchor", check 3): the command line of the build whose server is this
+    /// server's own running code (`own`, `Platform.CodeIdentity.ownCdhash`) in the node's record (`pins`, root's to
+    /// write). Never read from `<nodeRoot>/bin/vibeswitcher` (`nodeRoot` chooses nothing), so a command line swapped
+    /// there after the host's start isn't the installed one. nil when the record can't be taken or names no build for
+    /// this server: then no peer is the user's.
+    public static func commandLineAnchor(nodeRoot: String?, own: Data?, pins: Result<NodePins, NodePins.Refused>) -> Data? {
+        guard case .success(let record) = pins, let own else { return nil }
+        return record.build(server: own)?.cli
     }
 
     public init(authenticator: any Authenticator, commandLine: Data?,

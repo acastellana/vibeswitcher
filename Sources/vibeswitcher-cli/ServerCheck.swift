@@ -9,8 +9,9 @@ import VibeNode
 /// node started detached the host its record names, checked (`NodeCheck.recordedHost`, the start plan's S3: holding
 /// the account's host lock among the rest), and for a
 /// scratch node the holder of `<root>/scratch-host.lock` (`/proc/locks`, by the file's inode).
-/// The Mac (dumpable can't be told there): the user's node only, its listener running the server of the build its
-/// LaunchAgent job runs (by its audit token's cdhash, hardened), the job's child in its session; else refused.
+/// The Mac (dumpable can't be told there): the user's node only, its listener running a server the node's record pins
+/// (`NodePins`, root's to write; by its audit token's cdhash, hardened), the LaunchAgent job's child in its session; else
+/// refused. The job's program line chooses nothing (item 12): only its pid is taken from `launchctl print`.
 enum ServerCheck {
     /// Why the server at the other end of `fd` isn't the node's, or nil when it passes.
     static func refusal(fd: Int32, context: NodeContext) -> String? {
@@ -24,8 +25,8 @@ enum ServerCheck {
         var listener = codeIdentity
             ? NodeCheck.macListener(pid: pid, token: Platform.Sockets.peerToken(fd), code: { token in
                 guard let job else { return nil }
-                let answer = NodeCheck.macServerCode(token: token, job: job, prefix: NodeCheck.resolved(NodeFolders.defaultPrefix(accountHome: VibePaths.accountHome)),
-                                                     pins: NodePins.read())
+                // The node's record of its builds, root's to write: the listener's code must be a server it pins.
+                let answer = NodeCheck.macServerCode(token: token, job: job, prefix: nil, pins: NodePins.read())
                 codeWhy = answer.why
                 return answer.told
             })

@@ -87,7 +87,8 @@ public enum NodeCheck {
     /// (`Platform.Processes.lockHolder(path:exclusiveFlock:patience:)`: one look at /proc/locks can miss a held lock).
     public static let lockPatience: TimeInterval = 3
 
-    /// The Mac's server check: the server beside an installed build's host, `<prefix>/<build>/bin/vibeswitcher-server`
+    /// The server beside an installed build's host (the Mac's server check took it before the node's record; nothing
+    /// chooses the server by it now), `<prefix>/<build>/bin/vibeswitcher-server`
     /// for the host `<prefix>/<build>/bin/vibeswitcher-host` (both paths resolved); nil for a host anywhere else.
     public static func installedServer(host: String, prefix: String) -> String? {
         let parts = host.split(separator: "/", omittingEmptySubsequences: false).map(String.init)
@@ -125,22 +126,26 @@ public enum NodeCheck {
         }
     }
 
-    /// The Mac: whether the process `token` names runs an installed build's server with the Hardened Runtime. Today's
-    /// anchor: the server beside the job's program (`job`, as `launchctl print` names it; `installedServer` under
-    /// `prefix`, both resolved by `resolve`), by the running slice's cdhash (`runsFile`). `pins` (the node's record,
-    /// `NodePins.read`), `runs` (a token against a cdhash) are read by nothing yet. Every reader is a parameter, the
-    /// system's by default.
+    /// The Mac: whether the process `token` names runs an installed build's server with the Hardened Runtime (the node on
+    /// the Mac's design, "The anchor", check 1): its running code, by Security's dynamic check of the token (`runs`), must
+    /// be the server of a build the node's record pins (`pins`, `NodePins.read`: root's to write, never the user's), and
+    /// hardened (`hardened`). No path under the home chooses the build: not the builds folder, not the job's program
+    /// (`job`, as `launchctl print` names it after a plist anyone of the user's can bootstrap; item 12: after an
+    /// in-place switch it names the next build while this one's server still runs). `job` and `prefix` are taken so a
+    /// caller's and a test's facts are the same; they choose nothing. A record that can't be taken: can't be told, why
+    /// said. Every reader is a parameter, the system's by default.
     public static func macServerCode(token: Platform.PeerToken, job: NodeAgent.Printed?, prefix: String?,
                                      pins: Result<NodePins, NodePins.Refused>,
                                      runs: (Platform.PeerToken, Data) -> Bool = { Platform.CodeIdentity.runs($0, cdhash: $1) },
-                                     runsFile: (Platform.PeerToken, String) -> Bool = { Platform.CodeIdentity.runs($0, executable: $1) },
-                                     hardened: (Platform.PeerToken) -> Bool? = Platform.CodeIdentity.isHardened,
-                                     resolve: (String) -> String? = NodeCheck.resolved) -> MacCode {
-        guard let program = job?.program, let prefix, let host = resolve(program) else { return .unknown("the job's program can't be read") }
-        guard let server = installedServer(host: host, prefix: prefix) else { return .other("the job's program isn't an installed build's host") }
-        // The server file itself, not a link elsewhere (the review of 2026-11-21).
-        guard resolve(server) == server else { return .other("the server beside the job's program is a link") }
-        guard runsFile(token, server) else { return .other("it doesn't run the server beside the job's program") }
+                                     hardened: (Platform.PeerToken) -> Bool? = Platform.CodeIdentity.isHardened) -> MacCode {
+        let record: NodePins
+        switch pins {
+        case .failure(let why): return .unknown(why.description)
+        case .success(let read): record = read
+        }
+        guard record.builds.contains(where: { runs(token, $0.server) }) else {
+            return .other("it runs no server the node's record pins: not an installed build's server")
+        }
         return hardened(token) == true ? .runs : .other("it doesn't run with the Hardened Runtime")
     }
 

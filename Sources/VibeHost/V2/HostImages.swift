@@ -239,12 +239,26 @@ public enum HostImages {
     public static let isCheckedMacNode = false
 
     /// The Mac's node host's server child (the node on the Mac's design, "The anchor", check 2): the cdhash the child is
-    /// started and checked by, from `server` (its `--server` file, read by `cdhashOf`), or why not. Today: the file's
-    /// own cdhash, whatever it is. `own` (this host's running cdhash, `Platform.CodeIdentity.ownCdhash`) and `pins`
-    /// (the node's record) are read by nothing yet. Asked only by a checked Mac node start (`isCheckedMacNode`, never yet).
+    /// started and checked by, or why not. The host finds its own build by the code it runs (`own`,
+    /// `Platform.CodeIdentity.ownCdhash`), in the node's record (`pins`, root's to write): no row, no child. Its
+    /// `--server` file (`server`, read by `cdhashOf`, this Mac's slice) must be that row's server; the child is then
+    /// started only while the file still has that cdhash, and its connector answers only a child whose token runs it
+    /// (`ServerChild.Image.checked`). Asked only by a checked Mac node start (`isCheckedMacNode`, never yet).
     public static func macServerPin(server: String, own: Data?, pins: Result<NodePins, NodePins.Refused>,
                                     cdhashOf: (String) -> Data? = { Platform.CodeIdentity.cdhash(atPath: $0) }) -> Result<Data, Refused> {
+        let record: NodePins
+        switch pins {
+        case .failure(let why): return .failure(Refused(why.description))
+        case .success(let read): record = read
+        }
+        guard let own else { return .failure(Refused("this host's own code can't be read, so its build in the node's record can't be found")) }
+        guard let build = record.build(host: own) else {
+            return .failure(Refused("this host's code (\(NodePins.hex(own))) is no host the node's record pins: not an installed build's host; \(NodePins.remedy)"))
+        }
         guard let cdhash = cdhashOf(server) else { return .failure(Refused("\(server) has no code signature to check it by (no cdhash)")) }
+        guard cdhash == build.server else {
+            return .failure(Refused("\(server) (\(NodePins.hex(cdhash))) isn't the server the node's record pins for this host's build \(build.commit)"))
+        }
         return .success(cdhash)
     }
 
