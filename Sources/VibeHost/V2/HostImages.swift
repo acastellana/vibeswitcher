@@ -127,7 +127,7 @@ public enum HostImages {
             }
             guard let home else { return "the account has no home in the user database" }
             let given = ProcessInfo.processInfo.environment
-            let wanted = nodeEnvironment(given, accountHome: home, accountName: accountName, shell: accountShell)
+            let wanted = checkedNodeEnvironment(nodeEnvironment(given, accountHome: home, accountName: accountName, shell: accountShell))
             for name in Set(given.keys).union(wanted.keys) where given[name] != wanted[name] {
                 if let value = wanted[name] { setenv(name, value, 1) } else { unsetenv(name) }
             }
@@ -266,9 +266,16 @@ public enum HostImages {
         public var server: Data
     }
 
+    /// The arguments a checked node takes (after its executable), and whether each takes a value: its own (the unit's
+    /// and the agent's form) and a switch's. Every other is refused (`macNodeStart`, step 0).
+    public static let checkedNodeArguments: [String: Bool] = [nodeFlag: false, nodeRootFlag: true, "--server": true, "--handover": true,
+                                                              MacHandoverKeeper.channelFlag: true, MacHandoverKeeper.pidFlag: true]
+
     /// The Mac's checked node start (the node on the Mac's design, "The checked node start"): what this `--node` host
-    /// is, or why it may not start, checked in this order: its `--node-root` an absolute folder (its build's,
-    /// `<folder>/bin/…`, as the unit and the agent start it: the row is found by code, never by that path), and `lockPath`
+    /// is, or why it may not start, checked in this order: its arguments only its own (`checkedNodeArguments`, each
+    /// once); its `--node-root` an absolute folder, which names only where its `--server` must be (by device and inode:
+    /// a link to the build's folder, or any folder holding a byte copy of the pinned server, passes, since the row is
+    /// found by code, never by that path), and `lockPath`
     /// the node's data root's own `host.lock` (`Platform.Service.nodeRoot` of the user database's home, `accountHome`; by
     /// path or by file; a link refused); the record
     /// (`pins`, read once by the caller) taken; its own running code (`own`, the kernel's cdhash) a row's host; its
@@ -281,6 +288,16 @@ public enum HostImages {
                                     cdhashOf: (String) -> Data? = { Platform.CodeIdentity.cdhash(atPath: $0) }) -> Result<CheckedNode, Refused> {
         func refused(_ why: String) -> Result<CheckedNode, Refused> { .failure(Refused(why)) }
         guard let accountHome else { return refused("the account has no home in the user database, so the node's root can't be found") }
+        // 0. Its arguments: its own and a handover's, each once, and nothing else (the review's F1 and N5): no argument
+        // left that changes who the app is, where it logs, what it locks or listens on, or what it runs.
+        var seen = Set<String>()
+        var index = arguments.index(after: arguments.startIndex)
+        while index < arguments.endIndex {
+            let flag = arguments[index]
+            guard let takesValue = checkedNodeArguments[flag] else { return refused("a checked node takes no \(flag): refused") }
+            guard seen.insert(flag).inserted else { return refused("a checked node takes \(flag) once: refused") }
+            index += takesValue ? 2 : 1
+        }
         let dataRoot = Platform.Service.nodeRoot(accountHome: accountHome)
         guard let nodeRoot = value(after: nodeRootFlag, in: arguments), nodeRoot.hasPrefix("/") else {
             return refused("\(nodeFlag) needs \(nodeRootFlag) and its build's absolute folder after it")
@@ -337,8 +354,15 @@ public enum HostImages {
     /// Why this image doesn't take `state` (seam: nil).
     public static func mayTakeHandover(_ state: HostHandover.State, viaKeeper: Bool, checkedNode: CheckedNode?) -> String? { nil }
 
-    /// A checked node's environment from `environment` (seam: as given).
-    public static func checkedNodeEnvironment(_ environment: [String: String]) -> [String: String] { environment }
+    /// A checked node's environment from `environment` (the review's F1): no variable of this program's but
+    /// `VIBESWITCHER_HOME` (the start sets it) and the descriptor limit the host carries across its own exec
+    /// (`descriptorCarriedVariable`), so nothing in it moves the host's log (`VIBESWITCHER_HOST_LOG`) or holds its
+    /// launchers; and no `SWIFT_BACKTRACE`, which can name a program the runtime starts on a crash.
+    public static func checkedNodeEnvironment(_ environment: [String: String]) -> [String: String] {
+        environment.filter { name, _ in
+            name != "SWIFT_BACKTRACE" && (!name.hasPrefix("VIBESWITCHER_") || name == "VIBESWITCHER_HOME" || name == descriptorCarriedVariable)
+        }
+    }
 
     /// The checked start `startAsNode` made on the Mac (behind `isCheckedMacNode`), held until `main` puts it in the
     /// host's config (`takeCheckedMacNode`).
