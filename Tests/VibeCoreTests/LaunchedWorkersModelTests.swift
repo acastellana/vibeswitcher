@@ -614,22 +614,35 @@ extension LeadAdvanceTests {
         try installScript("#!/bin/sh\n", at: real)
         let link = temp.url("bin-claude")
         try FileManager.default.createSymbolicLink(at: link, withDestinationURL: real)
-        let codex = temp.url("pkg").appendingPathComponent("bin/codex.js")
+        // The node's own link names Claude Code's binary here (its engine starts roles by that path).
+        let nodeLinks: [Agent: [String]] = [.claude: [link.path]]
+        let codex = temp.url("prefix").appendingPathComponent("lib/node_modules/@openai/codex/bin/codex.js")
         try FileManager.default.createDirectory(at: codex.deletingLastPathComponent(), withIntermediateDirectories: true)
         try installScript("#!/usr/bin/env node\n", at: codex)
         let lookAlike = temp.url("wrappers").appendingPathComponent("claude")
-        try FileManager.default.createDirectory(at: lookAlike.deletingLastPathComponent(), withIntermediateDirectories: true)
-        try installScript("#!/bin/sh\nexec codex-evil\n", at: lookAlike)
-        #expect(WorkerLaunch.commandAgent("env -i FOO=1 '\(real.path)' --model opus -- go") == .claude)
-        #expect(WorkerLaunch.commandAgent("'\(link.path)' --model opus") == .claude)
+        let codexLookAlike = temp.url("wrappers").appendingPathComponent("codex")
+        let stray = temp.url("stray").appendingPathComponent("@openai/codex/evil")
+        for file in [lookAlike, codexLookAlike, stray] {
+            try FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try installScript("#!/bin/sh\nexec codex-evil\n", at: file)
+        }
+        #expect(WorkerLaunch.commandAgent("env -i FOO=1 '\(real.path)' --model opus -- go", links: nodeLinks) == .claude)
+        #expect(WorkerLaunch.commandAgent("'\(link.path)' --model opus", links: nodeLinks) == .claude)
         #expect(WorkerLaunch.commandAgent("claude --model opus -- 'a; b | c'") == .claude)
         #expect(WorkerLaunch.commandAgent("'\(codex.path)' -m gpt-6") == .codex)
+        // Assignments the shell takes, and that leave the program's search alone, are passed over.
+        #expect(WorkerLaunch.commandAgent("FOO=1 claude") == .claude && WorkerLaunch.commandAgent("env -i claude") == .claude)
         for command in ["sh -c 'exec codex-evil' claude", "env X=claude real-program", "'\(lookAlike.path)' --model opus", "bash codex", "bash -l",
-                        "claude --model opus; claude --model fable", "exec -a claude fable", "env -S 'claude' x", "claude --model opus > out.txt"] {
-            #expect(WorkerLaunch.commandAgent(command) == nil, "\(command)")
+                        "claude --model opus; claude --model fable", "exec -a claude fable", "env -S 'claude' x", "claude --model opus > out.txt",
+                        // What a bare name or a script runs, moved by an assignment.
+                        "PATH=/x claude", "env PATH=/x codex", "NODE_OPTIONS=--require=/x/evil.js codex", "LD_PRELOAD=/x.so claude",
+                        "DYLD_INSERT_LIBRARIES=/x.dylib claude", "BASH_ENV=/x claude", "ENV=/x claude", "env -i PATH=/x claude",
+                        // Not assignments to the shell: a program by that name.
+                        "'FOO=1' claude", "\"PATH\"=/x claude", "é=1 claude",
+                        // A name alone, or a package path outside an install root.
+                        "'\(codexLookAlike.path)' -m gpt-6", "'\(stray.path)'"] {
+            #expect(WorkerLaunch.commandAgent(command, links: nodeLinks) == nil, "\(command)")
         }
-        // What the node's own link names counts as that agent (the node's roles start by its resolved path).
-        #expect(WorkerLaunch.commandAgent("'\(lookAlike.path)' --model opus", links: [.claude: [lookAlike.path]]) == .claude)
         // Under the floor, such a session holds no role.
         let (book, root, commit) = floorBook()
         guard case .refused(let why) = bindVerifier(book, root: root, commit: commit, session: "sh", command: "sh -c 'exec claude --model fable' claude") else {

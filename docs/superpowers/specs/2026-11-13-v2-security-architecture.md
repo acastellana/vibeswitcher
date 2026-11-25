@@ -2452,7 +2452,11 @@ Not checked after the bind (the review of 45c62592, V3): a verifier's or finder'
 life, so a process in it that ends its agent and starts `claude --model <excluded>` in the same session gives its
 verdict with the bind's judgement. The two ways to close it: the host drops the role when the session's first agent
 process exits (a new verdict then needs a new, judged bind), or the vault checks, at `submitVerdict` and a ballot, that
-the caller's agent process is the one that was running at the bind.
+the caller's agent process is the one that was running at the bind. Only that check of the running agent's executable
+also closes what a bind's reading of the command can't: a same-uid writer putting a program under Claude Code's or
+Codex's install folders (`~/.local/share/claude/versions/`, a `lib/node_modules` package) or behind the node's links, a
+PATH in the session's inherited environment that a bare `claude` or `codex` is found by, and a file swapped after the
+bind looked at it.
 Also not seen, with (a): a race on the worktree's settings, written before the worker starts (it reads them), then
 deleted before the bind reads them (the host's read at the bind finds nothing to add).
 (b) `/model` typed in a worker's session; (c) a `claude -p` child the worker starts with a `--model` of its own;

@@ -191,29 +191,64 @@ public enum WorkerLaunch {
     /// (`nodeLinks`: the program the node's engine starts its roles with, `RoleProgram`). Anything else is nil (a shell,
     /// a wrapper, another program), which a bind under the floor refuses.
     public static func commandAgent(_ command: String, links: [Agent: [String]] = nodeLinks) -> Agent? {
+        switch program(of: command) {
+        case .bare(let agent): return agent
+        case .path(let path): return agent(atPath: path, links: links)
+        case nil: return nil
+        }
+    }
+
+    /// What `commandAgent` reads of a command without touching the disk: the agent a bare name starts, or the path
+    /// whose resolution decides (`agent(atPath:links:)`); nil when it can't be told (not one simple command, a wrapper,
+    /// an assignment that changes what a name or a script runs: `riskyAssignment`).
+    enum Program: Equatable { case bare(Agent), path(String) }
+
+    static func program(of command: String) -> Program? {
         guard !controlled(command) else { return nil }
-        var rest = words(command)[...]
-        func skipAssignments() { while let first = rest.first, isAssignment(first) { rest = rest.dropFirst() } }
-        skipAssignments()
-        if let first = rest.first, first == "env" || first == "/usr/bin/env" || first == "/bin/env" {
+        var rest = tokens(command)[...]
+        func skipAssignments() -> Bool {
+            while let first = rest.first, first.assignment {
+                if riskyAssignment(String(first.text.prefix { $0 != "=" })) { return false }
+                rest = rest.dropFirst()
+            }
+            return true
+        }
+        guard skipAssignments() else { return nil }
+        if let first = rest.first?.text, first == "env" || first == "/usr/bin/env" || first == "/bin/env" {
             rest = rest.dropFirst()
-            while let option = rest.first, option.hasPrefix("-") {
+            while let option = rest.first?.text, option.hasPrefix("-") {
                 rest = rest.dropFirst()
                 if option == "-u" || option == "--unset" { rest = rest.dropFirst() }
                 guard ["-i", "-", "--ignore-environment", "-u", "--unset"].contains(option) || option.hasPrefix("--unset=") else { return nil }
             }
-            skipAssignments()
+            guard skipAssignments() else { return nil }
         }
-        guard let program = rest.first else { return nil }
-        if program == "claude" { return .claude }
-        if program == "codex" { return .codex }
-        guard program.hasPrefix("/"), let resolved = realpath(program, nil) else { return nil }
-        defer { free(resolved) }
-        let real = String(cString: resolved)
-        for (agent, paths) in links where paths.contains(where: { link in realPathOf(link) == real }) { return agent }
-        let name = (real as NSString).lastPathComponent
-        if VersionedClaude.isBinary(real) || real.contains("/@anthropic-ai/claude-code/") { return .claude }
-        if name == "codex" || name == "codex.js" || real.contains("/@openai/codex/") { return .codex }
+        guard let program = rest.first?.text else { return nil }
+        if program == "claude" { return .bare(.claude) }
+        if program == "codex" { return .bare(.codex) }
+        return program.hasPrefix("/") ? .path(program) : nil
+    }
+
+    /// An assignment that changes what a bare name or a node script runs: PATH, NODE_OPTIONS, BASH_ENV, ENV, and the
+    /// loaders' LD_* and DYLD_*.
+    static func riskyAssignment(_ name: String) -> Bool {
+        ["PATH", "NODE_OPTIONS", "BASH_ENV", "ENV"].contains(name) || name.hasPrefix("LD_") || name.hasPrefix("DYLD_")
+    }
+
+    /// The agent the program at `path` is, once resolved: what the node's own links resolve to (`nodeLinks`, the
+    /// program its engine starts roles with), Claude Code's versioned binary in the account's
+    /// `~/.local/share/claude/versions/`, or Claude Code's or Codex's npm package under a `lib/node_modules` (or bun's
+    /// `install/global/node_modules`) folder; nil for anything else, a name alone included (`/x/codex`).
+    static func agent(atPath path: String, links: [Agent: [String]]) -> Agent? {
+        guard let real = realPathOf(path) else { return nil }
+        for (agent, paths) in links where paths.contains(where: { realPathOf($0) == real }) { return agent }
+        let versions = (VibePaths.accountHome as NSString).appendingPathComponent(".local/share/claude/versions") + "/"
+        if real.hasPrefix(versions), VersionedClaude.isBinary(real) { return .claude }
+        func package(_ name: String) -> Bool {
+            ["/lib/node_modules/", "/install/global/node_modules/"].contains { real.contains($0 + name + "/") }
+        }
+        if package("@anthropic-ai/claude-code") { return .claude }
+        if package("@openai/codex") { return .codex }
         return nil
     }
 
@@ -231,12 +266,6 @@ public enum WorkerLaunch {
         return String(cString: resolved)
     }
 
-    /// `NAME=value`, a shell assignment before a command.
-    static func isAssignment(_ word: String) -> Bool {
-        guard let equals = word.firstIndex(of: "="), equals != word.startIndex else { return false }
-        let name = word[..<equals]
-        return name.first.map { $0 == "_" || $0.isLetter } == true && name.allSatisfy { $0 == "_" || $0.isLetter || $0.isNumber }
-    }
 
     /// Whether `command` holds more than one simple command's syntax outside quotes: a list (`;`, `&`, `|`), a
     /// redirection, a substitution (`$(`, backquote), a subshell or a newline.
@@ -264,17 +293,42 @@ public enum WorkerLaunch {
 
     /// `command`'s words as a POSIX shell splits them: single quotes literal, double quotes with `\` escaping `"`, `\`,
     /// `$` and `` ` ``, a bare `\` escaping the next character (`RecentProjects.shellQuote`'s `'\''` among them).
-    static func words(_ command: String) -> [String] {
-        var words: [String] = []
+    static func words(_ command: String) -> [String] { tokens(command).map(\.text) }
+
+    /// `command`'s words as `words` splits them, each with whether the shell takes it as an assignment: a word whose
+    /// first `=` comes after a name of unquoted, unescaped ASCII `[A-Za-z_][A-Za-z0-9_]*` (`'FOO=1'`, `"PATH"=/x` and
+    /// `é=1` aren't: the shell runs them as a program's name).
+    static func tokens(_ command: String) -> [(text: String, assignment: Bool)] {
+        var tokens: [(text: String, assignment: Bool)] = []
         var word = "", inWord = false
+        // Before the word's first `=`: whether every character was plain and makes a name.
+        var name = "", plainName = true, sawEquals = false, assignment = false
+        func plain(_ character: Character) {
+            guard !sawEquals else { return }
+            if character == "=" {
+                sawEquals = true
+                assignment = plainName && !name.isEmpty
+                return
+            }
+            let ascii = character.isASCII && (character.isLetter || character == "_" || (character.isNumber && !name.isEmpty))
+            if !ascii { plainName = false }
+            name.append(character)
+        }
+        func quoted() { if !sawEquals { plainName = false } }
+        func end() {
+            if inWord { tokens.append((word, assignment)) }
+            word = ""; inWord = false; name = ""; plainName = true; sawEquals = false; assignment = false
+        }
         var characters = command.makeIterator()
         while let character = characters.next() {
             switch character {
             case "'":
                 inWord = true
+                quoted()
                 while let next = characters.next(), next != "'" { word.append(next) }
             case "\"":
                 inWord = true
+                quoted()
                 while let next = characters.next(), next != "\"" {
                     if next == "\\", let escaped = characters.next() {
                         if !"\"\\$`".contains(escaped) { word.append(next) }
@@ -285,18 +339,18 @@ public enum WorkerLaunch {
                 }
             case "\\":
                 inWord = true
+                quoted()
                 if let escaped = characters.next() { word.append(escaped) }
             case _ where character.isWhitespace:
-                if inWord { words.append(word) }
-                word = ""
-                inWord = false
+                end()
             default:
                 inWord = true
+                plain(character)
                 word.append(character)
             }
         }
-        if inWord { words.append(word) }
-        return words
+        end()
+        return tokens
     }
 
     /// The families a launch adds (`seen` nil: the host didn't know the session, none): its `--model`'s (`runsOn`), or
@@ -332,18 +386,24 @@ public enum WorkerLaunch {
         guard let seen else { return BindFacts() }
         var facts = BindFacts(known: true)
         facts.model = seen.command.flatMap(launchModel(command:)).flatMap { $0.lowercased() == "default" ? nil : $0 }
-        facts.agent = seen.command.flatMap { commandAgent($0) }
+        // The agent: a bare name told now; a path resolved in the bounded block below (a hung mount never holds the
+        // vault), nil past its time.
+        let told = seen.command.flatMap { Self.program(of: $0) }
+        if case .bare(let agent) = told { facts.agent = agent }
         let done = DispatchSemaphore(value: 0)
         let result = Found()
         DispatchQueue.global(qos: .userInitiated).async {
             let home = settings(in: home, [".claude", "settings.json"])
             let project = projectModels(cwd: seen.cwd)
-            result.set((home.object?["model"] as? String, project.models, home.note.map { [$0] } ?? [], project.notes, home.note == nil))
+            var agent: Agent?
+            if case .path(let path) = told { agent = Self.agent(atPath: path, links: nodeLinks) }
+            result.set((home.object?["model"] as? String, project.models, home.note.map { [$0] } ?? [], project.notes, home.note == nil, agent))
             done.signal()
         }
         if done.wait(timeout: .now() + limit) == .success, let read = result.get() {
             facts.defaultModel = read.defaultModel
             facts.defaultKnown = read.homeRead
+            if case .path = told { facts.agent = read.agent }
             facts.notes = read.homeNotes + read.projectNotes
             facts.unread = !read.projectNotes.isEmpty
             facts.families = Array(Set(ran(facts) + read.projectModels.flatMap(runsOn))).sorted()
@@ -380,7 +440,7 @@ public enum WorkerLaunch {
 
     /// The bounded reads' result, handed between two queues.
     private final class Found: @unchecked Sendable {
-        typealias Read = (defaultModel: String?, projectModels: [String], homeNotes: [String], projectNotes: [String], homeRead: Bool)
+        typealias Read = (defaultModel: String?, projectModels: [String], homeNotes: [String], projectNotes: [String], homeRead: Bool, agent: Agent?)
         private let lock = NSLock()
         private var value: Read?
         func set(_ found: Read) { lock.withLock { value = found } }
