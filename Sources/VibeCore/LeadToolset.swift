@@ -107,9 +107,6 @@ public protocol LeadRuntime: AnyObject {
     func memoryReading() -> MacMemory?
     /// The model the project's workers run on, as `claude --model` names it (nil: Claude's default, not known).
     func workerModel(root: String) -> String?
-    /// The command the session host started `session` with, as it recorded it (nil: not known). See
-    /// `LeadToolset.launchedWorkersModel`.
-    func launchCommand(of session: String) -> String?
     /// How a session's agent ended, in the witness's words (see `LeadWitness.verifierEnding`): its session's ending
     /// ("killed by SIGTERM"), or that its agent quit and left the session's shell open; nil while its agent runs, or
     /// when that can't be told.
@@ -3035,7 +3032,11 @@ public final class LeadToolset: MCPToolset {
         let fallback = security != nil && LeadReviewFloor.sameModel(workflow.securityAuditModel, AccountUsage.heldBackFamily)
             && !LeadReviewFloor.sameModel(verifierModel, workflow.securityAuditModel)
             ? fableFallback()?.fableHeldBack(now: usageClock()) : nil
-        let modelNotice = fallback.map { " on \(verifierModel) in Fable's place: Fable held back until \(UsageLimit.resetText(AccountUsage.ends($0)))" } ?? ""
+        // Under a floor that keeps audits off the workers' model, what their model was judged by (`WorkerLaunch.basis`):
+        // in the audit's reply, so why a model was passed over can be seen.
+        let basis = workflow.floor?.verifierDifferent == true ? workersBasis(task, projectDefault: runtime.workerModel(root: root)).text : nil
+        let modelNotice = (fallback.map { " on \(verifierModel) in Fable's place: Fable held back until \(UsageLimit.resetText(AccountUsage.ends($0)))" } ?? "")
+            + (basis.map { " (on \(verifierModel): \($0))" } ?? "")
         // Near one of the account's usage limits on the audits' model: a verifier started now would stop mid-audit at it.
         let instead = security == nil ? "audit on another model (configure verifier_model, e.g. opus)"
             : "let it wait: this sensitive or security audit runs on \(verifierModel) under the review floor"
@@ -3219,7 +3220,8 @@ public final class LeadToolset: MCPToolset {
     /// The model this project's audits run on: verifier_model, or another than the workers' (see `LeadWorkflow.auditModel`).
     /// `task`: the task audited, whose own model (add_task's model) counts as the workers' under the floor. The workers'
     /// model is the one the task's workers were launched on, as the session host recorded their commands
-    /// (`launchedWorkersModel`), else the project's default (Claude Code's model: `LeadRuntime.workerModel`).
+    /// (`workersBasis`: every launch the vault recorded for the task), else the project's default (Claude Code's model:
+    /// `LeadRuntime.workerModel`).
     /// While Fable is held back (`AccountUsage.fableHeldBack`), the workers' model and the task's are the ones their
     /// sessions start on (opus in Fable's place), and the audit goes on the most capable model that isn't Fable and that
     /// the floor allows.
@@ -3230,17 +3232,22 @@ public final class LeadToolset: MCPToolset {
     /// the same automatic fallback as other audits: the most capable other model the floor allows, even with no
     /// verifier_model set. At the reset the ordinary Fable preference applies again.
     func auditModel(_ workflow: LeadWorkflow, task: LeadTask? = nil, security: Bool = false) -> String {
-        // The model the task's workers were launched on, by the host's record, else the project's default.
-        let workers = launchedWorkersModel(task) ?? runtime.workerModel(root: root)
         let launched = task.flatMap { task in task.worker.flatMap { task.launchedModels?[$0] } }
             .flatMap { $0.isEmpty || $0.hasPrefix("codex") ? nil : $0 }
         // A re-rolled task's Fable counts as its own model (`LeadTask.intendedModel`).
         let taskModel = task?.intendedModel
-        guard let usage = fableFallback() else {
-            return workflow.auditModel(workerModel: workers, taskModel: taskModel, launchedModel: launched, security: security)
-        }
+        let usage = fableFallback()
         let now = usageClock()
-        return workflow.auditModel(workerModel: usage.startModel(workers, now: now), taskModel: usage.startModel(taskModel, now: now),
+        // The models the task's workers ran on, by the host's record of each launch; else the project's default (as a
+        // worker would start on it now: Opus in Fable's place while Fable is held back).
+        let projectDefault = runtime.workerModel(root: root)
+        let workers = task.map { workersBasis($0, projectDefault: usage?.startModel(projectDefault, now: now) ?? projectDefault).workers }
+            ?? [usage?.startModel(projectDefault, now: now) ?? projectDefault]
+        guard let usage else {
+            return workflow.auditModel(workerModel: workers.first ?? nil, moreWorkers: Array(workers.dropFirst()), taskModel: taskModel,
+                                       launchedModel: launched, security: security)
+        }
+        return workflow.auditModel(workerModel: workers.first ?? nil, moreWorkers: Array(workers.dropFirst()), taskModel: usage.startModel(taskModel, now: now),
                                    launchedModel: launched, heldBack: AccountUsage.heldBackFamily, security: security)
     }
 

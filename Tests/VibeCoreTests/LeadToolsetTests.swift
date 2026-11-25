@@ -56,18 +56,16 @@ final class FakeRuntime: LeadRuntime {
     /// The project's Claude command, flags included.
     var claude = "claude --dangerously-skip-permissions"
     func claudeCommand(root: String) -> String { claude }
-    /// The host's record of each session's launch command (`LeadRuntime.launchCommand`): as spawned, unless set here
-    /// (a session's entry taken out: the host doesn't know it).
-    var hostCommands: [String: String?] = [:]
     /// Claude Code's own default model, as `~/.claude/settings.json`'s "model" gives it (`HostRuntime.workerModel`),
     /// where the project's command names none.
     var settingsModel: String?
     func workerModel(root: String) -> String? { LeadWorkflow.claudeModel(command: claude) ?? settingsModel }
-    func launchCommand(of session: String) -> String? {
+    /// What the session host would see of `session` when a role is bound to it (`LeadVault.Book.seenOf`): the command
+    /// it was spawned with; nil for one this runtime didn't spawn.
+    func hostSeen(_ session: String) -> WorkerLaunch.Seen? {
         calls.lock()
         defer { calls.unlock() }
-        if let set = hostCommands[session] { return set }
-        return spawned.last { $0.id == session }?.command
+        return spawned.last { $0.id == session }.map { WorkerLaunch.Seen(command: $0.command) }
     }
     /// The project's Codex command, flags included.
     var codex = "codex"
@@ -199,7 +197,6 @@ final class FakeSeat: LeadRuntime {
     }
     var server: String { shared.server }
     func claudeCommand(root: String) -> String { shared.claudeCommand(root: root) }
-    func launchCommand(of session: String) -> String? { shared.launchCommand(of: session) }
     func workerModel(root: String) -> String? { shared.workerModel(root: root) }
     func codexCommand(root: String) -> String { shared.codexCommand(root: root) }
     func spawn(cwd: String, command: String, env: [String: String], label: String, agent: String) throws -> String {

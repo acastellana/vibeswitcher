@@ -465,22 +465,29 @@ public struct LeadWorkflow: Equatable, Sendable {
     /// `launchedModel`: the model the task's current worker was started on (`LeadTask.launchedModels`), kept off the
     /// audit under that floor as the task's model is.
     ///
+    /// `moreWorkers`: other models the task's workers ran on (`WorkerLaunch.basis`: a task with several worker sessions),
+    /// each kept off the audit under that floor as `workerModel` is.
+    ///
     /// `security`: the audited branch touches sensitive_paths or is flagged for security (`LeadToolset.securityReason`):
     /// it's audited on security_audit_model (`securityAuditModel`, Mythos unless set), whatever verifier_model says,
     /// where the floor allows that model (not the workers', the task's or its worker's under a different-model floor,
     /// and a name that says which model it is); else as any other audit.
-    public func auditModel(workerModel: String?, taskModel: String? = nil, launchedModel: String? = nil, heldBack: String? = nil,
-                           security: Bool = false) -> String {
-        let chosen = security && securityAllowed(workerModel: workerModel, taskModel: taskModel, launchedModel: launchedModel)
-            ? securityAuditModel : unheldAuditModel(workerModel: workerModel, taskModel: taskModel, launchedModel: launchedModel)
+    public func auditModel(workerModel: String?, moreWorkers: [String?] = [], taskModel: String? = nil, launchedModel: String? = nil,
+                           heldBack: String? = nil, security: Bool = false) -> String {
+        let workers = ([workerModel] + moreWorkers).map(LeadReviewFloor.workersModel)
+        let chosen = security && securityAllowed(workers: workers, taskModel: taskModel, launchedModel: launchedModel)
+            ? securityAuditModel : unheldAuditModel(workerModel: workerModel, workers: workers, taskModel: taskModel, launchedModel: launchedModel)
         guard let heldBack, LeadReviewFloor.sameModel(chosen, heldBack) else { return chosen }
         let different = floor?.verifierDifferent == true
-        let workers = LeadReviewFloor.workersModel(workerModel)
         return (Self.byCapability + [Self.lastResortAuditModel]).first { model in
-            !LeadReviewFloor.sameModel(model, heldBack)
-                && (!different || (!LeadReviewFloor.sameModel(model, workers) && !LeadReviewFloor.sameModel(model, taskModel)
-                                   && !LeadReviewFloor.sameModel(model, launchedModel)))
+            !LeadReviewFloor.sameModel(model, heldBack) && (!different || !Self.excluded(model, workers: workers, taskModel: taskModel, launchedModel: launchedModel))
         } ?? "sonnet"
+    }
+
+    /// One of the workers', the task's or its worker's models, which a different-model floor keeps an audit off.
+    static func excluded(_ model: String, workers: [String], taskModel: String?, launchedModel: String?) -> Bool {
+        workers.contains { LeadReviewFloor.sameModel(model, $0) } || LeadReviewFloor.sameModel(model, taskModel)
+            || LeadReviewFloor.sameModel(model, launchedModel)
     }
 
     /// The model a sensitive or security audit runs on when security_audit_model names none: Mythos (the user's
@@ -496,25 +503,23 @@ public struct LeadWorkflow: Equatable, Sendable {
 
     /// Whether the floor lets a sensitive audit run on `securityAuditModel`: always, unless it keeps audits off the
     /// workers' model and that's one of theirs, or a name that doesn't say which model it is (it may be theirs).
-    private func securityAllowed(workerModel: String?, taskModel: String?, launchedModel: String?) -> Bool {
+    private func securityAllowed(workers: [String], taskModel: String?, launchedModel: String?) -> Bool {
         guard floor?.verifierDifferent == true else { return true }
         let model = securityAuditModel
         guard LeadReviewFloor.knownModel(model) else { return false }
-        return !LeadReviewFloor.sameModel(model, LeadReviewFloor.workersModel(workerModel)) && !LeadReviewFloor.sameModel(model, taskModel)
-            && !LeadReviewFloor.sameModel(model, launchedModel)
+        return !Self.excluded(model, workers: workers, taskModel: taskModel, launchedModel: launchedModel)
     }
 
-    private func unheldAuditModel(workerModel: String?, taskModel: String?, launchedModel: String?) -> String {
+    private func unheldAuditModel(workerModel: String?, workers: [String], taskModel: String?, launchedModel: String?) -> String {
         let different = floor?.verifierDifferent == true
         if let verifierModel, !verifierModel.isEmpty {
             if !different { return verifierModel }
-            if LeadReviewFloor.knownModel(verifierModel), !LeadReviewFloor.sameModel(verifierModel, LeadReviewFloor.workersModel(workerModel)),
-               !LeadReviewFloor.sameModel(verifierModel, taskModel), !LeadReviewFloor.sameModel(verifierModel, launchedModel) { return verifierModel }
+            if LeadReviewFloor.knownModel(verifierModel),
+               !Self.excluded(verifierModel, workers: workers, taskModel: taskModel, launchedModel: launchedModel) { return verifierModel }
         }
         guard different else { return Self.otherModel(than: workerModel) }
-        let workers = LeadReviewFloor.workersModel(workerModel)
         return (Self.byCapability + [Self.lastResortAuditModel]).first {
-            !LeadReviewFloor.sameModel($0, workers) && !LeadReviewFloor.sameModel($0, taskModel) && !LeadReviewFloor.sameModel($0, launchedModel)
+            !Self.excluded($0, workers: workers, taskModel: taskModel, launchedModel: launchedModel)
         } ?? "sonnet"
     }
 

@@ -221,6 +221,8 @@ public struct LeadVault: Sendable {
         case unaudited(root: String, task: String)
         /// What small_task_min judges a task by, as the vault keeps it (`Reply.smallTask`; see `LeadVault.SmallTaskFacts`).
         case smallTaskFacts(root: String, task: String)
+        /// The task's worker launches as the host recorded them at each bind (`Reply.launches`; see `WorkerLaunch`).
+        case launches(root: String, task: String)
         /// The repository's lead only: notes on a task small_task_min judges it by (`LeadVault.SmallTaskNote`).
         case noteSmallTask(root: String, task: String, note: SmallTaskNote)
         /// The app only: the sessions its witness sees at work now (`at`, its clock); each worker's task counts the time
@@ -263,6 +265,8 @@ public struct LeadVault: Sendable {
         case push(LeadPush.Request?)
         /// `Request.smallTaskFacts`: none while nothing is kept for the task.
         case smallTask(SmallTaskFacts?)
+        /// `Request.launches`: none while nothing is kept for the task.
+        case launches([WorkerLaunch]?)
     }
 
     /// The host said no, or couldn't be asked.
@@ -585,6 +589,9 @@ extension LeadVault {
             var openRuns: [String: Double]?
             /// What small_task_min judges each task by, by task (optional: older vaults have none; see `SmallTaskFacts`).
             var smallTasks: [String: SmallTaskFacts]?
+            /// Each task's worker launches, as the host saw each session it bound a worker's role to (`WorkerLaunch`),
+            /// newest last, by task (optional: older vaults have none).
+            var launches: [String: [WorkerLaunch]]?
 
             /// Takes the members `drop` picks out; the sessions the workers and verifiers among them were bound to
             /// become `former`, with the role and task each held.
@@ -655,6 +662,9 @@ extension LeadVault {
         public var onChange: ((Data) -> Void)?
         /// The home whose agents' config this vault seals (`ConfigSeal`): its own process's (a test's scratch one).
         public var configHome = VibePaths.home
+        /// An in-process vault's stand-in for the host's session table (tests): what the host would see of a session a
+        /// role is bound to (`WorkerLaunch.Seen`), when `answer` is told nothing. The host never sets it.
+        public var seenOf: (@Sendable (String) -> WorkerLaunch.Seen?)?
         /// What a held first look kept from being recorded (`holdsFirstLook`), said for the host's log.
         public var onHeld: ((String) -> Void)?
         private var heldNotes: [String] = []
@@ -782,8 +792,10 @@ extension LeadVault {
         /// the session the message's agent runs in, as the host tells from its pid (nil: none it started).
         /// `liveSessions`: the sessions the host runs now, by id (nil: not known, and every worker or verifier the team
         /// has, holding its role or former, counts as running; see `ConfigSeal`).
+        /// `bound`: for `.bind`, what the host saw of the session (`WorkerLaunch.Seen`: the command it started it with);
+        /// nil: not told.
         public func answer(_ request: Request, from caller: Caller, userOpened: Bool = false, agentSession: String? = nil,
-                           liveSessions: Set<String>? = nil) -> Reply {
+                           liveSessions: Set<String>? = nil, bound: WorkerLaunch.Seen? = nil) -> Reply {
             // It reads git: outside the lock.
             if case .acceptMove(let root, let branch) = request { return acceptMove(root: root, branch: branch, from: caller) }
             // The agents' config, hashed here (never taken from the caller) and outside the lock: it reads files.
@@ -796,13 +808,18 @@ extension LeadVault {
                     config = ConfigSeal.hashes(of: ConfigSeal.homeWatched(home: configHome))
                 }
             }
+            // A worker's launch, Claude Code's default read here (outside the lock: it reads a file).
+            var launch: WorkerLaunch?
+            if case .bind(_, _, let session) = request {
+                launch = WorkerLaunch.recorded(session: session, seen: bound ?? seenOf?(session), home: configHome)
+            }
             var held: [String] = []
             let (reply, skills): (Reply, (hash: String, entries: String)?) = {
                 lock.lock()
                 defer { lock.unlock() }
                 var changed = false
                 let reply = answer(request, from: caller, userOpened: userOpened, agentSession: agentSession, liveSessions: liveSessions,
-                                   config: config, changed: &changed)
+                                   config: config, launch: launch, changed: &changed)
                 if changed, let onChange, let data = try? JSONEncoder().encode(state) { onChange(data) }
                 swap(&held, &heldNotes)
                 let key = ConfigSeal.keyPrefix + ConfigSeal.copiedFolder
@@ -889,7 +906,7 @@ extension LeadVault {
         // MARK: Rules
 
         private func answer(_ request: Request, from caller: Caller, userOpened: Bool, agentSession: String?, liveSessions: Set<String>?,
-                            config: [String: String]? = nil, changed: inout Bool) -> Reply {
+                            config: [String: String]? = nil, launch: WorkerLaunch? = nil, changed: inout Bool) -> Reply {
             switch request {
             case .issue(let role, let root, let task, let auditing, let finder):
                 if role == .lead {
@@ -957,6 +974,12 @@ extension LeadVault {
                     // A worker's or verifier's commands run from now on (`ConfigSeal`).
                     if team.members[index].role != .lead { team.branchCodeAt = Date().timeIntervalSince1970 }
                     team.members[index].session = session
+                    // A worker's launch, as the host saw its session (`WorkerLaunch`): the task keeps every one.
+                    if team.members[index].role == .worker, let task = team.members[index].task, let launch {
+                        var all = team.launches ?? [:]
+                        all[task] = Array(((all[task] ?? []).filter { $0.session != session } + [launch]).suffix(WorkerLaunch.kept))
+                        team.launches = all
+                    }
                 }
                 return .ok
             case .revoke(let grant, let root):
@@ -976,6 +999,7 @@ extension LeadVault {
                     team.reviews?[task] = nil
                     team.reported?[task] = nil
                     team.evidence?[task] = nil
+                    team.launches?[task] = nil
                 }
                 return .ok
             case .whoami(let root):
@@ -1202,6 +1226,8 @@ extension LeadVault {
                 return .ok
             case .smallTaskFacts(let root, let task):
                 return .smallTask(team(root)?.smallTasks?[task])
+            case .launches(let root, let task):
+                return .launches(team(root)?.launches?[task])
             case .noteSmallTask(let root, let task, let note):
                 // What lowers an audit is the lead's word only: a worker that wrote these would merge with no verdict.
                 guard isLead(caller, root) else { return .refused("Only the repository's lead notes what small_task_min judges a task by.") }

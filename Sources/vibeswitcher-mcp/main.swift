@@ -255,11 +255,6 @@ final class HostRuntime: LeadRuntime {
 
     func claudeCommand(root: String) -> String { command(.claude, root: root) ?? "claude" }
 
-    /// The command the host started `session` with, from its own list (`LeadToolset.launchedWorkersModel`).
-    func launchCommand(of session: String) -> String? {
-        (try? HostCall.sessions(socket: socket))?.first { $0.id.uuidString == session }?.command
-    }
-
     /// Claude Code's own `plugin list --json`, run as the session would start (see `LeadLaunch.listedPlugins`).
     func pluginIDs(command: String) -> [String]? { LeadLaunch.listedPlugins(command: command) }
 
