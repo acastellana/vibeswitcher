@@ -6,7 +6,7 @@
 import { h, setText, setClass } from '../dom.js';
 import { icon } from '../marks.js';
 import { AGENTS } from '../words.js';
-import { copyLine } from './cards.js';
+import { copyLine, UNDO_MS } from './cards.js';
 import {
   sessionShort, shellWord, renameLine, PAUSES, pauseLine, endable, endLine, closeShellsLine, resumeLine, endedEntry, newLine,
   PRESET_VARIABLES, presetProblem, presetLine, presetArgs, leadLine, newProjectLine, projectFolderName,
@@ -15,6 +15,7 @@ import { t } from '../i18n.js';
 import { actsFor, doButton, refusalWords } from '../acting.js';
 import { waysFor, sendArgs } from '../sendways.js';
 import { sendMenu } from './sendmenu.js';
+import { sessionHref, projectHref } from '../ui.js';
 
 // The command line's words for a session and for what the user typed (js/actions.js, where the page's lines are made).
 export { sessionShort, shellWord };
@@ -136,22 +137,114 @@ export function queuedStrip() {
 }
 
 // The question open on a session's screen (a permission prompt, its own question, a plan to approve), as the node read
-// it: the options numbered as the screen numbers them. A pick shows the line that answers it, `vibeswitcher reply`;
-// an option that takes words opens a field, and the line carries them. Returns { el, update(session) }.
+// it: the options numbered as the screen numbers them. Where the page acts and the node lists `session.reply`, a click
+// answers it: "Sending … · Undo" for as long as a Blocking card's answer waits (`UNDO_MS`, on `app.later`, the tests'
+// clock), then the request, with the question and options the click was made on (the node types nothing unless its
+// screen still shows them), then "You answered …" on the card; a refusal stays on the card in words, the choices back.
+// The answer waiting to go is dropped if the question changes or closes meanwhile. Elsewhere a pick shows the line that
+// answers it, `vibeswitcher reply`, and the card says why; an option that takes words opens a field, and the line or
+// the answer carries them. Returns { el, update(session) }.
+export const promptKey = (prompt) => JSON.stringify([prompt.question, prompt.options, prompt.at ?? null]);
+
 export function promptCard(app) {
   const el = h('article', { class: 'card ask session-prompt', tabindex: -1, hidden: true });
+  const later = app.later || ((fn, ms) => { const timer = setTimeout(fn, ms); return () => clearTimeout(timer); });
   let key = '';
   let chosen = null;
   let words = '';
+  let shown = null;
+  // This page's answer, for the session it was given on: { phase: 'waiting' (Undo still possible) | 'sending' |
+  // 'answered' | 'refused' | 'dropped', session, prompt (the click's identity), choice, option, text, cancel, why }.
+  let mine = null;
+  let lastSession = null;
+
+  const acting = () => actsFor(app, 'session.reply');
+
+  // The click: what it answers is taken now, and checked again when it goes.
+  function answer(session, index, text = null) {
+    const prompt = session.prompt;
+    if (!prompt || mine?.phase === 'waiting' || mine?.phase === 'sending') return;
+    mine = { phase: 'waiting', session: session.id, key: promptKey(prompt), question: prompt.question, options: [...prompt.options], choice: index + 1,
+      option: prompt.options[index], text };
+    mine.cancel = later(() => go(mine), UNDO_MS);
+    draw(session);
+  }
+
+  function undo() {
+    if (mine?.phase !== 'waiting') return;
+    mine.cancel?.();
+    mine = null;
+    if (shown) draw(shown);
+    el.focus?.();
+  }
+
+  // The seconds are over: it goes only if the session still shows that question and the page still acts.
+  function go(waiting) {
+    if (mine !== waiting) return;
+    const now = app.store.state.sessions.get(waiting.session);
+    if (!drivable(now) || !now.prompt || promptKey(now.prompt) !== waiting.key || !acting()) {
+      mine = { ...waiting, phase: 'dropped', key: now?.prompt ? promptKey(now.prompt) : null };
+      if (shown) draw(shown);
+      return;
+    }
+    mine = { ...waiting, phase: 'sending' };
+    draw(now);
+    const args = { session: waiting.session, choice: waiting.choice, question: waiting.question, options: waiting.options, ...(waiting.text ? { text: waiting.text } : {}) };
+    app.store.request('session.reply', args).then((reply) => {
+      // It no longer needs you: until the node reads its screen again, the answered question counts no more.
+      if (reply?.ok) app.store.sessionReplied?.(waiting.session, waiting.key);
+      if (mine?.session !== waiting.session || mine.phase !== 'sending') return;
+      if (reply?.ok) {
+        mine = { ...mine, phase: 'answered' };
+      } else {
+        mine = { ...mine, phase: 'refused', why: refusalWords(reply?.error) };
+      }
+      if (shown) draw(app.store.state.sessions.get(waiting.session) || shown);
+    });
+  }
+
+  function closedCard(session, ...lines) {
+    el.replaceChildren(h('header', { class: 'card-head' }, h('span', { class: 'priority blocking' }, t('drIsAsking', { agent: AGENTS[session.agent] || t('drTheAgent') }))),
+      h('div', { class: 'card-closed', role: 'status' }, ...lines));
+  }
+
+  // Why this card shows a line to paste instead of answering: the page doesn't act here, or the node doesn't take it.
+  const whyLine = () => h('p', { class: 'confirm-note prompt-why' }, app.store.acts() ? t('drReplyTerminalOnly') : t('drReplyPageReads'));
 
   function draw(session) {
     const prompt = session.prompt;
+    const said = (option, text) => h('strong', null, text ? `${option}: ${text}` : option);
+    if (mine?.phase === 'waiting') {
+      el.classList.add('closed', 'sending');
+      return closedCard(session, icon('send', 13), h('div', null, h('p', null, t('cSending', { x: mine.text ? `${mine.option}: ${mine.text}` : mine.option }), ' · ',
+        h('button', { class: 'link card-undo', type: 'button', onclick: undo }, t('cUndo'))), h('p', { class: 'card-about' }, mine.question.split('\n').at(-1))));
+    }
+    if (mine?.phase === 'sending') {
+      el.classList.add('closed', 'sending');
+      return closedCard(session, icon('send', 13), h('div', null, h('p', null, t('cSending', { x: mine.text ? `${mine.option}: ${mine.text}` : mine.option })),
+        h('p', { class: 'card-about' }, mine.question.split('\n').at(-1))));
+    }
+    if (mine?.phase === 'answered' && (!prompt || promptKey(prompt) === mine.key)) {
+      el.classList.add('closed');
+      el.classList.remove('sending');
+      return closedCard(session, icon('check', 13), h('div', null, h('p', null, t('cYouAnswered'), said(mine.option, mine.text)),
+        h('p', { class: 'card-about' }, mine.question.split('\n').at(-1))));
+    }
+    el.classList.remove('closed', 'sending');
+    if (!prompt) return;
     const agent = AGENTS[session.agent] || t('drTheAgent');
     const takes = new Set(prompt.text || []);
     const short = sessionShort(session.id);
+    const acts = acting();
     const buttons = prompt.options.map((option, index) => h('button', {
       class: 'option' + (chosen === index ? ' chosen' : ''), type: 'button', 'aria-pressed': String(chosen === index),
-      onclick: () => { chosen = index; draw(session); el.querySelector(takes.has(index) ? '.answer-input' : '.copy-button')?.focus(); },
+      onclick: () => {
+        // Acting, an option that takes no words is the answer; one that does opens its field first.
+        if (acts && !takes.has(index)) { chosen = null; answer(session, index); return; }
+        chosen = index;
+        draw(session);
+        el.querySelector(takes.has(index) ? '.answer-input' : '.copy-button')?.focus();
+      },
     }, h('span', { class: 'option-key', 'aria-hidden': 'true' }, String(index + 1)), h('span', { class: 'option-text' }, option),
     prompt.descriptions?.[index] ? h('span', { class: 'option-note' }, prompt.descriptions[index]) : null));
     const parts = [
@@ -161,6 +254,17 @@ export function promptCard(app) {
     if (prompt.multiSelect) {
       parts.push(h('ol', { class: 'options read-only' }, prompt.options.map((option) => h('li', { class: 'option' }, h('span', { class: 'option-text' }, option)))),
         h('p', { class: 'confirm-note' }, t('drItTakesSeveralTicksAnswer')));
+    } else if (acts) {
+      parts.push(h('div', { class: 'options' }, buttons));
+      if (chosen !== null && takes.has(chosen)) {
+        const index = chosen;
+        const input = h('input', { class: 'answer-input', type: 'text', value: words, placeholder: t('drYourWords'), 'aria-label': t('drYourWordsForThisOption'), autocomplete: 'off' });
+        const send = h('button', { class: 'button', type: 'submit', disabled: !words.trim() }, t('drReplySend'));
+        input.addEventListener('input', () => { words = input.value; send.disabled = !words.trim(); });
+        parts.push(h('form', { class: 'answer', onsubmit: (event) => { event.preventDefault(); if (words.trim()) { const text = words.trim(); words = ''; chosen = null; answer(session, index, text); } } }, input, send));
+      }
+      if (mine?.phase === 'refused' && mine.key === promptKey(prompt)) parts.push(h('p', { class: 'card-notice', role: 'alert' }, t('drReplyRefused', { why: mine.why })));
+      if (mine?.phase === 'dropped') parts.push(h('p', { class: 'card-notice', role: 'status' }, t('drReplyChanged')));
     } else {
       parts.push(h('div', { class: 'options' }, buttons));
       if (chosen !== null && takes.has(chosen)) {
@@ -174,7 +278,7 @@ export function promptCard(app) {
         return copyLine(`vibeswitcher reply ${short} ${chosen + 1}${typed}`, t('drTheCommandThatAnswersIt'));
       };
       const line = h('div', { class: 'prompt-line' }, command());
-      parts.push(line, h('p', { class: 'confirm-note' }, t('drRunItInATerminal2')));
+      parts.push(line, whyLine(), h('p', { class: 'confirm-note' }, t('drRunItInATerminal2')));
     }
     el.replaceChildren(...parts);
   }
@@ -182,13 +286,29 @@ export function promptCard(app) {
   return {
     el,
     update(session) {
+      // Another session: nothing of this one's answer is kept (one waiting to go is dropped).
+      if (session?.id !== lastSession) {
+        if (mine?.phase === 'waiting') mine.cancel?.();
+        mine = null;
+        key = '';
+        lastSession = session?.id ?? null;
+      }
+      shown = session;
       const prompt = drivable(session) ? session.prompt : null;
-      el.hidden = !prompt;
-      if (!prompt) { key = ''; return; }
-      const now = JSON.stringify([session.id, prompt.question, prompt.options, prompt.at]);
+      // Waiting to go, and the question changed or closed: it doesn't go.
+      if (mine?.phase === 'waiting' && (!prompt || promptKey(prompt) !== mine.key)) {
+        mine.cancel?.();
+        mine = { ...mine, phase: 'dropped', key: prompt ? promptKey(prompt) : null };
+      }
+      // A new question: what was said of the last one goes.
+      if (prompt && mine && mine.phase !== 'waiting' && mine.phase !== 'sending' && promptKey(prompt) !== mine.key) mine = null;
+      const keeps = mine?.phase === 'sending' || mine?.phase === 'answered';
+      el.hidden = !prompt && !keeps;
+      if (!prompt && !keeps) { key = ''; if (mine?.phase === 'dropped' || mine?.phase === 'refused') mine = null; return; }
+      const now = JSON.stringify([session.id, prompt?.question, prompt?.options, prompt?.at, mine?.phase ?? null, acting()]);
       if (now === key) return;
       // Another question (or the same one asked again): nothing picked for it yet.
-      if (!key.startsWith(JSON.stringify([session.id, prompt.question]).slice(0, -1))) { chosen = null; words = ''; }
+      if (!prompt || !key.startsWith(JSON.stringify([session.id, prompt.question]).slice(0, -1))) { chosen = null; words = ''; }
       key = now;
       draw(session);
     },
@@ -309,6 +429,45 @@ export function actionsStrip(app = null) {
   };
 }
 
+// Starting a session or a project's lead from the page, where it acts and the node lists the kind: the primary button
+// ("Starting…" while the request is out), and once the node said what it started, the page goes there as soon as the
+// store lists it (the reply can come before the stream's delta); the node's refusal said under the button. Elsewhere
+// the line to run, and why it is a line. `target(result)`: { session } for a session, { lead } for a lead's session;
+// `note(result)` what to say instead of going (a lead that waits for its host). Returns the slot's nodes.
+function startOrLine(app, { kind, label, args, line, lineLabel, terminalOnly, target, note = () => null }) {
+  if (!actsFor(app, kind)) {
+    return [line ? copyLine(line, lineLabel) : null, h('p', { class: 'confirm-note start-why' }, app.store.acts() ? t(terminalOnly) : t('drStartPageReads'))].filter(Boolean);
+  }
+  let stop = () => {};
+  const button = doButton(app, { label, kind, args, className: 'start-button', busy: t('drStarting'), done: (reply) => {
+    stop();
+    const said = note(reply.result || {});
+    if (said) { button.say(said); return; }
+    const wanted = target(reply.result || {});
+    const place = () => {
+      if (wanted.session && app.store.state.sessions.has(wanted.session)) return sessionHref(wanted.session);
+      if (wanted.lead) {
+        const lead = [...app.store.state.leads.values()].find((one) => one.session === wanted.lead);
+        if (lead) return projectHref(lead.project);
+      }
+      return null;
+    };
+    if (!wanted.session && !wanted.lead) { button.say(t('drStartedNoName')); return; }
+    const here = place();
+    if (here) { app.ui.go(here); return; }
+    button.say(t('drStartedWaiting'));
+    const topic = wanted.lead ? 'leads' : 'sessions';
+    const off = app.store.subscribe(topic, () => {
+      const found = place();
+      if (!found) return;
+      stop();
+      app.ui.go(found);
+    });
+    stop = () => { off?.(); stop = () => {}; };
+  } });
+  return [button.el, line ? h('p', { class: 'confirm-note or-terminal' }, t('drOrInATerminal')) : null, line ? copyLine(line, lineLabel) : null].filter(Boolean);
+}
+
 // Starting a session: a folder, one of the launch presets the node keeps for it (`session.presets`: the folder's own
 // and its default first, as the app's New Session lists them; Claude and Shell when the node lists none), Claude's model;
 // the line that starts it, as you type. `folder()` gives the folder to offer first. Returns { el, update() }.
@@ -330,8 +489,14 @@ export function newLeadForm(app) {
   }
   function draw() {
     const folder = where();
-    lineSlot.replaceChildren(...(folder && actsFor(app, 'lead') ? [doButton(app, { label: t('acStartLead'), kind: 'lead', args: () => ({ folder: where(), ...(goal.value.trim() ? { goal: goal.value.trim() } : {}) }) }).el] : []), folder ? copyLine(leadLine(folder, goal.value), t('drTheCommandThatStartsThe'))
-      : h('p', { class: 'confirm-note' }, t('drGiveAFolderTheLine')));
+    if (!folder) { lineSlot.replaceChildren(h('p', { class: 'confirm-note' }, t('drGiveAFolderTheLine'))); return; }
+    // With the `act` right and `lead` listed, Start the lead starts it (the folder and the goal, nothing else: never
+    // `--init`, `--replace` or `--take-head`, which stay the terminal's), then opens its project.
+    lineSlot.replaceChildren(...startOrLine(app, { kind: 'lead', label: t('acStartLead'), terminalOnly: 'drLeadTerminalOnly',
+      args: () => ({ folder: where(), ...(goal.value.trim() ? { goal: goal.value.trim() } : {}) }),
+      line: leadLine(folder, goal.value), lineLabel: t('drTheCommandThatStartsThe'),
+      target: (result) => ({ lead: typeof result.session === 'string' ? result.session : null }),
+      note: (result) => (result.happened === 'waiting' ? t('drLeadWaiting') : null) }));
   }
   path.addEventListener('input', draw);
   goal.addEventListener('input', draw);
@@ -368,8 +533,11 @@ export function newProjectForm(app) {
     const folder = projectFolderName(name.value);
     folderNote.hidden = !folder;
     folderNote.textContent = folder ? t('drItsFolder', { folder }) : '';
-    lineSlot.replaceChildren(folder ? copyLine(newProjectLine(name.value, location.value, goal.value), t('drTheCommandThatMakesThe'))
-      : h('p', { class: 'confirm-note' }, t('drGiveItANameThe')));
+    // No node kind makes a project's folder from a page (`vibeswitcher new-project` makes it in the terminal's own
+    // process): the line, and why it is one.
+    lineSlot.replaceChildren(...(folder ? [copyLine(newProjectLine(name.value, location.value, goal.value), t('drTheCommandThatMakesThe')),
+      h('p', { class: 'confirm-note start-why' }, t('drProjectTerminalOnly'))]
+      : [h('p', { class: 'confirm-note' }, t('drGiveItANameThe'))]));
   }
   for (const field of [name, location, goal]) field.addEventListener('input', draw);
   draw();
@@ -405,6 +573,7 @@ export function newSessionForm(app, { folder }) {
     h('p', { class: 'confirm-note' }, t('drRunItInATerminal3')),
     editor.el);
   let offered = false;
+  let lineDrawn = '';
 
   // `~/` is the node's home, as a shell would read it (the command line takes the folder as given).
   function where() {
@@ -440,16 +609,24 @@ export function newSessionForm(app, { folder }) {
     setText(about, preset.builtIn ? '' : presetNote(preset));
     const folder = where();
     if (!folder) {
+      lineDrawn = '';
       lineSlot.replaceChildren(h('p', { class: 'confirm-note' }, t('drGiveAFolderTheLine2')));
       if (!editor.el.hidden) editor.update(presets);
       return;
     }
     // With the `act` right, Start starts it from here (`session.new`: the folder, a built-in's agent or a preset by
     // name, the model), the line beside it.
-    const builtIn = { Claude: 'claude', Codex: 'codex', Shell: 'shell' }[preset.name];
-    lineSlot.replaceChildren(...[actsFor(app, 'session.new') ? doButton(app, { label: t('acStart'), kind: 'session.new',
-      args: () => ({ folder, ...(preset.builtIn || builtIn ? { agent: preset.kind || builtIn } : { preset: preset.name }), ...(model.value.trim() ? { model: model.value.trim() } : {}) }) }).el : null,
-    copyLine(newLine(folder, preset, model.value), 'the command that starts it')].filter(Boolean));
+    // A preset the node listed goes by its name with the digest it was listed with (the node starts it only while it is
+    // as shown); the page's own Claude, Codex or Shell (the node listed none) by its agent.
+    // Drawn again only when what it starts changed: a store update while a start is out keeps its "Starting…".
+    const drawnNow = JSON.stringify([folder, preset.name, preset.digest ?? null, preset.kind, model.value, actsFor(app, 'session.new'), app.store.acts()]);
+    if (drawnNow === lineDrawn) { if (!editor.el.hidden) editor.update(presets); return; }
+    lineDrawn = drawnNow;
+    const startArgs = () => ({ folder, ...(preset.digest ? { preset: preset.name, digest: preset.digest } : { agent: preset.kind || 'claude' }),
+      ...(model.value.trim() && preset.kind !== 'shell' ? { model: model.value.trim() } : {}) });
+    lineSlot.replaceChildren(...startOrLine(app, { kind: 'session.new', label: t('acStart'), terminalOnly: 'drStartTerminalOnly', args: startArgs,
+      line: newLine(folder, preset, model.value), lineLabel: 'the command that starts it',
+      target: (result) => ({ session: typeof result.session === 'string' ? result.session : null }) }));
     if (!editor.el.hidden) editor.update(presets);
   }
   path.addEventListener('input', () => { draw(); ask(); });

@@ -22,6 +22,8 @@
 //   store.read(kind, args)       a read (no action id): resolves with the feed's reply
 //   store.attach(id, bytes, type) an image for a session's composer, sent in parts (`session.attach`): the last reply,
 //                                whose result has the `path` the node wrote it to
+//   store.sessionReplied(id, key) a session's question this page answered (`session.reply` done, `key` the question's
+//                                identity): it no longer needs you, until the node's value shows another question
 
 // The keyed collections, and the field each entry is keyed by (a lead and its board by their project's id).
 import { applyOps, reindex } from './chatops.js';
@@ -94,6 +96,10 @@ export function createStore(options = {}) {
     // refused the last one.
     sessionDrafts: new Map(),
     sessionDraftRefused: new Map(),
+    // A session's question this page answered, by session id: the question's identity (`promptKey`). While the node's
+    // value still shows that question (its screen not read again yet), the session is shown working, the question
+    // closed; another question, or none, ends it.
+    replied: new Map(),
   };
 
   const listeners = new Map();
@@ -166,6 +172,20 @@ export function createStore(options = {}) {
     emit(new Map([['chat:' + session, [{ type: 'page', count: older.length }]]]));
   }
 
+  // The question's identity, as views/drive.js's `promptKey`.
+  const promptKey = (prompt) => JSON.stringify([prompt.question, prompt.options, prompt.at ?? null]);
+
+  // A session's value as shown: the question this page answered, still on the node's value, closed.
+  function replied(session) {
+    const answered = session && state.replied.get(session.id);
+    if (!answered) return session;
+    if (!session.prompt || promptKey(session.prompt) !== answered) {
+      state.replied.delete(session.id);
+      return session;
+    }
+    return { ...session, prompt: null, status: session.status === 'needs-you' ? 'working' : session.status };
+  }
+
   function applyChange(change, touched) {
     if (change.in === 'node') {
       state.node = change.value;
@@ -173,8 +193,8 @@ export function createStore(options = {}) {
     }
     if (!COLLECTIONS.includes(change.in)) return; // rule 3: a reader ignores what it doesn't know
     const map = state[change.in];
-    if (change.value === null) map.delete(change.id);
-    else map.set(change.id, change.value);
+    if (change.value === null) { map.delete(change.id); if (change.in === 'sessions') state.replied.delete(change.id); }
+    else map.set(change.id, change.in === 'sessions' ? replied(change.value) : change.value);
     if (change.in === 'cards') {
       state.acting.delete(change.id);
       if (change.value === null) state.cardKeys.delete(change.id);
@@ -227,7 +247,7 @@ export function createStore(options = {}) {
         for (const id of state.drafts.keys()) if (!next.get(id)?.open) state.drafts.delete(id);
         for (const id of state.draftRefused.keys()) if (!next.has(id)) state.draftRefused.delete(id);
       } else {
-        for (const entry of list) next.set(entry[key], entry);
+        for (const entry of list) next.set(entry[key], name === 'sessions' ? replied(entry) : entry);
       }
       state[name] = next;
       touch(touched, name, { type: 'reset' });
@@ -252,7 +272,7 @@ export function createStore(options = {}) {
       state.seq = message.seq;
       state.node = message.state.node || null;
       for (const name of COLLECTIONS) {
-        state[name] = new Map((message.state[name] || []).map((entry) => [entry[KEYS[name]], entry]));
+        state[name] = new Map((message.state[name] || []).map((entry) => [entry[KEYS[name]], name === 'sessions' ? replied(entry) : entry]));
         touch(touched, name, { type: 'reset' });
       }
       state.acting.clear();
@@ -570,6 +590,13 @@ export function createStore(options = {}) {
       if (rights !== undefined) state.rights = Array.isArray(rights) ? rights : [];
       state.plugins = Array.isArray(plugins) ? plugins : null;
       emit(new Map([['connection', [{ connection: state.connection }]]]));
+    },
+    sessionReplied(id, key) {
+      const session = state.sessions.get(id);
+      if (!session?.prompt || promptKey(session.prompt) !== key) return;
+      state.replied.set(id, key);
+      state.sessions.set(id, replied(session));
+      emit(new Map([['sessions', [{ in: 'sessions', id, value: state.sessions.get(id) }]]]));
     },
     setConnection: (connection) => setConnection(connection),
     connect(source) { feed = source; },

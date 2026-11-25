@@ -45,7 +45,8 @@ export function pageMaySet(key, value) {
 // success; the refusal said under it. Returns { el, button, say(text) }. `confirm`: a second click asked first, in
 // place ("Click again to stop the node", with Cancel beside it), for what can't be taken back; `danger`: drawn as
 // what ends something, never as the page's primary button.
-export function doButton(app, { label, kind, args, done = () => {}, quiet = false, confirm = null, danger = false, className = '' }) {
+// `busy`: the button's words while the request is out ("Starting…").
+export function doButton(app, { label, kind, args, done = () => {}, quiet = false, confirm = null, danger = false, className = '', busy = null }) {
   const said = h('span', { class: 'act-said', role: 'status' });
   let asking = false;
   let stopAsking = () => {};
@@ -65,10 +66,12 @@ export function doButton(app, { label, kind, args, done = () => {}, quiet = fals
     }
     reset();
     button.disabled = true;
+    if (busy) button.textContent = busy;
     setText(said, '');
     said.classList.remove('refused');
     app.store.request(kind, args()).then((reply) => {
       button.disabled = false;
+      if (busy) button.textContent = label;
       if (reply.ok) { done(reply); return; }
       setText(said, refusalWords(reply.error, label));
       said.classList.add('refused');
