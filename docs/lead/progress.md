@@ -4625,3 +4625,8 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-26 00:34 Kept v2-on-the-mac-4 unmerged: By design nothing of it merges into main: its commits are on the local branch v2-mac-checked-start in its clone (.vibeswitcher/v2-start), tip d90f4a6f, independently reviewed three times with the last verdict 'ready to offer for v2' and the last small change in; delivered as a branch for v2 at the user's push. The next Mac piece builds on its clone. No merge and no cleanup until the Mac node work is finished.
 - 2026-11-26 00:35 Planned v2-on-the-mac-5: v2 on the Mac, step 5: the node as a launchd agent (start, stop, status), on top of the checked start and the web port hold joined (in a clone; a branch for v2)
 - 2026-11-26 00:35 Started a worker on v2-on-the-mac-5
+- 2026-11-26 00:42 Kept v2-web-design-system unmerged: By design nothing of it merges into main: its commits are on the local branch v2-web-design in its clone (.vibeswitcher/v2-ds): the phone and buttons branches joined plus 10 commits of tokens and states; the next design steps build on it and it is pushed as a branch for v2 at the user's say. No merge and no cleanup until then.
+- 2026-11-26 00:42 Planned v2-web-design-system-2: v2 web design system, step 2: one button, one switch, one field, one badge, one section title (the review's shared components, D4 and its group B; in a clone)
+- 2026-11-26 00:43 Planned v2-web-the-chat: v2 web: the chat reads and writes like a first-rate app (the agent's writing rendered, code copyable, one message box where Enter sends; D7–D9, U9 and the review's group C; in a clone)
+- 2026-11-26 00:43 Started a worker on v2-web-design-system-2
+- 2026-11-26 00:43 Started a worker on v2-web-the-chat
