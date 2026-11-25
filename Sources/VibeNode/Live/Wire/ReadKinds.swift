@@ -206,7 +206,8 @@ extension WireKinds {
         public struct Result: Codable, Sendable {
             public var card: NodeWire.Value?
             public var difference: NodeWire.Value?
-            public init(card: NodeWire.Value, difference: NodeWire.Value? = nil) {
+            /// `card`: closed ("nothing to accept"), never kept, when nothing is held and nothing waits to be recorded.
+            public init(card: NodeWire.Value?, difference: NodeWire.Value? = nil) {
                 self.card = card
                 self.difference = difference
             }

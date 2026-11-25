@@ -75,6 +75,9 @@ public enum ConfigHoldStore {
         /// (`SharedHome`): not in `items` nor `hashes`. Set by the engine as it draws the card; nil on the home's own
         /// card and when none is shared.
         public var sharedHome: SharedHome?
+        /// Nothing held, and no guard rail recorded for the folder: the vault's first look is owed (a host restart
+        /// since): accepting confirms the project's rules once. Such a card is no hold (not blocking).
+        public var firstLook: Bool?
 
         public init(items: [Item] = [], hashes: [String: String] = [:], floor: LeadReviewFloor? = nil, rails: [String: String] = [:],
                     baseBranch: String? = nil, guarded: [Rail] = [], lastAccept: Date? = nil) {
@@ -188,15 +191,15 @@ public enum ConfigHoldStore {
         let byName = Dictionary(hashes.map { (ConfigSeal.name(ofKey: $0.key), (key: $0.key, hash: $0.value)) }) { first, _ in first }
         // "The same" only from a snapshot this host's vault sealed at the last accept (the security follow-ups' item 18;
         // the close-out review: the record now is that accept's).
-        let vouched = AcceptedSnapshot.vouches(snapshot, root: root, vault: vault, record: record)
+        let vouched = AcceptedSnapshot.vouch(snapshot, root: root, vault: vault, record: record)
         let items = names.map { name in
             Item(name: name, changedAt: times[name], size: sizes[name], hash: String((byName[name]?.hash ?? "").prefix(12)), change: changes[name],
                  outside: outside.contains(name), files: details[name]?.files ?? [],
-                 sinceAccept: byName[name].flatMap { AcceptedSnapshot.since(key: $0.key, hash: $0.hash, in: snapshot, vouched: vouched) })
+                 sinceAccept: byName[name].flatMap { AcceptedSnapshot.since(key: $0.key, hash: $0.hash, in: snapshot, vouched: vouched.item($0.key)) })
         }
         let workflow = LeadWorkflow.load(from: workflowPath(root: root))
         let guarded = guardedValues(workflow).map {
-            Rail(key: $0.key, value: $0.value, sinceAccept: AcceptedSnapshot.since(rail: $0.key, value: $0.value, in: snapshot, vouched: vouched))
+            Rail(key: $0.key, value: $0.value, sinceAccept: AcceptedSnapshot.since(rail: $0.key, value: $0.value, in: snapshot, vouched: vouched.rail($0.key)))
         }
         return .success(Shown(items: items, hashes: hashes, floor: LeadReviewFloor.starting(from: workflow), rails: recordedHashes(workflow),
                               baseBranch: workflow.baseBranch, guarded: guarded,

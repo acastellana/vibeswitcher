@@ -100,24 +100,38 @@ public struct AcceptedSnapshot: Codable, Equatable, Sendable {
         return message
     }
 
-    /// Whether `vault` (this host's) sealed `project`'s config part as it reads now, and it is the last accept's: every
-    /// watched thing and guard rail the vault's record (`record`, `guardedRecord`) holds now is what the snapshot says
-    /// was accepted (the close-out review: the seal carries no counter, so a snapshot sealed at an earlier accept, kept
-    /// and put back, still checks; the record has moved on to the later accept's). False for a rewritten one, one with no
-    /// seal, an earlier accept's, and after a host restart (another vault's key). Reads the vault.
-    public static func vouches(_ project: Project?, root: String, vault: LeadVault, record: [String: String]?) -> Bool {
-        guard let project, project.seal != nil, let record, isLast(project, record: record) else { return false }
-        return (try? vault.verify([sealMessage(project, root: root)])) == [true]
+    /// What `project` speaks for now (the security follow-ups' item 18 and its close-out review): only when this host's
+    /// vault sealed its config part as it reads now (`sealChecks`), and then each watched thing and guard rail alone
+    /// whose value the vault's record (`record`) holds now is the snapshot's (a rail it records none for: as before, not
+    /// held against it). One key the record moved on for since the
+    /// accept (the server's own sealed write, a hooks update after a build switch; a lead's quiet seal of an instruction
+    /// file; a later accept) speaks for no other: the real node, 2026-11-25, had every guard rail read "not known to be
+    /// the same" after a hooks update moved one watched thing, and a page's accept refused. A snapshot sealed at an
+    /// earlier accept and put back speaks only for what the record still holds at its values: never for a rail the user
+    /// has since set otherwise.
+    public struct Vouch: Sendable, Equatable {
+        public var sealed: Bool
+        public var items: Set<String>
+        public var rails: Set<String>
+        public static let none = Vouch(sealed: false, items: [], rails: [])
+        public func item(_ key: String) -> Bool { items.contains(key) }
+        public func rail(_ key: String) -> Bool { rails.contains(key) }
+        /// Every guard rail the vault records as the snapshot has it.
+        public var allRails: Bool { sealed && rails.isSuperset(of: LeadVault.guardedKeys) }
     }
 
-    /// Whether `record` (the vault's) holds what `project` says the last accept left: each watched thing at the hash
-    /// the snapshot has, and each guard rail at the hash of the snapshot's value (none set: the empty value's).
-    static func isLast(_ project: Project, record: [String: String]) -> Bool {
-        for (key, hash) in record where ConfigSeal.isWatchedKey(key) && project.hashes[key] != hash { return false }
-        for key in LeadVault.guardedKeys {
-            if let hash = record[key], hash != LeadVault.hash(project.guarded[key] ?? "") { return false }
-        }
-        return true
+    /// `project`'s vouch now (`Vouch`). Reads the vault.
+    public static func vouch(_ project: Project?, root: String, vault: LeadVault, record: [String: String]?) -> Vouch {
+        guard let project, project.seal != nil, let record, (try? vault.verify([sealMessage(project, root: root)])) == [true] else { return .none }
+        let items = Set(project.hashes.keys.filter { ConfigSeal.isWatchedKey($0) && record[$0] == project.hashes[$0] })
+        let rails = Set(LeadVault.guardedKeys.filter { key in record[key].map { $0 == LeadVault.hash(project.guarded[key] ?? "") } ?? true })
+        return Vouch(sealed: true, items: items, rails: rails)
+    }
+
+    /// Whether `project` speaks for every guard rail now (`vouch`'s `allRails`): what `vibeswitcher set` needs before it
+    /// seals the snapshot again with a rail's new value.
+    public static func vouches(_ project: Project?, root: String, vault: LeadVault, record: [String: String]?) -> Bool {
+        vouch(project, root: root, vault: vault, record: record).allRails
     }
 
     /// What a held thing (`key`, the vault's, with the `hash` it's held at) is against the last accept, in words: the
