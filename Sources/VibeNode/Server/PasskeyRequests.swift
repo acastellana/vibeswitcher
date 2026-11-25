@@ -207,8 +207,10 @@ extension Requests {
         guard (acting.state?.keys.count ?? 0) < LeadVaultV2.passkeysKept else {
             return reply(.init(re: request.id, error: .init(.refused, "at most \(LeadVaultV2.passkeysKept) passkeys: forget one first (vibeswitcher web --passkey --forget ID)")))
         }
-        // One at a time.
-        guard passkeyRegistrations.isEmpty else {
+        // One at a time; a contested one holds no seat (the review's K1b: else whatever holds a page's token and secret
+        // could contest every registration and keep the next one out until it ran out). It is kept only to say why to
+        // the terminal that asked it, and dropped once another begins.
+        guard passkeyRegistrations.values.allSatisfy({ $0.contested != nil }) else {
             return reply(.init(re: request.id, error: .init(.refused, "a passkey's registration waits already: finish it, or wait \(Int(Self.registrationWait)) s")))
         }
         // The one page named by the words it shows (its pairing's phrase), on the origin a passkey works on.
@@ -234,6 +236,7 @@ extension Requests {
             return reply(.init(re: request.id, error: .init(.gone, "no page showing those words is open at http://localhost and confirmed: open it there "
                 + "(`vibeswitcher web --localhost`, confirmed by its words), then this again")))
         }
+        passkeyRegistrations = [:]
         passkeyRegistrations[id] = PasskeyRegistration(challenge: challenge, user: user, until: now.addingTimeInterval(Self.registrationWait), page: page,
                                                        phrase: phrase, offer: offer)
         // Run out (answered or not, while the terminal hasn't kept it): dropped, and the page's tabs told.

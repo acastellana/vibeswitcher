@@ -382,6 +382,21 @@ struct PasskeyTests {
         #expect(try ask(tab, twoTabs).ok && ask(tab, twoTabs).ok, "the same tab asking again")
         #expect(try ask(sibling, twoTabs).error?.code == "voice")
         #expect(try await state(twoTabs).result?["state"]?.string == "contested")
+        // K1b: a contested registration holds no seat: the next one is taken at once (no clear here), and the
+        // contested one is gone with it.
+        let retried = try #require(try await begin(phraseA).result?["register"]?.string, "a retry right after a contested registration")
+        #expect(try await state(twoTabs).result?["state"]?.string == "gone")
+        #expect(try ask(raw, retried).ok)
+        #expect(try await state(retried).result?["state"]?.string == "asked")
+        #expect(try await begin(phraseA).error?.message.contains("waits already") == true, "a live one still holds the seat")
+        #expect(try ask(tab, retried).error?.code == "voice", "contested again, by the user's own click")
+        // A typed mismatch ends one too: the next is taken at once.
+        let mismatched = try #require(try await begin(phraseA).result?["register"]?.string)
+        let mismatchedAsked = try ask(tab, mismatched)
+        let wrong = SoftAuthenticator()
+        #expect(try registered(tab, mismatched, wrong, asked: mismatchedAsked).ok)
+        #expect(try await add(mismatched, typed: wrong.idText.prefix(typedLength) == "abcdef" ? "abcdeg" : "abcdef").error != nil)
+        #expect(try await begin(phraseA).result?["register"]?.string != nil, "a retry right after a mismatch")
         clear()
 
         // The clicked tab answers twice: contested.
