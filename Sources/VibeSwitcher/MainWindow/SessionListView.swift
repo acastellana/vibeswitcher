@@ -123,8 +123,15 @@ struct SessionListView: View {
                 .background(RoundedRectangle(cornerRadius: 6).fill(.quaternary.opacity(0.6)))
                 TimelineView(.ticking(every: 30)) { context in
                     let summary = WindowGroups.summary(model.allRows, now: context.date)
-                    Text(summary.isEmpty ? countText : summary)
-                        .font(.system(size: 11)).foregroundStyle(.secondary)
+                    HStack(spacing: 6) {
+                        Text(summary.isEmpty ? countText : summary)
+                            .foregroundStyle(.secondary)
+                        Spacer(minLength: 0)
+                        // Looked at again as the list changes and on the clock's tick: a shell back at its prompt
+                        // says nothing the list hears.
+                        CloseFinishedButton(count: actions.closable().count, actions: actions)
+                    }
+                    .font(.system(size: 11))
                 }
             }
             .padding(.horizontal, 10)
@@ -404,6 +411,24 @@ struct CloseFinishedShellsButton: View {
     var body: some View {
         Button("Close Finished Shells…") { actions.closeFinishedShells(project) }
             .help("Ends the shells agents opened in this project that are back at their prompt, after asking")
+    }
+}
+
+/// "Close Finished (3)…" at the sidebar's foot: every project's finished Run-card shells and replaced leads between
+/// turns, ended after one confirmation listing them (`WindowActions.closeFinished`). Not there when there's none.
+struct CloseFinishedButton: View {
+    let count: Int
+    let actions: WindowActions
+
+    var body: some View {
+        if count > 0 {
+            Button(CloseFinished.title(count)) { actions.closeFinished() }
+                .buttonStyle(.borderless)
+                .lineLimit(1)
+                .fixedSize()
+                .help("Ends, after asking, the shells agents opened that are back at their prompt and the replaced leads between turns, in every project")
+                .accessibilityLabel(count == 1 ? "Close 1 finished session" : "Close \(count) finished sessions")
+        }
     }
 }
 

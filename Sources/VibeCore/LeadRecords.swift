@@ -5,7 +5,7 @@ import Foundation
 /// the plan's reasoning survives a deleted `.vibeswitcher`, another Mac or a new lead, and `decisions-archive.md`, where
 /// `archive_decisions` moves the decisions every lead start no longer needs to read. The board stays local.
 ///
-/// The lead itself may not edit files or run git that writes; its tool server commits for it, batched (after each
+/// The lead itself may not edit files or run git that writes; its tool server commits for it, batched (before and after each
 /// merge, and at most every `interval` otherwise), as small commits of their own that touch only those two files
 /// (`Worktrees.commitFiles`), and the product inventory when the code before it makes another (`ProductInventory`):
 /// the user's own staged and unstaged changes in the main checkout stay as they are. A
@@ -98,12 +98,15 @@ public final class LeadRecords: @unchecked Sendable {
 
     /// Commits the logs to `base` now, when they changed. Each outcome but `unchanged` and `local` shows in status
     /// (`statusLine`) until a later one replaces it; nothing written is lost: what isn't committed stays in the files.
+    /// `holdingBaseLock`: the caller, a merge into `base`, already holds the lock a merge into it takes
+    /// (`baseLock`), so the commit doesn't take it again. `inventory`: false leaves the product inventory out (the
+    /// commit before a merge: the one after it makes it from the merged code).
     @discardableResult
-    public func flush(base: String, now: Date = Date()) -> Outcome {
+    public func flush(base: String, now: Date = Date(), holdingBaseLock: Bool = false, inventory withInventory: Bool = true) -> Outcome {
         lock.lock()
         defer { lock.unlock() }
         lastFlush = now
-        let outcome = commit(base: base, now: now)
+        let outcome = commit(base: base, now: now, holdingBaseLock: holdingBaseLock, inventory: withInventory)
         lastOutcome = outcome
         return outcome
     }
@@ -161,7 +164,7 @@ public final class LeadRecords: @unchecked Sendable {
         }
     }
 
-    private func commit(base: String, now: Date) -> Outcome {
+    private func commit(base: String, now: Date, holdingBaseLock: Bool, inventory withInventory: Bool) -> Outcome {
         // Earlier months of progress.md move to its archive, in `records_dir` or `.vibeswitcher` alike.
         try? store.withRecordsLock { _ = try Self.rollProgress(store, now: now) }
         guard let dir = store.recordsDir, Git.run(["rev-parse", "--git-dir"], in: root).ok else { return .local }
@@ -169,13 +172,18 @@ public final class LeadRecords: @unchecked Sendable {
         var paths = Self.paths(dir)
         // Made before the lock (it takes seconds), from the head as it is; checked again under the lock.
         let early = Git.run(["rev-parse", "--verify", "--quiet", "refs/heads/\(base)"], in: root).output
-        let inventoryDue = !early.isEmpty && inventory(at: early) != nil
+        let inventoryDue = withInventory && !early.isEmpty && inventory(at: early) != nil
         guard changed(paths, on: base) || inventoryDue else { return .unchanged }
-        // As a merge into the branch does: one at a time, and never between its tests and its fast-forward.
-        let baseLock = Self.baseLock(vault: vault, root: root, base: base)
-        try? vault.ensurePrivate(baseLock.deletingLastPathComponent())
-        guard let held = FileLock.attempt(baseLock.path) else { return .waiting("a merge into \(base) is running.") }
-        defer { held.release() }
+        // As a merge into the branch does: one at a time, and never between its tests and its fast-forward. A merge
+        // committing them before its rebase holds it already.
+        var held: FileLock?
+        if !holdingBaseLock {
+            let baseLock = Self.baseLock(vault: vault, root: root, base: base)
+            try? vault.ensurePrivate(baseLock.deletingLastPathComponent())
+            guard let taken = FileLock.attempt(baseLock.path) else { return .waiting("a merge into \(base) is running.") }
+            held = taken
+        }
+        defer { held?.release() }
         let head = Git.run(["rev-parse", "--verify", "--quiet", "refs/heads/\(base)"], in: root).output
         guard !head.isEmpty else { return .failed("there's no branch \(base).") }
         // On top of a head the lead hasn't taken, the commit would take it too: the next merge decides on it first.
@@ -204,7 +212,7 @@ public final class LeadRecords: @unchecked Sendable {
         // The inventory goes in when the head's code makes another one, unless the user changed the checkout's copy.
         let checkedOut = Worktrees.checkout(of: base, root: root).map { URL(fileURLWithPath: $0).resolvingSymlinksInPath().path }
             == URL(fileURLWithPath: root).resolvingSymlinksInPath().path
-        let inventory = inventory(at: head).flatMap { made in !checkedOut || inventoryUntouched(head) ? made : nil }
+        let inventory = withInventory ? inventory(at: head).flatMap { made in !checkedOut || inventoryUntouched(head) ? made : nil } : nil
         if let inventory {
             paths.append(ProductInventory.output)
             snapshot[ProductInventory.output] = inventory
@@ -268,15 +276,18 @@ public final class LeadRecords: @unchecked Sendable {
         try? VibePaths.writePrivate(Data((named.joined(separator: "\n") + "\n").utf8), to: failedOnFile)
     }
 
-    /// Before a merge starts: when the records have changes not committed and the last merge failed on one of them (a
-    /// lint over docs/lead/, say), or a redaction waits (`LeadRedaction`), they're committed now, so the merge tests
-    /// the fix rather than the line it fixes. On 2026-11-12 the fix of a progress.md line waited behind every merge,
-    /// each built on the bad line. Nil when nothing was due; else what the flush did.
+    /// Before every merge (one task's or a batch's) rebases: when the records have changes not committed, they're
+    /// committed now, the usual records commit, so the merge tests and lands on the records as they are rather than on
+    /// lines they've since fixed. On 2026-11-12 the fix of a progress.md line waited behind every merge, each built on
+    /// the bad line; until 2026-11-18 this ran only once a merge had failed on the records (`mergeFailedOn`) or a
+    /// redaction waited, so the merge before it failed first (9 that week). The merge calls it past its gate and its
+    /// waits, holding its lock on the base (`holdingBaseLock`): a merge refused before then moves nothing. The records
+    /// alone: the product inventory waits for the commit after the merge, made from the merged code. Nil when nothing
+    /// was due; else what the flush did.
     @discardableResult
-    public func commitBeforeMerge(base: String, now: Date = Date()) -> Outcome? {
-        guard let dir = store.recordsDir, !mergeFailedOn.isEmpty || !LeadRedaction.pending(store).isEmpty,
-              changed(Self.paths(dir), on: base) else { return nil }
-        return flush(base: base, now: now)
+    public func commitBeforeMerge(base: String, now: Date = Date(), holdingBaseLock: Bool = false) -> Outcome? {
+        guard let dir = store.recordsDir, changed(Self.paths(dir), on: base) else { return nil }
+        return flush(base: base, now: now, holdingBaseLock: holdingBaseLock, inventory: false)
     }
 
     /// Whether any of `paths` in the working tree differs from `base`'s.
@@ -605,6 +616,13 @@ final class LandedMoves: @unchecked Sendable {
         lock.lock()
         defer { lock.unlock() }
         moves[base] = (from, to)
+    }
+
+    /// Where the move noted on `base` went, if one is noted.
+    func noted(base: String) -> String? {
+        lock.lock()
+        defer { lock.unlock() }
+        return moves[base]?.to
     }
 
     /// True when the vault's head (`known`) and the branch (`current`) are exactly the two ends of a move noted here,

@@ -4,7 +4,7 @@
 extension Platform.Sandbox {
     enum System {
         static func probe() -> Facts {
-            Facts(userNamespaces: false, overlay: false, landlockABI: 0, vsock: false, binfmt: false, why: "macOS")
+            Facts(userNamespaces: false, overlay: false, landlockABI: 0, vsock: false, binfmt: .none, why: "macOS")
         }
 
         /// Starts nothing.

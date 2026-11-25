@@ -163,6 +163,13 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
             return !(chat.composer.drafts[key] ?? "").isEmpty || !(chat.composer.attachments[key] ?? []).isEmpty
                 || chat.outbox.outbox.entries.contains { $0.key == key }
         }
+        // A replaced lead a handover ends: its selection goes to the new lead, and its unsent text with it (the
+        // composer's, and what was typed into its terminal), ahead of what the new lead's box holds.
+        leads.handedOver = { [weak self] old, new, typed in
+            guard let self else { return }
+            self.model.handedOver(old, to: new)
+            Self.carryDraft(self.chat.composer, from: "host:\(old)", to: "host:\(new)", typed: typed)
+        }
         // A Claude Code session's dictation goes through its own /voice.
         dictation?.claudeSession = { [weak self] key in self?.sync.claudeVoice(key: key, folder: self?.model.selectedRow?.cwd) }
         // A message sent over it cancels it, and goes once it's stopped.
@@ -184,7 +191,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
         inspectorItem = NSSplitViewItem(inspectorWithViewController: inspectorHost)
         inspectorItem.minimumThickness = 240
         inspectorItem.maximumThickness = 380
-        inspectorItem.isCollapsed = UserDefaults.standard.object(forKey: "inspectorCollapsed") as? Bool ?? false
+        inspectorItem.isCollapsed = model.defaults.object(forKey: "inspectorCollapsed") as? Bool ?? false
         split.splitViewItems = [sidebar, content, inspectorItem]
         // Renamed when the pane limits changed, so widths saved under the old limits don't squeeze the terminal.
         split.splitView.autosaveName = "MainWindowSplit2"
@@ -199,7 +206,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
         window.toolbarStyle = .unified
         if !window.setFrameUsingName("MainWindow") { window.center() }
         window.setFrameAutosaveName("MainWindow")
-        if let layout = FocusLayout.saved { focusTerminal(keeping: layout, animated: false) }
+        if let layout = FocusLayout.saved(in: model.defaults) { focusTerminal(keeping: layout, animated: false) }
 
         chat.runner.session = { [weak self] in self?.model.selectedRow?.hostID }
         chat.runner.refused = { [weak self] reason in self?.chat.sendNotice = reason }
@@ -210,6 +217,10 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
         chat.runner.run = { [weak self] runnable, way, done in
             guard let self else { return done(.refused(RunRefusal.noSession)) }
             self.runSelected(runnable, way: way, done)
+        }
+        chat.runner.openShell = { [weak self] runnable, folder, session, done in
+            guard let self else { return done(.refused(RunRefusal.noFolder)) }
+            self.openShell(runnable, in: folder, from: session, done)
         }
         model.$selectedID.removeDuplicates().receiveLatest(on: RunLoop.main)
             .sink { [weak self] _ in DispatchQueue.main.async { self?.showSelection() } }
@@ -234,6 +245,9 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
                     self?.seeSelectedLead()
                 }
             }
+            .store(in: &cancellables)
+        leads.$leadPlaces.receiveLatest(on: RunLoop.main)
+            .sink { [weak self] places in self?.model.leadPlaces = places }
             .store(in: &cancellables)
         leads.$replacedLeads.receiveLatest(on: RunLoop.main)
             .sink { [weak self] replaced in
@@ -364,9 +378,13 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
         showSelection()
     }
 
-    /// `--idle-bench`: the window up but off screen, without a Dock icon or taking the keyboard.
+    /// `--idle-bench`: the window up but off screen, without a Dock icon or taking the keyboard. Without AppKit's
+    /// open and close animation, which nobody sees off screen: it runs on a display link, which never fires while the
+    /// display is asleep, so each animation stayed with its display link's thread and run loop (2026-11-24, the memory
+    /// bench at night: a thread and ~130 KB kept per churn cycle, the growth 13.1 % against ~5.5 % by day).
     func presentOffscreen() {
         mountViews()
+        window?.animationBehavior = .none
         window?.setFrame(NSRect(x: -20_000, y: -20_000, width: 1280, height: 800), display: false)
         window?.orderFrontRegardless()
         window?.setFrameOrigin(NSPoint(x: -20_000, y: -20_000))
@@ -432,7 +450,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
         let shown = model.showsChat && path != nil
         // Only read a conversation that's on screen.
         let previous = chat.path
-        chat.show(path: shown ? path : nil, key: shown ? row?.draftKey : nil)
+        chat.show(path: shown ? path : nil, key: shown ? row?.draftKey : nil, history: shown ? row.flatMap(model.chatHistory(for:)) : nil)
         if chat.path != previous { Breadcrumbs.shared.note("chat: show \(chat.path.map { ($0 as NSString).lastPathComponent } ?? "none")") }
         if shown, chat.path != previous {
             chat.loadCompletions(agent: row?.session?.agent ?? row?.hosted?.agent.flatMap(Agent.init(rawValue:)) ?? .claude,
@@ -503,6 +521,9 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
         // says why then).
         let way = runWay(model.selectedRow)
         if chat.runner.way != way { chat.runner.way = way }
+        // Run in New Shell: shown while the session shown has a folder and a shell can start (none in the benches).
+        let folder = shells == nil ? nil : model.selectedRow?.cwd
+        if chat.runner.folder != folder { chat.runner.folder = folder }
         // Messages steered to this session that are still waiting (also from before a relaunch), and whether its
         // agent is idle (then they won't be taken by themselves). Idle by the hook event the store's scan read off the
         // main thread: this runs each second, and a state file read here stalled the window (hang-20261031-102359).
@@ -539,6 +560,23 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
             if agent == .claude { self.chat.sent(text, expectsSoon: !working) }
             self.chat.scrollToBottom()
             done(.ran)
+        }
+    }
+
+    /// A code block's Run in New Shell: a new shell session in `folder` whose shell runs the block's command at launch,
+    /// as a vs-shell card's Run starts one (`ShellDesk.runBlock`).
+    private func openShell(_ runnable: RunnableCommand.Runnable, in folder: String, from session: UUID?,
+                           _ done: @escaping (RunOutcome) -> Void) {
+        guard let shells else { return done(.refused(RunRefusal.noFolder)) }
+        // When Run was taken, before its shell started (as a card's `userRan`): a quick git command's move comes after.
+        let at = Date()
+        shells.runBlock(command: runnable.command, cwd: folder, from: session) { [weak self] outcome in
+            if outcome == .ran {
+                Breadcrumbs.shared.note("chat: ran a code block in a new shell (\(runnable.command.count) chars)")
+                // A git command run: what lets the lead's base move it makes be taken as yours, as Run's.
+                if let session { self?.leads.baseMoves.typed(runnable.prompt, session: session.uuidString, cwd: folder, at: at) }
+            }
+            done(outcome)
         }
     }
 
@@ -608,6 +646,19 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
     private func updateViewing() {
         let row = model.selectedRow
         store.windowViewingTTY = window?.isKeyWindow == true && row?.hostID != nil ? row?.session?.tty : nil
+    }
+
+    /// A replaced lead's unsent text, carried to the lead that took its place (`from`, `to`: their composers' keys):
+    /// its composer's draft and attachments, and what was typed into its terminal (`typed`), before what the new
+    /// lead's box holds already. Nothing is dropped.
+    static func carryDraft(_ composer: ComposerDrafts, from old: String, to new: String, typed: String) {
+        let parts = [composer.drafts[old] ?? "", typed, composer.drafts[new] ?? ""]
+            .filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+        if !parts.isEmpty { composer.drafts[new] = parts.joined(separator: "\n") }
+        composer.drafts[old] = nil
+        let attached = (composer.attachments[old] ?? []) + (composer.attachments[new] ?? [])
+        if !attached.isEmpty { composer.attachments[new] = attached.reduce(into: []) { if !$0.contains($1) { $0.append($1) } } }
+        composer.attachments[old] = nil
     }
 
     // MARK: NSWindowDelegate
@@ -810,6 +861,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
 
     /// The layout Focus Terminal hides, brought back when it's used again; kept (in the defaults) while focus mode is on,
     /// so it outlives a closed window and a relaunch.
+    /// The window's layout settings are kept in its model's defaults: the app's own; a test's own suite.
     struct FocusLayout: Codable, Equatable {
         var sidebarCollapsed: Bool
         var inspectorCollapsed: Bool
@@ -817,9 +869,11 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
 
         static let key = "focusTerminal"
 
-        static var saved: FocusLayout? {
-            get { UserDefaults.standard.data(forKey: key).flatMap { try? JSONDecoder().decode(FocusLayout.self, from: $0) } }
-            set { UserDefaults.standard.set(newValue.flatMap { try? JSONEncoder().encode($0) }, forKey: key) }
+        static func saved(in defaults: UserDefaults) -> FocusLayout? {
+            defaults.data(forKey: key).flatMap { try? JSONDecoder().decode(FocusLayout.self, from: $0) }
+        }
+        static func save(_ layout: FocusLayout?, in defaults: UserDefaults) {
+            defaults.set(layout.flatMap { try? JSONEncoder().encode($0) }, forKey: key)
         }
     }
 
@@ -832,7 +886,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
         if let layout = focusedFrom {
             Breadcrumbs.shared.note("window: focus terminal off")
             focusedFrom = nil
-            FocusLayout.saved = nil
+            FocusLayout.save(nil, in: model.defaults)
             setLayout(sidebarCollapsed: layout.sidebarCollapsed, inspectorCollapsed: layout.inspectorCollapsed, bars: true)
             model.showsChat = layout.showsChat
         } else {
@@ -844,7 +898,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
 
     private func focusTerminal(keeping layout: FocusLayout, animated: Bool) {
         focusedFrom = layout
-        FocusLayout.saved = layout
+        FocusLayout.save(layout, in: model.defaults)
         model.showsChat = false
         setLayout(sidebarCollapsed: true, inspectorCollapsed: true, bars: false, animated: animated)
     }
@@ -867,7 +921,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
     @objc func toggleInspectorAction(_ sender: Any?) {
         if Motion.isReduced { inspectorItem.isCollapsed.toggle() } else { inspectorItem.animator().isCollapsed.toggle() }
         // The animator proxy already reports the new value.
-        UserDefaults.standard.set(inspectorItem.isCollapsed, forKey: "inspectorCollapsed")
+        model.defaults.set(inspectorItem.isCollapsed, forKey: "inspectorCollapsed")
     }
 
     func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {

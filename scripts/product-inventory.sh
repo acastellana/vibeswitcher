@@ -492,6 +492,7 @@ FEATURES = {
         ("A lead's Team tab: tasks, decisions, scorecard, messages between leads", "MainWindow/Lead/TeamViews.swift", r"struct LeadTeamPane\b"),
         ("Brief Me (⇧⌘B): a spoken briefing across led projects, or one project's", "Briefing/BriefingViews.swift", r"struct BriefMeButton\b"),
         ("Statistics window", "Statistics/StatisticsView.swift", r"class StatisticsWindowController\b"),
+        ("Sidebar: Close Finished (N)… at its foot ends every project's finished agent-opened shells and replaced leads between turns, after one confirmation listing them", "MainWindow/SessionListView.swift", r"struct CloseFinishedButton\b"),
         ("Menu bar popover: every session, switch, pause, rename", "PopoverView.swift", r"\.contextMenu"),
         ("Global hot key", "HotKey.swift", r"class HotKey\b"),
         ("Phone access: a web app for the phone over Tailscale", "PhoneAccess.swift", r"\S"),

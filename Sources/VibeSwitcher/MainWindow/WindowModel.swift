@@ -15,7 +15,7 @@ final class WindowModel: ObservableObject {
         didSet {
             guard selectedID != oldValue else { return }
             selectedKept = nil
-            UserDefaults.standard.set(selectedID, forKey: Self.selectionKey)
+            defaults.set(selectedID, forKey: Self.selectionKey)
             // An ended session chosen from Home, the palette or a filter shows in the sidebar: its fold opens.
             if !endedOpen, let selectedID, foldsAway(selectedID) { endedOpen = true }
         }
@@ -23,7 +23,7 @@ final class WindowModel: ObservableObject {
     @Published var grouping: WindowGrouping {
         didSet {
             if grouping != oldValue { arrange() }
-            UserDefaults.standard.set(grouping.rawValue, forKey: Self.groupingKey)
+            defaults.set(grouping.rawValue, forKey: Self.groupingKey)
         }
     }
     /// The sidebar's filter text.
@@ -41,19 +41,30 @@ final class WindowModel: ObservableObject {
     }
     /// Leads another session of their project replaced (see `LeadController.replacedLeads`), by window session.
     @Published var replacedLeads: [UUID: ReplacedLead] = [:]
+    /// Leads a handover put in place of an ended one, each listed where that one was (see `LeadController.leadPlaces`).
+    var leadPlaces: [UUID: RowPlace] = [:] {
+        didSet {
+            guard leadPlaces != oldValue else { return }
+            let placed = WindowRows.placed(sections, places: leadPlaces)
+            if placed != sections {
+                sections = placed
+                arrange()
+            }
+        }
+    }
     /// The agent's own session id last seen in each window session, so it can be resumed once it ends.
     private(set) var agentSessions: [UUID: (agent: Agent, sessionID: String, transcript: String?)] = [:]
     /// The middle pane shows the conversation (Chat) rather than the terminal, where there is one.
     @Published var showsChat: Bool {
-        didSet { UserDefaults.standard.set(showsChat, forKey: Self.showsChatKey) }
+        didSet { defaults.set(showsChat, forKey: Self.showsChatKey) }
     }
     private static let showsChatKey = "middleShowsChat"
     /// The sidebar's "Ended (n)" fold is open, and Home's; each remembered on this Mac, folded at first.
     @Published var endedOpen: Bool {
-        didSet { UserDefaults.standard.set(endedOpen, forKey: Self.endedOpenKey) }
+        didSet { defaults.set(endedOpen, forKey: Self.endedOpenKey) }
     }
     @Published var homeEndedOpen: Bool {
-        didSet { UserDefaults.standard.set(homeEndedOpen, forKey: Self.homeEndedOpenKey) }
+        didSet { defaults.set(homeEndedOpen, forKey: Self.homeEndedOpenKey) }
     }
     static let endedOpenKey = "sidebarEndedOpen"
     static let homeEndedOpenKey = "homeEndedOpen"
@@ -64,12 +75,17 @@ final class WindowModel: ObservableObject {
     private static let selectionKey = "windowSelection"
     private static let groupingKey = "windowGrouping"
 
-    init() {
-        selectedID = UserDefaults.standard.string(forKey: Self.selectionKey)
-        grouping = UserDefaults.standard.string(forKey: Self.groupingKey).flatMap(WindowGrouping.init(rawValue:)) ?? .attention
-        showsChat = UserDefaults.standard.object(forKey: Self.showsChatKey) as? Bool ?? true
-        endedOpen = UserDefaults.standard.bool(forKey: Self.endedOpenKey)
-        homeEndedOpen = UserDefaults.standard.bool(forKey: Self.homeEndedOpenKey)
+    /// Where the selection, grouping, middle pane and folds are remembered: the app's own defaults; a test's own suite
+    /// (`Scratch.defaults`), since an unbundled test binary's `.standard` is shared by every test process on the Mac.
+    let defaults: UserDefaults
+
+    init(defaults: UserDefaults = .standard) {
+        self.defaults = defaults
+        selectedID = defaults.string(forKey: Self.selectionKey)
+        grouping = defaults.string(forKey: Self.groupingKey).flatMap(WindowGrouping.init(rawValue:)) ?? .attention
+        showsChat = defaults.object(forKey: Self.showsChatKey) as? Bool ?? true
+        endedOpen = defaults.bool(forKey: Self.endedOpenKey)
+        homeEndedOpen = defaults.bool(forKey: Self.homeEndedOpenKey)
     }
 
     /// Every row, whatever the grouping and filter. Made once for each change of the sections: the header, the
@@ -176,6 +192,11 @@ final class WindowModel: ObservableObject {
         row.session?.transcriptPath ?? row.hostID.flatMap { agentSessions[$0]?.transcript }
     }
 
+    /// Whose earlier sessions the row's chat shows above its own: a project lead's, in its project (`LeadChatHistory`).
+    func chatHistory(for row: WindowRow) -> LeadChatHistory.Source? {
+        LeadChatHistory.source(label: label(of: row), session: row.hostID, cwd: row.startFolder ?? row.cwd)
+    }
+
     /// The session whose wallet cards sit under its terminal: a window session with no conversation to pin them under
     /// (a New Shell session running a program that files with vs-wallet). One with a transcript has them in its chat.
     func walletUnderTerminal(for row: WindowRow?) -> UUID? {
@@ -197,7 +218,8 @@ final class WindowModel: ObservableObject {
         let known = Set(hosted.map(\.id))
         agentSessions = agentSessions.filter { known.contains($0.key) }
         let labels = Dictionary(uniqueKeysWithValues: hosted.map { ($0.id, $0.label) })
-        let fresh = WindowRows.sections(sessions: sessions, hosted: hosted, table: table) { SessionNaming.name(forProjectRoot: $0) }
+        let fresh = WindowRows.placed(WindowRows.sections(sessions: sessions, hosted: hosted, table: table) { SessionNaming.name(forProjectRoot: $0) },
+                                      places: leadPlaces)
         let labelsChanged = labels != hostLabels, sectionsChanged = fresh != sections
         if labelsChanged { hostLabels = labels }
         if sectionsChanged { sections = fresh }
@@ -211,6 +233,15 @@ final class WindowModel: ObservableObject {
     }
 
     func select(hostID: UUID) { selectedID = "host:\(hostID)" }
+
+    /// A replaced lead a handover ended (`LeadController.handedOver`): the selection on its row goes to the lead that
+    /// took its place. Whether it moved.
+    @discardableResult
+    func handedOver(_ old: UUID, to new: UUID) -> Bool {
+        guard selectedID == "host:\(old)" else { return false }
+        select(hostID: new)
+        return true
+    }
 
     func select(tty: String) {
         if let row = allRows.first(where: { $0.session?.tty == tty }) { selectedID = row.id }
@@ -276,6 +307,12 @@ struct WindowActions {
     /// Close Finished Shells…: ends, after one confirmation listing them, every shell of the project named `project`
     /// that an agent's Run card opened and that is back at its prompt (`ShellTidier.close`).
     var closeFinishedShells: (_ project: String) -> Void = { _ in }
+    /// What the sidebar's Close Finished (N)… would close now, in every project: the finished Run-card shells and the
+    /// replaced leads between turns (`ShellTidier.closable`). The button shows only when there's one.
+    var closable: () -> [CloseFinished.Item] = { [] }
+    /// Close Finished (N)…: ends, after one confirmation listing them, what `closable` lists that is still to close
+    /// then (`ShellTidier.closeFinished`).
+    var closeFinished: () -> Void = {}
 
     /// You pick a project's folder and its lead starts there (`ProjectFolderStart`): Home's Choose Folder…, the empty
     /// sidebar's Project Lead….

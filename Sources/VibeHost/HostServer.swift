@@ -485,7 +485,8 @@ public final class HostServer {
 
     private static let unauthorized = HostEvent.error(HostProtocol.unauthorized)
 
-    private func handle(_ kind: HostFrame.Kind, _ payload: Data, from client: ClientConnection) {
+    /// One frame from `client`, on `queue`. Internal for HostVaultStackTests, which runs it on a thread it measures.
+    func handle(_ kind: HostFrame.Kind, _ payload: Data, from client: ClientConnection) {
         checkPeer(client)
         guard kind == .control else { return client.close() }
         guard let envelope = try? HostCoding.decode(HostRequestEnvelope.self, from: payload) else {
@@ -654,7 +655,7 @@ public final class HostServer {
             if case .bind(_, _, let target) = request, let id = UUID(uuidString: target), let session = sessions[id] {
                 bound = WorkerLaunch.Seen(command: session.info.command, cwd: session.info.cwd)
             }
-            var answer = vault.answer(request, from: from, userOpened: opened, agentSession: agentSession, liveSessions: live, bound: bound)
+            var answer = answerOffQueue { vault.answer(request, from: from, userOpened: opened, agentSession: agentSession, liveSessions: live, bound: bound) }
             // A verifier that gave its verdict has no job left: it ends once its grace is over (see `endSubmitted`).
             if case .submitVerdict = request, case .session(let id) = from {
                 switch answer {
@@ -746,6 +747,32 @@ public final class HostServer {
     private static func another(_ source: InputSource?) -> Bool {
         if case .another? = source { return true }
         return false
+    }
+
+    /// Where a vault call's answer runs (`answerOffQueue`): a thread of `ToolThread.stackSize`. HostVaultStackTests
+    /// gives one it measures.
+    var vaultThread: (@escaping @Sendable () -> Void) -> Void = ToolThread.detach
+
+    /// `answer` (the vault's, `LeadVault.Book.answer`) on a `vaultThread`, the queue waiting for it: the queue's own
+    /// threads have 512 KB of stack, and a board-sized vault's answer, saving it sealed, took 156 KB of it in a debug
+    /// build (76 KB in release; HostVaultStackTests, 2026-11-19), more than the quarter any path may need, and a host
+    /// whose stack overflows ends every session. The queue does nothing else meanwhile, as when it answered itself,
+    /// so its order is unchanged. The answer touches nothing of the queue's: the vault holds its own lock, and saves
+    /// itself (`VaultStorage`).
+    private func answerOffQueue(_ answer: @escaping () -> LeadVault.Reply) -> LeadVault.Reply {
+        // Handed over before the thread starts and read back after it signals: the semaphore orders them.
+        final class Handoff: @unchecked Sendable {
+            var answer: (() -> LeadVault.Reply)?
+            var reply: LeadVault.Reply?
+        }
+        let handoff = Handoff(), done = DispatchSemaphore(value: 0)
+        handoff.answer = answer
+        vaultThread {
+            handoff.reply = handoff.answer?()
+            done.signal()
+        }
+        done.wait()
+        return handoff.reply ?? .refused("The session host couldn't answer that.")
     }
 
     /// Who the process on `client` is to the lead's vault (see `identify`).

@@ -156,11 +156,11 @@ enum ShimBox {
     static let python = FileManager.default.isExecutableFile(atPath: "/usr/bin/python3")
 
     /// The base of every plan: `/usr` and `/etc` read-only with the usual links, the box's own `/proc` (with a
-    /// binfmt_misc of its own where the kernel gives one, as `SandboxPlanner` plans it), `/dev` and `/tmp`, and
+    /// binfmt_misc of its own unless the kernel answered that it gives none, as `SandboxPlanner` plans it), `/dev` and `/tmp`, and
     /// `folder` read-write, where the program starts.
     static func plan(_ folder: String, extra: [Platform.Sandbox.Mount] = [], network: Platform.Sandbox.Network = .none,
                      terminal: Platform.Sandbox.Terminal = .none, door: String? = nil, nesting: Bool = false,
-                     environment: [String] = [], binfmt: Bool = Platform.Sandbox.probe().binfmt) -> Platform.Sandbox.Plan {
+                     environment: [String] = [], binfmt: Bool = Platform.Sandbox.probe().binfmt != .none) -> Platform.Sandbox.Plan {
         var mounts: [Platform.Sandbox.Mount] = [
             .init("/usr", .readOnly(source: "/usr")),
             .init("/etc", .readOnly(source: "/etc")),
@@ -247,16 +247,18 @@ enum ShimBox {
 
     /// Starts this test binary in its launcher mode on `plan` with `program`. Its stdout and stderr are pipes the
     /// result reads, unless `terminal` names a pty slave to give it as all three (in a session of its own, whose
-    /// terminal that becomes).
+    /// terminal that becomes). `prefix` (a program's path, then its arguments), when given, is started instead, with
+    /// the launcher's path and arguments after its own, to start the launcher itself.
     static func launch(_ plan: Platform.Sandbox.Plan, _ program: [String], in folder: URL, doorLine: Int32? = nil,
                        proxyOut: Int32? = nil, keep: [Int32] = [], thread: Bool = false, terminal: String? = nil,
-                       group: Platform.Spawn.Group = .ownGroup) throws -> Launched {
+                       group: Platform.Spawn.Group = .ownGroup, prefix: [String] = []) throws -> Launched {
         try #require(getenv(requestVariable) == nil)
         let request = Request(plan: plan, program: program, doorLine: doorLine, proxyOut: proxyOut, thread: thread)
         let file = folder.deletingLastPathComponent().appendingPathComponent("request-\(UUID().uuidString.prefix(8)).txt")
         try Data(request.lines.utf8).write(to: file)
         let binary = try #require(Bundle.main.executablePath)
-        var spawn = Platform.Spawn(executable: binary, arguments: ProcessInfo.processInfo.arguments)
+        var spawn = prefix.isEmpty ? Platform.Spawn(executable: binary, arguments: ProcessInfo.processInfo.arguments)
+            : Platform.Spawn(executable: prefix[0], arguments: prefix + [binary] + ProcessInfo.processInfo.arguments.dropFirst())
         spawn.environment = ProcessInfo.processInfo.environment.map { "\($0.key)=\($0.value)" } + ["\(requestVariable)=\(file.path)"]
         spawn.keep = keep + [doorLine, proxyOut].compactMap { $0 }
         var output: (reading: Int32, writing: Int32)?, errors: (reading: Int32, writing: Int32)?
@@ -282,15 +284,15 @@ enum ShimBox {
 
     /// Runs `program` in a box of `plan` to its end.
     static func run(_ plan: Platform.Sandbox.Plan, _ program: [String], in folder: URL, doorLine: Int32? = nil,
-                    proxyOut: Int32? = nil, keep: [Int32] = [], thread: Bool = false) throws -> (ended: SpawnTests.Ended, errors: String) {
-        let launched = try launch(plan, program, in: folder, doorLine: doorLine, proxyOut: proxyOut, keep: keep, thread: thread)
+                    proxyOut: Int32? = nil, keep: [Int32] = [], thread: Bool = false, prefix: [String] = []) throws -> (ended: SpawnTests.Ended, errors: String) {
+        let launched = try launch(plan, program, in: folder, doorLine: doorLine, proxyOut: proxyOut, keep: keep, thread: thread, prefix: prefix)
         let ended = launched.ended()
         return (ended, launched.errors)
     }
 
     /// `sh -c script` in a box of `plan`: its exit, its output and its errors.
-    static func shell(_ script: String, _ plan: Platform.Sandbox.Plan, in folder: URL) throws -> (ended: SpawnTests.Ended, errors: String) {
-        try run(plan, ["/bin/sh", "-c", script], in: folder)
+    static func shell(_ script: String, _ plan: Platform.Sandbox.Plan, in folder: URL, prefix: [String] = []) throws -> (ended: SpawnTests.Ended, errors: String) {
+        try run(plan, ["/bin/sh", "-c", script], in: folder, prefix: prefix)
     }
 
     /// `python3 -I -c source` in a box of `plan`.
@@ -687,7 +689,7 @@ enum ShimBox {
             ("a foreground terminal that isn't one", ShimBox.plan(box.path, terminal: .foreground), nil, [], "terminal", ENOTTY),
             ("a binfmt_misc where nothing can be mounted", ShimBox.plan(box.path, extra: [.init("/usr/binfmt", .binfmt)]), nil, [],
              "mount /usr/binfmt", EROFS),
-        ] + (Platform.Sandbox.probe().binfmt ? [] : [
+        ] + (Platform.Sandbox.probe().binfmt != .none ? [] : [
             // A kernel that gives a user namespace no binfmt_misc of its own (5.15, by the kernel's history; not
             // measured here, where it gives one) refuses the mount itself: EPERM, as for sysfs above.
             ("a binfmt_misc the kernel refuses", ShimBox.plan(box.path, binfmt: true), nil, [], "mount /proc/sys/fs/binfmt_misc", EPERM),

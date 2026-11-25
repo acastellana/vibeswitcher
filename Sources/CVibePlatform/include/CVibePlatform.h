@@ -58,6 +58,10 @@ int vibe_filesystem_type(const char *path, unsigned long *type);
 // macro. The pointer is untyped so that this header needs no <signal.h>.
 pid_t vibe_signal_sender(const void *info);
 
+// The calling thread's stack: its lowest address and its size (pthread_getattr_np and pthread_attr_getstack, which
+// glibc shows only under _GNU_SOURCE). 0 and both filled; an error number otherwise, as the calls.
+int vibe_thread_stack(void **low, size_t *size);
+
 #endif
 // Outside the __linux__ block, as every header of this umbrella must be: on the Mac each comes out empty (its own
 // __linux__ guard), and the module's umbrella has no header it leaves out (-Wincomplete-umbrella).

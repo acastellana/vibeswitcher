@@ -466,8 +466,8 @@ replay = """
 It scores the verifier on a past commit: no lead, board or VibeSwitcher tool server is behind it, so submit_audit isn't \
 there. The task's whole contract is its goal above, the only text a replay has: its acceptance checks, boundaries \
 and context are there when it has them. Do everything else as above. Then end your last message with what you would give submit_audit, as one JSON \
-object in a ```json block: {"completion": …, "integrity": …, "tests": …, "summary": …, "findings": [{"severity": …, \
-"file": …, "line": …, "evidence": …, "failure_scenario": …}]}.
+object in a ```json block: {"completion": …, "integrity": …, "tests": …, "summary": …, "rules": […], "findings": [{"severity": …, \
+"file": …, "line": …, "evidence": …, "failure_scenario": …, "rule": …}]}.
 """
 open(sys.argv[2] + "/prompt.md", "w").write(start["prompt"] + replay)
 json.dump(start["settings"], open(sys.argv[2] + "/settings.json", "w"), indent=2, sort_keys=True)

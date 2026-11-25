@@ -138,7 +138,11 @@ import Testing
                                 status: .running)
             task.worker = UUID().uuidString
             board.tasks.append(task)
+            // The lead it carries on, as the board named it before the restart: one a handover had put in place.
+            board.leadSession = "lead-before-restart"
         }
+        try LeadChatHistory.record(.init(from: "lead-before-that", to: "lead-before-restart", transcript: nil, at: 1_000, reason: "scheduled",
+                                         root: world.root))
         #expect(world.client.state == .notRunning)
         world.controller.reopenLead(root: world.root, conversation: "conv-lead-1")
         #expect(await until { world.vault.current(.lead, root: world.root, task: nil)?.session != nil || !world.alerts.list.isEmpty })
@@ -153,6 +157,8 @@ import Testing
         #expect(command.hasSuffix(" --resume 'conv-lead-1' -- " + RecentProjects.shellQuote(notice)), "\(command)")
         #expect(command.components(separatedBy: " -- ").count == 2)
         #expect(command.contains("--mcp-config ") && command.contains("--settings "))
+        // Its chat keeps the earlier sessions of the lead it carries on: the handover into that one now leads to it.
+        #expect(await until { LeadChatHistory.chain(to: id.uuidString, root: world.root, records: LeadChatHistory.load(root: world.root)).map(\.from) == ["lead-before-that"] })
         if world.client.sessions.first(where: { $0.id == id })?.isLive == true {
             world.client.kill(id)
             #expect(await until { world.client.sessions.first { $0.id == id }?.isLive != true })

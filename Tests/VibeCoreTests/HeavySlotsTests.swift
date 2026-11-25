@@ -49,6 +49,8 @@ extension LeadToolsetTests {
         let own = (root as NSString).lastPathComponent
         defer { end(holders) }
         let told = Told()
+        // The records go in before the merge starts (`LeadRecords.commitBeforeMerge`): committed now, the base stays put.
+        lead.records.flush(base: "main")
         let before = Git.run(["rev-parse", "main"], in: root).output
         let refused = ToolProgress.with(ToolProgress(every: 0.2, told.add)) { call(lead, "merge", ["task": "add-b"]) }
         #expect(refused.isError)

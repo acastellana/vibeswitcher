@@ -15,17 +15,29 @@ extension Platform.Sandbox {
             let vsock = vibe_sandbox_vsock_opens() == 1
             let why = refusal()
             return Facts(userNamespaces: why == nil, overlay: overlay, landlockABI: landlock, vsock: vsock,
-                         binfmt: why == nil && ownBinfmt(), why: why)
+                         binfmt: why == nil ? binfmt() : .unknown, why: why)
         }
 
         /// util-linux's mount(8), which the binfmt probe mounts with.
         static let mount = "/usr/bin/mount"
 
-        /// Whether a user namespace gets a binfmt_misc of its own (measured on 6.18; 6.7 in the kernel's history): mount(8)
-        /// mounts one, as the namespace's root, over the /tmp of a mount namespace of unshare(1)'s child's own.
-        private static func ownBinfmt() -> Bool {
-            guard access(mount, X_OK) == 0 else { return false }
-            return run(["unshare", "--user", "--map-root-user", "--mount", mount, "-t", "binfmt_misc", "binfmt_misc", "/tmp"]) == nil
+        /// The binfmt probe's command: mount(8) mounts a binfmt_misc, as the root of a user namespace of unshare(1)'s
+        /// child's own, over the /tmp of a mount namespace of its own.
+        static let binfmtProbe = [unshare, "--user", "--map-root-user", "--mount", mount, "-t", "binfmt_misc", "binfmt_misc", "/tmp"]
+
+        /// Whether a user namespace gets a binfmt_misc of its own (measured on 6.18; 6.7 in the kernel's history), as
+        /// `command` (`binfmtProbe`) finds, given `bound` microseconds: `.own` when it exits 0; `.none` only when the
+        /// kernel answered no, mount(8)'s exit 32 (its mount failed: measured on 6.18 for a file system the kernel
+        /// refuses a user namespace, sysfs with the machine's network, and for one it doesn't have); `.unknown` for every
+        /// other end (no mount(8), unshare(1) not started or failing, 126 or 127 from its exec, a signal, a child hung past
+        /// `bound` or lost), which is no answer and so never reads as "nothing to hide" (`SandboxPlanner.hidesInterpreters`).
+        static func binfmt(_ command: [String] = binfmtProbe, mount: String = mount, bound: useconds_t = 10_000_000) -> Binfmt {
+            guard access(mount, X_OK) == 0 else { return .unknown }
+            switch run(command, bound: bound) {
+            case .exited(0): return .own
+            case .exited(32): return .none
+            default: return .unknown
+            }
         }
 
         /// Why the kernel refuses this user a box's namespaces; nil when a child made them.
@@ -37,34 +49,48 @@ extension Platform.Sandbox {
                 return "AppArmor refuses unprivileged user namespaces (kernel.apparmor_restrict_unprivileged_userns is \(restricted))"
             }
             guard access(unshare, X_OK) == 0 else { return "no \(unshare) to try the namespaces with" }
-            return run(["unshare", "--user", "--map-current-user", "--mount", "--pid", "--ipc", "--uts", "--cgroup", "--net", "--fork", "/bin/true"])
+            switch run([unshare, "--user", "--map-current-user", "--mount", "--pid", "--ipc", "--uts", "--cgroup", "--net", "--fork", "/bin/true"]) {
+            case .exited(0): return nil
+            case .exited(let code): return "the kernel refused an unprivileged user namespace (unshare: exit \(code))"
+            case .signaled(let signal): return "the kernel refused an unprivileged user namespace (unshare: signal \(signal))"
+            case .failed(let why): return why
+            }
         }
 
-        /// unshare(1) run with `arguments`, its output thrown away: nil when it exits 0, else why not.
-        private static func run(_ arguments: [String]) -> String? {
-            var child = Platform.Spawn(executable: unshare, arguments: arguments)
+        /// How a probe's child ended.
+        enum Ran: Equatable {
+            case exited(Int32)
+            case signaled(Int32)
+            /// It didn't start, was lost, or hung (killed after its bound): why.
+            case failed(String)
+        }
+
+        /// `command` (its program's path, then its arguments) run with its output thrown away, killed after `bound`
+        /// microseconds.
+        static func run(_ command: [String], bound: useconds_t = 10_000_000) -> Ran {
+            guard let program = command.first else { return .failed("no program") }
+            var child = Platform.Spawn(executable: program, arguments: command)
             child.stdin = .path("/dev/null", flags: O_RDONLY)
             child.stdout = .path("/dev/null", flags: O_WRONLY)
             child.stderr = .path("/dev/null", flags: O_WRONLY)
             child.keep = []
-            guard case .success(let pid) = child.start() else { return "\(unshare) didn't start" }
+            guard case .success(let pid) = child.start() else { return .failed("\(program) didn't start") }
             var status: Int32 = 0
-            // Bounded: a hung child is killed after 10 s and counts as a refusal.
+            // Bounded: a hung child is killed after `bound`.
             var waited: useconds_t = 0
             while true {
                 let found = waitpid(pid, &status, WNOHANG)
                 if found == pid { break }
-                if found < 0, errno != EINTR { return "the probe's child was lost" }
-                if waited >= 10_000_000 {
+                if found < 0, errno != EINTR { return .failed("the probe's child was lost") }
+                if waited >= bound {
                     kill(pid, SIGKILL)
                     while waitpid(pid, &status, 0) < 0 && errno == EINTR {}
-                    return "the probe's child hung"
+                    return .failed("the probe's child hung")
                 }
                 usleep(2_000)
                 waited += 2_000
             }
-            let exited = status & 0x7f == 0
-            return exited && (status >> 8) & 0xff == 0 ? nil : "the kernel refused an unprivileged user namespace (unshare: status \(status))"
+            return status & 0x7f == 0 ? .exited((status >> 8) & 0xff) : .signaled(status & 0x7f)
         }
 
         /// The number a /proc/sys file holds; nil when it isn't there.

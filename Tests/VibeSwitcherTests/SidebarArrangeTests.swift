@@ -20,8 +20,7 @@ struct SidebarArrangeTests {
     }
 
     @Test func arrangedIsMadeAgainOnlyWhenItsInputsChange() {
-        UserDefaults.standard.removeObject(forKey: "windowGrouping")
-        let model = WindowModel()
+        let model = WindowModel(defaults: scratch.defaults("sidebar-arrange"))
         let lead = Self.hosted("Lead · acme", cwd: "/Users/you/dev/acme")
         let worker = Self.hosted("Worker: One", cwd: "/Users/you/dev/acme/.vibeswitcher/worktrees/one")
         var other = Self.hosted("Shell", cwd: "/Users/you/dev/tools")
@@ -54,7 +53,6 @@ struct SidebarArrangeTests {
         let fresh = LeadTeams.arrange(model.grouping == .attention ? WindowGroups.attention(model.sections) : model.sections,
                                       label: model.label(of:), expanded: model.expandedTeams)
         #expect(model.arranged.sections == fresh.sections && model.arranged.nested == fresh.nested)
-        UserDefaults.standard.removeObject(forKey: "windowGrouping")
     }
 
     /// The sidebar drawn again and again with nothing changed arranges nothing and counts no lead's questions
@@ -62,11 +60,9 @@ struct SidebarArrangeTests {
     /// every update); a board's questions changing counts that board's once, and the sessions changing arranges the list
     /// once, as they change rather than as it draws.
     @Test func redrawsArrangeNothingAndABoardChangeCountsItsQuestionsOnce() throws {
-        let saved = UserDefaults.standard.string(forKey: "windowGrouping")
-        defer { UserDefaults.standard.set(saved, forKey: "windowGrouping") }
         let folder = scratch.url("sidebar-arrange")
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-        let model = WindowModel()
+        let model = WindowModel(defaults: scratch.defaults("sidebar-arrange"))
         model.grouping = .projects
         let root = "/Users/you/dev/acme"
         let lead = Self.hosted("Lead · acme", cwd: root)
@@ -156,9 +152,7 @@ struct SidebarArrangeTests {
     /// Grouped by attention, the stored arrangement is made again when a "starting" runs out, with no other change:
     /// the row leaves the working group by itself.
     @Test func theAttentionGroupingRegroupsByItselfWhenAStartRunsOut() async {
-        let saved = UserDefaults.standard.string(forKey: "windowGrouping")
-        defer { UserDefaults.standard.set(saved, forKey: "windowGrouping") }
-        let model = WindowModel()
+        let model = WindowModel(defaults: scratch.defaults("sidebar-arrange"))
         model.grouping = .attention
         let starting = Self.hosted("Claude", cwd: "/Users/you/dev/acme", agent: "claude",
                                    started: Date().addingTimeInterval(0.3 - WindowGroups.startingFor))

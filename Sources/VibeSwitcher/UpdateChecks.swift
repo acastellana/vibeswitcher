@@ -64,6 +64,14 @@ final class UpdateChecks {
                 power: { PowerState.load() },
                 batteryLimit: { [weak self] in self?.limitNow ?? 0 },
                 summarize: { [weak self] prompt in self?.summariesNow == true ? AppUpdate.headless(prompt) : nil },
+                pushers: { checkout, tip, commits in
+                    // GitHub's record of the repository the lead's fetch_remote pinned, as `fetch` takes it: never
+                    // one a session's `git remote set-url` named since.
+                    guard case .success(let url) = LeadRemote.url(root: checkout.root, remote: checkout.remote),
+                          let pin = try? LeadVault.standard.guardedSettings(root: checkout.root)?[LeadRemote.urlKey(checkout.remote)],
+                          pin == LeadVault.hash(url) else { return [:] }
+                    return GitHubPushers.shared.pushers(root: checkout.root, url: url, branch: checkout.base, tip: tip, commits: commits)
+                },
                 tellLead: { [weak self] root, text in DispatchQueue.main.async { self?.tellLead(root, text) } })
         }
         timer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in self?.tick() }

@@ -452,3 +452,272 @@
 - 2026-11-23 12:27 Started a worker on turn-this-incident-into-4
 - 2026-11-23 12:27 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: ~/.claude/shell-snapshots
 - 2026-11-23 12:27 Started a worker on team-sessions-start
+- 2026-11-23 12:47 Automatically (auto_advance): Didn't audit sb5-the-host-confines: Not audited: finder 1 of 2 couldn't start (Problem(text: "sb5-the-host-confines\'s finder not started: ~/.claude/settings.json changed while the team\'s sessions ran, since VibeSwitcher last sealed it. A worker\'s shell, a verifier\'s command or a branch\'s tests can write it (the deny rules hold only the file tools), and the next session would load what was written. New workers, verifiers and merges are held until the user accepts the change in VibeSwitcher (its notice names the files); you can…
+- 2026-11-23 13:08 Automatically (auto_advance): Didn't audit team-sessions-start: Not audited: finder 1 of 2 couldn't start (Problem(text: "team-sessions-start\'s finder not started: ~/.claude/settings.json changed while the team\'s sessions ran, since VibeSwitcher last sealed it. A worker\'s shell, a verifier\'s command or a branch\'s tests can write it (the deny rules hold only the file tools), and the next session would load what was written. New workers, verifiers and merges are held until the user accepts the change in VibeSwitcher (its notice names the files); you can\'…
+- 2026-11-23 13:08 Automatically (auto_advance): Didn't start turn-this-incident-into-3: turn-this-incident-into-3's worker not started: ~/.claude/settings.json changed while the team's sessions ran, since VibeSwitcher last sealed it. A worker's shell, a verifier's command or a branch's tests can write it (the deny rules hold only the file tools), and the next session would load what was written. New workers, verifiers and merges are held until the user accepts the change in VibeSwitcher (its notice names the files); you can't. Tell the user which changed and ask them to look: if th…
+- 2026-11-23 13:09 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: /run/user/1000/systemd/transient
+- 2026-11-23 13:09 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: /run/user/1000/systemd/transient
+- 2026-11-23 13:11 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: /run/user/1000/systemd/transient
+- 2026-11-23 13:11 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: /run/user/1000/systemd/transient
+- 2026-11-23 13:15 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: /run/user/1000/systemd/transient
+- 2026-11-23 13:15 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: /run/user/1000/systemd/transient
+- 2026-11-23 13:15 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: /run/user/1000/systemd/transient
+- 2026-11-23 13:15 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: /run/user/1000/systemd/transient
+- 2026-11-23 13:16 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: /run/user/1000/systemd/transient
+- 2026-11-23 13:16 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: /run/user/1000/systemd/transient
+- 2026-11-23 13:16 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: /run/user/1000/systemd/transient
+- 2026-11-23 13:16 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: /run/user/1000/systemd/transient
+- 2026-11-23 13:16 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: /run/user/1000/systemd/transient
+- 2026-11-23 13:16 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: /run/user/1000/systemd/transient
+- 2026-11-23 13:16 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: /run/user/1000/systemd/transient
+- 2026-11-23 13:16 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: /run/user/1000/systemd/transient
+- 2026-11-23 13:16 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: /run/user/1000/systemd/transient
+- 2026-11-23 13:16 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: /run/user/1000/systemd/transient
+- 2026-11-23 13:16 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: /run/user/1000/systemd/transient
+- 2026-11-23 13:17 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: /run/user/1000/systemd/transient
+- 2026-11-23 13:17 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: /run/user/1000/systemd/transient
+- 2026-11-23 13:17 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: /run/user/1000/systemd/transient
+- 2026-11-23 13:18 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: /run/user/1000/systemd/transient
+- 2026-11-23 13:18 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: /run/user/1000/systemd/transient
+- 2026-11-23 13:18 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: /run/user/1000/systemd/transient
+- 2026-11-23 13:18 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: /run/user/1000/systemd/transient
+- 2026-11-23 13:18 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: /run/user/1000/systemd/transient
+- 2026-11-23 13:18 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: /run/user/1000/systemd/transient
+- 2026-11-23 13:18 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: /run/user/1000/systemd/transient
+- 2026-11-23 13:18 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: /run/user/1000/systemd/transient
+- 2026-11-23 13:19 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: /run/user/1000/systemd/transient
+- 2026-11-23 13:19 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: /run/user/1000/systemd/transient
+- 2026-11-23 13:19 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: /run/user/1000/systemd/transient
+- 2026-11-23 13:19 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: /run/user/1000/systemd/transient
+- 2026-11-23 13:19 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: /run/user/1000/systemd/transient
+- 2026-11-23 13:20 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: /run/user/1000/systemd/transient
+- 2026-11-23 13:20 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: /run/user/1000/systemd/transient
+- 2026-11-23 13:20 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: /run/user/1000/systemd/transient
+- 2026-11-23 13:20 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: /run/user/1000/systemd/transient
+- 2026-11-23 13:20 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: /run/user/1000/systemd/transient
+- 2026-11-23 13:20 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: /run/user/1000/systemd/transient
+- 2026-11-23 13:20 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: /run/user/1000/systemd/transient
+- 2026-11-23 13:20 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: /run/user/1000/systemd/transient
+- 2026-11-23 13:20 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: /run/user/1000/systemd/transient
+- 2026-11-23 13:20 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: /run/user/1000/systemd/transient
+- 2026-11-23 13:20 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: /run/user/1000/systemd/transient
+- 2026-11-23 13:20 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: /run/user/1000/systemd/transient
+- 2026-11-23 13:20 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: /run/user/1000/systemd/transient
+- 2026-11-23 13:21 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: /run/user/1000/systemd/transient
+- 2026-11-23 13:21 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: /run/user/1000/systemd/transient
+- 2026-11-23 13:21 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: /run/user/1000/systemd/transient
+- 2026-11-23 13:21 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: /run/user/1000/systemd/transient
+- 2026-11-23 13:21 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: /run/user/1000/systemd/transient
+- 2026-11-23 13:21 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: /run/user/1000/systemd/transient
+- 2026-11-23 13:21 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: /run/user/1000/systemd/transient
+- 2026-11-23 13:21 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: /run/user/1000/systemd/transient
+- 2026-11-23 13:21 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: /run/user/1000/systemd/transient
+- 2026-11-23 13:21 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: /run/user/1000/systemd/transient
+- 2026-11-23 13:21 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: /run/user/1000/systemd/transient
+- 2026-11-23 13:21 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: /run/user/1000/systemd/transient
+- 2026-11-23 13:21 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: /run/user/1000/systemd/transient
+- 2026-11-23 13:21 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: /run/user/1000/systemd/transient
+- 2026-11-23 13:21 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: /run/user/1000/systemd/transient
+- 2026-11-23 13:21 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: /run/user/1000/systemd/transient
+- 2026-11-23 13:21 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: /run/user/1000/systemd/transient
+- 2026-11-23 13:21 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: /run/user/1000/systemd/transient
+- 2026-11-23 13:21 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: /run/user/1000/systemd/transient
+- 2026-11-23 13:21 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: /run/user/1000/systemd/transient
+- 2026-11-23 13:21 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: /run/user/1000/systemd/transient
+- 2026-11-23 13:21 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: /run/user/1000/systemd/transient
+- 2026-11-23 13:21 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: /run/user/1000/systemd/transient
+- 2026-11-23 13:21 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: /run/user/1000/systemd/transient
+- 2026-11-23 13:44 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: /run/user/1000/systemd/transient
+- 2026-11-23 13:44 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: /run/user/1000/systemd/transient
+- 2026-11-23 13:56 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: /run/user/1000/systemd/transient
+- 2026-11-23 13:56 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: /run/user/1000/systemd/transient
+- 2026-11-23 14:00 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: /run/user/1000/systemd/transient
+- 2026-11-23 14:00 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: /run/user/1000/systemd/transient
+- 2026-11-23 14:21 Automatically (auto_advance): Didn't start sandbox-env-hygiene-no: sandbox-env-hygiene-no's worker not started: ~/.claude/settings.json changed while the team's sessions ran, since VibeSwitcher last sealed it. A worker's shell, a verifier's command or a branch's tests can write it (the deny rules hold only the file tools), and the next session would load what was written. New workers, verifiers and merges are held until the user accepts the change in VibeSwitcher (its notice names the files); you can't. Tell the user which changed and ask them to look: if they …
+- 2026-11-23 14:21 Automatically (auto_advance): Didn't start the-config-card-says: the-config-card-says's worker not started: ~/.claude/settings.json changed while the team's sessions ran, since VibeSwitcher last sealed it. A worker's shell, a verifier's command or a branch's tests can write it (the deny rules hold only the file tools), and the next session would load what was written. New workers, verifiers and merges are held until the user accepts the change in VibeSwitcher (its notice names the files); you can't. Tell the user which changed and ask them to look: if they ma…
+- 2026-11-23 14:22 Update: Today: the gate branch is in v2; five finished branches wait on one Accept — **Landed (Nov 22–23)**
+- 2026-11-23 15:04 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: /run/user/1000/systemd/transient
+- 2026-11-23 15:04 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: /run/user/1000/systemd/transient
+- 2026-11-23 15:06 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: /run/user/1000/systemd/transient
+- 2026-11-23 15:06 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: /run/user/1000/systemd/transient
+- 2026-11-23 15:07 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: /run/user/1000/systemd/transient
+- 2026-11-23 15:07 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: /run/user/1000/systemd/transient
+- 2026-11-23 15:17 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: ~/.claude/shell-snapshots
+- 2026-11-23 15:17 Audit of team-sessions-start at 81c94cec by 2 finders (contract and acceptance; bugs, regressions and security); the shared run: the test command passed
+- 2026-11-23 15:17 Released team-sessions-start's worker (idle since its done report on 81c94cec) while its audit runs
+- 2026-11-23 15:17 Automatically (auto_advance): Started the audit of team-sessions-start at 81c94cec (Its review is audit). Released its worker, idle since its done report, while the audit runs: its Mac slot and memory are free, its worktree and branch stay.
+- 2026-11-23 15:17 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: ~/.claude/shell-snapshots
+- 2026-11-23 15:17 Started a worker on turn-this-incident-into-3
+- 2026-11-23 15:17 Automatically (auto_advance): Started a worker on turn-this-incident-into-3 (The suite proves the gate can build this project: the toolchain that built the tests runs in a branch run's box), its after tasks done (the-node-s-gate).
+- 2026-11-23 15:17 Automatically (auto_advance): Overlap for turn-this-incident-into-3's start (a warning only: nothing was refused or reordered). Tests/VibeCoreTests/TestSupport.swift: tests-that-write-a (blocked: its branch changes it); Tests/VibeHostTests/TestSupport.swift: tests-that-write-a (blocked: its branch changes it); Tests/VibeNodeTests/TestSupport.swift: tests-that-write-a (blocked: its branch changes it).
+- 2026-11-23 15:17 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: ~/.claude/shell-snapshots and ~/.vibeswitcher/lead/run
+- 2026-11-23 15:17 Started a worker on sandbox-env-hygiene-no
+- 2026-11-23 15:17 Automatically (auto_advance): Started a worker on sandbox-env-hygiene-no (sandbox_env hygiene: no credentials in it, no refused value echoed, every path judged, more shell names refused), its after tasks done (the-node-s-gate).
+- 2026-11-23 15:17 Automatically (auto_advance): Overlap for sandbox-env-hygiene-no's start (a warning only: nothing was refused or reordered). Sources/VibeCore/V2/Sandbox/SandboxPolicy.swift: branch-runs-get-the (planned: its boundaries name it), windows-access-is-a (planned: its boundaries name it).
+- 2026-11-23 15:17 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: ~/.claude/shell-snapshots and ~/.vibeswitcher/lead/run
+- 2026-11-23 15:17 Audit of turn-this-incident-into-4 at 909bccc1 by 2 finders (contract and acceptance; bugs, regressions and security); the shared run: the test command passed
+- 2026-11-23 15:17 Started a worker on the-config-card-says
+- 2026-11-23 15:17 Automatically (auto_advance): Started a worker on the-config-card-says (The config card says what sandbox_nesting: on exposes), its after tasks done (the-node-s-gate).
+- 2026-11-23 15:20 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: ~/.claude/shell-snapshots and ~/.vibeswitcher/lead/run
+- 2026-11-23 15:21 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: ~/.claude/shell-snapshots
+- 2026-11-23 15:21 Audit of team-sessions-start at 81c94cec by 2 finders (contract and acceptance; bugs, regressions and security); the shared run: the test command passed
+- 2026-11-23 15:21 Audit of sb5-the-host-confines at 20d3e815 by 2 finders (contract and acceptance; bugs, regressions and security); the shared run: test command failed
+- 2026-11-23 15:21 Automatically (auto_advance): Started the audit of sb5-the-host-confines at 20d3e815 (Its review is audit).
+- 2026-11-23 15:21 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: ~/.claude/shell-snapshots
+- 2026-11-23 15:21 Started a worker on hookscommandtests-hooks
+- 2026-11-23 15:21 Automatically (auto_advance): Started a worker on hookscommandtests-hooks (HooksCommandTests: `hooks install` takes minutes in a full run and is killed at its 120 s limit).
+- 2026-11-23 15:21 Automatically (auto_advance): Overlap for hookscommandtests-hooks's start (a warning only: nothing was refused or reordered). Tests/VibeNodeTests/HooksCommandTests.swift: tests-that-write-a (planned, set to start after this one: its branch changes it); Tests/VibeNodeTests/ScratchNode.swift: tests-that-write-a (planned, set to start after this one: its branch changes it).
+- 2026-11-23 15:22 Audit of turn-this-incident-into-4: finder 2 of 2 submitted (complete, clean, 2 findings)
+- 2026-11-23 15:23 Audit of turn-this-incident-into-4: complete, clean, round 1: 2 Nit (1 open, 1 unconfirmed) (2 finders voted: 1 new finding confirmed, 1 unconfirmed)
+- 2026-11-23 15:24 Audit of team-sessions-start: finder 2 of 2 submitted (complete, clean, 1 finding)
+- 2026-11-23 15:25 Audit of team-sessions-start: complete, clean, round 1: 2 Nit (1 open, 1 unconfirmed) (2 finders voted: 1 new finding confirmed, 1 unconfirmed)
+- 2026-11-23 15:25 Automatically (auto_advance): Didn't merge team-sessions-start: Not merged yet: the merge policy is ask_sensitive, so the user approves team-sessions-start at 81c94cec first. It touches Sources/VibeCore/LeadLaunch.swift, Sources/VibeCore/V2/Sandbox/SandboxPlanner.swift. Ask once: ask_user(question: "Merge team-sessions-start (Team sessions start Claude Code with its updater off) at 81c94cec? …what it changes and the risk…", options: ["Approve 81c94cecaed9a896d58c9878dfa62568b949ecf2", "Not yet"], priority: blocking, task: "team-sessions-start"), with no timer, and merge again when they approve. The approval covers this commit only: a new commit needs a new…
+- 2026-11-23 15:26 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: ~/.vibeswitcher/lead/run
+- 2026-11-23 15:26 Audit of measured-with-a-real at fc16375c by 2 finders (contract and acceptance; bugs, regressions and security); the shared run: the test command passed
+- 2026-11-23 15:29 Audit of sb5-the-host-confines: finder 2 of 2 submitted (incomplete, suspect, 5 findings)
+- 2026-11-23 15:29 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: ~/.claude/shell-snapshots and ~/.vibeswitcher/lead/run
+- 2026-11-23 15:29 Started a worker on the-config-card-says
+- 2026-11-23 15:29 Automatically (auto_advance): Started a worker on the-config-card-says (The config card says what sandbox_nesting: on exposes), its after tasks done (the-node-s-gate).
+- 2026-11-23 15:29 Audit of sb5-the-host-confines: incomplete, suspect, round 1: 1 Important open, 5 Nit (1 open, 4 unconfirmed), 1 Pre-existing unconfirmed (2 finders voted: 2 new findings confirmed, 5 unconfirmed, 2 Nits past audit_nit_cap (5) left out)
+- 2026-11-23 15:31 Exception on sb5-the-host-confines by lead of vibeswitcher-v2-lead: edits to scripts/test-under-load.sh, scripts/temporary-folder-lint.txt, Sources/VibeCore/V2/Sandbox/SandboxRole.swift, Sources/VibeHost/V2/HostNotesAnswer.swift, Sources/VibeNode/Server/Requests.swift, Sources/vibeswitcher-cli/Start.swift, Sources/vibeswitcher-cli/Status.swift accepted. Reason: One note restating, with today's paths, the lead's three earlier exceptions on this task (2026-11-19, 2026-11-20 and 2026-11-23), which the audit at 20d3e815 did not find: the earlier one named Source…
+- 2026-11-23 15:31 Planned a-fifo-planted-in: A FIFO planted in the slots' folder can't hang the test lock (review audit, for security)
+- 2026-11-23 15:32 Audit of measured-with-a-real: finder 2 of 2 submitted (complete, clean, 1 finding)
+- 2026-11-23 15:32 Audit of measured-with-a-real: complete, clean, round 1: 1 Important unconfirmed (2 finders voted: 0 new findings confirmed, 1 unconfirmed)
+- 2026-11-23 15:33 Planned on-wsl-no-box: On WSL, no box starts when the machine's binfmt_misc entries can't be seen and the kernel gives a box none of its own (review audit, for security)
+- 2026-11-23 15:35 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: ~/.claude/shell-snapshots
+- 2026-11-23 15:36 Started a worker on sb5-the-host-confines
+- 2026-11-23 15:36 Automatically (auto_advance): Started a worker on sb5-the-host-confines (SB5: the host confines what a lead starts), its after tasks done (sb3-the-launcher-builds, planner-a-worker-s).
+- 2026-11-23 15:36 Automatically (auto_advance): Overlap for sb5-the-host-confines's start (a warning only: nothing was refused or reordered). Package.swift: branch-runs-get-the (planned, set to start after this one: its boundaries name it), sb6-2-2-a (planned, set to start after this one: its boundaries name it).
+- 2026-11-23 15:40 The worker on sb5-the-host-confines answered findings: sb5-the-host-confines:F1 fixed at b5d5b6e2: b5d5b6e2 (test only, Tests/VibeHostTests/ConfinedSpawnTests.swift). aSessionStartedWithNoHelperInAWorkersWorktreeIsPlainAndTakesNoWorkersRole no longer looks at the hostname. Its script prints `readlink /proc/self/ns/pid`, and the test expects that to equal SessionBox.pidNamespace(getpid()), the test process's own pid namespace, so a plain session matches wherever the suite runs. It also expects !SessionBox.keepsABox(own.childPID). The check !world.con…
+- 2026-11-23 15:41 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: ~/.claude/shell-snapshots
+- 2026-11-23 15:41 Merged turn-this-incident-into-3: The suite proves the gate can build this project: the toolchain that built the tests runs in a branch run's box (no audit: review none) (build 63411f509118)
+- 2026-11-23 15:41 Automatically (auto_advance): Merged turn-this-incident-into-3 (The suite proves the gate can build this project: the toolchain that built the tests runs in a branch run's box) into v2 at 0a9e5cdb, review none: on its worker's done report on d25884a0 and the full test run.
+- 2026-11-23 15:41 Automatically (auto_advance): Cleaned up turn-this-incident-into-3; ended pid 2545338 (Worker: The suite proves the gate can build this project: the toolchain that built the tests runs in a branch run's box) (freed 1.9 GB of build output and temporary folders). It stays done.
+- 2026-11-23 15:49 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: ~/.claude/shell-snapshots
+- 2026-11-23 15:49 Merged hookscommandtests-hooks: HooksCommandTests: `hooks install` takes minutes in a full run and is killed at its 120 s limit (no audit: review none) (build 63411f509118)
+- 2026-11-23 15:49 Automatically (auto_advance): Merged hookscommandtests-hooks (HooksCommandTests: `hooks install` takes minutes in a full run and is killed at its 120 s limit) into v2 at 40fd2803, review none: on its worker's done report on 8fbabd7e and the full test run.
+- 2026-11-23 15:49 Automatically (auto_advance): Cleaned up hookscommandtests-hooks; ended pid 2890586 (Worker: HooksCommandTests: `hooks install` takes minutes in a full run and is killed at its 120 s limit) (freed 1.9 GB of build output and temporary folders). It stays done.
+- 2026-11-23 15:51 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: ~/.claude/shell-snapshots
+- 2026-11-23 15:51 Started a worker on tests-that-write-a
+- 2026-11-23 15:51 Automatically (auto_advance): Started a worker on tests-that-write-a (Tests that write a program and run it no longer fail with "Text file busy"), its after tasks done (hookscommandtests-hooks).
+- 2026-11-23 16:08 Automatically (auto_advance): Didn't audit sb5-the-host-confines: Not audited: finder 1 of 2 couldn't start (Problem(text: "sb5-the-host-confines\'s finder not started: ~/.claude/plugins: context7@claude-plugins-official changed while the team\'s sessions ran, since VibeSwitcher last sealed it. A worker\'s shell, a verifier\'s command or a branch\'s tests can write it (the deny rules hold only the file tools), and the next session would load what was written. New workers, verifiers and merges are held until the user accepts the change in VibeSwitcher (its noti…
+- 2026-11-23 16:27 Automatically (auto_advance): Didn't audit the-config-card-says: Not audited: finder 1 of 2 couldn't start (Problem(text: "the-config-card-says\'s finder not started: ~/.claude/plugins: context7@claude-plugins-official changed while the team\'s sessions ran, since VibeSwitcher last sealed it. A worker\'s shell, a verifier\'s command or a branch\'s tests can write it (the deny rules hold only the file tools), and the next session would load what was written. New workers, verifiers and merges are held until the user accepts the change in VibeSwitcher (its notic…
+- 2026-11-23 16:29 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: /run/user/1000/systemd/transient
+- 2026-11-23 16:29 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: /run/user/1000/systemd/transient
+- 2026-11-23 16:39 Automatically (auto_advance): Didn't audit sandbox-env-hygiene-no: Not audited: finder 1 of 2 couldn't start (Problem(text: "sandbox-env-hygiene-no\'s finder not started: ~/.claude/plugins: context7@claude-plugins-official changed while the team\'s sessions ran, since VibeSwitcher last sealed it. A worker\'s shell, a verifier\'s command or a branch\'s tests can write it (the deny rules hold only the file tools), and the next session would load what was written. New workers, verifiers and merges are held until the user accepts the change in VibeSwitcher (its not…
+- 2026-11-23 16:43 Pipeline held: turn-this-incident-into-4, team-sessions-start, measured-with-a-real ready to merge with none landing; cause: every test slot held
+- 2026-11-23 16:44 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: /run/user/1000/systemd/transient
+- 2026-11-23 16:44 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: /run/user/1000/systemd/transient
+- 2026-11-23 16:45 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: /run/user/1000/systemd/transient
+- 2026-11-23 16:45 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: /run/user/1000/systemd/transient
+- 2026-11-23 16:54 Automatically (auto_advance): Didn't audit tests-that-write-a: Not audited: finder 1 of 2 couldn't start (Problem(text: "tests-that-write-a\'s finder not started: ~/.claude/plugins: context7@claude-plugins-official changed while the team\'s sessions ran, since VibeSwitcher last sealed it. A worker\'s shell, a verifier\'s command or a branch\'s tests can write it (the deny rules hold only the file tools), and the next session would load what was written. New workers, verifiers and merges are held until the user accepts the change in VibeSwitcher (its notice …
+- 2026-11-23 16:58 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: /run/user/1000/systemd/transient
+- 2026-11-23 16:58 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: /run/user/1000/systemd/transient
+- 2026-11-23 17:53 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: /run/user/1000/systemd/transient
+- 2026-11-23 17:53 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: /run/user/1000/systemd/transient
+- 2026-11-23 17:54 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: /run/user/1000/systemd/transient
+- 2026-11-23 17:54 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: /run/user/1000/systemd/transient
+- 2026-11-23 17:55 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: /run/user/1000/systemd/transient
+- 2026-11-23 17:55 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: /run/user/1000/systemd/transient
+- 2026-11-23 18:14 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: /run/user/1000/systemd/transient
+- 2026-11-23 18:15 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: /run/user/1000/systemd/transient
+- 2026-11-23 18:38 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: /run/user/1000/systemd/transient
+- 2026-11-23 18:38 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: /run/user/1000/systemd/transient
+- 2026-11-23 18:39 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: /run/user/1000/systemd/transient
+- 2026-11-23 18:39 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: /run/user/1000/systemd/transient
+- 2026-11-23 18:40 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: /run/user/1000/systemd/transient
+- 2026-11-23 18:40 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: /run/user/1000/systemd/transient
+- 2026-11-23 18:43 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: /run/user/1000/systemd/transient
+- 2026-11-23 18:43 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: /run/user/1000/systemd/transient
+- 2026-11-23 18:44 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: /run/user/1000/systemd/transient
+- 2026-11-23 18:44 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: /run/user/1000/systemd/transient
+- 2026-11-23 22:16 Claude Code's skill sync finished a round (1795468579.8981943) in ~/.claude/skills/synced, accepted by itself (nothing held): 11 changed
+- 2026-11-24 09:40 Pipeline held: turn-this-incident-into-4, team-sessions-start, measured-with-a-real ready to merge with none landing; cause: every test slot held
+- 2026-11-24 09:40 Update: Today: nothing can move until the plugins hold is accepted; three merges wait on approval — **Landed on Nov 23 (not posted one by one)**
+- 2026-11-24 09:41 Automatically (auto_advance): The account's usage is near a limit: the weekly limit (every model): 83% used, resets Nov 26, 12:00. At 80% of a limit VibeSwitcher starts no workers or audits on any model, so the limit doesn't stop one mid-task; sessions already running go on. Tell the user. Nothing on it starts by itself until the reset, then it does; start_worker or audit with override_usage: true starts one anyway.
+- 2026-11-24 10:10 Pipeline held: turn-this-incident-into-4, team-sessions-start, measured-with-a-real ready to merge with none landing; cause: every test slot held
+- 2026-11-24 10:10 Kept turn-this-incident-into-4 unmerged: Audit clean at 909bccc18a54d7374732aa09a1a875d15d243e46; waits on the user's approval of that exact commit (D5BD68B0) and on the ~/.claude/plugins hold (BD6DBB5F). Kept only to stop the half-hourly "merges are held" notices. On the approval: status planned, then merge.
+- 2026-11-24 10:10 Kept team-sessions-start unmerged: Audit clean at 81c94cecaed9a896d58c9878dfa62568b949ecf2; waits on the user's approval of that exact commit (64C0164C) and on the ~/.claude/plugins hold (BD6DBB5F). Kept only to stop the half-hourly "merges are held" notices. On the approval: status planned, then merge.
+- 2026-11-24 10:10 Kept measured-with-a-real unmerged: Audit clean at fc16375c400f5f7efd73c159ceec9bfde10f16ac; waits on the user's approval of that exact commit (D745A6E8) and on the ~/.claude/plugins hold (BD6DBB5F). Kept only to stop the half-hourly "merges are held" notices. On the approval: status planned, then merge.
+- 2026-11-24 11:46 Parked measured-with-a-real's worker (idle since its last report) for a build switch to e3ef7b07c65f; start_worker continues in its worktree
+- 2026-11-24 11:46 Parked sandbox-env-hygiene-no's worker (idle since its last report) for a build switch to e3ef7b07c65f; start_worker continues in its worktree
+- 2026-11-24 11:46 Parked the-config-card-says's worker (idle since its last report) for a build switch to e3ef7b07c65f; start_worker continues in its worktree
+- 2026-11-24 11:46 Parked sb5-the-host-confines's worker (idle since its last report) for a build switch to e3ef7b07c65f; start_worker continues in its worktree
+- 2026-11-24 11:46 Parked tests-that-write-a's worker (idle since its last report) for a build switch to e3ef7b07c65f; start_worker continues in its worktree
+- 2026-11-24 11:46 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: ~/.claude/shell-snapshots
+- 2026-11-24 11:51 Audit of sb5-the-host-confines at b5d5b6e2 by 2 finders (contract and acceptance; bugs, regressions and security); the shared run: the test command passed
+- 2026-11-24 11:51 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: ~/.claude/shell-snapshots
+- 2026-11-24 11:54 Audit of sb5-the-host-confines: finder 2 of 2 submitted (complete, clean, 2 findings)
+- 2026-11-24 11:54 Audit of tests-that-write-a at 3f269664 by 2 finders (contract and acceptance; bugs, regressions and security); the shared run: the test command passed
+- 2026-11-24 12:01 Audit of tests-that-write-a: finder 2 of 2 submitted (complete, clean, 1 finding)
+- 2026-11-24 12:05 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: ~/.claude/shell-snapshots
+- 2026-11-24 12:05 Merged turn-this-incident-into-4: An audit's finder can read the audit's own run logs without a permission prompt (build 63411f509118)
+- 2026-11-24 12:15 Merged team-sessions-start: Team sessions start Claude Code with its updater off (in a batch: team-sessions-start, measured-with-a-real landed on one test run) (build 63411f509118)
+- 2026-11-24 12:15 Merged measured-with-a-real: Measured with a real Windows program: no box starts one or reaches the Windows side (WSL interop's F flag), and what is still open is closed (in a batch: team-sessions-start, measured-with-a-real landed on one test run) (build 63411f509118)
+- 2026-11-24 12:15 Automatically (auto_advance): Cleaned up team-sessions-start (freed 2.0 GB of build output and temporary folders). It stays done.
+- 2026-11-24 12:15 Update: Merged into v2: finders read their audit's logs, team sessions start with the updater off, interop phase 2 — All three merged on your approvals of Nov 24; each merge's full test run passed.
+- 2026-11-24 14:33 Workflow: auto_advance = `false`
+- 2026-11-24 15:00 Workflow: auto_advance = `true`
+- 2026-11-24 15:01 Workflow: handover_idle_min = `10`, handover_tokens = •••
+- 2026-11-24 15:01 Workflow: auto_advance = `false`
+- 2026-11-24 15:12 Handed the lead over to a fresh session: the last one had been idle 10 minutes with 188k tokens of context, past handover_idle_min 10 and handover_tokens 100k
+- 2026-11-24 15:12 Ended the replaced lead session D1AC1BA4 and its tool server: only the current lead acts
+- 2026-11-24 15:13 Workflow: auto_advance = `true`, handover_idle_min = `50`, handover_tokens = •••
+- 2026-11-24 15:13 Automatically (auto_advance): The account's usage is near a limit: the weekly limit (every model): 99% used, resets Nov 26, 12:00. At 80% of a limit VibeSwitcher starts no workers or audits on any model, so the limit doesn't stop one mid-task; sessions already running go on. Tell the user. Nothing on it starts by itself until the reset, then it does; start_worker or audit with override_usage: true starts one anyway.
+- 2026-11-24 16:52 Claude Code's skill sync finished a round (1795535486.6338434) in ~/.claude/skills/synced, accepted by itself (nothing held): 72 changed
+- 2026-11-24 16:52 Automatically (auto_advance): Didn't start on-wsl-no-box: on-wsl-no-box's worker not started: ~/.config/systemd/user and ~/.vibeswitcher/v2/builds changed outside a team session: they carry code that runs (hooks, MCP servers, shell startup, git's commands), so only the user's Accept seals them, whoever made the change. New workers, verifiers and merges are held until the user accepts the change in VibeSwitcher (its notice names the files); you can't. Tell the user which changed and ask them to look: if they made the change, they accept it there; if not…
+- 2026-11-24 16:53 Incident: After a build switch the running lead's tool server stays on the old build, so the lead starts audits and workers with the old build's launch code and nothing t… (in sb5-the-host-confines); planned turn-this-incident-into-6 to turn it into a check
+- 2026-11-24 17:03 Audit of sb5-the-host-confines at b5d5b6e2 by 2 finders (contract and acceptance; bugs, regressions and security); the shared run of its merged result 9cda10f1: test command failed
+- 2026-11-24 17:03 Automatically (auto_advance): The verifier on sb5-the-host-confines ended without a verdict (exited 143): closed its session and started the audit again on the same commit, b5d5b6e2. If this one ends without a verdict too, it's left to you.
+- 2026-11-24 17:04 Audit of sb5-the-host-confines: finder 2 of 2 submitted (complete, clean, 2 findings)
+- 2026-11-24 17:04 Audit of sb5-the-host-confines: complete, clean, round 2: 1 Important closed, 5 Nit (4 unconfirmed), 1 Pre-existing unconfirmed (2 finders voted: 0 new findings confirmed, 0 unconfirmed)
+- 2026-11-24 17:06 Started a worker on sb5-the-host-confines
+- 2026-11-24 17:06 Planned an-audit-whose-own: An audit whose own test run failed never reads "complete, clean" (review audit, for security)
+- 2026-11-24 17:12 Audit of tests-that-write-a at 3f269664 by 2 finders (contract and acceptance; bugs, regressions and security); the shared run of its merged result 8e169c85: test command failed
+- 2026-11-24 17:12 Automatically (auto_advance): The verifier on tests-that-write-a ended without a verdict (exited 143): closed its session and started the audit again on the same commit, 3f269664. If this one ends without a verdict too, it's left to you.
+- 2026-11-24 17:12 Automatically (auto_advance): sandbox-env-hygiene-no's audit at 4b0a7eb2 is held (update_task hold_audit): nothing moves it on until an exception is recorded, or hold_audit: false.
+- 2026-11-24 17:12 Automatically (auto_advance): the-config-card-says's audit at 42eee715 is held (update_task hold_audit): nothing moves it on until an exception is recorded, or hold_audit: false.
+- 2026-11-24 17:12 Automatically (auto_advance): The account's usage is near a limit: the weekly limit (every model): 88% used, resets Nov 25, 18:00. At 80% of a limit VibeSwitcher starts no workers or audits on any model, so the limit doesn't stop one mid-task; sessions already running go on. Tell the user. Nothing on it starts by itself until the reset, then it does; start_worker or audit with override_usage: true starts one anyway.
+- 2026-11-24 17:13 Audit of tests-that-write-a: finder 2 of 2 submitted (complete, clean, 0 findings)
+- 2026-11-24 17:13 Audit of tests-that-write-a: incomplete, clean, round 1: 1 Important unconfirmed (2 finders voted: 0 new findings confirmed, 1 unconfirmed)
+- 2026-11-24 17:13 Started a worker on tests-that-write-a
+- 2026-11-24 17:22 The worker on tests-that-write-a answered findings: tests-that-write-a:F1 fixed at 86db64dd: 86db64dd: SandboxFactsTests.aBoxDoesntTryAnEntryWithFOfTheNamespaceItStartsIn's binfmt interpreter (copy of /usr/bin/echo, line 243) now goes through installProgram, and its MZ stub (Data.write + chmod 0755, line 245) through installScript, as the same file's line 188 already does. No allow-list entry. Red on the merged tree first: CloseOnExecLintTests.aTestsCopyOrMakingOfAFileIsCountedWithItsReason failed at CloseOnExecLintTests.swift:383 ('SandboxFactsT…
+- 2026-11-24 17:24 Automatically (auto_advance): sb5-the-host-confines's audit at 17c4a239 is held (update_task hold_audit): nothing moves it on until an exception is recorded, or hold_audit: false.
+- 2026-11-24 17:36 Automatically (auto_advance): tests-that-write-a's audit at 86db64dd is held (update_task hold_audit): nothing moves it on until an exception is recorded, or hold_audit: false.
+- 2026-11-24 18:27 Handed the lead over to a fresh session: the last one had been idle 50 minutes with 240k tokens of context, past handover_idle_min 50 and handover_tokens 150k
+- 2026-11-24 18:27 Automatically (auto_advance): The account's usage is near a limit: the weekly limit (every model): 89% used, resets Nov 25, 18:00. At 80% of a limit VibeSwitcher starts no workers or audits on any model, so the limit doesn't stop one mid-task; sessions already running go on. Tell the user. Nothing on it starts by itself until the reset, then it does; start_worker or audit with override_usage: true starts one anyway.
+- 2026-11-24 18:27 Automatically (auto_advance): sb5-the-host-confines's audit at 17c4a239 is held (update_task hold_audit): nothing moves it on until an exception is recorded, or hold_audit: false.
+- 2026-11-24 18:27 Automatically (auto_advance): tests-that-write-a's audit at 86db64dd is held (update_task hold_audit): nothing moves it on until an exception is recorded, or hold_audit: false.
+- 2026-11-24 18:27 Automatically (auto_advance): sandbox-env-hygiene-no's audit at 4b0a7eb2 is held (update_task hold_audit): nothing moves it on until an exception is recorded, or hold_audit: false.
+- 2026-11-24 18:27 Automatically (auto_advance): the-config-card-says's audit at 42eee715 is held (update_task hold_audit): nothing moves it on until an exception is recorded, or hold_audit: false.
+- 2026-11-24 18:27 Ended the replaced lead session CDC7A13C and its tool server: only the current lead acts
+- 2026-11-25 11:28 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: /run/user/1000/systemd/transient
+- 2026-11-25 11:28 Claude Code's skill sync finished a round (1795541565.3431218) in ~/.claude/skills/synced, accepted by itself (nothing held): 1 changed
+- 2026-11-25 11:28 Automatically (auto_advance): Didn't start on-wsl-no-box: on-wsl-no-box's worker not started: ~/.local/bin and ~/.local/share/claude/versions changed while the team's sessions ran, since VibeSwitcher last sealed them. A worker's shell, a verifier's command or a branch's tests can write them (the deny rules hold only the file tools), and the next session would load what was written. New workers, verifiers and merges are held until the user accepts the change in VibeSwitcher (its notice names the files); you can't. Tell the user which changed and ask the…
+- 2026-11-25 11:29 Claude Code's skill sync finished a round (1795602544.7019162) in ~/.claude/skills/synced, accepted by itself (nothing held): 73 changed
+- 2026-11-25 12:00 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: /run/user/1000/systemd/transient
+- 2026-11-25 13:34 Automatically (auto_advance): Didn't audit sb5-the-host-confines: An audit of sb5-the-host-confines is already making its build and test run; its verdict comes as a report.
+- 2026-11-25 13:34 Started a worker on on-wsl-no-box
+- 2026-11-25 13:34 Automatically (auto_advance): Started a worker on on-wsl-no-box (On WSL, no box starts when the machine's binfmt_misc entries can't be seen and the kernel gives a box none of its own), its after tasks done (measured-with-a-real).
+- 2026-11-25 13:34 Automatically (auto_advance): Overlap for on-wsl-no-box's start (a warning only: nothing was refused or reordered). Sources/VibeCore/V2/Sandbox/SandboxPlanner.swift: windows-access-is-a (planned: its boundaries name it).
+- 2026-11-25 13:48 Goal merges-are-fast-and added: Merges are fast and don't fail at random
+- 2026-11-25 13:48 Goal the-lead-s-own added: The lead's own machinery can be trusted on a Linux node
+- 2026-11-25 13:48 Goal vibeswitcher-2-covers added: VibeSwitcher 2 covers daily use as the Mac app does
+- 2026-11-25 13:48 Goal sessions-and-branch-code added: Sessions and branch code run confined: the sandbox's first slice is finished
+- 2026-11-25 13:52 Audit of sb5-the-host-confines at 17c4a239 by 2 finders (contract and acceptance; bugs, regressions and security); the shared run: the test command passed
+- 2026-11-25 13:52 Released sb5-the-host-confines's worker (idle since its done report on 17c4a239) while its audit runs
+- 2026-11-25 13:52 Automatically (auto_advance): Started the audit of sb5-the-host-confines at 17c4a239 (Its review is audit). Released its worker, idle since its done report, while the audit runs: its Mac slot and memory are free, its worktree and branch stay.
+- 2026-11-25 13:53 Audit of sb5-the-host-confines: finder 2 of 2 submitted (complete, clean, 0 findings)
+- 2026-11-25 13:54 Audit of sb5-the-host-confines: complete, clean, round 3: 1 Important closed, 5 Nit (4 unconfirmed), 1 Pre-existing unconfirmed (2 finders voted: 0 new findings confirmed, 0 unconfirmed)
+- 2026-11-25 13:54 Automatically (auto_advance): Didn't merge sb5-the-host-confines: Not merged yet: the merge policy is ask_sensitive, so the user approves sb5-the-host-confines at 17c4a239 first. It touches Sources/VibeCore/HostProtocol.swift, Sources/VibeCore/LeadLaunch.swift, Sources/VibeCore/LeadToolset.swift, Sources/VibeCore/LeadVault.swift, Sources/VibeCore/TestLock.swift, Sources/VibeCore/V2/Sandbox/SandboxRole.swift, Sources/VibeHost/HostHandover.swift, Sources/VibeHost/HostServer.swift, …. Ask once: ask_user(question: "Merge sb5-the-host-confines (SB5: the host confines what a lead starts) at 17c4a239? …what it changes and the risk…", options: ["Approve 17c4a2390b88…
+- 2026-11-25 14:07 Automatically (auto_advance): Didn't audit tests-that-write-a: Not audited: finder 1 of 2 couldn't start (Problem(text: "tests-that-write-a\'s finder not started: ~/.local/bin changed while the team\'s sessions ran, since VibeSwitcher last sealed it. A worker\'s shell, a verifier\'s command or a branch\'s tests can write it (the deny rules hold only the file tools), and the next session would load what was written. New workers, verifiers and merges are held until the user accepts the change in VibeSwitcher (its notice names the files); you can\'t. Tell the …
+- 2026-11-25 14:26 Exception on on-wsl-no-box by lead of vibeswitcher-v2-lead: edits to Sources/VibeCore/V2/Sandbox/BranchRun.swift accepted. Reason: The worker added a defaulted `planner:` parameter to BranchRun.plan so a BranchRun test can reach a kernel that gives a box no binfmt_misc of its own; this node's kernel (6.18) always answers own. The…
+- 2026-11-25 14:36 Automatically (auto_advance): Didn't audit on-wsl-no-box: Not audited: finder 1 of 2 couldn't start (Problem(text: "on-wsl-no-box\'s finder not started: /mnt/c/Users/kstel/AppData/Roaming/Microsoft/Windows/Start Menu/Programs/Startup and ~/.local/bin changed while the team\'s sessions ran, since VibeSwitcher last sealed them. A worker\'s shell, a verifier\'s command or a branch\'s tests can write them (the deny rules hold only the file tools), and the next session would load what was written. New workers, verifiers and merges are held until the user ac…
+- 2026-11-25 14:45 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: ~/.vibeswitcher/lead/run
+- 2026-11-25 14:46 Audit of on-wsl-no-box at 93a8d89e by 2 finders (contract and acceptance; bugs, regressions and security); the shared run: the test command passed
+- 2026-11-25 14:46 Released on-wsl-no-box's worker (idle since its done report on 93a8d89e) while its audit runs
+- 2026-11-25 14:46 Automatically (auto_advance): Started the audit of on-wsl-no-box at 93a8d89e (Its review is audit). Released its worker, idle since its done report, while the audit runs: its Mac slot and memory are free, its worktree and branch stay.
+- 2026-11-25 14:46 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: ~/.claude/shell-snapshots
+- 2026-11-25 14:46 Pipeline held: sb5-the-host-confines ready to merge with none landing; cause: the gate not installed
+- 2026-11-25 14:46 Kept sb5-the-host-confines unmerged: Audit clean at 17c4a2390b884ed701993705647790143ac94ea2; waits on the user's approval of that exact commit (758DDEA0) and on the holds on ~/.local/bin and the Windows Startup folder. Kept only to stop the half-hourly "merges are held" notices. On the approval: status planned, then merge.
+- 2026-11-25 14:47 Audit of on-wsl-no-box: finder 2 of 2 submitted (complete, clean, 1 finding)

@@ -399,3 +399,51 @@ Eight finished tasks sat 7–11 h waiting on Fable's limit (resets Nov 24) while
 
 This follows the user's instruction. The review gate for sensitive paths is a guard rail the lead doesn't work around.
 
+## 2026-11-19 11:02:14 the-config-seal-is: a passing merge test run that survives a config-seal hold is kept in the tool server's memory only. It is bound to the exact base and branch heads it tested, and it is lost on restart (option b, of the worker's three). No durable pass receipt.
+
+A durable pass sealed with the lead's seal could be forged from the lead's shell to skip a merge's test run, a new way past the gate. Keeping it in memory meets the contract (it survives a seal hold) without adding anything forgeable, and a restart only costs a rerun.
+
+## 2026-11-19 13:02:39 audits-run-on-codex: the lead may close a pending post-merge Claude re-audit that can't be audited (branch gone, verifier keeps ending) only through cleanup(task, force: true, reason:). The reason must cite something checkable, it is screened by the record lints, and the close is recorded as "closed by the lead", never as passed. Not vetoed.
+
+Without it, an unauditable obligation would block cleanup forever. The change it tracks is already merged, so closing it removes no gate, and the waiver is explicit, has a reason and is visible on the record, like dismiss_finding.
+
+## 2026-11-19 15:09:00 From the 2026-11-19 retrospective: (1) Root-cause and debugging tasks go to Claude (agent: claude, advisor fable), never auto or Codex. (2) Never delete the build output of a task waiting for review to free disk. new-work-waits-when now holds new starts instead; free disk elsewhere first. (3) The lead files vs-shell commands with the whole command line as one quoted argument, never through `zsh -c` with separate words.
+
+(1) merge-reruns-only-what's Codex round failed 3 Important findings on root cause, and the Claude round fixed them. (2) Deleting 16 GB of build output made 8 reviews rebuild from scratch at load 60–110. (3) The first install card ran `zsh -c security` with no arguments and failed.
+
+## 2026-11-21 15:56:14 Memory growth (2026-11-21): no fix task. The lead read the footprint-relief lines in app.log for Nov 19–21: it isn't a leak. Malloc in use stays level at about 120–170 MB with 27 sessions, and the footprint moves between about 250 and 420 MB with activity and comes back down; what stays is 150–200 MB of freed malloc-small memory that macOS keeps for reuse after busy peaks. File a root-cause task (agent claude, advisor fable) only if malloc in use keeps climbing across a day, or the footprint settles above about 500 MB, or the Mac's memory pressure leaves normal with the app among the top users.
+
+Two leads promised the user to read the memory log and file "the real fix". The log shows the "+5 MB an hour" trend is the allocator holding freed pages after peaks, not memory in use growing: in use was 120 MB at 27 h and 120–125 MB a day later. Nine memory tasks have already been spent, memory pressure is normal, and the working policy rules out another round without a concrete concern.
+
+## 2026-11-22 09:10:26 A lead handover looks like one continuous lead to the user (2026-11-22). The handover itself stays (a fresh session at 50 idle minutes with over 150k tokens of context, and the daily/context rotation): it is kept for cost. What changes is how it shows: the old lead session ends by itself once the new lead holds the role and has finished its first turn and the old one is between turns (task a-lead-handover-keeps, audited: it ends sessions), the new lead takes its row and the selection, and the lead's chat shows the earlier sessions' conversation above one divider line, "Started a fresh lead session at HH:mm (reason)" (task the-lead-s-chat, after it). In-place compaction of the old session is not used instead.
+
+The user dislikes seeing one lead finished and replaced by another, and asked for a single continuous session with a signal that a new lead started. Keeping the handover: a fresh lead starts near 80k tokens against 166k–411k carried by the three leads replaced on Nov 19–21, and every later turn re-reads the whole context; compaction would re-send the old context to write a lossy summary, while a fresh lead continues from the board and decisions, which are durable. The old session's terminal scrollback is lost when it ends; its transcript stays on disk and feeds the chat.
+
+## 2026-11-23 12:31:43 From the verification article (claude.dev, Nov 2026), agreed with the user 2026-11-23: (1) a test that flakes once in a merge gets a fix task at once, and fix tasks fix the root cause or delete the test with a reason, never sleep/retry/skip (a-test-that-flakes); a merge that passes only on its rerun still merges. (2) The "naming no test" flakes are investigated as a likely double count first (a-merge-whose-tests), and this week's repeat flakers get fix tasks (fix-the-dictation-tests, fix). (3) After those: REVIEW.md rules get triggers, sources and per-rule counts for pruning (review-rules-carry-a), and the scorecard counts bugs that got past review (the-weekly-scorecard-counts). Not adopted: stacking reviewers (we keep one primary verifier by default), a commit gate (merge already requires a review and stamps VS-Review).
+
+Merge health misses its objectives (12% passing only on rerun); the article names retrying flaky tests and unscoped, unpruned review rules as the failure modes we have, and an escape count is the missing measure of our review.
+
+## 2026-11-23 13:25:47 Ledger-planned flaky-test fix tasks are review audit, and one that deletes a test can't drop to review none through small_task_min (built in a-test-that-flakes).
+
+Fix tasks may now delete a test whose root cause isn't found; without a review, one load-induced timeout could end in a deleted test merged unchecked. An audit checks that the cause is real or that the deletion's reason is written down. Cost: one audit per flake fix (about 4–8 a week).
+
+## 2026-11-23 14:02:00 Fix tasks for tests that were red on main too (red-on-base) are audited like flaky-test fixes. a-test-that-flakes:F1, which flags that they now get an audit and the small_task_min hold, is intended, not a defect.
+
+A red-on-base fix changes a failing test just as a flake fix does and can weaken or delete it; the same review keeps that honest. They are rare (0 in the last 7 days), so the cost is negligible.
+
+## 2026-11-23 18:07:09 From the 2026-11-23 retrospective (verification plan): (1) Before filing a flaky-test fix task by hand, the lead checks `git log --since=<flake time> main -- <the test's file and the code it exercises>` for a fix that landed after the flake; if one did, no task (task fix found 5743c865 had already fixed it, after a worker's 0.3 h). (2) To settle an Important finding as intended, the lead dismisses it and leaves the worker running for auto_advance to merge, never stop_worker first: stopping it set the task blocked, so auto_advance didn't merge it and the lead had to merge by hand. (3) At the next decisions archive (after Fable's reset, Nov 25), the lead also reads status's review-rules line: R13's trigger matched every eval case and drew 3 false alarms, R2 matched none; narrow or prune from the 30-day counts, not from one eval run.
+
+Each is a setback from today's batch: a fix task with nothing to fix, a manual merge after a self-inflicted block, and review rules whose triggers don't yet discriminate.
+
+## 2026-11-23 23:37:08 Tests never use UserDefaults.standard: each test keeps its settings in a Scratch.defaults suite, and a lint enforces it (task tests-keep-their, after fix-the-flaky-test-25).
+
+fix-the-flaky-test-25 showed that an unbundled test binary's UserDefaults.standard lives in the real ~/Library/Preferences through cfprefsd, whatever the scratch HOME says, so every test process on the Mac shares it (6 of 10 EndedFoldTests runs failed under load). 19 more test files still use it, a latent cross-process flake source while merges miss their rerun objective.
+
+## 2026-11-24 02:27:23 Memory bench churn growth: the Nov 23–24 rise was the bench's off-screen window keeping an open/close animation per cycle while the display slept (fixed in find-why-the-memory: animationBehavior .none on presentOffscreen only). The ~1.8 MB malloc rise left over 40 cycles (AppKit KVO dependency tables, SwiftUI glass display links) is not a task now.
+
+With the fix the bench passes at 5.6–6.5 % with the display asleep, and the absolute growth left (3.2–3.7 MB) matches the daytime passes since before Nov 22, so it isn't new. File a root-cause task (agent claude, advisor fable) only if churn-growth-percent passes 8 % again on a run with the display awake, or the live app's malloc in use keeps climbing across a day (the 2026-11-21 memory decision's conditions).
+
+## 2026-11-24 14:05:16 Commits from GitHub show the GitHub handle that pushed them: on the update card and in fetch_remote and merge_remote reports (task github-commits-name-the, audited as security). The handle comes from GitHub's record of the push, read-only through the user's gh. When the handle can't be found, the commit shows as before. Merges made on this Mac aren't in scope.
+
+The user asked on 2026-11-24 to see who triggered an update's merge, and chose this scope (DEC96FEA). There are no PRs (direct pushes from two Macs), and git author names aren't handles.
+

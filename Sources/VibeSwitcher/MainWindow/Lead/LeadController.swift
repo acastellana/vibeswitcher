@@ -283,6 +283,9 @@ struct TeamReading {
             guard let info = hosted[id], info.isLive, let session = sessions[id] else { continue }
             team.watched[id] = observer.watching(info, agentPid: session.pid)
             if workers.contains(id) {
+                // A Codex worker's copy its rollout shows it took (typed in mid-turn) isn't held: it's recorded as
+                // delivered first (see `CodexInbox`), so it's neither told as undelivered nor typed again at turn end.
+                observer.retireTaken(info, agent: session.agent, agentPid: session.pid)
                 team.held[id] = SteerInbox.pending(tty: session.tty).filter { $0.agentPid == session.pid }.min { $0.at < $1.at }
             }
         }
@@ -644,6 +647,25 @@ final class LeadController: ObservableObject {
     private var keepingRunning = false
     /// What's typed into each replaced lead so far.
     private var lines: [UUID: HostInput.Line] = [:]
+    /// What a handover's ending reads of a lead session's agent, off the main thread (`TurnReading.read`). Faked in tests.
+    var turnReading: (_ session: HostSession, _ agentPid: Int32?, _ background: String?) -> TurnReading = { session, pid, background in
+        TurnReading.read(LeadObserver(), session, agentPid: pid, background: background)
+    }
+    /// A replaced lead a handover ended (`endReplacedLeads`), told just before its session ends (main thread): the lead
+    /// that took its place, and what was typed into its terminal but not sent. The window moves its selection and
+    /// carries its unsent text over to the new lead.
+    var handedOver: (_ old: UUID, _ new: UUID, _ typed: String) -> Void = { _, _, _ in }
+    /// Where each lead a handover put in place of an ended one goes in the list: its window session → the start of the
+    /// lead it replaced (the first of a chain), as that one's row had it (`WindowRows.placed`).
+    @Published private(set) var leadPlaces: [UUID: RowPlace] = [:]
+    /// New leads seen to have ended a turn: once, it's known for good.
+    private var turnEnded: Set<UUID> = []
+    /// Replaced leads a handover ended: never marked replaced again while the host still lists them live.
+    private var endedByHandover: Set<UUID> = []
+    /// A look for `endReplacedLeads` is under way.
+    private var endingLook = false
+    /// Each refresh's look at the replaced leads to end, once done (main thread): the ones it ended. For tests.
+    var endLooked: ([UUID]) -> Void = { _ in }
     /// The leads' inboxes, and the home whose agents' folders hold transcripts (scratch ones in tests).
     private let inbox: URL
     private let home: String
@@ -1092,6 +1114,10 @@ final class LeadController: ObservableObject {
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             var issued: String?
             var replacedSession: UUID?
+            // The replaced lead and its transcript, for the new lead's chat (`LeadChatHistory`).
+            var replacedChat: (session: UUID, transcript: String?)?
+            // A reopened lead: the session whose conversation it carries on, whose earlier sessions its chat keeps.
+            var reopened: String?
             var waiting: [SteerMessage] = []
             // In its prompt: it isn't told it again (see `LeadWitness.PolicyWatch`).
             let policy = WorkingPolicy.load()
@@ -1119,6 +1145,7 @@ final class LeadController: ObservableObject {
                 issued = grant
                 // The role is the new session's from now on: the lead it replaces gets nothing more, and what waited
                 // for it goes to the new one (see `LeadHandover`).
+                if resume != nil { reopened = boardStore.load().leadSession ?? running?.id.uuidString }
                 let handover = try LeadHandover.begin(boardStore, inbox: inbox)
                 waiting = handover.waiting
                 if let replaced = handover.replaced {
@@ -1134,6 +1161,7 @@ final class LeadController: ObservableObject {
                 if resume == nil, let old, let tty = handover.replaced?.tty ?? running?.tty {
                     let transcript = transcripts[old.uuidString]
                         ?? running.flatMap { TranscriptLocator.claude(cwd: root, name: name, startedAt: $0.startedAt, home: home) }
+                    replacedChat = (old, transcript)
                     let turns = transcript.flatMap { LastTurns.read(transcript: $0, tty: tty, home: home) }
                     if let file = try LeadLaunch.writeTurns(turns, root: root) { handed = (tty, file) }
                     Breadcrumbs.shared.note("lead: the replaced lead on \(tty) " + (handed != nil ? "left its last turns for the new one"
@@ -1167,13 +1195,15 @@ final class LeadController: ObservableObject {
                     self.replacing = self.replacing.filter { $0.value != root }
                     self.alert("The lead didn't start.", "\(error)")
                 case .success(let (grant, launch)):
-                    self.spawnLead(root: root, project: project, grant: grant, launch: launch, policy: policy, show: show)
+                    self.spawnLead(root: root, project: project, grant: grant, launch: launch, policy: policy, show: show, replaced: replacedChat, reopened: reopened)
                 }
             }
         }
     }
 
-    private func spawnLead(root: String, project: String, grant: String, launch: LeadLaunch.Prepared, policy: String, show: Bool) {
+    /// `replaced`: the lead this one takes the place of, and its transcript: the new lead's chat carries its conversation.
+    private func spawnLead(root: String, project: String, grant: String, launch: LeadLaunch.Prepared, policy: String, show: Bool,
+                           replaced: (session: UUID, transcript: String?)? = nil, reopened: String? = nil) {
         let boardStore = BoardStore(root: root)
         let vault = self.vault
         host.spawn(SpawnRequest(cwd: root, command: launch.command, env: launch.environment, cols: 120, rows: 40, keepShell: false,
@@ -1187,6 +1217,14 @@ final class LeadController: ObservableObject {
                     }
                 }
                 self?.reads.async { _ in try? boardStore.update { board in LeadHandover.started(session.id.uuidString, on: &board) } }
+                if let replaced { self?.recordHandover(root: root, from: replaced.session, to: session.id, transcript: replaced.transcript,
+                                                       reason: LeadChatHistory.startedReason, at: Date()) }
+                if let reopened {
+                    self?.reads.async { _ in
+                        do { try LeadChatHistory.carry(root: root, from: reopened, to: session.id.uuidString) }
+                        catch { Breadcrumbs.shared.note("reopened lead's earlier sessions not carried to its chat: \(error)") }
+                    }
+                }
                 self?.policyWatch?.started(session.id.uuidString, with: policy)
                 // You chose to start the lead here: answer Claude's trust question for this folder.
                 if self?.answersTrust == true { self?.answerTrust(session.id, folder: root) }
@@ -1395,7 +1433,9 @@ final class LeadController: ObservableObject {
 
     /// Marks the lead sessions live now, with `holders` the lead session each root's board names.
     private func markReplaced(holders: [String: UUID]) {
-        let live = host.sessions.filter { $0.isLive && LeadTeams.role(label: $0.label) == .lead }
+        // One a handover ended stays ended: not marked again while the host still lists it live.
+        endedByHandover.formIntersection(host.sessions.filter(\.isLive).map(\.id))
+        let live = host.sessions.filter { $0.isLive && LeadTeams.role(label: $0.label) == .lead && !endedByHandover.contains($0.id) }
         let roots = Dictionary(uniqueKeysWithValues: live.map { ($0.id, ($0.cwd as NSString).standardizingPath) })
         replacing = replacing.filter { roots[$0.key] != nil }
         let replacedBy = StatusRules.replacedLeads(roots.map { (id: $0.key, root: $0.value) }, holders: holders)
@@ -1410,6 +1450,110 @@ final class LeadController: ObservableObject {
         }
         lines = lines.filter { marked[$0.key] != nil }
         if marked != replacedLeads { replacedLeads = marked }
+    }
+
+    // MARK: A handover ends the replaced lead
+
+    /// What a handover's ending reads of a lead session's agent: what it's doing, whether its own question dialog is
+    /// open, and whether one of its turns has ended.
+    struct TurnReading: Equatable {
+        var activity: LeadActivity
+        var asking: Bool
+        var turnEnded: Bool
+
+        /// From its own hooks and the transcript they name (`LeadObserver`); `background`: shells of its own still
+        /// running. No hook of its own yet: not known. Never a transcript found by folder and name: the replaced lead
+        /// and its successor share both, so it may be the other's (a turn that just ended there isn't this one's).
+        static func read(_ observer: LeadObserver, _ session: HostSession, agentPid: Int32?, background: String?) -> TurnReading {
+            guard let hook = observer.hook(session, agentPid: agentPid) else { return TurnReading(activity: .unknown, asking: false, turnEnded: false) }
+            let path = hook.transcriptPath.flatMap { TranscriptReader.checkedURL($0, home: observer.home) != nil ? $0 : nil }
+            let tail = path.flatMap { TranscriptTail.read(url: URL(fileURLWithPath: $0)) }
+            return TurnReading(activity: LeadActivity.resolve(hook: hook, transcript: tail, background: background),
+                               asking: hook.openQuestion != nil,
+                               turnEnded: hook.lastEvent == "Stop" || tail?.state == .turnOver(apiError: nil))
+        }
+    }
+
+    /// Whether a replaced lead (`old`) ends now, its place taken by the lead `new`: the board names `new` (`named`) and
+    /// the vault binds the role to it (`holder`); `new` has ended a turn (`newTurnEnded`, or its reading says so); and
+    /// `old`'s agent is between turns, with nothing of its own running and no question of its own open. Anything not
+    /// known (no reading, no board, no holder) keeps it, as a replaced lead.
+    static func endsReplaced(old: UUID, new: UUID, named: String?, holder: String?, oldReading: TurnReading?,
+                             newReading: TurnReading?, newTurnEnded: Bool) -> Bool {
+        guard old != new, named == new.uuidString, holder == new.uuidString else { return false }
+        guard newTurnEnded || newReading?.turnEnded == true else { return false }
+        guard let oldReading, oldReading.activity == .idle(background: nil), !oldReading.asking else { return false }
+        return true
+    }
+
+    /// The replaced leads whose new lead holds the role and has ended its first turn, and whose own agent is between
+    /// turns, end by themselves (the session ending as End Session ends it): the user sees one lead, the new one in
+    /// the old one's place (`leadPlaces`), selected if the old one was, with what was typed into the old one and not
+    /// sent carried over (`handedOver`). One mid-turn stays replaced, as before, and ends once its turn has. The board,
+    /// the vault and the agents' state are read off the main thread; what changed by the time they're read (another
+    /// handover, the role back to it, a rotation's commit) keeps it.
+    private func endReplacedLeads() {
+        guard !endingLook else { return }
+        let live = Dictionary(host.sessions.filter(\.isLive).map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        turnEnded.formIntersection(live.keys)
+        let listed = Set(host.sessions.map(\.id))
+        if !host.sessions.isEmpty, !leadPlaces.keys.allSatisfy(listed.contains) { leadPlaces = leadPlaces.filter { listed.contains($0.key) } }
+        let scanned = Dictionary(store.sessions.compactMap { session in session.hostID.map { ($0, session) } }, uniquingKeysWith: { first, _ in first })
+        struct Look { var old: HostSession; var new: HostSession; var root: String; var oldPid: Int32?; var newPid: Int32?; var background: String? }
+        let looks = replacedLeads.compactMap { id, lead -> Look? in
+            guard let new = lead.live, new != id, let old = live[id], let fresh = live[new], holders[lead.root] == new,
+                  rotationCommits[id] == nil, rotationCommits[new] == nil else { return nil }
+            let jobs = scanned[id]?.backgroundJobs ?? []
+            return Look(old: old, new: fresh, root: lead.root, oldPid: scanned[id]?.pid, newPid: scanned[new]?.pid,
+                        background: jobs.isEmpty ? nil : "\(jobs.count) shell(s) of its own")
+        }
+        guard !looks.isEmpty else { return endLooked([]) }
+        endingLook = true
+        let (vault, reading, replacements, seen) = (vault, turnReading, replacements, turnEnded)
+        reads.async({ files in
+            looks.map { look -> (look: Look, ends: Bool, newTurnEnded: Bool) in
+                // The agents' state first (hooks and transcripts: slow on a busy disk), whom the board and the vault
+                // name last: a board that names the old lead again while its state was read keeps it.
+                let newReading = seen.contains(look.new.id) ? nil : reading(look.new, look.newPid, nil)
+                let oldReading = reading(look.old, look.oldPid, look.background)
+                let named = files.names.board(look.root).leadSession
+                let holder = vault.current(.lead, root: look.root, task: nil)?.session
+                let ends = Self.endsReplaced(old: look.old.id, new: look.new.id, named: named, holder: holder, oldReading: oldReading,
+                                             newReading: newReading, newTurnEnded: seen.contains(look.new.id))
+                return (look, ends, newReading?.turnEnded == true)
+            }
+        }) { [weak self] verdicts in
+            guard let self else { return }
+            self.endingLook = false
+            for verdict in verdicts where verdict.newTurnEnded { self.turnEnded.insert(verdict.look.new.id) }
+            // Another handover since: the next refresh looks again.
+            let ended = self.replacements != replacements ? [] : verdicts.filter(\.ends).compactMap { verdict in
+                self.endReplaced(verdict.look.old, by: verdict.look.new.id, root: verdict.look.root) ? verdict.look.old.id : nil
+            }
+            self.endLooked(ended)
+        }
+    }
+
+    /// Ends the replaced lead `old`, whose place `new` takes, if it's still as it was looked at (main thread).
+    private func endReplaced(_ old: HostSession, by new: UUID, root: String) -> Bool {
+        guard let lead = replacedLeads[old.id], lead.live == new, holders[root] == new, rotationCommits[old.id] == nil,
+              host.sessions.contains(where: { $0.id == old.id && $0.isLive }), host.sessions.contains(where: { $0.id == new && $0.isLive })
+        else { return false }
+        let typed = lines[old.id]?.draft ?? lead.draft
+        // Its row's place, as the list had it: the scan's start for its agent, else its session's.
+        let place = RowPlace(start: store.sessions.first { $0.hostID == old.id }?.startedAt ?? old.startedAt, tty: old.tty)
+        var places = leadPlaces
+        places[new] = places.removeValue(forKey: old.id) ?? place
+        leadPlaces = places
+        handedOver(old.id, new, typed)
+        replacedLeads[old.id] = nil
+        lines[old.id] = nil
+        replacing[old.id] = nil
+        endedByHandover.insert(old.id)
+        Breadcrumbs.shared.note("lead: the replaced lead on \(old.tty) ended by itself: the lead of \(lead.project) "
+                                + "(session \(new.uuidString.prefix(8))) holds the role and has ended a turn, and it was between turns")
+        host.kill(old.id)
+        return true
     }
 
     /// Wakes an idle lead that reports wait for (see `LeadWake`): one short prompt for all of them, typed into its
@@ -1560,6 +1704,7 @@ final class LeadController: ObservableObject {
         startPending()
         keepRunningLeads()
         markReplaced()
+        endReplacedLeads()
         sweepRoles()
         let accountWatch = accountWatch
         DispatchQueue.global(qos: .utility).async { [weak self] in
@@ -2275,7 +2420,7 @@ final class LeadController: ObservableObject {
             }
             guard let asked, asked.session == session.id else {
                 reading.gate?.release()
-                let marker = "VIBESWITCHER_HANDOVER_" + UUID().uuidString
+                let marker = LeadRotation.noteMarker + UUID().uuidString
                 self.rotationAsked[root] = (session.id, now, reading.reason, marker)
                 let message = LeadRotation.request + " Start your reply with this line:\n" + marker + "\nThen write the handover note."
                 let done: (Bool) -> Void = { [weak self] sent in
@@ -2427,7 +2572,9 @@ final class LeadController: ObservableObject {
                         self.replacing[old.id] = root; self.replacements += 1
                         self.holders[root] = fresh.id
                         self.markReplaced(holders: self.holders)
-                        let notice = LeadRotation.notice(reason: reason, at: self.rotationNow())
+                        let at = self.rotationNow()
+                        let notice = LeadRotation.notice(reason: reason, at: at)
+                        self.recordHandover(root: root, from: old.id, to: fresh.id, transcript: path, reason: reason, at: at)
                         self.rotationNotices[fresh.id] = notice
                         self.rotationNotices[old.id] = notice
                         if self.answersTrust { self.answerTrust(fresh.id, folder: root) }
@@ -2442,6 +2589,16 @@ final class LeadController: ObservableObject {
     }
 
     private enum RotationError: Error { case noTurns, changed }
+
+    /// A handover in the project's record (off the main thread): the new lead's chat shows the old one's conversation
+    /// above a line where it began (`LeadChatHistory`).
+    private func recordHandover(root: String, from old: UUID, to new: UUID, transcript: String?, reason: String, at: Date) {
+        let handover = LeadChatHistory.Handover(from: old.uuidString, to: new.uuidString, transcript: transcript,
+                                                at: at.timeIntervalSince1970, reason: reason, root: root)
+        reads.async { _ in
+            do { try LeadChatHistory.record(handover) } catch { Breadcrumbs.shared.note("lead handover not recorded for its chat: \(error)") }
+        }
+    }
 
 }
 

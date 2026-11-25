@@ -34,3 +34,10 @@ Evidence: 2026-11-21 18:25, `ps -eo pid,ppid,lstart,etime,stat,args`: three sess
 Task: the-node-s-gate
 Check: task turn-this-incident-into-5 turns it into a check that runs before merge.
 
+## 2026-11-24 16:53:27 After a build switch the running lead's tool server stays on the old build, so the lead starts audits and workers with the old build's launch code and nothing tells it the build changed
+
+Evidence: Three switches, two leads. (1) Lead tool server pid 3622870 ran build 63411f50 from Nov 23 12:26 across the switches to e3ef7b07 (Nov 24 11:38) and 8687299f (14:40); the two verifiers it started at 11:50 ran 63411f50's launch code and their finder 1 sessions sat 2.5 hours on a dialog the newer build fixes; the lead then forced a rotation to get onto the new build (decisions.md, 2026-11-24 15:01:44). (2) The fresh lead's tool server (pids 1535361 and 1535391, started 15:12 on 8687299f) was on the old build again 99 minutes later: builds/current pointed to abf3c047 at 16:51 and the host pid 3603064 ran abf3c047, while ps at 16:52 showed the lead's vibeswitcher-mcp still from builds/8687299f; status still read "the installed build (8687299fa38c)". The only message the lead got was "This node's server restarted, and the cards the user answers were in its memory"; nothing named the build. Idle workers are parked for a build switch (progress.md, 2026-11-24 11:46), the lead is not restarted or told. auto_advance in that old tool server started SB5's audit by itself after the switch.
+
+Task: sb5-the-host-confines
+Check: task turn-this-incident-into-6 turns it into a check that runs before merge.
+

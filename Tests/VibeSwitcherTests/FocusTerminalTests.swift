@@ -9,16 +9,11 @@ import Testing
 @MainActor
 @Suite(.serialized) struct FocusTerminalTests {
     let temp = Scratch()
+    /// This test's own defaults, where its windows keep their layout: each window made in a test shares them, as the
+    /// app's windows share the app's (the standard defaults are every test process's on this Mac).
+    let defaults: UserDefaults
 
-    /// The defaults these tests change, put back after.
-    static let keys = [MainWindowController.FocusLayout.key, "inspectorCollapsed", "middleShowsChat"]
-
-    func keepingDefaults(_ body: () throws -> Void) rethrows {
-        let saved = Self.keys.map { UserDefaults.standard.object(forKey: $0) }
-        defer { for (key, value) in zip(Self.keys, saved) { UserDefaults.standard.set(value, forKey: key) } }
-        UserDefaults.standard.removeObject(forKey: MainWindowController.FocusLayout.key)
-        try body()
-    }
+    init() { defaults = temp.defaults("focus-terminal-defaults") }
 
     func window() throws -> MainWindowController {
         _ = NSApplication.shared
@@ -28,7 +23,7 @@ import Testing
         let store = SessionStore(scanner: SessionScanner(processes: { [:] }, stateDir: { scratch }, cwd: { _ in nil }, arguments: { _ in [] }))
         let leads = LeadController(host: host, store: store, vault: LeadVault(folder: scratch.appendingPathComponent("vault"), ask: { _ in throw LeadVault.Refused("none") }),
                                    inbox: scratch, home: scratch.path) { _ in "true" }
-        return MainWindowController(store: store, host: host, model: WindowModel(), actions: EndedSnapshots.actions, leads: leads)
+        return MainWindowController(store: store, host: host, model: WindowModel(defaults: defaults), actions: EndedSnapshots.actions, leads: leads)
     }
 
     /// The split's items: sidebar, middle, inspector.
@@ -47,8 +42,8 @@ import Testing
         controller.window?.titleVisibility == .hidden
     }
 
-    @Test func itHidesTheSidebarAndInspectorAndComesBack() throws { try keepingDefaults {
-        UserDefaults.standard.set(false, forKey: "inspectorCollapsed")
+    @Test func itHidesTheSidebarAndInspectorAndComesBack() throws {
+        defaults.set(false, forKey: "inspectorCollapsed")
         let controller = try window()
         controller.model.showsChat = true
         arrange(controller, sidebarCollapsed: false, inspectorCollapsed: false)
@@ -60,20 +55,20 @@ import Testing
         #expect(collapsed(controller) == [true, false, true])
         #expect(!controller.model.showsChat && !sessionBarShown(controller))
         #expect(controller.validateMenuItem(item) && item.state == .on)
-        #expect(MainWindowController.FocusLayout.saved == .init(sidebarCollapsed: false, inspectorCollapsed: false, showsChat: true))
+        #expect(MainWindowController.FocusLayout.saved(in: defaults) == .init(sidebarCollapsed: false, inspectorCollapsed: false, showsChat: true))
 
         controller.focusTerminalAction(nil)
         #expect(collapsed(controller) == [false, false, false])
         #expect(controller.model.showsChat && sessionBarShown(controller))
         #expect(controller.validateMenuItem(item) && item.state == .off)
-        #expect(MainWindowController.FocusLayout.saved == nil)
+        #expect(MainWindowController.FocusLayout.saved(in: defaults) == nil)
         // The inspector's own setting isn't touched by focus mode.
-        #expect(UserDefaults.standard.object(forKey: "inspectorCollapsed") as? Bool == false)
-    } }
+        #expect(defaults.object(forKey: "inspectorCollapsed") as? Bool == false)
+    }
 
-    @Test func aWindowMadeAgainStaysFocusedAndRestoresTheLayoutFromBefore() throws { try keepingDefaults {
+    @Test func aWindowMadeAgainStaysFocusedAndRestoresTheLayoutFromBefore() throws {
         // Before: the inspector hidden, the sidebar shown, the chat on.
-        UserDefaults.standard.set(true, forKey: "inspectorCollapsed")
+        defaults.set(true, forKey: "inspectorCollapsed")
         let first = try window()
         first.model.showsChat = true
         arrange(first, sidebarCollapsed: false, inspectorCollapsed: true)
@@ -91,5 +86,5 @@ import Testing
         reopened.focusTerminalAction(nil)
         #expect(collapsed(reopened) == [false, false, true])
         #expect(sessionBarShown(reopened) && reopened.model.showsChat)
-    } }
+    }
 }

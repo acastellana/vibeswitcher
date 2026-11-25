@@ -440,7 +440,8 @@ private struct ChatRows: View, Equatable {
         VStack(alignment: .leading, spacing: 0) {
             ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
                 ChatItemView(item: item, chat: chat, expanded: item.opens ? expanded : [], agent: agent, rowID: rowID,
-                             canSend: canSend, resend: resend, openImage: openImage)
+                             // An earlier lead session's rows are display only: nothing in them is sent again.
+                             canSend: canSend && !chat.isHistory(item.id), resend: resend, openImage: openImage)
                     .equatable()
                     .id(item.id)
                     .accessibilityHidden(unexposed.contains(item.id))
@@ -699,7 +700,29 @@ struct ChatItemRow: View {
                 Rectangle().fill(Color.accentColor).frame(height: 1)
             }
             .padding(.vertical, 4)
+        case .handover(_, let notice, _):
+            HandoverDivider(notice: notice)
         }
+    }
+}
+
+/// Where a fresh lead session began after a handover: the earlier sessions' conversation above it, the new one's below.
+struct HandoverDivider: View {
+    let notice: String
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Rectangle().fill(Color.secondary.opacity(0.45)).frame(height: 1)
+            Label(notice, systemImage: "arrow.triangle.2.circlepath")
+                .font(.system(size: 11, weight: .medium)).foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
+                .layoutPriority(1)
+            Rectangle().fill(Color.secondary.opacity(0.45)).frame(height: 1)
+        }
+        .padding(.vertical, 6)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(notice)
     }
 }
 

@@ -453,9 +453,9 @@ struct DictationTests {
     /// Each OpenAI run leaves its start and end in app.log, how it ended and why, as Claude's do: never the key, the
     /// vocabulary or the text. Until 2026-11-07 it left nothing, so a run that failed couldn't be told from one never made.
     @Test func eachOpenAIRunLeavesATrailInAppLogWithoutTheKeyOrTheText() async {
-        // Looked for in the whole ring, not from a count taken before: in a full suite the ring (its last 400 lines) may
-        // roll past where this test's began.
-        let lines = { Breadcrumbs.shared.lines.filter { $0.contains("dictation: OpenAI's") } }
+        // Watched from here, not looked for in the ring: in a full suite the other tests' lines may roll the ring (its
+        // last 400) past this test's first runs before it looks (2026-11-19: only the last two runs' lines were left).
+        let watch = Breadcrumbs.shared.watch { $0.contains("dictation: OpenAI's") }
         let (ok, _) = controller(FakeHTTP(), recorder: FakeRecorder())
         ok.press("row-log") { "Words that may come up: VibeSwitcher." }
         await releaseAndWait(ok)
@@ -470,7 +470,7 @@ struct DictationTests {
         let (tapped, _) = controller(FakeHTTP(), recorder: short)
         tapped.press("row-log") { "" }
         tapped.release()
-        let trail = lines().joined(separator: "\n")
+        let trail = watch.lines.joined(separator: "\n")
         #expect(trail.contains("dictation: OpenAI's recording began"), "\(trail)")
         #expect(trail.contains("dictation: OpenAI's ended, text taken (31 characters) after 3.0 s recorded"), "\(trail)")
         #expect(trail.contains("dictation: OpenAI's ended, no text: HTTP 429"), "\(trail)")

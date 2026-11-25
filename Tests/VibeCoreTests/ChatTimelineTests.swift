@@ -21,6 +21,7 @@ struct ChatTimelineTests {
             case .allDone(let mark): return "all-done:\(mark.id)"
             case .question(let question, _): return "question:\(question.id)"
             case .updates(let updates): return updates.id
+            case .handover(let id, _, _): return id
             }
         }
     }

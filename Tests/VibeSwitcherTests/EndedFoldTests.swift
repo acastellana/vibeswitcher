@@ -10,25 +10,39 @@ import Testing
 @Suite(.serialized)
 struct EndedFoldTests {
     static let now = Date()
+    /// Each test's own defaults, where its models remember their folds: the standard defaults are the test binary's
+    /// domain in the real ~/Library/Preferences, which every test process on this Mac shares (another session's suite
+    /// running beside this one flipped `sidebarEndedOpen` under it: 6 runs in 10 under load failed so).
+    let temp = Scratch()
+    let defaults: UserDefaults
+
+    init() { defaults = temp.defaults("ended-fold") }
+
+    /// Each session made here gets a terminal of its own. They were named from `title.hashValue % 800`, and Swift seeds
+    /// String hashing afresh in each process: about one run in 800 gave the two live agents one tty, so one id, and
+    /// `WindowRows.sections` kept only one of their rows (the flake in endedRowsFoldAwayAndTheListSkipsThemWhileFolded).
+    private static var ttysMade = 0
+    static func nextTTY() -> String {
+        ttysMade += 1
+        return "ttys\(String(format: "%03d", ttysMade))"
+    }
 
     static func hosted(_ title: String, project: String, exit: Int32?, label: String = "Shell", cwd: String? = nil) -> HostSession {
-        HostSession(id: UUID(), tty: "ttys9\(abs(title.hashValue) % 90)", childPID: 1, cwd: cwd ?? "/Users/you/dev/\(project)", command: "claude",
+        HostSession(id: UUID(), tty: nextTTY(), childPID: 1, cwd: cwd ?? "/Users/you/dev/\(project)", command: "claude",
                     label: label, agent: nil, title: title, startedAt: now - 3_600, cols: 80, rows: 24,
                     exit: exit.map { HostSession.Exit(status: $0, at: now - 600) })
     }
 
     static func agent(_ name: String, project: String, status: SessionStatus) -> Session {
-        var session = Session(tty: "ttys\(abs(name.hashValue) % 800)", agent: .claude, pid: 1, startedAt: now - 900, cwd: "/Users/you/dev/\(project)",
+        var session = Session(tty: nextTTY(), agent: .claude, pid: 1, startedAt: now - 900, cwd: "/Users/you/dev/\(project)",
                               project: project, task: nil, status: status, statusSince: now - 120, detail: nil, hasHooks: true, inTerminalApp: false)
         session.customName = name
         return session
     }
 
     /// A model with two live sessions, one ended by VibeSwitcher (129), one that failed (exit 1), and one finished (0).
-    static func model() -> (model: WindowModel, ended: [HostSession], live: [Session]) {
-        UserDefaults.standard.removeObject(forKey: WindowModel.endedOpenKey)
-        UserDefaults.standard.removeObject(forKey: WindowModel.homeEndedOpenKey)
-        let model = WindowModel()
+    static func model(defaults: UserDefaults) -> (model: WindowModel, ended: [HostSession], live: [Session]) {
+        let model = WindowModel(defaults: defaults)
         let live = [agent("Menu shortcuts", project: "acme", status: .working), agent("Phone input", project: "acme", status: .needsInput)]
         let ended = [hosted("Release notes", project: "acme", exit: 129), hosted("Build script", project: "tools", exit: 1),
                      hosted("Docs pass", project: "tools", exit: 0)]
@@ -37,8 +51,7 @@ struct EndedFoldTests {
     }
 
     @Test func endedRowsFoldAwayAndTheListSkipsThemWhileFolded() {
-        let (model, ended, _) = Self.model()
-        defer { UserDefaults.standard.removeObject(forKey: WindowModel.endedOpenKey) }
+        let (model, ended, _) = Self.model(defaults: defaults)
         for grouping in [WindowGrouping.attention, .projects] {
             model.grouping = grouping
             let folded = model.folded(model.arranged)
@@ -60,33 +73,28 @@ struct EndedFoldTests {
     }
 
     @Test func theFoldRemembersWhetherItsOpenOnThisMac() {
-        let (model, _, _) = Self.model()
-        defer {
-            UserDefaults.standard.removeObject(forKey: WindowModel.endedOpenKey)
-            UserDefaults.standard.removeObject(forKey: WindowModel.homeEndedOpenKey)
-        }
+        let (model, _, _) = Self.model(defaults: defaults)
         #expect(!model.endedOpen && !model.homeEndedOpen)
         model.endedOpen = true
-        #expect(WindowModel().endedOpen)
-        #expect(!WindowModel().homeEndedOpen)
+        #expect(WindowModel(defaults: defaults).endedOpen)
+        #expect(!WindowModel(defaults: defaults).homeEndedOpen)
         model.homeEndedOpen = true
         model.endedOpen = false
-        let again = WindowModel()
+        let again = WindowModel(defaults: defaults)
         #expect(!again.endedOpen && again.homeEndedOpen)
     }
 
     /// Choosing an ended session while the sidebar's fold is closed (from Home, the palette, ⌘-navigation or a filter)
     /// opens the fold, so the selected row shows; choosing a live one leaves it as it is.
     @Test func selectingAnEndedSessionOpensTheFold() {
-        let (model, ended, live) = Self.model()
-        defer { UserDefaults.standard.removeObject(forKey: WindowModel.endedOpenKey) }
+        let (model, ended, live) = Self.model(defaults: defaults)
         model.selectedID = model.rows.first?.id
         #expect(!model.endedOpen)
         // Home's row, or the palette: by id.
         model.selectedID = "host:\(ended[1].id)"
         #expect(model.endedOpen)
         #expect(model.rows.contains { $0.id == model.selectedID })
-        #expect(UserDefaults.standard.bool(forKey: WindowModel.endedOpenKey))
+        #expect(defaults.bool(forKey: WindowModel.endedOpenKey))
 
         // A filter that leaves only ended rows, then ⌘1.
         model.endedOpen = false
@@ -115,7 +123,7 @@ struct EndedFoldTests {
 
     /// A team's ended members stay with their lead (its Team view and history rule), not in Home's fold.
     @Test func aLeadsTeamStaysOutOfHomesFold() {
-        let model = WindowModel()
+        let model = WindowModel(defaults: defaults)
         let lead = Self.hosted("Lead", project: "acme", exit: nil, label: "Lead · acme")
         let worker = Self.hosted("Worker", project: "acme", exit: 129, label: "Worker: One", cwd: "/Users/you/dev/acme/.vibeswitcher/worktrees/one")
         let plain = Self.hosted("Plain", project: "acme", exit: 143)
@@ -166,11 +174,7 @@ struct EndedSnapshots {
     @Test(.enabled(if: folder != nil)) func drawEndedRows() throws {
         let folder = try #require(Self.folder)
         try FileManager.default.createDirectory(atPath: folder, withIntermediateDirectories: true)
-        let (model, ended, _) = EndedFoldTests.model()
-        defer {
-            UserDefaults.standard.removeObject(forKey: WindowModel.endedOpenKey)
-            UserDefaults.standard.removeObject(forKey: WindowModel.homeEndedOpenKey)
-        }
+        let (model, ended, _) = EndedFoldTests.model(defaults: temp.defaults("ended-snapshots"))
         // A client and store that reach nothing: the list only asks them for leads' boards (none here).
         let scratch = temp.url("ended-snapshots")
         try FileManager.default.createDirectory(at: scratch, withIntermediateDirectories: true)
@@ -186,7 +190,7 @@ struct EndedSnapshots {
 
         // The ended bar under each one's terminal.
         let selected = ended.map { info -> WindowModel in
-            let one = WindowModel()
+            let one = WindowModel(defaults: temp.defaults("ended-bar"))
             one.update(sessions: [], hosted: [info], table: TableRead(at: EndedFoldTests.now))
             one.selectedID = "host:\(info.id)"
             return one

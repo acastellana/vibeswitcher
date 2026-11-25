@@ -107,9 +107,10 @@ extension LeadAdvanceTests {
         let advancing = Advancing(lead)
         defer { advancing.stop() }
         _ = lead.call("add_task", ["title": "Paging", "goal": "g", "acceptance": ["a"]])
-        await advancing.settle()
+        // The pass that records the wait, not settle()'s (see LeadAdvanceTests.aStartWaitsForTheMacsRoomAndGoesOnTheAppsNudge).
+        #expect(await advancing.until { roomWaits.waits().contains { $0.wait.auto == true && $0.wait.what == "start_worker(paging)" } },
+                "\(roomWaits.waits())")
         #expect(task("paging", root)?.status == .planned)
-        #expect(roomWaits.waits().contains { $0.wait.auto == true && $0.wait.what == "start_worker(paging)" }, "\(roomWaits.waits())")
         #expect(runtime.spawned.isEmpty)
         // Swapping out fast at pressure normal holds it too.
         set(MacMemory(pressure: .normal, swapOutRate: 500))

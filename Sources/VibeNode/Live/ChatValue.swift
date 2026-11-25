@@ -47,7 +47,8 @@ public enum ChatValue {
         // engine's marks (`LeadEngine.chatExtras`), never read from a transcript.
         case .allDone(let mark):
             return .object(head(item.id, "allDone", Date(timeIntervalSince1970: mark.at)).merging(BoardValue.allDoneFields(mark)) { $1 })
-        case .newMarker, .question, .updates: return nil
+        // A handover's divider (main's, 2026-11-23: a lead's chat across its earlier sessions) isn't on the wire yet.
+        case .newMarker, .question, .updates, .handover: return nil
         }
     }
 

@@ -3,6 +3,9 @@ import Foundation
 /// A code block in a reply that's a shell command, as the prompt that runs it in the session (`! command`: Claude
 /// Code runs it in its shell and the output joins the conversation).
 ///
+/// A block tagged as a shell's (or console's) gets Run, and so does an untagged one whose first line starts with `$ ` or
+/// `!`, or whose only line reads as one plain command (`untagged`, always asked about first).
+///
 /// Run must type only what the block shows: a block with characters you can't see (zero-width, bidi overrides,
 /// escape sequences), lines past what's on screen, or a heredoc gets no Run at all; anything else that isn't plainly
 /// harmless is shown in full to confirm first. A bash, sh, zsh or shell block whose lines mean something only together
@@ -103,8 +106,9 @@ public enum RunnableCommand {
         let lines = raw.map { $0.trimmingCharacters(in: .whitespaces) }
         let first = lines.first { !$0.isEmpty } ?? ""
         let marked = first.hasPrefix("!") || first.hasPrefix("$ ")
-        guard language.map(shells.contains) ?? false || (language == nil && marked) else { return nil }
         // A heredoc spans lines that mean something only together.
+        if language == nil, !marked, !code.contains("<<") { return untagged(lines) }
+        guard language.map(shells.contains) ?? false || (language == nil && marked) else { return nil }
         guard !code.contains("<<") else { return nil }
         let console = language == "console" || language == "terminal"
         var commands: [String] = []
@@ -134,6 +138,56 @@ public enum RunnableCommand {
             return script(code: code, lines: lines, sourceLines: sourceLines, language: language, folder: scripts)
         }
         return Runnable(command: commands.joined(separator: " && "), needsConfirmation: sourceLines > 1 || !plainlyHarmless(commands[0]))
+    }
+
+    /// A block with no language (a bare fence, its header "code") whose only line reads as one plain shell command:
+    /// it starts with a command word a shell knows (`commandWords`, after any `NAME=value`) or a path, and isn't a
+    /// sentence. Always asked about first, the line shown in full and wrapped: a line wider than the block shows part
+    /// of it off to the side. On 2026-11-18 a lead showed `cd …/prototype && python3 -m http.server …` in a bare
+    /// fence and the block had only Copy.
+    static func untagged(_ lines: [String]) -> Runnable? {
+        let content = lines.filter { !$0.isEmpty }
+        guard content.count == 1, let line = content.first, readsAsTyped(line), readsAsCommand(line) else { return nil }
+        return Runnable(command: line, needsConfirmation: true)
+    }
+
+    /// Words that start a command line: the programs people run from a chat's code blocks, and the risky ones
+    /// (`riskyPrograms`), which run too, after the confirmation that every untagged block gets.
+    static let commandWords: Set<String> = riskyPrograms.union([
+        "cd", "pushd", "ls", "cat", "echo", "printf", "pwd", "open", "mkdir", "touch", "ln", "du", "df", "stat", "file",
+        "head", "tail", "less", "more", "grep", "rg", "sed", "awk", "jq", "yq", "sort", "uniq", "wc", "diff", "tree",
+        "which", "type", "man", "export", "unset", "set", "time", "watch", "sleep", "test", "true", "false", "ps", "lsof",
+        "top", "htop", "tmux", "screen", "tar", "zip", "unzip", "gzip", "gunzip", "ping", "dig", "nc", "nslookup",
+        "git", "gh", "npm", "npx", "pnpm", "yarn", "bun", "bunx", "deno", "pip", "pip3", "pipx", "uv", "uvx", "poetry",
+        "pytest", "tox", "gem", "bundle", "rails", "rake", "go", "cargo", "rustc", "rustup", "swift", "swiftc",
+        "xcodebuild", "xcrun", "make", "cmake", "ninja", "docker", "docker-compose", "podman", "kubectl", "helm",
+        "terraform", "brew", "java", "mvn", "gradle", "php", "composer", "dotnet", "flutter", "dart", "sqlite3", "psql",
+        "mysql", "redis-cli", "hugo", "jekyll", "mkdocs", "ffmpeg", "ollama", "claude", "codex", "code", "vim", "nvim",
+        "nano", "pbcopy", "pbpaste", "say", "caffeinate", "http", "vs-shell", "vs-heavy", "vs-wallet", "passage",
+    ])
+
+    /// Whether one line reads as a command rather than prose: after any `NAME=value` words, its first word is a known
+    /// command (`commandWords`) or a path (`/…`, `./…`, `../…`, `~/…`, or `dir/file.ext`), and it doesn't end like a
+    /// sentence (a letter, then `.`, `:`, `?`, `!` or `,`).
+    static func readsAsCommand(_ line: String) -> Bool {
+        let words = line.split(separator: " ").map(String.init)
+        guard let first = words.first(where: { !isAssignment($0) }) else { return false }
+        if let last = line.last, ".:?!,".contains(last), line.dropLast().last?.isLetter == true { return false }
+        if commandWords.contains(first) { return true }
+        let pathCharacters = CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789/._-~+@")
+        guard first.contains("/"), first.unicodeScalars.allSatisfy(pathCharacters.contains) else { return false }
+        if ["/", "./", "../", "~/"].contains(where: first.hasPrefix) { return first.count > 1 }
+        // A relative path names a file to run: `scripts/build-app.sh`, not `and/or`.
+        let name = first.split(separator: "/").last.map(String.init) ?? ""
+        return name.dropFirst().contains(".") && !name.hasSuffix(".")
+    }
+
+    /// `NAME=value`: an environment assignment before the command.
+    static func isAssignment(_ word: String) -> Bool {
+        guard let equals = word.firstIndex(of: "="), equals != word.startIndex else { return false }
+        let name = word[..<equals]
+        return name.first.map { $0 == "_" || $0.isASCII && $0.isLetter } == true
+            && name.allSatisfy { $0 == "_" || $0.isASCII && ($0.isLetter || $0.isNumber) }
     }
 
     /// Several lines of a bash, sh, zsh or shell block that only mean something together, as one script; nil for one

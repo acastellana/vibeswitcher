@@ -154,6 +154,10 @@ public final class LeadAdvance: @unchecked Sendable {
     private var unbatched: Set<String> = []
     /// The look again armed for the window's end, at this time.
     private var batchWake: Date?
+    /// The audits this pass holds for the project's audit cap (heavy_slots, `LeadToolset.auditCap`), and the ones under
+    /// way it holds them behind. Read and written by passes only.
+    private var capHeld: [String] = []
+    private var capUnderWay: [String] = []
 
     struct Ready {
         let slug: String
@@ -192,7 +196,7 @@ public final class LeadAdvance: @unchecked Sendable {
         try? lead.store.prepare()
         runningLock = FileLock.attempt(Self.runningLock(lead.store))
         let folder = lead.store.folder
-        Thread.detachNewThread { [weak self] in Self.follow(folder, self) }
+        ToolThread.detach { [weak self] in Self.follow(folder, self) }
         trigger()
     }
 
@@ -350,7 +354,11 @@ public final class LeadAdvance: @unchecked Sendable {
 
     private func tell(_ report: [String]) {
         // While Fable is held back, every report says so (the switch's own line says it already).
-        let held = lead.fableFallback()?.fableHeldBack(now: lead.usageClock()).map(AccountUsage.fallbackText)
+        let held = lead.fableFallback()?.fableHeldBack(now: lead.usageClock()).map { limit in
+            let text = AccountUsage.fallbackText(limit)
+            return lead.codexWorkers && lead.workflow.codexVerifier == .fallback
+                ? text.replacingOccurrences(of: "workers and audits on Opus", with: "workers on Opus; audits try eligible Claude models first, then Codex when it has room") : text
+        }
         let fable = held.flatMap { line in report.contains { $0.hasPrefix(line) } ? nil : "\n" + line + "." } ?? ""
         let text = "VibeSwitcher moved finished work on by itself (auto_advance):\n" + report.map { "- " + $0 }.joined(separator: "\n") + fable
             + "\nThe judgement calls stay yours: holds (update_task kept or blocked), re-plans, questions to the user, and post_update for a merge the user would notice."
@@ -390,6 +398,86 @@ public final class LeadAdvance: @unchecked Sendable {
 
     // MARK: A pass
 
+    /// Sensitive Codex merges owe Claude an independent review, even when ordinary auto_advance is off.
+    /// Arm the existing reset wake and retry lost verifiers; a failed verdict stays listed for the lead.
+    /// Bounded as the ordinary audit's retry is (`auditAgain`): a verifier stopped at Claude's usage limit waits for that
+    /// limit's reset (`LeadClaudeReaudit.limitedUntil`), and isn't an ending; one gone or ended without a verdict is, and
+    /// at `LeadClaudeReaudit.maxEndings` nothing restarts it by itself: the lead is told once, and it stays listed.
+    private func followClaudeReaudits() {
+        let pending = lead.store.load().tasks.filter { $0.claudeReaudit?.pending == true && $0.claudeReaudit?.evidence == nil && $0.claudeReaudit?.stopped != true }
+        guard !pending.isEmpty else { return }
+        // Merged tasks get no review-task death notification from the witness. Keep looking even if the host is
+        // temporarily unreadable or a battery/usage hold outlasts this pass; the injected scheduler drives tests.
+        let key = "claude-reaudit-watch"
+        lock.lock()
+        let arm = wakes.insert(key).inserted
+        lock.unlock()
+        if arm {
+            let root = lead.root
+            lead.usageWake(Date().addingTimeInterval(60)) { [weak self] in
+                guard let self else { return }
+                self.lock.lock()
+                self.wakes.remove(key)
+                self.lock.unlock()
+                LeadAdvance.nudge(root: root)
+            }
+        }
+        guard !(lead.power().map { $0.onBattery && $0.heldUnder != nil } ?? false),
+              let sessions = try? lead.advanceSessions() else { return }
+        _ = lead.accountUsage(sessions: sessions)
+        let now = lead.usageClock().timeIntervalSince1970
+        for task in pending {
+            guard var followup = task.claudeReaudit, followup.pending, followup.evidence == nil, !followup.stopped,
+                  task.auditHeld == nil else { continue }
+            if let session = followup.session {
+                let info = sessions.first(where: { $0.id == session })
+                if let info, info.live, info.usageLimit == nil, lead.runtime.agentEnding(info) == nil { continue }
+                if let limit = info?.usageLimit, followup.limitedUntil == nil {
+                    // Stopped at Claude's limit: wait for its reset, whatever a newer reading of the account says.
+                    let until = limit.resetsAt ?? (limit.at ?? now) + AccountUsage.untimed
+                    followup.limitedUntil = until
+                    try? lead.store.update { board in
+                        guard let index = board.taskIndex(task.slug), board.tasks[index].claudeReaudit?.session == session else { return }
+                        board.tasks[index].claudeReaudit?.limitedUntil = until
+                    }
+                }
+                if let until = followup.limitedUntil {
+                    if until > now { resetWake(task.slug, until); continue }
+                } else if !(followup.endings ?? []).contains(where: { $0.session == session }) {
+                    let how = info.map { lead.runtime.agentEnding($0) ?? "its session ended" }
+                        ?? "its session is gone (the session host was replaced, or it was removed)"
+                    followup.endings = (followup.endings ?? []) + [LeadClaudeReauditEnding(session: session, how: how)]
+                    let endings = followup.endings ?? []
+                    try? lead.store.update { board in
+                        guard let index = board.taskIndex(task.slug), board.tasks[index].claudeReaudit?.session == session else { return }
+                        board.tasks[index].claudeReaudit?.endings = endings
+                    }
+                    if followup.stopped {
+                        if info?.live == true { try? lead.runtime.kill(session) }
+                        did("The post-merge Claude re-audit of \(task.slug) ended without a verdict \(endings.count) times at \(followup.head.prefix(8)), "
+                            + "so it doesn't start again by itself: " + endings.enumerated().map { "\($0.offset + 1): \($0.element.how)" }.joined(separator: "; ")
+                            + ". It stays listed as pending and its branch stays. Decide: read_session(\(task.slug), who: verifier) to see why, then audit(\(task.slug)) to start it again, or tell the user.")
+                        continue
+                    }
+                }
+            }
+            if usageHeld(model: followup.model) || capHolds(task.slug) { continue }
+            guard hasRoom(task.slug, need: 1) else { roomWait("audit(\(task.slug))", need: 1); continue }
+            step("claude-reaudit|\(task.slug)|\(followup.head)") { try lead.startClaudeReaudit(task.slug).text }
+        }
+    }
+
+    /// A pass just after `until`, when the post-merge re-audit of `slug` stopped at Claude's limit may start again.
+    private func resetWake(_ slug: String, _ until: Double) {
+        let key = "claude-reaudit-reset|\(slug)|\(Int(until))"
+        lock.lock()
+        let arm = wakes.insert(key).inserted
+        lock.unlock()
+        guard arm else { return }
+        let root = lead.root
+        lead.usageWake(Date(timeIntervalSince1970: until + 1)) { LeadAdvance.nudge(root: root) }
+    }
+
     /// The workflow's switch as the lead set it: on, and workflow.md says what the vault recorded (a configure under
     /// way finishes first). Read again before each step: one that lands during another's merge counts.
     private func switchedOn() -> Bool {
@@ -416,6 +504,8 @@ public final class LeadAdvance: @unchecked Sendable {
         resting = rest
         rest = []
         lock.unlock()
+        capHeld = []
+        defer { sayCapHeld() }
         guard let rotationGate = FileLock.attempt(LeadRotation.gate(lead.root), shared: true) else { return }
         defer { rotationGate.release() }
         guard (try? lead.authenticate()) != nil else { return }
@@ -430,6 +520,7 @@ public final class LeadAdvance: @unchecked Sendable {
         lead.deliverWalls()
         // Members' done parts, to their integrators, once each (moves nothing: the integrator takes them).
         lead.deliverParts()
+        followClaudeReaudits()
         guard workflow.autoAdvance else { return }
         // Off as the lead set it, whatever a worker wrote into workflow.md since.
         if let changed, changed.contains(where: { $0.key == "auto_advance" }) {
@@ -593,7 +684,12 @@ public final class LeadAdvance: @unchecked Sendable {
             }
         }
         if (try? fallback.switched(to: held.map(AccountUsage.ends))) == true {
-            did(held.map { AccountUsage.fallbackText($0) + ". Claude refused Fable at its usage limit, so new workers and audits that would run on Fable start on Opus "
+            did(held.map {
+                if lead.codexWorkers && lead.workflow.codexVerifier == .fallback {
+                    return "Fable held back until \(UsageLimit.resetText(AccountUsage.ends($0))): workers on Opus; audits try eligible Claude models first, then Codex when it has room. "
+                        + "Sensitive or Codex-worked tasks merged on Codex get a post-merge Claude re-audit after reset. A worker Fable's refusal halted starts again on Opus in its worktree."
+                }
+                return AccountUsage.fallbackText($0) + ". Claude refused Fable at its usage limit, so new workers and audits that would run on Fable start on Opus "
                     + "(audits under a floor that keeps them off the workers' model, on the next one down), and a worker Fable's refusal halted "
                     + "starts again on Opus in its worktree. At the reset they're back on Fable by themselves; nothing for you to set." }
                 ?? "Fable is back: its usage limit reset, so new workers and audits run on Fable again (sessions already on Opus go on there).")
@@ -678,9 +774,22 @@ public final class LeadAdvance: @unchecked Sendable {
         return true
     }
 
+    /// Arm Claude's reset wake even when Codex has no room, and explain both accounts' wait.
+    private func auditUsageHeld(_ slug: String, head: String) -> Bool {
+        let workflow = lead.workflow
+        let task = lead.store.load().task(slug)
+        guard !lead.codexVerifierFallback(workflow, task: task, head: head, sessions: try? lead.advanceSessions()),
+              usageHeld(model: lead.auditModel(workflow, task: task, head: head)) else { return false }
+        if workflow.codexVerifier == .fallback, lead.codexWorkers {
+            let codex = UsageRouting.codex(lead.codexUsage.read(now: lead.usageClock()), now: lead.usageClock())
+            once("audit-codex-usage|\(slug)|\(codex.text)", "Codex audit fallback for \(slug) is waiting too: \(codex.text).")
+        }
+        return true
+    }
+
     /// Starts `slug`'s audit at `head` (`why`: what sends it there) once the Mac has room for its finders.
     private func audit(_ slug: String, head: String, busy: Bool, why needed: String, key: String? = nil) {
-        if auditHeld(slug, head: head) { return }
+        if auditHeld(slug, head: head) || capHolds(slug) { return }
         let finders = lead.workflow.findersInForce
         guard !busy, hasRoom(slug, need: finders) else {
             // Raised: the lead hears why now, though its audit waits for the Mac's room.
@@ -689,7 +798,7 @@ public final class LeadAdvance: @unchecked Sendable {
             }
             return roomWait("audit(\(slug))", need: finders)
         }
-        if usageHeld(model: lead.auditModel(lead.workflow, task: lead.store.load().task(slug), head: head)) { return }
+        if auditUsageHeld(slug, head: head) { return }
         step(key ?? "audit|\(slug)|\(head)") {
             guard let before = due(slug, [.review]) else { throw NotDue() }
             _ = try lead.advanceAudit(slug)
@@ -790,10 +899,12 @@ public final class LeadAdvance: @unchecked Sendable {
             do {
                 result = try lead.advanceMergeBatch(batch.map(\.slug), locked: locked)
             } catch {
-                // It couldn't start: one at a time from here, each with merge's own checks and refusals.
-                for task in batch { markUnbatched(task.key) }
+                // A seal hold keeps the group intact, so Accept can land its retained passing stack.
+                let sealHeld = (error as? LeadToolset.Problem)?.sealHeld == true
+                if !sealHeld { for task in batch { markUnbatched(task.key) } }
                 let text = (error as? LeadToolset.Problem)?.text ?? "\(error)"
-                did("Didn't merge \(names) as a batch: \(LeadToolset.clip(text, 400)) They merge one at a time from here.")
+                let line = "Didn't merge \(names) as a batch: \(LeadToolset.clip(text, 400))" + (sealHeld ? " The batch waits for the config seal." : " They merge one at a time from here.")
+                if sealHeld { once("merge-batch|\(names)|seal|\(text.prefix(60))", line) } else { did(line) }
                 return
             }
             var merged: [String] = []
@@ -807,7 +918,7 @@ public final class LeadAdvance: @unchecked Sendable {
                 case .refused(let text)?:
                     once("merge|\(task.slug)|\(task.head)|\(text.prefix(60))", "Didn't merge \(task.slug): \(LeadToolset.clip(text, 600))")
                 case .untouched?, nil:
-                    markUnbatched(task.key)
+                    if !result.sealHeld { markUnbatched(task.key) }
                 }
             }
             if !merged.isEmpty {
@@ -845,7 +956,8 @@ public final class LeadAdvance: @unchecked Sendable {
         guard let task = due(slug, [.review]), task.evidence == nil, let ended = endedVerifier(task) else { return }
         // The retry's own verifier ended too; any other (the lead audited again since, or an older commit's retry) is a
         // first ending.
-        if let retry = task.verifierRetry, retry.commit == head, retry.verifiers.contains(ended.session) {
+        let quotaFallback = ended.ending == "Claude stopped at its usage limit"
+        if let retry = task.verifierRetry, retry.commit == head, retry.verifiers.contains(ended.session), !quotaFallback {
             guard retry.second == nil else { return }
             try? lead.store.update { board in
                 guard let index = board.taskIndex(slug) else { return }
@@ -859,9 +971,10 @@ public final class LeadAdvance: @unchecked Sendable {
                 + "read_session(\(slug), who: verifier) to see why, then audit(\(slug)) again or tell the user.")
             return
         }
+        if capHolds(slug) { return }
         let finders = lead.workflow.findersInForce
         guard !busy, hasRoom(slug, need: finders) else { return roomWait("audit(\(slug))", need: finders) }
-        if usageHeld(model: lead.auditModel(lead.workflow, task: lead.store.load().task(slug), head: head)) { return }
+        if auditUsageHeld(slug, head: head) { return }
         step("audit|\(slug)|\(head)|again") {
             guard let task = due(slug, [.review]), task.evidence == nil, endedVerifier(task)?.session == ended.session else { throw NotDue() }
             _ = try lead.advanceAudit(slug)
@@ -885,6 +998,10 @@ public final class LeadAdvance: @unchecked Sendable {
         for verifier in task.awaitedVerifiers where !submitted.contains(verifier) {
             guard let info = sessions.first(where: { $0.id == verifier }) else {
                 return Ended(session: verifier, ending: "its session is gone (the session host was replaced, or it was removed)", live: false)
+            }
+            if info.usageLimit != nil, let head = lead.advanceHead(task.slug),
+               lead.limitedVerifierCanRestart(task, head: head, sessions: sessions) {
+                return Ended(session: verifier, ending: "Claude stopped at its usage limit", live: info.live)
             }
             if let ending = lead.runtime.agentEnding(info) { return Ended(session: verifier, ending: ending, live: info.live) }
         }
@@ -1050,10 +1167,11 @@ public final class LeadAdvance: @unchecked Sendable {
         let open = hold.findings
         let ids = open.map { "\(slug):\($0.id)" }.joined(separator: ", ")
         let why: String = hold.why.isEmpty ? "" : "\n(\(hold.why).)"
-        let listed: String = open.map { "- \($0.id): " + LeadToolset.clip($0.line1, 400) }.joined(separator: "\n") + why
-        let text = "Your branch's audit (at \(head.prefix(8))) left \(open.count) Important finding\(open.count == 1 ? "" : "s") open, which hold its merge back:\n"
+        // Each whole: a worker can't read its audit, so what it's sent is all it has (2026-11-21, claude-dictation-text).
+        let listed: String = LeadToolset.findingsForWorker(open) + why
+        let text = "Your branch's audit (at \(head.prefix(8))) left \(open.count) Important finding\(open.count == 1 ? "" : "s") open, which hold its merge back:\n\n"
             + listed
-            + "\nFix \(open.count == 1 ? "it" : "each") on your branch and commit, or disagree with a reason; answer each by id with answer_findings "
+            + "\n\nFix \(open.count == 1 ? "it" : "each") on your branch and commit, or disagree with a reason; answer each by id with answer_findings "
             + "(fixed or disagree), run the affected tests, then report done again: it's audited again then (a re-audit checks these findings' concerns and judges your answers)."
         let live = workerRuns(task)
         // Its worker ended (released during the audit, say): a new one in its worktree gets them, not on a battery
@@ -1186,7 +1304,7 @@ public final class LeadAdvance: @unchecked Sendable {
               let mac = try? lead.macLoad(sessions, load: lead.runtime.steadyLoad(), except: Worktrees.path(root: lead.root, slug: slug)) else { return false }
         let limits = lead.macLimits()
         return !mac.isBusy(threshold: limits.loadLimit) && mac.memoryShortage(limits) == nil && mac.sessions + need <= limits.maxSessions
-            && lead.roomWaits.heldFor(root: lead.root, need: need, mac: mac, limits: limits) == nil
+            && lead.roomWaits.heldFor(root: lead.root, need: need, mac: mac, limits: limits, freeSpace: lead.freeSpace) == nil
     }
 
     /// A merged task (a reverted one too: its work is out of the base, and it stays reverted) whose worktree or
@@ -1194,7 +1312,7 @@ public final class LeadAdvance: @unchecked Sendable {
     /// (`LeadTask.strayKept`), said once, while what's there is still kept (`Worktrees.strayFolder`): once it's gone,
     /// only .DS_Store, or a real worktree again, cleanup goes on as before.
     private func cleanup(_ slug: String) {
-        guard let task = due(slug, [.done, .reverted]), task.merged != nil,
+        guard let task = due(slug, [.done, .reverted]), task.merged != nil, task.claudeReaudit?.pending != true,
               task.worktree != nil || lead.advanceHead(slug) != nil, !beingMerged(slug) else { return }
         if task.strayKept != nil, case .kept? = Worktrees.strayFolder(root: lead.root, slug: slug) { return }
         step("cleanup|\(slug)") {
@@ -1223,8 +1341,16 @@ public final class LeadAdvance: @unchecked Sendable {
             let live = board.tasks.contains(where: \.isTeam) ? Set(((try? lead.advanceSessions()) ?? []).filter(\.live).map(\.id)) : []
             let running = board.tasks.filter { $0.status == .running }.count + LeadTeam.memberWorkers(board, live: live)
             guard running < lead.maxWorkers(workflow) else { return }
-            // The Mac's room as start_worker counts it; a refusal for it waits for the app's nudge.
-            guard hasRoom(task.slug, need: 1) else { return roomWait("start_worker(\(task.slug))", need: 1) }
+            // The Mac's room as start_worker counts it; a refusal for it waits for the app's nudge. The disk too: the
+            // tasks in flight keep the room their load checks need (`LoadRunDisk`), said once while it holds.
+            let disk = lead.newWorktree(task.slug) ? lead.loadRunRoom(workflow) : nil
+            guard hasRoom(task.slug, need: 1) else { return roomWait("start_worker(\(task.slug))", need: 1, disk: disk?.needed) }
+            if let disk, disk.held {
+                once("hold|disk", "Planned tasks wait to start: the Mac has \(disk.text). They start by themselves once there's room again; "
+                     + "meanwhile merge and cleanup finished tasks (cleanup frees their worktrees). Freeing other space on the disk is the user's call: tell them if it stays this full.")
+                return roomWait("start_worker(\(task.slug))", need: 1, disk: disk.needed)
+            }
+            forget("hold|disk")
             // An auto task goes where both accounts' usage says (start_worker routes it again in its lock): on Codex,
             // Claude's back-off doesn't hold it.
             let route = task.workerAgent == .auto ? lead.workerRoute(for: task, sessions: try? lead.advanceSessions()) : nil
@@ -1284,15 +1410,41 @@ public final class LeadAdvance: @unchecked Sendable {
              "The account's usage is near a limit: \(limit.text). " + LeadToolset.usageBackoff(limit, model: model)
                 + " Tell the user. Nothing on it starts by itself until the reset, then it does; start_worker or audit with override_usage: true starts one anyway"
                 + (limit.model == nil ? "." : ", and a task can run on another model (update_task model, configure verifier_model).")
-                + (lead.codexWorkers ? " A bounded, mechanical task with a tight contract can run on Codex instead (update_task(<task>, agent: codex): the Codex account's usage, always audited by a Claude verifier); you decide." : ""))
+                + (lead.codexWorkers ? " A bounded, mechanical task with a tight contract can run on Codex instead (update_task(<task>, agent: codex): the Codex account's usage, always audited by a Claude verifier, or by Codex while Claude is at its limit); you decide." : ""))
         return true
     }
 
+    /// `slug`'s audit waits its turn: heavy_slots of this project's audits are under way (`LeadToolset.auditCap`), so it
+    /// is held, in board order, until one ends (that verdict's write brings the next pass). Not when the host can't be
+    /// read: audit's own check then refuses or lets it start.
+    private func capHolds(_ slug: String) -> Bool {
+        guard let sessions = try? lead.advanceSessions() else { return false }
+        let under = lead.auditsUnderWay(except: slug, sessions: sessions)
+        guard under.count >= lead.auditCap(lead.workflow) else { return false }
+        if !capHeld.contains(slug) { capHeld.append(slug) }
+        capUnderWay = under
+        return true
+    }
+
+    /// The pass's end: the audits it held for the cap, in board order, go to the lead's toolset (audit's refusal counts
+    /// a place in line by them) and into one line of the report, said once for each set of them.
+    private func sayCapHeld() {
+        let order = lead.store.load().tasks.map(\.slug)
+        let held = capHeld.sorted { (order.firstIndex(of: $0) ?? .max) < (order.firstIndex(of: $1) ?? .max) }
+        lead.holdAudits(held)
+        let key = "audit-cap|" + held.joined(separator: ",")
+        forget(where: { $0.hasPrefix("audit-cap|") && $0 != key })
+        guard !held.isEmpty else { return }
+        once(key, "Holding the audit\(held.count == 1 ? "" : "s") of \(held.joined(separator: ", ")): " + LeadToolset.capText(cap: lead.auditCap(lead.workflow), under: capUnderWay)
+             + " \(held.count == 1 ? "It starts" : "They start, in board order,") as one ends.")
+    }
+
     /// The Mac has no room (or too much load) for `what`: the app nudges once it has.
-    private func roomWait(_ what: String, need: Int) {
+    /// `disk`: the bytes a start waits for free on the worktrees' volume (see `RoomWaits.Wait.disk`).
+    private func roomWait(_ what: String, need: Int, disk: Int64? = nil) {
         guard !waitingRoom else { return }
         waitingRoom = true
-        lead.roomWaits.record(root: lead.root, what: what, need: need, auto: true)
+        lead.roomWaits.record(root: lead.root, what: what, need: need, auto: true, disk: disk)
     }
 
     /// A step through a lead tool: done, said in the report; refused, said once (on this key).

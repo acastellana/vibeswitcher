@@ -21,9 +21,13 @@ public enum AppUpdate {
     public struct Change: Codable, Equatable, Sendable {
         public var id: String
         public var subject: String
-        public init(id: String, subject: String) {
+        /// The GitHub handle that pushed it (`GitHubPushers`), for a change only GitHub has; nil when it isn't one or
+        /// GitHub didn't say.
+        public var pusher: String?
+        public init(id: String, subject: String, pusher: String? = nil) {
             self.id = id
             self.subject = subject
+            self.pusher = pusher
         }
     }
 
@@ -72,8 +76,10 @@ public enum AppUpdate {
 
     /// What `root`'s `base` (main) and `remote`/`base` (as last fetched) hold for the build that `installed` lacks; nil
     /// when there's nothing newer. Fails when it can't be compared: no commit recorded by the build, one this repository
-    /// doesn't hold, or a build from neither branch's history (a task's branch).
-    public static func find(root: String, remote: String, base: String, installed: ServerBuild?) -> Result<Offer?, Failure> {
+    /// doesn't hold, or a build from neither branch's history (a task's branch). `pushers` names who pushed the changes
+    /// only GitHub has (`GitHubPushers.Lookup`), given the remote's tip and their ids; nil: no names.
+    public static func find(root: String, remote: String, base: String, installed: ServerBuild?,
+                            pushers: ((_ tip: String, _ commits: [String]) -> [String: String])? = nil) -> Result<Offer?, Failure> {
         guard let commit = installed?.commit else {
             return .failure(Failure("the installed build recorded no source commit"))
         }
@@ -95,8 +101,13 @@ public enum AppUpdate {
             return .failure(Failure("git log in \(root) failed"))
         }
         // Both, newest first, as git orders them.
-        guard let all = changes(root: root, from: commit, to: [head] + (remoteOnly.isEmpty ? [] : [tip!])), let newest = all.first else {
+        guard var all = changes(root: root, from: commit, to: [head] + (remoteOnly.isEmpty ? [] : [tip!])), let newest = all.first else {
             return local.isEmpty && remoteOnly.isEmpty ? .success(nil) : .failure(Failure("git log in \(root) failed"))
+        }
+        if let pushers, let tip, !remoteOnly.isEmpty {
+            let found = pushers(tip, remoteOnly.map(\.id))
+            let gitHubs = Set(remoteOnly.map(\.id))
+            for index in all.indices where gitHubs.contains(all[index].id) { all[index].pusher = found[all[index].id] }
         }
         return .success(Offer(installed: commit, head: head, tip: tip, newest: newest.id, changes: all, waiting: remoteOnly.count))
     }

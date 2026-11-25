@@ -461,15 +461,26 @@ enum ImageCache {
         return queue
     }()
 
-    /// The thumbnail cached under `key`, else what `decode` makes, off the main thread.
+    /// Each thumbnail made, for as long as something (a view showing it) still holds it. NSCache lets go of its own
+    /// when the Mac is short of memory, not only past its cost limit: a view asking again then got a second copy decoded
+    /// (the whole picture first, 20 MB a screenshot) beside the one it still showed, just when memory was short.
+    private static let held = NSMapTable<NSString, NSImage>.strongToWeakObjects()
+    private static let heldLock = NSLock()
+
+    /// Removes every thumbnail from the cache, as NSCache does when the Mac is short of memory (tests).
+    static func evictAll() { thumbnails.removeAllObjects() }
+
+    /// The thumbnail cached under `key`, or still held, else what `decode` makes, off the main thread.
     private static func thumbnail(key: String, decode: @escaping @Sendable () -> CGImage?) async -> NSImage? {
         let key = key as NSString
         if let hit = thumbnails.object(forKey: key) { return hit }
+        if let hit = heldLock.withLock({ held.object(forKey: key) }) { return hit }
         guard let cgImage = await withCheckedContinuation({ (done: CheckedContinuation<CGImage?, Never>) in
             decoding.addOperation { done.resume(returning: decode()) }
         }) else { return nil }
         let image = NSImage(cgImage: cgImage, size: NSSize(width: cgImage.width, height: cgImage.height))
         thumbnails.setObject(image, forKey: key, cost: cgImage.width * cgImage.height * 4)
+        heldLock.withLock { held.setObject(image, forKey: key) }
         return image
     }
 

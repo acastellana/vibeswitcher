@@ -4,6 +4,8 @@
 #define _GNU_SOURCE
 #include "CVibePlatform.h"
 
+#include <pthread.h>
+
 #include <errno.h>
 #include <fcntl.h>
 #include <signal.h>
@@ -105,4 +107,13 @@ ssize_t vibe_receive_credentials(int fd, void *buffer, size_t length, struct vib
     }
     return count;
 }
+int vibe_thread_stack(void **low, size_t *size) {
+    pthread_attr_t attributes;
+    int error = pthread_getattr_np(pthread_self(), &attributes);
+    if (error != 0) return error;
+    error = pthread_attr_getstack(&attributes, low, size);
+    pthread_attr_destroy(&attributes);
+    return error;
+}
+
 #endif

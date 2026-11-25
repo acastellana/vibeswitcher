@@ -191,6 +191,29 @@ final class ShellDesk: ObservableObject {
         start(card.request, auto: false, done: finish)
     }
 
+    /// A code block's Run in New Shell (`RunInShellButton`): the New Shell session a card's Run starts (`launch`, which
+    /// gives `command` to its shell at launch, `ShellAsk.spawnRequest`), in `cwd`, never typed into any terminal. Held to
+    /// a card's rules for what it shows (`ShellRequest.check`). Nothing is filed and nothing is told back to `session`
+    /// (the session whose chat shows the block): your click on the block is the request, and the button shows what
+    /// came of it. `done` (main thread): ran once its session started, else refused with why not.
+    func runBlock(command: String, cwd: String, from session: UUID?, done: @escaping (RunOutcome) -> Void) {
+        let request = ShellRequest(session: (session ?? UUID()).uuidString, cwd: cwd, command: command, label: "", createdAt: now())
+        do { try request.check() } catch {
+            log("a code block's shell didn't start: \(error)")
+            return done(.refused(RunRefusal.shellNotStarted("\(error)")))
+        }
+        launch(request) { [self] result in
+            switch result {
+            case .success(let shell):
+                log("a code block's command (\(command.count) chars) started as \(shell.id)")
+                done(.ran)
+            case .failure(let why):
+                log("a code block's shell didn't start: \(why)")
+                done(.refused(RunRefusal.shellNotStarted(why.description)))
+            }
+        }
+    }
+
     /// A button on a card: Run (`run`) or Decline while it waits, Dismiss once answered.
     func act(_ action: Action, on id: String, then: @escaping () -> Void = {}) {
         if action == .run { return run(id) { _ in then() } }

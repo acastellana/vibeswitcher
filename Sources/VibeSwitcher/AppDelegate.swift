@@ -87,6 +87,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
         let tidier = ShellTidier()
         tidier.sessions = { [weak self] in self?.hostClient.sessions ?? [] }
         tidier.end = { [weak self] id in self?.hostClient.kill(id) }
+        // A replaced lead its board names again holds the role: never closed as replaced.
+        tidier.holdsRole = { [weak self] id in
+            self?.leadController.boards.values.contains { $0.leadSession.flatMap(UUID.init(uuidString:)) == id } ?? true
+        }
+        // Read live, not from the window's copies: those wait while an alert runs modal (`ShellTidier.rows`).
+        tidier.scanned = { [weak self] in (self?.store.sessions ?? [], self?.store.tableRead ?? TableRead()) }
+        tidier.replaced = { [weak self] in self.map { Set($0.leadController.replacedLeads.keys) } ?? [] }
         hostClient.onInput = { [weak tidier] id in tidier?.typed(id) }
         return tidier
     }()
@@ -175,7 +182,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
         closeFinishedShells: { [weak self] project in
             guard let self else { return }
             shellTidier.close(project: project, rows: windowModel.allRows.filter { $0.project == project })
-        })
+        },
+        closable: { [weak self] in self?.shellTidier.closable() ?? [] },
+        closeFinished: { [weak self] in self?.shellTidier.closeFinished() })
     private(set) lazy var leadController: LeadController = {
         let controller = LeadController(host: hostClient, store: store, sweepsRoles: true) { [weak self] root in
             let presets = self?.presets(for: root) ?? []

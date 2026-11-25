@@ -108,9 +108,12 @@ failed before compiling, and the lead had to hand its worker `--disable-sandbox`
 The on-demand `CodexRealRunTests/theProjectsChecksRunInARealCodexWorkersSandbox` runs these checks in a real Codex
 worker's sandbox.
 
-A Codex task is always audited by a Claude verifier: its review is audit and can't be lowered while its worker is
-Codex, or once a Codex worker worked on it; merge refuses it without a passing audit whatever the board or the vault
-says. Status and board say `worker: Codex` on it (and `worker: Claude` on the other open tasks beside it), and the
+A Codex task is always audited: by a Claude verifier, or, while no Claude verifier model the review floor allows has
+room under its usage limit and Codex's account has, by a read-only Codex verifier (workflow.md's `codex_verifier:
+fallback`, the default; `off` waits for Claude's reset). A merge over `sensitive_paths` on a Codex verdict then gets a
+post-merge Claude re-audit after the reset, listed in status until it passes. Its review is audit and can't be lowered
+while its worker is Codex, or once a Codex worker worked on it; merge refuses it without a passing audit whatever the
+board or the vault says. Status and board say `worker: Codex` on it (and `worker: Claude` on the other open tasks beside it), and the
 Mac-wide session limit counts it like any worker.
 
 What Codex can't be made to refuse (it has no per-session deny rules: its `.rules` files load only from its own home,
@@ -153,8 +156,8 @@ at the start, not when the task is planned:
 - **Claude** otherwise, and whenever either side's usage isn't known. Unknown is never room.
 
 So where Claude's 80% hold would refuse or hold an auto task, it starts on Codex while Codex has room. A task pinned to
-`claude` holds as before. A start that lands on Codex is a Codex task from then on (`codexWorked`): a Claude verifier
-audits it before merge whatever its review says. Its `model` is Claude's, so a start on Codex runs Codex's own. The
+`claude` holds as before. A start that lands on Codex is a Codex task from then on (`codexWorked`): a verifier (Claude's,
+or Codex's at Claude's limit) audits it before merge whatever its review says. Its `model` is Claude's, so a start on Codex runs Codex's own. The
 start's reply and its progress line say where it went and why, e.g. `auto → Codex: Claude weekly 64%, 12 points ahead
 of pace; Codex 40%`. Status shows Claude's limits and Codex's, each with its pace, and `Next auto task → codex|claude
 (why)`. Board says `worker: auto (now Codex)` while it runs.
@@ -270,8 +273,10 @@ branch carrying the remote refuse then, until you install from the base (`script
 
 **Flaky tests.** When tests fail, the failing tests run once more (up to 20 named tests, else the whole command), at
 most once per merge, and never after a build error or a `regression_command` failure. If they pass, the merge goes
-ahead and each is recorded as a flake, with its evidence in a file. A test that flakes 3 times within 7 days becomes a
-task to fix it, once.
+ahead and each is recorded as a flake, with its evidence in a file. A named test's first flake becomes a task to fix
+it, pointing at that file; a later flake while that task (or another open task naming the test) is open goes in its
+context instead. The task finds the root cause and fixes it: never a sleep, a retry, a longer timeout, or a skipped test.
+If the cause can't be found within its budget, it deletes the test and writes down why.
 
 **Merge policy** (`merge_policy:` in `workflow.md`), chosen once per project, within the floor above:
 
@@ -349,7 +354,11 @@ With `auto_advance: true` (the default), finished work moves on without waiting 
 tool server:
 
 - merges a review-none task reported done (unless the risk check raises it to audit);
-- starts an audit task's audit, and merges a clean verdict;
+- starts an audit task's audit, and merges a clean verdict; at most `heavy_slots` of the project's audits at once (re-audits
+  and post-merge Claude re-audits among them, counted from their start, build and test runs included, to their verdict),
+  the rest held in board order with one line in the report and started as one ends. The lead's `audit` past that is
+  refused with its place in line, unless it passes `override_heavy_slots: true`; other projects' audits count only for
+  their own cap;
 - sends the worker a verdict's open Important findings, once per verdict, never past the round cap;
 - retries once a verifier that ended without a verdict;
 - sends the worker a failed merge's output;
@@ -573,6 +582,7 @@ Each value as the code sets it today. Paths are under `Sources/VibeCore/` unless
 | `strict_paths` | none | `LeadWorkflow.swift` |
 | `records_dir` | `docs/lead` | `LeadWorkflow.swift` |
 | `disk_warning_gb`, `disk_floor_gb` | 10 GB, 3 GB | `LeadWorkflow.swift` |
+| `disk_headroom_gb` | 6 GB: new workers wait under scripts/test-under-load.sh's `floor_gb` plus this, so the tasks in flight can run their load check | `LeadWorkflow.swift`, `LoadRunDisk` |
 | `watch_app_logs` | false | `LeadWorkflow.swift` |
 | Audit round cap | 2 rounds | `LeadBoard.swift` |
 | Flake limit | 3 flakes of one test in 7 days | `LeadBoard.swift` |

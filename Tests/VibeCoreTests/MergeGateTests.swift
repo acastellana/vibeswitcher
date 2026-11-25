@@ -197,26 +197,84 @@ struct MergeGateTests: LeadTeamFixture {
         #expect(kept.first?.count == MergeRerun.evidenceWidth && kept.first?.hasSuffix("…") == true)
     }
 
-    @Test func aTestThatFlakesThreeTimesInAWeekIsDueOnce() {
+    @Test func aNamedTestsFirstFlakeIsDueAndAFlakeAfterItsPlannedTaskIsDueAgain() {
         var board = FlakeLedger()
         let day = 86_400.0, start = 1_000_000.0
-        // One flake eight days ago is out of the window.
-        #expect(board.recordFlakes(["flaky()"], task: "old", commit: "c0", now: start).due.isEmpty)
-        #expect(board.recordFlakes(["flaky()", "other()"], task: "one", commit: "c1", now: start + 8 * day).due.isEmpty)
-        #expect(board.recordFlakes(["flaky()"], task: "two", commit: "c2", now: start + 9 * day).due.isEmpty)
-        let due = board.recordFlakes(["flaky()"], task: "three", commit: "c3", now: start + 10 * day).due
-        #expect(due.map(\.test) == ["flaky()"] && due.first?.merges == ["one", "two", "three"])
+        // A test's first flake is due at once. other() isn't planned for (a ledger an older build wrote), so its
+        // next flake carries its earlier ones, but not one eight days old: that's out of the window.
+        #expect(board.recordFlakes(["other()"], task: "old", commit: "c0", now: start).due.map(\.merges) == [["old"]])
+        let first = board.recordFlakes(["flaky()", "other()"], task: "one", commit: "c1", now: start + 8 * day).due
+        #expect(first.map(\.test) == ["flaky()", "other()"] && first.map(\.merges) == [["one"], ["one"]], "\(first.map(\.merges))")
         board.notePlanned("fix-the-flaky-test-flaky", for: "flaky()")
-        // The next flake doesn't plan another; three more after the planned one do.
-        #expect(board.recordFlakes(["flaky()"], task: "four", commit: "c4", now: start + 10 * day + 1).due.isEmpty)
-        #expect(board.recordFlakes(["flaky()"], task: "five", commit: "c5", now: start + 10 * day + 2).due.isEmpty)
-        #expect(board.recordFlakes(["flaky()"], task: "six", commit: "c6", now: start + 10 * day + 3).due.map(\.test) == ["flaky()"])
+        // A flake after the planned one is due again, alone: the caller notes it in the open task that names it.
+        let second = board.recordFlakes(["flaky()"], task: "two", commit: "c2", now: start + 9 * day).due
+        #expect(second.map(\.test) == ["flaky()"] && second.first?.merges == ["two"], "\(second.map(\.merges))")
         // Unnamed failures are recorded and plan nothing.
-        for n in 0..<3 { #expect(board.recordFlakes([MergeRerun.unnamed], task: "u\(n)", commit: "u", now: start + 10 * day + 4).due.isEmpty) }
-        let line = try? #require(board.flakeLine(now: start + 10 * day + 5))
-        #expect(line?.contains("flaky() ×6 (one, two, three, four, five, six) → task fix-the-flaky-test-flaky") == true, "\(line ?? "")")
-        #expect(line?.contains("other() ×1 (one)") == true)
+        for n in 0..<3 { #expect(board.recordFlakes([MergeRerun.unnamed], task: "u\(n)", commit: "u", now: start + 9 * day + 4).due.isEmpty) }
+        let line = try? #require(board.flakeLine(now: start + 9 * day + 5))
+        #expect(line?.contains("flaky() ×2 (one, two) → task fix-the-flaky-test-flaky") == true, "\(line ?? "")")
+        #expect(line?.contains("other() ×1 (one)") == true, "\(line ?? "")")
         #expect(FlakeLedger().flakeLine(now: start) == nil)
+    }
+
+    /// A named test's first flake plans a task to fix it, pointing at its evidence file; its next flake, while that
+    /// task is open, plans nothing new and goes in that task's context with its own evidence; an unnamed one plans
+    /// nothing.
+    @Test func aFirstFlakePlansAFixTaskAndTheNextGoesInThatOpenTask() throws {
+        let root = try repo()
+        let runtime = FakeRuntime()
+        let lead = try lead(root, runtime)
+        let test = "FlakySuite.flaky()"
+        func flake(_ task: String, _ n: Int) throws -> LeadToolset.FlakePlan {
+            let commit = String(repeating: "\(n)", count: 40), at = Date()
+            let file = MergeRerun.evidenceFile(root: root, task: task, commit: commit, at: at)
+            try FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try MergeRerun.evidenceLog(task: task, commit: commit, evidence: [test: ["✘ Test \(test) failed in \(task)'s run."]], tests: [test])
+                .write(to: file, atomically: true, encoding: .utf8)
+            return try lead.store.update { board in
+                lead.planFlakeFixes(&board, flakes: [test], slug: task, commit: commit, at: at, logged: [test],
+                                    log: MergeRerun.evidencePath(task: task, commit: commit, at: at), workflow: lead.workflow)
+            }
+        }
+        let fixes = { BoardStore(root: root).load().tasks.filter { $0.title.hasPrefix("Fix the flaky test") } }
+
+        let first = try flake("one", 1)
+        let fix = try #require(fixes().first)
+        #expect(fixes().count == 1 && first.planned.map(\.slug) == [fix.slug] && first.planned.first?.noted == false, "\(first.planned)")
+        let one = try #require(ledger(root).flakes.last?.log)
+        #expect(fix.contract.context.contains(MergeRerun.evidenceFile(root: root, log: one)), "\(fix.contract.context)")
+        #expect(fix.contract.context.contains("✘ Test \(test) failed in one's run."), "\(fix.contract.context)")
+        // It may delete the test: audited, in the vault too once the board is written, and never small_task_min's to drop.
+        #expect(fix.review == .audit && first.audited == [fix.slug])
+        lead.sendFlakeNotes(first)
+        #expect(try lead.vault.unaudited(root: root, task: fix.slug).review == .audit)
+        #expect(try lead.vault.smallTaskFacts(root: root, task: fix.slug)?.kept == "a flaky test's fix, which may delete the test")
+
+        let second = try flake("two", 2)
+        #expect(second.planned.map(\.slug) == [fix.slug] && second.planned.first?.noted == true && second.audited.isEmpty, "\(second.planned)")
+        #expect(fixes().count == 1, "\(fixes().map(\.slug))")
+        let noted = try #require(fixes().first).contract.context
+        let two = try #require(ledger(root).flakes.last?.log)
+        #expect(noted.contains(MergeRerun.evidenceFile(root: root, log: two)) && noted.contains("✘ Test \(test) failed in two's run."), "\(noted)")
+        #expect(ledger(root).flakes.last?.planned == fix.slug)
+
+        let unnamed = try lead.store.update { board in
+            lead.planFlakeFixes(&board, flakes: [MergeRerun.unnamed], slug: "three", commit: "c3", at: Date(), logged: [], log: nil, workflow: lead.workflow)
+        }
+        #expect(unnamed.planned.isEmpty && fixes().count == 1 && BoardStore(root: root).load().tasks.count == 1)
+    }
+
+    /// The fix task the ledger plans holds its worker to the root cause: never a sleep, a retry, a longer timeout, a
+    /// skip; when the cause can't be found within the budget, the test goes, with the reason written down.
+    @Test func aFlakyTestsFixTaskFixesTheRootCauseOrDeletesTheTestWithItsReason() {
+        let contract = MergeRerun.fixContract(test: "flaky()", flakes: [LeadFlake(test: "flaky()", task: "one", commit: "c1", at: 1)],
+                                              workflow: LeadWorkflow(), root: "/repo")
+        let text = ([contract.goal] + contract.acceptance + contract.boundaries).joined(separator: "\n").lowercased()
+        for rule in ["root cause", "never add a sleep, a retry or a longer timeout as the fix", "never skip or disable the test",
+                     "delete the test", "in the commit message and in the done report"] {
+            #expect(text.contains(rule), "\(rule): \(text)")
+        }
+        #expect(contract.acceptance.contains { $0.contains("can't be found within the budget") && $0.contains("delete the test") }, "\(contract.acceptance)")
     }
 
     // MARK: Merges
@@ -366,6 +424,8 @@ struct MergeGateTests: LeadTeamFixture {
         let worktree = RecentProjects.shellQuote(Worktrees.path(root: root, slug: "add-b"))
         configure(lead, ["test_command": "cd \(worktree) && echo late > late.txt && git add late.txt && git commit -q -m late"])
         try audited(lead, runtime, root: root)
+        // The records go in before the merge starts (`LeadRecords.commitBeforeMerge`): committed now, the base stays put.
+        lead.records.flush(base: "main")
         let main = Git.run(["rev-parse", "main"], in: root).output
         let tested = Git.run(["rev-parse", "agent/add-b"], in: root).output
 
@@ -656,7 +716,10 @@ struct MergeGateTests: LeadTeamFixture {
         // The lead's session was told too, once.
         #expect(runtime.steered.filter { $0.text.contains("flaked again") }.count == 1, "\(runtime.steered.map(\.text))")
         let status = lead.call("status", [:]).text
-        #expect(status.contains("flaky() ×2 (earlier, add-c) → task add-b (fixed by add-b, flaked again since)"), "\(status)")
+        // The flake after the fix is a flake like any: a task to fix it again, planned at once.
+        let refix = try #require(BoardStore(root: root).load().tasks.first { $0.title == "Fix the flaky test flaky()" })
+        #expect(again.text.contains("flaky() flaked: planned \(refix.slug) to fix it."), "\(again.text)")
+        #expect(status.contains("flaky() ×2 (earlier, add-c) → task \(refix.slug) (fixed by add-b, flaked again since)"), "\(status)")
 
         try audited(lead, runtime, root: root, slug: "add-d", files: ["d.txt": "dee\n"])
         let third = lead.call("merge", ["task": "add-d"])
@@ -784,12 +847,12 @@ struct MergeGateTests: LeadTeamFixture {
         let fix = try #require(fixes.first)
         #expect(fixes.count == 1)
         #expect(board.task("steady-flaky")?.contract.context == "")
-        #expect(merged.text.contains("flaky() flaked 3 times within 7 days: planned \(fix.slug) to fix it."), "\(merged.text)")
+        #expect(merged.text.contains("flaky() flaked: planned \(fix.slug) to fix it."), "\(merged.text)")
         #expect(fix.status == .planned && fix.title == "Fix the flaky test flaky()")
         #expect(fix.contract.context.contains("earlier, later, add-b"), "\(fix.contract.context)")
         #expect(ledger(root).flakes.last?.planned == fix.slug && board.flakes == nil)
         let progress = try String(contentsOfFile: BoardStore(root: root).recordPath("progress.md"), encoding: .utf8)
-        #expect(progress.contains("Planned \(fix.slug): flaky() flaked 3 times within 7 days"), "\(progress)")
+        #expect(progress.contains("Planned \(fix.slug): flaky() flaked in add-b's merge"), "\(progress)")
     }
 
     @Test func aFlakysFailingLinesAreReadableInTheRepositoryTheLedgerAndTheFixTasksContext() throws {
@@ -884,7 +947,14 @@ struct MergeGateTests: LeadTeamFixture {
         #expect(logs.count == 2 && Set(logs).count == 2, "\(logs)")
         let folder = root + "/.vibeswitcher/flakes"
         let files = try FileManager.default.contentsOfDirectory(atPath: folder).filter { $0.hasSuffix(".log") }
-        #expect(files.count == 2, "\(files)")
+        let firstRuns = files.filter { $0.hasSuffix("-first-run.log") }
+        #expect(files.count == 4 && firstRuns.count == 2, "two flake logs and two first-run tails: \(files)")
+        for name in firstRuns {
+            let path = folder + "/" + name
+            let text = try String(contentsOfFile: path, encoding: .utf8)
+            #expect(text.contains("First failing run in add-b's merge") && text.contains("Test flaky() failed after"))
+            #expect(try FileManager.default.attributesOfItem(atPath: path)[.posixPermissions] as? Int == 0o600)
+        }
         for (flake, log) in zip(flakes, logs) {
             #expect(log.hasSuffix("-add-b-\(flake.commit.prefix(8)).log"), "\(log)")
             #expect(MergeRerun.evidence(for: "flaky()", inLog: log)?.first?.hasPrefix("✘ Test flaky() recorded an issue") == true)
@@ -1015,12 +1085,12 @@ struct MergeGateTests: LeadTeamFixture {
         #expect(!board.tasks.contains { $0.title.hasPrefix("Fix the flaky test") }, "\(board.tasks.map(\.slug))")
         let open = try #require(board.task("terminal-clipboard-security"))
         #expect(open.status == .review)
-        #expect(open.contract.context.hasPrefix("What it knew.\n\nFlake ledger: \(test) flaked 3 times within 7 days"), "\(open.contract.context)")
+        #expect(open.contract.context.hasPrefix("What it knew.\n\nFlake ledger: \(test) flaked in the merges of earlier, later, add-b"), "\(open.contract.context)")
         #expect(open.contract.context.contains("earlier, later, add-b"), "\(open.contract.context)")
         #expect(open.contract.context.contains("- add-b's merge (") && open.contract.context.contains("\n    ✘ Test \(test) recorded an issue at FlakyTests.swift:3:5"),
                 "\(open.contract.context)")
         #expect(ledger(root).flakes.last?.planned == open.slug)
-        #expect(merged.text.contains("\(test) flaked 3 times within 7 days: the open task terminal-clipboard-security names it"), "\(merged.text)")
+        #expect(merged.text.contains("\(test) flaked: the open task terminal-clipboard-security names it"), "\(merged.text)")
         let progress = try String(contentsOfFile: BoardStore(root: root).recordPath("progress.md"), encoding: .utf8)
         #expect(progress.contains("Noted in terminal-clipboard-security's context"), "\(progress)")
         #expect(!progress.contains("Planned fix-the-flaky-test"), "\(progress)")
@@ -1159,7 +1229,7 @@ struct MergeGateTests: LeadTeamFixture {
     /// A merge stopped for making no progress with several tests open can't say which were running: the flake ledger
     /// blames none, and the reply says so. One alone goes in the ledger as before.
     @Test func aStalledMergeWithSeveralTestsOpenBlamesNoneOfThem() async throws {
-        func run(_ lines: String, _ name: String) throws -> (text: String, ledger: FlakeLedger, isError: Bool) {
+        func run(_ lines: String, _ name: String) throws -> (text: String, ledger: FlakeLedger, isError: Bool, tasks: [LeadTask]) {
             let root = try repo()
             try commit(["scripts/test.sh": "#!/bin/bash\n" + lines + "\nexec sleep \(ShellTests.childRuns)\n"], in: root, "a suite that hangs")
             let runtime = FakeRuntime()
@@ -1170,7 +1240,7 @@ struct MergeGateTests: LeadTeamFixture {
             lock.watch = StallWatch(after: 3, every: 0.05, loadLimit: 24, load: { 4.2 })
             lead.testLock = lock
             let merged = lead.call("merge", ["task": "add-b"])
-            return (merged.text, ledger(root), merged.isError)
+            return (merged.text, ledger(root), merged.isError, BoardStore(root: root).load().tasks)
         }
         let queued = try run("echo '◇ Test one() started.'\necho '◇ Test two() started.'\necho '◇ Test three() started.'", "queued")
         #expect(queued.isError && queued.text.contains("3 tests printed their start and never finished"), "\(queued.text)")
@@ -1181,6 +1251,8 @@ struct MergeGateTests: LeadTeamFixture {
         #expect(alone.text.contains("Started and never finished: only().") && !alone.text.contains("printed their start"), "\(alone.text)")
         #expect(!queued.text.contains("6 tests printed their start"), "\(queued.text)")
         #expect(alone.ledger.flakes.map(\.test) == ["only()"], "\(alone.ledger.flakes)")
+        // Its test may be innocent: one hang plans no task (`LeadBoard.hangLimit`), though one flake would.
+        #expect(!alone.tasks.contains { $0.title.hasPrefix("Fix the flaky test") } && !alone.text.contains("planned"), "\(alone.tasks.map(\.slug)) \(alone.text)")
     }
 
     /// What a stopped run was doing: building (its last build line) when no test started after it, testing when one

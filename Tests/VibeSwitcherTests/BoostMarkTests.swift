@@ -24,7 +24,7 @@ import VibeCore
         let store = SessionStore(scanner: SessionScanner(processes: { [:] }, stateDir: { scratch }, cwd: { _ in nil }, arguments: { _ in [] }))
         let leads = LeadController(host: host, store: store, vault: LeadVault(folder: scratch.appendingPathComponent("vault"), ask: { _ in throw LeadVault.Refused("none") }),
                                    inbox: scratch, home: scratch.path) { _ in "true" }
-        return MainWindowController(store: store, host: host, model: WindowModel(), actions: EndedSnapshots.actions, leads: leads,
+        return MainWindowController(store: store, host: host, model: WindowModel(defaults: temp.defaults("boost-mark-window")), actions: EndedSnapshots.actions, leads: leads,
                                     briefing: briefing, boost: watch)
     }
 
