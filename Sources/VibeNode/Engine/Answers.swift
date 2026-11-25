@@ -681,11 +681,14 @@ extension LeadEngine {
                 guard case .success(let shown) = held else { return false }
                 return !((try? ConfigHoldStore.wouldRecord(shown, root: root, vault: vault)) ?? []).isEmpty
             }()
+            // Whether the last accept's snapshot is one this vault sealed (no: a first look owed), and the rules start_worker
+            // and merge refuse on now: with what is held, whether the card holds the team's work (`Shown.holds`).
+            let sealed = AcceptedSnapshot.vouch(snapshot.projects[root], root: root, vault: vault,
+                                                record: (try? vault.guardedRecord(root: root)) ?? nil).sealed
+            let railsHeld = !ConfigHoldStore.railsHeld(root: root, vault: vault).isEmpty
             let owed: (record: Bool, firstLook: Bool)? = {
                 guard case .success(let shown) = held, shown.items.isEmpty else { return nil }
                 let pending = (try? ConfigHoldStore.wouldRecord(shown, root: root, vault: vault)) ?? ["?"]
-                let record = (try? vault.guardedRecord(root: root)) ?? nil
-                let sealed = AcceptedSnapshot.vouch(snapshot.projects[root], root: root, vault: vault, record: record).sealed
                 return (!pending.isEmpty || !sealed, !sealed)
             }()
             let difference: [String]? = {
@@ -701,6 +704,7 @@ extension LeadEngine {
                 case .success(let held):
                     var shown = self.sharingHome(held, root: root, homeNames: homeNames)
                     shown.recordsRules = recordsRules ? true : nil
+                    shown.holdsWork = !shown.items.isEmpty || shown.sharedHome != nil || railsHeld || !sealed
                     let project = NodeIds.project(root: root)
                     let open = self.cards.list(project: project).filter { $0.kind == .configHeld }
                     if let owed, shown.sharedHome == nil {
@@ -755,6 +759,8 @@ extension LeadEngine {
                 if case .success(var shown) = ConfigHoldStore.held(root: root, vault: vault, home: home, look: false,
                                                                    snapshot: snapshot.projects[root]) {
                     shown.recordsRules = ((try? ConfigHoldStore.wouldRecord(shown, root: root, vault: vault)) ?? []).isEmpty ? nil : true
+                    // Something is held (a look draws a card only then): it holds the team's work.
+                    shown.holdsWork = true
                     found[root] = shown
                 }
             }

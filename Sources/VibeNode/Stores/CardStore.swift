@@ -112,6 +112,40 @@ public final class CardStore: @unchecked Sendable {
 
         public var isOpen: Bool { closed == nil }
 
+        /// Whether `vibeswitcher approve`'s batch takes it (`ApproveRequest`): held config that records no rules and owes
+        /// no first look; a base move from a recorded or given commit to another. The rest it sets aside, each named with
+        /// its `settle`.
+        public var approveTakes: Bool {
+            guard isOpen else { return false }
+            switch kind {
+            case .configHeld:
+                guard let config else { return false }
+                return (!config.items.isEmpty || config.sharedHome != nil) && config.recordsRules != true && config.firstLook != true
+            case .baseMove:
+                guard let base else { return false }
+                return [.recorded, .given].contains(base.fromIs) && base.from != nil && base.from != base.to
+            default: return false
+            }
+        }
+
+        /// The one command that settles this card in one step, for `status`, `approve`'s set-aside lines and the page alike
+        /// (the held-config card's `config.settle` is this): its own accept, which prints the short card and asks one code
+        /// (`config accept CARD`, `base accept CARD`); a question, approval or plugin's card is answered (`answer CARD
+        /// TEXT`, or one of its words). Nil once closed. (`vibeswitcher approve` settles those its batch takes too:
+        /// `approveTakes`.)
+        public var settle: String? {
+            guard isOpen else { return nil }
+            switch kind {
+            case .configHeld: return "vibeswitcher config accept \(id)"
+            case .baseMove: return "vibeswitcher base accept \(id)"
+            case .plugin:
+                let words = plugin?.actions.map(\.word) ?? []
+                return "vibeswitcher answer \(id) " + (words.isEmpty ? "WORD" : words.joined(separator: "|"))
+            case .question, .approval:
+                return "vibeswitcher answer \(id) TEXT"
+            }
+        }
+
         /// As `cards.json` keeps it (`CardKeep`): every field but `code`, which is its id's (`NodeIds.code(card:)`, a
         /// digest of the id, no secret: the voice rule is what keeps a code from any sender but the user's terminal) and
         /// is made again from the id as it's read, never taken from the file.
@@ -144,7 +178,7 @@ public final class CardStore: @unchecked Sendable {
             case .approval, .baseMove: return true
             // Something held (its own, or the home folder's it leaves to that card): no worker, verifier or merge until
             // accepted. A card with nothing held (rails to record, a first look owed) holds nothing up.
-            case .configHeld: return config.map { !$0.items.isEmpty || $0.sharedHome != nil } ?? true
+            case .configHeld: return config.map { $0.holdsWork ?? (!$0.items.isEmpty || $0.sharedHome != nil) } ?? true
             // The agent waits on it, not the lead's work.
             case .plugin: return false
             }

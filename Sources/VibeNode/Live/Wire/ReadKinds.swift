@@ -110,18 +110,26 @@ extension WireKinds {
             public var approvals: Int?
             public var config: Int?
             public var base: Int?
-            /// The folders of held config `vibeswitcher approve` sets aside (its accept records the project's rules:
-            /// `config held FOLDER`), and of base moves it sets aside (from a commit the node hadn't recorded: `base show
-            /// FOLDER`): `status` names each with its own command.
-            public var configOwn: [String]?
-            public var baseOwn: [String]?
-            public init(questions: Int?, approvals: Int?, config: Int?, base: Int?, configOwn: [String]? = nil, baseOwn: [String]? = nil) {
+            /// The held config and base moves `vibeswitcher approve` sets aside, each with the one command that settles it
+            /// (`CardStore.Card.settle`): `status` names each so.
+            public var own: [Own]?
+            public struct Own: Codable, Sendable, Equatable {
+                public var folder: String
+                /// `config` or `base`.
+                public var kind: String
+                public var settle: String
+                public init(folder: String, kind: String, settle: String) {
+                    self.folder = folder
+                    self.kind = kind
+                    self.settle = settle
+                }
+            }
+            public init(questions: Int?, approvals: Int?, config: Int?, base: Int?, own: [Own]? = nil) {
                 self.questions = questions
                 self.approvals = approvals
                 self.config = config
                 self.base = base
-                self.configOwn = configOwn
-                self.baseOwn = baseOwn
+                self.own = own
             }
         }
 
