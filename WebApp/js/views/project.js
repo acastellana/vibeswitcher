@@ -292,7 +292,7 @@ export function projectView(app, { sheet }) {
       summary.unknown ? h('p', { class: 'hc-quiet' }, t('hcUnknown', { n: summary.unknown }), ' ',
         h('button', { class: 'link', type: 'button', onclick: () => { details.open = true; } }, t('hcShowThem'))) : null,
       acts ? h('div', { class: 'card-acts' },
-        doButton(app, { label: t('acAccept'), kind: 'config.accept', args: () => cardArgs(card), done: () => receipt(t('hcAcceptedN', { what: summary.holdsEvery ? t('hcHomeConfig') : summary.holds || lastPart(root) || root, n: (card.config?.items || []).length + summary.changed.length })) }).el)
+        doButton(app, { label: t('acAccept'), kind: 'config.accept', args: () => cardArgs(card), done: () => receipt(t('hcAcceptedN', { what: summary.holdsEvery ? t('hcHomeConfig') : summary.holds || lastPart(root) || root, n: (card.config?.items || []).length })) }).el)
         : terminalLine(summary.changed.length ? t('hcNeedsTerminal') : t('hcNeedsTerminalUnknown')),
       details);
   }
@@ -316,7 +316,8 @@ export function projectView(app, { sheet }) {
     ];
   }
 
-  // A one-line record of what was done from the page, kept in the conversation (this page's).
+  // A one-line record of what was done from the page, kept in the conversation (this page's). A config accept's counts
+  // the held things only, as the terminal's does (its rules aren't changes).
   function receipt(text) {
     const project = ui.state.route.id;
     notes.set(project, [...(notes.get(project) || []), { text, state: 'receipt' }]);
