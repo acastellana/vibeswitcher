@@ -221,8 +221,9 @@ public struct LeadVault: Sendable {
         case unaudited(root: String, task: String)
         /// What small_task_min judges a task by, as the vault keeps it (`Reply.smallTask`; see `LeadVault.SmallTaskFacts`).
         case smallTaskFacts(root: String, task: String)
-        /// The task's worker launches as the host recorded them at each bind (`Reply.launches`; see `WorkerLaunch`).
-        case launches(root: String, task: String)
+        /// The model families the host recorded at each bind of the task's workers and its team members'
+        /// (`Reply.families`; see `WorkerLaunch`).
+        case launchedFamilies(root: String, task: String)
         /// The repository's lead only: notes on a task small_task_min judges it by (`LeadVault.SmallTaskNote`).
         case noteSmallTask(root: String, task: String, note: SmallTaskNote)
         /// The app only: the sessions its witness sees at work now (`at`, its clock); each worker's task counts the time
@@ -265,8 +266,8 @@ public struct LeadVault: Sendable {
         case push(LeadPush.Request?)
         /// `Request.smallTaskFacts`: none while nothing is kept for the task.
         case smallTask(SmallTaskFacts?)
-        /// `Request.launches`: none while nothing is kept for the task.
-        case launches([WorkerLaunch]?)
+        /// `Request.launchedFamilies`: none while nothing is kept for the task.
+        case families([String]?)
     }
 
     /// The host said no, or couldn't be asked.
@@ -589,9 +590,9 @@ extension LeadVault {
             var openRuns: [String: Double]?
             /// What small_task_min judges each task by, by task (optional: older vaults have none; see `SmallTaskFacts`).
             var smallTasks: [String: SmallTaskFacts]?
-            /// Each task's worker launches, as the host saw each session it bound a worker's role to (`WorkerLaunch`),
-            /// newest last, by task (optional: older vaults have none).
-            var launches: [String: [WorkerLaunch]]?
+            /// The model families each task's workers were launched on, as the host saw each session it bound a worker's
+            /// role to (`WorkerLaunch`), by the task the grant names; only ever added to (optional: older vaults have none).
+            var launchedFamilies: [String: [String]]?
 
             /// Takes the members `drop` picks out; the sessions the workers and verifiers among them were bound to
             /// become `former`, with the role and task each held.
@@ -809,10 +810,8 @@ extension LeadVault {
                 }
             }
             // A worker's launch, Claude Code's default read here (outside the lock: it reads a file).
-            var launch: WorkerLaunch?
-            if case .bind(_, _, let session) = request {
-                launch = WorkerLaunch.recorded(session: session, seen: bound ?? seenOf?(session), home: configHome)
-            }
+            var launch: [String] = []
+            if case .bind(_, _, let session) = request { launch = WorkerLaunch.families(seen: bound ?? seenOf?(session), home: configHome) }
             var held: [String] = []
             let (reply, skills): (Reply, (hash: String, entries: String)?) = {
                 lock.lock()
@@ -906,7 +905,7 @@ extension LeadVault {
         // MARK: Rules
 
         private func answer(_ request: Request, from caller: Caller, userOpened: Bool, agentSession: String?, liveSessions: Set<String>?,
-                            config: [String: String]? = nil, launch: WorkerLaunch? = nil, changed: inout Bool) -> Reply {
+                            config: [String: String]? = nil, launch: [String] = [], changed: inout Bool) -> Reply {
             switch request {
             case .issue(let role, let root, let task, let auditing, let finder):
                 if role == .lead {
@@ -974,11 +973,11 @@ extension LeadVault {
                     // A worker's or verifier's commands run from now on (`ConfigSeal`).
                     if team.members[index].role != .lead { team.branchCodeAt = Date().timeIntervalSince1970 }
                     team.members[index].session = session
-                    // A worker's launch, as the host saw its session (`WorkerLaunch`): the task keeps every one.
-                    if team.members[index].role == .worker, let task = team.members[index].task, let launch {
-                        var all = team.launches ?? [:]
-                        all[task] = Array(((all[task] ?? []).filter { $0.session != session } + [launch]).suffix(WorkerLaunch.kept))
-                        team.launches = all
+                    // A worker's launch, as the host saw its session (`WorkerLaunch`): its families added to the task's.
+                    if team.members[index].role == .worker, let task = team.members[index].task, !launch.isEmpty {
+                        var all = team.launchedFamilies ?? [:]
+                        all[task] = Array(Set((all[task] ?? []) + launch)).sorted()
+                        team.launchedFamilies = all
                     }
                 }
                 return .ok
@@ -999,7 +998,7 @@ extension LeadVault {
                     team.reviews?[task] = nil
                     team.reported?[task] = nil
                     team.evidence?[task] = nil
-                    team.launches?[task] = nil
+                    // Not the launched families: they only add to what an audit is kept off, and the branch may outlive it.
                 }
                 return .ok
             case .whoami(let root):
@@ -1226,8 +1225,10 @@ extension LeadVault {
                 return .ok
             case .smallTaskFacts(let root, let task):
                 return .smallTask(team(root)?.smallTasks?[task])
-            case .launches(let root, let task):
-                return .launches(team(root)?.launches?[task])
+            case .launchedFamilies(let root, let task):
+                // The task's own and its team members' (`Worktrees.memberSlug`), whatever the board lists now.
+                let kept = (team(root)?.launchedFamilies ?? [:]).filter { $0.key == task || $0.key.hasPrefix(task + LeadTeam.joiner) }
+                return .families(kept.isEmpty ? nil : Array(Set(kept.values.flatMap { $0 })).sorted())
             case .noteSmallTask(let root, let task, let note):
                 // What lowers an audit is the lead's word only: a worker that wrote these would merge with no verdict.
                 guard isLead(caller, root) else { return .refused("Only the repository's lead notes what small_task_min judges a task by.") }

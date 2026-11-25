@@ -1,91 +1,77 @@
 import Foundation
 
-/// The model each of a task's worker sessions was launched on, as the session host recorded it when the lead bound the
-/// worker's role to the session (`LeadVault.Request.bind`): the `--model` on the command the host itself started that
-/// session with (never what the request says), and Claude Code's default at that moment (`~/.claude/settings.json`'s
-/// "model" in the host's home), for a launch that passed none. Kept in the vault's record of the task
-/// (`Team.launches`), which only the host writes, across every worker session the task had (a rework's, one that ended
-/// or was parked), until the task is retired.
+/// The model families a task's worker sessions were launched on, as the session host saw each one when the lead bound
+/// a worker's role to it (`LeadVault.Request.bind`): every `--model` on the command the host itself started that
+/// session with (never what the request says), or Claude Code's default at that moment (`~/.claude/settings.json`'s
+/// "model" in the host's home) for a launch that passed none. Kept in the vault's record of the task
+/// (`Team.launchedFamilies`), which only the host writes, by the task the vault's own grant names (a team member's
+/// under its member slug), never trimmed and never cleared, not even at retire (the branch may outlive it).
 ///
-/// The floor that keeps audits off the workers' model judges a task's audit by these (`basis`): the union of what every
-/// one of its worker sessions ran on. With no record (a worker started before this build, a vault that started over, a
-/// session the host couldn't tell), the project's default counts as before. The board's model and `launchedModels`
-/// never take a model off: any session of the team can write them.
-public struct WorkerLaunch: Codable, Equatable, Sendable {
-    public var session: String
-    /// The `--model` its launch command passed, before the start message's `--`; nil: none.
-    public var model: String?
-    /// Claude Code's default then; nil: none set (Claude's own default).
-    public var defaultModel: String?
-    /// The host knew the session's command; false: nothing to judge by (counts as no record).
-    public var known: Bool
-    public var at: Double
-
-    public init(session: String, model: String?, defaultModel: String?, known: Bool, at: Double) {
-        self.session = session
-        self.model = model
-        self.defaultModel = defaultModel
-        self.known = known
-        self.at = at
-    }
-
+/// These only ever ADD to what an audit is kept off under the floor that keeps audits off the workers' model
+/// (`excluded`): Claude Code's default and the lead's model stay excluded as before, with the board's task model and
+/// launched model. Nothing here unlocks a model: argv isn't proof of what ran (a decoy bind, Claude Code's own
+/// precedence, `/model` mid-session). A name that isn't a known family adds nothing and removes nothing.
+public enum WorkerLaunch {
     /// What the host saw of a session it binds a role to: the command it started it with (nil: a plain shell).
     public struct Seen: Equatable, Sendable {
         public var command: String?
         public init(command: String?) { self.command = command }
     }
 
-    /// The launch of `session` as the host saw it (`seen` nil: it doesn't know the session), Claude Code's default
-    /// read from `home`.
-    public static func recorded(session: String, seen: Seen?, home: String, at: Double = Date().timeIntervalSince1970) -> WorkerLaunch {
-        guard let seen else { return WorkerLaunch(session: session, model: nil, defaultModel: nil, known: false, at: at) }
-        let model = seen.command.flatMap(launchModel(command:))
-        return WorkerLaunch(session: session, model: model, defaultModel: model == nil ? LeadWorkflow.claudeModel(command: "", home: home) : nil,
-                            known: true, at: at)
+    static let families = ["mythos", "fable", "opus", "sonnet", "haiku"]
+
+    /// `model`'s family when it names one; nil for an alias (default, best, opusplan), a custom id or anything else.
+    public static func family(of model: String?) -> String? {
+        guard let name = model?.lowercased() else { return nil }
+        return families.first { name.contains($0) }
     }
 
-    /// The model it ran on: its `--model`, else the default then, else Claude's own (which the floor counts as opus);
-    /// nil when the host didn't know it.
-    public var ran: String? {
-        guard known else { return nil }
-        return model ?? defaultModel ?? "opus"
-    }
-
-    /// The `--model` a launch command passes before its `--` (what follows is the start message: the brief's words,
-    /// never options); nil when it passes none.
-    public static func launchModel(command: String) -> String? {
-        let options = command.split(whereSeparator: \.isWhitespace).prefix { $0 != "--" }.joined(separator: " ")
-        return LeadWorkflow.claudeModel(command: options)
-    }
-
-    /// The most kept per task: the newest.
-    static let kept = 50
-
-    /// The workers' models a task's audit is kept off (`launches` the task's record, nil: none), and what they were
-    /// judged by, for the audit's line. Every launch known: what each ran on. Else the project's default
-    /// (`projectDefault`, nil: Claude's own) with what is known.
-    public static func basis(_ launches: [WorkerLaunch]?, projectDefault: String?) -> (workers: [String?], text: String) {
-        let launches = launches ?? []
-        let ran = launches.compactMap(\.ran)
-        if !launches.isEmpty, ran.count == launches.count {
-            var families: [String] = []
-            for model in ran where !families.contains(where: { LeadReviewFloor.sameModel($0, model) }) { families.append(model) }
-            return (families, "workers ran on \(families.map(shown).joined(separator: " and ")) by the host's record")
+    /// Every `--model` (or `--model=`) a launch command passes before its `--` (what follows is the start message: the
+    /// brief's words, never options), in order.
+    public static func launchModels(command: String) -> [String] {
+        let words = command.split(whereSeparator: \.isWhitespace).prefix { $0 != "--" }
+            .map { $0.trimmingCharacters(in: CharacterSet(charactersIn: "'\"")) }
+        var found: [String] = []
+        for (index, word) in words.enumerated() {
+            if word == "--model", index + 1 < words.count, !words[index + 1].isEmpty { found.append(words[index + 1]) }
+            if word.hasPrefix("--model="), word.count > "--model=".count { found.append(String(word.dropFirst("--model=".count))) }
         }
-        return ([projectDefault] + ran, "no launch record: Claude Code's default counts as the workers' model")
+        return found
+    }
+
+    /// The families a launch adds (`seen` nil: the host didn't know the session, none): each `--model`'s, or with none,
+    /// Claude Code's default's as `home` holds it now. Unknown names add nothing.
+    public static func families(seen: Seen?, home: String) -> [String] {
+        guard let seen else { return [] }
+        let models = seen.command.map(launchModels(command:)) ?? []
+        let named: [String?] = models.isEmpty ? [LeadWorkflow.claudeModel(command: "", home: home)] : models
+        return Array(Set(named.compactMap(family(of:)))).sorted()
+    }
+
+    /// What a task's audit is kept off under the floor, and the line that says so: Claude Code's default
+    /// (`projectDefault`), the lead's model(s), and the families the vault recorded for the task's launches
+    /// (`launched`, nil: no record).
+    public static func excluded(projectDefault: String?, lead: [String?], launched: [String]?) -> (workers: [String?], text: String) {
+        let leads = Array(Set(lead.compactMap { $0 }.map(LeadReviewFloor.workersModel).map(shown))).sorted()
+        var parts = ["Claude Code's default \(projectDefault.map(shown) ?? "(Claude's own, counted as opus)")"]
+        if !leads.isEmpty { parts.append("the lead's \(leads.joined(separator: " and "))") }
+        if let launched, !launched.isEmpty {
+            parts.append("workers launched on \(launched.joined(separator: " and ")) by the host's record")
+        } else {
+            parts.append("no launch record")
+        }
+        return ([projectDefault] + lead + (launched ?? []), "kept off the workers' models: " + parts.joined(separator: "; "))
     }
 
     /// A model as the line says it: its family when known.
-    static func shown(_ model: String) -> String {
-        ["mythos", "fable", "opus", "sonnet", "haiku"].first { model.lowercased().contains($0) } ?? model
-    }
+    static func shown(_ model: String) -> String { family(of: model) ?? model }
 }
 
 extension LeadVault {
-    /// The task's worker launches as the host recorded them (`WorkerLaunch`); nil: none kept, or the vault couldn't be
-    /// asked (an older host).
-    public func launches(root: String, task: String) -> [WorkerLaunch]? {
-        guard case .launches(let launches)? = try? call(.launches(root: root, task: task)) else { return nil }
-        return launches
+    /// The families the host recorded for `task`'s worker launches and its team members' (`WorkerLaunch`); nil: none
+    /// kept, or the vault couldn't be asked (an older host).
+    public func launchedFamilies(root: String, task: String) -> [String]? {
+        guard case .families(let families)? = try? call(.launchedFamilies(root: root, task: task)) else { return nil }
+        return families
     }
 }

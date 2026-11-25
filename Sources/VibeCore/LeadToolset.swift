@@ -3034,7 +3034,7 @@ public final class LeadToolset: MCPToolset {
             ? fableFallback()?.fableHeldBack(now: usageClock()) : nil
         // Under a floor that keeps audits off the workers' model, what their model was judged by (`WorkerLaunch.basis`):
         // in the audit's reply and its progress line, so why a model was passed over can be seen.
-        let basis = workflow.floor?.verifierDifferent == true ? workersBasis(task, projectDefault: runtime.workerModel(root: root)).text : nil
+        let basis = workflow.floor?.verifierDifferent == true ? workersBasis(task, projectDefault: runtime.workerModel(root: root), workflow: workflow).text : nil
         let modelNotice = (fallback.map { " on \(verifierModel) in Fable's place: Fable held back until \(UsageLimit.resetText(AccountUsage.ends($0)))" } ?? "")
             + (basis.map { " (on \(verifierModel): \($0))" } ?? "")
         // Near one of the account's usage limits on the audits' model: a verifier started now would stop mid-audit at it.
@@ -3221,9 +3221,8 @@ public final class LeadToolset: MCPToolset {
 
     /// The model this project's audits run on: verifier_model, or another than the workers' (see `LeadWorkflow.auditModel`).
     /// `task`: the task audited, whose own model (add_task's model) counts as the workers' under the floor. The workers'
-    /// model is the one the task's workers were launched on, as the session host recorded their commands
-    /// (`workersBasis`: every launch the vault recorded for the task), else the project's default (Claude Code's model:
-    /// `LeadRuntime.workerModel`).
+    /// models are the project's default (Claude Code's model: `LeadRuntime.workerModel`), the lead's, and every family
+    /// the host recorded for the task's launches (`workersBasis`): the record only ever adds.
     /// While Fable is held back (`AccountUsage.fableHeldBack`), the workers' model and the task's are the ones their
     /// sessions start on (opus in Fable's place), and the audit goes on the most capable model that isn't Fable and that
     /// the floor allows.
@@ -3240,11 +3239,10 @@ public final class LeadToolset: MCPToolset {
         let taskModel = task?.intendedModel
         let usage = fableFallback()
         let now = usageClock()
-        // The models the task's workers ran on, by the host's record of each launch; else the project's default (as a
-        // worker would start on it now: Opus in Fable's place while Fable is held back).
+        // The project's default (as a worker would start on it now: Opus in Fable's place while Fable is held back), the
+        // lead's model, and what the host recorded for the task's launches.
         let projectDefault = runtime.workerModel(root: root)
-        let workers = task.map { workersBasis($0, projectDefault: usage?.startModel(projectDefault, now: now) ?? projectDefault).workers }
-            ?? [usage?.startModel(projectDefault, now: now) ?? projectDefault]
+        let workers = workersBasis(task, projectDefault: usage?.startModel(projectDefault, now: now) ?? projectDefault, workflow: workflow).workers
         guard let usage else {
             return workflow.auditModel(workerModel: workers.first ?? nil, moreWorkers: Array(workers.dropFirst()), taskModel: taskModel,
                                        launchedModel: launched, security: security)
