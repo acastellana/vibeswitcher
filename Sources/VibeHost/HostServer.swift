@@ -78,6 +78,13 @@ public final class HostServer {
         /// The Mac: what this host's checked node start found (`HostImages.macNodeStart`), made by `main` only behind
         /// `HostImages.isCheckedMacNode`, by tests through the function. Nil: no node host (every host today).
         public var checkedNode: HostImages.CheckedNode?
+        /// A scratch host's test of the Mac's switch through a keeper (`MacHandoverKeeper`): the host code its test pins
+        /// (`--handover-test-keeper HEX`), and the files renamed over the target after the path check, or after the
+        /// keeper's proof (`--handover-test-swap-after-check PATH`, `--handover-test-swap-before-exec PATH`). Nil: none
+        /// (every other host; a checked node host's switch takes its pins from the record).
+        public var testKeeperHost: Data?
+        public var testSwapAfterCheck: String?
+        public var testSwapBeforeExec: String?
         /// The project allow-list (`~/.vibeswitcher/v2/projects` for the node's host on Linux): a spawn whose working
         /// folder isn't inside a repository it names is refused, saying why (see V2/ProjectAllowList.swift). Nil: any
         /// folder, as always (the Mac's and every scratch host's).
@@ -828,10 +835,13 @@ public final class HostServer {
         }
         // On Linux from the target's sealed copy, through sealed memory, writing no file (V2/HandoverMemory.swift).
         if !Platform.CodeIdentity.isAvailable { return handOverThroughMemory(to: executable, reply: reply) }
-        // The Mac's checked node host (never yet): only to a build the node's record pins; the new image's own start
-        // then finds its row by the code it runs (`HostImages.macServerPin`).
-        if isMacNodeHost, let why = HandoverTarget.macPinned(executable, pins: NodePins.read()) {
-            return reply(.error("Couldn't hand over: \(why.description)."))
+        // The Mac's checked node host (never yet): only to a build the node's record pins, and through a keeper whose
+        // running code proved to be it (V2/MacHandoverKeeper.swift); the new image's own start then finds its row by the
+        // code it runs (`HostImages.macNodeStart`).
+        switch keeperTarget(executable) {
+        case .failure(let why): return reply(.error("Couldn't hand over: \(why.description)."))
+        case .success(let expected): return handOverThroughKeeper(to: executable, expected: expected, reply: reply)
+        case nil: break
         }
         handingOver = true
         let path = config.handoverPath

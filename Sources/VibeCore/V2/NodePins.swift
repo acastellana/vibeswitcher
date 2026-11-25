@@ -126,7 +126,7 @@ public struct NodePins: Equatable, Sendable {
     }
 
     /// A cdhash's 20 bytes from its 40 lowercase hex digits; nil otherwise.
-    static func bytes(_ word: String) -> Data? {
+    public static func bytes(_ word: String) -> Data? {
         guard isHex(word) else { return nil }
         var data = Data()
         var index = word.startIndex

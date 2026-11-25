@@ -12,6 +12,9 @@ PTYSpawn.execIfLaunched(CommandLine.arguments)
 SessionParser.runIfAsked(CommandLine.arguments)
 // As the probe of a handover (see `HostHandover`): only whether this build can take over.
 HostHandover.probeIfAsked(CommandLine.arguments)
+// As the keeper of a Mac switch (V2/MacHandoverKeeper.swift): it proves its code, holds the state, gives it back only
+// to a new image that proves its own, and exits.
+MacHandoverKeeper.keepIfAsked(CommandLine.arguments)
 // As the node's egress proxy for its confined sessions (the session sandbox plan's SB9, `EgressProxy`). Hardened first.
 EgressProxy.runIfAsked(CommandLine.arguments)
 
@@ -100,6 +103,13 @@ var config = HostServer.Config(
     hostBuild: build)
 // The Mac's checked node start (`HostImages.startAsNode`, behind `isCheckedMacNode`, never yet): what it found.
 config.checkedNode = HostImages.takeCheckedMacNode()
+// A scratch host's test of the Mac's switch through a keeper (`HostServer.Config.testKeeperHost`): never the user's
+// host's, nor a checked node host's.
+if Platform.CodeIdentity.isAvailable, !ownsLaunchers, config.checkedNode == nil {
+    config.testKeeperHost = value(after: "--handover-test-keeper").flatMap(NodePins.bytes)
+    config.testSwapAfterCheck = value(after: "--handover-test-swap-after-check")
+    config.testSwapBeforeExec = value(after: "--handover-test-swap-before-exec")
+}
 config.idleExit = value(after: "--idle-exit").flatMap(TimeInterval.init) ?? 600
 // A bench's host: it ends, sessions and all, with the bench (see `HostServer.Config.owner`). Kept through a handover.
 config.owner = value(after: "--exit-with").flatMap(pid_t.init).flatMap { $0 > 0 ? $0 : nil }
@@ -134,7 +144,8 @@ config.logPath = value(after: "--log") ?? (ownsLaunchers ? VibePaths.root.append
 // What a build this one hands over to is started with: the same, without this start's handover.
 let handoverFlags: [String: Bool] = ["--handover": true, "--handover-fallback": true, "--handover-fail-restore": false,
                                      "--handover-fallback-app": true, "--app-executable": true,
-                                     HostStart.appKeyFlag: false, HostImages.imagePathFlag: true, HandoverMemory.fallbackImageFlag: true].merging(TestAppPrincipal.handoverFlags) { $1 }
+                                     HostStart.appKeyFlag: false, HostImages.imagePathFlag: true, HandoverMemory.fallbackImageFlag: true,
+                                     MacHandoverKeeper.channelFlag: true, MacHandoverKeeper.pidFlag: true].merging(TestAppPrincipal.handoverFlags) { $1 }
     // On Linux --node-root and --server too: a handover appends the target's, and its fallback's (V2/HandoverMemory.swift).
     .merging(HandoverMemory.handoverFlags) { $1 }
 config.arguments = HostHardening.withoutTestFlags(arguments.dropFirst().enumerated().reduce(into: (kept: [String](), skip: false)) { result, item in
@@ -181,7 +192,8 @@ if let handoverPath {
         // A test of the fallback: as if this build couldn't read the state (on Linux, once it has read it and its
         // secrets, below: V2/HandoverMemory.swift).
         if arguments.contains("--handover-fail-restore"), !HandoverMemory.failsRestoreLate { throw HostHandover.Failure.unreadable("--handover-fail-restore") }
-        var state = try HostHandover.read(from: handoverPath)
+        // A Mac switch through a keeper: the state it held, given only once this image proved its code to it.
+        var state = try MacHandoverKeeper.takeIfAsked(arguments)?.get() ?? HostHandover.read(from: handoverPath)
         handedOver = state
         restoredSecrets = HostHandover.takeSecrets(from: &state)
         restoring = state

@@ -319,8 +319,9 @@ opened from disk or anything is served), in this order, each failure a refusal t
 3. The host's own running code, from the kernel (`Platform.CodeIdentity.ownCdhash`, `SecCodeCopySelf`'s dynamic
    cdhash): unreadable, or no row's host, refuses ("this host's code is no host the node's record pins").
 4. The `--server` file, opened once (`O_NOFOLLOW`, a regular file, the node root's own `bin/vibeswitcher-server` by
-   device and inode, as Linux's `openServer`), and the cdhash of that opened file for this Mac's slice must be the
-   row's server: another build's server, an unsigned or unreadable file refuses.
+   device and inode, as Linux's `openServer`), and its cdhash for this Mac's slice, read by path while the path still
+   names the file opened (device and inode after the read), must be the row's server: another build's server, an
+   unsigned or unreadable file, a link, a copy elsewhere refuses.
 
 The result (`HostImages.CheckedNode`: the row, the server's cdhash) goes in the host's config, and only a host holding
 one is a node host (`HostServer.isMacNodeHost`): it runs the server child by the row's server cdhash (each start
@@ -354,14 +355,21 @@ What stays: a file swapped in the short window between the keeper's proof (2) an
 gets nothing, but the old image is gone by then: the keeper closes everything and the sessions end. "The old host keeps
 running" holds for every refusal before the exec, not for that one; closing it too needs an exec bound to the checked
 code (an open question for the reviewer: `LightweightCodeRequirements`' launch constraint, untested with an in-place
-exec and ad-hoc signatures). A proven new image that can't restore doesn't go back by an unchecked exec: it goes back
-through the same keeper to the old image's code, by its cdhash.
+exec and ad-hoc signatures). A proven new image that can't restore doesn't go back (its fallback would be an unchecked
+exec by path): it exits, and the sessions end, said in its log. Going back through a keeper of its own is an idea for
+the reviewer.
 
 **The server child after a handover.** On the Mac a server child checks its connector's peer once, at its start, and
-a token taken before an exec is refused after it. So the checked node host ends its server child (SIGTERM, then
-SIGKILL after `replaceLimit`, reaped) before it parks the state, and the new image starts a new one from its own checked
+a token taken before an exec is refused after it. So the checked node host ends its server child (its connector
+closed, SIGKILL, reaped: `ServerChild.endForHandover`) before it parks the state, started again if the switch fails
+before its exec, and the new image starts a new one from its own checked
 start: its connector is a pair the new image made, so the server's check (`NodeCheck.macConnectorRefusal`) runs
 against the new image's code. No Mac handover carries a server child.
+
+**What a real Mac proved (2026-11-25, this Mac, macOS 27.2, SIP on):** the start's checks with this Mac's real signed
+images and the kernel's own cdhash (`MacCheckedStartTests`); the keeper's proofs by fresh audit tokens of real
+hardened host images, the in-place exec at the same pid, every descriptor carried over `SCM_RIGHTS` and renumbered,
+and a real server child ended and started again (`MacKeeperHandoverTests`).
 
 **What no test reaches while `macUnbuilt`, `approvalMeasured` and `isCheckedMacNode` are off:** a real `--node` host
 process reading the installed record (the record's path isn't a test's to choose in a node process), a real node
@@ -371,10 +379,15 @@ take the keeper's switch end to end.
 
 **What it doesn't cover** (open, in the reviewer's words where they are the reviewer's):
 
-- **A switch's target swapped between check and exec (F6)** "is reliable, not a tight race: `HostServer.handOver`
-  checks the path, then probes the new build off the queue" before the exec, so a host image swapped in that window
-  runs, with the sessions' descriptors and the handover's secrets, and asks no record. "What closes it is the new image
-  proving its code by token before the state is handed over, with item 13."
+- **A switch's target swapped between check and exec (F6): closed by the keeper (2026-11-25, item 13), but for one
+  window.** The reviewer: it "is reliable, not a tight race: `HostServer.handOver` checks the path, then probes the new
+  build off the queue". Now a checked node host's switch hands nothing over the exec: a swap before the keeper's proof
+  is refused with the old host as it was (`MacKeeperHandoverTests/aTargetSwappedAfterThePathCheckHandsOverNothing`), and
+  a swap after it gets no state, secret, terminal, lock or listener
+  (`aTargetSwappedJustBeforeTheExecGetsNothing`); in that last window the old image is gone and the sessions end.
+- **The stale connector check after a handover: closed (item 13).** No Mac handover carries a server child: the node
+  host ends and reaps it before the exec, and the new image starts one whose connector it made
+  (`afterASwitchTheServerChildIsANewProcess`).
 - **Every pinned build passes for good (F8).** "Every pinned build up to 16 back passes every check for good, so a
   session can re-bootstrap an old pinned build whole": an older build's host, server and command line are each the
   record's. The lever is the administrator step: on a security update, install with `--fresh` (or run

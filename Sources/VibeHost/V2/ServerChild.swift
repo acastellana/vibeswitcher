@@ -482,6 +482,35 @@ public final class ServerChild {
         if DispatchQueue.getSpecific(key: HostServer.queueKey) != nil { work() } else { queue.sync(execute: work) }
     }
 
+    /// A Mac switch through a keeper (the node on the Mac's design, "The server child after a handover"): the child
+    /// running is ended (its connector closed, SIGKILL, reaped) and none is started again until `resumeAfterHandover`,
+    /// so the new image starts its own, whose connector is a pair it made and whose check runs against its code. Its pid,
+    /// or nil when none ran. On `queue`.
+    @discardableResult
+    func endForHandover() -> pid_t? {
+        let running = lock.withLock { () -> Running? in
+            guard !stopped else { return nil }
+            stopped = true
+            restartPending = false
+            defer { child = nil }
+            return child
+        }
+        guard let running else { return nil }
+        running.watch.cancel()
+        server?.closeAppConnector(running.connector)
+        kill(running.pid, SIGKILL)
+        var status: Int32 = 0
+        while waitpid(running.pid, &status, 0) < 0, errno == EINTR {}
+        if let server { Self.say(server, "server child pid \(running.pid) ended for the handover: the new image starts its own") }
+        return running.pid
+    }
+
+    /// The switch `endForHandover` was for failed before its exec: the server child started again. On `queue`.
+    func resumeAfterHandover() {
+        lock.withLock { stopped = false }
+        spawn()
+    }
+
     /// A server child the host stopped before it took it (`HostServer.stop` ran on the queue first, finding no
     /// `serverChild` to stop): started never, its copy closed (`stop`), and the carried child of `record`, when there is
     /// one, ended and reaped with its connector closed (`release`), so a host that stops and waits to exit

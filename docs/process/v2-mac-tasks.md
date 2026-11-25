@@ -343,6 +343,24 @@ or decided. Done on Linux, tested on both systems (`ApprovalJudgmentTests`, `App
    the administrator step by the user, and a switch that execs the checked file (not its path) or has the new image
    prove its code before the state is handed over. A record that can't be taken has no recovery short of the
    administrator step run by hand (`--fresh`) or a newer install: the install refuses an installed commit.
+   **Built 2026-11-25 (`v2-mac-checked-start`, on `v2-mac-anchor`; off: `isCheckedMacNode` stays false; needs a
+   review)**, as the design's "The checked node start" says. *Closed:* a `--node` host on the Mac starts only after
+   `HostImages.macNodeStart` found, in order, the node root's own lock, the record, its own running code (the kernel's
+   cdhash) as a row's host, and its `--server` (opened once, the node root's own file) as that row's server; only a host
+   holding that result (`Config.checkedNode`) is a node host (a server child by the row's cdhash, `vaultV2`, the book's
+   record and hooks), and a `--node` host without one runs no server child (`MacCheckedStartTests`, red on the seam
+   `80358389`, green from `783e585d`). F6: a checked node host's switch goes through a keeper whose fresh token runs the
+   pinned target's code, and the state, secrets and every descriptor cross the exec only to a new image whose fresh
+   token runs the keeper's code; the server child is ended and reaped before the exec and started again by the new
+   image (`MacKeeperHandoverTests`, scratch hosts with `--handover-test-keeper`). *A real Mac proved:* all of it with
+   this Mac's real hardened images, tokens and in-place exec. *Still open:* a file swapped between the keeper's proof
+   and the exec runs at the job's pid with nothing, and the sessions end; a proven new image that can't restore exits
+   (no unchecked fallback); F8 as above. *What step 5 (the LaunchAgent, next) can rely on:* the job's program, started
+   with `--node --node-root <home>/.vibeswitcher/v2/node --server <that root>/bin/vibeswitcher-server` on the node root's
+   `host.lock`, either refuses with one line on stderr (exit 1) or is the pinned host of its row with that row's server
+   as its child, on the job's pid across every switch; a switch never changes the pid; and the job's stderr is where
+   each refusal is said. Step 5 still owes the plist, `launchctl`, the command line's start and stop, and the switch-on
+   review with the user's go-ahead.
 
 14. **(Answered, the re-review questions of 2026-11-22)**
    - *Is `HostImages.macServerRefusal`'s set of the account's locks complete?* It names the app's
@@ -359,6 +377,10 @@ or decided. Done on Linux, tested on both systems (`ApprovalJudgmentTests`, `App
      a Mac node host would leave it on for the rest. Nothing sets it today (`isCheckedMacNode` is false). When the
      checked node start lands (item 13), move it into the vault (`LeadVault.Book`, set by the host that owns it) and
      pass the book's own `on:` from the `.seal` and `.verify` hooks in `LeadVault.swift` (a one-line hook each).
+     **Done 2026-11-25 (`v2-mac-checked-start`):** `LeadVault.Book.recordsActions` (Linux: every book; the Mac: set by
+     the checked node host that owns it), passed by the `.seal` and `.verify` hooks and `VaultV2Handler`; the
+     process-wide `recordsOnThisHost` is gone (`LeadVaultV2Tests/theRecordIsTheBooksNotTheProcesss`, red on the seam
+     `056bd608`, green from `b0a2aa98`).
 
 ## What `v2` found on the Mac and doesn't change
 
