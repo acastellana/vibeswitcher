@@ -61,6 +61,9 @@ can't be done.
 Smaller: the all-done mark can't be dismissed (S, a regression), Run in New Shell and Run on a one-line command (S), first install is five terminal steps (S), reopening after
 a restart is terminal lines (S), no changelog on the update (S).
 
+**Every step that still sends you to a terminal**, 42 of them, with the click that replaces each and a build order:
+[V2 without a terminal](v2-no-terminal.md).
+
 The gap list of 2026-11-19 is replaced: its numbers, still cited elsewhere ("gap 9", "gap 10" in
 `v2-port-map.md` and `Engine/RestartResume.swift`), were settings and restarts, both closed on 2026-11-20.
 

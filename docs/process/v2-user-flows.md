@@ -48,6 +48,7 @@ with the step when one matters) or whether something is **missing in V2 everywhe
 Under trust needs three things from a terminal first: `vibeswitcher web`, the pairing phrase confirmed with the code,
 and `vibeswitcher set web_acts trust`. The pairing lasts 12 hours and a reload loses it. Without trust, every V2 step
 marked "(acts under trust)" is instead a line the page shows, to copy and run in a terminal with a typed code.
+Every such step, with the click that would replace it and a build order: [V2 without a terminal](v2-no-terminal.md).
 
 ## 1. First install and first project
 
