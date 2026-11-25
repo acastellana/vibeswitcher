@@ -8,11 +8,13 @@ extension HostServer {
     /// (`.success`), or why it is refused (`.failure`); nil: neither (Linux's, the Mac app's and every scratch host's
     /// switch, as before). A checked Mac node host's: the target a host the node's record pins (`HandoverTarget.macPinned`),
     /// its file's cdhash. A scratch host's test (`Config.testKeeperHost`): the target's file must have that cdhash.
-    func keeperTarget(_ executable: String) -> Result<Data, MacHandoverKeeper.Refused>? {
+    /// `pins` and `cdhashOf`: how the record and a file's cdhash are read (tests give them).
+    func keeperTarget(_ executable: String, pins: @autoclosure () -> Result<NodePins, NodePins.Refused> = NodePins.read(),
+                      cdhashOf: (String) -> Data? = { Platform.CodeIdentity.cdhash(atPath: $0) }) -> Result<Data, MacHandoverKeeper.Refused>? {
         guard Platform.CodeIdentity.isAvailable else { return nil }
         if isMacNodeHost {
-            if let why = HandoverTarget.macPinned(executable, pins: NodePins.read()) { return .failure(MacHandoverKeeper.Refused(why.description)) }
-            guard let cdhash = Platform.CodeIdentity.cdhash(atPath: executable) else {
+            if let why = HandoverTarget.macPinned(executable, pins: pins(), cdhashOf: cdhashOf) { return .failure(MacHandoverKeeper.Refused(why.description)) }
+            guard let cdhash = cdhashOf(executable) else {
                 return .failure(MacHandoverKeeper.Refused("\(executable) has no code signature to check it by"))
             }
             return .success(cdhash)

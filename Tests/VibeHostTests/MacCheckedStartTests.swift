@@ -138,3 +138,33 @@ struct MacCheckedStartTests {
         #expect(refused.child == nil, "a --node host with another build's server ran a server child")
     }
 }
+
+/// The blind check's item 1: a checked node host's switch proves the keeper against the cdhash the record was checked
+/// against, read once. Here the target's file reads as the genuine pinned host the first time and as another image's
+/// after (a file a session renames over it in between): the code expected of the keeper must be the genuine one, never
+/// the second read's. Red before: the path was read again for the expected code, and the swapped image's passed.
+@Suite(.enabled(if: Platform.CodeIdentity.isAvailable, "the Mac's switch through a keeper: code identity"))
+struct MacKeeperTargetTests {
+    @Test func theKeeperIsProvenAgainstTheCodeTheRecordWasCheckedAgainst() throws {
+        let own = try #require(Platform.CodeIdentity.ownCdhash())
+        let genuine = Data(repeating: 0x11, count: 20), swapped = Data(repeating: 0x22, count: 20)
+        let row = NodePins.Build(commit: String(repeating: "a", count: 40), host: own, server: Data(repeating: 0x5e, count: 20), cli: Data(repeating: 0xc1, count: 20))
+        let next = NodePins.Build(commit: String(repeating: "c", count: 40), host: genuine, server: Data(repeating: 0x5f, count: 20), cli: Data(repeating: 0xc2, count: 20))
+        let checked = HostImages.CheckedNode(build: row, serverPath: "/usr/bin/true", server: row.server)
+        let host = try TestHost(vault: LeadVault.Book(), appConnector: false, checkedNode: checked)
+        let child = ServerChild.adopt(arguments: ["vibeswitcher-host", "--node", "--server", "/usr/bin/true"], ownsLaunchers: false, nodeRoot: "/nonexistent",
+                                      config: host.server.config, server: host.server)
+        defer { child?.stop() }
+        try #require(host.server.queue.sync { host.server.isMacNodeHost })
+        var reads = 0
+        let target = host.server.queue.sync {
+            host.server.keeperTarget("/target", pins: .success(NodePins(uid: getuid(), builds: [row, next])), cdhashOf: { _ in
+                reads += 1
+                return reads == 1 ? genuine : swapped
+            })
+        }
+        guard case .success(let expected)? = target else { Issue.record("a pinned target refused: \(String(describing: target))"); return }
+        #expect(expected == genuine, "the keeper would be proven against a second read of the path (\(NodePins.hex(expected)))")
+        #expect(reads == 1, "the target's file was read \(reads) times")
+    }
+}
