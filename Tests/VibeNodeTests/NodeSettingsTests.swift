@@ -149,7 +149,14 @@ struct NodeSettingsTests {
         #expect(NodeSettings.projectsFolder(files: files) == "/srv/work")
         _ = try set("projects_folder", "default", files: files)
         #expect(NodeSettings.projectsFolder(files: files) == "~/dev")
+        #if os(Linux)
         #expect(files.preferences?.string(forKey: "projectsFolder") == nil)
+        #else
+        // The store holds no folder. Its read is the process's registration domain's once a test of this process has
+        // made the app's `Preferences` (which registers "~/dev"): its own domain is asked (VibePlatformTests' SettingsTests).
+        let own = try #require(files.preferences as? UserDefaults)
+        #expect(own.persistentDomain(forName: files.preferencesDomain)?["projectsFolder"] == nil)
+        #endif
         let setting = try #require(NodeSettings.setting("projects_folder"))
         for refused in ["dev", "~other/dev", "./dev", "/a\nb", String(repeating: "/a", count: 600)] {
             #expect((try? NodeSettings.parse(setting, refused).get()) == nil, "\(refused)")

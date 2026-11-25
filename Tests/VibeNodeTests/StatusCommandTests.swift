@@ -4,7 +4,8 @@ import VibeCore
 import VibeNode
 
 /// A fake `claude` on a terminal of its own: a copy of `sleep` named `claude` (the process table knows an agent by its
-/// name), exec'd by a shell that `script` runs on a new pty, in `folder`. The app's `FakeClaude` isn't this target's,
+/// name; on the Mac signed as a program of its own, `signedAsItsOwn`, or it's killed as it starts), exec'd by a shell
+/// that `script` runs on a new pty, in `folder`. The app's `FakeClaude` isn't this target's,
 /// and nothing here needs more than a process that is named so and sits on a terminal.
 ///
 /// `script` is started by `Platform.Spawn` (its stdin a close-on-exec pipe this holds open, nothing else of this
@@ -25,6 +26,7 @@ final class FakeAgent {
         try FileManager.default.createDirectory(at: bin, withIntermediateDirectories: true)
         let claude = bin.appendingPathComponent("claude")
         try copyClosedOnExec(URL(fileURLWithPath: "/bin/sleep").resolvingSymlinksInPath().path, to: claude.path)
+        try signedAsItsOwn(claude.path)
         let command = "cd '\(folder.path)' && exec '\(claude.path)' 600"
         let deadline = MacTime.real.awake() + 60
         while pid == 0, MacTime.real.awake() < deadline, !Task.isCancelled {
