@@ -156,3 +156,110 @@ test('A5: elsewhere, the line that unpairs every browser, and why', async () => 
     assert.match(detail.textContent, options.acts ? /doesn’t take it from a page/ : /reads and drafts/);
   }
 });
+
+// An ended session of yours, as the node lists it (`node.ended`), and the session it is started again as.
+const ENDED = { session: 'local:5c1e7a92-0000-4000-8000-000000000001', folder: '/home/dev/projects/example-api', name: 'example-api',
+  conversation: '7a3f0c21-9b4d-4e8a-a1f2-3c5d7e9b0a14', at: '2026-11-25T08:00:00.000Z', exit: { status: 0, cause: 'exited 0', at: '2026-11-25T08:00:00.000Z' } };
+const AGAIN = 'local:aa11bb22-0000-4000-8000-000000000002';
+
+test('B3: an ended session’s own view has Resume: Resuming…, then the page goes to it once listed; refused, the node’s words', async () => {
+  // What the session view's terminal and chat watch for, which the stand-in DOM doesn't have: nothing to watch here.
+  globalThis.MutationObserver ??= class { observe() {} disconnect() {} };
+  globalThis.ResizeObserver ??= class { observe() {} unobserve() {} disconnect() {} };
+  const { sessionView } = await import('../js/views/session.js');
+  for (const code of ['es', 'en']) {
+    setLanguage(code);
+    let answer = null;
+    const app = fakeApp({ route: { name: 'session', id: ENDED.session }, state: { node: { ...nodeValue(), ended: [ENDED] } }, kinds: ['session.resume'],
+      reply: () => new Promise((resolve) => { answer = resolve; }) });
+    app.ui.inspectorShown = () => false;
+    app.ui.inspectorWide = () => false;
+    const view = sessionView(app);
+    view.show?.(ENDED.session);
+    view.render?.();
+    const el = view.el;
+    assert.doesNotMatch(el.textContent, /vibeswitcher resume/, `${code}: no line where Resume does it`);
+    assert.match(el.textContent, new RegExp(t('seItEndedResume').slice(0, 12)));
+    const resume = buttonNamed(el, t('acResume'));
+    assert.ok(resume, code);
+    resume.click();
+    assert.equal(resume.textContent, t('drResuming'));
+    assert.deepEqual(app.sent, [{ kind: 'session.resume', args: { session: ENDED.session } }]);
+    answer({ ok: true, result: { reopened: [{ was: ENDED.session, folder: ENDED.folder, conversation: ENDED.conversation, session: AGAIN, terminal: 'pts/9' }], refused: [] } });
+    await flush();
+    assert.match(el.textContent, new RegExp(t('drStartedWaiting').slice(0, 10)), 'started: it opens once listed');
+    app.store.state.sessions.set(AGAIN, { id: AGAIN, hosted: true, cwd: ENDED.folder, status: 'working' });
+    app.store.notify('sessions');
+    assert.deepEqual(app.went, ['#/s/' + encodeURIComponent(AGAIN)]);
+  }
+  setLanguage('en');
+});
+
+test('B3: Resume refused says the node’s words, the button back; where the page doesn’t act, the line and why', async () => {
+  const { resumeOrLine } = await import('../js/views/drive.js');
+  setLanguage('en');
+  const holder = (nodes) => { const el = document.createElement('div'); el.append(...nodes); return el; };
+  // Nothing to resume (its conversation wasn't recorded): said, nothing opened.
+  const none = fakeApp({ kinds: ['session.resume'], reply: () => ({ ok: true, result: { reopened: [], refused: [{ was: ENDED.session, folder: ENDED.folder, why: 'its conversation id wasn’t recorded: nothing to resume' }] } }) });
+  const a = holder(resumeOrLine(none, ENDED));
+  buttonNamed(a, 'Resume').click();
+  await flush();
+  assert.match(a.textContent, /The node didn’t start it again: its conversation id wasn’t recorded/);
+  assert.deepEqual(none.went, []);
+  // Refused outright: the node's words, the button back.
+  const gone = fakeApp({ kinds: ['session.resume'], reply: () => ({ ok: false, error: { code: 'gone', message: 'no ended session local:5c1e of yours to resume' } }) });
+  const b = holder(resumeOrLine(gone, ENDED));
+  buttonNamed(b, 'Resume').click();
+  await flush();
+  assert.match(find(b, byClass('refused')).textContent, /no ended session local:5c1e of yours to resume/);
+  assert.equal(buttonNamed(b, 'Resume').disabled, false);
+  for (const options of [{ acts: false, kinds: ['session.resume'] }, { acts: true, kinds: ['send'] }]) {
+    const c = holder(resumeOrLine(fakeApp(options), ENDED));
+    assert.equal(buttonNamed(c, 'Resume'), null);
+    assert.match(c.textContent, /vibeswitcher resume 5c1e7a92/);
+    assert.match(c.textContent, options.acts ? /resumes a session only from a terminal/ : /doesn’t act for you here/);
+  }
+});
+
+test('B2: Recent projects get New session and Start the lead; each starts from here and opens what started; elsewhere their lines', async () => {
+  const { newProjectView } = await import('../js/views/own.js');
+  const SITE = '/home/dev/projects/example-site';
+  for (const code of ['es', 'en']) {
+    setLanguage(code);
+    const started = 'local:cc33dd44-0000-4000-8000-000000000003';
+    const app = fakeApp({ route: { name: 'new' }, state: { node: { ...nodeValue(), home: '/home/dev', ended: [] } }, kinds: ['recent', 'session.new', 'lead'],
+      reply: (kind) => (kind === 'recent' ? { ok: true, result: { projects: [{ folder: SITE, lastUsed: '2026-11-25T08:00:00.000Z', lead: null }] } }
+        : kind === 'session.new' ? { ok: true, result: { session: started, terminal: 'pts/4', agent: 'claude', folder: SITE, model: null, preset: null } }
+          : { ok: true, result: { happened: 'started', session: 'local:lead0000-0000-4000-8000-000000000004', program: '/usr/bin/claude', notes: [] } }) });
+    const view = newProjectView(app);
+    view.render();
+    await flush();
+    view.render();
+    const recent = find(view.el, byClass('recent'));
+    assert.doesNotMatch(recent.textContent, /vibeswitcher new|vibeswitcher lead/, `${code}: no lines where the buttons do it`);
+    assert.match(recent.textContent, new RegExp(t('owRecentActs').slice(0, 14)));
+    buttonNamed(recent, t('owNewSessionHere')).click();
+    await flush();
+    assert.deepEqual(app.sent.at(-1), { kind: 'session.new', args: { folder: SITE, agent: 'claude' } });
+    app.store.state.sessions.set(started, { id: started, hosted: true, cwd: SITE, status: 'working' });
+    app.store.notify('sessions');
+    assert.deepEqual(app.went, ['#/s/' + encodeURIComponent(started)]);
+    buttonNamed(recent, t('acStartLead')).click();
+    await flush();
+    assert.deepEqual(app.sent.at(-1), { kind: 'lead', args: { folder: SITE } });
+    assert.match(recent.textContent, new RegExp(t('drLeadStartedWaiting').slice(0, 10)));
+  }
+  // A page that reads: the lines, and why.
+  setLanguage('en');
+  const reads = fakeApp({ route: { name: 'new' }, acts: false, state: { node: { ...nodeValue(), home: '/home/dev', ended: [] } }, kinds: ['recent', 'session.new', 'lead'],
+    reply: () => ({ ok: true, result: { projects: [{ folder: SITE, lastUsed: '2026-11-25T08:00:00.000Z', lead: null }] } }) });
+  const view = newProjectView(reads);
+  view.render();
+  await flush();
+  view.render();
+  const recent = find(view.el, byClass('recent'));
+  assert.equal(buttonNamed(recent, 'New session'), null);
+  assert.match(recent.textContent, /vibeswitcher new/);
+  assert.match(recent.textContent, /vibeswitcher lead/);
+  assert.match(recent.textContent, /doesn’t act for you here/);
+});

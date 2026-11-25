@@ -10,8 +10,8 @@ import { chatView } from './chat.js';
 import { teamStrip } from './lead.js';
 import { inspector } from './inspector.js';
 import { terminalView } from './terminal.js';
-import { actionsStrip } from './drive.js';
-import { copyLine } from './cards.js';
+import { actionsStrip, resumeOrLine } from './drive.js';
+import { actsFor } from '../acting.js';
 import { endedEntry, resumeLine } from '../actions.js';
 import { t } from '../i18n.js';
 
@@ -82,16 +82,18 @@ export function sessionView(app) {
   let goneDrawn = '';
   function drawGone(id) {
     const entry = endedEntry(store.state.node, id);
-    const key = JSON.stringify(entry);
+    const key = JSON.stringify([entry, store.acts(), store.can('session.resume')]);
     if (key === goneDrawn) return;
     goneDrawn = key;
     const line = resumeLine(entry);
+    // Where the page acts and the node lists `session.resume`, Resume starts it again from here (views/drive.js).
+    const acts = !!line && actsFor(app, 'session.resume');
     setText(goneWhy, !entry ? t('seItEndedOrItsLink')
-      : line ? t('seItEndedThisStartsIt') : t('seItEndedAndItsConversation'));
+      : acts ? t('seItEndedResume') : line ? t('seItEndedThisStartsIt') : t('seItEndedAndItsConversation'));
     goneExit.hidden = !entry?.exit;
     setText(goneExit, entry?.exit ? t('seExit', { cause: entry.exit.cause, time: clock(entry.exit.at) }) : '');
     goneResume.hidden = !line;
-    goneResume.replaceChildren(...(line ? [copyLine(line, 'the command that resumes it')] : []));
+    goneResume.replaceChildren(...(line ? resumeOrLine(app, entry) : []));
   }
   const loading = h('div', { class: 'pane head-skeleton', hidden: true, 'aria-hidden': 'true' }, h('span', { class: 'bone wide' }), h('span', { class: 'bone' }), h('span', { class: 'bone short' }));
   // The session's own column, and the inspector over its right edge: open as a column, the session's column gives

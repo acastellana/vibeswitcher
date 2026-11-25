@@ -5,17 +5,16 @@
 // - New project (#/new): the lines that make a project and start its lead, and the recent folders with theirs.
 // Nothing here starts anything: each line is copied and run in a terminal, where the code is typed.
 
-import { h, setClass, framed } from '../dom.js';
+import { h, setClass, setText, framed } from '../dom.js';
 import { sessionMark, icon } from '../marks.js';
 import { STATES, stateOf, since, tilde, lastPart, AGENTS } from '../words.js';
 import { twoColumns, queryWords, holdsAll } from './twocol.js';
 import { t } from '../i18n.js';
-import { actsFor, doButton } from '../acting.js';
+import { actsFor } from '../acting.js';
 import { sessionHref, projectHref, leadMarks } from '../ui.js';
 import { ownSession } from './left.js';
-import { newSessionForm, newLeadForm, newProjectForm } from './drive.js';
-import { copyLine } from './cards.js';
-import { resumeLine, recentProjects, projectLines } from '../actions.js';
+import { newSessionForm, newLeadForm, newProjectForm, startOrLine, resumeOrLine, leadStartOrLine } from './drive.js';
+import { recentProjects, projectLines } from '../actions.js';
 
 const ENDED_SHOWN = 5;
 
@@ -65,8 +64,8 @@ export function ownSessionsView(app, { session = null } = {}) {
   };
   const starting = newSessionForm(app, { folder });
   const endedList = h('div', { class: 'ended-list' });
-  const ended = h('section', { class: 'ended', hidden: true }, h('h2', { class: 'new-title' }, t('owEndedLately')), endedList,
-    h('p', { class: 'confirm-note' }, t('owRunTheLineInA')));
+  const endedNote = h('p', { class: 'confirm-note' }, t('owRunTheLineInA'));
+  const ended = h('section', { class: 'ended', hidden: true }, h('h2', { class: 'new-title' }, t('owEndedLately')), endedList, endedNote);
   // The list's head: a new session (its form beside the list) and a new project.
   const newSession = h('a', { class: 'icon-button tc-new', href: '#/sessions/new', 'aria-label': t('owNewSession'), title: t('owNewSession') }, icon('plus', 16));
   const newProject = h('a', { class: 'icon-button', href: '#/new', 'aria-label': t('newProject'), title: t('newProject') }, icon('team', 16));
@@ -97,14 +96,14 @@ export function ownSessionsView(app, { session = null } = {}) {
     starting.el.hidden = state.connection === 'unpaired' || state.connection === 'revoked';
     starting.update();
     const endedNow = (state.node?.ended || []).slice(0, ENDED_SHOWN);
-    const key = JSON.stringify([endedNow, state.node?.home, store.acts()]);
+    const key = JSON.stringify([endedNow, state.node?.home, store.acts(), store.can('session.resume')]);
     if (key !== endedDrawn) {
       endedDrawn = key;
       ended.hidden = endedNow.length === 0;
+      setText(endedNote, actsFor(app, 'session.resume') ? t('owEndedActs') : t('owRunTheLineInA'));
       endedList.replaceChildren(...endedNow.map((entry) => h('div', { class: 'ended-row' },
         h('div', { class: 'ended-name' }, h('span', null, entry.name || t('owASession')), h('span', { class: 'ended-folder' }, tilde(entry.folder, state.node?.home))),
-        entry.conversation && actsFor(app, 'session.resume') ? doButton(app, { label: t('acResume'), kind: 'session.resume', quiet: true, args: () => ({ session: entry.session }) }).el : null,
-        entry.conversation ? copyLine(resumeLine(entry), t('owTheCommandThatResumesIt')) : h('p', { class: 'confirm-note' }, t('owItsConversationIdWasnT')))));
+        ...(entry.conversation ? resumeOrLine(app, entry, { quiet: true }) : [h('p', { class: 'confirm-note' }, t('owItsConversationIdWasnT'))]))));
     }
     columns.show({ title: t('owNewSession'), sub: mine.length ? t('owCount', { n: mine.length }) : '', body: [startPage] });
   }
@@ -120,8 +119,8 @@ export function newProjectView(app) {
   const project = newProjectForm(app);
   const leading = newLeadForm(app);
   const recentList = h('div', { class: 'ended-list' });
-  const recent = h('section', { class: 'ended recent', hidden: true }, h('h2', { class: 'new-title' }, t('owRecentFolders')), recentList,
-    h('p', { class: 'confirm-note' }, t('owRunALineInA')));
+  const recentNote = h('p', { class: 'confirm-note' }, t('owRunALineInA'));
+  const recent = h('section', { class: 'ended recent', hidden: true }, h('h2', { class: 'new-title' }, t('owRecentFolders')), recentList, recentNote);
   const el = h('section', { class: 'centre screen new', 'aria-label': t('newProject') },
     screenHead(app, t('newProject')), h('div', { class: 'screen-body' }, h('div', { class: 'screen-col' }, project.el, leading.el, recent)));
   let known = null;
@@ -135,16 +134,25 @@ export function newProjectView(app) {
       store.request('recent', {}).then((reply) => { if (reply.ok) { known = reply.result.projects; render(); } else asked = false; });
     }
     const rows = recentProjects(known, state.sessions.values(), state.node?.ended || [], state.leads.values());
-    const key = JSON.stringify([rows, state.node?.home]);
+    const key = JSON.stringify([rows, state.node?.home, store.acts(), store.can('session.new'), store.can('lead')]);
     if (key === drawn) return;
     drawn = key;
     recent.hidden = rows.length === 0;
+    // Where the page acts and the node lists `session.new` and `lead`, New session and Start lead start them from here
+    // (views/drive.js, the page goes to what started); elsewhere each line and why.
+    const startsHere = actsFor(app, 'session.new') || actsFor(app, 'lead');
+    setText(recentNote, startsHere ? t('owRecentActs') : t('owRunALineInA'));
     recentList.replaceChildren(...rows.map((one) => {
       const lines = projectLines(one);
-      return h('div', { class: 'ended-row' },
-        h('div', { class: 'ended-name' }, h('span', null, lastPart(one.folder) || one.folder), h('span', { class: 'ended-folder' }, tilde(one.folder, state.node?.home))),
-        copyLine(lines.session, t('owStartsIn', { name: lastPart(one.folder) })),
-        lines.lead ? copyLine(lines.lead, t('owTheCommandThatStartsIts')) : h('a', { class: 'link', href: projectHref(one.lead) }, t('owItsLeadRunsOpenIt')));
+      const name = lastPart(one.folder) || one.folder;
+      return h('div', { class: 'ended-row recent-row' },
+        h('div', { class: 'ended-name' }, h('span', null, name), h('span', { class: 'ended-folder' }, tilde(one.folder, state.node?.home))),
+        h('div', { class: 'recent-acts' },
+          ...startOrLine(app, { kind: 'session.new', label: t('owNewSessionHere'), quiet: true, orLine: false, args: () => ({ folder: one.folder, agent: 'claude' }),
+            line: lines.session, lineLabel: t('owStartsIn', { name }), terminalOnly: 'drStartTerminalOnly',
+            target: (result) => ({ session: typeof result.session === 'string' ? result.session : null }) }),
+          ...(lines.lead ? leadStartOrLine(app, { folder: one.folder, label: t('acStartLead'), quiet: true, line: lines.lead, lineLabel: t('owTheCommandThatStartsIts') })
+            : [h('a', { class: 'link', href: projectHref(one.lead) }, t('owItsLeadRunsOpenIt'))])));
     }));
   }
 

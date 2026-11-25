@@ -437,8 +437,10 @@ export function actionsStrip(app = null) {
 // ("Starting…" while the request is out), and once the node said what it started, the page goes there as soon as the
 // store lists it (the reply can come before the stream's delta); the node's refusal said under the button. Elsewhere
 // the line to run, and why it is a line. `target(result)`: { session } for a session, { lead } for a lead's session;
-// `note(result)` what to say instead of going (a lead that waits for its host). Returns the slot's nodes.
-function startOrLine(app, { kind, label, args, line, lineLabel, terminalOnly, target, note = () => null }) {
+// `note(result)` what to say instead of going (a lead that waits for its host). `busy`: the button's words while it
+// is out; `orLine`: the terminal's line beside the button too (false: the button alone, the line only where there is
+// none). Returns the slot's nodes.
+export function startOrLine(app, { kind, label, args, line, lineLabel, terminalOnly, target, note = () => null, busy = null, orLine = true, quiet = false, after = null, confirm = null }) {
   if (!actsFor(app, kind)) {
     return [line ? copyLine(line, lineLabel) : null, h('p', { class: 'confirm-note start-why' }, app.store.acts() ? t(terminalOnly) : t('drStartPageReads'))].filter(Boolean);
   }
@@ -446,8 +448,9 @@ function startOrLine(app, { kind, label, args, line, lineLabel, terminalOnly, ta
   // Where the user was when it started: the page goes to what started only while they are still there.
   const here = () => JSON.stringify(app.ui.state?.route ?? null);
   let from = null;
-  const button = doButton(app, { label, kind, args, className: 'start-button', busy: t('drStarting'), done: (reply) => {
+  const button = doButton(app, { label, kind, args, quiet, confirm, className: 'start-button', busy: busy || t('drStarting'), done: (reply) => {
     stop();
+    after?.(reply.result || {}, button);
     // Started: the button doesn't start a second one (the form drawn again for another folder or preset gives a new one).
     button.button.disabled = true;
     from = here();
@@ -477,7 +480,59 @@ function startOrLine(app, { kind, label, args, line, lineLabel, terminalOnly, ta
     });
     stop = () => { off?.(); stop = () => {}; };
   } });
-  return [button.el, line ? h('p', { class: 'confirm-note or-terminal' }, t('drOrInATerminal')) : null, line ? copyLine(line, lineLabel) : null].filter(Boolean);
+  return [button.el, line && orLine ? h('p', { class: 'confirm-note or-terminal' }, t('drOrInATerminal')) : null, line && orLine ? copyLine(line, lineLabel) : null].filter(Boolean);
+}
+
+// What a lead's start answered that asks the user for a choice (`lead`'s notes, the engine's `LeadStart` words; the
+// reply has no field for it yet): 'replace' when the lead there runs without its role and nothing started (`--replace`
+// starts a new one), else null. Only those exact words: anything else is said as the node said it.
+export function leadNeeds(result) {
+  const notes = (result?.notes || []).join('\n');
+  if (result?.happened === 'shown' && /without its role/.test(notes) && /--replace\b/.test(notes)) return 'replace';
+  return null;
+}
+
+// The open base-move card of the project in `folder` (its base moved since its lead last left it, outside its merges),
+// or null.
+export function baseMoveOf(app, folder) {
+  return [...app.store.state.cards.values()].find((card) => card.open !== false && card.kind === 'base' && card.base && card.root === folder) || null;
+}
+
+// Starting a project's lead from the page (`lead`, the folder and `extra`: a goal, `resume`), where it acts and the
+// node lists `lead`; the line and why elsewhere. Two choices the node takes as `lead`'s own flags, each said in a line
+// before it is made: where the base moved since its lead last left it (its card open), Take the base as it is
+// (`takeHead`: the lead starts on the branch as it is now, the move not asked again); where the lead runs without its
+// role and nothing started (the node's answer), Replace it (`replace`: a new lead takes the role, a second click in
+// place). Returns the slot's nodes.
+export function leadStartOrLine(app, { folder, extra = () => ({}), label, quiet = false, line, lineLabel, orLine = false, baseChoice = true }) {
+  const choices = h('div', { class: 'lead-choices', hidden: true });
+  const go = (result) => ({ lead: typeof result.session === 'string' ? result.session : null });
+  const words = (result) => (result.happened === 'waiting' ? t('drLeadWaiting') : leadNeeds(result) === 'replace' ? t('drLeadNoRole') : null);
+  const offerReplace = (result) => {
+    if (leadNeeds(result) !== 'replace' || !actsFor(app, 'lead')) return;
+    choices.hidden = false;
+    choices.replaceChildren(h('p', { class: 'confirm-note choice-what' }, t('drReplaceWhat')),
+      ...startOrLine(app, { kind: 'lead', label: t('drReplaceLead'), busy: t('drReplacing'), confirm: t('drReplaceSure'), orLine: false,
+        args: () => ({ folder, ...extra(), replace: true }), terminalOnly: 'drLeadTerminalOnly', target: go, note: words }));
+  };
+  const start = startOrLine(app, { kind: 'lead', label, quiet, orLine, args: () => ({ folder, ...extra() }), line, lineLabel, terminalOnly: 'drLeadTerminalOnly',
+    target: go, note: words, after: offerReplace });
+  const base = baseChoice && actsFor(app, 'lead') ? baseMoveOf(app, folder) : null;
+  if (!base) return [...start, choices];
+  const moved = base.base;
+  return [...start, h('div', { class: 'lead-choices base-choice' },
+    h('p', { class: 'confirm-note choice-what' }, t('drTakeBaseWhat', { branch: moved.branch || '', to: String(moved.to || '').slice(0, 8) })),
+    ...startOrLine(app, { kind: 'lead', label: t('drTakeBase'), quiet: true, orLine: false, args: () => ({ folder, ...extra(), takeHead: true }),
+      terminalOnly: 'drLeadTerminalOnly', target: go, note: words, after: offerReplace })), choices];
+}
+
+// Resume for an ended session of yours (`session.resume`): started again in its conversation, the page goes to it once
+// the node lists it; what the node refused (no conversation recorded) said beside it. Elsewhere its line and why.
+export function resumeOrLine(app, entry, { quiet = false } = {}) {
+  return startOrLine(app, { kind: 'session.resume', label: t('acResume'), busy: t('drResuming'), quiet, orLine: false,
+    args: () => ({ session: entry.session }), line: resumeLine(entry), lineLabel: t('drTheCommandThatResumesIt'), terminalOnly: 'drResumeTerminalOnly',
+    target: (result) => ({ session: typeof result.reopened?.[0]?.session === 'string' ? result.reopened[0].session : null }),
+    note: (result) => (!result.reopened?.length && result.refused?.length ? t('drResumeRefused', { why: result.refused[0].why || '' }) : null) });
 }
 
 // Starting a session: a folder, one of the launch presets the node keeps for it (`session.presets`: the folder's own
@@ -502,13 +557,12 @@ export function newLeadForm(app) {
   function draw() {
     const folder = where();
     if (!folder) { lineSlot.replaceChildren(h('p', { class: 'confirm-note' }, t('drGiveAFolderTheLine'))); return; }
-    // With the `act` right and `lead` listed, Start the lead starts it (the folder and the goal, nothing else: never
-    // `--init`, `--replace` or `--take-head`, which stay the terminal's), then opens its project.
-    lineSlot.replaceChildren(...startOrLine(app, { kind: 'lead', label: t('acStartLead'), terminalOnly: 'drLeadTerminalOnly',
-      args: () => ({ folder: where(), ...(goal.value.trim() ? { goal: goal.value.trim() } : {}) }),
-      line: leadLine(folder, goal.value), lineLabel: t('drTheCommandThatStartsThe'),
-      target: (result) => ({ lead: typeof result.session === 'string' ? result.session : null }),
-      note: (result) => (result.happened === 'waiting' ? t('drLeadWaiting') : null) }));
+    // With the `act` right and `lead` listed, Start the lead starts it (the folder and the goal; never `--init`, which
+    // stays the terminal's), then opens its project; Take the base as it is and Replace it where the node's state asks
+    // for them (leadStartOrLine).
+    lineSlot.replaceChildren(...leadStartOrLine(app, { folder, label: t('acStartLead'), orLine: true,
+      extra: () => (goal.value.trim() ? { goal: goal.value.trim() } : {}),
+      line: leadLine(folder, goal.value), lineLabel: t('drTheCommandThatStartsThe') }));
   }
   path.addEventListener('input', draw);
   goal.addEventListener('input', draw);
