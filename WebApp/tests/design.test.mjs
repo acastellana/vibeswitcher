@@ -158,3 +158,15 @@ test('elevation: a shadow is --e-1, --e-2 or --e-3 (or a field’s edge, ring or
   const names = new Set(RULES.flatMap((block) => block.declarations).filter((d) => d.property === 'box-shadow').flatMap((d) => [...d.value.matchAll(/var\((--e-[a-z0-9-]+)\)/g)].map((m) => m[1])));
   for (const name of names) assert.ok(ROOT[name], `${name} is no token`);
 });
+
+test('corners: every radius is --r-1 to --r-4 or the pill (a circle is 50%, a part inside a track the track’s less its padding), unless the line says why', () => {
+  const ok = (part) => /^(0|50%|inherit|var\(--r-(1|2|3|4|pill)\)|calc\(var\(--r-(1|2|3|4)\) - \d+(\.\d+)?px\))$/.test(part);
+  const found = [];
+  for (const block of RULES) {
+    for (const d of block.declarations) {
+      if (!/^border(-[a-z]+)*-radius$/.test(d.property) || reasoned(d)) continue;
+      if (!d.value.split(/ (?![^(]*\))/).every(ok)) found.push(where(block, d));
+    }
+  }
+  assert.deepEqual(found, []);
+});
