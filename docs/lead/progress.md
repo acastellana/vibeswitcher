@@ -4599,3 +4599,5 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-25 21:40 Planned v2-web-ux-join: v2 web UX: join the four fix branches into one branch for v2, with v2's lint green and a full set of screenshots (in a clone)
 - 2026-11-25 21:40 Started a worker on v2-web-ux-join
 - 2026-11-25 21:41 Kept v2-on-the-mac-4 unmerged: By design nothing of it merges into main: its 20 commits are on the local branch v2-mac-checked-start in its clone (.vibeswitcher/v2-start), fix round done (tip 1b6b67f9), awaiting the reviewer's re-check and then delivery as a branch for v2 at the user's say. No merge and no cleanup until then (decision 2026-11-25 16:27).
+- 2026-11-25 21:44 Planned re-check-v2-s: Re-check v2's checked Mac node start after its fix round (branch v2-mac-checked-start, 8 commits): report only
+- 2026-11-25 21:44 Started a worker on re-check-v2-s
