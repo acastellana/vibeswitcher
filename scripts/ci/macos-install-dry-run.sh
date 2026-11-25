@@ -42,7 +42,7 @@ agent_before=$( [[ -e $agent ]] && echo there || echo none )
 install() {
     local prefix=$1 answer=$2
     shift 2
-    /usr/bin/env -i HOME="$HOME" PATH=/usr/bin:/bin VIBESWITCHER_HEAVY_TIMEOUT=50m /bin/bash "${INSTALL_SCRIPT:-$script}" "$commit" \
+    /usr/bin/env -i HOME="$HOME" PATH=/usr/bin:/bin VIBESWITCHER_HEAVY_TIMEOUT=50m /bin/bash -p "${INSTALL_SCRIPT:-$script}" "$commit" \
         --prefix "$prefix" --repo "$repo" --test-origin "file://$origin" --test-ci-answer "$answer" "$@" > "$work/out" 2>&1
 }
 
@@ -83,6 +83,11 @@ else
     grep -q "node-pins-mac: --dry-run: nothing written, no password asked" "$work/out" && pass_case "the administrator step wrote nothing (a test install)" \
         || fail_case "the administrator step didn't say it wrote nothing"
     [[ -x $builds/$commit/Resources/node-pins-mac.sh ]] && pass_case "the build keeps its administrator step" || fail_case "no Resources/node-pins-mac.sh in the build"
+    # The review's case: exported `builtin` and `printf` functions don't reach the step run as `bash -p`.
+    hijacked=$(env 'BASH_FUNC_builtin%%=() { :; }' 'BASH_FUNC_printf%%=() { command printf "HIJACKED\n"; }' \
+        /bin/bash -p "$builds/$commit/Resources/node-pins-mac.sh" --dry-run --build "$commit" $pins 2>&1 | grep -c HIJACKED)
+    [[ $hijacked == 0 ]] && pass_case "exported builtin and printf functions don't reach the administrator step (bash -p)" \
+        || fail_case "an exported function reached the administrator step ($hijacked lines)"
     [[ ! -e $builds/dev.vibeswitcher.node.plist ]] || fail_case "a LaunchAgent was written into $builds"
     echo "the installed products' load commands (for the record):"
     for program in vibeswitcher-server vibeswitcher; do otool -L "$builds/$commit/bin/$program" | sed 's/^/  /'; done

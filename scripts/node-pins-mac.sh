@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/bash -p
 # The Mac node's install, its one administrator step (docs/superpowers/specs/2026-11-19-v2-node-on-macos.md, "The
 # anchor"): writes the node's record of its builds' cdhashes, a file only root can change, which the node's checks read
 # (NodePins). It does one thing: write the record, printing first exactly what it will write and where; then one `sudo`,
@@ -24,6 +24,10 @@
 # never change). As root, the step checks every folder from / down to the record's (each root's, writable by neither
 # its group nor others, no link, no ACL), makes the last one when it is missing (root:wheel 0755), writes a temporary
 # file in it, makes it root:wheel 0644 and renames it over the record.
+#
+# Run it as `/usr/bin/env -i /bin/bash -p <its absolute path> …`: bash's privileged mode imports no function from the
+# environment (an exported `builtin` would defeat the drop below, then an exported `printf` would print one record and
+# hand sudo another), and env -i passes no variable at all.
 #
 # Exit codes: 0 written (or printed, --dry-run); 64 usage; 65 the record there can't be carried or kept (see --fresh);
 # 1 the write failed or was refused (sudo's password not given, a folder not root's alone).

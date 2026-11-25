@@ -246,8 +246,9 @@ install checks the step's text against the commit's blob and runs it from memory
 cdhashes is refused (a build's pins never change). `--dry-run` prints and writes nothing. `--record` names only the node's record or a trial's
 (`/Library/Application Support/VibeSwitcher-trial/node-<uid>.pins`), and the root half checks the path, the uid (sudo's
 `SUDO_UID`) and every line it is handed by the record's pattern before it touches a folder (the review's F4). The step
-drops every function its shell imported, as the install does, fixes `LC_ALL`, and the install runs it under `env -i`
-(F3, F5). `--keep N` takes no values: it rewrites the record there, root's alone, to its first N rows, which root checks
+drops every function its shell imported, as the install does, fixes `LC_ALL`, and runs as `/usr/bin/env -i /bin/bash
+-p` (privileged mode imports no function, so an exported `builtin` can't defeat the drop; the install calls it so: F3,
+F5, the re-check's N1). `--keep N` takes no values: it rewrites the record there, root's alone, to its first N rows, which root checks
 against the record itself; after a security update `--keep 1` is the lever (below). Nothing else writes it: no check,
 no start, no switch.
 
@@ -292,7 +293,10 @@ Mac host starts a `--node` server yet). Measured by the reviewer (`pair.c`): a s
 the process that made the pair (its pid and pidversion), fixed at creation: not "the last sender", as this section said
 before. Two things for item 13: after an in-place exec handover that token is stale (Security refuses a token whose
 process exec'd), so a server carried across a handover needs a new connector or a restart; and the test is at the
-function, with a real pair's token (a node server's record path isn't a test's to choose).
+function, with a real pair's token (a node server's record path isn't a test's to choose). And from the re-check: a
+server child checks its connector's peer once, at its start, so after a handover it would keep serving a swapped host
+image; on the Mac the server child is ended and started again after every handover, so the check runs against the new
+image (to build with item 13, not here).
 
 **What it doesn't cover** (open, in the reviewer's words where they are the reviewer's):
 

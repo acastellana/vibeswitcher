@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/bash -p
 # The Mac's install of the node's next build (scripts/install-node.sh's guarantees with the Mac's tools; that script is
 # Linux's and stays so): COMMIT, fetched by its hash from GitHub into a fresh repository, built with the developer
 # folder's Swift, its products checked (Mach-O executables, arm64 or x86_64 slices, nothing loaded from outside the
@@ -30,7 +30,7 @@
 # libraries checked against the expected commit's blobs and sourced from the blob (COMMIT on the first install; then the
 # commit current/build-info names, and it runs only as <prefix>/current/Resources/install-node-mac.sh). It runs under
 # /bin/bash 3.2: run it as
-#   /usr/bin/env -i HOME=<home> PATH=/usr/bin:/bin /bin/bash <its absolute path> COMMIT …
+#   /usr/bin/env -i HOME=<home> PATH=/usr/bin:/bin /bin/bash -p <its absolute path> COMMIT …
 #
 # Only a real Mac confirms (docs/process/v2-mac-tasks.md): the keychain read of gh's token, GitHub's answers, an App
 # Store Xcode passing the toolchain check, launchd taking the written agent, and the installed host starting from it.
@@ -618,7 +618,7 @@ install_node_mac_main() {
     [[ -n $pin_host && -n $pin_server && -n $pin_cli ]] || fail 1 "the cdhashes to pin weren't read"
     local pins_args=(--build "$commit" "$pin_host" "$pin_server" "$pin_cli")
     (( testing )) && pins_args=(--dry-run "${pins_args[@]}")
-    /usr/bin/env -i HOME="$home" PATH=/usr/bin:/bin LC_ALL=C /bin/bash -c "$pins_step" node-pins-mac.sh "${pins_args[@]}" \
+    /usr/bin/env -i HOME="$home" PATH=/usr/bin:/bin LC_ALL=C /bin/bash -p -c "$pins_step" node-pins-mac.sh "${pins_args[@]}" \
         || fail 1 "the node's record wasn't written, so nothing was installed: run the install again"
     # BSD mv has no -T: the target is checked absent here, under the lock (a folder there would take the build in).
     [[ ! -e $final && ! -L $final ]] || fail 1 "$final is there already: $commit is installed"
