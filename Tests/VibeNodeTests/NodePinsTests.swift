@@ -268,9 +268,6 @@ struct NodePinsAnchorTests {
         try refused("an ACL on a folder above it") { base, components in
             try #require(try runToEnd("/bin/chmod", ["+a", "everyone allow add_file", path(base, components, 2)]) == 0)
         }
-        try refused("a second link to the record") { base, components in
-            #expect(link(path(base, components, 4), base.appendingPathComponent("other-link").path) == 0)
-        }
         try refused("the record not a file") { base, components in
             let file = path(base, components, 4)
             try FileManager.default.removeItem(atPath: file)
@@ -282,6 +279,14 @@ struct NodePinsAnchorTests {
         try refused("not parseable") { base, components in
             try Data("format 1\nuid \(uid)\nbuild x\n".utf8).write(to: URL(fileURLWithPath: path(base, components, 4)))
         }
+        // A second name for the record (macOS lets a user hard-link a root-owned file it can't write: the review's F2)
+        // gives no write: taken, so no process of the user's can make every check refuse by linking it.
+        let linked = top.appendingPathComponent("base-linked")
+        try FileManager.default.createDirectory(at: linked, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o755])
+        let linkedComponents = try record([genuine], in: linked)
+        #expect(link(path(linked, linkedComponents, 4), linked.appendingPathComponent("other-link").path) == 0)
+        let linkedPins = NodePins.read(uid: uid, components: linkedComponents, base: linked.path, owner: asRoot)
+        #expect((try? linkedPins.get()) != nil, "a record with a second link: \(linkedPins)")
         let me = uid
         let recordName = goodComponents.last!
         try refused("the record owned by the user (the uid fact)", owner: { path, owner in
