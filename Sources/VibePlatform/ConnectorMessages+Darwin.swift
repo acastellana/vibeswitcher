@@ -1,4 +1,6 @@
 #if canImport(Darwin)
+import Foundation
+
 // A connector's messages on the Mac (the Mac's H1, docs/process/v2-mac-tasks.md item 9): its pair is a stream (the
 // Mac's Unix domain has no SOCK_SEQPACKET: `socketpair` refuses it, EPROTONOSUPPORT), which keeps no message's edges,
 // and a read can run on past one message into the next (measured on this Mac: bytes sent after a descriptor's message
@@ -14,9 +16,10 @@
 // that rides on another message than the one read. Anything else (a message too long, cut, or a descriptor on a byte
 // that isn't a message's first) fails: never taken as a message.
 extension Platform.Sockets {
-    /// How long a framed message's rest may take to come once its first byte has: its sender wrote it in one call, so it
-    /// is there at once unless the sender is broken.
-    static let framedRestPatience: Int32 = 1_000
+    /// How long a framed message's rest may take, all of it, once its first byte has come (one deadline for the frame,
+    /// never one for each byte: a sender dripping a byte at a time holds its reader no longer than this). Its sender wrote
+    /// it in one call, so it is there at once unless the sender is broken.
+    static let framedRestPatience: TimeInterval = 1
 
     /// Sends `bytes`, a framed message (it starts with `framedStart` and holds no `framedEnd`), with `fds` riding on its
     /// first byte, over the stream connector `socket`: the message and its end in one call, then what that call left,
@@ -33,6 +36,7 @@ extension Platform.Sockets {
         let frame = bytes + [framedEnd]
         let first = sendFirst(frame, with: fds, over: socket)
         guard first > 0 else { return -1 }
+        let deadline = Platform.Clock.awakeSeconds() + framedRestPatience
         var sent = first
         while sent < frame.count {
             let more = frame[sent...].withUnsafeBytes { Darwin.send(socket, $0.baseAddress, $0.count, 0) }
@@ -41,7 +45,7 @@ extension Platform.Sockets {
                 continue
             }
             if more < 0, errno == EINTR { continue }
-            if more < 0, errno == EAGAIN, waitFor(socket, Int16(POLLOUT)) { continue }
+            if more < 0, errno == EAGAIN, waitFor(socket, Int16(POLLOUT), until: deadline) { continue }
             if more == 0 { errno = EIO }
             return -1
         }
@@ -96,7 +100,7 @@ extension Platform.Sockets {
         var cut = first.cut
         if byte == framedStart {
             while true {
-                guard let next = receiveByte(over: socket) ?? (errno == EAGAIN && waitFor(socket, Int16(POLLIN)) ? receiveByte(over: socket) : nil),
+                guard let next = receiveByte(over: socket) ?? (errno == EAGAIN && waitFor(socket, Int16(POLLIN), until: Platform.Clock.awakeSeconds() + framedRestPatience) ? receiveByte(over: socket) : nil),
                       let more = next.byte else {
                     // Its end, a failed read, or its rest never came.
                     cut = true
@@ -153,7 +157,7 @@ extension Platform.Sockets {
     /// next request stays unread. Its sender is `peerToken` once the message is read, when it is the same image as after
     /// its first byte (else nil: refused). As `receive(_:into:)` otherwise: 0 at the stream's end, -1 and `errno` when the
     /// first read fails (EAGAIN: nothing yet). A framed message that doesn't fit `buffer` is -1 with EMSGSIZE, one whose
-    /// rest doesn't come (its end, a failed read, nothing within `framedRestPatience`) -1 with EBADMSG: the caller ends
+    /// rest doesn't come (its end, a failed read, not all of it within `framedRestPatience`) -1 with EBADMSG: the caller ends
     /// the connector, as on any failed read, since what follows on it can't be told apart any more.
     public static func receiveConnectorRequest(_ fd: Int32, into buffer: UnsafeMutableRawBufferPointer) -> (count: Int, sender: Platform.PeerToken?) {
         guard let base = buffer.baseAddress, buffer.count > 0 else {
@@ -165,6 +169,7 @@ extension Platform.Sockets {
         guard first > 0 else { return (first, nil) }
         let sender = peerToken(fd)
         guard buffer[0] == framedStart else { return (1, sender) }
+        let deadline = Platform.Clock.awakeSeconds() + framedRestPatience
         var count = 1
         while true {
             let got = read(fd, base + count, 1)
@@ -178,7 +183,7 @@ extension Platform.Sockets {
                 continue
             }
             if got < 0, errno == EINTR { continue }
-            if got < 0, errno == EAGAIN, waitFor(fd, Int16(POLLIN)) { continue }
+            if got < 0, errno == EAGAIN, waitFor(fd, Int16(POLLIN), until: deadline) { continue }
             errno = EBADMSG
             return (-1, nil)
         }
@@ -186,12 +191,16 @@ extension Platform.Sockets {
         return (count, sender)
     }
 
-    /// Whether `socket` became ready for `events` within `framedRestPatience` (an error or a hang-up counts as ready: the
-    /// next call says it).
-    private static func waitFor(_ socket: Int32, _ events: Int16) -> Bool {
+    /// Whether `socket` became ready for `events` before `deadline` (`Platform.Clock.awakeSeconds()`'s; an error or a
+    /// hang-up counts as ready: the next call says it). False once the deadline has passed, ready or not.
+    private static func waitFor(_ socket: Int32, _ events: Int16, until deadline: TimeInterval) -> Bool {
         var waiting = pollfd(fd: socket, events: events, revents: 0)
         var ready: Int32
-        repeat { ready = poll(&waiting, 1, framedRestPatience) } while ready < 0 && errno == EINTR
+        repeat {
+            let left = deadline - Platform.Clock.awakeSeconds()
+            guard left > 0 else { return false }
+            ready = poll(&waiting, 1, Int32(min((left * 1_000).rounded(.up), Double(Int32.max))))
+        } while ready < 0 && errno == EINTR
         return ready > 0
     }
 }
