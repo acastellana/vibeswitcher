@@ -4543,3 +4543,9 @@ Turn what's a real bug into a task (one already on the board needs nothing); the
 - 2026-11-25 15:42 Planned v2-on-the-mac: v2 on the Mac, step 4: measure on this real Mac what the Mac's approval rule depends on (in a clone; report and local commits, nothing merges)
 - 2026-11-25 15:50 Started a worker on v2-on-the-mac
 - 2026-11-25 16:04 Planned v2-s-web-page: v2's web page: fix what the lead's review found (in a clone; a local branch for v2, nothing merges)
+- 2026-11-25 16:24 Started a worker on v2-s-web-page
+- 2026-11-25 16:25 Kept v2-on-the-mac unmerged: By design nothing of it merges into main: its record, scripts and commits are on the local branch v2-mac-step4 in its clone (.vibeswitcher/v2-mac), which the user's keyboard measurements and the next v2-on-Mac tasks use. No merge and no cleanup until the branch is delivered to v2 and the Mac node work is finished (decision 2026-11-25).
+- 2026-11-25 16:27 Planned v2-on-the-mac-2: v2 on the Mac, item 9: the node's web port is held so no other process can take it between one server and the next (in a clone; a branch for v2)
+- 2026-11-25 16:27 Started a worker on v2-on-the-mac-2
+- 2026-11-25 16:28 Planned v2-on-the-mac-3: v2 on the Mac, item 10: the command line's server check anchored in a root-owned record a session can't write (in a clone; a branch for v2)
+- 2026-11-25 16:28 Started a worker on v2-on-the-mac-3
