@@ -33,7 +33,7 @@ struct MacCheckedLastTests {
             let server = HostServer(config: config)
             do {
                 try server.start()
-                server.stop()
+                server.stop(terminateSessions: true)
                 return true
             } catch {
                 return false
