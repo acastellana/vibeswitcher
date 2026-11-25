@@ -656,3 +656,72 @@ test('B9: a quiet project whose base moved: Take the base as it is, its conseque
   assert.equal(buttonNamed(b.el, 'Take the base as it is'), null);
   assert.match(b.el.textContent, /vibeswitcher lead \/home\/dev\/projects\/example-site --resume/);
 });
+
+test('the mock lists the buttons’ kinds and answers each as the node does, refusals in its words; ?older lists none, ?refuse refuses each', async () => {
+  const { createMock } = await import('../js/mock.js');
+  const started = async (options = {}) => {
+    let kinds = null;
+    let shown = null;
+    const ready = new Promise((resolve) => { shown = resolve; });
+    const store = { apply() { shown(); }, setConnection() {}, chatSnapshot() {}, chatOps() {}, setKinds(list) { kinds = list; } };
+    const mock = createMock(store, { still: true, ...options });
+    mock.start();
+    await ready;
+    return { mock, kinds, ask: (kind, args = {}) => mock.request({ kind, args, action: crypto.randomUUID() }) };
+  };
+  const BUTTONS = ['shells', 'session.close-shells', 'presets.edit', 'update.check', 'web.revoke', 'config.held', 'base.show', 'mail', 'session.resume', 'session.new', 'lead', 'send'];
+  const { mock, kinds, ask } = await started({ held: true });
+  for (const kind of BUTTONS) assert.ok(kinds.includes(kind), kind);
+  const SITE = '/home/dev/projects/example-site';
+  // shells, then those still finished closed; none finished: the node's refusal.
+  const shells = (await ask('shells', { folder: SITE })).result.shells;
+  assert.deepEqual(shells.map((one) => one.finished), [true, true, false]);
+  assert.deepEqual((await ask('session.close-shells', {})).error.code, 'bad-args');
+  const closed = await ask('session.close-shells', { sessions: shells.map((one) => one.session) });
+  assert.deepEqual([closed.result.ended.length, closed.result.left.length], [2, 1]);
+  assert.match((await ask('session.close-shells', { sessions: [shells[2].session] })).error.message, /nothing ended/);
+  // presets.edit: an edit needs the digest shown; a stale one is refused.
+  assert.match((await ask('presets.edit', { op: 'edit', name: 'Opus', folder: SITE })).error.message, /needs the digest/);
+  assert.match((await ask('presets.edit', { op: 'edit', name: 'Opus', folder: SITE, digest: 'old', args: '--model sonnet' })).error.message, /changed since it was shown/);
+  assert.equal((await ask('presets.edit', { op: 'edit', name: 'Opus', folder: SITE, digest: 'mock-opus', args: '--model sonnet' })).result.held, true);
+  assert.match((await ask('presets.edit', { op: 'remove', name: 'Claude', digest: 'x' })).error.message, /built-in/);
+  // update.check: a newer build; web.revoke: how many.
+  assert.match((await ask('update.check')).result.commit, /^5b8e1d2a/);
+  assert.deepEqual((await ask('web.revoke')).result, { revoked: 1, tailnetRevoked: 1 });
+  // config.held and base.show: the card whole, a held thing's difference.
+  assert.equal((await ask('config.held', { folder: SITE })).result.card.kind, 'config');
+  assert.ok((await ask('config.held', { folder: SITE, diff: '.claude/settings.json' })).result.difference.length > 2);
+  assert.equal((await ask('base.show', { folder: SITE })).result.card.kind, 'base');
+  // mail: its newest 20 of 26, every one with all.
+  assert.equal((await ask('mail')).result.projects[0].messages.length, 20);
+  assert.equal((await ask('mail', { folder: SITE, all: true })).result.projects[0].messages.length, 26);
+  // send's images: checked as SessionSend checks them.
+  const sid = 'local:e91d05a3-4f6a-4c1e-9b7d-2e5a8c0d1f3b';
+  assert.match((await ask('send', { session: sid, text: '', images: ['shots/a.png'] })).error.message, /absolute path/);
+  assert.match((await ask('send', { session: sid, text: '', images: ['/home/dev/a.txt'] })).error.message, /isn’t an image/);
+  // lead: the site's lead ended (held), its base moved: started, kept checked unless takeHead.
+  const kept = await ask('lead', { folder: SITE });
+  assert.equal(kept.result.happened, 'started');
+  assert.match(kept.result.notes.join(' '), /--take-head/);
+  mock.stop();
+  // A lead running without its role: shown, nothing started, until replace.
+  const norole = await started({ norole: true });
+  const shown = await norole.ask('lead', { folder: SITE });
+  assert.equal(shown.result.happened, 'shown');
+  assert.match(shown.result.notes[0], /without its role/);
+  assert.equal((await norole.ask('lead', { folder: SITE, replace: true })).result.happened, 'started');
+  norole.mock.stop();
+  // ?older: none of them listed, each refused as unknown.
+  const older = await started({ older: true });
+  for (const kind of ['shells', 'session.close-shells', 'presets.edit', 'update.check', 'web.revoke', 'config.held', 'base.show']) {
+    assert.ok(!older.kinds.includes(kind), kind);
+    assert.equal((await older.ask(kind)).error.code, 'unknown-kind', kind);
+  }
+  older.mock.stop();
+  // ?refuse=…: each listed, refused in the node's own words.
+  const refusing = await started({ refuse: ['update.check', 'web.revoke', 'presets.edit'] });
+  assert.match((await refusing.ask('update.check')).error.message, /scratch node asks GitHub nothing/);
+  assert.match((await refusing.ask('web.revoke')).error.message, /weren’t dropped/);
+  assert.match((await refusing.ask('presets.edit', { op: 'add', name: 'X' })).error.message, /haven’t accepted/);
+  refusing.mock.stop();
+});
