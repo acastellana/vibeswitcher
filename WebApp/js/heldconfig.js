@@ -80,7 +80,8 @@ export function heldSummary(config = {}) {
   const unknown = rails.filter((rail) => rail.state === 'unknown').length;
   const items = config.items || [];
   const { title, line } = heldTitle(items);
-  // Nothing held and no rule changed: the node only wants this project's rules confirmed once (after a restart).
-  const confirmOnly = !items.length && !changed.length && unknown > 0;
+  // Nothing held and no sealed last accept (the node's `firstLook`: it restarted, or the rules were never accepted), or
+  // from a node before that field, nothing held and no rule changed: it only wants this project's rules confirmed once.
+  const confirmOnly = config.firstLook === true || (!items.length && !changed.length && unknown > 0);
   return { title, line, changed, unknown, rails, confirmOnly, terminal: config.pageMayAccept === false || changed.length > 0 || unknown > 0 };
 }
