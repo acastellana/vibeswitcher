@@ -149,6 +149,12 @@ lock on who is asking (`tailscale whois`, B's login header, or the tailnet ACL a
 (a QR code in the terminal, or typing it). Its decisions 6 (a watched terminal on the remote page) and 7 (the port) weren't
 asked either, so a terminal on the phone (item 3 above) still meets decision 6.
 
+**Answered, 2026-11-25** (the lead's calls at the user's word): the remote access note's decisions 2 to 7, each beside
+its question there: a device paired once with its own key until removed, unlocked by Face ID or Touch ID for 12 hours;
+credentials masked on every remote page; the peer's Tailscale login the machine's own; a phone added by a QR code on the
+unlocked page; the phone's terminal once device keys and HTTPS are built; the port 47830. Where they meet what v2 built:
+[V2 without a terminal](v2-no-terminal.md#where-the-target-meets-what-v2-built).
+
 ### Where the answers meet what v2 already decided or built
 
 Noted for the lead that builds v2, not settled here:

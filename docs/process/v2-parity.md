@@ -37,7 +37,8 @@ can't be done.
    the redesign's "Acting from the page" (the passkey level isn't built), and replies from a phone in the V2 design's
    stage 7 (milestone 2), waiting on your decision 4 in [H1](v2-h1-plan.md) (the tailnet page's input).
    **Decided, 2026-11-25 (your answer):** the phone's page moves to HTTPS through `tailscale serve` (way B), and its
-   input comes with a device key, as below. The remote access note's decisions 2 to 5 stay open.
+   input comes with a device key, as below. The remote access note's decisions 2 to 7 were answered the same day (the
+   lead's calls at your word: [its decisions](../superpowers/specs/2026-11-20-v2-remote-access.md#decisions-for-the-user)).
 4. **No typing into a terminal from the page**, and no find in it (L). On plan: [H1](v2-h1-plan.md) is built
    (2026-11-21); page input waits on your decisions 1 and 2 there. **Decided, 2026-11-25 (your answers):** page input
    reaches every session, your own unconfined ones included, on condition that each device holds its own key made at
