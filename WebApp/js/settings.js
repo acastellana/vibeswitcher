@@ -34,14 +34,35 @@ export function draftProblem(setting, value) {
   switch (setting.form) {
     case 'flag': return ['on', 'off'].includes(text) ? null : t('slOnOff');
     case 'choice': return setting.choices.includes(text) ? null : t('slOneOf', { list: setting.choices.join(', ') });
-    case 'count': return /^\d+$/.test(text.trim()) ? null : t('slWhole') + (setting.limits ? ` (${setting.limits})` : '');
-    case 'number': return Number(text) > 0 ? null : t('slNumber') + (setting.limits ? ` (${setting.limits})` : '');
+    case 'count': {
+      const range = countRange(setting.limits);
+      const whole = /^\d+$/.test(text.trim());
+      if (range) return whole && Number(text) >= range.low && Number(text) <= range.high ? null : t('slWholeRange', range);
+      return whole ? null : t('slWhole') + (setting.limits ? ` (${setting.limits})` : '');
+    }
+    case 'number': {
+      const ceiling = numberCeiling(setting.limits);
+      const number = /^\s*\d+(\.\d+)?\s*$/.test(text) ? Number(text) : NaN;
+      if (number > 0 && (ceiling === null || number <= ceiling)) return null;
+      return ceiling === null ? t('slNumber') + (setting.limits ? ` (${setting.limits})` : '') : t('slNumberAtMost', { high: ceiling });
+    }
     case 'model': return /^[A-Za-z0-9.\-_[\]:]{1,100}$/.test(text.trim()) ? null : t('slOneWordAModelS');
     case 'paths': return text.includes('\n') ? t('slOneLine') : null;
     case 'text': return text.trim() ? null : t('slSomeTextOrDefault');
     case 'folder': return /^(\/|~$|~\/)/.test(text.trim()) && !text.includes('\n') ? null : t('slAFullPathOrOne');
     default: return null;
   }
+}
+
+// The node's limits as it words them (SettingsRequest: a count's "1 to 12", a number's "above 0, at most 48"), read
+// back as numbers; null where it says none.
+export function countRange(limits) {
+  const found = /^(\d+) to (\d+)$/.exec(String(limits || '').trim());
+  return found ? { low: Number(found[1]), high: Number(found[2]) } : null;
+}
+export function numberCeiling(limits) {
+  const found = /at most (\d+(?:\.\d+)?)/.exec(String(limits || ''));
+  return found ? Number(found[1]) : null;
 }
 
 // A value as a row shows it: on one line, a long text by its first line and how many more.

@@ -133,3 +133,28 @@ test('the push card offers Push only where the node lists it, else its terminal 
   assert.doesNotMatch(refusalWords({ code: 'unknown-kind' }), /take/);
   setLanguage('en');
 });
+
+test('a setting’s value out of its range, or not a number, says the range beside the box and offers no line to copy', async () => {
+  setLanguage('en');
+  const { draftProblem } = await import('../js/settings.js');
+  const { editor } = await import('../js/views/settings.js');
+  const slots = { key: 'node_heavy_slots', title: 'Test and build slots at once', form: 'count', scope: 'node', limits: '1 to 12', value: '3', default: '2' };
+  const load = { key: 'boost_load_threshold', title: 'Start nothing above a load of, while boosted', form: 'number', scope: 'node', limits: 'above 0, at most 48', value: '36', default: '36' };
+  assert.equal(draftProblem(slots, '4'), null);
+  assert.equal(draftProblem(slots, 'default'), null);
+  for (const value of ['99', '0', 'many', '3.5', '']) assert.match(draftProblem(slots, value) || '', /1 to 12/, value);
+  assert.equal(draftProblem(load, '48'), null);
+  assert.match(draftProblem(load, '49') || '', /at most 48/);
+  assert.match(draftProblem({ ...slots, limits: '0 to 100' }, '101') || '', /0 to 100/);
+  const app = fakeApp({ kinds: ['set'] });
+  const editing = new Map([[slots.key, '99']]);
+  const box = editor(slots, null, editing, app);
+  const problem = find(box, byClass('card-notice'));
+  assert.equal(problem.hidden, false);
+  assert.match(problem.textContent, /1 to 12/);
+  assert.equal(findAll(box, (node) => node.tag === 'button' && /Set|Copy/.test(node.textContent + (node.attrs['aria-label'] || ''))).length, 0, 'nothing to set or copy');
+  assert.doesNotMatch(box.textContent, /vibeswitcher set/);
+  editing.set(slots.key, '4');
+  const fine = editor(slots, null, editing, app);
+  assert.match(fine.textContent, /vibeswitcher set node_heavy_slots 4/);
+});

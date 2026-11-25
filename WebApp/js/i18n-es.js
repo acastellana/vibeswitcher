@@ -492,6 +492,8 @@ export const ES = {
   slOnOff: "on u off",
   slOneOf: "uno de {list}",
   slWhole: "un número entero",
+  slWholeRange: "un número entero, de {low} a {high}",
+  slNumberAtMost: "un número mayor que 0, como mucho {high}",
   slNumber: "un número",
   slOneLine: "una sola línea",
   slMoreLines: { one: " (y {n} línea más)", other: " (y {n} líneas más)" },

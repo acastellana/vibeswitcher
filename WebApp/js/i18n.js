@@ -501,6 +501,8 @@ const EN = {
   slOnOff: "on or off",
   slOneOf: "one of {list}",
   slWhole: "a whole number",
+  slWholeRange: "a whole number, {low} to {high}",
+  slNumberAtMost: "a number above 0, at most {high}",
   slNumber: "a number",
   slOneLine: "one line",
   slMoreLines: { one: " (and {n} more line)", other: " (and {n} more lines)" },

@@ -43,7 +43,7 @@ function settingRow(setting, { folder, home, editing, toggle, app = null }) {
 }
 
 // The field for a new value and the line it makes: a click to copy, never sent from here.
-function editor(setting, folder, editing, app = null) {
+export function editor(setting, folder, editing, app = null) {
   const lineSlot = h('div');
   const problem = h('p', { class: 'card-notice', role: 'alert', hidden: true });
   let control;
