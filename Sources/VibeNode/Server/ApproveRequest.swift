@@ -128,7 +128,7 @@ extension Requests {
                             if pending?.isEmpty == true {
                                 items.append(ApproveItem(kind: "config.accept", args: ["card": .string(id), "batch": .bool(true)], subject: root, card: card))
                             } else {
-                                own.append(ApproveOwn(text: "held config in \(root), with guard rails or a review floor to record",
+                                own.append(ApproveOwn(text: "held config in \(root), with rules to record (a first accept, or workflow.md changed them)",
                                                       command: "vibeswitcher config held \(root)"))
                             }
                             configs(Array(left.dropFirst()), then: then)

@@ -376,6 +376,17 @@ enum Samples {
                               guarded: [.init(key: "test_command", value: "make test", sinceAccept: "same"), .init(key: "merge_policy", value: "auto")],
                               lastAccept: at)
         config.config?.sharedHome = .init(names: ["~/.claude/settings.json"], card: "local:card:00000000-0000-4000-8000-000000000016", folder: "/home/u")
+        // The plain card's fields (2026-11-25): what each is, the card's line and whom it holds, each rule against the last accept.
+        config.config?.items[0].about = .init(kind: .pluginUpdate, what: "the plugin x from y updated to 1.2.0", from: "1.1.0", to: "1.2.0")
+        config.config?.guarded[0].changed = .changed
+        config.config?.guarded[0].old = "make check"
+        config.config?.guarded[0].records = true
+        config.config?.summary = "the plugin x from y updated to 1.2.0"
+        config.config?.holds = "repo"
+        config.config?.holdsEvery = false
+        config.config?.recordsAll = false
+        config.config?.pageMayAccept = false
+        config.config?.guarded[0].atDefault = false
         var bareConfig = CardStore.Card(id: "local:card:00000000-0000-4000-8000-000000000007", root: root, kind: .configHeld, at: at)
         bareConfig.config = .init()
         // Nothing held and no sealed last accept: the node restarted, the project's rules confirmed once.

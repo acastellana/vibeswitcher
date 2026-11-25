@@ -100,7 +100,7 @@ struct HooksCommandTests {
 
     /// What the app's look (`config held`) holds now, by name.
     private func held(_ node: ScratchNode, _ repo: URL) async throws -> [String] {
-        let held = try await node.run(["config", "held", repo.path])
+        let held = try await node.run(["config", "held", repo.path, "--long"])
         try #require(held.status == 0, "\(held.output)\(held.errors)\n\(node.said)")
         return held.output.components(separatedBy: "\n").filter { $0.hasPrefix("    ~/") }
             .map { String($0.dropFirst(4).prefix { $0 != "," && $0 != " " }) }

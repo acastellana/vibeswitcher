@@ -203,7 +203,16 @@ struct ApproveTests {
         let subjects = items.compactMap { $0["subject"]?.string }
         #expect(subjects.contains(world.repo), "\(listed)")
         // Each item with its card, as `config held` shows it.
-        let shown = items.map { item in CardText.lines(item["card"] ?? .null).joined(separator: "\n") }
+        let shown = items.map { item in CardText.lines(item["card"] ?? .null, long: false).joined(separator: "\n") }
+        // Plain (the default): what changed in the node's words, whom it holds, each item's kind and what on the wire.
+        for item in items {
+            let card = item["card"] ?? .null
+            let plain = CardText.plainConfig(card)
+            #expect(plain.contains { $0.hasPrefix("holds ") }, "\(plain)")
+            #expect(!plain.joined().contains("hash"), "\(plain)")
+            for held in card["config"]?["items"]?.array ?? [] { #expect(held["kind"]?.string != nil && held["what"]?.string != nil, "\(held)") }
+            #expect(WireSchema.check(card, as: "card") == nil, "\(WireSchema.check(card, as: "card") ?? "")")
+        }
         // The home's lists it; a project's says it in its line of what it shares with the home's card.
         // The home's lists it; a project's says it in its line of what it leaves to the home's card.
         #expect(shown.allSatisfy { $0.contains("~/.claude/settings.json") || $0.contains("of your home folder's config, the same as") }, "\(shown)")
@@ -295,7 +304,7 @@ extension ApproveTests {
         let subjects = (listed["items"]?.array ?? []).compactMap { $0["subject"]?.string }
         #expect(!subjects.contains(planted.path) && !subjects.contains(railed.path), "\(subjects)")
         let own = (listed["own"]?.array ?? []).map { "\($0["text"]?.string ?? "") \($0["command"]?.string ?? "")" }
-        #expect(own.contains { $0.contains("guard rails or a review floor to record") && $0.contains("vibeswitcher config held \(railed.path)") }, "\(own)")
+        #expect(own.contains { $0.contains("rules to record") && $0.contains("vibeswitcher config held \(railed.path)") }, "\(own)")
         // Bases that didn't move list nothing.
         #expect(!(listed["items"]?.array ?? []).contains { $0["kind"]?.string == "base.accept" }, "\(listed)")
         let bases = try await list(world, only: ["base"])

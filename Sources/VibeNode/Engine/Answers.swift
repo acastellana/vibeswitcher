@@ -697,7 +697,7 @@ extension LeadEngine {
             guard let self else { return }
             self.queue.async {
                 switch held {
-                case .failure(let error): then(.failure(.refused("the vault can't be asked what it holds for \(root): \(error)")))
+                case .failure(let error): then(.failure(.refused("the node couldn't say what it holds for \(root): try again (\(error))")))
                 case .success(let held):
                     var shown = self.sharingHome(held, root: root, homeNames: homeNames)
                     shown.recordsRules = recordsRules ? true : nil
@@ -788,6 +788,8 @@ extension LeadEngine {
         marked.items.removeAll { left.contains($0.name) }
         marked.hashes = marked.hashes.filter { !left.contains(ConfigSeal.name(ofKey: $0.key)) }
         marked.sharedHome = ConfigHoldStore.SharedHome(names: best.names, card: best.card.id, folder: best.card.root)
+        // Its plain line says what is its own (the rest is said as the home folder's).
+        marked.summary = HeldWhat.summary(items: marked.items)
         return marked
     }
 

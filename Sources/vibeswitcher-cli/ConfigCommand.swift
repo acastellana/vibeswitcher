@@ -6,10 +6,10 @@ import VibeNode
 /// S7): what the host's vault holds of the agents' config for a project, as a card bound to exactly the hashes it
 /// shows, with the floor workflow.md proposes; then the user's accept of that card, which seals exactly those and then
 /// records the floor (EN-D7). `config held` changes nothing and asks no code; `config accept` asks the card's.
-/// `config held` is short (`CardText.lines(_:long:)`: a line per held thing and guard rail, a word they share said once);
-/// `--long` says every word on every line.
+/// `config held` and `config accept` are plain (`CardText.plainConfig`: what changed, whom it holds, the rules that
+/// changed; 2026-11-25); `--long` says every path, hash and rule, every word on every line.
 enum ConfigCommand {
-    static let usage = "usage: vibeswitcher config held [FOLDER] [--diff NAME] [--long] | config accept CARD | config startup"
+    static let usage = "usage: vibeswitcher config held [FOLDER] [--diff NAME] [--long] | config accept CARD [--long] | config startup"
 
     static func run(_ arguments: [String]) -> Int32 {
         switch arguments.first {
@@ -20,11 +20,28 @@ enum ConfigCommand {
             StartupShortcuts.report().forEach { Say.out(ConfigSeal.inert($0, limit: 1000)) }
             return 0
         case "accept":
-            guard arguments.count == 2 else { return Say.usage(usage) }
-            return CardCommand.act(WireKinds.ConfigAccept.self, card: arguments[1], args: { _, id, code in .init(card: id, code: code) }, what: { card in
-                "This accepts what card \(ConfigSeal.inert(card["id"]?.string ?? "", limit: 80)) shows, exactly as shown,\n"
-                    + "and the project's rules and review rules as workflow.md has them."
+            let long = arguments.contains("--long")
+            let rest = arguments.filter { $0 != "--long" }
+            guard rest.count == 2 else { return Say.usage(usage) }
+            var shown: NodeWire.Value?
+            return CardCommand.act(WireKinds.ConfigAccept.self, card: rest[1], detail: long ? .long : .plain, args: { _, id, code in .init(card: id, code: code) }, what: { card in
+                shown = card
+                return long ? "This accepts the agents' config card \(ConfigSeal.inert(card["id"]?.string ?? "", limit: 80)) showed, sealing exactly that, "
+                    + "then records the floor and guard rails workflow.md proposes."
+                    : "This accepts what card \(ConfigSeal.inert(card["id"]?.string ?? "", limit: 80)) shows, exactly as shown,\n"
+                        + "and the project's rules and review rules as workflow.md has them (--long shows every path and rule)."
             }) { result in
+                guard long else {
+                    // Plain (2026-11-25): one receipt line, what it was and whom it no longer holds.
+                    let waits = !(result.homeWaits ?? []).isEmpty
+                    Say.out((result.sealed ?? []).isEmpty && !waits ? "accepted: nothing held" : CardText.acceptedLine(shown, count: result.sealed?.count, waits: waits))
+                    if result.floorRecorded == true { Say.out("the review rules are recorded") }
+                    if waits {
+                        let folder = ConfigSeal.inert(result.homeFolder ?? "~", limit: 300)
+                        Say.out("next: accept \(folder)'s card (`vibeswitcher config held \(folder)`), then this folder's again")
+                    }
+                    return
+                }
                 // One line per path sealed, so a long accept reads as a list.
                 let sealed = result.sealed ?? []
                 Say.out(sealed.isEmpty ? "accepted: nothing held" : "accepted \(sealed.count) held change\(sealed.count == 1 ? "" : "s"):")
@@ -71,7 +88,8 @@ enum ConfigCommand {
         case .refused(let reply): return Say.replyError(reply)
         case .success(let result, _):
             guard let card = result.card else { return Say.failed(.broken("the node's server answered config.held with no card")) }
-            CardText.lines(card, long: long).forEach(Say.out)
+            // Plain by default (what changed, whom it holds, the rules that changed); `--long` every path, hash and rule.
+            CardText.lines(card, detail: long ? .long : .plain).forEach(Say.out)
             if let difference = result.difference {
                 if let lines = difference.array { lines.compactMap(\.string).forEach { Say.out(ConfigSeal.inert($0, limit: .max)) } }
                 else { Say.out(ConfigSeal.inert(difference.string ?? "", limit: .max)) }

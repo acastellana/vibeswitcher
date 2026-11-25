@@ -84,7 +84,7 @@ struct UpdateCommandTests {
     }
 
     func held(_ node: ScratchNode) async throws -> String {
-        try await node.run(["config", "held", node.home.path]).output
+        try await node.run(["config", "held", node.home.path, "--long"]).output
     }
 
     @Test func oneCodeInstallsSwitchesAndAcceptsTheBuildsFolderOnly() async throws {

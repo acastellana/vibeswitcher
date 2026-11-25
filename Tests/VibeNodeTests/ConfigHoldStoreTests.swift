@@ -348,7 +348,7 @@ struct ConfigHoldStoreTests {
                       ConfigHoldStore.Rail(key: "test_command", value: "make test", sinceAccept: changed),
                       ConfigHoldStore.Rail(key: "base_branch", value: "main")],
             lastAccept: Date(timeIntervalSince1970: 1_790_000_000))
-        let short = CardText.lines(card.value)
+        let short = CardText.lines(card.value, long: false)
         #expect(short.contains("    ~/.claude/settings.json, hash abc123: env ?"), "\(short)")
         #expect(short.contains("    ~/.zshrc, hash def456 (changed outside a team session); no earlier accept known"), "\(short)")
         #expect(short.contains("    merge_policy: ask_all *"), "\(short)")
@@ -370,7 +370,7 @@ struct ConfigHoldStoreTests {
         // No line carries a mark: no closing word.
         card.config?.items = []
         card.config?.guarded = [ConfigHoldStore.Rail(key: "test_command", value: "make test", sinceAccept: changed)]
-        let plain = CardText.lines(card.value)
+        let plain = CardText.lines(card.value, long: false)
         #expect(!plain.contains { $0.contains("marks a line") }, "\(plain)")
         #expect(plain.contains { $0.hasPrefix("  compared with your last accept") }, "\(plain)")
     }
@@ -382,7 +382,7 @@ struct ConfigHoldStoreTests {
         var card = CardStore.Card(root: "/r", kind: .configHeld)
         card.config = ConfigHoldStore.Shown(items: [ConfigHoldStore.Item(name: "~/.claude/skills\(evil)", hash: "abc\(evil)", change: "a/\(evil) changed")],
                                             baseBranch: "main\(evil)")
-        let text = CardText.lines(card.value).joined(separator: "\n")
+        let text = (CardText.lines(card.value, long: false) + CardText.lines(card.value)).joined(separator: "\n")
         #expect(text.contains("~/.claude/skills") && text.contains("changed"), "\(text)")
         let forbidden = text.unicodeScalars.filter { $0.value < 0x20 && $0 != "\n" || $0.value == 0x7F || (0x202A...0x202E).contains($0.value) }
         #expect(forbidden.isEmpty, "\(forbidden.map { String($0.value, radix: 16) })")
