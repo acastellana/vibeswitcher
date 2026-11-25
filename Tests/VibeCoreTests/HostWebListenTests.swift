@@ -58,4 +58,19 @@ struct HostWebListenTests {
         }
         #expect(HostWebListen.port == 47830)
     }
+
+    /// The Mac's stream connector frames a web message from its first byte to its newline (ConnectorMessages+Darwin.swift):
+    /// every request and answer starts with that byte and holds no newline of its own; a connection's answer (`d`) and
+    /// request (`c`) never start with it.
+    @Test func everyWebMessageIsOneTheMacsConnectorFrames() {
+        let requests = [HostWebListen.Request.listen(.loopback, address: "127.0.0.1", port: 0), .listen(.page, address: "127.0.0.1", port: 0),
+                        .listen(.tailnet, address: "100.64.0.1", port: 47830), .release(.loopback)]
+        var messages = requests.map(HostWebListen.bytes)
+        messages += requests.flatMap { [HostWebListen.answer($0, refusal: nil), HostWebListen.answer($0, refusal: "127.0.0.1:0 couldn't be bound")] }
+        messages.append(HostWebListen.unasked("not a web request"))
+        for message in messages {
+            #expect(message.first == Platform.Sockets.framedStart && !message.contains(Platform.Sockets.framedEnd), "\(String(decoding: message, as: UTF8.self))")
+        }
+        #expect(![UInt8(ascii: "c"), UInt8(ascii: "d")].contains(Platform.Sockets.framedStart))
+    }
 }
