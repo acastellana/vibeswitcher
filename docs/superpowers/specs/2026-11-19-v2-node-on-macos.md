@@ -179,6 +179,107 @@ copy hashed once, the record): the Mac's arm differs in
   node signs with the local identity `scripts/setup-signing.sh` already makes for the app's builds (one decision for
   the user). Notarisation isn't needed: a build made on the Mac carries no quarantine, and nothing is distributed.
 
+## The anchor: a root-owned record of the builds (the Mac's tasks, items 3, 10 and 12)
+
+Written 2026-11-25 on the first real Mac (macOS 27.2, SIP on), after the user chose, of item 10's three anchors, the
+root-owned record: one administrator password per install or update, nothing day to day. Until it, every fact the Mac's
+checks compared against was the user's to write (the job's plist and label, the builds folder, `build-info`, the
+program `launchctl print` names), so a session with a genuine host and a server of its own passed them.
+
+**Where it lives.** `/Library/Application Support/VibeSwitcher/node-<uid>.pins` (`Platform.Service.nodePinsRecord`;
+nil on Linux, which has no such record and whose checks are unchanged). A process of the user's can't write, replace,
+rename over or shadow it, and the readers check each reason every time they read it, from `/` down, never trusting a
+resolved path:
+
+- **Every folder on the path** (`/`, `/Library`, `/Library/Application Support`, `…/VibeSwitcher`) is owned by root
+  (uid 0) and writable by neither its group nor others, so no one but root makes, removes or renames an entry in it:
+  a rename over the record, a link put in its place and a folder swapped above it all need write on a folder above.
+  Measured here: `/` and `/Library` `root:wheel 755`, `/Library/Application Support` `root:admin 755`. The group test
+  carries weight: the user is in `admin`, so a `775` there would be the user's to write. The administrator step makes
+  `VibeSwitcher` `root:wheel 755`.
+- **The file** is owned by root, a regular file with one link, `0644` (readable by the user's processes, written by root
+  alone), at most 64 KiB.
+- **No link is followed.** The reader opens `/` and then each component with `openat(…, O_NOFOLLOW)` from the folder it
+  holds, checks what it opened by `fstat` on that descriptor, and reads the record from the descriptor it checked: a
+  link anywhere on the path is refused, not followed, and nothing is checked by one name and read by another.
+- **No access control list.** Mode bits don't show an ACL's grant (`chmod +a "everyone allow add_file"`), so a component
+  carrying any extended ACL is refused (`Platform.Files.hasExtendedACL`; none on the path today, `ls -le`).
+- **Shadowing.** A mount over a folder on the path needs the covered folder to be the user's (macOS lets a user mount
+  only on a folder they own) **(not measured here: unproven)**; a mount over it would also show its own root's owner and
+  mode to the walk, which refuses anything not root's.
+- **What SIP adds.** Nothing to the record: `…/Application Support` carries no `restricted` flag (`ls -lO`), so root
+  writes it, which is the point (root is the administrator step). SIP keeps the tools the step and the checks run
+  (`/usr/bin/sudo`, `/usr/bin/codesign`, Security) and the kernel's code-signing enforcement out of root's reach, and
+  root is one password away (the security architecture's S1): the record moves only with that password.
+
+The path, the folder the walk starts from and the owner it expects are parameters of the reader for tests only (a
+scratch tree, an injected owner fact): in the node no environment variable, flag or file chooses them.
+
+**What it holds.** Text, one fact per line, parsed whole and refused whole on anything unusual:
+
+```
+# VibeSwitcher node pins: written by the install's administrator step (scripts/node-pins-mac.sh); read by the node's checks
+format 1
+uid 501
+build <commit, 40 hex> host <cdhash, 40 hex> server <cdhash> cli <cdhash>
+build …
+```
+
+`uid` must be the reader's own. Each `build` line names a commit and the cdhashes of that build's
+`vibeswitcher-host`, `vibeswitcher-server` and `vibeswitcher` (the command line), each this Mac's slice as the install
+signed it (`mac_sign_hardened`, then `codesign -d -a <this Mac's arch>`): a process running another slice of the same
+file (Rosetta's x86_64) has another cdhash and is refused. One to sixteen builds: the installed one first, then the
+builds a rollback may go to. No commit and no cdhash twice; every other line, case, length or byte refused.
+
+**Who writes it, and when.** Only the install's administrator step, `scripts/node-pins-mac.sh`, called by
+`install-node-mac.sh` once the build is checked and in place, before `current` names it. It takes values, not paths:
+the new build's commit and three cdhashes, which the install read from the copies it signed and hashed (never read
+again from the builds folder), and it carries the existing record's rows forward verbatim, after reading that record
+with the same checks (never recomputed from files a session can write). It prints exactly what it will write and
+where, then runs one `sudo` whose script is text inside it, not a file: it makes the folder (root, `755`, checked
+afterwards), writes a temporary file in it as root, sets it `root:wheel 0644`, and renames it over the record. The
+install checks the step's text against the commit's blob and runs it from memory, as it does its libraries, so what
+`sudo` runs isn't a file a session could edit before the password is typed. A commit already in the record with other
+cdhashes is refused (a build's pins never change). `--dry-run` prints and writes nothing. Nothing else writes it:
+no check, no start, no switch.
+
+**How each check reads it** (every read through the walk above; anything unreadable is a refusal):
+
+1. **The command line's server check.** The listener's audit token (bound as before: pid, link read before and after,
+   `Link.isProcess(of:)`) must run, by Security's dynamic check, the cdhash of a server pinned in the record, with the
+   Hardened Runtime. Which file is beside which program no longer matters: no path under the home chooses the row, and
+   `launchctl print`'s `program` line drops out (item 12): the running image is read from the process bound to its
+   token. Only `pid` stays from `launchctl print`, launchd's own word for the job's process: the listener must be its
+   child, in its session, as before.
+2. **The host's server child.** The Mac's node host finds its own build by its own running cdhash (`SecCodeCopySelf`,
+   `Platform.CodeIdentity.ownCdhash`): no row, no start. Its `--server` file's cdhash must be that row's server; the
+   child is then started only while the file still has it, and its connector answers only a child whose token runs it
+   (`Image.checked`, as before, now holding the pinned value).
+3. **The command line's anchor (item 3's owed half).** The server takes the command line's cdhash from the record's
+   row whose server is its own running code, read once at its start: never from `<root>/bin/vibeswitcher`, so a
+   command line swapped there after the start is not the installed one.
+4. **A switch or a rollback.** The target's host image must be a host pinned in the record (its file's cdhash for this
+   Mac's slice, checked before the handover), and the new image, once running, passes 2 by its own running code, which
+   is decisive (a file swapped between the check and the exec runs other code and finds no row). A rollback goes only
+   to a build the record still holds: one dropped from it is refused ("not in the record: install it again").
+
+**When it isn't right**, each refused with one plain line naming the record's path and what to do (run the install's
+administrator step again): the record missing; unreadable; a link anywhere on its path; any folder on it or the file
+not root's, or writable by its group or others, or carrying an ACL; not a regular file, more than one link, too large;
+not parseable, another format, another uid; and a running code that names no row (an unknown build).
+
+**What it doesn't cover.** A session that re-bootstraps the job with a host of its own that runs the genuine pinned
+server: the server check (1) passes, as the listener is the genuine server, the child of the job's process. Closing it
+means checking the job's process runs a pinned host too (a pid-based Security check bound by the link read before and
+after); it isn't built here (the reviewer's list; the checked start, item 13). Nor is the install's own window: a
+session that rewrites the staged build between its check and the administrator step is the install's S9, as on Linux.
+
+**Where it is built.** `NodePins` (VibeCore: the format, the walk's rules, the lookups), `Platform.Files.readRootRecord`
+and `hasExtendedACL`, `Platform.CodeIdentity.ownCdhash`, `Platform.Service.nodePinsRecord` (the seam; Linux's arms answer
+nil and nothing on Linux calls them), the checks above in `NodeCheck`, `HostImages`, `HandoverTarget` and `ApprovalVoice`;
+off, as the rest of the Mac node is, until items 5 and 13 and the switch-on (`HostImages.isCheckedMacNode`,
+`NodeSystem.approvalMeasured`, `macUnbuilt` and `macServerRefusal` unchanged).
+
 ## The seal's Mac list
 
 `LinuxSealList` stays empty on the Mac; a `MacSealList` beside it, by the same rules (a change waits for the user's
