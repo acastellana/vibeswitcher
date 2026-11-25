@@ -68,7 +68,7 @@ public struct NodePins: Equatable, Sendable {
         let named = components.reduce(base == "/" ? "" : base) { $0 + "/" + $1 }
         switch Platform.Files.readRootRecord(components, base: base, maxBytes: maxBytes, owner: owner) {
         case .failure(let why):
-            return .failure(Refused("the node's record of its builds isn't root's alone: \(why.description); \(remedy)"))
+            return .failure(Refused("the node's record of its builds can't be taken: \(why.description); \(remedy)"))
         case .success(let data):
             return parse(data, uid: uid).mapError { Refused("the node's record of its builds (\(named)) \($0.description); \(remedy)") }
         }
