@@ -1,12 +1,12 @@
 // Your own sessions, This node and Settings as two columns (views/twocol.js): a list with a search beside the chosen
-// one's detail, the choice in the address, the keys, the fold under 760 px; each page drawn on tests/fakedom.mjs's
+// one's detail, the choice in the address, the keys, the fold under 760 px; each page drawn on tests/fakedom.test.mjs's
 // stand-in DOM with the node's own shapes (wire/vectors.json). Run: node --test WebApp/tests/
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { installDom, find, findAll, byClass, button } from './fakedom.mjs';
+import { installDom, find, findAll, byClass, button } from './fakedom.test.mjs';
 
 process.env.TZ = 'UTC';
 const here = dirname(fileURLToPath(import.meta.url));

@@ -1,4 +1,4 @@
-// The UX review's U3, U4, U5 and U16 (2026-11-25), each held here on tests/fakedom.mjs's stand-in DOM: what blocks
+// The UX review's U3, U4, U5 and U16 (2026-11-25), each held here on tests/fakedom.test.mjs's stand-in DOM: what blocks
 // comes first and open, "What waits on me" takes the centre, Push and Decline wait a few seconds with an Undo and leave
 // a line in the conversation, and the Approve button names what it approves. Every wait is the injected clock
 // (`app.later`), never a real one. Run: node --test WebApp/tests/
@@ -7,7 +7,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { installDom, find, findAll, byClass, button } from './fakedom.mjs';
+import { installDom, find, findAll, byClass, button } from './fakedom.test.mjs';
 
 process.env.TZ = 'UTC';
 const here = dirname(fileURLToPath(import.meta.url));

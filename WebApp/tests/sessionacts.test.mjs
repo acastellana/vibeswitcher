@@ -1,11 +1,11 @@
 // A session's own question answered from the page, and a session or a project's lead started from it (the UX review's
 // U1 and U12, 2026-11-25), where the page acts and the node lists the kind (`session.reply`, `session.new`, `lead`);
 // elsewhere the terminal's line and why. And the mock, which lists exactly those of a real acting node's kinds it
-// answers, answers them as the node does, and with `older` lists none of them. Drawn on tests/fakedom.mjs's stand-in
+// answers, answers them as the node does, and with `older` lists none of them. Drawn on tests/fakedom.test.mjs's stand-in
 // DOM over the real store, with an injected clock for the seconds an answer waits. Run: node --test WebApp/tests/
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { installDom, find, findAll, byClass, button } from './fakedom.mjs';
+import { installDom, find, findAll, byClass, button } from './fakedom.test.mjs';
 
 installDom();
 const { setLanguage } = await import('../js/i18n.js');

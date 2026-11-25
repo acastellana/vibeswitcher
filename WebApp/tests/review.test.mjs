@@ -1,11 +1,11 @@
-// What the lead's review of the mock found (2026-11-25), each held here: drawn on tests/fakedom.mjs's stand-in DOM
+// What the lead's review of the mock found (2026-11-25), each held here: drawn on tests/fakedom.test.mjs's stand-in DOM
 // with the node's own shapes (wire/vectors.json), in English and in Spanish. Run: node --test WebApp/tests/
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, readdirSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { installDom, find, findAll, byClass, button } from './fakedom.mjs';
+import { installDom, find, findAll, byClass, button } from './fakedom.test.mjs';
 
 process.env.TZ = 'UTC';
 const here = dirname(fileURLToPath(import.meta.url));

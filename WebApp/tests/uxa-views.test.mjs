@@ -1,9 +1,9 @@
-// The UX review's small states (2026-11-25), drawn on tests/fakedom.mjs's stand-in DOM: U19 a project that is gone,
+// The UX review's small states (2026-11-25), drawn on tests/fakedom.test.mjs's stand-in DOM: U19 a project that is gone,
 // U22 a question the lead withdrew, U23 Brief me and the palette from a phone's drawer (their stylesheet's part, and
 // U18's and U21's, in tests/uxa.test.mjs). Run: node --test WebApp/tests/
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { installDom, find, findAll, byClass } from './fakedom.mjs';
+import { installDom, find, findAll, byClass } from './fakedom.test.mjs';
 
 process.env.TZ = 'UTC';
 installDom();

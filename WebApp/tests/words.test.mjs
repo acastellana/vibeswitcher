@@ -3,7 +3,7 @@
 // and a way forward from a project that is gone. Run: node --test WebApp/tests/
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { installDom } from './fakedom.mjs';
+import { installDom } from './fakedom.test.mjs';
 
 installDom();
 const { TABLES, t, tParts, setLanguage } = await import('../js/i18n.js');
@@ -89,7 +89,7 @@ test('U18: Spanish contracts “a el” and “de el” wherever a sentence is b
 
 test('U17: the left column’s places say what they count, in words: what needs you, else how many; the node’s notices', async () => {
   const { leftColumn } = await import('../js/views/left.js');
-  const { find, byClass } = await import('./fakedom.mjs');
+  const { find, byClass } = await import('./fakedom.test.mjs');
   const app = (sessions, notices) => ({
     store: { state: { node: { notices, web: null }, connection: 'live', phrase: null, sessions: new Map(sessions.map((one) => [one.id, one])), leads: new Map(), boards: new Map(), cards: new Map() },
       acts: () => false, can: () => true },
@@ -121,7 +121,7 @@ test('U17: the left column’s places say what they count, in words: what needs 
 
 test('U19: a project that is gone says so and offers the start page, as a gone session does', async () => {
   const { projectView } = await import('../js/views/project.js');
-  const { find, findAll } = await import('./fakedom.mjs');
+  const { find, findAll } = await import('./fakedom.test.mjs');
   for (const [code, title, button] of [['en', 'This project isn’t on this node', 'Start Page'], ['es', 'Este proyecto no está en este nodo', 'Página de inicio']]) {
     setLanguage(code);
     const state = { node: null, connection: 'live', phrase: null, pageWords: null, sessions: new Map(), leads: new Map(), boards: new Map(), cards: new Map(),
