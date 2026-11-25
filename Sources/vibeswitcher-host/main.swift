@@ -98,6 +98,8 @@ var config = HostServer.Config(
                                                  adding: folders.commandFolder),
                                                  adding: Platform.CodeIdentity.isAvailable ? nil : VibePaths.root.appendingPathComponent("plugins/bin").path),
     hostBuild: build)
+// The Mac's checked node start (`HostImages.startAsNode`, behind `isCheckedMacNode`, never yet): what it found.
+config.checkedNode = HostImages.takeCheckedMacNode()
 config.idleExit = value(after: "--idle-exit").flatMap(TimeInterval.init) ?? 600
 // A bench's host: it ends, sessions and all, with the bench (see `HostServer.Config.owner`). Kept through a handover.
 config.owner = value(after: "--exit-with").flatMap(pid_t.init).flatMap { $0 > 0 ? $0 : nil }

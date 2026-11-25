@@ -179,7 +179,17 @@ public final class ServerChild {
             if let carried { Sys.close(carried.fd) }
             // The review of 2026-11-21: a child's connections are the app's, so only a scratch host runs one until the
             // Mac's node start is checked (`HostImages.macServerRefusal`).
-            if let why = HostImages.macServerRefusal(lockPath: config.lockPath, ownsLaunchers: ownsLaunchers) {
+            // A `--node` host runs one only from its checked start (`Config.checkedNode`, item 13), with that start's server.
+            if arguments.contains(HostImages.nodeFlag) {
+                guard let checked = config.checkedNode else {
+                    say(server, "refused --server: a --node host on the Mac runs a server child only from a checked node start")
+                    return nil
+                }
+                guard launch.image == checked.serverPath else {
+                    say(server, "refused --server: \(launch.image) isn't the server its node start checked (\(checked.serverPath))")
+                    return nil
+                }
+            } else if config.checkedNode == nil, let why = HostImages.macServerRefusal(lockPath: config.lockPath, ownsLaunchers: ownsLaunchers) {
                 say(server, "refused --server: \(why)")
                 return nil
             }
@@ -371,10 +381,9 @@ public final class ServerChild {
     /// each start from the file once its cdhash is still that (`Image.checked`).
     public static func start(_ launch: Launch, server: HostServer, loaded: Platform.ProcessSelf.SealedCopy? = nil) -> ServerChild? {
         if Platform.CodeIdentity.isAvailable {
-            // A checked Mac node start (never yet) takes the server's cdhash from the node's record, by its own build.
-            let pinned = HostImages.isCheckedMacNode
-                ? HostImages.macServerPin(server: launch.image, own: Platform.CodeIdentity.ownCdhash(), pins: NodePins.read())
-                : Platform.CodeIdentity.cdhash(atPath: launch.image).map { .success($0) }
+            // A checked Mac node start's child is checked by its row's server, as its start found it (`Config.checkedNode`).
+            let pinned: Result<Data, HostImages.Refused> = server.config.checkedNode.map { .success($0.server) }
+                ?? Platform.CodeIdentity.cdhash(atPath: launch.image).map { .success($0) }
                     ?? .failure(HostImages.Refused("\(launch.image) has no code signature to check it by (no cdhash)"))
             let cdhash: Data
             switch pinned {

@@ -114,7 +114,25 @@ public enum HostImages {
     /// its host is unchanged.
     public static func startAsNode(arguments: [String]) -> String? {
         guard arguments.contains(nodeFlag) else { return nil }
-        guard !Platform.CodeIdentity.isAvailable else { return macNodeRefusal }
+        if Platform.CodeIdentity.isAvailable {
+            // The Mac: refused until its node start is switched on; then checked (`macNodeStart`) before anything else.
+            guard isCheckedMacNode else { return macNodeRefusal }
+            let home = accountHome
+            let lock = value(after: "--lock", in: arguments)
+                ?? ((home.map { Platform.Service.nodeRoot(accountHome: $0) } ?? "/nonexistent") as NSString).appendingPathComponent("host.lock")
+            switch macNodeStart(arguments: arguments, lockPath: lock, own: Platform.CodeIdentity.ownCdhash(), pins: NodePins.read(), accountHome: home) {
+            case .failure(let why): return why.description
+            case .success(let checked):
+                checkedServerLock.withLock { checkedMacNode = checked }
+            }
+            guard let home else { return "the account has no home in the user database" }
+            let given = ProcessInfo.processInfo.environment
+            let wanted = nodeEnvironment(given, accountHome: home, accountName: accountName, shell: accountShell)
+            for name in Set(given.keys).union(wanted.keys) where given[name] != wanted[name] {
+                if let value = wanted[name] { setenv(name, value, 1) } else { unsetenv(name) }
+            }
+            return nil
+        }
         guard let nodeRoot = value(after: nodeRootFlag, in: arguments), nodeRoot.hasPrefix("/") else {
             return "\(nodeFlag) needs \(nodeRootFlag) and an absolute folder after it"
         }
@@ -248,14 +266,73 @@ public enum HostImages {
         public var server: Data
     }
 
-    /// The Mac's checked node start (seam: not checked yet).
+    /// The Mac's checked node start (the node on the Mac's design, "The checked node start"): what this `--node` host
+    /// is, or why it may not start, checked in this order: its `--node-root` is the node's root by the user database's
+    /// home (`accountHome`), and `lockPath` that root's own `host.lock` (by path or by file; a link refused); the record
+    /// (`pins`, read once by the caller) taken; its own running code (`own`, the kernel's cdhash) a row's host; its
+    /// `--server` opened once as the node root's own `bin/vibeswitcher-server` (`openServer`: no link, a regular file, by
+    /// device and inode), and that file's cdhash (`cdhashOf`, this Mac's slice, read while the path still names the file
+    /// opened) the row's server. `main` asks it only behind `isCheckedMacNode`; tests give the record, the code and the
+    /// home. Each refusal is one plain line.
     public static func macNodeStart(arguments: [String], lockPath: String, own: Data?, pins: Result<NodePins, NodePins.Refused>,
                                     accountHome: String?,
                                     cdhashOf: (String) -> Data? = { Platform.CodeIdentity.cdhash(atPath: $0) }) -> Result<CheckedNode, Refused> {
-        guard case .success(let record) = pins, let build = record.builds.first, let server = value(after: "--server", in: arguments) else {
-            return .failure(Refused("no record"))
+        func refused(_ why: String) -> Result<CheckedNode, Refused> { .failure(Refused(why)) }
+        guard let accountHome else { return refused("the account has no home in the user database, so the node's root can't be found") }
+        let nodeRoot = Platform.Service.nodeRoot(accountHome: accountHome)
+        let standard = { (path: String) in (path as NSString).standardizingPath }
+        guard let given = value(after: nodeRootFlag, in: arguments), given.hasPrefix("/"), standard(given) == standard(nodeRoot) else {
+            return refused("\(nodeFlag) needs \(nodeRootFlag) \(nodeRoot), the node's own root")
         }
-        return .success(CheckedNode(build: build, serverPath: server, server: build.server))
+        guard let server = value(after: "--server", in: arguments) else { return refused("\(nodeFlag) needs --server") }
+        // 1. The lock: the node root's own, and only it.
+        let ownLock = (nodeRoot as NSString).appendingPathComponent("host.lock")
+        var held = stat(), node = stat()
+        if lstat(lockPath, &held) == 0, held.st_mode & S_IFMT == S_IFLNK { return refused("the lock \(lockPath) is a symbolic link") }
+        let sameFile = stat(lockPath, &held) == 0 && stat(ownLock, &node) == 0 && held.st_dev == node.st_dev && held.st_ino == node.st_ino
+        guard standard(lockPath) == standard(ownLock) || sameFile else {
+            return refused("\(nodeFlag) takes only the node root's own lock (\(ownLock)), not \(lockPath)")
+        }
+        // 2. The record. 3. This host's own running code, a row's host.
+        let record: NodePins
+        switch pins {
+        case .failure(let why): return refused(why.description)
+        case .success(let read): record = read
+        }
+        guard let own else { return refused("this host's own code can't be read, so its build in the node's record can't be found") }
+        guard let build = record.build(host: own) else {
+            return refused("this host's code (\(NodePins.hex(own))) is no host the node's record pins: not an installed build's host; \(NodePins.remedy)")
+        }
+        // 4. Its --server, opened once: the node root's own file, whose cdhash is the row's server.
+        let fd: Int32
+        switch openServer(server: server, nodeRoot: nodeRoot) {
+        case .failure(let why): return .failure(why)
+        case .success(let opened): fd = opened
+        }
+        defer { Sys.close(fd) }
+        var opened = stat(), named = stat()
+        let cdhash = cdhashOf(server)
+        guard fstat(fd, &opened) == 0, lstat(server, &named) == 0, named.st_mode & S_IFMT == S_IFREG,
+              named.st_dev == opened.st_dev, named.st_ino == opened.st_ino else {
+            return refused("the server \(server) changed while it was checked")
+        }
+        guard let cdhash else { return refused("\(server) has no code signature to check it by (no cdhash)") }
+        guard cdhash == build.server else {
+            return refused("\(server) (\(NodePins.hex(cdhash))) isn't the server the node's record pins for this host's build \(build.commit)")
+        }
+        return .success(CheckedNode(build: build, serverPath: server, server: cdhash))
+    }
+
+    /// The checked start `startAsNode` made on the Mac (behind `isCheckedMacNode`), held until `main` puts it in the
+    /// host's config (`takeCheckedMacNode`).
+    nonisolated(unsafe) private static var checkedMacNode: CheckedNode?
+
+    /// The Mac's checked start `startAsNode` made, taken (no longer held); nil when there is none.
+    public static func takeCheckedMacNode() -> CheckedNode? {
+        checkedServerLock.lock()
+        defer { checkedServerLock.unlock() }
+        defer { checkedMacNode = nil }
+        return checkedMacNode
     }
 
     /// The Mac's node host's server child (the node on the Mac's design, "The anchor", check 2): the cdhash the child is
