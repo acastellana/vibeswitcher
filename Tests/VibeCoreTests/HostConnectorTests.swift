@@ -171,12 +171,12 @@ struct HostConnectorTests {
         })
     }
 
-    /// H1's web ask (`HostConnector.web`) against a stand-in host on a `SOCK_SEQPACKET` pair: answers to other requests
-    /// that came late (a tailnet listen's with its socket, a release's, a connection's) are passed over and their
-    /// sockets closed, and its own is taken; an answer whose socket listens on another port than asked is refused.
-    @Test(.enabled(if: Platform.Sockets.connectorType == Platform.Sockets.seqpacket, "Linux's connector carries web requests"))
-    func aWebAskTakesOnlyItsOwnAnswer() async throws {
-        let (host, connector) = try #require(Platform.Sockets.pair(type: Platform.Sockets.seqpacket))
+    /// H1's web ask (`HostConnector.web`) against a stand-in host on a connector's pair (Linux's `SOCK_SEQPACKET`, the
+    /// Mac's stream with its framed messages, the Mac's H1): answers to other requests that came late (a tailnet listen's
+    /// with its socket, a release's, a connection's) are passed over and their sockets closed, and its own is taken; an
+    /// answer whose socket listens on another port than asked is refused.
+    @Test func aWebAskTakesOnlyItsOwnAnswer() async throws {
+        let (host, connector) = try #require(Platform.Sockets.pair(type: Platform.Sockets.connectorType))
         defer { Sys.close(host); Sys.close(connector) }
         let listening = try Platform.TCP.listen(family: .ipv4, address: "127.0.0.1", port: 0, backlog: 1).get()
         defer { Sys.close(listening) }
@@ -186,11 +186,11 @@ struct HostConnectorTests {
         // The stand-in: reads the request, then sends the late answers and its own.
         let served = Task.detached { () -> [UInt8] in
             var request = [UInt8](repeating: 0, count: 256)
-            let (count, _) = request.withUnsafeMutableBytes { Platform.Sockets.receive(host, into: $0) }
-            _ = Platform.Sockets.send(HostWebListen.answer(stale, refusal: nil), with: [listening], over: host)
-            _ = Platform.Sockets.send(HostWebListen.answer(.release(.loopback), refusal: nil), with: [], over: host)
-            _ = Platform.Sockets.send([UInt8(ascii: "d")], with: [listening], over: host)
-            _ = Platform.Sockets.send(HostWebListen.answer(asked, refusal: nil), with: [listening], over: host)
+            let (count, _) = request.withUnsafeMutableBytes { Platform.Sockets.receiveConnectorRequest(host, into: $0) }
+            _ = Platform.Sockets.sendConnectorMessage(HostWebListen.answer(stale, refusal: nil), with: [listening], over: host)
+            _ = Platform.Sockets.sendConnectorMessage(HostWebListen.answer(.release(.loopback), refusal: nil), with: [], over: host)
+            _ = Platform.Sockets.sendDescriptor(listening, over: host)
+            _ = Platform.Sockets.sendConnectorMessage(HostWebListen.answer(asked, refusal: nil), with: [listening], over: host)
             return Array(request.prefix(max(count, 0)))
         }
         let answer = try await offPool { try HostConnector.web(asked, over: connector, timeout: 30) }
@@ -203,8 +203,8 @@ struct HostConnectorTests {
         let elsewhere = HostWebListen.Request.listen(.loopback, address: "127.0.0.1", port: port == 65535 ? 1 : port + 1)
         let wrong = Task.detached {
             var request = [UInt8](repeating: 0, count: 256)
-            _ = request.withUnsafeMutableBytes { Platform.Sockets.receive(host, into: $0) }
-            _ = Platform.Sockets.send(HostWebListen.answer(elsewhere, refusal: nil), with: [listening], over: host)
+            _ = request.withUnsafeMutableBytes { Platform.Sockets.receiveConnectorRequest(host, into: $0) }
+            _ = Platform.Sockets.sendConnectorMessage(HostWebListen.answer(elsewhere, refusal: nil), with: [listening], over: host)
         }
         let refused = try await offPool { try HostConnector.web(elsewhere, over: connector, timeout: 30) }
         await wrong.value
@@ -214,9 +214,8 @@ struct HostConnectorTests {
 
     /// The web ask's bound covers its wait for the connector's lock: a connection asked for meanwhile, which the host
     /// never answers, holds it for its own 30 s, and the web ask gives up at its own.
-    @Test(.enabled(if: Platform.Sockets.connectorType == Platform.Sockets.seqpacket, "Linux's connector carries web requests"))
-    func aWebAsksBoundCoversTheLocksWait() async throws {
-        let (host, connector) = try #require(Platform.Sockets.pair(type: Platform.Sockets.seqpacket))
+    @Test func aWebAsksBoundCoversTheLocksWait() async throws {
+        let (host, connector) = try #require(Platform.Sockets.pair(type: Platform.Sockets.connectorType))
         defer { Sys.close(host); Sys.close(connector) }
         let asking = Task.detached { _ = try? HostConnector.connect(over: connector, timeout: 30) }
         // The connection's byte reached the host: its asker holds the lock.

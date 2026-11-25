@@ -470,16 +470,11 @@ extension WebListenerTests {
             #expect(asked.value.count == 2)
         }
 
-        /// H1 and the Mac: the server takes the host's socket where its connector carries web requests (a
-        /// `SOCK_SEQPACKET` one), and binds its own on a stream connector (the Mac's, until its own H1 step), so the Mac
-        /// node's web comes up.
-        @Test func theServersBindIsTheHostsOnlyOverASeqpacketConnector() throws {
-            let mac = WebBind.forServer(connector: -1, connectorType: Platform.Sockets.stream, note: { _ in })
-            let fd = try mac.listen(.loopback, "127.0.0.1", 0, 4).get()
-            #expect(Platform.TCP.isListening(fd))
-            Sys.close(fd)
-            let linux = WebBind.forServer(connector: -1, connectorType: Platform.Sockets.seqpacket, note: { _ in })
-            guard case .failure(.host) = linux.listen(.loopback, "127.0.0.1", 0, 4) else {
+        /// H1 on both systems: the server's socket is always the host's, over its connector (Linux's `SOCK_SEQPACKET` and
+        /// the Mac's stream alike, the Mac's H1): with no host to ask it has none, and never binds its own.
+        @Test func theServersBindIsAlwaysTheHosts() throws {
+            let bind = WebBind.forServer(connector: -1, note: { _ in })
+            guard case .failure(.host) = bind.listen(.loopback, "127.0.0.1", 0, 4) else {
                 Issue.record("bound without a host")
                 return
             }

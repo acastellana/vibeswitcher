@@ -7,7 +7,9 @@ import Foundation
 /// its own. Between two servers (a crash, a restart, a handover, a switch) the host holds the port, so no other process
 /// of the user can bind it and take what a page sends.
 ///
-/// The messages, each one `SOCK_SEQPACKET` message on the connector beside its one-byte connection requests:
+/// The messages, each one `SOCK_SEQPACKET` message on Linux's connector beside its one-byte connection requests, and one
+/// framed message on the Mac's stream connector, to its newline (`Platform.Sockets.sendConnectorMessage`: every web
+/// message's first byte, `w`, is the Mac's `framedStart`; no other message there starts with it):
 ///
 /// - `web listen PLACE ADDRESS PORT`: PLACE `loopback`, `tailnet` or `page` (a plugin's one-request page). Answered `web ok listen PLACE ADDRESS PORT` with the
 ///   listening socket riding on it, or `web no listen PLACE ADDRESS PORT: WHY` with none.
