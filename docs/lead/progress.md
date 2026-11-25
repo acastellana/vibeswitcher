@@ -4613,3 +4613,4 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-25 22:22 Started a worker on v2-web-the-lead
 - 2026-11-25 22:23 Started a worker on v2-web-eleven-lines
 - 2026-11-25 22:23 Update: v2: los arreglos de UX, unidos en una sola rama — **Qué cambió:** los cuatro arreglos de la revisión de UX están unidos en una rama, `v2-web-ux` (33 commits sobre las dos columnas).
+- 2026-11-25 23:15 Kept v2-s-page-against unmerged: Report only, delivered: 30 ranked design findings (D1–D30), a design system audit with the proposed token scale, and a build order, in its worktree's evidence folder (report.md, shots/). Nothing merges; the report and screenshots feed the build tasks, so no cleanup until those are delivered.
