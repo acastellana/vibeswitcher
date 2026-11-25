@@ -141,7 +141,8 @@ async function run() {
       if (!card) return null;
       const details = card.querySelector('.hc-details');
       const face = [...card.children].filter((el) => el !== details && el.tagName !== 'HEADER');
-      const words = face.map((el) => el.innerText).join(' ');
+      // The words, its command aside (a card's id is in the command the node gives to settle it).
+      const words = face.filter((el) => !el.classList.contains('hc-terminal')).map((el) => el.innerText).join(' ');
       // Four blocks: the title (with the things named under it), what it holds back, the rules that would change, the
       // action (Accept, or the terminal's line); quiet lines beside them. Every thing that isn't an update is named, so
       // blocks are counted, not lines; what may be capped is: rules at five, updates at three.
