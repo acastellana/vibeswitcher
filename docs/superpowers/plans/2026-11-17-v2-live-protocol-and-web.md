@@ -201,6 +201,11 @@ needs them starts. The lead accepted LW-D1, D3, D4, D5, D6 and D12 as recommende
       `vibeswitcher send` on the user's terminal with the typed code, never a page. Typing from a page on the user's
       node still waits for H1 and a decision with the user. A scratch server keeps the typed spike
       (`--test-web-terminal`) and takes `--test-web-terminal-watch` as the user's node's stand-in.
+    - **Decided, 2026-11-25 (the user's answer), for what "is decided with the user" above:** page input reaches every
+      session, the user's own unconfined Claude and shell sessions included, as V1 does, on condition that each device
+      holds its own key made at pairing (Touch ID / passkey, WebAuthn) and every input message is checked against it;
+      device keys, not a token with a third right. This amends the design's "reply rights type only into confined
+      sessions" quoted above. H1 is built (2026-11-21). See [the H1 plan's decisions 1 and 2](../../process/v2-h1-plan.md#what-h1-alone-doesnt-decide-the-users-decisions).
 13. **LW-D13: slices 1 to 3 are plain ES modules; nothing is vendored before the user says so.** The design asks for
     a spike of Preact with signals and of xterm.js before anything is built on them, and vendoring is the first thing
     this work would bring in from outside. The lists and cards of slices 1 to 3 need no library; `store.js` and

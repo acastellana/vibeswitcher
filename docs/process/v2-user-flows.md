@@ -143,7 +143,8 @@ the terminal.
 
 **Verdict**: works differently, about the same for steering (two steps where V1 has one, and more ways); worse for a
 bare stop and the terminal. **On the Mac**: waits for step 4; typing into a terminal is missing everywhere (the user's
-decisions in the H1 plan). **Checked**: driven.
+decisions in the H1 plan; answered 2026-11-25: every session, with a device key checked per message,
+[the build order](v2-h1-plan.md#what-can-now-be-built-in-order)). **Checked**: driven.
 
 ## 7. Read a session (chat, terminal, scroll back, copy, search)
 
@@ -221,8 +222,8 @@ dismissed, and a task's full details are only in a team session's inspector. **O
 the Mac, a paired phone gets push notifications (optionally only while away). 3. Quit the app and nothing notifies.
 
 **V2**: 1. With a page open: the browser's notifications and a chime, each kind's choice on This node (driven).
-2. With no page open: nothing. No push (four decisions open, [the push decision note](v2-push-decision.md)), no
-notifier on the node. 3. A terminal can wait: `vibeswitcher questions --wait`.
+2. With no page open: nothing. No push (four decisions open, [the push decision note](v2-push-decision.md); answered
+2026-11-25: push wanted, over HTTPS, the first line on the lock screen), no notifier on the node. 3. A terminal can wait: `vibeswitcher questions --wait`.
 
 **Verdict**: can't be done: step 1 breaks once the tab closes. **On the Mac**: missing everywhere (push M; a Mac node's
 own banner would be a Mac piece). **Checked**: read; the toggles driven.
@@ -236,7 +237,8 @@ away.
 **V2**: 1. `vibeswitcher web --tailnet` in a terminal; open its MagicDNS address on the phone; pair with the code it
 prints. 2. The phone's layout (driven at 390 px: the lead page and a session with its prompt): read everything, draft
 answers and messages, each to be run from a terminal. 3. The tailnet page never acts, by rule (replies from a phone are planned for the V2 design's stage 7,
-waiting on your decision 4 in [H1](v2-h1-plan.md)); no terminal there, no
+waiting on your decision 4 in [H1](v2-h1-plan.md); answered 2026-11-25: HTTPS through `tailscale serve`, input with
+a device key, [the build order](v2-h1-plan.md#what-can-now-be-built-in-order)); no terminal there, no
 dictation (not a secure page), no dev pages, no push.
 
 **Verdict**: works differently, worse: from the phone you read and draft only. **On the Mac**: acting from the phone,
