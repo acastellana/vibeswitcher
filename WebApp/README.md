@@ -26,10 +26,10 @@ bash scripts/test.sh --web WebApp/tests
 | `/?rows=10000` | One mock session ("Add dark mode…") with a 10,000-row chat: its newest 200 first, the rest paged in as you scroll up. |
 | `/#/p/<project>/lead?show=asks\|all&tab=stats\|files&task=<slug>&sheet=<line>` | A project: you and its lead in the centre (the dial's level, the right column's tab, a task open in place, a line's side sheet). `/#/p/<project>` (the board page's address before) opens it too. |
 | `/#/p/<project>/roadmap?open=<goal>,unsorted,done` | Its roadmap: a row per goal opening in place to its tasks, Unsorted, the done goals folded (each named in `open` is open); with no goals, in motion, blocked and the queue as one band (`open=queue`). |
-| `/#/sessions`, `/#/s/<session>` | Your own sessions (outside every project's team); a session's chat, terminal and inspector. |
-| `/#/new`, `/#/node` | New project; This node. |
+| `/#/sessions`, `/#/sessions/new`, `/#/s/<session>` | Your own sessions (outside every project's team) as a list beside the start form, or beside a session's chat, terminal and inspector (a team's session shows alone). |
+| `/#/new`, `/#/node`, `/#/node/<group>` | New project; This node, a group of it chosen (`#/node` opens what needs you, else the first). |
 | `/?lang=es` | The page's words in Spanish whatever the browser says (it follows the browser's language otherwise). |
-| `/#/settings`, `/#/settings/<project id>` | Settings: the node's and a project's, each change drafted as the `vibeswitcher set` line to run in a terminal (`js/views/settings.js`). |
+| `/#/settings`, `/#/settings/node/<section>`, `/#/settings/<project id>[/<section>]`, `/#/settings/terminal` | Settings: the node's and every project's sections beside the chosen one, each change drafted as the `vibeswitcher set` line to run in a terminal (`js/views/settings.js`). |
 | `/?theme=dark`, `/?theme=light` | The other look, whatever the system says. |
 
 Screenshots of each main state, light and dark, wide and at 390 px, are in `shots/`, made from `PageCheckTests`' scratch node: `PAGE_SHOTS=$PWD/WebApp/shots bash scripts/test.sh --filter PageCheckTests`.
@@ -79,7 +79,8 @@ Screenshots of each main state, light and dark, wide and at 390 px, are in `shot
 | --- | --- |
 | ⌘K / Ctrl+K | Go to a session or run a command |
 | ⌘J / Ctrl+J, ⌥J / Alt+J | Next project with something waiting on you |
-| Esc | Closes the side sheet, a drawer, the inspector where it is a sheet |
+| Esc | Closes the side sheet, a drawer, the inspector where it is a sheet; clears a list's search |
+| / | Your own sessions, This node, Settings: the list's search (↑ ↓ move in the list, ↩ opens) |
 | ⌥⌘1 2 / Ctrl+Alt+1 2 | Terminal, Chat |
 | ⌥⌘0 / Ctrl+Alt+0, ⌥0 / Alt+0 | Toggle Inspector (the Mac's View › Toggle Inspector) |
 | ⌥⌘3 / Ctrl+Alt+3 | The inspector's Team tab, for a lead or a session of its team |

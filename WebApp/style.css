@@ -1342,4 +1342,7 @@ mark.found { padding: 0 1px; border-radius: 3px; background: light-dark(rgb(255 
   .tc-dhead { padding: calc(8px + env(safe-area-inset-top)) 12px 8px; }
   .tc-dwords { flex-direction: column; gap: 0; }
   .tc-dbody { padding: 16px 14px 40px; }
+  /* A fact's name over its value: the value gets the screen's width, its mark beside its words. */
+  .tc-dbody .fact { grid-template-columns: minmax(0, 1fr); gap: 0; padding: 5px 0; }
+  .tc-dbody .fact dt { font-size: var(--small); }
 }

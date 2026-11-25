@@ -176,11 +176,13 @@ test('This node: with nothing that needs you, #/node opens the first group; a se
   assert.deepEqual(listed, ['host', 'server']);
   const facts = findAll(view.columns.detail, byClass('fact')).filter((row) => !row.hidden);
   assert.deepEqual(facts.map((row) => row.children[0].textContent), ['Process']);
+  assert.deepEqual(findAll(view.columns.detail, (one) => one.tag === 'mark').map((one) => one.textContent), ['pid'], 'the word found, marked');
   type(view, 'zebra quartz');
   assert.deepEqual(rowsOf(view), []);
   assert.match(view.columns.detail.shownText, /Nothing on this node matches “zebra quartz”/);
   type(view, '');
   assert.ok(findAll(view.columns.detail, byClass('fact')).every((row) => !row.hidden), 'every row back once the search is cleared');
+  assert.deepEqual(findAll(view.el, (one) => one.tag === 'mark'), [], 'and nothing marked');
 });
 
 // ---- Your own sessions ----

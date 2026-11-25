@@ -11,7 +11,7 @@ import { updateFacts } from '../updates.js';
 import { copyLine } from './cards.js';
 import { t, tParts, nodeWords } from '../i18n.js';
 import { actsLine, actsFor, doButton } from '../acting.js';
-import { twoColumns, queryWords, holdsAll } from './twocol.js';
+import { twoColumns, queryWords, holdsAll, marked } from './twocol.js';
 import { settingsHref } from './settings.js';
 
 // A group's address: `#/node/<group>`; `#/node` opens the one that needs you, else the first.
@@ -34,6 +34,28 @@ function searched(one, words) {
   const found = titleFound ? Math.max(rows.length, 1) : rows.filter((row) => holdsAll(row.textContent, words)).length;
   return { found, titleFound };
 }
+// Marks each word of `words` where it is in `el`'s text (the rows a search found), as elements.
+function markWords(el, words) {
+  for (const child of [...(el.childNodes || [])]) {
+    if (child.nodeType === 3 || child.tagName === '#text') {
+      const parts = marked(child.textContent, words);
+      if (parts.length < 2 && typeof parts[0] === 'string') continue;
+      for (const part of parts) el.insertBefore(typeof part === 'string' ? document.createTextNode(part) : part, child);
+      child.remove();
+    } else if (child.tagName !== 'svg' && child.tagName !== 'MARK') markWords(child, words);
+  }
+}
+
+// Takes back what markWords marked (the parts of a group kept between draws: the plugins', the approvals', this browser's).
+function unmarkWords(el) {
+  for (const child of [...(el.childNodes || [])]) {
+    if (child.tagName === 'MARK' && child.classList.contains('found')) {
+      el.insertBefore(document.createTextNode(child.textContent), child);
+      child.remove();
+    } else if (child.childNodes?.length) unmarkWords(child);
+  }
+}
+
 // Shows only the rows that hold every word (`words` null: every row again). Only what the search hid is shown again.
 function showRows(el, words, all = false) {
   for (const row of rowsOf(el)) {
@@ -253,12 +275,16 @@ export function nodeView(app) {
       columns.show({ title: t('noThisNode'), body: [h('div', { class: 'head-skeleton', 'aria-hidden': 'true' }, h('span', { class: 'bone wide' }), h('span', { class: 'bone' }), h('span', { class: 'bone short' }))] });
       return;
     }
-    for (const one of groups) if (!words.length) showRows(one.el, null);
+    for (const one of groups) { unmarkWords(one.el); if (!words.length) showRows(one.el, null); }
     if (!chosen) {
       columns.show({ title: t('noThisNode'), body: [h('p', { class: 'tc-empty' }, t('noNoMatchLong', { query: query.trim() }))] });
       return;
     }
-    if (words.length) showRows(chosen.el, words, chosen.titleFound);
+    if (words.length) {
+      showRows(chosen.el, words, chosen.titleFound);
+      // The words found, marked (the groups are drawn again for each search, so nothing marked stays).
+      for (const row of rowsOf(chosen.el)) if (!row.hidden) markWords(row, words);
+    }
     if (columns.detailBody.firstChild !== chosen.el || columns.detailBody.childNodes.length !== 1) columns.show({ title: chosen.title, sub: chosen.group, body: [chosen.el] });
     else columns.show({ title: chosen.title, sub: chosen.group });
   }
