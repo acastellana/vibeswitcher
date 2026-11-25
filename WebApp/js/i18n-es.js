@@ -1002,6 +1002,9 @@ export const ES = {
   ccWaitsAnswer: "; espera tu respuesta.",
   ccAgentWords: "{name} (palabras del agente)",
   ccIsAsking: "{agent} pregunta",
+  ccApprove: "Aprobar la fusión de {short}",
+  ccApproveInto: "Aprobar la fusión de {short} en {base}",
+  ccNotYet: "Todavía no",
   // js/termlook.js
   tkMatchSystem: "Como el sistema",
   tkLight: "Claro",

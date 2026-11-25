@@ -16,20 +16,32 @@ import { pushLines } from '../push.js';
 import { talkButton } from '../dictate.js';
 import { pluginFacts } from '../plugincard.js';
 import { t } from '../i18n.js';
-import { actsFor, refusalWords, doButton, answerArgs, cardArgs } from '../acting.js';
+import { actsFor, refusalWords, doButton, answerArgs } from '../acting.js';
 import { questionHead, shortHashes, lineKey, contextOf } from '../conversation.js';
 import { routeHref } from '../ui.js';
 
 const PRIORITY = { blocking: t('cBlocking'), important: t('cImportant'), whenever: t('cWhenever') };
 
-// The options as buttons, the proposed one marked, and the keys that work across them.
-function optionList(options, { proposed = null, numbered = false, choose }) {
-  const buttons = options.map((option, index) => h('button', { class: 'option', type: 'button', onclick: () => choose(option) },
+// An option as its button says it. An approval's names its whole commit (the node checks the answer against it,
+// `LeadWorkflow.approval(of:)`): the button says what it approves in words with the commit's first 8 characters; the
+// whole option, which is what is sent, on hover, and the whole commit in the Commit row above. Anything else as it is.
+export function optionWords(card, option) {
+  const text = String(option ?? '');
+  if (card?.kind !== 'approval') return text;
+  const approve = /^Approve ([0-9a-f]{40}|[0-9a-f]{64})$/i.exec(text.trim());
+  if (approve) return t(card.approval?.base ? 'ccApproveInto' : 'ccApprove', { short: approve[1].slice(0, 8), base: card.approval?.base || '' });
+  return text.trim() === 'Not yet' ? t('ccNotYet') : text;
+}
+
+// The options as buttons, the proposed one marked, and the keys that work across them. `words`: what a button says
+// for its option (the option itself is what `choose` gets).
+function optionList(options, { proposed = null, numbered = false, choose, words = (option) => option }) {
+  const buttons = options.map((option, index) => h('button', { class: 'option', type: 'button', title: words(option) !== option ? option : null, onclick: () => choose(option) },
     numbered ? h('span', { class: 'option-key', 'aria-hidden': 'true' }, String(index + 1)) : null,
-    h('span', { class: 'option-text' }, option),
+    h('span', { class: 'option-text' }, words(option)),
     option === proposed ? h('span', { class: 'option-note' }, t('cProposed')) : null));
   buttons.forEach((button, index) => { if (options[index] === proposed) button.classList.add('proposed'); });
-  return { el: h('div', { class: 'options' }, buttons), buttons };
+  return { el: h('div', { class: 'options' }, buttons), buttons, values: options };
 }
 
 // The keys every card shares, attached once; `now()` gives the card's buttons and actions as it's drawn at the
@@ -37,7 +49,7 @@ function optionList(options, { proposed = null, numbered = false, choose }) {
 function cardKeys(el, now) {
   el.addEventListener('keydown', (event) => {
     if (event.metaKey || event.ctrlKey || event.altKey) return;
-    const { buttons, choose, hold } = now();
+    const { buttons, values = [], choose, hold } = now();
     const stops = [...el.querySelectorAll('.option, .answer-input')].filter((node) => !node.disabled);
     if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
       const to = stops[stops.indexOf(document.activeElement) + (event.key === 'ArrowDown' ? 1 : -1)];
@@ -47,7 +59,7 @@ function cardKeys(el, now) {
     if (event.target.matches('input, textarea')) return;
     if (/^[1-9]$/.test(event.key) && buttons[Number(event.key) - 1]) {
       event.preventDefault();
-      choose(buttons[Number(event.key) - 1].querySelector('.option-text').textContent);
+      choose(values[Number(event.key) - 1] ?? buttons[Number(event.key) - 1].querySelector('.option-text').textContent);
     } else if ((event.key === 'h' || event.key === 'H') && hold) {
       event.preventDefault();
       hold();
@@ -215,7 +227,7 @@ export function questionCard(app, first, { expand = null } = {}) {
     if (sending) {
       el.classList.add('closed', 'sending');
       el.append(h('div', { class: 'card-closed', role: 'status' }, icon('send', 13), h('div', null,
-        h('p', null, t('cSending', { x: sending.text }), ' · ', h('button', { class: 'link card-undo', type: 'button', onclick: undo }, t('cUndo'))),
+        h('p', null, t('cSending', { x: optionWords(card, sending.text) }), ' · ', h('button', { class: 'link card-undo', type: 'button', onclick: undo }, t('cUndo'))),
         h('p', { class: 'card-about' }, shortHashes(questionHead(question.text))))));
       keys = { buttons: [], hold: null };
       return;
@@ -226,7 +238,7 @@ export function questionCard(app, first, { expand = null } = {}) {
       const state = pendingAnswer ? 'answered' : question.state;
       if (state === 'withdrawn') el.append(closedLine(icon('close', 13), t('cWithdrawn'), question.withdrawReason || 'no reason given'));
       else if (state === 'autoDecided') el.append(closedLine(icon('check', 13), t('cWentAhead'), h('strong', null, question.answer), t('cNoAnswerIn')));
-      else el.append(closedLine(icon('check', 13), t('cYouAnswered'), h('strong', null, pendingAnswer || question.answer || '')));
+      else el.append(closedLine(icon('check', 13), t('cYouAnswered'), h('strong', null, optionWords(card, pendingAnswer || question.answer || ''))));
       if (card.notice) el.append(h('p', { class: 'card-notice' }, card.notice));
       keys = { buttons: [], hold: null };
       return;
@@ -283,7 +295,7 @@ export function questionCard(app, first, { expand = null } = {}) {
       return;
     }
 
-    const list = optionList(question.options, { proposed: question.proposal, choose });
+    const list = optionList(question.options, { proposed: question.proposal, choose, words: (option) => optionWords(card, option) });
     el.append(list.el);
 
     const draft = input?.value || '';
@@ -301,7 +313,7 @@ export function questionCard(app, first, { expand = null } = {}) {
       : t('cKeepsWorking')));
     // The keys, as a tooltip on the options.
     list.el.title = t('cKeysAnswers', { n: Math.max(question.options.length, 1) }) + (counting ? t('cKeysHold') : '');
-    keys = { buttons: list.buttons, hold: counting ? hold : null };
+    keys = { buttons: list.buttons, values: list.values, hold: counting ? hold : null };
   }
 
   // A page that drafts (the node's): the options pick a draft, the box drafts its own words, and the draft shows
@@ -314,7 +326,7 @@ export function questionCard(app, first, { expand = null } = {}) {
     };
     // An option picked: the box's own words, if any, give way to it.
     const choose = (option) => { if (input) input.value = ''; pick(option); };
-    const list = optionList(question.options, { proposed: question.proposal, choose });
+    const list = optionList(question.options, { proposed: question.proposal, choose, words: (option) => optionWords(card, option) });
     list.buttons.forEach((button, index) => {
       const chosen = drafted?.text === question.options[index];
       button.setAttribute('aria-pressed', String(chosen));
@@ -347,7 +359,7 @@ export function questionCard(app, first, { expand = null } = {}) {
         counting ? h('p', { class: 'card-foot' }, t('cUntilConfirm', { x: question.proposal, time: clock(question.decideBy) })) : null));
     }
     list.el.title = question.options.length > 1 ? t('cKeysPicks', { n: question.options.length }) : t('cKeysMove');
-    keys = { buttons: list.buttons, hold: null };
+    keys = { buttons: list.buttons, values: list.values, hold: null };
   }
 
   // "Read it all": the side sheet with the question's whole text from its markdown (and an approval's facts whole).
@@ -552,6 +564,6 @@ export function askCard(app, session, item, local, asked, redraw) {
     list.el);
   if (local?.refused) el.append(h('p', { class: 'card-notice', role: 'alert' }, local.refused));
   list.el.title = t('cKeysAnswers', { n: item.options.length });
-  cardKeys(el, () => ({ buttons: list.buttons, choose, hold: null }));
+  cardKeys(el, () => ({ buttons: list.buttons, values: list.values, choose, hold: null }));
   return el;
 }

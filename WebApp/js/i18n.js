@@ -1013,6 +1013,9 @@ const EN = {
   ccWaitsAnswer: "; it waits for your answer.",
   ccAgentWords: "{name} (the agent’s words)",
   ccIsAsking: "{agent} is asking",
+  ccApprove: "Approve merging {short}",
+  ccApproveInto: "Approve merging {short} into {base}",
+  ccNotYet: "Not yet",
   // js/termlook.js
   tkMatchSystem: "Match System",
   tkLight: "Light",
