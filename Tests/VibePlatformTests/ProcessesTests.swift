@@ -288,10 +288,12 @@ struct ProcessesTests {
         return String(cString: resolved)
     }
 
-    /// A copy of /bin/cat under `name` in `folder`: a program whose name is the test's to choose.
+    /// A copy of /bin/cat under `name` in `folder`: a program whose name is the test's to choose (on the Mac signed as a
+    /// program of its own, `signedAsItsOwn`, or it's killed as it starts).
     static func cat(named name: String, in folder: URL) throws -> URL {
         let copy = folder.appendingPathComponent(name)
         try FileManager.default.copyItem(at: URL(fileURLWithPath: real("/bin/cat")), to: copy)
+        try signedAsItsOwn(copy.path)
         return copy
     }
 
@@ -473,7 +475,16 @@ struct ProcessesTests {
 
     @Test func aChildsEnvironmentIsReadable() async throws {
         let mark = "mark \(UUID().uuidString)"
+        #if os(macOS)
+        // macOS lets no process read the environment of one of its own programs (/bin/cat reads as none): a copy signed
+        // as a program of its own (`cat(named:)`, `signedAsItsOwn`) is read as any program is.
+        let folder = try Self.scratch("environment")
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let child = try await Self.startEchoing(try Self.cat(named: "cat", in: folder).path,
+                                                adding: ["VS_PROCESSES_TEST": mark, "VS_PROCESSES_EMPTY": ""])
+        #else
         let child = try await Self.startEchoing(adding: ["VS_PROCESSES_TEST": mark, "VS_PROCESSES_EMPTY": ""])
+        #endif
         defer { await child.end() }
         let environment = try #require(Processes.environment(child.pid))
         #expect(environment.contains("VS_PROCESSES_TEST=\(mark)"))

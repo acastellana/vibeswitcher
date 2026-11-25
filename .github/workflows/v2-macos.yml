@@ -116,9 +116,14 @@ jobs:
             test.log
             .build/crash-reports/
           retention-days: 14
+  # The Mac app's own tests (V1's window, composer, relaunch). They still run on every push and are read, but they no
+  # longer decide the run: the user's decision of 2026-11-25, after two different app tests (ComposerDeliveryTests,
+  # LeadRelaunchTests) failed in two attempts on a head that changed no app code and held a V2 build back. What V2 and
+  # the shared code rest on (platform, core, host, and `v2 linux`) still must pass for a build to be installed.
   app:
     runs-on: xcode-27
     timeout-minutes: 90
+    continue-on-error: true
     defaults:
       run:
         shell: bash

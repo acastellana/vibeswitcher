@@ -128,11 +128,14 @@ struct TeamRowsTests {
         board.tasks = [stopped, audit, sensitive]
         let team = Self.limitedTeam(verifier: stopped.verifier!)
         try observedRows(board, team: team) { rows, controller in
-            for row in rows where row.id != stopped.id {
-                #expect(row.state == "Waits for Fable")
-                #expect(row.line(summary: "Old worker summary") == "Fable's limit resets Nov 24, 01:00")
+            // The ordinary audit would start on Fable; the sensitive one on Mythos, security_audit_model's default since
+            // b43dedde. The account's seven-day limit holds both.
+            for (id, model) in [(audit.id, "Fable"), (sensitive.id, "Mythos")] {
+                let row = try #require(rows.first { $0.id == id })
+                #expect(row.state == "Waits for \(model)")
+                #expect(row.line(summary: "Old worker summary") == "\(model)'s limit resets Nov 24, 01:00")
                 #expect(row.since == nil)
-                #expect(PhoneLeads.task(row, now: Self.now)["line"] as? String == "Fable's limit resets Nov 24, 01:00")
+                #expect(PhoneLeads.task(row, now: Self.now)["line"] as? String == "\(model)'s limit resets Nov 24, 01:00")
             }
             #expect(rows.count == 3)
             // The hold disappearing with the next observation invalidates the row cache, with no board change.

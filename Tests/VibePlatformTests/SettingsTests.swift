@@ -33,6 +33,12 @@ private final class Shared<Value>: @unchecked Sendable {
 /// `Platform.settings(domain:)` as the shared code uses it, on the system's own store: a domain that is a path in the
 /// test's scratch folder, which both systems keep in the file at that path (so nothing reaches ~/Library/Preferences
 /// on the Mac, nor VibeSwitcher's folder on Linux), and which goes with the folder.
+///
+/// On the Mac every store also reads the process's registration domain, where the app's `Preferences` registers its
+/// defaults (`claudeCommand`: "claude", `projectsFolder`: "~/dev") with `register(defaults:)`, for every store of the
+/// process. The Mac runs every test target in one process, so once any test has made a `Preferences`, a key no store
+/// holds reads that. There a key's absence is asked of the store's own domain (`persistentDomain(forName:)`), which the
+/// registration domain doesn't reach; Linux has no such domain, and asks the store.
 struct SettingsTests {
     @Test func aStoreNamedByAScratchPathKeepsWhatTheSharedCodeGivesIt() throws {
         let folder = try TestScriptLinuxTests.scratch("settings")
@@ -44,7 +50,12 @@ struct SettingsTests {
 
         // Nothing set: the answers the callers' defaults rest on.
         #expect(store.object(forKey: "leadMail") == nil)
+        #if os(Linux)
         #expect(store.string(forKey: "claudeCommand") == nil)
+        #else
+        let own = try #require(store as? UserDefaults)
+        #expect(own.persistentDomain(forName: domain)?["claudeCommand"] == nil)
+        #endif
         #expect(store.bool(forKey: "letAgentsOpenShells") == false)
         #expect(store.dictionary(forKey: "pausedSessions") == nil)
 
@@ -56,6 +67,10 @@ struct SettingsTests {
         store.set(["proc:1": until, "session:a": Date.distantFuture], forKey: "pausedSessions")
 
         #expect(store.string(forKey: "claudeCommand") == "claude --dangerously-skip-permissions")
+        #if !os(Linux)
+        // The store's own domain holds what was set: what the checks of absence ask.
+        #expect(own.persistentDomain(forName: domain)?["claudeCommand"] as? String == "claude --dangerously-skip-permissions")
+        #endif
         #expect(store.bool(forKey: "letAgentsOpenShells") == true)
         // `LeadMail.isOn`'s read, and `PauseStore.init`'s.
         #expect((store.object(forKey: "leadMail") as? Bool) == false)
@@ -63,8 +78,13 @@ struct SettingsTests {
         #expect(store.string(forKey: "pausedSessions") == nil)
 
         store.set(nil, forKey: "claudeCommand")
+        #if os(Linux)
         #expect(store.string(forKey: "claudeCommand") == nil)
         #expect(store.object(forKey: "claudeCommand") == nil)
+        #else
+        #expect(own.persistentDomain(forName: domain)?["claudeCommand"] == nil)
+        #expect(store.string(forKey: "claudeCommand") != "claude --dangerously-skip-permissions")
+        #endif
         #expect(store.bool(forKey: "letAgentsOpenShells") == true)
 
         #if os(Linux)
