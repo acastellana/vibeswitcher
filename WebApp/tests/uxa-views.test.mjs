@@ -23,6 +23,21 @@ function fakeApp({ route, boards = new Map(), leads = new Map() }) {
   return { store, ui, calls, drawer: (which) => calls.push(['drawer', which]) };
 }
 
+test('U19: a project that is gone says so and offers the start page', async () => {
+  const { projectView } = await import('../js/views/project.js');
+  for (const [code, words] of [['en', 'Start Page'], ['es', 'Página de inicio']]) {
+    setLanguage(code);
+    const view = projectView(fakeApp({ route: { name: 'project', id: 'local:project:gone', view: 'lead' } }), { sheet: { open() {}, close() {}, shown: () => false } });
+    view.render();
+    const gone = find(view.el, (node) => node.classList.contains('empty-state') && !node.hidden);
+    assert.ok(gone, 'the gone page shows');
+    const way = find(gone, (node) => node.tag === 'a' && node.attrs.href === '#/');
+    assert.ok(way, 'a way out');
+    assert.equal(way.textContent, words);
+  }
+  setLanguage('en');
+});
+
 // The cascade's result for `selector` among the rules outside any @media: the last declaration wins.
 const computed = (selector) => Object.assign({}, ...rules().filter((rule) => rule.media === '' && rule.selector === selector).map((rule) => declarations(rule.body)));
 
