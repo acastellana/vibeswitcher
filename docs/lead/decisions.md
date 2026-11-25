@@ -407,3 +407,7 @@ The user's answer to 99E29A76 (2026-11-18 12:17) is the standing rule: workers a
 
 22 GB was more than a single worker needs (about 3 GB for a clone and build), and it held the v2 test with nothing else of this project in flight. If finished workers start waiting on disk for their load runs again, as on Nov 18, raise it back.
 
+## 2026-11-25 07:56:15 v2's test failures on this Mac are fixed here, in a scratch clone of GitHub's v2, as commits on a local branch plus a patch series. Nothing merges into main, and nothing is pushed without the user's say on how the commits reach v2. This lifts, for these fixes only, the earlier "don't fix v2 here" note; merging v2 into main still needs planning with the user.
+
+The user, 2026-11-25: "fix whatever u see in v2". Most of the 13 failures are Mac-only and can only be reproduced on a Mac, which the Linux machine where v2 is developed can't do. Workers can't push, and pushing is outward-facing, so delivery stays the user's choice.
+
