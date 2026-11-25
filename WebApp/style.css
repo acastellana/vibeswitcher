@@ -1360,3 +1360,25 @@ mark.found { padding: 0 1px; border-radius: 3px; background: light-dark(rgb(255 
   .tc-dbody .fact dt { font-size: var(--small); }
   .tc-dbody .fact dd { flex-wrap: nowrap; align-items: baseline; }
 }
+
+/* ---- A touch screen: every control a fingertip (44 px) both ways, by its padding, not a bigger glyph; checkboxes 24 px
+   with their words tappable; text boxes at 16 px, under which a phone's browser zooms the page on focus. ---- */
+@media (hover: none) and (pointer: coarse) {
+  .icon-button, .row-action, .send, .composer-attach, .task-more { width: 44px; height: 44px; min-width: 44px; }
+  .head .back, .tc-back { margin-left: -12px; }
+  .switch-link, .segmented button, .inspect-top .segmented button { display: inline-flex; align-items: center; justify-content: center; min-width: 44px; min-height: 44px; }
+  .button, .button.small, .button.quiet, .copy-button, .confirm-clear, .link, .summary-brief, .summary-count, .take-back, .fold, .code-run,
+  .offer button, .attach-choice, .send-way, .road-band-toggle, .brand {
+    display: inline-flex; align-items: center; justify-content: center; min-width: 44px; min-height: 44px;
+  }
+  .attach-choice, .send-way { justify-content: flex-start; }
+  .send-way { display: grid; align-content: center; }
+  .records-row > summary, .records-earlier > summary, .facts-files summary, .card-terminal > summary { display: flex; align-items: center; min-height: 44px; }
+  .place, .project, .tc-row, .palette-row, .suggestion, .option, .task-link { min-height: 44px; }
+  label:has(> input[type="checkbox"]) { display: flex; align-items: center; gap: 10px; min-height: 44px; }
+  input[type="checkbox"] { flex: none; width: 24px; height: 24px; margin: 0; }
+  :is(textarea, select, input:not([type="checkbox"]):not([type="radio"]):not([type="color"]):not([type="range"])) { min-height: 44px; font-size: 16px; }
+  .send-menu { gap: 4px; }
+  .left-summary { gap: 0; }
+  .tc-links { gap: 0 14px; }
+}

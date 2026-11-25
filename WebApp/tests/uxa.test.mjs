@@ -106,3 +106,34 @@ test('U7: no text under 11.5 px, in any rule, wide or on a phone; the browser’
   const ua = rules().find((rule) => rule.selector === 'small' && rule.media === '');
   assert.ok(ua && px(declarations(ua.body)['font-size'], sizes) >= 11.5, 'a rule for <small> at the small size');
 });
+
+test('U8: on a touch screen every kind of control is 44 px both ways by its padding, checkboxes 24 px with their words tappable, text boxes 16 px', () => {
+  const touch = rules().filter((rule) => /hover:\s*none/.test(rule.media) && /pointer:\s*coarse/.test(rule.media));
+  const size = (selector, property) => {
+    let found = null;
+    for (const rule of touch) {
+      const listed = rule.selector.split(/,(?![^(]*\))/).map((one) => one.trim());
+      if (!listed.includes(selector)) continue;
+      const value = declarations(rule.body)[property];
+      if (value) found = parseFloat(value);
+    }
+    return found;
+  };
+  const tall = (selector) => Math.max(size(selector, 'min-height') ?? 0, size(selector, 'height') ?? 0);
+  const wide = (selector) => Math.max(size(selector, 'min-width') ?? 0, size(selector, 'width') ?? 0);
+  const short = [];
+  // Icon buttons, a message's actions, Send: square.
+  for (const selector of ['.icon-button', '.row-action', '.send', '.composer-attach']) if (tall(selector) < 44 || wide(selector) < 44) short.push(selector);
+  // Switches, small and text buttons.
+  for (const selector of ['.switch-link', '.segmented button', '.button', '.button.small', '.copy-button', '.confirm-clear', '.link', '.summary-brief', '.take-back', '.fold', '.offer button']) {
+    if (tall(selector) < 44 || wide(selector) < 44) short.push(selector);
+  }
+  // The drawers' rows and the two-column list's rows: the whole width already, 44 tall.
+  for (const selector of ['.place', '.project', '.tc-row', '.palette-row', '.option', '.task-link']) if (tall(selector) < 44) short.push(selector);
+  assert.deepEqual(short, []);
+  assert.equal(size('input[type="checkbox"]', 'width'), 24);
+  assert.equal(size('input[type="checkbox"]', 'height'), 24);
+  assert.equal(size('label:has(> input[type="checkbox"])', 'min-height'), 44);
+  const inputs = touch.find((rule) => rule.selector.startsWith(':is(textarea, select, input'));
+  assert.ok(inputs && parseFloat(declarations(inputs.body)['font-size']) >= 16, 'text boxes at 16 px');
+});
