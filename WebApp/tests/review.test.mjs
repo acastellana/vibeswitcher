@@ -219,12 +219,26 @@ test('a Blocking card’s answer shows “Sending … · Undo” for a few secon
   find(view.el, button('Wait')).click();
   timers[1].fn();
   assert.deepEqual(app.sent.map((one) => [one.kind, one.args.text]), [['answer', 'Wait']]);
+  // Reworded while it waits: what was picked doesn't go as the answer to a question the user didn't read.
+  const asked = { ...card, seen: 'v1-seen', question: { ...card.question, version: 1 } };
+  const changing = questionCard(app, asked);
+  changing.update(asked);
+  find(changing.el, button('Thursday')).click();
+  const reworded = { ...asked, seen: 'v2-seen', question: { ...asked.question, version: 2, text: 'Ship the hero and the pricing page on Thursday?' } };
+  changing.update(reworded);
+  assert.equal(timers[2].cancelled, true, 'the wait is dropped');
+  assert.ok(find(changing.el, button('Thursday')), 'the reworded question, with its options');
+  assert.deepEqual(app.sent.map((one) => one.args.text), ['Wait'], 'nothing more sent');
+  // One that goes carries the version and seen it was picked on.
+  find(changing.el, button('Wait')).click();
+  timers[3].fn();
+  assert.deepEqual([app.sent.at(-1).args.version, app.sent.at(-1).args.seen], [2, 'v2-seen']);
   // Not Blocking: the click is the answer, as before.
   const calm = { ...card, id: 'local:card:q2', blocking: false, question: { ...card.question, priority: 'important' } };
   const other = questionCard(app, calm);
   other.update(calm);
   find(other.el, button('Thursday')).click();
-  assert.deepEqual(app.sent.map((one) => one.args.text), ['Wait', 'Thursday']);
+  assert.deepEqual(app.sent.map((one) => one.args.text), ['Wait', 'Wait', 'Thursday']);
   setLanguage('es');
   const es = questionCard(app, { ...card, id: 'local:card:q3' });
   es.update({ ...card, id: 'local:card:q3' });

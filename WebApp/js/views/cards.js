@@ -174,7 +174,9 @@ export function questionCard(app, first, { expand = null } = {}) {
   let keys = { buttons: [], hold: null };
 
   // With the `act` right the click is the answer: the card, the `seen` it was drawn with, the words and the version.
-  const send = (text) => app.store.act(card.id, 'answer', { text, ...(card.question?.version != null ? { version: card.question.version } : {}), seen: card.seen ?? null });
+  // What was clicked on: the version and `seen` the card had then, so a question reworded since is refused as changed.
+  const drawnAs = () => ({ ...(card.question?.version != null ? { version: card.question.version } : {}), seen: card.seen ?? null });
+  const send = (text, drawn = drawnAs()) => app.store.act(card.id, 'answer', { text, ...drawn });
   // A Blocking card's answer waits a few seconds first, "Sending … · Undo" on the card, so a slip of one click can be
   // taken back; then it goes as it would have. `app.later(fn, ms)` (the tests' clock) returns what cancels it.
   let sending = null;
@@ -183,7 +185,7 @@ export function questionCard(app, first, { expand = null } = {}) {
     const text = answer.trim();
     if (!text || sending) return;
     if (card.question?.priority !== 'blocking') { send(text); return; }
-    sending = { text, cancel: later(() => { const going = sending; sending = null; shape = ''; send(going.text); build(); }, UNDO_MS) };
+    sending = { text, drawn: drawnAs(), cancel: later(() => { const going = sending; sending = null; shape = ''; send(going.text, going.drawn); build(); }, UNDO_MS) };
     shape = '';
     build();
   };
@@ -208,8 +210,8 @@ export function questionCard(app, first, { expand = null } = {}) {
     el.replaceChildren();
     el.className = 'card';
 
-    // Answered elsewhere while one waited to go: it doesn't go.
-    if (sending && !card.open) { sending.cancel(); sending = null; }
+    // Answered elsewhere, or the question changed, while one waited to go: it doesn't go, and the card shows again.
+    if (sending && (!card.open || JSON.stringify(drawnAs()) !== JSON.stringify(sending.drawn))) { sending.cancel(); sending = null; }
     if (sending) {
       el.classList.add('closed', 'sending');
       el.append(h('div', { class: 'card-closed', role: 'status' }, icon('send', 13), h('div', null,
