@@ -48,6 +48,8 @@ struct HeldWhatTests {
 
     static func plain(_ card: NodeWire.Value) -> String { CardText.lines(card).joined(separator: "\n") }
 
+    static let install = item("~/.vibeswitcher/v2/builds", files: [file(commit + "/bin/vibeswitcher", .added), file(commit + "/build-info", .added)])
+
     static let claude = [item("~/.local/share/claude/versions", files: [file("2.1.332", .added)]), item("~/.local/bin", files: [file("claude")])]
 
     @Test func eachIsItsPathInNeutralWords() {
@@ -64,11 +66,14 @@ struct HeldWhatTests {
                 == "other: ~/.claude/plugins: genlayernode@genlayerlabs: hooks/hooks.json changed")
         #expect(say(Self.item("~/.config/systemd/user", files: [Self.file("vibeswitcher-node.service")]))
                 == "build-switch: ~/.config/systemd/user/vibeswitcher-node.service now starts build 3e9df41a (looks like VibeSwitcher's own switch)")
-        #expect(say(Self.item("~/.vibeswitcher/v2/builds", files: [Self.file(Self.commit + "/bin/vibeswitcher", .added)]))
+        #expect(say(Self.install)
                 == "build-switch: ~/.vibeswitcher/v2/builds: build 3e9df41a added (looks like VibeSwitcher's own install)")
         #expect(say(Self.item(".git/config (main checkout)", change: "branch.v2-usage.merge added, branch.v2-usage.remote added"))
                 == "git-config: .git/config (main checkout): the tracking entry of branch v2-usage (branch.v2-usage.merge added, branch.v2-usage.remote added)")
         #expect(say(Self.item(".git/config (main checkout)", change: "core.hookspath added")) == "git-config: .git/config (main checkout): core.hookspath added")
+        // A tracking entry beside another key is no tracking entry: every key named, the risky ones first.
+        #expect(say(Self.item(".git/config (main checkout)", change: "branch.v2.merge added, core.hookspath added, user.name changed"))
+                == "git-config: .git/config (main checkout): core.hookspath added, branch.v2.merge added, user.name changed")
         #expect(say(Self.item(Self.startup)) == "startup: \(Self.startup): VibeSwitcher node.lnk not on your list of known shortcuts")
         #expect(say(Self.item("~/.claude/settings.json", change: "model changed")) == "settings: ~/.claude/settings.json: model changed")
         #expect(say(Self.item("~/.zshrc")) == "other: ~/.zshrc changed")
@@ -78,12 +83,12 @@ struct HeldWhatTests {
     @Test func aGitConfigsChangedKeysAreNamed() {
         let before = "[core]\n\trepositoryformatversion = 0\n[remote \"origin\"]\n\turl = git@example.com:x/y.git\n"
         let after = before + "[branch \"v2-usage\"]\n\tremote = origin\n\tmerge = refs/heads/v2-usage\n"
-        let change = ConfigSeal.changedKeys(from: ConfigSeal.encode(ConfigSeal.gitKeys(before)), to: ConfigSeal.encode(ConfigSeal.gitKeys(after)))
+        let change = ConfigSeal.changedKeys(from: ConfigSeal.encode(ConfigSeal.gitKeys(before) ?? [:]), to: ConfigSeal.encode(ConfigSeal.gitKeys(after) ?? [:]))
         #expect(change == "branch.v2-usage.merge added, branch.v2-usage.remote added", "\(String(describing: change))")
         #expect(HeldWhat.tracking(change ?? "") == ["v2-usage"])
         #expect(!(change ?? "").contains("refs/heads"), "no value")
         let moved = before.replacingOccurrences(of: "x/y.git", with: "x/z.git")
-        #expect(ConfigSeal.changedKeys(from: ConfigSeal.encode(ConfigSeal.gitKeys(before)), to: ConfigSeal.encode(ConfigSeal.gitKeys(moved)))
+        #expect(ConfigSeal.changedKeys(from: ConfigSeal.encode(ConfigSeal.gitKeys(before) ?? [:]), to: ConfigSeal.encode(ConfigSeal.gitKeys(moved) ?? [:]))
                 == "remote.origin.url changed")
     }
 
@@ -91,7 +96,7 @@ struct HeldWhatTests {
     @Test func aSettingsChangeIsNeverFoldedBehindUpdates() {
         let items = Self.claude + [Self.item("~/.claude/plugins: genlayernode@genlayerlabs", change: "version folder changed"),
                                    Self.item("~/.claude/plugins: context7@claude-plugins-official", change: "version folder changed"),
-                                   Self.item("~/.vibeswitcher/v2/builds", files: [Self.file(Self.commit + "/bin/vibeswitcher", .added)]),
+                                   Self.install,
                                    Self.item("~/.claude/settings.json", change: "model changed")]
         let lines = CardText.plainConfig(Self.card(root: "/home/someone", items: items, project: nil))
         #expect(lines.first == "~/.claude/settings.json: model changed", "\(lines)")
@@ -114,7 +119,7 @@ struct HeldWhatTests {
                                    Self.item(Self.startup),
                                    Self.item("~/.claude/settings.json", change: "model changed"),
                                    Self.item("~/.config/systemd/user", files: [Self.file("vibeswitcher-node.service")]),
-                                   Self.item("~/.vibeswitcher/v2/builds", files: [Self.file(Self.commit + "/bin/vibeswitcher", .added)])]
+                                   Self.install]
         let rails = (0..<11).map { Self.rail("rule\($0)", "\($0)") }
         let card = Self.card(root: "/home/someone", items: items, rails: rails, project: nil)
         #expect(CardText.plainConfig(card) == [
@@ -136,7 +141,7 @@ struct HeldWhatTests {
     /// VibeSwitcher's own switch: its unit and its builds folder, holding the project; a line in `approve`'s list.
     @Test func theSwitchsTwo() {
         let items = [Self.item("~/.config/systemd/user", files: [Self.file("vibeswitcher-node.service")]),
-                     Self.item("~/.vibeswitcher/v2/builds", files: [Self.file(Self.commit + "/bin/vibeswitcher", .added)])]
+                     Self.install]
         let card = Self.card(root: "/home/someone/projects/vibeswitcher-v2-lead", items: items, project: "vibeswitcher-v2-lead")
         #expect(CardText.plainConfig(card) == [
             "~/.config/systemd/user/vibeswitcher-node.service now starts build 3e9df41a (looks like VibeSwitcher's own switch)",
@@ -202,5 +207,37 @@ struct HeldWhatTests {
         guard case .failure(let error) = held else { Issue.record("a card was drawn: \(held)"); return }
         #expect("\(error)".contains("didn't answer"), "\(error)")
         #expect(asked.value == 2)
+    }
+
+    /// The git config parser understands the whole file or nothing (the card then says only that it changed): a key on
+    /// a header's own line, a continued line, an include.
+    @Test func aGitConfigItCantFullyReadHasNoKeys() {
+        #expect(ConfigSeal.gitKeys("[core]\n\tbare = false\n[branch \"v2\"]\n\tremote = origin\n")?.keys.sorted() == ["branch.v2.remote", "core.bare"])
+        #expect(ConfigSeal.gitKeys("[core] sshCommand = ssh -i x\n") == nil, "a key after the header's ]")
+        #expect(ConfigSeal.gitKeys("[alias]\n\tx = !echo \\\n\t\tdone\n") == nil, "a continued line")
+        #expect(ConfigSeal.gitKeys("[include]\n\tpath = ~/elsewhere\n") == nil && ConfigSeal.gitKeys("[includeIf \"gitdir:~/w/\"]\n\tpath = x\n") == nil)
+        #expect(ConfigSeal.gitKeys("[core.x]\n\tbare = false\n") == nil && ConfigSeal.gitKeys("bare = false\n") == nil)
+        #expect(ConfigSeal.gitKeys("[core]\n\tbad_name = 1\n") == nil && ConfigSeal.gitKeys("[core]\n\t = 1\n") == nil)
+        // No keys: the vault notes no change words, so the card says the file changed and nothing else.
+        #expect(ConfigSeal.changedKeys(from: ConfigSeal.encode(ConfigSeal.gitKeys("[core]\n\tbare = false\n") ?? [:]), to: nil) == nil)
+        #expect(Self.item(".git/config (main checkout)").about?.what == ".git/config (main checkout) changed")
+    }
+
+    /// An update is exactly one, or it's named as what it is: the unit's drop-in, a plugin's hooks beside its new
+    /// version, a file changed inside an existing build, a version file replaced.
+    @Test func onlyExactlyAnUpdateIsCalledOne() {
+        let dropIn = Self.item("~/.config/systemd/user", files: [Self.file("vibeswitcher-node.service.d/x.conf", .added)])
+        #expect(dropIn.about?.kind == .other && dropIn.about?.what == "~/.config/systemd/user: vibeswitcher-node.service.d/x.conf changed", "\(String(describing: dropIn.about))")
+        let hooks = Self.item("~/.claude/plugins: genlayernode@genlayerlabs", change: "version folder changed, hooks/hooks.json changed")
+        #expect(hooks.about?.kind == .other && hooks.about?.what.contains("hooks/hooks.json changed") == true, "\(String(describing: hooks.about))")
+        let inside = Self.item("~/.vibeswitcher/v2/builds", files: [Self.file(Self.commit + "/bin/vibeswitcher")])
+        #expect(inside.about?.kind == .other && inside.about?.what.contains(Self.commit + "/bin/vibeswitcher changed") == true, "\(String(describing: inside.about))")
+        let noInfo = Self.item("~/.vibeswitcher/v2/builds", files: [Self.file(Self.commit + "/bin/vibeswitcher", .added)])
+        #expect(noInfo.about?.kind == .other, "an added file in a build folder with no new build-info")
+        let replaced = Self.item("~/.local/share/claude/versions", files: [Self.file("2.1.332", .added), Self.file("2.1.331")])
+        #expect(replaced.about?.kind == .other, "\(String(describing: replaced.about))")
+        // Each is named on the default screen, beside whatever does look like an update.
+        let lines = CardText.plainConfig(Self.card(root: "/home/someone", items: Self.claude + [dropIn, hooks, inside], project: nil))
+        #expect(lines.filter { !$0.hasPrefix("holds") }.count == 4 && lines.contains("and 2 more that look like updates (--long lists them)"), "\(lines)")
     }
 }

@@ -597,11 +597,12 @@ public enum ConfigSeal {
     /// doesn't read as JSON now.
     static func keyHashes(_ watched: Watched) -> [String: String]? {
         if let parts = parts(watched) { return Dictionary(parts, uniquingKeysWith: { first, _ in first }) }
-        // A git config's keys (2026-11-25: the card names a branch's tracking entry that changed, not just the file).
+        // A git config's keys (2026-11-25: the card names a branch's tracking entry that changed, not just the file), only
+        // when the whole file reads as `gitKeys` understands it: else none, and the card says only that it changed.
         if watched.kind == .file, gitConfigNames.contains(watched.name) {
             var info = stat()
             guard stat(watched.path, &info) == 0 else { return [:] }
-            return regularContents(watched.path, limit: jsonLimit).map { gitKeys(String(decoding: $0, as: UTF8.self)) }
+            return regularContents(watched.path, limit: jsonLimit).flatMap { String(data: $0, encoding: .utf8) }.flatMap(gitKeys)
         }
         guard watched.kind == .mcpServers || (watched.kind == .file && watched.path.hasSuffix(".json")) else { return nil }
         var info = stat()
@@ -623,28 +624,44 @@ public enum ConfigSeal {
     static var gitConfigNames: Set<String> { [".git/config (main checkout)", "~/.gitconfig", "~/.config/git/config"] }
 
     /// A git config's keys, each "section[.subsection].name" (section and name lowercased, as git compares them) with
-    /// its values hashed (a key set more than once, all of them in order). Names only reach the card, never a value.
-    static func gitKeys(_ text: String) -> [String: String] {
+    /// its values hashed (a key set more than once, all of them in order); nil for anything it doesn't fully understand,
+    /// so a change it would misread is never named (the review of 2026-11-25: a second parser of git's config hides what
+    /// it misses): text after a section header's `]`, a header other than `[section]` or `[section "sub"]` exactly, a
+    /// line continued with a trailing `\`, a line that is neither a header, a comment, `name` nor `name = value`, a name
+    /// outside `[A-Za-z][A-Za-z0-9-]*`, a key before any section, and any `include` or `includeIf` (it pulls in another
+    /// file). Names only reach the card, never a value. These hashes only describe: what is held rests on the whole
+    /// file's hash (`fingerprint`), as for every file; nothing reads them to decide a hold.
+    static func gitKeys(_ text: String) -> [String: String]? {
         var values: [String: [String]] = [:]
-        var section = ""
-        for raw in text.split(whereSeparator: \.isNewline) {
-            let line = raw.trimmingCharacters(in: .whitespaces)
-            guard !line.isEmpty, !line.hasPrefix("#"), !line.hasPrefix(";") else { continue }
-            if line.hasPrefix("["), let close = line.firstIndex(of: "]") {
-                let inside = line[line.index(after: line.startIndex)..<close].trimmingCharacters(in: .whitespaces)
-                if let quote = inside.firstIndex(of: "\"") {
-                    let name = inside[..<quote].trimmingCharacters(in: .whitespaces).lowercased()
-                    let sub = inside[inside.index(after: quote)...].trimmingCharacters(in: CharacterSet(charactersIn: "\" "))
-                    section = name + "." + sub
+        var section: String?
+        let name = #"^[A-Za-z][A-Za-z0-9-]*$"#
+        for raw in text.split(separator: "\n", omittingEmptySubsequences: false) {
+            var line = Substring(raw)
+            if line.hasSuffix("\r") { line = line.dropLast() }
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            guard !trimmed.isEmpty, !trimmed.hasPrefix("#"), !trimmed.hasPrefix(";") else { continue }
+            guard !trimmed.hasSuffix("\\") else { return nil }
+            if trimmed.hasPrefix("[") {
+                guard trimmed.hasSuffix("]") else { return nil }
+                let inside = String(trimmed.dropFirst().dropLast())
+                if let space = inside.firstIndex(of: " ") {
+                    let head = String(inside[..<space]), rest = String(inside[inside.index(after: space)...])
+                    guard head.range(of: name, options: .regularExpression) != nil, rest.count >= 2, rest.hasPrefix("\""), rest.hasSuffix("\""),
+                          !rest.dropFirst().dropLast().contains(where: { $0 == "\"" || $0 == "\\" }) else { return nil }
+                    section = head.lowercased() + "." + String(rest.dropFirst().dropLast())
                 } else {
+                    guard inside.range(of: name, options: .regularExpression) != nil else { return nil }
                     section = inside.lowercased()
                 }
+                let base = section?.split(separator: ".").first.map(String.init) ?? ""
+                guard base != "include", base != "includeif" else { return nil }
                 continue
             }
-            let parts = line.split(separator: "=", maxSplits: 1)
-            let name = parts[0].trimmingCharacters(in: .whitespaces).lowercased()
-            guard !name.isEmpty else { continue }
-            values[section + "." + name, default: []].append(parts.count > 1 ? parts[1].trimmingCharacters(in: .whitespaces) : "true")
+            guard let section else { return nil }
+            let parts = trimmed.split(separator: "=", maxSplits: 1, omittingEmptySubsequences: false)
+            let key = parts[0].trimmingCharacters(in: .whitespaces)
+            guard key.range(of: name, options: .regularExpression) != nil else { return nil }
+            values[section + "." + key.lowercased(), default: []].append(parts.count > 1 ? parts[1].trimmingCharacters(in: .whitespaces) : "true")
         }
         return values.mapValues { valueHash($0) }
     }

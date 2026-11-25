@@ -75,8 +75,9 @@ public enum HeldWhat {
         let change = item.change.map(inert)
         switch name {
         case versions:
+            // Only new files, each named as a version: anything changed or removed beside them isn't an update.
             let added = item.files.filter { $0.change == .added }.map { ($0.path as NSString).lastPathComponent }
-            guard !added.isEmpty, added.allSatisfy(isVersion) else {
+            guard !added.isEmpty, added.count == item.files.count, added.allSatisfy(isVersion) else {
                 return Described(kind: .other, what: versions + (files.isEmpty ? " changed" : ": \(listed(files)) changed"))
             }
             let to = added.max { $0.compare($1, options: .numeric) == .orderedAscending }.map(inert)
@@ -89,12 +90,19 @@ public enum HeldWhat {
             }
             return Described(kind: .other, what: bin + (files.isEmpty ? " changed" : ": \(listed(files)) changed"))
         case builds:
-            let commits = files.map { String($0.split(separator: "/").first ?? "") }.filter(NodeUnit.isCommit)
-            guard let first = commits.first else { return Described(kind: .other, what: builds + " changed") }
+            // An install only when every file is new and under a commit's folder, each such folder with its own new
+            // build-info (a new build's): anything changed, removed or beside them is named as it is.
+            let commits = Set(files.map { String($0.split(separator: "/").first ?? "") })
+            let installs = !files.isEmpty && item.files.allSatisfy { $0.change == .added } && commits.allSatisfy(NodeUnit.isCommit)
+                && files.allSatisfy { $0.contains("/") } && commits.allSatisfy { files.contains($0 + "/" + BuildInfo.fileName) }
+            guard installs, let first = commits.sorted().first else {
+                return Described(kind: .other, what: builds + (files.isEmpty ? " changed" : ": \(listed(files)) changed"))
+            }
             let short = String(first.prefix(8))
             return Described(kind: .buildSwitch, what: "\(builds): build \(short) added (looks like VibeSwitcher's own install)", to: short)
         case units:
-            guard !files.isEmpty, files.allSatisfy({ $0.hasPrefix(unitFile) }), let build = facts.unitBuild else {
+            // The unit file itself and nothing else: a drop-in (`.d/`) or any other file is named as it is.
+            guard files == [unitFile], let build = facts.unitBuild else {
                 return Described(kind: .other, what: units + (files.isEmpty ? " changed" : ": \(listed(files)) changed"))
             }
             let short = String(build.prefix(8))
@@ -107,19 +115,21 @@ public enum HeldWhat {
             var id = name.hasPrefix(pluginPrefix) ? String(name.dropFirst(pluginPrefix.count)) : String(name.dropFirst(checkoutPluginPrefix.count))
             if let checkout = id.range(of: " (main checkout)") { id = String(id[..<checkout.lowerBound]) }
             // Moved to a new version folder and nothing else said: looks like the plugin's update; anything else, said.
-            let updated = item.change.map { $0 == "version folder changed" || $0.hasPrefix("version folder changed, ") } ?? false
+            let updated = item.change == "version folder changed"
             let to = facts.pluginVersions[id].map(inert)
             guard updated else { return Described(kind: .other, what: inert(name) + (change.map { ": \($0)" } ?? " changed")) }
             return Described(kind: .pluginUpdate, what: inert(name) + (to.map { ": now version \($0)" } ?? ": a new version folder") + " (looks like the plugin's own update)",
                              to: to)
         }
         if name.hasPrefix(".git/config") || name == "~/.gitconfig" || name == "~/.config/git/config" {
+            // Its keys only when the node read the whole file (`ConfigSeal.gitKeys`); a branch's tracking entry the
+            // plain phrase only when that is every key that changed; any other key named, the riskiest first.
             guard let keys = item.change else { return Described(kind: .gitConfig, what: "\(inert(name)) changed") }
             let branches = tracking(keys)
             if !branches.isEmpty {
                 return Described(kind: .gitConfig, what: "\(inert(name)): the tracking entry of branch \(branches.map(inert).joined(separator: ", ")) (\(change ?? ""))")
             }
-            return Described(kind: .gitConfig, what: "\(inert(name)): \(change ?? "changed")")
+            return Described(kind: .gitConfig, what: "\(inert(name)): \(inert(riskiestFirst(keys)))")
         }
         if name.contains("/Start Menu/Programs/Startup") {
             let names = facts.unknownStartup
@@ -135,9 +145,27 @@ public enum HeldWhat {
     /// only those may be counted instead of named on a default screen; everything else is always named.
     public static func looksLikeUpdate(_ kind: Kind) -> Bool { [.claudeUpdate, .pluginUpdate, .buildSwitch].contains(kind) }
 
-    /// The branches whose tracking entry (`branch.<name>.remote`, `.merge`, `.rebase`, `.pushRemote`) is all that
-    /// changed, from `ConfigSeal.changedKeys`' words ("branch.v2.merge added, branch.v2.remote added"); empty when
-    /// anything else changed, or more were cut.
+    /// A branch's tracking entry's keys: what `git push -u`, `git branch --set-upstream-to` and an editor's merge base
+    /// write, nothing that runs.
+    static let trackingFields: Set<String> = ["remote", "merge", "rebase", "pushremote", "vscode-merge-base"]
+
+    /// The key prefixes that run something or pull in other config: named first.
+    static let riskyKeys = ["include.", "includeif.", "core.", "alias.", "url.", "filter.", "credential."]
+
+    /// `ConfigSeal.changedKeys`' words reordered: the risky keys first, the rest as they came, any "and N more" last.
+    static func riskiestFirst(_ change: String) -> String {
+        var parts = change.components(separatedBy: ", ")
+        var tail = ""
+        if let last = parts.last, let and = last.range(of: " and ", options: .backwards), last.hasSuffix(" more") {
+            tail = String(last[and.lowerBound...])
+            parts[parts.count - 1] = String(last[..<and.lowerBound])
+        }
+        let risky = parts.filter { part in riskyKeys.contains { part.lowercased().hasPrefix($0) } }
+        return (risky + parts.filter { !risky.contains($0) }).joined(separator: ", ") + tail
+    }
+
+    /// The branches whose tracking entry (`trackingFields`) is all that changed, from `ConfigSeal.changedKeys`' words
+    /// ("branch.v2.merge added, branch.v2.remote added"); empty when anything else changed, or more were cut.
     static func tracking(_ change: String) -> [String] {
         guard !change.contains(" and ") || !change.hasSuffix(" more") else { return [] }
         var branches: [String] = []
@@ -147,7 +175,7 @@ public enum HeldWhat {
             let key = String(words[0])
             guard key.hasPrefix("branch."), let dot = key.lastIndex(of: "."), key.index(after: key.startIndex) < dot else { return [] }
             let field = key[key.index(after: dot)...].lowercased()
-            guard ["remote", "merge", "rebase", "pushremote"].contains(field) else { return [] }
+            guard trackingFields.contains(field) else { return [] }
             let branch = String(key[key.index(key.startIndex, offsetBy: "branch.".count)..<dot])
             if !branches.contains(branch) { branches.append(branch) }
         }
