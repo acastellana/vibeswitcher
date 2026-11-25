@@ -20,6 +20,7 @@ export const ES = {
   nothingHereNeedsYou: 'Nada de este proyecto te necesita',
   needYouInAll: { one: '{n} te necesita en total', other: '{n} te necesitan en total' },
   ownWaiting: { one: '{n} te necesita', other: '{n} te necesitan' },
+  placeNotices: { one: '{n} aviso', other: '{n} avisos' },
   briefMe: 'Resúmeme',
   nextWaiting: 'Ir a lo siguiente que te necesita',
   briefTitle: 'Qué ha pasado y qué se te pide',
@@ -187,7 +188,7 @@ export const ES = {
   showTeam: 'El equipo',
   ownNone: 'Ninguna fuera de un proyecto.',
   ownSub: 'Sesiones que arrancaste tú, fuera del equipo de cualquier proyecto.',
-  goneProject: 'Este proyecto no está en el nodo',
+  goneProject: 'Este proyecto no está en este nodo',
   goneProjectSub: 'Su líder terminó, o el enlace es de otro nodo.',
   // The cards (views/cards.js).
   askerLead: 'el líder',

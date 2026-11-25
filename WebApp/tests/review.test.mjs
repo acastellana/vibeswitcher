@@ -86,12 +86,12 @@ test('the counts say what they count: the project’s things against everything 
     const left = leftColumn(app, { brief() {} });
     left.render();
     assert.equal(find(left.el, byClass('summary-count')).textContent, all);
-    // Your own sessions: how many there are, plain; what waits among them, apart and in the asking colour.
+    // Your own sessions: what waits among them, in words and in the asking colour (how many there are, in its title).
     const own = find(left.el, (node) => node.dataset.place === 'ownSessions');
-    assert.equal(find(own, byClass('place-count')).textContent, '5');
+    assert.equal(find(own, byClass('place-count')).hidden, true);
     const waits = find(own, byClass('place-waiting'));
-    assert.equal(waits.textContent, '1');
-    assert.equal(waits.title, code === 'en' ? '1 needs you' : '1 te necesita');
+    assert.equal(waits.textContent, code === 'en' ? '1 needs you' : '1 te necesita');
+    assert.equal(own.title, code === 'en' ? '5 sessions of yours' : '5 sesiones tuyas');
     const { projectView } = await import('../js/views/project.js');
     const view = projectView(app, { sheet: { open() {}, close() {} } });
     view.render();

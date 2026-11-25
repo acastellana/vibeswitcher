@@ -86,3 +86,55 @@ test('U18: Spanish contracts “a el” and “de el” wherever a sentence is b
   setLanguage('en');
   assert.equal(t('chSteerShort', { agent: 'el agente' }), 'Steer el agente…');
 });
+
+test('U17: the left column’s places say what they count, in words: what needs you, else how many; the node’s notices', async () => {
+  const { leftColumn } = await import('../js/views/left.js');
+  const { find, byClass } = await import('./fakedom.mjs');
+  const app = (sessions, notices) => ({
+    store: { state: { node: { notices, web: null }, connection: 'live', phrase: null, sessions: new Map(sessions.map((one) => [one.id, one])), leads: new Map(), boards: new Map(), cards: new Map() },
+      acts: () => false, can: () => true },
+    ui: { state: { route: { name: 'home' } } },
+  });
+  const own = (status, i) => ({ id: `local:own${i}`, role: null, status, cwd: '/home/dev' });
+  const place = (left, key) => find(left.el, (node) => node.dataset?.place === key);
+  const shown = (el) => (el.hidden ? '' : el.textContent);
+  for (const [code, needs, notice, notices] of [['en', '1 needs you', '1 notice', '2 notices'], ['es', '1 te necesita', '1 aviso', '2 avisos']]) {
+    setLanguage(code);
+    const left = leftColumn(app([own('needs-you', 0), ...[1, 2, 3, 4].map((i) => own('idle', i))], ['example-site: landing-base moved']), { brief() {} });
+    left.render();
+    const sessions = place(left, 'ownSessions');
+    assert.equal(shown(find(sessions, byClass('place-waiting'))), needs, 'what needs you, in words');
+    assert.equal(shown(find(sessions, byClass('place-count'))), '', 'never two numbers side by side');
+    assert.ok(sessions.classList.contains('asked'));
+    assert.equal(shown(find(place(left, 'thisNode'), byClass('place-count'))), notice);
+    const calm = leftColumn(app([1, 2, 3, 4, 5].map((i) => own('idle', i)), ['a', 'b']), { brief() {} });
+    calm.render();
+    assert.equal(shown(find(place(calm, 'ownSessions'), byClass('place-count'))), '5', 'nothing waits: how many are yours');
+    assert.equal(shown(find(place(calm, 'ownSessions'), byClass('place-waiting'))), '');
+    assert.equal(shown(find(place(calm, 'thisNode'), byClass('place-count'))), notices);
+    const none = leftColumn(app([], []), { brief() {} });
+    none.render();
+    assert.equal(shown(find(place(none, 'thisNode'), byClass('place-count'))), '');
+  }
+  setLanguage('en');
+});
+
+test('U19: a project that is gone says so and offers the start page, as a gone session does', async () => {
+  const { projectView } = await import('../js/views/project.js');
+  const { find, findAll } = await import('./fakedom.mjs');
+  for (const [code, title, button] of [['en', 'This project isn’t on this node', 'Start Page'], ['es', 'Este proyecto no está en este nodo', 'Página de inicio']]) {
+    setLanguage(code);
+    const state = { node: null, connection: 'live', phrase: null, pageWords: null, sessions: new Map(), leads: new Map(), boards: new Map(), cards: new Map(),
+      cardKeys: new Map(), acting: new Map(), draftRefused: new Map() };
+    const app = { store: { state, acts: () => false, can: () => true, subscribe() {}, request: () => Promise.resolve({ ok: true }), read: () => Promise.resolve({ ok: false }), cardKey: (id) => id, draftOf: () => null },
+      ui: { state: { route: { name: 'project', id: 'local:project:gone', view: 'lead' } }, subscribe() {}, go() {} } };
+    const view = projectView(app, { sheet: { open() {}, close() {} } });
+    view.render();
+    const gone = find(view.el, (node) => node.classList?.contains('empty-state') && !node.hidden);
+    assert.ok(gone, 'the gone page shows');
+    assert.match(gone.textContent, new RegExp(title));
+    const links = findAll(gone, (node) => node.tag === 'a');
+    assert.deepEqual(links.map((link) => [link.textContent, link.getAttribute('href')]), [[button, '#/']]);
+  }
+  setLanguage('en');
+});

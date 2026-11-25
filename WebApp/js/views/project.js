@@ -93,7 +93,7 @@ export function projectView(app, { sheet }) {
   const quiet = h('section', { class: 'quiet-block', hidden: true, 'aria-label': t('quietProject') },
     h('h2', { class: 'quiet-title' }, t('quietProject')), quietWords, quietLines, h('p', { class: 'confirm-note' }, t('quietNote'), ' ', quietForm));
   let quietDrawn = '';
-  const gone = h('div', { class: 'empty-state', hidden: true }, h('h2', null, t('goneProject')), h('p', null, t('goneProjectSub')));
+  const gone = h('div', { class: 'empty-state', hidden: true }, h('h2', null, t('goneProject')), h('p', null, t('goneProjectSub')), h('a', { class: 'button quiet', href: '#/' }, t('seStartPage')));
   const el = h('section', { class: 'centre project-view', 'aria-label': t('lead') }, head, strip, quiet, talk, waitBox, composer, gone);
   // The project's name beside "N things need you" shrinks to an ellipsis; squeezed to a mark, it goes (the right
   // column's head names the project).

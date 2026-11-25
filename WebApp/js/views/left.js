@@ -48,12 +48,12 @@ export function leftColumn(app, { brief }) {
   const place = (route, iconName, key) => h('a', { class: 'place', href: route, data: { place: key } }, icon(iconName, 16), h('span', null, t(key)));
   const newProject = place('#/new', 'plus', 'newProject');
   const own = place('#/sessions', 'chat', 'ownSessions');
-  // How many sessions are yours (plain), and how many of them need you (apart, in the asking colour).
+  // How many sessions are yours (plain), or, when some need you, how many in words ("1 needs you", in the asking colour).
   const ownWaiting = h('span', { class: 'place-waiting' });
   const ownCount = h('span', { class: 'place-count' });
   own.append(ownWaiting, ownCount);
   const nodeLink = place('#/node', 'node', 'thisNode');
-  // A notice on the node (its count beside This node), and Boost while it's on (a bolt that opens Settings).
+  // The node's notices beside This node, in words ("1 notice"), and Boost while it's on (a bolt that opens Settings).
   const notices = h('span', { class: 'place-count tone-text-working' });
   nodeLink.append(notices);
   const boost = h('a', { class: 'icon-button boost-mark', href: '#/settings', hidden: true }, icon('bolt', 14));
@@ -120,7 +120,6 @@ export function leftColumn(app, { brief }) {
       if (on) placeLink.setAttribute('aria-current', 'page'); else placeLink.removeAttribute('aria-current');
     }
     const mine = [...state.sessions.values()].filter(ownSession);
-    setText(ownCount, mine.length ? String(mine.length) : '');
     const waits = waitingPlaces(state, ownSession);
     const needs = waits.reduce((sum, place) => sum + place.count, 0);
     const moving = projects.reduce((sum, project) => sum + project.motion, 0);
@@ -143,13 +142,16 @@ export function leftColumn(app, { brief }) {
     // The places that hold what waits carry the asking colour, so the user sees where it is.
     const ownWaits = waits.filter((place) => place.kind === 'session').reduce((sum, place) => sum + place.count, 0);
     setClass(own, 'asked', ownWaits > 0);
-    setText(ownWaiting, ownWaits ? String(ownWaits) : '');
-    ownWaiting.title = ownWaits ? t('ownWaiting', { n: ownWaits }) : '';
+    // Two numbers side by side read as nothing: what needs you, in words, else how many are yours.
+    setText(ownWaiting, ownWaits ? t('ownWaiting', { n: ownWaits }) : '');
     ownWaiting.hidden = !ownWaits;
+    setText(ownCount, !ownWaits && mine.length ? String(mine.length) : '');
+    ownCount.hidden = !!ownWaits || !mine.length;
+    own.title = mine.length ? t('owCount', { n: mine.length }) : '';
     setClass(nodeLink, 'asked', waits.some((place) => place.kind === 'node'));
     const count = state.node?.notices?.length || 0;
-    setText(notices, count ? String(count) : '');
-    nodeLink.title = count ? `${t('thisNode')} · ${count}` : '';
+    setText(notices, count ? t('placeNotices', { n: count }) : '');
+    notices.hidden = !count;
     const mark = boostMarkText(state.node?.boost);
     boost.hidden = !mark;
     if (mark) { boost.title = mark.help; boost.setAttribute('aria-label', mark.label); }

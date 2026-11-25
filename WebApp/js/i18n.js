@@ -29,6 +29,8 @@ const EN = {
   nothingHereNeedsYou: 'Nothing in this project needs you',
   needYouInAll: { one: '{n} needs you in all', other: '{n} need you in all' },
   ownWaiting: { one: '{n} needs you', other: '{n} need you' },
+  // This node's notices, beside it in the left column.
+  placeNotices: { one: '{n} notice', other: '{n} notices' },
   briefMe: 'Brief me',
   nextWaiting: 'Go to the next thing that needs you',
   briefTitle: 'What happened, and what’s asked of you',
@@ -196,7 +198,7 @@ const EN = {
   showTeam: 'The team',
   ownNone: 'None outside a project.',
   ownSub: 'Sessions you started yourself, outside any project’s team.',
-  goneProject: 'This project isn’t on the node',
+  goneProject: 'This project isn’t on this node',
   goneProjectSub: 'Its lead ended, or the link is from another node.',
   // The cards (views/cards.js).
   askerLead: 'the lead',
