@@ -75,8 +75,12 @@ struct MacCheckedReCheckTests {
         let n = try node()
         let own = Platform.CodeIdentity.ownCdhash() ?? Data(repeating: 9, count: 20)
         let pins = Result<NodePins, NodePins.Refused>.success(NodePins(uid: getuid(), builds: []))
+        // Refused by the parser itself (its refusal names the command line), never by a later check that happens to
+        // refuse too: the record here pins nothing, so every line is refused at its row.
         func refused(_ arguments: [String]) -> Bool {
-            if case .failure = HostImages.macNodeStart(arguments: arguments, lockPath: n.lock, own: own, pins: pins, accountHome: n.home) { return true }
+            if case .failure(let why) = HostImages.macNodeStart(arguments: arguments, lockPath: n.lock, own: own, pins: pins, accountHome: n.home) {
+                return why.description.contains("command line")
+            }
             return false
         }
         func parsed(_ arguments: [String]) -> Bool {
