@@ -676,6 +676,12 @@ const EN = {
   pcCommandThat: "the command that {x}",
   // js/push.js
   puWhat: { one: "{branch} at {short}, {n} commit ahead of {target}", other: "{branch} at {short}, {n} commits ahead of {target}" },
+  puPushing: "Pushing {short} to {target}…",
+  puDeclining: "Declining the push of {short} to {target}…",
+  puPushed: "Pushed: {target} at {short}",
+  puUpToDate: "Already there: {target} at {short}",
+  puDeclined: "Push declined",
+  puChanged: "The lead changed its request while yours waited: nothing was sent. Look at it again.",
   // js/activity.js
   acWritten: "Written",
   acEdited: "Edited",

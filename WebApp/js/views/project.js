@@ -16,10 +16,11 @@ import { icon } from '../marks.js';
 import { clock, moment, tilde, lastPart, taskLine } from '../words.js';
 import { t, listed, lang, nodeWords } from '../i18n.js';
 import { hasDates, dated, timeAxis, axisPoints, landingWords, basisWords } from '../forecast.js';
-import { leadLines, shownLines, dialCounts, waitingCards, waitingCount, cut, shortHashes, dayOf, teamCounts, standing, taskTone, taskStep, waitsOn, goalRows, lineKey } from '../conversation.js';
+import { leadLines, shownLines, dialCounts, waitingCards, waitingCount, withPushLines, cut, shortHashes, dayOf, teamCounts, standing, taskTone, taskStep, waitsOn, goalRows, lineKey } from '../conversation.js';
 import { projectHref, routeHref } from '../ui.js';
 import { questionStack, pluginCard, copyLine, cardSheet } from './cards.js';
 import { tellLine, shellWord, leadLine } from '../actions.js';
+import { pushReceipt } from '../push.js';
 import { pluginFacts } from '../plugincard.js';
 import { actsFor, doButton, cardArgs, refusalWords } from '../acting.js';
 import { waysFor, sendArgs, sentWords } from '../sendways.js';
@@ -233,6 +234,8 @@ export function projectView(app, { sheet }) {
   }
 
   function lineEl(line, route) {
+    // A push settled from this page: what came of it, one quiet line (the lead hears it from the node).
+    if (line.kind === 'push') return [h('p', { class: `line kind-push ${line.outcome}` }, icon(line.outcome === 'declined' ? 'close' : 'check', 13), h('span', { class: 'line-text' }, line.head), h('time', null, clock(line.at)))];
     const answered = line.kind === 'ask';
     const button = h('a', { class: `line kind-${line.kind}${answered ? ' answered' : ''}`, href: routeHref(route, { sheet: line.key }) },
       lineMark(line.kind), h('span', { class: 'line-text' }, cut(shortHashes(line.head), 140)), h('time', null, clock(line.at)));
@@ -303,14 +306,15 @@ export function projectView(app, { sheet }) {
     stack.update();
     const extra = cards.filter((card) => !['question', 'approval'].includes(card.kind));
     const mine = notes.get(route.id) || [];
+    const pushes = stack.receipts();
     const key = JSON.stringify([route.id, route.show, lines.map((line) => [line.key, line.answer, line.state, line.delivered, line.replaceable]), extra.map((card) => [card.id, card.seen]), mine, waiting, lang(), store.acts(),
-      lead?.told || null, [...changing], stack.el.hidden]);
+      lead?.told || null, [...changing], pushes, stack.el.hidden]);
     if (key === drawn) return;
     const atEnd = talk.scrollHeight - talk.scrollTop - talk.clientHeight < 40;
     drawn = key;
     const asks = route.show === 'asks';
     setClass(el, 'show-asks', asks);
-    const shown = shownLines(lines, route.show);
+    const shown = withPushLines(shownLines(lines, route.show), asks ? [] : pushes, pushReceipt);
     const children = [];
     let day = null;
     for (const line of shown) {

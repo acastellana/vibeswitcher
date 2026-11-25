@@ -665,6 +665,12 @@ export const ES = {
   pcCommandThat: "la orden que {x}",
   // js/push.js
   puWhat: { one: "{branch} en {short}, {n} commit por delante de {target}", other: "{branch} en {short}, {n} commits por delante de {target}" },
+  puPushing: "Haciendo push de {short} a {target}…",
+  puDeclining: "Rechazando el push de {short} a {target}…",
+  puPushed: "Push hecho: {target} en {short}",
+  puUpToDate: "Ya estaba: {target} en {short}",
+  puDeclined: "Push rechazado",
+  puChanged: "El líder cambió su petición mientras la tuya esperaba: no se envió nada. Vuelve a mirarla.",
   // js/activity.js
   acWritten: "Escrito",
   acEdited: "Editado",

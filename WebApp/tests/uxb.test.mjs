@@ -140,6 +140,154 @@ test('U4: at “What waits on me” the conversation pane is hidden and the wait
   assert.match(css, /\.project-view\.show-asks \.wait-box \{ flex: 1; min-height: 0; max-height: none;/);
 });
 
+// U5 ---------------------------------------------------------------------------------------------------------------
+
+function pushApp(reply) {
+  return fakeApp({ kinds: ['push', 'push.decline'], state: { leads: new Map([[P, leadWithPush()]]) }, reply });
+}
+const pushed = (kind, args) => ({ ok: true, result: { request: args.request, settled: kind === 'push' ? 'pushed' : 'declined', ok: true, said: '', target: kind === 'push' ? 'origin/landing-base' : null } });
+
+test('U5: Push waits the same seconds as a Blocking answer with “Pushing <sha> to <target>… · Undo”; Undo sends nothing and gives the buttons back', () => {
+  setLanguage('en');
+  const app = pushApp(pushed);
+  const block = cards.pushBlock(app);
+  block.update(app.store.state.leads.get(P));
+  find(block.el, button('Push')).click();
+  assert.deepEqual(app.sent, [], 'nothing sent yet');
+  assert.match(block.el.textContent, /Pushing c41d7e09 to origin\/landing-base… · Undo/);
+  assert.equal(app.timers[0].ms, cards.UNDO_MS, 'the Blocking answer’s seconds');
+  find(block.el, byClass('card-undo')).click();
+  assert.equal(app.timers[0].cancelled, true);
+  assert.ok(find(block.el, button('Push')) && find(block.el, button('Decline')), 'the buttons back');
+  assert.deepEqual(app.sent, []);
+  assert.deepEqual(block.receipts(), []);
+});
+
+test('U5: once the wait runs out the same request goes, taken at the click; the card leaves and a line says “Pushed: <target> at <sha>”', async () => {
+  setLanguage('en');
+  const app = pushApp(pushed);
+  let changes = 0;
+  const block = cards.pushBlock(app, { onChange: () => { changes += 1; } });
+  const lead = app.store.state.leads.get(P);
+  block.update(lead);
+  find(block.el, button('Push')).click();
+  runNext(app);
+  assert.deepEqual(app.sent, [{ kind: 'push', args: { folder: ROOT, request: 'p1' } }], 'the same request as ever');
+  assert.match(block.el.textContent, /Pushing c41d7e09 to origin\/landing-base…/);
+  assert.doesNotMatch(block.el.textContent, /Undo/, 'gone: no Undo once sent');
+  await settle();
+  assert.equal(block.el.firstChild, null, 'the card leaves before the node’s delta');
+  assert.ok(changes >= 1, 'the holder is told');
+  const { pushReceipt } = await import('../js/push.js');
+  assert.deepEqual(block.receipts().map(pushReceipt), ['Pushed: origin/landing-base at c41d7e09']);
+  // The node's delta: the request settled. Nothing comes back.
+  block.update({ ...lead, push: null });
+  assert.equal(block.el.firstChild, null);
+});
+
+test('U5: a request that changes while the push waits is not pushed: the wait is dropped and the new request shows with a word saying so', () => {
+  setLanguage('en');
+  const app = pushApp(pushed);
+  const block = cards.pushBlock(app);
+  block.update(app.store.state.leads.get(P));
+  find(block.el, button('Push')).click();
+  block.update(leadWithPush('p2', { commit: 'aa11bb22cc33dd44ee55ff6600112233445566', short: 'aa11bb22', ahead: 3 }));
+  assert.equal(app.timers[0].cancelled, true);
+  assert.deepEqual(app.sent, []);
+  assert.match(block.el.textContent, /aa11bb22/);
+  assert.match(block.el.textContent, /changed its request while yours waited: nothing was sent/);
+  // The lead withdrew it instead: nothing goes, and no card.
+  find(block.el, button('Push')).click();
+  block.update({ ...leadWithPush(), push: null });
+  assert.equal(app.timers[1].cancelled, true);
+  assert.equal(block.el.firstChild, null);
+  assert.deepEqual(app.sent, []);
+});
+
+test('U5: Decline the same way: “Declining the push of … · Undo”, then push.decline and the line “Push declined”', async () => {
+  setLanguage('en');
+  const app = pushApp(pushed);
+  const block = cards.pushBlock(app);
+  block.update(app.store.state.leads.get(P));
+  find(block.el, button('Decline')).click();
+  assert.match(block.el.textContent, /Declining the push of c41d7e09 to origin\/landing-base… · Undo/);
+  assert.deepEqual(app.sent, []);
+  runNext(app);
+  assert.deepEqual(app.sent, [{ kind: 'push.decline', args: { folder: ROOT, request: 'p1' } }]);
+  await settle();
+  const { pushReceipt } = await import('../js/push.js');
+  assert.deepEqual(block.receipts().map(pushReceipt), ['Push declined']);
+});
+
+test('U5: a refusal stays on the card in the node’s words with the buttons back; a push git refused stays too, with nothing left to press', async () => {
+  setLanguage('en');
+  const busy = 'a push of /home/dev/projects/example-site’s is under way: wait for it';
+  const app = pushApp(() => ({ ok: false, error: { code: 'refused', message: busy } }));
+  const block = cards.pushBlock(app);
+  const lead = app.store.state.leads.get(P);
+  block.update(lead);
+  find(block.el, button('Push')).click();
+  runNext(app);
+  await settle();
+  assert.equal(find(block.el, byClass('push-refused')).textContent, busy);
+  assert.ok(find(block.el, button('Push')), 'the buttons back');
+  assert.deepEqual(block.receipts(), []);
+  // Again, and git refuses it: the node closes the request and says why; the card keeps its words.
+  const said = 'Not pushed: origin/landing-base has commits c41d7e09 lacks (not a fast-forward; nothing forced).';
+  const git = pushApp(() => ({ ok: true, result: { request: 'p1', settled: 'notFastForward', ok: false, said, target: 'origin/landing-base' } }));
+  const other = cards.pushBlock(git);
+  other.update(lead);
+  find(other.el, button('Push')).click();
+  runNext(git);
+  await settle();
+  other.update({ ...lead, push: null });
+  assert.equal(find(other.el, byClass('push-refused')).textContent, said);
+  assert.equal(find(other.el, button('Push')), null, 'nothing to settle: the request is gone');
+  assert.deepEqual(other.receipts(), []);
+  // A newer request takes its place.
+  other.update(leadWithPush('p2'));
+  assert.equal(find(other.el, byClass('push-refused')), null);
+  assert.ok(find(other.el, button('Push')));
+});
+
+test('U5: in Spanish, “Haciendo push de … · Deshacer”, then “Push hecho: …” or “Push rechazado”', async () => {
+  setLanguage('es');
+  const app = pushApp(pushed);
+  const block = cards.pushBlock(app);
+  block.update(app.store.state.leads.get(P));
+  find(block.el, button('Hacer push')).click();
+  assert.match(block.el.textContent, /Haciendo push de c41d7e09 a origin\/landing-base… · Deshacer/);
+  runNext(app);
+  await settle();
+  const decline = pushApp(pushed);
+  const other = cards.pushBlock(decline);
+  other.update(decline.store.state.leads.get(P));
+  find(other.el, button('Rechazar')).click();
+  assert.match(other.el.textContent, /Rechazando el push de c41d7e09 a origin\/landing-base… · Deshacer/);
+  runNext(decline);
+  await settle();
+  const { pushReceipt } = await import('../js/push.js');
+  assert.deepEqual([...block.receipts(), ...other.receipts()].map(pushReceipt), ['Push hecho: origin/landing-base en c41d7e09', 'Push rechazado']);
+  setLanguage('en');
+});
+
+test('U5: the lead view: Push from the waiting block, and its line stays in the conversation', async () => {
+  setLanguage('en');
+  const { projectView } = await import('../js/views/project.js');
+  const app = pushApp(pushed);
+  const view = projectView(app, { sheet: { open() {}, close() {} } });
+  view.render();
+  find(find(view.el, byClass('wait-box')), button('Push')).click();
+  runNext(app);
+  await settle();
+  app.store.state.leads.set(P, { ...app.store.state.leads.get(P), push: null });
+  view.render();
+  const line = find(find(view.el, byClass('talk')), byClass('kind-push'));
+  assert.ok(line, 'a line in the conversation');
+  assert.match(line.textContent, /Pushed: origin\/landing-base at c41d7e09/);
+  assert.equal(find(view.el, byClass('wait-box')).hidden, true, 'nothing waits');
+});
+
 // U16 --------------------------------------------------------------------------------------------------------------
 
 test('U16: the Approve option says what it approves in words with 8 characters of the commit; the whole one on hover and in what is sent', () => {

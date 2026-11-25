@@ -1042,6 +1042,11 @@ kbd { padding: 1px 6px; border-radius: 5px; box-shadow: inset 0 0 0 1px var(--li
 /* "What waits on me" (show=asks): no conversation pane; the waiting block takes the centre and is its one scroll. */
 .project-view.show-asks .talk { display: none; }
 .project-view.show-asks .wait-box { flex: 1; min-height: 0; max-height: none; border-top: 0; }
+/* A push settled from this page, in the conversation: one quiet line. */
+.line.kind-push { color: var(--ink-2); font-size: var(--text); }
+.line.kind-push svg { margin-top: 3px; color: var(--ready); }
+.line.kind-push.declined svg { color: var(--ink-3); }
+.line.kind-push:hover .line-text { text-decoration: none; }
 /* Agent text in a card: body size, a few lines at most; the whole in the side sheet. */
 .card-question { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
 .card-lines { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; color: var(--ink-2); font-size: var(--text); line-height: 1.45; overflow-wrap: anywhere; }

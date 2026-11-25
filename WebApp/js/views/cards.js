@@ -15,7 +15,7 @@ import { since, until, clock } from '../words.js';
 import { pushLines } from '../push.js';
 import { talkButton } from '../dictate.js';
 import { pluginFacts } from '../plugincard.js';
-import { t } from '../i18n.js';
+import { t, lang } from '../i18n.js';
 import { actsFor, refusalWords, doButton, answerArgs } from '../acting.js';
 import { questionHead, shortHashes, lineKey, contextOf } from '../conversation.js';
 import { routeHref } from '../ui.js';
@@ -407,10 +407,16 @@ export function cardSheet(card) {
 }
 
 // The push the lead asks for, while it's open: what goes where, from git and the vault, and the two lines that settle
-// it in a terminal. Nothing on the page pushes.
-export function pushCard(lead, app = null) {
+// it in a terminal. Nothing on the page pushes unless the node lets it act (`push`): then Push and Decline are buttons,
+// `onPush`/`onDecline` (the waiting block's, which waits a few seconds first); `said` is the node's refusal, kept on
+// the card; `settle: false` draws it with no buttons (its request is gone).
+export function pushCard(lead, app = null, { onPush = null, onDecline = null, said: refusal = null, notice = null, settle = true } = {}) {
   const said = pushLines(lead.push, lead.root);
   const fact = (name, ...value) => [h('dt', null, name), h('dd', null, value)];
+  const acts = app && actsFor(app, 'push');
+  const button = (label, kind, go, quiet) => (go
+    ? h('button', { class: 'button' + (quiet ? ' quiet' : ''), type: 'button', onclick: go }, label)
+    : doButton(app, { label, kind, quiet, args: () => ({ folder: lead.root, request: lead.push.id }) }).el);
   return h('article', { class: 'card push-card', 'aria-label': t('cPushAsk') },
     h('header', { class: 'card-head' }, h('span', { class: 'priority important' }, t('cPush')), h('span', { class: 'card-asker' }, t('askerLead')),
       h('time', { class: 'asked', data: { ago: lead.push.askedAt } }, t('askedAgo', { d: since(lead.push.askedAt) }))),
@@ -422,14 +428,98 @@ export function pushCard(lead, app = null) {
         fact(t('cTo'), h('code', null, said.url)),
         fact(t('cCommits'), h('ul', { class: 'files' }, said.subjects.map((subject) => h('li', null, h('code', null, subject))),
           said.more ? h('li', null, t('cAndMore', { n: said.more })) : null)))),
-    app && actsFor(app, 'push') ? h('div', { class: 'card-acts' },
-      doButton(app, { label: t('acPush'), kind: 'push', args: () => ({ folder: lead.root, request: lead.push.id }) }).el,
-      actsFor(app, 'push.decline') ? doButton(app, { label: t('acDecline'), kind: 'push.decline', quiet: true, args: () => ({ folder: lead.root, request: lead.push.id }) }).el : null)
+    notice ? h('p', { class: 'card-notice' }, notice) : null,
+    refusal ? h('p', { class: 'card-notice push-refused', role: 'alert' }, refusal) : null,
+    !settle ? null : acts ? h('div', { class: 'card-acts' },
+      button(t('acPush'), 'push', onPush, false),
+      actsFor(app, 'push.decline') ? button(t('acDecline'), 'push.decline', onDecline, true) : null)
       : h('div', { class: 'card-command' },
         h('span', { class: 'card-command-label' }, t('cSettle')),
         copyLine(said.push, 'the command that pushes it'),
         copyLine(said.decline, 'the command that declines it')),
-    h('p', { class: 'card-foot' }, app && actsFor(app, 'push') ? t('acPushNote') : t('cPushNote')));
+    settle ? h('p', { class: 'card-foot' }, acts ? t('acPushNote') : t('cPushNote')) : null);
+}
+
+// The lead's push in the waiting block, settled the way a Blocking answer is: Push (or Decline) shows "Pushing <short>
+// to <target>… · Undo" for UNDO_MS, then sends the same request as ever, the request's id, sha and target taken at the
+// click (dropped, nothing sent, if the lead's request changes while it waits). What came of it: a receipt for the
+// conversation (`receipts()`, this page's), or the node's refusal on the card with the buttons back. `onChange`: drawn
+// again by itself (the wait ran out, the node replied), so whoever holds it may draw too.
+export function pushBlock(app, { onChange = () => {} } = {}) {
+  const el = h('div', { class: 'stack-cards push-slot' });
+  const later = app.later || ((fn, ms) => { const timer = setTimeout(fn, ms); return () => clearTimeout(timer); });
+  let lead = null;
+  let shape = null;
+  // Waiting to go ({ kind, request, root, short, target, cancel }); out (sent, no reply yet); the node's refusal
+  // ({ request, words, lead as it was drawn }); the request ids settled here (not drawn again before the node's delta).
+  let waiting = null;
+  let out = null;
+  let refused = null;
+  let changed = false;
+  const settled = new Set();
+  const receipts = [];
+
+  const live = () => (lead?.push && lead.root && !settled.has(lead.push.id) ? lead : null);
+  const start = (kind) => {
+    const now = live();
+    if (waiting || out || !now) return;
+    waiting = { kind, request: now.push.id, root: now.root, short: now.push.short || String(now.push.commit || '').slice(0, 8), target: now.push.target, drawn: now,
+      cancel: later(go, UNDO_MS) };
+    refused = null;
+    changed = false;
+    draw();
+  };
+  const undo = () => { waiting?.cancel(); waiting = null; draw(); el.querySelector?.('.push-card .button')?.focus?.(); };
+  function go() {
+    const going = waiting;
+    if (!going) return;
+    waiting = null;
+    out = going;
+    draw();
+    onChange();
+    app.store.request(going.kind, { folder: going.root, request: going.request }).then((reply) => {
+      out = null;
+      const result = reply.ok ? reply.result || {} : null;
+      // The node's `ok: false` (git refused, nothing pushed) is a refusal too, in its words.
+      if (reply.ok && result.ok !== false) {
+        settled.add(going.request);
+        receipts.push({ id: going.request, at: new Date().toISOString(), outcome: going.kind === 'push' ? (result.settled === 'upToDate' ? 'upToDate' : 'pushed') : 'declined',
+          short: going.short, target: result.target || going.target });
+      } else {
+        refused = { request: going.request, words: reply.ok ? (result.said || t('acRefused')) : refusalWords(reply.error, t(going.kind === 'push' ? 'acPush' : 'acDecline')), lead: going.drawn };
+      }
+      draw();
+      onChange();
+    });
+  }
+
+  function draw() {
+    const now = live();
+    // The request changed (a newer one, or settled elsewhere) while one waited to go: it doesn't go.
+    if (waiting && (now?.push.id !== waiting.request || now?.root !== waiting.root)) { waiting.cancel(); waiting = null; changed = !!now; }
+    if (refused && now && now.push.id !== refused.request) refused = null;
+    const next = JSON.stringify([now?.push || null, now?.root || null, waiting && [waiting.kind, waiting.request], out && [out.kind, out.request], refused, changed, app.store.acts(), lang()]);
+    if (next === shape) return;
+    shape = next;
+    const going = waiting || out;
+    if (going) {
+      const words = t(going.kind === 'push' ? 'puPushing' : 'puDeclining', { short: going.short, target: going.target });
+      el.replaceChildren(h('article', { class: 'card push-card closed sending', 'aria-label': t('cPushAsk') }, h('div', { class: 'card-closed', role: 'status' }, icon('send', 13), h('div', null,
+        h('p', null, words, waiting ? [' · ', h('button', { class: 'link card-undo', type: 'button', onclick: undo }, t('cUndo'))] : null),
+        h('p', { class: 'card-about' }, t('cPushAsk'))))));
+      return;
+    }
+    const shown = now || refused?.lead || null;
+    el.replaceChildren(...(shown ? [pushCard(shown, app, { onPush: () => start('push'), onDecline: () => start('push.decline'), said: refused?.words || null,
+      notice: changed ? t('puChanged') : null, settle: !!now })] : []));
+  }
+
+  return {
+    el,
+    update(next) { lead = next; draw(); return !!el.firstChild; },
+    shown: () => !!el.firstChild,
+    receipts: () => receipts.slice(),
+  };
 }
 
 // How a card's priority ranks in the waiting block: Blocking first, then Important, then Whenever.
@@ -443,14 +533,14 @@ export const ANSWERED_SHOWN = 4000;
 // Blocking card is shown whole; with several open, the others fold to their question line (one the user opens shows
 // whole), and with none Blocking the first shows whole. `others()`: the project's other cards, drawn by the caller
 // ({ key, at, priority, el }: held config, a base move, a plugin's request), placed among them by their priority.
-// `onChange`: an answered card left (its few seconds over), so whoever holds the stack may draw again.
+// `onChange`: an answered card left (its few seconds over), or the push changed by itself, so whoever holds the stack
+// may draw again.
 export function questionStack(app, project, { onChange = () => {}, now = () => Date.now(), others = () => [] } = {}) {
   const count = h('h2', { class: 'stack-title' });
   const order = h('span', { class: 'stack-note' }, t('anyOrder'));
   const list = h('div', { class: 'stack-cards' });
-  const pushSlot = h('div', { class: 'stack-cards push-slot' });
-  const el = h('section', { class: 'stack', 'aria-label': t('cQuestionsForYou') }, h('header', { class: 'stack-head' }, count, order), list, pushSlot);
-  let shownPush = null;
+  const push = pushBlock(app, { onChange });
+  const el = h('section', { class: 'stack', 'aria-label': t('cQuestionsForYou') }, h('header', { class: 'stack-head' }, count, order), list, push.el);
   const rows = new Map();
   // Each card's place: keyed by its first id and ordered by when that card was first asked, so a question the node
   // posts again after a restart (a new card id, the same question) keeps its row, its place and what was typed in it.
@@ -487,15 +577,7 @@ export function questionStack(app, project, { onChange = () => {}, now = () => D
     const items = [...cards.map((card) => ({ card, open: isOpen(card), rank: rankOf(card), at: firstAt.get(keyOf(card)) })),
       ...extra.map((other) => ({ other, open: true, rank: RANK[other.priority] ?? 1, at: Date.parse(other.at) || 0 }))];
     items.sort((a, b) => (b.open - a.open) || (a.rank - b.rank) || (a.at - b.at));
-    const lead = app.store.state.leads.get(project);
-    const push = lead?.push && lead.root ? lead : null;
-    // Drawn again only when the request changed: a newer one replaces it, a settled one leaves.
-    const pushKey = push ? `${push.push.id}:${push.root}:${app.store.acts()}` : null;
-    if (pushKey !== shownPush) {
-      shownPush = pushKey;
-      pushSlot.replaceChildren(...(push ? [pushCard(push, app)] : []));
-    }
-    const pushShown = !!push;
+    const pushShown = push.update(app.store.state.leads.get(project) || null);
     el.hidden = items.length === 0 && !pushShown;
     const asking = open.length + extra.length;
     setText(count, asking ? t('questionsForYou', { n: asking }) + (pushShown ? t('andAPush') : '') : pushShown ? t('pushWaits') : t('cNoQuestions'));
@@ -531,7 +613,7 @@ export function questionStack(app, project, { onChange = () => {}, now = () => D
     return asking + (pushShown ? 1 : 0);
   }
 
-  return { el, update, focusLast() { const cards = el.querySelectorAll('.card:not(.closed)'); cards[cards.length - 1]?.querySelector('.option, .answer-input')?.focus(); } };
+  return { el, update, receipts: push.receipts, focusLast() { const cards = el.querySelectorAll('.card:not(.closed)'); cards[cards.length - 1]?.querySelector('.option, .answer-input')?.focus(); } };
 }
 
 // A feature plugin's card (js/plugincard.js): who asks, the node's facts, what it asks whole, the agent's own words,
