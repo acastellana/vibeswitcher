@@ -4567,3 +4567,5 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-25 18:31 Started a worker on v2-on-the-mac-4
 - 2026-11-25 19:38 Handed the lead over to a fresh session: the last one had been idle 56 minutes with 398k tokens of context, past handover_idle_min 50 and handover_tokens 150k; its prompt cache had expired, so VibeSwitcher wrote the note
 - 2026-11-25 20:03 Automatically (auto_advance): Not resumed after sleep: the worker on v2-on-the-mac-4 could not be confirmed as still interrupted on its last turn. Check its session and resume it yourself if needed.
+- 2026-11-25 20:21 Planned v2-s-web-page-2: v2's web page: Your sessions, This node and Settings become two columns (categories and detail) with a search (in a clone; a branch for v2)
+- 2026-11-25 20:21 Started a worker on v2-s-web-page-2
