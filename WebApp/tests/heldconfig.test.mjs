@@ -67,3 +67,9 @@ test('the node’s plain fields: each item’s `what`, the rules’ `changed`/`o
     guarded: [{ key: 'k', value: 'v', changed: 'same' }], holds: 'example-app', summary: 'one; two', recordsAll: true });
   assert.deepEqual([card.title, card.line, card.holds, card.summary, card.itemsUnknown, card.recordsAll, card.terminal], ['2 things changed', 'one, two', 'example-app', 'one; two', 1, 1, true]);
 });
+
+test('the node’s newer words for what it can’t vouch for: “can’t be compared with your last accept … the node restarted since”', () => {
+  const words = 'can\'t be compared with your last accept (2026-11-25T10:00:00Z): the node restarted since';
+  assert.deepEqual(railState({ sinceAccept: words }), { state: 'unknown', before: null });
+  assert.equal(heldSummary({ items: [{ name: '~/.zshrc', sinceAccept: words }], guarded: [] }).itemsUnknown, 1);
+});

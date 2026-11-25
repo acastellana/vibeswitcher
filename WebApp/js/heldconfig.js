@@ -88,7 +88,7 @@ export function heldSummary(config = {}) {
   const items = config.items || [];
   const { title, line } = heldTitle(items);
   // Held things the node can't compare (no sealed snapshot since a restart).
-  const itemsUnknown = items.filter((item) => /^not known to be the same/.test(item.sinceAccept || '')).length;
+  const itemsUnknown = items.filter((item) => /^(not known to be the same|can.t be compared)/.test(item.sinceAccept || '')).length;
   // Nothing held and no sealed last accept (the node's `firstLook`: it restarted, or the rules were never accepted), or
   // from a node before that field, nothing held and no rule changed: it only wants this project's rules confirmed once.
   const confirmOnly = config.firstLook === true || (!items.length && !changed.length && unknown > 0);

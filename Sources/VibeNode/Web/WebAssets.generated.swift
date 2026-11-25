@@ -1999,7 +1999,7 @@ extension EmbeddedAssets {
             aW5nLmxlbmd0aCA/ICduZWVkcy15b3UnIDogJ2RvbmUnOwogIHJldHVybiB7IHRvbmUsIHJvd3Ms
             IGxpbmVzIH07Cn0K
             """),
-        EmbeddedAssets.File(path: "js/heldconfig.js", sha256: "db148f7b042ca6f24115febbe243274d7014f9bbff906561a412867c26880e0e", base64: """
+        EmbeddedAssets.File(path: "js/heldconfig.js", sha256: "b22d418cadcaab2745785724d6410ed1652c486abbe993ce2ec6717c5319f3db", base64: """
             Ly8gQSBoZWxkLWNvbmZpZyBjYXJkIGluIHBsYWluIHdvcmRzICh0aGUgTWFjIGFwcCdzIGVjb25v
             bXkpOiB3aGF0IGNoYW5nZWQgYXMgb25lIHRpdGxlLCB3aGF0IGl0IGhvbGRzIGJhY2ssIHRoZSBn
             dWFyZAovLyByYWlscyB0aGF0IGNoYW5nZWQgKG9ubHkgdGhvc2UpLCBhbmQgd2hldGhlciB0aGUg
@@ -2114,23 +2114,23 @@ extension EmbeddedAssets {
             ZW5ndGg7CiAgY29uc3QgaXRlbXMgPSBjb25maWcuaXRlbXMgfHwgW107CiAgY29uc3QgeyB0aXRs
             ZSwgbGluZSB9ID0gaGVsZFRpdGxlKGl0ZW1zKTsKICAvLyBIZWxkIHRoaW5ncyB0aGUgbm9kZSBj
             YW4ndCBjb21wYXJlIChubyBzZWFsZWQgc25hcHNob3Qgc2luY2UgYSByZXN0YXJ0KS4KICBjb25z
-            dCBpdGVtc1Vua25vd24gPSBpdGVtcy5maWx0ZXIoKGl0ZW0pID0+IC9ebm90IGtub3duIHRvIGJl
-            IHRoZSBzYW1lLy50ZXN0KGl0ZW0uc2luY2VBY2NlcHQgfHwgJycpKS5sZW5ndGg7CiAgLy8gTm90
-            aGluZyBoZWxkIGFuZCBubyBzZWFsZWQgbGFzdCBhY2NlcHQgKHRoZSBub2RlJ3MgYGZpcnN0TG9v
-            a2A6IGl0IHJlc3RhcnRlZCwgb3IgdGhlIHJ1bGVzIHdlcmUgbmV2ZXIgYWNjZXB0ZWQpLCBvcgog
-            IC8vIGZyb20gYSBub2RlIGJlZm9yZSB0aGF0IGZpZWxkLCBub3RoaW5nIGhlbGQgYW5kIG5vIHJ1
-            bGUgY2hhbmdlZDogaXQgb25seSB3YW50cyB0aGlzIHByb2plY3QncyBydWxlcyBjb25maXJtZWQg
-            b25jZS4KICBjb25zdCBjb25maXJtT25seSA9IGNvbmZpZy5maXJzdExvb2sgPT09IHRydWUgfHwg
-            KCFpdGVtcy5sZW5ndGggJiYgIWNoYW5nZWQubGVuZ3RoICYmIHVua25vd24gPiAwKTsKICAvLyBB
-            IHBhZ2UncyBhY2NlcHQgaXMgcmVmdXNlZCB3aGVyZSBhbnkgcnVsZSB3b3VsZCBiZSByZWNvcmRl
-            ZCBhbmV3LCBjYW4ndCBiZSBjb21wYXJlZCwgb3Igbm9uZSBpcyByZWNvcmRlZCB5ZXQuCiAgcmV0
-            dXJuIHsgdGl0bGUsIGxpbmUsIGNoYW5nZWQsIHVua25vd24sIHJhaWxzLCBjb25maXJtT25seSwg
-            aXRlbXNVbmtub3duLCBzdW1tYXJ5OiBjb25maWcuc3VtbWFyeSB8fCBudWxsLCBob2xkczogY29u
-            ZmlnLmhvbGRzIHx8IG51bGwsIGhvbGRzRXZlcnk6IGNvbmZpZy5ob2xkc0V2ZXJ5ID09PSB0cnVl
-            LAogICAgcmVjb3Jkc0FsbDogY29uZmlnLnJlY29yZHNBbGwgPT09IHRydWUgPyByYWlscy5sZW5n
-            dGggOiAwLAogICAgdGVybWluYWw6IGNvbmZpZy5wYWdlTWF5QWNjZXB0ID09PSBmYWxzZSB8fCBj
-            b25maWcucmVjb3Jkc0FsbCA9PT0gdHJ1ZSB8fCBjaGFuZ2VkLmxlbmd0aCA+IDAgfHwgdW5rbm93
-            biA+IDAgfTsKfQo=
+            dCBpdGVtc1Vua25vd24gPSBpdGVtcy5maWx0ZXIoKGl0ZW0pID0+IC9eKG5vdCBrbm93biB0byBi
+            ZSB0aGUgc2FtZXxjYW4udCBiZSBjb21wYXJlZCkvLnRlc3QoaXRlbS5zaW5jZUFjY2VwdCB8fCAn
+            JykpLmxlbmd0aDsKICAvLyBOb3RoaW5nIGhlbGQgYW5kIG5vIHNlYWxlZCBsYXN0IGFjY2VwdCAo
+            dGhlIG5vZGUncyBgZmlyc3RMb29rYDogaXQgcmVzdGFydGVkLCBvciB0aGUgcnVsZXMgd2VyZSBu
+            ZXZlciBhY2NlcHRlZCksIG9yCiAgLy8gZnJvbSBhIG5vZGUgYmVmb3JlIHRoYXQgZmllbGQsIG5v
+            dGhpbmcgaGVsZCBhbmQgbm8gcnVsZSBjaGFuZ2VkOiBpdCBvbmx5IHdhbnRzIHRoaXMgcHJvamVj
+            dCdzIHJ1bGVzIGNvbmZpcm1lZCBvbmNlLgogIGNvbnN0IGNvbmZpcm1Pbmx5ID0gY29uZmlnLmZp
+            cnN0TG9vayA9PT0gdHJ1ZSB8fCAoIWl0ZW1zLmxlbmd0aCAmJiAhY2hhbmdlZC5sZW5ndGggJiYg
+            dW5rbm93biA+IDApOwogIC8vIEEgcGFnZSdzIGFjY2VwdCBpcyByZWZ1c2VkIHdoZXJlIGFueSBy
+            dWxlIHdvdWxkIGJlIHJlY29yZGVkIGFuZXcsIGNhbid0IGJlIGNvbXBhcmVkLCBvciBub25lIGlz
+            IHJlY29yZGVkIHlldC4KICByZXR1cm4geyB0aXRsZSwgbGluZSwgY2hhbmdlZCwgdW5rbm93biwg
+            cmFpbHMsIGNvbmZpcm1Pbmx5LCBpdGVtc1Vua25vd24sIHN1bW1hcnk6IGNvbmZpZy5zdW1tYXJ5
+            IHx8IG51bGwsIGhvbGRzOiBjb25maWcuaG9sZHMgfHwgbnVsbCwgaG9sZHNFdmVyeTogY29uZmln
+            LmhvbGRzRXZlcnkgPT09IHRydWUsCiAgICByZWNvcmRzQWxsOiBjb25maWcucmVjb3Jkc0FsbCA9
+            PT0gdHJ1ZSA/IHJhaWxzLmxlbmd0aCA6IDAsCiAgICB0ZXJtaW5hbDogY29uZmlnLnBhZ2VNYXlB
+            Y2NlcHQgPT09IGZhbHNlIHx8IGNvbmZpZy5yZWNvcmRzQWxsID09PSB0cnVlIHx8IGNoYW5nZWQu
+            bGVuZ3RoID4gMCB8fCB1bmtub3duID4gMCB9Owp9Cg==
             """),
         EmbeddedAssets.File(path: "js/i18n-es.js", sha256: "31454bde24f42cb380f31a4afc8d40e3ea096f17ea1f2f43e1b6b6be7029b738", base64: """
             Ly8gVGhlIHBhZ2UncyBvd24gd29yZHMgaW4gU3BhbmlzaCAoanMvaTE4bi5qcyBoYXMgdGhlIEVu
