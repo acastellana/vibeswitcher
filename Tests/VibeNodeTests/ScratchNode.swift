@@ -594,8 +594,13 @@ final class WireClient {
     private var ready: [Data] = []
     private var counter = 0
 
-    init(_ node: ScratchNode, timeout: TimeInterval = 10) throws {
-        fd = try UnixSocket.connect(path: node.serverSocket)
+    convenience init(_ node: ScratchNode, timeout: TimeInterval = 10) throws {
+        try self.init(path: node.serverSocket, timeout: timeout)
+    }
+
+    /// A client of the server whose socket is at `path` (a Mac scratch host's server, which no `ScratchNode` starts).
+    init(path: String, timeout: TimeInterval = 10) throws {
+        fd = try UnixSocket.connect(path: path)
         guard let first = Self.read(fd, &lines, &ready, until: Date().addingTimeInterval(timeout)),
               let hello = NodeWire.decode(NodeWire.Hello.self, first) else {
             Sys.close(fd)
