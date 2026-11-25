@@ -4565,3 +4565,4 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-25 18:07 Kept review-v2-s-mac unmerged: Report only, delivered: verdict 'ready for v2 with one fix' (F1, a Linux compile break in a test file). Its worktree holds the review copy and probes that the fix round may use. Nothing merges; clean up once v2-mac-web-port is delivered.
 - 2026-11-25 18:31 Planned v2-on-the-mac-4: v2 on the Mac, item 13: the checked Mac node start, on top of the anchor (in a clone; a branch for v2)
 - 2026-11-25 18:31 Started a worker on v2-on-the-mac-4
+- 2026-11-25 19:38 Handed the lead over to a fresh session: the last one had been idle 56 minutes with 398k tokens of context, past handover_idle_min 50 and handover_tokens 150k; its prompt cache had expired, so VibeSwitcher wrote the note
