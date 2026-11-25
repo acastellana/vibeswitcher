@@ -1043,12 +1043,21 @@ const ago = (seconds) => new Date(now() - seconds * 1000).toISOString();
         { folder: `${HOME}/projects/notes`, lastUsed: ago(86400), lead: null },
       ] } };
     }
+    // Between leads (`mail`, `Requests.mail`): a project's newest 20 of its 26 messages, every one with `all`; one
+    // project's with its folder.
     if (message.kind === 'mail') {
+      if (args.folder != null && !String(args.folder).startsWith('/')) return badArgs('folder is an absolute path');
+      const older = Array.from({ length: 24 }, (_, index) => ({ at: ago(3600 + index * 1800), from: index % 2 ? 'example-api' : 'example-site', to: index % 2 ? 'example-site' : 'example-api',
+        received: index % 2 === 1, kind: index % 2 ? 'answer' : 'note', text: index % 2 ? `Done: the staging deploy ${24 - index} is green.` : `FYI: landing-base was rebased (${24 - index}).`,
+        outcome: 'delivered', sent: true, detail: 'Delivered.' }));
       const messages = [
         { at: ago(600), from: 'example-api', to: 'example-site', received: true, kind: 'answer', text: '8080, behind the staging proxy.', outcome: 'waiting', sent: true, detail: 'Waiting in its inbox.' },
         { at: ago(900), from: 'example-site', to: 'example-api', received: false, kind: 'question', text: 'Which port does the API listen on in staging?', outcome: 'delivered', sent: true, detail: 'Delivered.' },
+        ...older,
       ];
-      return { ok: true, result: { projects: options.empty ? [] : [{ root: SITE, project: 'example-site', total: messages.length, messages }] } };
+      const shown = args.all === true ? messages : messages.slice(0, 20);
+      const site = { root: SITE, project: 'example-site', total: messages.length, messages: shown };
+      return { ok: true, result: { projects: options.empty ? [] : args.folder && !args.folder.startsWith(SITE) ? [] : [site] } };
     }
     if (message.kind === 'settings') {
       if (args.folder && args.folder !== SITE) return { ok: false, error: { code: 'gone', message: `no lead has worked in ${args.folder} yet: \`vibeswitcher lead ${args.folder}\` starts one` } };
@@ -1139,6 +1148,7 @@ const ago = (seconds) => new Date(now() - seconds * 1000).toISOString();
     'update.check': 'this server doesn’t check for updates (a scratch node asks GitHub nothing)',
     'web.revoke': 'the web tokens weren’t dropped: the token file couldn’t be written',
     'session.close-shells': 'none of them is a finished shell now (back at its prompt): nothing ended',
+    'mail': 'this server keeps no leads',
     'presets.edit': 'presets.json has changes you haven’t accepted: review with `vibeswitcher config held`, then `config accept` (it changed since your accept); nothing changed',
   };
 

@@ -36,10 +36,12 @@ export function fakeApp({ route = { name: 'node' }, state = {}, kinds = null, ac
     sessionDraftOf: () => null,
   };
   const went = [];
-  const ui = { state: { route }, subscribe() {}, go(hash) { went.push(hash); } };
+  const routeListeners = [];
+  const ui = { state: { route }, subscribe(fn) { routeListeners.push(fn); }, go(hash) { went.push(hash); } };
+  const goTo = (next) => { ui.state.route = next; for (const fn of routeListeners) fn('route'); };
   const later = (fn, ms) => { const timer = { fn, ms, on: true }; waiting.push(timer); return () => { timer.on = false; }; };
   const fire = () => { for (const timer of waiting.splice(0)) if (timer.on) timer.fn(); };
-  return { store, sent, ui, went, later, waiting, fire };
+  return { store, sent, ui, went, later, waiting, fire, goTo };
 }
 
 export const buttonNamed = (el, text) => find(el, (node) => node.tag === 'button' && !node.hidden && node.textContent.trim() === text);
@@ -458,4 +460,42 @@ test('B6: Save, Add and Remove for your presets send presets.edit with the chang
   reads.update(presets, true);
   buttonNamed(reads.el, 'Remove').click();
   assert.match(reads.el.textContent, /vibeswitcher preset remove Opus --folder/);
+});
+
+test('B7: Between leads, a project with more than its newest shown has Show all: Loading…, then every message; refused, the node’s words', async () => {
+  const { mailView } = await import('../js/views/mail.js');
+  const SITE = '/home/dev/projects/example-site';
+  const message = (n) => ({ at: '2026-11-25T08:00:00.000Z', from: 'example-api', to: 'example-site', received: true, kind: 'note', text: `note ${n}`, outcome: 'delivered', sent: true, detail: 'Delivered.' });
+  const all = Array.from({ length: 26 }, (_, n) => message(n));
+  for (const code of ['es', 'en']) {
+    setLanguage(code);
+    let refuse = false;
+    const app = fakeApp({ route: { name: 'home' }, kinds: ['mail'], acts: false, state: { node: { home: '/home/dev' } },
+      reply: (kind, args) => (refuse && args.all ? { ok: false, error: { code: 'refused', message: 'this server keeps no leads' } }
+        : { ok: true, result: { projects: [{ root: SITE, project: 'example-site', total: 26, messages: args.all ? all : all.slice(0, 20) }] } }) });
+    const view = mailView(app);
+    app.goTo({ name: 'mail' });
+    await flush();
+    assert.doesNotMatch(view.el.textContent, /vibeswitcher mail/, `${code}: no line where Show all does it (a read: a page that doesn’t act shows it too)`);
+    assert.equal(findAll(view.el, byClass('mail-message')).length, 20);
+    // Refused: the node's words beside it, the button back.
+    refuse = true;
+    const show = buttonNamed(view.el, t('mvShowAll', { n: 26 }));
+    show.click();
+    assert.equal(show.textContent, t('mvLoading'));
+    await flush();
+    assert.match(find(view.el, byClass('refused')).textContent, /this server keeps no leads/);
+    assert.equal(show.disabled, false);
+    refuse = false;
+    show.click();
+    await flush();
+    assert.deepEqual(app.sent.at(-1), { kind: 'mail', args: { folder: SITE, all: true } });
+    assert.equal(findAll(view.el, byClass('mail-message')).length, 26);
+    assert.match(view.el.textContent, new RegExp(t('mvAllShown', { n: 26 })));
+    app.goTo({ name: 'home' });
+  }
+  setLanguage('en');
+  // A node that doesn't list mail for this page: the line (the view says it can't read the record either).
+  const { mailCommand } = await import('../js/mail.js');
+  assert.match(mailCommand('~/projects/example-site'), /vibeswitcher mail .* --all/);
 });

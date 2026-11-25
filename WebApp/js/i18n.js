@@ -1210,6 +1210,10 @@ const EN = {
   drPresetSaved: "Saved {name}.",
   drPresetRemoved: "Removed {name}.",
   drPresetHeld: "The presets file changed, so it waits for your accept (its card shows what changed) before its presets start.",
+  mvShowAll: { one: "Show it", other: "Show all {n}" },
+  mvLoading: "Loading…",
+  mvAllShown: { one: "Its 1 message, shown.", other: "All {n} messages, shown." },
+  mvNoLongerThere: "The node no longer lists that project’s messages.",
   // END buttons
   // The two columns of Your own sessions, This node and Settings (views/twocol.js).
   tcBackToList: "Back to the list",

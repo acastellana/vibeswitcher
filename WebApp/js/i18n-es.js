@@ -1199,6 +1199,10 @@ export const ES = {
   drPresetSaved: "{name} guardado.",
   drPresetRemoved: "{name} quitado.",
   drPresetHeld: "El archivo de preajustes cambió, así que espera a que lo aceptes (su tarjeta muestra qué cambió) antes de que sus preajustes arranquen.",
+  mvShowAll: { one: "Mostrarlo", other: "Mostrar los {n}" },
+  mvLoading: "Cargando…",
+  mvAllShown: { one: "Su único mensaje, mostrado.", other: "Los {n} mensajes, mostrados." },
+  mvNoLongerThere: "El nodo ya no lista los mensajes de ese proyecto.",
   // END buttons
   // The two columns of Your own sessions, This node and Settings (views/twocol.js).
   tcBackToList: "Volver a la lista",
