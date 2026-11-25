@@ -183,6 +183,7 @@ enum NodeResetHelper {
             while waitpid(pid, &status, 0) < 0, errno == EINTR {}
             core = ((try? String(contentsOfFile: out, encoding: .utf8)) ?? "?").trimmingCharacters(in: .whitespacesAndNewlines)
         }
+        unlink(out)
         let text = "why=\(why ?? "nil") limit=\(limit) open300=\(open300) umask=\(String(mask, radix: 8)) cwd=\(cwd) core=\(core)\n"
         FileManager.default.createFile(atPath: results, contents: Data(text.utf8))
         _exit(0)
