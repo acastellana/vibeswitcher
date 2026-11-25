@@ -186,9 +186,11 @@ struct ServerTests {
         // start plan's S6, `build.switch` from its S8b). The live protocol's later kinds are named and not yet taken: each
         // is answered `unknown-kind` until the live plan's integration task that wires it (slice 1's are taken from I1,
         // `chat.page` from I2, the drafts from I3: a web page's only, refused `voice` here,
-        // `DraftTests.aDraftOnTheUnixSocketIsRefused`).
+        // `DraftTests.aDraftOnTheUnixSocketIsRefused`). A confirmed page's passkey kinds (`act.challenge`, `passkey.ask`,
+        // `passkey.registered`) are served on a confirmed web connection alone (`Requests.pagePaired`): on this socket,
+        // `unknown-kind` like the terminal's.
         let live = Set(NodeWire.kinds.keys).subtracting(NodeWire.taken)
-        #expect(live == ["term.open", "term.close"])
+        #expect(live == ["term.open", "term.close", "act.challenge", "passkey.ask", "passkey.registered"])
         for kind in ["shell", "exec", ""] + live.sorted() {
             let reply = try #require(WireClient.reply(client.request(kind, args: ["folder": .string("/")])), "\(kind)")
             #expect(reply.ok == false && reply.error?.code == "unknown-kind", "\(kind): \(reply)")

@@ -161,11 +161,17 @@ extension WebListenerTests {
             }
         }
 
-        /// A request under any name but the listener's own is 421 with no body, whatever it asks for.
+        /// A request under any name but the listener's own two (`127.0.0.1:PORT`, and on the loopback `localhost:PORT`,
+        /// the origin a passkey works on) is 421 with no body, whatever it asks for, an upgrade too: another host,
+        /// localhost on another port, `LOCALHOST`, a trailing dot. On its own names, an upgrade whose Origin is the other
+        /// name's is refused (403): a pairing belongs to the origin it was made on.
         @Test func aRequestUnderAnotherNameIs421() throws {
             let world = try WiredWorld(files: ["/": WebAsset(body: Data("page".utf8), headers: [("Content-Type", "text/html")])])
-            for host in ["evil.example:\(world.port)", "localhost:\(world.port)", "127.0.0.1", "127.0.0.1:1", "127.0.0.1:\(world.port).evil.example",
-                         "[::1]:\(world.port)", "0.0.0.0:\(world.port)", "127.1:\(world.port)"] {
+            let localhost = "localhost:\(world.port)"
+            for host in ["evil.example:\(world.port)", "127.0.0.1", "127.0.0.1:1", "127.0.0.1:\(world.port).evil.example",
+                         "[::1]:\(world.port)", "0.0.0.0:\(world.port)", "127.1:\(world.port)", "localhost", "localhost:1", "LOCALHOST:\(world.port)",
+                         "Localhost:\(world.port)", "localhost.:\(world.port)", "localhost:\(world.port).", "127.0.0.1.:\(world.port)",
+                         "localhost:\(world.port).evil.example", "evil.localhost:\(world.port)"] {
                 let answer = try world.exchange("GET / HTTP/1.1\r\nHost: \(host)\r\n\r\n")
                 #expect(answer.head.hasPrefix("HTTP/1.1 421 Misdirected Request\r\n"), "\(host): \(answer.head)")
                 #expect(answer.body.isEmpty && answer.head.contains("\r\nContent-Length: 0\r\n"))
@@ -173,6 +179,11 @@ extension WebListenerTests {
                 let upgrade = try world.connect()
                 #expect(upgrade.upgrade(path: "/ws", host: host, origin: world.origin)?.hasPrefix("HTTP/1.1 421 ") == true, "\(host)")
             }
+            // Its second name: the page, and an upgrade from its own origin; each name's Origin the other's: refused.
+            #expect(try world.exchange("GET / HTTP/1.1\r\nHost: \(localhost)\r\n\r\n").body == "page")
+            #expect(try world.connect().upgrade(path: "/ws", host: localhost, origin: "http://" + localhost)?.hasPrefix("HTTP/1.1 101 ") == true)
+            #expect(try world.connect().upgrade(path: "/ws", host: localhost, origin: world.origin)?.hasPrefix("HTTP/1.1 403 ") == true)
+            #expect(try world.connect().upgrade(path: "/ws", host: world.host, origin: "http://" + localhost)?.hasPrefix("HTTP/1.1 403 ") == true)
             // No Host, and two, are refused alike (the live wire contract's §1).
             #expect(try world.exchange("GET / HTTP/1.1\r\n\r\n").head.hasPrefix("HTTP/1.1 421 "))
             #expect(try world.exchange("GET / HTTP/1.1\r\nHost: \(world.host)\r\nHost: \(world.host)\r\n\r\n").head.hasPrefix("HTTP/1.1 421 "))
@@ -238,11 +249,14 @@ extension WebListenerTests {
             world.settle()
             #expect(client.nothingWaits())
             #expect(world.hub.events.all.isEmpty)
-            client.send(WebTestClient.text(#"{"v":1,"id":"0","kind":"auth","args":{"pair":"code","client":"webapp","assets":"9f2c61d0"}}"#))
+            // A page's own `_origin` is never taken: the listener writes the name the connection came on (its Origin's,
+            // checked at the upgrade) over it.
+            client.send(WebTestClient.text(#"{"v":1,"id":"0","kind":"auth","args":{"pair":"code","client":"webapp","assets":"9f2c61d0","_origin":"localhost:1"}}"#))
             let hello = try #require(client.frame())
             #expect(hello.opcode == WebTestClient.text && hello.text == #"{"auth":{"token":"minted"},"kind":"hello"}"#)
             #expect(world.hub.events.wait(for: "opened:0:3"))
-            #expect(world.gate.admissions == [["pair": .string("code"), "client": .string("webapp"), "assets": .string("9f2c61d0")]])
+            #expect(world.gate.admissions == [["pair": .string("code"), "client": .string("webapp"), "assets": .string("9f2c61d0"),
+                                               WebAccess.originArg: .string(world.host)]])
 
             // A message in fragments reaches the handler whole; a binary one too.
             client.send(WebTestClient.text(#"{"v":1,"id":"1","#, fin: false) + WebTestClient.frame(WebTestClient.continuation, Array(#""kind":"status"}"#.utf8)))
