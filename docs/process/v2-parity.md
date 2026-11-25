@@ -87,6 +87,10 @@ LaunchAgent, 6 the unified log, 7 the install script, 8 the seal list, 9 living 
 | Reopen sessions after the machine restarts (the restart card, a lead `--resume`d) | `RestartCard.swift`, `Sources/VibeCore/RestartReopen.swift` | has it | `vibeswitcher reopen [all\|SESSION…\|--forget]` (`Server/ReopenRequest.swift`), `lead FOLDER --resume` (`Engine/RestartResume.swift`); the page's project has Resume lead / Fresh lead (`project.js`, kind `lead`). The page has no reopen control for your own sessions (`session.reopen` unused in `WebApp/js`) | S | step 5 (LaunchAgent) | a preset's session reopens without its preset's variables |
 | Status detection: hooks, OSC 7501, titles, the process table | `SessionStore.swift`, `Sources/VibeCore/StatusRules.swift` | has it | `Stores/NodeSessions.swift`, `Sources/VibeHost/V2/ParserReplies.swift` | | step 9 (hooks shared with the app) | titles only for sessions the host runs |
 | Background shells shown on a session | `SessionStore.swift` | has it | `Stores/NodeSessions.swift` (`BackgroundWork.summary`) | | node start | |
+| Stop the agent's turn (Session › Stop ⌘.) | `MainWindow/MainWindowController.swift` | partly | `vibeswitcher send SESSION TEXT` with the interrupt way, and the page's send menu "Interrupt, then send" (`js/sendways.js`), stop it and type. **Missing**: a bare stop with nothing sent (`send` needs text, `Server/SessionSend.swift`), the ⌘. key | S | step 4 (voice) | new row |
+| Clear Scrollback (⇧⌘K) | `MainWindow/TerminalPane.swift` | missing | the watched terminal has no clear | S | missing everywhere | new row |
+| Focus Terminal (⇧⌘↩): the terminal takes the whole window | `MainWindow/MainWindowController.swift` | missing | no full-pane terminal; the left column can't be hidden on a desktop | S | missing everywhere | new row |
+| Option-drag selects past a program that asked for the mouse | `MainWindow/TerminalPane.swift` | partly | xterm.js's Shift-drag. **Missing**: Option-drag on a Mac (`macOptionClickForcesSelection` isn't set in `views/terminal.js`): read only, not run | S | node start | new row |
 
 ### The switcher, sidebar and attention
 
@@ -102,6 +106,13 @@ LaunchAgent, 6 the unified log, 7 the install script, 8 the seal list, 9 living 
 | Menu bar dots and popover | `PopoverView.swift`, `Sources/VibeCore/MenuBarDots.swift` | missing | nothing outside a browser tab: the tab title counts what needs you and the browser notifies while the page is open (`js/notify.js`) | M | Mac piece owed | was "not needed" (a design non-goal on Linux); a Mac user loses the always-visible status and its switch/pause/rename |
 | Sidebar mode, auto-hide, Spaces, global hot key, `--toggle`, minimize on pause | `Sidebar.swift`, `Spaces.swift`, `HotKey.swift` | missing | the left column is fixed. **Missing**: a global hot key or `--toggle` to bring the switcher up. Docking, auto-hide, Spaces and minimize-on-pause stay not needed: the page is a browser tab and hosted sessions have no Terminal windows | S | Mac piece owed | was "not needed" |
 | Statistics window | `Statistics/` | has it | `vibeswitcher stats [today\|week\|month] [--json]` (`Stats/StatisticsText.swift`), the page's Statistics (`views/stats.js`, `#/stats`) | | node start | |
+| Toggle Sidebar (⌃⌘S) | `MainWindow/MainMenu.swift` | missing | the left column can't be collapsed on a desktop (a drawer on a phone) | S | missing everywhere | new row |
+| A sidebar row's Remove (an ended session) | `MainWindow/SessionListView.swift` | missing | no way to drop one ended entry (`reopen --forget` only puts the restart offer away) | S | missing everywhere | new row |
+| A sidebar row's Copy Session ID (a live session) | `MainWindow/SessionListView.swift` | partly | the inspector shows the id cut to 8 characters, whole in its tooltip; an ended one's id is there to copy. **Missing**: a copy control for a live session's id | S | node start | new row |
+| A sidebar row's Reveal in Finder | `MainWindow/SessionListView.swift` | missing | the page shows the folder's path only; a browser can't reveal a folder | S | Mac piece owed | new row |
+| Close Finished (N)… at the sidebar's foot: finished agent shells and replaced leads, one confirmation | `MainWindow/SessionListView.swift` (main `49fb4616`, 2026-11-21) | has it | `vibeswitcher close-shells` with no folder; replaced leads end by themselves once the new lead is up (`Engine/ReplacedLeads.swift`); Run-card shells end alone. No node-wide button or count on the page | S | step 4 (voice) | new row |
+| Open the window when VibeSwitcher starts | `SettingsWindow.swift` (General › Startup) | missing | `vibeswitcher web` prints an address and opens nothing; the page must be paired again (12 h, lost on reload) to watch or act | S | Mac piece owed | new row |
+| Order sessions (the menu bar's list) | `SettingsCatalog.swift` | missing | belongs with the menu bar, owed with it | S | Mac piece owed | new row |
 ### Chat and composer
 
 | Feature | V1 (where) | V2 state | Where in V2 / what's missing | Size | On the Mac | Note |
@@ -117,6 +128,14 @@ LaunchAgent, 6 the unified log, 7 the install script, 8 the seal list, 9 living 
 | The all-done card (a batch's summary and receipts) | `MainWindow/Lead/AllDoneWatch.swift`, `Chat/AllDoneCard.swift` | partly | `Engine/AllDoneLook.swift`; `vibeswitcher status` and `board` show it; the page shows it in the lead's chat (`views/alldone.js`) and "All done" in the left column. **Missing**: nothing marks it seen any more (the redesign removed the board card and its `seen {project}`; no caller on the page or the command line), so "All done" stays | S | missing everywhere | was has it: a regression of `3ff1455b` |
 | Push-to-talk dictation | `Dictation/` | partly | `WebApp/js/dictate.js`: hold the mic beside the session's composer and the lead cards' answer boxes; the browser's own speech service (Chrome: Google's), only on a secure page, off until turned on on This node. **Missing**: V1's OpenAI transcription with the project's words, Claude Code's own /voice, Hold Space, silencing the Mac (new rows below); no mic on the lead's message box | M | node start | was has it: re-judged against V1's whole dictation |
 | Chat text size (⌘+ ⌘− ⌘0) | `MainWindow/Chat/MarkdownView.swift` | not needed | the browser zooms | | n/a | |
+| ↑ / ↓ walk earlier prompts in the composer | `MainWindow/Chat/ComposerView.swift` | missing | ↑ in an empty box goes to the open card instead | S | missing everywhere | new row |
+| The to-do list or plan steps pinned above the conversation | `MainWindow/Chat/ChatView.swift` | missing | to-dos only inside their folded tool call | S | missing everywhere | new row |
+| A code block's Copy | `MainWindow/Chat/ChatMessageText.swift` | missing | a code block's caption has its language and Run only (`js/text.js`) | S | missing everywhere | new row |
+| Selecting across messages and copying it | `MainWindow/Chat/ChatMessageText.swift` | not needed | the browser's own selection; Copy Chat as Markdown for the whole chat (rows not drawn yet can't be selected) | | n/a | new row |
+| Dictation through Claude Code's own /voice | `Dictation/ClaudeVoice.swift` (main `21727278`, 2026-11-21) | missing | nothing drives a session's /voice | L | Mac piece owed | new row |
+| Dictation by OpenAI with a key in the Keychain, its model, the project's words | `Dictation/OpenAITranscription.swift`, `DictationVocabulary.swift` | missing | the page uses the browser's recognition only | M | missing everywhere | new row |
+| Hold Space to dictate | `Dictation/HeldKey.swift` | missing | hold the mic button (or Space while it has focus) | S | missing everywhere | new row |
+| Silence the Mac while dictating | `Dictation/OutputSilencer.swift` | missing | a page can't mute the system | S | Mac piece owed | new row |
 
 ### Accounts, usage limits and performance
 
@@ -160,6 +179,16 @@ LaunchAgent, 6 the unified log, 7 the install script, 8 the seal list, 9 living 
 | Records: progress, decisions, incidents, redaction, the board's archive | `LeadToolset.swift` (shared) | has it | the lead's tool server (`progress`, `record_decision`, `record_incident`, `redact_record`, `archive_decisions`) | | node start | |
 | Your working policy, and leads told when it changes | `WorkingPolicySettings.swift`, `Sources/VibeCore/WorkingPolicy.swift` | has it | `vibeswitcher set policy TEXT` (`Settings/NodeSettings.swift`); running leads told (`Engine/SettingsWatch.swift`); the page shows the line, never sets it (a guard rail) | | step 4 (voice) | |
 | The review rules floor | `ReviewFloorSettings.swift`, `Sources/VibeCore/LeadReviewFloor.swift` | has it | recorded at `config accept`; `vibeswitcher set FOLDER floor_… VALUE` (`Settings/NodeSettingsSet.swift`); a page never sets a floor | | step 4 (voice) | V1's review rules with ids are a new row below |
+| A lead's chat carries its earlier sessions across handovers, with a divider | `Sources/VibeCore/LeadChatHistory.swift` (main `2891eaba`, 2026-11-22) | partly | the project page's conversation is built from the board, so it spans leads; the lead session's own chat (`ChatStore`) is its transcript only. **Missing**: earlier sessions and the divider in that chat | M | missing everywhere | new row |
+| A handover ends the replaced lead by itself | `MainWindow/Lead/LeadController.swift` (main `b8a85f2d`, 2026-11-22) | has it | `Engine/ReplacedLeads.swift`: once the new lead is live and bound (V2's own rule, not after its first turn) | | node start | new row |
+| Open findings sent whole to the worker (`message(findings:)`, auto_advance) | `Sources/VibeCore/LeadToolset.swift`, `LeadAdvance.swift` (main `809c1719`) | missing | V2's `message` has no `findings`; auto_advance sends the open ids only | S | missing everywhere | new row |
+| Review rules with an id, a trigger and a source; the verifier lists those it applied; `status` counts them | `Sources/VibeCore/LeadReviewRules.swift` (main `208cd3fd`, 2026-11-23) | missing | no `LeadReviewRules`, no `submit_audit rules` | M | missing everywhere | new row |
+| Bug fixes name what introduced the bug; the weekly scorecard counts bugs that got past review | `Sources/VibeCore/LeadOrigins.swift` (main `74a0b0bb`, `e5290087`) | missing | no `report introduced_by`, no `LeadEscapedBugs` | M | missing everywhere | new row |
+| A named test's first flake plans its fix task (root cause or delete the test), always audited | `Sources/VibeCore/FlakeLedger.swift`, `MergeRerun.swift` (main `4da711c2`, `12765aaf`) | partly | V2 plans a fix task after 3 flakes (`LeadBoard.flakeLimit`). **Missing**: first-flake planning, its contract, the audit for good | S | missing everywhere | new row |
+| GitHub pushers named on the update card and in fetch_remote / merge_remote | `Sources/VibeCore/GitHubPushers.swift` (main `cd52e331`, 2026-11-24) | missing | no `GitHubPushers` | M | missing everywhere | new row |
+| A project's audits capped at its heavy slots (`audit override_heavy_slots`) | `Sources/VibeCore/LeadToolset.swift`, `LeadAdvance.swift` | missing | V2's heavy slots count merges and `vs-heavy` jobs only | S | missing everywhere | new row |
+| New workers wait while the disk can't hold the tasks in flight (`configure disk_headroom_gb`) | `Sources/VibeCore/LeadToolset.swift`, `LeadWitness.swift` | missing | V2 has the disk watch's warning, no gate | S | missing everywhere | new row |
+| Codex audits while Claude is at its limit (`configure codex_verifier`) | `Sources/VibeCore/LeadToolset.swift` | missing | not in V2's tools (Codex workers are off on purpose) | S | missing everywhere | new row |
 ### Hooks, status line, config seal and git guards
 
 | Feature | V1 (where) | V2 state | Where in V2 / what's missing | Size | On the Mac | Note |
@@ -177,6 +206,7 @@ LaunchAgent, 6 the unified log, 7 the install script, 8 the seal list, 9 living 
 | A sound when a session needs input | Settings › Notifications | partly | `notify.js`'s chime, its own toggle on This node, off by default. **Missing**: as above, only while a page is open | S | Mac piece owed | was has it: same limit |
 | Reminders about waiting or stuck sessions | Settings › Notifications, `Sources/VibeCore/AlertRules.swift` | has it | `Stores/NodeSessions.swift` `reminderNotices` (in `status`) and `node.reminders` (the page's banner, "Remind me about waiting or stuck sessions") | | node start | a banner only while a page is open |
 | Phone push notifications | `Sources/VibeCore/WebPush.swift`, `Web/sw.js` | missing | no service worker or push anywhere in `WebApp`; four decisions still open ([the push decision note](v2-push-decision.md)): HTTPS by `tailscale serve`, posting to the browser vendors, the VAPID key's home, what a lock screen shows | M | missing everywhere | `WebApp/js/push.js` is the lead's push request, not this |
+| Phone notifications only while I'm away from the Mac | `PhoneAccessView.swift` | missing | needs push and presence (their rows) | S | missing everywhere | new row |
 
 ### Updates and install
 
@@ -188,6 +218,7 @@ LaunchAgent, 6 the unified log, 7 the install script, 8 the seal list, 9 living 
 | Open at login | Settings › General (ServiceManagement) | has it | `vibeswitcher start --at-login`; the Mac's agent property list sets RunAtLoad with it (`Start/NodeAgent.swift`) | | step 5 (LaunchAgent) | |
 | First-run setup, installing Claude Code and tools | `Onboarding.swift`, `ToolInstaller.swift` | partly | `vibeswitcher doctor` (`Start/NodeDoctor.swift`): what the node needs, each missing piece with its command. **Missing**: one-click installs (on purpose: agents install nothing); every check is Linux's (swiftly, WSL, systemd), none for a Mac (Xcode or its Command Line Tools, Homebrew's gh, launchd) | S | Mac piece owed | |
 | Restart Session Host | `HostRestart.swift` | has it | `vibeswitcher stop`, `start`; `switch` hands over; This node's Stop the node acts under trust (asks again in place); starting again is a terminal's | | step 5 (LaunchAgent) | |
+| About VibeSwitcher (the version) | `MainWindow/MainMenu.swift` | has it | This node's Build (running, installed, the rollback's target); `status` names the host's build | | node start | new row |
 
 ### Remote and web
 
@@ -196,6 +227,8 @@ LaunchAgent, 6 the unified log, 7 the install script, 8 the seal list, 9 living 
 | Phone access over Tailscale: pairing, replies, key presses, answers, Chrome access | `PhoneAccess.swift`, `RemoteServer.swift`, `Tailscale.swift`, `Web/` | partly | `vibeswitcher web --tailnet` (`Server/TailnetWeb.swift`, the listener now the host's: H1 is built), its MagicDNS name, 8 h tokens, `web --revoke`; the phone layout; reads everything and drafts; the chat's secrets masked (`Redaction`, `Live/CommandMask.swift`). **Missing**: anything acted from the phone (answers, replies, key presses): the tailnet page never acts, by rule (`Web/WebAccess.swift`: acting is the loopback page's only); no terminal there; Chrome access, push, a QR code, `tailscale whois` | L | node start | input no longer waits on H1, only on the rule; **unverified**: whether cards and the board are masked as the chat is |
 | Dev pages, previews | `DevPreviews.swift`, `Sources/VibeCore/DevPages.swift` | partly | `Facts/DevPorts.swift`, `session.ports`: the inspector's Dev servers, each opening `localhost:PORT` on the loopback page. **Missing**: the phone's previews and Chrome access (the remote decisions); the ports are read from `/proc`, which a Mac hasn't | S | Mac piece owed | |
 | A web page for the desktop, paired with a one-time code | — | v2-only | `vibeswitcher web [--tailnet\|--revoke]` (`Sources/VibeNode/Web/`), `WebApp/` on `127.0.0.1`, redesigned 2026-11-23, in English and Spanish; acts when `web_acts trust` and its pairing phrase is confirmed in the terminal | | node start | was "reads and drafts, never answers" |
+| Paired devices: a list with names, revoke one | `PhoneAccessView.swift` (Settings › Phone) | partly | `status` and This node count the pages and tokens; `web --revoke` drops them all. **Missing**: names, and revoking one | S | node start | new row |
+| Activity log: what each phone did | `PhoneAccessView.swift`, `PhoneAccess.swift` | partly | each acting page's request is recorded in the vault with its page's mark, and in the journal. **Missing**: any command or view that lists them | S | node start | new row |
 
 ### Diagnostics and health
 
@@ -219,6 +252,9 @@ LaunchAgent, 6 the unified log, 7 the install script, 8 the seal list, 9 living 
 | Mac permissions (Automation, Accessibility) | Settings › Advanced | not needed | the node drives its own terminals and no other app; its voice on a Mac is Touch ID, which needs neither | | n/a | owed only with Open in Terminal or a hot key on a Mac |
 | App Nap, focus log, presence | `TeamActivity.swift`, `FocusLog.swift`, `UserPresence.swift` | missing | App Nap is answered by the Mac agent's `ProcessType Interactive` (`Start/NodeAgent.swift`); the focus log has nothing to log. **Missing**: presence (V1 uses it for Boost's Automatic, reminders and push only while away) | S | Mac piece owed | was "not needed" |
 | Wallet and passage end-to-end test | `scripts/e2e/wallet-e2e.sh` | missing | none for the node; the wallet plugin's case A45 is by hand | S | missing everywhere | was "not needed": a wallet plugin exists now |
+| Wallet Manager's Mac and Passage's command path (Settings › Wallet) | `Wallet/WalletSettingsTab.swift` | missing | no Wallet Manager or Passage on a node | M | missing everywhere | new row |
+| Send all N to Wallet Manager… | `Wallet/WalletSendAll.swift` | missing | needs Wallet Manager | M | missing everywhere | new row |
+| The wallet request strip along the terminal | `MainWindow/TerminalWalletStrip.swift` | missing | a plugin's cards show in the chat only | S | missing everywhere | new row |
 
 ### V2-only
 
@@ -227,6 +263,18 @@ LaunchAgent, 6 the unified log, 7 the install script, 8 the seal list, 9 living 
 | The user's voice: a typed code before each change | — | v2-only | the command line's typed word (`vibeswitcher-cli/TypedWord.swift`), `Server/Voice.swift`; every change recorded in the vault and the journal. On a Mac: Touch ID per change, built (`VoiceRule.Mode.approval`) and off until measured (`NodeSystem.approvalMeasured`) | | step 4 (voice) | |
 | The session sandbox: shim, planner, door, egress proxy | — | partly | built (`Sources/VibeCore/V2/Sandbox/`, `V2/Door/`, `Sources/VibeHost/V2/SessionSandbox.swift`, `EgressProxy.swift`); branch runs are boxed. **Missing**: workers', leads' and verifiers' sessions (nothing spawns one with a box: SB3, SB11); no box on a Mac | L | Mac piece owed | unchanged since 2026-11-22 |
 | The host's project allow-list and hardening (parser, seccomp) | — | v2-only | `Sources/VibeHost/V2/ProjectAllowList.swift`, `HostHardening.swift` | | Mac piece owed | Linux's host only |
+| Send ways: at its next step, now, after this turn, interrupt then send | — | v2-only | `vibeswitcher send --when` (`Server/SendWhen.swift`), the page's Send menu (`js/sendways.js`, `views/sendmenu.js`) | | step 4 (voice) | new row |
+| Goals: the lead keeps 3 to 5 goals, each task belongs to one (`add_goal`, `update_goal`, `order_goals`) | — | v2-only | the tool server, `goals.json`, the board's `goals`, the page's roadmap by goal (`project.js`, `#/p/<project>/roadmap`); acceptance A12b | | node start | new row |
+| Estimates and landing dates: a worker's likely and worst case, scored against what happened, a roadmap of dates | — | v2-only | `Sources/VibeCore/LeadEstimates.swift`, `LeadForecast` (`Live/BoardValue.swift`), `js/forecast.js`, the roadmap; the Stats tab's score; acceptance A12c | | node start | new row |
+| The dial over the lead's conversation: what waits on you, decisions and results, everything | — | v2-only | `project.js` `dialLinks`, `conversation.js` | | node start | new row |
+| The security audits' model (`security_audit_model`, Mythos by default) | — (V1: fixed) | v2-only | `LeadWorkflow.securityAuditModel`, `configure`, `vibeswitcher set FOLDER security_audit_model` | | node start | new row |
+| A Blocking card's answer waits 5 s with Undo | — | v2-only | `cards.js` `UNDO_MS`, dropped when the question changes | | step 4 (voice) | new row |
+| Acting from the page (`web_acts`: off, confirm, trust) and a pairing phrase confirmed in the terminal | — | v2-only | `Web/ActingPages.swift`, `Web/PagePairing.swift`, `js/acting.js`. Off by default, raised from a terminal; `confirm` (a passkey per act) isn't built though the page already draws it | M | step 4 (voice) | new row |
+| Plugins: `plugin list\|add\|on\|off\|remove`, and This node's switches | — | v2-only | `vibeswitcher-cli/PluginCommand.swift`, `Sources/VibeNode/Plugins/`; add and inspect from a terminal only | | node start | new row |
+| `vibeswitcher approve`: one code for every plain accept, and the page's Approve all | — | v2-only | `vibeswitcher-cli/Approve.swift`, `Server/ApproveRequest.swift`, `views/node.js` | | step 4 (voice) | new row |
+| `vibeswitcher questions --wait`: block until a card needs you | — | v2-only | `vibeswitcher-cli/Questions.swift` | | node start | new row |
+| The Mac's LaunchAgent property list (`vibeswitcher agent-plist`) | — | v2-only | `vibeswitcher-cli/AgentPlistCommand.swift`, `Start/NodeAgent.swift`; printed, never loaded; not wired to `start` yet | M | step 5 (LaunchAgent) | new row |
+| The page in Spanish | — (V1: the briefing's language only) | v2-only | `WebApp/js/i18n-es.js`, following the browser's language or `?lang=es` | | node start | new row |
 
 ## Different on purpose and different by accident
 
