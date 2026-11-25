@@ -283,7 +283,15 @@ import VibeCore
         let folder = scratchRoot.appendingPathComponent("vsos-\(UUID().uuidString.prefix(8))").path
         try FileManager.default.createDirectory(atPath: folder, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(atPath: folder) }
+        #if os(macOS)
+        // The Mac kills a copy of its own sleep as it starts (`signedAsItsOwn`): here the copies are of one signed as a
+        // program of its own, made before the children start.
+        let program = folder + "/sleep"
+        try installProgram(URL(fileURLWithPath: "/bin/sleep").resolvingSymlinksInPath().path, atPath: program)
+        try signedAsItsOwn(program)
+        #else
         let program = URL(fileURLWithPath: "/bin/sleep").resolvingSymlinksInPath().path
+        #endif
         let children = Children()
         let spawning = Thread { children.spawnUntilStopped() }
         spawning.start()

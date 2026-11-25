@@ -304,7 +304,7 @@ extension ApproveTests {
         world.queue.sync { world.requests.nodeRoot = world.host.folder.path }
         let withConfig = try await list(world, only: ["config", "hooks"])
         #expect(!(withConfig["items"]?.array ?? []).contains { $0["kind"]?.string == "hooks.install" }, "\(withConfig)")
-        #expect((withConfig["own"]?.array ?? []).contains { $0["command"]?.string?.hasPrefix("vibeswitcher hooks install --agent claude") == true }, "\(withConfig)")
+        #expect((withConfig["own"]?.array ?? []).contains { $0["command"]?.string == HooksRequest.installCommand }, "\(withConfig)")
         let alone = try await list(world, only: ["hooks"])
         #expect(alone["items"]?.array?.map { $0["kind"]?.string } == ["hooks.install"], "\(alone)")
     }
@@ -405,6 +405,41 @@ extension ApproveTests {
 /// The hooks out of date, as `approve` lists them (`HooksRequest.outOfDate`).
 struct HooksOutOfDateTests {
     private let scratch = Scratch()
+
+    /// `status` after a switch (2026-11-24): one line with what waits and the one command for each part, and the hooks
+    /// out of date with their command (`HooksLook`), each program hashed again only when its file changed.
+    @Test func statusSaysWhatWaitsAndTheHooksWithTheirCommands() async throws {
+        typealias Counts = WireKinds.Status.CardCounts
+        #expect(CardText.waitingLine(nil) == nil && CardText.waitingLine(Counts(questions: 0, approvals: 0, config: 0, base: 0)) == nil)
+        #expect(CardText.waitingLine(Counts(questions: 2, approvals: 1, config: 4, base: 1))
+            == "waiting on you: 4 held config, 1 base move: `vibeswitcher approve` settles them with one code; 2 questions, 1 approval to answer: `vibeswitcher questions`")
+        #expect(CardText.waitingLine(Counts(questions: 1, approvals: nil, config: nil, base: 2))
+            == "waiting on you: 2 base moves: `vibeswitcher approve` settles them with one code; 1 question to answer: `vibeswitcher questions`")
+        #expect(HooksLook.notice(reasons: ["a", "b"], agents: [.claude, .codex])
+            == "the hooks are out of date: a; b: vibeswitcher hooks install (or `vibeswitcher approve`, with what else waits)")
+
+        // Kept by the file's stat: the same file isn't read again; a changed one is.
+        let look = HooksLook()
+        let file = scratch.url("program")
+        try Data("one".utf8).write(to: file)
+        let first = look.sha256(file.path)
+        #expect(first == HooksRequest.sha256(file.path))
+        #expect(look.sha256(file.path) == first)
+        try Data("two".utf8).write(to: file)
+        #expect(look.sha256(file.path) == HooksRequest.sha256(file.path) && look.sha256(file.path) != first)
+
+        // A server's status on a home without the hooks: the notice, after the look `status` makes.
+        let world = try await CardWorld.make(scratch)
+        defer { world.stop() }
+        let done = Locked(false)
+        world.queue.async {
+            world.requests.nodeRoot = world.host.folder.path
+            world.requests.refreshNotes { done.value = true }
+        }
+        try #require(await eventually(timeout: 60) { done.value })
+        let notices = world.queue.sync { world.requests.statusNotices() }
+        #expect(notices.contains { $0.hasPrefix("the hooks are out of date: ") && $0.contains(": vibeswitcher hooks install (or") }, "\(notices)")
+    }
 
     @Test func aMissingProgramAndAConfigWithoutTheHooksAreSaid() throws {
         let home = scratch.url("home").path

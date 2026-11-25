@@ -270,8 +270,9 @@ export function questionCard(app, first, { expand = null } = {}) {
 
     el.append(h('p', { class: 'card-foot' }, counting
       ? t('cPickOrHold', { x: question.proposal, time: clock(question.decideBy) })
-      : t('cKeepsWorking')),
-      h('p', { class: 'card-keys', 'aria-hidden': 'true' }, t('cKeysAnswers', { n: Math.max(question.options.length, 1) }) + (counting ? t('cKeysHold') : '')));
+      : t('cKeepsWorking')));
+    // The keys, as a tooltip on the options.
+    list.el.title = t('cKeysAnswers', { n: Math.max(question.options.length, 1) }) + (counting ? t('cKeysHold') : '');
     keys = { buttons: list.buttons, hold: counting ? hold : null };
   }
 
@@ -297,7 +298,11 @@ export function questionCard(app, first, { expand = null } = {}) {
     const typed = input?.value ?? '';
     input = h('input', { class: 'answer-input', type: 'text', placeholder: question.options.length ? t('cOwnWords') : t('yourAnswer'), 'aria-label': t('yourAnswer'), autocomplete: 'off', maxlength: 4000 });
     input.value = typed || own;
-    const send = h('button', { class: 'button quiet', type: 'submit', disabled: !input.value.trim() || input.value.trim() === drafted?.text }, t('cDraft'));
+    // Acting is on for the node but not in this tab (it isn't paired): a pick isn't a draft for a terminal, it's a choice
+    // this tab can't send; the banner at the top says how to make it act.
+    const level = app.store.state.node?.web?.acts?.level ?? (app.store.state.node?.web?.acts?.on ? 'trust' : 'off');
+    const notYet = level !== 'off';
+    const send = h('button', { class: 'button quiet', type: 'submit', disabled: !input.value.trim() || input.value.trim() === drafted?.text }, t(notYet ? 'cChoose' : 'cDraft'));
     input.addEventListener('input', () => { send.disabled = !input.value.trim() || input.value.trim() === app.store.draftOf(card.id)?.text; });
     el.append(h('form', { class: 'answer', onsubmit: (event) => { event.preventDefault(); pick(input.value); } }, input, talkButton(input), send));
 
@@ -305,13 +310,15 @@ export function questionCard(app, first, { expand = null } = {}) {
     if (refused) el.append(h('p', { class: 'card-notice', role: 'alert' }, refused));
     else if (card.notice) el.append(h('p', { class: 'card-notice' }, card.notice));
 
-    if (drafted) el.append(confirmBox(card, drafted, () => app.store.draft(card.id, null)));
-    if (counting) el.append(h('div', { class: 'card-hold' }, h('span', { class: 'card-hold-label' }, t('cToStop')), copyLine(`vibeswitcher hold ${cardShort(card.id)}`, 'the command that holds the timer')));
-
-    el.append(h('p', { class: 'card-foot' }, drafted
-      ? (counting ? t('cUntilConfirm', { x: question.proposal, time: clock(question.decideBy) }) : t('cPickAnother'))
-      : t('cPickThenConfirm')),
-      h('p', { class: 'card-keys', 'aria-hidden': 'true' }, question.options.length > 1 ? t('cKeysPicks', { n: question.options.length }) : t('cKeysMove')));
+    // One line once picked; the terminal's way one click away, never the pile of it.
+    if (drafted) el.append(h('p', { class: 'card-notsent' }, notYet ? t('cNotSent') : t('cDrafted')));
+    if (drafted || counting) {
+      el.append(h('details', { class: 'card-terminal' }, h('summary', null, t('cUseTerminal')),
+        drafted ? confirmBox(card, drafted, () => app.store.draft(card.id, null)) : null,
+        counting ? h('div', { class: 'card-hold' }, h('span', { class: 'card-hold-label' }, t('cToStop')), copyLine(`vibeswitcher hold ${cardShort(card.id)}`, 'the command that holds the timer')) : null,
+        counting ? h('p', { class: 'card-foot' }, t('cUntilConfirm', { x: question.proposal, time: clock(question.decideBy) })) : null));
+    }
+    list.el.title = question.options.length > 1 ? t('cKeysPicks', { n: question.options.length }) : t('cKeysMove');
     keys = { buttons: list.buttons, hold: null };
   }
 
@@ -412,7 +419,11 @@ export function pluginCard(card, app = null) {
     card.notice ? h('p', { class: 'card-notice' }, card.notice) : null);
 }
 
-export function questionStack(app, project) {
+// How long an answered card stays in the waiting block, saying it was answered: the conversation is the record.
+export const ANSWERED_SHOWN = 4000;
+
+// `onChange`: an answered card left (its few seconds over), so whoever holds the stack may draw again.
+export function questionStack(app, project, { onChange = () => {}, now = () => Date.now() } = {}) {
   const count = h('h2', { class: 'stack-title' });
   const order = h('span', { class: 'stack-note' }, t('anyOrder'));
   const pushSlot = h('div', { class: 'stack-cards' });
@@ -427,12 +438,28 @@ export function questionStack(app, project) {
   // With several open, one shows whole (the first, or the one the user opened) and the others their question line.
   let chosen = null;
   const expand = (card) => { chosen = keyOf(card); update(); };
+  // When each card closed here (answered, decided, withdrawn): shown that long, then gone. One already closed when
+  // first seen is never shown.
+  const closedAt = new Map();
+  let leaving = null;
 
   function update() {
     const cards = [...app.store.state.cards.values()].filter((card) => card.project === project && (card.kind === 'question' || card.kind === 'approval'));
     for (const card of cards) if (!firstAt.has(keyOf(card))) firstAt.set(keyOf(card), Date.parse(card.at));
     const isOpen = (card) => card.open && app.store.state.acting.get(card.id)?.kind !== 'answer';
     const open = cards.filter(isOpen);
+    const at = now();
+    for (const card of cards) {
+      const key = keyOf(card);
+      if (isOpen(card)) closedAt.delete(key);
+      else if (!closedAt.has(key)) closedAt.set(key, rows.has(key) ? at : 0);
+    }
+    const stays = (card) => isOpen(card) || at - (closedAt.get(keyOf(card)) || 0) < ANSWERED_SHOWN;
+    cards.splice(0, cards.length, ...cards.filter(stays));
+    // The next answered card to leave: drawn again then, and the holder told.
+    const soonest = Math.min(...cards.filter((card) => !isOpen(card)).map((card) => closedAt.get(keyOf(card)) + ANSWERED_SHOWN));
+    clearTimeout(leaving);
+    if (Number.isFinite(soonest)) leaving = setTimeout(() => { update(); onChange(); }, Math.max(0, soonest - at) + 20);
     cards.sort((a, b) => (isOpen(b) - isOpen(a)) || (firstAt.get(keyOf(a)) - firstAt.get(keyOf(b))));
     const lead = app.store.state.leads.get(project);
     const push = lead?.push && lead.root ? lead : null;
@@ -496,7 +523,7 @@ export function askCard(app, session, item, local, asked, redraw) {
     h('pre', { class: 'ask-text' }, item.text),
     list.el);
   if (local?.refused) el.append(h('p', { class: 'card-notice', role: 'alert' }, local.refused));
-  el.append(h('p', { class: 'card-keys', 'aria-hidden': 'true' }, t('cKeysAnswers', { n: item.options.length })));
+  list.el.title = t('cKeysAnswers', { n: item.options.length });
   cardKeys(el, () => ({ buttons: list.buttons, choose, hold: null }));
   return el;
 }

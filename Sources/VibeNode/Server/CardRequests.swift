@@ -16,6 +16,7 @@ extension Requests {
         let kinds: [CardStore.Kind]
         switch request.kind {
         case "answer": kinds = [.question, .approval, .plugin]
+        case "answer.replace": kinds = [.question]
         case "hold": kinds = [.question, .approval]
         case "config.accept": kinds = [.configHeld]
         default: kinds = [.baseMove]
@@ -28,7 +29,7 @@ extension Requests {
             return .init(re: request.id, error: .init(.voice, "code: the code typed isn't card \(card.id)'s"))
         }
         // A late answer to a withdrawn or decided question still reaches the lead as a note (the board says what became of it).
-        guard card.isOpen || request.kind == "answer" else { return .init(re: request.id, error: .init(.gone, "card \(card.id) is closed: \(card.closed ?? "")")) }
+        guard card.isOpen || request.kind == "answer" || request.kind == "answer.replace" else { return .init(re: request.id, error: .init(.gone, "card \(card.id) is closed: \(card.closed ?? "")")) }
         return nil
     }
 
@@ -37,9 +38,10 @@ extension Requests {
         return (engine, card)
     }
 
-    private func failed(_ request: NodeWire.Request, _ failure: LeadEngine.CardFailure) -> NodeWire.Reply {
+    func failed(_ request: NodeWire.Request, _ failure: LeadEngine.CardFailure) -> NodeWire.Reply {
         switch failure {
         case .gone(let why): return .init(re: request.id, error: .init(.gone, why))
+        case .delivered(let why): return .init(re: request.id, error: .init(.delivered, why))
         case .refused(let why): return .init(re: request.id, error: .init(.refused, why))
         case .badArgs(let why): return .init(re: request.id, error: .init(.badArgs, why))
         }
@@ -161,6 +163,22 @@ extension Requests {
             switch result {
             case .failure(let failure): reply(self.failed(request, failure))
             case .success(let answered): reply(.init(re: request.id, typed: answered))
+            }
+        }
+    }
+
+    /// `answer.replace` (`WireKinds.AnswerReplace`): the user's answer on a question card taken back before its lead had
+    /// it, `text` in its place (`LeadEngine.replaceAnswer`).
+    func answerReplace(_ request: NodeWire.Request, reply: @escaping (NodeWire.Reply) -> Void) {
+        guard let (engine, card) = engineCard(request) else { return reply(.init(re: request.id, error: .init(.gone, "no such card"))) }
+        guard let text = request.args?["text"]?.string, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return reply(.init(re: request.id, error: .init(.badArgs, "answer.replace needs text")))
+        }
+        engine.replaceAnswer(card: card.id, text: text, action: request.action?.lowercased()) { [weak self] result in
+            guard let self else { return }
+            switch result {
+            case .failure(let failure): reply(self.failed(request, failure))
+            case .success(let replaced): reply(.init(re: request.id, typed: replaced))
             }
         }
     }

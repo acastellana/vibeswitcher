@@ -36,7 +36,7 @@ extension Requests {
                 reply(.init(re: request.id, typed: WireKinds.PluginSetResult(plugin: value["plugin"]?.string ?? id, on: value["on"]?.bool ?? false,
                                                                               withdrawn: value["withdrawn"]?.int ?? 0)))
             case .failure(.gone(let why)): reply(.init(re: request.id, error: .init(.gone, why)))
-            case .failure(.refused(let why)): reply(.init(re: request.id, error: .init(.refused, why)))
+            case .failure(.refused(let why)), .failure(.delivered(let why)): reply(.init(re: request.id, error: .init(.refused, why)))
             case .failure(.badArgs(let why)): reply(.init(re: request.id, error: .init(.badArgs, why)))
             }
         }

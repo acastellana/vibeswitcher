@@ -100,8 +100,7 @@ struct ServerBuildLinuxTests {
     @Test(.enabled(if: !Platform.CodeIdentity.isAvailable, "Linux: the node's install"))
     func theGateNamesTheLinuxInstallOnLinux() {
         let refusal = Self.lag().refusal(base: "main", what: "The merge")
-        #expect(refusal.contains("install-node.sh"), "\(refusal)")
-        #expect(refusal.contains("vs switch"), "\(refusal)")
+        #expect(refusal.contains("vibeswitcher update"), "\(refusal)")
         #expect(!refusal.contains("build-app.sh"), "\(refusal)")
         #expect(refusal.contains(ServerBuildLinux.installHint), "\(refusal)")
     }

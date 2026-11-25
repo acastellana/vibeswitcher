@@ -25,7 +25,7 @@ extension Requests {
                 engine.settlePush(root: root, id: id, push: approve) { result in
                     switch result {
                     case .success(let settled): reply(.init(re: request.id, typed: settled))
-                    case .failure(.refused(let why)), .failure(.gone(let why)), .failure(.badArgs(let why)):
+                    case .failure(.refused(let why)), .failure(.gone(let why)), .failure(.badArgs(let why)), .failure(.delivered(let why)):
                         reply(.init(re: request.id, error: .init(.refused, why)))
                     }
                 }

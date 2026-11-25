@@ -62,6 +62,10 @@ extension Session {
         fields["branch"] = branch.map(NodeWire.Value.string) ?? .null
         fields["command"] = host?.command.map { .string(CommandMask.masked($0)) } ?? .null
         fields["size"] = host.map { .object(["cols": .int($0.cols), "rows": .int($0.rows)]) } ?? .null
+        // The ways `send` can reach its agent (`SendWhen.ways`, by the version it was launched at): none for a shell.
+        let agent = host.flatMap(HostedAgents.agent(of:))
+        let version = host.flatMap { host in agent.map { _ in AgentVersion.cached(session: host, pid: pid) } } ?? nil
+        fields["sendWays"] = .array(SendWhen.ways(agent: agent, version: version).map { .string($0.rawValue) })
         return .object(fields)
     }
 }

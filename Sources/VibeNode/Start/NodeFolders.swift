@@ -272,7 +272,7 @@ public enum NodeFolders {
     }
 
     /// `path` resolved with `realpath`, or nil.
-    static func resolved(_ path: String) -> String? {
+    public static func resolved(_ path: String) -> String? {
         guard let real = realpath(path, nil) else { return nil }
         defer { free(real) }
         return String(cString: real)

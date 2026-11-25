@@ -9,6 +9,8 @@ import { createUI, teamOf, projectHref } from './js/ui.js';
 import { h, setText } from './js/dom.js';
 import { since, until, lastPart, tilde, KEY, MAC } from './js/words.js';
 import { t } from './js/i18n.js';
+import { register as registerPasskey } from './js/passkey.js';
+import { copyLine } from './js/views/cards.js';
 import { projectsOf, firstProject } from './js/conversation.js';
 import { leftColumn, ownSession } from './js/views/left.js';
 import { projectView } from './js/views/project.js';
@@ -30,6 +32,10 @@ const ui = createUI();
 const mocked = params.has('mock') || params.has('still') || params.has('empty') || params.has('rows');
 // The mock is loaded only for ?mock and its kin: the node's embedded page leaves it out (scripts/webapp-embed.sh), so
 // there it says so; WebApp/serve.sh and a scratch server's folder serve it.
+// Whether this page runs inside a frame (a cross-origin parent can't be read: framed too).
+function framed() {
+  try { return window.top !== window; } catch { return true; }
+}
 // The build this page's files came from: their address names it (`/_/<build>/app.js`); by a plain path, /build.json.
 function fetchBuild() {
   return fetch('build.json', { cache: 'no-cache' }).then((reply) => (reply.ok ? reply.json() : null)).then((json) => json?.assets || null, () => null);
@@ -54,6 +60,10 @@ const feed = mocked
     // in this module's own address), else /build.json, asked again at a hello while it isn't known.
     build: ownBuild(),
     rebuild: fetchBuild,
+    // The tabs of this node's origin share acting, memory to memory: never in a frame (the node's pages refuse being
+    // framed anyway). The channel is the origin's own; its name carries host and port too, so localhost and 127.0.0.1
+    // (two origins, two pairings) stay apart by construction as well.
+    share: typeof BroadcastChannel === 'function' && !framed() ? new BroadcastChannel(`vibeswitcher-acting-${location.host}`) : null,
   });
 store.connect(feed);
 
@@ -127,15 +137,32 @@ const confirming = h('div', { class: 'offline confirm-pairing', role: 'status', 
 const tabBanner = h('div', { class: 'tab-banner', role: 'alert', hidden: true });
 function drawTabBanner() {
   const state = store.state;
+  const acts = state.node?.web?.acts;
+  const level = acts?.level ?? (acts?.on ? 'trust' : 'off');
+  const connected = state.connection === 'live' || state.connection === 'reconnecting';
+  // Acting is on for the node but not in this tab, and nothing else is being said about it (a pairing waiting for the
+  // terminal has its own banner): one banner, always, in plain words, with the one command and its copy button.
+  const cantYet = connected && level !== 'off' && !store.acts() && !state.phrase && state.actsLost !== 'unconfirmed';
   const lost = state.actsLost && !store.acts();
-  tabBanner.hidden = !lost && !state.newerBuild;
+  tabBanner.hidden = !cantYet && !lost && !state.newerBuild;
   if (tabBanner.hidden) return;
+  if (cantYet) {
+    const elsewhere = level === 'confirm' && acts.passkeyOrigin && location.origin !== acts.passkeyOrigin;
+    if (elsewhere) {
+      tabBanner.replaceChildren(h('span', null, h('strong', null, t('tbCantYet')), ' ', t('acPasskeyOrigin'), ' '),
+        h('a', { class: 'link', href: acts.passkeyOrigin }, acts.passkeyOrigin));
+      return;
+    }
+    const why = state.actsLost === 'reloaded' ? t('tbReloaded') + ' ' : state.actsLost === 'ended' ? t('tbEnded') + ' ' : '';
+    tabBanner.replaceChildren(h('span', null, h('strong', null, t('tbCantYet')), ' ', why, t('tbRunWeb')),
+      copyLine('vibeswitcher web', 'the command that pairs this tab'));
+    return;
+  }
   if (!lost) {
     tabBanner.replaceChildren(h('span', null, h('strong', null, t('tbOlderBuild')), ' ', store.acts() ? t('tbOlderActing') : t('tbOlderReads')),
       h('button', { class: 'button small', type: 'button', onclick: () => store.reloadNow() }, t('tbReload')));
     return;
   }
-  const level = state.node?.web?.acts?.level ?? (state.node?.web?.acts?.on ? 'trust' : 'off');
   const unconfirmed = state.actsLost === 'unconfirmed';
   const why = unconfirmed ? 'tbUnconfirmed' : state.actsLost === 'reloaded' ? 'tbReloaded' : level === 'off' ? 'tbTurnedOff' : 'tbEnded';
   // With acting off on the node, pairing again needs it on first: said too when the reason was another.
@@ -148,6 +175,39 @@ function drawTabBanner() {
     h('button', { class: 'icon-button tab-banner-close', type: 'button', 'aria-label': t('close'), title: t('close'), onclick: () => store.forgetActsLost() }, '×'));
 }
 store.subscribe('connection', drawTabBanner);
+
+// At `confirm`: while the browser asks for the passkey, what it approves, large; after, the vault's line for it.
+const passkeyPill = h('div', { class: 'offline confirm-pairing passkey-pill', role: 'status', hidden: true });
+let recordedTimer = null;
+function drawPasskeyPill() {
+  const { confirming, recorded } = store.state;
+  passkeyPill.hidden = !confirming && !recorded;
+  if (confirming) {
+    passkeyPill.replaceChildren(h('span', null, t('pkConfirming')), h('strong', { class: 'phrase passkey-line' }, confirming.line), h('span', { class: 'sub' }, t('pkBrowserAsks')));
+  } else if (recorded) {
+    passkeyPill.replaceChildren(h('span', null, t('pkRecorded')), h('span', { class: 'passkey-line' }, recorded.line));
+    clearTimeout(recordedTimer);
+    recordedTimer = setTimeout(() => store.clearRecorded(), 8000);
+  }
+}
+store.subscribe('connection', drawPasskeyPill);
+
+// The terminal's offer to add a passkey (`vibeswitcher web --passkey`): at the top of the centre, one button.
+const passkeyOffer = h('div', { class: 'tab-banner passkey-offer', role: 'status', hidden: true });
+function drawPasskeyOffer() {
+  const { passkeyOffer: offer, passkeyAdding: adding } = store.state;
+  // Shown while the offer holds (`expires`) and this connection may answer it.
+  const expired = offer?.expires && Date.parse(offer.expires) <= Date.now();
+  passkeyOffer.hidden = !offer || expired || !store.can('passkey.registered');
+  if (passkeyOffer.hidden) return;
+  if (offer.expires) setTimeout(drawPasskeyOffer, Math.max(0, Date.parse(offer.expires) - Date.now()) + 50);
+  const add = h('button', { class: 'button small', type: 'button', disabled: adding?.state === 'adding' || adding?.state === 'added', onclick: () => store.addPasskey(registerPasskey) }, t('pkAdd'));
+  const named = store.state.pageWords ? h('span', { class: 'page-words' }, t('pkThisPage'), ' ', h('strong', null, store.state.pageWords)) : null;
+  const said = !adding ? t('pkOffer') : adding.state === 'adding' ? t('pkAdding') : adding.state === 'added' ? t('pkAdded', { id: adding.id })
+    : adding.state === 'cancelled' ? t('pkCancelled') : adding.state === 'unsupported' ? t('pkUnsupported') : t('pkRefused', { why: adding.why });
+  passkeyOffer.replaceChildren(h('span', null, said), named, adding?.state === 'added' ? null : add);
+}
+store.subscribe('connection', drawPasskeyOffer);
 store.subscribe('node', drawTabBanner);
 // The page never sits scrolled sideways (a focus or a scroll into view past an edge could move it): put back at once.
 const unscroll = () => {
@@ -161,11 +221,11 @@ document.addEventListener('focusin', () => requestAnimationFrame(unscroll));
 const waitingWords = h('h1', { class: 'big' });
 const waitingSub = h('p');
 const waiting = h('section', { class: 'centre screen status-screen', hidden: true }, h('div', { class: 'empty-state' }, waitingWords, waitingSub));
-const centre = h('main', { class: 'centre-wrap' }, tabBanner, project.el, own.el, newProject.el, session.el, node.el, settings.el, stats.el, mail.el, waiting);
+const centre = h('main', { class: 'centre-wrap' }, tabBanner, passkeyOffer, project.el, own.el, newProject.el, session.el, node.el, settings.el, stats.el, mail.el, waiting);
 const root = document.getElementById('app');
 const commandPalette = palette(app);
 const scrim = h('div', { class: 'drawer-scrim', onclick: () => app.drawer(null) });
-root.replaceChildren(left.el, centre, right.el, scrim, sheet.scrim, sheet.el, commandPalette.el, offline, unpaired, confirming, app.notifications.offer);
+root.replaceChildren(left.el, centre, right.el, scrim, sheet.scrim, sheet.el, commandPalette.el, offline, unpaired, confirming, passkeyPill, app.notifications.offer);
 
 // `#/` opens the project with the most waiting on you, else the most active one, else Your own sessions; it takes
 // the address's place (no history entry), so back doesn't land on it again.

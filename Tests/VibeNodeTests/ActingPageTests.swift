@@ -234,7 +234,7 @@ struct ActingPageTests {
     /// An acting page sends every user's kind its entry lets it, and none it doesn't; a page without the right sends
     /// none; the right changes nothing for any other kind; a terminal needs the watch right, never reading alone.
     @Test func anActingPageRoutesTheUsersKindsItsEntryLets() {
-        let terminalOnly: Set<String> = ["start", "web.open", "build.switch", "hooks.install", "plugin.add", "plugin.inspect", "web.pairing", "web.confirm"]
+        let terminalOnly: Set<String> = ["start", "web.open", "build.switch", "build.seal", "hooks.install", "plugin.add", "plugin.inspect", "web.pairing", "web.confirm"]
         for spec in KindSpec.all {
             switch (spec.sender, spec.page) {
             case (.user, .acts): #expect(!terminalOnly.contains(spec.name), "\(spec.name)")

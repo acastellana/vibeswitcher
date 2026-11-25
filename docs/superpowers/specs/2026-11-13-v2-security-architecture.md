@@ -2153,6 +2153,39 @@ against it. Each line says what reduces it now, if anything.
 34. **Under WSL's mirrored networking the web's port is reachable from every Windows process of every Windows user**
     (S1, item 22's reach). The token is the only lock against them; the page's files are public and hold no secret.
     The listener is off until `vibeswitcher web`, and closes with the last token (`vibeswitcher web --revoke`).
+35. **A live session can change what an install builds while it builds** (`install-node.sh`, run by the user or by
+    `vibeswitcher update`, 2026-11-24). The commit is fetched by its hash into a fresh repository, built with the
+    root-owned toolchain under `env -i`, from its pinned `Package.resolved` into fresh caches; but the scratch checkout
+    (`/tmp/install-node.*`, 0700), its build folder and the products are the user's uid's while the build runs, and a
+    lead may run during `update` (only workers and verifiers refuse a switch). A session that edits a source file
+    mid-compile and restores it before the checkout's re-check (git status, untracked and ignored files too) and the
+    products' re-hash gets its code built and installed; one left in place is caught. Closed only by building as
+    another uid or in a private mount namespace the sessions can't enter (the box, S12); `update` doesn't refuse a
+    live lead (the lead's call of 2026-11-24: it would rarely be usable). A new build's integrity rests on install-node
+    verifying what it fetches (the commit by its hash, both CI runs, its own bytes against the commit's blob): the
+    layout check after it (`SwitchSealCheck.layoutRefusal`) compares the build with its own `build-info`, so it says the
+    folder is whole, not that it is the commit's.
+36. **What `vibeswitcher update` runs, and what the install starts.** It runs the install-node of the build its
+    command line was proved installed from, only while `current` names that build and the builds folder is the one the
+    user accepted (unchanged since the vault's look and while the code was asked), opened once and checked against
+    the listing's line for it (inode, size, mode, times, the folder's device), its bytes read once into a sealed memfd
+    and the file checked against that line again (a write in place moves its change time), and run from that copy
+    (`bash /dev/fd/N --self PATH`: install-node takes PATH for its own checks only when PATH's bytes are the ones
+    running): a script a session planted, repointed, renamed into place or rewrote in place never runs. An installed
+    install-node from before `--self` runs from the checked descriptor itself, said: a write in place after the check is
+    read then, which the scope (below) leaves without a voice and the builds folder's listing after the install catches
+    (nothing sealed or switched). It runs in a transient
+    scope of the user's systemd manager (`systemd-run --user --scope`), with no controlling terminal and stdin
+    `/dev/null`: what it starts (install-node, git, gh, the compiler, a pinned dependency's build plugin) is never the
+    user's voice under either rule; without the manager, `update` refuses. Left: the build's own integrity (item 35),
+    and that its processes run as the user's uid, with what any process of the uid can do (items 25 to 28).
+37. **Nothing vouches for the command line the user's PATH resolves.** `vibeswitcher` on the user's PATH is a file of
+    the user's uid (`~/.vibeswitcher/v2/builds/current/bin`, or wherever PATH leads): a session that writes a
+    `vibeswitcher` earlier on PATH, or a shell alias in a startup file, gets the user's typed code and acts with it as
+    the user's terminal. The seal holds the builds folder and the startup files, so such a change waits for an accept,
+    but a PATH entry outside what the seal watches is not. Later hardening: the server judges a voiced peer's
+    `/proc/<pid>/exe` against an accepted build's `bin` (its sealed copy's hash), refusing a request from any other
+    program.
 
 **The project allow-list (S2-D11)** is what makes this list acceptable before stage 6: in the user's host on Linux a
 `spawn` whose working folder isn't inside an allowed repository is refused, saying why. The list is

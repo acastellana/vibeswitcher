@@ -1,10 +1,8 @@
 # VibeSwitcher 2: how it works
 
-One current page for V2, the Linux node (branch `v2`). It describes the code as it is. The kinds table at the end is
-generated from the code, and a lint fails when it goes stale. For why each rule exists, see the
-[security architecture](../superpowers/specs/2026-11-13-v2-security-architecture.md) (its S-numbers are cited below).
-For what is wrong today and the order of work, see the [architecture review](../process/v2-architecture-review.md).
-To try the node, see [Try it](v2-try-it.md).
+One current page for V2, the Linux node (branch `v2`), describing the code as it is; the kinds table at the end is
+generated from the code (a lint fails when it goes stale). Why each rule exists: the [security architecture](../superpowers/specs/2026-11-13-v2-security-architecture.md)
+(its S-numbers below); what is wrong and the order of work: the [architecture review](../process/v2-architecture-review.md); [Try it](v2-try-it.md).
 
 ## The processes, and who starts whom
 
@@ -19,9 +17,8 @@ To try the node, see [Try it](v2-try-it.md).
 | `vibeswitcher-hook` | Claude Code and Codex, from the hooks `vibeswitcher hooks install` writes | Tells the node a session's status (working, needs you, done). |
 | The page (`WebApp/`) | a browser, at the address `vibeswitcher web` prints (loopback; `--tailnet` for the phone, port 47830) | Shows the node live and leaves drafts. The server holds the page's files (`WebAssets.generated.swift`). |
 
-Dependencies go one way: `VibeNode` (the server's and the command line's code) never imports `VibeHost`. It reaches
-the host only through `HostLink`. Every system call goes through `VibePlatform` (`Platform.X`), and PlatformLint
-enforces that.
+Dependencies go one way: `VibeNode` (the server's and the command line's code) never imports `VibeHost`. It reaches the
+host only through `HostLink`. Every system call goes through `VibePlatform` (`Platform.X`), as PlatformLint enforces.
 
 ## The principals, and what each may do
 
@@ -174,6 +171,7 @@ taken on the Unix socket.
 | Kind | Who may send it | Changes state | Recorded first | Card code | Handled by | Arguments (state changes) | Typed | A retry | In approve's batch | From an acting page |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | `answer` | the user's terminal | yes | yes | yes | `Requests.act` | `card`, `code`, `text`, `version` | `WireKinds.Answer` | its result |  | yes |
+| `answer.replace` | the user's terminal | yes | yes | yes | `Requests.act` | `card`, `code`, `text`, `version` | `WireKinds.AnswerReplace` | its result |  | yes |
 | `approve` | the user's terminal | yes | yes |  | `Requests.act` | `batch`, `code` | `WireKinds.Approve` | its result |  | yes |
 | `approve.list` | the user's terminal |  |  |  | `Requests.act` |  | `WireKinds.ApproveList` |  |  | yes |
 | `base.accept` | the user's terminal | yes | yes | yes | `Requests.act` | `card`, `code` | `WireKinds.BaseAccept` | its result | yes | yes |
@@ -183,7 +181,8 @@ taken on the Unix socket.
 | `board.image` | anyone of the uid |  |  |  | `Requests.act` |  | the page's (WireSchema) |  |  |  |
 | `board.task` | anyone of the uid |  |  |  | `Requests.act` |  | the page's (WireSchema) |  |  |  |
 | `brief` | the user's terminal, or a page that reads |  |  |  | `Requests.act` |  | `WireKinds.Brief` |  |  |  |
-| `build.switch` | the user's terminal | yes | yes |  | `Requests.act` | `commit` | `WireKinds.BuildSwitch` | its result |  | the terminal's alone |
+| `build.seal` | the user's terminal | yes | yes |  | `Requests.act` | `commit`, `from`, `switchAction` | `WireKinds.BuildSeal` | its result |  | the terminal's alone |
+| `build.switch` | the user's terminal | yes | yes |  | `Requests.act` | `buildsAfter`, `buildsBeforeListing`, `commit` | `WireKinds.BuildSwitch` | its result |  | the terminal's alone |
 | `chat.image` | anyone of the uid |  |  |  | the live hub |  | the page's (WireSchema) |  |  |  |
 | `chat.page` | anyone of the uid |  |  |  | the live hub |  | the page's (WireSchema) |  |  |  |
 | `config.accept` | the user's terminal | yes | yes | yes | `Requests.act` | `batch`, `card`, `code` | `WireKinds.ConfigAccept` | its result | yes | yes |
@@ -191,7 +190,7 @@ taken on the Unix socket.
 | `draft` | a page that drafts | yes |  |  | `draft` |  | the page's (WireSchema) |  |  |  |
 | `draft.clear` | a page that drafts | yes |  |  | `draft` |  | the page's (WireSchema) |  |  |  |
 | `hold` | the user's terminal | yes | yes | yes | `Requests.act` | `card`, `code` | `WireKinds.Hold` | its result |  | yes |
-| `hooks.install` | the user's terminal | yes | yes |  | `Requests.act` | `agents` | `WireKinds.HooksInstall` | its result; done again | yes | the terminal's alone |
+| `hooks.install` | the user's terminal | yes | yes |  | `Requests.act` | `agents`, `codex` | `WireKinds.HooksInstall` | its result; done again | yes | the terminal's alone |
 | `hooks.remove` | the user's terminal | yes | yes |  | `Requests.act` | `agents` | `WireKinds.HooksRemove` | its result; done again |  | yes |
 | `lead` | the user's terminal | yes | yes |  | `Requests.act` | `folder`, `goal`, `initialized`, `replace`, `resume`, `takeHead` | `WireKinds.Lead` | its result |  | yes |
 | `mail` | the user's terminal, or a page that reads |  |  |  | `Requests.act` |  | `WireKinds.Mail` |  |  |  |
@@ -212,7 +211,7 @@ taken on the Unix socket.
 | `questions` | anyone of the uid |  |  |  | `Requests.act` |  | `WireKinds.Questions` |  |  |  |
 | `recent` | the user's terminal, or a page that reads |  |  |  | `Requests.act` |  | the page's (WireSchema) |  |  |  |
 | `seen` | anyone of the uid |  |  |  | `Requests.act` |  | the page's (WireSchema) |  |  |  |
-| `send` | the user's terminal | yes | yes |  | `Requests.act` | `images`, `now`, `session`, `text` | `WireKinds.Send` | its result |  | yes |
+| `send` | the user's terminal | yes | yes |  | `Requests.act` | `images`, `now`, `session`, `text`, `when` | `WireKinds.Send` | its result |  | yes |
 | `session.attach` | a page that drafts | yes |  |  | `draft` |  | the page's (WireSchema) |  |  |  |
 | `session.close-shells` | the user's terminal | yes | yes |  | `Requests.act` | `sessions` | `WireKinds.CloseShells` | its result; done again |  | yes |
 | `session.complete` | anyone of the uid |  |  |  | `Requests.act` |  | the page's (WireSchema) |  |  |  |
@@ -237,6 +236,7 @@ taken on the Unix socket.
 | `stop` | the user's terminal | yes | yes |  | `Requests.act` | none | `WireKinds.Stop` | its result |  | yes |
 | `subscribe` | anyone of the uid |  |  |  | the live hub |  | the page's (WireSchema) |  |  |  |
 | `tell` | the user's terminal | yes | yes |  | `Requests.act` | `folder`, `text` | `WireKinds.Tell` | its result |  | yes |
+| `tell.retract` | the user's terminal | yes | yes |  | `Requests.act` | `action` | `WireKinds.TellRetract` | its result |  | yes |
 | `term.close` | a page's terminal (a page only) | yes |  |  | the terminal relay |  | the page's (WireSchema) |  |  |  |
 | `term.open` | a page's terminal (a page only) | yes |  |  | the terminal relay |  | the page's (WireSchema) |  |  |  |
 | `unsubscribe` | anyone of the uid |  |  |  | the live hub |  | the page's (WireSchema) |  |  |  |

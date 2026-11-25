@@ -58,7 +58,12 @@ final class TranscriptFollow: @unchecked Sendable {
     private var imageLines: [String: Int] = [:]
     private var imageOrder: [String] = []
 
-    init(url: URL, format: TranscriptReader.Format, windowItems: Int = TranscriptFollow.windowItems, windowBytes: Int = TranscriptFollow.windowBytes) {
+    /// The node's live pairing codes, masked in each item's value (`ChatValue.value`).
+    private let codes: PairingCodes?
+
+    init(url: URL, format: TranscriptReader.Format, windowItems: Int = TranscriptFollow.windowItems, windowBytes: Int = TranscriptFollow.windowBytes,
+         codes: PairingCodes? = nil) {
+        self.codes = codes
         self.url = url
         self.format = format
         self.windowItems = max(Self.minItems, windowItems)
@@ -193,7 +198,7 @@ final class TranscriptFollow: @unchecked Sendable {
         guard start < log.entries.count else { return ([], [], []) }
         var made: ([ChatItem], [Int], [(id: String, value: NodeWire.Value)]) = ([], [], [])
         for item in ChatTimeline.items(Array(log.entries[start...]), newAfter: nil) {
-            guard let value = ChatValue.value(item), let first = Self.firstEntry(item).flatMap({ entryIndex[$0] }) else { continue }
+            guard let value = ChatValue.value(item, codes: codes), let first = Self.firstEntry(item).flatMap({ entryIndex[$0] }) else { continue }
             made.0.append(item)
             made.1.append(first)
             made.2.append((item.id, value))
@@ -336,7 +341,7 @@ final class TranscriptFollow: @unchecked Sendable {
                 }
             }
             var made = ChatTimeline.items(page.entries, newAfter: nil).compactMap { item -> (ChatItem, NodeWire.Value)? in
-                ChatValue.value(item).map { (item, $0) }
+                ChatValue.value(item, codes: codes).map { (item, $0) }
             }
             // A read that began mid-file: its first item may be a run of tools begun before it.
             if start > 0, !made.isEmpty { made.removeFirst() }

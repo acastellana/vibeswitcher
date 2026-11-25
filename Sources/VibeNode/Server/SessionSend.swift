@@ -58,7 +58,12 @@ extension Requests {
     func send(_ request: NodeWire.Request, reply: @escaping (NodeWire.Reply) -> Void) {
         let text = (request.args?["text"]?.string ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         let images = request.args?["images"]?.array?.map { $0.string ?? "" } ?? []
-        let now = request.args?["now"]?.bool == true
+        // When it reaches the agent (`SendWhen`): `when`, or an older page's and command line's `now: true` as `now`.
+        let whenText = request.args?["when"]?.string
+        guard whenText.map({ SendWhen(rawValue: $0) != nil }) ?? true else {
+            return reply(.init(re: request.id, error: .init(.badArgs, "when is one of step, now, after, interrupt")))
+        }
+        let asked: SendWhen? = whenText.flatMap(SendWhen.init) ?? (request.args?["now"]?.bool == true ? .now : nil)
         guard !text.isEmpty || !images.isEmpty else { return reply(.init(re: request.id, error: .init(.badArgs, "send needs text or images"))) }
         guard images.count <= Self.imagesLimit else {
             return reply(.init(re: request.id, error: .init(.badArgs, "at most \(Self.imagesLimit) images a message")))
@@ -71,9 +76,9 @@ extension Requests {
             return reply(.init(re: request.id, error: .init(.badArgs, "too long to type into a terminal (at most \(Self.sendLimit / 1024) KB): "
                                                             + "save it to a file and mention the file instead")))
         }
-        guard !now || message.count <= Self.steerLimit else {
+        guard asked != .step || message.count <= Self.steerLimit else {
             return reply(.init(re: request.id, error: .init(.badArgs, "too long to steer (at most \(Self.steerLimit) characters, what a hook hands "
-                                                            + "Claude at once): send it without --now (it goes after the turn), or save it to a file and mention the file")))
+                                                            + "Claude at once): send it without when (it goes after the turn), or save it to a file and mention the file")))
         }
         let session: HostSession
         switch hostedSession(request.args?["session"]?.string, for: "send", id: request.id) {
@@ -88,13 +93,15 @@ extension Requests {
             return reply(.init(re: request.id, error: .init(.refused, "session \(short) is a lead another one replaced: what you type there reaches "
                                                             + "no live lead (`vibeswitcher tell FOLDER TEXT` tells the running one)")))
         }
-        guard !now || engine != nil else {
-            return reply(.init(re: request.id, error: .init(.refused, "this server has no engine to steer through: send it without --now")))
+        guard asked != .step || engine != nil || HostedAgents.agent(of: session) != .claude else {
+            return reply(.init(re: request.id, error: .init(.refused, "this server has no engine to steer through: send it without when")))
         }
         let working = sessions?.sessions.first { $0.hostID == session.id }?.status == .working
-        let (queue, drafts) = (self.queue, sessionDrafts)
+        let (queue, drafts, vault, roster) = (self.queue, sessionDrafts, engine?.cardVault ?? link.vault, teamRoster)
         let id = NodeIds.session(host: session.id)
         let held = HeldSend(message: message, text: text, images: images, at: Date(), action: request.action ?? request.id)
+        // What was done, once known (`SendWhen.resolve`): the reply says it.
+        let done = Locked<(way: SendWhen, said: String?)?>(nil)
         let answer = { (queued: String?, opened: String?, steered: Bool, answered: String?) in
             // The page's draft it was is sent (or waits to be): it goes from beside the session.
             if let draft = drafts.values[id], draft.text.trimmingCharacters(in: .whitespacesAndNewlines) == text, draft.images == images {
@@ -103,7 +110,11 @@ extension Requests {
             var result = WireKinds.Send.Result(session: id, terminal: session.tty, working: working, characters: message.count, queued: queued != nil)
             result.waits = queued
             result.opened = opened
-            if now { result.steered = steered }
+            if let done = done.get() {
+                result.when = done.way.rawValue
+                result.said = done.said
+                if done.way == .step { result.steered = steered }
+            }
             result.answered = answered
             result.agent = HostedAgents.agent(of: session)?.rawValue
             reply(.init(re: request.id, typed: result))
@@ -111,6 +122,10 @@ extension Requests {
         // Off the engine's queue: the agent's process is read from /proc, the images from the disk.
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             let pid = HostedAgents.agentPid(of: session)
+            let version = asked == nil ? nil : AgentVersion.of(session: session, pid: pid)
+            // Interrupt and send-now stop a turn: whether it is a team's worker or verifier, as the vault's roster says
+            // (the host's record, not a label anyone can give a session; nil: the roster didn't answer).
+            let team: Bool? = asked == .interrupt || asked == .now ? Self.isTeam(session, roster: { try roster(vault) }) : false
             let missing = images.lazy.compactMap { Self.imageRefusal($0, onDisk: true) }.first
             queue.async {
                 guard let self else { return }
@@ -118,6 +133,65 @@ extension Requests {
                 guard let pid else {
                     return reply(.init(re: request.id, error: .init(.refused, "no agent runs in session \(short)'s terminal now (it quit, or ended): nothing typed")))
                 }
+                let agent = HostedAgents.agent(of: session)
+                var resolved = asked.map { SendWhen.resolve($0, agent: agent, version: version) }
+                // `interrupt` (2026-11-24): Esc, then the words as the user's turn, into an agent the user may stop: their
+                // own session or a lead, never a worker or a verifier (it would stop mid-task or mid-audit).
+                if resolved?.way == .interrupt, team != false {
+                    return reply(.init(re: request.id, error: .init(.refused, (team == true ? "session \(short) is a team's worker or verifier"
+                        : "the vault's roster didn't answer, so whether session \(short) is a team's worker or verifier can't be told")
+                        + ": it isn't stopped mid-task or mid-audit (tell its lead instead, or send without interrupt: it goes after its turn); nothing typed")))
+                }
+                // Claude's send-now stops its turn too: a worker's or a verifier's gets it at its next step instead.
+                if resolved?.way == .now, agent == .claude, team != false {
+                    resolved = (.step, team == true ? "a team's worker or verifier isn't stopped mid-task or mid-audit, so it gets it at its next step"
+                                                    : "the vault's roster didn't answer, so whether it is a team's worker or verifier can't be told: at its next step")
+                }
+                done.set(resolved)
+                if let resolved, resolved.way == .step, agent == .claude, message.count > Self.steerLimit {
+                    return reply(.init(re: request.id, error: .init(.badArgs, "too long to steer (at most \(Self.steerLimit) characters): send it without when, "
+                                                                    + "or save it to a file and mention the file")))
+                }
+                if resolved?.way == .interrupt {
+                    // One unit: Esc, its idle prompt waited for, the words; or nothing after the Esc, said.
+                    guard (self.heldSends.values[id] ?? []).isEmpty else {
+                        return reply(.init(re: request.id, error: .init(.refused, "session \(short) has messages waiting behind a question on its screen: "
+                                                                        + "answer it first (`vibeswitcher reply`); nothing typed")))
+                    }
+                    // At work by its screen: Esc first (its gate reads the screen again). Between turns already: no Esc (a
+                    // second one opens its rewind menu), the words typed in as a message, and the reply says so.
+                    let notWorking = "its agent wasn't working: no Esc went in, the words were typed in as a message"
+                    let typePlain = {
+                        done.set((.step, notWorking))
+                        self.typeIn(held, into: session) { outcome in
+                            switch outcome {
+                            case .typed, .typedOnly: answer(nil, nil, false, nil)
+                            case .menuOpen(let open), .notWorking(let open):
+                                reply(.init(re: request.id, error: .init(.refused, "session \(short): \(open), so it wasn't interrupted: answer it first; nothing typed")))
+                            case .refused(let why): reply(.init(re: request.id, error: .init(.refused, "session \(short): \(why)")))
+                            }
+                        }
+                    }
+                    return self.link.screen(session.id) { screen in
+                        queue.async {
+                            guard screen.map(Self.working) == true else { return typePlain() }
+                            self.typeIn(held, into: session, interrupt: true) { outcome in
+                                switch outcome {
+                                case .typed, .typedOnly: answer(nil, nil, false, nil)
+                                // Its turn ended between the two looks: nothing went in, so it goes as a message.
+                                case .notWorking: typePlain()
+                                case .menuOpen(let open):
+                                    reply(.init(re: request.id, error: .init(.refused, "session \(short): \(open), so it wasn't interrupted: answer it first; nothing typed")))
+                                case .refused(let why): reply(.init(re: request.id, error: .init(.refused, "session \(short): \(why)")))
+                                }
+                            }
+                        }
+                    }
+                }
+                // `now` on a Claude with send-now: typed, Enter, then Ctrl+X Ctrl+S while it works. `after` on Codex: Tab.
+                var submit: [UInt8] = [13]
+                var trailing: [HostInput.Write] = []
+                if resolved?.way == .after, agent == .codex { submit = [9] }
                 let typeIt = { [weak self] in
                     guard let self else { return }
                     // Behind the messages it holds already, in the order sent.
@@ -125,9 +199,13 @@ extension Requests {
                         guard self.hold(held, for: session) else { return self.refuseHeldFull(request, short, reply) }
                         return answer("messages sent before it wait in session \(short)", nil, false, nil)
                     }
-                    self.typeIn(held, into: session) { outcome in
+                    self.typeIn(held, into: session, submit: submit, trailing: trailing) { outcome in
                         switch outcome {
-                        case .typed:
+                        case .typedOnly(let why):
+                            // The words went in (queued for after its turn); its send-now didn't.
+                            done.set((.after, why))
+                            answer(nil, nil, false, nil)
+                        case .typed, .notWorking:
                             // A command may open a picker (`/model`, `/resume`): the reply says so, as the app's composer
                             // watches the screen for one.
                             guard text.hasPrefix("/"), images.isEmpty else { return answer(nil, nil, false, nil) }
@@ -151,9 +229,18 @@ extension Requests {
                         }
                     }
                 }
-                // `--now` to a Claude agent: through its hook while it works (the app's steer). Codex takes what's typed
+                if resolved?.way == .now, agent == .claude {
+                    // Its send-now only while it works by its screen (between turns, Enter submits it already).
+                    return self.link.screen(session.id) { screen in
+                        queue.async {
+                            if screen.map(Self.working) == true { trailing = [HostInput.Write(bytes: SendWhen.sendNowBytes, delay: 0.15)] }
+                            typeIt()
+                        }
+                    }
+                }
+                // `step` to a Claude agent: through its hook while it works (the app's steer). Codex takes what's typed
                 // during its turn as a steer itself, so it's typed, as the app types it.
-                guard now, HostedAgents.agent(of: session) == .claude, let engine = self.engine else { return typeIt() }
+                guard resolved?.way == .step, agent == .claude, let engine = self.engine else { return typeIt() }
                 engine.steerAsUser(message, session: session, agentPid: pid) { outcome in
                     switch outcome {
                     case .steered:
@@ -161,7 +248,7 @@ extension Requests {
                         answer(nil, nil, true, nil)
                     case .idle:
                         // Its turn is over (or its hooks say nothing): a steer would wait for a step that never comes.
-                        self.note("send to session \(short): --now, but its agent isn't working by its hooks: typed in instead")
+                        self.note("send to session \(short): at its next step, but its agent isn't working by its hooks: typed in instead")
                         typeIt()
                     case .refused(let why):
                         reply(.init(re: request.id, error: .init(.refused, "session \(short): \(why)")))
@@ -169,6 +256,13 @@ extension Requests {
                 }
             }
         }
+    }
+
+    /// Whether `session` is a team's worker or verifier by the vault's roster; nil when the roster didn't answer.
+    static func isTeam(_ session: HostSession, roster: () throws -> [LeadVault.RosterEntry]) -> Bool? {
+        guard let entries = try? roster() else { return nil }
+        let id = session.id.uuidString.lowercased()
+        return entries.contains { $0.role != .lead && $0.session.lowercased() == id }
     }
 
     private func refuseHeldFull(_ request: NodeWire.Request, _ short: String, _ reply: (NodeWire.Reply) -> Void) {
@@ -204,6 +298,10 @@ extension Requests {
 
     enum TypeOutcome: Sendable {
         case typed
+        /// The words went in, what was to follow them (`trailing`) didn't: why.
+        case typedOnly(String)
+        /// An interrupt's Esc: its turn had ended by its gate (nothing typed).
+        case notWorking(String)
         /// Not typed: what's open on the screen.
         case menuOpen(String)
         case refused(String)
@@ -211,14 +309,63 @@ extension Requests {
 
     /// `held` typed into `session` as one unit whose gate reads the screen right before the first write (a menu open:
     /// nothing typed, `menuOpen`), and whose Enter waits for its images to show taken. `done` on the queue.
-    func typeIn(_ held: HeldSend, into session: HostSession, done: @escaping (TypeOutcome) -> Void) {
+    /// `interrupt`: Esc first (only while its screen says it works: `esc to interrupt`), then the words once its idle
+    /// prompt shows (no `esc to interrupt`, no question open), at most `interruptWait`; else nothing after the Esc goes in.
+    /// `submit`: the key that sends the words (Enter; Codex's Tab queues them for after its turn). `trailing`: written after
+    /// them in the same unit (Claude's send-now).
+    func typeIn(_ held: HeldSend, into session: HostSession, interrupt: Bool = false, submit: [UInt8] = [13], trailing: [HostInput.Write] = [],
+                done: @escaping (TypeOutcome) -> Void) {
         let (link, note, queue) = (self.link, self.note, self.queue)
         let short = String(session.id.uuidString.lowercased().prefix(8))
         let stopped = Locked<TypeOutcome?>(nil)
-        let writes = ComposerText.writes(held.message, bracketed: true)
+        let lead = interrupt ? 1 : 0
+        var words = ComposerText.writes(held.message, bracketed: true)
+        if let last = words.indices.last, submit != [13] { words[last] = HostInput.Write(bytes: submit, delay: words[last].delay) }
+        let writes = (interrupt ? [LeadWitness.DeclinePlan.escape] : []) + words + trailing
         let images = held.images
+        let trailingAt = lead + words.count
         link.type(writes, into: session.id, gate: { index, go in
-            if index > 0 {
+            if interrupt, index == 0 {
+                // The Esc: only into a turn at work (read again here: one that ended meanwhile gets no Esc, a second
+                // one would open its rewind menu), never onto a question (it would dismiss it).
+                return link.screen(session.id) { screen in
+                    guard let screen else {
+                        stopped.set(.refused("its screen couldn't be read: nothing typed"))
+                        return go(false)
+                    }
+                    if let open = Self.openMenu(screen) {
+                        stopped.set(.menuOpen(open))
+                        return go(false)
+                    }
+                    guard Self.working(screen) else {
+                        stopped.set(.notWorking("its turn ended before the Esc"))
+                        return go(false)
+                    }
+                    go(true)
+                }
+            }
+            if !trailing.isEmpty, index == trailingAt {
+                // Claude's send-now: only while it still works, nothing opened on its screen since the words went in.
+                return link.screen(session.id) { screen in
+                    guard let screen, Self.openMenu(screen) == nil, Self.working(screen) else {
+                        stopped.set(.typedOnly(screen == nil ? "its screen couldn't be read after the words went in, so its send-now wasn't sent: they wait for its turn's end"
+                                               : "a question or menu opened, or its turn ended, as the words went in, so its send-now wasn't sent: they wait for its turn's end"))
+                        return go(false)
+                    }
+                    go(true)
+                }
+            }
+            if interrupt, index == 1 {
+                // Its idle prompt, after the Esc: the words go in only then.
+                return Self.waitForIdle(session.id, link: link, queue: queue, until: Platform.Clock.steadyDate().addingTimeInterval(Self.interruptWait)) { idle in
+                    if !idle {
+                        stopped.set(.refused("Esc went in, but its prompt didn't come back in \(Int(Self.interruptWait)) s (a question, or a turn that didn't stop): "
+                                             + "nothing more was typed; look at its terminal"))
+                    }
+                    go(idle)
+                }
+            }
+            if index > lead, index < trailingAt {
                 guard !images.isEmpty else { return go(true) }
                 return Self.waitForImages(images, in: session.id, link: link, queue: queue, until: Platform.Clock.steadyDate().addingTimeInterval(Self.imageWait), go)
             }
@@ -237,14 +384,32 @@ extension Requests {
             // Nothing of the text in the log: it is the user's words.
             let outcome: TypeOutcome = typed ? .typed : stopped.get() ?? .refused("the host didn't take all of it: it may not have gone in")
             switch outcome {
-            case .typed:
+            case .typed, .typedOnly:
                 note("send to session \(short): typed in, \(held.message.count) characters, \(images.count) image(s)")
                 queue.async { [weak self] in self?.engine?.noteUserInput(session) }
+            case .notWorking(let why): note("send to session \(short): not typed: \(why)")
             case .menuOpen(let open): note("send to session \(short): held, \(open)")
             case .refused(let why): note("send to session \(short): not typed: \(why)")
             }
             done(outcome)
         })
+    }
+
+    /// How long an interrupt waits for the idle prompt after its Esc.
+    static let interruptWait: TimeInterval = 10
+
+    /// Whether `screen` shows Claude at work (its spinner line's "esc to interrupt").
+    static func working(_ screen: String) -> Bool { screen.contains("esc to interrupt") }
+
+    /// Answers whether the session's idle prompt shows (not working, no question open) before `deadline`.
+    static func waitForIdle(_ id: UUID, link: HostLink, queue: DispatchQueue, until deadline: Date, _ idle: @escaping (Bool) -> Void) {
+        link.screen(id) { screen in
+            queue.async {
+                if let screen, !working(screen), openMenu(screen) == nil { return idle(true) }
+                guard Platform.Clock.steadyDate() < deadline else { return idle(false) }
+                queue.asyncAfter(deadline: .now() + 0.2) { waitForIdle(id, link: link, queue: queue, until: deadline, idle) }
+            }
+        }
     }
 
     /// How long the screen is watched for a picker after a `/` command went in.
@@ -391,9 +556,9 @@ extension Requests {
                             }
                             self.typeIn(first, into: session) { outcome in
                                 switch outcome {
-                                case .menuOpen:
+                                case .menuOpen, .notWorking:
                                     later(Self.heldEvery)
-                                case .typed, .refused:
+                                case .typed, .typedOnly, .refused:
                                     if case .refused(let why) = outcome { self.note("send to session \(short): a held message dropped: \(why)") }
                                     let rest = Array((self.heldSends.values[id] ?? []).drop { $0.action == first.action })
                                     self.heldSends.send(id, rest.isEmpty ? nil : rest)

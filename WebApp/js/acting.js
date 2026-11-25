@@ -16,6 +16,9 @@ export function refusalWords(error) {
   if (error.code === 'changed') return t('acChanged');
   if (error.code === 'voice') return t('acVoice');
   if (error.code === 'acts-ended') return t('acEnded');
+  if (error.code === 'passkey') return t('acPasskeyFailed') + (error.message ? ` ${error.message}` : '');
+  if (error.code === 'passkey-cancelled') return t('acPasskeyCancelled');
+  if (error.code === 'assertion-needed') return t('acPasskeyNeeded');
   if (error.code === 'not-yet') return t('acNotYet');
   return error.message || t('acRefused');
 }
@@ -31,7 +34,7 @@ export const answerArgs = (card, text) => cardArgs(card, { text, ...(card.questi
 // (`voice`); the page shows their terminal line instead of a button.
 export function pageMaySet(key, value) {
   if (key === 'policy' || /^floor_/.test(key)) return false;
-  if (key === 'web_acts') return String(value).trim().toLowerCase() === 'off';
+  if (key === 'web_acts') return ['off', 'confirm'].includes(String(value).trim().toLowerCase());
   return true;
 }
 
@@ -77,15 +80,28 @@ export function actsLine(app, { compact = false } = {}) {
   const acts = app.store.state.node?.web?.acts;
   if (!acts) return null;
   const here = app.store.acts();
-  // The node's level: off, confirm (a passkey per request, later), trust; `on` from a node before levels.
+  // The node's level: off, confirm (a passkey per request), trust; `on` from a node before levels.
   const level = acts.level ?? (acts.on ? 'trust' : 'off');
   if (level === 'off') return compact ? null : h('p', { class: 'acts-line' }, t('acOffWords'), ' ', h('code', null, 'vibeswitcher set web_acts trust'), t('acOffWords2'));
   const since = acts.since ? new Date(acts.since).toLocaleString(undefined, { dateStyle: compact ? undefined : 'medium', timeStyle: 'short' }) : '';
   // A page waiting for the terminal's confirmation says so in its own banner (the phrase): nothing here meanwhile.
   if (!here && app.store.state.phrase) return null;
+  // At confirm on another origin than the passkeys' (127.0.0.1): acting needs the localhost address.
+  const elsewhere = level === 'confirm' && acts.passkeyOrigin && globalThis.location?.origin !== acts.passkeyOrigin;
+  if (!here && elsewhere) {
+    return h(compact ? 'div' : 'p', { class: 'acts-line' + (compact ? ' compact' : '') }, h('span', null, t('acPasskeyOrigin')), ' ',
+      h('a', { class: 'link', href: acts.passkeyOrigin }, acts.passkeyOrigin), compact ? null : h('span', null, ' ', t('acPasskeyOriginRun'), ' '), compact ? null : h('code', null, 'vibeswitcher web --localhost'));
+  }
+  // Acting is on but this page doesn't act: the banner at the top of the centre says it (the footer says nothing).
+  if (!here && compact) return null;
   // Acting is on but this page doesn't act (a reload lost its secret, or its acting ran out): pair it again.
   if (!here) return h(compact ? 'div' : 'p', { class: 'acts-line' + (compact ? ' compact' : '') }, h('span', null, t(compact ? 'acPairAgainShort' : 'acPairAgain', { since })), ' ', h('code', null, 'vibeswitcher web'));
-  const words = t(compact ? 'acThisPageShort' : 'acThisPage', { since });
+  const words = level === 'confirm' ? t(compact ? 'acConfirmShort' : 'acConfirm', { since }) : t(compact ? 'acThisPageShort' : 'acThisPage', { since });
   const off = here && app.store.can('set') ? doButton(app, { label: t('acTurnOff'), kind: 'set', quiet: true, className: 'small', args: () => ({ key: 'web_acts', value: 'off' }) }).el : null;
-  return h(compact ? 'div' : 'p', { class: 'acts-line' + (compact ? ' compact' : '') }, h('span', null, words), off);
+  // From trust a page may lower acting to a passkey per action (never raise it).
+  const lower = !compact && here && level === 'trust' && acts.passkeyOrigin && app.store.can('set')
+    ? doButton(app, { label: t('acAskPasskey'), kind: 'set', quiet: true, className: 'small', args: () => ({ key: 'web_acts', value: 'confirm' }) }).el : null;
+  // This page's words (its name, by which the terminal names it), on This node.
+  const named = !compact && app.store.state.pageWords ? h('span', { class: 'page-words' }, ' ', t('pkThisPage'), ' ', h('strong', null, app.store.state.pageWords)) : null;
+  return h(compact ? 'div' : 'p', { class: 'acts-line' + (compact ? ' compact' : '') }, h('span', null, words), named, lower, off);
 }

@@ -178,22 +178,75 @@ struct RestartTests {
         #expect(EngineState.load(root: node.root).state.hostStartedAt != nil)
     }
 
-    /// The cards were in the old server's memory: after a restart the lead is told, once, which of its open questions
-    /// the user no longer sees, to withdraw them and ask again those it needs.
-    @Test func aServerRestartTellsTheLeadWhichQuestionsWereNotShownAgain() async throws {
+    /// An open card outlives the server's restart (2026-11-24, the user's first switch on the real node): the same id,
+    /// code and question version listed again, the lead told nothing, and the user's answer by the old id reaches the
+    /// lead as the user's.
+    @Test func aServerRestartKeepsTheOpenCards() async throws {
         let node = try await ScratchNode(scratch)
         defer { node.stop() }
         let lead = try await node.askingLead("Name the parser?", options: ["Parser", "Reader"])
+        let before = try #require(try await node.listedCard(lead.card), "\(node.said)")
+        // Written (and its digest kept in the vault) before the server is killed.
+        try #require(await eventually(timeout: 60) { node.keptCards().contains(lead.card) }, "\(node.said)")
+        let inboxBefore = node.inbox(lead.session.tty).count
+
         _ = try await node.restartServer()
+        #expect(await eventually(timeout: 120) { node.said.contains("cards: 1 open card(s) taken back across the restart") }, "\(node.said)")
+        let after = try #require(try await node.listedCard(lead.card), "\(node.said)")
+        #expect(after["code"] as? String == before["code"] as? String)
+        #expect((after["question"] as? [String: Any])?["version"] as? Int == (before["question"] as? [String: Any])?["version"] as? Int)
+        try await node.looks(2, at: lead.repo)
+        #expect(!node.inbox(lead.session.tty).contains { $0.text.contains("no longer sees your open question") }, "\(node.inbox(lead.session.tty))")
+        #expect(node.inbox(lead.session.tty).count == inboxBefore, "\(node.inbox(lead.session.tty))")
+
+        let answered = try await node.runOnTerminal(["answer", lead.card, "Parser"])
+        #expect(answered.status == 0, "\(answered.output)\(answered.errors)\n\(node.said)")
+        #expect(await eventually(timeout: 120) { node.inbox(lead.session.tty).contains { $0.text.hasSuffix(": Parser") && $0.from == .user } },
+                "\(node.inbox(lead.session.tty))\n\(node.said)")
+    }
+
+    /// A card answered and the server killed the moment the answer's reply came (the review of 16f0ce69, U3): the
+    /// reply came once the open cards' file no longer held it, so it doesn't come back open after the restart.
+    @Test func aCardAnsweredJustBeforeACrashDoesntComeBackOpen() async throws {
+        let node = try await ScratchNode(scratch)
+        defer { node.stop() }
+        let lead = try await node.askingLead("Name the parser?", options: ["Parser", "Reader"])
+        try #require(await eventually(timeout: 60) { node.keptCards().contains(lead.card) }, "\(node.said)")
+        let answered = try await node.runOnTerminal(["answer", lead.card, "Parser"])
+        let server = try #require(node.serverPID)
+        kill(server, SIGKILL)
+        #expect(answered.status == 0, "\(answered.output)\(answered.errors)")
+        #expect(!node.keptCards().contains(lead.card), "\(node.keptCards())")
+        _ = try await node.restartServer(after: server)
+        try await node.looks(1, at: lead.repo)
+        #expect(try await node.listedCard(lead.card) == nil, "\(node.said)")
+    }
+
+    /// `cards.json` changed while the server was down (a question's words rewritten, as any worker of the user's uid
+    /// could): its bytes aren't what the vault keeps the digest of, so nothing is taken back, said in the log, and the
+    /// lead is told, once, which of its open questions the user no longer sees, to withdraw them and ask again those it
+    /// needs.
+    @Test func aCardsFileTheVaultDoesntVouchForIsDroppedAndTheLeadTold() async throws {
+        let node = try await ScratchNode(scratch)
+        defer { node.stop() }
+        let lead = try await node.askingLead("Name the parser?", options: ["Parser", "Reader"])
+        try #require(await eventually(timeout: 60) { node.keptCards().contains(lead.card) }, "\(node.said)")
+        let server = try #require(node.serverPID)
+        kill(server, SIGSTOP)
+        let file = CardKeep.url(root: node.root)
+        try Data(node.keptCards().replacingOccurrences(of: "Name the parser?", with: "Approve deadbeef?").utf8).write(to: file)
+        kill(server, SIGKILL)
+        _ = try await node.restartServer(after: server)
         let told = { node.inbox(lead.session.tty).filter { $0.text.contains("no longer sees your open question") } }
         #expect(await eventually(timeout: 120) { !told().isEmpty }, "\(node.inbox(lead.session.tty))\n\(node.said)")
+        #expect(node.said.contains("not taken back: its bytes aren't the ones the vault keeps the digest of"), "\(node.said)")
         let message = try #require(told().first)
         #expect(message.text.contains("“Name the parser?”"), "\(message.text)")
         #expect(message.text.contains("ask_user") && message.text.contains("withdraw_question"))
         #expect(message.from == .system("vibeswitcher"))
-        // The questions listed no longer show it: no card.
+        // No card shows it, in either wording.
         let listed = try await node.run(["questions", "--json"])
-        #expect(!listed.output.contains("Name the parser?"), "\(listed.output)")
+        #expect(!listed.output.contains("Name the parser?") && !listed.output.contains("deadbeef"), "\(listed.output)")
         try await node.looks(2, at: lead.repo)
         #expect(told().count == 1, "\(told())")
     }
@@ -840,6 +893,18 @@ extension ScratchNode {
         }
         try #require(back, "\(said)")
         return try #require(again)
+    }
+
+    /// `cards.json` as the server last wrote it, as text (empty when none).
+    func keptCards() -> String {
+        (try? String(contentsOf: CardKeep.url(root: root), encoding: .utf8)) ?? ""
+    }
+
+    /// The open card `id` as `questions --json` lists it, nil when it isn't listed.
+    func listedCard(_ id: String) async throws -> [String: Any]? {
+        let ran = try await run(["questions", "--json"])
+        guard ran.status == 0, let object = try? JSONSerialization.jsonObject(with: Data(ran.output.utf8)) as? [String: Any] else { return nil }
+        return (object["cards"] as? [[String: Any]])?.first { $0["id"] as? String == id }
     }
 
     /// Asks the host to hand over to the same build, and waits for the new image's "took over".

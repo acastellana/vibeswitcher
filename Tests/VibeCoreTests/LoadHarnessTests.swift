@@ -200,6 +200,8 @@ import Testing
         copy.arguments = ["/bin/bash", binary.path]
         try copy.run()
         try #require(await offPool { waitForEnd(copy) } && copy.terminationStatus == 0, "bash wasn't copied")
+        // The Mac kills a copy of its own bash as it starts: signed as a program of its own, it runs.
+        try signedAsItsOwn(binary.path)
         let owned = try await harness(["--check-only"], fake: idle.merging(["OWNER_NAME": "fakeclaude"]) { $1 }, claudeCode: true, under: binary)
         #expect(owned.status == 0, "\(owned.output)")
         #expect(!owned.output.contains("no live owner"), "\(owned.output)")

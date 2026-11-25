@@ -12,7 +12,7 @@ import VibeCore
 /// queue.
 public enum ConfigHoldStore {
     /// One held thing as the card shows it.
-    public struct Item: Equatable, Sendable {
+    public struct Item: Codable, Equatable, Sendable {
         public var name: String
         /// When it last changed: a file's own time, a folder's newest changed file's (what the vault holds), none for a
         /// plugin or a settings file's scripts (`changedAt`).
@@ -46,7 +46,7 @@ public enum ConfigHoldStore {
 
     /// One of workflow.md's guard rails as the card shows it (E8, S7: "a guarded key shows its value"): its key, its
     /// value now (the `test_command` text, the `merge_policy`), and what it is against the last accept.
-    public struct Rail: Equatable, Sendable {
+    public struct Rail: Codable, Equatable, Sendable {
         public var key: String
         public var value: String
         public var sinceAccept: String?
@@ -60,7 +60,7 @@ public enum ConfigHoldStore {
 
     /// What a held-config card showed: the items, the hashes the accept seals, and what `workflow.md` proposes (the
     /// floor, and the guard rails' hashes with its `base_branch`'s, `recordedHashes`), recorded at the accept.
-    public struct Shown: Equatable, Sendable {
+    public struct Shown: Codable, Equatable, Sendable {
         public var items: [Item]
         public var hashes: [String: String]
         public var floor: LeadReviewFloor?
@@ -93,7 +93,7 @@ public enum ConfigHoldStore {
     /// project's card neither lists nor seals them (a card's accept seals exactly what it shows, all of it on its short
     /// lines): it says them in one line, and the home's card's accept seals them for every project. On 2026-11-23 after a
     /// restart the user read four near-identical 100-line cards, about 85 lines of each the home's.
-    public struct SharedHome: Equatable, Sendable {
+    public struct SharedHome: Codable, Equatable, Sendable {
         public var names: [String]
         public var card: String
         public var folder: String

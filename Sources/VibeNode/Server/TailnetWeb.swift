@@ -71,8 +71,8 @@ public final class TailnetWeb: @unchecked Sendable {
     /// admitted connection.
     public init(root: URL, queue: DispatchQueue, clock: NodeClock, port: UInt16 = NodeWeb.port, find: @escaping Tailnet.Finder = Tailnet.find,
                 admitPeer: @escaping @Sendable (String) -> Bool = Platform.TCP.isTailscaleAddress, bind: WebBind = .direct, folder: URL? = nil,
-                handler: WebSocketHandler, hello: @escaping (WebAdmission) -> Data?, now: @escaping @Sendable () -> Date = { Date() },
-                note: @escaping @Sendable (String) -> Void = { _ in }) {
+                handler: WebSocketHandler, hello: @escaping (WebAdmission) -> Data?, codes: PairingCodes = PairingCodes(),
+                now: @escaping @Sendable () -> Date = { Date() }, note: @escaping @Sendable (String) -> Void = { _ in }) {
         self.queue = queue
         self.port = port
         self.bind = bind
@@ -83,7 +83,7 @@ public final class TailnetWeb: @unchecked Sendable {
         self.hello = hello
         self.clock = clock
         self.note = note
-        access = WebAccess(tokens: WebTokens.tailnet(root: root), now: now, note: { note("tailnet: " + $0) })
+        access = WebAccess(tokens: WebTokens.tailnet(root: root), codes: codes, now: now, note: { note("tailnet: " + $0) })
         access.listen = { [weak self] in
             guard let self, let port = self.lock.withLock({ self.held })?.port else { return .failure(WebTokens.Refusal("the tailnet listener isn't up")) }
             return .success(port)

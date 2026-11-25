@@ -28,6 +28,23 @@ public enum CardText {
         return lines
     }
 
+    /// What waits on the user, in one line with the one command for each part (2026-11-24, after the user's first switch
+    /// on the real node took some ten commands): held config and base moves, which `vibeswitcher approve` settles with one
+    /// code, and the questions and approvals to answer (`vibeswitcher questions` lists them). Nil when nothing waits.
+    public static func waitingLine(_ cards: WireKinds.Status.CardCounts?) -> String? {
+        guard let cards else { return nil }
+        func counted(_ count: Int?, _ one: String, _ many: String) -> String? {
+            guard let count, count > 0 else { return nil }
+            return "\(count) \(count == 1 ? one : many)"
+        }
+        let settled = [counted(cards.config, "held config", "held config"), counted(cards.base, "base move", "base moves")].compactMap { $0 }
+        let answered = [counted(cards.questions, "question", "questions"), counted(cards.approvals, "approval", "approvals")].compactMap { $0 }
+        var parts: [String] = []
+        if !settled.isEmpty { parts.append(settled.joined(separator: ", ") + ": `vibeswitcher approve` settles them with one code") }
+        if !answered.isEmpty { parts.append(answered.joined(separator: ", ") + " to answer: `vibeswitcher questions`") }
+        return parts.isEmpty ? nil : "waiting on you: " + parts.joined(separator: "; ")
+    }
+
     /// The lines for `card` (`CardStore.Card.value`), short (`lines(_:long:)`).
     public static func lines(_ card: NodeWire.Value) -> [String] { lines(card, long: false) }
 

@@ -416,3 +416,42 @@ func writeClosedOnExec(_ bytes: [UInt8], to target: String, mode: mode_t = 0o755
         done += wrote
     }
 }
+
+/// Lets the Mac run `path`: a copy a test made of one of the Mac's own programs (`/bin/sleep`, `/bin/cat`, `/bin/bash`),
+/// to run it under a name or from a folder of its own. macOS 27 kills such a copy as it starts (SIGKILL, exit 137; its
+/// crash report says "Launch Constraint Violation": an Apple platform binary's signature holds it to its own path), so
+/// the copy is signed again, ad hoc (`codesign --force --sign -`), as a program of its own. It then runs, a copy of it
+/// runs too, and this process may read its environment, as macOS lets no process read a platform binary's. Linux has
+/// no such signature: nothing is done there. `codesign` is started with `Platform.Spawn` and reaped by a bounded
+/// `waitpid(WNOHANG)`, never Foundation's `waitUntilExit` (as VibeHostTests' `installProgram` reaps its `cp`).
+/// One helper, the same in each test target's TestSupport.swift.
+func signedAsItsOwn(_ path: String) throws {
+    #if os(macOS)
+    var sign = Platform.Spawn(executable: "/usr/bin/codesign", arguments: ["/usr/bin/codesign", "--force", "--sign", "-", path])
+    sign.stdin = .path("/dev/null", flags: O_RDONLY)
+    sign.stdout = .path("/dev/null", flags: O_WRONLY)
+    sign.stderr = .path("/dev/null", flags: O_WRONLY)
+    let failed = { (why: String) in
+        CocoaError(.executableLoad, userInfo: [NSFilePathErrorKey: path, NSLocalizedDescriptionKey: "codesign --sign - \(path): \(why)"])
+    }
+    let pid: pid_t
+    switch sign.start() {
+    case .success(let started): pid = started
+    case .failure(let failure): throw failed("not started (errno \(failure.code))")
+    }
+    var status: Int32 = 0
+    var reaped: pid_t = 0
+    let deadline = DispatchTime.now() + .seconds(120)
+    repeat {
+        reaped = waitpid(pid, &status, WNOHANG)
+        if reaped == 0 { usleep(1_000) }
+    } while (reaped == 0 || (reaped < 0 && errno == EINTR)) && DispatchTime.now() < deadline
+    if reaped == 0 {
+        kill(pid, SIGKILL)
+        _ = waitpid(pid, &status, 0)
+        throw failed("still running after 120 s")
+    }
+    // Exited 0: no signal, no status.
+    guard reaped == pid, status == 0 else { throw failed("wait status \(status)") }
+    #endif
+}

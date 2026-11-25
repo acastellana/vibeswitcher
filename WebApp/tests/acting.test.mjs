@@ -264,3 +264,36 @@ test('a page whose own build is unknown asks for it again at a hello, so the nex
   assert.equal(reloads.length, 1, 'the switch to B is seen');
   assert.equal(store.state.newerBuild, false);
 });
+
+test('a confirmed page’s words are its name, never a pending confirmation; a waiting one’s are to be typed in the terminal', async () => {
+  const waiting = await page({ rights: ['read', 'draft'], kinds: ['status'], phrase: 'amber fox lantern' });
+  assert.equal(waiting.store.state.phrase, 'amber fox lantern');
+  assert.equal(waiting.store.state.pageWords, null);
+  waiting.socket.onmessage({ data: JSON.stringify({ v: 1, kind: 'paired', act: 'f'.repeat(43), rights: CONFIRMED, kinds: ACTING, phrase: 'amber fox lantern' }) });
+  assert.equal(waiting.store.state.phrase, null, 'confirmed: no banner');
+  assert.equal(waiting.store.state.pageWords, 'amber fox lantern');
+  // A confirmed page's reconnect: its hello carries the words with "watch".
+  const again = waiting.reconnect();
+  again.onmessage({ data: JSON.stringify({ ...waiting.hello, auth: { ...waiting.hello.auth, rights: CONFIRMED, phrase: 'amber fox lantern' }, kinds: ACTING }) });
+  assert.equal(waiting.store.state.phrase, null);
+  assert.equal(waiting.store.state.pageWords, 'amber fox lantern');
+  assert.equal(waiting.store.acts(), true);
+});
+
+test('a confirmed page whose node has a newer build isn’t taken for one redeeming a code: no reload before a phrase', async () => {
+  const confirmed = await page({ rights: CONFIRMED, kinds: ACTING, phrase: 'amber fox lantern', build: 'A', assets: 'B' });
+  assert.equal(confirmed.kept.has('vibeswitcher.unconfirmed'), false);
+  assert.equal(confirmed.store.state.phrase, null);
+});
+
+test('a `paired` again on a level change: rights and kinds taken, the secret kept; one without "act" doesn’t count as acting', async () => {
+  const watching = await page({ rights: ['read', 'draft'], kinds: ['status'], phrase: 'amber fox lantern' });
+  watching.socket.onmessage({ data: JSON.stringify({ v: 1, kind: 'paired', act: 'g'.repeat(43), rights: ['read', 'draft', 'watch'], kinds: ['status', 'term.open'] }) });
+  assert.equal(watching.store.acts(), false);
+  assert.equal(watching.kept.has('vibeswitcher.acted'), false, 'watching only: not acting');
+  // The level rises: the same secret, now with "act".
+  watching.socket.onmessage({ data: JSON.stringify({ v: 1, kind: 'paired', act: 'g'.repeat(43), rights: CONFIRMED, kinds: ACTING }) });
+  assert.equal(watching.store.acts(), true);
+  assert.equal(watching.kept.get('vibeswitcher.acted'), '1');
+  assert.equal(authOf(watching.reconnect()).act, 'g'.repeat(43));
+});

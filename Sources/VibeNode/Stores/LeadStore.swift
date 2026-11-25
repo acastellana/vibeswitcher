@@ -140,6 +140,15 @@ public final class LeadStore: @unchecked Sendable {
         heldChanged()
     }
 
+    /// The held message `id` of `project`'s lead taken back (`LeadEngine.pull`): held no more, never sent.
+    func drop(project: String, id: String) {
+        guard let index = held[project]?.firstIndex(where: { $0.id == id }) else { return }
+        held[project]?.remove(at: index)
+        if held[project]?.isEmpty == true { held[project] = nil }
+        if let lead = leads[project] { self.lead(root: lead.root) { $0.held = self.held[project]?.count ?? 0 } }
+        heldChanged()
+    }
+
     /// The messages held for `project`'s lead, taken out.
     public func takeHeld(project: String) -> [Held] {
         let taken = held.removeValue(forKey: project) ?? []

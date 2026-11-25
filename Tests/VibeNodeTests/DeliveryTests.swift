@@ -123,6 +123,8 @@ struct DeliveryTests {
         #expect(world.pending(worker).isEmpty)
         #expect(world.pending(lead).isEmpty)
         #expect(world.held().map(\.text) == ["yes, merge it"])
+        // Said once the post's tries are spent (`heldRetryDelays`: short here), not at the first miss.
+        #expect(await eventually(timeout: 60) { world.stored?.notice != nil })
         let notice = try #require(world.stored?.notice)
         #expect(notice.contains(worker.session.id.uuidString) && notice.contains("vault binds"), "\(notice)")
         #expect(notice.contains(lead.session.id.uuidString), "\(notice)")
@@ -170,6 +172,8 @@ struct DeliveryTests {
         #expect(world.pending(worker).isEmpty, "\(world.pending(worker))")
         #expect(world.pending(lead).isEmpty)
         #expect(world.held().map(\.text) == ["yes, merge it"])
+        // Said once the post's tries are spent (`heldRetryDelays`: short here), not at the first miss.
+        #expect(await eventually(timeout: 60) { world.stored?.notice != nil })
         let notice = try #require(world.stored?.notice)
         #expect(notice.contains(worker.session.tty) && notice.contains(lead.session.tty), "\(notice)")
         // What waits in the worker's inbox isn't woken for in the lead's box.

@@ -111,7 +111,10 @@ public final class TerminalRelay: @unchecked Sendable {
         /// Watching: the size the last replay was sent at (type 5).
         var size: (cols: Int, rows: Int)?
         /// The session's bytes masked of any pairing code (`TerminalMask`), started over with each replay.
-        var mask = TerminalMask()
+        var mask: TerminalMask
+        /// Counts its outputs: a quiet flush of what the mask holds (`maskQuiet`) goes only if no output came since.
+        var outputs = 0
+        init(mask: TerminalMask) { self.mask = mask }
     }
 
     /// `link`: the server's. `mode`: `.watch` on the user's node. `note`: the server's log.
@@ -172,7 +175,7 @@ public final class TerminalRelay: @unchecked Sendable {
             replayAgain(hosted.id, attachment)
             return
         }
-        let attachment = Attachment()
+        let attachment = Attachment(mask: TerminalMask(codes: liveCodes))
         attachment.streams.insert(id)
         attachments[hosted.id] = attachment
         let held = hosted.id
@@ -271,14 +274,39 @@ public final class TerminalRelay: @unchecked Sendable {
         replayAgain(session.id, attachment)
     }
 
+    /// This server's live pairing codes (`WebAccess.liveCodes`, set by `NodeLive`): what the mask hides besides `pair=`.
+    public var liveCodes: PairingCodes?
+
     /// Whether a page's connection still watches (`WebRequestScreen.watching`, set by `NodeLive`): asked for each chunk,
     /// so a stream whose watching ended gets nothing more, whatever its close is waiting on. Unset (tests), all do.
     public var watching: (@Sendable (AnyObject) -> Bool)?
 
+    /// How long the tail the mask holds back (it may be a pairing code's start, `TerminalMask`) waits for more before it
+    /// goes as it is: a prompt never waits longer.
+    static let maskQuiet: TimeInterval = 0.15
+
     private func output(of session: UUID, _ bytes: Data) {
         guard let attachment = attachments[session] else { return }
         // Never a live pairing code to a page (the acting review's fix C): `vibeswitcher web` run in a hosted terminal.
-        let whole = [UInt8](attachment.mask.pass(bytes))
+        attachment.outputs &+= 1
+        feed(attachment, attachment.mask.pass(bytes))
+        quietFlush(session, attachment, after: attachment.outputs)
+    }
+
+    /// After a quiet with no output since, what the mask holds goes; a run still waiting on a live code's start (it
+    /// holds while the code lives) is asked again after the next quiet.
+    private func quietFlush(_ session: UUID, _ attachment: Attachment, after count: Int) {
+        guard attachment.mask.holding else { return }
+        queue.asyncAfter(deadline: .now() + Self.maskQuiet) { [weak self] in
+            guard let self, let now = self.attachments[session], now === attachment, now.outputs == count else { return }
+            self.feed(now, now.mask.flush())
+            self.quietFlush(session, now, after: count)
+        }
+    }
+
+    /// `bytes` (masked already) to every stream of `attachment` that takes them.
+    private func feed(_ attachment: Attachment, _ bytes: Data) {
+        let whole = [UInt8](bytes)
         guard !whole.isEmpty else { return }
         for stream in fed(by: attachment) where (stream.state == .replaying || stream.state == .live) && watching?(stream.transport) != false {
             var start = 0
@@ -312,7 +340,7 @@ public final class TerminalRelay: @unchecked Sendable {
     private func replayAgain(_ session: UUID, _ attachment: Attachment) {
         guard !attachment.starting else { return }
         attachment.starting = true
-        attachment.mask = TerminalMask()
+        attachment.mask = TerminalMask(codes: liveCodes)
         link.resync(session)
     }
 

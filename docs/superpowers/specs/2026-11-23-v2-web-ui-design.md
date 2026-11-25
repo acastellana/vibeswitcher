@@ -139,25 +139,61 @@ merge). Recommended instead, and the planned next step: a passkey touch per acti
 - What a page shows before an acting click is what the command line shows before its code: the card whole, the batch
   listed, the command of a shell request in full.
 - `status` and This node say the page can act and since when.
+- One pairing serves every tab of that origin in that browser profile: the tabs pass its secret to each other in memory
+  (a BroadcastChannel named by the origin's host and port), never through storage, never inside a frame, and a tab
+  holding another pairing's token keeps its own.
+- What that widens: any script that runs on the node's own origin could ask for the secret. Nothing else runs there:
+  the page's content policy allows only its own scripts, it is never framed (`frame-ancestors 'none'`), and plugin
+  pages are served on their own port, another origin.
 
 As built (the node's side, after its security reviews):
 
-- Acting needs two secrets. One is the page's token, which the browser keeps where any process of yours can read it.
-  The other is an acting secret, given once when a page is paired while `web_acts` is on. The page keeps it in its
-  memory only. Reloading the page loses it, and the page then only reads and drafts until it is paired again
-  (`vibeswitcher web`). An acting pairing lasts 12 hours at most. The vault keeps `web_acts` and the acting pairings,
-  never a file. Turning it off, or revoking, ends acting at the next request.
+- `web_acts` is a level, kept in the host's vault, never a file:
+  - `off` is the default: pages read and draft.
+  - `confirm` asks for a passkey at each act. That check isn't built yet, so the node refuses this level for now.
+  - `trust` lets each click act as you.
+
+  Only a terminal raises the level. A page may lower it.
+- A page is admitted only on a token the host's vault knows. A host restart therefore needs every page paired again.
+- Pairing is confirmed in the terminal. The page that opens `vibeswitcher web`'s address shows three words. The
+  terminal asks you to type the words your own page shows, then your code.
+  - Only then does that page get its pairing secret, once, on its open connection. It keeps the secret in memory only.
+  - A page that merely took the address first stays a reader. So does any page after a reload.
+  - A confirmed pairing watches the hosted terminals at every level, and acts as the level allows. It lasts 12 hours
+    at most.
+  - Turning acting off, revoking, or the pairing running out ends it at the next request. Any terminal stream it has
+    open closes too.
 - On a card or a batch, the page sends what it drew. If the card has changed since then, the node refuses
   (`changed`). This is checked again once the confirmation is given.
+- A page never accepts a held config change whose review floor or guard rails differ from the recorded ones. The same
+  goes for a first accept, or a change whose snapshot isn't sealed by this host's vault. Those are the terminal's.
+- Masking shields pages only. The node masks pairing codes (and `#pair=` addresses, plain or percent-encoded) in what
+  it serves a page:
+  - a terminal's bytes, matched on what the screen shows, so cursor moves, colours and line breaks don't hide a code;
+  - a transcript's text.
+
+  Transcripts on disk (`~/.claude`, `~/.codex`) are not masked, and neither is a terminal you read yourself. A process
+  that reads them can still read an address there. That alone no longer gives it a page that watches or acts: the
+  terminal's confirmation stands in the way.
 - What the terminal-only list protects, and what it doesn't. It keeps an acting page's token from widening its own
-  reach, or from lasting: a page can't turn acting on, pair another page, switch the node to other code, install the
-  agents' hooks, add a plugin, start the node, or set the review floors, the working policy, the reviewers' models, the
-  guard rails, lead mail or a plugin's settings. An approve list from a page leaves out the hooks install. It does
-  **not** keep an acting page from doing what you can do in a session's day. A page can accept a held config change or
-  a base move, answer and approve the leads' cards (merges included), edit the session presets, send text into any
-  session, start and end sessions, and stop the node. So whatever holds both of a page's secrets while it is open acts
-  as you there. That is the cost the user accepted ("for now trust the page completely"). A passkey touch per request
-  (`PageVoice`) is the planned next step.
+  reach, or from lasting:
+  - A page can't raise `web_acts`, pair another page, switch the node to other code, install the agents' hooks, add a
+    plugin, or start the node.
+  - It can't set the review floors, the working policy, the reviewers' models, the guard rails, lead mail or a
+    plugin's settings.
+  - It can't accept a held config change that would change those.
+  - An approve list from a page leaves out what a page may not approve.
+
+  It does **not** keep an acting page from doing what you can do in a session's day. A page can:
+  - accept a held config change that keeps the floor and rails as recorded, or a base move;
+  - answer and approve the leads' cards, merges included;
+  - edit the session presets;
+  - send text into any session, and start and end sessions;
+  - stop the node.
+
+  So at `trust`, whatever holds a page's two secrets while it is open acts as you there. That is the cost the user
+  accepted ("for now trust the page completely"). `confirm`, a passkey touch per request (`PageVoice`), is the
+  planned next step.
 
 ## Constraints
 

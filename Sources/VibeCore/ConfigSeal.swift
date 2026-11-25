@@ -1127,7 +1127,7 @@ public enum ConfigSeal {
     }
 
     /// One of `walk`'s lines: what's hashed, and for an entry its path and mtime (`FolderRead.entries`).
-    private struct FolderLine {
+    struct FolderLine {
         var text: String
         var path: String?
         var mtime = 0
@@ -1137,7 +1137,7 @@ public enum ConfigSeal {
     }
 
     /// Each entry under `folder` (of the watched thing `name`) in name order, one line each: links read, never followed.
-    private static func walk(_ folder: String, relative: String, name watchedName: String, count: inout Int, line: (FolderLine) -> Void) {
+    static func walk(_ folder: String, relative: String, name watchedName: String, count: inout Int, line: (FolderLine) -> Void) {
         guard let names = try? FileManager.default.contentsOfDirectory(atPath: folder) else {
             line(FolderLine(text: "unreadable \(relative)"))
             return

@@ -282,6 +282,8 @@ public enum NodeWire {
         /// This page no longer acts or watches (its pairing ran out or was dropped, the level was lowered, a revoke):
         /// it drops its pairing secret, reads and drafts, and is paired again to act.
         case actsEnded = "acts-ended"
+        /// The lead has it already: an answer or a tell taken back too late (`answer.replace`, `tell.retract`).
+        case delivered
         case `internal`
     }
 

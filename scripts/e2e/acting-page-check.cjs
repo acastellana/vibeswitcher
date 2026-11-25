@@ -4,7 +4,7 @@
 // fixed time.
 //
 // What is looked for comes from the test (EXPECT, a JSON file):
-//   { projectHref, first, firstOption, approval, approve, second, secondOption }
+//   { projectHref, first, firstOption, approval, approve, second, secondOption, third, thirdFirst, thirdSecond, fourth, fourthFirst }
 // - Pair: the phrase in the banner (written to OUT/phrase for the test); once confirmed, the banner goes and the
 //   page's cards answer for real ("Answer", not "Draft"). The pairing's secret (`paired.act`, read off the wire) is in
 //   no storage, cookie, address or console line.
@@ -13,11 +13,21 @@
 // - Changed: the page holds back the node's frames (a test shim around WebSocket, never the page's code), asks the
 //   test to reword the second question (OUT/revise.want, answered by OUT/revise.done), then clicks the option it drew:
 //   the node refuses it as `changed` and the card says to look again; let go, the card shows the new wording.
+// - Send menu: the ways the node lists for the lead's agent, the next step first (a Claude never "after"); the second
+//   sent, and the note says what the node did, or why not.
+// - Told and taken back: a message at the next step offers Take back while the lead hasn't had it; taken back, it says
+//   so.
+// - Change while unread: an answer the lead hasn't had is changed from its pill.
+// - Read by the lead: the lead's hook takes its inbox (OUT/take.want, answered by OUT/take.done); a Change opened
+//   before is refused after; the message says the lead read it.
 // - Older build: the served page changes under the tab (OUT/switch.want, answered by OUT/switch.done once the test
 //   changed a file); at its next hello the acting tab says it is from an older build, with Reload, and still acts.
 // - Level off: This node's Turn off (set web_acts off); the page reconnects reading and drafting: the line that
 //   turns acting on, the open card drafts, and the banner at the top says this tab no longer acts (turned off).
 // - Reloaded: the tab reloaded says it no longer acts (its pairing was in its memory) and to pair again.
+// - Two tabs: a second tab opened by hand acts with the first one's pairing, held in memory only.
+// - Can't act yet: acting on again (OUT/trust.want) with no tab paired: one plain banner with the command; a pick is
+//   one line, "Not sent", the terminal's way behind a disclosure.
 // - Console: no error over the whole run.
 //
 // Usage: node acting-page-check.cjs URL EXPECT-JSON OUT-FOLDER CHROME   (exit 1 on any fail; a table and report.json in OUT)
@@ -119,10 +129,22 @@ async function run() {
       : leaks || logged ? `the secret is kept outside memory (${leaks} stored, ${logged} logged)` : `“${phrase}” confirmed; the page acts; the secret only in memory`);
     if (!acting) return;
 
+    // Two tabs: a second tab of the same origin, opened by hand (no code, no token), acts too: it asks its sibling over
+    // the origin's channel and connects with the pairing it holds.
+    const second = await protocol.tab(out);
+    await second.send('Page.navigate', { url: `${new URL(url).origin}/${expect.projectHref}` });
+    const both = await second.until(`(() => { const c = [...document.querySelectorAll('.wait-box .card')].find((el) => el.innerText.includes(${JSON.stringify(expect.first)})); return c && c.querySelector('.answer button[type=submit]')?.innerText.trim() === 'Answer' && !document.querySelector('.tab-banner:not([hidden])') ? 'the second tab acts' : null; })()`, WAIT);
+    const kept = secret && await second.evaluate(`[sessionStorage, localStorage].flatMap((store) => Object.keys(store).map((key) => store.getItem(key))).filter((value) => value.includes(${JSON.stringify(secret || '')})).length`);
+    await second.shot('second-tab');
+    record('Two tabs', both && kept === 0, !both ? 'the second tab didn’t act' : kept ? 'the secret is stored in the second tab' : both + ', the secret in memory only');
+    await protocol.send('Target.closeTarget', { targetId: (await second.send('Target.getTargetInfo')).targetInfo.targetId }).catch(() => {});
+
     // Answer by click: the first question.
     const clicked = await page.until(clickOption(expect.first, expect.firstOption), WAIT);
     const answered = clicked && await page.until(`(() => { const c = ${card(expect.first)}; return c && c.classList.contains('closed') ? c.innerText.replace(/\\s+/g, ' ').slice(0, 80) : null; })()`, WAIT);
-    record('Answer by click', answered, answered || 'the question’s option didn’t answer it');
+    // Answered, the card says so in the waiting block for a few seconds, then leaves it: the conversation is the record.
+    const gone = answered && await page.until(`!${card(expect.first)} ? true : null`, WAIT);
+    record('Answer by click', answered && gone, !answered ? 'the question’s option didn’t answer it' : !gone ? 'the answered card stayed in the waiting block' : answered + '; then gone from the waiting block');
 
     // Approve: the long approval, its "Approve <commit>".
     const approving = await page.until(clickOption(expect.approval, expect.approve), WAIT);
@@ -141,6 +163,67 @@ async function run() {
     const reworded = refused && await page.until(`(() => { const c = ${card(expect.second)}; return c && !c.classList.contains('closed') && /Monday/.test(c.innerText) ? 'the new wording shown' : null; })()`, WAIT);
     await page.shot('changed');
     record('Changed', refused && reworded, !drawn ? 'the second question wasn’t drawn whole' : !revised ? 'the test never reworded it' : !stale ? 'its option couldn’t be clicked' : !refused ? 'no “look again” after the stale click' : !reworded ? 'the new wording never showed' : refused + '; ' + reworded);
+
+    // Told and taken back: a message at the lead's next step (`tell`) offers Take back until the lead has it; taken
+    // back, it says so. A second one stays, for the read mark below.
+    const tell = (text) => page.evaluate(`(() => { const say = document.querySelector('.project-view .say'); say.value = ${JSON.stringify(text)}; document.querySelector('.project-view .lead-send .send-main').click(); return true; })()`);
+    const noteOf = (text) => `[...document.querySelectorAll('.project-view .note')].find((el) => el.querySelector('.mine')?.innerText === ${JSON.stringify(text)})`;
+    await tell('Keep the old name');
+    const offered = await page.until(`(() => { const note = ${noteOf('Keep the old name')}; const back = note?.querySelector('.take-back'); if (!back) return null; back.click(); return true; })()`, WAIT);
+    const takenBack = offered && await page.until(`(() => { const said = ${noteOf('Keep the old name')}?.querySelector('.confirm-note')?.innerText || ''; return /Taken back/.test(said) ? said : null; })()`, WAIT);
+    await tell('And ship it on Monday');
+    const stays = await page.until(`${noteOf('And ship it on Monday')}?.querySelector('.take-back') ? true : null`, WAIT);
+    record('Told and taken back', takenBack && stays, !offered ? 'no Take back under a message the lead hasn’t had' : !takenBack ? 'taking it back didn’t say so' : !stays ? 'the second message offers no Take back' : takenBack);
+
+    // Change while unread: the third question answered by click; its pill offers Change while the lead hasn't had it,
+    // and the answer changes.
+    const pillOf = (text) => `(() => { const line = [...document.querySelectorAll('.project-view .line.kind-ask')].find((el) => el.innerText.includes(${JSON.stringify(text)})); let next = line?.nextElementSibling; const out = []; while (next && !next.classList.contains('line') && !next.classList.contains('day')) { out.push(next); next = next.nextElementSibling; } return out; })()`;
+    const answeredThird = await page.until(clickOption(expect.third, expect.thirdFirst), WAIT);
+    const change = answeredThird && await page.until(`(() => { const button = ${pillOf(expect.third)}.flatMap((el) => [...el.querySelectorAll('button')]).find((b) => b.innerText.trim() === 'Change'); if (!button) return null; button.click(); return true; })()`, WAIT);
+    const chose = change && await page.until(`(() => { const option = ${pillOf(expect.third)}.flatMap((el) => [...el.querySelectorAll('.answer-change button.option')]).find((b) => b.innerText.includes(${JSON.stringify(expect.thirdSecond)})); if (!option) return null; option.click(); return true; })()`, WAIT);
+    const changed = chose && await page.until(`(() => { const pill = ${pillOf(expect.third)}.find((el) => el.classList.contains('mine')); return pill && pill.innerText.includes(${JSON.stringify(expect.thirdSecond)}) ? pill.innerText : null; })()`, WAIT);
+    await page.shot('changed-answer');
+    record('Change while unread', changed, !answeredThird ? 'the third question couldn’t be answered' : !change ? 'no Change under an answer the lead hasn’t had' : !chose ? 'Change offered no other option' : changed ? 'changed to ' + changed : 'the answer didn’t change');
+
+    // The lead's step: its hook takes what waits for it (OUT/take.want, answered by OUT/take.done). A Change opened
+    // before it is refused after it; the message and the first answer say the lead has read them.
+    const answeredFourth = await page.until(clickOption(expect.fourth, expect.fourthFirst), WAIT);
+    const opened = answeredFourth && await page.until(`(() => { const button = ${pillOf(expect.fourth)}.flatMap((el) => [...el.querySelectorAll('button')]).find((b) => b.innerText.trim() === 'Change'); if (!button) return null; button.click(); return true; })()`, WAIT);
+    fs.writeFileSync(path.join(out, 'take.want'), 'the lead takes its inbox');
+    const took = opened && await waitFile(path.join(out, 'take.done'), 60000);
+    // The option clicked if the open Change is still there; the node's read mark may close it first: either way, the
+    // pill says the answer was read and the change can't be made.
+    const late = took && await page.evaluate(`(() => { const option = ${pillOf(expect.fourth)}.flatMap((el) => [...el.querySelectorAll('.answer-change button.option')])[0]; option?.click(); return true; })()`);
+    const refusedLate = late && await page.until(`(() => { const all = ${pillOf(expect.fourth)}; const said = all.map((el) => (el.classList.contains('card-notice') ? el.innerText : el.querySelector('.card-notice')?.innerText) || '').find(Boolean); return said && /read your answer already/.test(said) && all.some((el) => /Read by the lead/.test(el.innerText)) ? said : null; })()`, WAIT);
+    const readMarks = refusedLate && await page.until(`(() => {
+      const told = ${noteOf('And ship it on Monday')}?.querySelector('.confirm-note')?.innerText || '';
+      return /Read by the lead/.test(told) ? told : null;
+    })()`, WAIT);
+    await page.shot('read-by-lead');
+    record('Read by the lead', refusedLate && readMarks, !answeredFourth ? 'the fourth question couldn’t be answered' : !opened ? 'no Change under the fourth answer before the lead’s step' : !took ? 'the lead’s hook never took its inbox' : !late ? 'the open Change offered no option' : !refusedLate ? 'a Change after the lead’s step wasn’t refused as read' : !readMarks ? 'the message never said the lead read it' : refusedLate + '; ' + readMarks);
+
+    // Send menu (after the rows above: typing into an idle lead lets its prompt hook take what waits): the ways the lead's
+    // agent takes a message, as the node lists them (a Claude never "After this turn"),
+    // the next step first; the second one sent, and the note says what the node did (or why not).
+    const ways = await page.evaluate(`(() => {
+      const more = document.querySelector('.project-view .lead-send .send-more');
+      if (!more || more.hidden) return null;
+      more.click();
+      return [...document.querySelectorAll('.lead-send .send-way strong')].map((el) => el.innerText.trim());
+    })()`);
+    const known = ['At its next step', 'Now', 'After this turn', 'Interrupt, then send'];
+    const fits = ways && ways[0] === 'At its next step' && ways.every((way) => known.includes(way)) && !ways.includes('After this turn')
+      && ways.every((way, index) => index === 0 || known.indexOf(way) > known.indexOf(ways[index - 1]));
+    const secondWay = fits && ways.length > 1 ? ways[1] : null;
+    if (secondWay) {
+      await page.evaluate(`(() => {
+        document.querySelector('.project-view .say').value = 'Run the audits on Fable';
+        [...document.querySelectorAll('.lead-send .send-way')].find((el) => el.querySelector('strong')?.innerText.trim() === ${JSON.stringify(secondWay)})?.click();
+      })()`);
+    }
+    const did = secondWay && await page.until(`(() => { const note = [...document.querySelectorAll('.project-view .note .confirm-note')].pop()?.innerText || ''; return note && !/Sending/.test(note) ? note : null; })()`, WAIT);
+    await page.shot('send-menu');
+    record('Send menu', did, !ways ? 'no menu beside Send' : !fits ? 'the menu’s ways aren’t the node’s: ' + ways.join(', ') : !secondWay ? 'only one way listed' : !did ? 'no note on what was done' : ways.join(', ') + ' → ' + secondWay + ': ' + did);
 
     // Older build: the node's files change under the tab (the test edits the served folder); at its next hello the
     // tab, which acts, isn't reloaded behind the user's back: the banner at the top says it is from an older build,
@@ -170,6 +253,18 @@ async function run() {
     const reloaded = await page.until(`(() => { const b = document.querySelector('.tab-banner:not([hidden])'); return b && /no longer acts/.test(b.innerText) && /reloaded/.test(b.innerText) && b.innerText.includes('vibeswitcher web') ? b.innerText.replace(/\\s+/g, ' ').slice(0, 90) : null; })()`, WAIT);
     await page.shot('reloaded');
     record('Reloaded', reloaded, reloaded || 'the reloaded tab didn’t say it no longer acts');
+
+    // Can't act yet: acting on again from a terminal (OUT/trust.want, answered by OUT/trust.done), and no tab holds a
+    // pairing: one plain banner with the command and its copy button; a pick on a card is one line, not sent, the
+    // terminal's way behind a disclosure.
+    fs.writeFileSync(path.join(out, 'trust.want'), 'set web_acts trust');
+    const trusted = await waitFile(path.join(out, 'trust.done'), 60000);
+    const cant = trusted && await page.until(`(() => { const b = document.querySelector('.tab-banner:not([hidden])'); return b && /can’t act yet/.test(b.innerText) && b.querySelector('.copy-line')?.innerText.includes('vibeswitcher web') ? b.innerText.replace(/\\s+/g, ' ').slice(0, 90) : null; })()`, WAIT);
+    await page.go(expect.projectHref);
+    const picked = cant && await page.until(clickOption(expect.second, 'Drop it today'), WAIT);
+    const oneLine = picked && await page.until(`(() => { const c = ${card(expect.second)}; const line = c?.querySelector('.card-notsent')?.innerText || ''; const terminal = c?.querySelector('details.card-terminal'); return /Not sent/.test(line) && terminal && !terminal.open && !c.querySelector('.card-keys') ? line : null; })()`, WAIT);
+    await page.shot('cant-act-yet');
+    record('Can’t act yet', cant && oneLine, !trusted ? 'the test never turned acting on again' : !cant ? 'no banner saying this tab can’t act yet, with the command' : !oneLine ? 'a pick isn’t one line with the terminal behind a disclosure' : cant + '; ' + oneLine);
   } catch (error) {
     record('run', false, error.message);
   } finally {

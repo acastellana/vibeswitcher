@@ -12,10 +12,15 @@ import Testing
 /// - Approve: the long approval approved by clicking its "Approve <commit>";
 /// - Changed: a question the lead reworded after the page drew it (its frames held back meanwhile) is refused as
 ///   `changed`, "look again", and nothing is done;
+/// - Send menu: the ways the node lists for the lead's agent; the second sent, its note what the node did;
+/// - Told and taken back, Change while unread: a message and an answer the lead hasn't had are taken back, changed;
+/// - Read by the lead: the lead's hook takes its inbox; a Change opened before is refused after, the message is read;
 /// - Older build: the served page changed under the acting tab: at its next hello it says it is from an older build,
 ///   with Reload and what reloading costs, and still acts;
 /// - Level off: the page's own Turn off lowers `web_acts`, and the page reads and drafts again, saying so at the top;
 /// - Reloaded: reloaded, the tab says it no longer acts (its pairing lived in its memory) and to pair again;
+/// - Two tabs: a second tab opened by hand acts with the first one's pairing, held in memory only;
+/// - Can't act yet: acting on again with no tab paired: one plain banner with the command, a pick one line, not sent;
 /// - Console: no error.
 /// The node's record must then hold the two answers and the setting, each the page's.
 @Suite(NodeTraits.linuxOnly, .timeLimit(.minutes(5)),
@@ -77,17 +82,25 @@ struct ActingPageCheckTests {
         try tools.call("ask_user", ["question": second, "options": ["Keep it until Friday", "Drop it today"]])
         try #require(await eventually(timeout: 120) { tools.calls().count == 3 }, "\(node.said)")
         let secondID = try #require(try BoardStore(root: repo.path).read().questions.first { $0.text == second }?.id, "the second question on the board")
+        // A third, answered and changed while the lead hasn't had the answer.
+        let third = "Name the release Aurora or Borealis?"
+        try tools.call("ask_user", ["question": third, "options": ["Aurora", "Borealis"]])
+        try #require(await eventually(timeout: 120) { tools.calls().count == 4 }, "\(node.said)")
+        // A fourth, answered and then changed too late: after the lead's hook has taken the answer.
+        let fourth = "Run the migration tonight or tomorrow?"
+        try tools.call("ask_user", ["question": fourth, "options": ["Tonight", "Tomorrow"]])
+        try #require(await eventually(timeout: 120) { tools.calls().count == 5 }, "\(node.said)")
 
         // The three cards open on the node before the page looks.
         var open = 0
         let until = MacTime.real.awake() + 120
-        while open < 3, MacTime.real.awake() < until {
+        while open < 5, MacTime.real.awake() < until {
             let listed = try await node.run(["questions", "--json"])
             let cards = ((try? JSONSerialization.jsonObject(with: Data(listed.output.utf8)) as? [String: Any])?["cards"] as? [[String: Any]]) ?? []
             open = cards.filter { ["question", "approval"].contains($0["kind"] as? String) }.count
-            if open < 3 { try await Task.sleep(nanoseconds: 300_000_000) }
+            if open < 5 { try await Task.sleep(nanoseconds: 300_000_000) }
         }
-        try #require(open == 3, "\(open) cards open\n\(node.said)")
+        try #require(open == 5, "\(open) cards open\n\(node.said)")
 
         let opened = try LiveScratch.open(node)
         let out = scratch.url("acting-page-check")
@@ -100,8 +113,23 @@ struct ActingPageCheckTests {
             var confirmed = false
             var revised = false
             var switched = false
+            var trusted = false
+            var taken = false
             let end = MacTime.real.awake() + 200
-            while !(confirmed && revised && switched), MacTime.real.awake() < end, !Task.isCancelled {
+            while !(confirmed && revised && switched && trusted && taken), MacTime.real.awake() < end, !Task.isCancelled {
+                if !taken, FileManager.default.fileExists(atPath: out.appendingPathComponent("take.want").path) {
+                    // The lead's step: its hook takes what waits in its inbox (the answers and the message the user sent).
+                    let handed = leadsHookTakes(node, event: "PostToolUse", tty: lead.tty, pid: leadPID)
+                    try #require(!handed.messages.isEmpty, "the lead's hook took nothing\n\(node.said)")
+                    try "\(handed.messages.count)".write(to: out.appendingPathComponent("take.done"), atomically: true, encoding: .utf8)
+                    taken = true
+                }
+                if !trusted, FileManager.default.fileExists(atPath: out.appendingPathComponent("trust.want").path) {
+                    let again = try await node.runOnTerminal(["set", "web_acts", "trust"])
+                    try #require(again.status == 0, "set web_acts trust again: \(again.output)")
+                    try "done".write(to: out.appendingPathComponent("trust.done"), atomically: true, encoding: .utf8)
+                    trusted = true
+                }
                 if !switched, FileManager.default.fileExists(atPath: out.appendingPathComponent("switch.want").path) {
                     // Build B: one byte more in one file changes the build the node names in its hello.
                     let words = URL(fileURLWithPath: webApp).appendingPathComponent("js/words.js")
@@ -138,6 +166,7 @@ struct ActingPageCheckTests {
             "projectHref": "#/p/" + NodeIds.project(root: repo.path).addingPercentEncoding(withAllowedCharacters: .alphanumerics)! + "/lead",
             "first": "Launch the onboarding page", "firstOption": "Thursday", "approval": "Merge the upload retry task", "approve": "Approve \(approved)",
             "second": "Keep the old pricing table", "secondOption": "Keep it until Friday",
+            "third": "Name the release Aurora", "thirdFirst": "Aurora", "thirdSecond": "Borealis", "fourth": "Run the migration tonight", "fourthFirst": "Tonight",
         ]
         let expectFile = scratch.url("acting-page-check-expect.json")
         try JSONSerialization.data(withJSONObject: expect).write(to: expectFile)
@@ -151,7 +180,7 @@ struct ActingPageCheckTests {
                          output: .path(said.path, flags: O_WRONLY | O_TRUNC), limit: 240)
         }
         let table = (try? String(contentsOf: said, encoding: .utf8)) ?? ""
-        for row in ["Pair", "Answer by click", "Approve", "Changed", "Older build", "Level off", "Reloaded", "Console"] {
+        for row in ["Pair", "Two tabs", "Answer by click", "Approve", "Changed", "Told and taken back", "Change while unread", "Read by the lead", "Send menu", "Older build", "Level off", "Reloaded", "Can’t act yet", "Console"] {
             #expect(table.split(separator: "\n").contains { $0.hasPrefix(row + " ") && $0.contains(" pass ") }, "\(row):\n\(table)")
         }
         #expect(status == 0, "\(table)\n\(node.said)")
@@ -159,7 +188,8 @@ struct ActingPageCheckTests {
         // the test's own from a terminal (the level, the accepts, the lead).
         let accepted = (try await node.statusJSON())["accepted"] as? [[String: Any]] ?? []
         let fromPage = accepted.filter { ($0["commandLine"] as? [Any])?.isEmpty == true }.compactMap { $0["kind"] as? String }
-        #expect(fromPage == ["answer", "answer", "set"], "\(accepted)")
+        #expect(Set(fromPage) == ["answer", "send", "tell", "tell.retract", "answer.replace", "set"] && fromPage.filter { $0 == "answer" }.count == 4,
+                "\(accepted)")
         let files = (try? FileManager.default.contentsOfDirectory(atPath: out.path)) ?? []
         // With PAGE_SHOTS=DIR, its screenshots there too, named acting-*.png (WebApp/shots/ is made that way).
         if let shots = ProcessInfo.processInfo.environment["PAGE_SHOTS"] {

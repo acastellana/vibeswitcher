@@ -22,7 +22,7 @@ import VibeCore
 /// Looked at from the engine's queue (`main`); git, the vault and the files' stamps are asked off it (`background`).
 public final class BaseMoveStore: @unchecked Sendable {
     /// A commit as a card lists it.
-    public struct Commit: Equatable, Sendable {
+    public struct Commit: Codable, Equatable, Sendable {
         public var sha: String
         public var subject: String
         public init(sha: String, subject: String) {
@@ -33,10 +33,10 @@ public final class BaseMoveStore: @unchecked Sendable {
 
     /// What a base-move card showed: the base branch, where it was (and how that's known), where it is, the commits
     /// between, and why the vault didn't take it.
-    public struct Shown: Equatable, Sendable {
+    public struct Shown: Codable, Equatable, Sendable {
         /// How "from" is known: the head the vault recorded (`recorded`), the commit the user named (`given`), a
         /// snapshot's (E8: `unverified`), or not at all (`none`: the card lists the base's last commits).
-        public enum From: String, Sendable { case recorded, given, unverified, none }
+        public enum From: String, Codable, Sendable { case recorded, given, unverified, none }
 
         public var branch: String
         public var from: String?

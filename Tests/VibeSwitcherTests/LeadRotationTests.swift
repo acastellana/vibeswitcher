@@ -35,7 +35,10 @@ struct LeadRotationTests {
     }
 
     @MainActor final class World {
-        var now = Date().addingTimeInterval(1000)
+        /// The injected clock, on a whole second: the transcript's stamps (`ISO8601DateFormatter`: whole seconds, rounded to
+        /// the millisecond first) then say its instants exactly. With a fraction of .9995 s or more, the last reply 70
+        /// minutes back was stamped a second later, and the note said "idle 69 minutes" (one run in about 2,150).
+        var now = Date(timeIntervalSince1970: (Date().timeIntervalSince1970 + 1000).rounded(.down))
         var mode = LeadRotationMode.context
         var handoverMarker = ""
         var requested = 0
@@ -469,7 +472,7 @@ struct LeadRotationTests {
         #expect(world.requested == 0, "Asking a lead whose cache expired for a note would re-send its whole context")
         #expect(world.holder == world.fresh.id.uuidString)
         let note = try String(contentsOfFile: world.root + "/.vibeswitcher/scheduled-lead-handover.md", encoding: .utf8)
-        #expect(note.contains("VibeSwitcher wrote this note") && note.contains("idle 70 minutes with 238k tokens"))
+        #expect(note.contains("VibeSwitcher wrote this note") && note.contains("idle 70 minutes with 238k tokens"), "\(note)")
         #expect(world.controller.rotationNotices[world.fresh.id]?.contains("prompt cache had expired") == true)
         let turns = try String(contentsOfFile: LeadLaunch.turnsFile(root: world.root), encoding: .utf8)
         #expect(turns.contains("keep my promise"), "The fresh lead still gets the last turns with the user")

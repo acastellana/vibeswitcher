@@ -40,6 +40,8 @@ export const UNCONFIRMED_KEY = 'vibeswitcher.unconfirmed';
 export function connectSocket(store, options) {
   const {
     url, WebSocket, storage, validate, build = Promise.resolve(null), rebuild = null,
+    // The tabs of this origin, for sharing acting (a BroadcastChannel, or none).
+    share = null, tabId = globalThis.crypto?.randomUUID?.() || String(Math.random()),
     setTimeout: later = globalThis.setTimeout, clearTimeout: cancel = globalThis.clearTimeout,
     location = globalThis.location, history = globalThis.history, reload = () => globalThis.location.reload(),
     log = (...args) => console.warn(...args),
@@ -63,6 +65,43 @@ export function connectSocket(store, options) {
   // and "act" while the node's level lets pages act. A reload loses it: the page then reads and drafts until it is
   // paired again.
   let actSecret = null;
+  // The tabs of one origin share acting, memory to memory (`share`, a BroadcastChannel named per node): a tab without
+  // the secret asks; one that acts answers with it and the token it belongs to; the asker connects again with them.
+  // A secret the node refused here (`acts-ended`, or a hello without "watch" after taking it) isn't taken again, and
+  // an `acts-ended` is told to the others, which drop it too. Nothing is written to any storage but the token, as ever.
+  const refused = new Set();
+  // The secret came from a sibling and no hello has confirmed it here yet.
+  let borrowed = false;
+  function ask() { share?.postMessage({ type: 'ask', from: tabId }); }
+  function shared(message) {
+    if (!message || typeof message !== 'object') return;
+    if (message.type === 'ask' && message.from !== tabId && actSecret && !borrowed && token()) {
+      share.postMessage({ type: 'give', to: message.from, token: token(), act: actSecret });
+    } else if (message.type === 'give' && (!message.to || message.to === tabId) && !actSecret
+               && typeof message.act === 'string' && typeof message.token === 'string' && !refused.has(message.act)
+               // A tab holding another pairing's token never swaps it for this one silently.
+               && (!token() || token() === message.token)) {
+      actSecret = message.act;
+      borrowed = true;
+      keep(message.token);
+      pair = null;
+      // Connect again with them: now, or at once if this tab had stopped (unpaired).
+      if (reloading) return;
+      if (!socket || stopped) {
+        stopped = false;
+        cancel(timer);
+        open();
+      } else socket.close();
+    } else if (message.type === 'ended' && typeof message.act === 'string') {
+      refused.add(message.act);
+      if (actSecret === message.act) {
+        actSecret = null;
+        store.setActsLost('ended');
+        socket?.close();
+      }
+    }
+  }
+  if (share) share.onmessage = (event) => shared(event.data);
   let stopped = false;
   let attempts = 0;
   let timer = null;
@@ -112,7 +151,10 @@ export function connectSocket(store, options) {
     timer = null;
     if (stopped) return;
     const credential = pair ? { pair } : token() ? { token: token() } : null;
-    if (!credential) return store.setConnection('unpaired');
+    if (!credential) {
+      ask();
+      return store.setConnection('unpaired');
+    }
     authed = false;
     const ws = new WebSocket(url);
     socket = ws;
@@ -156,6 +198,7 @@ export function connectSocket(store, options) {
     switch (message.kind) {
       case 'hello': return hello(message);
       case 'paired': return paired(message);
+      case 'passkey': return passkey(message);
       case 'bye': return bye(message);
       case 'snapshot':
       case 'delta': return event(message);
@@ -174,10 +217,22 @@ export function connectSocket(store, options) {
     // A hello without "watch": this connection's pairing isn't a confirmed one (any more): the secret goes, and the
     // tab says it no longer acts (its pairing ended: run out, ended in the terminal, acting lowered).
     if (!rights.includes('watch') && actSecret) {
+      // A sibling's secret this node didn't take here: not asked for again, and nothing said to the others.
+      refused.add(actSecret);
+      if (!borrowed) store.setActsLost('ended');
       actSecret = null;
-      store.setActsLost('ended');
     }
-    const phrase = typeof message.auth?.phrase === 'string' ? message.auth.phrase : null;
+    borrowed = false;
+    // Acting here (its own pairing, or a sibling's): this tab acted, and has nothing to say about not acting.
+    if (rights.includes('act') && actSecret) {
+      flag(ACTED_KEY, true);
+      store.setActsLost(null);
+    }
+    // The words: a pairing waiting for the terminal (no "watch" yet) shows them to be typed there; a confirmed one
+    // keeps them as this page's name (the terminal names a page by them, as when it adds a passkey).
+    const words = typeof message.auth?.phrase === 'string' ? message.auth.phrase : null;
+    const phrase = rights.includes('watch') ? null : words;
+    store.setPageWords(rights.includes('watch') ? words : null);
     const newer = !!(mine && message.assets && message.assets !== mine);
     pair = null;
     // A code just redeemed by a page older than the node's build: reloaded before any phrase shows (the confirmation
@@ -195,6 +250,8 @@ export function connectSocket(store, options) {
     acted = false;
     flag(UNCONFIRMED_KEY, false);
     store.setKinds(Array.isArray(message.kinds) ? message.kinds : [], message.plugins, rights);
+    // Not acting here: a sibling tab may be.
+    if (!actSecret) ask();
     // The page's own build unknown (/build.json failed at its load): asked again, so the next switch is seen.
     if (!mine && message.assets && rebuild) Promise.resolve(rebuild()).then((assets) => { if (assets && !mine) mine = assets; }, () => {});
     if (newer && actSecret) {
@@ -225,11 +282,23 @@ export function connectSocket(store, options) {
     if (typeof message.act !== 'string' || !Array.isArray(message.rights)) return;
     actSecret = message.act;
     store.setPhrase(null);
-    store.setActsLost(null);
-    flag(ACTED_KEY, true);
+    if (typeof message.phrase === 'string') store.setPageWords(message.phrase);
+    // Also sent again when the level rises under an open page: "act" then may come, or not (127.0.0.1 at confirm). Only
+    // a pairing that acts counts as this tab having acted; then the other tabs of this origin act with it too.
+    if (message.rights.includes('act')) {
+      store.setActsLost(null);
+      flag(ACTED_KEY, true);
+      if (token()) share?.postMessage({ type: 'give', to: null, token: token(), act: actSecret });
+    }
     if (Array.isArray(message.kinds)) return store.setKinds(message.kinds, message.plugins ?? store.state.plugins, message.rights);
     store.setKinds(store.state.kinds, store.state.plugins, message.rights);
     socket?.close();
+  }
+
+  // The terminal asks to add a passkey (`vibeswitcher web --passkey`): its offer, until it ends here or elsewhere.
+  function passkey(message) {
+    if (message.op === 'register' && typeof message.register === 'string' && message.challenge && message.user?.id) store.setPasskeyOffer(message);
+    else if (message.op === 'ended' && (!message.register || store.state.passkeyOffer?.register === message.register)) store.setPasskeyOffer(null);
   }
 
   function bye(message) {
@@ -438,7 +507,13 @@ export function connectSocket(store, options) {
 
   return {
     // This page no longer acts (the node's `acts-ended`: the pairing ended, the level was lowered, it was revoked).
-    dropAct() { actSecret = null; },
+    dropAct() {
+      if (actSecret) {
+        refused.add(actSecret);
+        share?.postMessage({ type: 'ended', act: actSecret });
+      }
+      actSecret = null;
+    },
     // The user dismissed "this tab no longer acts": it isn't said again after a reload either.
     forgetActed() { flag(ACTED_KEY, false); },
     // The user's own reload, for a newer build: the tab then says it no longer acts.

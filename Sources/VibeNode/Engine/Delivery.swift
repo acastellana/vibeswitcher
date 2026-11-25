@@ -50,6 +50,7 @@ extension LeadEngine {
                  order given: Int? = nil, then: @escaping (Bool) -> Void = { _ in }) {
         let project = NodeIds.project(root: root)
         let (order, id) = (given ?? leads.next(), UUID().uuidString)
+        if sender == .user, let action { went(action, as: id) }
         if leads.held[project]?.isEmpty == false || sendingHeld.contains(root) || posting.contains(root) || recordingUser[root] != nil {
             reads.async({ _ in built() }) { [weak self] text in
                 guard let self else { return }
@@ -60,9 +61,10 @@ extension LeadEngine {
             return
         }
         posting.insert(root)
-        post(id: id, built: built, from: sender, root: root) { [weak self] went, text in
+        post(id: id, built: built, from: sender, root: root) { [weak self] went, text, target in
             guard let self else { return }
             self.posting.remove(root)
+            if went { self.noted(target, root: root) }
             if !went {
                 self.leads.hold(.init(id: id, text: text, from: sender, order: order, action: action), root: root)
                 self.note("lead: holding a message for \(LeadMail.project(of: root)) (no lead the vault binds runs there)")
@@ -76,18 +78,39 @@ extension LeadEngine {
     }
 
     /// The messages held for `root`'s lead, sent one after another in the order sent while it takes them; each stays
-    /// held (and at rest) until it went. On `queue`.
+    /// held (and at rest) until it went. A post that finds no lead is tried again after `heldRetryDelays`, without
+    /// waiting for the next refresh (WitnessOffEngineQueueTests on a starved CI runner, 2026-11-24: one slow lookup left
+    /// 16 of 30 messages held); only once those are spent is the project's notice raised (`noted`). On `queue`.
     func deliverHeld(root: String) {
         let project = NodeIds.project(root: root)
         guard !sendingHeld.contains(root), !posting.contains(root), recordingUser[root] == nil, let first = leads.held[project]?.first else { return }
         sendingHeld.insert(root)
-        post(id: first.id, built: { first.text }, from: first.from, root: root, restored: restoredHeld.contains(first.id)) { [weak self] went, _ in
+        post(id: first.id, built: { first.text }, from: first.from, root: root, restored: restoredHeld.contains(first.id)) { [weak self] went, _, target in
             guard let self else { return }
             self.sendingHeld.remove(root)
-            guard went else { return }
+            guard went else { return self.heldWentNowhere(target, root: root) }
+            self.heldTries[root] = nil
+            self.noted(target, root: root)
             self.restoredHeld.remove(first.id)
             if first.from == .user, let action = first.action { self.spend(action, root: root) }
             self.leads.delivered(project: project, order: first.order)
+            self.deliverHeld(root: root)
+        }
+    }
+
+    /// A held message's post found no lead (`target`): tried again after the next of `heldRetryDelays`; once they are
+    /// spent, the project's notice says why (`noted`), and the next refresh or wake tries again. On `queue`.
+    func heldWentNowhere(_ target: Target, root: String) {
+        let tries = heldTries[root, default: 0]
+        guard tries < heldRetryDelays.count else {
+            heldTries[root] = nil
+            return noted(target, root: root)
+        }
+        heldTries[root] = tries + 1
+        guard heldRetrying.insert(root).inserted else { return }
+        queue.asyncAfter(deadline: .now() + heldRetryDelays[tries]) { [weak self] in
+            guard let self else { return }
+            self.heldRetrying.remove(root)
             self.deliverHeld(root: root)
         }
     }
@@ -139,7 +162,7 @@ extension LeadEngine {
     /// process's to write, and the held ids are in `engine.json`, so a worker could have one dropped unposted). On
     /// `queue`; `then` too, with the text as built.
     private func post(id: String, built: @escaping @Sendable () -> String, from sender: SteerMessage.Sender, root: String,
-                      restored: Bool = false, then: @escaping (_ went: Bool, _ text: String) -> Void) {
+                      restored: Bool = false, then: @escaping (_ went: Bool, _ text: String, _ target: Target) -> Void) {
         let (vault, runs, inbox, inboxRead, hosted) = (link.vault, leadRuns, self.root, self.inboxRead, link.sessions)
         reads.async({ files -> (target: Target, posted: Bool, text: String) in
             let text = built()
@@ -155,10 +178,9 @@ extension LeadEngine {
             return (target, posted, text)
         }) { [weak self] target, posted, text in
             guard let self else { return }
-            self.noted(target, root: root)
             if posted, sender == .user, case .lead(let lead) = target { self.postedAsUser(id, tty: lead.tty, text: text, agentPid: lead.pid) }
             if posted { self.wake(root: root) }
-            then(posted, text)
+            then(posted, text, target)
         }
     }
 
