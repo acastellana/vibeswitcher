@@ -120,3 +120,26 @@ test('colour: a failure is drawn in its own role (--danger), the scrims in one (
   assert.equal(value('mark.found', 'background'), 'var(--highlight)');
   for (const selector of ['.fold.failed', '.output.failed', '.task-failure', '.act-said.refused']) assert.equal(value(selector, 'color'), 'var(--danger)', selector);
 });
+
+test('motion: every duration is --dur-1, --dur-2 or --loop, every curve named (never the browser’s default), and reduced motion stops it all', () => {
+  const found = [];
+  for (const block of RULES) {
+    for (const d of block.declarations) {
+      if (!/^(transition|animation)(-duration|-delay|-timing-function)?$/.test(d.property) || reasoned(d)) continue;
+      // A literal time other than 0s.
+      if (/(^|[\s,(])(?!0s\b)\d*\.?\d+m?s\b/.test(d.value)) found.push(`${where(block, d)}: a literal duration`);
+      if (d.property !== 'transition' && d.property !== 'animation') continue;
+      if (/^none( !important)?$/.test(d.value) || d.value === 'var(--state-transition)') continue;
+      for (const part of d.value.split(/,(?![^(]*\))/).map((one) => one.trim())) {
+        if (/^visibility 0s/.test(part)) continue;
+        if (!/var\(--(dur-1|dur-2|loop)\)/.test(part)) found.push(`${where(block, d)}: "${part}" without a duration token`);
+        else if (!/var\(--ease-(out|in)\)|\blinear\b|ease-in-out/.test(part)) found.push(`${where(block, d)}: "${part}" on the browser’s default curve`);
+        else if (/ease-in-out|linear/.test(part) && !/var\(--loop\)/.test(part)) found.push(`${where(block, d)}: "${part}": linear and ease-in-out are for loops`);
+      }
+    }
+  }
+  assert.deepEqual(found, []);
+  const reduced = ALL.find((block) => /prefers-reduced-motion: reduce/.test(block.media) && block.selector.startsWith('*'));
+  assert.ok(reduced, 'a reduced-motion block for everything');
+  assert.match(reduced.declarations.map((d) => `${d.property}: ${d.value}`).join('; '), /animation: none !important; transition: none !important/);
+});
