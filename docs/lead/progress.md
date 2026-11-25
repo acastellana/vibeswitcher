@@ -4542,3 +4542,4 @@ Turn what's a real bug into a task (one already on the board needs nothing); the
 - 2026-11-25 15:07 Kept a-side-by-side unmerged: By design nothing of it merges into main: the side-by-side app, its clone and its build live in this worktree (.vibeswitcher/v2-side), and the user's trial of v2 on this Mac uses them. No merge and no cleanup until the user is finished with v2 here (decision 2026-11-25 13:41).
 - 2026-11-25 15:42 Planned v2-on-the-mac: v2 on the Mac, step 4: measure on this real Mac what the Mac's approval rule depends on (in a clone; report and local commits, nothing merges)
 - 2026-11-25 15:50 Started a worker on v2-on-the-mac
+- 2026-11-25 16:04 Planned v2-s-web-page: v2's web page: fix what the lead's review found (in a clone; a local branch for v2, nothing merges)
