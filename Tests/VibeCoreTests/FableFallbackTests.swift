@@ -97,10 +97,11 @@ extension LeadAdvanceTests {
         lead.usageClock = { Date(timeIntervalSince1970: Self.fableReset) }
         try vault.setReviewFloor(LeadReviewFloor(), root: root)
         #expect(lead.auditModel(lead.workflow) == "opus")
-        // But "one"'s worker ran on Opus: under the floor its audit stays off Opus after the reset too.
+        // But "one"'s worker ran on Opus: under the floor its audit stays off Opus after the reset too, and goes on
+        // Fable, the project's default, which its worker never ran on (the host's record of its launch says Opus).
         let one = try #require(task("one", root))
         #expect(one.launchedModels?[try #require(one.worker)] == "opus")
-        #expect(lead.auditModel(lead.workflow, task: one) == "sonnet")
+        #expect(lead.auditModel(lead.workflow, task: one) == "fable")
     }
 
     @Test(arguments: [nil, "opus", "sonnet"] as [String?], [false, true])

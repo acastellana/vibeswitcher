@@ -107,6 +107,9 @@ public protocol LeadRuntime: AnyObject {
     func memoryReading() -> MacMemory?
     /// The model the project's workers run on, as `claude --model` names it (nil: Claude's default, not known).
     func workerModel(root: String) -> String?
+    /// The command the session host started `session` with, as it recorded it (nil: not known). See
+    /// `LeadToolset.launchedWorkersModel`.
+    func launchCommand(of session: String) -> String?
     /// How a session's agent ended, in the witness's words (see `LeadWitness.verifierEnding`): its session's ending
     /// ("killed by SIGTERM"), or that its agent quit and left the session's shell open; nil while its agent runs, or
     /// when that can't be told.
@@ -3214,7 +3217,9 @@ public final class LeadToolset: MCPToolset {
     }
 
     /// The model this project's audits run on: verifier_model, or another than the workers' (see `LeadWorkflow.auditModel`).
-    /// `task`: the task audited, whose own model (add_task's model) counts as the workers' under the floor.
+    /// `task`: the task audited, whose own model (add_task's model) counts as the workers' under the floor. The workers'
+    /// model is the one the task's workers were launched on, as the session host recorded their commands
+    /// (`launchedWorkersModel`), else the project's default (Claude Code's model: `LeadRuntime.workerModel`).
     /// While Fable is held back (`AccountUsage.fableHeldBack`), the workers' model and the task's are the ones their
     /// sessions start on (opus in Fable's place), and the audit goes on the most capable model that isn't Fable and that
     /// the floor allows.
@@ -3225,7 +3230,8 @@ public final class LeadToolset: MCPToolset {
     /// the same automatic fallback as other audits: the most capable other model the floor allows, even with no
     /// verifier_model set. At the reset the ordinary Fable preference applies again.
     func auditModel(_ workflow: LeadWorkflow, task: LeadTask? = nil, security: Bool = false) -> String {
-        let workers = runtime.workerModel(root: root)
+        // The model the task's workers were launched on, by the host's record, else the project's default.
+        let workers = launchedWorkersModel(task) ?? runtime.workerModel(root: root)
         let launched = task.flatMap { task in task.worker.flatMap { task.launchedModels?[$0] } }
             .flatMap { $0.isEmpty || $0.hasPrefix("codex") ? nil : $0 }
         // A re-rolled task's Fable counts as its own model (`LeadTask.intendedModel`).
