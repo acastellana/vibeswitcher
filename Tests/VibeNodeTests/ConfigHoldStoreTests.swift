@@ -356,14 +356,14 @@ struct ConfigHoldStoreTests {
         #expect(short.contains("    test_command: make test; " + changed), "\(short)")
         #expect(short.contains("    base_branch: main; no earlier accept known"), "\(short)")
         #expect(short.contains("  * marks a line that is " + same), "\(short)")
-        #expect(short.contains("  ? marks a line that is " + unknown), "\(short)")
+        #expect(short.contains("  ? marks a line that " + unknown), "\(short)")
         #expect(short.filter { $0.contains(AcceptedSnapshot.unvouchedPrefix) }.count == 1, "\(short)")
         #expect(short.filter { $0.contains(same) && !$0.contains(AcceptedSnapshot.unvouchedPrefix) }.count == 1, "\(short)")
         #expect(short.contains { $0.hasPrefix("  compared with your last accept") && $0.contains("unsealed snapshot") }, "\(short)")
 
         let long = CardText.lines(card.value, long: true)
         #expect(long.contains("    merge_policy: ask_all; " + same), "\(long)")
-        #expect(long.contains("    ~/.claude/settings.json, hash abc123: env; " + unknown), "\(long)")
+        #expect(long.contains("    ~/.claude/settings.json, hash abc123: env; " + unknown + " " + AcceptedSnapshot.unvouchedWhy), "\(long)")
         #expect(long.filter { $0.contains(AcceptedSnapshot.unvouchedPrefix) }.count == 2, "\(long)")
         #expect(!long.contains { $0.contains("marks a line") }, "\(long)")
 

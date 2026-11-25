@@ -123,9 +123,13 @@ public enum CardText {
             // What the card leaves to the home folder's card (`sharedHome`: not among its items): one line.
             let shared = config["sharedHome"]?["names"]?.array?.compactMap(\.string) ?? []
             let firstLook = config["firstLook"]?.bool == true
-            lines.append(items.isEmpty && shared.isEmpty && firstLook
+            // A card shown, never kept (nothing held, nothing to record): it says so, never what an accept would do.
+            let shownOnly = card["open"]?.bool == false && card["closed"]?.string == "nothing to accept"
+            lines.append(items.isEmpty && shared.isEmpty && shownOnly
+                         ? "  nothing held, and nothing waits to be accepted"
+                         : items.isEmpty && shared.isEmpty && firstLook
                          ? "  nothing held: the node restarted (or this project's rules were never accepted): confirm them once, accepting records what workflow.md proposes"
-                         : items.isEmpty && shared.isEmpty ? "  nothing held: accepting records the guard rails or review floor workflow.md proposes"
+                         : items.isEmpty && shared.isEmpty ? "  nothing held: accepting records the rules workflow.md proposes"
                          : items.isEmpty ? "  held (no worker, verifier or merge until accepted), none of it this folder's own:"
                          : "  held (no worker, verifier or merge until accepted):")
             // The folder, never the other card's id: that card may be superseded or accepted since this one was drawn.
@@ -141,7 +145,7 @@ public enum CardText {
                 line += ", hash " + inert(item["hash"]?.string)
                 if let change = item["change"]?.string { line += ": " + inert(change) }
                 if item["outside"]?.bool == true { line += " (changed outside a team session)" }
-                if long { line += item["sinceAccept"]?.string.map { "; " + inert($0) } ?? "" }
+                if long { line += item["sinceAccept"]?.string.map { "; " + inert(AcceptedSnapshot.longSince($0)) } ?? "" }
                 else { line += shortSince(item["sinceAccept"]?.string, legend: &legend) }
                 lines.append(line)
                 for file in item["files"]?.array?.compactMap(\.string) ?? [] { lines.append("      " + inert(file)) }
@@ -162,12 +166,13 @@ public enum CardText {
             if !rails.isEmpty { lines.append("  workflow.md's guard rails (read each value: the accept records them):") }
             for rail in rails {
                 var line = "    \(inert(rail["key"]?.string)): \(inert(rail["value"]?.string))"
-                if long { line += rail["sinceAccept"]?.string.map { "; " + inert($0) } ?? "" }
+                if long { line += rail["sinceAccept"]?.string.map { "; " + inert(AcceptedSnapshot.longSince($0)) } ?? "" }
                 else { line += shortSince(rail["sinceAccept"]?.string, legend: &legend) }
                 lines.append(line)
             }
             for mark in ["*", "?"] {
-                if let word = legend[mark] { lines.append("  \(mark) marks a line that is " + inert(word)) }
+                // "can't be compared …" reads after "that", "the same …" after "that is".
+                if let word = legend[mark] { lines.append("  \(mark) marks a line that " + (mark == "?" ? "" : "is ") + inert(word)) }
             }
             if let at = config["lastAccept"]?.string {
                 lines.append("  compared with your last accept (\(inert(at))), from an unsealed snapshot a worker could rewrite: read the values")

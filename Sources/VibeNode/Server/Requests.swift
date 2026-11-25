@@ -929,7 +929,7 @@ public final class Requests: @unchecked Sendable {
             return session.liveValue(prompt: sessions?.prompts.values[id], draft: sessionDrafts.values[id], queued: heldSends.values[id] ?? [])
         }
         result.leads = (engine?.leads.leads.values.sorted { $0.root < $1.root } ?? []).map(leadValue)
-        result.cards = Self.counts(engine?.cards.counts() ?? [:])
+        result.cards = Self.counts(engine?.cards.counts() ?? [:], open: engine?.cards.list() ?? [])
         result.plugins = engine?.plugins.onValue ?? .array([])
         result.accepted = accepted.map(\.value)
         result.notices = statusNotices(reminders: reminders)
@@ -976,8 +976,16 @@ public final class Requests: @unchecked Sendable {
     }
 
     /// Open cards counted by kind, as `status` gives them.
-    static func counts(_ counts: [CardStore.Kind: Int]) -> WireKinds.Status.CardCounts {
-        .init(questions: counts[.question] ?? 0, approvals: counts[.approval] ?? 0, config: counts[.configHeld] ?? 0, base: counts[.baseMove] ?? 0)
+    static func counts(_ counts: [CardStore.Kind: Int], open: [CardStore.Card] = []) -> WireKinds.Status.CardCounts {
+        // What `vibeswitcher approve` sets aside (`ApproveRequest`): held config whose accept records the project's rules,
+        // and a base move from a commit the node hadn't recorded.
+        let configOwn = open.filter { $0.kind == .configHeld && $0.config?.recordsRules == true }.map(\.root)
+        let baseOwn = open.filter { card in
+            guard card.kind == .baseMove, let shown = card.base, shown.from != shown.to else { return false }
+            return !([.recorded, .given].contains(shown.fromIs) && shown.from != nil)
+        }.map(\.root)
+        return .init(questions: counts[.question] ?? 0, approvals: counts[.approval] ?? 0, config: counts[.configHeld] ?? 0, base: counts[.baseMove] ?? 0,
+                     configOwn: configOwn.isEmpty ? nil : Array(Set(configOwn)).sorted(), baseOwn: baseOwn.isEmpty ? nil : Array(Set(baseOwn)).sorted())
     }
 
     static func word(_ state: HostLink.State) -> String {

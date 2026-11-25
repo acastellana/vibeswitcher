@@ -293,7 +293,7 @@ struct PageVoicedTests {
     /// changed or new rail, and a rail whose snapshot isn't sealed by this host's vault (the card's "?") are each refused.
     @Test func aPageAcceptsAHeldConfigOnlyWhenItsRailsAreTheSame() {
         #expect(ConfigHoldStore.pageNotSame(Self.shown()).isEmpty)
-        #expect(ConfigHoldStore.pageNotSame(Self.shown(lastAccept: nil)) == ["no accept is recorded yet (a first accept)"])
+        #expect(ConfigHoldStore.pageNotSame(Self.shown(lastAccept: nil)) == ["no accept recorded yet"])
         #expect(ConfigHoldStore.pageNotSame(Self.shown(rail: "changed since your last accept (…), from “make check”")) == ["test_command"])
         #expect(ConfigHoldStore.pageNotSame(Self.shown(rail: AcceptedSnapshot.unvouched("2026-11-24"))) == ["test_command"])
         #expect(ConfigHoldStore.pageNotSame(Self.shown(rail: nil)) == ["test_command"])
@@ -316,9 +316,9 @@ struct PageVoicedTests {
         #expect(try ConfigHoldStore.pageRefusal(Self.shown(), root: "/r", vault: vault(rails: ["test_command": LeadVault.hash("true")], floor: LeadReviewFloor()))
                 == ["test_command"])
         #expect(try ConfigHoldStore.pageRefusal(Self.shown(), root: "/r", vault: vault(rails: recorded, floor: LeadReviewFloor(auditFinders: 3)))
-                == ["the review floor"])
-        #expect(try ConfigHoldStore.pageRefusal(Self.shown(), root: "/r", vault: vault(rails: recorded, floor: nil)) == ["the review floor"])
-        #expect(try ConfigHoldStore.pageRefusal(Self.shown(), root: "/r", vault: vault(rails: nil, floor: nil)).contains("no guard rails are recorded yet"))
+                == ["the review rules"])
+        #expect(try ConfigHoldStore.pageRefusal(Self.shown(), root: "/r", vault: vault(rails: recorded, floor: nil)) == ["the review rules"])
+        #expect(try ConfigHoldStore.pageRefusal(Self.shown(), root: "/r", vault: vault(rails: nil, floor: nil)).contains("no rules recorded yet"))
     }
 
     /// On a node: a page's accept of a first-accept card is refused before anything is recorded; one whose card says the
@@ -338,11 +338,11 @@ struct PageVoicedTests {
         let first = card(Self.shown(lastAccept: nil))
         let firstAction = UUID().uuidString.lowercased()
         let refused = try #require(await fromPage(world, page, "config.accept", ["card": .string(first.id), "seen": .string(first.seen)], action: firstAction))
-        #expect(refused.error?.code == "voice" && refused.error?.message.contains("accept this one from a terminal") == true, "\(refused)")
+        #expect(refused.error?.code == "voice" && refused.error?.message.contains("accept this one in a terminal") == true, "\(refused)")
         #expect(await world.actions().allSatisfy { $0.action != firstAction })
         let looksSame = card(Self.shown())
         let late = try #require(await fromPage(world, page, "config.accept", ["card": .string(looksSame.id), "seen": .string(looksSame.seen)]))
-        #expect(late.error?.code == "refused" && late.error?.message.contains("no guard rails are recorded yet") == true, "\(late)")
+        #expect(late.error?.code == "refused" && late.error?.message.contains("no rules recorded yet") == true, "\(late)")
         #expect(world.card(looksSame.id)?.isOpen == true)
         // The approve list and its batch.
         let changed = card(Self.shown(rail: "changed since your last accept (…)"))

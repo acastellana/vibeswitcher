@@ -55,7 +55,7 @@ struct SessionMarksTests {
         #expect(renamed.status == 0 && renamed.output.contains("names session \(short)") && renamed.output.contains("is “Release notes”"),
                 "\(renamed.output)")
         #expect(await node.eventuallyStatus { listed($0)?["name"] as? String == "Release notes" })
-        let shown = try await node.run(["status"])
+        let shown = try await node.run(["status", "--long"])
         #expect(shown.output.contains("“Release notes”"), "\(shown.output)")
 
         let paused = try await node.runOnTerminal(["pause", short, "--hours", "2"])

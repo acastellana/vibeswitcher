@@ -2,11 +2,14 @@ import Foundation
 import VibeCore
 import VibeNode
 
-/// `vibeswitcher status [--json]`: the node as its server sees it (sessions, leads, cards, the user's-voice requests
+/// `vibeswitcher status [--long] [--json]`: the node as its server sees it (sessions, leads, cards, the user's-voice requests
 /// it accepted, its notices, the host's notes), with what the command line reads itself (the engine plan's E1,
 /// EN-D15): the machine's facts (`NodeFacts`, the standing plain-mode line first) and the journal (starts, stops and
 /// server restarts nothing explains, until acknowledged; accepted requests the journal has no entry for; entries from
-/// a cgroup that isn't a terminal's). With no node it exits 69, naming `status --probe`.
+/// a cgroup that isn't a terminal's). With no node it exits 69, naming `status --probe`. The default is 8 lines at most
+/// (2026-11-25, the text walk after a switch: 17 to 22 lines every time): the node and its build, the page, the
+/// sessions and leads, the open cards, what waits on the user with the command that settles each kind, and one line for
+/// anything wrong; `--long` says everything, as before.
 ///
 /// `vibeswitcher status --probe [--json]`: stage 1's local read, without the server: the agent sessions on this machine
 /// (`LocalSessions`), one line each: terminal, agent, folder, status, since when.
@@ -21,19 +24,20 @@ import VibeNode
 /// `vibeswitcher status --ack`: acknowledges what the journal shows (a journal entry the command line writes after the
 /// typed code), never a server request.
 enum StatusCommand {
-    static let usage = "usage: vibeswitcher status [--json] | status --health [--json] | status --probe [--json] | status --check-updates [--json] | status --ack"
+    static let usage = "usage: vibeswitcher status [--long] [--json] | status --health [--json] | status --probe [--json] | status --check-updates [--json] | status --ack"
 
     /// The JSON form's version.
     static let format = 1
 
     static func run(_ arguments: [String]) -> Int32 {
         let words = Set(arguments)
-        guard words.count == arguments.count, words.isSubset(of: ["--json", "--probe", "--ack", "--health", "--check-updates"]),
+        guard words.count == arguments.count, words.isSubset(of: ["--json", "--long", "--probe", "--ack", "--health", "--check-updates"]),
+              !(words.contains("--long") && !words.isSubset(of: ["--long", "--json"])),
               !(words.contains("--ack") && words.count > 1), words.intersection(["--health", "--probe", "--check-updates"]).count < 2 else { return Say.usage(usage) }
         if words.contains("--check-updates") { return checkUpdates(json: words.contains("--json")) }
         if words.contains("--probe") { return probe(json: words.contains("--json")) }
         if words.contains("--ack") { return acknowledge() }
-        return throughServer(json: words.contains("--json"), health: words.contains("--health"))
+        return throughServer(json: words.contains("--json"), health: words.contains("--health"), long: words.contains("--long"))
     }
 
     /// `--check-updates`: the server's `update.check`, said as `UpdateWatch.lines` (with `json`, its object).
@@ -70,7 +74,7 @@ enum StatusCommand {
     }
 
     /// `health`: only the health digest (`NodeHealth.lines`; with `json`, its object).
-    static func throughServer(json asJSON: Bool, health: Bool = false) -> Int32 {
+    static func throughServer(json asJSON: Bool, health: Bool = false, long: Bool = false) -> Int32 {
         let context = NodeContext.current()
         context.sayScratch()
         let client: NodeClient
@@ -101,7 +105,7 @@ enum StatusCommand {
         let facts = context.facts()
         // A node started detached: the weaker rule, and its pid file any worker can write (the start plan's S3).
         let modeLines = NodeTexts.statusLines(mode: context.mode)
-        let journal = journalLines(context, accepted: result.accepted ?? [], epoch: result.epoch, restart: result.restart)
+        let journal = journalLines(context, accepted: result.accepted ?? [], epoch: result.epoch, restart: result.restart, long: long || asJSON)
         if asJSON {
             var report = raw.object ?? [:]
             report["format"] = .int(format)
@@ -110,6 +114,10 @@ enum StatusCommand {
             report["journal"] = .array(journal.map(NodeWire.Value.string))
             let data = NodeWire.printable(NodeWire.line(NodeWire.Value.object(report)))
             Platform.Stdio.output(data)
+            return 0
+        }
+        guard long else {
+            Say.out(short(result, modeLines: modeLines, journal: journal).joined(separator: "\n"))
             return 0
         }
         var out: [String] = []
@@ -136,7 +144,7 @@ enum StatusCommand {
             out.append("  \(inert(session["terminal"]?.string))  \(inert(session["agent"]?.string))  \(inert(session["cwd"]?.string))  \(inert(session["status"]?.string))\(name)\(paused)")
         }
         out += CardText.statusLines(leads: result.leads ?? [], cards: result.cards.map(NodeWire.Value.init(wire:)))
-        if let line = CardText.waitingLine(result.cards) { out.append(line) }
+        if let line = waitingLine(result.cards) { out.append(line) }
         // What a build switch would wait on now, each with what it does and since when (the rule on switches).
         let holders = (result.switchBlockers ?? []).map { inert($0) }
         if !holders.isEmpty { out.append("a build switch waits now on: " + holders.joined(separator: "; ")) }
@@ -146,14 +154,101 @@ enum StatusCommand {
         if let plugins = result.plugins?.array {
             out.append("plugins on: " + (plugins.isEmpty ? "none" : plugins.map { inert($0["id"]?.string) }.joined(separator: ", ")) + " (`vibeswitcher plugin list`)")
         }
+        // What was done in the user's voice: its kind, when, and from where (the page's has no pid: `NodeLive.webPeer`).
         for accepted in result.accepted ?? [] {
-            out.append("accepted: \(inert(accepted["kind"]?.string)) at \(inert(accepted["at"]?.string)) from pid \(accepted["pid"]?.int.map(String.init) ?? "?") in \(inert(accepted["cgroup"]?.string)): \(inert(accepted["commandLine"]?.array?.compactMap(\.string).joined(separator: " ")))")
+            out.append("accepted: \(inert(accepted["kind"]?.string)) at \(inert(accepted["at"]?.string)) "
+                       + (accepted["pid"]?.int == 0 ? "from the page" : "from your terminal"))
         }
         for notice in result.notices ?? [] { out.append("notice: \(inert(notice))") }
         if let line = updateLine(result.update) { out.append(line) }
         out += journal
         Say.out(out.joined(separator: "\n"))
         return 0
+    }
+
+    /// The default `status`: 8 lines at most. The node and its build; the page and whether it can act; the sessions and
+    /// leads, counted; the open cards; what waits on the user, each kind with the command that settles it; and the first
+    /// thing wrong (a restart not yet acknowledged, the unit's last failure, a start or stop nothing explains, a path the
+    /// host took back, a notice), with how many more; then where the rest is (`--long`).
+    static func short(_ result: WireKinds.Status.Result, modeLines: [String], journal: [String]) -> [String] {
+        var out: [String] = []
+        let build = result.server?.commit.map { String($0.prefix(12)) } ?? "?"
+        out.append("node \(inert(result.node)): build \(inert(build)), up since \(inert(result.server?.startedAt))")
+        out.append(shortWebLine(result.web, tailnet: result.webTailnet))
+        let sessions = result.sessions ?? []
+        let agents = Dictionary(grouping: sessions.compactMap { $0["agent"]?.string }, by: { $0 }).map { "\($0.value.count) \(inert($0.key))" }.sorted()
+        let leads = (result.leads ?? []).compactMap { $0["root"]?.string }.map { inert(($0 as NSString).lastPathComponent) }
+        out.append("sessions: \(sessions.count)" + (agents.isEmpty ? "" : " (\(agents.joined(separator: ", ")))")
+                   + "; leads: \(leads.count)" + (leads.isEmpty ? "" : " (\(leads.joined(separator: ", ")))"))
+        let cards = result.cards
+        func counted(_ count: Int?, _ one: String, _ many: String) -> String? {
+            guard let count, count > 0 else { return nil }
+            return "\(count) \(count == 1 ? one : many)"
+        }
+        let open = [counted(cards?.questions, "question", "questions"), counted(cards?.approvals, "approval", "approvals"),
+                    counted(cards?.config, "held config", "held config"), counted(cards?.base, "base move", "base moves")].compactMap { $0 }
+        out.append("open cards: " + (open.isEmpty ? "none" : open.joined(separator: ", ")))
+        if let line = waitingLine(cards) { out.append(line) }
+        let wrong = wrongLines(result, modeLines: modeLines, journal: journal)
+        if let first = wrong.first {
+            out.append("needs a look: \(first)" + (wrong.count > 1 ? "; and \(wrong.count - 1) more" : ""))
+        }
+        out.append("more: vibeswitcher status --long")
+        return out
+    }
+
+    /// The page in one line: its address (and the tailnet's), and whether it can act.
+    static func shortWebLine(_ web: NodeWire.Value?, tailnet: NodeWire.Value?) -> String {
+        guard let web, let state = web["state"]?.string else { return "web: not known (an older server)" }
+        let level = web["acts"]?["level"]?.string ?? (web["acts"]?["on"]?.bool == true ? "trust" : "off")
+        let acts: String
+        switch level {
+        case "trust": acts = "the page acts as you at each click"
+        case "confirm": acts = "the page acts with your passkey"
+        default: acts = "the page reads and drafts, it can't act"
+        }
+        let there = tailnet?["state"]?.string == "listening"
+            ? " and http://\(inert(tailnet?["name"]?.string)):\(tailnet?["port"]?.int.map(String.init) ?? "?")/ on the tailnet" : ""
+        switch state {
+        case "off": return "web: off (`vibeswitcher web` opens it)"
+        case "listening":
+            let pages = web["connections"]?.int ?? 0
+            return "web: http://127.0.0.1:\(web["port"]?.int.map(String.init) ?? "?")/\(there), \(pages) page\(pages == 1 ? "" : "s") open; \(acts)"
+        default: return "web: \(inert(state))"
+        }
+    }
+
+    /// What waits on the user, each kind with the one command that settles it: held config and base moves
+    /// `vibeswitcher approve` takes with one code, and those it sets aside by their own command (held config whose accept
+    /// records the project's rules: `config held FOLDER`; a base that moved from a commit the node hadn't recorded:
+    /// `base show FOLDER`), and the questions and approvals to answer. Nil when nothing waits.
+    static func waitingLine(_ cards: WireKinds.Status.CardCounts?) -> String? {
+        guard let cards else { return nil }
+        let ownConfig = cards.configOwn ?? [], ownBase = cards.baseOwn ?? []
+        var parts: [String] = []
+        let batch = max(0, (cards.config ?? 0) - ownConfig.count) + max(0, (cards.base ?? 0) - ownBase.count)
+        if batch > 0 { parts.append("\(batch) to accept: `vibeswitcher approve`") }
+        for folder in ownConfig { parts.append("rules to confirm in \(inert((folder as NSString).lastPathComponent)): `vibeswitcher config held \(inert(folder))`") }
+        for folder in ownBase { parts.append("a base move in \(inert((folder as NSString).lastPathComponent)): `vibeswitcher base show \(inert(folder))`") }
+        let answers = (cards.questions ?? 0) + (cards.approvals ?? 0)
+        if answers > 0 { parts.append("\(answers) to answer: `vibeswitcher questions`") }
+        return parts.isEmpty ? nil : "waiting on you: " + parts.joined(separator: "; ")
+    }
+
+    /// What is wrong, most pressing first, each in a few words with what to do: the host not connected, a restart not
+    /// yet acknowledged, the journal's warnings, a path the host took back, the mode's warning, the server's notices.
+    static func wrongLines(_ result: WireKinds.Status.Result, modeLines: [String], journal: [String]) -> [String] {
+        var wrong: [String] = []
+        if let state = result.host?.state, state != "connected" { wrong.append("the node's host is \(inert(state))") }
+        // The journal's lines but its informational ones (the last start's line, no journal to read on a scratch node).
+        wrong += journal.filter { line in
+            !line.hasPrefix("journal: the node's last start at") && !line.hasPrefix("journal: no ")
+                && !(line.hasPrefix("the node's unit last ended: success"))
+        }.map { $0.hasPrefix("journal: ") ? String($0.dropFirst("journal: ".count)) : $0 }
+        wrong += (result.host?.notes?.replacedPaths ?? []).map { "the host took back its path \(inert($0))" }
+        wrong += modeLines
+        wrong += (result.notices ?? []).map(inert)
+        return wrong
     }
 
     /// The last update check's answer when it has nothing to offer (a newer build is a notice): up to date, or why it
@@ -169,14 +264,14 @@ enum StatusCommand {
     /// the host ended and whether a `vibeswitcher start` explains it, until acknowledged; unexplained starts, stops and
     /// server restarts not yet acknowledged, how the unit's last process ended, and `NodeJournal.marks` (given the
     /// server's `epoch`).
-    static func journalLines(_ context: NodeContext, accepted: [NodeWire.Value], epoch: String?, restart: NodeWire.Value? = nil) -> [String] {
+    static func journalLines(_ context: NodeContext, accepted: [NodeWire.Value], epoch: String?, restart: NodeWire.Value? = nil, long: Bool = true) -> [String] {
         let entries: [JournalEntry]
         let state = context.unitState()
         let ended = state?.result.map { "it last ended \(inert($0)), status \(inert(state?.execMainStatus))" }
         switch context.journalEntries() {
         case .failure(let failure):
             // Without a journal the restart is still said, and that nothing here can say how the host ended.
-            return restartLines(restart, ended: ended ?? "how it ended isn't known (\(failure.reason))", explained: nil, acknowledged: false)
+            return restartLines(restart, ended: ended ?? "how it ended isn't known (\(failure.reason))", explained: nil, acknowledged: false, long: long)
                 + ["journal: \(failure.reason)"]
         case .success(let read): entries = read
         }
@@ -186,7 +281,7 @@ enum StatusCommand {
             let event = NodeJournal.Event(kind: .start, at: at)
             lines += restartLines(restart, ended: ended ?? "how it ended isn't known (the node's unit says nothing)",
                                   explained: NodeJournal.unexplained(starts: [event], entries: entries, rule: rule).isEmpty,
-                                  acknowledged: NodeJournal.acknowledged(event, entries: entries, rule: rule))
+                                  acknowledged: NodeJournal.acknowledged(event, entries: entries, rule: rule), long: long)
         }
         if let state, let result = state.result {
             lines.append("the node's unit last ended: \(inert(result)), status \(inert(state.execMainStatus)), started \(inert(state.execMainStartTimestamp))")
@@ -208,16 +303,19 @@ enum StatusCommand {
 
     /// The host restart the server saw (E8), until acknowledged: when, what it reset, how the host before ended
     /// (`ended`) and whether a `vibeswitcher start` or `stop` entry explains it (`explained`; nil: no journal to ask).
-    static func restartLines(_ restart: NodeWire.Value?, ended: String, explained: Bool?, acknowledged: Bool) -> [String] {
+    /// Not `long`: what happened and what to do, in one line; `long`: how the host before ended, whether a start explains
+    /// it, and what the restart reset.
+    static func restartLines(_ restart: NodeWire.Value?, ended: String, explained: Bool?, acknowledged: Bool, long: Bool = true) -> [String] {
         guard let restart, let at = restart["at"]?.string, !acknowledged else { return [] }
+        guard long else { return ["the node restarted at \(inert(at)): it asks you to confirm each project's rules once (`vibeswitcher status --ack` once read)"] }
         let explains: String
         switch explained {
         case true?: explains = "a `vibeswitcher start` or `stop` entry in the journal explains it"
         case false?: explains = "no `vibeswitcher start` or `stop` entry in the journal explains it"
         case nil: explains = "whether you started it can't be read"
         }
-        return ["restart: the session host restarted at \(inert(at)) (the one before started at \(inert(restart["before"]?.string))); \(ended); "
-                + "\(explains). Its vault started over: \(inert(restart["reset"]?.string)) (`vibeswitcher status --ack` once read)"]
+        return ["restart: the node restarted at \(inert(at)) (the one before started at \(inert(restart["before"]?.string))): it asks you to confirm "
+                + "each project's rules once; \(ended); \(explains); what it forgot: \(inert(restart["reset"]?.string)) (`vibeswitcher status --ack` once read)"]
     }
 
     /// `status --ack`: the journal entry that clears what it shows, after the typed code.

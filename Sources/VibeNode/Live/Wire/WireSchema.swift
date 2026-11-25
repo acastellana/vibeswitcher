@@ -307,7 +307,9 @@ public enum WireSchema {
             shape("node.rule", from: "Requests.statusValue", [field("mode", .words(["systemd", "weaker", "closed", "approval"])), field("says", .string),
                                                              field("scopes", strings)]),
             shape("node.cards", from: "Requests.counts", [field("questions", .int), field("approvals", .int), field("config", .int),
-                                                         field("base", .int)]),
+                                                         field("base", .int),
+                                                         // What `vibeswitcher approve` sets aside, by folder (each its own command).
+                                                         optional("configOwn", strings), optional("baseOwn", strings)]),
             shape("node.accepted", from: "Requests.Accepted.value", [
                 field("kind", .string), field("action", Kind.string.orNull), field("subject", Kind.string.orNull), field("at", .date),
                 field("pid", .int), field("cgroup", Kind.string.orNull), field("commandLine", strings)]),

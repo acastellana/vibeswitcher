@@ -54,7 +54,7 @@ extension LeadEngine {
         guard let sessions = restart.sessions, !sessions.isEmpty else { return [] }
         let names = sessions.prefix(5).map { "\(ConfigSeal.inert($0.name, limit: 60)) in \(ConfigSeal.inert($0.folder, limit: .max))" }
             .joined(separator: ", ") + (sessions.count > 5 ? ", …" : "")
-        return ["the session host restarted at \(at): \(sessions.count) of your own session\(sessions.count == 1 ? "" : "s") ended with it "
+        return ["the node restarted at \(at): \(sessions.count) of your own session\(sessions.count == 1 ? "" : "s") ended with it "
                 + "(\(names)). `vibeswitcher reopen` lists \(sessions.count == 1 ? "it" : "them") and reopens each in its same conversation; "
                 + "`vibeswitcher reopen --forget` puts the offer away"]
     }

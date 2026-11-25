@@ -22,18 +22,18 @@ enum ConfigCommand {
         case "accept":
             guard arguments.count == 2 else { return Say.usage(usage) }
             return CardCommand.act(WireKinds.ConfigAccept.self, card: arguments[1], args: { _, id, code in .init(card: id, code: code) }, what: { card in
-                "This accepts the agents' config card \(ConfigSeal.inert(card["id"]?.string ?? "", limit: 80)) showed, sealing exactly that, "
-                    + "then records the floor and guard rails workflow.md proposes."
+                "This accepts what card \(ConfigSeal.inert(card["id"]?.string ?? "", limit: 80)) shows, exactly as shown,\n"
+                    + "and the project's rules and review rules as workflow.md has them."
             }) { result in
                 // One line per path sealed, so a long accept reads as a list.
                 let sealed = result.sealed ?? []
                 Say.out(sealed.isEmpty ? "accepted: nothing held" : "accepted \(sealed.count) held change\(sealed.count == 1 ? "" : "s"):")
                 sealed.forEach { Say.out("  " + ConfigSeal.inert($0, limit: 200)) }
-                Say.out(result.floorRecorded == true ? "  the review floor is recorded" : "  no review floor recorded")
+                Say.out(result.floorRecorded == true ? "  the review rules are recorded" : "  no review rules recorded")
                 if let waits = result.homeWaits, !waits.isEmpty {
                     let folder = ConfigSeal.inert(result.homeFolder ?? "~", limit: 300)
-                    Say.out("  still held: \(waits.count) of your home folder's config: accept \(folder)'s card (`vibeswitcher config held \(folder)`), "
-                        + "then this folder's card again (`vibeswitcher config held FOLDER`): its guard rails and review floor are recorded then")
+                    Say.out("  still waiting: \(waits.count) of your home folder's changes: accept them first (`vibeswitcher config held \(folder)`), "
+                        + "then this folder's again, which records its rules")
                 }
             }
         default: return Say.usage(usage)

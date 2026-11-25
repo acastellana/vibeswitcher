@@ -28,10 +28,10 @@ import VibeNode
 /// 6. The host's start line (ST-D24), read back and shown: from the journal (`NodeJournal.events`), or on a node
 ///    started detached from the host's log (`NodeJournal.hostLogStart`).
 enum SwitchCommand {
-    static let usage = "usage: vibeswitcher switch COMMIT | rollback"
+    static let usage = "usage: vibeswitcher switch COMMIT [--long] | rollback [--long]"
 
     static func run(_ arguments: [String], rollback: Bool) -> Int32 {
-        var arguments = arguments
+        var arguments = Say.takingLong(arguments)
         // A scratch node's test: the wait for the new server, shortened (`--test-server-wait SECONDS`).
         var serverWait = SwitchSettle.serverWait
         if let at = arguments.firstIndex(of: "--test-server-wait"), at + 1 < arguments.count, let seconds = TimeInterval(arguments[at + 1]) {
@@ -103,14 +103,18 @@ enum SwitchCommand {
         if !blockers.isEmpty {
             return Say.refused("\(command) can't run now: " + SwitchRequest.blockedText(blockers) + ". Nothing was asked or switched.")
         }
-        let what = (rollback
+        // Two lines (from, to; when, and what after); the whole of it with --long.
+        let full = (rollback
             ? NodeTexts.rollback(from: from, to: target, line: status.builds?.rollback?.line ?? "", rewrites: rewrites(context))
             : NodeTexts.switch(from: from, to: target, rewrites: rewrites(context)))
             + (parks.isEmpty
-                ? "\n  it can run now: no worker or verifier runs (a change the seal holds under the builds or the unit's folder would still stop it: `vs config held`)"
+                ? "\n  it can run now: no worker or verifier runs (a change not yet accepted under the builds or the unit's folder would still stop it: `vibeswitcher approve`)"
                 : "\n  it parks first the workers that only wait on their lead (idle since their last report; their worktrees and commits stay, "
                     + "start_worker continues there, and their leads are told): " + parks.joined(separator: ", ")
-                    + "\n  then it runs, unless one of them has begun a turn meanwhile (a change the seal holds under the builds or the unit's folder would still stop it: `vs config held`)")
+                    + "\n  then it runs, unless one of them has begun a turn meanwhile (a change not yet accepted under the builds or the unit's folder would still stop it: `vibeswitcher approve`)")
+        let what = NodeTexts.switchShort(from: from, to: target, rewrites: rewrites(context), parks: parks,
+                                         rollbackLine: rollback ? (status.builds?.rollback?.line ?? "") : nil)
+            + (Say.long ? "\n" + full : "")
 
         // What the switch waits for before it returns (`SwitchSettle`): the server that stays, and a paired page's listener.
         let serverBefore = client.hello.server
@@ -137,7 +141,7 @@ enum SwitchCommand {
         case .success(let result, _):
             let parked = (result.parked ?? []).map { ConfigSeal.inert($0, limit: 120) }
             if !parked.isEmpty { Say.out("parked first (idle since their last report; their leads were told): " + parked.joined(separator: ", ")) }
-            Say.out(ConfigSeal.inert(result.said ?? "switched", limit: 400))
+            Say.detail(ConfigSeal.inert(result.said ?? "switched", limit: 400))
             guard result.outcome == "handed-over" || result.outcome == "already" else {
                 Say.err("vibeswitcher: the server's reply names no outcome: \(ConfigSeal.inert(result.outcome ?? "none", limit: 64))")
                 return 1
@@ -153,8 +157,24 @@ enum SwitchCommand {
             Say.err("vibeswitcher: \(ConfigSeal.inert(refused.text, limit: .max))")
             return refused.exitCode
         }
-        Say.out(startLine(context, commit: target, hostPid: hostPid))
+        Say.detail(startLine(context, commit: target, hostPid: hostPid))
+        resultLines(context, target: target, rewrites: rewrites(context)).forEach(Say.out)
         return 0
+    }
+
+    /// What a switch says when done, in two lines: switched (and, where the node's start line changed, the one command
+    /// that lets the teams go on), and the page's address.
+    static func resultLines(_ context: NodeContext, target: String, rewrites: NodeTexts.SwitchRewrites) -> [String] {
+        var first = "switched to build \(ConfigSeal.inert(String(target.prefix(12)), limit: 64))"
+        switch rewrites {
+        case .unitAndCurrent, .currentOnly: first += "; teams wait until you accept the new build: `vibeswitcher approve`"
+        case .nothing: break
+        }
+        var page = "web: off (`vibeswitcher web` opens it)"
+        if case .success(let client) = NodeClient.connect(context, warn: false), case .success(let status, _) = client.read(WireKinds.Status.self, WireNoArgs()) {
+            page = StatusCommand.shortWebLine(status.web, tailnet: status.webTailnet)
+        }
+        return [first, page]
     }
 
     /// Waits, after a handover, for the server that stays and, when a page held a token, its web listener on the same
@@ -167,7 +187,8 @@ enum SwitchCommand {
                        target: String, serverWait: TimeInterval = SwitchSettle.serverWait) {
         switch due {
         case .some(true):
-            Say.out("the new build's server starts in place of pid \(serverBefore.pid) once the old one is idle (up to \(Int(serverWait)) s): waiting for it")
+            Say.out("waiting for the new build's server (up to \(Int(serverWait)) s)…")
+            Say.detail("  it starts in place of pid \(serverBefore.pid) once the old one is idle")
         case .some(false): break
         case .none:
             Say.out("whether the server is replaced isn't known (its build's record or the target's can't be read): not waited for")
@@ -175,7 +196,7 @@ enum SwitchCommand {
         let server = SwitchSettle.waitForServer(before: serverBefore.pid, target: target, due: due, wait: serverWait, look: { lookAtServer(context) })
         switch server {
         case .answered(let pid, let commit):
-            if due == true { Say.out("the new build's server answers: pid \(pid), build \(ConfigSeal.inert(commit, limit: 64))") }
+            if due == true { Say.detail("the new build's server answers: pid \(pid), build \(ConfigSeal.inert(commit, limit: 64))") }
         case .slow(let line), .refused(let line):
             Say.out(line)
             return
@@ -196,7 +217,7 @@ enum SwitchCommand {
             }
             usleep(250_000)
         }
-        Say.out("the web listener is back on port \(web.port ?? 0): a page paired before the switch reconnects by itself")
+        Say.detail("the web listener is back on port \(web.port ?? 0): a page paired before the switch reconnects by itself")
     }
 
     /// A connection to the server that stays after a handover: one on its way out, or none answering, is asked again for
@@ -248,10 +269,10 @@ enum SwitchCommand {
         let check = { hostCheck(context) }
         switch context.mode {
         case .scratch:
-            Say.out("scratch node: no unit to rewrite")
+            Say.detail("scratch node: no unit to rewrite")
             return nil
         case .node where Platform.CodeIdentity.isAvailable:
-            Say.out("the Mac: no unit to rewrite")
+            Say.detail("the Mac: no unit to rewrite")
             return nil
         case .node:
             let tools = NodeStarter.node(accountHome: accountHome, uid: getuid())
@@ -259,16 +280,16 @@ enum SwitchCommand {
             guard let hostPid else { return unknownPid(commit) }
             if case .failure(let refused) = SwitchFollowUp.apply(tools: tools, prefix: prefix, accountHome: accountHome, commit: commit,
                                                                  hostPid: hostPid, hostCheck: check) { return refused }
-            Say.out("the unit's ExecStart names \(commit) and `current` names it: the next start runs it")
+            Say.detail("the unit's ExecStart names \(commit) and `current` names it: the next start runs it")
         case .detached:
             if !handedOver, SwitchFollowUp.isCurrent(prefix: prefix, commit: commit) { return nil }
             guard let hostPid else { return unknownPid(commit) }
             if case .failure(let refused) = SwitchFollowUp.applyDetached(prefix: prefix, commit: commit, hostPid: hostPid, hostCheck: check) {
                 return refused
             }
-            Say.out("no systemd: `current` names \(commit), so the next `vs start` runs it")
+            Say.detail("no systemd: `current` names \(commit), so the next `vs start` runs it")
         }
-        Say.out("the seal holds every team until `vs config accept` (`vs config held` shows what changed)")
+        Say.detail("every team waits until you accept the new build (`vibeswitcher approve`)")
         return nil
     }
 

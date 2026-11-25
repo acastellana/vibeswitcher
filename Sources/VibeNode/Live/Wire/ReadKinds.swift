@@ -110,11 +110,18 @@ extension WireKinds {
             public var approvals: Int?
             public var config: Int?
             public var base: Int?
-            public init(questions: Int?, approvals: Int?, config: Int?, base: Int?) {
+            /// The folders of held config `vibeswitcher approve` sets aside (its accept records the project's rules:
+            /// `config held FOLDER`), and of base moves it sets aside (from a commit the node hadn't recorded: `base show
+            /// FOLDER`): `status` names each with its own command.
+            public var configOwn: [String]?
+            public var baseOwn: [String]?
+            public init(questions: Int?, approvals: Int?, config: Int?, base: Int?, configOwn: [String]? = nil, baseOwn: [String]? = nil) {
                 self.questions = questions
                 self.approvals = approvals
                 self.config = config
                 self.base = base
+                self.configOwn = configOwn
+                self.baseOwn = baseOwn
             }
         }
 

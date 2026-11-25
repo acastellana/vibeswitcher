@@ -24,7 +24,15 @@ struct NodeAcceptanceTests {
     func a1Status() async throws {
         let node = try await ScratchNode(scratch)
         defer { node.stop() }
-        let shown = try await node.run(["status"])
+        // The default: 8 lines at most (2026-11-25, the text walk), none of the words a user can't act on.
+        let short = try await node.run(["status"])
+        let shortLines = short.output.split(separator: "\n")
+        #expect(short.status == 0 && shortLines.count <= 8 && shortLines.first?.hasPrefix("node local: build ") == true, "\(short.output)")
+        for word in ["snapshot", "seal", "vault", "hash", "guard rail", "review floor", "/non-systemd", "pid "] {
+            #expect(!short.output.contains(word), "\(word): \(short.output)")
+        }
+        #expect(short.output.contains("more: vibeswitcher status --long"), "\(short.output)")
+        let shown = try await node.run(["status", "--long"])
         #expect(shown.status == 0 && !shown.errors.lowercased().contains("error"), "\(shown.output)\(shown.errors)")
         let lines = shown.output.components(separatedBy: "\n")
         #expect(lines.contains { $0.hasPrefix("node local, server pid ") && $0.contains("build \(ScratchNode.commit)") }, "\(shown.output)")
@@ -98,7 +106,7 @@ struct NodeAcceptanceTests {
         #expect(session.command?.hasSuffix("--model 'haiku'") == true, "\(String(describing: session.command))")
         let id = NodeIds.session(host: session.id)
         #expect(await node.eventuallyStatus { Self.listed($0, id) != nil }, "\(node.said)")
-        let shown = try await node.run(["status"])
+        let shown = try await node.run(["status", "--long"])
         #expect(shown.output.contains(String(session.id.uuidString.lowercased().prefix(8))) || shown.output.contains(session.tty), "\(shown.output)")
     }
 
@@ -259,7 +267,7 @@ struct NodeAcceptanceTests {
         let listed = await node.eventuallyStatus { status in
             ((status["sessions"] as? [[String: Any]]) ?? []).contains { $0["terminal"] as? String == worker.tty }
         }
-        let status = try await node.run(["status"])
+        let status = try await node.run(["status", "--long"])
         #expect(listed, "\(status.output)")
         let running = await Self.polled(timeout: 60) {
             let board = try? await node.run(["board", repo.path])
@@ -572,7 +580,7 @@ struct NodeAcceptanceTests {
         defer { node.stop() }
         let (session, files) = try await Self.newClaude(node)
         let pid = EngineEndToEndTests.state(files)["pid"] as? Int
-        let switched = try await node.runOnTerminal(["switch", b])
+        let switched = try await node.runOnTerminal(["switch", b, "--long"])
         #expect(switched.status == 0 && switched.output.contains("handed over") && switched.output.contains("build \(b)"),
                 "\(switched.output)\(switched.errors)\n\(node.said)")
         #expect(await node.eventuallyStatus { (($0["host"] as? [String: Any])?["notes"] as? [String: Any])?["build"] as? String == b }, "\(node.said)")
@@ -633,7 +641,7 @@ struct NodeAcceptanceTests {
         try #require(await eventually(timeout: 60) { ids.allSatisfy { node.keptCards().contains($0) } && node.keptCards().contains("keep Reader") }, "\(node.said)")
         let serverBefore = try #require(node.serverPID)
 
-        let switched = try await node.runOnTerminal(["switch", b])
+        let switched = try await node.runOnTerminal(["switch", b, "--long"])
         #expect(switched.status == 0 && switched.output.contains("handed over") && switched.output.contains("the new build's server answers")
                 && switched.output.contains("the web listener is back on port \(opened.port)"), "\(switched.output)\(switched.errors)\n\(node.said)")
         // Right after it returns, a command reaches the new build's server.
@@ -917,7 +925,7 @@ struct NodeAcceptanceTests {
         #expect(found.status == 0 && found.output.contains("a newer build is on v2: \(newer) (2 commits ahead)")
                 && found.output.contains(UpdateWatch.installLine(newer)), "\(found.output)\(found.errors)")
         // The answer is kept: `status` says it too.
-        let status = try await node.run(["status"])
+        let status = try await node.run(["status", "--long"])
         #expect(status.output.contains("notice: a newer build is on v2: \(newer)"), "\(status.output)")
         // The running build is the newest: none.
         try answer(.init(running: running, runs: runs.map { var run = $0; run.headSha = running; return run }))
@@ -948,7 +956,7 @@ struct NodeAcceptanceTests {
         try #require(await eventually(timeout: 120) { files.calls().count == 2 }, "\(node.said)")
         try hook(node, ["hook_event_name": "Stop"], tty: worker.tty, pid: pid)
         try #require(await node.eventuallyStatus { (($0["switchParks"] as? [String]) ?? []).contains { $0.contains(worker.tty) } }, "\(node.said)")
-        let switched = try await node.runOnTerminal(["switch", b])
+        let switched = try await node.runOnTerminal(["switch", b, "--long"])
         #expect(switched.status == 0 && switched.output.contains("it parks first the workers that only wait on their lead")
                 && switched.output.contains("parked first") && switched.output.contains(worker.tty) && switched.output.contains("handed over"),
                 "\(switched.output)\(switched.errors)\n\(node.said)")
@@ -981,7 +989,7 @@ struct NodeAcceptanceTests {
         // Nothing left, and every accepted request (the batch's, its item's) is in the journal.
         let again = try await node.runOnTerminal(["approve", "--only", "config"])
         #expect(again.status == 0 && again.output.contains("Nothing a plain accept settles is waiting on you."), "\(again.output)\(again.errors)")
-        let status = try await node.run(["status"])
+        let status = try await node.run(["status", "--long"])
         #expect(!status.output.contains("the journal has no entry for it"), "\(status.output)")
         let kinds = ((try await node.statusJSON())["accepted"] as? [[String: Any]] ?? []).compactMap { $0["kind"] as? String }
         #expect(kinds.contains("approve") && kinds.filter { $0 == "config.accept" }.count == 2, "\(kinds)")
@@ -1015,14 +1023,14 @@ struct NodeAcceptanceTests {
         #expect(refused.said.contains("vs-shell: this node doesn't have shell on") && refused.said.contains("status 1"), "\(refused.said)")
         let asked = node.root.appendingPathComponent("shell-requests/asked")
         #expect(((try? FileManager.default.contentsOfDirectory(atPath: asked.path)) ?? []).isEmpty, "nothing filed")
-        let status = try await node.run(["status"])
+        let status = try await node.run(["status", "--long"])
         #expect(status.output.contains("plugins on: none"), "\(status.output)")
 
         let on = try await node.runOnTerminal(["plugin", "on", "shell"])
         #expect(on.status == 0 && on.output.contains("shell is on"), "\(on.output)\(on.errors)")
         let again = try await node.run(["plugin", "list"])
         #expect(again.output.contains("shell  Shell requests  on (its default)"), "\(again.output)")
-        #expect(try await node.run(["status"]).output.contains("plugins on: shell"))
+        #expect(try await node.run(["status", "--long"]).output.contains("plugins on: shell"))
     }
 
     @Test("A42: an agent's vs-shell request through the shell plugin: its card lists the folder and the command whole, and answer CARD run with the code starts the shell that runs it")

@@ -198,18 +198,30 @@ struct SwitchTests {
         #expect(text.contains("a running team keeps its build until its lead restarts"), "\(text)")
         // ST-D16: who runs the old build's tool server after the switch (no worker is live at one: ST-D15).
         #expect(text.contains("a lead started before the switch keeps starting its workers with the old build's tool server"), "\(text)")
-        #expect(text.contains("the seal holds every team until `vs config accept`") && text.contains("builds folder") && text.contains("unit"), "\(text)")
+        #expect(text.contains("every team waits until you accept the new build and the unit's change"), "\(text)")
         // The code is still typed (EN-D5): `build.switch` is a state change in the user's voice.
         #expect(NodeWire.kinds["build.switch"] == .user && NodeWire.changesState("build.switch"))
     }
 
     /// `rollback`'s confirmation names where it goes and the `installs` line it read, which any worker can edit, so
     /// the user reads it before typing the code; the rest is the switch's.
+    /// The short prompts: a forward switch in two lines; a rollback always with its target whole and the installs line
+    /// it came from (the automated review of 324d0997: the short form had dropped them).
+    @Test func theShortPromptsSayWhatTheCodeIsFor() {
+        let forward = NodeTexts.switchShort(from: Self.a, to: Self.b, rewrites: .nothing("a scratch node"), parks: [])
+        #expect(forward.split(separator: "\n").count == 2 && forward.contains(String(Self.b.prefix(12))), "\(forward)")
+        let line = "\(Self.a) 2026-11-16T10:00:00Z from v2 4f0c1a2"
+        let back = NodeTexts.switchShort(from: Self.b, to: Self.a, rewrites: .unitAndCurrent, parks: [], rollbackLine: line)
+        #expect(back.contains(Self.a) && back.contains("installed as: \(line)") && back.contains("any worker can write that record"), "\(back)")
+        let odd = NodeTexts.switchShort(from: Self.b, to: Self.a, rewrites: .unitAndCurrent, parks: [], rollbackLine: "\(Self.a) \u{1b}[2Jx")
+        #expect(!odd.contains("\u{1b}"), "\(odd)")
+    }
+
     @Test func aRollbackSaysWhereItGoes() {
         let line = "\(Self.a) 2026-11-16T10:00:00Z"
         let text = NodeTexts.rollback(from: Self.b, to: Self.a, line: line, rewrites: .unitAndCurrent)
         #expect(text.contains(Self.a) && text.contains(Self.b) && text.contains(line), "\(text)")
-        #expect(text.contains("keeps every session") && text.contains("the seal holds every team until `vs config accept`"), "\(text)")
+        #expect(text.contains("keeps every session") && text.contains("every team waits until you accept the new build"), "\(text)")
         // A line holding a control character is shown inert.
         let odd = NodeTexts.rollback(from: Self.b, to: Self.a, line: "\(Self.a) \u{1b}[2Jx", rewrites: .unitAndCurrent)
         #expect(!odd.contains("\u{1b}"), "\(odd)")
@@ -224,7 +236,7 @@ struct SwitchTests {
                      NodeTexts.rollback(from: Self.a, to: Self.b, line: line, rewrites: .currentOnly)] {
             #expect(text.contains("`current` is moved to \(Self.b), so the next `vs start` runs it"), "\(text)")
             #expect(!text.contains("unit's ExecStart") && !text.contains("the unit change"), "\(text)")
-            #expect(text.contains("the seal holds every team until `vs config accept`") && text.contains("builds folder"), "\(text)")
+            #expect(text.contains("every team waits until you accept the new build (`vibeswitcher approve`)"), "\(text)")
             #expect(text.contains("keeps every session"), "\(text)")
         }
         for text in [NodeTexts.switch(from: Self.a, to: Self.b, rewrites: .nothing("a scratch node")),
@@ -899,7 +911,7 @@ struct SwitchTests {
         // `status` names what blocks it, so the command line says so before its code, by name, and asks nothing.
         let blockers = (Self.status(client)?["switchBlockers"]?.array ?? []).compactMap(\.string)
         #expect(blockers.count == 1 && blockers[0].contains(worker.tty) && blockers[0].contains("Worker: task-1"), "\(blockers)")
-        let said = try await node.runOnTerminal(["switch", Self.b])
+        let said = try await node.runOnTerminal(["switch", Self.b, "--long"])
         #expect(said.status == 77 && said.output.contains("switch can't run now: no switch of builds while a worker or verifier runs")
                 && said.output.contains(worker.tty) && said.output.contains("Nothing was asked or switched."), "\(said.output)")
         #expect(!said.output.contains("This switches the node") && !said.output.contains("code"), "no confirmation, no code: \(said.output)")
@@ -936,9 +948,9 @@ struct SwitchTests {
         let refused = try #require(WireClient.reply(client.request("build.switch", args: ["commit": .string(Self.b)])))
         let message = refused.error?.message ?? ""
         #expect(message.contains("\(worker.tty) (Worker: task-1): ") && message.contains(" since ") && !message.contains(lead.tty), "\(message)")
-        let shown = try await node.run(["status"])
+        let shown = try await node.run(["status", "--long"])
         #expect(shown.output.contains("a build switch waits now on: \(worker.tty) (Worker: task-1): "), "\(shown.output)")
-        let said = try await node.runOnTerminal(["switch", Self.b])
+        let said = try await node.runOnTerminal(["switch", Self.b, "--long"])
         #expect(said.status == 77 && said.output.contains("\(worker.tty) (Worker: task-1): ") && said.output.contains(" since "), "\(said.output)")
         #expect(Self.host(client).build == Self.a)
     }
@@ -1126,7 +1138,7 @@ struct SwitchTests {
         let node = try await ScratchNode(scratch, build: builds.a, installRoot: builds.root)
         defer { node.stop() }
         #expect(await Self.everythingNames(node, Self.a), "\(node.said)")
-        let switched = try await node.runOnTerminal(["switch", Self.b])
+        let switched = try await node.runOnTerminal(["switch", Self.b, "--long"])
         #expect(switched.status == 0, "\(switched.output)\n\(node.said)")
         #expect(switched.output.contains("This switches the node from the build of commit \(Self.a) to the build of commit \(Self.b)"), "\(switched.output)")
         #expect(switched.output.contains("handed over") && switched.output.contains("build \(Self.b)"), "\(switched.output)")
@@ -1143,7 +1155,7 @@ struct SwitchTests {
         #expect(await Self.everythingNames(onB, Self.b), "\(onB.said)")
         let installs = try String(contentsOf: builds.root.appendingPathComponent("installs"), encoding: .utf8)
         let lineA = try #require(installs.split(separator: "\n").first { $0.hasPrefix(Self.a) }.map(String.init))
-        let back = try await onB.runOnTerminal(["rollback"])
+        let back = try await onB.runOnTerminal(["rollback", "--long"])
         #expect(back.status == 0, "\(back.output)\n\(onB.said)")
         #expect(back.output.contains("This rolls the node back from the build of commit \(Self.b) to the build of commit \(Self.a)"), "\(back.output)")
         #expect(back.output.contains(lineA), "\(back.output)")
@@ -1151,7 +1163,7 @@ struct SwitchTests {
         #expect(await Self.everythingNames(onB, Self.a), "\(onB.said)")
         #expect(onB.said.contains(HostStartLine.text(pid: onB.hostPID, commit: Self.a, backtrace: "enable=no")), "\(onB.said)")
         // Nothing before A to roll back to.
-        let none = try await onB.runOnTerminal(["rollback"])
+        let none = try await onB.runOnTerminal(["rollback", "--long"])
         #expect(none.status == 77 && none.output.contains("no build to roll back to"), "\(none.output)")
     }
 
@@ -1165,11 +1177,11 @@ struct SwitchTests {
         defer { node.stop() }
         let server = try #require(node.serverPID)
         let ended = "server child pid \(server) ended for the new build's server"
-        let switched = try await node.runOnTerminal(["switch", Self.b])
+        let switched = try await node.runOnTerminal(["switch", Self.b, "--long"])
         #expect(switched.status == 0, "\(switched.output)\n\(node.said)")
         #expect(switched.output.contains("handed over") && switched.output.contains("build \(Self.b)"), "\(switched.output)")
         #expect(!switched.output.contains("reply was lost"), "the server was replaced before the command line had its reply: \(switched.output)")
-        #expect(switched.output.contains("the new build's server starts in place of pid \(server)")
+        #expect(switched.output.contains("it starts in place of pid \(server)")
                 && switched.output.contains("the new build's server answers"), "\(switched.output)")
         let hello = try WireClient(node).hello
         #expect(hello.server.pid != server && hello.server.commit == Self.b, "\(hello.server)")
@@ -1185,7 +1197,7 @@ struct SwitchTests {
         let node = try await ScratchNode(scratch, build: builds.a, installRoot: builds.root)
         defer { node.stop() }
         let server = try #require(node.serverPID)
-        let switched = try await node.runOnTerminal(["switch", Self.b, "--test-server-wait", "1"])
+        let switched = try await node.runOnTerminal(["switch", Self.b, "--test-server-wait", "1", "--long"])
         #expect(switched.status == 0, "\(switched.output)\n\(node.said)")
         #expect(switched.output.contains("handed over to \(Self.b); its server hasn't answered yet after")
                 && switched.output.contains("`vibeswitcher status` shows when it does"), "\(switched.output)")
@@ -1224,7 +1236,7 @@ struct SwitchTests {
         try handle.close()
         let node = try await ScratchNode(scratch, build: builds.a, installRoot: builds.root)
         defer { node.stop() }
-        let switched = try await node.runOnTerminal(["switch", Self.b])
+        let switched = try await node.runOnTerminal(["switch", Self.b, "--long"])
         #expect(switched.status == 77, "\(switched.output)\n\(node.said)")
         #expect(switched.output.contains("isn't an installed build") && switched.output.contains("nothing was switched"), "\(switched.output)")
         #expect(!switched.output.contains("This switches the node"), "\(switched.output)")
@@ -1247,7 +1259,7 @@ struct SwitchTests {
         try EngineEndToEndTests.workflow(repo)
         try await node.acceptConfig(repo)
         func refused(_ name: String, sourceLocation: SourceLocation = #_sourceLocation) async throws {
-            let switched = try await node.runOnTerminal(["switch", Self.b])
+            let switched = try await node.runOnTerminal(["switch", Self.b, "--long"])
             #expect(switched.status == 77, "\(switched.output)\n\(node.said)", sourceLocation: sourceLocation)
             #expect(switched.output.contains(name) && switched.output.contains(SwitchRequest.acceptFirst), "\(switched.output)",
                     sourceLocation: sourceLocation)
@@ -1269,7 +1281,7 @@ struct SwitchTests {
         try await refused("~/.config/systemd/user")
         try await node.acceptConfig(repo)
 
-        let switched = try await node.runOnTerminal(["switch", Self.b])
+        let switched = try await node.runOnTerminal(["switch", Self.b, "--long"])
         #expect(switched.status == 0, "\(switched.output)\n\(node.said)")
         #expect(switched.output.contains("handed over") && switched.output.contains("build \(Self.b)"), "\(switched.output)")
     }
@@ -1296,7 +1308,7 @@ struct SwitchTests {
         func logged() -> String { (try? String(contentsOf: log, encoding: .utf8)) ?? "" }
         #expect(await eventually { logged().contains(Self.source(Self.a)) }, "\(logged())")
 
-        let switched = try await node.runOnTerminal(["switch", Self.b])
+        let switched = try await node.runOnTerminal(["switch", Self.b, "--long"])
         try #require(switched.status == 0, "\(switched.output)\n\(node.said)")
         #expect(Self.host(try WireClient(node)).build == Self.b)
         // It answers after the switch, the same process on A's image.
@@ -1340,7 +1352,7 @@ struct SwitchTests {
         let builds = try twoBuilds(paddedServer: true)
         let (node, repo) = try await leadReadyNode(builds)
         defer { node.stop() }
-        let switched = try await node.runOnTerminal(["switch", Self.b])
+        let switched = try await node.runOnTerminal(["switch", Self.b, "--long"])
         try #require(switched.status == 0, "\(switched.output)\n\(node.said)")
         try #require(await Self.everythingNames(node, Self.b), "\(node.said)")
         let lead = try await Self.startLead(node, repo)
@@ -1372,7 +1384,7 @@ struct SwitchTests {
         try #require(await eventually(timeout: 120) { tools.calls().count == 1 }, "\(tools.calls())")
 
         // The switch, with only the lead live.
-        let switched = try await node.runOnTerminal(["switch", Self.b])
+        let switched = try await node.runOnTerminal(["switch", Self.b, "--long"])
         try #require(switched.status == 0, "\(switched.output)\n\(node.said)")
         try #require(await Self.everythingNames(node, Self.b), "\(node.said)")
 

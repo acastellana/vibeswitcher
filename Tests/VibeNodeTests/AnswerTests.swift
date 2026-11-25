@@ -390,4 +390,26 @@ struct AnswerTests {
         #expect(await world.actions().filter { $0.action == action }.isEmpty)
         #expect(world.card(asked.card.id)?.isOpen == true)
     }
+
+    /// `answer CARD TEXT`'s prompt (`AnswerPrompt`, the automated review of 324d0997): the question whole up to 8 lines,
+    /// with its options and proposal; longer, its first 8 lines and how many more, with the command that shows it all.
+    @Test func theAnswerPromptShowsTheQuestionOrSaysHowMuchIsLeft() {
+        func card(_ text: String) -> NodeWire.Value {
+            .object(["id": .string("local:card:1"), "question": .object([
+                "text": .string(text), "options": .array([.string("Yes"), .string("No")]), "proposal": .string("Yes, today"),
+            ])])
+        }
+        let short = AnswerPrompt.lines(card("Ship it?\nIt touches the login page.\nBut not if the audit fails."))
+        for wanted in ["  Ship it?", "  It touches the login page.", "  But not if the audit fails.", "options (the lead's): Yes | No",
+                       "the lead proposes: Yes, today"] {
+            #expect(short.contains(wanted), "\(wanted): \(short)")
+        }
+        #expect(!short.contains { $0.contains("more line") })
+        let long = (1...20).map { "line \($0)" }.joined(separator: "\n")
+        let cut = AnswerPrompt.lines(card(long))
+        #expect(cut.contains("  line 8") && !cut.contains("  line 9"), "\(cut)")
+        #expect(cut.contains("  … 12 more lines: `vibeswitcher answer local:card:1 --long` shows all of it before you answer"), "\(cut)")
+        let whole = AnswerPrompt.lines(card(long), long: true)
+        #expect(whole.contains("  line 20") && !whole.contains { $0.contains("more line") }, "\(whole)")
+    }
 }
