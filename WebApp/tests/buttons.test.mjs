@@ -72,3 +72,87 @@ test('B10: no Set for a setting the node keeps to a terminal; the line and why, 
   }
   setLanguage('en');
 });
+
+// This node as the node sends it (wire/vectors.json), with an update watch's record.
+import { readFileSync } from 'node:fs';
+const vectors = JSON.parse(readFileSync(new URL('../wire/vectors.json', import.meta.url), 'utf8'));
+const nodeValue = () => ({ ...structuredClone(vectors['snapshot.node'].entries[0].value),
+  update: { checkedAt: '2026-11-25T03:00:00.000Z', commit: null, aheadBy: null, install: null, problem: null, running: 'f62aef61' } });
+async function nodeGroup(group, options) {
+  const { nodeView } = await import('../js/views/node.js');
+  const app = fakeApp({ route: { name: 'node', group }, state: { node: nodeValue() }, ...options });
+  const view = nodeView(app);
+  return { app, view, detail: view.columns.detail };
+}
+
+test('B4: Check now asks the node to look, says Checking…, then what it found; refused, the node’s words beside it and the button back', async () => {
+  for (const code of ['es', 'en']) {
+    setLanguage(code);
+    const found = { checkedAt: '2026-11-25T09:00:00.000Z', commit: '5b8e1d2a9c4f7e3b6a0d', aheadBy: 3, install: null, problem: null, running: 'f62aef61', notice: null };
+    let answer = null;
+    const { app, detail } = await nodeGroup('updates', { kinds: ['update.check', 'web.revoke'], reply: () => new Promise((resolve) => { answer = resolve; }) });
+    assert.doesNotMatch(detail.textContent, /--check-updates/, `${code}: no line where the button does it`);
+    const check = buttonNamed(detail, t('upCheckNow'));
+    assert.ok(check, code);
+    check.click();
+    assert.equal(check.disabled, true, 'busy while it looks');
+    assert.equal(check.textContent, t('upChecking'));
+    assert.deepEqual(app.sent, [{ kind: 'update.check', args: {} }]);
+    assert.equal(app.sent[0].kind, 'update.check');
+    answer({ ok: true, result: found });
+    await flush();
+    assert.equal(check.disabled, false);
+    assert.match(detail.textContent, new RegExp(t('upCheckedNewer', { commit: '5b8e1d2a9c4f' }).replace(/[()]/g, '.')));
+    // Refused: in the node's words, the button back.
+    check.click();
+    answer({ ok: false, error: { code: 'refused', message: 'this server doesn’t check for updates (a scratch node asks GitHub nothing)' } });
+    await flush();
+    assert.equal(check.disabled, false);
+    assert.match(find(detail, byClass('refused')).textContent, /scratch node asks GitHub nothing/);
+  }
+  setLanguage('en');
+});
+
+test('B4: where the page doesn’t act, or the node lists no update.check, the line that checks now and no button', async () => {
+  for (const options of [{ acts: false, kinds: ['update.check'] }, { acts: true, kinds: ['set'] }]) {
+    const { detail } = await nodeGroup('updates', options);
+    assert.equal(buttonNamed(detail, 'Check now'), null);
+    assert.match(detail.textContent, /vibeswitcher status --check-updates/);
+  }
+});
+
+test('A5: Remove all paired browsers asks again in place, says this page goes too, then says how many were unpaired', async () => {
+  for (const code of ['es', 'en']) {
+    setLanguage(code);
+    const { app, view, detail } = await nodeGroup('web', { kinds: ['update.check', 'web.revoke'], reply: () => ({ ok: true, result: { revoked: 2, tailnetRevoked: 1 } }) });
+    assert.match(detail.textContent, new RegExp(t('noRevokeWords').slice(0, 30)));
+    const remove = buttonNamed(detail, t('noRevokeAll'));
+    assert.ok(remove, code);
+    assert.ok(remove.classList.contains('danger'), 'drawn as what ends something');
+    remove.click();
+    assert.equal(app.sent.length, 0, 'the first click only asks');
+    assert.equal(remove.textContent, t('noRevokeSure'));
+    assert.ok(buttonNamed(detail, t('acCancel')), 'Cancel beside it');
+    remove.click();
+    await flush();
+    assert.deepEqual(app.sent.map((one) => one.kind), ['web.revoke']);
+    assert.match(detail.textContent, new RegExp(t('noRevoked', { n: 3 })));
+    // A node update draws the groups again: the same control, its words kept.
+    const before = find(view.columns.detail, byClass('revoke'));
+    app.store.state.node = { ...nodeValue(), web: { ...nodeValue().web, tokens: 0 } };
+    app.store.notify('node');
+    assert.match(view.columns.detail.textContent, new RegExp(t('noPagesPaired') + '0'), 'drawn again');
+    assert.equal(find(view.columns.detail, byClass('revoke')), before);
+    assert.match(view.columns.detail.textContent, new RegExp(t('noRevoked', { n: 3 })));
+  }
+  setLanguage('en');
+});
+
+test('A5: elsewhere, the line that unpairs every browser, and why', async () => {
+  for (const options of [{ acts: false, kinds: ['web.revoke'] }, { acts: true, kinds: ['set'] }]) {
+    const { detail } = await nodeGroup('web', options);
+    assert.equal(buttonNamed(detail, 'Remove all paired browsers'), null);
+    assert.match(detail.textContent, /vibeswitcher web --revoke/);
+    assert.match(detail.textContent, options.acts ? /doesn’t take it from a page/ : /reads and drafts/);
+  }
+});

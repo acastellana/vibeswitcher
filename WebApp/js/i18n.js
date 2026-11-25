@@ -1159,6 +1159,20 @@ const EN = {
   // The buttons for what the node takes from an acting page (docs/process/v2-no-terminal.md, table B and A5), and the
   // left column's keys and filter.
   svTerminalKeeps: "Only a terminal sets this one: the node keeps it from pages, as it guards the work or what one project sees of another.",
+  upCheckNow: "Check now",
+  upChecking: "Checking…",
+  upCheckedNewer: "Checked just now: a newer build is out, {commit}",
+  upCheckedCurrent: "Checked just now: this is the newest build.",
+  upCheckedProblem: "The node couldn’t look: {why}",
+  upCheckedNothing: "The node looked, but couldn’t say what it found.",
+  noRevokeWords: "Remove all unpairs every browser paired with this node, on this machine and on your phone, this page too. To use one again, pair it again from a terminal.",
+  noRevokeAll: "Remove all paired browsers",
+  noRevokeSure: "Click again: this page is unpaired too",
+  noRevoking: "Removing…",
+  noRevoked: { one: "Done: 1 browser unpaired, this one too.", other: "Done: {n} browsers unpaired, this one too." },
+  noTheCommandThatRevokes: "the command that unpairs every browser",
+  noRevokeTerminalOnly: "This node doesn’t take it from a page: run it in a terminal.",
+  noRevokePageReads: "This page reads and drafts: run it in a terminal.",
   // END buttons
   // The two columns of Your own sessions, This node and Settings (views/twocol.js).
   tcBackToList: "Back to the list",

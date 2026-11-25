@@ -199,6 +199,8 @@ const ago = (seconds) => new Date(now() - seconds * 1000).toISOString();
     ending: [],
     // Pages acting for the user (`web_acts` on) since an hour ago.
     web: { state: 'listening', port: 8765, tokens: 1, connections: 1, acts: { on: true, since: ago(3600), pages: 1 } },
+    // The update watch's last look (`UpdateWatch.value`): up to date six hours ago.
+    update: { checkedAt: ago(6 * 3600), commit: null, aheadBy: null, install: null, problem: null, running: 'f62aef61' },
     // Your sessions that ended lately (`vibeswitcher resume`).
     ended: [
       { session: id('5c1e7a92'), folder: `${HOME}/projects/example-api`, name: 'example-api', conversation: '7a3f0c21-9b4d-4e8a-a1f2-3c5d7e9b0a14', at: ago(1500), exit: { status: 0, cause: 'exited 0', at: ago(1510) } },
@@ -694,6 +696,8 @@ const ago = (seconds) => new Date(now() - seconds * 1000).toISOString();
     const args = message.args || {};
     // A kind it doesn't list is refused as a node refuses it, whatever it could answer (`?older`'s starts).
     if (!KINDS.includes(message.kind)) return { ok: false, error: { code: 'unknown-kind', message: `this server doesn’t take ${message.kind}` } };
+    // `?refuse=KIND,…`: the node's own refusal of each named kind, so the page's refused state can be seen.
+    if (REFUSE.has(message.kind) && REFUSALS[message.kind]) return refused(REFUSALS[message.kind]);
     if (message.kind === 'answer') {
       // The node's words (`text`, with the card's `seen`); an older page's `answer`.
       args.answer = args.text ?? args.answer;
@@ -1021,17 +1025,43 @@ const ago = (seconds) => new Date(now() - seconds * 1000).toISOString();
       later(400, () => feed.restart());
       return { ok: true, result: { sessionsEnded: sessions.size, host: 'stopped' } };
     }
+    // Check for Updates now (`update.check`, `Requests.updateCheck`): the watch looks at once; here it finds a newer
+    // build, its record in the `node` value too.
+    if (message.kind === 'update.check') {
+      node.update = { checkedAt: new Date().toISOString(), commit: '5b8e1d2a9c4f7e3b6a0d1c2e3f4a5b6c7d8e9f01', aheadBy: 3,
+        install: 'curl -fsSL https://example.invalid/install.sh | sh -s -- 5b8e1d2a9c4f', problem: null, running: 'f62aef61' };
+      emit({ in: 'node', id: 'local', value: node });
+      return { ok: true, result: { ...node.update, notice: null } };
+    }
+    // Every page unpaired (`web.revoke`, `Requests.webRevoke`): the loopback's tokens and the tailnet's; this page's
+    // connection is closed a moment later, as the node's is.
+    if (message.kind === 'web.revoke') {
+      const revoked = node.web.tokens;
+      node.web = { ...node.web, tokens: 0, connections: 0 };
+      emit({ in: 'node', id: 'local', value: node });
+      later(1500, () => store.setConnection('revoked'));
+      return { ok: true, result: { revoked, tailnetRevoked: 1 } };
+    }
     return { ok: false, error: { code: 'unknown-kind', message: `This node doesn’t take ${message.kind}.` } };
   }
 
   // What this mock answers, as a node's `hello.kinds` lists them: a page offers a button only for a kind listed, so
   // nothing it shows here is refused as unknown. `chat.page` is the feed's own (`pageChat`).
   // `?older`: a node that doesn't take a session's reply or a start from a page (STARTS), so the page shows their lines.
+  // `?older` lists none of the buttons' kinds either (BUTTONS: what an acting page sends a node in place of the lines
+  // it showed before, docs/process/v2-no-terminal.md's table B and A5), so their lines can be seen.
   const STARTS = ['lead', 'session.new', 'session.reply', 'session.resume'];
+  const BUTTONS = ['update.check', 'web.revoke'];
   const KINDS = ['chat.page',
     'answer', 'answer.replace', 'tell', 'tell.retract', 'hold', 'send', 'session.draft', 'session.draft.clear', 'session.complete',
     'session.attach', 'session.usage', 'stats', 'session.ports', 'board.task', 'board.image', 'chat.image', 'session.presets', 'brief', 'recent',
-    'mail', 'settings', 'seen', 'push', 'push.decline', 'set', 'stop', ...STARTS].filter((kind) => !options.older || !STARTS.includes(kind));
+    'mail', 'settings', 'seen', 'push', 'push.decline', 'set', 'stop', ...STARTS, ...BUTTONS].filter((kind) => !options.older || (!STARTS.includes(kind) && !BUTTONS.includes(kind)));
+  // The node's own words for refusing each (`?refuse=KIND,…`).
+  const REFUSE = new Set(options.refuse || []);
+  const REFUSALS = {
+    'update.check': 'this server doesn’t check for updates (a scratch node asks GitHub nothing)',
+    'web.revoke': 'the web tokens weren’t dropped: the token file couldn’t be written',
+  };
 
   // ---- The feed's interface (what the WebSocket feed will offer too) ----
 

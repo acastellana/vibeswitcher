@@ -1148,6 +1148,20 @@ export const ES = {
   // Los botones para lo que el nodo acepta de una página que actúa (docs/process/v2-no-terminal.md, tabla B y A5), y
   // las teclas y el filtro de la columna izquierda.
   svTerminalKeeps: "Esto solo se cambia desde una terminal: el nodo no deja que una página lo toque, porque protege el trabajo o lo que un proyecto ve de otro.",
+  upCheckNow: "Buscar ahora",
+  upChecking: "Buscando…",
+  upCheckedNewer: "Buscado ahora mismo: hay una versión más nueva, {commit}",
+  upCheckedCurrent: "Buscado ahora mismo: esta es la versión más nueva.",
+  upCheckedProblem: "El nodo no pudo buscar: {why}",
+  upCheckedNothing: "El nodo buscó, pero no pudo decir qué encontró.",
+  noRevokeWords: "Quitar todos desvincula todos los navegadores vinculados a este nodo, en esta máquina y en tu teléfono, también esta página. Para volver a usar uno, vincúlalo otra vez desde una terminal.",
+  noRevokeAll: "Quitar todos los navegadores vinculados",
+  noRevokeSure: "Pulsa otra vez: esta página también se desvincula",
+  noRevoking: "Quitando…",
+  noRevoked: { one: "Hecho: 1 navegador desvinculado, también este.", other: "Hecho: {n} navegadores desvinculados, también este." },
+  noTheCommandThatRevokes: "la orden que desvincula todos los navegadores",
+  noRevokeTerminalOnly: "Este nodo no lo acepta desde una página: ejecútalo en una terminal.",
+  noRevokePageReads: "Esta página lee y prepara borradores: ejecútalo en una terminal.",
   // END buttons
   // The two columns of Your own sessions, This node and Settings (views/twocol.js).
   tcBackToList: "Volver a la lista",

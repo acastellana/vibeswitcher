@@ -7,9 +7,9 @@ import { since, plural, tilde, dateTime } from '../words.js';
 import { usageFacts } from '../settings.js';
 import { dictationGroup } from '../dictate.js';
 import { healthFacts } from '../health.js';
-import { updateFacts } from '../updates.js';
+import { updateFacts, checkedWords } from '../updates.js';
 import { copyLine } from './cards.js';
-import { t, tParts, nodeWords } from '../i18n.js';
+import { t, tParts, nodeWords, lang } from '../i18n.js';
 import { actsLine, actsFor, doButton } from '../acting.js';
 import { twoColumns, queryWords, holdsAll, marked } from './twocol.js';
 import { settingsHref } from './settings.js';
@@ -96,17 +96,40 @@ export function healthGroup(health) {
 
 // Check for Updates (the node's `update`): up to date or a newer build, the last look's time, why a look failed, and
 // the lines to copy (install, switch, check now). A page asks GitHub nothing.
-export function updatesGroup(update) {
+// `check`: Check now (a button that asks the node to look, `update.check`), shown in place of the check-now line.
+export function updatesGroup(update, check = null) {
   const facts = updateFacts(update);
   if (!facts) return null;
+  const lines = check ? facts.lines.filter((line) => !line.checks) : facts.lines;
   const tone = facts.tone === 'done' ? 'dot tone-done' : facts.tone === 'needs-you' ? 'dot tone-needs-you' : 'dot';
   return group(t('noUpdates'),
     h('dl', { class: 'facts-list' },
       row(t('noState'), h('span', { class: tone, 'aria-hidden': 'true' }), facts.state),
       facts.checkedAt ? row(t('noLastChecked'), tParts('noAgo', { d: ago(facts.checkedAt) })) : null,
       facts.problem ? row(t('noLastTry'), t('noCouldntLook', { why: facts.problem })) : null),
-    h('div', { class: 'card-command' }, h('span', { class: 'card-command-label' }, t('noInATerminal')),
-      facts.lines.map((line) => copyLine(line.text, line.label))));
+    check,
+    lines.length ? h('div', { class: 'card-command' }, h('span', { class: 'card-command-label' }, t('noInATerminal')),
+      lines.map((line) => copyLine(line.text, line.label))) : null);
+}
+
+// Check now (`update.check`, the user's read through an acting page: the node asks GitHub, as the 6 h watch does), with
+// what it found said beside it. One for the view, so a node update while it looks keeps it and its words.
+function updateCheck(app) {
+  const button = doButton(app, { label: t('upCheckNow'), kind: 'update.check', args: () => ({}), busy: t('upChecking'), receipt: (result) => checkedWords(result) });
+  return h('div', { class: 'node-act update-check' }, button.el);
+}
+
+// Remove all paired browsers (`web.revoke`, the user's through an acting page): every page paired with this node, here
+// and over the tailnet, this one too; a second click asks first. Elsewhere `vibeswitcher web --revoke`, and why.
+function revokeAll(app) {
+  const note = h('p', { class: 'node-says' }, t('noRevokeWords'));
+  if (!actsFor(app, 'web.revoke')) {
+    return h('div', { class: 'node-act revoke' }, note, h('div', { class: 'card-command' }, h('span', { class: 'card-command-label' }, t('noInATerminal')),
+      copyLine('vibeswitcher web --revoke', t('noTheCommandThatRevokes'))), h('p', { class: 'confirm-note' }, app.store.acts() ? t('noRevokeTerminalOnly') : t('noRevokePageReads')));
+  }
+  const button = doButton(app, { label: t('noRevokeAll'), kind: 'web.revoke', args: () => ({}), danger: true, confirm: t('noRevokeSure'), busy: t('noRevoking'),
+    receipt: (result) => t('noRevoked', { n: (result.revoked || 0) + (result.tailnetRevoked || 0) }) });
+  return h('div', { class: 'node-act revoke' }, note, button.el);
 }
 
 // Whether the node is healthy, in one line, from what it already sends: what waits on you here (`waiting`: what one
@@ -197,6 +220,15 @@ export function nodeView(app) {
     return { el, refresh(key) { if (key !== asked) { asked = key; load(); } } };
   })();
 
+  // Check now and Remove all: made once (again when acting or the language changes), so the groups drawn again at a
+  // node update keep them, their busy state and what they said.
+  let controls = { key: null };
+  const controlsNow = () => {
+    const key = JSON.stringify([store.acts(), store.can('update.check'), store.can('web.revoke'), lang()]);
+    if (key !== controls.key) controls = { key, check: actsFor(app, 'update.check') ? updateCheck(app) : null, revoke: revokeAll(app) };
+    return controls;
+  };
+
   // The page's groups, in its order (what needs you and the notices first), each with its key in the address, its
   // title, its count or one-word state (`meta`), and its section; the groups a node doesn't have are left out.
   function groupsOf(node) {
@@ -252,8 +284,9 @@ export function nodeView(app) {
         h('dl', { class: 'facts-list' },
           row(t('noState'), node.web.state === 'listening' ? t('noListening', { port: node.web.port }) : node.web.state === 'off' ? t('noOff') : node.web.state),
           row(t('noPagesPaired'), String(node.web.tokens)),
-          row(t('noOpenNow'), String(node.web.connections)))) } : null,
-      update ? { key: 'updates', title: t('noUpdates'), meta: update.tone === 'needs-you' ? t('noNewer') : update.tone === 'done' ? t('noCurrent') : '', metaTone: update.tone === 'needs-you' ? 'asked' : '', el: updatesGroup(node.update) } : null,
+          row(t('noOpenNow'), String(node.web.connections))),
+        controlsNow().revoke) } : null,
+      update ? { key: 'updates', title: t('noUpdates'), meta: update.tone === 'needs-you' ? t('noNewer') : update.tone === 'done' ? t('noCurrent') : '', metaTone: update.tone === 'needs-you' ? 'asked' : '', el: updatesGroup(node.update, controlsNow().check) } : null,
       { key: 'build', title: t('noBuild'), meta: String(notes?.build || server.commit || '').slice(0, 8), metaTone: 'mono', el: group(t('noBuild'),
         h('dl', { class: 'facts-list' },
           row(t('noRunning'), h('code', null, notes?.build || server.commit)),
