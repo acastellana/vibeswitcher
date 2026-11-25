@@ -744,6 +744,16 @@ extension LeadVault {
             return adopted
         }
 
+        /// Whether this book keeps the node's record of the user's actions, its `.seal` and `.verify` hooks included
+        /// (`LeadVaultV2`): on Linux every book; on the Mac only the book of a checked node host, which sets it once it is
+        /// one (`HostServer.isMacNodeHost`, the Mac's tasks, item 14), never the Mac app's, and never another book in
+        /// the same process (a test bundle runs many hosts in one). Under the vault's lock.
+        public var recordsActions: Bool {
+            get { lock.withLock { keepsRecord } }
+            set { lock.withLock { keepsRecord = newValue } }
+        }
+        private var keepsRecord = !Platform.CodeIdentity.isAvailable
+
         /// The node's record (`HostRequest.vaultV2`, V2/LeadVaultV2.swift): `body` on it under the vault's lock, saved
         /// when it changed.
         public func v2<T>(_ body: (inout LeadVaultV2.Book?) -> T) -> T {
