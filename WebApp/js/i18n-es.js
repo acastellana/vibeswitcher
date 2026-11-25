@@ -1218,6 +1218,18 @@ export const ES = {
   shLastAccept: "Tu última aceptación: {time}",
   shNoCommitsListed: "ningún commit listado",
   shUnmoved: "{branch} no se ha movido desde que el líder la dejó: no hay nada que aceptar.",
+  lfPlaceholder: "Filtrar proyectos y sesiones",
+  lfLabel: "Filtrar los proyectos y tus sesiones",
+  lfNeedsYou: "Te necesita",
+  lfTheRest: "El resto",
+  lfNoMatch: "Nada aquí contiene «{query}».",
+  apNextNeedingYou: "Lo siguiente que te necesita",
+  apNextNeedingYouAbout: "Un proyecto, una sesión tuya o Este nodo",
+  apNextInList: "Siguiente de la lista",
+  apPreviousInList: "Anterior de la lista",
+  apInTheLeftColumn: "En la columna izquierda",
+  apFilterLeft: "Filtrar los proyectos y las sesiones",
+  apFilterLeftAbout: "Por nombre o carpeta; primero lo que te necesita",
   // END buttons
   // The two columns of Your own sessions, This node and Settings (views/twocol.js).
   tcBackToList: "Volver a la lista",

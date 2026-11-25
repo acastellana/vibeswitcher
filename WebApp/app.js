@@ -13,6 +13,7 @@ import { register as registerPasskey } from './js/passkey.js';
 import { copyLine } from './js/views/cards.js';
 import { projectsOf, firstProject } from './js/conversation.js';
 import { leftColumn, ownSession } from './js/views/left.js';
+import { shortcut, keyCommands, needingHref, nthHref, stepHref } from './js/keys.js';
 import { projectView } from './js/views/project.js';
 import { rightColumn } from './js/views/right.js';
 import { sideSheet } from './js/views/sheet.js';
@@ -314,13 +315,16 @@ store.subscribe('connection', () => {
 
 // ---- Commands (the palette's, and the keys') ----
 
-// ⌘J: the next project with something waiting on you, after the one shown.
-function nextNeedingYou() {
-  const waiting = projectsOf(store.state).filter((one) => one.waiting > 0);
-  if (!waiting.length) return;
-  const at = waiting.findIndex((one) => ui.state.route.name === 'project' && one.project === ui.state.route.id);
-  ui.go(projectHref(waiting[(at + 1) % waiting.length].project));
+// ⌘J / ⌥J (Alt+J): the next place with something waiting on you (js/keys.js); ⌥F or / the left column's filter (in its
+// drawer on a phone); ⌥1–9 (Ctrl+Shift+1–9) its nth, ⌥↓ ⌥↑ (Alt+↓ ↑) the next or previous in it.
+const goTo = (href) => { if (href) ui.go(href); return !!href; };
+const nextNeedingYou = () => goTo(needingHref(store.state, ui.state.route, ownSession));
+function leftFilter() {
+  if (narrow.matches) app.drawer('left');
+  left.focusFilter();
 }
+const leftNth = (n) => goTo(nthHref(left.order(), n));
+const leftStep = (by) => goTo(stepHref(left.order(), ui.state.route, by));
 
 // The palette's "New … in …" (the Mac's palette): each recent folder's presets as the node lists them, asked once a
 // minute at most while the palette is open (Claude and Shell until the node answers). Running one shows the start
@@ -381,15 +385,17 @@ function sessionCommands(selected) {
 function commands() {
   const selected = ui.state.route.name === 'session' ? store.state.sessions.get(ui.state.route.id) : null;
   const pane = (id, title, key) => ({ title, keys: `${KEY.mod}${KEY.alt}${key}`, icon: id, run: () => ui.setPane(selected.id, id) });
+  const keyed = keyCommands({ mac: MAC, state: store.state, route: ui.state.route, items: left.order(), own: ownSession, go: goTo, filter: leftFilter });
+  const firstNine = keyed.nth;
   return [
-    { title: t('apNextProjectNeedingYou'), keys: `${KEY.mod}J`, icon: 'question', run: nextNeedingYou },
+    ...keyed.entries,
     ...(selected ? [pane('chat', t('apChat'), '2'), pane('terminal', t('apTerminal'), '1')] : []),
     // The inspector's, for a session: the Mac's View › Toggle Inspector, and its Team tab for a lead or its team.
     ...(selected && teamOf(store.state, selected) ? [{ title: t('apTeam'), about: t('apTheTeamSTasksIn'), keys: `${KEY.mod}${KEY.alt}3`, icon: 'team', run: () => ui.showInspector('team') }] : []),
     ...(selected ? [{ title: t('apToggleInspector'), about: t('apTeamOverviewAndActivity'), keys: `${KEY.mod}${KEY.alt}0`, icon: 'inspector', run: () => ui.toggleInspector() }] : []),
     // Each lead's board: its team's tasks, grouped (views/board.js).
     ...projectsOf(store.state).flatMap((one) => [
-      { title: t('apLeadOf', { name: one.name }), about: t('apYouAndItsLead'), icon: 'chat', run: () => ui.go(projectHref(one.project)) },
+      { title: t('apLeadOf', { name: one.name }), about: t('apYouAndItsLead'), keys: firstNine.get(one.project), icon: 'chat', run: () => ui.go(projectHref(one.project)) },
       { title: t('apRoadmapOf', { name: one.name }), about: t('apItsTasksAsTheyMove'), icon: 'team', run: () => ui.go(projectHref(one.project, { view: 'roadmap' })) },
     ]),
     ...sessionCommands(selected),
@@ -430,6 +436,7 @@ addEventListener('keydown', (event) => {
     && !(!MAC && event.ctrlKey && event.altKey && /^Digit[12]$/.test(event.code))) return;
   const mod = MAC ? event.metaKey : event.ctrlKey;
   const digit = /^Digit[1-9]$/.test(event.code) ? Number(event.code.slice(5)) : 0;
+  const keyed = shortcut(event, { mac: MAC });
   if (mod && !event.altKey && event.code === 'KeyK') {
     event.preventDefault();
     ui.setPalette(!ui.state.palette);
@@ -445,12 +452,14 @@ addEventListener('keydown', (event) => {
     event.preventDefault();
     if (digit < 3) ui.setPane(ui.state.route.id, digit === 1 ? 'terminal' : 'chat');
     else if (teamOf(store.state, store.state.sessions.get(ui.state.route.id))) ui.showInspector('team');
-  } else if ((mod || event.altKey) && !event.shiftKey && event.code === 'KeyJ') {
+  } else if (keyed) {
+    // The left column's keys (js/keys.js): never while typing in a field.
+    if (keyed.do === 'nth' ? leftNth(keyed.n) : keyed.do === 'step' ? leftStep(keyed.by) : keyed.do === 'needing' ? (nextNeedingYou(), true) : (leftFilter(), true)) event.preventDefault();
+  } else if (wantsSearch(event)) {
+    // / is the screen's own list search where it has one (Your own sessions, This node, Settings), else the left
+    // column's filter.
     event.preventDefault();
-    nextNeedingYou();
-  } else if (wantsSearch(event) && searchable()) {
-    event.preventDefault();
-    searchable().focusSearch();
+    if (searchable()) searchable().focusSearch(); else leftFilter();
   } else if (event.key === 'Escape' && root.dataset.drawer) {
     app.drawer(null);
   }

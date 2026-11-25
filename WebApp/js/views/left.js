@@ -9,7 +9,9 @@ import { projectsOf, teamCounts, waitingPlaces, nextPlace } from '../conversatio
 import { projectHref, sessionHref } from '../ui.js';
 import { t, lang } from '../i18n.js';
 import { actsLine } from '../acting.js';
-import { boostMarkText } from '../words.js';
+import { boostMarkText, STATES, stateOf, lastPart } from '../words.js';
+import { queryWords, holdsAll } from './twocol.js';
+import { typing, shownNow } from '../keys.js';
 
 // The ring's colours, in the order they go round: one meaning each, as everywhere on the page.
 const RING = ['working', 'review', 'ready', 'blocked', 'queued'];
@@ -41,10 +43,37 @@ export function projectLine(project) {
   return { words: project.lead && !project.live ? t('noLead') : t('quiet'), tone: 'quiet' };
 }
 
+// The left column's filter (⌥F or /, or a letter typed in the column, js/keys.js): the projects and your own sessions
+// whose name or folder holds every word, grouped by what needs you: those that do first, then the rest.
+// [{ kind: 'project' | 'session', id, href, name, line: { words, tone }, needs }].
+export function filterItems(state, query) {
+  const words = queryWords(query);
+  if (!words.length) return [];
+  const projects = projectsOf(state).filter((one) => holdsAll(`${one.name} ${one.root}`, words))
+    .map((one) => ({ kind: 'project', id: one.project, href: projectHref(one.project), name: one.name, line: projectLine(one), needs: one.waiting > 0, project: one }));
+  const sessions = [...state.sessions.values()].filter(ownSession).map((one) => ({ one, word: stateOf(one), name: one.title || lastPart(one.cwd) || t('owASession') }))
+    .filter(({ one, word, name }) => holdsAll(`${name} ${one.cwd || ''} ${STATES[word].label}`, words))
+    .map(({ one, word, name }) => ({ kind: 'session', id: one.id, href: sessionHref(one.id), name, line: { words: STATES[word].label, tone: word === 'needs-you' ? 'asked' : '' }, needs: word === 'needs-you' }));
+  const all = [...projects, ...sessions];
+  return [...all.filter((item) => item.needs), ...all.filter((item) => !item.needs)];
+}
+
+// What the left column lists, in its order, for the keys (⌥1–9, next and previous): the filter's rows while it
+// holds words, else the projects.
+export function leftOrder(state, query = '') {
+  if (queryWords(query).length) return filterItems(state, query);
+  return projectsOf(state).map((one) => ({ kind: 'project', id: one.project, href: projectHref(one.project) }));
+}
+
+
 export function leftColumn(app, { brief }) {
   const { store, ui } = app;
   const list = h('div', { class: 'projects', role: 'list' });
   const empty = h('p', { class: 'left-empty', hidden: true });
+  // The filter's field and rows, over the projects (they stand in for them while it holds words).
+  const filter = h('input', { class: 'left-filter', type: 'search', placeholder: t('lfPlaceholder'), 'aria-label': t('lfLabel'), autocomplete: 'off', spellcheck: 'false', hidden: true });
+  const results = h('div', { class: 'left-results', hidden: true });
+  const filterEmpty = h('p', { class: 'left-empty', hidden: true });
   const place = (route, iconName, key) => h('a', { class: 'place', href: route, data: { place: key } }, icon(iconName, 16), h('span', null, t(key)));
   const newProject = place('#/new', 'plus', 'newProject');
   const own = place('#/sessions', 'chat', 'ownSessions');
@@ -71,9 +100,72 @@ export function leftColumn(app, { brief }) {
       // A phone has no ⌘K: the palette from the drawer's head.
       h('button', { class: 'icon-button phone-only palette-open', type: 'button', 'aria-label': t('paGoToASessionOr'), title: t('paGoToASessionOr'),
         onclick: () => { app.drawer?.(null); app.ui.setPalette(true); } }, icon('search', 16))),
-    h('div', { class: 'colbody' }, h('h2', { class: 'col-title' }, t('projects')), list, empty, newProject, h('span', { class: 'left-gap' }), ...places.slice(1)),
+    h('div', { class: 'colbody' }, h('h2', { class: 'col-title' }, t('projects')), filter, results, filterEmpty, list, empty, newProject, h('span', { class: 'left-gap' }), ...places.slice(1)),
     summary);
   const rows = new Map();
+
+  // The filter: hidden until asked for (its key, or a letter typed in the column); ↑ ↓ move in its rows, ↩ opens one,
+  // Esc clears it.
+  let query = '';
+  let active = 0;
+  const closeFilter = () => {
+    query = '';
+    filter.value = '';
+    filter.hidden = true;
+    render();
+  };
+  filter.addEventListener('input', () => { query = filter.value; active = 0; render(); });
+  filter.addEventListener('keydown', (event) => {
+    const items = filterItems(store.state, query);
+    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+      event.preventDefault();
+      if (items.length) active = (active + (event.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length;
+      render();
+    } else if (event.key === 'Enter') {
+      event.preventDefault();
+      const chosen = items[active];
+      if (chosen) { ui.go(chosen.href); closeFilter(); }
+    } else if (event.key === 'Escape') {
+      event.preventDefault();
+      event.stopPropagation?.();
+      closeFilter();
+      list.querySelector?.('a')?.focus?.();
+    }
+  });
+  // A letter typed while the keyboard is in the column (on a project, a place) starts the filter with it.
+  el.addEventListener('keydown', (event) => {
+    if (typing(event.target) || event.ctrlKey || event.metaKey || event.altKey || event.key?.length !== 1 || !/\S/.test(event.key)) return;
+    event.preventDefault();
+    focusFilter(event.key);
+  });
+  function focusFilter(initial = null) {
+    filter.hidden = false;
+    if (initial != null) { filter.value = initial; query = initial; active = 0; }
+    render();
+    filter.focus?.();
+    if (initial == null) filter.select?.();
+  }
+
+  function drawResults(route) {
+    const items = filterItems(store.state, query);
+    if (active >= items.length) active = 0;
+    const groups = [['needs', t('lfNeedsYou'), items.filter((item) => item.needs)], ['rest', t('lfTheRest'), items.filter((item) => !item.needs)]];
+    let index = 0;
+    results.replaceChildren(...groups.filter(([, , shown]) => shown.length).flatMap(([key, title, shown]) => [
+      h('h3', { class: `left-group ${key}` }, title),
+      ...shown.map((item) => {
+        const at = index++;
+        const link = h('a', { class: 'project left-result' + (at === active ? ' active' : '') + (item.line.tone === 'asked' ? ' asked' : ''), href: item.href,
+          'aria-current': shownNow(item, route) ? 'page' : null, onclick: () => closeFilter() },
+        item.kind === 'project' ? h('span', { class: 'project-ring' }, ring(teamCounts(item.project.board))) : h('span', { class: 'project-ring' }, icon('chat', 16)),
+        h('span', { class: 'project-text' }, h('span', { class: 'project-name' }, item.name),
+          h('span', { class: 'project-line' + (item.line.tone ? ` tone-text-${item.line.tone}` : '') }, item.line.words)));
+        if (!shownNow(item, route)) link.removeAttribute('aria-current');
+        return link;
+      })]));
+    filterEmpty.hidden = items.length > 0;
+    setText(filterEmpty, items.length ? '' : t('lfNoMatch', { query: query.trim() }));
+  }
 
   function row(id) {
     const ringSlot = h('span', { class: 'project-ring' });
@@ -103,6 +195,11 @@ export function leftColumn(app, { brief }) {
     const state = store.state;
     const projects = projectsOf(state);
     const route = ui.state.route;
+    // While the filter holds words, its rows stand in for the projects.
+    const filtering = queryWords(query).length > 0;
+    list.hidden = filtering;
+    results.hidden = !filtering;
+    if (filtering) drawResults(route); else filterEmpty.hidden = true;
     const current = route.name === 'project' ? route.id : null;
     const next = new Map();
     let cursor = list.firstChild;
@@ -115,7 +212,7 @@ export function leftColumn(app, { brief }) {
     for (const [id, r] of rows) if (!next.has(id)) r.el.remove();
     rows.clear();
     for (const [id, r] of next) rows.set(id, r);
-    empty.hidden = projects.length > 0 || state.connection === 'connecting';
+    empty.hidden = filtering || projects.length > 0 || state.connection === 'connecting';
     setText(empty, t('noProjectsSub'));
     for (const placeLink of places) {
       if (!placeLink.dataset.place) continue;
@@ -160,7 +257,7 @@ export function leftColumn(app, { brief }) {
     if (mark) { boost.title = mark.help; boost.setAttribute('aria-label', mark.label); }
   }
 
-  return { el, render };
+  return { el, render, focusFilter: () => focusFilter(), order: () => leftOrder(store.state, query) };
 }
 
 // A session of the user's own: outside every project's team (no role), or a lead session that leads nothing now

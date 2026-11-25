@@ -81,14 +81,19 @@ Screenshots of each main state, light and dark, wide and at 390 px, are in `shot
 | Key | Does |
 | --- | --- |
 | ⌘K / Ctrl+K | Go to a session or run a command |
-| ⌘J / Ctrl+J, ⌥J / Alt+J | Next project with something waiting on you |
+| ⌘J or ⌥J / Alt+J | Next with something waiting on you: a project, a session of your own, This node (Ctrl+J stays the browser's Downloads, ⌥⌘J Chrome's console) |
+| ⌥1–9 / Ctrl+Shift+1–9 | The left column's first nine, in its order (⌘1–9, Ctrl+1–9 and, on Linux, Alt+1–9 are the browser's tabs) |
+| ⌥↓ ⌥↑ / Alt+↓ Alt+↑ | The next or previous in the left column |
+| ⌥F, or / | The left column's filter, also a letter typed while the keyboard is in the column: the projects and your own sessions by name or folder, what needs you first (↑ ↓ move, ↩ opens, Esc clears). Off a Mac only / (Alt+F is the browser's menu) |
 | Esc | Closes the side sheet, a drawer, the inspector where it is a sheet; clears a list's search |
-| / | Your own sessions, This node, Settings: the list's search (↑ ↓ move in the list, ↩ opens) |
+| / | Your own sessions, This node, Settings: the list's search (↑ ↓ move in the list, ↩ opens); elsewhere the left column's filter |
 | ⌥⌘1 2 / Ctrl+Alt+1 2 | Terminal, Chat |
 | ⌥⌘0 / Ctrl+Alt+0, ⌥0 / Alt+0 | Toggle Inspector (the Mac's View › Toggle Inspector) |
 | ⌥⌘3 / Ctrl+Alt+3 | The inspector's Team tab, for a lead or a session of its team |
 | ↑ in an empty message box | Into the last open card |
 | In a card: 1–9, ↑ ↓, ↩, H | Answer with that option; move; answer with the focused one; hold the timer |
+
+None of the left column's keys fires while typing in a field or a terminal; each is in the palette beside its command (`js/keys.js`).
 
 ## The inspector
 

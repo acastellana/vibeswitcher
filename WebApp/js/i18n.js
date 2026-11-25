@@ -1229,6 +1229,18 @@ const EN = {
   shLastAccept: "Your last accept: {time}",
   shNoCommitsListed: "no commit listed",
   shUnmoved: "{branch} hasn’t moved since its lead last left it: nothing to accept.",
+  lfPlaceholder: "Filter projects and sessions",
+  lfLabel: "Filter the projects and your own sessions",
+  lfNeedsYou: "Needs you",
+  lfTheRest: "The rest",
+  lfNoMatch: "Nothing here holds “{query}”.",
+  apNextNeedingYou: "Next needing you",
+  apNextNeedingYouAbout: "A project, a session of yours or This node",
+  apNextInList: "Next in the list",
+  apPreviousInList: "Previous in the list",
+  apInTheLeftColumn: "In the left column",
+  apFilterLeft: "Filter the projects and sessions",
+  apFilterLeftAbout: "By name or folder; what needs you first",
   // END buttons
   // The two columns of Your own sessions, This node and Settings (views/twocol.js).
   tcBackToList: "Back to the list",
