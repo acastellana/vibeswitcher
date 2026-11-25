@@ -691,3 +691,7 @@
 - 2026-11-24 18:27 Automatically (auto_advance): sandbox-env-hygiene-no's audit at 4b0a7eb2 is held (update_task hold_audit): nothing moves it on until an exception is recorded, or hold_audit: false.
 - 2026-11-24 18:27 Automatically (auto_advance): the-config-card-says's audit at 42eee715 is held (update_task hold_audit): nothing moves it on until an exception is recorded, or hold_audit: false.
 - 2026-11-24 18:27 Ended the replaced lead session CDC7A13C and its tool server: only the current lead acts
+- 2026-11-25 11:28 Agents' config changed while no worker or verifier ran (the user's), sealed as they are: /run/user/1000/systemd/transient
+- 2026-11-25 11:28 Claude Code's skill sync finished a round (1795541565.3431218) in ~/.claude/skills/synced, accepted by itself (nothing held): 1 changed
+- 2026-11-25 11:28 Automatically (auto_advance): Didn't start on-wsl-no-box: on-wsl-no-box's worker not started: ~/.local/bin and ~/.local/share/claude/versions changed while the team's sessions ran, since VibeSwitcher last sealed them. A worker's shell, a verifier's command or a branch's tests can write them (the deny rules hold only the file tools), and the next session would load what was written. New workers, verifiers and merges are held until the user accepts the change in VibeSwitcher (its notice names the files); you can't. Tell the user which changed and ask the…
+- 2026-11-25 11:29 Claude Code's skill sync finished a round (1795602544.7019162) in ~/.claude/skills/synced, accepted by itself (nothing held): 73 changed
