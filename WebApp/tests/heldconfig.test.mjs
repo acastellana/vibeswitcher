@@ -55,3 +55,54 @@ test('the node’s `firstLook`: nothing held, no sealed accept: confirm the rule
   const first = heldSummary({ items: [], guarded: [{ key: 'test_command', value: 'true', sinceAccept: null }], firstLook: true });
   assert.deepEqual([first.confirmOnly, first.terminal], [true, false]);
 });
+
+test('the node’s plain fields: each item’s `what`, the rules’ `changed`/`old`/`records`, `holds`, `recordsAll`, `summary`', () => {
+  assert.equal(itemLabel({ name: '~/.local/bin/claude', kind: 'claude-update', what: 'Claude Code’s link moved to 2.1.332', from: '2.1.331', to: '2.1.332' }), 'Claude Code’s link moved to 2.1.332');
+  assert.equal(itemLabel({ name: 'x', what: 'the plugin genlayernode updated', from: '0.4.0', to: '0.4.1' }), 'the plugin genlayernode updated (0.4.0 → 0.4.1)');
+  assert.deepEqual(railState({ changed: 'changed', old: 'true', value: 'false' }), { state: 'changed', before: 'true' });
+  assert.deepEqual(railState({ changed: 'changed', value: 'x' }), { state: 'new', before: null }, 'not set at the last accept');
+  assert.deepEqual(railState({ changed: 'same' }), { state: 'same', before: null });
+  assert.deepEqual(railState({ changed: 'unknown', records: true }), { state: 'records', before: null });
+  const card = heldSummary({ items: [{ name: 'a', what: 'one' }, { name: 'b', what: 'two' }],
+    guarded: [{ key: 'k', value: 'v', changed: 'same' }], holds: 'example-app', summary: 'one; and 1 more', pageMayAccept: true });
+  assert.deepEqual([card.title, card.line, card.holds, card.summary, card.terminal], ['2 things changed', 'one, two', 'example-app', 'one; and 1 more', false], 'the node’s word on accepting');
+});
+
+test('the node’s newer words for what it can’t vouch for: “can’t be compared with your last accept … the node restarted since”', () => {
+  const words = 'can\'t be compared with your last accept (2026-11-25T10:00:00Z): the node restarted since';
+  assert.deepEqual(railState({ sinceAccept: words }), { state: 'unknown', before: null });
+  assert.deepEqual(heldSummary({ items: [{ name: '~/.zshrc', kind: 'other', what: '~/.zshrc changed', sinceAccept: words }], guarded: [] }).lines,
+    ['~/.zshrc changed (can’t be compared with your last accept)']);
+});
+
+test('the reviewed rules: every non-update named, updates only while under three lines, the rest counted', async () => {
+  const { itemLines } = await import('../js/heldconfig.js');
+  const items = [
+    { kind: 'claude-update', what: '~/.local/bin/claude now points to 2.1.332 (looks like Claude Code’s own update)' },
+    { kind: 'git-config', what: '.git/config: the tracking entry of branch v2-x' },
+    { kind: 'plugin-update', what: 'plugin genlayernode updated' },
+    { kind: 'build-switch', what: 'VibeSwitcher’s unit starts build 3e9df41a now' },
+    { kind: 'startup', what: 'the Windows Startup folder: X.lnk added' },
+  ];
+  assert.deepEqual(itemLines(items), { lines: ['.git/config: the tracking entry of branch v2-x', 'the Windows Startup folder: X.lnk added',
+    '~/.local/bin/claude now points to 2.1.332 (looks like Claude Code’s own update)'], moreUpdates: 2 });
+  const many = Array.from({ length: 5 }, (_, i) => ({ kind: 'settings', what: `s${i}` }));
+  assert.deepEqual(itemLines([...many, items[0]]), { lines: ['s0', 's1', 's2', 's3', 's4'], moreUpdates: 1 }, 'no cap on what isn’t an update');
+});
+
+test('a first accept: the rules set away from their defaults (sandbox_ first, eight), then the defaults counted; unknown rules not shown', () => {
+  const guarded = [...Array.from({ length: 9 }, (_, i) => ({ key: `k${i}`, value: 'v', changed: 'unknown', atDefault: false })), { key: 'sandbox_read', value: '~/x', changed: 'unknown', atDefault: false },
+    ...Array.from({ length: 5 }, (_, i) => ({ key: `d${i}`, value: 'v', changed: 'unknown', atDefault: true }))];
+  const card = heldSummary({ items: [{ kind: 'settings', what: 'x' }], guarded, recordsAll: true, pageMayAccept: false });
+  assert.deepEqual([card.first.shown[0].key, card.first.shown.length, card.first.more, card.first.defaults, card.unknown, card.terminal], ['sandbox_read', 8, 2, 5, 0, true]);
+});
+
+test('an unknown rule this accept would record stays on the card with its value; an unknown one the node holds is not shown', () => {
+  const card = heldSummary({ items: [{ kind: 'settings', what: 'x' }], guarded: [
+    { key: 'auto_advance', value: 'false', changed: 'unknown', records: true },
+    { key: 'test_command', value: 'true', changed: 'unknown' },
+    { key: 'merge_policy', value: 'ask_all', changed: 'unknown', records: false },
+  ] });
+  assert.deepEqual(card.changed.map((rail) => [rail.key, rail.value, rail.state]), [['auto_advance', 'false', 'records']]);
+  assert.equal(card.unknown, 0, 'the held ones not even counted');
+});
