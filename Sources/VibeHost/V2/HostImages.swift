@@ -282,17 +282,18 @@ public enum HostImages {
         func refused(_ why: String) -> Result<CheckedNode, Refused> { .failure(Refused(why)) }
         guard let accountHome else { return refused("the account has no home in the user database, so the node's root can't be found") }
         let dataRoot = Platform.Service.nodeRoot(accountHome: accountHome)
-        let standard = { (path: String) in (path as NSString).standardizingPath }
         guard let nodeRoot = value(after: nodeRootFlag, in: arguments), nodeRoot.hasPrefix("/") else {
             return refused("\(nodeFlag) needs \(nodeRootFlag) and its build's absolute folder after it")
         }
         guard let server = value(after: "--server", in: arguments) else { return refused("\(nodeFlag) needs --server") }
         // 1. The lock: the node root's own, and only it.
         let ownLock = (dataRoot as NSString).appendingPathComponent("host.lock")
-        var held = stat(), node = stat()
+        // By its exact path alone (the review's F2): `main` takes the user's host by comparing this path
+        // (`HostHardening.ownsLaunchers`), so another spelling or a hard link elsewhere would make a checked node it
+        // took for a scratch host.
+        var held = stat()
         if lstat(lockPath, &held) == 0, held.st_mode & S_IFMT == S_IFLNK { return refused("the lock \(lockPath) is a symbolic link") }
-        let sameFile = stat(lockPath, &held) == 0 && stat(ownLock, &node) == 0 && held.st_dev == node.st_dev && held.st_ino == node.st_ino
-        guard standard(lockPath) == standard(ownLock) || sameFile else {
+        guard lockPath == ownLock else {
             return refused("\(nodeFlag) takes only the node root's own lock (\(ownLock)), not \(lockPath)")
         }
         // 2. The record. 3. This host's own running code, a row's host.
@@ -325,9 +326,13 @@ public enum HostImages {
         return .success(CheckedNode(build: build, serverPath: server, server: cdhash))
     }
 
-    /// Why `main` refuses a checked start (`checked`) it doesn't take for the user's host (`ownsLaunchers`), or nil
-    /// (seam: nil).
-    public static func checkedNodeRefusal(_ checked: CheckedNode?, ownsLaunchers: Bool) -> String? { nil }
+    /// Why `main` refuses a checked start (`checked`) it doesn't take for the user's host (`ownsLaunchers`), or nil: a
+    /// checked node is always the user's host (its vault from disk, no test arguments for its server), never a scratch
+    /// one (the review's F2; `macNodeStart` takes the lock by its exact path too, so neither can drift).
+    public static func checkedNodeRefusal(_ checked: CheckedNode?, ownsLaunchers: Bool) -> String? {
+        guard checked != nil, !ownsLaunchers else { return nil }
+        return "a checked node start on a lock this host doesn't take for the user's: refused"
+    }
 
     /// Why this image doesn't take `state` (seam: nil).
     public static func mayTakeHandover(_ state: HostHandover.State, viaKeeper: Bool, checkedNode: CheckedNode?) -> String? { nil }

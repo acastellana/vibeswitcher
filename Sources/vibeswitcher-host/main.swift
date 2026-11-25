@@ -103,6 +103,7 @@ var config = HostServer.Config(
     hostBuild: build)
 // The Mac's checked node start (`HostImages.startAsNode`, behind `isCheckedMacNode`, never yet): what it found.
 config.checkedNode = HostImages.takeCheckedMacNode()
+if let why = HostImages.checkedNodeRefusal(config.checkedNode, ownsLaunchers: ownsLaunchers) { notStarted(why) }
 // A scratch host's test of the Mac's switch through a keeper (`HostServer.Config.testKeeperHost`): never the user's
 // host's, nor a checked node host's.
 if Platform.CodeIdentity.isAvailable, !ownsLaunchers, config.checkedNode == nil {
