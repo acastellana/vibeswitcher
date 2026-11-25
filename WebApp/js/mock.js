@@ -6,6 +6,10 @@
 //   ?rows=10000   gives one session a long chat, to see the list and the scroll hold up
 //   ?still        sends the snapshot and nothing after it (for screenshots)
 //   ?empty        a node with no sessions
+//   ?older        a node from before a page could answer a session's question or start one: it lists none of
+//                 session.reply, session.new, session.resume and lead (as a node that doesn't take them from a page)
+//   ?toggle       the asking session's question is Claude's auto-mode popup, whose second option is a setting toggled
+//                 with Space: the node refuses it from a page, as it does there
 
 import { diffOps, summaryOf } from './chatops.js';
 import { taskGroup, taskState } from './words.js';
@@ -75,8 +79,10 @@ const ago = (seconds) => new Date(now() - seconds * 1000).toISOString();
     // Its own question, as the node reads it off the session's screen (`prompt`, SessionPrompt.value), and a message
     // drafted for it on a page (`draft`, session.draft).
     add(ASKING, { cwd: API, status: 'needs-you', since: ago(20), startedAt: ago(140), title: 'Why does the payout job run twice?', detail: 'Bash: pytest tests/test_payouts.py',
-      prompt: { question: 'Bash command\n  pytest tests/test_payouts.py\nDo you want to proceed?', options: ['Yes', 'Yes, and don’t ask again for this command', 'No, and tell Claude what to do differently (esc)'],
-        descriptions: [null, null, null], text: [], multiSelect: false, at: ago(20) },
+      prompt: options.toggle
+        ? { question: 'Auto mode lets Claude run commands without asking first.', options: ['Continue', 'Also scan shell history'], descriptions: [null, 'on'], text: [], multiSelect: false, at: ago(20) }
+        : { question: 'Bash command\n  pytest tests/test_payouts.py\nDo you want to proceed?', options: ['Yes', 'Yes, and don’t ask again for this command', 'No, and tell Claude what to do differently (esc)'],
+          descriptions: [null, null, null], text: [], multiSelect: false, at: ago(20) },
       draft: { text: 'Once the tests pass, also add one for two regions at once.', images: [], at: ago(8), action: 'mock-draft' },
       queued: [{ text: 'And keep the old job name in the logs.', images: 0, at: ago(5), action: 'mock-queued' }] });
     add(WEBHOOKS, { agent: 'codex', cwd: PAYOUTS, status: 'working', since: ago(95), startedAt: ago(400), branch: 'retry-webhooks', title: 'Retry failed bank webhooks', detail: 'Running the retry tests', activity: 'pytest tests/test_webhook_retry.py', activitySince: ago(95) });
@@ -551,6 +557,72 @@ const ago = (seconds) => new Date(now() - seconds * 1000).toISOString();
   }
 
   const refused = (message) => ({ ok: false, error: { code: 'refused', message } });
+  const badArgs = (message) => ({ ok: false, error: { code: 'bad-args', message } });
+
+  // The folders this invented machine has, and which of them are git repositories (notes has no commit yet).
+  const NOTES = `${HOME}/projects/notes`;
+  const REPOSITORIES = [SITE, API, PAYOUTS, DOCS, NOTES];
+  const FOLDERS = [HOME, `${HOME}/projects`, ...REPOSITORIES];
+
+  // A live session the host started, by its whole id or a prefix of 4 or more (the node's `hostedSession`), or the
+  // reply that refuses it in the node's words.
+  function hostedSession(given, kind) {
+    const wanted = String(given || '').trim().toLowerCase();
+    if (!wanted) return { refusal: badArgs(`${kind} needs session`) };
+    const bare = wanted.startsWith('local:') ? wanted.slice(6) : wanted;
+    const own = [...sessions.values()].find((one) => !one.hosted && one.id.toLowerCase() === wanted);
+    if (own) return { refusal: refused(`session ${wanted} runs in a terminal of yours, not in the node’s host: VibeSwitcher only drives the sessions it started`) };
+    const matching = bare.length >= 4 ? [...sessions.values()].filter((one) => one.hosted && one.id.slice(6).startsWith(bare)) : [];
+    if (matching.length > 1) return { refusal: badArgs(`${matching.length} sessions start with ${wanted}: give more of its id`) };
+    if (!matching.length) {
+      const ended = node.ended.some((entry) => entry.session.toLowerCase() === wanted);
+      return { refusal: { ok: false, error: { code: 'gone', message: ended ? `session ${wanted} has ended` : `no live session ${wanted} on this node (\`vibeswitcher status\` lists them)` } } };
+    }
+    return { session: matching[0] };
+  }
+
+  // The launch presets for a folder (`session.presets`): a project's own and its default first, then the built-ins.
+  function presetsFor(folder) {
+    const presets = [
+      { name: 'Opus', kind: 'claude', command: 'claude --model opus', env: ['MAX_THINKING_TOKENS'], keepShell: false, project: true, default: true, builtIn: false, digest: 'mock-opus', refused: null },
+      { name: 'Claude', kind: 'claude', command: 'claude', env: [], keepShell: false, project: false, default: false, builtIn: true, digest: 'mock-claude', refused: null },
+      { name: 'Codex', kind: 'codex', command: 'codex', env: [], keepShell: false, project: false, default: false, builtIn: true, digest: 'mock-codex', refused: 'Codex doesn’t run on this node yet' },
+      { name: 'Shell', kind: 'shell', command: '', env: [], keepShell: false, project: false, default: false, builtIn: true, digest: 'mock-shell', refused: null },
+    ];
+    return folder ? presets : presets.slice(1);
+  }
+
+  // A session the host starts in `folder`: listed a moment after the reply that names it, as the host tells the node.
+  const sessionTerminal = (sid) => sessions.get(sid)?.terminal || `pts/${20 + (parseInt(sid.slice(6, 10), 16) % 50)}`;
+  function startSession(folder, agent, title) {
+    const sid = id(Math.random().toString(16).slice(2, 10).padEnd(8, '0'));
+    const terminal = sessionTerminal(sid);
+    later(200, () => {
+      add(sid, { cwd: folder, agent: agent === 'shell' ? 'claude' : agent, status: agent === 'shell' ? 'idle' : 'working', since: new Date().toISOString(),
+        startedAt: new Date().toISOString(), title, terminal, branch: null, project: null, detail: agent === 'shell' ? null : 'Starting', command: agent });
+      emit(put('sessions', sessions, sid));
+    });
+    return sid;
+  }
+
+  // A session's question closed after its answer was typed: it works on (the asking session runs its tests, as the
+  // story had it).
+  function answered(sid) {
+    const items = chats.get(sid) || [];
+    const pending = items.find((item) => item.kind === 'tool' && item.result === null);
+    emit(setSession(sid, { prompt: null, status: 'working', since: new Date().toISOString(), detail: sid === ASKING ? 'Running the payout tests' : null,
+      activity: sid === ASKING ? 'pytest tests/test_payouts.py' : null, activitySince: new Date().toISOString() }));
+    if (sid !== ASKING || options.still) return;
+    later(2400, () => {
+      if (!sessions.has(sid)) return;
+      if (pending) {
+        pending.result = { output: '5 passed, 1 failed\n\nFAILED tests/test_payouts.py::test_two_workers_run_once', failed: true, at: new Date().toISOString() };
+        emit(chatPut(sid, pending), setSession(sid, { activity: null, activitySince: null }));
+      }
+      stream(sid, 'One test fails, and it’s the one that names the bug: `test_two_workers_run_once`. Moving the lock above the schedule read next.',
+        () => emit(setSession(sid, { status: 'done', since: new Date().toISOString(), detail: null })));
+    });
+  }
 
   // What a value set from the page made of a setting (`set`): read back in place of the invented one.
   const setValues = new Map();
@@ -617,6 +689,8 @@ const ago = (seconds) => new Date(now() - seconds * 1000).toISOString();
 
   function handle(message) {
     const args = message.args || {};
+    // A kind it doesn't list is refused as a node refuses it, whatever it could answer (`?older`'s starts).
+    if (!KINDS.includes(message.kind)) return { ok: false, error: { code: 'unknown-kind', message: `this server doesn’t take ${message.kind}` } };
     if (message.kind === 'answer') {
       // The node's words (`text`, with the card's `seen`); an older page's `answer`.
       args.answer = args.text ?? args.answer;
@@ -675,22 +749,99 @@ const ago = (seconds) => new Date(now() - seconds * 1000).toISOString();
       emit(put('cards', cards, card.id));
       return { ok: true, result: { card: card.id, held: true } };
     }
-    if (message.kind === 'ask.answer') {
-      const items = chats.get(args.session) || [];
-      const ask = items.find((item) => item.id === args.item);
-      if (!ask || ask.answer) return refused('It isn’t asking that any more.');
-      ask.answer = args.answer;
-      const pending = items.find((item) => item.kind === 'tool' && item.result === null);
-      emit(chatPut(args.session, ask), setSession(args.session, { status: 'working', since: new Date().toISOString(), detail: 'Running the payout tests', activity: 'pytest tests/test_payouts.py', activitySince: new Date().toISOString() }));
-      later(2400, () => {
-        if (pending) {
-          pending.result = { output: '5 passed, 1 failed\n\nFAILED tests/test_payouts.py::test_two_workers_run_once', failed: true, at: new Date().toISOString() };
-          emit(chatPut(args.session, pending), setSession(args.session, { activity: null, activitySince: null }));
-        }
-        stream(args.session, 'One test fails, and it’s the one that names the bug: `test_two_workers_run_once`. Moving the lock above the schedule read next.',
-          () => emit(setSession(args.session, { status: 'done', since: new Date().toISOString(), detail: null })));
+    // A session's own question answered (`session.reply`, as `Requests.replySession`): the question on its screen read
+    // again, refused unless it is the one the page was shown; then the keys typed, and the question closes a moment
+    // after the reply, as the node's next read of the screen finds it gone.
+    if (message.kind === 'session.reply') {
+      if (!Number.isInteger(args.choice) || args.choice < 1) return badArgs('session.reply needs choice, an option’s number from 1');
+      const text = typeof args.text === 'string' && args.text.trim() ? args.text : null;
+      const found = hostedSession(args.session, 'session.reply');
+      if (found.refusal) return found.refusal;
+      const target = found.session;
+      const short = target.id.slice(6, 14);
+      const no = (why) => refused(`session ${short}: ${why}`);
+      const menu = target.prompt;
+      if (!menu) return no('no question is open on its screen');
+      if (args.question != null && args.question !== menu.question) return no('the question on its screen isn’t the one you were shown; it asks now: ' + menu.question);
+      if (args.options != null && JSON.stringify(args.options) !== JSON.stringify(menu.options)) {
+        return no('its options aren’t the ones you were shown; they are now: ' + menu.options.map((option, index) => `${index + 1}. ${option}`).join('; '));
+      }
+      if (menu.multiSelect) return no('its question takes several ticks: answer it in the session’s terminal');
+      const index = args.choice - 1;
+      if (index >= menu.options.length) return no(`its question has ${menu.options.length} options, not ${args.choice}`);
+      if (menu.descriptions?.[index] != null && options.toggle) {
+        return no(`option ${args.choice} is a setting toggled with Space (${menu.options[index]}): set it in the session’s terminal, or choose its Continue`);
+      }
+      const takes = (menu.text || []).includes(index);
+      if (takes && !text) return no(`option ${args.choice} takes your words: give them after the choice`);
+      if (!takes && text) return no(`option ${args.choice} takes no words (${menu.options[index]})`);
+      later(250, () => answered(target.id));
+      return { ok: true, result: { session: target.id, terminal: target.terminal, choice: args.choice, option: menu.options[index], question: menu.question } };
+    }
+    // A session started (`session.new`, as `Requests.newSession`): listed a moment after the reply, as the host tells.
+    if (message.kind === 'session.new') {
+      const folder = args.folder;
+      if (typeof folder !== 'string' || !folder.startsWith('/')) return badArgs('session.new needs folder, an absolute path');
+      const name = args.preset || null;
+      if (name && args.agent != null) return badArgs('session.new takes agent or preset, not both');
+      if (name && !args.digest) return badArgs('session.new with a preset needs its digest, as `session.presets` gave it');
+      const agent = args.agent || 'claude';
+      if (!['claude', 'codex', 'shell'].includes(agent)) return badArgs(`session.new’s agent is claude, codex or shell, not ${agent}`);
+      if (args.model && agent === 'shell') return badArgs('a shell takes no model');
+      if (!FOLDERS.includes(folder.replace(/\/+$/, ''))) return refused(`${folder} isn’t a folder`);
+      let started = { name: agent === 'shell' ? 'Shell' : agent === 'codex' ? 'Codex' : 'Claude', kind: agent };
+      if (name) {
+        const preset = presetsFor(folder).find((one) => one.name === name);
+        if (!preset) return refused(`no preset ${name} for ${folder} (\`vibeswitcher presets ${folder}\` lists them)`);
+        if (preset.refused) return refused(`preset ${name} can’t start here: ${preset.refused}`);
+        if (preset.digest !== args.digest) return refused(`preset ${name} changed since it was shown (or the node’s server restarted since): nothing started; run the command again to see it as it is now`);
+        if (args.model && preset.kind === 'shell') return refused(`preset ${name} starts a shell, which takes no model`);
+        started = preset;
+      }
+      const kind = started.kind;
+      if (kind === 'codex') return refused('no codex for this node');
+      const sid = startSession(folder, kind, null);
+      return { ok: true, result: { session: sid, terminal: sessionTerminal(sid), agent: kind, folder, model: args.model || null, preset: name ? started.name : null } };
+    }
+    // An ended session started again in its conversation (`session.resume`, as `Requests.resumeSession`).
+    if (message.kind === 'session.resume') {
+      const given = String(args.session || '').trim().toLowerCase();
+      if (!given) return badArgs('session.resume needs session');
+      const bare = given.startsWith('local:') ? given.slice(6) : given;
+      const matching = bare.length >= 4 ? node.ended.filter((entry) => entry.session.slice(6).startsWith(bare)) : [];
+      if (matching.length !== 1) {
+        return matching.length ? badArgs(`${matching.length} ended sessions start with ${given}: give more of its id`)
+          : { ok: false, error: { code: 'gone', message: `no ended session ${given} of yours to resume (\`vibeswitcher resume\` lists them)` } };
+      }
+      const entry = matching[0];
+      if (!entry.conversation) return { ok: true, result: { reopened: [], refused: [{ was: entry.session, folder: entry.folder, why: 'its conversation id wasn’t recorded: nothing to resume' }] } };
+      node.ended = node.ended.filter((one) => one !== entry);
+      const sid = startSession(entry.folder, 'claude', entry.name);
+      emit({ in: 'node', id: 'local', value: node });
+      return { ok: true, result: { reopened: [{ was: entry.session, folder: entry.folder, conversation: entry.conversation, session: sid, terminal: sessionTerminal(sid) }], refused: [] } };
+    }
+    // A project's lead started in its folder (`lead`, as `Requests.lead` and `LeadEngine.startLead`): the running one
+    // shown; a folder in no repository, or one with no commit, refused with the engine's words.
+    if (message.kind === 'lead') {
+      const folder = typeof args.folder === 'string' ? args.folder.replace(/\/+$/, '') : '';
+      if (!folder.startsWith('/')) return badArgs('lead needs folder, an absolute path');
+      const running = [...leads.values()].find((lead) => folder === lead.root || folder.startsWith(lead.root + '/'));
+      if (running) {
+        return { ok: true, result: { happened: 'shown', session: running.session, program: null, notes: args.goal ? ['your goal is held for the running lead: it reads it at its next step'] : [] } };
+      }
+      const root = REPOSITORIES.find((repo) => folder === repo || folder.startsWith(repo + '/'));
+      if (!root) return refused(`${folder} isn’t in a git repository: a lead needs one (git init, and a first commit; \`vibeswitcher lead FOLDER --init\` makes them)`);
+      if (root === NOTES) return refused(`${root} has no commits yet: workers branch from a commit; make one (git add, git commit), then start the lead`);
+      const sid = id(Math.random().toString(16).slice(2, 10).padEnd(8, '0'));
+      const project = `local:project:${Math.random().toString(36).slice(2, 14)}`;
+      later(200, () => {
+        add(sid, { cwd: root, role: 'lead', lead: project, status: 'working', since: new Date().toISOString(), startedAt: new Date().toISOString(),
+          title: args.goal || null, detail: 'Reading the project’s records', project });
+        leads.set(project, { project, root, session: sid, named: null, bound: sid, replaced: [], held: 0, reportsWaiting: 0, notice: null,
+          starting: false, lastStart: 'started', lastStartAt: new Date().toISOString(), looks: 0, questions: { open: 0, blocking: 0 }, cards: [], told: [], push: null });
+        emit(put('sessions', sessions, sid), put('leads', leads, project));
       });
-      return { ok: true, result: {} };
+      return { ok: true, result: { happened: 'started', session: sid, program: `${HOME}/.local/bin/claude`, notes: [] } };
     }
     if (message.kind === 'send') {
       const target = sessions.get(args.session);
@@ -811,15 +962,7 @@ const ago = (seconds) => new Date(now() - seconds * 1000).toISOString();
       if (args.id !== SHOT.id) return { ok: false, error: { code: 'gone', message: 'no such image in that session’s chat' } };
       return { ok: true, result: { mediaType: SHOT.mediaType, bytes: SHOT.bytes, offset: 0, data: SHOT_DATA } };
     }
-    if (message.kind === 'session.presets') {
-      const presets = [
-        { name: 'Opus', kind: 'claude', command: 'claude --model opus', env: ['MAX_THINKING_TOKENS'], keepShell: false, project: true, default: true, builtIn: false, digest: 'mock-opus', refused: null },
-        { name: 'Claude', kind: 'claude', command: 'claude', env: [], keepShell: false, project: false, default: false, builtIn: true, digest: 'mock-claude', refused: null },
-        { name: 'Codex', kind: 'codex', command: 'codex', env: [], keepShell: false, project: false, default: false, builtIn: true, digest: 'mock-codex', refused: 'Codex doesn’t run on this node yet' },
-        { name: 'Shell', kind: 'shell', command: '', env: [], keepShell: false, project: false, default: false, builtIn: true, digest: 'mock-shell', refused: null },
-      ];
-      return { ok: true, result: { presets: args.folder ? presets : presets.slice(1), problems: [] } };
-    }
+    if (message.kind === 'session.presets') return { ok: true, result: { presets: presetsFor(args.folder), problems: [] } };
     if (message.kind === 'brief') {
       return { ok: true, result: { text: options.empty ? 'No project lead is running and no session needs you.'
         : 'In example-site, the sync with main is running and the cleanup of ended folders is being checked. One question waits on you: whether to ship the new hero. One session needs you.',
@@ -880,10 +1023,12 @@ const ago = (seconds) => new Date(now() - seconds * 1000).toISOString();
 
   // What this mock answers, as a node's `hello.kinds` lists them: a page offers a button only for a kind listed, so
   // nothing it shows here is refused as unknown. `chat.page` is the feed's own (`pageChat`).
+  // `?older`: a node that doesn't take a session's reply or a start from a page (STARTS), so the page shows their lines.
+  const STARTS = ['lead', 'session.new', 'session.reply', 'session.resume'];
   const KINDS = ['chat.page',
-    'answer', 'answer.replace', 'tell', 'tell.retract', 'hold', 'ask.answer', 'send', 'session.draft', 'session.draft.clear', 'session.complete',
+    'answer', 'answer.replace', 'tell', 'tell.retract', 'hold', 'send', 'session.draft', 'session.draft.clear', 'session.complete',
     'session.attach', 'session.usage', 'stats', 'session.ports', 'board.task', 'board.image', 'chat.image', 'session.presets', 'brief', 'recent',
-    'mail', 'settings', 'seen', 'push', 'push.decline', 'set', 'stop'];
+    'mail', 'settings', 'seen', 'push', 'push.decline', 'set', 'stop', ...STARTS].filter((kind) => !options.older || !STARTS.includes(kind));
 
   // ---- The feed's interface (what the WebSocket feed will offer too) ----
 

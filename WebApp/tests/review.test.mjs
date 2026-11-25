@@ -116,7 +116,7 @@ test('the mock lists the kinds it answers, as a node’s hello does, and answers
   await shown;
   assert.ok(Array.isArray(kinds), 'no kinds before the snapshot: the page takes the mock to answer anything');
   for (const kind of ['push', 'push.decline', 'set', 'stop', 'answer', 'settings']) assert.ok(kinds.includes(kind), kind);
-  for (const kind of ['lead', 'session.new', 'plugin.on', 'approve', 'term.open', 'draft']) assert.ok(!kinds.includes(kind), `${kind}: the mock doesn’t answer it, so it isn’t listed`);
+  for (const kind of ['plugin.on', 'approve', 'term.open', 'draft']) assert.ok(!kinds.includes(kind), `${kind}: the mock doesn’t answer it, so it isn’t listed`);
   const push = await mock.request({ kind: 'push', args: { folder: '/home/dev/projects/example-site', request: '3c9e1f20' } });
   assert.equal(push.ok, true, JSON.stringify(push));
   assert.equal(push.result.settled, 'pushed');

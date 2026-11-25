@@ -30,7 +30,7 @@ import { briefFoot, speech, speak } from './js/brief.js';
 const params = new URLSearchParams(location.search);
 const store = createStore();
 const ui = createUI();
-const mocked = params.has('mock') || params.has('still') || params.has('empty') || params.has('rows');
+const mocked = params.has('mock') || params.has('still') || params.has('empty') || params.has('rows') || params.has('older') || params.has('toggle');
 // The mock is loaded only for ?mock and its kin: the node's embedded page leaves it out (scripts/webapp-embed.sh), so
 // there it says so; WebApp/serve.sh and a scratch server's folder serve it.
 // Whether this page runs inside a frame (a cross-origin parent can't be read: framed too).
@@ -47,7 +47,7 @@ function ownBuild() {
 }
 const feed = mocked
   ? await import('./js/mock.js').then(
-    ({ createMock }) => createMock(store, { rows: Number(params.get('rows')) || 0, still: params.has('still'), empty: params.has('empty') }),
+    ({ createMock }) => createMock(store, { rows: Number(params.get('rows')) || 0, still: params.has('still'), empty: params.has('empty'), older: params.has('older'), toggle: params.has('toggle') }),
     (error) => {
       document.body.textContent = 'The mock (?mock) couldn\u2019t be loaded: the node\u2019s own page leaves it out; WebApp/serve.sh serves it.';
       throw error;
