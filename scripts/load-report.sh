@@ -36,7 +36,10 @@ if start > to:
 stats, debug = os.path.join(home, "stats"), os.path.join(home, "debug")
 
 def local(stamp):
-    """A recorded stamp ("2026-11-01T14:02:00+01:00") as local wall time, no zone."""
+    """A recorded stamp ("2026-11-01T14:02:00+01:00", or UTC's "…Z") as local wall time, no zone. The Mac's
+    /usr/bin/python3 is 3.9, whose fromisoformat takes a "Z" only from 3.11: it's spelled +00:00 first."""
+    if stamp.endswith("Z"):
+        stamp = stamp[:-1] + "+00:00"
     return dt.datetime.fromisoformat(stamp).astimezone().replace(tzinfo=None)
 
 def lines(kind):
