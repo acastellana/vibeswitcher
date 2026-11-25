@@ -10,7 +10,7 @@ source "$(dirname "$0")/lib.sh"
 mm_arguments "$@"
 mm_users_terminal
 mm_build
-{ echo "== this script's own facts (your Terminal)"; "$mm_bin/facts"; } > "$mm_out/mine.txt"
+{ echo "== this script's own facts (run from: $(mm_where))"; "$mm_bin/facts"; } > "$mm_out/mine.txt"
 mm_write_command "$tool_scratch/escape.command" "$mm_out/escaped.txt"
 mm_say ""
 mm_say "What happens next: a detached process runs  osascript -e 'tell application \"Terminal\" to do script \"$tool_scratch/escape.command\"'"

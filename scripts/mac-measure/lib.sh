@@ -38,14 +38,29 @@ mm_arguments() {
     esac
 }
 
-# The real run is the user's: at a terminal, never from an agent's session (whose process could otherwise put a
-# dialog on the user's screen without them knowing why).
+# The real run is the user's: at a terminal (Terminal.app, or a shell card the app's host started, whose shell carries
+# VIBESWITCHER_SESSION and a pty), never from an agent's own process (Claude Code's or Codex's commands: CLAUDECODE,
+# CODEX_SANDBOX), which could otherwise put a dialog on the user's screen without them knowing why. The Return prompt
+# (mm_go) is the person's.
 mm_users_terminal() {
     [[ $mm_dry == 1 ]] && return 0
-    [[ -n ${VIBESWITCHER_SESSION:-} || -n ${CLAUDECODE:-} || -n ${CODEX_SANDBOX:-} ]] \
-        && mm_stop "this runs from an agent's session (VIBESWITCHER_SESSION, CLAUDECODE or CODEX_SANDBOX is set): run it yourself in Terminal, or use --dry-run"
-    [[ -t 0 && -t 1 ]] || mm_stop "no terminal on stdin and stdout: run it in Terminal (or --dry-run)"
+    [[ -n ${CLAUDECODE:-} || -n ${CODEX_SANDBOX:-} ]] \
+        && mm_stop "this runs from an agent's process (CLAUDECODE or CODEX_SANDBOX is set): run it yourself in Terminal or a shell card, or use --dry-run"
+    [[ -t 0 && -t 1 ]] || mm_stop "no terminal on stdin and stdout: run it in Terminal or a shell card (or --dry-run)"
     [[ $(/usr/bin/uname -s) == Darwin ]] || mm_stop "not a Mac"
+}
+
+# For a measurement of Terminal.app itself (its chain through login): refuses anywhere else, a shell card included.
+mm_terminal_app() {
+    [[ $mm_dry == 1 ]] && return 0
+    [[ ${TERM_PROGRAM:-} == Apple_Terminal && -z ${VIBESWITCHER_SESSION:-} ]] \
+        || mm_stop "this measures Terminal.app's own chain: run it in a Terminal.app window (TERM_PROGRAM is '${TERM_PROGRAM:-}'; a shell card of the app's isn't Terminal.app)"
+}
+
+# Where "your own facts" were read: Terminal.app, a shell card of the app's, or another terminal.
+mm_where() {
+    if [[ -n ${VIBESWITCHER_SESSION:-} ]]; then echo "a shell session of the app's host (a shell card)"
+    else echo "${TERM_PROGRAM:-an unknown terminal}"; fi
 }
 
 # Return goes on; anything else (or end of input) stops, nothing done. Dry runs don't ask.

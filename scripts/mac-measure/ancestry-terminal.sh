@@ -3,12 +3,13 @@
 # up to launchd, as the voice rule reads it: PROC_PIDTBSDINFO (refused for root's `login`), the short record and
 # sysctl's fallback, the environment, the code's status word. Reads only; nothing on screen.
 #
-# Run in Terminal:  bash scripts/mac-measure/ancestry-terminal.sh   (--dry-run: build, and read the chain of a detached
+# Run in a Terminal.app window (a shell card is refused):  bash scripts/mac-measure/ancestry-terminal.sh   (--dry-run: build, and read the chain of a detached
 # probe of its own, launchd its only ancestor: never the caller's ancestors)
 # Look for: every ancestor gives shortbsdinfo=read or kern_proc_pid=read; `login` (root) with bsdinfo=refused.
 source "$(dirname "$0")/lib.sh"
 mm_arguments "$@"
 mm_users_terminal
+mm_terminal_app
 mm_build
 if [[ $mm_dry == 1 ]]; then
     probe=$("$mm_bin/detach" "$mm_bin/facts" --sleep 30)

@@ -9,7 +9,7 @@ source "$(dirname "$0")/lib.sh"
 mm_arguments "$@"
 mm_users_terminal
 mm_build
-{ echo "== this script's own facts (your Terminal)"; "$mm_bin/facts"; } > "$mm_out/mine.txt"
+{ echo "== this script's own facts (run from: $(mm_where))"; "$mm_bin/facts"; } > "$mm_out/mine.txt"
 mm_new_label escape-launchctl
 mm_write_plist "$mm_bin/facts"
 mm_say ""
