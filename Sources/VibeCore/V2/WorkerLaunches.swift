@@ -26,6 +26,8 @@ public enum WorkerLaunch {
     }
 
     static let families = ["mythos", "fable", "opus", "sonnet", "haiku"]
+    /// Every family: what a launch whose default couldn't be read is recorded as.
+    public static var allFamilies: [String] { families.sorted() }
     /// What a Codex worker's launch records (no Claude family): a Codex verifier is kept off such a task.
     public static let codexFamily = "codex"
 
@@ -246,6 +248,9 @@ public enum WorkerLaunch {
         public var agent: Agent?
         /// Claude Code's default as the vault's home held it (nil: none set, or not read).
         public var defaultModel: String?
+        /// The home's settings were read (or aren't there): false when refused or out of time, so `defaultModel` isn't
+        /// known, and the bind fails closed (`LeadVault.Book.verifierBindRefusal`, every family for a worker).
+        public var defaultKnown = false
         /// The families a worker's launch adds (`families`).
         public var families: [String] = []
         /// A settings file there wasn't read (refused, or the reads ran out of time).
@@ -265,21 +270,29 @@ public enum WorkerLaunch {
         DispatchQueue.global(qos: .userInitiated).async {
             let home = settings(in: home, [".claude", "settings.json"])
             let project = projectModels(cwd: seen.cwd)
-            result.set((home.object?["model"] as? String, project.models, home.note.map { [$0] } ?? [], project.notes))
+            result.set((home.object?["model"] as? String, project.models, home.note.map { [$0] } ?? [], project.notes, home.note == nil))
             done.signal()
         }
         if done.wait(timeout: .now() + limit) == .success, let read = result.get() {
             facts.defaultModel = read.defaultModel
+            facts.defaultKnown = read.homeRead
             facts.notes = read.homeNotes + read.projectNotes
             facts.unread = !read.projectNotes.isEmpty
-            let ran = facts.model.map(runsOn) ?? runsOn(LeadReviewFloor.workersModel(read.defaultModel))
-            facts.families = Array(Set(ran + read.projectModels.flatMap(runsOn))).sorted()
+            facts.families = Array(Set(ran(facts) + read.projectModels.flatMap(runsOn))).sorted()
         } else {
             facts.unread = true
             facts.notes = ["a launch's settings weren't read: reading them took more than \(Int(limit)) s; only its command's model is recorded"]
-            facts.families = (facts.model.map(runsOn) ?? runsOn(LeadReviewFloor.workersModel(nil))).sorted()
+            facts.families = ran(facts).sorted()
         }
         return facts
+    }
+
+    /// The families a launch ran on by its command: its `--model`'s; with none, Claude Code's default's, and every
+    /// family when that default couldn't be read (never a guess: the user is then asked rather than an audit run on it).
+    static func ran(_ facts: BindFacts) -> [String] {
+        if let model = facts.model { return runsOn(model) }
+        guard facts.defaultKnown else { return families }
+        return runsOn(LeadReviewFloor.workersModel(facts.defaultModel))
     }
 
     /// The families a launch adds and why a file wasn't read (`bindFacts`, unbounded): for a caller that waits itself.
@@ -299,7 +312,7 @@ public enum WorkerLaunch {
 
     /// The bounded reads' result, handed between two queues.
     private final class Found: @unchecked Sendable {
-        typealias Read = (defaultModel: String?, projectModels: [String], homeNotes: [String], projectNotes: [String])
+        typealias Read = (defaultModel: String?, projectModels: [String], homeNotes: [String], projectNotes: [String], homeRead: Bool)
         private let lock = NSLock()
         private var value: Read?
         func set(_ found: Read) { lock.withLock { value = found } }
@@ -368,6 +381,13 @@ extension LeadVault {
     public func settingsUnread(root: String, task: String) -> Bool {
         guard case .approved(let unread)? = try? call(.unreadSettings(root: root, task: task)) else { return false }
         return unread
+    }
+
+    /// The families the vault's own record keeps `task`'s audits off under the floor (nil: no such floor, or a vault
+    /// that can't say): what the lead's tools choose an audit model from, with the board's.
+    public func auditExclusions(root: String, task: String) -> [String]? {
+        guard case .families(let families)? = try? call(.auditExclusions(root: root, task: task)) else { return nil }
+        return families
     }
 
     /// The allowance the user gave for `task`, if any.

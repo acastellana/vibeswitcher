@@ -232,6 +232,9 @@ public struct LeadVault: Sendable {
         /// Whether a worker of `task` (or of its team's members) was bound while a settings file wasn't read
         /// (`Reply.approved`).
         case unreadSettings(root: String, task: String)
+        /// The families the vault's record keeps `task`'s audits off under the floor (`Reply.families`; nil: no such
+        /// floor), its default read now from the vault's home; every family when that read fails.
+        case auditExclusions(root: String, task: String)
         /// The repository's lead only: its audit of `task` at `commit` found no model the floor leaves, and asked the
         /// user `question` (the question's id) which may audit it (`AuditOffer`; `Reply.ok`).
         case offerAuditModels(root: String, task: String, commit: String, question: String, digest: String)
@@ -845,6 +848,11 @@ extension LeadVault {
                 }
             }
             // A worker's launch, Claude Code's default read here (outside the lock: it reads a file).
+            // Claude Code's default for an exclusions read, read the careful way here (outside the lock).
+            var exclusionDefault: WorkerLaunch.BindFacts?
+            if case .auditExclusions = request {
+                exclusionDefault = WorkerLaunch.bindFacts(seen: .init(command: nil), home: configHome, limit: WorkerLaunch.bindLimit)
+            }
             var launch: WorkerLaunch.BindFacts?
             if case .bind(_, _, let session) = request {
                 // The command's model from its argv; the files read the careful way, off this queue, bounded.
@@ -858,7 +866,7 @@ extension LeadVault {
                 defer { lock.unlock() }
                 var changed = false
                 let reply = answer(request, from: caller, userOpened: userOpened, agentSession: agentSession, liveSessions: liveSessions,
-                                   config: config, launch: launch, changed: &changed)
+                                   config: config, launch: launch, exclusionDefault: exclusionDefault, changed: &changed)
                 if changed, let onChange, let data = try? JSONEncoder().encode(state) { onChange(data) }
                 swap(&held, &heldNotes)
                 let key = ConfigSeal.keyPrefix + ConfigSeal.copiedFolder
@@ -945,7 +953,8 @@ extension LeadVault {
         // MARK: Rules
 
         private func answer(_ request: Request, from caller: Caller, userOpened: Bool, agentSession: String?, liveSessions: Set<String>?,
-                            config: [String: String]? = nil, launch: WorkerLaunch.BindFacts? = nil, changed: inout Bool) -> Reply {
+                            config: [String: String]? = nil, launch: WorkerLaunch.BindFacts? = nil, exclusionDefault: WorkerLaunch.BindFacts? = nil,
+                            changed: inout Bool) -> Reply {
             switch request {
             case .issue(let role, let root, let task, let auditing, let finder, let agent):
                 if role == .lead {
@@ -1048,7 +1057,7 @@ extension LeadVault {
                         var all = team.launchedFamilies ?? [:]
                         // A Codex worker (its command Codex's, as the host started it): recorded as Codex; a Claude one by its
                         // models, never Codex in their place.
-                        let families = launch.agent == .codex ? [WorkerLaunch.codexFamily] : launch.families
+                        let families = launch.agent == .codex ? [WorkerLaunch.codexFamily] + (launch.model.map(WorkerLaunch.runsOn) ?? []) : launch.families
                         all[task] = Array(Set((all[task] ?? []) + families)).sorted()
                         team.launchedFamilies = all
                         if launch.unread { team.unreadSettings = Array(Set((team.unreadSettings ?? []) + [task])).sorted() }
@@ -1337,6 +1346,10 @@ extension LeadVault {
                 return .ok
             case .auditAllowance(let root, let task):
                 return .allowance(team(root)?.auditAllowances?[task])
+            case .auditExclusions(let root, let task):
+                guard let team = team(root), let floor = team.floor, floor.verifierDifferent else { return .families(nil) }
+                guard floor.workerModel != nil || exclusionDefault?.defaultKnown == true else { return .families(WorkerLaunch.allFamilies) }
+                return .families(Self.exclusions(team, task: task, floor: floor, defaultModel: exclusionDefault?.defaultModel).sorted())
             case .unreadSettings(let root, let task):
                 return .approved(team(root)?.unreadSettings?.contains(where: { $0 == task || $0.hasPrefix(task + LeadTeam.joiner) }) == true)
             case .launchedFamilies(let root, let task):
@@ -1935,8 +1948,10 @@ extension LeadVault {
             guard let launch, launch.known, let model = launch.model, WorkerLaunch.namesOne(model), let family = WorkerLaunch.family(of: model) else {
                 return .refused("Under the review floor a verifier is started with a model that says which one it is (--model fable, opus, sonnet, mythos, haiku or its id): this one isn't, so it holds no role.")
             }
-            var excluded = recorded
-            if let workers = WorkerLaunch.family(of: floor.workerModel ?? LeadReviewFloor.workersModel(launch.defaultModel)) { excluded.insert(workers) }
+            guard floor.workerModel != nil || launch.defaultKnown else {
+                return .refused("Claude Code's default couldn't be read (\(launch.notes.first ?? "its settings weren't read")), and the review floor names no worker_model, so the workers' model isn't known: this verifier holds no role. Set floor_worker_model, or fix the settings file.")
+            }
+            let excluded = Self.exclusions(team, task: task, floor: floor, defaultModel: launch.defaultModel)
             guard excluded.contains(family) else { return nil }
             let by = member.finder.map { "panel:" + $0.panel } ?? "grant:" + member.id
             // A panel's finders: one panel's worth, each index once, at the size the panel had when it first took it.
@@ -1952,6 +1967,16 @@ extension LeadVault {
         }
 
         private func allowance(_ team: Team, _ task: String) -> AuditAllowance? { team.auditAllowances?[task] }
+
+        /// The families the vault's own record keeps `task`'s audits off under the floor: worker_model's, else Claude
+        /// Code's default's (`defaultModel`, as read; none set counts as opus), and every family recorded for the task's
+        /// and its members' worker launches. What a verifier's bind is judged by, and what the lead's tools choose from
+        /// (`Request.auditExclusions`), so the two never disagree.
+        private static func exclusions(_ team: Team, task: String, floor: LeadReviewFloor, defaultModel: String?) -> Set<String> {
+            var excluded = Set(team.launchedFamilies?.filter { $0.key == task || $0.key.hasPrefix(task + LeadTeam.joiner) }.values.flatMap { $0 } ?? [])
+            if let workers = WorkerLaunch.family(of: floor.workerModel ?? LeadReviewFloor.workersModel(defaultModel)) { excluded.insert(workers) }
+            return excluded
+        }
 
         private func isLead(_ caller: Caller, _ root: String) -> Bool {
             guard case .session(let session) = caller else { return false }

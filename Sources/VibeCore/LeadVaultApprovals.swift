@@ -79,9 +79,10 @@ extension LeadVault {
         }
         var workflow = LeadWorkflow.load(from: (BoardStore(root: root).folder as NSString).appendingPathComponent("workflow.md"))
         workflow.floor = floor
+        // The vault's own exclusion set for the task (what a verifier's bind is judged by); this side's read where it can't say.
         let defaultModel = floor.workerModel
             ?? WorkerLaunch.settings(in: home, [".claude", "settings.json"]).object?["model"] as? String
-        let launched = vault.launchedFamilies(root: root, task: task) ?? []
+        let launched = vault.auditExclusions(root: root, task: task) ?? (vault.launchedFamilies(root: root, task: task) ?? [])
         let board = BoardStore(root: root).load().task(task)
         let launchedModel = board.flatMap { task in task.worker.flatMap { task.launchedModels?[$0] } }.flatMap { $0.isEmpty || $0.hasPrefix("codex") ? nil : $0 }
         // The vault's own record decides (the board, which the team can write, never takes the user's question away nor

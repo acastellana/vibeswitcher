@@ -363,8 +363,9 @@ extension LeadAdvanceTests {
         #expect(found.families == (kind == "link" ? ["fable", "opus"] : ["opus"]), "\(found)")
         let worktreeNotes = found.notes.filter { $0.contains("settings.local.json") }
         #expect(worktreeNotes.count == (kind == "link" ? 0 : 1) && found.notes.contains { $0.contains("home-") && $0.contains("settings.json") }, "\(found)")
+        // No --model, and the default not read (the home's settings a FIFO): every family, never a guess.
         let unnamed = WorkerLaunch.families(seen: .init(command: "claude -- go", cwd: nil), home: home.path, limit: hangGuard)
-        #expect(unnamed.families == ["opus"] && unnamed.notes.first?.contains("settings.json") == true, "\(unnamed)")
+        #expect(unnamed.families == WorkerLaunch.allFamilies && unnamed.notes.first?.contains("settings.json") == true, "\(unnamed)")
     }
 
     /// Under the floor, a task's model must name one: an alias or custom id is refused, and one already on the board
@@ -618,5 +619,49 @@ extension LeadAdvanceTests {
             Issue.record("a later finder under the panel's name used it")
             return
         }
+    }
+
+    /// V1: a Codex worker's record is Codex and its command's model family too.
+    @Test func aCodexWorkersRecordHasItsCommandsModelToo() {
+        let (book, root, _) = floorBook()
+        guard case .grant(let worker) = book.answer(.issue(role: .worker, root: root, task: "x", auditing: nil, agent: .codex), from: .session("lead")) else { return }
+        #expect(book.answer(.bind(grant: worker, root: root, session: "cx"), from: .session("lead"), bound: .init(command: "codex --model claude-opus-5-5")) == .ok)
+        #expect(book.answer(.launchedFamilies(root: root, task: "x"), from: .app) == .families(["codex", "opus"]))
+    }
+
+    /// V2: with no worker_model and Claude Code's default unreadable, a verifier's bind is refused (the workers' model
+    /// isn't known), and a worker's launch with no --model is recorded as every family.
+    @Test func anUnreadableDefaultFailsClosed() throws {
+        let (book, root, commit) = floorBook(floor: LeadReviewFloor())
+        let settings = URL(fileURLWithPath: book.configHome).appendingPathComponent(".claude/settings.json")
+        try FileManager.default.createDirectory(at: settings.deletingLastPathComponent(), withIntermediateDirectories: true)
+        #expect(mkfifo(settings.path, 0o600) == 0)
+        guard case .refused(let why) = bindVerifier(book, root: root, commit: commit, session: "v", command: "claude --model sonnet -- go") else {
+            Issue.record("a verifier bound with the default unknown")
+            return
+        }
+        #expect(why.contains("couldn't be read"), "\(why)")
+        guard case .grant(let worker) = book.answer(.issue(role: .worker, root: root, task: "y", auditing: nil), from: .session("lead")) else { return }
+        #expect(book.answer(.bind(grant: worker, root: root, session: "wy"), from: .session("lead"), bound: .init(command: "claude -- go")) == .ok)
+        #expect(book.answer(.launchedFamilies(root: root, task: "y"), from: .app) == .families(WorkerLaunch.allFamilies))
+        // The lead's tools read the same set: every family, so no audit model is left and the user is asked.
+        #expect(book.answer(.auditExclusions(root: root, task: "y"), from: .app) == .families(WorkerLaunch.allFamilies))
+    }
+
+    /// V4: the lead's choice is made from the vault's set too: with the project's command on Sonnet and Claude Code's
+    /// default (where the vault reads it) on Fable, the audit isn't put on Fable, which the bind would refuse.
+    @Test func theLeadsChoiceNeverTakesAModelTheVaultExcludes() throws {
+        let (root, runtime, lead) = try floorTeam(defaultModel: "sonnet", leadModel: "opus")
+        runtime.claude = "claude --model sonnet"
+        try writeVaultDefault(Self.fableDefault)
+        _ = lead.call("add_task", ["title": "Plain", "goal": "g", "acceptance": ["a"], "review": "audit"])
+        #expect(!lead.call("start_worker", ["task": "plain"]).isError)
+        let task = try #require(task("plain", root))
+        #expect(vault.auditExclusions(root: root, task: "plain") == ["fable", "sonnet"])
+        let choice = try #require(lead.auditChoice(lead.workflow, task: task))
+        #expect(!["fable", "sonnet"].contains { LeadReviewFloor.sameModel(choice, $0) }, "\(choice)")
+        try commit("plain.txt", "x\n", in: Worktrees.path(root: root, slug: "plain"))
+        let audited = lead.call("audit", ["task": "plain"])
+        #expect(!audited.isError, "\(audited.text)")
     }
 }

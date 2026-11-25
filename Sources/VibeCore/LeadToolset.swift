@@ -3441,12 +3441,10 @@ public final class LeadToolset: MCPToolset {
         guard !sensitive.isEmpty || codexWorked else { return }
         let baseline = Git.run(["merge-base", onto, head], in: root)
         // Both are known commits of a successfully tested merge. An unreadable baseline keeps the obligation.
-        let launched = task.worker.flatMap { task.launchedModels?[$0] }.flatMap { $0.isEmpty || $0.hasPrefix("codex") ? nil : $0 }
         // A Codex-worked branch touching no sensitive_paths can still be a security one (`securityReason`).
         let security = Self.securityReason(root: root, head: head, workflow: before, raised: task.riskRaised, sensitive: sensitive) != nil
         task.claudeReaudit = LeadClaudeReaudit(head: head, base: baseline.ok ? baseline.output : onto,
-                                             model: workflow.auditModel(workerModel: runtime.workerModel(root: root), taskModel: task.intendedModel,
-                                                                        launchedModel: launched, security: security), sensitive: sensitive,
+                                             model: auditModel(workflow, task: task, security: security), sensitive: sensitive,
                                              codexWorked: codexWorked ? true : nil)
     }
 
@@ -3465,7 +3463,14 @@ public final class LeadToolset: MCPToolset {
                let info = sessions.first(where: { $0.id == session }), info.live, info.usageLimit == nil, runtime.agentEnding(info) == nil {
                 return MCPToolResult(text: "Post-merge Claude re-audit of \(slug) is already running (session \(session)).")
             }
-            if let refusal = usageRefusal(model: followup.model, sessions: sessions, not: "No post-merge Claude verifier started",
+            // Chosen now, as every audit is (`auditPick`: the vault's exclusions and the board's): never the noted text of a
+            // choice that found none, nor a model the verifier's bind would refuse.
+            guard let model = auditPick(workflow, task: task, security: !followup.sensitive.isEmpty)?.model else {
+                let why = workersBasis(task, projectDefault: runtime.workerModel(root: root), workflow: workflow).text
+                throw Problem(text: "No post-merge Claude verifier started: \(why), with the task's own model, and no model is left. "
+                              + askWhichModelAudits(task, head: followup.head, why: why) + " Once they answer, start it again.")
+            }
+            if let refusal = usageRefusal(model: model, sessions: sessions, not: "No post-merge Claude verifier started",
                                           what: "audit(\(slug))", instead: "wait for Claude's reset") { throw Problem(text: refusal) }
             // One of this project's audits too: within heavy_slots (`claimAuditStart`).
             try claimAuditStart(slug, workflow: workflow, sessions: sessions, override: overrideSlots, not: "No post-merge Claude verifier started")
@@ -3496,7 +3501,7 @@ public final class LeadToolset: MCPToolset {
                                      label: "Verifier: \(task.title) (post-merge Claude re-audit)",
                                      trust: Worktrees.committedAgentConfig(root: root, slug: slug, base: followup.base).isEmpty
                                         && Worktrees.localAgentConfig(root: root, slug: slug).isEmpty,
-                                     prompt: prompt, start: "Audit the merged task independently now, then call submit_audit.", model: followup.model, auditing: followup.head)
+                                     prompt: prompt, start: "Audit the merged task independently now, then call submit_audit.", model: model, auditing: followup.head)
             try store.update { board in
                 guard let index = board.taskIndex(slug) else { return }
                 board.tasks[index].verifier = session
@@ -3507,7 +3512,7 @@ public final class LeadToolset: MCPToolset {
                 board.tasks[index].claudeReaudit?.limitedUntil = nil
                 // Only the lead starts one that stopped after its endings (auto_advance leaves it): its count starts over.
                 if followup.stopped { board.tasks[index].claudeReaudit?.endings = nil }
-                board.tasks[index].launched([session], on: followup.model)
+                board.tasks[index].launched([session], on: model)
             }
             // auto_advance stopped watching it at its endings: it looks again (merged tasks get no verifier-death notice).
             if followup.stopped { LeadAdvance.nudge(root: root) }

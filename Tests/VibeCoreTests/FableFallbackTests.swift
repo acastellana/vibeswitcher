@@ -26,6 +26,8 @@ extension LeadAdvanceTests {
     func fableTeam(_ settings: [String: Any] = [:]) throws -> (root: String, runtime: FakeRuntime, lead: LeadToolset) {
         let (root, runtime, lead) = try team(test: nil, ["auto_advance": false, "max_workers": 5].merging(settings) { $1 })
         runtime.claude = "claude --dangerously-skip-permissions --model fable"
+        // Claude Code's default where the vault reads it: Fable too, as on the node.
+        try writeVaultDefault("fable")
         lead.usageClock = { Self.fableNow }
         lead.power = { PowerState(onBattery: false, percent: 90) }
         // The floor read afresh at each look (it's kept `floorFresh` otherwise).
