@@ -7,9 +7,9 @@ import Testing
 /// before; and the Mac's vault hooks do nothing.
 struct LeadVaultV2Tests {
     /// The record per host (the review of 2026-11-21): `on` decides, on both systems, for the answer and both hooks; the
-    /// default is Linux's every host and, on the Mac, only a host that said it's a node host (`recordsOnThisHost`).
+    /// default is Linux's every host and none on the Mac, where a book says for itself (`LeadVault.Book.recordsActions`).
     @Test func theRecordIsKeptWhereTheHostSaysSo() {
-        #expect(LeadVaultV2.isOn == (!Platform.CodeIdentity.isAvailable || LeadVaultV2.recordsOnThisHost))
+        #expect(LeadVaultV2.isOn == !Platform.CodeIdentity.isAvailable)
         let request = LeadVaultV2.Request.recordUserAction(action: "a", kind: "set", subject: nil, digest: "d")
         var book: LeadVaultV2.Book?
         #expect(LeadVaultV2.answer(request, from: .app, book: &book, on: true) == .recorded(first: true))

@@ -16,6 +16,8 @@ enum VaultV2Handler {
         guard !Platform.CodeIdentity.isAvailable || viaConnector else { return .refused(HostProtocol.unauthorized) }
         guard caller == .app else { return .refused(HostProtocol.unauthorized) }
         guard let vault else { return .refused("This session host keeps no lead vault.") }
-        return vault.v2 { LeadVaultV2.answer(request, from: caller, book: &$0, on: !Platform.CodeIdentity.isAvailable || nodeHost) }
+        // Read before `v2` takes the vault's lock (`recordsActions` takes it too).
+        let on = vault.recordsActions
+        return vault.v2 { LeadVaultV2.answer(request, from: caller, book: &$0, on: on) }
     }
 }

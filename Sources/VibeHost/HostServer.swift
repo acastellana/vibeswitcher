@@ -162,9 +162,9 @@ public final class HostServer {
     var appConnectors: [Int32: AppConnector] = [:]
     /// The server child, the app on Linux (see V2/ServerChild.swift); on the Mac only a node's host's (`--server`, the
     /// node on the Mac's step 3); none without `--server`. A Mac node host's vault keeps the record of the user's
-    /// actions, its hooks included, from then on (`LeadVaultV2.recordsOnThisHost`).
+    /// actions, its hooks included, from then on (its book's `recordsActions`: that book's alone, item 14).
     var serverChild: ServerChild? {
-        didSet { if isMacNodeHost { LeadVaultV2.recordsOnThisHost = true } }
+        didSet { if isMacNodeHost { config.vault?.recordsActions = true } }
     }
 
     /// A node's host on the Mac: it runs a server child and keeps a vault. It answers `vaultV2` there (the record of the

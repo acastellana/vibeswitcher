@@ -1061,12 +1061,13 @@ extension LeadVault {
                 return .ok
             case .seal(let message):
                 if let refusal = maySeal(message, caller: caller, agentSession: agentSession) { return .refused(refusal) }
-                LeadVaultV2.sealed(message, target: agentSession, book: &state.v2, changed: &changed)
+                LeadVaultV2.sealed(message, target: agentSession, book: &state.v2, changed: &changed, on: keepsRecord)
                 return .seal(SteerInbox.seal(message, key: SymmetricKey(data: state.senderKey)))
             case .verify(let messages):
                 let key = SymmetricKey(data: state.senderKey)
                 let valid = messages.map { message in message.seal.map { $0 == SteerInbox.seal(message, key: key) } ?? false }
-                return .verified(LeadVaultV2.verified(messages, valid, book: &state.v2, changed: &changed, caller: caller, members: state.teams.values.flatMap(\.members)))
+                return .verified(LeadVaultV2.verified(messages, valid, book: &state.v2, changed: &changed, caller: caller, members: state.teams.values.flatMap(\.members),
+                                                      on: keepsRecord))
             case .walletSession:
                 guard case .session(let session) = caller else {
                     return .refused("This process isn't in any session VibeSwitcher's session host runs.")
