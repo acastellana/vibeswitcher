@@ -482,11 +482,13 @@ public enum HostImages {
     /// `--image-path`, else from `executable`; on the Mac from `executable`, as always.
     public static func folders(arguments: [String], executable: String) -> Folders {
         let nodeRoot = Platform.CodeIdentity.isAvailable ? nil : value(after: nodeRootFlag, in: arguments)
+        // The Mac's node: its server child is told the build's folder (`--node-root`), as on Linux (the review's N3).
+        let macNodeRoot = Platform.CodeIdentity.isAvailable && arguments.contains(nodeFlag) ? value(after: nodeRootFlag, in: arguments) : nil
         let image = Platform.CodeIdentity.isAvailable ? executable
             : nodeRoot.map { ($0 as NSString).appendingPathComponent("bin/" + BuildInfo.host) }
                 ?? value(after: imagePathFlag, in: arguments) ?? executable
         let folder = URL(fileURLWithPath: image).deletingLastPathComponent()
-        return Folders(image: image, installFolder: nodeRoot ?? folder.path,
+        return Folders(image: image, installFolder: nodeRoot ?? macNodeRoot ?? folder.path,
                        toolServer: folder.appendingPathComponent("vibeswitcher-mcp").path,
                        commandFolder: TestLock.commandFolder(besideExecutable: image),
                        appExecutable: folder.appendingPathComponent("VibeSwitcher").path)

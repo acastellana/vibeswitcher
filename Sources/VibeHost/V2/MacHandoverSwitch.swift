@@ -17,10 +17,20 @@ extension HostServer {
             // The target's file read once: the cdhash the record is checked against is the one the keeper must run, never
             // a second read of a path a session can rename over (the blind check's item 1).
             var read: Data?
-            if let why = HandoverTarget.macPinned(executable, pins: pins(), cdhashOf: { read = cdhashOf($0); return read }) {
+            let record = pins()
+            if let why = HandoverTarget.macPinned(executable, pins: record, cdhashOf: { read = cdhashOf($0); return read }) {
                 return .failure(MacHandoverKeeper.Refused(why.description))
             }
-            guard let read else { return .failure(MacHandoverKeeper.Refused("\(executable) has no code signature to check it by")) }
+            guard let read, case .success(let pinned) = record, let row = pinned.build(host: read) else {
+                return .failure(MacHandoverKeeper.Refused("\(executable) has no code signature to check it by"))
+            }
+            // Its build's server, by path, its row's (the review's N4): the new image's own start would find another
+            // only after this image is gone, and the sessions with it.
+            let folder = ((executable as NSString).deletingLastPathComponent as NSString).deletingLastPathComponent
+            let server = (folder as NSString).appendingPathComponent("bin/" + BuildInfo.server)
+            guard cdhashOf(server) == row.server else {
+                return .failure(MacHandoverKeeper.Refused("\(server) isn't the server the node's record pins for build \(row.commit)"))
+            }
             return .success(read)
         }
         guard let pinned = config.testKeeperHost, config.checkedNode == nil else { return nil }
@@ -58,8 +68,8 @@ extension HostServer {
             self?.log("handover to \(executable) failed: \(error)")
             reply(.error("Couldn't hand over: \(error)."))
         }
-        // A scratch host's test: the target swapped after the path check.
-        if let swap = config.testSwapAfterCheck { _ = rename(swap, executable) }
+        // A scratch host's test: the target swapped after the path check (never a checked node's).
+        if config.checkedNode == nil, let swap = config.testSwapAfterCheck { _ = rename(swap, executable) }
         log("handing over to \(executable) through a keeper")
         DispatchQueue.global().async { [weak self] in
             let started = MacHandoverKeeper.start(executable, expected: expected)
@@ -83,7 +93,7 @@ extension HostServer {
                     if let bad = state.descriptors.first(where: { !HostHandover.isOpen($0) }) { throw HostHandover.Failure.badDescriptor(bad) }
                     try MacHandoverKeeper.park(state, with: keeper).get()
                     // A scratch host's test: the target swapped after the keeper's proof, before the exec.
-                    if let swap = self.config.testSwapBeforeExec { _ = rename(swap, executable) }
+                    if self.config.checkedNode == nil, let swap = self.config.testSwapBeforeExec { _ = rename(swap, executable) }
                     reply(.ok)
                     self.sessions.values.forEach { $0.suspendParser() }
                     parsersStopped = true

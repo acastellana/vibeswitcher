@@ -92,8 +92,9 @@ public enum HandoverTarget {
     /// The Mac's node host: why a switch or a rollback to the host image at `path` is refused, or nil (the node on the
     /// Mac's design, "The anchor", check 4): its file's cdhash (`cdhashOf`, this Mac's slice) must be a host the node's
     /// record pins (`pins`, root's to write); a rollback goes only to a build the record still holds. Checked by path
-    /// before the handover, which then execs the path: a file swapped between the two isn't caught here (the design's
-    /// "What it doesn't cover"; with item 13). Asked only by a checked Mac node host (`HostImages.isCheckedMacNode`, never yet).
+    /// before the handover; the switch then goes through a keeper proven to run the cdhash read here
+    /// (`HostServer.keeperTarget`, V2/MacHandoverKeeper.swift), so a file swapped after this check is the keeper's to
+    /// refuse. Asked only by a checked Mac node host (`Config.checkedNode`, made only behind `HostImages.isCheckedMacNode`).
     public static func macPinned(_ path: String, pins: Result<NodePins, NodePins.Refused>,
                                  cdhashOf: (String) -> Data? = { Platform.CodeIdentity.cdhash(atPath: $0) }) -> Refused? {
         let record: NodePins

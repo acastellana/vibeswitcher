@@ -26,6 +26,11 @@ public enum MacHandoverKeeper {
     /// How long a keeper may take to prove itself, and to take the parcel (amfid's first look at a new build on a loaded
     /// Mac, as the probe's `HostHandover.probeLimit`).
     static let limit: TimeInterval = HostHandover.probeLimit
+    /// A keeper's limit for the new image, in seconds, when shorter than `limit`: `--handover-keeper-limit S` (the old
+    /// host's; it only shortens the keeper's own wait).
+    public static let limitFlag = "--handover-keeper-limit"
+    /// How long the old host waits for the keeper's word that it took the parcel, on its queue (decoding a state).
+    static let parkLimit: TimeInterval = 30
     /// The keeper's answer once it read the parcel whole: it can give it back.
     static let parked: UInt8 = 0x6b
 
@@ -59,7 +64,7 @@ public enum MacHandoverKeeper {
     /// is its pid, runs `expected`, hardened. Otherwise it is ended and reaped, and why. Blocks (not on the host's queue).
     static func start(_ executable: String, expected: Data, limit keeperLimit: TimeInterval = limit) -> Result<Keeper, Refused> {
         guard let (host, keeper) = Platform.Sockets.pair(type: Platform.Sockets.stream) else { return .failure(Refused("no channel (errno \(errno))")) }
-        var spawn = Platform.Spawn(executable: executable, arguments: [executable, keeperFlag, String(keeper)])
+        var spawn = Platform.Spawn(executable: executable, arguments: [executable, keeperFlag, String(keeper), limitFlag, String(Int(max(1, keeperLimit)))])
         spawn.stdin = .path("/dev/null", flags: O_RDONLY)
         spawn.stdout = .path("/dev/null", flags: O_WRONLY)
         spawn.stderr = .inherit
@@ -94,7 +99,7 @@ public enum MacHandoverKeeper {
         encoder.outputFormat = .binary
         guard let data = try? encoder.encode(state) else { return .failure(Refused("the state couldn't be encoded")) }
         guard send(data, descriptors: state.descriptors, over: keeper.proven) else { return .failure(Refused("the state didn't reach the keeper (errno \(errno))")) }
-        guard wait(readable: keeper.proven, for: limit), readByte(keeper.proven) == parked else {
+        guard wait(readable: keeper.proven, for: parkLimit), readByte(keeper.proven) == parked else {
             return .failure(Refused("the keeper didn't take the state"))
         }
         return .success(())
@@ -131,7 +136,10 @@ public enum MacHandoverKeeper {
         var byte = parked
         guard Sys.write(mine, &byte, 1) == 1 else { quit("the host has gone") }
         // The host's exec closes `mine`'s other end; the new image's pair arrives on the channel (or the channel ends:
-        // the handover failed before the exec, or the host went).
+        // the handover failed before the exec, or the host went), within the limit: past it, everything held is closed
+        // with this process (the review's N6; the sessions end, as in the residual).
+        let wanted = arguments.firstIndex(of: limitFlag).flatMap { arguments.indices.contains($0 + 1) ? TimeInterval(arguments[$0 + 1]) : nil }
+        guard wait(readable: channel, for: min(limit, max(1, wanted ?? limit))) else { quit("no new image came within its limit: everything held closed") }
         guard let theirsNow = Platform.Sockets.receiveDescriptor(over: channel) else { quit("no new image came (the handover ended before its exec)") }
         if let why = refusal(Platform.Sockets.peerToken(theirsNow), pid: host, cdhash: own, what: "the image at the host's pid") {
             quit("refused the new image: \(why); nothing handed over")
