@@ -305,6 +305,8 @@ export function projectView(app, { sheet }) {
       h('ul', { class: 'hc-items' }, items.map((item) => h('li', null, h('strong', null, itemLabel(item)), ' ', h('code', null, item.name),
         item.changedAt ? h('small', null, ' · ', t('hcWhen', { time: since(item.changedAt) })) : null,
         item.files?.length ? h('ul', { class: 'files' }, item.files.map((file) => h('li', null, h('code', null, file)))) : null))),
+      // Why a rule can't be compared, only here (the long view): never "the node restarted" alone.
+      summary.rails.some((rail) => rail.state === 'unknown') ? h('p', { class: 'hc-quiet' }, t('hcUnknownWhy')) : null,
       summary.rails.length ? h('table', { class: 'hc-rails' }, h('tbody', null, summary.rails.map((rail) => h('tr', { class: ['changed', 'new', 'records'].includes(rail.state) ? 'changed' : null },
         h('th', null, rail.key), h('td', null, h('code', null, rail.value)), h('td', { class: 'hc-state' }, stateWord(rail)))))) : null,
       h('details', { class: 'hc-technical' }, h('summary', null, t('hcTechnical')),
