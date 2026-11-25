@@ -190,12 +190,12 @@ test('U7: no text under 11.5 px, in any rule, wide or on a phone; the browser’
       if (size !== null) sizes[name] = Math.min(sizes[name] ?? Infinity, size);
     }
   }
-  assert.ok(sizes['--small'] >= 11.5, `--small is ${sizes['--small']}px`);
+  assert.ok(sizes['--t-caption'] >= 11.5, `--t-caption is ${sizes['--t-caption']}px`);
   const small = [];
   for (const rule of rules()) {
     const d = declarations(rule.body);
     let value = d['font-size'];
-    if (!value && d.font && d.font !== 'inherit') value = d.font.match(/^(?:[a-z0-9-]+\s+)*?(var\(--[a-z]+\)|[\d.]+px)/)?.[1];
+    if (!value && d.font && d.font !== 'inherit') value = d.font.match(/^(?:[a-z0-9-]+\s+)*?(var\(--[a-z0-9-]+\)|[\d.]+px)/)?.[1];
     if (!value || value === 'inherit') continue;
     // max(A, B) is at least A.
     const floor = value.match(/^max\(([^,]+),/)?.[1].trim();

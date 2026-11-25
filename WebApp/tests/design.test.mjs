@@ -318,3 +318,34 @@ test('sizes: buttons and fields come in three heights (24, 30, 36), and 44 on a 
   }
   assert.deepEqual(wrong, []);
 });
+
+// ---- Type (D3's first step, D19) ----
+
+test('type: every size, weight and line is a token (seven sizes, three weights), every kind of code one size, nothing under 11.5 px', () => {
+  const found = [];
+  for (const block of RULES) {
+    for (const d of block.declarations) {
+      if (reasoned(d)) continue;
+      if (d.property === 'font-size' && !/^(var\(--t-[a-z-]+\)|inherit)$/.test(d.value)) found.push(where(block, d));
+      if (d.property === 'font-weight' && !/^(var\(--w-(regular|medium|strong)\)|inherit)$/.test(d.value)) found.push(where(block, d));
+      if (d.property === 'line-height' && !/^(var\(--lh-[a-z]+\)|0|1|normal|inherit)$/.test(d.value)) found.push(where(block, d));
+      if (d.property === 'font' && d.value !== 'inherit' && !/^var\(--t-[a-z]+\)\/var\(--lh-[a-z]+\) var\(--(sans|mono)\)$/.test(d.value)) found.push(where(block, d));
+    }
+  }
+  assert.deepEqual(found, []);
+  // Every size a rule names is on the scale (or a touch screen's field), and every :root's value of it, wide or on a
+  // phone, is a size this page draws: nothing under 11.5.
+  const sizes = new Set(RULES.flatMap((block) => block.declarations).filter((d) => d.property === 'font-size').flatMap((d) => [...d.value.matchAll(/var\((--t-[a-z-]+)\)/g)].map((m) => m[1])));
+  for (const name of sizes) assert.ok(name in SCALE.type || name === '--t-field-touch', `${name} is not on the scale`);
+  for (const [name, values] of Object.entries(VALUES)) {
+    if (!name.startsWith('--t-')) continue;
+    for (const value of values) assert.ok(parseFloat(value) >= 11.5, `${name}: ${value}`);
+  }
+  // The old three are gone: one scale.
+  for (const name of ['--small', '--text', '--large']) assert.ok(!VALUES[name], `${name} still defined`);
+  // Code: inline, fenced, output, diffs and command lines all at --t-code (D19).
+  for (const selector of ['.prose code, .card code, .node code', '.code pre', '.output', '.diff', '.tool-title', '.copy-line .copy-text', '.held-diff', '.sheet-body code']) {
+    const size = RULES.filter((block) => block.selector === selector).flatMap((block) => block.declarations).filter((d) => d.property === 'font-size').at(-1)?.value;
+    assert.equal(size, 'var(--t-code)', selector);
+  }
+});
