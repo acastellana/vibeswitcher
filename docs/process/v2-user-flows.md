@@ -23,7 +23,7 @@ with the step when one matters) or whether something is **missing in V2 everywhe
 | --- | --- | --- | --- | --- |
 | 1 | First install and first project | works differently, worse | waits for steps 4, 5, 7 | read; New project driven |
 | 2 | Start a project and its lead and give it work | works differently, about the same | waits for step 4 | read; forms driven |
-| 3 | See what needs me and answer a lead's question | works the same (under trust) | waits for step 4 | driven |
+| 3 | See what needs me and answer a lead's question | works the same (under trust) | waits for step 4 | driven (to Undo) |
 | 4 | Answer a session's own prompt | works differently, worse | waits for step 4; the page's answer missing everywhere | driven |
 | 5 | Start, find, rename, pause, end and resume my own session | works differently, worse | waits for step 4; keys missing everywhere | driven in part |
 | 6 | Type to a working session and steer it | works differently, about the same | waits for step 4 | driven |
@@ -34,7 +34,7 @@ with the step when one matters) or whether something is **missing in V2 everywhe
 | 11 | Review what a lead did | works differently, better | waits for the Mac node | driven |
 | 12 | Get notified when the page or app is closed | can't be done | missing everywhere | read; toggles driven |
 | 13 | Use it from the phone | works differently, worse | acting from a phone missing everywhere | driven (layout) |
-| 14 | Change a setting for the node and for a project | works the same (under trust) | waits for step 4 | driven |
+| 14 | Change a setting for the node and for a project | works the same (under trust) | waits for step 4 | driven (the list), read (Set) |
 | 15 | Update to a new version and roll back | works differently, better | waits for steps 5, 7 | read; This node driven |
 | 16 | Restart the Mac and get my sessions back | works differently, worse | waits for step 5 | read |
 | 17 | A wallet request end to end | can't be done (Wallet Manager) | missing everywhere | read |
@@ -92,12 +92,12 @@ words; Hold stops the timer.
 **V2**: 1. The left column says "N need you" per project and in all; the tab's title counts; the browser notifies while
 a page is open. 2. ⌘J / ⌥J: the next project with a card waiting. 3. The project page's "Waiting on me" shows the
 question with its options and timer. 4. Click an option (acts under trust; driven: "Thursday" gave "Sending “Thursday”…
-· Undo", a Blocking card's five seconds) or type your own words; Hold is a button. Without trust the card shows
+· Undo", a Blocking card's five seconds; the answer's arrival wasn't waited for) or type your own words; Hold is a button. Without trust the card shows
 `vibeswitcher answer CARD` to run.
 
 **Verdict**: works the same under trust, with Undo as a bonus; worse without it. ⌘J skips your own sessions, and
 nothing outside a browser tab says something needs you. **On the Mac**: waits for step 4 (the Mac's own H1 too).
-**Checked**: driven.
+**Checked**: driven up to the Undo.
 
 ## 4. Answer a session's own prompt
 
@@ -120,13 +120,13 @@ Pause ›, Resume Notifications. 4. End Session… (asks first). 5. The start pa
 
 **V2**: 1. Your own sessions (`#/sessions`, driven): Start a session with Claude, Codex, Shell or a preset (acts under
 trust), or `vibeswitcher new FOLDER [--agent] [--preset]`; the palette's New PRESET in FOLDER. 2. Find it: Your own
-sessions lists yours; team sessions only under their project; ⌘K searches. 3. The session's Actions… (driven: it
-opened): Rename, the four pauses, Resume Notifications, each "Do it" under trust, or `vibeswitcher rename`/`pause`.
-4. Actions › End: one click, no confirmation; or `vibeswitcher end SESSION`. 5. Ended lately (driven) with Resume and
+sessions lists yours; team sessions only under their project; ⌘K searches. 3. The session's Actions… (driven: it opened
+on Rename, Pause, End, Close shells): Rename, the four pauses, Resume Notifications, each "Do it" under trust, or `vibeswitcher rename`/`pause`.
+4. Actions › End, then Do it, with no "are you sure"; or `vibeswitcher end SESSION`. 5. Ended lately (driven) with Resume and
 its `vibeswitcher resume ID` line.
 
-**Verdict**: works differently, worse: no ⌘N, ⌘1–9, next/previous or filter (the redesign removed them), End without a
-confirmation. **On the Mac**: waits for step 4; the keys and the filter are missing everywhere. **Checked**: driven in
+**Verdict**: works differently, worse: no ⌘N (never a page key), and the redesign removed ⌘1–9, next/previous and the
+filter; End has no "are you sure". **On the Mac**: waits for step 4; the keys and the filter are missing everywhere. **Checked**: driven in
 part (the mock has no `session.new` or `session.end`, so those showed their lines).
 
 ## 6. Type to a working session and steer it
@@ -134,15 +134,15 @@ part (the mock has no `session.new` or `session.end`, so those showed their line
 **V1**: 1. Open the session; type in the composer. 2. ↩ while it works: taken after its current step, or held behind
 an open question. 3. ⌘. stops it. 4. Or type straight into its terminal.
 
-**V2**: 1. Type in the session's box; ↩ leaves it as a draft over the box (driven: "Your message for Claude", Edit,
-Discard). 2. The draft's Send (acts under trust) or its menu (driven): At its next step, Now, Interrupt then send; or
+**V2**: 1. Type in the session's box; ↩ leaves it as a draft over the box (driven: the mock's own draft, "Your message for
+Claude" with Edit and Discard; nothing was typed). 2. The draft's Send (acts under trust) or its menu (driven): At its next step, Now, Interrupt then send; or
 `vibeswitcher send SESSION TEXT [--when …]`. A message sent while a question is open waits and goes in once it
 closes (driven: "A message waits to go in"). 3. No bare stop: "Interrupt, then send" needs a message. 4. No typing into
 the terminal.
 
 **Verdict**: works differently, about the same for steering (two steps where V1 has one, and more ways); worse for a
-bare stop and the terminal. **On the Mac**: waits for step 4; typing into a terminal is missing everywhere (H1 and the
-user's decisions). **Checked**: driven.
+bare stop and the terminal. **On the Mac**: waits for step 4; typing into a terminal is missing everywhere (the user's
+decisions in the H1 plan). **Checked**: driven.
 
 ## 7. Read a session (chat, terminal, scroll back, copy, search)
 
@@ -245,13 +245,13 @@ push and dev pages are missing everywhere. **Checked**: driven (layout), read.
 **V1**: 1. ⌘, opens Settings; search or pick a tab. 2. Change a value; running leads are told where it matters.
 
 **V2**: 1. Settings (`#/settings`, driven): This node and each project; every setting with its value, default, where it
-lives and its range. 2. Change… sets it (acts under trust), or drafts `vibeswitcher set [FOLDER] KEY VALUE`. The policy,
+lives and its range. 2. Change opens a field, and its Set button sets it (acts under trust; read in `views/settings.js`, not clicked), or drafts `vibeswitcher set [FOLDER] KEY VALUE`. The policy,
 the floors, `lead_mail`, `verifier_model`, `security_audit_model` and `max_workers` are a terminal's only (the page shows
 a Set button for the last four, which the node refuses). 3. Search: `vibeswitcher settings --find WORDS` or the page's
 box.
 
 **Verdict**: works the same under trust, with some settings a terminal's on purpose. **On the Mac**: waits for step 4.
-**Checked**: driven.
+**Checked**: driven (the list), read (Set).
 
 ## 15. Update to a new version and roll back
 
