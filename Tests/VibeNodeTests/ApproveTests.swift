@@ -212,7 +212,7 @@ struct ApproveTests {
             #expect(!plain.joined().contains("hash"), "\(plain)")
             for held in card["config"]?["items"]?.array ?? [] { #expect(held["kind"]?.string != nil && held["what"]?.string != nil, "\(held)") }
             #expect(WireSchema.check(card, as: "card") == nil, "\(WireSchema.check(card, as: "card") ?? "")")
-            #expect(card["config"]?["settle"]?.string == "vibeswitcher config accept \(card["id"]?.string ?? "")", "\(card)")
+            #expect(card["settle"]?.string == "vibeswitcher config accept \(card["id"]?.string ?? "")", "\(card)")
         }
         // The home's lists it; a project's says it in its line of what it shares with the home's card.
         // The home's lists it; a project's says it in its line of what it leaves to the home's card.

@@ -109,7 +109,8 @@ function readOnlyAnswer(card, counting) {
       h('span', { class: 'option-text' }, option), option === card.question.proposal ? h('span', { class: 'option-note' }, t('cProposed')) : null))) : null,
     h('div', { class: 'card-command' },
       h('span', { class: 'card-command-label' }, t('cAnswerInTerminal')),
-      h('code', null, `vibeswitcher answer ${short} "${sample(options[0])}"`),
+      // The node's own line for it (`settle`), as is; else the answer line with the first option.
+      h('code', null, card.settle || `vibeswitcher answer ${short} "${sample(options[0])}"`),
       counting ? h('code', null, `vibeswitcher hold ${short}`) : null),
   ];
 }

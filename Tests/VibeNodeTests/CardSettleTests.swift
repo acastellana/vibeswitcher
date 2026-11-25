@@ -24,9 +24,11 @@ struct CardSettleTests {
     }
 
     /// `settle` run as the user would type it (its placeholder, if any, given), then the card closed.
-    private func settles(_ node: ScratchNode, _ card: [String: Any], answer: String? = nil, sourceLocation: SourceLocation = #_sourceLocation) async throws {
+    /// `command`: another than the card's own (`approve`, for a card its batch takes).
+    private func settles(_ node: ScratchNode, _ card: [String: Any], answer: String? = nil, command: String? = nil,
+                         sourceLocation: SourceLocation = #_sourceLocation) async throws {
         let id = try #require(card["id"] as? String, sourceLocation: sourceLocation)
-        let settle = try #require(card["settle"] as? String, "\(card)", sourceLocation: sourceLocation)
+        let settle = try #require(command ?? card["settle"] as? String, "\(card)", sourceLocation: sourceLocation)
         var words = settle.split(separator: " ").map(String.init)
         #expect(words.first == "vibeswitcher", "\(settle)", sourceLocation: sourceLocation)
         words.removeFirst()
@@ -60,10 +62,15 @@ struct CardSettleTests {
         // Its own one step (`config accept CARD`), though approve takes it too.
         let heldID = try #require(held["id"] as? String)
         #expect(held["settle"] as? String == "vibeswitcher config accept \(heldID)" && held["blocking"] as? Bool == true, "\(held)")
-        #expect((held["config"] as? [String: Any])?["settle"] as? String == held["settle"] as? String, "one source: \(held)")
+        #expect((held["config"] as? [String: Any])?["settle"] == nil, "one field, the card's: \(held)")
         let batched = try await node.run(["status"])
         #expect(batched.output.contains("1 to accept: `vibeswitcher approve`"), "approve takes it: \(batched.output)")
         try await settles(node, held)
+        // `vibeswitcher approve` (what status offers for the batch) settles such a card too.
+        try "{\"env\":{\"SETTLE\":\"2\"}}".write(to: repo.appendingPathComponent(".claude/settings.json"), atomically: true, encoding: .utf8)
+        _ = try await node.run(["config", "held", root])
+        let again = try await card(node) { $0["kind"] as? String == "config" && $0["root"] as? String == root }
+        try await settles(node, again, command: "vibeswitcher approve")
 
         // A rule changed in workflow.md (start_worker and merge refuse on it), nothing held: its own accept, blocking.
         let workflow = ConfigHoldStore.workflowPath(root: root)
