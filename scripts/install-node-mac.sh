@@ -618,7 +618,7 @@ install_node_mac_main() {
     [[ -n $pin_host && -n $pin_server && -n $pin_cli ]] || fail 1 "the cdhashes to pin weren't read"
     local pins_args=(--build "$commit" "$pin_host" "$pin_server" "$pin_cli")
     (( testing )) && pins_args=(--dry-run "${pins_args[@]}")
-    /bin/bash -c "$pins_step" node-pins-mac.sh "${pins_args[@]}" \
+    /usr/bin/env -i HOME="$home" PATH=/usr/bin:/bin LC_ALL=C /bin/bash -c "$pins_step" node-pins-mac.sh "${pins_args[@]}" \
         || fail 1 "the node's record wasn't written, so nothing was installed: run the install again"
     # BSD mv has no -T: the target is checked absent here, under the lock (a folder there would take the build in).
     [[ ! -e $final && ! -L $final ]] || fail 1 "$final is there already: $commit is installed"

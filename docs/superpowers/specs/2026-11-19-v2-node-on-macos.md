@@ -243,8 +243,13 @@ where, then runs one `sudo` whose script is text inside it, not a file: it makes
 afterwards), writes a temporary file in it as root, sets it `root:wheel 0644`, and renames it over the record. The
 install checks the step's text against the commit's blob and runs it from memory, as it does its libraries, so what
 `sudo` runs isn't a file a session could edit before the password is typed. A commit already in the record with other
-cdhashes is refused (a build's pins never change). `--dry-run` prints and writes nothing. Nothing else writes it:
-no check, no start, no switch.
+cdhashes is refused (a build's pins never change). `--dry-run` prints and writes nothing. `--record` names only the node's record or a trial's
+(`/Library/Application Support/VibeSwitcher-trial/node-<uid>.pins`), and the root half checks the path, the uid (sudo's
+`SUDO_UID`) and every line it is handed by the record's pattern before it touches a folder (the review's F4). The step
+drops every function its shell imported, as the install does, fixes `LC_ALL`, and the install runs it under `env -i`
+(F3, F5). `--keep N` takes no values: it rewrites the record there, root's alone, to its first N rows, which root checks
+against the record itself; after a security update `--keep 1` is the lever (below). Nothing else writes it: no check,
+no start, no switch.
 
 **How each check reads it** (every read through the walk above; anything unreadable is a refusal):
 
@@ -267,12 +272,15 @@ no check, no start, no switch.
    from it is refused. The check is by path, then the Mac's handover execs that path: a file swapped between the two
    runs the session's code, which asks nothing (below, "What it doesn't cover").
 
-**When it isn't right**, each refused with one plain line naming the record's path and what to do (an administrator
-runs `scripts/node-pins-mac.sh` from a checkout of the installed commit for that build, with `--fresh` when the record
-there can't be carried; the install itself refuses a commit already installed, so there is no recovery short of that
-step or a newer install): the record missing; unreadable; a link anywhere on its path; any folder on it or the file
-not root's, or writable by its group or others, or carrying an ACL; not a regular file, too large;
-not parseable, another format, another uid; and a running code that names no row (an unknown build).
+**When it isn't right**, each refused with one plain line naming the record's path and what to do: install a newer
+commit (`install-node-mac.sh`, whose administrator step writes the record from the build it checked). Never values by
+hand: a build's cdhashes read from the builds folder are a session's to choose, and a checkout's copy of the step is
+the user's file (the install runs the commit's checked blob); the step's no-values form, `--keep N`, only rewrites the
+rows of the record there, root's alone, checked again as root. The cases: the record missing; unreadable; a link
+anywhere on its path; any folder on it or the file not root's, or writable by its group or others, or carrying an ACL;
+not a regular file, too large; not parseable, another format, another uid; and a running code that names no row (an
+unknown build). A second hard link isn't one of them (the review of 2026-11-25, F2: any process of the user's can add
+one to a root-owned file, so refusing it let a session make every check refuse).
 
 **What it doesn't cover.** A session that re-bootstraps the job with a host of its own that runs the genuine pinned
 server: the server check (1) passes, as the listener is the genuine server, the child of the job's process. Closing it
