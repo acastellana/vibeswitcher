@@ -9,7 +9,7 @@ import { dictationGroup } from '../dictate.js';
 import { healthFacts } from '../health.js';
 import { updateFacts } from '../updates.js';
 import { copyLine } from './cards.js';
-import { t } from '../i18n.js';
+import { t, tParts } from '../i18n.js';
 import { actsLine, actsFor, doButton } from '../acting.js';
 
 const row = (name, ...value) => h('div', { class: 'fact' }, h('dt', null, name), h('dd', null, value));
@@ -49,7 +49,7 @@ export function updatesGroup(update) {
   return group(t('noUpdates'),
     h('dl', { class: 'facts-list' },
       row(t('noState'), h('span', { class: tone, 'aria-hidden': 'true' }), facts.state),
-      facts.checkedAt ? row(t('noLastChecked'), t('noAgo', { d: ago(facts.checkedAt) })) : null,
+      facts.checkedAt ? row(t('noLastChecked'), tParts('noAgo', { d: ago(facts.checkedAt) })) : null,
       facts.problem ? row(t('noLastTry'), t('noCouldntLook', { why: facts.problem })) : null),
     h('div', { class: 'card-command' }, h('span', { class: 'card-command-label' }, t('noInATerminal')),
       facts.lines.map((line) => copyLine(line.text, line.label))));
@@ -187,7 +187,7 @@ export function nodeView(app) {
         h('ul', { class: 'lines' }, (node.facts || []).map((line) => h('li', null, line)))),
       node.journal?.length ? group(t('noJournal'), h('ul', { class: 'lines' }, node.journal.map((line) => h('li', null, line.replace(/^journal: /, ''))))) : null,
       node.accepted?.length ? group(t('noRequestsItTookAsYours'),
-        h('ul', { class: 'lines' }, node.accepted.map((entry) => h('li', null, h('code', null, entry.commandLine.join(' ')), ' · ', t('noAgo', { d: ago(entry.at) }), ' · ', entry.cgroup)))) : null,
+        h('ul', { class: 'lines' }, node.accepted.map((entry) => h('li', null, h('code', null, entry.commandLine.join(' ')), ' · ', tParts('noAgo', { d: ago(entry.at) }), ' · ', entry.cgroup)))) : null,
       group(t('noBetweenLeads'),
         h('p', { class: 'node-says' }, t('noWhatTheProjectsLeadsTold')),
         h('a', { class: 'link', href: '#/mail' }, t('noOpenBetweenLeads'))),

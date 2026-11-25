@@ -1122,6 +1122,17 @@ export const lang = () => language;
 // For the tests.
 export function setLanguage(code) { language = TABLES[code] ? code : 'en'; }
 
+// `t` for a value that is a node (a <time> that keeps counting): the word's parts in order, each blank its value as
+// given, for `h` to append. A node given to `t` would be written as its name ("[object HTMLTimeElement]").
+export function tParts(key, values = {}) {
+  let word = TABLES[language][key] ?? EN[key] ?? key;
+  if (typeof word === 'object') word = values.n === 1 ? word.one : word.other;
+  return word.split(/(\{\w+\})/).filter((part) => part !== '').map((part) => {
+    const name = part.match(/^\{(\w+)\}$/)?.[1];
+    return name && name in values ? values[name] : part;
+  });
+}
+
 export function t(key, values = {}) {
   let word = TABLES[language][key] ?? EN[key] ?? key;
   if (typeof word === 'object') word = values.n === 1 ? word.one : word.other;
