@@ -14,7 +14,16 @@ real sessions; none of it was touched.
 child, launchd's pid 1 for the root records, as `ProcessesTests` reads it); no task port was taken (`task_for_pid` would
 put the Developer Tools dialog on the screen: the status word was read instead), no dialog was shown, no job was loaded.
 The probes are [scripts/mac-measure/probes](../../scripts/mac-measure/probes), built with `clang`/`swiftc` into
-`.build/mac-measure`. Paths below are cut to `<clone>` and `~`.
+`.build/mac-measure`. Paths below are cut to `<clone>` and `~`. **M1 to M8 and M10 run again in one command**, what an
+agent may run (no dialog, no job, only its own processes and pid 1):
+`bash scripts/mac-measure/taken-here.sh` ([taken-here.sh](../../scripts/mac-measure/taken-here.sh)); its run of
+2026-11-25 gave the same lines as below (and the two additions marked "the runner").
+
+Reads beyond the measurement's own processes, all of them reads the kernel or launchd answers any process of the
+user's: pid 1's records; `launchctl list` (to pick an Apple agent) and `launchctl print` of Finder's job (M11); the
+frontmost app's bundle id, which `keys` prints (LA-7's helper, checked here posting nothing). Written: a few entries in
+the unified log (M10, under `dev.vibeswitcher.measure.<random>`, and two `logger -t vibeswitcher`); scratch folders under
+`/tmp/mac-measure.*`, made and removed by the project's `scripts/lib/scratch.sh`.
 
 ## What step 4 names, and where each stands
 
@@ -48,7 +57,7 @@ The probes are [scripts/mac-measure/probes](../../scripts/mac-measure/probes), b
 | Item 10: an anchor a session can't write | item 10 | a decision of the user's (below) |
 | Item 11: a chain from Terminal and one from ssh read whole | item 11 | **taken** for root's records (M8); scripts ANC-1, ANC-2 |
 | Item 12: `launchctl print`'s lines | item 12 | **taken** (M11): the format `NodeAgent.printed` parses |
-| Item 13: the checked node start | item 13 | not built: it waits on item 10 |
+| Item 13: the checked node start | item 13 | the check not built (it waits on item 10); what it gates built and off |
 | The unified log: writing under another image's name; `log show` without admin | step 6 | **taken** (M10) |
 | The design's own tests with SIP on | the tasks' rows | **taken** (M13): 98 of 98 |
 
@@ -89,6 +98,9 @@ cs_status=0x22011311 valid=1 … hard=1 kill=1 runtime=1 linker_signed=0 platfor
 procargs=read bytes=3252 argc=3 environment_entries=46 MEASURE_MARK_seen=1
 ```
 
+The runner reads each target with the hardened copy too (the server is hardened): the same `environment_entries` and
+`MEASURE_MARK_seen` each time (`/bin/sleep` 0, the two builds 46 and 1).
+
 **Conclusion.** With SIP on, a process of the user's reads another's environment, its own or hardened code alike;
 only an Apple platform binary's environment comes back empty (its arguments still read). **The design assumed the
 opposite** ("a real Mac with SIP on is expected not to, which fails the line for every peer"). For the rule: the line
@@ -122,7 +134,8 @@ ancestry says nothing after it, the terminal line is lost to it (and `script` gi
 
 **Conclusion.** A process keeps its coalition through fork, exec, `setsid` and being reparented to launchd: what
 Linux's cgroup gives (a process of the user's can't leave `user@<uid>.service`). launchd puts each job in a coalition
-of its own. So a session's descendants stay in the coalition of whatever job started the session (the app's today,
+of its own (each job's `resource coalition` in `launchctl print`; that a session's own job gets a new one is ESC-3's to
+show, not measured here). So a session's descendants stay in the coalition of whatever job started the session (the app's today,
 the node's LaunchAgent on a node), however they detach, **unless they go through launchd** (`open -a Terminal`,
 AppleScript, `launchctl bootstrap`): the escapes ESC-1 to 3 measure where those land. A candidate line, at no dialog's
 cost: "the peer isn't in the node's coalition" refuses every detached descendant of a node session that didn't go
@@ -142,7 +155,9 @@ the reader's shell (59979)   responsible=59979
 ```
 
 **Conclusion.** Under the app's session host every process measured is its own responsible process: nothing was
-inherited from the shell to its child. So from here this line tells nothing. Whether it is inherited under Terminal
+inherited from the shell to its child. There is no positive control here (no case returned anything but its
+argument), so this says only that from here the line tells nothing; ANC-1 and ESC-1 (run from Terminal.app) are the
+first that can show it naming another process. Whether it is inherited under Terminal
 (the design: "inherited across fork, exec, setsid") and where the escapes land is in ESC-1 to 3's records (each prints
 `responsible=` for the escaped shell and for the user's own). Not a rule alone, as the design says.
 
@@ -257,10 +272,14 @@ UUID: EB152B86-… (arm64) <clone>/.build/mac-measure/fakebin/forger        (aft
 
 **Conclusion.** `log show` needs no admin (2 s for two minutes). logd names an entry's image **by the Mach-O UUID**, as
 first seen at a path, not by the file that ran: a copy, a link and `exec -a` all read as the original, and another
-program carrying the original's UUID is logged as the original's image (its message failed to compose here because its
-format strings sit elsewhere; one built to match the layout would compose). So **the design's step 6 ack rule,
-"written by the installed command line's image" (`processImagePath`), is forgeable by any process of the user's**: the
-installed command line's UUID is readable from its file. Weaker than the design's "weaker than Linux's". Step 6 needs
+program carrying the original's UUID is logged under the original's path. Its message failed to compose
+(`<compose failure [UUID]>`); the runner's forger, built from `oslog.c` itself with one function more, failed the same
+way, so whether a forger can make its message compose too is **not measured**. The runner adds one more: its fresh
+`oslog`, built in a scratch folder from the same source (a deterministic build, so the same UUID), was logged under
+the `.build/mac-measure` path logd saw first; a build of the installed command line's commit has its UUID. So **the
+design's step 6 ack rule, "written by the installed command line's image" (`processImagePath`), is forgeable by any
+process of the user's** as to the path: the installed command line's UUID is readable from its file, and a rule that
+also wanted the message to compose would stand on what isn't measured. Weaker than the design's "weaker than Linux's". Step 6 needs
 another anchor (a nonce the server hands only to the request it accepted, or the record in the host's vault alone).
 
 ### M11. `launchctl print`'s lines (item 12, `NodeAgent.printed`)
@@ -335,21 +354,29 @@ Each in [scripts/mac-measure](../../scripts/mac-measure), one measurement each, 
 login where said). Each prints what will appear before it happens and waits for Return; refuses from an agent's
 session or without a terminal; loads only a job labelled `dev.vibeswitcher.measure.<what>.<pid>` from a property list in
 its own `/tmp/mac-measure.*` folder (never `~/Library/LaunchAgents`), boots it out when it ends (Ctrl-C too), and
-prints a record (the account's name and home taken out) to paste back. A job's property list carries
+prints a record (the account's name and home taken out) to paste back. They run in Terminal.app or in a shell card
+the lead files (the app's shell session, which carries `VIBESWITCHER_SESSION` and a pty): the guard refuses an agent's
+own process (`CLAUDECODE`, `CODEX_SANDBOX`) and a run without a terminal, and the Return prompt is the person's. ANC-1
+alone wants Terminal.app (it refuses a shell card); ESC-1 and ESC-2 compare with "your own" facts where they ran, so
+Terminal.app gives the comparison the design asks for. A job's property list carries
 `MEASURE_ASK=yes` (`la ask` refuses without it; a job inherits nothing from the shell), and `la` writes line by line. `--dry-run` builds the probes, writes and lints
-the property list, and stops before anything is shown or loaded: all thirteen were dry-run from the agent's session, and
-the real run of three was checked to refuse there (`STOPPED: this runs from an agent's session …`, exit 1) and without
-a terminal (`STOPPED: no terminal on stdin and stdout`, exit 1).
+the property list, and stops before anything is shown or loaded: all thirteen were dry-run from the agent's session.
+What runs after the `bootstrap` was run without launchd: AG-1's job body (its three pid files, the `setsid` child in a
+group of its own), LA-6's body without `MEASURE_ASK` (two refusals), a written `.command` under `detach` (its chain
+recorded), a written job's property list (`EnvironmentVariables` `MEASURE_ASK=yes`, by `plutil -p`), and `keys escape`
+with the dialog not in front (posts nothing, exit 3). The real run of three was checked to refuse from the agent's
+process (`STOPPED: this runs from an agent's process …`, exit 1) and without a terminal (`STOPPED: no terminal on
+stdin and stdout`, exit 1).
 
-| Id | Command (in Terminal, from the clone) | Look for |
+| Id | Command (in Terminal.app or a shell card, from the clone) | Look for |
 | --- | --- | --- |
 | LA-1 | `bash scripts/mac-measure/la-agent.sh` | the dialog appears from a LaunchAgent; its exact words: does "MEASURE-1 …" read first, after the program's name "la"? Touch ID → `outcome=approved` |
 | LA-2 | `bash scripts/mac-measure/la-cancel.sh` | Cancel → `outcome=declined("cancelled at the Mac")`; left alone → gone by itself at 60 s, `declined("not answered within 60 s")` |
-| LA-3 | `bash scripts/mac-measure/la-password.sh` | "Use Password…" offered; the login password in the system dialog → `approved` |
+| LA-3 | `bash scripts/mac-measure/la-password.sh` | "Use Password…" offered; the login password in the system dialog → `approved`. A stand-in for "no Touch ID enrolled" (nobody un-enrolls a finger for this) |
 | LA-4 | `bash scripts/mac-measure/la-lid-closed.sh` | with an external display and the lid shut: `la can`'s biometry, then which route the dialog offers |
-| LA-5 | `bash scripts/mac-measure/la-ssh.sh` (from `ssh localhost`) | `la can` over ssh, the ask's outcome (expected `.notInteractive`, unavailable), and whether anything appeared on the Mac's screen. Needs Remote Login on |
+| LA-5 | `bash scripts/mac-measure/la-ssh.sh` (from `ssh localhost`) | `la can` over ssh, the ask's outcome (expected `.notInteractive`, unavailable), and whether anything appeared on the Mac's screen. Needs Remote Login on. It asks from the ssh login's own process; the node's server stays in `Aqua`, so a request a command line sends over ssh would still raise the server's dialog on the Mac's screen (for the rule's review) |
 | LA-6 | `bash scripts/mac-measure/la-second.sh` | a second dialog 3 s after the first: queued, replaced, or refused |
-| LA-7 | `bash scripts/mac-measure/la-keys.sh` | `accessibility_trusted=`; "keys: posted Escape at=T" then `outcome=declined(…)` at T plus a second or two, untouched, means synthetic keys reach the dialog; it posts only while the dialog's process is frontmost (else "posted nothing", naming the frontmost bundle id: rerun with it). Decline any "control this computer" request |
+| LA-7 | `bash scripts/mac-measure/la-keys.sh` | `accessibility_trusted=`; "keys: posted Escape at=T" then `outcome=declined(…)` at T plus a second or two, untouched, means synthetic keys reach the dialog; it posts only while the dialog's process is frontmost; the dialog's bundle ids in the script are guesses (`com.apple.coreautha` and three more), so the first run may say "posted nothing", naming the frontmost bundle id: add it to `DIALOGS` and run again. Decline any "control this computer" request |
 | ESC-1 | `bash scripts/mac-measure/escape-open-terminal.sh` | a Terminal window opened by a detached process: its shell's chain, terminal, coalition and responsible pid against yours |
 | ESC-2 | `bash scripts/mac-measure/escape-osascript.sh` | the same through `osascript … do script`, and any Automation consent (its words) |
 | ESC-3 | `bash scripts/mac-measure/escape-launchctl.sh` | a job of its own in `gui/<uid>`: `ppid=1`, no terminal, its coalition and responsible pid |
@@ -400,7 +427,7 @@ user's decisions are named.
 | 2 | Step 4's escape measurements (ESC-1 to 3, ANC-1, ANC-2, AG-1) | scripts ready (this) | the records | no | the user at the keyboard |
 | 3 | The rule written from them: whether to add the coalition line (M4) and the peer's environment line (M2); the `approval` mode's guard rails settled | **built, off** behind `NodeSystem.approvalMeasured` (`VoiceRule.Mode.approval`, `ApprovalVoice`, `Requests.approvalJudgment`); coalition line not built | `ApprovalJudgmentTests`, `ApprovalVoiceTests` (pass here); then a manual `set` and `answer` from Terminal, a Claude Code Bash tool, and ESC-1/2 started by a session (the tasks' `1a6c4688` row) | **yes**: `ApprovalRequests.swift`, `ApprovalCard.swift`, `Requests.handle`'s split, and the trust path (above) | a worker; the user's decision on the five reads (item 6: a dialog for them, plain reads, or refused on the Mac) |
 | 4 | Item 10: an anchor a session can't write for the server check | **not built** (design) | a fake server (genuine host, evil server in `~/.vibeswitcher/v2/builds/…`, plist rebootstrapped) refused | **yes** | **the user's decision**: root-owned pins (a `sudo` at each install), a Keychain item bound to the CLI's code (the login keychain unlocked; the ACL rewritten each install), or a Developer ID team (a paid identity); then a worker |
-| 5 | Item 13: the checked Mac node start | **built, off** behind `HostImages.isCheckedMacNode` (and `HostImages.macServerRefusal` refusing a server child on the account's locks) | a node host on a scratch root with a server child, its vaultV2 and hooks; `LeadVaultV2.recordsOnThisHost` moved into the vault (item 14) | **yes** | a worker, after 4 |
+| 5 | Item 13: the checked Mac node start | the check itself **not built** (it needs item 10's anchor); what it gates (a node host's server child, `vaultV2`, the record's hooks) **built, off** behind `HostImages.isCheckedMacNode = false` (`HostImages.swift` 239) and refused by `HostImages.macServerRefusal` | a node host on a scratch root with a server child, its vaultV2 and hooks; `LeadVaultV2.recordsOnThisHost` moved into the vault (item 14) | **yes** | a worker, after 4 |
 | 6 | Item 11: Darwin ancestry through root's processes | **built, unproven** (`Platform.Processes.link`'s fallback, `PeerFacts.runner`) | M8 here; ANC-1, ANC-2 | **yes** (owed) | a worker for the review; the user runs ANC-1/2 |
 | 7 | Item 3's owed half: the CLI's cdhash anchored where the host anchors the server's, not re-read from `<root>/bin` | **not built** | a CLI swapped in `<root>/bin` after the host's start refused | yes (with 4) | a worker |
 | 8 | Item 9: the Mac's H1, the web port held by the host (`SCM_RIGHTS` over the stream, or launchd's `Sockets`), or `web` refused on the Mac until then | **not built**; today `WebBind.direct` on the Mac | a second process can't bind the port while the host holds it; the server gets the descriptor | yes | a worker; the user's call on an opt-in that says the port can be squatted |
