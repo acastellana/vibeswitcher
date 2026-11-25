@@ -18,10 +18,19 @@ test('each held thing in a few words: the node’s own label first, else read of
   assert.equal(itemLabel({ name: '~/.local/bin/claude' }), 'Files changed in ~/.local/bin');
 });
 
-test('the title: one thing by its label; several, their count and the first two', () => {
-  assert.equal(heldTitle([{ name: '~/.vibeswitcher/bin' }]), 'VibeSwitcher switched to a new build');
-  assert.equal(heldTitle([{ name: '~/.zshrc' }, { name: 'plugin a@m' }]), '2 things changed: Your shell’s startup file changed: .zshrc, a plugin updated: a');
-  assert.equal(heldTitle([{ name: 'plugin a@m' }, { name: '~/.vibeswitcher/bin' }, { name: '~/.zshrc' }]), '3 things changed: A plugin updated: a, VibeSwitcher switched to a new build, …');
+test('the title: one thing in its own words; several, their count and a line naming three, then how many more', () => {
+  assert.deepEqual(heldTitle([{ name: '~/.vibeswitcher/bin' }]), { title: 'VibeSwitcher switched to a new build', line: null });
+  assert.deepEqual(heldTitle([{ name: 'x', what: { label: 'Claude Code updated itself', from: '2.1.331', to: '2.1.332' } }]), { title: 'Claude Code updated itself (2.1.331 → 2.1.332)', line: null });
+  assert.deepEqual(heldTitle([{ name: '.git/config (main checkout)' }, { name: '~/.bashrc' }, { name: '~/.claude/settings.json' }, { name: '~/.zshrc' }, { name: '~/.gitconfig' }, { name: 'plugin a@m' }, { name: '~/.vibeswitcher/bin' }]),
+    { title: '7 things changed', line: 'this checkout’s git config, your shell’s startup file (.bashrc), Claude’s settings, and 4 more' });
+  assert.deepEqual(heldTitle([{ name: '~/.zshrc' }, { name: 'plugin a@m', what: { label: 'A plugin updated: a', short: 'the plugin a (1.2 → 1.3)' } }]), { title: '2 things changed', line: 'your shell’s startup file (.zshrc), the plugin a (1.2 → 1.3)' });
+});
+
+test('nothing held and no rule changed, only rules that can’t be compared: the node wants them confirmed once', () => {
+  const restarted = heldSummary({ items: [], guarded: [{ key: 'test_command', value: 'true', sinceAccept: unvouched }] });
+  assert.deepEqual([restarted.confirmOnly, restarted.terminal], [true, true]);
+  assert.equal(heldSummary({ items: [{ name: '~/.zshrc' }], guarded: [{ key: 'k', value: 'v', sinceAccept: unvouched }] }).confirmOnly, false);
+  assert.equal(heldSummary({ items: [{ name: '~/.zshrc' }], guarded: [], pageMayAccept: false }).terminal, true, 'the node’s own word');
 });
 
 test('a rail against the last accept, from the node’s words until it says it in fields', () => {

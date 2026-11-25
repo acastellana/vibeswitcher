@@ -139,7 +139,11 @@ async function run() {
       const details = card.querySelector('.hc-details');
       const face = [...card.children].filter((el) => el !== details && el.tagName !== 'HEADER');
       const words = face.map((el) => el.innerText).join(' ');
-      const why = details?.open ? 'details open' : face.length - card.querySelectorAll('.hc-rail').length > 4 ? 'more than four lines: ' + face.map((el) => el.className).join(', ')
+      // Four lines: the title, what it holds back, the rules that would change (a block of five at most), the buttons
+      // or the terminal's line; the line naming the things and the quiet line beside them.
+      const main = face.filter((el) => !el.classList.contains('hc-line') && !el.classList.contains('hc-quiet'));
+      const why = details?.open ? 'details open' : main.length > 4 ? 'more than four lines: ' + face.map((el) => el.className).join(', ')
+        : card.querySelectorAll('.hc-rail').length > 5 ? 'more than five rules on its face'
         : /snapshot|sealed|vault|[0-9a-f]{12}/i.test(words) ? 'technical words on its face: ' + words.slice(0, 120)
         : !(card.querySelector('.card-acts button') || card.querySelector('.hc-terminal .copy-line')) ? 'neither Accept nor the terminal’s line'
         : null;
@@ -150,6 +154,16 @@ async function run() {
     await page.evaluate(`(() => { const d = document.querySelector('.wait-box .card.held-config .hc-details'); if (d) d.open = true; })()`);
     await page.shot('held-config-details');
     await page.evaluate(`(() => { const d = document.querySelector('.wait-box .card.held-config .hc-details'); if (d) d.open = false; })()`);
+    // Dark, and at a phone's width.
+    await page.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: 'dark' }] });
+    await page.shot('held-config-dark');
+    await page.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 2, mobile: true });
+    await page.evaluate(`document.querySelector('.wait-box .card.held-config')?.scrollIntoView({ block: 'start' })`);
+    await page.shot('held-config-phone-dark');
+    await page.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: 'light' }] });
+    await page.shot('held-config-phone-light');
+    await page.send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 900, deviceScaleFactor: 1, mobile: false });
+    await page.send('Emulation.setEmulatedMedia', { features: [] });
     record('Held config', held && !held.startsWith('FAIL'), held || 'no held-config card in the waiting block');
 
     // Two tabs: a second tab of the same origin, opened by hand (no code, no token), acts too: it asks its sibling over
@@ -287,6 +301,14 @@ async function run() {
     const picked = cant && await page.until(clickOption(expect.second, 'Drop it today'), WAIT);
     const oneLine = picked && await page.until(`(() => { const c = ${card(expect.second)}; const line = c?.querySelector('.card-notsent')?.innerText || ''; const terminal = c?.querySelector('details.card-terminal'); return /Not sent/.test(line) && terminal && !terminal.open && !c.querySelector('.card-keys') ? line : null; })()`, WAIT);
     await page.shot('cant-act-yet');
+    // The held config in Spanish, light and dark (the page reloaded with ?lang=es: it reads from here on).
+    await page.send('Page.navigate', { url: `${new URL(url).origin}/?lang=es${expect.projectHref}` });
+    await page.until(`document.querySelector('.wait-box .card.held-config') ? true : null`, WAIT);
+    await page.evaluate(`document.querySelector('.wait-box .card.held-config')?.scrollIntoView({ block: 'center' })`);
+    await page.shot('held-config-spanish-light');
+    await page.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: 'dark' }] });
+    await page.shot('held-config-spanish-dark');
+    await page.send('Emulation.setEmulatedMedia', { features: [] });
     record('Can’t act yet', cant && oneLine, !trusted ? 'the test never turned acting on again' : !cant ? 'no banner saying this tab can’t act yet, with the command' : !oneLine ? 'a pick isn’t one line with the terminal behind a disclosure' : cant + '; ' + oneLine);
   } catch (error) {
     record('run', false, error.message);

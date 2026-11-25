@@ -407,8 +407,11 @@ code, pre, kbd { font-family: var(--mono); }
 .card-context { font-size: var(--small); margin: 6px 0 0; overflow-wrap: anywhere; }
 .card-context-label { color: var(--ink-2); }
 .card > .card-foot { grid-column: 1; color: var(--ink-3); font-size: var(--small); }
-.hc-rail { color: var(--needs-you); font-size: var(--text); }
-.hc-rail code { color: inherit; }
+.hc-line { color: var(--ink-2); font-size: var(--text); margin-top: -4px; }
+.hc-rules { display: grid; gap: 2px; }
+.hc-rules-label { color: var(--needs-you); font-size: var(--small); font-weight: 600; }
+.hc-rail { color: var(--ink); font-size: var(--text); }
+.hc-rail code { padding: 0 4px; border-radius: 4px; background: var(--fill-2); }
 .hc-quiet { color: var(--ink-3); font-size: var(--small); }
 .hc-quiet .link, .hc-details summary { color: var(--accent); cursor: pointer; }
 .hc-terminal { display: grid; gap: 6px; color: var(--ink-2); font-size: var(--text); }

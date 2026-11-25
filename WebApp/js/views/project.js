@@ -257,19 +257,32 @@ export function projectView(app, { sheet }) {
   function configCard(card) {
     const root = card.root || '';
     const summary = heldSummary(card.config);
+    const head = h('header', { class: 'card-head' }, h('span', { class: 'priority blocking' }, t('blocking')), h('time', { class: 'asked' }, t('askedAt', { who: t('vibeswitcher'), time: clock(card.at) })));
+    const terminalLine = (words) => h('div', { class: 'hc-terminal' }, h('span', null, words), copyLine('vibeswitcher approve', 'the command that accepts it'));
+    // Nothing held and nothing changed: the node only wants this project's rules confirmed once, after a restart.
+    if (summary.confirmOnly) {
+      return h('article', { class: 'card held-config confirm-only' }, head,
+        terminalLine(t('hcConfirmOnly')),
+        h('details', { class: 'hc-details' }, h('summary', null, t('hcShowRules')), heldDetails(card, summary)));
+    }
     const details = h('details', { class: 'hc-details' }, h('summary', null, t('hcShowDetails')), heldDetails(card, summary));
     const acts = actsFor(app, 'config.accept') && !summary.terminal;
-    return h('article', { class: 'card held-config' },
-      h('header', { class: 'card-head' }, h('span', { class: 'priority blocking' }, t('blocking')), h('time', { class: 'asked' }, t('askedAt', { who: t('vibeswitcher'), time: clock(card.at) }))),
+    const shown = summary.changed.slice(0, 5);
+    const more = summary.changed.length - shown.length;
+    return h('article', { class: 'card held-config' }, head,
       h('h3', { class: 'card-question' }, summary.title),
+      summary.line ? h('p', { class: 'hc-line' }, summary.line) : null,
       h('p', { class: 'card-why' }, card.config?.sharedHome ? t('hcHoldsAll') : t('hcHolds', { project: lastPart(root) || root })),
-      summary.changed.map((rail) => h('p', { class: 'hc-rail' }, h('code', null, rail.key), ': ',
-        rail.state === 'new' ? [h('code', null, rail.value), ' ', t('hcNew')] : [h('code', null, rail.before ?? '?'), ' → ', h('code', null, rail.value)])),
+      // The rules that would change: five at most, the rest one click away.
+      shown.length ? h('div', { class: 'hc-rules' }, h('p', { class: 'hc-rules-label' }, t('hcRulesChange')),
+        shown.map((rail) => h('p', { class: 'hc-rail' }, h('code', null, rail.key), ': ',
+          rail.state === 'new' ? [rail.value, ' ', t('hcNew')] : [rail.before ?? '?', ' → ', rail.value])),
+        more > 0 ? h('p', { class: 'hc-quiet' }, t('hcMoreRules', { n: more }), ' ', h('button', { class: 'link', type: 'button', onclick: () => { details.open = true; } }, t('hcShowThem'))) : null) : null,
       summary.unknown ? h('p', { class: 'hc-quiet' }, t('hcUnknown', { n: summary.unknown }), ' ',
         h('button', { class: 'link', type: 'button', onclick: () => { details.open = true; } }, t('hcShowThem'))) : null,
       acts ? h('div', { class: 'card-acts' },
-        doButton(app, { label: t('acAccept'), kind: 'config.accept', args: () => cardArgs(card), done: () => receipt(t('hcAccepted', { what: summary.title })) }).el)
-        : h('div', { class: 'hc-terminal' }, h('span', null, t('hcNeedsTerminal')), copyLine('vibeswitcher approve', 'the command that accepts it')),
+        doButton(app, { label: t('acAccept'), kind: 'config.accept', args: () => cardArgs(card), done: () => receipt(t('hcAccepted', { what: summary.line || summary.title })) }).el)
+        : terminalLine(summary.changed.length ? t('hcNeedsTerminal') : t('hcNeedsTerminalUnknown')),
       details);
   }
 

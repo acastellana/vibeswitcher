@@ -27,14 +27,37 @@ export function itemLabel(item) {
   return slash > 0 ? t('hcFiles', { folder: plain.slice(0, slash) }) : t('hcChanged', { name: plain });
 }
 
-// The card's title: one thing by its label; several, their count and the first two.
+// What a held item is, as a short noun for a list ("your shell's startup file (.bashrc)"): the node's own where it
+// has one, else read off its name.
+export function itemShort(item) {
+  const what = item?.what;
+  if (what?.short) return what.short;
+  const name = String(item?.name || '');
+  const plain = name.replace(/ \(main checkout\)/, '');
+  if (/^plugin /.test(name)) return t('hsPlugin', { name: plain.slice('plugin '.length).split('@')[0] });
+  if (/^~\/\.vibeswitcher\/bin\b/.test(name)) return t('hsBuild');
+  if (/^\.git\/config/.test(name)) return t('hsGitConfig');
+  if (/^\.git\/hooks/.test(name)) return t('hsGitHooks');
+  if (/'s scripts$/.test(name)) return t('hsScripts');
+  if (/^~\/\.claude\.json$/.test(name)) return t('hsMcp');
+  if (/\.claude\/settings(\.local)?\.json$/.test(plain) || /^\.mcp\.json$/.test(plain)) return t('hsClaudeSettings');
+  if (/^~\/\.claude\/(skills|agents|commands|hooks|output-styles)$/.test(name)) return t('hsClaudeFolder', { folder: name.split('/').pop() });
+  if (/^~\/\.codex\//.test(name)) return t('hsCodex');
+  if (/(CLAUDE(\.local)?|AGENTS)\.md$/.test(plain)) return t('hsInstructions', { file: plain.split('/').pop() });
+  if (/^~\/\.(zshenv|zprofile|zshrc|zlogin|zlogout|bashrc|bash_profile|bash_login|profile)$/.test(name)) return t('hsShell', { file: name.slice(2) });
+  if (/^~\/\.(gitconfig|config\/git\/config)$/.test(name)) return t('hsGitGlobal');
+  const slash = plain.lastIndexOf('/');
+  return slash > 0 ? t('hsFiles', { folder: plain.slice(0, slash) }) : plain;
+}
+
+// The card's title and the line under it: one thing, its own words and no line; several, their count, and a line
+// naming the first three ("and 4 more").
 export function heldTitle(items = []) {
-  const labels = [...new Set(items.map(itemLabel))];
-  if (!labels.length) return t('hcNothing');
-  if (labels.length === 1) return labels[0];
-  // A label after the first starts small where its first word is a plain one ("a plugin updated"), never a name.
-  const lower = (text) => (/^(A|The|This|Your|Files|Instructions|Se|Cambi|Tu|Esta)\b/.test(text) ? text.charAt(0).toLowerCase() + text.slice(1) : text);
-  return t('hcSeveral', { n: labels.length, first: labels.slice(0, 2).map((label, index) => (index ? lower(label) : label)).join(', ') + (labels.length > 2 ? ', …' : '') });
+  if (!items.length) return { title: t('hcNothing'), line: null };
+  if (items.length === 1) return { title: itemLabel(items[0]), line: null };
+  const shorts = [...new Set(items.map(itemShort))];
+  const named = shorts.slice(0, 3).join(', ');
+  return { title: t('hcCount', { n: items.length }), line: shorts.length > 3 ? t('hcAndMore', { named, n: shorts.length - 3 }) : named };
 }
 
 // A rail against the last accept: 'same', 'changed' (with `before`), 'new', 'unknown' (can't be compared: the node
@@ -55,5 +78,9 @@ export function heldSummary(config = {}) {
   const rails = (config.guarded || []).map((rail) => ({ ...rail, ...railState(rail) }));
   const changed = rails.filter((rail) => rail.state === 'changed' || rail.state === 'new');
   const unknown = rails.filter((rail) => rail.state === 'unknown').length;
-  return { title: heldTitle(config.items || []), changed, unknown, rails, terminal: changed.length > 0 || unknown > 0 };
+  const items = config.items || [];
+  const { title, line } = heldTitle(items);
+  // Nothing held and no rule changed: the node only wants this project's rules confirmed once (after a restart).
+  const confirmOnly = !items.length && !changed.length && unknown > 0;
+  return { title, line, changed, unknown, rails, confirmOnly, terminal: config.pageMayAccept === false || changed.length > 0 || unknown > 0 };
 }
