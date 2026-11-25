@@ -171,7 +171,7 @@ struct PasskeyTests {
     /// wrong assertion refused before anything is recorded: another origin, relying party, no user verification, a
     /// cross-origin one, a challenge for another card, another `seen`, another action, one run out, one used already, a
     /// sign count that didn't move, a key not registered.
-    @Test func eachActNeedsItsOwnTouch() async throws {
+    @Test(NodeTraits.linuxOnly) func eachActNeedsItsOwnTouch() async throws {
         let (world, soft, credentials, acting, card, other) = try await confirmWorld()
         defer { world.stop() }
         let args: [String: NodeWire.Value] = ["card": .string(card.id), "seen": .string(card.seen), "text": .string("Yes")]
@@ -217,7 +217,8 @@ struct PasskeyTests {
         // A repeat after a lost reply (the same action and assertion, sent again after a reconnect): the earlier reply,
         // not a refusal for a used challenge; done once.
         let again = try #require(await act(world, credentials, kind: "answer", args: args, action: action, assertion: assertion))
-        #expect(again.ok, "\(again)")
+        // With the line it was recorded with, as the first reply (the page says it after a reconnect too).
+        #expect(again.ok && again.recorded == line, "\(again)")
         #expect(await world.actions().filter { $0.action == action && $0.kind == "answer" }.count == 1)
         // A known action id with anything else isn't a repeat: another kind, other arguments, another page's token each
         // need the assertion, and nothing more is done.
@@ -247,7 +248,7 @@ struct PasskeyTests {
 
     /// `set web_acts confirm` needs a passkey; the page at 127.0.0.1 doesn't act at `confirm` (it can't do passkeys) and
     /// is asked no challenge.
-    @Test func confirmNeedsAKeyAndLocalhost() async throws {
+    @Test(NodeTraits.linuxOnly) func confirmNeedsAKeyAndLocalhost() async throws {
         let world = try await CardWorld.make(scratch)
         defer { world.stop() }
         let acting = ActingPages(vault: MemoryVaultV2().client)
@@ -272,7 +273,7 @@ struct PasskeyTests {
     /// The review's K1 (the hijack): a client holding the page's token and acting secret (any connection, any Origin it
     /// writes) asks and answers first with its own software key. Once the user's own tab asks, it is contested; if the
     /// user's tab never asks, the user's page shows no id, and nothing the user types keeps the key.
-    @Test func aRegistrationIsTheNamedPagesClickedTabAlone() async throws {
+    @Test(NodeTraits.linuxOnly) func aRegistrationIsTheNamedPagesClickedTabAlone() async throws {
         let world = try await CardWorld.make(scratch)
         defer { world.stop() }
         let acting = ActingPages(vault: MemoryVaultV2().client)
@@ -424,7 +425,7 @@ struct PasskeyTests {
 
     /// The review's Low: a request that passed at `trust` while the level rose to `confirm` meanwhile is refused (it
     /// needs its passkey now), and nothing is recorded.
-    @Test func aRequestPassedAtTrustAsTheLevelRisesNeedsItsPasskey() async throws {
+    @Test(NodeTraits.linuxOnly) func aRequestPassedAtTrustAsTheLevelRisesNeedsItsPasskey() async throws {
         let world = try await CardWorld.make(scratch)
         defer { world.stop() }
         let acting = ActingPages(vault: MemoryVaultV2().client)
@@ -456,7 +457,7 @@ struct PasskeyTests {
 
     /// At `trust` too, a known action id is only the same page's very same request: another page's, another kind, other
     /// arguments are refused before anything is done (and a terminal's action id from a page as well).
-    @Test func atTrustAKnownActionIsTheSamePagesSameRequestAlone() async throws {
+    @Test(NodeTraits.linuxOnly) func atTrustAKnownActionIsTheSamePagesSameRequestAlone() async throws {
         let world = try await CardWorld.make(scratch)
         defer { world.stop() }
         let acting = ActingPages(vault: MemoryVaultV2().client)

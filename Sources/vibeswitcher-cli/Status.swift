@@ -154,11 +154,8 @@ enum StatusCommand {
         if let plugins = result.plugins?.array {
             out.append("plugins on: " + (plugins.isEmpty ? "none" : plugins.map { inert($0["id"]?.string) }.joined(separator: ", ")) + " (`vibeswitcher plugin list`)")
         }
-        // What was done in the user's voice: its kind, when, and from where (the page's has no pid: `NodeLive.webPeer`).
-        for accepted in result.accepted ?? [] {
-            out.append("accepted: \(inert(accepted["kind"]?.string)) at \(inert(accepted["at"]?.string)) "
-                       + (accepted["pid"]?.int == 0 ? "from the page" : "from your terminal"))
-        }
+        // What was done in the user's voice: its kind, when, and from where (`NodeTexts.acceptedLine`).
+        for accepted in result.accepted ?? [] { out.append(NodeTexts.acceptedLine(accepted, ruleMode: result.rule?.mode)) }
         for notice in result.notices ?? [] { out.append("notice: \(inert(notice))") }
         if let line = updateLine(result.update) { out.append(line) }
         out += journal
@@ -240,6 +237,7 @@ enum StatusCommand {
     static func wrongLines(_ result: WireKinds.Status.Result, modeLines: [String], journal: [String]) -> [String] {
         var wrong: [String] = []
         if let state = result.host?.state, state != "connected" { wrong.append("the node's host is \(inert(state))") }
+        if let unchecked = NodeTexts.uncheckedNotice(result.accepted ?? [], ruleMode: result.rule?.mode) { wrong.append(unchecked) }
         // The journal's lines but its informational ones (the last start's line, no journal to read on a scratch node).
         wrong += journal.filter { line in
             !line.hasPrefix("journal: the node's last start at") && !line.hasPrefix("journal: no ")

@@ -185,8 +185,9 @@ final class GatePlace: @unchecked Sendable {
     /// Whether `output` (a run that said `whereItRan`) ran in this process's own pid namespace: no box of its own.
     static func unboxed(_ output: String) -> Bool { said("pidns", in: output) == ownNamespace }
 
-    /// The command that asks the compiler for its version, then says where it ran.
-    static let version = "swift --version; status=$?; \(whereItRan); exit $status"
+    /// The command that asks the compiler for its version, then says where it ran. Its exit code in `code`, never
+    /// `status`: the Mac runs it in zsh, where `status` is read-only and the line stops there (v2 macos, 76b7ac28).
+    static let version = "swift --version; code=$?; \(whereItRan); exit $code"
 }
 
 struct GateToolchainTests {
