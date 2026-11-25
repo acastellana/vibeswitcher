@@ -48,10 +48,12 @@ const copies = (el) => findAll(el, byClass('copy-button'));
 
 // ---- U14: Settings ----
 
-test('U14: a setting’s Change is the page’s ordinary (quiet) button at the row’s end, in English and in Spanish', async () => {
+test('U14: a setting’s Change is the page’s ordinary (quiet) button at the row’s end, in English and in Spanish', async (ctx) => {
   for (const [code, change, close] of [['en', 'Change', 'Close'], ['es', 'Cambiar', 'Cerrar']]) {
     setLanguage(code);
     const app = fakeApp({ route: { name: 'settings', id: null, section: 'boost' }, reply: () => ({ ok: true, result: settingsReply() }) });
+    // Left even when an assertion fails, so its refresh timer stops with the test.
+    ctx.after(() => app.leave());
     const view = settingsView(app);
     await settle();
     const row = find(view.columns.detail, byClass('setting'));
@@ -114,7 +116,7 @@ test('U14: where the page doesn’t act (or may not set this one), the open sett
   setLanguage('en');
 });
 
-test('U14: a value out of range says so as before, with nothing to set or copy; the page says which way Change applies', async () => {
+test('U14: a value out of range says so as before, with nothing to set or copy; the page says which way Change applies', async (ctx) => {
   setLanguage('en');
   const box = editor(slots, null, new Map([[slots.key, '99']]), fakeApp({ kinds: ['set'], acts: true }));
   const problem = find(box, byClass('card-notice'));
@@ -124,6 +126,7 @@ test('U14: a value out of range says so as before, with nothing to set or copy; 
   assert.deepEqual(copies(box), []);
   for (const [acts, intro] of [[true, 'Change a value, then press Set.'], [false, 'Change drafts the line that sets it; run it in a terminal.']]) {
     const app = fakeApp({ kinds: ['set'], acts, reply: () => ({ ok: true, result: settingsReply() }) });
+    ctx.after(() => app.leave());
     const view = settingsView(app);
     await settle();
     assert.match(find(view.columns.list, byClass('tc-note')).textContent, new RegExp(intro.replace(/[.;]/g, '.')));
