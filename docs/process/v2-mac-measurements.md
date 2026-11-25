@@ -326,7 +326,7 @@ own `withKnownIssue` (`aChildCollectedElsewhereIsNamedAndItsEndComes`, `aChildSt
 ### M14. Read from the code
 
 - The command line's wait for a state change under the Mac's rule: `max(timeout, 120)` (`NodeClient.swift` 431,
-  `approvalPatience`), so `web`'s `timeout: 30` waits 120 s there; the dialog's own is 60 s (`Approval.ask`'s timeout).
+  `approvalPatience`), so `web`'s `timeout: 30` waits 120 s there; the dialog's own is 60 s (`ApprovalVoice.System(timeout: 60)`, `ServerStart.swift` 120).
 - `launchctl print` of the user's GUI domain works without admin from the `Aqua` session (M11).
 
 ## The scripts for the user
@@ -335,7 +335,8 @@ Each in [scripts/mac-measure](../../scripts/mac-measure), one measurement each, 
 login where said). Each prints what will appear before it happens and waits for Return; refuses from an agent's
 session or without a terminal; loads only a job labelled `dev.vibeswitcher.measure.<what>.<pid>` from a property list in
 its own `/tmp/mac-measure.*` folder (never `~/Library/LaunchAgents`), boots it out when it ends (Ctrl-C too), and
-prints a record (the account's name and home taken out) to paste back. `--dry-run` builds the probes, writes and lints
+prints a record (the account's name and home taken out) to paste back. A job's property list carries
+`MEASURE_ASK=yes` (`la ask` refuses without it; a job inherits nothing from the shell), and `la` writes line by line. `--dry-run` builds the probes, writes and lints
 the property list, and stops before anything is shown or loaded: all thirteen were dry-run from the agent's session, and
 the real run of three was checked to refuse there (`STOPPED: this runs from an agent's session …`, exit 1) and without
 a terminal (`STOPPED: no terminal on stdin and stdout`, exit 1).
@@ -348,7 +349,7 @@ a terminal (`STOPPED: no terminal on stdin and stdout`, exit 1).
 | LA-4 | `bash scripts/mac-measure/la-lid-closed.sh` | with an external display and the lid shut: `la can`'s biometry, then which route the dialog offers |
 | LA-5 | `bash scripts/mac-measure/la-ssh.sh` (from `ssh localhost`) | `la can` over ssh, the ask's outcome (expected `.notInteractive`, unavailable), and whether anything appeared on the Mac's screen. Needs Remote Login on |
 | LA-6 | `bash scripts/mac-measure/la-second.sh` | a second dialog 3 s after the first: queued, replaced, or refused |
-| LA-7 | `bash scripts/mac-measure/la-keys.sh` | `accessibility_trusted=`; whether one synthetic Escape closes the dialog (`declined` within ~4 s). Decline any "control this computer" request |
+| LA-7 | `bash scripts/mac-measure/la-keys.sh` | `accessibility_trusted=`; "keys: posted Escape at=T" then `outcome=declined(…)` at T plus a second or two, untouched, means synthetic keys reach the dialog; it posts only while the dialog's process is frontmost (else "posted nothing", naming the frontmost bundle id: rerun with it). Decline any "control this computer" request |
 | ESC-1 | `bash scripts/mac-measure/escape-open-terminal.sh` | a Terminal window opened by a detached process: its shell's chain, terminal, coalition and responsible pid against yours |
 | ESC-2 | `bash scripts/mac-measure/escape-osascript.sh` | the same through `osascript … do script`, and any Automation consent (its words) |
 | ESC-3 | `bash scripts/mac-measure/escape-launchctl.sh` | a job of its own in `gui/<uid>`: `ppid=1`, no terminal, its coalition and responsible pid |
