@@ -750,6 +750,14 @@ kbd { padding: 1px 6px; border-radius: 5px; box-shadow: inset 0 0 0 1px var(--li
 .notify-line { display: flex; align-items: center; gap: 8px; color: var(--ink); }
 .notify-said { display: block; margin-top: 4px; color: var(--ink-3); font-size: var(--small); }
 .notify-said:empty { display: none; }
+/* The reconnecting line, the page not paired and the notifications' offer (app.js puts them first in the centre): a row
+   of their own across the top of the centre, pushing what is under it down, never over the header's controls. */
+.centre-wrap > .offline, .centre-wrap > .offline.offer {
+  position: relative; top: auto; left: auto; z-index: auto; flex: none; flex-wrap: wrap; justify-content: center; width: auto; max-width: none;
+  padding: 7px 24px; border-radius: 0; border-bottom: 1px solid var(--line); box-shadow: none; transform: none;
+}
+.centre-wrap > .offline.signed-out { padding-left: 40px; }
+.centre-wrap > .offline.signed-out::before { left: 24px; }
 
 /* ---- The session's team strip (views/lead.js) ---- */
 
@@ -1256,6 +1264,9 @@ kbd { padding: 1px 6px; border-radius: 5px; box-shadow: inset 0 0 0 1px var(--li
   .screen-col { padding: 14px 14px 40px; }
   .sheet { width: 100%; padding: calc(20px + env(safe-area-inset-top)) 18px 32px; }
   .tdet { margin-left: 0; }
+  /* A banner over the header takes the screen's top inset; the header under it doesn't take it twice. */
+  .centre-wrap > .offline { padding-top: calc(7px + env(safe-area-inset-top)); }
+  .centre-wrap:has(> .offline:not([hidden])) :is(.centre-head, .head, .tc-head, .tc-dhead) { padding-top: 8px; }
 }
 
 /* Acting from the page: a request's button, what the node said under it, and whether this page acts */

@@ -137,3 +137,21 @@ test('U8: on a touch screen every kind of control is 44 px both ways by its padd
   const inputs = touch.find((rule) => rule.selector.startsWith(':is(textarea, select, input'));
   assert.ok(inputs && parseFloat(declarations(inputs.body)['font-size']) >= 16, 'text boxes at 16 px');
 });
+
+test('U6: the reconnecting line, the page not paired and the notifications’ offer are a row of the centre, never over its header', async () => {
+  const { readFileSync } = await import('node:fs');
+  const app = readFileSync(new URL('../app.js', import.meta.url), 'utf8');
+  const centre = app.match(/const centre = h\('main', \{ class: 'centre-wrap' \}, ([^;]+)\);/)?.[1] || '';
+  const parts = centre.split(',').map((part) => part.trim());
+  // First in the centre, above the header of whatever it shows.
+  assert.deepEqual(parts.slice(0, 3), ['offline', 'unpaired', 'app.notifications.offer']);
+  const floating = app.match(/root\.replaceChildren\(([^;]+)\);/)?.[1] || '';
+  for (const banner of ['offline', 'unpaired', 'notifications.offer']) assert.ok(!floating.includes(banner), `${banner} isn't laid over the page`);
+  const row = rules().find((rule) => rule.media === '' && rule.selector.split(',').map((one) => one.trim()).includes('.centre-wrap > .offline.offer'));
+  assert.ok(row, 'a rule for the banners in the centre');
+  const d = declarations(row.body);
+  assert.ok(['relative', 'static'].includes(d.position), `in the flow: ${d.position}`);
+  assert.equal(d.top, 'auto');
+  assert.equal(d.left, 'auto');
+  assert.equal(d.transform, 'none');
+});
