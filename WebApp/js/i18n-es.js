@@ -990,7 +990,7 @@ export const ES = {
   chTapWide: "{words} · toca para verla en grande",
   chRunTitle: "Deja «{prompt}» como borrador para esta sesión: vibeswitcher send lo ejecuta después de que escribas su código",
   chSending: "enviando…",
-  chFailed: " · {n} fallaron",
+  chFailed: { one: " · {n} falló", other: " · {n} fallaron" },
   chTldr: "En resumen: {x}",
   chTurnDone: "Turno hecho · aún en marcha: {x}",
   chBackgroundWork: "trabajo en segundo plano",

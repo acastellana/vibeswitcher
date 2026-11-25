@@ -1001,7 +1001,7 @@ const EN = {
   chTapWide: "{words} · tap to see it wide",
   chRunTitle: "Leaves “{prompt}” as a draft for this session: vibeswitcher send runs it after you type its code",
   chSending: "sending…",
-  chFailed: " · {n} failed",
+  chFailed: { one: " · {n} failed", other: " · {n} failed" },
   chTldr: "TL;DR: {x}",
   chTurnDone: "Turn done · still running: {x}",
   chBackgroundWork: "background work",
