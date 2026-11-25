@@ -94,10 +94,14 @@ test('the counts say what they count: the project’s things against everything 
 test('the mock lists the kinds it answers, as a node’s hello does, and answers each: push, its decline, set and stop among them', async () => {
   const { createMock } = await import('../js/mock.js');
   let kinds = null;
-  const store = { apply() {}, setConnection() {}, chatSnapshot() {}, chatOps() {}, setKinds(list) { kinds = list; } };
+  let snapshot = null;
+  const shown = new Promise((resolve) => { snapshot = resolve; });
+  const store = { apply() { snapshot(); }, setConnection() {}, chatSnapshot() {}, chatOps() {}, setKinds(list) { kinds = list; } };
   const mock = createMock(store, { still: true });
   mock.start();
-  await new Promise((resolve) => { const wait = () => (kinds ? resolve() : setImmediate(wait)); wait(); });
+  // A node says its kinds in its hello, before its snapshot.
+  await shown;
+  assert.ok(Array.isArray(kinds), 'no kinds before the snapshot: the page takes the mock to answer anything');
   for (const kind of ['push', 'push.decline', 'set', 'stop', 'answer', 'settings']) assert.ok(kinds.includes(kind), kind);
   for (const kind of ['lead', 'session.new', 'plugin.on', 'approve', 'term.open', 'draft']) assert.ok(!kinds.includes(kind), `${kind}: the mock doesn’t answer it, so it isn’t listed`);
   const push = await mock.request({ kind: 'push', args: { folder: '/home/dev/projects/example-site', request: '3c9e1f20' } });
