@@ -312,8 +312,9 @@ struct HeldWhatTests {
     @Test func aCardCarriesTheCommandThatSettlesIt() {
         var card = CardStore.Card(root: "/r", kind: .configHeld)
         card.config = ConfigHoldStore.Shown(items: [Self.item("~/.zshrc")])
-        #expect(card.value["config"]?["settle"]?.string == "vibeswitcher config accept \(card.id)")
+        // One field, the card's own (`CardStore.Card.settle`), for every kind of card: none under `config`.
+        #expect(card.value["settle"]?.string == "vibeswitcher config accept \(card.id)" && card.value["config"]?["settle"] == nil)
         card.closed = "accepted"
-        #expect(card.value["config"]?["settle"] == nil)
+        #expect(card.value["settle"] == nil)
     }
 }

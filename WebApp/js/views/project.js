@@ -283,7 +283,9 @@ export function projectView(app, { sheet }) {
         summary.line ? h('p', { class: 'hc-line' }, summary.line) : null,
         summary.lines?.length > 1 || summary.moreUpdates ? h('ul', { class: 'hc-things' }, summary.lines.map((line) => h('li', null, line)),
           summary.moreUpdates ? h('li', { class: 'hc-quiet' }, t('hcMoreUpdates', { n: summary.moreUpdates })) : null) : null),
-      h('p', { class: 'card-why' }, summary.holdsEvery || (!summary.holds && card.config?.sharedHome) ? t('hcHoldsAll') : t('hcHolds', { project: summary.holds || lastPart(root) || root })),
+      // What it holds back, only when the node says it holds work (`blocking`); a card that only records rules doesn't.
+      card.blocking === false ? null
+        : h('p', { class: 'card-why' }, summary.holdsEvery || (!summary.holds && card.config?.sharedHome) ? t('hcHoldsAll') : t('hcHolds', { project: summary.holds || lastPart(root) || root })),
       // A first accept records the rules: those set away from their defaults listed, the defaults counted.
       summary.first ? h('div', { class: 'hc-rules' }, h('p', { class: 'hc-rules-label' }, t('hcFirstRules')),
         summary.first.shown.map((rail) => h('p', { class: 'hc-rail' }, h('code', null, rail.key), ': ', rail.value)),
@@ -350,8 +352,8 @@ export function projectView(app, { sheet }) {
         config ? copyLine(`vibeswitcher config held ${shellWord(root)}`, 'the command that shows it') : copyLine(`vibeswitcher base show ${shellWord(root)}`, 'the command that shows it'))
         : h('details', { class: 'card-terminal' }, h('summary', null, t('cUseTerminal')),
           h('div', { class: 'card-command' }, h('span', { class: 'card-command-label' }, t('settleInTerminal')),
-            config ? copyLine(`vibeswitcher config held ${shellWord(root)}`, 'the command that shows it') : copyLine(`vibeswitcher base show ${shellWord(root)}`, 'the command that shows it'),
-            config ? copyLine('vibeswitcher approve', 'the command that accepts it') : null)));
+            // The one command that settles it, as the node says it (`settle`); else the one that shows it.
+            card.settle ? copyLine(card.settle, 'the command that settles it') : copyLine(`vibeswitcher base show ${shellWord(root)}`, 'the command that shows it'))));
   }
 
   function drawLead(route, board, lead) {

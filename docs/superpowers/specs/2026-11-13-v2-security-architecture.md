@@ -1224,6 +1224,12 @@ for the user to judge, it doesn't judge it); that the user reads the list before
 guard rail, S3); that the seal sees a change swapped in and restored between two looks (the seal compares points in
 time: before a worker or verifier starts, after a merge's tests, at accept).
 
+**Open: a query for the held first look.** A held-config card's `blocking` counts a first look owed, but the vault
+answers no question whether it holds one for a root (`isHeld` is its own): the server stands in with "no last accept
+this vault sealed" (`AcceptedSnapshot.vouch`'s `sealed`; on the user's node the vault always holds the first look, so a
+fresh vault has sealed none, and an accept seals one). A real vault query is owed, so the card says it from the vault's
+record, not from the snapshot. *(2026-11-25, open)*
+
 **Before the bootstrap:** yes (plain mode, the extended first look, the two-step accept); no (strong mode's key file).
 
 **Built in:** stage 2, Task 4c (the Keychain's Linux form), Task 10 (`holdsFirstLook` over every record, kept in the
