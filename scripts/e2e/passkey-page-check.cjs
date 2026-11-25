@@ -90,21 +90,22 @@ async function run() {
     const offered = await page.until(`(() => { const b = document.querySelector('.passkey-offer:not([hidden]) button'); if (!b || b.disabled) return null; b.click(); return true; })()`, WAIT);
     // The new key's id as the page shows it, from its own browser's answer (the node never says it): what the user
     // types in the terminal (`web.passkey.add`'s `typed`).
-    // (The banner's sentence, i18n's pkAdded: "Your new passkey: <6>. Type these 6 characters in the terminal.")
-    const shownID = offered && await page.until(`(() => { const e = document.querySelector('.passkey-offer:not([hidden])'); const m = e && e.innerText.match(/Your new passkey: ([A-Za-z0-9_-]{6})\\./); return m ? m[1] : null; })()`, WAIT);
+    const shownID = offered && await page.until(`(() => { const e = document.querySelector('.passkey-offer:not([hidden]) .passkey-id'); const t = e && e.innerText.trim(); return t && /^[A-Za-z0-9_-]{6}$/.test(t) ? t : null; })()`, WAIT);
     await page.shot('passkey-offer');
     if (shownID) fs.writeFileSync(path.join(out, 'passkey.typed'), shownID);
     const kept = shownID && await waitFile(path.join(out, 'passkey.done'), WAIT * 2);
-    record('Register', Boolean(offered && shownID && kept), !offered ? 'no passkey offer on the page' : !shownID ? 'the page showed no id of its new key (pkAdded)'
+    record('Register', Boolean(offered && shownID && kept), !offered ? 'no passkey offer on the page' : !shownID ? 'the page showed no id of its new key (.passkey-id)'
       : !kept ? 'the terminal never kept a key' : `made by the authenticator, its id ${shownID} typed, kept by the terminal, the level confirm`);
     if (!kept) return;
 
     // Act: the first question answered by clicking its option, the passkey asked and given.
     await page.go(expect.projectHref);
+    // The recorded line is said for 8 s (the pill): kept as it shows, so a slow look after the card closed still sees it.
+    await page.until(`(() => { window.__recordedSeen = ''; setInterval(() => { const l = document.querySelector('.passkey-pill:not([hidden]) .passkey-line'); if (l && l.innerText) window.__recordedSeen = l.innerText; }, 50); return true; })()`, WAIT);
     const clicked = await page.until(clickOption(expect.first, expect.firstOption), WAIT);
     const pill = clicked && await page.until(`(() => { const p = document.querySelector('.passkey-pill'); return p && p.innerText.trim() ? p.innerText.replace(/\\s+/g, ' ').slice(0, 120) : null; })()`, WAIT);
     const answered = clicked && await page.until(`(() => { const c = ${card(expect.first)}; return c && c.classList.contains('closed') ? c.innerText.replace(/\\s+/g, ' ').slice(0, 80) : null; })()`, WAIT);
-    const shown = answered && recorded && await page.until(`(() => document.body.innerText.includes(${JSON.stringify((recorded || '').slice(0, 40))}) ? true : null)()`, WAIT);
+    const shown = answered && recorded && await page.until(`(() => { const line = ${JSON.stringify((recorded || '').slice(0, 40))}; return document.body.innerText.includes(line) || (window.__recordedSeen || '').includes(line) ? true : null; })()`, WAIT);
     await page.shot('passkey-act');
     record('Act', answered && recorded && shown, !clicked ? 'the option couldn’t be clicked' : !answered ? `the act wasn’t done (${pill || 'no pill'})` : !recorded ? 'no recorded line in the reply' : !shown ? 'the recorded line isn’t shown' : `done; recorded “${recorded}”`);
   } catch (error) {
