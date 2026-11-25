@@ -270,8 +270,12 @@ not parseable, another format, another uid; and a running code that names no row
 
 **What it doesn't cover.** A session that re-bootstraps the job with a host of its own that runs the genuine pinned
 server: the server check (1) passes, as the listener is the genuine server, the child of the job's process. Closing it
-means checking the job's process runs a pinned host too (a pid-based Security check bound by the link read before and
-after); it isn't built here (the reviewer's list; the checked start, item 13). Nor is the install's own window: a
+from the command line would mean a pid looked up through launchd and then checked, the racy shape this design avoids.
+The other side closes it without a pid: the genuine server refuses to serve unless its connector's peer (the stream
+pair's audit token, which names the last sender on the host's end) runs a host pinned in the same record. Not built
+here (the lead's call, 2026-11-25): it needs the server to read the record before its first request, a test that starts
+a pinned server from an unpinned host, and an answer on whether a fake host can make a genuine host the last sender on
+its end; it goes with item 13 (the checked start) and its review. Nor is the install's own window: a
 session that rewrites the staged build between its check and the administrator step is the install's S9, as on Linux.
 
 **Where it is built.** `NodePins` (VibeCore: the format, the walk's rules, the lookups), `Platform.Files.readRootRecord`
