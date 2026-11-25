@@ -11,6 +11,19 @@ func underRecords(_ ref: String, in root: String) -> String {
     return Git.run(["rev-parse", records ? "\(ref)~1" : ref], in: root).output
 }
 
+/// Whether `ref` is `since` or holds only the lead's records commits on top of it (`LeadRecords.subject`, touching
+/// only the records): what a merge that didn't land leaves, the records it committed before its rebase
+/// (`LeadRecords.commitBeforeMerge`) aside.
+func onlyRecords(on ref: String, since: String, in root: String) -> Bool {
+    guard Git.run(["merge-base", "--is-ancestor", since, ref], in: root).ok else { return false }
+    let commits = Git.run(["rev-list", "\(since)..\(ref)"], in: root).output.split(separator: "\n").map(String.init)
+    return commits.allSatisfy { commit in
+        let files = Git.run(["diff-tree", "--no-commit-id", "--name-only", "-r", commit], in: root).output.split(separator: "\n")
+        return Git.run(["log", "-1", "--format=%s", commit], in: root).output == LeadRecords.subject
+            && files.allSatisfy { LeadRecords.paths("docs/lead").contains(String($0)) }
+    }
+}
+
 /// The lead's decision and progress logs in the repository (`records_dir`), committed to the base branch by the
 /// lead's tool server: only those files, batched, around merges, never disturbing the user's uncommitted work. Every
 /// repository here is a temporary one.
@@ -367,17 +380,26 @@ struct LeadRecordsTests: LeadTeamFixture {
         try audited(lead, runtime, root: root, slug: "add-d", file: "d.txt")
         let next = lead.call("merge", ["task": "add-d"])
         #expect(!next.isError, "\(next.text)")
-        #expect(head("\(underRecords("main", in: root))~1", root) == records)
+        // The records add-d's report and audit wrote went in first (`LeadRecords.commitBeforeMerge`), on top of these.
+        let onto = try #require(BoardStore(root: root).load().task("add-d")?.merged?.onto)
+        #expect(Git.run(["log", "-1", "--format=%s", onto], in: root).output == LeadRecords.subject)
+        #expect(head("\(onto)~1", root) == records)
+        #expect(head("\(underRecords("main", in: root))~1", root) == onto)
         #expect(Git.run(["rev-list", "--merges", "main"], in: root).output.isEmpty)
     }
 
     @Test func noRecordsCommitLandsWhileAMergeTests() async throws {
         let root = try repo()
         let runtime = FakeRuntime()
-        try workflow(root, "---\ntest_command: sleep 2 && test -f b.txt\n---")
+        // The tests say they've started and run until the test lets them end: the checks below happen while they run.
+        let started = temp.url("started").path, release = temp.url("release").path
+        try workflow(root, "---\ntest_command: touch '\(started)'; while [ ! -e '\(release)' ]; do sleep 0.05; done; test -f b.txt\n---")
         let lead = try lead(root, runtime)
         try audited(lead, runtime, root: root, slug: "add-b", file: "b.txt")
         #expect(!lead.call("record_decision", ["decision": "Merge add-b", "why": "audited"]).isError)
+        // Committed now, so the merge has none to commit before its rebase: what's written below is new.
+        guard case .committed = lead.records.flush(base: "main") else { Issue.record("records not committed"); return }
+        try lead.store.appendProgress("Before the merge")
         let before = head("main", root)
         final class Box: @unchecked Sendable { var result: MCPToolResult? }
         let box = Box()
@@ -388,14 +410,19 @@ struct LeadRecordsTests: LeadTeamFixture {
             done.signal()
         }
         // While its tests run, a batch is due: it waits for the merge.
-        await pause(1)
+        #expect(await eventually { FileManager.default.fileExists(atPath: started) })
+        let committedFirst = head("main", root)
+        #expect(Git.run(["log", "-1", "--format=%s", committedFirst], in: root).output == LeadRecords.subject)
+        #expect(head("\(committedFirst)~1", root) == before)
+        try lead.store.appendDecision("During the merge's tests", why: "a batch is due")
         #expect(lead.records.flush(base: "main") == .waiting("a merge into main is running."))
-        #expect(head("main", root) == before)
+        #expect(head("main", root) == committedFirst)
+        FileManager.default.createFile(atPath: release, contents: nil)
         #expect(await offPool { done.wait(timeout: .now() + hangGuard) } == .success)
         #expect(box.result?.isError == false, "\(box.result?.text ?? "")")
         // Then right after it: the tested commit is what landed, the records on top.
         #expect(underRecords("main", in: root) == BoardStore(root: root).load().task("add-b")?.merged?.commit)
-        #expect(Git.run(["show", "main:docs/lead/decisions.md"], in: root).output.contains("Merge add-b"))
+        #expect(Git.run(["show", "main:docs/lead/decisions.md"], in: root).output.contains("During the merge's tests"))
     }
 
     @Test func aBranchMovedByAnotherWaitsForTheMergeToTakeIt() throws {

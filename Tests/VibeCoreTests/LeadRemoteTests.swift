@@ -289,6 +289,59 @@ struct LeadRemoteTests: LeadTeamFixture {
         #expect(conflict.text.contains("merge_remote would stop: merging origin/main into main conflicts in a.txt"), "\(conflict.text)")
     }
 
+    /// The other clone's two pushes by two handles, and GitHub's activity for them.
+    func twoPushes(_ scene: Scene) throws -> (first: String, second: String, activity: Data) {
+        let start = git(["rev-parse", "HEAD"], in: scene.other).output
+        let first = try pushed(scene, "b.txt", "bee\n", message: "Remote one")
+        let second = try pushed(scene, "c.txt", "sea\n", message: "Remote two")
+        return (first, second, activityJSON([("laptop-dev", first, second), ("studio-mac", start, first)]))
+    }
+
+    @Test func fetchAndMergeNameWhoPushedEachIncomingCommit() throws {
+        let scene = try makeScene()
+        let lead = try lead(scene.root, FakeRuntime())
+        let pushes = try twoPushes(scene)
+        let lookup = fakePushers { pushes.activity }
+        lead.pushers = lookup
+        let fetched = lead.call("fetch_remote", [:])
+        #expect(!fetched.isError, "\(fetched.text)")
+        let listed = fetched.text.components(separatedBy: "\n").filter { $0.hasPrefix("- ") }
+        #expect(listed == ["- \(pushes.second.prefix(7)) Remote two (pushed by @laptop-dev)", "- \(pushes.first.prefix(7)) Remote one (pushed by @studio-mac)"],
+                "\(fetched.text)")
+        // fetch_remote again on the same tip: GitHub isn't asked again.
+        #expect(lead.call("fetch_remote", [:]).text.contains("Remote two (pushed by @laptop-dev)"))
+        #expect(lookup.asked == 1)
+
+        let merged = lead.call("merge_remote", [:])
+        #expect(!merged.isError, "\(merged.text)")
+        #expect(merged.text.contains("Brought, newest first:\n- \(pushes.second.prefix(7)) Remote two (pushed by @laptop-dev)\n- \(pushes.first.prefix(7)) Remote one (pushed by @studio-mac)"),
+                "\(merged.text)")
+        #expect(lookup.asked == 1)
+    }
+
+    /// No answer (no gh, signed out, out of time, nothing matching, a remote that isn't github.com): the lists are
+    /// as they were, and the calls succeed.
+    @Test func withoutGitHubsAnswerFetchAndMergeListTheCommitsAlone() throws {
+        let other = String(repeating: "a", count: 40)
+        let answers: [(Data?) -> GitHubPushers.Lookup] = [
+            { _ in fakePushers { nil } }, { _ in fakePushers { Data("{}".utf8) } }, { _ in fakePushers { activityJSON([("someone", other, other)]) } },
+            { data in GitHubPushers.Lookup(fetch: { _, _ in data }) },
+        ]
+        for make in answers {
+            let scene = try makeScene()
+            let lead = try lead(scene.root, FakeRuntime())
+            let pushes = try twoPushes(scene)
+            lead.pushers = make(pushes.activity)
+            let fetched = lead.call("fetch_remote", [:])
+            #expect(!fetched.isError, "\(fetched.text)")
+            let listed = fetched.text.components(separatedBy: "\n").filter { $0.hasPrefix("- ") }
+            #expect(listed == ["- \(pushes.second.prefix(7)) Remote two", "- \(pushes.first.prefix(7)) Remote one"], "\(fetched.text)")
+            let merged = lead.call("merge_remote", [:])
+            #expect(!merged.isError && merged.text.contains("Brought, newest first:\n- \(pushes.second.prefix(7)) Remote two\n"), "\(merged.text)")
+            #expect(!merged.text.contains("pushed by"))
+        }
+    }
+
     /// Nothing in the call's arguments reaches git: not a remote, a refspec, a URL or an option. The remote is
     /// workflow.md's, by name only, and its URL goes only by file, https or ssh, with git's own upload-pack.
     @Test func fetchCantBeSteeredToAnotherRemoteOrRefspec() throws {

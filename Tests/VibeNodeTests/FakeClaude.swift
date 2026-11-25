@@ -95,7 +95,8 @@ enum FakeClaude {
 # voice footer, and the box its caret, as a focused terminal's), "focusEvents" (it asks for focus events, DECSET 1004,
 # and takes CSI I and CSI O as them; else they're Esc and typed text), "focused" (its terminal has focus: only then
 # does it draw its caret and level cursor), "processing" (seconds a recording takes to process once it ends: a
-# Space then is typed, and it drops what it heard if the box changed meanwhile, as 2.1.312's input_diverged), "stuck" (a
+# Space then is typed, and it drops what it heard if the box changed meanwhile, as 2.1.312's input_diverged),
+# "processingFooter" (its footer meanwhile: "Voice: processing…" as 2.1.312, "Transcribing…" as 2.1.330), "stuck" (a
 # recording goes on after the Spaces stop, until Esc), "loud" (its level cursor coloured though no words show), "wrap"
 # (a box wider than this many characters is word-wrapped onto rows of its own, as Claude Code draws a long draft, and ⌃U
 # deletes only the row the caret is on, as its deleteToLineStart does)) | "voiceStop" (it stops listening by itself, as after 15 s of silence) |
@@ -224,6 +225,7 @@ state = {
     "doublePush": 0.3,       # a second push this soon after a transcript went in sends it, 120 ms on
     "disarms": 0,            # sends a double push armed or could, called off by another key
     "processing": 0.0,       # seconds a recording takes to process once it ends (0: its transcript goes in at once)
+    "processingFooter": "Voice: processing…",  # its footer while it processes (2.1.330: "Transcribing…")
     "stuck": False,          # a recording goes on after the Spaces stop, until Esc
     "loud": False,           # its level cursor coloured though no words show (a level heard, the words not in yet)
     "dropped": 0,            # transcripts dropped: the box changed while they were processed
@@ -371,7 +373,7 @@ def draw():
         lines.append(RULE)
         menu = suggestions()
         footer = {"warming": "keep holding…", "listening": "listening…", "tap": "● REC · tap to send",
-                  "processing": "Voice: processing…"}.get(state["recording"])
+                  "processing": state["processingFooter"]}.get(state["recording"])
         if state["statusLine"]:
             footer = None
             lines.extend(STATUS)
@@ -1356,7 +1358,7 @@ def control():
             if state["recording"] == "processing":
                 VOICE["until"] = time.monotonic()
         elif op == "voice":
-            for name in ("mode", "account", "transcript", "interim", "warmup", "gap", "statusLine", "focused", "processing", "stuck", "loud", "wrap"):
+            for name in ("mode", "account", "transcript", "interim", "warmup", "gap", "statusLine", "focused", "processing", "processingFooter", "stuck", "loud", "wrap"):
                 if name in command:
                     state[{"mode": "voice", "account": "voiceAccount"}.get(name, name)] = command[name]
             if "focusEvents" in command:

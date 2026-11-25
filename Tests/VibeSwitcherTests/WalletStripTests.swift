@@ -180,7 +180,8 @@ struct WalletStripTests {
         let desks = WalletDeskTests()
         let s = try desks.setup()
         defer { s.desk.close() }
-        let model = TerminalWalletStripTests.model(hosted: [TerminalWalletStripTests.shell()])
+        let model = TerminalWalletStripTests.model(hosted: [TerminalWalletStripTests.shell()],
+                                                   defaults: desks.temp.defaults("wallet-strip-window"))
         let terminal = NSHostingView(rootView: TerminalWalletStrip(model: model, desk: s.desk) {}.frame(width: 640))
         terminal.sizingOptions = [.intrinsicContentSize]
         let chat = NSHostingView(rootView: WalletRequestStrip(desk: s.desk, session: Self.session).frame(width: 640))

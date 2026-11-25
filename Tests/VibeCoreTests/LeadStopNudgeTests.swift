@@ -453,3 +453,34 @@ extension LeadAdvanceTests {
         #expect(after.status == .review && after.reportCall == nil && after.reportRefused == nil && after.stopNudge == nil)
     }
 }
+
+extension LeadAdvanceTests {
+    /// A refused report's text, kept on the board for the witness and the nudge to quote, ends with a failed pre-done
+    /// check's raw output: it's masked for secrets where it's kept (`Redaction.secrets`), so neither board.json, the
+    /// lead's wake nor the worker's nudge carries a credential the check printed.
+    @Test func aRefusedReportsTextIsMaskedForSecretsOnTheBoardInTheWitnessAndInTheNudge() async throws {
+        let (root, runtime, lead) = try team()
+        // Assembled at run time (SecretShapeLint). The check quotes it in its command, where the witness's and the nudge's
+        // 300 characters reach, and prints it, in the output's tail, after the scratch home's header.
+        let secret = "correct-horse" + "-battery-7f3a"
+        _ = lead.call("add_task", ["title": "Add b", "goal": "b.txt exists", "acceptance": ["test -f b.txt"],
+                                   "done_check": "echo API_KEY=\(secret); exit 1"])
+        #expect(!lead.call("start_worker", ["task": "add-b"]).isError)
+        let worker = try #require(task("add-b", root)?.worker)
+        try commit("b.txt", "bee\n", in: Worktrees.path(root: root, slug: "add-b"))
+        let reply = try seat("worker-add-b", runtime).call("report", doneReport("added b.txt"))
+        #expect(reply.isError && reply.text.contains("pre-done check failed"), "\(reply.text)")
+        // On the board (board.json, as read back), in the command and in the output.
+        let refused = try #require(task("add-b", root)?.reportRefused)
+        #expect(!refused.text.contains(secret) && refused.text.components(separatedBy: "API_KEY=•••").count == 3, "\(refused.text)")
+        // The lead's wake on the worker's stop.
+        let stopped = Date(timeIntervalSince1970: refused.at + 100)
+        let seen = [worker: LeadWitnessTests.stoppedWorker(since: stopped)]
+        let told = LeadWitness.events(board: BoardStore(root: root).load(), seen: seen, now: stopped + 200, advancing: false)
+            .map(\.text).filter { $0.contains("stopped without calling report") }
+        #expect(told.count == 1 && told.allSatisfy { $0.contains("API_KEY=•••") && !$0.contains(secret) }, "\(told)")
+        // The worker's nudge.
+        let nudge = LeadAdvance.nudgeText(job: nil, refused: refused)
+        #expect(nudge.contains("API_KEY=•••") && !nudge.contains(secret), "\(nudge)")
+    }
+}

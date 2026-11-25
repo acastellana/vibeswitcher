@@ -367,6 +367,38 @@ public enum LeadLaunch {
         }
     }
 
+    /// The files of an audit's shared build and test run (`LeadToolset.auditRun`'s folder).
+    public static let auditLogFiles = ["init.log", "test.log", "run.txt"]
+
+    /// What a verifier or finder on `task` may also read outside its worktree without a prompt: the files of the audit's
+    /// one shared run its brief names (`logs`, all in `<root>/.vibeswitcher/audit/<task>/<run>/`), each of
+    /// `auditLogFiles` by name, read-only (the verifier's deny rules refuse every Edit and Write). On 2026-11-20 and
+    /// 2026-11-21 a finder stopped on the Read prompt for test.log and init.log there, which no one on the node answers,
+    /// and the audit never reached a verdict. As `evidenceReads`: a rule per spelling of the folder (as `root` spells it
+    /// and as the file system does), so a link out of it, another run's or task's folder and the rest of `.vibeswitcher`
+    /// stay as they were; nothing for a worker or the lead, nor for logs not in one such folder, a folder that isn't
+    /// there or is reached through a link, or a name a rule can't hold as it is.
+    public static func auditLogReads(_ role: Role, root: String, task: String?, logs: [String]) -> [String] {
+        guard role == .verifier, let task, !task.hasPrefix("."), root.hasPrefix("/") else { return [] }
+        let parents = Set(logs.map { URL(fileURLWithPath: $0).standardizedFileURL.deletingLastPathComponent().path })
+        guard parents.count == 1, let parent = parents.first else { return [] }
+        let run = (parent as NSString).lastPathComponent
+        guard !run.hasPrefix("."), [task, run].allSatisfy({ !$0.isEmpty && $0.unicodeScalars.allSatisfy(ruleSafe.contains) }) else { return [] }
+        let spelled = URL(fileURLWithPath: root, isDirectory: true).standardizedFileURL.path
+        guard let found = realpath(spelled, nil) else { return [] }
+        let resolved = String(cString: found)
+        free(found)
+        let inside = "/.vibeswitcher/audit/\(task)/\(run)"
+        guard spelled != "/", resolved != "/", parent == spelled + inside || parent == resolved + inside else { return [] }
+        // The folder is where it says it is: no link on the way out of the project's.
+        guard let landing = realpath(resolved + inside, nil) else { return [] }
+        defer { free(landing) }
+        guard String(cString: landing) == resolved + inside else { return [] }
+        let folders = Array(Set([spelled + inside, resolved + inside])).sorted()
+        guard folders.allSatisfy(isRuleSafe) else { return [] }
+        return folders.flatMap { folder in auditLogFiles.map { "Read(/\(folder)/\($0))" } }
+    }
+
     /// The hook every role's settings add: its `PermissionRequest` hook lets a command line run without a prompt when
     /// it parses cleanly as git reads and grep/rg/head/tail/wc/sort with known flags, every path in the role's worktree
     /// `root` (symlinks resolved), and for a worker its own `git add`, `git rm`, `git commit -m` and `git apply`
@@ -410,6 +442,12 @@ public enum LeadLaunch {
     }
 
     static let autoMemoryVariable = "CLAUDE_CODE_DISABLE_AUTO_MEMORY"
+
+    /// Claude Code's updater off (its plugins' auto-update too): `prepare` sets it to 1 in every role's process
+    /// environment, a boxed session's too (`SandboxPlanner`). An interactive session whose binary is older than the
+    /// newest version on disk otherwise re-creates `~/.local/bin/claude`, which the vault takes as a config change made
+    /// while the team ran (docs/lead-v2/incidents.md, 2026-11-20; with it set, measured with 2.1.328, the link stays).
+    public static let autoUpdaterVariable = "DISABLE_AUTOUPDATER"
 
     /// Claude Code's folder for the project at `path` (in `~/.claude/projects`): every character but an ASCII letter or
     /// digit made a "-", and a name longer than 200 cut there and followed by "-" and its hash (as Claude Code 2.1.319
@@ -577,7 +615,8 @@ public enum LeadLaunch {
                                branch: String? = nil, records: String? = nil, folder: URL? = nil, cwd: String? = nil,
                                temporary: URL = SessionTemp.root, home: String = VibePaths.home, resume: String? = nil,
                                teamPlugins: [String] = [], listedPlugins: [String]? = nil,
-                               box: Result<SandboxPolicy, SandboxRefusal> = .success(.standard)) throws -> Prepared {
+                               box: Result<SandboxPolicy, SandboxRefusal> = .success(.standard),
+                               auditLogs: [String] = []) throws -> Prepared {
         let folder = folder?.path ?? (root as NSString).appendingPathComponent(".vibeswitcher/run/\(name)")
         try VibePaths.ensurePrivate(URL(fileURLWithPath: folder, isDirectory: true))
         let promptFile = (folder as NSString).appendingPathComponent("prompt.md")
@@ -603,7 +642,8 @@ public enum LeadLaunch {
         if role == .verifier, let task {
             rules += memberTranscripts(root: root, slug: task, team: try team(root: root, task: task), cwd: cwd, home: home)
         }
-        var settings: [String: Any] = ["permissions": ["allow": allow(role, base: branch) + evidenceReads(role, root: root, task: task),
+        var settings: [String: Any] = ["permissions": ["allow": allow(role, base: branch) + evidenceReads(role, root: root, task: task)
+                                                           + auditLogReads(role, root: root, task: task, logs: auditLogs),
                                                        "deny": rules]]
         var env = environment(role)
         if role == .verifier {
@@ -656,6 +696,8 @@ public enum LeadLaunch {
         var prepared = Prepared(command: parts.joined(separator: " "), promptFile: promptFile, mcpFile: mcpFile, settingsFile: settingsFile)
         // Marks the role's session: its hook gives it none of the notes plain sessions get (`SessionNote`).
         prepared.environment[SessionNote.roleVariable] = role.rawValue
+        // Its updater off, from the start (`autoUpdaterVariable`).
+        prepared.environment[autoUpdaterVariable] = "1"
         // The lead's model, for its tool server to note on the board (`LeadBoard.leadModel`): a refusal its session
         // stops at is then kept for that model, so a lead stopped at Fable's limit holds Fable back.
         if role == .lead, let model { prepared.environment[leadModelVariable] = model }
@@ -853,6 +895,7 @@ public enum LeadLaunch {
 
     static func toml(_ list: [String]) -> String { "[" + list.map { toml($0) }.joined(separator: ", ") + "]" }
 
+    /// A verifier uses the read-only sandbox; workers use workspace-write.
     /// How a Codex task's worker is started: the project's Codex command (its sandbox-loosening flags dropped) in the
     /// worktree, with the worker's brief as Codex's developer instructions, the VibeSwitcher tool server as its one MCP
     /// server (scoped to the role and the repository as a Claude worker's is), the workspace-write sandbox (writes in
@@ -864,7 +907,7 @@ public enum LeadLaunch {
     /// configuration given on the command line as JSON, for reading back.
     public static func prepareCodex(root: String, task: String, base: String, prompt: String, start: String, server: String,
                                     name: String, model: String? = nil, effort: String? = nil, folder: URL? = nil, cwd: String? = nil,
-                                    temporary: URL = SessionTemp.root,
+                                    role: Role = .worker, temporary: URL = SessionTemp.root,
                                     toolTimeout: TimeInterval = LeadDoneCheck.callTimeout(limit: LeadDoneCheck.defaultMinutes * 60)) throws -> Prepared {
         let folder = folder?.path ?? (root as NSString).appendingPathComponent(".vibeswitcher/run/\(name)")
         try VibePaths.ensurePrivate(URL(fileURLWithPath: folder, isDirectory: true))
@@ -873,8 +916,8 @@ public enum LeadLaunch {
         try LeadVault.writePrivate(Data(prompt.utf8), to: URL(fileURLWithPath: promptFile))
         let cwd = cwd ?? Worktrees.path(root: root, slug: task)
         let temporaryFolder = SessionTemp.make(cwd: cwd, name: name, in: temporary)
-        let writable = codexWritableRoots(cwd: cwd, slug: task, temporary: temporaryFolder?.path, root: root)
-        let args = [MCPKeeper.flag, "--role", Role.worker.rawValue, "--root", root, "--task", task]
+        let writable = role == .verifier ? [] : codexWritableRoots(cwd: cwd, slug: task, temporary: temporaryFolder?.path, root: root)
+        let args = [MCPKeeper.flag, "--role", role.rawValue, "--root", root, "--task", task]
         // In order; each is one `-c key=value`.
         var config: [(key: String, value: String)] = [
             ("sandbox_workspace_write.writable_roots", toml(writable)),
@@ -912,13 +955,13 @@ public enum LeadLaunch {
         let trimmed = base.trimmingCharacters(in: .whitespaces)
         var command = withoutCodexFlags(trimmed.isEmpty ? "codex" : trimmed)
         if model != nil { command = withoutModel(command, short: true) }
-        var parts = [command.isEmpty ? "codex" : command, "--no-daemon", "--cd \(quote(cwd))", "--sandbox workspace-write", "--ask-for-approval never"]
+        var parts = [command.isEmpty ? "codex" : command, "--no-daemon", "--cd \(quote(cwd))", "--sandbox \(role == .verifier ? "read-only" : "workspace-write")", "--ask-for-approval never"]
         parts += config.map { "-c \(quote("\($0.key)=\($0.value)"))" }
         if let model { parts.append("--model \(quote(model))") }
         parts.append("-- \(quote(start))")
         var prepared = Prepared(command: parts.joined(separator: " "), promptFile: promptFile, mcpFile: configFile, settingsFile: configFile)
-        prepared.environment[SessionNote.roleVariable] = Role.worker.rawValue
-        prepared.environment.merge(environment(.worker)) { $1 }
+        prepared.environment[SessionNote.roleVariable] = role.rawValue
+        prepared.environment.merge(environment(role)) { $1 }
         if let temporaryFolder { prepared.environment["TMPDIR"] = temporaryFolder.path + "/" }
         return prepared
     }

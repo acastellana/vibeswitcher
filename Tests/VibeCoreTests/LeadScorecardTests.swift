@@ -193,8 +193,10 @@ struct LeadScorecardTests: LeadTeamFixture {
         let lead = try lead(root, runtime)
         #expect(!lead.call("configure", ["merge_policy": "auto", "test_command": "echo TESTS-RAN > \"$HOME/../order\"",
                                          "regression_command": "grep -q TESTS-RAN \"$HOME/../order\""]).isError)
-        let onto = Git.run(["rev-parse", "main"], in: root).output
         try audited(lead, runtime, root: root)
+        // The records go in before the merge starts (`LeadRecords.commitBeforeMerge`): committed now, the base stays put.
+        lead.records.flush(base: "main")
+        let onto = Git.run(["rev-parse", "main"], in: root).output
         let merged = lead.call("merge", ["task": "change"])
         #expect(!merged.isError, "\(merged.text)")
         #expect(merged.text.contains("regression_command passed too"))

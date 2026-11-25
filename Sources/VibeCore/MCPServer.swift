@@ -398,7 +398,7 @@ public final class MCPHostedToolset: MCPToolset, @unchecked Sendable {
             return
         }
         Platform.Stdio.error("vibeswitcher-mcp: the session host can't be asked yet, or its session holds no role yet; asking again\n")
-        Thread.detachNewThread { [self] in
+        ToolThread.detach { [self] in
             let deadline = Date().addingTimeInterval(patience)
             var delay = firstDelay
             var toolset: MCPToolset?
@@ -467,7 +467,7 @@ public final class ToolProgress: @unchecked Sendable {
     public func heartbeat(_ message: @escaping @Sendable () -> String) -> () -> Void {
         let done = ShellCancel()
         let every = self.every
-        Thread.detachNewThread { [self] in
+        ToolThread.detach { [self] in
             var next = Date().addingTimeInterval(every)
             while !done.isCancelled {
                 if Date() >= next {
@@ -605,7 +605,7 @@ public final class MCPServer: @unchecked Sendable {
             if key == nil { switchGate.wait() }
         }
         switchGate.unlock()
-        Thread.detachNewThread { [self] in
+        ToolThread.detach { [self] in
             ShellCancel.with(token) { work() }
             lock.lock()
             running[key!] = nil
@@ -848,7 +848,7 @@ public final class MCPServer: @unchecked Sendable {
                     if let data = self?.encode(note) { respond(data) }
                 }
             }
-            Thread.detachNewThread { [self] in
+            ToolThread.detach { [self] in
                 let reply = ShellCancel.with(token) { ToolProgress.with(progress) { handle(data) } }
                 // Answered before it counts as ended: a switch of builds waits for no call, and loses none.
                 if let reply { respond(reply) }

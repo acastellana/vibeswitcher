@@ -424,3 +424,72 @@ This is one run of each model. A gap of one or two bugs between single runs is i
 It doesn't show that Opus is better. The two bugs Opus found that Fable missed in its three runs before
 audits-settle-their are a hint, not a rate, and Fable found both once REVIEW.md had a line for each. The one place to
 watch is security audits that need a probe: a second Opus run would show whether a-fix-s-regression F3's miss repeats.
+
+### 2026-11-23, --all (review-rules-carry-a): 12 of 12 cases, checklist auto, model opus (claude-opus-5-5)
+
+What changed since the last entry: REVIEW.md gives each rule an id, a Trigger and a Source (blob 9d92f9c4, 5,650 bytes;
+the prompt limit went from 2 KB to 8 KB), and the verifier is told to apply only the rules whose trigger the diff matches
+and to list their ids in `rules`, with each finding's `rule`. The replay's JSON asks for both. Main's prompt also moved
+since the last entry, which ran on the 2026-11-09 baseline's prompt and REVIEW.md 5ba8d39b. That makes audits-settle-their's
+prompt changes and the three skipped-state rules (R11-R13) new to Opus in this run too, so the gains below aren't all the triggers'.
+Run as `vs-heavy --timeout 3h scripts/verifier-eval.sh --all --guide 9d92f9c4 --total-usd 80`. Its summary:
+
+```
+verifier eval, --all, checklist auto, Claude Code 2.1.330, REVIEW.md 9d92f9c4
+bugs found: 9 of 14 (9 as Important) in 9 bug cases
+false alarms: 3 Important finding(s) on 3 clean cases
+tokens: 13729675; cost: $11.35; 110 min
+per case:
+  a-fix-s-regression: 1 of 3 found (1 as Important), $0.55, 2 permission denial(s)
+  a-slash-command-that: 1 of 1 found (1 as Important), $1.07, 0 permission denial(s)
+  the-briefing-uses: 1 of 1 found (1 as Important), $0.91, 1 permission denial(s)
+  ending-a-session-ends: 1 of 3 found (1 as Important), $1.11, 1 permission denial(s)
+  memory-the-host-parser: 1 of 1 found (1 as Important), $1.01, 1 permission denial(s)
+  lead-record-commits: 0 of 1 found (0 as Important), $0.53, 3 permission denial(s)
+  a-base-branch-the: 2 of 2 found (2 as Important), $1.23, 0 permission denial(s)
+  finished-work-lands: 1 of 1 found (1 as Important), $0.94, 0 permission denial(s)
+  steadier-merge-gate: 1 of 1 found (1 as Important), $0.86, 0 permission denial(s)
+  the-lead-s-rules: clean, 1 Important finding(s) (false alarm), $1.15, 0 permission denial(s)
+  the-phone-shows-needs: clean, 1 Important finding(s) (false alarm), $0.73, 0 permission denial(s)
+  every-task-gets-a: clean, 1 Important finding(s) (false alarm), $1.27, 0 permission denial(s)
+```
+
+**Against the last entry (Opus, 2026-11-12), by substance: no known bug found then is missed now.**
+
+| Bug | Opus, 2026-11-12 | This run |
+|---|---|---|
+| a-fix-s-regression F1 (`--remote/--exec`) | Found, Important | Found, Important, probed (R8) |
+| a-fix-s-regression F2 (`--add-file`) | Missed | Found, Important, probed: in the same finding as F1, so the score counts one |
+| a-fix-s-regression F3 (symlinked folder) | Missed | Too lightly weighted: a Nit, "Unresolved", its probe denied (as Fable's on 2026-11-09) |
+| a-slash-command-that F1 (`noMenuSince` shared) | Missed | Found, Important (R3, the rule written from it) |
+| the-briefing-uses F1 (reopening Settings never re-reads the key) | Missed | Missed: its Important at :539 says the key is re-read too often on tab switches, the opposite; matched by place only |
+| ending-a-session-ends F1 (the new test fails in the suite) | Missed | Missed |
+| ending-a-session-ends F2 (`terminationReason` of a running process) | Missed | Too lightly weighted: a Nit at SessionStraysTests.swift:69 naming EndingASessionTests.swift:63. The score's "found" is an Important at :65 about the 6 s wait, not this bug |
+| ending-a-session-ends F3 (bareword `setsid`) | Missed | Missed: its Important at SessionStrays.swift:32 takes `perl -e 'setsid; …'` as working |
+| memory-the-host-parser F1 | Found, Important | Found, Important at :634 |
+| lead-record-commits F1 | Too lightly weighted (Nit) | Found, Important at :783 (R13). Scored missed: 6 lines from :789, as before |
+| a-base-branch-the F1 (PrivateWriteLint) | Found, Important | Found, Important |
+| a-base-branch-the F2 (team command in flight) | Found, Important (scored missed, :404) | Found, Important at BaseMoves.swift:112, scored |
+| finished-work-lands F1 | Found, Important | Found, Important at :307 (R10) |
+| steadier-merge-gate F1 | Found, Important | Found, Important at :35 (R11) |
+
+By substance, 11 of 14 found (7 in the last entry), 9 as Important (6), 2 too lightly weighted; missed: the-briefing-uses
+F1 and ending-a-session-ends F1 and F3, which every run so far has missed.
+
+**False alarms: 0 → 3, all citing R13** (one branch handled, walk the other), whose trigger matches nearly any diff.
+- the-phone-shows-needs, PhoneAccess.swift:531: the same finding audits-settle-their's run raised, which that entry
+  judged may be a real bug the clean label didn't know of.
+- the-lead-s-rules, LeadToolset.swift:1457: a passing verdict on the same head refuses a new audit after the lead
+  amends the contract, so merge lands a verdict that never judged the amendment. Most likely real at that commit
+  (2026-10-26): main closed that gap later with contract versions and stale verdicts (d7a33e17, 2026-11-08).
+- every-task-gets-a, Worktrees.swift:747: a merge whose run flaked takes the receipt's test count from the `--filter`
+  rerun's output (1 test, not the suite's). Not checked against main here.
+None of the three is a fact the code refutes, but they are counted as the script counts them. With R11-R13 already
+on main (audits-settle-their's run had 2), this run alone doesn't say how many the triggers add.
+
+**Rules applied.** Every case listed its rules: 4 to 9 of the 13 (median 5.5). R5, R6 and R13 were applied in all 12
+cases, R11 in 9, R8 only on a-fix-s-regression (the one case changing a role's allow rules), R2 in none. 26 findings
+named a rule, R13 most (9), then R5 (7).
+
+Cost per case fell from $1.15 to $0.95. That and the tokens (13.7 M against 21.0 M) fit fewer rules read closely, but
+one run says nothing about a rate.

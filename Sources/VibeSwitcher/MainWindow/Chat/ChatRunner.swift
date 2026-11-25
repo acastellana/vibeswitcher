@@ -27,6 +27,10 @@ enum RunRefusal {
     }
     static func shellNotStarted(_ why: String) -> String { "Not run: the shell session didn't start (\(why))." }
 
+    // A code block's Run in New Shell (`RunInShellButton`): it starts a new shell session as a card's Run does.
+    static let noFolder = "Not run: the session shown has no folder to start a shell in."
+    static let folderChanged = "Not run: the session shown or its folder changed meanwhile. Run it again."
+
     /// A replaced lead's typing goes to the live lead as a message: a command isn't one.
     static let replacedLead = "Not run: this lead was replaced. Run it from the live lead's chat."
 
@@ -35,6 +39,7 @@ enum RunRefusal {
     static func kind(of reason: String) -> String {
         let known: [(String, String)] = [
             (noSession, "noSession"), (otherSession, "otherSession"), (wayChanged, "wayChanged"), (replacedLead, "replacedLead"),
+            (noFolder, "noFolder"), (folderChanged, "folderChanged"),
             (ChatSync.notConnected, "notConnected"), (ChatSync.shellBusy, "shellBusy"), (ChatSync.noAgent, "noAgent"),
             (ChatSync.dictating, "dictating"), (ChatSync.pickerOpen, "pickerOpen"), (ChatSync.questionOpen, "questionOpen"),
         ]
@@ -42,11 +47,13 @@ enum RunRefusal {
         if Agent.allCases.contains(where: { ChatSync.behindDraft($0) == reason }) { return "behindDraft" }
         if Agent.allCases.contains(where: { ChatSync.notTaken($0) == reason }) { return "notTaken" }
         if reason.hasPrefix(notWrittenStart) { return "notWritten" }
+        if reason.hasPrefix(shellNotStartedStart) { return "shellNotStarted" }
         return "other"
     }
 
     /// What every `notWritten` starts with, whatever its error.
     private static let notWrittenStart = String(notWritten(CocoaError(.fileWriteUnknown)).prefix { $0 != "(" })
+    private static let shellNotStartedStart = String(shellNotStarted("").prefix { $0 != "(" })
 
     /// The app.log line for a code block's refusal: its kind and the session's (`ChatRunner.sessionKind`), nothing it
     /// was asked to run. The log watcher counts each kind as its own cause (`AppHealth.notices`).
@@ -116,6 +123,113 @@ final class ChatRunner: ObservableObject {
     var sessionKind: () -> String = { "none" }
     /// Writes a refusal's line (`RunRefusal.logLine`) to app.log.
     var log: (String) -> Void = { Breadcrumbs.shared.note($0) }
+    /// The folder of the session shown, where a block's Run in New Shell starts its shell. nil when there's none to
+    /// start in (nothing shown, or its folder isn't known), or nothing here starts shells: Run in New Shell isn't shown.
+    @Published var folder: String?
+    /// Starts a New Shell session in the folder, from the session shown (`session`), whose shell runs the block's
+    /// command at launch: the path a vs-shell card's Run takes (`ShellDesk.runBlock`), never typed into any terminal. Then
+    /// answers what came of it (on the main thread).
+    var openShell: (_ runnable: RunnableCommand.Runnable, _ folder: String, _ session: UUID?, _ done: @escaping (RunOutcome) -> Void) -> Void = { _, _, _, done in
+        done(.refused(RunRefusal.noFolder))
+    }
+}
+
+/// A code block's Run and Run in New Shell, side by side: each shows only while the session shown allows it.
+struct CodeRunButtons: View {
+    @ObservedObject var runner: ChatRunner
+    let runnable: RunnableCommand.Runnable
+
+    var body: some View {
+        HStack(spacing: 12) {
+            RunButton(runner: runner, runnable: runnable)
+            RunInShellButton(runner: runner, runnable: runnable)
+        }
+    }
+}
+
+/// Runs a code block's command in a new shell session (Run in New Shell, beside Run): for one that keeps running (a
+/// local server, a watcher), which typed into the session would hold up its agent. It starts an ordinary New Shell
+/// session in the folder of the session shown, its shell given the command at launch, as a vs-shell card's Run does
+/// (`ShellDesk.runBlock`, `ShellAsk.spawnRequest`), never typed in as keystrokes. Asked about first as Run is
+/// (`RunnableCommand.Runnable.needsConfirmation`); never without your click.
+struct RunInShellButton: View {
+    @ObservedObject var runner: ChatRunner
+    let runnable: RunnableCommand.Runnable
+    @State private var shown: RunShown = .ready
+    @State private var click = 0
+
+    var body: some View {
+        if let folder = runner.folder {
+            Button {
+                Self.run(runnable, in: folder, with: runner,
+                         confirm: { Self.confirmation($0, folder: folder).runModal() == .alertFirstButtonReturn }) { outcome in
+                    if let outcome { show(RunShown(outcome)) }
+                }
+            } label: {
+                Label(Self.label(shown), systemImage: shown == .ready ? "terminal" : shown.symbol).font(.system(size: 10.5))
+            }
+            .buttonStyle(.borderless)
+            .chatRowControl()
+            .help(shown.reason ?? "Opens a new shell session in \(folder) that runs: \(runnable.command)")
+        }
+    }
+
+    static func label(_ shown: RunShown) -> String {
+        switch shown {
+        case .ready: return "Run in New Shell"
+        case .sent: return "Started"
+        case .refused: return "Not run"
+        }
+    }
+
+    private func show(_ state: RunShown) {
+        click += 1
+        let mine = click
+        shown = state
+        DispatchQueue.main.asyncAfter(deadline: .now() + state.lasts) { if click == mine { shown = .ready } }
+    }
+
+    /// Asks first when it must (`confirm`), checks the session shown and its folder are still the ones asked about,
+    /// writes a script's file and has the runner start the shell. `done`: nil when cancelled; refused with why not (also
+    /// told through `runner.refused` and logged by kind through `runner.log`; a script file this Run wrote goes then).
+    static func run(_ runnable: RunnableCommand.Runnable, in folder: String, with runner: ChatRunner,
+                    confirm: (RunnableCommand.Runnable) -> Bool, done: @escaping (RunOutcome?) -> Void = { _ in }) {
+        let session = runner.session(), sessionKind = runner.sessionKind()
+        var wrote: URL?
+        func refuse(_ reason: String) {
+            if let wrote { try? FileManager.default.removeItem(at: wrote) }
+            runner.log(RunRefusal.logLine(reason, session: sessionKind))
+            runner.refused(reason)
+            done(.refused(reason))
+        }
+        guard !runnable.needsConfirmation || confirm(runnable) else { return done(nil) }
+        // While it asked, the window may have come to show another session, or this one's agent may have moved.
+        guard runner.session() == session, runner.folder == folder else { return refuse(RunRefusal.folderChanged) }
+        if let script = runnable.script {
+            let there = FileManager.default.fileExists(atPath: script.file.path)
+            do { try script.write() } catch { return refuse(RunRefusal.notWritten(error)) }
+            if !there { wrote = script.file }
+        }
+        runner.openShell(runnable, folder, session) { outcome in
+            if case .refused(let reason) = outcome { return refuse(reason) }
+            done(outcome)
+        }
+    }
+
+    /// The folder and the exact line the new shell runs, wrapped so nothing sits off to the side; a script's own lines
+    /// with that line below.
+    static func confirmation(_ runnable: RunnableCommand.Runnable, folder: String) -> NSAlert {
+        let alert = RunButton.confirmation(runnable, way: .shell)
+        alert.messageText = "Run this in a new shell session?"
+        if let script = runnable.script {
+            alert.informativeText = "A new shell session starts in \(folder). These lines run there as one \(script.shell) "
+                + "script, exactly as shown. Its shell runs:\n\(runnable.command)"
+        } else {
+            alert.informativeText = "A new shell session starts in \(folder), and its shell runs exactly this:"
+        }
+        alert.buttons.first?.title = "Run in New Shell"
+        return alert
+    }
 }
 
 /// Runs a code block's command in the session: typed in as `! command` for an agent (it runs in the agent's shell and

@@ -13,6 +13,9 @@ import Testing
 @MainActor
 @Suite(.serialized)
 struct FreezeCausesTests {
+    /// Where the window models keep their settings: a suite of each test's own.
+    let temp = Scratch()
+
     // MARK: SessionHeaderView
 
     func show<V: View>(_ view: V) -> (window: NSWindow, settle: () -> Void) {
@@ -30,8 +33,7 @@ struct FreezeCausesTests {
     }
 
     @Test func theHeaderIsNotDrawnAgainWhenAnotherSessionChanges() {
-        UserDefaults.standard.removeObject(forKey: "windowGrouping")
-        let model = WindowModel()
+        let model = WindowModel(defaults: temp.defaults("freeze-causes"))
         let host = HostClient(socketPath: "/nonexistent-freeze-causes", bundledBuild: { 0 }, note: { _ in })
         let lead = SidebarArrangeTests.hosted("Lead · acme", cwd: "/Users/you/dev/acme")
         var other = SidebarArrangeTests.hosted("Shell", cwd: "/Users/you/dev/tools")

@@ -287,12 +287,7 @@ struct GlossarySnapshots {
         }
         sessions[5].pausedUntil = .distantFuture
         let ended = [EndedFoldTests.hosted("Build script", project: "acme", exit: 129)]
-        let model = WindowModel()
-        let grouping = model.grouping
-        defer {
-            model.grouping = grouping
-            UserDefaults.standard.removeObject(forKey: WindowModel.endedOpenKey)
-        }
+        let model = WindowModel(defaults: temp.defaults("glossary-snapshots-defaults"))
         model.grouping = .attention
         model.update(sessions: sessions, hosted: ended, table: TableRead(at: now))
         model.endedOpen = true

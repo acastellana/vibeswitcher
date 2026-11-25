@@ -13,8 +13,8 @@
 # scripts/sandbox-app.sh [options] COMMAND…     any other command of the sandbox's: status, chat, type TEXT, send,
 #                                               composer [paste|clear|expect TEXT|unsent TEXT], dictation press|release,
 #                                               pointer drag FROM TO|copy|menu-copy TEXT,
-#                                               terminal, drag, copy, tell JSON, runblock [yes], lines FILE N, new, select TEXT, home, settings [TAB], sheet NAME, wallet STATE, wallet-page, wallet-send-all,
-#                                               close settings|sheet (help lists them)
+#                                               terminal, drag, copy, tell JSON, runblock [yes], runshell [yes], lines FILE N, new, select TEXT, home, settings [TAB], sheet NAME, wallet STATE, wallet-page, wallet-send-all,
+#                                               close-finished [yes], close settings|sheet (help lists them)
 # e.g. run; chat; type "hello"; shot chat; settings agents; shot settings; sheet new-project; shot new-project; quit
 #
 # Options: --minutes N (run: how long it lives, 10), --empty (run: no fake session at launch, so no session host until

@@ -103,11 +103,46 @@ public final class Breadcrumbs: @unchecked Sendable {
         return unwritten.utf8.count
     }
 
+    /// Every line noted while it's kept that `matching` takes, however far the ring rolls meanwhile. For a test that looks
+    /// for its own lines: in a full suite the other tests in the process note theirs too, and the ring may roll past
+    /// what it looks for before it looks (2026-11-19: an OpenAI dictation test's first two runs gone from the last 400).
+    public final class Watch: @unchecked Sendable {
+        private let matching: @Sendable (String) -> Bool
+        private let lock = NSLock()
+        private var seen: [String] = []
+
+        fileprivate init(_ matching: @escaping @Sendable (String) -> Bool) { self.matching = matching }
+
+        /// The lines it took, oldest first.
+        public var lines: [String] { lock.withLock { seen } }
+
+        fileprivate func take(_ line: String) {
+            guard matching(line) else { return }
+            lock.withLock { seen.append(line) }
+        }
+    }
+
+    private struct Watching { weak var watch: Watch? }
+    private var watches: [Watching] = []
+
+    /// A watch on the lines noted from now on (`Watch`), until it's let go of. `matching` mustn't note a line itself.
+    public func watch(_ matching: @escaping @Sendable (String) -> Bool) -> Watch {
+        let watch = Watch(matching)
+        lock.lock()
+        watches.append(Watching(watch: watch))
+        lock.unlock()
+        return watch
+    }
+
     public func note(_ text: String) {
         lock.lock()
         let line = "\(stamp.string(from: Date())) \(text)"
         ring.append(line)
         if ring.count > capacity { ring.removeFirst(ring.count - capacity) }
+        if !watches.isEmpty {
+            watches.removeAll { $0.watch == nil }
+            for watching in watches { watching.watch?.take(line) }
+        }
         unwritten += line + "\n"
         let full = unwritten.utf8.count > 8_192
         lock.unlock()

@@ -81,7 +81,8 @@ struct LeadWaitsTests: LeadTeamFixture {
         var new = old
         new.waits = LeadWaits(doneAt: 5, auditWait: 1, auditAt: 7, auditSessions: 2, auditing: 3, verifierTime: 6, mergeLoadWait: 4,
                               mergeSlotWait: 8, mergeTesting: 9)
-        new.receipt?.waits = new.waits?.closed(at: 10)
+        let closed = new.waits?.closed(at: 10)
+        new.receipt?.waits = closed
         new.receipt?.worker?.codex = 3
         #expect(try JSONDecoder().decode(LeadTask.self, from: encoder.encode(new)) == new)
     }

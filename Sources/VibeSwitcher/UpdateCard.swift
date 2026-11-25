@@ -185,10 +185,16 @@ struct UpdateCardView: View {
                     ForEach(group.changes, id: \.id) { change in
                         HStack(alignment: .firstTextBaseline, spacing: 6) {
                             Text("•").foregroundStyle(.secondary).accessibilityHidden(true)
-                            // Commit subjects are text from the repository: shown as plain text, never as markdown.
-                            Text(verbatim: Self.shortSubject(change.subject, area: group.area))
-                                .font(.callout).lineLimit(desk.showAll ? nil : 2)
-                                .fixedSize(horizontal: false, vertical: true)
+                            VStack(alignment: .leading, spacing: 1) {
+                                // Commit subjects are text from the repository: shown as plain text, never as markdown.
+                                Text(verbatim: Self.shortSubject(change.subject, area: group.area))
+                                    .font(.callout).lineLimit(desk.showAll ? nil : 2)
+                                    .fixedSize(horizontal: false, vertical: true)
+                                // Who pushed it to GitHub, when GitHub said (a change only GitHub has).
+                                if let pusher = change.pusher {
+                                    Text(verbatim: Self.pushedBy(pusher)).font(.caption).foregroundStyle(.secondary)
+                                }
+                            }
                         }
                     }
                 }
@@ -209,6 +215,9 @@ struct UpdateCardView: View {
         .background(RoundedRectangle(cornerRadius: 8).fill(Color(nsColor: .controlBackgroundColor)))
         .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color(nsColor: .separatorColor)))
     }
+
+    /// "pushed by @login": the GitHub handle that pushed a change.
+    static func pushedBy(_ login: String) -> String { "pushed by @\(login)" }
 
     /// The subject without its area (the group's heading says it).
     static func shortSubject(_ subject: String, area: String) -> String {

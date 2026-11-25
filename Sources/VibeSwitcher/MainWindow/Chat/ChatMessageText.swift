@@ -1026,7 +1026,7 @@ final class ChatTextView: NSTextView {
         // AppKit: an NSHostingView per code block cost a page's rows ~0.6 ms each. SwiftUI only for Run, which
         // follows whether the session can take it.
         let header = ChatCodeHeader(language: ref.language, code: ref.code,
-                                    run: runner.flatMap { runner in runnable.map { RunButton(runner: runner, runnable: $0) } })
+                                    run: runner.flatMap { runner in runnable.map { CodeRunButtons(runner: runner, runnable: $0) } })
         addSubview(header)
         var more: NSButton?
         if ref.limited {
@@ -1491,14 +1491,14 @@ final class ChatCodeScroll: NSScrollView {
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
 }
 
-/// A code block's header in a message: its language, Run (when the session takes it) and Copy.
+/// A code block's header in a message: its language, Run (when the session takes it), Run in New Shell and Copy.
 final class ChatCodeHeader: NSView {
     private let code: String
     private let label: NSTextField
     private let copy: ClosureButton
     private let run: NSView?
 
-    init(language: String?, code: String, run: RunButton?) {
+    init(language: String?, code: String, run: CodeRunButtons?) {
         self.code = code
         label = NSTextField(labelWithString: language?.lowercased() ?? "code")
         label.font = .systemFont(ofSize: 10.5, weight: .medium)
@@ -1568,7 +1568,7 @@ fileprivate final class ClosureButton: NSButton {
     @objc func fire(_ sender: Any?) { handler() }
 }
 
-/// A code block's header: its language, Run (when the session takes it) and Copy.
+/// A code block's header: its language, Run (when the session takes it), Run in New Shell and Copy.
 struct CodeBlockHeader: View {
     let language: String?
     let code: String
@@ -1580,7 +1580,7 @@ struct CodeBlockHeader: View {
         HStack {
             Text(language?.lowercased() ?? "code").font(.system(size: 10.5, weight: .medium)).foregroundStyle(.secondary)
             Spacer()
-            if let runner, let runnable { RunButton(runner: runner, runnable: runnable) }
+            if let runner, let runnable { CodeRunButtons(runner: runner, runnable: runnable) }
             Button {
                 Pasteboard.copy(code)
                 copied = true

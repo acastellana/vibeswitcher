@@ -177,7 +177,7 @@ extension LeadAdvanceTests {
     }
 
     @Test func aSensitiveOrSecurityAuditRunsOnSecurityAuditModelOthersOnVerifierModelAndTheFloorWins() throws {
-        let (root, runtime, lead) = try team(test: nil, ["auto_advance": false, "max_workers": 5, "verifier_model": "opus"])
+        let (root, runtime, lead) = try team(test: nil, ["auto_advance": false, "max_workers": 5, "verifier_model": "opus", "heavy_slots": 2])
         runtime.claude = "claude --model opus"
         _ = lead.call("add_task", ["title": "Plain", "goal": "g", "acceptance": ["a"], "review": "audit"])
         _ = lead.call("add_task", ["title": "Touchy", "goal": "g", "acceptance": ["a"], "review": "audit"])
@@ -290,7 +290,7 @@ extension LeadAdvanceTests {
     /// verifier_model says, so near Fable's limit its audit waits for the reset (a look again armed) instead of being
     /// tried on Opus's reading and refused on Fable's.
     @Test func autoAdvanceHoldsASensitiveAuditNearFablesLimitThoughVerifierModelIsOpus() async throws {
-        let (root, runtime, lead) = try team(test: nil, ["verifier_model": "opus", "security_audit_model": "fable"])
+        let (root, runtime, lead) = try team(test: nil, ["verifier_model": "opus", "security_audit_model": "fable", "codex_verifier": "off"])
         runtime.claude = "claude --model opus"
         let now = AccountUsageTests.now, resets = AccountUsageTests.tomorrow
         lead.usageClock = { now }

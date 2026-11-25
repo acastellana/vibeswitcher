@@ -17,6 +17,8 @@ public enum ChatItem: Equatable, Sendable, Identifiable {
     case question(LeadQuestion, notice: String?)
     /// A burst of VibeSwitcher's cards for the lead, folded into one line (see `ChatUpdates`, `ChatTimeline.foldUpdates`).
     case updates(ChatUpdates)
+    /// Where a fresh lead session began after a handover (`LeadChatHistory`): its line, `LeadRotation.notice`'s words.
+    case handover(id: String, notice: String, at: Double)
 
     public static func toolsID(_ firstToolID: String) -> String { "tools:\(firstToolID)" }
 
@@ -28,6 +30,7 @@ public enum ChatItem: Equatable, Sendable, Identifiable {
         case .allDone(let mark): return "all-done:\(mark.id)"
         case .question(let question, _): return "question:\(question.id)"
         case .updates(let updates): return updates.id
+        case .handover(let id, _, _): return id
         }
     }
 }
@@ -113,6 +116,7 @@ public enum ChatTimeline {
         case .allDone(let mark): return mark.at
         case .question(let question, _): return closed(question)
         case .updates(let updates): return updates.items.lazy.compactMap(time).first
+        case .handover(_, _, let at): return at
         case .newMarker: return nil
         }
     }
@@ -187,6 +191,8 @@ public enum ChatSearch {
                 }
             case .newMarker:
                 return false
+            case .handover(_, let notice, _):
+                return notice.localizedCaseInsensitiveContains(needle)
             case .question(let question, let notice):
                 return ([question.text, question.withdrawReason ?? "", question.proposal ?? "", notice ?? ""]).contains { $0.localizedCaseInsensitiveContains(needle) }
             case .updates(let updates):

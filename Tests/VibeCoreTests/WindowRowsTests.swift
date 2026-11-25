@@ -69,4 +69,36 @@ struct WindowRowsTests {
         let ended = WindowRow(content: .hosted(info), project: "a")
         #expect(running.id == ended.id)
     }
+
+    /// A handover ended the old lead (started at 10): the new one (started at 40) goes where its row was, before the
+    /// user's session started at 20, not last; Terminal's sessions and the ended old row don't count.
+    @Test func aLeadAHandoverStartedTakesTheOldOnesPlace() {
+        func at(_ tty: String, _ started: TimeInterval, host: UUID? = nil) -> Session {
+            var session = agent(tty, project: "alpha", host: host)
+            session.startedAt = Date(timeIntervalSince1970: started)
+            return session
+        }
+        let (user, new) = (UUID(), UUID())
+        var old = hosted("ttys001", cwd: "/x/alpha", live: false, started: 10)
+        old.label = "Lead · alpha"
+        let terminal = at("ttys009", 50)
+        let sessions = [terminal, at("ttys002", 20, host: user), at("ttys003", 40, host: new)]
+        let shell = hosted("ttys004", cwd: "/x/alpha", started: 30)
+        let sections = WindowRows.sections(sessions: sessions, hosted: [old, shell], table: TableRead(),
+                                           projectName: { ($0 as NSString).lastPathComponent })
+        #expect(sections[0].rows.map(\.id) == ["tty:ttys009", "host:\(user)", "host:\(new)", "host:\(shell.id)", "host:\(old.id)"])
+        let place = RowPlace(start: Date(timeIntervalSince1970: 10), tty: "ttys001")
+        let placed = WindowRows.placed(sections, places: [new: place])
+        #expect(placed[0].rows.map(\.id) == ["tty:ttys009", "host:\(new)", "host:\(user)", "host:\(shell.id)", "host:\(old.id)"])
+        // Placed again, or with no places: as it was.
+        #expect(WindowRows.placed(placed, places: [new: place]) == placed)
+        #expect(WindowRows.placed(sections, places: [:]) == sections)
+        // A lead that started before everything after its place stays where it is.
+        #expect(WindowRows.placed(sections, places: [new: RowPlace(start: Date(timeIntervalSince1970: 35), tty: "ttys001")]) == sections)
+        // Started in the same second as the old lead (process starts are whole seconds): the terminal tells which was first.
+        let sameSecond = WindowRows.sections(sessions: [terminal, at("ttys002", 10, host: user), at("ttys003", 40, host: new)], hosted: [old, shell],
+                                             table: TableRead(), projectName: { ($0 as NSString).lastPathComponent })
+        #expect(WindowRows.placed(sameSecond, places: [new: place])[0].rows.map(\.hostID) == [nil, new, user, shell.id, old.id])
+        #expect(WindowRows.placed(sameSecond, places: [new: RowPlace(start: place.start, tty: "ttys002")]) == sameSecond)
+    }
 }

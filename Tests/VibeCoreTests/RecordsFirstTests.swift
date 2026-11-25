@@ -2,10 +2,10 @@ import Foundation
 import Testing
 @testable import VibeCore
 
-/// A records fix lands first: when the last merge failed on a file under docs/lead/ and the lead's records have
-/// changes not committed, the records are committed before the next merge starts (`LeadRecords.commitBeforeMerge`),
-/// so it tests the fix. On 2026-11-12 the fix of a progress.md line waited behind every merge, each built on the line
-/// it fixed.
+/// The records land first: when the lead's records have changes not committed, they're committed before every merge
+/// starts (`LeadRecords.commitBeforeMerge`), so it tests them as they are. On 2026-11-12 the fix of a progress.md line
+/// waited behind every merge, each built on the line it fixed; until 2026-11-18 this ran only after a merge had failed
+/// on the records, so 9 merges that week failed on them first.
 @Suite(.serialized)
 struct RecordsFirstTests: LeadTeamFixture {
     let temp = Scratch()
@@ -121,19 +121,139 @@ struct RecordsFirstTests: LeadTeamFixture {
         #expect(told.count == 1 && told.first?.text.contains("redact_record") == true, "\((lead.store.load().reports ?? []).map(\.text))")
     }
 
-    /// Nothing is due when the last merge's failure named no record: the records wait for their usual commit.
-    @Test func aFailureThatNamesNoRecordCommitsNothingEarly() throws {
+    /// Uncommitted record lines at a merge's start don't fail it, though no merge failed on them before: the records
+    /// commit lands first, the merge's commit follows, and the routine commit adds no progress line of its own.
+    @Test func uncommittedRecordLinesAtAMergesStartDontFailIt() throws {
+        let root = try repo()
+        try lintSuite(root)
+        let runtime = FakeRuntime()
+        let lead = try lead(root, runtime)
+        #expect(!lead.call("configure", ["test_command": "bash scripts/run.sh"]).isError)
+        try lead.store.appendProgress("Started")
+        guard case .committed = lead.records.flush(base: "main") else { Issue.record("records not committed"); return }
+
+        // The line the lint wants is in the records, not committed yet; no merge has failed on it.
+        try audited(lead, runtime, root: root, slug: "add-b", files: ["b.txt": "bee\n"])
+        try lead.store.appendProgress("FIXED the line the lint fails on")
+        #expect(lead.records.mergeFailedOn.isEmpty)
+        #expect(!Git.run(["show", "main:docs/lead/progress.md"], in: root).output.contains("FIXED"))
+        let before = Git.run(["rev-parse", "main"], in: root).output
+
+        let merged = lead.call("merge", ["task": "add-b"])
+        #expect(!merged.isError, "\(merged.text)")
+        let task = try #require(BoardStore(root: root).load().task("add-b"))
+        #expect(task.status == .done)
+        // The records commit, on the base as it was; the merge's commit on top of it.
+        let onto = try #require(task.merged?.onto)
+        #expect(Git.run(["log", "-1", "--format=%s", onto], in: root).output == LeadRecords.subject)
+        #expect(Git.run(["rev-parse", "\(onto)~1"], in: root).output == before)
+        #expect(Git.run(["show", "\(onto):docs/lead/progress.md"], in: root).output.contains("FIXED"))
+        let landed = Git.run(["log", "--format=%s", "\(onto)..main"], in: root).output.split(separator: "\n").map(String.init)
+        #expect(landed.contains("add-b's work"), "\(landed)")
+        #expect(Git.run(["show", "main:b.txt"], in: root).output == "bee")
+        let progress = try String(contentsOfFile: root + "/docs/lead/progress.md", encoding: .utf8)
+        #expect(!progress.contains("Committed the records at"), "\(progress)")
+        #expect(lead.records.mergeFailedOn.isEmpty)
+    }
+
+    /// A batch, the same: the records commit lands first, then each task's commit on it.
+    @Test func uncommittedRecordLinesAtABatchsStartDontFailIt() throws {
+        let root = try repo()
+        try lintSuite(root)
+        let runtime = FakeRuntime()
+        let lead = try lead(root, runtime)
+        lead.power = { nil }
+        lead.macLimits = { MacLimits(maxSessions: 12) }
+        let set = lead.call("configure", ["test_command": "bash scripts/run.sh", "merge_batching": "always"])
+        #expect(!set.isError, "\(set.text)")
+        try lead.store.appendProgress("Started")
+        guard case .committed = lead.records.flush(base: "main") else { Issue.record("records not committed"); return }
+
+        try audited(lead, runtime, root: root, slug: "add-b", files: ["b.txt": "bee\n"])
+        try audited(lead, runtime, root: root, slug: "add-c", files: ["c.txt": "sea\n"])
+        try lead.store.appendProgress("FIXED the line the lint fails on")
+        #expect(lead.records.mergeFailedOn.isEmpty)
+        let before = Git.run(["rev-parse", "main"], in: root).output
+
+        let batch = try lead.mergeBatch(["add-b", "add-c"])
+        for slug in ["add-b", "add-c"] {
+            let task = try #require(BoardStore(root: root).load().task(slug))
+            #expect(task.status == .done, "\(slug) \(task.status): \(batch.text)")
+        }
+        let landed = Git.run(["log", "--reverse", "--format=%s", "\(before)..main"], in: root).output.split(separator: "\n").map(String.init)
+        #expect(Array(landed.prefix(3)) == [LeadRecords.subject, "add-b's work", "add-c's work"], "\(landed)")
+        let onto = Git.run(["rev-list", "--reverse", "\(before)..main"], in: root).output.split(separator: "\n").first.map(String.init) ?? ""
+        #expect(Git.run(["show", "\(onto):docs/lead/progress.md"], in: root).output.contains("FIXED"))
+    }
+
+    /// A merge refused at its gate (here: no audit yet) commits nothing: the records go in only once a merge is past
+    /// its gate and its waits, about to rebase, so a refused merge that auto_advance tries again doesn't move the base.
+    @Test func aMergeRefusedAtItsGateLeavesTheRecordsUncommitted() throws {
         let root = try repo()
         let runtime = FakeRuntime()
         let lead = try lead(root, runtime)
         try lead.store.appendProgress("Started")
         guard case .committed = lead.records.flush(base: "main") else { Issue.record("records not committed"); return }
+        #expect(!lead.call("add_task", ["title": "add-b", "goal": "g", "acceptance": ["a"]]).isError)
+        let before = Git.run(["rev-parse", "main"], in: root).output
+
+        let refused = lead.call("merge", ["task": "add-b"])
+        #expect(refused.isError, "\(refused.text)")
+        #expect(Git.run(["rev-parse", "main"], in: root).output == before)
+        #expect(!Git.run(["diff", "--quiet", "main", "--", "docs/lead/progress.md"], in: root).ok)
+    }
+
+    /// The commit before a merge takes only the records: the user's other changes in the main checkout (staged,
+    /// unstaged, untracked) stay as they were.
+    @Test func theCommitBeforeAMergeLeavesEveryOtherFileAlone() throws {
+        let root = try repo()
+        let runtime = FakeRuntime()
+        let lead = try lead(root, runtime)
+        try lead.store.appendProgress("Started")
+        guard case .committed = lead.records.flush(base: "main") else { Issue.record("records not committed"); return }
+        let before = Git.run(["rev-parse", "main"], in: root).output
+
+        // The user's own work in progress: a.txt staged at "two" and changed again to "three", notes.txt untracked.
+        try "two\n".write(toFile: root + "/a.txt", atomically: true, encoding: .utf8)
+        #expect(Git.run(["add", "a.txt"], in: root).ok)
+        try "three\n".write(toFile: root + "/a.txt", atomically: true, encoding: .utf8)
+        try "mine\n".write(toFile: root + "/notes.txt", atomically: true, encoding: .utf8)
+        try lead.store.appendProgress("More")
+        try lead.store.appendDecision("A decision", why: "Because.")
+
+        lead.commitRecordsFirst(not: "add-x")
+        let head = Git.run(["rev-parse", "main"], in: root).output
+        #expect(head != before)
+        #expect(Git.run(["rev-parse", "main~1"], in: root).output == before)
+        #expect(Git.run(["log", "-1", "--format=%B", "main"], in: root).output == LeadRecords.message("docs/lead"))
+        let files = Git.run(["show", "--name-only", "--format=", "main"], in: root).output.split(separator: "\n").map(String.init)
+        #expect(Set(files) == ["docs/lead/decisions.md", "docs/lead/progress.md"], "\(files)")
+        #expect(Git.run(["show", "main:a.txt"], in: root).output == "one")
+        #expect(Git.run(["show", ":a.txt"], in: root).output == "two")
+        #expect(try String(contentsOfFile: root + "/a.txt", encoding: .utf8) == "three\n")
+        #expect(try String(contentsOfFile: root + "/notes.txt", encoding: .utf8) == "mine\n")
+        let status = Git.run(["status", "--porcelain"], in: root).output.split(separator: "\n").map(String.init)
+        #expect(status.contains("MM a.txt") && status.contains("?? notes.txt"), "\(status)")
+        #expect(!status.contains { $0.contains("docs/lead/") }, "\(status)")
+    }
+
+    /// The records are committed before a merge whether or not the last merge failed on them; nothing is due when
+    /// they have nothing new.
+    @Test func theRecordsAreCommittedFirstWithOrWithoutAFailure() throws {
+        let root = try repo()
+        let runtime = FakeRuntime()
+        let lead = try lead(root, runtime)
+        try lead.store.appendProgress("Started")
+        guard case .committed = lead.records.flush(base: "main") else { Issue.record("records not committed"); return }
+        #expect(lead.records.commitBeforeMerge(base: "main") == nil)
         lead.records.noteMergeRun(failing: ["✘ Test other() failed after 0.1 seconds with 1 issue. Sources/A.swift:3"])
         #expect(lead.records.mergeFailedOn.isEmpty)
         try lead.store.appendProgress("More")
+        guard case .committed? = lead.records.commitBeforeMerge(base: "main") else { Issue.record("not committed first"); return }
         #expect(lead.records.commitBeforeMerge(base: "main") == nil)
         lead.records.noteMergeRun(failing: ["PrivateNamesLint: docs/lead/decisions.md:4"])
         #expect(lead.records.mergeFailedOn == ["docs/lead/decisions.md"])
+        try lead.store.appendProgress("Again")
         guard case .committed? = lead.records.commitBeforeMerge(base: "main") else { Issue.record("not committed first"); return }
         // Nothing left to commit: nothing to do.
         #expect(lead.records.commitBeforeMerge(base: "main") == nil)

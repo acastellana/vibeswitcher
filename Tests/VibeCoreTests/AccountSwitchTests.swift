@@ -106,7 +106,7 @@ struct AccountSwitchTests: LeadTeamFixture {
         let root = try repo()
         let runtime = FakeRuntime()
         let lead = try lead(root, runtime)
-        #expect(!call(lead, "configure", ["max_workers": 4]).isError)
+        #expect(!call(lead, "configure", ["max_workers": 4, "heavy_slots": 4]).isError)
         // Room on the Mac for four workers and three verifiers.
         lead.macLimits = { MacLimits(maxSessions: 8) }
         for title in ["One", "Two", "Three", "Four"] { _ = call(lead, "add_task", ["title": title, "goal": "g", "acceptance": ["a"]]) }

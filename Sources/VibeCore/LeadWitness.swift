@@ -1042,6 +1042,10 @@ extension LeadWitness {
             /// Refused to VibeSwitcher's own automatic step (see `LeadAdvance`), not to the lead: once there's room,
             /// the lead's tool server is nudged to try again, and the lead isn't told.
             public var auto: Bool?
+            /// A new worker's start: the bytes it waits for free on the volume holding the project's worktrees (the
+            /// load runs' floor plus disk_headroom_gb, see `LoadRunRoom`); nil: no disk wait (audits, merges, a
+            /// project without a load script).
+            public var disk: Int64?
         }
 
         public let folder: URL
@@ -1055,12 +1059,18 @@ extension LeadWitness {
             (try? LeadSleepRecovery.Store(root: root).pending().isEmpty) == false
         }
 
+        /// The bytes free on the volume holding a path (`DiskSpace.free`), injected by tests.
+        var freeSpace: (String) -> Int64? = DiskSpace.free(at:)
+
         public init(folder: URL = RoomWaits.folder) { self.folder = folder }
 
-        /// Keeps a refusal for the lead of `root` until there's room for it.
-        public func record(root: String, what: String, need: Int, auto: Bool = false, now: Date = Date()) {
+        /// The folder whose volume a project's disk wait is about: its worktrees'.
+        static func worktrees(_ root: String) -> String { (root as NSString).appendingPathComponent(".vibeswitcher/worktrees") }
+
+        /// Keeps a refusal for the lead of `root` until there's room for it (`disk`: see `Wait.disk`).
+        public func record(root: String, what: String, need: Int, auto: Bool = false, disk: Int64? = nil, now: Date = Date()) {
             let wait = Wait(root: (root as NSString).standardizingPath, what: what, need: max(0, need), at: now.timeIntervalSince1970,
-                            auto: auto ? true : nil)
+                            auto: auto ? true : nil, disk: disk)
             guard let data = try? JSONEncoder().encode(wait) else { return }
             try? VibePaths.ensurePrivate(folder)
             try? VibePaths.writePrivate(data, to: folder.appendingPathComponent(UUID().uuidString + ".json"))
@@ -1100,11 +1110,21 @@ extension LeadWitness {
             // when it doesn't fit yet (as `heldFor` keeps it from start_worker and audit).
             var woken = 0
             var keptFor = false
+            // Each project's free disk, read once per look, for its waits that need some.
+            var free: [String: Int64?] = [:]
+            func freeDisk(_ root: String) -> Int64? {
+                if let read = free[root] { return read }
+                let read = freeSpace(Self.worktrees(root))
+                free[root] = read
+                return read
+            }
             for (file, wait) in kept {
                 var room = mac
                 if favored != nil, woken > 0 { room.holders.append(Holder(project: "", sessions: woken)) }
-                guard Self.hasRoom(for: wait, mac: room, limits: limits) else {
-                    if favored != nil, !keptFor, wait.need > 0, Self.isProject(wait.root, favored) {
+                let free = wait.disk == nil ? nil : freeDisk(wait.root)
+                guard Self.hasRoom(for: wait, mac: room, limits: limits, free: free) else {
+                    // A wait short of disk keeps no sessions' room: it can't take them until the disk has room.
+                    if favored != nil, !keptFor, wait.need > 0, Self.isProject(wait.root, favored), !Self.shortOfDisk(wait, free: free) {
                         keptFor = true
                         woken += wait.need
                     }
@@ -1121,14 +1141,24 @@ extension LeadWitness {
                 guard !waits.isEmpty else { return nil }
                 var whats: [String] = []
                 for wait in waits where !whats.contains(wait.what) { whats.append(wait.what) }
-                return (root, LeadWitness.roomText(whats, mac: mac, limits: limits, root: root))
+                let disk = waits.contains { $0.disk != nil } ? free[root] ?? nil : nil
+                return (root, LeadWitness.roomText(whats, mac: mac, limits: limits, root: root, disk: disk))
             }
         }
 
-        static func hasRoom(for wait: Wait, mac: MacLoad, limits: MacLimits) -> Bool {
+        /// `free`: the bytes free on the wait's worktrees' volume, for a wait that needs some (nil: not read, or
+        /// unreadable, which holds nothing, as start_worker doesn't hold on a reading it hasn't).
+        static func hasRoom(for wait: Wait, mac: MacLoad, limits: MacLimits, free: Int64? = nil) -> Bool {
             guard !mac.isBusy(threshold: limits.loadLimit) else { return false }
+            if shortOfDisk(wait, free: free) { return false }
             // A merge's wait (no session) waits on the load alone, as merge does; starts and audits on memory too.
             return wait.need == 0 || (mac.memoryShortage(limits) == nil && mac.sessions + wait.need <= limits.maxSessions)
+        }
+
+        /// The wait waits for disk (`Wait.disk`) its worktrees' volume hasn't free (`free`; nil: not read, holds nothing).
+        static func shortOfDisk(_ wait: Wait, free: Int64?) -> Bool {
+            if let needed = wait.disk, let free, free < needed { return true }
+            return false
         }
 
         private typealias Holder = MacLoad.Holder
@@ -1152,10 +1182,19 @@ extension LeadWitness {
         /// sessions for the project `root` would take the room of: a refused start or audit of the favored project,
         /// still waiting, which wouldn't fit beside them. Nil when not boosted, `root` is the favored project, it
         /// waits on nothing, or there's room for both. Fairness: freed room goes to where the user works first.
-        public func heldFor(root: String, need: Int, mac: MacLoad, limits: MacLimits, now: Date = Date()) -> Wait? {
+        /// A start that waits for disk its volume hasn't free (`Wait.disk`) keeps no room: it couldn't take the sessions
+        /// until the disk has room, which can be hours, and other projects' audits and starts would wait on it meanwhile.
+        /// `freeSpace`: the reader of a volume's free bytes (the lead's, injected by tests); nil: this ledger's own.
+        public func heldFor(root: String, need: Int, mac: MacLoad, limits: MacLimits, freeSpace reader: ((String) -> Int64?)? = nil,
+                            now: Date = Date()) -> Wait? {
             guard let favored = limits.boost?.favored, !Self.isProject(root, favored) else { return nil }
+            var free: [String: Int64?] = [:]
             let theirs = waits().map(\.wait).filter {
                 Self.isProject($0.root, favored) && $0.need > 0 && now.timeIntervalSince1970 - $0.at <= Self.expiry
+            }.filter { wait in
+                guard wait.disk != nil else { return true }
+                if free[wait.root] == nil { free[wait.root] = (reader ?? freeSpace)(Self.worktrees(wait.root)) }
+                return !Self.shortOfDisk(wait, free: free[wait.root] ?? nil)
             }.sorted { $0.at < $1.at }
             guard let first = theirs.first else { return nil }
             return mac.sessions + need + first.need > limits.maxSessions ? first : nil
@@ -1165,10 +1204,11 @@ extension LeadWitness {
     /// "The Mac has room again for what was refused: start_worker(one), audit(two). Now: load 3.0 (load_threshold 24,
     /// twice the 12 cores), 4 team sessions across 2 projects (this one 1, 1 other 3) (mac_max_sessions 10). Retry what's
     /// still wanted." Naming no project but the lead's `root`'s: the lead may copy it into its repo's records.
-    public static func roomText(_ whats: [String], mac: MacLoad, limits: MacLimits, root: String) -> String {
+    /// `disk`: the bytes free on the project's worktrees' volume, said when a wait waited for disk too.
+    public static func roomText(_ whats: [String], mac: MacLoad, limits: MacLimits, root: String, disk: Int64? = nil) -> String {
         "The Mac has room again for what was refused: \(whats.joined(separator: ", ")). Now: load \(mac.loadText) "
             + "(load_threshold \(limits.loadLimitText)), \(mac.sessionsText(for: root)) (mac_max_sessions \(limits.maxSessionsText))"
-            + (mac.memory.map { ", \($0.text)" } ?? "") + ". "
+            + (mac.memory.map { ", \($0.text)" } ?? "") + (disk.map { ", \(DiskSpace.text($0)) of disk free" } ?? "") + ". "
             + "Retry what's still wanted; other projects' leads may take the room too."
     }
 }
