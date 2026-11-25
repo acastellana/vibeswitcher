@@ -23,6 +23,8 @@ bash scripts/test.sh --web WebApp/tests
 | `/?mock` | The mock node: a lead's team moves tasks across its board, a question arrives, sessions finish. |
 | `/?still` | The mock's snapshot with nothing happening after it (for screenshots). |
 | `/?empty` | A mock node with no sessions. |
+| `/?older` | A mock node that doesn't take a session's answer or a start from a page (it lists no `session.reply`, `session.new`, `session.resume` or `lead`): their lines, and why. |
+| `/?toggle` | The mock's asking session shows Claude's auto-mode popup, whose Space-toggled option the node refuses from a page. |
 | `/?rows=10000` | One mock session ("Add dark mode…") with a 10,000-row chat: its newest 200 first, the rest paged in as you scroll up. |
 | `/#/p/<project>/lead?show=asks\|all&tab=stats\|files&task=<slug>&sheet=<line>` | A project: you and its lead in the centre (the dial's level, the right column's tab, a task open in place, a line's side sheet). `/#/p/<project>` (the board page's address before) opens it too. |
 | `/#/p/<project>/roadmap?open=<goal>,unsorted,done` | Its roadmap: a row per goal opening in place to its tasks, Unsorted, the done goals folded (each named in `open` is open); with no goals, in motion, blocked and the queue as one band (`open=queue`). |
