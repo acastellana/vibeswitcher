@@ -19,7 +19,7 @@ import { hasDates, dated, timeAxis, axisPoints, landingWords, basisWords } from 
 import { leadLines, shownLines, dialCounts, waitingCards, waitingCount, withPushLines, cut, shortHashes, dayOf, teamCounts, standing, taskTone, taskStep, waitsOn, goalRows, lineKey } from '../conversation.js';
 import { projectHref, routeHref } from '../ui.js';
 import { questionStack, pluginCard, copyLine, cardSheet, optionWords } from './cards.js';
-import { heldParts } from './sheet.js';
+import { heldParts, sinceWord } from './sheet.js';
 import { leadStartOrLine, baseMoveOf } from './drive.js';
 import { tellLine, shellWord, leadLine } from '../actions.js';
 import { pushReceipt } from '../push.js';
@@ -309,7 +309,7 @@ export function projectView(app, { sheet }) {
         // A held folder's files as the node sends them ({ path, change }; a name alone from an older one).
         items.map((item) => fact(item.name, [item.change || '', item.files?.length ? h('ul', { class: 'files' }, item.files.map((file) => h('li', null, h('code', null, typeof file === 'string' ? file : file?.path || ''),
           typeof file === 'object' && file?.change ? ` · ${t({ added: 'shAdded', changed: 'shChanged', removed: 'shRemoved' }[file.change] || 'shChanged')}` : ''))) : null])),
-        rails.map((rail) => fact(rail.key, h('code', null, rail.value), rail.sinceAccept ? ` (${rail.sinceAccept})` : ''))));
+        rails.map((rail) => fact(rail.key, h('code', null, rail.value), rail.sinceAccept ? ` (${sinceWord(rail.sinceAccept)})` : ''))));
     }
     if (card.kind === 'base' && card.base) {
       const base = card.base;

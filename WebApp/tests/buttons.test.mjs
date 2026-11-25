@@ -738,6 +738,7 @@ test('B8: a held folder’s files read as their paths and what became of them, o
   const box = find(view.el, byClass('wait-box'));
   assert.doesNotMatch(box.textContent, /object Object/);
   assert.match(box.textContent, /reviewer\.md · añadido/);
+  assert.match(box.textContent, /npm test -- --runInBand \(cambiado\)/);
   const sheet = document.createElement('div');
   sheet.append(...heldParts(HELD, { root: SITE_ROOT }).more);
   assert.match(sheet.textContent, /cambiado desde tu última aceptación/);
