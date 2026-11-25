@@ -146,7 +146,7 @@ extension Requests {
                             if [.recorded, .given].contains(shown.fromIs), let from = shown.from, from != shown.to {
                                 items.append(ApproveItem(kind: "base.accept", args: ["card": .string(card.id)], subject: root, card: card.value))
                             } else if shown.from != shown.to {
-                                own.append(ApproveOwn(text: "the base of \(root) moved from a commit the node can't confirm (\(shown.fromIs.rawValue))",
+                                own.append(ApproveOwn(text: "the base of \(root) moved from a commit the node hadn't recorded (\(shown.fromIs.rawValue))",
                                                       command: "vibeswitcher base show \(root)"))
                             }
                         }

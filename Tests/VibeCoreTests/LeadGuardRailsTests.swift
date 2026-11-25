@@ -752,7 +752,9 @@ struct LeadGuardRailsTests: LeadTeamFixture {
         for command in commands where !told.contains(command) { #expect(Self.denied(command, by: rules.deny), "\(command)") }
         // A worker that types env in front of one (to keep git's editor away) is refused: the session has no need.
         #expect(!Self.allowed("GIT_EDITOR=true git commit", by: rules))
-        #expect(try environment("worker-add-b", runtime) == LeadLaunch.environment(.worker))
+        // The role's own variables, and beside them only the models' pins (`WorkerLaunch.pins`).
+        let own = try environment("worker-add-b", runtime).filter { !$0.key.hasPrefix("ANTHROPIC_") }
+        #expect(own == LeadLaunch.environment(.worker))
     }
 
     @Test func aConflictAtMergeAsksForAMergeAndTheBriefSaysHow() throws {

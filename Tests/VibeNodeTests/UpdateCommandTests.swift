@@ -27,7 +27,7 @@ struct UpdateCommandTests {
         var ran: Bool { FileManager.default.fileExists(atPath: marker.path) }
         /// The arguments of `update` with the build's own script, through the scope's stand-in.
         func update(_ extra: [String] = []) -> [String] {
-            ["update", UpdateCommandTests.b, "--test-build", buildA.path, "--test-scope", scope.path] + extra
+            ["update", UpdateCommandTests.b, "--test-build", buildA.path, "--test-scope", scope.path, "--long"] + extra
         }
     }
 
@@ -135,7 +135,7 @@ struct UpdateCommandTests {
         let rig = try await rig(extra: "echo planted > \"$prefix/\(Self.a)/planted\"")
         let node = rig.node
         defer { node.stop() }
-        let updated = try await node.runOnTerminal(["update", Self.b, "--test-installer", rig.installer.path])
+        let updated = try await node.runOnTerminal(["update", Self.b, "--test-installer", rig.installer.path, "--long"])
         let out = updated.output + updated.errors
         #expect(updated.status != 0, "\(out)\n\(node.said)")
         #expect(out.contains("the builds folder changed beyond this install (\(Self.a) changed)"), "\(out)")
@@ -148,7 +148,7 @@ struct UpdateCommandTests {
         let rig = try await rig(fails: true)
         let node = rig.node
         defer { node.stop() }
-        let updated = try await node.runOnTerminal(["update", Self.b, "--test-installer", rig.installer.path])
+        let updated = try await node.runOnTerminal(["update", Self.b, "--test-installer", rig.installer.path, "--long"])
         let out = updated.output + updated.errors
         #expect(updated.status != 0 && out.contains("the install of \(Self.b) failed (exit 3") && out.contains("nothing was switched")
                 && out.contains("the folder it made is removed"), "\(out)")

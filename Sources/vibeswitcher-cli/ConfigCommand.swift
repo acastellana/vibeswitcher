@@ -28,13 +28,14 @@ enum ConfigCommand {
                 shown = card
                 return long ? "This accepts the agents' config card \(ConfigSeal.inert(card["id"]?.string ?? "", limit: 80)) showed, sealing exactly that, "
                     + "then records the floor and guard rails workflow.md proposes."
-                    : "This accepts what the card above shows (the same code accepts exactly that; --long shows every path and rule)."
+                    : "This accepts what card \(ConfigSeal.inert(card["id"]?.string ?? "", limit: 80)) shows, exactly as shown,\n"
+                        + "and the project's rules and review rules as workflow.md has them (--long shows every path and rule)."
             }) { result in
                 guard long else {
                     // Plain (2026-11-25): one receipt line, what it was and whom it no longer holds.
                     let waits = !(result.homeWaits ?? []).isEmpty
                     Say.out((result.sealed ?? []).isEmpty && !waits ? "accepted: nothing held" : CardText.acceptedLine(shown, count: result.sealed?.count, waits: waits))
-                    if result.floorRecorded == true { Say.out("its review rules are recorded") }
+                    if result.floorRecorded == true { Say.out("the review rules are recorded") }
                     if waits {
                         let folder = ConfigSeal.inert(result.homeFolder ?? "~", limit: 300)
                         Say.out("next: accept \(folder)'s card (`vibeswitcher config held \(folder)`), then this folder's again")
@@ -45,11 +46,11 @@ enum ConfigCommand {
                 let sealed = result.sealed ?? []
                 Say.out(sealed.isEmpty ? "accepted: nothing held" : "accepted \(sealed.count) held change\(sealed.count == 1 ? "" : "s"):")
                 sealed.forEach { Say.out("  " + ConfigSeal.inert($0, limit: 200)) }
-                Say.out(result.floorRecorded == true ? "  the review floor is recorded" : "  no review floor recorded")
+                Say.out(result.floorRecorded == true ? "  the review rules are recorded" : "  no review rules recorded")
                 if let waits = result.homeWaits, !waits.isEmpty {
                     let folder = ConfigSeal.inert(result.homeFolder ?? "~", limit: 300)
-                    Say.out("  still held: \(waits.count) of your home folder's config: accept \(folder)'s card (`vibeswitcher config held \(folder)`), "
-                        + "then this folder's card again (`vibeswitcher config held FOLDER`): its guard rails and review floor are recorded then")
+                    Say.out("  still waiting: \(waits.count) of your home folder's changes: accept them first (`vibeswitcher config held \(folder)`), "
+                        + "then this folder's again, which records its rules")
                 }
             }
         default: return Say.usage(usage)

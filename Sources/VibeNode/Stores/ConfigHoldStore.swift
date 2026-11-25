@@ -103,6 +103,9 @@ public enum ConfigHoldStore {
         /// Nothing held, and no guard rail recorded for the folder: the vault's first look is owed (a host restart
         /// since): accepting confirms the project's rules once. Such a card is no hold (not blocking).
         public var firstLook: Bool?
+        /// Its accept would record the project's rules (`wouldRecord`): `vibeswitcher approve` sets it aside for its own
+        /// `config held FOLDER`.
+        public var recordsRules: Bool?
 
         public init(items: [Item] = [], hashes: [String: String] = [:], floor: LeadReviewFloor? = nil, rails: [String: String] = [:],
                     baseBranch: String? = nil, guarded: [Rail] = [], lastAccept: Date? = nil) {
@@ -165,7 +168,7 @@ public enum ConfigHoldStore {
     public static func wouldRecord(_ shown: Shown, root: String, vault: LeadVault) throws -> [String] {
         let recorded = try vault.guardedSettings(root: root) ?? [:]
         var said = shown.rails.keys.sorted().filter { recorded[$0] != shown.rails[$0] }
-        if shown.floor != nil, try vault.reviewFloor(root: root) == nil { said.append("the review floor") }
+        if shown.floor != nil, try vault.reviewFloor(root: root) == nil { said.append("the review rules") }
         return said
     }
 
@@ -175,14 +178,16 @@ public enum ConfigHoldStore {
     /// last accept (changed, new, or its snapshot not sealed by this host's vault: the card's "?"). Empty: the card may
     /// be accepted from a page, as far as the card says (`pageRefusal` asks the vault too).
     public static func pageNotSame(_ shown: Shown) -> [String] {
-        guard shown.lastAccept != nil else { return ["no accept is recorded yet (a first accept)"] }
+        guard shown.lastAccept != nil else { return ["no accept recorded yet"] }
         return shown.guarded.filter { !($0.sinceAccept?.hasPrefix("the same as at your last accept") ?? false) }.map(\.key)
     }
 
     /// What an acting page is told when it may not accept a card (`pageNotSame`, `pageRefusal`'s names).
+    /// At most three named, then how many more (2026-11-25: the real node's listed every rule).
     public static func pageRefusalWords(_ changed: [String]) -> String {
-        "the review floor or guard rails changed (" + changed.map { ConfigSeal.inert($0, limit: 80) }.joined(separator: ", ")
-            + "): accept this one from a terminal (vibeswitcher config held)"
+        let named = changed.prefix(3).map { ConfigSeal.inert($0, limit: 80) }.joined(separator: ", ")
+            + (changed.count > 3 ? " and \(changed.count - 3) more" : "")
+        return "rules changed (\(named)): accept this one in a terminal: vibeswitcher config held"
     }
 
     /// The same, the vault asked (in the accept's own turn of `work`): `pageNotSame`, and each guard rail whose hash
@@ -190,9 +195,9 @@ public enum ConfigHoldStore {
     /// that isn't the recorded one, or no rails recorded at all.
     public static func pageRefusal(_ shown: Shown, root: String, vault: LeadVault) throws -> [String] {
         var said = pageNotSame(shown)
-        guard try vault.guardedSettings(root: root) != nil else { return said + ["no guard rails are recorded yet"] }
+        guard try vault.guardedSettings(root: root) != nil else { return said + ["no rules recorded yet"] }
         said += try wouldRecord(shown, root: root, vault: vault)
-        if let proposed = shown.floor, let recorded = try vault.reviewFloor(root: root), proposed != recorded { said.append("the review floor") }
+        if let proposed = shown.floor, let recorded = try vault.reviewFloor(root: root), proposed != recorded { said.append("the review rules") }
         var seen = Set<String>()
         return said.filter { seen.insert($0).inserted }
     }

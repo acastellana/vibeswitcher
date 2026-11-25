@@ -12,9 +12,10 @@ import VibeNode
 /// with the request's text, never with whatever the card holds by then. A page only leaves the draft; this is the
 /// user's voice, as every answer is.
 enum AnswerCommand {
-    static let usage = "usage: vibeswitcher answer CARD [TEXT]  (no TEXT: the answer drafted on the card's web page; a plugin's card: one of its words, as it lists them)"
+    static let usage = "usage: vibeswitcher answer CARD [TEXT] [--long]  (no TEXT: the answer drafted on the card's web page; a plugin's card: one of its words, as it lists them)"
 
     static func run(_ arguments: [String]) -> Int32 {
+        let arguments = Say.takingLong(arguments)
         if arguments.count == 1 { return takeDraft(arguments[0]) }
         guard arguments.count == 2, !arguments[1].trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return Say.usage(usage) }
         let text = arguments[1]
@@ -27,7 +28,7 @@ enum AnswerCommand {
                 return Say.usage("usage: vibeswitcher answer CARD \(words.map { ConfigSeal.inert($0, limit: 20) }.joined(separator: "|"))  (a \(ConfigSeal.inert(plugin["noun"]?.string ?? "plugin", limit: 40))'s card)")
             }
             return nil
-        }, args: { card, id, code in
+        }, shows: showsCard, args: { card, id, code in
             // Bound to the wording shown: a revision after it is said to the lead with the answer.
             let plugin = card["plugin"].map { $0 != .null } ?? false
             return .init(card: id, code: code, text: plugin ? word : text, version: card["question"]?["version"]?.int)
@@ -38,8 +39,20 @@ enum AnswerCommand {
                 let action = (plugin["actions"]?.array ?? []).first { $0["word"]?.string == word }
                 return "This " + ConfigSeal.inert(action?["does"]?.string ?? "answers card \(id) with \(word)", limit: .max) + "."
             }
-            return "This answers card \(id) with: \(ConfigSeal.inert(text, limit: 400))"
+            // The question whole (or its first lines and how many more), then the answer: no card header reprinted.
+            return questionLines(card) + "\nThis answers it with: \(ConfigSeal.inert(text, limit: 400))"
         }, say: said)
+    }
+
+    /// Whether the card is printed before the code: a question's isn't (its one line is in the prompt); an approval's
+    /// is (what is approved: its commit and files), and so is a plugin's.
+    static func showsCard(_ card: NodeWire.Value) -> Bool {
+        (card["question"] ?? .null) == .null || (card["approval"] ?? .null) != .null
+    }
+
+    /// The lead's question as the prompt shows it (`AnswerPrompt`): whole up to its 8 lines, else how many more.
+    static func questionLines(_ card: NodeWire.Value) -> String {
+        AnswerPrompt.lines(card, long: Say.long).joined(separator: "\n")
     }
 
     /// The card's draft, if it has one: its text and the question's version it was drafted for.
@@ -53,13 +66,12 @@ enum AnswerCommand {
             guard draft(of: card) == nil else { return nil }
             let id = ConfigSeal.inert(card["id"]?.string ?? wanted, limit: 80)
             return Say.usage("\(usage)\ncard \(id) has no draft: pick an answer on its web page, or give TEXT")
-        }, args: { card, id, code in
+        }, shows: showsCard, args: { card, id, code in
             let taken = draft(of: card)
             return .init(card: id, code: code, text: taken?.text ?? "", version: taken?.version.int)
         }, what: { card in
             // Whole: this is what the lead will be told as the user's.
-            "This answers card \(ConfigSeal.inert(card["id"]?.string ?? "", limit: 80)) with the answer drafted on its web page: "
-                + ConfigSeal.inert(draft(of: card)?.text ?? "", limit: .max)
+            questionLines(card) + "\nThis answers it with the answer drafted on its web page: " + ConfigSeal.inert(draft(of: card)?.text ?? "", limit: .max)
         }, say: said)
     }
 

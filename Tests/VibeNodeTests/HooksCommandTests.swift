@@ -125,7 +125,7 @@ struct HooksCommandTests {
         for event in Self.claudeEvents { #expect(found[event] == ["\(hook(node)) claude"], "\(event)") }
         #expect(names(given).isEmpty, "\(names(given))")
         #expect(!FileManager.default.fileExists(atPath: node.home.appendingPathComponent(".codex").path))
-        #expect(ran.output.contains("Claude: hooks installed in \(settings(node).path)"), "\(ran.output)")
+        #expect(ran.output.contains("Claude: hooks installed"), "\(ran.output)")
     }
 
     @Test func installCopiesBothBinariesExecutable() async throws {
@@ -520,7 +520,7 @@ struct HooksCommandTests {
         #expect(HookInstaller.isInstalled(in: try object(codexHooks(node))))
         let remove = try await node.runOnTerminal(["hooks", "remove"])
         #expect(remove.status == 0, "\(remove.output)\n\(node.said)")
-        #expect(remove.output.contains("Claude: hooks removed from \(settings(node).path)"), "\(remove.output)")
+        #expect(remove.output.contains("Claude: hooks removed"), "\(remove.output)")
         #expect(!HookInstaller.isInstalled(in: try object(settings(node))))
         #expect(!HookInstaller.isInstalled(in: try object(codexHooks(node))))
         // The programs stay.

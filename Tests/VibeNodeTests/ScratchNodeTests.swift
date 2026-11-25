@@ -229,7 +229,7 @@ struct ScratchNodeTests {
     @Test func statusSaysTheWebsState() async throws {
         let node = try await ScratchNode(scratch, hostArguments: LiveScratch.webArguments)
         defer { node.stop() }
-        let off = try await node.run(["status"])
+        let off = try await node.run(["status", "--long"])
         #expect(off.output.contains("web: off"), "\(off.output)")
         let opened = try LiveScratch.open(node)
         let socket = try LivePage(port: opened.port)
@@ -239,7 +239,7 @@ struct ScratchNodeTests {
         var said = ""
         let deadline = Date().addingTimeInterval(30)
         while !said.contains("web: http://127.0.0.1:\(opened.port)/, 1 tokens alive, 1 pages open"), Date() < deadline {
-            said = try await node.run(["status"]).output
+            said = try await node.run(["status", "--long"]).output
         }
         #expect(said.contains("web: http://127.0.0.1:\(opened.port)/, 1 tokens alive, 1 pages open"), "\(said)")
     }

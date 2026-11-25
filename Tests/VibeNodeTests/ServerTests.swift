@@ -172,7 +172,7 @@ struct ServerTests {
         }
         #expect(served?["id"] as? String == NodeIds.session(host: session.id))
         // The plain form shows the standing plain-mode line, and names the scratch node on stderr.
-        let plain = try await node.run(["status"])
+        let plain = try await node.run(["status", "--long"])
         #expect(plain.status == 0, "\(plain.errors)")
         #expect(plain.output.contains("plain mode: no sandbox"), "\(plain.output)")
         #expect(plain.output.contains(session.tty), "\(plain.output)")
@@ -373,7 +373,7 @@ struct ServerTests {
         let journal = report["journal"] as? [String] ?? []
         #expect(!journal.contains { $0.contains("no entry") }, "\(journal)")
         #expect(node.recorder?.entries.contains { $0.event == "request" && $0.kind == "start" && $0.action == first["action"] as? String } == true)
-        let plain = try await node.run(["status"])
+        let plain = try await node.run(["status", "--long"])
         #expect(plain.output.contains("accepted: start"), "\(plain.output)")
 
         // E6: an answer, recorded in the vault before it acts, is shown too (after the lead's start).
@@ -441,7 +441,7 @@ struct ServerTests {
         recorder.writersEnded = false
         let acked = try await node.runOnTerminal(["status", "--ack"])
         #expect(acked.status == 0 && acked.output.contains("acknowledged"), "\(acked.output)")
-        let after = try await node.run(["status"])
+        let after = try await node.run(["status", "--long"])
         #expect(!after.output.contains("journal: a start at "), "\(after.output)")
     }
 

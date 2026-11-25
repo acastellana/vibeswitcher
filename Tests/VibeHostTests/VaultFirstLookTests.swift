@@ -65,7 +65,8 @@ struct VaultFirstLookTests {
         #expect((record(app)["test_command"] == nil) == holds, "\(record(app))")
         let said = "first look is held: workflow.md's test_command \(rail.prefix(12))"
         if holds {
-            #expect(await eventually { ((try? String(contentsOfFile: host.sessionLog, encoding: .utf8)) ?? "").contains(said) })
+            #expect(await eventually { ((try? String(contentsOfFile: host.sessionLog, encoding: .utf8)) ?? "").contains(said) },
+                    "\(((try? String(contentsOfFile: host.sessionLog, encoding: .utf8)) ?? "unread").suffix(1500))")
         } else {
             #expect(!((try? String(contentsOfFile: host.sessionLog, encoding: .utf8)) ?? "").contains("first look is held"))
         }

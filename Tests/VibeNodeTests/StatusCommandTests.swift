@@ -159,7 +159,7 @@ struct StatusCommandTests {
     @Test(NodeTraits.linuxOnly) func statusNamesTheHostsBuild() async throws {
         let node = try await ScratchNode(scratch)
         #expect(try WireClient(node).hello.host.pid == node.hostPID)
-        let plain = try await node.run(["status"])
+        let plain = try await node.run(["status", "--long"])
         #expect(plain.status == 0, "\(plain.errors)")
         let hostLine = plain.output.split(separator: "\n").first { $0.hasPrefix("host ") }.map(String.init) ?? ""
         #expect(hostLine.contains("pid \(node.hostPID)"), "\(plain.output)")

@@ -95,7 +95,11 @@ public enum HeldWhat {
             let commits = Set(files.map { String($0.split(separator: "/").first ?? "") })
             let installs = !files.isEmpty && item.files.allSatisfy { $0.change == .added } && commits.allSatisfy(NodeUnit.isCommit)
                 && files.allSatisfy { $0.contains("/") } && commits.allSatisfy { files.contains($0 + "/" + BuildInfo.fileName) }
-            guard installs, let first = commits.sorted().first else {
+            // More than one new build at once isn't one install: each named, never folded.
+            if installs, commits.count > 1 {
+                return Described(kind: .other, what: "\(builds): \(commits.count) builds added: " + commits.sorted().map { inert(String($0.prefix(8))) }.joined(separator: ", "))
+            }
+            guard installs, commits.count == 1, let first = commits.first else {
                 return Described(kind: .other, what: builds + (files.isEmpty ? " changed" : ": \(listed(files)) changed"))
             }
             let short = String(first.prefix(8))

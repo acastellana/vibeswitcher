@@ -143,9 +143,9 @@ extension LeadEngine {
         guard let restart = hostRestart else { return [] }
         let at = NodeWire.dateText(Date(timeIntervalSince1970: restart.at))
         return restart.gone.map { root in
-            "the session host restarted at \(at): the lead and team of \(LeadMail.project(of: root)) (\(root)) ended with the host before it, "
-                + "and its vault started over (" + Self.resetByRestart + "). Run `vibeswitcher config held \(root)`, `config accept CARD`, "
-                + "`base show \(root)` and `base accept CARD`, reading the values, then " + reopenStep(root: root)
+            "the node restarted at \(at): the lead and team of \(LeadMail.project(of: root)) (\(root)) ended with it, and the node asks you "
+                + "to confirm the project's rules and base once: `vibeswitcher config held \(root)`, then `vibeswitcher base show \(root)`, "
+                + "reading the values, then " + reopenStep(root: root)
                 + (formerLeadWaits[root].map { ". \($0) message(s) wait in the inbox of the lead that ended: `vibeswitcher lead \(root) --resume` takes them" } ?? "")
         } + sessionsNotice(restart, at: at)
     }
