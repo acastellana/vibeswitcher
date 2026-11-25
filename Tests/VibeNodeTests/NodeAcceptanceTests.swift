@@ -967,7 +967,7 @@ struct NodeAcceptanceTests {
         // A fresh node: the home's accept would record its guard rails, so it is the user's own, named with its command.
         let first = try await node.runOnTerminal(["approve", "--only", "config"])
         #expect(first.status == 0 && first.output.contains("rules to record")
-                && first.output.contains("vibeswitcher config held \(node.home.path)") && first.output.contains("Nothing a plain accept settles"),
+                && first.output.contains("vibeswitcher config accept local:card:") && first.output.contains("Nothing a plain accept settles"),
                 "\(first.output)\(first.errors)\n\(node.said)")
         let held = try await node.run(["config", "held", node.home.path])
         let card = try #require(ScratchNode.card(held.output, "config accept"), "\(held.output)")

@@ -341,7 +341,8 @@ async function run() {
       const closed = done && await page.until(`!document.querySelector('.wait-box .card.held-config') ? true : null`, WAIT);
       settled.push(`${index}: ${command} → ${how}${closed ? ', the card closed' : ', the card stayed'}`);
     }
-    record('Settle from the card', settled.every((line) => line.endsWith('the card closed')), settled.join('; '));
+    // One step each: the node's `config accept <card>` (its `settle`), and the card closes.
+    record('Settle from the card', settled.every((line) => / config accept local:card:\S+ → one step, the card closed$/.test(line)), settled.join('; '));
   } catch (error) {
     record('run', false, error.message);
   } finally {

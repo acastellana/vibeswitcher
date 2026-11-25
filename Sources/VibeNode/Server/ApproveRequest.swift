@@ -116,20 +116,23 @@ extension Requests {
                 guard let root = left.first else { return then() }
                 engine.configHeld(root: root, diff: nil) { result in
                     queue.async {
-                        // A card with something held: its own, or only what it leaves to the home's card, which the batch
-                        // accepts first (the home is the first root), so this one's accept then ends its first look.
-                        guard case .success(let held) = result, let card = held.card, let id = card["id"]?.string,
-                              card["config"]?["items"]?.array?.isEmpty == false || card["config"]?["sharedHome"] != .null,
-                              let shown = engine.cards.cards[id]?.config else {
+                        // The card drawn, kept and open (one with nothing to accept isn't kept: nothing to list), and the
+                        // one command that settles it (`CardStore.Card.settle`, as `status` and the page say it).
+                        guard case .success(let held) = result, let id = held.card?["id"]?.string, let kept = engine.cards.cards[id],
+                              kept.isOpen, let shown = kept.config, let settle = kept.settle else {
                             return configs(Array(left.dropFirst()), then: then)
                         }
+                        let card = kept.value
+                        // A card with something held: its own, or only what it leaves to the home's card, which the batch
+                        // accepts first (the home is the first root), so this one's accept then ends its first look.
+                        let something = !shown.items.isEmpty || shown.sharedHome != nil
                         // Of the card actually drawn: what its accept would record besides its seals (as `accept` would).
                         engine.reads.async({ _ in try? ConfigHoldStore.wouldRecord(shown, root: root, vault: vault) }) { pending in
-                            if pending?.isEmpty == true {
+                            if something, kept.approveTakes, pending?.isEmpty == true {
                                 items.append(ApproveItem(kind: "config.accept", args: ["card": .string(id), "batch": .bool(true)], subject: root, card: card))
                             } else {
                                 own.append(ApproveOwn(text: "held config in \(root), with rules to record (a first accept, or workflow.md changed them)",
-                                                      command: "vibeswitcher config held \(root)"))
+                                                      command: settle))
                             }
                             configs(Array(left.dropFirst()), then: then)
                         }
@@ -147,7 +150,7 @@ extension Requests {
                                 items.append(ApproveItem(kind: "base.accept", args: ["card": .string(card.id)], subject: root, card: card.value))
                             } else if shown.from != shown.to {
                                 own.append(ApproveOwn(text: "the base of \(root) moved from a commit the node hadn't recorded (\(shown.fromIs.rawValue))",
-                                                      command: "vibeswitcher base show \(root)"))
+                                                      command: card.settle ?? "vibeswitcher base show \(root)"))
                             }
                         }
                         bases(Array(left.dropFirst()), then: then)

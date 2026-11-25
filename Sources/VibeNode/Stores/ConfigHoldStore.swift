@@ -106,8 +106,13 @@ public enum ConfigHoldStore {
         /// since): accepting confirms the project's rules once. Such a card is no hold (not blocking).
         public var firstLook: Bool?
         /// Its accept would record the project's rules (`wouldRecord`): `vibeswitcher approve` sets it aside for its own
-        /// `config held FOLDER`.
+        /// `config accept CARD`.
         public var recordsRules: Bool?
+        /// Whether what it shows holds the team's work now (`CardStore.Card.isBlocking`, the card's `blocking`): something held (its own or
+        /// the home folder's it leaves to that card), a rule whose recorded value differs from workflow.md's (start_worker
+        /// and merge refuse on it: `railsHeld`), or a first look owed (no sealed last accept: a lead can't start). False:
+        /// nothing of that, the card only records rules. Nil from a server before it.
+        public var holdsWork: Bool?
 
         public init(items: [Item] = [], hashes: [String: String] = [:], floor: LeadReviewFloor? = nil, rails: [String: String] = [:],
                     baseBranch: String? = nil, guarded: [Rail] = [], lastAccept: Date? = nil) {
@@ -269,6 +274,19 @@ public enum ConfigHoldStore {
         case value?: return (vouched ? .same : .unknown, nil)
         case .some(let before): return (.changed, before)
         case nil: return (.changed, nil)
+        }
+    }
+
+    /// The rules start_worker and merge refuse on now (`LeadVault.changedSettings`, without its recording of the ones not
+    /// yet recorded): each whose recorded value, or the baseline it would record (`SandboxPolicy.baseline`), isn't
+    /// workflow.md's. Empty when the vault records no rules for the root, or can't be asked.
+    public static func railsHeld(root: String, vault: LeadVault) -> [String] {
+        let now = LeadVault.guardedHashes(LeadWorkflow.load(from: workflowPath(root: root)))
+        guard let recorded = (try? vault.guardedSettings(root: root)) ?? nil else { return [] }
+        let unrecorded = SandboxPolicy.baseline(now.filter { recorded[$0.key] == nil }, recorded: recorded)
+        return LeadVault.guardedKeys.filter { key in
+            guard let was = recorded[key] ?? unrecorded[key] else { return false }
+            return was != now[key]
         }
     }
 

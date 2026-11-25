@@ -432,6 +432,8 @@ extension CardStore.Card {
         fields["notice"] = text(notice)
         fields["at"] = .date(at)
         fields["blocking"] = .bool(isBlocking)
+        // The one command that settles it (`settle`): what the page, `status` and `approve` say alike.
+        if let settle { fields["settle"] = .string(settle) }
         // The user's own words, drafted on a page: shown as theirs, inert on the command line like every other field.
         fields["draft"] = draft.map(Self.draftValue) ?? .null
         if let question {
@@ -503,7 +505,7 @@ extension CardStore.Card {
             if let may = config.pageMayAccept { c["pageMayAccept"] = .bool(may) }
             // The one command that settles this card from a terminal (it shows the card, asks its code, accepts it):
             // the page shows it as given, never composes one. None for a card that is closed.
-            if isOpen { c["settle"] = .string("vibeswitcher config accept \(id)") }
+            if let settle { c["settle"] = .string(settle) }
             c["lastAccept"] = config.lastAccept.map(NodeWire.Value.date) ?? .null
             if config.firstLook == true { c["firstLook"] = .bool(true) }
             c["sharedHome"] = config.sharedHome.map { shared in
