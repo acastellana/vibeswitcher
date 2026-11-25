@@ -173,7 +173,7 @@ extension LeadAdvanceTests {
         #expect(again.contains("--model 'fable'"), "\(again)")
         #expect(task("again", root)?.model == nil && task("again", root)?.intendedModel == "fable")
         let pinned = try #require(command("pinned", runtime))
-        #expect(pinned.contains("--model 'sonnet'") && !pinned.contains("fable"), "\(pinned)")
+        #expect(pinned.contains("--model 'sonnet'") && !launchedOn(pinned).contains { $0.contains("fable") }, "\(pinned)")
     }
 
     @Test func aSensitiveOrSecurityAuditRunsOnSecurityAuditModelOthersOnVerifierModelAndTheFloorWins() throws {
@@ -334,7 +334,7 @@ extension LeadAdvanceTests {
         let rerolled = lead.call("update_task", ["task": "again", "reroll": true])
         #expect(!rerolled.isError, "\(rerolled.text)")
         let again = try #require(command("again", runtime))
-        #expect(again.contains("--model 'opus'") && !again.contains("fable"), "\(again)")
+        #expect(again.contains("--model 'opus'") && !launchedOn(again).contains { $0.contains("fable") }, "\(again)")
         // No session the team started since carries --advisor fable.
         #expect(!runtime.spawned.contains { $0.command.contains("--advisor") }, "\(runtime.spawned.map(\.command))")
         // The lead: Opus, and no Fable advisor whatever lead_advisor says.

@@ -203,6 +203,7 @@ export const ES = {
   cConfirmNote: "Ejecútalo en una terminal: muestra la tarjeta y tu respuesta, y pide el código de la tarjeta. Antes no le llega nada al líder.",
   cAnswerInTerminal: "Responde en una terminal",
   cFacts: "De git y del almacén",
+  cVaultFacts: "Del almacén, no son palabras del líder",
   cCommit: "Commit",
   cSubject: "Asunto",
   cInto: "En",

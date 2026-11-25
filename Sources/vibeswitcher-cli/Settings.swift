@@ -179,6 +179,7 @@ enum SetCommand {
         let named = setting.key == key ? key : "\(setting.key) (as \(ConfigSeal.inert(key, limit: 80)))"
         let what = "This sets \(named) (\(setting.title)) for \(place) to \(shownValue)"
             + (setting.guardRail ? "\nA guard rail: recorded in the host's vault as yours." : "")
+            + (setting.key == "floor_worker_model" ? "\n" + NodeSettings.workerModelEffect(value) : "")
         let said = TypedWord.said(approval: client.approvalRule, action: action, what: what)
         guard case .success(let typed) = said else { return Say.refused(said.refusal) }
         switch client.change(WireKinds.SetSetting.self, .init(key: key, value: given, folder: folder), action: action, typed: typed, timeout: 120) {

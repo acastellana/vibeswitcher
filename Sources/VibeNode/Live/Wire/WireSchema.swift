@@ -398,6 +398,8 @@ public enum WireSchema {
                 field("at", .date), field("blocking", .bool), optional("question", .shape("card.question")),
                 optional("approval", .shape("card.approval")), optional("config", .shape("card.config")),
                 optional("base", .shape("card.base")), optional("plugin", .shape("card.plugin")), field("draft", Kind.shape("card.draft").orNull),
+                // The vault's facts beside the lead's words, on a question the lead's audit asked (`LeadEngine.auditFacts`).
+                optional("facts", strings),
                 // What an acting page names to answer or accept it (`CardStore.Card.seen`); absent from a server before
                 // acting from the page (its cards are never acted on from a page: no `seen` to name).
                 optional("seen", .string)]),

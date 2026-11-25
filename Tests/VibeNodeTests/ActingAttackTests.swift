@@ -348,7 +348,7 @@ struct ActingAttackTests {
 
     /// Finding 4: the guard rails that are a project's merge gate are a terminal's, as the floors and the policy are.
     @Test func noPageSetsAGuardRail() {
-        for key in ["security_audit_model", "max_workers", "floor_merge_policy", "policy", "verifier_model"] {
+        for key in ["security_audit_model", "max_workers", "floor_merge_policy", "policy", "verifier_model", "floor_worker_model"] {
             guard case .terminalOnly? = NodeSettings.setting(key)?.page else { Issue.record("\(key) is a page's"); continue }
         }
         if case .lowersOnly? = NodeSettings.setting("web_acts")?.page {} else { Issue.record("web_acts is raised from a page") }

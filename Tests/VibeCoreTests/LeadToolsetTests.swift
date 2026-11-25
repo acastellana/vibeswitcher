@@ -56,6 +56,17 @@ final class FakeRuntime: LeadRuntime {
     /// The project's Claude command, flags included.
     var claude = "claude --dangerously-skip-permissions"
     func claudeCommand(root: String) -> String { claude }
+    /// Claude Code's own default model, as `~/.claude/settings.json`'s "model" gives it (`HostRuntime.workerModel`),
+    /// where the project's command names none.
+    var settingsModel: String?
+    func workerModel(root: String) -> String? { LeadWorkflow.claudeModel(command: claude) ?? settingsModel }
+    /// What the session host would see of `session` when a role is bound to it (`LeadVault.Book.seenOf`): the command
+    /// it was spawned with; nil for one this runtime didn't spawn.
+    func hostSeen(_ session: String) -> WorkerLaunch.Seen? {
+        calls.lock()
+        defer { calls.unlock() }
+        return spawned.last { $0.id == session }.map { WorkerLaunch.Seen(command: $0.command) }
+    }
     /// The project's Codex command, flags included.
     var codex = "codex"
     func codexCommand(root: String) -> String { codex }
@@ -186,6 +197,7 @@ final class FakeSeat: LeadRuntime {
     }
     var server: String { shared.server }
     func claudeCommand(root: String) -> String { shared.claudeCommand(root: root) }
+    func workerModel(root: String) -> String? { shared.workerModel(root: root) }
     func codexCommand(root: String) -> String { shared.codexCommand(root: root) }
     func spawn(cwd: String, command: String, env: [String: String], label: String, agent: String) throws -> String {
         try shared.spawn(cwd: cwd, command: command, env: env, label: label, agent: agent)
@@ -251,6 +263,9 @@ extension LeadTeamFixture {
         let grant = try vault.startLead(root: root, branch: Worktrees.currentBranch(root: root) ?? "main")
         try vault.bind(grant, root: root, session: try #require(runtime.me.session))
         let lead = LeadToolset(root: root, runtime: runtime, vault: vault(for: runtime))
+        // The host's view of each session a role is bound to: the command this runtime spawned it with (the host
+        // passes its own; a verifier under the floor holds no role without one).
+        book.seenOf = { [runtime] session in runtime.hostSeen(session) }
         lead.testLock = testLock
         // The Mac-wide cap these tests' scenes were written for, and refusals kept in the vault's folder (removed with it).
         lead.macLimits = { MacLimits(maxSessions: 6) }

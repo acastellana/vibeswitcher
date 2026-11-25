@@ -351,6 +351,8 @@ enum Samples {
         asked.question = full
         asked.closed = "answered"
         asked.notice = "taken late"
+        // The vault's facts on a question the lead's audit asked (`LeadEngine.auditFacts`).
+        asked.facts = ["the audit of login-fix at abababababab asked it: an answer allows that model for that commit only, once"]
         var timed = CardStore.Card(id: "local:card:00000000-0000-4000-8000-000000000002", root: root, kind: .question, at: at)
         timed.question = counting
         // A draft a page left (B5), for the version it showed.

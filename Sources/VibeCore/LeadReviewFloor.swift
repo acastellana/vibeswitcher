@@ -28,6 +28,35 @@ public struct LeadReviewFloor: Codable, Equatable, Sendable {
     /// The least share, in percent, of review none tasks auto_advance audits anyway (audit_sample_percent; higher is
     /// stricter); 0: no floor on it.
     public var auditSamplePercent: Int
+    /// The model every worker starts on (`--model`, unless its task names its own), as the user set it; nil: Claude
+    /// Code's default. Set, it's the workers' model the floor keeps audits off in place of Claude Code's default
+    /// (`LeadToolset.workersBasis`): the user's word for what the workers run, where nothing else is (the launches the
+    /// host recorded only ever add). A name that doesn't say which model it is isn't kept. Set with `setWorkerModel`.
+    public private(set) var workerModel: String?
+    /// Whether this floor says anything of worker_model (`setWorkerModel`, or a decoded floor with the key, null
+    /// included). One that doesn't (the Mac's Settings sheet builds its floor without it, an older client) leaves the
+    /// recorded one as it is when the vault records it (`LeadVault.Request.setReviewFloor`).
+    public private(set) var workerModelGiven = false
+
+    /// worker_model set (nil: cleared): kept lower-cased when it says which model it is, else cleared.
+    public mutating func setWorkerModel(_ model: String?) {
+        workerModel = model.map { $0.trimmingCharacters(in: .whitespaces).lowercased() }.flatMap { WorkerLaunch.namesOne($0) ? $0 : nil }
+        workerModelGiven = true
+    }
+
+    /// This floor with worker_model set (`setWorkerModel`).
+    public func with(workerModel: String?) -> LeadReviewFloor {
+        var floor = self
+        floor.setWorkerModel(workerModel)
+        return floor
+    }
+
+    /// Equal by their rules (`workerModelGiven` says how a floor was sent, not what it holds).
+    public static func == (one: LeadReviewFloor, other: LeadReviewFloor) -> Bool {
+        one.sensitivePaths == other.sensitivePaths && one.strictPaths == other.strictPaths && one.auditFinders == other.auditFinders
+            && one.mergePolicy == other.mergePolicy && one.riskLines == other.riskLines && one.riskModel == other.riskModel
+            && one.verifierDifferent == other.verifierDifferent && one.auditSamplePercent == other.auditSamplePercent && one.workerModel == other.workerModel
+    }
 
     public init(sensitivePaths: [String] = [], strictPaths: [String] = [], auditFinders: Int = 1, mergePolicy: LeadWorkflow.MergePolicy = .auto,
                 riskLines: Int = 0, riskModel: Bool = false, verifierDifferent: Bool = true, auditSamplePercent: Int = 0) {
@@ -42,7 +71,7 @@ public struct LeadReviewFloor: Codable, Equatable, Sendable {
     }
 
     enum CodingKeys: String, CodingKey {
-        case sensitivePaths, strictPaths, auditFinders, mergePolicy, riskLines, riskModel, verifierDifferent, auditSamplePercent
+        case sensitivePaths, strictPaths, auditFinders, mergePolicy, riskLines, riskModel, verifierDifferent, auditSamplePercent, workerModel
     }
 
     /// A floor recorded before audit_sample_percent was part of it holds no share (0).
@@ -53,6 +82,23 @@ public struct LeadReviewFloor: Codable, Equatable, Sendable {
                   riskLines: try c.decode(Int.self, forKey: .riskLines), riskModel: try c.decode(Bool.self, forKey: .riskModel),
                   verifierDifferent: try c.decode(Bool.self, forKey: .verifierDifferent),
                   auditSamplePercent: try c.decodeIfPresent(Int.self, forKey: .auditSamplePercent) ?? 0)
+        if c.contains(.workerModel) { setWorkerModel(try c.decodeIfPresent(String.self, forKey: .workerModel)) }
+    }
+
+    /// worker_model's key only when this floor says something of it (`workerModelGiven`), null for a cleared one.
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(sensitivePaths, forKey: .sensitivePaths)
+        try c.encode(strictPaths, forKey: .strictPaths)
+        try c.encode(auditFinders, forKey: .auditFinders)
+        try c.encode(mergePolicy, forKey: .mergePolicy)
+        try c.encode(riskLines, forKey: .riskLines)
+        try c.encode(riskModel, forKey: .riskModel)
+        try c.encode(verifierDifferent, forKey: .verifierDifferent)
+        try c.encode(auditSamplePercent, forKey: .auditSamplePercent)
+        if workerModelGiven {
+            if let workerModel { try c.encode(workerModel, forKey: .workerModel) } else { try c.encodeNil(forKey: .workerModel) }
+        }
     }
 
     /// The floor at a project's values now: its sensitive_paths (the defaults when it names none) and strict_paths,
@@ -183,6 +229,7 @@ public struct LeadReviewFloor: Codable, Equatable, Sendable {
         rule("risk_model", workflow.riskModelInForce ? "on" : "off", file.riskModelInForce ? "on" : "off")
         rule("audit_sample_percent", String(workflow.samplePercentInForce), String(file.samplePercentInForce))
         rule("audits on", workflow.auditModel(workerModel: workerModel), file.auditModel(workerModel: workerModel))
+        if let model = self.workerModel { held.append("workers start on \(model) (worker_model)") }
         for (name, inForce, written) in [("sensitive_paths", workflow.sensitiveGlobs, file.sensitiveGlobs),
                                          ("strict_paths", workflow.strictGlobs ?? [], file.strictGlobs ?? [])] {
             let added = inForce.filter { !written.contains($0) }
@@ -204,6 +251,7 @@ public struct LeadReviewFloor: Codable, Equatable, Sendable {
             "- risk_model: floor \(riskModel ? "on" : "off (either)"); in force \(workflow.riskModelInForce)",
             "- audit_sample_percent: floor \(auditSamplePercent); in force \(workflow.samplePercentInForce)",
             "- verifier: floor \(verifierDifferent ? "never the workers' model" : "any model"); audits run on \(auditModel)",
+            "- worker_model: " + (workerModel.map { "\($0): every worker starts on it unless its task names a model" } ?? "not set (Claude Code's default)"),
         ]
     }
 }
