@@ -998,6 +998,9 @@ kbd { padding: 1px 6px; border-radius: 5px; box-shadow: inset 0 0 0 1px var(--li
 .team-strip b { color: var(--ink); font-weight: 600; }
 .strip-part { display: inline-flex; align-items: center; gap: 6px; }
 .phone-only { display: none; }
+/* The team strip wraps to a second line where it doesn't fit (1024, a phone), never cut or scrolled out of sight. */
+.team-strip { flex-wrap: wrap; row-gap: 4px; overflow-x: visible; white-space: normal; }
+.team-strip > * { white-space: nowrap; }
 
 /* The lead conversation */
 .talk { flex: 1; min-height: 0; overflow-y: auto; padding: 18px 24px 28px; }
