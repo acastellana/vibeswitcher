@@ -98,6 +98,17 @@ struct BoardTests {
         asked.tasks[4].receipt = LeadReceipt(ending: .merged, startedAt: at - 3600, endedAt: at, worked: 1800,
                                              worker: LeadTokens(output: 10_000, sessions: 1, models: ["claude-opus-5-5"], cost: 0.25), verifier: nil)
         let questioned = BoardValue.value(project: "p", root: "/r", board: asked, now: WireVectors.boardNow)
+        // The engine's mark on an answer it followed (`LeadEngine.marks`, 2026-11-24): when the lead took it, whether
+        // `answer.replace` would take it now, and its card.
+        let marked = BoardValue.value(project: "p", root: "/r", board: asked, now: WireVectors.boardNow, delivered: [
+            "q1": .object(["delivered": .date(WireVectors.boardNow), "replaceable": .bool(true), "card": .string("card-q1")])])
+        // A server before the marks: its answered questions carry none of them.
+        var beforeMarks = questioned.object ?? [:]
+        beforeMarks["answered"] = .array((beforeMarks["answered"]?.array ?? []).map { question in
+            var fields = question.object ?? [:]
+            for key in ["delivered", "replaceable", "card"] { fields[key] = nil }
+            return .object(fields)
+        })
         let nothingMerged = BoardValue.value(project: "p", root: "/r", board: LeadBoard(), now: WireVectors.boardNow)
         // A server before goals: no `goals`, no task's `goal`.
         var beforeGoals = WireVectors.boardValue.object ?? [:]
@@ -121,8 +132,8 @@ struct BoardTests {
             return .object(fields)
         })
         let scored = BoardValue.value(project: "p", root: "/r", board: Self.scoredBoard(now: WireVectors.boardNow.timeIntervalSince1970), now: WireVectors.boardNow)
-        for value in [WireVectors.boardValue, WireVectors.boardMoved, unreadable, older, questioned, nothingMerged, .object(beforeGoals),
-                      .object(beforeEstimates), scored] {
+        for value in [WireVectors.boardValue, WireVectors.boardMoved, unreadable, older, questioned, marked, .object(beforeMarks), nothingMerged,
+                      .object(beforeGoals), .object(beforeEstimates), scored] {
             #expect(WireSchema.check(value, as: "board", strict: true) { field, state in seen.insert("\(field) \(state)") } == nil)
         }
         let missed = WireSchema.coverage(of: ["board"]).subtracting(seen).sorted()
