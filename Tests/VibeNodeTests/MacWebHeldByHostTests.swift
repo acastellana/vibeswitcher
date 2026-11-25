@@ -1,3 +1,6 @@
+#if canImport(Darwin)
+// The Mac's own: its fake holder's socket is made by hand (`sin_len`, Darwin's `SOCK_STREAM`), which Linux's test
+// build can't compile; Linux's suite is `WebHeldByHostTests`.
 import Foundation
 import Testing
 @testable import VibeCore
@@ -244,3 +247,4 @@ struct MacWebHeldByHostTests {
         await host.end()
     }
 }
+#endif
