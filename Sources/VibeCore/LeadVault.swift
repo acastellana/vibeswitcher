@@ -231,12 +231,12 @@ public struct LeadVault: Sendable {
         case launchedFamilies(root: String, task: String)
         /// The repository's lead only: its audit of `task` at `commit` found no model the floor leaves, and asked the
         /// user `question` (the question's id) which may audit it (`AuditOffer`; `Reply.ok`).
-        case offerAuditModels(root: String, task: String, commit: String, question: String)
+        case offerAuditModels(root: String, task: String, commit: String, question: String, digest: String)
         /// The offer behind `question`, if the lead's audit made one (`Reply.offer`): what a card shows beside its words.
         case auditOffer(root: String, question: String)
         /// The app only: the user answered `question`, an offer's, that `model` may audit `task` at `commit` (the
         /// commit as the answer names it, a prefix of the offer's) (`Reply.ok`).
-        case allowAuditModel(root: String, task: String, commit: String, model: String, question: String)
+        case allowAuditModel(root: String, task: String, commit: String, model: String, question: String, digest: String)
         /// The allowance the user gave for `task` (`Reply.allowance`).
         case auditAllowance(root: String, task: String)
         /// The lead or the app: the audit that used the allowance for `task` at `commit` started; it's gone.
@@ -1268,25 +1268,25 @@ extension LeadVault {
                 return .ok
             case .smallTaskFacts(let root, let task):
                 return .smallTask(team(root)?.smallTasks?[task])
-            case .offerAuditModels(let root, let task, let commit, let question):
+            case .offerAuditModels(let root, let task, let commit, let question, let digest):
                 // The lead's audit (its tool server): an offer only lets the user's answer to that question count.
                 guard isLead(caller, root) else { return .refused("Only the repository's lead's audit asks which model may audit a task.") }
                 let commit = commit.lowercased()
                 guard LeadVault.isFullCommit(commit), !task.isEmpty, !question.isEmpty else { return .refused("An offer names a task, a whole commit and a question.") }
                 change(root, &changed) { team in
                     var all = team.auditOffers ?? [:]
-                    all[question] = AuditOffer(task: task, commit: commit, at: Date().timeIntervalSince1970)
+                    all[question] = AuditOffer(task: task, commit: commit, at: Date().timeIntervalSince1970, digest: digest)
                     team.auditOffers = all.count > 20 ? Dictionary(uniqueKeysWithValues: all.sorted { $0.value.at > $1.value.at }.prefix(20).map { ($0.key, $0.value) }) : all
                 }
                 return .ok
             case .auditOffer(let root, let question):
                 return .offer(team(root)?.auditOffers?[question])
-            case .allowAuditModel(let root, let task, let commit, let model, let question):
+            case .allowAuditModel(let root, let task, let commit, let model, let question, let digest):
                 // Only your answer, recorded by the app, to the question the lead's audit asked for this task at this
                 // commit: never the lead the floor holds, nor a worker, nor an answer to a question of the lead's own.
                 guard caller == .app else { return .refused("Only VibeSwitcher records which model may audit a task, when you answer.") }
                 guard let offer = team(root)?.auditOffers?[question], offer.task == task, commit.count >= 7,
-                      offer.commit.hasPrefix(commit.lowercased()) else {
+                      offer.commit.hasPrefix(commit.lowercased()), offer.digest == digest else {
                     return .refused("That question isn't the one the audit of \(task) at \(commit) asked: nothing was recorded.")
                 }
                 guard let family = WorkerLaunch.family(of: model) else { return .refused("Name a model: fable, opus, sonnet, mythos or haiku.") }

@@ -43,19 +43,54 @@ extension LeadVault {
     /// (a merge approval's way), only when the answer is one of the question's options, names the task the question is
     /// about, and the question is one the lead's audit asked (the vault's `AuditOffer` for it, at that commit). What to
     /// tell the user ("recorded: …"), or why it wasn't; nil when the answer allows nothing.
-    public func recordAuditGrant(_ answer: String, of question: LeadQuestion, root: String) -> String? {
+    /// `home`: where Claude Code's default is read when the floor names no worker_model (the account's).
+    public func recordAuditGrant(_ answer: String, of question: LeadQuestion, root: String, home: String = VibePaths.accountHome) -> String? {
         guard question.state == .answered, let grant = Self.auditGrant(in: answer) else { return nil }
         let refused = "No model was allowed to audit \(grant.task): "
         guard question.options.contains(where: { $0.trimmingCharacters(in: .whitespaces).caseInsensitiveCompare(answer.trimmingCharacters(in: .whitespacesAndNewlines)) == .orderedSame }) else {
             return refused + "the answer isn't one of the question's options."
         }
         guard question.task == grant.task else { return refused + "the question isn't about \(grant.task)." }
+        guard question.proposal == nil, question.decideBy == nil else { return refused + "the question carries a proposal or a timer, which the audit's never does." }
+        // This side decides, not the lead: no model is left for the task at that commit by the vault's own record.
+        if let why = Self.modelLeft(root: root, task: grant.task, commit: grant.commit, granted: grant.model, vault: self, home: home) { return refused + why }
         do {
-            _ = try call(.allowAuditModel(root: root, task: grant.task, commit: grant.commit, model: grant.model, question: question.id))
+            _ = try call(.allowAuditModel(root: root, task: grant.task, commit: grant.commit, model: grant.model, question: question.id,
+                                          digest: AuditOffer.questionDigest(text: question.text, options: question.options)))
         } catch {
             return refused + "\(error)"
         }
         return "Recorded: \(grant.task) may be audited on \(grant.model) at \(grant.commit.prefix(12)), by its next audit only."
+    }
+
+    /// Why no allowance may be recorded for `task` at `commit` (nil: it may): computed here, from the vault's record and
+    /// the files, never the lead's word: the floor keeps audits off the workers' model, the task's branch is at that
+    /// commit, and no model is free for its audit, ordinary or sensitive (the workers' model, worker_model by the floor
+    /// or Claude Code's default read here, every family the host recorded for its launches, the task's own and its
+    /// worker's models, workflow.md's verifier_model), and `granted` is one of the models an audit falls back through.
+    static func modelLeft(root: String, task: String, commit: String, granted: String, vault: LeadVault, home: String) -> String? {
+        guard let floor = (try? vault.reviewFloor(root: root)) ?? nil, floor.verifierDifferent else {
+            return "the review floor doesn't keep audits off the workers' model, so an audit always has a model."
+        }
+        let head = Git.run(["rev-parse", "--verify", "--quiet", "refs/heads/" + Worktrees.branch(task)], in: root)
+        guard head.ok, head.output.lowercased().hasPrefix(commit) else { return "the branch of \(task) isn't at \(commit) now." }
+        guard (LeadWorkflow.byCapability + [LeadWorkflow.lastResortAuditModel]).contains(where: { LeadReviewFloor.sameModel($0, granted) }) else {
+            return "\(granted) isn't one of the models an audit falls back through."
+        }
+        var workflow = LeadWorkflow.load(from: (BoardStore(root: root).folder as NSString).appendingPathComponent("workflow.md"))
+        workflow.floor = floor
+        let defaultModel = floor.workerModel
+            ?? WorkerLaunch.settings(in: home, [".claude", "settings.json"]).object?["model"] as? String
+        let launched = vault.launchedFamilies(root: root, task: task) ?? []
+        let board = BoardStore(root: root).load().task(task)
+        let launchedModel = board.flatMap { task in task.worker.flatMap { task.launchedModels?[$0] } }.flatMap { $0.isEmpty || $0.hasPrefix("codex") ? nil : $0 }
+        for security in [false, true] {
+            if let free = workflow.auditModelChoice(workerModel: defaultModel, moreWorkers: launched, taskModel: board?.intendedModel,
+                                                    launchedModel: launchedModel, security: security) {
+                return "\(free) is free for its audit (by the vault's record), so the audit can run without an allowance."
+            }
+        }
+        return nil
     }
 
     /// Your answer to `question`, as the app records it after the board took it (`LeadBoard.answer` said `.answered`):

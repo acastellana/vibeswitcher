@@ -3376,9 +3376,16 @@ public final class LeadToolset: MCPToolset {
         let short = String(head.prefix(12))
         let question = "Audit \(task.slug) at \(short): every model is one this task's workers ran on (\(why)), and the review floor keeps audits off those. Which may audit it at this commit?"
         let options = (LeadWorkflow.byCapability + [LeadWorkflow.lastResortAuditModel]).map { "Audit \(task.slug) at \(short) on \($0)" }
+        let digest = AuditOffer.questionDigest(text: question, options: options)
         let asked: LeadQuestion
         var new = false
-        if let open = store.load().questions.first(where: { $0.state == .open && $0.text == question && $0.task == task.slug }) {
+        // Asked once while open: only a question this audit made and the vault holds its offer for, at this commit, as
+        // asked (never one found by its words: a lead could have written those first).
+        if let open = store.load().questions.first(where: { question in
+            question.isOpen && question.task == task.slug
+                && vault.auditOffer(root: root, question: question.id).map { $0.commit == head && $0.digest == digest } == true
+                && AuditOffer.questionDigest(text: question.text, options: question.options) == digest
+        }) {
             asked = open
         } else {
             new = true
@@ -3388,7 +3395,7 @@ public final class LeadToolset: MCPToolset {
             asked = made
         }
         // The vault told first, so the card the node draws for it finds the offer (its facts).
-        do { try vault.offerAuditModels(root: root, task: task.slug, commit: head, question: asked.id) } catch {
+        do { try vault.offerAuditModels(root: root, task: task.slug, commit: head, question: asked.id, digest: digest) } catch {
             return "The user is asked (\(asked.short)), but the vault didn't take the question as the audit's (\(error)): their answer won't allow a model. Audit again."
         }
         if new { NodeQuestionPost.post(asked, op: .post, root: root, vault: vault) }

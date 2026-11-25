@@ -25,13 +25,13 @@ struct AuditFactsCardTests {
                               priority: nil, whyNow: nil, proposal: nil, decideIn: nil, task: "held")
         // A question no audit asked: said so.
         #expect(LeadEngine.auditFacts(question: asked, root: root, vault: app) == ["no audit of held asked this question (the vault has no record of it): an answer to it allows no model"])
-        #expect(book.answer(.offerAuditModels(root: root, task: "held", commit: commit, question: asked.id), from: .session("lead")) == .ok)
+        #expect(book.answer(.offerAuditModels(root: root, task: "held", commit: commit, question: asked.id, digest: "d"), from: .session("lead")) == .ok)
         let facts = LeadEngine.auditFacts(question: asked, root: root, vault: app)
         #expect(facts.contains("the audit of held at \(commit.prefix(12)) asked it: an answer allows that model for that commit only, once"), "\(facts)")
         #expect(facts.contains("workers' model: opus, by your review floor") && facts.contains("its workers were launched on: fable (the host's record)"), "\(facts)")
         #expect(LeadEngine.mayAskAuditModel(asked))
         // A worker can't file an offer.
-        guard case .refused = book.answer(.offerAuditModels(root: root, task: "held", commit: commit, question: "q"), from: .session("w")) else {
+        guard case .refused = book.answer(.offerAuditModels(root: root, task: "held", commit: commit, question: "q", digest: "d"), from: .session("w")) else {
             Issue.record("a worker filed an offer")
             return
         }

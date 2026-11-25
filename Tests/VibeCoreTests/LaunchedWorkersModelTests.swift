@@ -260,7 +260,7 @@ extension LeadAdvanceTests {
     func answer(_ question: LeadQuestion, _ text: String, root: String) -> String? {
         var answered = question
         answered.answer = text
-        return vault.recordAuditGrant(text, of: answered, root: root)
+        return vault.recordAuditGrant(text, of: answered, root: root, home: book.configHome)
     }
 
     /// No model left: the audit is held and the user asked, never run on an excluded model; their answer to that
@@ -279,7 +279,8 @@ extension LeadAdvanceTests {
         _ = lead.call("audit", ["task": "held"])
         #expect(BoardStore(root: root).load().questions.filter { $0.text == asked.text }.count == 1)
         let worker = try #require(task.worker)
-        guard case .refused = book.answer(.allowAuditModel(root: root, task: "held", commit: head, model: "fable", question: asked.id), from: .session(worker)) else {
+        guard case .refused = book.answer(.allowAuditModel(root: root, task: "held", commit: head, model: "fable", question: asked.id,
+                                                           digest: AuditOffer.questionDigest(text: asked.text, options: asked.options)), from: .session(worker)) else {
             Issue.record("a worker allowed a model")
             return
         }
@@ -331,7 +332,7 @@ extension LeadAdvanceTests {
 
     /// The worktree's settings and the home's are read the careful way at the bind: a link, a FIFO, a file over the
     /// bound, JSON nested too deep: the bind returns at once, records only the launch's own model, and says why.
-    @Test(arguments: ["link", "fifo", "big", "deep"])
+    @Test(arguments: ["link", "fifo", "big", "deep", "utf16"])
     func aBindReadsSettingsCarefully(_ kind: String) throws {
         let worktree = temp.url("worktree-\(kind)")
         let folder = worktree.appendingPathComponent(".claude")
@@ -347,6 +348,9 @@ extension LeadAdvanceTests {
         case "big":
             #expect(FileManager.default.createFile(atPath: file.path, contents: nil))
             #expect(truncate(file.path, off_t(300 << 20)) == 0)
+        case "utf16":
+            // What the parser would read as JSON, its bytes no depth scan of UTF-8 sees as nested.
+            try #require((String(repeating: "[", count: 5_000) + "\"fable\"" + String(repeating: "]", count: 5_000)).data(using: .utf16)).write(to: file)
         default:
             try Data((String(repeating: "[", count: 5_000) + "\"fable\"" + String(repeating: "]", count: 5_000)).utf8).write(to: file)
         }
@@ -419,5 +423,53 @@ extension LeadAdvanceTests {
         for id in WorkerLaunch.currentIDs.values { #expect(LeadPrices.table[id] != nil, "\(id)") }
         #expect(WorkerLaunch.fullID("Opus") == "claude-opus-5-5" && WorkerLaunch.fullID("fable[1m]") == "claude-fable-5-2[1m]")
         #expect(WorkerLaunch.fullID("claude-sonnet-4-6") == "claude-sonnet-4-6" && WorkerLaunch.fullID("my-model") == "my-model")
+    }
+
+    /// An offer a process in the lead's session filed with no audit out of models (a question of its own, in the
+    /// audit's very words): the app side finds a model free by the vault's record, and records nothing.
+    @Test func anOfferWithNoModelLeftOutRecordsNothing() throws {
+        let (root, _, lead) = try floorTeam(defaultModel: "opus", leadModel: "opus")
+        _ = lead.call("add_task", ["title": "Plain", "goal": "g", "acceptance": ["a"], "review": "audit"])
+        #expect(!lead.call("start_worker", ["task": "plain"]).isError)
+        try commit("plain.txt", "x\n", in: Worktrees.path(root: root, slug: "plain"))
+        let head = Git.run(["rev-parse", "agent/plain"], in: root).output
+        let option = "Audit plain at \(head.prefix(12)) on fable"
+        #expect(!lead.call("ask_user", ["question": "Which may audit plain?", "options": [option], "task": "plain"]).isError)
+        let question = try #require(BoardStore(root: root).load().questions.last)
+        #expect(book.answer(.offerAuditModels(root: root, task: "plain", commit: head, question: question.id,
+                                              digest: AuditOffer.questionDigest(text: question.text, options: question.options)), from: .session("lead-session")) == .ok)
+        let said = try #require(answer(question, option, root: root))
+        #expect(said.contains("is free for its audit"), "\(said)")
+        #expect(vault.auditAllowance(root: root, task: "plain") == nil)
+    }
+
+    /// A question the lead wrote first in the audit's very words isn't the audit's: the audit asks its own.
+    @Test func aPreCreatedLookAlikeIsntAdopted() throws {
+        let (root, lead, task, head) = try exhausted()
+        let why = lead.workersBasis(task, projectDefault: "opus", workflow: lead.workflow).text
+        let short = String(head.prefix(12))
+        let text = "Audit held at \(short): every model is one this task's workers ran on (\(why)), and the review floor keeps audits off those. Which may audit it at this commit?"
+        let options = ["fable", "opus", "sonnet", "mythos"].map { "Audit held at \(short) on \($0)" }
+        #expect(!lead.call("ask_user", ["question": text, "options": options, "task": "held", "priority": "important"]).isError)
+        let planted = try #require(BoardStore(root: root).load().questions.last)
+        _ = lead.call("audit", ["task": "held"])
+        let questions = BoardStore(root: root).load().questions.filter { $0.text == text }
+        #expect(questions.count == 2, "\(questions.map(\.id))")
+        let asked = try #require(questions.last)
+        #expect(asked.id != planted.id && vault.auditOffer(root: root, question: planted.id) == nil && vault.auditOffer(root: root, question: asked.id) != nil)
+        // The planted one's answer allows nothing; the audit's does.
+        #expect(try #require(answer(planted, options[0], root: root)).contains("isn't the one the audit"))
+        #expect(try #require(answer(asked, options[0], root: root)).hasPrefix("Recorded"))
+    }
+
+    /// A question reworded (or re-optioned) after the audit asked it isn't the one the audit asked: refused.
+    @Test func aQuestionEditedAfterTheOfferIsRefused() throws {
+        let (root, lead, task, head) = try exhausted()
+        _ = lead.call("audit", ["task": "held"])
+        var asked = try #require(BoardStore(root: root).load().questions.last)
+        asked.text += " (Fable wrote none of it.)"
+        let said = try #require(answer(asked, "Audit held at \(head.prefix(12)) on fable", root: root))
+        #expect(said.contains("isn't the one the audit"), "\(said)")
+        #expect(lead.auditChoice(lead.workflow, task: task) == nil)
     }
 }

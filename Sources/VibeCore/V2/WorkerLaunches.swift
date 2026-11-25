@@ -86,14 +86,19 @@ public enum WorkerLaunch {
         case .absent: return (nil, nil)
         case .refused(let why): return (nil, "\(name) in \(root) not read: \(why)")
         case .data(let data):
-            guard nests(data, within: depthLimit) else { return (nil, "\(name) in \(root) not read: its JSON nests deeper than \(depthLimit)") }
+            guard nests(data, within: depthLimit) else {
+                return (nil, "\(name) in \(root) not read: not UTF-8 JSON (no byte-order mark, no NUL) nesting at most \(depthLimit) deep")
+            }
             guard let object = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else { return (nil, nil) }
             return (object, nil)
         }
     }
 
-    /// Whether `data`'s JSON nests at most `limit` deep (brackets outside strings counted), before a parser sees it.
+    /// Whether `data`'s JSON nests at most `limit` deep (brackets outside strings counted), before a parser sees it:
+    /// only UTF-8 with no byte-order mark and no NUL (what the parser could read otherwise, UTF-16 or UTF-32, isn't these
+    /// bytes), and never closing more than it opened.
     static func nests(_ data: Data, within limit: Int) -> Bool {
+        guard !data.starts(with: [0xEF, 0xBB, 0xBF]), !data.contains(0), String(data: data, encoding: .utf8) != nil else { return false }
         var depth = 0, inString = false, escaped = false
         for byte in data {
             if inString {
@@ -105,7 +110,9 @@ public enum WorkerLaunch {
             case 0x5B, 0x7B:
                 depth += 1
                 if depth > limit { return false }
-            case 0x5D, 0x7D: depth -= 1
+            case 0x5D, 0x7D:
+                depth -= 1
+                if depth < 0 { return false }
             default: break
             }
         }
@@ -250,6 +257,14 @@ public struct AuditOffer: Codable, Equatable, Sendable {
     public var task: String
     public var commit: String
     public var at: Double
+    /// The question as the audit asked it (`questionDigest` of its text and options): a reworded or re-optioned one
+    /// isn't the audit's.
+    public var digest: String?
+
+    /// The digest of a question's text and options, as the audit asked them.
+    public static func questionDigest(text: String, options: [String]) -> String {
+        LeadVault.hash(([text] + options).joined(separator: "\u{0}"))
+    }
 }
 
 /// The user allowed `model` to audit `task` at `commit` (their answer to an `AuditOffer`'s question): used by the one
@@ -269,8 +284,8 @@ extension LeadVault {
     }
 
     /// The lead's audit of `task` at `commit` asked `question` (its id): the user's answer to it may then allow a model.
-    public func offerAuditModels(root: String, task: String, commit: String, question: String) throws {
-        _ = try call(.offerAuditModels(root: root, task: task, commit: commit, question: question))
+    public func offerAuditModels(root: String, task: String, commit: String, question: String, digest: String) throws {
+        _ = try call(.offerAuditModels(root: root, task: task, commit: commit, question: question, digest: digest))
     }
 
     /// The audit that used `task`'s allowance at `commit` started: the allowance is gone.
