@@ -77,8 +77,10 @@ export function editor(setting, folder, editing, app = null) {
         args: () => ({ ...(folder ? { folder } : {}), key: setting.key, value: String(editing.get(setting.key) ?? '') }), done: () => { editing.delete(setting.key); } }).el,
       h('p', { class: 'confirm-note' }, project ? t('svSetNowProject') : t('svSetNow')));
     } else {
-      lineSlot.replaceChildren(copyLine(setLine(setting, value, folder), t('svSetsCommand', { key: setting.key })),
-        h('p', { class: 'confirm-note' }, project ? t('svRunItInATerminal') : t('svRunItInATerminal2')));
+      lineSlot.replaceChildren(...[copyLine(setLine(setting, value, folder), t('svSetsCommand', { key: setting.key })),
+        h('p', { class: 'confirm-note' }, project ? t('svRunItInATerminal') : t('svRunItInATerminal2')),
+        // A page that acts, on a setting the node keeps to a terminal: why there is no Set here.
+        app && actsFor(app, 'set') && !pageMaySet(setting.key, value) ? h('p', { class: 'confirm-note set-why' }, t('svTerminalKeeps')) : null].filter(Boolean));
     }
   };
   const take = (value) => { editing.set(setting.key, value); draw(); };

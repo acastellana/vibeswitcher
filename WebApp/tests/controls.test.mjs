@@ -43,6 +43,8 @@ function fakeApp({ route = { name: 'settings', id: null }, state = {}, kinds = n
 
 const slots = { key: 'node_heavy_slots', title: 'Test and build slots at once', form: 'count', scope: 'node', limits: '1 to 12', value: '3', default: '2' };
 const workers = { key: 'max_workers', title: 'Workers at once, at most', form: 'count', scope: 'project', limits: '1 to 8', value: '4', default: '4' };
+// A project's setting a page may set (max_workers is a guard rail the node keeps to a terminal).
+const leadModel = { key: 'lead_model', title: 'The lead’s model', form: 'model', scope: 'project', limits: null, value: 'opus', default: '' };
 const buttons = (el) => findAll(el, (node) => node.tag === 'button').map((one) => one.textContent);
 const copies = (el) => findAll(el, byClass('copy-button'));
 
@@ -88,10 +90,10 @@ test('U14: where the page acts for you, an open setting shows Set alone, and Set
     assert.deepEqual(app.sent, [{ kind: 'set', args: { key: 'node_heavy_slots', value: '4' } }]);
     // A project's: its folder, as before.
     const project = fakeApp({ kinds: ['set'], acts: true });
-    const one = editor(workers, '/home/u/acme-site', new Map([[workers.key, '5']]), project);
+    const one = editor(leadModel, '/home/u/acme-site', new Map([[leadModel.key, 'sonnet']]), project);
     find(one, button(set)).click();
     await settle();
-    assert.deepEqual(project.sent, [{ kind: 'set', args: { folder: '/home/u/acme-site', key: 'max_workers', value: '5' } }]);
+    assert.deepEqual(project.sent, [{ kind: 'set', args: { folder: '/home/u/acme-site', key: 'lead_model', value: 'sonnet' } }]);
     assert.match(one.textContent, new RegExp(t('svSetNowProject').slice(0, 20)));
   }
   setLanguage('en');

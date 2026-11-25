@@ -104,13 +104,15 @@ test('a card’s request carries the card, the seen the page drew it with and it
   assert.equal(refusalWords({ code: 'changed' }), 'This changed since the page drew it: look again. Nothing was done.');
 });
 
-test('the settings a page may not set even when it acts stay the terminal’s: web_acts raised, a floor, the policy', () => {
+test('the settings a page may not set even when it acts stay the terminal’s: web_acts raised, a floor, the policy, a guard rail', () => {
   assert.equal(pageMaySet('web_acts', 'off'), true, 'off, the one value');
   assert.equal(pageMaySet('web_acts', ' OFF '), true);
   assert.equal(pageMaySet('web_acts', 'on'), false);
   assert.equal(pageMaySet('floor_audit_finders', '1'), false);
   assert.equal(pageMaySet('policy', 'auto'), false);
-  assert.equal(pageMaySet('max_workers', '3'), true);
+  // B10: a guard rail the node keeps to a terminal (`terminalOnly`), offered no Set.
+  assert.equal(pageMaySet('max_workers', '3'), false);
+  assert.equal(pageMaySet('node_heavy_slots', '3'), true);
   assert.equal(refusalWords({ code: 'voice', message: 'not the user' }), 'A page can’t do this one: run it in a terminal. Nothing was done.');
   assert.equal(refusalWords({ code: 'acts-ended', message: 'this page doesn’t act' }), 'This page no longer acts: pair it again with `vibeswitcher web` to act. Nothing was done.');
   assert.equal(refusalWords({ code: 'gone', message: 'That card is gone.' }), 'That card is gone.', 'any other: the node’s own words');

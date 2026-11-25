@@ -1145,6 +1145,10 @@ export const ES = {
   pkKeys: { one: "1 llave de acceso", other: "{n} llaves de acceso" },
   acTurnOff: "Desactivar",
   acGroupTitle: "Actuar desde una página",
+  // Los botones para lo que el nodo acepta de una página que actúa (docs/process/v2-no-terminal.md, tabla B y A5), y
+  // las teclas y el filtro de la columna izquierda.
+  svTerminalKeeps: "Esto solo se cambia desde una terminal: el nodo no deja que una página lo toque, porque protege el trabajo o lo que un proyecto ve de otro.",
+  // END buttons
   // The two columns of Your own sessions, This node and Settings (views/twocol.js).
   tcBackToList: "Volver a la lista",
   svProjectGroup: "Proyecto {name}",

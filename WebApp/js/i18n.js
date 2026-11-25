@@ -1156,6 +1156,10 @@ const EN = {
   pkKeys: { one: "1 passkey", other: "{n} passkeys" },
   acTurnOff: "Turn off",
   acGroupTitle: "Acting from a page",
+  // The buttons for what the node takes from an acting page (docs/process/v2-no-terminal.md, table B and A5), and the
+  // left column's keys and filter.
+  svTerminalKeeps: "Only a terminal sets this one: the node keeps it from pages, as it guards the work or what one project sees of another.",
+  // END buttons
   // The two columns of Your own sessions, This node and Settings (views/twocol.js).
   tcBackToList: "Back to the list",
   svProjectGroup: "Project {name}",

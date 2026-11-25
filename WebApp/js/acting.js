@@ -33,12 +33,18 @@ export const cardArgs = (card, args = {}) => ({ card: card.id, seen: card.seen ?
 // A question's version answered; a plugin's card (a shell request's) has none, so none is sent.
 export const answerArgs = (card, text) => cardArgs(card, { text, ...(card.question?.version != null ? { version: card.question.version } : {}) });
 
-// A setting a page may not set even when it acts: web_acts raised (only off), a floor, the policy. The node refuses them
-// (`voice`); the page shows their terminal line instead of a button.
+// The settings a page may set when it acts: those the node's catalog marks `.sets` (`NodeSettings`' `page`), and
+// web_acts lowered. Every other one the node keeps to a terminal (`terminalOnly`: lead_mail, verifier_model,
+// security_audit_model, max_workers, the policy, the floors, and every plugin's setting) and refuses from a page by
+// voice; a key the page doesn't know (a newer node's, a plugin's) is the terminal's too, so nothing is offered that the
+// node would refuse. The node sends no setting's page rule yet (`settings`' `Setting` has no `page`): this list is it.
+export const PAGE_SETS = new Set(['projects_folder', 'node_max_sessions', 'load_threshold', 'node_heavy_slots', 'ignore_usage_limits',
+  'boost', 'boost_load_threshold', 'boost_max_sessions', 'boost_max_workers', 'boost_heavy_slots', 'prompt_audit', 'prompt_audit_days',
+  'ai_summaries', 'lead_model', 'lead_advisor', 'worker_advisor', 'lead_rotation']);
+
 export function pageMaySet(key, value) {
-  if (key === 'policy' || /^floor_/.test(key)) return false;
   if (key === 'web_acts') return ['off', 'confirm'].includes(String(value).trim().toLowerCase());
-  return true;
+  return PAGE_SETS.has(key);
 }
 
 // A button that sends `kind` with `args()` (a function, read at the click), disabled while it is out; `done(reply)` on
@@ -46,7 +52,8 @@ export function pageMaySet(key, value) {
 // place ("Click again to stop the node", with Cancel beside it), for what can't be taken back; `danger`: drawn as
 // what ends something, never as the page's primary button.
 // `busy`: the button's words while the request is out ("Starting…").
-export function doButton(app, { label, kind, args, done = () => {}, quiet = false, confirm = null, danger = false, className = '', busy = null }) {
+// `receipt(reply)`: what happened, in words, said beside the button once the node took it.
+export function doButton(app, { label, kind, args, done = () => {}, quiet = false, confirm = null, danger = false, className = '', busy = null, receipt = null }) {
   const said = h('span', { class: 'act-said', role: 'status' });
   let asking = false;
   let stopAsking = () => {};
@@ -68,11 +75,16 @@ export function doButton(app, { label, kind, args, done = () => {}, quiet = fals
     button.disabled = true;
     if (busy) button.textContent = busy;
     setText(said, '');
-    said.classList.remove('refused');
+    said.classList.remove('refused', 'receipt');
     app.store.request(kind, args()).then((reply) => {
       button.disabled = false;
       if (busy) button.textContent = label;
-      if (reply.ok) { done(reply); return; }
+      if (reply.ok) {
+        const words = receipt ? receipt(reply.result || {}) : '';
+        if (words) { setText(said, words); said.classList.add('receipt'); }
+        done(reply);
+        return;
+      }
       setText(said, refusalWords(reply.error, label));
       said.classList.add('refused');
     });
