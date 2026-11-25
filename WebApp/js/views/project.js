@@ -273,11 +273,13 @@ export function projectView(app, { sheet }) {
     const shown = summary.changed.slice(0, 5);
     const more = summary.changed.length - shown.length;
     return h('article', { class: 'card held-config' }, head,
-      h('h3', { class: 'card-question' }, summary.title),
-      summary.line ? h('p', { class: 'hc-line' }, summary.line) : null,
-      // The node's names for what changed: each its own line, the updates past three counted.
-      summary.lines?.length > 1 || summary.moreUpdates ? h('ul', { class: 'hc-things' }, summary.lines.map((line) => h('li', null, line)),
-        summary.moreUpdates ? h('li', { class: 'hc-quiet' }, t('hcMoreUpdates', { n: summary.moreUpdates })) : null) : null,
+      // The title block: the count with the things named under it (each its own line, the updates past three counted),
+      // or a single thing as the title.
+      h('div', { class: 'hc-title' },
+        h('h3', { class: 'card-question' }, summary.title),
+        summary.line ? h('p', { class: 'hc-line' }, summary.line) : null,
+        summary.lines?.length > 1 || summary.moreUpdates ? h('ul', { class: 'hc-things' }, summary.lines.map((line) => h('li', null, line)),
+          summary.moreUpdates ? h('li', { class: 'hc-quiet' }, t('hcMoreUpdates', { n: summary.moreUpdates })) : null) : null),
       h('p', { class: 'card-why' }, summary.holdsEvery || (!summary.holds && card.config?.sharedHome) ? t('hcHoldsAll') : t('hcHolds', { project: summary.holds || lastPart(root) || root })),
       // A first accept records the rules: those set away from their defaults listed, the defaults counted.
       summary.first ? h('div', { class: 'hc-rules' }, h('p', { class: 'hc-rules-label' }, t('hcFirstRules')),
