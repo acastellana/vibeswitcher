@@ -479,6 +479,11 @@ const EN = {
   svDefault: "Default",
   svRunItInATerminal: "Run it in a terminal: it shows the change and asks for a code. The project’s running lead is told.",
   svRunItInATerminal2: "Run it in a terminal: it shows the change and asks for a code. Every project’s leads read it at their next step.",
+  // Where the page sets a setting itself (Set), what Set does, said instead of the terminal's line.
+  svSetNow: "Set changes it now, recorded as yours. Every project’s leads read it at their next step.",
+  svSetNowProject: "Set changes it now, recorded as yours. The project’s running lead is told.",
+  svChangeIt: "Change {title}",
+  svIntroActs: "What the leads and their teams work under. Change a value, then press Set.",
   svWhoseSettings: "Whose settings",
   svSearchSettings: "Search settings",
   svSettings: "Settings",

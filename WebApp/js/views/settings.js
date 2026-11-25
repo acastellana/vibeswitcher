@@ -1,8 +1,9 @@
 // Settings: the node's own (the machine-wide limits, usage limits, Boost, leads messaging each other, the working policy)
 // and a project's (its models and max_workers in workflow.md, its review rules' floor in the host's vault), as
 // `vibeswitcher settings [FOLDER]` reads them: each with its value, its default, where it lives and whether it is a
-// guard rail. Calm and read-only: Change opens a field, and what you pick becomes the line that sets it from a terminal
-// (`vibeswitcher set …`, a click to copy), where the change is shown and a code asked. Nothing here changes a setting.
+// guard rail. Change opens a field, and the field shows one way to apply what you pick: Set, where the page acts for you
+// (`set`) and may set it, else the line that sets it from a terminal (`vibeswitcher set …`, a click to copy), where the
+// change is shown and a code asked. Never both.
 
 import { h, setText, framed } from '../dom.js';
 import { icon } from '../marks.js';
@@ -37,7 +38,8 @@ function settingRow(setting, { folder, home, editing, toggle, app = null, words 
     setting.isDefault ? h('span', { class: 'setting-mark' }, t('svMarkDefault')) : h('span', { class: 'setting-mark changed', title: t('svDefaultIs', { x: setting.default }) }, t('svMarkChanged')),
     setting.guardRail ? h('span', { class: 'setting-mark rail', title: t('svAChangeHereIsRecorded') }, t('svMarkRail')) : null,
   ];
-  const change = h('button', { class: 'confirm-clear', type: 'button', 'aria-expanded': String(drafted != null), onclick: () => toggle(setting) },
+  // A control that looks like one (the page's quiet button), always at the row's end with the value beside it.
+  const change = h('button', { class: 'button quiet small setting-change', type: 'button', 'aria-expanded': String(drafted != null), onclick: () => toggle(setting) },
     drafted != null ? t('svClose') : t('svChange'));
   // The machine-wide limits' file keeps the Mac's name (mac-limits.json, which the leads' tools read): this node's.
   const where = [setting.home === 'floor' ? setting.where : (setting.home === 'limits' ? t('svThisNodeSLimits') : '') + tilde(setting.where, home)];
@@ -45,14 +47,18 @@ function settingRow(setting, { folder, home, editing, toggle, app = null, words 
   if (setting.limits) where.push(setting.limits);
   return h('div', { class: 'setting', data: { key: setting.key } },
     h('div', { class: 'setting-head' },
-      h('span', { class: 'setting-title' }, marked(setting.title, words)), marks, h('span', { class: 'setting-spacer' }), value, change),
+      h('span', { class: 'setting-title' }, marked(setting.title, words)), marks, h('span', { class: 'setting-spacer' }), h('span', { class: 'setting-end' }, value, change)),
     h('p', { class: 'setting-about' }, marked(setting.about, words)),
     h('p', { class: 'setting-where' }, words.some((word) => String(setting.key).toLowerCase().includes(word)) ? [h('code', null, marked(setting.key, words)), ' · '] : null, where.join(' · ')),
     setting.note ? h('p', { class: 'setting-note' }, icon('warning', 12), setting.note) : null,
     drafted != null ? editor(setting, folder, editing, app) : null);
 }
 
-// The field for a new value and the line it makes: a click to copy, never sent from here.
+// Whether the page sets `setting` to `value` itself: it acts for you (`set`), and the setting is one a page may set.
+const pageSets = (app, setting, value) => !!app && actsFor(app, 'set') && pageMaySet(setting.key, value);
+
+// The field for a new value and one way to apply it: Set where the page sets it (pageSets), else the line that sets it
+// from a terminal with its Copy, and what running it does. Never both, so it is clear which one applies it.
 export function editor(setting, folder, editing, app = null) {
   const lineSlot = h('div');
   const problem = h('p', { class: 'card-notice', role: 'alert', hidden: true });
@@ -64,10 +70,16 @@ export function editor(setting, folder, editing, app = null) {
     if (why) setText(problem, t('svIsWhy', { key: setting.key, why }));
     // With the `act` right, Set sets it from here (`set`), but for what a page may not set (a floor, the policy,
     // web_acts raised): those stay the terminal's line.
-    const acts = !why && app && actsFor(app, 'set') && pageMaySet(setting.key, value);
-    lineSlot.replaceChildren(...(why ? [h('span')] : [acts ? doButton(app, { label: t('acSet'), kind: 'set',
-      args: () => ({ ...(folder ? { folder } : {}), key: setting.key, value: String(editing.get(setting.key) ?? '') }), done: () => { editing.delete(setting.key); } }).el : null,
-    copyLine(setLine(setting, value, folder), t('svSetsCommand', { key: setting.key }))].filter(Boolean)));
+    const project = setting.scope === 'project';
+    if (why) lineSlot.replaceChildren(h('span'));
+    else if (pageSets(app, setting, value)) {
+      lineSlot.replaceChildren(doButton(app, { label: t('acSet'), kind: 'set',
+        args: () => ({ ...(folder ? { folder } : {}), key: setting.key, value: String(editing.get(setting.key) ?? '') }), done: () => { editing.delete(setting.key); } }).el,
+      h('p', { class: 'confirm-note' }, project ? t('svSetNowProject') : t('svSetNow')));
+    } else {
+      lineSlot.replaceChildren(copyLine(setLine(setting, value, folder), t('svSetsCommand', { key: setting.key })),
+        h('p', { class: 'confirm-note' }, project ? t('svRunItInATerminal') : t('svRunItInATerminal2')));
+    }
   };
   const take = (value) => { editing.set(setting.key, value); draw(); };
   const name = t('svNewValue', { title: setting.title });
@@ -93,11 +105,8 @@ export function editor(setting, folder, editing, app = null) {
     take('default');
   } }, t('svDefault'));
   draw();
-  return h('div', { class: 'confirm setting-editor', role: 'group', 'aria-label': t('svChangeFrom', { title: setting.title }) },
-    h('div', { class: 'setting-controls' }, control, reset), problem, lineSlot,
-    h('p', { class: 'confirm-note' }, setting.scope === 'project'
-      ? t('svRunItInATerminal')
-      : t('svRunItInATerminal2')));
+  return h('div', { class: 'confirm setting-editor', role: 'group', 'aria-label': t(pageSets(app, setting, setting.value) ? 'svChangeIt' : 'svChangeFrom', { title: setting.title }) },
+    h('div', { class: 'setting-controls' }, control, reset), problem, lineSlot);
 }
 
 
@@ -140,8 +149,9 @@ export function chosenSection(items, route) {
 
 export function settingsView(app) {
   const { store, ui } = app;
-  const columns = twoColumns(app, { label: t('svSettings'), title: t('svSettings'), searchLabel: t('svSearchSettings'), listHref: '#/settings',
-    foot: h('p', { class: 'tc-note' }, t('svWhatTheLeadsAndTheir')) });
+  // What the page says Change does: Set where the page acts for you, else the line for a terminal (render keeps it so).
+  const intro = h('p', { class: 'tc-note' });
+  const columns = twoColumns(app, { label: t('svSettings'), title: t('svSettings'), searchLabel: t('svSearchSettings'), listHref: '#/settings', foot: intro });
   columns.onSearch(() => { drawn = ''; render(true); });
   // This browser's own: the terminal's look (views/termlook.js).
   const terminalLook = terminalLookSection();
@@ -211,6 +221,7 @@ export function settingsView(app) {
 
   function render(typing = false) {
     if (ui.state.route.name !== 'settings') return;
+    setText(intro, actsFor(app, 'set') ? t('svIntroActs') : t('svWhatTheLeadsAndTheir'));
     const route = ui.state.route;
     const query = columns.query();
     const words = queryWords(query);

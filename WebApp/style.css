@@ -631,6 +631,8 @@ code, pre, kbd { font-family: var(--mono); }
 .setting-head { display: flex; align-items: baseline; flex-wrap: wrap; gap: 6px 8px; min-width: 0; }
 .setting-title { font-weight: 500; }
 .setting-spacer { flex: 1; }
+.setting-end { display: inline-flex; align-items: baseline; gap: 8px; min-width: 0; max-width: 100%; margin-left: auto; }
+.setting-change { flex: none; }
 .setting-value { min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink); font-size: 12px; }
 .setting-mark { padding: 0 5px; border-radius: 4px; background: var(--fill-2); color: var(--ink-3); font-size: 10px; font-weight: 600; letter-spacing: 0.04em; line-height: 15px; text-transform: uppercase; }
 .setting-mark.changed, .setting-mark.rail { background: var(--accent-fill); color: var(--accent); }

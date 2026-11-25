@@ -176,8 +176,10 @@ test('a setting’s value out of its range, or not a number, says the range besi
   assert.equal(findAll(box, (node) => node.tag === 'button' && /Set|Copy/.test(node.textContent + (node.attrs['aria-label'] || ''))).length, 0, 'nothing to set or copy');
   assert.doesNotMatch(box.textContent, /vibeswitcher set/);
   editing.set(slots.key, '4');
+  // A page that acts for you sets it with Set (the line is the terminal's way, shown where the page doesn't act).
   const fine = editor(slots, null, editing, app);
-  assert.match(fine.textContent, /vibeswitcher set node_heavy_slots 4/);
+  assert.ok(find(fine, button('Set')));
+  assert.match(editor(slots, null, editing, fakeApp({ kinds: ['set'], acts: false })).textContent, /vibeswitcher set node_heavy_slots 4/);
 });
 
 test('in Spanish the page’s own words are Spanish, its dates the page’s language without seconds; the node’s own sentences stay as sent', async () => {
