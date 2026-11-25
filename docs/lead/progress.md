@@ -4538,3 +4538,4 @@ Turn what's a real bug into a task (one already on the board needs nothing); the
 - 2026-11-25 13:31 Update: v2's Mac app builds and runs here; two things break that main gets right — **Result:** `v2` (at `v2-mac-fixes`, `b9df9949`) builds on this Mac with no errors and its sandbox app launched first try, with no fixes needed. A worker drove about 60 screens in light and dark: the …
 - 2026-11-25 13:41 Planned a-side-by-side: A side-by-side v2 app: its own name, bundle id, state folder and host, so the user can run it next to the installed app (in a clone; nothing merges)
 - 2026-11-25 13:41 Started a worker on a-side-by-side
+- 2026-11-25 14:39 Handed the lead over to a fresh session: the last one had been idle 50 minutes with 164k tokens of context, past handover_idle_min 50 and handover_tokens 150k
