@@ -30,6 +30,8 @@ remote one is a Unix socket that `tailscale serve` forwards to … a bind to any
 user's decision (below). B is what stage 4's signed approvals need anyway (WebAuthn and WebCrypto want a secure
 context), so A is a step, not the end: B replaces it before any page holds a key.
 
+**2026-11-25:** the user chose B (decision 1 below): A stays as built until B replaces it.
+
 ### The name: the MagicDNS name, never the IP
 
 The page's one origin on the tailnet is `http://<machine>.<tailnet>.ts.net:47830`, the name `tailscale status` gives
@@ -131,6 +133,15 @@ session** (the supervisor's decision of 2026-11-20) and before signed approvals,
 1. **A or B** for this step: accept the direct bind to the tailnet address (a deviation from requirement 4, built
    here, off by default), or wait for `tailscale serve` (HTTPS, which turns on HTTPS certificates for the tailnet and
    puts the machine's name in public certificate logs).
+
+   **Decided, 2026-11-25 (the user's answer):** B. The phone's page moves to HTTPS through `tailscale serve`; the user
+   accepted that the machine's and the tailnet's names go into public certificate logs. The same answer is
+   [the H1 plan's decision 4](../../process/v2-h1-plan.md#what-h1-alone-doesnt-decide-the-users-decisions) and
+   [the push note's decision 1](../../process/v2-push-decision.md#decisions-for-the-user); what it lets be built, in
+   order, is in [the H1 plan](../../process/v2-h1-plan.md#what-can-now-be-built-in-order). The same day the user
+   answered that page input, a phone's included, reaches every session with a device key checked per message, and that
+   push is wanted (those notes). **Decisions 2 to 5 stay open:** 2, the remote token's life; 3, masking credentials
+   on remote pages; 4, a second lock on who is asking; 5, getting the address to the phone. 6 and 7 weren't asked.
 2. **The remote token's life**: 8 hours (built), or another.
 3. **Masking credentials on remote pages**: the Mac's phone masks tokens, keys and passwords in what it sends; the
    node's chats scrub only URL credentials. Port the Mac's masking for remote pages before the user leaves a phone
