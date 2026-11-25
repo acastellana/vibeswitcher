@@ -114,6 +114,8 @@ public enum MacHandoverKeeper {
     /// then gives it back only to the host's new image: a pair that image made, its token the host's pid (this process's
     /// parent), running this process's own code, hardened. Anything else: it closes everything and exits.
     public static func keepIfAsked(_ arguments: [String], isAvailable: Bool = Platform.CodeIdentity.isAvailable) {
+        // Linux has no keeper: the flag means nothing there, as before (the review's N7).
+        guard isAvailable else { return }
         guard let at = arguments.firstIndex(of: keeperFlag) else { return }
         // Before it writes anything (its pairs are SO_NOSIGPIPE already; its stderr isn't).
         signal(SIGPIPE, SIG_IGN)
@@ -150,6 +152,8 @@ public enum MacHandoverKeeper {
     /// ones received, once this image proved itself to it (a pair made now, one end sent over FD); nil without the
     /// flag. A failure is a refusal: nothing was given.
     public static func takeIfAsked(_ arguments: [String], isAvailable: Bool = Platform.CodeIdentity.isAvailable) -> Result<HostHandover.State, Refused>? {
+        // Linux has no keeper: the state is read as before (the review's N7).
+        guard isAvailable else { return nil }
         guard let at = arguments.firstIndex(of: channelFlag) else { return nil }
         guard arguments.indices.contains(at + 1), let channel = Int32(arguments[at + 1]), channel > STDERR_FILENO else {
             return .failure(Refused("\(channelFlag) needs a descriptor"))
