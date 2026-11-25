@@ -366,9 +366,17 @@ or decided. Done on Linux, tested on both systems (`ApprovalJudgmentTests`, `App
    (`MacCheckedFixRoundTests`). *Still open:* a file swapped between the keeper's proof and the exec runs at the job's
    pid with nothing, and the sessions end; a wrapper running the genuine pinned image with other arguments takes nothing
    and the sessions end, and one running it with the node's own arguments is the node, with the environment outside
-   this program's variables (`PATH`, `TMPDIR`, the locale) of its choosing, which the sessions inherit (for the switch-on
-   review); a proven new image that can't restore exits
-   (no unchecked fallback); F8 as above. *What step 5 (the LaunchAgent, next) can rely on:* the job's program, started
+   this program's variables of its choosing (superseded by the re-check below); a proven new image that can't restore exits
+   (no unchecked fallback); F8 as above. *The re-check (2026-11-25, "not yet"; closed on this branch, needs its own
+   re-check):* a checked node's command line is parsed once into a value (`HostImages.CheckedCommandLine`) and `main`
+   builds the node from it alone, its raw arguments read by nothing else (I1); the keeper proves its parent (pinned host
+   code, from the record, for a checked node's parcel), a checked start takes only a checked node's parcel holding the
+   node's lock through its own descriptor, and only a checked node starts on the node's lock by file (I2); at its start
+   a checked node takes its environment from a fixed list and closes the descriptors it was given (but the keeper's),
+   umask 077, folder `/`, no core files; the handshake's flake (8 of 20 under load) found and fixed (the design's "The
+   handshake"). *Step 5 owes* (new): how the job gives the sessions `SSH_AUTH_SOCK` and the user's `PATH` (the reset
+   drops both, and a plist's environment is a wrapper's to replace); `NodeAgent` writes `SWIFT_BACKTRACE` into the plist,
+   which the reset drops (harmless, but the plist need not carry it). *What step 5 (the LaunchAgent, next) can rely on:* the job's program, started
    as the unit's form, `<builds>/<commit>/bin/vibeswitcher-host --node --node-root <builds>/<commit> --server
    <builds>/<commit>/bin/vibeswitcher-server`, on the node's data root's lock (`<home>/.vibeswitcher/v2/node/host.lock`,
    its default), either refuses with one line on stderr (exit 1) or is the pinned host of its row with that row's server

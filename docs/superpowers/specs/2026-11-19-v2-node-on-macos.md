@@ -417,8 +417,20 @@ park any state first. So:
 - What (b) proves is that the sender held the node's lock; who the sender was rests on (a) (pinned host code) and (c)
   (no host but a checked node holds that lock). The scratch hosts' `--handover-test-checked-parcel` is gone from the
   sources: it forged the mark on genuine code.
-- The handshake waits for the other side's byte before data goes over a pair just passed, and every keeper read and
-  write has the keeper's limit.
+- **The handshake (the flake's cause).** Every pair is passed by the process that made it, which keeps its own copy of
+  the end it passed until the receiver says, by a byte over the socket it came on (whose far end the receiver alone
+  holds, so a receiver that went is seen at once), that it holds it; nothing is written over a pair whose other end is
+  still in flight; every keeper read and write has the keeper's limit (`SO_RCVTIMEO`, `SO_SNDTIMEO`), and a poll that
+  couldn't be made is tried again. Caught under load before (8 of 20 runs, 2026-11-25): the new image got the keeper's
+  pair, read an end of file before the parcel was whole, and the keeper said it had given it ("the keeper's state
+  didn't arrive whole"; 6 of 8); or the keeper's word to the old host failed ("the host has gone"; 2 of 8). Each time a
+  socket in flight had been closed by its sender right after it was sent. That the kernel's collection of descriptors
+  in flight broke it is inferred, not seen; what the runs show is that no failure came once the senders held their
+  copies (100 runs, below).
+- **What no test reaches**, with no record on this Mac: a keeper accepting a checked node's parcel (its parent proved
+  against the installed record), so the re-check's route 2 (a scratch host of the pinned build given test flags) is
+  tested only as far as the acceptance function (`mayTakeHandover`, `nodeLockRefusal`), and route 1 (a parent that is
+  no host) end to end.
 
 What stays: a file swapped in the short window between the keeper's proof (2) and the exec runs at the job's pid. It
 gets nothing, but the old image is gone by then: the keeper closes everything and the sessions end. And a wrapper that
