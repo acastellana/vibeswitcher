@@ -29,13 +29,14 @@ extension Platform {
             /// Whether a user namespace gets a binfmt_misc of its own here (measured on 6.18; 6.7 in the kernel's history), so a box can hide the
             /// machine's entries behind an empty one (`Mount.Kind.binfmt`). Where it can't, a box tries the machine's:
             /// WSL's interop entry among them, whose interpreter (`/init`) the kernel holds open when it carries the F
-            /// flag, so the box's missing `/init` doesn't stop it; only the missing `/run/WSL` and the filter's refusal of
-            /// `AF_VSOCK` then keep a Windows program from the Windows side.
-            public var binfmt: Bool
+            /// flag, so the box's missing `/init` doesn't stop it, and the session sandbox's planner builds no box while
+            /// such an entry is enabled (`SandboxPlanner.interopRefusal`). A failed probe is `.unknown`, which a box treats
+            /// as `.own`: it plans its own binfmt_misc, and fails closed if the kernel refuses it.
+            public var binfmt: Binfmt
             /// Why no box can be built here; nil when one can.
             public var why: String?
 
-            public init(userNamespaces: Bool, overlay: Bool, landlockABI: Int, vsock: Bool, binfmt: Bool = false, why: String?) {
+            public init(userNamespaces: Bool, overlay: Bool, landlockABI: Int, vsock: Bool, binfmt: Binfmt = .none, why: String?) {
                 self.userNamespaces = userNamespaces
                 self.overlay = overlay
                 self.landlockABI = landlockABI
@@ -43,6 +44,17 @@ extension Platform {
                 self.binfmt = binfmt
                 self.why = why
             }
+        }
+
+        /// What the probe found when it asked the kernel for a binfmt_misc of a user namespace's own (`Facts.binfmt`).
+        public enum Binfmt: String, Equatable, Sendable {
+            /// The kernel gave one.
+            case own
+            /// The kernel refused one (an older kernel's answer: 6.7 gave a user namespace its own).
+            case none
+            /// The probe failed before the kernel answered (no mount(8), unshare(1) not starting, a child hung past its
+            /// bound): a box plans its own anyway, and fails closed where the kernel then refuses it.
+            case unknown
         }
 
         /// This machine's facts, found once: the namespaces are tried in a child `Platform.Spawn` starts, never in

@@ -88,6 +88,27 @@ struct LeadLaunchTests {
         #expect(!worker.command.contains("--setting-sources"))
     }
 
+    /// Every Claude Code session started for a role has its updater off, in its process environment: an interactive
+    /// session whose binary is older than the newest version on disk otherwise re-creates `~/.local/bin/claude`, which
+    /// the vault takes as a config change made while the team ran (docs/lead-v2/incidents.md, 2026-11-20). Measured
+    /// in the process environment, so it is there and not in the settings' `env`, which stays as it was. The name is
+    /// Claude Code's, spelled out here. A Codex worker's launch is as it was.
+    @Test func everyClaudeRoleStartsWithItsUpdaterOff() throws {
+        let root = try root()
+        for role in [LeadLaunch.Role.lead, .worker, .verifier] {
+            let launch = try LeadLaunch.prepare(role: role, root: root, task: role == .lead ? nil : "x", base: "claude", prompt: "p",
+                                                start: "Go.", server: "/s", name: "\(role.rawValue)-x", folder: temp.url("run-\(role.rawValue)"),
+                                                temporary: temp.url("tmp"))
+            #expect(launch.environment["DISABLE_AUTOUPDATER"] == "1", "\(role): \(launch.environment)")
+            let settings = try LaunchArguments.json("--settings", in: launch.command) as [String: Any]?
+            #expect((settings?["env"] as? [String: String])?["DISABLE_AUTOUPDATER"] == nil, "\(role)")
+        }
+        let codex = try LeadLaunch.prepareCodex(root: root, task: "x", base: "codex", prompt: "p", start: "Go.", server: "/s",
+                                                name: "worker-x", folder: temp.url("run-codex"), temporary: temp.url("tmp"))
+        let temporary = try #require(codex.environment["TMPDIR"])
+        #expect(codex.environment == [SessionNote.roleVariable: "worker", "GIT_OPTIONAL_LOCKS": "0", "GIT_EDITOR": "true", "TMPDIR": temporary])
+    }
+
     @Test func theVerifierIsReadOnlyAndMayUseAnotherModel() throws {
         let launch = try LeadLaunch.prepare(role: .verifier, root: try root(), task: "x", base: "claude", prompt: "p", start: "Check.",
                                             server: "/s", name: "verify-x", model: "sonnet")

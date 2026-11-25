@@ -8,9 +8,13 @@ import VibeNode
 /// in its own home (the scratch home), as the app, so the change is sealed; the command line writes nothing and its
 /// `CLAUDE_CONFIG_DIR` plays no part. Never the user's own ~/.claude, ~/.codex or ~/.vibeswitcher.
 ///
-/// `ScratchNode` links its build's `bin/` to the built products; the server opens the programs it installs without
-/// following a link, so each case first puts a copy of the two in place of their links (`ownPrograms`). The built
-/// products themselves are never written.
+/// Each case's node holds stand-ins for the two programs (`standIns`, 256 KB each, its build-info naming them), not
+/// the built products, but for the two that check the real programs end to end (`installCopiesBothBinariesExecutable`,
+/// `hooksInstallWritesAsTheAppAndSealsIt`): a debug build's are 68 MB each, and the install's flush of each staged
+/// program (`HooksRequest.stage`'s fsync) waits for the disk, so 13 cases at once, each copying and installing 137 MB
+/// beside a full run's writes, took minutes an install and were killed. `ScratchNode` links its build's `bin/` to
+/// them; the server opens the programs it installs without following a link, so each case first puts a copy of the
+/// two in place of their links (`ownPrograms`). Neither the stand-ins nor the built products are ever written.
 @Suite(NodeTraits.linuxOnly, .timeLimit(.minutes(10)))
 struct HooksCommandTests {
     private let scratch = Scratch()
@@ -21,11 +25,28 @@ struct HooksCommandTests {
 
     static let programs = ["vibeswitcher-hook", "vibeswitcher-mcp"]
 
+    /// The bytes this suite's nodes have for each program (`ScratchNode`'s `programs`): a script that does nothing,
+    /// padded to 256 KB, so it is still read and written in more than one part. Installed, never run.
+    static let standIns: [String: Data] = Dictionary(uniqueKeysWithValues: programs.map { name in
+        let text = "#!/bin/sh\n# \(name)'s stand-in on HooksCommandTests' scratch nodes: installed, never run.\nexit 0\n"
+        return (name, Data(text.utf8) + Data(repeating: UInt8(ascii: "#"), count: 256 * 1024))
+    })
+
     // MARK: Helpers
 
-    /// The node's build's `bin/<name>` for each of the two programs: a copy of the built product in place of the link.
+    /// A scratch node whose build holds this suite's stand-ins for the two programs (`standIns`), or the built
+    /// products when `real` (the cases that check the real programs' copy, mode and seal end to end).
+    private func scratchNode(holdFirstLook: Bool = false, real: Bool = false) async throws -> ScratchNode {
+        try await ScratchNode(scratch, holdFirstLook: holdFirstLook, programs: real ? [:] : Self.standIns)
+    }
+
+    /// The node's build's `bin/<name>` for each of the two programs: a copy of what its link names (the stand-in, or
+    /// the built product) in place of the link.
     private func ownPrograms(_ node: ScratchNode) throws {
-        for name in Self.programs { try replace(node.nodeRoot.appendingPathComponent("bin/" + name), withCopyOf: builtProducts.appendingPathComponent(name)) }
+        for name in Self.programs {
+            let program = node.nodeRoot.appendingPathComponent("bin/" + name)
+            try replace(program, withCopyOf: URL(fileURLWithPath: try FileManager.default.destinationOfSymbolicLink(atPath: program.path)))
+        }
     }
 
     /// `target` replaced (renamed over) with a closed copy of `source`.
@@ -68,8 +89,8 @@ struct HooksCommandTests {
     }
 
     /// A node holding its first look (as the user's does), its scratch repository's config accepted.
-    private func acceptedNode() async throws -> (node: ScratchNode, repo: URL) {
-        let node = try await ScratchNode(scratch, holdFirstLook: true)
+    private func acceptedNode(real: Bool = false) async throws -> (node: ScratchNode, repo: URL) {
+        let node = try await scratchNode(holdFirstLook: true, real: real)
         let repo = node.root.appendingPathComponent("repo")
         try await scratchRepository(repo)
         try EngineEndToEndTests.workflow(repo)
@@ -88,7 +109,7 @@ struct HooksCommandTests {
     // MARK: The five, restated
 
     @Test func installWritesOurHandlersIntoTheNodesHome() async throws {
-        let node = try await ScratchNode(scratch)
+        let node = try await scratchNode()
         defer { node.stop() }
         try ownPrograms(node)
         // A config folder the command line is given: it plays no part.
@@ -108,7 +129,8 @@ struct HooksCommandTests {
     }
 
     @Test func installCopiesBothBinariesExecutable() async throws {
-        let node = try await ScratchNode(scratch)
+        // The built products, not stand-ins: the real programs are copied whole and executable.
+        let node = try await scratchNode(real: true)
         defer { node.stop() }
         try ownPrograms(node)
         let ran = try await node.runOnTerminal(["hooks", "install", "--agent", "claude"])
@@ -129,7 +151,7 @@ struct HooksCommandTests {
     }
 
     @Test func removeLeavesTheUsersOwnHandlers() async throws {
-        let node = try await ScratchNode(scratch)
+        let node = try await scratchNode()
         defer { node.stop() }
         try ownPrograms(node)
         let own = "/usr/local/bin/notify-me done"
@@ -157,7 +179,7 @@ struct HooksCommandTests {
     /// With no `--agent`, both agents' hooks go in, in one request under one code, Codex's into the home's
     /// `.codex/hooks.json`.
     @Test func withNoAgentBothAreInstalledEachInItsOwnFolder() async throws {
-        let node = try await ScratchNode(scratch)
+        let node = try await scratchNode()
         defer { node.stop() }
         try ownPrograms(node)
         let ran = try await node.runOnTerminal(["hooks", "install"])
@@ -176,7 +198,7 @@ struct HooksCommandTests {
     }
 
     @Test func aWrongCommandSaysHowAndChangesNothing() async throws {
-        let node = try await ScratchNode(scratch)
+        let node = try await scratchNode()
         defer { node.stop() }
         for arguments in [["hooks"], ["hooks", "add"], ["hooks", "install", "--agent", "gemini"], ["hooks", "install", "--agent"]] {
             let ran = try await node.run(arguments)
@@ -191,7 +213,7 @@ struct HooksCommandTests {
     // MARK: The voice and the code
 
     @Test func aSessionsProcessCannotInstallHooks() async throws {
-        let node = try await ScratchNode(scratch)
+        let node = try await scratchNode()
         defer { node.stop() }
         try ownPrograms(node)
         let out = node.root.appendingPathComponent("hooks.out").path
@@ -219,7 +241,7 @@ struct HooksCommandTests {
     }
 
     @Test func aHooksInstallWithNoTerminalIsRefused() async throws {
-        let node = try await ScratchNode(scratch)
+        let node = try await scratchNode()
         defer { node.stop() }
         try ownPrograms(node)
         // stdin from /dev/null, in a session of its own: no /dev/tty.
@@ -244,7 +266,8 @@ struct HooksCommandTests {
     // MARK: Sealed as the app's
 
     @Test func hooksInstallWritesAsTheAppAndSealsIt() async throws {
-        let (node, repo) = try await acceptedNode()
+        // The built products, not stand-ins: the real programs' write is sealed.
+        let (node, repo) = try await acceptedNode(real: true)
         defer { node.stop() }
         try await node.acceptConfig(repo)
         #expect(try await held(node, repo).isEmpty)
@@ -315,11 +338,11 @@ struct HooksCommandTests {
     // MARK: Only the build's bytes
 
     @Test func aNodeRootProgramThatDiffersFromBuildInfoIsNotInstalled() async throws {
-        let node = try await ScratchNode(scratch)
+        let node = try await scratchNode()
         defer { node.stop() }
         try ownPrograms(node)
         let program = node.nodeRoot.appendingPathComponent("bin/vibeswitcher-hook")
-        // One byte appended to the copy (the built product is never written).
+        // One byte appended to the copy (the stand-in itself is never written).
         let handle = try FileHandle(forWritingTo: program)
         try handle.seekToEnd()
         try handle.write(contentsOf: Data([0]))
@@ -333,7 +356,7 @@ struct HooksCommandTests {
 
         // A link in its place, to the very bytes the build-info names: refused, not followed.
         try FileManager.default.removeItem(at: program)
-        try FileManager.default.createSymbolicLink(atPath: program.path, withDestinationPath: builtProducts.appendingPathComponent("vibeswitcher-hook").path)
+        try FileManager.default.createSymbolicLink(atPath: program.path, withDestinationPath: node.programsFolder.appendingPathComponent("vibeswitcher-hook").path)
         let linked = try await node.runOnTerminal(["hooks", "install"])
         #expect(linked.status == 77, "\(linked.output)\n\(node.said)")
         #expect(linked.output.contains("vibeswitcher-hook") && linked.output.contains("is a link"), "\(linked.output)")
@@ -342,7 +365,7 @@ struct HooksCommandTests {
     }
 
     @Test func noTemporaryIsLeftInTheWatchedFolder() async throws {
-        let node = try await ScratchNode(scratch)
+        let node = try await scratchNode()
         defer { node.stop() }
         try ownPrograms(node)
         // Watched while the install runs: every name made in the folder or renamed into it, as inotify tells it (a
@@ -488,7 +511,7 @@ struct HooksCommandTests {
     }
 
     @Test func hooksRemoveTakesThemOut() async throws {
-        let node = try await ScratchNode(scratch)
+        let node = try await scratchNode()
         defer { node.stop() }
         try ownPrograms(node)
         let install = try await node.runOnTerminal(["hooks", "install"])
