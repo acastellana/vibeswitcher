@@ -56,6 +56,9 @@
      gain contrast. */
   --accent-hover: color-mix(in srgb, var(--accent) 92%, var(--ink));
   --accent-press: color-mix(in srgb, var(--accent) 84%, var(--ink));
+  /* A raised control that floats over content (Lo último), pointed at and pressed: opaque steps toward the ink. */
+  --raised-hover: color-mix(in srgb, var(--raised) 94%, var(--ink));
+  --raised-press: color-mix(in srgb, var(--raised) 88%, var(--ink));
   --on-accent: light-dark(#ffffff, #10151c);
   --shadow: light-dark(rgb(0 0 0 / 0.14), rgb(0 0 0 / 0.5));
   /* Behind the palette, the side sheet, the inspector as a sheet and the drawers; a small control over a picture. */
@@ -1328,7 +1331,7 @@ kbd { padding: 1px 6px; border-radius: var(--r-1); box-shadow: var(--e-1-in); co
   display: none; content: attr(data-basis); position: absolute; right: 0; top: calc(100% + 4px); z-index: 3; width: 260px; padding: 8px 10px; border-radius: var(--r-2);
   background: var(--raised); box-shadow: var(--e-2); color: var(--ink); font-size: var(--t-caption); font-weight: var(--w-regular); white-space: normal;
 }
-.road-when[data-basis]:focus-visible::after { display: block; }
+.road-when[data-basis]:focus::after { display: block; } /* a tap focuses it too: a phone reads the basis there */
 @media (hover: hover) { .road-when[data-basis]:hover::after { display: block; } }
 .tdet-basis { display: block; color: var(--ink-3); }
 .tdet-lands.late { color: var(--needs-you); }
@@ -1652,16 +1655,16 @@ main.centre-wrap[tabindex="-1"]:focus { outline: none; }
 
 @media (hover: hover) {
   /* Quiet surfaces: the hover fill. */
-  :is(.task-link[href], .records-row > summary, .records-earlier > summary, .attach-choice, .suggestion, .palette-row, .tc-row, .own-row, .button.quiet):not(:where([aria-current], [aria-selected="true"], .chosen, .current .task-link, :disabled)):hover { background-color: var(--fill); }
+  :is(.task-link[href], .records-row > summary, .records-earlier > summary, .attach-choice, .suggestion, .palette-row, .tc-row, .own-row, .button.quiet):not(:where([aria-current], [aria-selected="true"], .chosen, .current .task-link, :disabled, .confirming, .copied, .listening, .done, .failed, .asked)):hover { background-color: var(--fill); }
   :is(.tc-row, .own-row):not(:where([aria-current])):hover { --ring: var(--fill); }
   /* On a fill already, or a quiet button with an icon: one step up. */
-  :is(.icon-button, .copy-button, .option, .road-band, .send-way, .dial-fold, .latest):not(:where([aria-current], [aria-selected="true"], [aria-pressed="true"], .chosen, .proposed, .read-only > *, :disabled)):hover { background-color: var(--fill-2); color: var(--ink); }
+  :is(.icon-button, .copy-button, .option, .road-band, .send-way, .dial-fold):not(:where([aria-current], [aria-selected="true"], [aria-pressed="true"], .chosen, .proposed, .read-only > *, :disabled, .confirming, .copied, .listening, .done, .failed, .asked)):hover { background-color: var(--fill-2); color: var(--ink); }
   /* The left column's own hover. */
-  :is(.project, .place, .summary-brief, .offer button):not(:where([aria-current], .active, :disabled)):hover { background-color: var(--side-hover); }
-  :is(.place, .summary-brief):not(:where([aria-current])):hover { color: var(--ink); }
+  :is(.project, .place, .summary-brief, .offer button):not(:where([aria-current], .active, :disabled, .confirming, .copied, .listening, .done, .failed, .asked)):hover { background-color: var(--side-hover); }
+  :is(.place, .summary-brief):not(:where([aria-current], .confirming, .copied, .listening, .done, .failed, .asked)):hover { color: var(--ink); }
   /* Words that darken. */
   :is(.segmented button, .switch-link, .fold, .confirm-clear, .latest-said, .code-run, .strip-fold, .tab-banner-close, .strip-team, .brand,
-    .facts-files summary, .card-terminal > summary, .all-done-tasks > summary):not(:where([aria-current], [aria-selected="true"], [aria-pressed="true"], :disabled)):hover { color: var(--ink); }
+    .facts-files summary, .card-terminal > summary, .all-done-tasks > summary):not(:where([aria-current], [aria-selected="true"], [aria-pressed="true"], :disabled, .confirming, .copied, .listening, .done, .failed, .asked)):hover { color: var(--ink); }
   .code-run:hover { border-color: var(--ink-3); }
   /* Links: underlined. */
   :is(.link, .inspect-link, .strip-board, .summary-count[href]):hover { text-decoration: underline; }
@@ -1671,6 +1674,8 @@ main.centre-wrap[tabindex="-1"]:focus { outline: none; }
   .line.kind-push:hover .line-text { text-decoration: none; }
   /* The × over a picture: the dark disc takes the accent. */
   .attached-remove:hover { background-color: var(--accent); color: var(--on-accent); }
+  /* Lo último floats over the chat: an opaque step, never a see-through fill. */
+  .latest:hover { background-color: var(--raised-hover); }
   /* Solid: the accent a step toward the ink. */
   :is(.button:not(.quiet):not(.confirming), .send):not(:disabled):hover { background-color: var(--accent-hover); }
   /* Fields: a firmer edge. */
@@ -1682,21 +1687,25 @@ main.centre-wrap[tabindex="-1"]:focus { outline: none; }
 /* Pressed: everywhere, a tap included. */
 :is(.icon-button, .segmented button, .switch-link, .option, .copy-button, .code-run, .fold, .confirm-clear, .link, .inspect-link, .strip-board,
   .summary-count, .summary-brief, .offer button, .attach-choice, .send-way, .suggestion, .palette-row, .project, .place, .tc-row, .own-row, .task-link,
-  .task-row2, .line, .now, .latest-said, .latest, .goal-title, .road-band, .card-unfold, .records-row > summary, .records-earlier > summary,
+  .task-row2, .line, .now, .latest-said, .goal-title, .road-band, .card-unfold, .records-row > summary, .records-earlier > summary,
   .facts-files summary, .card-terminal > summary, .all-done-tasks > summary, .chat-image-button, .dial-fold, .strip-fold, .button.quiet, .brand, .look-colour,
   .strip-team):not(:where(:disabled, .read-only > *)):active { background-color: var(--fill-3); }
 .attached-remove:active { transform: scale(0.9); }
+.latest:active { background-color: var(--raised-press); transform: scale(0.97); }
+/* Small controls also give a little under the finger: after a hover, light's pressed fill is only a step darker (as far
+   as the inks' contrast lets it go). */
+:is(.icon-button, .copy-button, .dial-fold):not(:disabled):active { transform: scale(0.97); }
 :is(.tc-row, .own-row):active { --ring: var(--fill-3); }
 :is(.button:not(.quiet), .send):not(:disabled):active { background-color: var(--accent-press); transform: scale(0.97); }
 .button.confirming:not(:disabled):active { background-color: var(--needs-you); }
 .button.quiet:not(:disabled):active { transform: scale(0.97); }
 /* A field pressed: its ring at once. */
 :is(.answer-input, .say, .setting-input, .setting-search, .look-input, .find-input, .left-filter, .setting-picker):not(:disabled):active,
-.tc-find:active, .composer-input:active { box-shadow: var(--e-focus-in); }
+.tc-find:active, .composer-input:not(:focus):active { box-shadow: var(--e-focus-in); }
 
 /* Busy: the node hasn't answered yet. Its own look (not the disabled grey), a slow pulse, the wait cursor; with
    reduced motion, still and a little dimmed. */
-.button[aria-busy="true"] { cursor: progress; opacity: 0.85; animation: busy var(--loop) ease-in-out infinite alternate; }
+.button[aria-busy="true"] { cursor: progress; opacity: 0.9; animation: busy var(--loop) ease-in-out infinite alternate; }
 .button:not(.quiet)[aria-busy="true"]:disabled { background: var(--accent); color: var(--on-accent); }
 .button.quiet[aria-busy="true"]:disabled { background: var(--raised); color: var(--ink); }
 @keyframes busy { to { opacity: 1; } }
