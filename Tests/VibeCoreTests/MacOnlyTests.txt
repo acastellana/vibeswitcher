@@ -9,8 +9,8 @@ KeptImagesTests.swift  aLargeImageIsDownscaled: a smaller copy of an image is Im
 KeychainLiveTests.swift  the login Keychain (Security.framework)
 LaunchPreflightTests.swift  xcodeSelectFailingSaysToInstallTheCommandLineTools and aGitThatsTheStubSaysSo: xcode-select, the Command Line Tools and Apple's git stub are the Mac's (Platform.Tools.developerToolsApply is false on Linux, which runs linuxAsksAfterNoDeveloperToolsAndRunsGit in their place)
 LeadGuardRailsTests.swift  aStrayPkillIsRefusedToEveryRole's pgrep of a scratch process: BSD pgrep and pkill read an option after the pattern as a second pattern, the hazard it shows; procps' (Linux) read it as that option (-n, the newest). The deny rules and the brief are checked on Linux too
-MacSealListTests.swift  addACL and everyRowDetectsAChange's ACL step: an extended ACL set through acl_set_file (ACL_TYPE_EXTENDED) is the Mac's; the Mac list's other tests are disabled on Linux, and theListIsEmptyOnLinux runs there
 MCPHandoverTests.swift  anUnsignedBuildLeavesTheOldOneServing: code signing (codesign, a kernel that kills an unsigned binary) is the Mac's; Linux runs aBuildKilledAsItStartsLeavesTheOldOneServing in its place
+MacSealListTests.swift  addACL and everyRowDetectsAChange's ACL step: an extended ACL set through acl_set_file (ACL_TYPE_EXTENDED) is the Mac's; the Mac list's other tests are disabled on Linux, and theListIsEmptyOnLinux runs there
 PreferenceLedger.swift  wraps NSUserDefaults' suite initializer through the Objective-C runtime, for the files cfprefsd writes: Linux has neither
 PreferencesCheckTests.swift  aSuiteOpenedInThisProcessIsInTheRunsLedger: the ledger's hook is the Mac's (PreferenceLedger.swift)
 ProcessTableTests.swift  aTerminalIsNamedByItsNumber and its openPty: TerminalNames and devname() are the Mac's
