@@ -33,21 +33,32 @@ import Foundation
 /// `<(…)`, zsh's `=(…)`, a shell option this doesn't read (`bash -s`, fish's), or any path when the command is given
 /// input) on a line that names git anywhere. And a git whose option or command word the shell makes from an expansion
 /// (`git $x …`, `git ${o:--C} x`, `git {push,x}`, `git pus?`, zsh's `git =x` and `git pus(h|x)`), or that the program
-/// running it fills in (`xargs git`, `xargs -I% git % x`, `find -exec git {} \;`). And, on a line that names git, a
-/// program whose own name the shell makes from a variable, braces, zsh's `=`, or a substitution alone (`g=git; $g push`,
-/// `command {git,push}`, `=git push`, `$(echo git) push`; not a path built on one, `"$(git rev-parse
-/// --show-toplevel)/scripts/x.sh"`).
+/// running it fills in (`xargs git`, `xargs -I% git % x`, `find -exec git {} \;`).
 ///
-/// Not seen here, and so open: a file a shell runs or sources (`bash x.sh`, `bash -x x.sh`, `source x`, which is how
-/// every script runs), and another language's interpreter or a program not listed that runs a command (`python3 -c`,
-/// `perl -e`, `osascript`, `script`, `ssh`); input a shell takes from further off, a reader nested in what's given it
-/// (`… | { true; bash dev/stdin; }`, `zsh -c '. /dev/stdin' <<< …`); text that reaches git without naming it
-/// (`a=gi; ${a}t push`, `$'\x67it'`, base64), or a program's name with text beside a substitution
-/// (`/usr/bin/$(echo git) push`); an argument after git's command that the shell makes (`git checkout $b`: a rule
-/// reads it as written); a variable set another way (`read GIT_DIR` after `set -a`, a file sourced; `HOME` or
-/// `XDG_CONFIG_HOME` set on its own or exported, which every program reads, before a git); a function or alias
-/// defined in a file the shell reads; and a git alias the user's config already has. A spelling found later is
-/// refused the same way, as unreadable, not listed here.
+/// And, on any line (`built`; the audit of keychain-keys-the-stated, F3), a program whose own name the shell makes,
+/// since it can be git or security: a pattern, a variable or a substitution in its last name (`/usr/bin/gi? push`,
+/// `g=gi; ${g}t push`, `"$tool" x`, `$(echo git) push`, zsh's `=git push`), an expansion not quoted anywhere in it,
+/// which the shell splits, braces too (`$(brew --prefix)/bin/x`, `{/usr/bin/gi,x}t`), or what xargs or find put there
+/// (`find … -exec {} \;`); a loop whose body's program is a variable too (`for t in git; do $t push; done`). A path
+/// whose expansion is in double quotes and whose last name is written out is read by that name (`"$ROOT/scripts/x.sh"`,
+/// `"$d/git" push` is a git). And a launcher it doesn't read (`script`, `setsid`, `chroot`, `su`, …: `launchers`),
+/// whatever it runs. A `[[ … ]]` test's operands aren't programs only in its plain form, and a `case` arm's pattern
+/// only in its plain form (`ShellWords.scan`); a line with any other (a quoted or escaped `[[`, `)]]`, a test across
+/// lines, a `case` with a test) is read the strict way: each word that could be a program is read as one, and the
+/// reason says to write the test plainly. That costs a rewrite of an odd-looking test; it never lets a line through
+/// that the reading before refused (RefusedGitMonotonicTests holds it to that, against a copy of it).
+///
+/// Not seen here, and so open, because the guard reads the Bash lines a session types: script files, other
+/// interpreters and remote shells are outside it. That is a file a shell runs or sources (`bash x.sh`, `bash -x x.sh`,
+/// `source x`, which is how every script runs, whatever is in it); another language's interpreter, a remote shell, or
+/// a program or launcher not listed that runs a command (`python3 -c`, `perl -e`, `osascript`, `ssh`, `tmux`); input a
+/// shell takes from further off, a reader nested in what's given it (`… | { true; bash dev/stdin; }`, `zsh -c '.
+/// /dev/stdin' <<< …`); text handed to another interpreter (`sh -c`, `eval`, zsh's `*(e:…:)`) that names neither git
+/// nor security, which is read only for naming them (`sh -c 'a=gi; ${a}t push'`, `eval $'\x67it push'`, base64); an
+/// argument after git's command that the shell makes (`git checkout $b`: a rule reads it as written); a variable set
+/// another way (`read GIT_DIR` after `set -a`, a file sourced; `HOME` or `XDG_CONFIG_HOME` set on its own or exported,
+/// which every program reads, before a git); a function or alias defined in a file the shell reads; and a git alias the
+/// user's config already has. A spelling found later is refused the same way, as unreadable, not listed here.
 public enum RefusedGit {
     /// The refused options. `--config-env` is `-c` with its value read from an environment variable.
     public static let options = ["-C", "-c", "--git-dir", "--work-tree", "--exec-path", "--config-env"]

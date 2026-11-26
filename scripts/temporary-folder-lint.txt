@@ -103,3 +103,6 @@ allow: Tests/VibeCoreTests/AgentExportLintTests.swift | static let scratchRoots 
 allow: Tests/VibeCoreTests/AgentExportLintTests.swift | unzip -q tree.zip -d /tmp/x | a line of an example script the lint reads; nothing runs it
 # RefusedGitSpellings: the reported command line, which the guard parses; nothing runs it or opens the path.
 allow: Tests/VibeCoreTests/RefusedGitSpellingsTests.swift | git --git-dir=/tmp/x status | the contract's symptom, a command line the guard reads; nothing runs it
+# RefusedGitProgramName and RefusedGitMonotonic: the audit's lines and the fuzz's refused command, which the guard parses; nothing runs them or opens the path.
+allow: Tests/VibeCoreTests/RefusedGitProgramNameTests.swift | "[[ ( -z a )]] || git -C /tmp status" | the audit's line, a command line the guard reads and refuses; nothing runs it
+allow: Tests/VibeCoreTests/RefusedGitMonotonicTests.swift | static let refused = ["git -C /tmp status" | the contract's command hidden in generated lines the guard reads and refuses; nothing runs them

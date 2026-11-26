@@ -63,6 +63,17 @@ proposal. Nothing is stopped; the lead extends the budget, re-plans or abandons 
 Workers can't push, move refs, rebase other branches, or check out the lead's branch: Claude Code's permission rules
 deny it. A worker brings its branch up to date by merging the base in.
 
+Behind those rules, every session the lead starts (lead, worker, verifier) has a hook that reads each Bash line before
+it runs: it finds each git and `security` the line runs and refuses the forms its rules can't see (git's `-C`, `-c` and
+`--git-dir`, `git -P push`, `GIT_DIR=…`, `security` in any form). What it can't read, it refuses rather than guesses:
+text naming git handed to `sh -c` or `eval`, a git option the shell makes from a variable, a program whose name the
+shell makes (`/usr/bin/gi? push`, `"$tool" x`, `$EDITOR f`, a loop running `$t`; a path with its variable in double
+quotes and its last name written out, `"$ROOT/scripts/x.sh"`, is fine), and launchers it doesn't read (`script`,
+`setsid`, `su`, …). A `[[ … ]]` test written plainly is read as a test; an odd-looking one (a quoted `[[`, `)]]`, a test
+across lines) is read word by word, and the refusal says to write it plainly. Its limit: it reads the Bash lines a
+session types. Script files, other interpreters (`python3 -c`, `osascript`) and remote shells (`ssh`) are outside it,
+and so is text handed to a shell or `eval` that doesn't name git or security.
+
 ### Codex workers
 
 A task can name its worker's agent: `add_task` or `update_task` with `agent: codex` (`claude` is the default; `auto`
