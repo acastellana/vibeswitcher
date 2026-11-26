@@ -118,11 +118,20 @@ export function unfold({ motion = null, onclosed = null, class: extra = '', ...p
   const el = h('div', { ...props, class: join('unfold', moving, extra), ...(moving === 'closing' ? { 'aria-hidden': 'true', inert: true } : {}) },
     h('div', { class: 'unfold-inner' }, ...children));
   if (moving) {
-    el.addEventListener('animationend', (event) => {
-      if (event.target !== el) return;
+    let ended = false;
+    const end = () => {
+      if (ended) return;
+      ended = true;
       el.classList.remove(moving);
       if (moving === 'closing') onclosed?.();
-    });
+    };
+    el.addEventListener('animationend', (event) => { if (event.target === el) end(); });
+    // An animation never runs where it isn't drawn (a hidden column, a tab in the background): what folds away is
+    // gone by twice the motion's time all the same, never left standing to fold later by itself.
+    if (moving === 'closing') {
+      const motion = parseFloat(globalThis.getComputedStyle?.(globalThis.document?.documentElement)?.getPropertyValue('--dur-2')) || 0;
+      setTimeout(end, 2 * motion);
+    }
   }
   if (motion === 'closing' && !moving) queueMicrotask(() => onclosed?.());
   return el;

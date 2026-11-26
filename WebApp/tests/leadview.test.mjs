@@ -164,12 +164,14 @@ test('D10: the centre is one scroll at every width: the conversation, then what 
 
 // A layout for the stand-in DOM: the conversation's rows one under another (a day line 20 px, a line 30, an answer's
 // pill 40, anything else 20), then the waiting block (300 px while shown), in a box 300 px tall at y 100.
-function laidOut(view) {
+function laidOut(view, { waitFirst = false } = {}) {
   const scroll = find(view.el, byClass('centre-scroll'));
   const col = find(view.el, byClass('col'));
   const wait = find(view.el, byClass('wait-box'));
-  const height = (node) => (node === wait ? (wait.hidden ? 0 : 300) : node.classList.contains('line') ? 30 : node.classList.contains('mine') ? 40 : 20);
+  const cardsIn = () => findAll(wait, (node) => node.classList.contains('card') && !node.hidden).length;
+  const height = (node) => (node === wait ? (wait.hidden ? 0 : 100 + 200 * cardsIn()) : node.classList.contains('line') ? 30 : node.classList.contains('mine') ? 40 : 20);
   scroll.clientHeight = 300;
+  scroll.scrollTop = 0;
   scroll.scrollHeight = 3000;
   scroll.querySelectorAll = () => findAll(scroll, (node) => !!node.dataset?.anchor);
   const rect = (top, size) => ({ top, bottom: top + size, height: size, left: 0, right: 600, width: 600 });
@@ -177,7 +179,7 @@ function laidOut(view) {
   FakeNode.prototype.getBoundingClientRect = function () {
     if (this === scroll) return rect(100, 300);
     let y = 0;
-    for (const node of [...col.children, wait]) {
+    for (const node of waitFirst ? [wait, ...col.children] : [...col.children, wait]) {
       if (node === this) return rect(100 + y - scroll.scrollTop, height(node));
       y += height(node);
     }
@@ -199,12 +201,52 @@ test('D10: a card answered while you read higher up: its question joins the conv
     // Reading Result 10 at the top of the box, not at the end.
     scroll.scrollTop = 0;
     scroll.scrollTop = top(lineKey('result', 'r10'));
+    scroll.dispatch('scroll');
     assert.equal(top(lineKey('result', 'r10')), 0);
     // The question asked between Result 3 and Result 4 is answered: its line and its answer arrive above.
     boards.set(P, board({ answered: [{ id: 'q1', text: 'Ship it on Thursday?', answer: 'Thursday', state: 'answered', at: at(17) }] }));
     view.render();
     assert.ok(line(lineKey('ask', 'q1')), 'the answered question is in the conversation');
     assert.equal(top(lineKey('result', 'r10')), 0, 'Result 10 where it was');
+  } finally { done(); }
+});
+
+const baseCard = (n) => ({ id: `local:card:base${n}`, kind: 'base', project: P, root: ROOT, open: true, closed: null, notice: null, at: at(n), blocking: true,
+  base: { branch: 'main', from: 'aaaaaaa', fromIs: null, to: `bbbbbb${n}`, reason: 'moved', commits: [] } });
+
+test('D10 on a phone: a card arriving above what you read (what waits comes first there) leaves what you read where it was', async () => {
+  globalThis.matchMedia = (query) => ({ matches: query.includes('760'), addEventListener() {} });
+  const { projectView } = await import('../js/views/project.js');
+  const app = fakeApp({ route: leadRoute(), cards: [baseCard(1)] });
+  const view = projectView(app, { sheet });
+  const { scroll, done } = laidOut(view, { waitFirst: true });
+  try {
+    view.render();
+    const line = (key) => find(view.el, (node) => node.dataset?.anchor === key);
+    const top = (key) => line(key).getBoundingClientRect().top - 100;
+    scroll.scrollTop = 0;
+    scroll.scrollTop = top(lineKey('result', 'r10'));
+    scroll.dispatch('scroll');
+    assert.equal(top(lineKey('result', 'r10')), 0);
+    // A second card arrives: the waiting block, above, grows by its height.
+    app.store.state.cards.set(baseCard(2).id, baseCard(2));
+    view.render();
+    assert.equal(findAll(find(view.el, byClass('wait-box')), (node) => node.classList.contains('card') && !node.hidden).length, 2, 'the second card is drawn');
+    assert.equal(top(lineKey('result', 'r10')), 0, 'Result 10 where it was');
+  } finally { done(); desktop(); }
+});
+
+test('D10 on a desktop: a project opens on the conversation’s end with the top of what waits in sight, never at the bottom of its last card', async () => {
+  desktop();
+  const { projectView } = await import('../js/views/project.js');
+  const app = fakeApp({ route: leadRoute(), cards: [baseCard(1), baseCard(2)] });
+  const view = projectView(app, { sheet });
+  const { scroll, done } = laidOut(view);
+  try {
+    view.render();
+    const wait = find(view.el, byClass('wait-box'));
+    // The waiting block (500 px) is taller than 60% of the 300 px view: its top 40% down the view.
+    assert.equal(wait.getBoundingClientRect().top - 100, 120);
   } finally { done(); }
 });
 
@@ -232,6 +274,18 @@ test('D22: kit.unfold opens over the short motion once, folds away the same way,
   const still = kit.unfold({ motion: 'opening' }, 'details');
   assert.ok(!still.classList.contains('opening'), 'reduced motion: none');
   desktop();
+});
+
+test('D22: what folds away where it isn’t drawn (a hidden column) is gone all the same, by twice the motion’s time', async () => {
+  desktop();
+  let closed = 0;
+  const el = kit.unfold({ motion: 'closing', onclosed: () => { closed += 1; } }, 'details');
+  assert.ok(el.classList.contains('closing'));
+  await new Promise((resolve) => setTimeout(resolve, 0)); // after the fold's own timer, made first
+  assert.equal(closed, 1, 'no animationend came, and it closed');
+  assert.ok(!el.classList.contains('closing'));
+  el.dispatch('animationend', { target: el });
+  assert.equal(closed, 1, 'once');
 });
 
 test('D22: reduced motion: what closes is gone at once', async () => {

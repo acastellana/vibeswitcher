@@ -153,6 +153,25 @@ export function projectView(app, { sheet }) {
     }
     return best;
   }
+  // Where the reader is, as last seen: noted on every scroll and after every draw, so a change the waiting block makes
+  // by itself before the draw (a card arriving above on a phone, an answered one leaving) is measured from where the
+  // reader was, not from after it moved.
+  let seen = { atEnd: true, reading: null };
+  function noteReading() {
+    const atEnd = scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < 40;
+    seen = { atEnd, reading: atEnd ? null : readingAt(scroller) };
+  }
+  scroller.addEventListener('scroll', noteReading, { passive: true });
+  // Where a project opens on a desktop: the conversation's end with what waits under it; where the waiting block is
+  // taller than about 60% of the view, its top at 40% down, the conversation's end above it (the old capped block's
+  // place), never the bottom of its last card.
+  function opening(box) {
+    if (phone() || waitBox.hidden || ui.state.route.show === 'asks' || typeof box.getBoundingClientRect !== 'function') return box.scrollHeight;
+    const view = box.getBoundingClientRect();
+    const wait = waitBox.getBoundingClientRect();
+    if (!wait.height || wait.height <= view.height * 0.6) return box.scrollHeight;
+    return box.scrollTop + (wait.top - view.top) - view.height * 0.4;
+  }
   function keepReading(box, at) {
     if (!at) return;
     const node = [...box.querySelectorAll('[data-anchor]')].find((one) => one.dataset.anchor === at.key);
@@ -284,8 +303,12 @@ export function projectView(app, { sheet }) {
     }
     drawn = '';
     render();
-    const scrolling = scrollBox();
-    scrolling.scrollTop = scrolling.scrollHeight;
+    // What was sent and what comes of it: the note's line at the conversation's end, in sight (on a desktop the waiting
+    // block is under it, so not the scroll's end).
+    const sent = col.lastElementChild;
+    if (typeof sent?.scrollIntoView === 'function') sent.scrollIntoView({ block: 'nearest' });
+    else scroller.scrollTop = scroller.scrollHeight;
+    noteReading();
   }
 
   // An answer's state under its pill, as the node says it (`delivered`): read by the lead, or not yet, when it can be
@@ -445,8 +468,7 @@ export function projectView(app, { sheet }) {
       lead?.told || null, [...changing], pushes, stack.el.hidden]);
     if (key === drawn) return;
     const box = scrollBox();
-    const atEnd = box.scrollHeight - box.scrollTop - box.clientHeight < 40;
-    const reading = atEnd ? null : readingAt(box);
+    const { atEnd, reading } = seen;
     drawn = key;
     const asks = route.show === 'asks';
     setClass(el, 'show-asks', asks);
@@ -493,8 +515,8 @@ export function projectView(app, { sheet }) {
     const top = changedView && phone() && waitShown && !asks;
     const settled = !changedView && phone() && !asks && lastWaiting > 0 && !waiting;
     lastWaiting = waiting;
-    if (changedView || atEnd || settled) requestAnimationFrame(() => { box.scrollTop = top ? 0 : box.scrollHeight; });
-    else keepReading(box, reading);
+    if (changedView || atEnd || settled) requestAnimationFrame(() => { box.scrollTop = top ? 0 : changedView ? opening(box) : box.scrollHeight; noteReading(); });
+    else { keepReading(box, reading); noteReading(); }
   }
 
   // The date column: the landing as the node says it, its range under it, and where it comes from on hover and focus
