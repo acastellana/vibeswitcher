@@ -79,7 +79,11 @@ struct MacSealFix2Tests {
         let odd = LinuxSealList.line(info, path: dir + "/odd", relative: "odd")
         #expect(!odd.contains("\n") && odd.hasSuffix(" ->x " + ConfigSeal.hex(Array("b\nf 1:c".utf8))), "\(odd)")
         #expect(lstat(dir + "/plain", &info) == 0)
-        #expect(LinuxSealList.line(info, path: dir + "/plain", relative: "plain").hasSuffix(" -> /usr/bin/true"))
+        // f4b22149's `line` for a link, written out: the bytes `MacSealRecheckTests.aListingsHashBytesAreUnchanged` relies on.
+        let modified = Platform.Files.modified(info), changed = Platform.Files.changed(info)
+        let old = "l 5:plain \(info.st_mode & 0o7777) \(info.st_size) \(info.st_ino) "
+            + "\(modified.tv_sec).\(modified.tv_nsec) \(changed.tv_sec).\(changed.tv_nsec)" + " -> " + "/usr/bin/true"
+        #expect(LinuxSealList.line(info, path: dir + "/plain", relative: "plain") == old)
     }
 
     // MARK: N6
@@ -137,6 +141,43 @@ struct MacSealFix2Tests {
         let cap = try #require(items.last)
         #expect(cap.name == LinuxSealList.capName && cap.kind == .capped("more than \(LinuxSealList.maxSourcedRows) rows"))
         #expect(ConfigSeal.fingerprint(cap) != nil)
+    }
+
+    /// A sparse file of 1 TB (no disk used: `ftruncate`) as a twin row is hashed by its metadata within the hang guard,
+    /// never read whole; a write to it is still a change; a file under the limit hashes by its contents as ever. The
+    /// shared code's (the blind check's: every `.file` row, session file and ByHost fallback read through `contentsDigest`).
+    @Test func aSparseFilesRowIsBoundedAndStillSeesAWrite() async throws {
+        let home = try home()
+        let path = home + "/.zshrc.zwc"
+        try MacSealListTests.write("small\n", path)
+        let row = ConfigSeal.Watched(name: "~/.zshrc.zwc", path: path, kind: .file)
+        let small = try #require(ConfigSeal.fingerprint(row))
+        #expect(ConfigSeal.contentsDigest(path, followLink: true) == .digest(ConfigSeal.hex(SHA256.hash(data: Data("small\n".utf8)))))
+        let handle = try #require(FileHandle(forWritingAtPath: path))
+        try handle.truncate(atOffset: 1 << 40)
+        try handle.close()
+        let print = { () async -> String? in
+            let done = DispatchSemaphore(value: 0)
+            final class Box: @unchecked Sendable {
+                let lock = NSLock()
+                var value: String?
+            }
+            let box = Box()
+            Thread {
+                let value = ConfigSeal.fingerprint(row)
+                box.lock.withLock { box.value = value }
+                done.signal()
+            }.start()
+            guard await offPool({ done.wait(timeout: .now() + hangGuard) == .success }) else { return nil }
+            return box.lock.withLock { box.value }
+        }
+        let sparse = try #require(await print(), "a 1 TB sparse file wasn't hashed within the hang guard")
+        #expect(sparse != small)
+        let writer = try #require(FileHandle(forWritingAtPath: path))
+        try writer.write(contentsOf: Data("evil".utf8))
+        try writer.close()
+        let written = try #require(await print())
+        #expect(written != sparse, "a write to a file past the limit changed nothing")
     }
 
     /// Each cap holds: no cap row under it; a cap row (a change) past the rows, at a file past 16 MB, and past the

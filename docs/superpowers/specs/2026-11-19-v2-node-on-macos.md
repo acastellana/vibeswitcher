@@ -1288,7 +1288,7 @@ R5, reopened by zsh's compiled twins; its tests are `MacSealRecheckTests`, `MacS
 | N5 (note) | `sourced` took time in the square of a file's lines, rows had no cap: a 5,000-line `.zshrc` took 47 s, a 100,000-line one more than 30 minutes | `sourced` keeps a set of what it found; `addSourced` reads at most 1,024 rows' files (`maxSourcedRows`, twins counted) and 32 MB in all (`maxSourcedBytes`), each file whole up to 16 MB; at any cap it stops and adds one row, `~/(sourced files past the seal's cap)` (`Kind.capped`, hashed by which cap), so the look that crosses it holds a change; 100,000 lines return in well under the hang guard (`aHundredThousandSourceLinesAreBounded`) |
 | N4 (note) | the 256-file read cap hid a file sourced past it, silently | the read cap is the row cap (a file read is a row), and hitting it holds (N5's row) |
 | N6 (note) | a lone UTF-16 surrogate read as U+FFFD, so profiles `P\u{D800}` and `P\u{DC00}` hashed as one | a string or key with a lone surrogate hashed by its code units (`MacSealList.form`: `u<count>:<hex>`), at every level and at the top; a valid string's form is the one before |
-| N3 (note) | at the 4,096-entry cap a listing's card says every sealed entry was removed | owed (below): its fix (keep keys past the cap) contradicts the re-check's own `aPaddedListingStillHashesEveryEntry`, which asserts no keys past the cap |
+| N3 (note) | at the 4,096-entry cap a listing's card says every sealed entry was removed | owed (below): neither fix passes both of the re-check's tests (`aPaddedListingStillHashesEveryEntry` asserts no keys past the cap) |
 | N7 (note) | a new node book's first look takes the home files (`homeFiles`) as they are | owed (below), before `isCheckedMacNode` is lifted |
 
 The zsh behaviour, probed in scratch homes only (`env -i HOME=<scratch> /bin/zsh`, zsh 5.9, 2026-11-26), each twin
@@ -1303,21 +1303,26 @@ row whose hash moved: a preferences or sessions row with a link in it (its targe
 preferences row holding a lone surrogate, a listing with a link whose target holds a newline. No book records any of
 them today (`isCheckedMacNode` is false), so no one sees these cards now.
 
-What each read's work is bounded by (N5's audit): `addSourced` by its caps above; a `.file` row and a session or ByHost
-file are hashed as a stream, so by their size on disk; a preferences file is parsed whole only up to 16 MB (past it, by
-its bytes); a `.entries` row by `ConfigSeal.maxEntries` (cut, held); a listing walks every entry, uncapped, one `lstat`
-each (Homebrew's `bin`, the largest, 1,213 here); the sessions and ByHost folders read every matching file. Each of
-these is linear in what is on disk, which a worker must write first; none grows faster.
+What each read's work is bounded by (N5's audit): `addSourced` by its caps above; every file whose contents are hashed
+(a `.file` row, a session or ByHost file, a folder's or entries row's file: `ConfigSeal.contentsDigest`) is read up to
+256 MB (`digestLimit`), and past it hashed by its metadata (size, inode, times with nanoseconds), so a write to it is
+still a change: a sparse file's size costs no disk, and `truncate -s 100T ~/.zshrc.zwc` would otherwise have a look
+hash 100 TB of zeros (the round's blind check; `aSparseFilesRowIsBoundedAndStillSeesAWrite`); a preferences file is
+parsed whole only up to 16 MB (past it, by its bytes, to that limit); a `.entries` row by `ConfigSeal.maxEntries` (cut,
+held); a listing walks every entry, uncapped, one `lstat` each (Homebrew's `bin`, the largest, 1,213 here); the
+sessions and ByHost folders read every matching file. The uncapped ones are linear in entries on disk, each of which a
+worker must make first; none grows faster.
 
 Shared code, for Linux: `LinuxSealList.sourced` keeps a set (same result, linear); `addSourced` caps as above (no twins
 on Linux: bash reads none), so a Linux startup file that reaches a cap shows the cap's row once where it named nothing
 before; a `.zwc` entry coming into or going from any `.entries` row (the snapshots, the hooks, the launch folders, the
-manager's `transient`) is held; a listing's link target holding a newline is said in hex. A Linux listing's hash bytes
+manager's `transient`) is held; a listing's link target holding a newline is said in hex; a file past 256 MB is hashed by
+its metadata wherever the seal hashes contents (the app's seal on v2 too: one card for such a file, none exists here). A Linux listing's hash bytes
 are otherwise unchanged (`MacSealRecheckTests.aListingsHashBytesAreUnchanged`, run here). What Linux must run:
 `LinuxSealListTests`, `MacSealListTests.theListIsEmptyOnLinux`, the ConfigSeal suites,
 `MacSealRecheckTests.aListingsHashBytesAreUnchanged`, and `MacSealFix2Tests`' tests without the Mac trait
 (`aTwinComingIntoAnEntriesFolderIsHeld`, `aListingLinksNewlineCantSpellALine`, `aHundredThousandSourceLinesAreBounded`,
-`eachSourcingCapAddsAHeldRow`).
+`eachSourcingCapAddsAHeldRow`, `aSparseFilesRowIsBoundedAndStillSeesAWrite`).
 
 **Owed:**
 
@@ -1327,8 +1332,9 @@ are otherwise unchanged (`MacSealRecheckTests.aListingsHashBytesAreUnchanged`, r
   from the app book's record with what that holds still held. `MacSealRecheckVaultTests.aNewNodeBooksFirstLookHoldsAPlantedZshrc`
   stands as a known issue.
 - N3: at the 4,096-entry cap a listing's card names every sealed entry "removed" (the hash is whole, so the change is
-  held; the card's words are wrong). Its fix, keys kept past the cap, contradicts the re-check's own
-  `aPaddedListingStillHashesEveryEntry` (no keys past the cap): one of the two is the lead's to change.
+  held; the card's words are wrong). The re-check's proposed fix, one "more than 4,096 entries" key, still says "git
+  removed", so its own test stays red; keeping the first 4,096 keys contradicts its `aPaddedListingStillHashesEveryEntry`
+  (no keys past the cap): either way a re-check test changes, the lead's call.
   `aListingsCardAtTheCapDoesntSayItsEntriesWereRemoved` stands as a known issue.
 - What lies past a sourcing cap (`addSourced`): after the cap's row is accepted, the files past it are unwatched until
   the startup files are under the caps again; and a compiled twin is hashed, never read for what it sources (as R6b).

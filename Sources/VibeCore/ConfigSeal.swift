@@ -1303,13 +1303,34 @@ public enum ConfigSeal {
         case unreadable
     }
 
+    /// A file past it (by `fstat`, before any read) is hashed by its metadata (`contentsDigest`), never read: a sparse
+    /// file's size costs no disk, so `truncate -s 100T` would make a look read and hash 100 TB of zeros (the second fix
+    /// round's blind check, N5's class). No file the seal watches comes near it (the largest: binaries of tens of MB).
+    static let digestLimit = 256 << 20
+
     /// Opens `path` without waiting (a FIFO's open would wait for a writer), checks what it opened is a regular file,
     /// and hashes it as it reads, a chunk at a time. `followLink`: a link at `path` is followed (the file behind it is
-    /// what loads); otherwise a link is refused (a folder's entries were told apart already).
+    /// what loads); otherwise a link is refused (a folder's entries were told apart already). Past `digestLimit`, its
+    /// "past <limit>" line instead: size, device, inode, and mtime and ctime with nanoseconds, so any write to it, which
+    /// moves its ctime, is still a change (fail closed); a file under it hashes as ever.
     static func contentsDigest(_ path: String, followLink: Bool) -> Contents {
+        let fd = open(path, O_RDONLY | O_NONBLOCK | O_CLOEXEC | (followLink ? 0 : O_NOFOLLOW))
+        guard fd >= 0 else { return errno == ELOOP ? .other : .unreadable }
+        defer { close(fd) }
+        let past = { () -> Contents? in
+            var info = stat()
+            guard fstat(fd, &info) == 0, (info.st_mode & S_IFMT) == S_IFREG, info.st_size > Int64(digestLimit) else { return nil }
+            let modified = Platform.Files.modified(info), changed = Platform.Files.changed(info)
+            let line = "past \(digestLimit) \(info.st_size) \(info.st_dev) \(info.st_ino) "
+                + "\(modified.tv_sec).\(modified.tv_nsec) \(changed.tv_sec).\(changed.tv_nsec)"
+            return .digest(hex(SHA256.hash(data: Data(line.utf8))))
+        }
+        if let past = past() { return past }
         var hasher = SHA256()
-        switch readRegular(path, followLink: followLink, limit: nil, chunk: { hasher.update(data: $0) }) {
+        switch readRegular(fd, limit: digestLimit, chunk: { hasher.update(data: $0) }) {
         case .digest: return .digest(hex(hasher.finalize()))
+        // Grown past the limit while read: by its metadata as it is now.
+        case .unreadable: return past() ?? .unreadable
         case let other: return other
         }
     }
