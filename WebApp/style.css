@@ -212,7 +212,7 @@
    Title        .section-title: small, strong, quiet, sentence case.
    Empty        .empty: one line where the rows would be; .empty.page, a page's or a pane's, centred: its icon, its
                 title, a line, its button.
-   Day line     .day: the day the lines under it were said, centred between two hairlines, small and quiet. A
+   Day line     .day-line: the day the lines under it were said, centred between two hairlines, small and quiet. A
                 session's chat and the lead's conversation. */
 
 .button { display: inline-flex; align-items: center; gap: var(--s-3); height: var(--ctl-m); padding: 0 var(--s-5); border-radius: var(--r-2); background: var(--accent); color: var(--on-accent); font-weight: var(--w-medium); white-space: nowrap; transition: opacity var(--dur-1) var(--ease-out); }
@@ -290,9 +290,9 @@ textarea.field { padding: var(--s-3) var(--s-4); line-height: var(--lh-body); re
 .empty.page > :is(h1, h2) { color: var(--ink); font-size: var(--t-title); font-weight: var(--w-strong); line-height: var(--lh-title); }
 .empty.page > .button { margin-top: var(--s-4); }
 
-.day { display: flex; align-items: center; gap: var(--s-4); color: var(--ink-3); font-size: var(--t-caption); line-height: var(--lh-caption); }
-.day::before, .day::after { content: ""; flex: 1; height: 1px; background: var(--line); }
-.day-text { flex: none; }
+.day-line { display: flex; align-items: center; gap: var(--s-4); color: var(--ink-3); font-size: var(--t-caption); line-height: var(--lh-caption); }
+.day-line::before, .day-line::after { content: ""; flex: 1; height: 1px; background: var(--line); }
+.day-line-text { flex: none; }
 
 * { box-sizing: border-box; }
 [hidden] { display: none !important; }
@@ -1478,7 +1478,9 @@ kbd { padding: 1px var(--s-3); border-radius: var(--r-1); box-shadow: var(--e-1-
 .talk { padding: var(--s-6) var(--s-7) var(--s-7); }
 .col { display: flex; flex-direction: column; justify-content: flex-end; gap: var(--s-3); max-width: 720px; min-height: 100%; margin: 0 auto; }
 .project-view .col:has(.road-row, .road-band, .road-intro, .goal-row) { justify-content: flex-start; }
-.col > .day { margin-top: var(--s-4); }
+.col > .day-line { margin-top: var(--s-4); }
+.day { display: flex; align-items: center; gap: var(--s-4); margin-top: var(--s-4); color: var(--ink-3); font-size: var(--t-caption); }
+.day::after { content: ""; flex: 1; height: 1px; background: var(--line); }
 .line { display: grid; grid-template-columns: 18px minmax(0, 1fr) auto; gap: var(--s-3); align-items: start; padding: var(--s-2) 0; font-size: var(--t-read); line-height: var(--lh-read); }
 .line time { padding-top: var(--s-1); color: var(--ink-3); font-size: var(--t-caption); white-space: nowrap; }
 .line.kind-update { color: var(--ink-2); font-size: var(--t-body); }

@@ -80,9 +80,13 @@ test('the words: Today, Yesterday, then the weekday and date in the page’s lan
 
 test('the kit draws a day line one way: its class and its words, nothing else', () => {
   const line = kit.dayLine({ tag: 'div', class: 'day-row' }, 'Today');
-  assert.deepEqual(line.className.split(' '), ['day', 'day-row']);
+  assert.deepEqual(line.className.split(' '), ['day-line', 'day-row']);
   assert.equal(line.textContent, 'Today');
-  assert.equal(line.children[0].className, 'day-text');
+  assert.equal(line.children[0].className, 'day-line-text');
+  // Its own class: the roadmap's midnight ticks are `.day` (project.js), and a day line's look must not reach them.
+  const css = readFileSync(fileURLToPath(new URL('../style.css', import.meta.url)), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
+  assert.doesNotMatch(css, /(^|[\s,}])\.day::before/, 'no hairline before a roadmap tick');
+  assert.match(css, /\.day-line::before, \.day-line::after \{/);
   // The lead's conversation and the session's chat both ask the kit; no view composes the class itself.
   const root = fileURLToPath(new URL('../js/', import.meta.url));
   for (const file of ['views/chat.js', 'views/project.js']) {
@@ -112,7 +116,7 @@ function open() {
 }
 // The chat's drawn rows in order: a day line as its words, a message by its kind.
 const drawn = (chat) => findAll(chat.el, byClass('chat-row')).filter((row) => !row.hidden)
-  .map((row) => (row.classList.contains('day') ? 'day:' + row.textContent : row.className.split(' ')[1]));
+  .map((row) => (row.classList.contains('day-line') ? 'day:' + row.textContent : row.className.split(' ')[1]));
 
 test('in the chat: a line where the day changes, drawn as a row between the messages, the grouping of a day untouched', () => {
   setLanguage('en');
