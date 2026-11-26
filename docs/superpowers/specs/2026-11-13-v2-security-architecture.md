@@ -2464,7 +2464,8 @@ verdict with the bind's judgement. The two ways to close it: the host drops the 
 process exits (a new verdict then needs a new, judged bind), or the vault checks, at `submitVerdict` and a ballot, that
 the caller's agent process is the one that was running at the bind. Only that check of the running agent's executable
 also closes what a bind's reading of the command can't: a same-uid writer putting a program in Claude Code's
-versions folder (`~/.local/share/claude/versions/`) or behind the node's links, a
+versions folder (`~/.local/share/claude/versions/`), in bun's Codex root in the home or behind the node's links (npm's
+global Codex roots count only when root's all the way down, `WorkerLaunch.codexRoots`, so not those), a
 PATH in the session's inherited environment that a bare `claude` or `codex` is found by, and a file swapped after the
 bind looked at it.
 What a role's launch check (`RoleLaunchCheck`: its flags, its spawn environment's names, its `--settings`) still doesn't

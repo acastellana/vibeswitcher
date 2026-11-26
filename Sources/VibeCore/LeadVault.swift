@@ -1034,6 +1034,10 @@ extension LeadVault {
                     // Under the floor, a session whose program isn't told apart as Claude Code or Codex (a shell, a wrapper,
                     // `sh -c`, another program) holds no role: what it runs can't be judged.
                     if launch.agent == nil, team(root)?.floor?.verifierDifferent == true {
+                        if case .path(let path)? = launch.command.flatMap(WorkerLaunch.program(of:)),
+                           member.agent == .codex || (path as NSString).lastPathComponent.hasPrefix("codex") {
+                            return .refused("That session's program \(WorkerLaunch.codexRootsSaid(path)): under the review floor it holds no role.")
+                        }
                         return .refused("That session's command isn't one Claude Code or Codex command the vault can tell apart (a shell, a wrapper or another program): under the review floor it holds no role.")
                     }
                     let declared = member.agent ?? .claude

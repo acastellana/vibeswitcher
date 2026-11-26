@@ -841,4 +841,53 @@ extension LeadAdvanceTests {
         #expect(free.answer(.bind(grant: other, root: freeRoot, session: "fb"), from: .session("lead"),
                             bound: .init(command: fallback, environmentNames: [SessionNote.roleVariable, "PATH"])) == .ok)
     }
+
+    // MARK: Codex's install roots
+
+    /// bun's root in the account's home counts by its path; npm's global roots only when root's all the way down; a Codex
+    /// path outside them is refused under the floor, named with the roots.
+    @Test func codexCountsUnderItsInstallRootsAndNpmsOnlyWhenRoots() throws {
+        let roots = WorkerLaunch.codexRoots.map(\.folder)
+        #expect(roots == [(VibePaths.accountHome as NSString).appendingPathComponent(".bun/install/global/node_modules/@openai/codex/"),
+                          "/usr/lib/node_modules/@openai/codex/", "/usr/local/lib/node_modules/@openai/codex/", "/opt/homebrew/lib/node_modules/@openai/codex/"])
+        #expect(WorkerLaunch.codexRoots.map(\.rootOwned) == [false, true, true, true])
+        // A home root (bun's): its path is enough.
+        let bun = temp.url("bun/install/global/node_modules/@openai/codex")
+        try FileManager.default.createDirectory(at: bun.appendingPathComponent("bin"), withIntermediateDirectories: true)
+        let program = bun.appendingPathComponent("bin/codex.js")
+        try Data("codex stand-in".utf8).write(to: program)
+        let link = temp.url("bun-codex-link")
+        try FileManager.default.createSymbolicLink(at: link, withDestinationURL: program)
+        let home = WorkerLaunch.CodexRoot(folder: bun.path, rootOwned: false)
+        #expect(WorkerLaunch.agent(atPath: link.path, links: [:], codexRoots: [home]) == .codex)
+        // The same folder as an npm root: not root's, so not Codex.
+        #expect(WorkerLaunch.agent(atPath: program.path, links: [:], codexRoots: [WorkerLaunch.CodexRoot(folder: bun.path, rootOwned: true)]) == nil)
+        // A root that is root's all the way down (the system's /usr/bin, standing in for npm's): counted.
+        let env = try #require(WorkerLaunch.realPathOf("/usr/bin/env"))
+        #expect(WorkerLaunch.rootsAlone(env))
+        #expect(WorkerLaunch.agent(atPath: "/usr/bin/env", links: [:], codexRoots: [WorkerLaunch.CodexRoot(folder: (env as NSString).deletingLastPathComponent, rootOwned: true)]) == .codex)
+        #expect(!WorkerLaunch.rootsAlone(program.path))
+        // Outside every root: nil, and the refusal names the path and the roots.
+        #expect(WorkerLaunch.agent(atPath: program.path, links: [:], codexRoots: []) == nil)
+        let said = WorkerLaunch.codexRootsSaid("/x/codex")
+        #expect(said.contains("/x/codex") && said.contains("/usr/lib/node_modules/@openai/codex/ (root's)") && said.contains(".bun/install/global"), "\(said)")
+    }
+
+    /// At the bind under the floor: a Codex grant whose program isn't under a root is refused, naming the path.
+    @Test func aCodexOutsideItsRootsIsRefusedNamingThePath() throws {
+        let (book, root, _) = floorBook()
+        guard case .grant(let worker) = book.answer(.issue(role: .worker, root: root, task: "x", auditing: nil, agent: .codex), from: .session("lead")) else {
+            Issue.record("no grant")
+            return
+        }
+        let stray = temp.url("npm-user/lib/node_modules/@openai/codex/bin/codex.js")
+        try FileManager.default.createDirectory(at: stray.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data("codex stand-in".utf8).write(to: stray)
+        guard case .refused(let why) = book.answer(.bind(grant: worker, root: root, session: "cx"), from: .session("lead"),
+                                                   bound: .init(command: "'\(stray.path)' --model gpt-6 -- go", links: [:])) else {
+            Issue.record("a Codex outside its roots was bound under the floor")
+            return
+        }
+        #expect(why.contains(stray.path) && why.contains("install roots"), "\(why)")
+    }
 }

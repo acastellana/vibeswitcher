@@ -236,15 +236,15 @@ public enum WorkerLaunch {
 
 
     /// The agent the program at `path` is, by what it resolves to, never by which link it was reached through: Claude
-    /// Code's versioned binary in the account's `~/.local/share/claude/versions/`, or Codex under its install root on this
-    /// machine (`codexRoot`); on a scratch node, a test's stand-in its links name (`links`, `nodeLinks`). A link the
-    /// user's `~/.local/bin/claude` points at `/bin/bash` resolves to bash: nil. Anything else is nil (a name alone, a
-    /// package path anyone of the uid could make).
-    static func agent(atPath path: String, links: [Agent: [String]]) -> Agent? {
+    /// Code's versioned binary in the account's `~/.local/share/claude/versions/`, or Codex under one of its install
+    /// roots (`codexRoots`, `CodexRoot.holds`); on a scratch node, a test's stand-in its links name (`links`,
+    /// `nodeLinks`). A link the user's `~/.local/bin/claude` points at `/bin/bash` resolves to bash: nil. Anything else
+    /// is nil (a name alone, a package path anyone of the uid could make).
+    static func agent(atPath path: String, links: [Agent: [String]], codexRoots: [CodexRoot] = codexRoots) -> Agent? {
         guard let real = realPathOf(path) else { return nil }
         let versions = (VibePaths.accountHome as NSString).appendingPathComponent(".local/share/claude/versions") + "/"
         if real.hasPrefix(versions), VersionedClaude.isBinary(real) { return .claude }
-        if real.hasPrefix(codexRoot) { return .codex }
+        if codexRoots.contains(where: { $0.holds(real) }) { return .codex }
         for (agent, paths) in links where paths.contains(where: { realPathOf($0) == real }) { return agent }
         return nil
     }
@@ -259,9 +259,56 @@ public enum WorkerLaunch {
         return [.claude: [test + "/claude"], .codex: [test + "/codex"]]
     }
 
-    /// Where Codex is installed on this machine: the account's bun global package (`~/.bun/bin/codex` resolves into it),
-    /// read where it's used.
-    static var codexRoot: String { (VibePaths.accountHome as NSString).appendingPathComponent(".bun/install/global/node_modules/@openai/codex") + "/" }
+    /// A folder Codex's package is installed in, and whether it counts only when root's.
+    public struct CodexRoot: Equatable, Sendable {
+        /// The package's folder, ending in `/`.
+        public var folder: String
+        /// npm's global roots: counted only when every folder from `/` down to the program, and the program, is root's
+        /// and writable by no group or other (`rootsAlone`). Those a same-uid writer can't make or change, so they hold
+        /// more than the home one, which anyone of the uid could fill.
+        public var rootOwned: Bool
+
+        public init(folder: String, rootOwned: Bool) {
+            self.folder = folder.hasSuffix("/") ? folder : folder + "/"
+            self.rootOwned = rootOwned
+        }
+
+        /// Whether the resolved program `real` is this root's.
+        public func holds(_ real: String) -> Bool {
+            real.hasPrefix(folder) && (!rootOwned || WorkerLaunch.rootsAlone(real))
+        }
+    }
+
+    /// Codex's install roots: bun's global package in the account's home (`~/.bun/bin/codex` resolves into it), and npm's
+    /// global roots (`/usr/lib/node_modules`, `/usr/local/lib/node_modules`, Homebrew's `/opt/homebrew/lib/node_modules`)
+    /// when root's (`CodexRoot.rootOwned`). Read where it's used (HomePathLint).
+    public static var codexRoots: [CodexRoot] {
+        [CodexRoot(folder: (VibePaths.accountHome as NSString).appendingPathComponent(".bun/install/global/node_modules/@openai/codex"), rootOwned: false)]
+            + ["/usr/lib/node_modules", "/usr/local/lib/node_modules", "/opt/homebrew/lib/node_modules"].map {
+                CodexRoot(folder: $0 + "/@openai/codex", rootOwned: true)
+            }
+    }
+
+    /// Whether `real` (a resolved path) and every folder from `/` down to it is root's, owned by uid 0 and writable by no
+    /// group or other, each looked at without following a link.
+    static func rootsAlone(_ real: String) -> Bool {
+        guard real.hasPrefix("/") else { return false }
+        var paths = ["/"]
+        for component in real.split(separator: "/") { paths.append((paths.count == 1 ? "" : paths[paths.count - 1]) + "/" + component) }
+        for path in paths {
+            var info = stat()
+            guard lstat(path, &info) == 0, info.st_uid == 0, info.st_mode & (S_IWGRP | S_IWOTH) == 0,
+                  info.st_mode & S_IFMT != S_IFLNK else { return false }
+        }
+        return true
+    }
+
+    /// Why a role's program at `path`, meant as Codex, isn't counted as Codex: named with the roots it would have had to
+    /// resolve into.
+    public static func codexRootsSaid(_ path: String, roots: [CodexRoot] = codexRoots) -> String {
+        let listed = roots.map { $0.folder + ($0.rootOwned ? " (root's)" : "") }.joined(separator: ", ")
+        return "\(path) doesn't resolve into one of Codex's install roots here (\(listed))"
+    }
 
     static func realPathOf(_ path: String) -> String? {
         guard let resolved = realpath(path, nil) else { return nil }
