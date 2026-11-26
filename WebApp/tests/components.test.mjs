@@ -83,6 +83,13 @@ test('the components stand on the tokens: three heights, the corners, the colour
   for (const tone of ['asking', 'working', 'done']) assert.match(body(`.badge.${tone}`), /var\(--(asked|working|done)\)/);
 });
 
+test('a field pointed at keeps its focus ring: the hover edge never replaces it, even on a frame whose input has focus (a list’s search)', () => {
+  const hovers = [...bare.matchAll(/([^{}]+)\{([^{}]*box-shadow: var\(--e-hover-in\)[^{}]*)\}/g)].map((m) => m[1].trim());
+  const field = hovers.filter((selector) => /\.field\b/.test(selector));
+  assert.ok(field.length, 'a hover edge for the field');
+  for (const selector of field) for (const one of selector.split(/,(?![^(]*\))/).filter((part) => /\.field\b/.test(part))) assert.match(one, /:not\(:focus-within\)/, one.trim());
+});
+
 // ---- js/kit.js ----
 
 const classes = (node) => node.getAttribute('class').split(' ');
