@@ -165,7 +165,8 @@ exit
 ## C. Needs an external display (about 3 minutes; skip it without one: a closed lid sleeps the Mac)
 
 **16. LA-4: the dialog with the lid closed.** Run it in a Terminal window on the external display, with an external
-keyboard; it asks you to close the lid first.
+keyboard (a new window starts in your home folder: run the `cd` line at the top in it first); it asks you to close the
+lid first.
 
 ```
 bash scripts/mac-measure/la-lid-closed.sh
