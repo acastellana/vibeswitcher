@@ -5,6 +5,7 @@
 # DependencyLockLintTests too.
 #
 # On 2026-11-26: ubuntu-24.04 had Node v22.23.5 and Chrome 157.0.8103.78; xcode-27 had Node v24.22.2 and v24.22.3
-# (the Mac runs no browser check).
+# (the Mac runs no browser check). Chrome 158 (158.0.8127.36): the browser checks passed on it on the Linux
+# integration machine the same day (ActingPageCheck, PageCheck, RealPageCheck, PasskeyPageCheck).
 node 22-24
-chrome 157-157
+chrome 157-158
