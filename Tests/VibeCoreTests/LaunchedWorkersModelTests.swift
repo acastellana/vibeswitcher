@@ -765,8 +765,13 @@ extension LeadAdvanceTests {
                     let prepared = try LeadLaunch.prepare(role: role, root: root, task: "t", base: base, prompt: "p {x} $HOME ~ [y]", start: "Go on: a; b | c {d} $e",
                                                           server: "/s", name: "\(role.rawValue)-t-\(pins)", model: "claude-opus-5-5", advisor: "fable",
                                                           effort: "high", folder: temp.url("run-\(role.rawValue)-\(pins)-\(base.count)"), pinModels: pins)
+                    // Where settings are a file (the Mac's): its folder and digest as the bind finds them, resolved.
+                    let path = RoleLaunchCheck.settingsPath(in: prepared.command)
+                    let folder = temp.url("run-\(role.rawValue)-\(pins)-\(base.count)").path
                     let why = RoleLaunchCheck.refusal(command: prepared.command, agent: .claude, role: role,
-                                                      environment: Array(prepared.environment.keys) + toolset, settings: settingsRead(prepared))
+                                                      environment: Array(prepared.environment.keys) + toolset, settings: settingsRead(prepared),
+                                                      file: .init(digest: prepared.settingsDigest, folder: WorkerLaunch.realPathOf(folder).map { $0 + "/" }),
+                                                      settingsAt: path.flatMap { WorkerLaunch.realPathOf(($0 as NSString).deletingLastPathComponent) })
                     #expect(why == nil, "\(role) \(base) \(pins): \(why ?? "")")
                 }
             }
@@ -849,7 +854,7 @@ extension LeadAdvanceTests {
     /// path outside them is refused under the floor, named with the roots.
     @Test func codexCountsUnderItsInstallRootsAndNpmsOnlyWhenRoots() throws {
         let roots = WorkerLaunch.codexRoots.map(\.folder)
-        #expect(roots == [(VibePaths.accountHome as NSString).appendingPathComponent(".bun/install/global/node_modules/@openai/codex/"),
+        #expect(roots == [(VibePaths.accountHome as NSString).appendingPathComponent(".bun/install/global/node_modules/@openai/codex") + "/",
                           "/usr/lib/node_modules/@openai/codex/", "/usr/local/lib/node_modules/@openai/codex/", "/opt/homebrew/lib/node_modules/@openai/codex/"])
         #expect(WorkerLaunch.codexRoots.map(\.rootOwned) == [false, true, true, true])
         // A home root (bun's): its path is enough.
@@ -941,9 +946,12 @@ extension LeadAdvanceTests {
         let text = "{\"env\":{\"GIT_EDITOR\":\"true\"}}"
         let folder = "/v/lead/run/abc/"
         let command = "claude --name w --model opus --settings \(folder)w-x/settings.json -- go"
+        // The folder the bind found the file in, as it resolves it (here, paths with no links).
         func refused(_ command: String, read: RoleLaunchCheck.SettingsRead?, digest: String?, inline: Bool) -> String? {
             RoleLaunchCheck.refusal(command: command, agent: .claude, role: .worker, environment: nil, settings: read,
-                                    file: .init(digest: digest, folder: folder), inline: inline)
+                                    file: .init(digest: digest, folder: folder),
+                                    settingsAt: RoleLaunchCheck.settingsPath(in: command).map { (($0 as NSString).deletingLastPathComponent as NSString).standardizingPath },
+                                    inline: inline)
         }
         let digest = WalletStamp.digest(Data(text.utf8))
         #expect(refused(command, read: .text(text), digest: digest, inline: true)?.contains("gives its settings inline") == true)
@@ -1014,7 +1022,9 @@ extension LeadAdvanceTests {
         // Where settings are a file (the Mac's): bound when the file in the launch's folder is the digest's, never by
         // what the bind says.
         book.settingsInline = false
-        let file = URL(fileURLWithPath: LeadVault.runPrefix(root: root)).appendingPathComponent("worker-x/settings.json")
+        let leads = temp.url("digest-leads")
+        book.wallFolder = leads
+        let file = LeadVault(folder: leads) { _ in .ok }.runFolder(root: root, name: "worker-x").appendingPathComponent("settings.json")
         try FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
         let text = "{\"env\":{\"GIT_EDITOR\":\"true\"}}"
         try Data(text.utf8).write(to: file)
@@ -1143,7 +1153,56 @@ extension LeadAdvanceTests {
         #expect(shell.contains("Name claude bare in the launch preset, or lower `floor_verifier_different`"), "\(shell)")
         // A grant with no digest where settings are a file (an older tool server): its own words.
         let older = RoleLaunchCheck.refusal(command: "claude --model opus --settings /v/run/k/w/settings.json -- go", agent: .claude, role: .worker,
-                                            environment: nil, settings: .text("{}"), file: .init(digest: nil, folder: "/v/run/k/"), inline: false)
+                                            environment: nil, settings: .text("{}"), file: .init(digest: nil, folder: "/v/run/k/"), settingsAt: "/v/run/k/w",
+                                            inline: false)
         #expect(older?.contains("the lead's tool server is from an older build") == true && older?.contains("restart the lead") == true, "\(older ?? "")")
+    }
+
+    // MARK: Paths compared resolved
+
+    /// The leads' folder behind a link, either way round (the Mac's /var and /tmp are links): a launch's settings file
+    /// is in its run folder by what each path resolves to, never by their texts; and a Codex root reached by a link
+    /// holds the program under it.
+    @Test func theSettingsFolderAndTheCodexRootsAreComparedResolved() throws {
+        let real = temp.url("leads-real")
+        let link = temp.url("leads-link")
+        try FileManager.default.createDirectory(at: real, withIntermediateDirectories: true)
+        try FileManager.default.createSymbolicLink(at: link, withDestinationURL: real)
+        let text = "{\"env\":{\"GIT_EDITOR\":\"true\"}}"
+        for (booksFolder, writersFolder) in [(real, link), (link, real)] {
+            let (book, root, _) = floorBook()
+            book.settingsInline = false
+            book.wallFolder = booksFolder
+            let file = LeadVault(folder: writersFolder) { _ in .ok }.runFolder(root: root, name: "worker-\(booksFolder.lastPathComponent)")
+                .appendingPathComponent("settings.json")
+            try FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try Data(text.utf8).write(to: file)
+            guard case .grant(let worker) = book.answer(.issue(role: .worker, root: root, task: "x", auditing: nil, settings: WalletStamp.digest(Data(text.utf8))),
+                                                        from: .session("lead")) else { return }
+            #expect(book.answer(.bind(grant: worker, root: root, session: "s"), from: .session("lead"),
+                                bound: .init(command: "claude --model sonnet --settings '\(file.path)' -- go")) == .ok,
+                    "the book's \(booksFolder.lastPathComponent), written under \(writersFolder.lastPathComponent)")
+            // A file outside the run folder is refused however it's reached.
+            let outside = temp.url("outside-\(booksFolder.lastPathComponent)/settings.json")
+            try FileManager.default.createDirectory(at: outside.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try Data(text.utf8).write(to: outside)
+            guard case .grant(let other) = book.answer(.issue(role: .worker, root: root, task: "y", auditing: nil, settings: WalletStamp.digest(Data(text.utf8))),
+                                                       from: .session("lead")) else { return }
+            guard case .refused(let why) = book.answer(.bind(grant: other, root: root, session: "o"), from: .session("lead"),
+                                                       bound: .init(command: "claude --model sonnet --settings '\(outside.path)' -- go")) else {
+                Issue.record("a settings file outside the run folder was bound")
+                return
+            }
+            #expect(why.contains("outside its launch's own folder"), "\(why)")
+        }
+        // A Codex root named by a link (a home behind one): the program under it is Codex.
+        let codexHome = temp.url("codex-real")
+        let codexReal = codexHome.appendingPathComponent("@openai/codex")
+        try FileManager.default.createDirectory(at: codexReal.appendingPathComponent("bin"), withIntermediateDirectories: true)
+        try Data("codex stand-in".utf8).write(to: codexReal.appendingPathComponent("bin/codex.js"))
+        let codexLink = temp.url("codex-link")
+        try FileManager.default.createSymbolicLink(at: codexLink, withDestinationURL: codexHome)
+        let root = WorkerLaunch.CodexRoot(folder: codexLink.appendingPathComponent("@openai/codex").path, rootOwned: false)
+        #expect(WorkerLaunch.agent(atPath: codexReal.appendingPathComponent("bin/codex.js").path, links: [:], codexRoots: [root]) == .codex)
     }
 }

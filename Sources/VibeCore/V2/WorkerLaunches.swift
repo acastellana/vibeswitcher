@@ -451,9 +451,11 @@ public enum WorkerLaunch {
             self.rootOwned = rootOwned
         }
 
-        /// Whether the resolved program `real` is this root's.
+        /// Whether the resolved program `real` is this root's: under the root's folder resolved too (the Mac's /var and
+        /// /tmp, a home reached by a link), never one path's text against another's.
         public func holds(_ real: String) -> Bool {
-            real.hasPrefix(folder) && (!rootOwned || WorkerLaunch.rootsAlone(real))
+            guard let resolved = WorkerLaunch.realPathOf(folder) else { return false }
+            return real.hasPrefix(resolved + "/") && (!rootOwned || WorkerLaunch.rootsAlone(real))
         }
     }
 
@@ -613,6 +615,8 @@ public enum WorkerLaunch {
         public var command: String?
         public var environmentNames: [String]?
         public var settings: RoleLaunchCheck.SettingsRead?
+        /// The folder that `--settings` file is in, resolved (each link followed), as the bind read it.
+        public var settingsFolder: String?
         public var full = true
         /// The routing names a worker's project settings hold (`routingKeys`), each with its file.
         public var projectRouting: [String] = []
@@ -647,13 +651,14 @@ public enum WorkerLaunch {
             if case .path(let path) = told { agent = Self.agent(atPath: path, links: links) }
             // The `--settings` file a command names, read the careful way (its content judged at the bind).
             var settingsText: String?
+            let settingsFolder = settingsPath.flatMap { realPathOf(($0 as NSString).deletingLastPathComponent) }
             if let settingsPath, case .data(let data)? = Optional(Platform.Files.readRegular(in: (settingsPath as NSString).deletingLastPathComponent,
                                                                                             path: [(settingsPath as NSString).lastPathComponent],
                                                                                             limit: settingsLimit)) {
                 settingsText = String(data: data, encoding: .utf8)
             }
             result.set((home.object?["model"] as? String, project.models, home.note.map { [$0] } ?? [], project.notes, home.note == nil, agent, settingsText,
-                        project.routing))
+                        project.routing, settingsFolder))
             done.signal()
         }
         if done.wait(timeout: .now() + limit) == .success, let read = result.get() {
@@ -661,6 +666,7 @@ public enum WorkerLaunch {
             facts.defaultKnown = read.homeRead
             if case .path = told { facts.agent = read.agent }
             if let settingsPath { facts.settings = read.settingsText.map { .text($0) } ?? .unread(settingsPath) }
+            facts.settingsFolder = read.settingsFolder
             facts.notes = read.homeNotes + read.projectNotes
             facts.projectRouting = read.projectRouting
             facts.projectUnread = read.projectNotes
@@ -702,7 +708,7 @@ public enum WorkerLaunch {
     /// The bounded reads' result, handed between two queues.
     private final class Found: @unchecked Sendable {
         typealias Read = (defaultModel: String?, projectModels: [String], homeNotes: [String], projectNotes: [String], homeRead: Bool, agent: Agent?,
-                          settingsText: String?, projectRouting: [String])
+                          settingsText: String?, projectRouting: [String], settingsFolder: String?)
         private let lock = NSLock()
         private var value: Read?
         func set(_ found: Read) { lock.withLock { value = found } }
