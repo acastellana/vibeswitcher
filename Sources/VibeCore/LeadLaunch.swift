@@ -638,7 +638,7 @@ public enum LeadLaunch {
                                temporary: URL = SessionTemp.root, home: String = VibePaths.home, resume: String? = nil,
                                teamPlugins: [String] = [], listedPlugins: [String]? = nil,
                                box: Result<SandboxPolicy, SandboxRefusal> = .success(.standard),
-                               auditLogs: [String] = [], pinModels: Bool = false) throws -> Prepared {
+                               auditLogs: [String] = [], pinModels: Bool = false, inline: Bool = Platform.Tools.roleSettingsInline) throws -> Prepared {
         let folder = folder?.path ?? (root as NSString).appendingPathComponent(".vibeswitcher/run/\(name)")
         try VibePaths.ensurePrivate(URL(fileURLWithPath: folder, isDirectory: true))
         let promptFile = (folder as NSString).appendingPathComponent("prompt.md")
@@ -733,7 +733,7 @@ public enum LeadLaunch {
         if role == .verifier { prepared.environment[BranchRun.policyVariable] = env[BranchRun.policyVariable] }
         // Not made (another user's folder in its place): the session keeps the TMPDIR it would have had.
         if let temporary = SessionTemp.make(cwd: cwd, name: name, in: temporary) { prepared.environment["TMPDIR"] = temporary.path + "/" }
-        return try LinuxLaunch.inline(prepared, prompt: prompt, mcp: mcp, settings: settings, start: start)  // Files on the Mac (S10).
+        return try LinuxLaunch.inline(prepared, prompt: prompt, mcp: mcp, settings: settings, start: start, enabled: inline)  // Files on the Mac (S10).
     }
 
     // MARK: Plugins
