@@ -14,6 +14,9 @@ public enum LeadLaunch {
         /// What the session's environment adds (`SpawnRequest.env`): its TMPDIR, a folder of its own (see `SessionTemp`),
         /// and its role (`SessionNote.roleVariable`).
         public var environment: [String: String] = [:]
+        /// The digest of the `--settings` file it names (`WalletStamp.digest`), given with its bind so the vault knows
+        /// the file it reads is the one written here; nil when its settings are inline (Linux: `LinuxLaunch.inline`).
+        public var settingsDigest: String?
     }
 
     static let readOnly = ["Edit", "Write", "NotebookEdit"]
@@ -428,6 +431,25 @@ public enum LeadLaunch {
     /// No role's `git status` takes index.lock (`GIT_OPTIONAL_LOCKS`), its status line's included: Claude Code stops
     /// a status line it gives up on with TERM, then SIGKILL about 2 s later, and on a busy Mac a `git status` killed
     /// so leaves a 0-byte lock that blocks every commit and merge in that checkout (2026-10-18).
+    /// Writes `data` to `path` as a new file (0600) made here: what was at `path` (an earlier launch's file, a link)
+    /// unlinked first, then created with O_EXCL and no link followed, so the file the digest is of
+    /// (`Prepared.settingsDigest`) is the one this wrote, never one someone left there.
+    static func writeExclusive(_ data: Data, to path: String) throws {
+        if unlink(path) != 0, errno != ENOENT { throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO) }
+        let fd = open(path, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0o600)
+        guard fd >= 0 else { throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO) }
+        defer { close(fd) }
+        var written = 0
+        try data.withUnsafeBytes { bytes in
+            while written < bytes.count {
+                let count = write(fd, bytes.baseAddress! + written, bytes.count - written)
+                if count < 0, errno == EINTR { continue }
+                guard count > 0 else { throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO) }
+                written += count
+            }
+        }
+    }
+
     public static func environment(_ role: Role) -> [String: String] {
         ["GIT_OPTIONAL_LOCKS": "0"].merging(role == .worker ? ["GIT_EDITOR": "true"] : [:]) { $1 }
     }
@@ -667,8 +689,8 @@ public enum LeadLaunch {
         // The account's usage windows reach VibeSwitcher only through a status line's input: its own records them and
         // shows yours (see `UsageStatusLine`): for a verifier, only your user settings' (its project settings don't run).
         settings["statusLine"] = UsageStatusLine.settings(server: server, userOnly: role == .verifier)
-        try LeadVault.writePrivate(try JSONSerialization.data(withJSONObject: settings, options: [.prettyPrinted, .sortedKeys]),
-                                   to: URL(fileURLWithPath: settingsFile))
+        let settingsData = try JSONSerialization.data(withJSONObject: settings, options: [.prettyPrinted, .sortedKeys])
+        try writeExclusive(settingsData, to: settingsFile)
         let quote = RecentProjects.shellQuote
         let trimmed = base.trimmingCharacters(in: .whitespaces)
         // The model given replaces one the project's command names (`--model x`, `--model=x`): `claude --help` doesn't
@@ -698,6 +720,7 @@ public enum LeadLaunch {
         if let resume { parts.append("--resume \(quote(resume))") }
         parts.append("-- \(quote(start))")
         var prepared = Prepared(command: parts.joined(separator: " "), promptFile: promptFile, mcpFile: mcpFile, settingsFile: settingsFile)
+        prepared.settingsDigest = WalletStamp.digest(settingsData)
         // Marks the role's session: its hook gives it none of the notes plain sessions get (`SessionNote`).
         prepared.environment[SessionNote.roleVariable] = role.rawValue
         // Its updater off, from the start (`autoUpdaterVariable`).

@@ -2464,9 +2464,35 @@ verdict with the bind's judgement. The two ways to close it: the host drops the 
 process exits (a new verdict then needs a new, judged bind), or the vault checks, at `submitVerdict` and a ballot, that
 the caller's agent process is the one that was running at the bind. Only that check of the running agent's executable
 also closes what a bind's reading of the command can't: a same-uid writer putting a program in Claude Code's
-versions folder (`~/.local/share/claude/versions/`) or behind the node's links, a
+versions folder (`~/.local/share/claude/versions/`), in bun's Codex root in the home or behind the node's links (npm's
+global Codex roots count only when root's all the way down, `WorkerLaunch.codexRoots`, so not those), a
 PATH in the session's inherited environment that a bare `claude` or `codex` is found by, and a file swapped after the
 bind looked at it.
+What a role's launch check (`RoleLaunchCheck`: its options as the agent reads them, each role's own flags, its spawn
+environment's names, its `--settings` keys and env names, a worker's branch settings' routing names) still doesn't judge:
+- the content of the files its other flags name (`--append-system-prompt-file`, an `--mcp-config` file: neither sets the
+  model, but an MCP server it lists runs code), and `--mcp-config`'s inline content;
+- the values of its settings' `hooks`, `statusLine`, `enabledPlugins` and `permissions` (only their keys are the builder's);
+- Codex's `-c` values (only their keys), and the model provider in `~/.codex/config.toml` (ConfigSeal watches that file:
+  a change while the team runs is held for the user, but its content at the team's start is not judged);
+- the advisor's model (`--advisor`, which shapes the work it judges), and the lead's own model (lead_model), which writes
+  code when the lead does;
+- a session the host started before a restart or a handover and binds after it: its full command and environment names
+  are gone (`HostedSession.requestCommand`), so under the floor its bind is refused ("start it again") and a retry works;
+- a settings file (the Mac's, S10) swapped between Claude Code's read and the bind's: the builder writes it fresh (O_EXCL,
+  in the launch's run folder) and its lead's tool server gives its digest with the grant, which the bind compares with
+  what it reads; a check before the spawn isn't the vault's to make, and what Claude Code read is V3's (the running
+  agent's check above);
+- whether a pinned key in a role's `--settings` env (the models) wins over the same key in the user's or the branch's
+  settings, key by key, is unverified; a worker's branch naming a routing key is refused at its bind;
+- pin ANTHROPIC_BASE_URL once a real subscription session is seen to start and answer with it set;
+- the start-to-bind window (M2): a `--settings` file or a branch's settings rewritten before the role starts and restored
+  before its bind passes the digest and the routing check (Linux's inline settings have no file to rewrite); whether
+  Claude Code re-reads changed settings later is unverified;
+- ANTHROPIC_API_KEY, ANTHROPIC_AUTH_TOKEN or `apiKeyHelper` (and the AWS, GCP and proxy helpers) in a branch's settings
+  change which account the session runs as, not its model: not refused;
+- a branch's `.claude/agents/` with a `model` in an agent's front matter: a worker's subagents may run on another model
+  than its `--model` (the main thread's `agent` key is refused, `WorkerLaunch.modelKeys`).
 The post-merge Claude re-audit's obligation and its security mark live on the board (`task.claudeReaudit`: `pending`,
 `sensitive`, and the task's `riskRaised`, in board.json, which anyone of the uid can write): moving them into the vault is open.
 Also not seen, with (a): a race on the worktree's settings, written before the worker starts (it reads them), then

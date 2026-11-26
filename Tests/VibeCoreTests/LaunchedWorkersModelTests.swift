@@ -510,7 +510,9 @@ extension LeadAdvanceTests {
                       finder: LeadVault.Finder? = nil, agent: Agent? = nil) -> LeadVault.Reply {
         guard case .grant(let grant) = book.answer(.issue(role: .verifier, root: root, task: "t", auditing: commit, finder: finder, agent: agent),
                                                    from: .session("lead")) else { return .refused("no grant") }
-        return book.answer(.bind(grant: grant, root: root, session: session), from: .session("lead"), bound: command.map { .init(command: $0) })
+        // A Claude verifier's own flags, as its launch carries them (`RoleLaunchCheck.verifierFlags`).
+        let carried = command.map { agent != .codex && $0.hasPrefix("claude ") ? "claude --setting-sources user --strict-mcp-config" + $0.dropFirst("claude".count) : $0 }
+        return book.answer(.bind(grant: grant, root: root, session: session), from: .session("lead"), bound: carried.map { .init(command: $0) })
     }
 
     /// The user's allowance of `model` for `t` at `commit`, as the app records an answer to the audit's question.
@@ -587,10 +589,10 @@ extension LeadAdvanceTests {
     /// A Codex verifier: bound unless a Codex worker worked on the task.
     @Test func aCodexVerifierIsKeptOffACodexWorkersTask() {
         let (book, root, commit) = floorBook()
-        #expect(bindVerifier(book, root: root, commit: commit, session: "c1", command: "codex -m gpt-6", agent: .codex) == .ok)
+        #expect(bindVerifier(book, root: root, commit: commit, session: "c1", command: "codex --model gpt-6", agent: .codex) == .ok)
         guard case .grant(let worker) = book.answer(.issue(role: .worker, root: root, task: "t", auditing: nil, agent: .codex), from: .session("lead")) else { return }
-        #expect(book.answer(.bind(grant: worker, root: root, session: "cw"), from: .session("lead"), bound: .init(command: "codex -m gpt-6")) == .ok)
-        guard case .refused = bindVerifier(book, root: root, commit: commit, session: "c2", command: "codex -m gpt-6", agent: .codex) else {
+        #expect(book.answer(.bind(grant: worker, root: root, session: "cw"), from: .session("lead"), bound: .init(command: "codex --model gpt-6")) == .ok)
+        guard case .refused = bindVerifier(book, root: root, commit: commit, session: "c2", command: "codex --model gpt-6", agent: .codex) else {
             Issue.record("a Codex verifier on a Codex worker's task was bound")
             return
         }
@@ -739,5 +741,409 @@ extension LeadAdvanceTests {
         try commit("plain.txt", "x\n", in: Worktrees.path(root: root, slug: "plain"))
         let audited = lead.call("audit", ["task": "plain"])
         #expect(!audited.isError, "\(audited.text)")
+    }
+
+    // MARK: X1: a role's launch carries what VibeSwitcher's own does
+
+    /// The `--settings` a prepared launch carries, as the bind reads it: inline JSON, or the file's text.
+    func settingsRead(_ prepared: LeadLaunch.Prepared) -> RoleLaunchCheck.SettingsRead? {
+        guard let path = RoleLaunchCheck.settingsPath(in: prepared.command) else { return nil }
+        return (try? String(contentsOfFile: path, encoding: .utf8)).map { .text($0) } ?? .unread(path)
+    }
+
+    /// The builders' own launches pass their check, each role and agent, with the toolset's heavy-slot variables, on the
+    /// Mac's presets' defaults and the node's program by its path: the allowlists are the builders' output.
+    @Test func whatTheBuildersLaunchPassesTheCheck() throws {
+        let root = temp.url("builders-repo").path
+        try FileManager.default.createDirectory(atPath: root, withIntermediateDirectories: true)
+        let toolset = [TestLock.slotsVariable, TestLock.timeoutVariable, TestLock.stallVariable]
+        let presets = LaunchPresets.builtIns().presets(for: nil).filter { $0.kind != .shell }.map(\.command)
+        #expect(presets == ["claude", "codex"])
+        for base in ["claude", "'/home/u/.local/share/claude/versions/2.1.332'"] {
+            for role in [LeadLaunch.Role.worker, .verifier] {
+                for pins in [false, true] {
+                    let prepared = try LeadLaunch.prepare(role: role, root: root, task: "t", base: base, prompt: "p {x} $HOME ~ [y]", start: "Go on: a; b | c {d} $e",
+                                                          server: "/s", name: "\(role.rawValue)-t-\(pins)", model: "claude-opus-5-5", advisor: "fable",
+                                                          effort: "high", folder: temp.url("run-\(role.rawValue)-\(pins)-\(base.count)"), pinModels: pins)
+                    let why = RoleLaunchCheck.refusal(command: prepared.command, agent: .claude, role: role,
+                                                      environment: Array(prepared.environment.keys) + toolset, settings: settingsRead(prepared))
+                    #expect(why == nil, "\(role) \(base) \(pins): \(why ?? "")")
+                }
+            }
+        }
+        for role in [LeadLaunch.Role.worker, .verifier] {
+            let prepared = try LeadLaunch.prepareCodex(root: root, task: "t", base: "codex", prompt: "p", start: "Go", server: "/s", name: "codex-\(role.rawValue)",
+                                                       model: "gpt-6", effort: "high", folder: temp.url("codex-run-\(role.rawValue)"), cwd: root, role: role)
+            let why = RoleLaunchCheck.refusal(command: prepared.command, agent: .codex, role: role, environment: Array(prepared.environment.keys) + toolset, settings: nil)
+            #expect(why == nil, "codex \(role): \(why ?? "")")
+        }
+        // The real node's worker command, as its process list shows it.
+        let real = "'/home/u/.local/share/claude/versions/2.1.332' --permission-mode auto --name 'worker-sb6-2-2-a' --model 'opus' --advisor 'fable' --effort 'high' "
+            + "--mcp-config '{\"mcpServers\":{\"vibeswitcher\":{\"args\":[\"--keeper\",\"--role\",\"worker\"],\"command\":\"/x/bin/vibeswitcher-mcp\"}}}' "
+            + "--settings '{\"enabledPlugins\":{\"a@b\":false},\"env\":{\"GIT_EDITOR\":\"true\",\"GIT_OPTIONAL_LOCKS\":\"0\"},\"hooks\":{},\"permissions\":{\"allow\":[\"Bash(git status:*)\"],\"deny\":[]},\"statusLine\":{\"type\":\"command\"}}' "
+            + "--append-system-prompt 'You are a worker {x} [y] $z' -- 'Start the task.'"
+        #expect(RoleLaunchCheck.refusal(command: real, agent: .claude, role: .worker, environment: [SessionNote.roleVariable, LeadLaunch.autoUpdaterVariable, "TMPDIR"],
+                                        settings: nil) == nil)
+    }
+
+    /// What can change the model without `--model` is refused under the floor, in one plain sentence with the way out.
+    @Test func whatCanChangeTheModelIsRefused() {
+        let base = "claude --name w --model opus"
+        let env = [SessionNote.roleVariable, "TMPDIR"]
+        func refused(_ command: String, agent: Agent = .claude, environment: [String]? = nil, settings: RoleLaunchCheck.SettingsRead? = nil) -> String? {
+            RoleLaunchCheck.refusal(command: command, agent: agent, role: .worker, environment: environment ?? env, settings: settings)
+        }
+        #expect(refused(base + " --fallback-model fable -- go") == "This session's command has `--fallback-model`, which the node can't vouch for under your review rules: remove it from the launch preset, or lower `floor_verifier_different`.")
+        for command in [base + " --agents '{\"x\":{\"model\":\"fable\"}}' -- go",
+                        base + " --settings '{\"env\":{\"GIT_EDITOR\":\"true\"}}' --settings '{\"env\":{}}' -- go",
+                        base + " --settings '{\"env\":{\"ANTHROPIC_BASE_URL\":\"https://x\"}}' -- go",
+                        base + " --settings '{\"model\":\"fable\"}' -- go",
+                        base + " --settings '{\"fallbackModel\":\"fable\"}' -- go",
+                        base + " --settings 'not json' -- go"] {
+            #expect(refused(command)?.hasSuffix("which the node can't vouch for under your review rules: remove it from the launch preset, or lower `floor_verifier_different`.") == true, "\(command)")
+        }
+        #expect(refused("codex --no-daemon -c 'model=o3' --model gpt-6 -- go", agent: .codex)?.contains("`-c model`") == true)
+        #expect(refused("codex --no-daemon -c 'mcp_servers.vibeswitcher.command=\"/s\"' --model gpt-6 -- go", agent: .codex) == nil)
+        #expect(refused(base + " -- go", environment: env + ["PATH"])?.contains("spawn environment has `PATH`") == true)
+        #expect(refused(base + " -- go", environment: env + ["ANTHROPIC_MODEL"])?.contains("`ANTHROPIC_MODEL`") == true)
+        // A `--settings` file where settings are inline: never the launch's (the Mac's: `aSettingsFileIsOnlyTheOneTheLaunchWrote`).
+        #expect(RoleLaunchCheck.refusal(command: base + " --settings /run/s.json -- go", agent: .claude, role: .worker, environment: env,
+                                        settings: .text("{\"env\":{\"GIT_EDITOR\":\"true\"}}"), inline: true)?.contains("gives its settings inline") == true)
+        // A flag twice (the program takes the last), a value that starts with `-`, a switch given a value.
+        #expect(refused("claude --model opus --name a --name b -- go")?.contains("`--name` more than once") == true)
+        #expect(refused("claude --model opus --model fable -- go") == nil)
+        #expect(refused("claude --model opus --append-system-prompt '--fallback-model is not a flag here' -- go")?.contains("given `--fallback-model") == true)
+        #expect(refused(base + " --strict-mcp-config=x -- go") != nil)
+        // The host's recorded command (long values as '…', `LinuxLaunch.recorded`) can't be judged: the bind takes the full one.
+        #expect(refused(base + " --settings '…' -- go") != nil)
+        // Words after `--` are the start message, never flags.
+        #expect(refused(base + " -- 'use --fallback-model fable'") == nil)
+    }
+
+    /// At the bind: under the floor such a worker holds no role; without it, as before.
+    @Test func aBindUnderTheFloorJudgesTheLaunchAndWithoutItNothingChanges() {
+        let fallback = "claude --model sonnet --fallback-model fable -- go"
+        let (book, root, _) = floorBook()
+        guard case .grant(let worker) = book.answer(.issue(role: .worker, root: root, task: "x", auditing: nil), from: .session("lead")) else { return }
+        guard case .refused(let why) = book.answer(.bind(grant: worker, root: root, session: "fb"), from: .session("lead"),
+                                                   bound: .init(command: fallback, environmentNames: [SessionNote.roleVariable])) else {
+            Issue.record("a worker with --fallback-model was bound under the floor")
+            return
+        }
+        #expect(why.contains("`--fallback-model`"), "\(why)")
+        guard case .grant(let pathed) = book.answer(.issue(role: .worker, root: root, task: "y", auditing: nil), from: .session("lead")) else { return }
+        guard case .refused = book.answer(.bind(grant: pathed, root: root, session: "path"), from: .session("lead"),
+                                          bound: .init(command: "claude --model sonnet -- go", environmentNames: [SessionNote.roleVariable, "PATH"])) else {
+            Issue.record("a worker whose spawn set PATH was bound under the floor")
+            return
+        }
+        let (free, freeRoot, _) = floorBook(floor: LeadReviewFloor(verifierDifferent: false))
+        guard case .grant(let other) = free.answer(.issue(role: .worker, root: freeRoot, task: "x", auditing: nil), from: .session("lead")) else { return }
+        #expect(free.answer(.bind(grant: other, root: freeRoot, session: "fb"), from: .session("lead"),
+                            bound: .init(command: fallback, environmentNames: [SessionNote.roleVariable, "PATH"])) == .ok)
+    }
+
+    // MARK: Codex's install roots
+
+    /// bun's root in the account's home counts by its path; npm's global roots only when root's all the way down; a Codex
+    /// path outside them is refused under the floor, named with the roots.
+    @Test func codexCountsUnderItsInstallRootsAndNpmsOnlyWhenRoots() throws {
+        let roots = WorkerLaunch.codexRoots.map(\.folder)
+        #expect(roots == [(VibePaths.accountHome as NSString).appendingPathComponent(".bun/install/global/node_modules/@openai/codex/"),
+                          "/usr/lib/node_modules/@openai/codex/", "/usr/local/lib/node_modules/@openai/codex/", "/opt/homebrew/lib/node_modules/@openai/codex/"])
+        #expect(WorkerLaunch.codexRoots.map(\.rootOwned) == [false, true, true, true])
+        // A home root (bun's): its path is enough.
+        let bun = temp.url("bun/install/global/node_modules/@openai/codex")
+        try FileManager.default.createDirectory(at: bun.appendingPathComponent("bin"), withIntermediateDirectories: true)
+        let program = bun.appendingPathComponent("bin/codex.js")
+        try Data("codex stand-in".utf8).write(to: program)
+        let link = temp.url("bun-codex-link")
+        try FileManager.default.createSymbolicLink(at: link, withDestinationURL: program)
+        let home = WorkerLaunch.CodexRoot(folder: bun.path, rootOwned: false)
+        #expect(WorkerLaunch.agent(atPath: link.path, links: [:], codexRoots: [home]) == .codex)
+        // The same folder as an npm root: not root's, so not Codex.
+        #expect(WorkerLaunch.agent(atPath: program.path, links: [:], codexRoots: [WorkerLaunch.CodexRoot(folder: bun.path, rootOwned: true)]) == nil)
+        // A root that is root's all the way down (the system's /usr/bin, standing in for npm's): counted.
+        let env = try #require(WorkerLaunch.realPathOf("/usr/bin/env"))
+        #expect(WorkerLaunch.rootsAlone(env))
+        #expect(WorkerLaunch.agent(atPath: "/usr/bin/env", links: [:], codexRoots: [WorkerLaunch.CodexRoot(folder: (env as NSString).deletingLastPathComponent, rootOwned: true)]) == .codex)
+        #expect(!WorkerLaunch.rootsAlone(program.path))
+        // Outside every root: nil, and the refusal names the path and the roots.
+        #expect(WorkerLaunch.agent(atPath: program.path, links: [:], codexRoots: []) == nil)
+        let said = WorkerLaunch.codexRootsSaid("/x/codex")
+        #expect(said.contains("/x/codex") && said.contains("/usr/lib/node_modules/@openai/codex/ (root's)") && said.contains(".bun/install/global"), "\(said)")
+    }
+
+    /// At the bind under the floor: a Codex grant whose program isn't under a root is refused, naming the path.
+    @Test func aCodexOutsideItsRootsIsRefusedNamingThePath() throws {
+        let (book, root, _) = floorBook()
+        guard case .grant(let worker) = book.answer(.issue(role: .worker, root: root, task: "x", auditing: nil, agent: .codex), from: .session("lead")) else {
+            Issue.record("no grant")
+            return
+        }
+        let stray = temp.url("npm-user/lib/node_modules/@openai/codex/bin/codex.js")
+        try FileManager.default.createDirectory(at: stray.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data("codex stand-in".utf8).write(to: stray)
+        guard case .refused(let why) = book.answer(.bind(grant: worker, root: root, session: "cx"), from: .session("lead"),
+                                                   bound: .init(command: "'\(stray.path)' --model gpt-6 -- go", links: [:])) else {
+            Issue.record("a Codex outside its roots was bound under the floor")
+            return
+        }
+        #expect(why.contains(stray.path) && why.contains("install roots"), "\(why)")
+    }
+
+    // MARK: The options as the agent reads them
+
+    /// One reading of the options, as Claude Code's parser reads them: a value-taking flag takes the next word whatever
+    /// it is, `--` included; only a `--` where a flag could start ends them; `--resume`'s value only when it doesn't
+    /// start with `-`.
+    @Test func theOptionsAreReadAsTheAgentReadsThem() {
+        let hidden = "claude --model sonnet --name -- --model claude-fable-5-2 -- 'start'"
+        #expect(WorkerLaunch.launchModel(command: hidden) == "claude-fable-5-2")
+        #expect(WorkerLaunch.options(of: hidden).map(\.flag) == ["--model", "--name", "--model"])
+        #expect(RoleLaunchCheck.refusal(command: hidden, agent: .claude, role: .worker, environment: nil, settings: nil)?.contains("`--name` given `--`") == true)
+        #expect(WorkerLaunch.launchModel(command: "claude --model x -- --model y") == "x")
+        #expect(RoleLaunchCheck.settingsPath(in: "claude --name -- --settings /x/s.json -- go") == "/x/s.json")
+        #expect(RoleLaunchCheck.settingsPath(in: "claude -- --settings /x/s.json") == nil)
+        // `--resume [value]`: the next flag is a flag.
+        #expect(WorkerLaunch.options(of: "claude --resume --fallback-model fable").map(\.flag) == ["--resume", "--fallback-model"])
+        #expect(WorkerLaunch.options(of: "claude --resume abc --model x").map(\.value) == ["abc", "x"])
+        #expect(WorkerLaunch.launchModel(command: "claude --resume --model claude-fable-5-2 -- go") == "claude-fable-5-2")
+        for command in ["claude --model sonnet --resume --fallback-model claude-fable-5-2 -- go",
+                        "claude --model sonnet --resume --settings '{\"env\":{\"ANTHROPIC_BASE_URL\":\"https://x\"}}' -- go",
+                        "claude --model sonnet --resume abc -- go"] {
+            #expect(RoleLaunchCheck.refusal(command: command, agent: .claude, role: .worker, environment: nil, settings: nil) != nil, "\(command)")
+        }
+        // Codex's: one value each, `--no-daemon` none.
+        #expect(WorkerLaunch.options(of: "codex --no-daemon --cd /w -c 'a=1' --model gpt-6 -- go").map(\.value) == [nil, "/w", "a=1", "gpt-6"])
+        #expect(RoleLaunchCheck.refusal(command: "codex --no-daemon --cd -- --model o3 -- go", agent: .codex, role: .worker, environment: nil, settings: nil) != nil)
+    }
+
+    /// A verifier carries `--setting-sources user` and `--strict-mcp-config`, exactly; a worker neither.
+    @Test func eachRoleCarriesItsOwnFlagsExactly() {
+        func refused(_ command: String, _ role: LeadLaunch.Role) -> String? {
+            RoleLaunchCheck.refusal(command: command, agent: .claude, role: role, environment: nil, settings: nil)
+        }
+        let verifier = "claude --name v --model opus --setting-sources user --strict-mcp-config -- go"
+        #expect(refused(verifier, .verifier) == nil)
+        #expect(refused("claude --name v --model opus --strict-mcp-config -- go", .verifier)?.contains("lacks `--setting-sources user`") == true)
+        #expect(refused("claude --name v --model opus --setting-sources user -- go", .verifier)?.contains("lacks `--strict-mcp-config`") == true)
+        #expect(refused("claude --name v --model opus --setting-sources user,project,local --strict-mcp-config -- go", .verifier)?
+            .contains("a verifier's launch carries `--setting-sources user`") == true)
+        #expect(refused(verifier, .worker)?.contains("`--setting-sources`") == true)
+        #expect(refused("claude --name w --model opus --strict-mcp-config -- go", .worker)?.contains("`--strict-mcp-config`") == true)
+        #expect(refused("claude --name w --model opus -- go", .worker) == nil)
+    }
+
+    /// A `--settings` file: never where settings are inline (Linux); where they aren't (the Mac's), only the one the
+    /// launch wrote, by its digest, in the launch's own folder.
+    @Test func aSettingsFileIsOnlyTheOneTheLaunchWrote() {
+        let text = "{\"env\":{\"GIT_EDITOR\":\"true\"}}"
+        let folder = "/v/lead/run/abc/"
+        let command = "claude --name w --model opus --settings \(folder)w-x/settings.json -- go"
+        func refused(_ command: String, read: RoleLaunchCheck.SettingsRead?, digest: String?, inline: Bool) -> String? {
+            RoleLaunchCheck.refusal(command: command, agent: .claude, role: .worker, environment: nil, settings: read,
+                                    file: .init(digest: digest, folder: folder), inline: inline)
+        }
+        let digest = WalletStamp.digest(Data(text.utf8))
+        #expect(refused(command, read: .text(text), digest: digest, inline: true)?.contains("gives its settings inline") == true)
+        #expect(refused(command, read: .text(text), digest: digest, inline: false) == nil)
+        #expect(refused(command, read: .text(text + " "), digest: digest, inline: false)?.contains("isn't the one VibeSwitcher wrote") == true)
+        #expect(refused(command, read: .text(text), digest: nil, inline: false) != nil)
+        #expect(refused(command, read: .unread("x"), digest: digest, inline: false)?.contains("couldn't read") == true)
+        #expect(refused("claude --name w --model opus --settings /elsewhere/settings.json -- go", read: .text(text), digest: digest, inline: false)?
+            .contains("outside its launch's own folder") == true)
+        #expect(refused("claude --name w --model opus --settings \(folder)../x/settings.json -- go", read: .text(text), digest: digest, inline: false) != nil)
+        // The builder's digest is its file's, and an inline launch carries none.
+        let prepared = LeadLaunch.Prepared(command: "c", promptFile: "/p", mcpFile: "/m", settingsFile: "/s")
+        #expect(prepared.settingsDigest == nil)
+    }
+
+    /// The launch builder's digest is what it wrote; inlined, it carries none.
+    @Test func theBuildersDigestIsWhatItWrote() throws {
+        let root = temp.url("digest-repo").path
+        try FileManager.default.createDirectory(atPath: root, withIntermediateDirectories: true)
+        let prepared = try LeadLaunch.prepare(role: .worker, root: root, task: "t", base: "claude", prompt: "p", start: "go", server: "/s",
+                                              name: "w-t", model: "opus", folder: temp.url("digest-run"))
+        if Platform.Tools.roleSettingsInline {
+            #expect(prepared.settingsDigest == nil)
+        } else {
+            let data = try Data(contentsOf: URL(fileURLWithPath: prepared.settingsFile))
+            #expect(prepared.settingsDigest == WalletStamp.digest(data))
+        }
+    }
+
+    /// At the bind under the floor: a worker whose branch's settings route it elsewhere, and a session whose full
+    /// command the host no longer has, hold no role; without the floor, as before.
+    @Test func aRoutedBranchAndAnUnknownFullCommandAreRefused() throws {
+        let worktree = temp.url("routed-worktree")
+        try FileManager.default.createDirectory(at: worktree.appendingPathComponent(".claude"), withIntermediateDirectories: true)
+        try Data("{\"env\":{\"ANTHROPIC_BASE_URL\":\"https://gateway.example\"}}".utf8).write(to: worktree.appendingPathComponent(".claude/settings.local.json"))
+        let (book, root, _) = floorBook()
+        guard case .grant(let worker) = book.answer(.issue(role: .worker, root: root, task: "x", auditing: nil), from: .session("lead")) else { return }
+        guard case .refused(let why) = book.answer(.bind(grant: worker, root: root, session: "routed"), from: .session("lead"),
+                                                   bound: .init(command: "claude --model sonnet -- go", cwd: worktree.path)) else {
+            Issue.record("a routed worker was bound under the floor")
+            return
+        }
+        #expect(why.contains("ANTHROPIC_BASE_URL in .claude/settings.local.json"), "\(why)")
+        // Refused, never pinned: no subscription session has been seen to start with it set.
+        #expect(WorkerLaunch.pins(model: "opus")["ANTHROPIC_BASE_URL"] == nil)
+        guard case .grant(let other) = book.answer(.issue(role: .worker, root: root, task: "y", auditing: nil), from: .session("lead")) else { return }
+        guard case .refused(let restart) = book.answer(.bind(grant: other, root: root, session: "clipped"), from: .session("lead"),
+                                                       bound: .init(command: "claude --model sonnet --settings '…' -- go", full: false)) else {
+            Issue.record("a session without its full command was bound under the floor")
+            return
+        }
+        #expect(restart.contains("start it again"), "\(restart)")
+        let (free, freeRoot, _) = floorBook(floor: LeadReviewFloor(verifierDifferent: false))
+        guard case .grant(let loose) = free.answer(.issue(role: .worker, root: freeRoot, task: "x", auditing: nil), from: .session("lead")) else { return }
+        #expect(free.answer(.bind(grant: loose, root: freeRoot, session: "routed"), from: .session("lead"),
+                            bound: .init(command: "claude --model sonnet -- go", cwd: worktree.path)) == .ok)
+    }
+
+    // MARK: The digest with the grant; the branch read fails closed; a key twice
+
+    /// The settings digest is given with the grant by its issuer and kept with it; only the issuer binds the grant.
+    @Test func theSettingsDigestComesWithTheGrantAndOnlyItsIssuerBinds() throws {
+        let (book, root, _) = floorBook()
+        guard case .grant(let worker) = book.answer(.issue(role: .worker, root: root, task: "x", auditing: nil, settings: "d1"), from: .session("lead")) else {
+            Issue.record("no grant")
+            return
+        }
+        // Where settings are a file (the Mac's): bound when the file in the launch's folder is the digest's, never by
+        // what the bind says.
+        book.settingsInline = false
+        let file = URL(fileURLWithPath: LeadVault.runPrefix(root: root)).appendingPathComponent("worker-x/settings.json")
+        try FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
+        let text = "{\"env\":{\"GIT_EDITOR\":\"true\"}}"
+        try Data(text.utf8).write(to: file)
+        let command = "claude --model sonnet --settings '\(file.path)' -- go"
+        guard case .refused(let other) = book.answer(.bind(grant: worker, root: root, session: "mismatch"), from: .session("lead"),
+                                                     bound: .init(command: command)) else {
+            Issue.record("a settings file other than the grant's digest's was bound")
+            return
+        }
+        #expect(other.contains("isn't the one VibeSwitcher wrote"), "\(other)")
+        guard case .grant(let matching) = book.answer(.issue(role: .worker, root: root, task: "y", auditing: nil,
+                                                             settings: WalletStamp.digest(Data(text.utf8))), from: .session("lead")) else { return }
+        #expect(book.answer(.bind(grant: matching, root: root, session: "match"), from: .session("lead"), bound: .init(command: command)) == .ok)
+        // A worker (or anyone but the lead's tool server that asked for it) can't bind the grant.
+        guard case .refused(let why) = book.answer(.bind(grant: worker, root: root, session: "w"), from: .session("worker"),
+                                                   bound: .init(command: "claude --model sonnet -- go")) else {
+            Issue.record("another caller bound the lead's grant")
+            return
+        }
+        #expect(why.contains("isn't yours to bind"), "\(why)")
+        // The file the digest is of is made fresh: a link left at its path is replaced, its target untouched.
+        let target = temp.url("planted-target")
+        try Data("theirs".utf8).write(to: target)
+        let path = temp.url("planted-settings.json")
+        try FileManager.default.createSymbolicLink(at: path, withDestinationURL: target)
+        try LeadLaunch.writeExclusive(Data("mine".utf8), to: path.path)
+        #expect(try String(contentsOf: target, encoding: .utf8) == "theirs")
+        #expect((try? FileManager.default.destinationOfSymbolicLink(atPath: path.path)) == nil)
+        #expect(try String(contentsOf: path, encoding: .utf8) == "mine")
+    }
+
+    /// Under the floor a Claude worker's branch settings must be read whole: unreadable, not JSON, too big, a key twice
+    /// or reads that didn't finish refuse it; a missing file is clean.
+    @Test func aBranchSettingsReadFailsClosed() throws {
+        func facts(_ write: (URL) throws -> Void) throws -> WorkerLaunch.BindFacts {
+            let worktree = temp.url("branch-\(UUID().uuidString.prefix(8))")
+            try FileManager.default.createDirectory(at: worktree.appendingPathComponent(".claude"), withIntermediateDirectories: true)
+            try write(worktree.appendingPathComponent(".claude/settings.json"))
+            return WorkerLaunch.bindFacts(seen: .init(command: "claude --model sonnet -- go", cwd: worktree.path), home: temp.url("home-none").path,
+                                          limit: 60)
+        }
+        #expect(RoleLaunchCheck.branchRefusal(try facts { _ in }) == nil)
+        #expect(RoleLaunchCheck.branchRefusal(try facts { try Data("{\"model\":\"sonnet\"}".utf8).write(to: $0) }) == nil)
+        let notJSON = RoleLaunchCheck.branchRefusal(try facts { try Data("model = sonnet".utf8).write(to: $0) })
+        #expect(notJSON?.contains("not one JSON object") == true && notJSON?.contains("fix or remove the file") == true, "\(notJSON ?? "")")
+        let big = RoleLaunchCheck.branchRefusal(try facts { try Data(repeating: 0x20, count: WorkerLaunch.settingsLimit + 1).write(to: $0) })
+        #expect(big?.contains("couldn't be read whole") == true, "\(big ?? "")")
+        if getuid() != 0 {
+            let unreadable = RoleLaunchCheck.branchRefusal(try facts {
+                try Data("{}".utf8).write(to: $0)
+                chmod($0.path, 0)
+            })
+            #expect(unreadable?.contains("couldn't be read whole") == true, "\(unreadable ?? "")")
+        }
+        var late = WorkerLaunch.BindFacts(known: true)
+        late.projectRead = false
+        #expect(RoleLaunchCheck.branchRefusal(late)?.contains("weren't read in time") == true)
+        // Two `env` objects, the second routing it: refused by the key twice, and by the name in the text.
+        let twice = try facts { try Data("{\"env\":{\"GIT_EDITOR\":\"true\"},\"env\":{\"ANTHROPIC_BASE_URL\":\"https://gateway.example\"}}".utf8).write(to: $0) }
+        #expect(twice.projectUnread.first?.contains("\"env\" twice") == true, "\(twice.projectUnread)")
+        #expect(twice.projectRouting == ["ANTHROPIC_BASE_URL in .claude/settings.json"], "\(twice.projectRouting)")
+        // The name hidden from the text by an escape, in a duplicate: the key twice still refuses it.
+        let hidden = try facts { try Data("{\"env\":{},\"env\":{\"ANTHROPIC_BASE_\\u0055RL\":\"https://gateway.example\"}}".utf8).write(to: $0) }
+        #expect(RoleLaunchCheck.branchRefusal(hidden)?.contains("twice") == true, "\(hidden.projectUnread)")
+        // A key's escapes are decoded before it's compared; values and arrays aren't keys.
+        #expect(WorkerLaunch.duplicateKey(Data("{\"a\":1,\"\\u0061\":2}".utf8)) == "a")
+        #expect(WorkerLaunch.duplicateKey(Data("{\"a\":\"a\",\"b\":[\"a\",{\"a\":1}],\"c\":{\"a\":{\"a\":2}}}".utf8)) == nil)
+        // The judged `--settings` too.
+        #expect(RoleLaunchCheck.refusal(command: "claude --model opus --settings '{\"env\":{},\"env\":{}}' -- go", agent: .claude, role: .worker,
+                                        environment: nil, settings: nil)?.contains("twice") == true)
+    }
+
+    /// At the bind under the floor: a Claude worker whose branch settings couldn't be read is refused, naming the file.
+    @Test func theBindRefusesAWorkerWhoseBranchSettingsCouldntBeRead() throws {
+        let worktree = temp.url("unreadable-worktree")
+        try FileManager.default.createDirectory(at: worktree.appendingPathComponent(".claude"), withIntermediateDirectories: true)
+        try Data("not json".utf8).write(to: worktree.appendingPathComponent(".claude/settings.local.json"))
+        let (book, root, _) = floorBook()
+        guard case .grant(let worker) = book.answer(.issue(role: .worker, root: root, task: "x", auditing: nil), from: .session("lead")) else { return }
+        guard case .refused(let why) = book.answer(.bind(grant: worker, root: root, session: "u"), from: .session("lead"),
+                                                   bound: .init(command: "claude --model sonnet -- go", cwd: worktree.path)) else {
+            Issue.record("a worker whose branch settings couldn't be read was bound under the floor")
+            return
+        }
+        #expect(why.contains("settings.local.json") && why.contains("fix or remove the file"), "\(why)")
+    }
+
+    // MARK: The model keys in a branch's settings; the refusals' ways out
+
+    /// A worker's branch settings that change its model beside `--model` (`modelOverrides`, `fallbackModel`, `agent`, …)
+    /// refuse it under the floor; `model` alone, below `--model` and counted, doesn't.
+    @Test func aBranchsModelKeysRefuseAWorker() throws {
+        func refusal(_ text: String) throws -> String? {
+            let worktree = temp.url("keys-\(UUID().uuidString.prefix(8))")
+            try FileManager.default.createDirectory(at: worktree.appendingPathComponent(".claude"), withIntermediateDirectories: true)
+            try Data(text.utf8).write(to: worktree.appendingPathComponent(".claude/settings.local.json"))
+            return RoleLaunchCheck.branchRefusal(WorkerLaunch.bindFacts(seen: .init(command: "claude --model sonnet -- go", cwd: worktree.path),
+                                                                         home: temp.url("home-none").path, limit: 60))
+        }
+        let overrides = try refusal("{\"modelOverrides\":{\"claude-sonnet-5-5\":\"claude-fable-5-2\"}}")
+        #expect(overrides?.contains("modelOverrides in .claude/settings.local.json") == true, "\(overrides ?? "")")
+        for text in ["{\"fallbackModel\":[\"fable\"]}", "{\"agent\":\"writer\"}", "{\"fastMode\":true}", "{\"availableModels\":[\"fable\"]}",
+                     "{\"advisorModel\":\"fable\"}", "{\"switchModelsOnFlag\":true}"] {
+            #expect(try refusal(text) != nil, "\(text)")
+        }
+        #expect(try refusal("{\"model\":\"sonnet\",\"effortLevel\":\"high\",\"apiKeyHelper\":\"/bin/true\"}") == nil)
+        // At the bind, the user's words: what it found and the way out.
+        let worktree = temp.url("overrides-worktree")
+        try FileManager.default.createDirectory(at: worktree.appendingPathComponent(".claude"), withIntermediateDirectories: true)
+        try Data("{\"modelOverrides\":{\"claude-sonnet-5-5\":\"claude-fable-5-2\"}}".utf8).write(to: worktree.appendingPathComponent(".claude/settings.local.json"))
+        let (book, root, _) = floorBook()
+        guard case .grant(let worker) = book.answer(.issue(role: .worker, root: root, task: "x", auditing: nil), from: .session("lead")) else { return }
+        guard case .refused(let why) = book.answer(.bind(grant: worker, root: root, session: "o"), from: .session("lead"),
+                                                   bound: .init(command: "claude --model sonnet -- go", cwd: worktree.path)) else {
+            Issue.record("a worker whose branch overrides its model was bound under the floor")
+            return
+        }
+        #expect(why.contains("modelOverrides") && why.contains("remove it from the branch's settings"), "\(why)")
+        // A program it can't tell apart: the way out names the bare name.
+        guard case .grant(let wrapped) = book.answer(.issue(role: .worker, root: root, task: "y", auditing: nil), from: .session("lead")) else { return }
+        guard case .refused(let shell) = book.answer(.bind(grant: wrapped, root: root, session: "sh"), from: .session("lead"),
+                                                     bound: .init(command: "sh -c 'claude --model sonnet'")) else {
+            Issue.record("a wrapped program was bound under the floor")
+            return
+        }
+        #expect(shell.contains("Name claude bare in the launch preset, or lower `floor_verifier_different`"), "\(shell)")
+        // A grant with no digest where settings are a file (an older tool server): its own words.
+        let older = RoleLaunchCheck.refusal(command: "claude --model opus --settings /v/run/k/w/settings.json -- go", agent: .claude, role: .worker,
+                                            environment: nil, settings: .text("{}"), file: .init(digest: nil, folder: "/v/run/k/"), inline: false)
+        #expect(older?.contains("the lead's tool server is from an older build") == true && older?.contains("restart the lead") == true, "\(older ?? "")")
     }
 }
