@@ -113,7 +113,7 @@ struct ScratchNodeTests {
         #expect(kinds == ["status", "questions", "subscribe", "unsubscribe", "chat.page", "draft", "draft.clear", "board", "seen",
                           "session.draft", "session.draft.clear", "session.presets", "session.complete", "session.attach",
                           "session.usage", "chat.image", "stats", "settings", "mail", "recent", "session.ports", "board.task", "board.image", "brief",
-                          "plugin.list"], "\(kinds)")
+                          "plugin.list", "logs"], "\(kinds)")
         var seq: [String: Int] = [:]
         // The next frame that isn't a delta of a subscription made already (the node's value can change between one
         // subscribe and the next, and its delta come first: the CI flake of 2026-11-22), each such delta checked in

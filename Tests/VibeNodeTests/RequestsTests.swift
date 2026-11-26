@@ -232,7 +232,9 @@ struct RequestsTests {
                                   // The feature plugins listed (2026-11-22).
                                   "plugin.list",
                                   // External plugins (2026-11-22): what an add shows, and an agent's vs-ask.
-                                  "plugin.inspect", "plugin.file"]
+                                  "plugin.inspect", "plugin.file",
+                                  // The node's logs, masked (the no-terminal inventory's C8, 2026-11-26).
+                                  "logs"]
         let changes: Set<String> = ["stop", "lead", "answer", "hold", "tell", "config.accept", "base.accept", "base.keep", "hooks.install", "hooks.remove", "build.switch",
                                     "draft", "draft.clear", "web.open", "web.revoke", "term.open", "term.close",
                                     // Driving an ordinary session (2026-11-20).
