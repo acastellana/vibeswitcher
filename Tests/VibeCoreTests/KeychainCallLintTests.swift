@@ -23,7 +23,6 @@ struct KeychainCallLintTests {
     static let allowedFiles: [(file: String, reason: String)] = [
         ("scripts/build-app.sh", "the user's interactive install path: it reads the user's search list and signing keychain and asks to unlock it, as the user runs it"),
         ("scripts/setup-signing.sh", "the user's interactive install path: it makes the user's signing keychain at the user's own password prompt"),
-        ("scripts/test-signing.sh", "the signing scripts' own check, run by hand: each security call is on a scratch HOME (its search list), its keychains made with their password on stdin, never the user's"),
     ]
 
     /// A use in `file`, on a line containing `text`, allowed for `reason`. An entry nothing matches fails the lint.
@@ -32,6 +31,37 @@ struct KeychainCallLintTests {
          "a line BriefingKey.parse is given, and refuses: nothing runs it"),
         ("Tests/VibeCoreTests/AppUpdateTests.swift", "== \"security unlock-keychain '\\(keychain.path)' && scripts/build-app.sh --install\"",
          "the command AppUpdate hands the user to run in a real terminal, compared as text: nothing runs it"),
+        // scripts/test-signing.sh, the signing scripts' own check: each line, with why it can't ask.
+        ("scripts/test-signing.sh", "CFFIXED_USER_HOME=\"$work/home\" security delete-keychain \"$kc\"",
+         "test-signing.sh --build, run by hand on a scratch HOME (`run` sets HOME and CFFIXED_USER_HOME): deletes its own scratch keychains by path"),
+        ("scripts/test-signing.sh", "printf 'security set-key-partition-%s",
+         "a fixture for its password lint, written to a file nothing runs"),
+        ("scripts/test-signing.sh", "$(before \"security ",
+         "text it looks for in setup-signing.sh's messages: nothing runs it"),
+        ("scripts/test-signing.sh", "security unlock-keychain $kc && scripts/build-app.sh",
+         "the command build-app.sh hands the user, looked for as text: nothing runs it"),
+        ("scripts/test-signing.sh", "\"[security unlock-keychain '$quoted_kc' && scripts/build-app.sh]\"",
+         "the command build-app.sh hands the user, looked for as text: nothing runs it"),
+        ("scripts/test-signing.sh", "grep -F \"security unlock-keychain\"",
+         "the command build-app.sh hands the user, looked for as text: nothing runs it"),
+        ("scripts/test-signing.sh", "run no_tty security create-keychain",
+         "test-signing.sh --build, run by hand on a scratch HOME (`run` sets HOME and CFFIXED_USER_HOME): makes a scratch keychain under its folder, the password on stdin with no terminal"),
+        ("scripts/test-signing.sh", "run security list-keychains -d user -s",
+         "test-signing.sh --build, run by hand on a scratch HOME (`run` sets HOME and CFFIXED_USER_HOME): sets the scratch HOME's search list, not the user's"),
+        ("scripts/test-signing.sh", "exec /usr/bin/security \"$@\"",
+         "test-signing.sh --build, run by hand on a scratch HOME (`run` sets HOME and CFFIXED_USER_HOME): a stand-in security on build-app.sh's PATH, passing each call through"),
+        ("scripts/test-signing.sh", "run no_tty security unlock-keychain \"$keychain\"",
+         "test-signing.sh --build, run by hand on a scratch HOME (`run` sets HOME and CFFIXED_USER_HOME): unlocks its scratch keychain by the password on stdin, no terminal: no dialog"),
+        ("scripts/test-signing.sh", "run security dump-keychain -a \"$keychain\"",
+         "test-signing.sh --build, run by hand on a scratch HOME (`run` sets HOME and CFFIXED_USER_HOME): reads its scratch keychain's access lists right after unlocking it"),
+        ("scripts/test-signing.sh", "[[ $(lockstate) == unlocked ]] && run security show-keychain-info",
+         "test-signing.sh --build, run by hand on a scratch HOME (`run` sets HOME and CFFIXED_USER_HOME): reads the settings only while lockstate says unlocked"),
+        ("scripts/test-signing.sh", "run security set-keychain-settings -l -u -t",
+         "test-signing.sh --build, run by hand on a scratch HOME (`run` sets HOME and CFFIXED_USER_HOME): sets the lock settings setup-signing.sh gives the user's keychain, on its scratch one, to check build-app.sh keeps them"),
+        ("scripts/test-signing.sh", "run security lock-keychain \"$keychain\"",
+         "test-signing.sh --build, run by hand on a scratch HOME (`run` sets HOME and CFFIXED_USER_HOME): locks its scratch keychain on purpose (as on sleep); its stand-in codesign unlocks it by the password on stdin, or stops, before anything reads it locked"),
+        ("scripts/test-signing.sh", "security unlock-keychain \"$SIGNING_KEYCHAIN\" 2>/dev/null",
+         "test-signing.sh --build, run by hand on a scratch HOME (`run` sets HOME and CFFIXED_USER_HOME): the stand-in codesign's unlock, the password on stdin with no terminal (setsid): no dialog"),
         // The live test runs only when the user asks for it (VIBESWITCHER_KEYCHAIN_LIVE=1, KeychainLintTests), in the
         // user's own login keychain, and reads the access list of the item it made: it changes none.
         ("Tests/VibeCoreTests/KeychainLiveTests.swift", "SecKeychainItemCopyAccess", "the user's opt-in live test reads its item's access list"),
@@ -43,11 +73,13 @@ struct KeychainCallLintTests {
 
     /// `security SUBCOMMAND` where it could run: a hyphenated subcommand, one of the plain ones, or one from a variable
     /// (`"$@"`, `$verb`). "the security checklist" isn't one.
-    static let securityCall = try! Regex(#"(?:^|[^A-Za-z0-9_.\-/])(?:/usr/bin/)?security\s+("?\$[^\s"]*|[a-z]+(?:-[a-z]+)+|import|export|authorize|authorizationdb|cms|leaks|smartcards|filevault)\b"#)
+    static let securityCall = try! Regex(#"(?:^|[^A-Za-z0-9_.\-/])(?:/usr/bin/)?security\s+(?:-[qvl]+\s+)*("?\$[^\s"]*|[a-z]+(?:-[a-z]+)+|import|export|authorize|authorizationdb|cms|leaks|smartcards|filevault)\b"#)
     /// The subcommands that read only, and never ask: the search list (not set), certificates, an error code.
     static let readOnly: Set<String> = ["list-keychains", "find-certificate", "verify-cert", "error", "help"]
-    /// security started from code: `["security", …]` handed to env or a shell, or its path.
-    static let securityLaunch = try! Regex(#"\[\s*["'](?:/usr/bin/)?security["']\s*,|["']/usr/bin/security["']"#)
+    /// security with its commands on stdin (`-i`, or options and nothing after) or its subcommand on the next line.
+    static let securityOpen = try! Regex(#"(?:^|[^A-Za-z0-9_.\-/])(?:/usr/bin/)?security(?:\s+-[a-z]+)*(?:\s+-[a-z]*i\b|\s*\\$)"#)
+    /// security started from code: `["security", …]` or `run("security", …)` handed to env or a shell, or its path.
+    static let securityLaunch = try! Regex(#"[\[(]\s*["'](?:/usr/bin/)?security["']\s*,|["']/usr/bin/security["']"#)
     /// A SecItem call, and the no-UI flag its query must hold.
     static let secItemCall = try! Regex(#"\bSec[I]tem(?:Add|CopyMatching|Update|Delete)\s*\("#)
     static let noUI = "kSecUseAuthenticationUIFail"
@@ -135,7 +167,7 @@ struct KeychainCallLintTests {
                     guard readOnly.contains(subcommand) else { return true }
                     return subcommand == "list-keychains" && line[match.range.upperBound...].contains(#/\s-s\b/#)
                 }
-                if unsafe || line.contains(securityLaunch) { flag("security outside \(helper)'s keychain_call") }
+                if unsafe || line.contains(securityOpen) || line.contains(securityLaunch) { flag("security outside \(helper)'s keychain_call") }
                 for match in line.matches(of: secItemCall) {
                     let open = line[match.range].lastIndex(of: "(")!
                     if !asksWithoutUI(lines, at: index, open: open) { flag("SecItem call without \(noUI)") }
@@ -208,6 +240,12 @@ struct KeychainCallLintTests {
             print(score['security'])
             timeout 5 security list-keychains -d user
             gtimeout -s KILL 5 security find-certificate -c Name
+            security -q add-generic-password -s probe -w x "$kc"
+            security -v find-generic-password -s probe "$kc"
+            security -i
+            security \\
+                add-generic-password -s probe "$kc"
+            security -q list-keychains -d user
             """
         try script.write(to: root.appendingPathComponent("scripts/probe.sh"), atomically: true, encoding: .utf8)
         try "security add-generic-password\n".write(to: root.appendingPathComponent(Self.helper), atomically: true, encoding: .utf8)
@@ -241,13 +279,14 @@ struct KeychainCallLintTests {
                 let process = Process()
                 process.executableURL = URL(fileURLWithPath: "/usr/bin/security")
                 process.arguments = ["security", "find-generic-password"]
+                run("security", "find-generic-password", "-s", service)
                 #expect(\(item)CopyMatching(bad as CFDictionary, nil) == errSecSuccess)
                 // \(item)Add(bad as CFDictionary, nil) in a comment
             }
             """
         try swift.write(to: root.appendingPathComponent("Tests/SomeTests/Probe.swift"), atomically: true, encoding: .utf8)
-        let planted = (2...13).map { "scripts/probe.sh:\($0)" } + ["scripts/probe.sh:20", "scripts/probe.sh:21"]
-            + [4, 5, 14, 15, 16, 17, 18, 21, 22, 23].map { "Tests/SomeTests/Probe.swift:\($0)" }
+        let planted = (2...13).map { "scripts/probe.sh:\($0)" } + (20...25).map { "scripts/probe.sh:\($0)" }
+            + [4, 5, 14, 15, 16, 17, 18, 21, 22, 23, 24].map { "Tests/SomeTests/Probe.swift:\($0)" }
         #expect(Self.findings(under: root).map { "\($0.file):\($0.line)" } == (2...4).map { "scripts/build-app.sh:\($0)" } + planted)
         #expect(Self.check(under: root).offending.map { "\($0.file):\($0.line)" } == (3...4).map { "scripts/build-app.sh:\($0)" } + planted)
     }
