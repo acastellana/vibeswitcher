@@ -35,7 +35,7 @@ public struct CheckedSessions: Equatable, Sendable {
         guard arguments.indices.contains(index + 1), case let home = arguments[index + 1], home.hasPrefix("/") else {
             return .failure(HostImages.Refused("\(testShapeFlag) needs an absolute scratch home after it"))
         }
-        guard let lock, lock != usersLock, !HostImages.isNodeLock(lock, accountHome: HostImages.accountHome) else {
+        guard let lock, !isSameLock(lock, usersLock), !HostImages.isNodeLock(lock, accountHome: HostImages.accountHome) else {
             return .failure(HostImages.Refused("\(testShapeFlag) is a scratch host's only: give it its own --lock"))
         }
         let given = ProcessInfo.processInfo.environment
@@ -46,6 +46,17 @@ public struct CheckedSessions: Equatable, Sendable {
         }
         if let why = Platform.NodeReset.processState(keeping: []) { return .failure(HostImages.Refused(why)) }
         return .success(home)
+    }
+
+    /// Whether `lock` is `other` by file: the same device and inode when both are there; else the same folder by device
+    /// and inode and the same name; the same text always.
+    static func isSameLock(_ lock: String, _ other: String) -> Bool {
+        if lock == other { return true }
+        var a = stat(), b = stat()
+        if stat(lock, &a) == 0, stat(other, &b) == 0 { return a.st_dev == b.st_dev && a.st_ino == b.st_ino }
+        guard (lock as NSString).lastPathComponent == (other as NSString).lastPathComponent,
+              stat((lock as NSString).deletingLastPathComponent, &a) == 0, stat((other as NSString).deletingLastPathComponent, &b) == 0 else { return false }
+        return a.st_dev == b.st_dev && a.st_ino == b.st_ino
     }
 
     /// What a checked node's sessions are given, read once at the host's start: `SSH_AUTH_SOCK` launchd's own for the
