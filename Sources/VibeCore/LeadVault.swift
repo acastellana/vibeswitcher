@@ -1044,6 +1044,13 @@ extension LeadVault {
                         return .refused("That session doesn't run Codex, which its grant was issued for: it holds no role.")
                     }
                 }
+                // Under the floor, a worker's, verifier's or finder's launch carries only what VibeSwitcher's own launch does
+                // (`RoleLaunchCheck`: its flags, its spawn environment's names, its `--settings`).
+                if member.role != .lead, team(root)?.floor?.verifierDifferent == true, let launch, launch.known, let command = launch.command,
+                   let why = RoleLaunchCheck.refusal(command: command, agent: launch.agent ?? member.agent ?? .claude, role: member.role,
+                                                     environment: launch.environmentNames, settings: launch.settings) {
+                    return .refused(why)
+                }
                 var allowanceUse: (task: String, by: String, finder: Finder?)?
                 if member.role == .verifier, member.session == nil, let task = member.task,
                    let check = verifierBindRefusal(member, task: task, root: root, launch: launch) {
@@ -1068,7 +1075,7 @@ extension LeadVault {
                     if team.members[index].role != .lead { team.branchCodeAt = Date().timeIntervalSince1970 }
                     team.members[index].session = session
                     // A worker's launch, as the host saw its session (`WorkerLaunch`): its families added to the task's.
-                    if team.members[index].role == .worker, let task = team.members[index].task, let launch, !launch.families.isEmpty {
+                    if team.members[index].role == .worker, let task = team.members[index].task, let launch, !launch.families.isEmpty || launch.agent == .codex {
                         var all = team.launchedFamilies ?? [:]
                         // A Codex worker (its command Codex's, as the host started it): recorded as Codex; a Claude one by its
                         // models, never Codex in their place.

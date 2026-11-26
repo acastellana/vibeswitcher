@@ -21,10 +21,13 @@ public enum WorkerLaunch {
         public var cwd: String?
         /// A test's stand-in programs a role's path may name, in place of a scratch node's (`nodeLinks`); nil: those.
         public var links: [Agent: [String]]?
-        public init(command: String?, cwd: String? = nil, links: [Agent: [String]]? = nil) {
+        /// The names (never the values) of the environment its spawn request gave it; nil: not told.
+        public var environmentNames: [String]?
+        public init(command: String?, cwd: String? = nil, links: [Agent: [String]]? = nil, environmentNames: [String]? = nil) {
             self.command = command
             self.cwd = cwd
             self.links = links
+            self.environmentNames = environmentNames
         }
     }
 
@@ -190,13 +193,12 @@ public enum WorkerLaunch {
     }
 
     /// The agent a launch command starts, judged by what runs, never by a scan of its words: the command must be one
-    /// simple command (no `;`, `&`, `|`, redirection, substitution or newline outside quotes: `controlled`), its program
-    /// the first word after assignments and `env` with its options (the one transparent wrapper; `sh -c`, `exec -a` or
-    /// any other wrapper isn't), and that program Claude Code's or Codex's: the bare name `claude` or `codex` (what the
-    /// session's shell finds), or a path that resolves to Claude Code's installed binary (`VersionedClaude.isBinary`, or
-    /// its npm package's) or Codex's (`codex`, `codex.js`, or its npm package's), or to what the node's own links name
-    /// (`nodeLinks`: the program the node's engine starts its roles with, `RoleProgram`). Anything else is nil (a shell,
-    /// a wrapper, another program), which a bind under the floor refuses.
+    /// simple command of literal words (no `;`, `&`, `|`, redirection, substitution, expansion or newline outside
+    /// quotes: `controlled`), no assignment, its program the first word or the first after `env` with its options (the
+    /// one transparent wrapper; `sh -c`, `exec -a` or any other wrapper isn't), and that program Claude Code's or
+    /// Codex's: the bare name `claude` or `codex` (what the session's shell finds), or a path that resolves into Claude
+    /// Code's versioned binaries or Codex's install root (`agent(atPath:links:)`), or to a scratch node's stand-ins
+    /// (`nodeLinks`). Anything else is nil (a shell, a wrapper, another program), which a bind under the floor refuses.
     public static func commandAgent(_ command: String, links: [Agent: [String]] = nodeLinks) -> Agent? {
         switch program(of: command) {
         case .bare(let agent): return agent
@@ -381,6 +383,11 @@ public enum WorkerLaunch {
         public var families: [String] = []
         /// A settings file there wasn't read (refused, or the reads ran out of time).
         public var unread = false
+        /// The command the host started it with, its spawn environment's names, and the `--settings` file it names, as
+        /// read (`RoleLaunchCheck`, judged under the floor at the bind).
+        public var command: String?
+        public var environmentNames: [String]?
+        public var settings: RoleLaunchCheck.SettingsRead?
         public var notes: [String] = []
     }
 
@@ -390,6 +397,9 @@ public enum WorkerLaunch {
         guard let seen else { return BindFacts() }
         let links = seen.links ?? nodeLinks
         var facts = BindFacts(known: true)
+        facts.command = seen.command
+        facts.environmentNames = seen.environmentNames
+        let settingsPath = seen.command.flatMap(RoleLaunchCheck.settingsPath(in:))
         facts.model = seen.command.flatMap(launchModel(command:)).flatMap { $0.lowercased() == "default" ? nil : $0 }
         // The agent: a bare name told now; a path resolved in the bounded block below (a hung mount never holds the
         // vault), nil past its time.
@@ -402,13 +412,21 @@ public enum WorkerLaunch {
             let project = projectModels(cwd: seen.cwd)
             var agent: Agent?
             if case .path(let path) = told { agent = Self.agent(atPath: path, links: links) }
-            result.set((home.object?["model"] as? String, project.models, home.note.map { [$0] } ?? [], project.notes, home.note == nil, agent))
+            // The `--settings` file a command names, read the careful way (its content judged at the bind).
+            var settingsText: String?
+            if let settingsPath, case .data(let data)? = Optional(Platform.Files.readRegular(in: (settingsPath as NSString).deletingLastPathComponent,
+                                                                                            path: [(settingsPath as NSString).lastPathComponent],
+                                                                                            limit: settingsLimit)) {
+                settingsText = String(data: data, encoding: .utf8)
+            }
+            result.set((home.object?["model"] as? String, project.models, home.note.map { [$0] } ?? [], project.notes, home.note == nil, agent, settingsText))
             done.signal()
         }
         if done.wait(timeout: .now() + limit) == .success, let read = result.get() {
             facts.defaultModel = read.defaultModel
             facts.defaultKnown = read.homeRead
             if case .path = told { facts.agent = read.agent }
+            if let settingsPath { facts.settings = read.settingsText.map { .text($0) } ?? .unread(settingsPath) }
             facts.notes = read.homeNotes + read.projectNotes
             facts.unread = !read.projectNotes.isEmpty
             facts.families = Array(Set(ran(facts) + read.projectModels.flatMap(runsOn))).sorted()
@@ -416,6 +434,7 @@ public enum WorkerLaunch {
             facts.unread = true
             facts.notes = ["a launch's settings weren't read: reading them took more than \(Int(limit)) s; only its command's model is recorded"]
             facts.families = ran(facts).sorted()
+            if let settingsPath { facts.settings = .unread(settingsPath) }
         }
         return facts
     }
@@ -445,7 +464,8 @@ public enum WorkerLaunch {
 
     /// The bounded reads' result, handed between two queues.
     private final class Found: @unchecked Sendable {
-        typealias Read = (defaultModel: String?, projectModels: [String], homeNotes: [String], projectNotes: [String], homeRead: Bool, agent: Agent?)
+        typealias Read = (defaultModel: String?, projectModels: [String], homeNotes: [String], projectNotes: [String], homeRead: Bool, agent: Agent?,
+                          settingsText: String?)
         private let lock = NSLock()
         private var value: Read?
         func set(_ found: Read) { lock.withLock { value = found } }

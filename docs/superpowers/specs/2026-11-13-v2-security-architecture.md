@@ -2467,6 +2467,10 @@ also closes what a bind's reading of the command can't: a same-uid writer puttin
 versions folder (`~/.local/share/claude/versions/`) or behind the node's links, a
 PATH in the session's inherited environment that a bare `claude` or `codex` is found by, and a file swapped after the
 bind looked at it.
+What a role's launch check (`RoleLaunchCheck`: its flags, its spawn environment's names, its `--settings`) still doesn't
+judge: the content of the files its other flags name (`--append-system-prompt-file`, an `--mcp-config` file: neither sets
+the model, but an MCP server it lists runs code); the advisor's model (`--advisor`, which shapes the work it judges);
+the lead's own model (lead_model), which writes code when the lead does.
 The post-merge Claude re-audit's obligation and its security mark live on the board (`task.claudeReaudit`: `pending`,
 `sensitive`, and the task's `riskRaised`, in board.json, which anyone of the uid can write): moving them into the vault is open.
 Also not seen, with (a): a race on the worktree's settings, written before the worker starts (it reads them), then

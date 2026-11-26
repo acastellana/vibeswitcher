@@ -565,6 +565,9 @@ public final class HostServer {
                 let session = try HostedSession.spawn(request, shell: config.shell, launcher: config.launcher, baseEnvironment: base,
                                                       ringCapacity: config.ringCapacity, queue: queue, parser: config.parser,
                                                       launcherTestDelay: config.launcherTestDelay, sessionUmask: config.checkedSessions?.umask)
+                // Its request's command and environment names, for the vault's judgement of a role's launch (`RoleLaunchCheck`).
+                session.requestCommand = request.command
+                session.requestEnvironmentNames = Array(request.env.keys)
                 // Only once it started: a spawn that fails leaves the ended sessions as they were.
                 for ended in room {
                     log.note("host: at its limit of \(max(1, config.maxSessions)) sessions, forgetting \(Self.short(ended.id)), ended \(Int(-ended.at.timeIntervalSinceNow)) s ago")
@@ -680,7 +683,8 @@ public final class HostServer {
             // (`WorkerLaunch`; the host's own record, never the request's word).
             var bound: WorkerLaunch.Seen?
             if case .bind(_, _, let target) = request, let id = UUID(uuidString: target), let session = sessions[id] {
-                bound = WorkerLaunch.Seen(command: session.info.command, cwd: session.info.cwd)
+                bound = WorkerLaunch.Seen(command: session.requestCommand ?? session.info.command, cwd: session.info.cwd,
+                                          environmentNames: session.requestEnvironmentNames)
             }
             var answer = answerOffQueue { vault.answer(request, from: from, userOpened: opened, agentSession: agentSession, liveSessions: live, bound: bound) }
             // A verifier that gave its verdict has no job left: it ends once its grace is over (see `endSubmitted`).
