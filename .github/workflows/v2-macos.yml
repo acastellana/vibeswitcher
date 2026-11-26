@@ -28,7 +28,7 @@ jobs:
         run: |
           xcodebuild -version
           swift --version
-          bash scripts/ci/check-versions.sh node
+          bash scripts/ci/check-versions.sh swift node
           python3 --version
           sw_vers
           sysctl -n hw.ncpu
@@ -65,7 +65,7 @@ jobs:
         run: |
           xcodebuild -version
           swift --version
-          bash scripts/ci/check-versions.sh node
+          bash scripts/ci/check-versions.sh swift node
           python3 --version
           sw_vers
           sysctl -n hw.ncpu
@@ -99,7 +99,7 @@ jobs:
         run: |
           xcodebuild -version
           swift --version
-          bash scripts/ci/check-versions.sh node
+          bash scripts/ci/check-versions.sh swift node
           python3 --version
           sw_vers
           sysctl -n hw.ncpu
@@ -138,7 +138,7 @@ jobs:
         run: |
           xcodebuild -version
           swift --version
-          bash scripts/ci/check-versions.sh node
+          bash scripts/ci/check-versions.sh swift node
           python3 --version
           sw_vers
           sysctl -n hw.ncpu

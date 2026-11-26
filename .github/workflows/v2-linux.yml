@@ -43,7 +43,7 @@ jobs:
       - name: Versions
         run: |
           swift --version
-          bash scripts/ci/check-versions.sh node
+          bash scripts/ci/check-versions.sh swift node
       - name: Tests
         run: bash scripts/test.sh --filter 'VibePlatformTests'
   core:
@@ -80,7 +80,7 @@ jobs:
       - name: Versions
         run: |
           swift --version
-          bash scripts/ci/check-versions.sh node chrome
+          bash scripts/ci/check-versions.sh swift node chrome
       - name: Tests
         run: bash scripts/test.sh --filter 'VibeCoreTests|VibeNodeTests'
   host:
@@ -117,6 +117,6 @@ jobs:
       - name: Versions
         run: |
           swift --version
-          bash scripts/ci/check-versions.sh node
+          bash scripts/ci/check-versions.sh swift node
       - name: Tests
         run: bash scripts/test.sh --filter 'VibeHostTests'
