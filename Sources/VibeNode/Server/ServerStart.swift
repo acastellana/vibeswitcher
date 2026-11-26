@@ -122,7 +122,8 @@ public enum ServerStart {
         let requests = Requests(link: link, sessions: sessions, rule: rule, root: root, hostSocket: parsed.hostSocket,
                                 commit: commit, note: say)
         // The Mac's rule (`NodeSystem.approvalMeasured`): Touch ID asked by this server, the caller's code the installed
-        // command line's, read once from the build it runs (`<node root>/bin/vibeswitcher`); unreadable, no peer is the user's.
+        // command line's, read once from the node's record (the row whose server is this server's own running code, never
+        // `<node root>/bin/vibeswitcher`: `ApprovalVoice.commandLineAnchor`); unreadable, no peer is the user's.
         if rule.mode == .approval {
             let commandLine = ApprovalVoice.commandLineAnchor(nodeRoot: parsed.nodeRoot, own: Platform.CodeIdentity.ownCdhash(), pins: NodePins.read())
             requests.approval = ApprovalVoice(authenticator: ApprovalVoice.System(timeout: 60), commandLine: commandLine)

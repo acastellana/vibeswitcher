@@ -10,8 +10,10 @@ import VibeNode
 /// the account's host lock among the rest), and for a
 /// scratch node the holder of `<root>/scratch-host.lock` (`/proc/locks`, by the file's inode).
 /// The Mac (dumpable can't be told there): the user's node only, its listener running a server the node's record pins
-/// (`NodePins`, root's to write; by its audit token's cdhash, hardened), the LaunchAgent job's child in its session; else
-/// refused. The job's program line chooses nothing (item 12): only its pid is taken from `launchctl print`.
+/// (`NodePins`, root's to write; by its audit token's cdhash, hardened), the child in its session of the job's host as
+/// `status` finds it (`MacAgent.runningHost`: launchd's whole word for the job, the host by its connection's audit token
+/// and running code, a host that switched in place before its plist was rewritten taken too); else refused. The job's
+/// program line chooses nothing (item 12): no text of `launchctl print` names the host.
 enum ServerCheck {
     /// Why the server at the other end of `fd` isn't the node's, or nil when it passes.
     static func refusal(fd: Int32, context: NodeContext) -> String? { verdict(fd: fd, context: context)?.text }
@@ -30,7 +32,15 @@ enum ServerCheck {
         // it says (its hello's rule) is trusted: the server of the build the job runs; the parent, the session and the
         // code all bound to the one audit token the socket gave (`NodeCheck.macListener`).
         let codeIdentity = Platform.CodeIdentity.isAvailable
-        let job = codeIdentity && context.mode == .node ? macJob(context) : nil
+        var job: NodeAgent.Printed?
+        if codeIdentity, context.mode == .node {
+            // The host not known as the node's: said with why and what to do (`MacAgent.serverCheckHost`).
+            switch macJob(context) {
+            // Not a server on its way out (`unsettled` false): a refusal, as the Mac branch has it.
+            case .failure(let why): return Refusal(text: why.text, unsettled: false)
+            case .success(let found): job = found
+            }
+        }
         var codeWhy: String?
         var listener = codeIdentity
             ? NodeCheck.macListener(pid: pid, token: Platform.Sockets.peerToken(fd), code: { token in
@@ -70,14 +80,14 @@ enum ServerCheck {
         return Refusal(text: text, unsettled: NodeCheck.unsettled(listener, alive: alive, mode: context.mode, codeIdentity: codeIdentity))
     }
 
-    /// The Mac's node job as launchd prints it (`launchctl print gui/<uid>/<label>`, by its absolute path): its pid
-    /// and program, the installed host; nil when it isn't running or can't be read.
-    static func macJob(_ context: NodeContext) -> NodeAgent.Printed? {
-        guard let launchctl = Platform.Service.launchctl,
-              let run = context.runTool(launchctl, ["print", NodeAgent.target(uid: getuid())]), run.status == 0 else { return nil }
-        let printed = NodeAgent.printed(run.output)
-        // Only the pid is taken (item 12): the program line chooses nothing, so its absence refuses nothing.
-        return printed.pid.map { $0 > 0 } == true ? printed : nil
+    /// The Mac's node job's host, as `status` finds it (`MacAgent.serverCheckHost`: between a switch's handover and its
+    /// follow-up the plist still names the build the host was started as): its pid; the line said when the node doesn't
+    /// run or its host isn't the node's (row 10: the host known by token and code, never by launchctl's text).
+    static func macJob(_ context: NodeContext) -> Result<NodeAgent.Printed, StartRefusal> {
+        guard let place = MacAgentCommand.place() else { return .failure(StartRefusal("this system has no launchctl, so the node's host can't be found", exitCode: 69)) }
+        let agent = MacAgent(place: place, steps: .system(place: place, pins: { NodePins.read() }, say: { _ in }, confirm: { _ in .success(()) },
+                                                          serverStop: { _ in .none("no server is asked") }, job: MacAgentCommand.job))
+        return agent.serverCheckHost().map { NodeAgent.Printed(pid: $0, program: nil) }
     }
 
     /// `pid`'s POSIX session (`getsid`, which Linux answers for any process); nil when it can't be read.

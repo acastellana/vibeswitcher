@@ -212,6 +212,91 @@ struct NodePinsAnchorTests {
         #expect(ApprovalVoice.commandLineAnchor(nodeRoot: root, own: genuine.server, pins: .failure(NodePins.Refused("missing"))) == nil)
     }
 
+    /// A host for `Requests` that never connects (the voice's paths need none).
+    private struct NoHost: HostDialer {
+        func connect(queue: DispatchQueue, patience: TimeInterval) throws -> HostConnection { throw HostLink.Failure("no host in this test") }
+    }
+
+    /// Row 7 of the measurement record (item 3's owed half), through every place that takes the command line's
+    /// identity, each with real signed images and real audit tokens: a command line renamed over `<root>/bin/
+    /// vibeswitcher` after the host's start is refused by each, with the reason said, and the genuine one (its image
+    /// kept aside) passes. The places: (1) the server's anchor, read once at its start (`ServerStart` →
+    /// `ApprovalVoice.commandLineAnchor`); (2) a connection's hello, whose voice is the rule's read (`Requests.hello` →
+    /// `ApprovalVoice.judge("status")`); (3) each request's voice before any dialog (`Requests.approvalJudgment` →
+    /// `ApprovalVoice.callerRefusal`): the swapped one never reaches the person at the Mac; (4) the command line's own
+    /// build for `start`, `stop`, `status` and `switch` (`MacAgent.ownBuild`, by the kernel's cdhash of the process
+    /// itself, never a file). Red with the anchor's read of `<root>/bin/vibeswitcher` (b3849695's hunk reverted).
+    @Test func everyPlaceTakingTheCommandLinesIdentityRefusesOneSwappedInTheBuild() async throws {
+        let top = try scratch.shortFolder("vspe")
+        let prefix = top.appendingPathComponent("builds")
+        let genuine = try build(prefix, Self.genuine)
+        let root = prefix.appendingPathComponent(Self.genuine).path
+        let pins: Result<NodePins, NodePins.Refused> = .success(NodePins(uid: uid, builds: [genuine]))
+        let kept = top.appendingPathComponent("kept-cli")
+        try #require(try runToEnd("/bin/cp", ["\(root)/bin/vibeswitcher", kept.path]) == 0)
+        let swapped = top.appendingPathComponent("swapped-cli")
+        let swappedHash = try image(swapped, "dev.vibeswitcher.test.swapped-cli-e")
+        try #require(try runToEnd("/bin/cp", [swapped.path, "\(root)/bin/vibeswitcher.new"]) == 0)
+        try #require(rename("\(root)/bin/vibeswitcher.new", "\(root)/bin/vibeswitcher") == 0)
+        try #require(Platform.CodeIdentity.cdhash(atPath: "\(root)/bin/vibeswitcher") == swappedHash)
+
+        // (1) The anchor, as `ServerStart` reads it (the server's own running code is its row's server).
+        let anchor = ApprovalVoice.commandLineAnchor(nodeRoot: root, own: genuine.server, pins: pins)
+        #expect(anchor == genuine.cli, "(1) the anchor is \(anchor.map(NodePins.hex) ?? "nil"), the swapped file's \(NodePins.hex(swappedHash))")
+        // The voice as `ServerStart` builds it (Security's checks, not a table), a person who approves.
+        let person = ApprovalVoiceTests.Person(.approved)
+        let voice = ApprovalVoice(authenticator: person, commandLine: anchor)
+        let queue = DispatchQueue(label: "row7-requests")
+        let requestsRoot = top.appendingPathComponent("node")
+        try FileManager.default.createDirectory(at: requestsRoot, withIntermediateDirectories: true)
+        let link = HostLink(dialer: NoHost(), root: requestsRoot, queue: queue)
+        let requests = Requests(link: link, sessions: nil, rule: VoiceRule(mode: .approval, scopes: [], uid: uid, says: VoiceRule.approvalSays),
+                                root: requestsRoot, hostSocket: top.appendingPathComponent("h.sock").path, commit: "test", hostPID: 1)
+        requests.engine = LeadEngine(root: requestsRoot, nodeRoot: nil, link: link, clock: nil)
+        requests.approval = voice
+        requests.approvalLinkWelcomed = { true }
+        func facts(_ pid: pid_t) -> PeerFacts {
+            PeerFacts(pid: pid, uid: uid, cgroup: nil, ancestry: [.init(pid: pid, startTicks: 5)], terminal: .none, sessionMarker: nil, underRunner: false)
+        }
+        func judged(_ token: Platform.PeerToken) async -> (done: Bool, refused: NodeWire.Reply?) {
+            let result = Locked<(Bool, NodeWire.Reply?)>((false, nil))
+            let request = NodeWire.Request(id: UUID().uuidString, kind: "set", args: ["key": .string("lead_mail"), "value": .string("off")],
+                                           action: UUID().uuidString.lowercased())
+            requests.queue.async { requests.approvalJudgment(request, from: facts(token.pid), token: token) { result.value = (true, $0) } }
+            _ = await eventually(timeout: 60) { result.value.0 }
+            return result.value
+        }
+        let notTheInstalled = "it isn't the installed command line"
+
+        let (swappedToken, endSwapped) = try await running(swapped.path)
+        // (3) The caller check itself, then (2) the hello's voice and (3) a state change's judgment: refused, said, no dialog.
+        let refusal = voice.callerRefusal(peer: swappedToken, facts: facts(swappedToken.pid), live: LiveSessions(), uid: uid)
+        #expect(refusal?.contains(notTheInstalled) == true, "(3) \(String(describing: refusal))")
+        let swappedHello = requests.queue.sync { requests.hello(peer: facts(swappedToken.pid), token: swappedToken) }
+        #expect(swappedHello.peer.voice == "other" && swappedHello.peer.why?.contains(notTheInstalled) == true, "(2) \(String(describing: swappedHello.peer))")
+        let swappedSet = await judged(swappedToken)
+        #expect(swappedSet.done && swappedSet.refused != nil, "(3) a state change from the swapped command line was taken")
+        #expect(swappedSet.refused?.error?.message.contains(notTheInstalled) == true, "(3) \(String(describing: swappedSet.refused?.error))")
+        #expect(person.asked.isEmpty, "(3) the swapped command line reached the dialog: \(person.asked)")
+        await endSwapped()
+
+        let (keptToken, endKept) = try await running(kept.path)
+        #expect(voice.callerRefusal(peer: keptToken, facts: facts(keptToken.pid), live: LiveSessions(), uid: uid) == nil, "(3) the genuine command line refused")
+        let keptHello = requests.queue.sync { requests.hello(peer: facts(keptToken.pid), token: keptToken) }
+        #expect(keptHello.peer.voice == "user", "(2) \(String(describing: keptHello.peer))")
+        let keptSet = await judged(keptToken)
+        #expect(keptSet.done && keptSet.refused == nil, "(3) \(String(describing: keptSet.refused?.error))")
+        #expect(person.asked.count == 1, "(3) \(person.asked)")
+        await endKept()
+
+        // (4) The command line's own build: its running code's row (the swapped file's code is no row's).
+        guard case .failure(let own) = MacAgent.ownBuild(own: swappedHash, pins: pins, prefix: prefix.path) else {
+            Issue.record("(4) the swapped command line found a build"); return
+        }
+        #expect(own.text.contains("is no build's the node's record pins"), "(4) \(own.text)")
+        #expect((try? MacAgent.ownBuild(own: genuine.cli, pins: pins, prefix: prefix.path).get())?.build == genuine, "(4) the genuine command line's build")
+    }
+
     // MARK: (c) A record that isn't root's alone
 
     /// The record missing, a link, writable by its group or others, under a folder writable by others, owned by the
