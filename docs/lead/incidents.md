@@ -165,3 +165,10 @@ Evidence: docs/lead/progress.md line 2603, committed in 5d597f5d at 10:57 from a
 Task: merges-never-sit-blocked
 Check: task turn-this-incident-into-19 turns it into a check that runs before merge.
 
+## 2026-11-26 08:54:18 A worker's scratch-keychain probe put a macOS "unlock scratch.keychain-db" password dialog on the user's screen twice; the user cancelled both.
+
+Evidence: Task the-app-s-keychain, 2026-11-26 about 09:1x: its worker measured Keychain behaviour with `security` on scratch keychain files; the scratch keychain auto-locked (default 300 s timeout) and a `security add-generic-password` call, which lets UI through, waited on an unlock dialog for about 2 minutes until the worker killed it. The worker reported one dialog; the user reported seeing two. The contract forbade anything that puts a dialog on the user's screen, but nothing enforced it: AGENTS.md's rule names debuggers, not the `security` tool or keychains, and no lint or guard covers `security` calls in tests, scripts or worker probes. A check should make a locked or interactive keychain call impossible from the team's tests and scripts (for example a lint that every `security` invocation in scripts/ and Tests/ goes through one helper that creates the keychain unlocked with no timeout, passes no-UI, and wraps a hard timeout), plus a line in AGENTS.md's hard rules.
+
+Task: the-app-s-keychain
+Check: task turn-this-incident-into-20 turns it into a check that runs before merge.
+
