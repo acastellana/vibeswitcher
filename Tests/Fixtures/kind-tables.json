@@ -139,6 +139,7 @@
     ],
     "session.reply" : [
       "choice",
+      "choices",
       "options",
       "question",
       "session",
@@ -394,6 +395,7 @@
     ],
     "session.reply" : [
       "choice",
+      "choices",
       "options",
       "question",
       "session",
