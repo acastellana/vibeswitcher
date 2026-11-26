@@ -165,8 +165,8 @@ public enum HostHandover {
     ///   lock (see `Proof`), and the channel holds the secrets it names. Only a host holding the Keychain's key makes
     ///   one, and only for its own exec. Without it a process of your account that holds a free lock could hand the
     ///   genuine host a vault of its own to seal under that key.
-    /// A keyless host (a scratch host on its own lock, or the user's when the Keychain didn't give the key) keeps its
-    /// vault in memory only: it takes the secrets once the lock holds.
+    /// A scratch host (on its own lock, not `userHost`) keeps its vault in memory only, never the user's: it takes the
+    /// secrets once the lock holds. The user's host without its key takes no handover at all.
     public static func receive(from path: String, lockPath: String, userHost: Bool, proof: String?, logPath: String?,
                                key: () -> SymmetricKey?) throws -> Received {
         let refuse: (String) -> Failure = { why in
@@ -176,9 +176,10 @@ public enum HostHandover {
         let data = try contents(of: path)
         var state = try decode(data)
         if let why = Lock.notHeld(state.lockFD, path: lockPath) { throw refuse(why) }
-        guard userHost, let key = key() else {
-            return Received(state: state, secrets: takeSecrets(from: &state))
-        }
+        guard userHost else { return Received(state: state, secrets: takeSecrets(from: &state)) }
+        // The user's host without its key (the Keychain didn't give it: a locked keychain, a build without the stable
+        // signing identity) can't tell its build before's handover from another process's: it takes none.
+        guard let key = key() else { throw refuse("this host has no vault key to check its proof with") }
         guard let proof else { throw refuse("it carries no proof that the running host made it (a build from before proofs, or not the host)") }
         guard let claimed = Proof.Claim(proof), Proof.holds(claimed, key: key, state: data, lockFD: state.lockFD, lockPath: lockPath) else {
             throw refuse("its proof doesn't hold for this state, this process and this lock")
@@ -271,8 +272,6 @@ public enum HostHandover {
 
         static func digest(_ secrets: Data?) -> Data { secrets.map { Data(SHA256.hash(data: $0)) } ?? none }
 
-        /// The proof for a handover of `state` (its bytes as written) with `secrets` by this process, holding the lock
-        /// `lockFD` at `lockPath`; nil when the process or the lock can't be told.
         /// The process a proof is for: this one (a test's another).
         struct Process {
             var pid: pid_t
@@ -280,6 +279,9 @@ public enum HostHandover {
 
             static var this: Process? { startTime(of: getpid()).map { Process(pid: getpid(), started: $0) } }
         }
+
+        /// The proof for a handover of `state` (its bytes as written) with `secrets` by `process`, holding the lock
+        /// `lockFD` at `lockPath`; nil when the process or the lock can't be told.
 
         static func make(vaultKey: SymmetricKey, state: Data, secrets: Data?, lockFD: Int32, lockPath: String,
                          process: Process? = .this) -> Claim? {

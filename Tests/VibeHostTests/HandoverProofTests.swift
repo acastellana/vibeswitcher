@@ -38,7 +38,14 @@ struct HandoverProofTests {
             kept = try Data(contentsOf: file)
         }
 
-        deinit { descriptors.forEach { close($0) } }
+        deinit { descriptors.forEach { Darwin.close($0) } }
+
+        /// Closes `fd`, one of this scene's (so it isn't closed again, when the number may be another test's).
+        func close(_ fd: Int32) {
+            guard let index = descriptors.firstIndex(of: fd) else { return }
+            descriptors.remove(at: index)
+            Darwin.close(fd)
+        }
 
         /// A descriptor on the lock at `path` (this scene's), held through it when `held`.
         func lock(held: Bool, path: String? = nil) -> Int32 {
@@ -168,7 +175,7 @@ struct HandoverProofTests {
         let secrets = scene.storage.book().serialized
         let (bytes, secretFD) = try scene.state(lockFD: lockFD, secrets: secrets)
         let proof = try scene.proof(bytes, secrets: secrets, lockFD: lockFD)
-        close(try #require(secretFD))
+        scene.close(try #require(secretFD))
         let received = try scene.receive(proof: proof).get()
         #expect(received.secrets == nil)
     }
@@ -196,9 +203,9 @@ struct HandoverProofTests {
         // The proven state's secrets digest, with a channel of other secrets under a state rewritten to its bytes.
         let provenState = try scene.state(lockFD: lockFD, secrets: secrets)
         let proven = try #require(try scene.proof(provenState.bytes, secrets: secrets, lockFD: lockFD))
-        close(try #require(provenState.secretFD))
+        // Put in its place at once (dup2 closes the channel there and takes its number, with no moment between).
         let forgedFD = try HostHandover.SecretChannel.make(scene.forged)
-        defer { close(forgedFD) }
+        defer { Darwin.close(forgedFD) }
         #expect(dup2(forgedFD, try #require(provenState.secretFD)) >= 0)
         let refused = scene.receive(proof: proven)
         guard case .failure(let error) = refused else { Issue.record("other secrets were taken under a proof"); return }
@@ -226,16 +233,40 @@ struct HandoverProofTests {
         try scene.expectRefused(scene.receive(proof: other), "its proof doesn't hold", secretFD: secretFD)
     }
 
-    /// A keyless host (a scratch host on its own lock; the user's when the Keychain gives no key) seals nothing: it
-    /// takes a handover once its lock holds, and still refuses one whose lock doesn't.
+    /// A scratch host (on its own lock: its vault in memory only, never the user's) takes a handover once its lock
+    /// holds, and still refuses one whose lock doesn't. The user's host without its key (a locked keychain, a build
+    /// without the stable signing identity) can't check a proof: it takes none, proven or not.
     @Test func aKeylessHostTakesAHandoverOnlyWhenTheLockHolds() throws {
         let scene = try Scene(temp)
         let forged = scene.forged
         let (_, secretFD) = try scene.state(lockFD: scene.lock(held: false), secrets: forged)
         try scene.expectRefused(scene.receive(proof: nil, userHost: false), "nobody held the lock", secretFD: secretFD)
         try scene.expectRefused(scene.receive(proof: nil, key: .some(nil)), "nobody held the lock", secretFD: secretFD)
-        _ = try scene.state(lockFD: scene.lock(held: true), secrets: forged)
+        let lockFD = scene.lock(held: true)
+        let (bytes, heldFD) = try scene.state(lockFD: lockFD, secrets: forged)
+        try scene.expectRefused(scene.receive(proof: nil, key: .some(nil)), "this host has no vault key", secretFD: heldFD)
+        let proof = try scene.proof(bytes, secrets: forged, lockFD: lockFD)
+        try scene.expectRefused(scene.receive(proof: proof, key: .some(nil)), "this host has no vault key", secretFD: heldFD)
         #expect(try scene.receive(proof: nil, userHost: false).get().secrets == forged)
+    }
+
+    /// A proof binds the process's start time as the kernel reports it, which a handover's exec in place must keep: a
+    /// real exec of another program in the same process, its start time before and after.
+    @Test func aProcessKeepsItsStartTimeThroughAnExec() async throws {
+        let folder = temp.url("exec-start")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let go = folder.appendingPathComponent("go").path
+        let process = Foundation.Process()
+        process.executableURL = URL(fileURLWithPath: "/bin/sh")
+        process.arguments = ["-c", "while [ ! -f '\(go)' ]; do sleep 0.05; done; exec /bin/sleep 600"]
+        try process.run()
+        defer { process.terminate(); process.waitUntilExit() }
+        let pid = process.processIdentifier
+        let before = try #require(HostHandover.Proof.startTime(of: pid))
+        FileManager.default.createFile(atPath: go, contents: nil)
+        #expect(await eventually { HostServer.executable(of: pid) == "/bin/sleep" })
+        let after = try #require(HostHandover.Proof.startTime(of: pid))
+        #expect(before.seconds == after.seconds && before.microseconds == after.microseconds)
     }
 
     /// The handover's own write: a handed-over vault is saved at once where no vault file opens, and never over one
