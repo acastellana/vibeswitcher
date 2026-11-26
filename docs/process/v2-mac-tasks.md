@@ -557,6 +557,16 @@ or decided. Done on Linux, tested on both systems (`ApprovalJudgmentTests`, `App
    *Owed:* the node root's own folders (Linux's quiet rules key on Linux's names; the builds folder's row turns on the
    switch's refusals), `appWrite` around `start`'s and a switch's plist writes (until then each is a held change), a real
    checked node host, the Linux run of `theListIsEmptyOnLinux`.
+   *Reviewed* (review-v2-s-mac-5, "ready with fixes"), *and its fix round* (2026-11-26, the design's "The independent
+   review and its fix round"): R1 (a ByHost file in another case), R2/R2b (a linked ByHost folder, a file past 16 MB),
+   R3 (canonically equal profile names), R4, R5 (`~/.zsh_sessions`, a new `.sessions` row: a saved session is held
+   unless it is the restore line alone, so a window's close holds nothing), R7 (`brew shellenv`'s three files, each
+   Homebrew link's target's `stat` line), R8 (a listing's card names its entries), R9 (a node book holds each Mac row's
+   first read for the user's accept), and R6's every level and 16 MB, each with the review's test red before and green
+   after. Not applied: the effective read through CFPreferences (measured stale in a long-lived process, so the global
+   domain stays owed), R6b (a variable other than HOME, a glob loop: owed, its test a known issue), `$ZDOTDIR`'s
+   sessions folder. *Owed for the switch-on*, as before plus: the global domain (what a keyboard session would measure,
+   and a disk-only candidate, in the design), R6b.
 
 ## What `v2` found on the Mac and doesn't change
 
