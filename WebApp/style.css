@@ -1803,9 +1803,9 @@ kbd { padding: 1px var(--s-3); border-radius: var(--r-1); box-shadow: var(--e-1-
   .app.keyboard .project-view :is(.team-strip, .dial-fold, .centre-head > .segmented) { display: none; }
   /* The load's skeleton in the phone's shape: the header's two rows within the width, the gutters a phone's. */
   :is(.skeleton-head, .skeleton-strip, .skeleton-composer) { padding-left: var(--s-5); padding-right: var(--s-5); }
-  /* Its rows the real header's: a fingertip, then the switch in its track (2 px round it), so the content arrives
-     without a jump (109 px at 390). */
-  .skeleton-head { display: grid; grid-template-rows: var(--ctl-touch) calc(var(--ctl-touch) + var(--s-1) * 2); gap: var(--s-2); height: auto; padding-top: calc(var(--s-2) + env(safe-area-inset-top)); padding-bottom: var(--s-4); }
+  /* Its rows the real header's, so the content arrives without a jump. With a mouse: the icon buttons' row, then the
+     dial's fold, a fingertip at every pointer (91 px at 700). */
+  .skeleton-head { display: grid; grid-template-rows: var(--ctl-m) var(--ctl-touch); gap: var(--s-2); height: auto; padding-top: calc(var(--s-2) + env(safe-area-inset-top)); padding-bottom: var(--s-4); }
   .frame-skeleton .bone:is(.skeleton-switch, .skeleton-dial) { height: var(--ctl-touch); }
   .skeleton-head > .skeleton-row { display: flex; }
   .skeleton-lines { padding: var(--s-6) var(--s-5); }
@@ -1813,6 +1813,12 @@ kbd { padding: 1px var(--s-3); border-radius: var(--r-1); box-shadow: var(--e-1-
   .frame-skeleton .bone.skeleton-switch { width: 30%; }
   .frame-skeleton .bone.skeleton-dial { width: 100%; }
   .skeleton-strip .bone { width: 64px; }
+}
+
+/* A phone's touch screen: the loading header's rows a fingertip, then the switch in its track (2 px round it), as the
+   real header's are there (109 px at 390). */
+@media (max-width: 760px) and (hover: none) and (pointer: coarse) {
+  .skeleton-head { grid-template-rows: var(--ctl-touch) calc(var(--ctl-touch) + var(--s-1) * 2); }
 }
 
 /* Acting from the page: a request's button, what the node said under it, and whether this page acts */
